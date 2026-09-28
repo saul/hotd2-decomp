@@ -38,7 +38,7 @@
  * whole scheduling model: `waitFrames` counts up in `holdFrames` while a
  * condition is unmet.
  */
-import type { Actor, HumanoidActor } from "../actor";
+import { MotionFlag, type Actor, type HumanoidActor } from "../actor";
 import { ActorBindPartList } from "../attachments";
 import { ScriptedHumanoidDebug } from "./debug";
 import { authoredFrameOfTicks, ticksOfAuthoredFrame }
@@ -49,7 +49,8 @@ import {
 } from "../registry";
 import { SpawnClass } from "../spawn_class";
 import { HumanoidDrawVariant } from "./state";
-import { T } from "../tables";
+import { MotionOf, T } from "../tables";
+import { ActorSeedRootBaseline } from "../root_motion";
 import { VecToAngles } from "../vec";
 
 /** The opcodes `ScriptedHumanoidUpdate` switches on. */
@@ -334,6 +335,9 @@ export function ScriptedHumanoidInit(obj: HumanoidActor): void {
   if (p.cmds[0]?.op === HumanoidOp.WaitThenHold) obj.frozen = 1;
   obj.motion = p.motion;
   const m = T.types[String(obj.charType)]?.motions[String(p.motion)];
+  // `ActorBuildSkinnedModel` on the program's clip (`CALL` at `0x00484192`),
+  // and only then the counter: the root-motion baseline is frame 0's.
+  ActorSeedRootBaseline(obj, m);
   const fps = m?.fps ?? 30;
   // `rand() % 10` rather than a frame anywhere in the clip: the phase here is
   // a tenth of a second's worth of stagger, not a random pose.
@@ -450,7 +454,18 @@ function RunCommand(obj: HumanoidActor, c: HumanoidCmd, f: ClassFrame): boolean 
     case HumanoidOp.SetMotionBlended: {
       obj.motion = c.a;
       obj.playTicks = 0;
-      obj.rootFrame = -1;
+      // Op 2 is `ActorSetMotion` (`CALL 0x00411930` at `0x00484451`), which
+      // seeds the root-motion baseline from frame 0 under the gate; op 3 is
+      // `ActorSetMotionBlended` (`0x004844C7`), whose fade resets it.
+      if (c.op === HumanoidOp.SetMotion) {
+        if (obj.motionFlags & MotionFlag.RootMotion) {
+          ActorSeedRootBaseline(obj, MotionOf(obj, c.a));
+        } else {
+          obj.rootFrame = 0;
+        }
+      } else {
+        obj.rootFrame = -1;
+      }
       // Mode 1 clears the draw flag and mode 2 sets it; `SetMotion` also takes
       // a phase in `b`, and -1 there is the same tenth-of-a-second stagger.
       if (c.op === HumanoidOp.SetMotion && c.b !== -1) {

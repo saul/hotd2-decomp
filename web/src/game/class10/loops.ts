@@ -47,8 +47,14 @@ export function CivilianCountMotionLoops(obj: Actor): void {
   if (sub.wait & CivilianWait.MotionLoops) {
     sub.loops -= 1;
     if (sub.loops !== 0) {
+      // `*g_cur_actor_model = 0` and nothing else: the counter written
+      // outright, not a clip set, so the root-motion baseline and `+0x10` are
+      // left as the last draw put them. `SkeletonApplyRootMotion` then takes
+      // the rewind as it takes any jump: damped to one average step if it
+      // spans more than a quarter of the play length, and a plain delta back
+      // to frame 0's root if it does not. This used to reset the baseline,
+      // which takes neither. `[proved]`
       obj.playTicks = 0;
-      obj.rootFrame = -1;
       return;
     }
   }

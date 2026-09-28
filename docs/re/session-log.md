@@ -23251,3 +23251,96 @@ sprite per part hit) and `RescueTargetInit`'s direct call of the ride-in on
 its own frame are unported; `obj+0x1FC`, the rotation order the rescue sets to
 2, has no field because nothing in `game/` composes a rotation from it.
 
+
+## 2026-09-28 -- the root-motion baseline is a position, and a loop's wrap is one average step (branch `port/root-motion-baseline`)
+
+Closes the found-not-fixed note from the class 0x53 session above.
+`SkeletonApplyRootMotion` (`FUN_00410C50`) re-read from the bytes, in order:
+
+```
+00410c59  d = |model+0x10 - model+0x18|; L = g_motion_play_length[model+0x20]
+00410c82  if (d > L/4)  base = (root - base) / L + root   ; 0x00410C8A..CEC
+00410cf8  if (model+0x37 & 1 && !(model+0x37 & 0x20))  base = root
+00410d2f  if (model+0x64 & 2) {
+00410da8    delta = root - base
+00410e5f    base = root                                  ; after the pop (L37)
+          }
+00410e99  model+0x10 = model+0x18                                ; either arm
+```
+
+So the wrap frame's step is `(base - root) / L` -- one average step in the
+direction of travel -- and a looping clip carries its actor
+`(root[last] - root[0]) * (1 + 1/L)` a pass. `rootDelta` gave `0` there, and
+`functions.tsv`'s row for the routine said the damper made the wrap
+contribute "very nearly nothing"; both corrected. Measured on the export:
+0.29 of the cat's 12.73 a pass on `0x2FD` (L 44), 0.67 of `char_adv02`'s 19.33
+on the attack run `0x108` (L 29). `[proved]`
+
+What writes the baseline, each read for this:
+
+* `ActorSetMotion` (`FUN_00411930`): `+0x10 = 0`, and under the gate frame 0's
+  root (`0x00411966`, `MotionFrameAddress(type, motion, 0)`). Gate down: the
+  old baseline stays.
+* `SkeletonBuildAndPose` (`FUN_00410590`): frame 0's root, unconditionally
+  (`0x00410704`..`0x00410719`). `OneHitTargetInit`, `Class22Init`,
+  `ScriptedHumanoidInit` and `PlayerBodiesCreate` all write `+0x1B4` **before**
+  `ActorBuildSkinnedModel`, and the first three write the counter **after** it
+  -- so their first draw steps from frame 0's root.
+* `ActorSetMotionBlended` (`FUN_004119A0`): the fade bit, and so the reset on
+  every fade draw. The fade's last draw has weight exactly 1 -- the limit at
+  `0x004111C6` is `s8(+0x30) + 1` = `fade + 2` -- so the reset leaves the
+  start frame's root and the first step after is from it.
+* `CivilianUpdate` (`FUN_0048A920`)'s frame-limit rewind is `*model = 0` and
+  nothing else, and `CatMotionListUpdate` writes `+0x1B4` and the counter
+  outright: neither touches the baseline.
+* Class 0x25 op 2 is `ActorSetMotion` (`0x00484451`) then the counter; op 3 is
+  `ActorSetMotionBlended(model, a, b, mode)` (`0x004844C7`).
+
+The port: `Actor.rootBase` (so it snapshots) and `rootFrame` as `+0x10`;
+`RootMotionStep` in `game/root_motion.ts` is the arithmetic, shared by the
+base channel, the one-shot channel and the game-over body. `ActorSetMotion`,
+the class 0x20/0x22/0x23/0x25 inits, class 0x25 op 2 and the body seed through
+`ActorSeedRootBaseline`; blended setters keep `rootFrame = -1`, the pending
+reset; the civilian's rewind no longer resets. `verify_port`'s uncited-export
+baseline falls 82 -> 81 (`rootDelta` was uncited).
+
+**Checked.** `port.test.ts` gains ten assertions: a pass of
+`(root[last] - root[0]) * (1 + 1/L)`, the wrap step alone, a clip cut under
+the baseline, `ActorSetMotion`'s seed inside and past a quarter of the play
+length and with the gate down, and a save restored mid-pass. The same file
+run against `HEAD`'s `game/` fails the first three (a pass of -16.5 against
+-17.25, a wrap step of 0 against -0.75) and throws on the missing field.
+
+**Wrong turns.**
+
+* No existing zombie-timing assertion moved. That is not evidence the change
+  is inert -- none of them runs a looping clip across enough wraps with a
+  tight enough bound -- which is why the new block was mutation-checked
+  against `HEAD` before being believed.
+* I first copied `rootBase` from host to twin in `ZombieTwinCopyHost` along
+  with `rootFrame`. The copy at `0x004532F9` is `host+0x40` for 0x18 dwords
+  and then `0x1320`, `0x1324`, `0x1B4`, `0x1B8`, `0x194`, `0x198` -- not
+  `model+0x1160` (`obj+0x12F4`), and not `+0x10` either. Reverted; the
+  existing `rootFrame` copy is left as it was, since the port's twin clock
+  runs before the copy and any step it takes is overwritten by it.
+* I expected a residual `(B - A) / (fade + 1)` on the first step after a fade,
+  reading the last fade draw's weight as `fade / (fade + 1)`. The `INC ECX` at
+  `0x004111C6` makes the limit `fade + 2`, so the last fade draw is at weight
+  1 and there is no residual.
+
+**Found, not fixed.**
+
+* The port's base clock wraps a looping clip at `2 * frames` ticks
+  (`authoredFrameOfTicks`), the engine's at `play + 1`; the pose and the
+  cursor a state reads drift apart by one or two ticks a loop. It is not
+  declared in code: I first added a marker on `MotionAuthoredFrame`, then read
+  the gameplay-port skill as rewritten on `main` during the session -- a new
+  divergence marker is the user's call and the count may not rise -- and took
+  it out; the question is put to the user. Faithful means changing every
+  looping pose in `render/` too.
+* Class 0x25's op 2 writes `b` as authored frames (twice the engine's counter)
+  and skips the `rand() % 10` for `b == -1`; op 3 ignores its start (`b`) and
+  its fade (`mode`) -- 330 shipped op-3 commands fade over 1 to 80 frames, and
+  the port cuts every one. `ScriptedHumanoidInit` (`FUN_004840D0`) has the
+  same two faults in its phase: `*model = phase`, or `rand() % 10` for -1.
+  `[proved]`

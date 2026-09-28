@@ -43,7 +43,8 @@ import {
 } from "../registry";
 import { ActorSpawn } from "../spawn";
 import { SpawnClass } from "../spawn_class";
-import { T } from "../tables";
+import { MotionOf, T } from "../tables";
+import { ActorSeedRootBaseline } from "../root_motion";
 import { Class22Death } from "./death";
 import { CLASS22_NODE2_SLOT } from "./draw";
 import {
@@ -120,7 +121,9 @@ export function Class22Init(obj: Actor, rng?: Rng, events?: Events): void {
   obj.fadeFrom = null;
   obj.fade = 0;
   obj.fadeLen = 0;
-  obj.rootFrame = -1;
+  // ...and `SkeletonBuildAndPose` seeds the root-motion baseline from frame
+  // 0 of `tail+0x02`'s clip, before the counter is moved off it.
+  ActorSeedRootBaseline(obj, MotionOf(obj, obj.motion));
   obj.motionFlags |= MOTION_FLAG_4;
   obj.playTicks = d.frame;
   obj.hitRadius = CLASS22_RADIUS;

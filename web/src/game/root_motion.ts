@@ -159,41 +159,125 @@ export function ActorModelScale(charType: number): number {
 }
 
 /**
- * The root translation between two frames of a clip, wrapping across the loop.
- *
- * `prev` is the frame the delta was last taken at, `-1` on the first call.
- * Returns the delta in the clip's own space, which {@link ApplyRootMotion}
- * turns by the actor's three angles.
- *
- * **The engine's baseline is a field, not a remembered frame index**, and the
- * difference is worth stating because it is what this port nearly got wrong.
- * `model+0x1160..0x1168` holds the root translation the last delta was taken
- * at, and `ActorSetMotion` (`FUN_00411930`) seeds it from the **new clip's
- * frame 0** whenever the gate is set (`TEST AL,2` at `0x00411966`), while
- * `ActorSetMotionBlended` (`FUN_004119A0`) leaves `track+0x37` in the state
- * that makes `SkeletonApplyRootMotion` reset it to the current root outright.
- * So neither a cut nor a fade ever turns a clip's **absolute** root into a
- * step, and `prev < 0` here — no delta on the first call — is that same
- * statement. `[proved]`
+ * The root translation of frame `f` of a clip, clamped into it: the first
+ * three floats of the frame record `MotionFrameAddress` (`FUN_00412F50`) hands
+ * back. `[port-only]` as a function -- the engine reads them through the
+ * pointer it is given.
  */
-export function rootDelta(m: BakedMotion, prev: number, next: number):
-    { x: number; y: number; z: number } {
-  const n = m.frames;
-  if (n <= 1 || prev < 0 || prev === next) return { x: 0, y: 0, z: 0 };
-  const at = (f: number): [number, number, number] =>
-    [m.root[f * 3] ?? 0, m.root[f * 3 + 1] ?? 0, m.root[f * 3 + 2] ?? 0];
-  const [px, py, pz] = at(Math.min(prev, n - 1));
-  const [nx, ny, nz] = at(Math.min(next, n - 1));
-  if (next > prev) return { x: nx - px, y: ny - py, z: nz - pz };
-  // **The loop wrap is damped, not stitched.** `SkeletonApplyRootMotion` tests
-  // `|frame - previous| > play_length / 4` and, when it trips, resets the
-  // baseline to `root + (root - baseline) / play_length` instead of taking the
-  // delta — so the wrap frame contributes very nearly nothing and a looping
-  // walk does not lurch once a cycle. Summing "finish the cycle, then start
-  // the next" as this used to gives the wrap frame a whole clip's worth of
-  // translation in one tick.
-  const [sx, sy, sz] = at(0);
-  return { x: (nx - sx) / n, y: (ny - sy) / n, z: (nz - sz) / n };
+function FrameRootInto(m: BakedMotion, f: number, out: Vec3): void {
+  const i = Math.max(0, Math.min(m.frames - 1, f)) * 3;
+  out.x = m.root[i] ?? 0;
+  out.y = m.root[i + 1] ?? 0;
+  out.z = m.root[i + 2] ?? 0;
+}
+
+/**
+ * `[port-only]` as a function: what `SkeletonBuildAndPose` (`FUN_00410590`)
+ * and `ActorSetMotion` (`FUN_00411930`) leave in the two fields the baseline
+ * arithmetic reads -- `model+0x10 = 0`, and `model+0x1160..0x1168` = the root
+ * of **frame 0** of `m`.
+ *
+ * The build stores it unconditionally (`0x00410704`..`0x00410719`, from the
+ * clip already in `model+0x20`); `ActorSetMotion` only under the gate
+ * (`TEST AL,2` at `0x00411966`), and leaves the old baseline where it is
+ * otherwise -- so its caller tests {@link MotionFlag.RootMotion}, and the
+ * build's callers do not. `[proved]`
+ *
+ * It is the seed and not a reset because the clip need not start at frame 0:
+ * `OneHitTargetInit` and `Class22Init` write the counter after the build, and
+ * class 0x25's op 2 after `ActorSetMotion`, so the first draw measures its
+ * frame against frame 0's root -- a jump, or the damper's one step, as
+ * {@link RootMotionStep} decides.
+ */
+export function ActorSeedRootBaseline(obj: { rootFrame: number;
+                                             rootBase: Vec3 },
+                                      m: BakedMotion | null | undefined):
+    void {
+  obj.rootFrame = 0;
+  if (m && m.frames > 0) FrameRootInto(m, 0, obj.rootBase);
+  else { obj.rootBase.x = 0; obj.rootBase.y = 0; obj.rootBase.z = 0; }
+}
+
+/** This draw's root, reused. */
+const _root: Vec3 = { x: 0, y: 0, z: 0 };
+
+/**
+ * The baseline half of `SkeletonApplyRootMotion` (`FUN_00410C50`),
+ * `0x00410C50`..`0x00410D29`, and its store at `0x00410E5F`, for a body
+ * that does not carry the model block. `[port-only]` as a function: the
+ * gated arm it feeds is {@link ApplyRootMotion}, and class 0x14's whole
+ * routine is in `game/skeleton.ts`.
+ *
+ * `base` is `model+0x1160..0x1168`, `prev` the channel's `model+0x10` and `f`
+ * the authored frame this draw poses; `play` is `g_motion_play_length` of the
+ * clip. Returns whether the gate is up, with the clip-space delta in `out`.
+ * The caller then stores `f` as its `+0x10`, as the shared tail at
+ * `0x00410E99` does whichever arm ran.
+ *
+ * ```
+ * 00410c59  d = |model+0x10 - model+0x18|; L = g_motion_play_length[model+0x20]
+ * 00410c82  if (d > L/4)                           ; CDQ/AND 3/SAR 2: truncated
+ * 00410c8a    base = (root - base) / L + root      ; FSUB, FIDIV, FADD
+ * 00410cf8  if (model+0x37 & 1 && !(model+0x37 & 0x20))
+ * 00410d03    base = root                           ; the fade's reset
+ * 00410d2f  if (model+0x64 & 2) {
+ * 00410da8    delta = root - base                   ; -> ApplyRootMotion
+ * 00410e64    base = root                           ; after the pop (L37)
+ *           }
+ * ```
+ *
+ * **The loop wrap is not free, and this used to say it was.** The damper does
+ * not stop the wrap from moving the actor; it sets the baseline to
+ * `root + (root - base) / L`, and the ordinary delta after it is then
+ * `root - base'` = **`(base - root) / L`**: the old baseline is the root at
+ * the last frame drawn, the new root is the clip's start, so that is the
+ * clip's whole travel divided by its play length -- **one average step, in the
+ * direction the clip walks**. A looping clip therefore carries its actor
+ * `(root[last] - root[0]) * (1 + 1/L)` a pass. The port used to hand back
+ * `(root[next] - root[0]) / frames` instead, which is **zero** on the usual
+ * wrap onto frame 0, under a comment calling the reset's contribution "very
+ * nearly nothing": every looping clip lost `1/L` of its travel a pass. On the
+ * exported data that is 0.29 of the cat's 12.73 units a pass on clip `0x2FD`
+ * (play length 44) and 0.67 of `char_adv02`'s 19.33 on its attack run `0x108`
+ * (play length 29). `[proved]`
+ *
+ * The test is on **frames** and the baseline is a **position**, and the two
+ * together are what let a class change the clip under the baseline: the
+ * port's baseline was a frame index, so `CatMotionListUpdate` (`FUN_00431340`),
+ * which writes `obj+0x1B4` and the counter outright, had the old clip's last
+ * frame looked up in the new clip's table. The engine takes the old clip's
+ * root from `+0x1160` and damps it the same way.
+ *
+ * `prev < 0` is the port's pending reset (see {@link Actor.rootFrame}), and
+ * lands on the same arm as `fading`: the engine's test at `0x00410CF8` runs
+ * after the damper and overrides it, so a reset draw takes no step whatever
+ * the frames say.
+ */
+export function RootMotionStep(base: Vec3, prev: number, m: BakedMotion,
+                               play: number, f: number, fading: boolean,
+                               gate: boolean, out: Vec3): boolean {
+  const r = _root;
+  FrameRootInto(m, f, r);
+  if (prev < 0 || fading) {
+    base.x = r.x; base.y = r.y; base.z = r.z;
+  } else if (play > 0 && Math.abs(prev - f) > Math.trunc(play / 4)) {
+    // `[port-only]` `play > 0`: a clip the bundle does not carry has no
+    // length, and every motion the engine plays is loaded. The x87 runs at
+    // single precision under Direct3D, hence a `fround` per operation, as
+    // `game/skeleton.ts` has it.
+    base.x = Math.fround(Math.fround(Math.fround(r.x - base.x) / play) + r.x);
+    base.y = Math.fround(Math.fround(Math.fround(r.y - base.y) / play) + r.y);
+    base.z = Math.fround(Math.fround(Math.fround(r.z - base.z) / play) + r.z);
+  }
+  if (!gate) {
+    out.x = 0; out.y = 0; out.z = 0;
+    return false;
+  }
+  out.x = Math.fround(r.x - base.x);
+  out.y = Math.fround(r.y - base.y);
+  out.z = Math.fround(r.z - base.z);
+  base.x = r.x; base.y = r.y; base.z = r.z;
+  return true;
 }
 
 /** The gated arm's matrix, rebuilt from identity on every call. */

@@ -2108,12 +2108,34 @@ export interface ActorBase {
    */
   fadeLen: number;
   /**
-   * The frame index the root-motion delta was last taken at, for the base
-   * motion and for `action`. Root translation is a difference between frames,
-   * so the previous one is state.
+   * `model+0x10` -- the authored frame the last draw took, which
+   * `SkeletonApplyRootMotion` (`FUN_00410C50`) compares with this draw's to
+   * find a loop wrap -- for the base motion and for `action`.
+   *
+   * `[port-only]` in being two: the engine has one track and one `+0x10`, and
+   * the port plays a one-shot on a channel of its own. Each channel starts
+   * from a reset, so neither ever reads the other's.
+   *
+   * **-1 is the fade's reset, pending**: the next step sets
+   * {@link Actor.rootBase} to the root it draws and moves nothing -- what
+   * `track+0x37` bit 0 does on every draw of a cross-fade, and so what each
+   * port site that stands for `ActorSetMotionBlended` (`FUN_004119A0`) writes.
+   * A site that stands for `ActorSetMotion` seeds the baseline instead
+   * (`ActorSeedRootBaseline`), and one that writes the counter outright, as
+   * `CivilianUpdate`'s rewind does, leaves both fields alone. See
+   * `game/root_motion.ts`.
    */
   rootFrame: number;
   rootActionFrame: number;
+  /**
+   * `model+0x1160..0x1168` -- **the root-motion baseline**: the clip-space
+   * root translation the last delta was taken at. A position, not a frame,
+   * so a clip changed under it -- `CatMotionListUpdate` writes `obj+0x1B4`
+   * outright -- is measured from where the old clip left it, as the engine
+   * measures it. Shared by both of the port's channels, as the engine's one
+   * field is.
+   */
+  rootBase: Vec3;
   /** A one-shot at full weight: a swing, an arc stage, an entrance. */
   action: ActorClip | null;
   /** The death clip, once. */
@@ -2475,6 +2497,7 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     fadeLen: 0,
     rootFrame: -1,
     rootActionFrame: -1,
+    rootBase: vec3(),
     action: null,
     death: null,
     react: null,

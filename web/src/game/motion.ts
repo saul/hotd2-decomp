@@ -10,13 +10,19 @@
  * `ActorSetMotion` and the motion job own these in the engine, and the frame
  * counter is a field of the object, at `obj+0x19C`.
  */
-import { ActorFlag, type Actor } from "./actor";
+import { ActorFlag, MotionFlag, type Actor } from "./actor";
 import { ActorStartFade } from "./class30/motion_cue";
 import { MotionFade } from "./class30/states";
 import { authoredFrameHeld, ticksOfAuthoredFrame }
   from "../core/play_cursor";
-import { ApplyRootMotion, rootDelta } from "./root_motion";
-import { MotionAuthoredFrame, MotionOf, SecondsToTicks } from "./tables";
+import { ApplyRootMotion, RootMotionStep } from "./root_motion";
+import {
+  MotionAuthoredFrame, MotionOf, MotionPlayLength, SecondsToTicks,
+} from "./tables";
+import type { Vec3 } from "./vec";
+
+/** The clip-space delta {@link RootMotionStep} hands back, reused. */
+const _step: Vec3 = { x: 0, y: 0, z: 0 };
 
 /** One actor's clocks, `dt` seconds of game time. */
 export function ActorAdvanceMotion(obj: Actor, dt: number): void {
@@ -132,14 +138,20 @@ export function ActorAdvanceMotion(obj: Actor, dt: number): void {
     // (`00410cf8`..`00410d29`), which is every frame of a fade: nothing moves
     // the actor until the clip is playing again, and the first step is from
     // the held start frame to the one after it.
-    const d = fading ? { x: 0, y: 0, z: 0 } : rootDelta(base, wasBase, f);
-    ApplyRootMotion(obj, d.x, d.z, d.y);
+    if (RootMotionStep(obj.rootBase, wasBase, base,
+                       MotionPlayLength(obj, obj.motion), f, fading,
+                       (obj.motionFlags & MotionFlag.RootMotion) !== 0,
+                       _step)) {
+      ApplyRootMotion(obj, _step.x, _step.z, _step.y);
+    }
     obj.rootFrame = f;
   } else {
     // A one-shot owns the body, and the base clock keeps running underneath
     // it. Forgetting the base frame here is what stops the *next* base delta
     // spanning the whole strike -- which teleported a zombie eleven units into
-    // the camera the frame its swing ended.
+    // the camera the frame its swing ended. `[port-only]`: the engine has one
+    // track, and the clip after a swing is set through a fade, whose reset
+    // this is.
     obj.rootFrame = -1;
   }
 
@@ -164,9 +176,16 @@ export function ActorAdvanceMotion(obj: Actor, dt: number): void {
       // Suppressing it left the actor already at the ring when the swing
       // ended, so the retreat finished on its first frame and it bit again
       // immediately.
+      // The same baseline as the base clip's: the engine has one. A one-shot
+      // is held, not wrapped, so the damper can only trip on a clip short
+      // enough that one frame is more than a quarter of it.
       const f = authoredFrameHeld(act.ticks, am.fps, am.frames);
-      const d = rootDelta(am, wasAct, f);
-      ApplyRootMotion(obj, d.x, d.z, d.y);
+      if (RootMotionStep(obj.rootBase, wasAct, am,
+                         MotionPlayLength(obj, act.motion), f, false,
+                         (obj.motionFlags & MotionFlag.RootMotion) !== 0,
+                         _step)) {
+        ApplyRootMotion(obj, _step.x, _step.z, _step.y);
+      }
       obj.rootActionFrame = f;
       if (act.ticks >= ticksOfAuthoredFrame(am.frames, am.fps)) {
         // A one-shot ending is a transition like any other: the next state

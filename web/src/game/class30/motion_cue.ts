@@ -15,7 +15,8 @@
  * same time, which is the one thing a crowd of shambling corpses never does.
  */
 import type { Rng } from "../../core/rng";
-import type { Actor } from "../actor";
+import { MotionFlag, type Actor } from "../actor";
+import { ActorSeedRootBaseline } from "../root_motion";
 import { FrameToTicks, MotionOf } from "../tables";
 import { MotionFade } from "./states";
 import { SkeletonModelSetMotion, SkeletonModelSetMotionBlended }
@@ -55,6 +56,11 @@ export function ZombieSetMotionIfIdle(obj: Actor, motion: number | undefined,
  * to cut**. It clears the track outright, `track[0]`, `track[2]`, `track[4]`
  * and `track[6]` together with the two fade bytes at `+0x36`/`+0x37`, so there
  * is nothing left of the outgoing clip to blend from.
+ *
+ * And it **seeds** the root-motion baseline rather than resetting it: frame
+ * 0's root into `model+0x1160` under the gate, so the first step is measured
+ * from the start of the clip whatever frame the caller then puts on the
+ * counter. See `ActorSeedRootBaseline` in `game/root_motion.ts`.
  */
 export function ActorSetMotion(obj: Actor, motion: number): void {
   // An actor that carries the engine's own model block gets the engine's own
@@ -72,7 +78,14 @@ export function ActorSetMotion(obj: Actor, motion: number): void {
   obj.fadeFrom = null;
   obj.fade = 0;
   obj.fadeLen = 0;
-  obj.rootFrame = -1;
+  // `track+0x10 = 0`, and under the gate the root-motion baseline from the
+  // **new** clip's frame 0 (`TEST AL,2` at `0x00411966`). With the gate down
+  // the old baseline stays -- and so does whatever the damper does with it.
+  if (obj.motionFlags & MotionFlag.RootMotion) {
+    ActorSeedRootBaseline(obj, MotionOf(obj, motion));
+  } else {
+    obj.rootFrame = 0;
+  }
 }
 
 /**
@@ -156,6 +169,9 @@ export function ActorSetMotionBlended(obj: Actor, motion: number,
   }
   obj.motion = motion;
   obj.playTicks = FrameToTicks(Math.max(0, frame), m);
+  // The fade's reset: with `track+0x37` bit 0 up, `SkeletonApplyRootMotion`
+  // sets the baseline to the root it poses and moves nothing -- even for a
+  // fade of zero, which still holds one draw. See `Actor.rootFrame`.
   obj.rootFrame = -1;
 }
 

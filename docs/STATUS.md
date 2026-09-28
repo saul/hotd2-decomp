@@ -19,7 +19,7 @@ is in `tools/verify_all.py`, beside the command that runs it.
 
 | Directory | Lines | Files | Layer |
 |---|---:|---:|---|
-| `game/` | 90940 | 293 | engine |
+| `game/` | 91136 | 293 | engine |
 | `hod2lib/` | 18581 | 35 | engine |
 | `render/` | 14605 | 51 | render |
 | `app/` | 7979 | 28 | app |
@@ -29,12 +29,12 @@ is in `tools/verify_all.py`, beside the command that runs it.
 | `core/` | 949 | 9 | engine |
 | `audio/` | 907 | 2 | render |
 | `hud/` | 491 | 1 | ui |
-| **total** | **144503** | **478** | |
+| **total** | **144699** | **478** | |
 
 The largest files, which is where the pressure to split next is:
 
 * `game/globals.ts` — 2682
-* `game/actor.ts` — 2556
+* `game/actor.ts` — 2579
 * `app/main.ts` — 2340
 * `hod2lib/exetab.ts` — 2212
 * `script/walker.ts` — 2140
@@ -73,7 +73,7 @@ in a checker**, and there is deliberately no suppression comment.
 
 | Ratchet | Where | Now | Baseline |
 |---|---|---:|---:|
-| `uncited-exports` | `tools/verify_port.py` | 82 | 82 |
+| `uncited-exports` | `tools/verify_port.py` | 81 | 81 |
 
 All 14 rules in `verify_layers.py` are `error` at zero;
 a new violation of any of them fails the build rather than moving

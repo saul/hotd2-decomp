@@ -1897,8 +1897,10 @@ shows is stage 2 block 21, whose pair are spawned rolled onto a wall: their
 wait clip's flat root height is beside the point, because the roll turns the
 clip's -Z into world -Y. See class 0x31's state 23 below. And the engine's
 wrap damper makes the applied delta `(baseline_old - root)/play_length` where
-`rootDelta` computes `(root - root[0])/frames`; both are small, neither was
-touched, they are not the same number and nothing asserts either.
+the port's old `rootDelta` computed `(root - root[0])/frames`, which is zero on
+the usual wrap. They were not the same number and nothing asserted either; the
+port now transcribes the damper, and `port.test.ts` asserts a loop's whole
+travel -- see "A looping clip's wrap is one average step" below.
 
 **15 further `[diverges]` tags live outside `game/` and `script/`** — eight
 files under `render/` — and `verify_port.py` does not count them, because
@@ -5357,10 +5359,69 @@ settles on the room.
 
 What is still not the engine's: `obj+0x1FC`, the rotation order, has no field
 on an actor without the model block, and every shipped cat turns about y alone.
-And the shared root-motion step (`rootDelta`) gives a looping clip's wrap frame
+And the shared root-motion step (`rootDelta`) gave a looping clip's wrap frame
 zero travel where `SkeletonApplyRootMotion`'s damped reset gives it one average
-step -- about 2% of `0x2FD`'s distance, and not the cat's alone, so it is left
-for its own change.
+step -- 2.3% of `0x2FD`'s distance, and not the cat's alone, so it was left
+for its own change, which is the next section.
+
+### A looping clip's wrap is one average step, and the baseline is a position
+
+`SkeletonApplyRootMotion` (`FUN_00410C50`) keeps its baseline at
+`model+0x1160..0x1168` -- a root **translation**, not a frame -- and when the
+frame jumps by more than a quarter of the play length (`0x00410C82`) it sets
+that baseline to `root + (root - baseline) / L` before taking the ordinary
+`root - baseline` at `0x00410DA8`. The step on a loop's wrap frame is therefore
+`(baseline - root) / L`: the clip's whole travel over its play length, one
+average step on in the direction it walks. The port's `rootDelta` returned
+`(root[next] - root[0]) / frames` there, which is **zero** on the ordinary
+wrap onto frame 0, under a comment saying the damped reset contributes "very
+nearly nothing" -- and `functions.tsv`'s row for the routine said the same.
+So every looping clip lost `1/L` of its travel a loop: measured on the
+exported data, 0.29 of the cat's 12.73 units a pass on `0x2FD` (L = 44), 0.67
+of the 19.33 `char_adv02`'s attack run `0x108` carries (L = 29).
+
+The port now transcribes the arithmetic in order (`RootMotionStep` in
+`game/root_motion.ts`): the damper, the fade's reset (`0x00410CF8`), the
+delta under the gate, and the store after the pop that Ghidra's pseudocode
+drops (`0x00410E5F`, L37). The baseline is `Actor.rootBase`, so it is in the
+snapshot, and `rootFrame` is `model+0x10`. What each kind of clip change does
+to them is now the exe's:
+
+* **`ActorSetMotion`** (`FUN_00411930`) seeds the baseline from the new clip's
+  frame 0 under the gate (`0x00411966`) and zeroes `+0x10`; with the gate down
+  it leaves the old baseline. So do `SkeletonBuildAndPose`'s stores
+  (`0x00410704`, unconditionally), which is what the inits of classes 0x20,
+  0x22 and 0x25 stand for -- all three write the counter **after** the build,
+  so their first draw steps from frame 0's root, as class 0x25's op 2 does
+  after its `ActorSetMotion`. The port used to reset instead, which takes no
+  step.
+* **`ActorSetMotionBlended`** (`FUN_004119A0`) raises the fade bit, whose
+  reset the port writes as `rootFrame = -1`: unchanged.
+* **A counter or clip written outright** leaves both alone.
+  `CatMotionListUpdate` writes `obj+0x1B4` with no setter, so the next clip is
+  measured from where the old one left the baseline -- the port used to look
+  the old clip's last frame index up in the new clip's table. And
+  `CivilianUpdate`'s frame-limit rewind (`*model = 0`, `0x0048A920`) was a
+  baseline reset in the port and is not one in the exe.
+
+The game-over body (`player_body.ts`) used the same `rootDelta`; it has the
+same two fields now, seeded by `PlayerBodiesCreate`'s build and by its
+`ActorSetMotion`.
+
+`port.test.ts` asserts a pass is `(root[last] - root[0]) * (1 + 1/L)` and the
+wrap frame's own step `(root[last] - root[0]) / L`, a clip cut under the
+baseline, both of `ActorSetMotion`'s cases, and a save restored mid-pass
+walking on to the same place. Run against the tree before this change, the
+first three fail -- a pass of -16.5 where the engine's is -17.25, and a wrap
+step of 0 where it is -0.75 -- and the rest throw on the missing field.
+
+Not changed, and noted rather than folded in: the port's **base clock** wraps
+a clip at `2 * frames` ticks (`authoredFrameOfTicks`), where the engine's
+cursor wraps at `play + 1` (`SkeletonAdvancePlayCursor`) -- one or two ticks
+sooner a loop. The travel per loop is now right; the loop's period is still
+the port's, and that is a change to every looping pose, not to this
+arithmetic. It is not declared in the code: a new divergence marker is the
+user's call, and this one is put to them rather than added.
 
 ### Translucent meshes are drawn the engine's way: two passes, depth written, nearest first
 

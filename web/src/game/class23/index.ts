@@ -23,6 +23,8 @@ import {
   registerClass, type ActorDebug, type ClassFrame, type ClassHandler,
 } from "../registry";
 import { SpawnClass } from "../spawn_class";
+import { ActorSeedRootBaseline } from "../root_motion";
+import { MotionOf } from "../tables";
 import { JudgmentRegisterEnemySlot } from "../class22/shot";
 import {
   Class23Collapse, Class23FightBesideCompanion,
@@ -74,7 +76,7 @@ export function Class23Init(obj: Actor, rng?: Rng, events?: Events): void {
   obj.fadeFrom = null;
   obj.fade = 0;
   obj.fadeLen = 0;
-  obj.rootFrame = -1;
+  ActorSeedRootBaseline(obj, MotionOf(obj, obj.motion));
   obj.motionFlags |= MOTION_FLAG_4;
   obj.hitRadius = CLASS23_RADIUS;
   obj.radius = CLASS23_RADIUS;

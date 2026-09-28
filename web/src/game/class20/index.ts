@@ -77,6 +77,7 @@ import {
 } from "../registry";
 import { SpawnClass } from "../spawn_class";
 import { MotionOf } from "../tables";
+import { ActorSeedRootBaseline } from "../root_motion";
 import { OneHitTargetState, type OneHitTargetTail } from "./state";
 
 export { OneHitTargetState, type OneHitTargetTail };
@@ -184,7 +185,9 @@ export function OneHitTargetInit(obj: Actor, rng?: Rng): void {
   const frames = m?.frames ?? 0;
   a.playTicks = (rng && frames > 0)
     ? ticksOfAuthoredFrame(rng.int(frames), m?.fps ?? 30) : 0;
-  a.rootFrame = -1;
+  // `ActorBuildSkinnedModel` ran between the two writes above, so the
+  // baseline is frame 0's and the first draw's step is measured from it.
+  ActorSeedRootBaseline(a, m);
   // `obj+0x1F8 |= 2`. Root motion's gate is bit 1 of that word and
   // `ActorBuildSkinnedModel` already sets it to 3 for every skeletal actor —
   // see `root_motion.ts` — so there is nothing for the port to do here.

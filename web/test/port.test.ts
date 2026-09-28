@@ -346,7 +346,8 @@ import { SND_LEAP_LANDED } from "../src/game/class31/leap";
 import { dist2d, vec3, type Vec3 } from "../src/game/vec";
 import { ActorPlayHitReaction, EffectCode, HitResultCode, ResolveHit }
   from "../src/game/combat/resolve_hit";
-import { ActorSetMotionBlended } from "../src/game/class30/motion_cue";
+import { ActorSetMotion, ActorSetMotionBlended }
+  from "../src/game/class30/motion_cue";
 import type { BreakablesJson, ScriptJson } from "../src/bundle";
 import { Walker, type BranchChoice } from "../src/script/walker";
 import {
@@ -7897,6 +7898,138 @@ console.log("root motion: the delta is turned by roll, yaw and pitch:");
   ApplyRootMotion(z, 1, 0, 0);
   check("the pitch is applied before the yaw, not after it",
         near(z.pos.x, 10) && near(z.pos.y, 20) && near(z.pos.z, 29), at());
+}
+
+// `SkeletonApplyRootMotion` (`FUN_00410C50`)'s **baseline**: a position at
+// `model+0x1160`, and a damper that sets it to `root + (root - base) / L`
+// whenever the frame jumps by more than a quarter of the play length
+// (`0x00410C82`..`0x00410CEC`). The ordinary delta after it is then
+// `(base - root) / L` -- one average step on, not nothing. The port used to
+// return `(root[next] - root[0]) / frames` on a wrap, which is zero on the
+// usual one, and kept only a frame index as its baseline.
+console.log("root motion: the loop wrap is one average step, not none:");
+{
+  // 12 frames walking 1.5 a frame along -Z, play length 22 (`2n - 2`); and a
+  // second clip walking 0.5, to be cut to underneath the baseline.
+  const WALK = 5001, SLOW = 5002, L = 22;
+  const walk = motion(12, 1.5, L);
+  const BASELINE_CHARS = {
+    ...CHARS,
+    types: {
+      ...CHARS.types,
+      "1": { ...TYPE, motions: { ...TYPE.motions, [String(WALK)]: walk,
+                                 [String(SLOW)]: motion(12, 0.5, L) } },
+    },
+  } as unknown as CharactersJson;
+  SetGameTables(BASELINE_CHARS);
+  ResetGameGlobals();
+  const near = (a: number, b: number, eps = 1e-4) => Math.abs(a - b) < eps;
+  const fresh = (at: number) => {
+    const z = makeActor(at, SpawnClass.Zombie, 1, "baseline");
+    z.pos = vec3(0, 0, 0);
+    z.yaw = 0; z.pitch = 0; z.roll = 0;
+    z.motionFlags = MOTION_FLAGS_INIT;
+    z.motion = WALK;
+    z.playTicks = 0;
+    return z;
+  };
+  const frameOf = (z: Actor) => authoredFrameOfTicks(z.playTicks, 30, 12);
+  const TICK = 1 / 60;
+
+  // Two whole passes; note where the actor is each time the clip comes back
+  // round to frame 0.
+  const z = fresh(0x5A0);
+  check("the fixture is at scale 1, so clip units are world units",
+        z.scale === 1, `${z.scale}`);
+  const wraps: number[] = [];
+  const steps: number[] = [];
+  let was = -1;
+  for (let i = 0; i < 24 * 3 + 2; i++) {
+    const z0 = z.pos.z;
+    ActorAdvanceMotion(z, TICK);
+    const f = frameOf(z);
+    if (was === 11 && f === 0) {
+      wraps.push(z.pos.z);
+      steps.push(z.pos.z - z0);
+    }
+    was = f;
+  }
+  // root[last] - root[0]
+  const span = walk.root[11 * 3 + 2] - walk.root[2];
+  const want = span * (1 + 1 / L);
+  check("a looping clip carries its actor (root[last] - root[0]) * (1 + 1/L) "
+        + "a pass", wraps.length >= 2 && near(wraps[1] - wraps[0], want),
+        `pass ${wraps[1] - wraps[0]} want ${want} (without the wrap step `
+        + `${span})`);
+  check("...and the wrap frame's own step is (root[last] - root[0]) / L, in "
+        + "the direction the clip walks", steps.length >= 1
+        && near(steps[0], span / L) && steps[0] < 0,
+        `step ${steps[0]} want ${span / L}`);
+
+  // The baseline is a position, so a clip changed underneath it -- as
+  // `CatMotionListUpdate` (`FUN_00431340`) does, writing `obj+0x1B4` and the
+  // counter with no setter -- is measured from where the old clip left it.
+  const c = fresh(0x5A1);
+  while (frameOf(c) !== 11) ActorAdvanceMotion(c, TICK);
+  const atCut = c.pos.z;
+  c.motion = SLOW;
+  c.playTicks = 0;
+  ActorAdvanceMotion(c, TICK);
+  // |11 - 0| > 22/4, so the damper: base' = 0 + (0 - -16.5) / 22, and the
+  // step is 0 - base' = -0.75 -- the old clip's travel over the new clip's
+  // play length.
+  check("a clip cut under the baseline steps (old root - new root) / L_new",
+        near(c.pos.z - atCut, (walk.root[11 * 3 + 2] - 0) / L),
+        `step ${c.pos.z - atCut} want ${walk.root[11 * 3 + 2] / L}`);
+  check("...and the baseline is left on the new clip's root",
+        near(c.rootBase.z, 0) && c.rootFrame === 0,
+        `base ${c.rootBase.z} +0x10 ${c.rootFrame}`);
+
+  // `ActorSetMotion` (`FUN_00411930`) **seeds** the baseline from the new
+  // clip's frame 0 under the gate (`0x00411966`); a caller that then moves
+  // the counter -- class 0x25's op 2 does -- has its first draw measured from
+  // frame 0. Frame 4 is inside a quarter of the play length, so no damper:
+  // the whole of root[4] - root[0].
+  const s = fresh(0x5A2);
+  ActorSetMotion(s, WALK);
+  check("ActorSetMotion seeds +0x10 = 0 and the baseline at frame 0's root",
+        s.rootFrame === 0 && near(s.rootBase.z, 0), `${s.rootFrame} `
+        + `${s.rootBase.z}`);
+  s.playTicks = ticksOfAuthoredFrame(4, 30);
+  ActorAdvanceMotion(s, TICK);
+  check("...so a counter moved on after it steps root[f] - root[0] on the "
+        + "first draw", near(s.pos.z, walk.root[4 * 3 + 2]),
+        `z ${s.pos.z} want ${walk.root[4 * 3 + 2]}`);
+  // Frame 8 is past the quarter, so the damper takes it instead:
+  // base' = r + (r - 0) / L, step = -r / L -- a small step *back*.
+  const s2 = fresh(0x5A3);
+  ActorSetMotion(s2, WALK);
+  s2.playTicks = ticksOfAuthoredFrame(8, 30);
+  ActorAdvanceMotion(s2, TICK);
+  check("...and one past a quarter of the play length is damped to -root[f]/L",
+        near(s2.pos.z, -walk.root[8 * 3 + 2] / L),
+        `z ${s2.pos.z} want ${-walk.root[8 * 3 + 2] / L}`);
+  // With the gate down it seeds nothing and the old baseline stays.
+  const g = fresh(0x5A4);
+  g.rootBase = vec3(1, 2, 3);
+  g.motionFlags &= ~MotionFlag.RootMotion;
+  ActorSetMotion(g, WALK);
+  check("...but with model+0x64 bit 1 down it leaves the baseline alone",
+        g.rootBase.x === 1 && g.rootBase.y === 2 && g.rootBase.z === 3
+        && g.rootFrame === 0, JSON.stringify(g.rootBase));
+
+  // The baseline lives on the actor, so it goes through a save. Run one
+  // actor on across a wrap, and a copy restored from mid-pass beside it.
+  const a = fresh(0x5A5);
+  for (let i = 0; i < 17; i++) ActorAdvanceMotion(a, TICK);
+  const saved = clonePlain(a);
+  for (let i = 0; i < 20; i++) ActorAdvanceMotion(a, TICK);
+  const b = clonePlain(saved) as Actor;
+  for (let i = 0; i < 20; i++) ActorAdvanceMotion(b, TICK);
+  check("a restored actor walks on to exactly where the original did",
+        b.pos.z === a.pos.z && b.rootBase.z === a.rootBase.z,
+        `restored ${b.pos.z} original ${a.pos.z}`);
+  SetGameTables(CHARS);
 }
 
 // Stage 2 block 21 step 2's two `zstin`, from the placement to the leap:

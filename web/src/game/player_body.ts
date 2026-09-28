@@ -23,10 +23,16 @@
 import { MotionFlag, MOTION_FLAGS_INIT } from "./actor";
 import { G } from "./globals";
 import { PLAYER_BODY_AT } from "./player_body_data";
-import { ActorModelScale, rootDelta } from "./root_motion";
+import {
+  ActorModelScale, ActorSeedRootBaseline, RootMotionStep,
+} from "./root_motion";
 import { T } from "./tables";
 import { authoredFrameHeld } from "../core/play_cursor";
 import { vec3, type Vec3 } from "./vec";
+import type { BakedMotion } from "../bundle";
+
+/** The clip-space delta `RootMotionStep` hands back, reused. */
+const _step: Vec3 = { x: 0, y: 0, z: 0 };
 
 /** One player's body actor -- the fields of it the fly-over reads. */
 export interface PlayerBody {
@@ -51,11 +57,15 @@ export interface PlayerBody {
   /** `model+0x116C`, from the character type alone. */
   scale: number;
   /**
-   * `[port-only]` -- the authored frame the last draw posed, so the next one
-   * can take the root delta `SkeletonApplyRootMotion` (`FUN_00410C50`) takes
-   * from inside the draw. -1: nothing drawn since `ActorSetMotion`.
+   * `model+0x10` -- the authored frame the last draw posed, which
+   * `SkeletonApplyRootMotion` (`FUN_00410C50`) compares with the next one's
+   * to find a wrap. See `Actor.rootFrame`.
    */
-  lastFrame: number;
+  rootFrame: number;
+  /**
+   * `model+0x1160..0x1168` -- the root-motion baseline. See `Actor.rootBase`.
+   */
+  rootBase: Vec3;
   /**
    * `[port-only]` -- the hook drew the body this frame. The engine's draw is
    * the hook's own `DrawSkinnedModelAndShadow` call; the port's is the
@@ -87,11 +97,15 @@ export function PlayerBodiesCreate(): void {
   }
   G.g_player_bodies = PLAYER_BODY_AT.map((at, p) => {
     const ct = go.body_char_types[p];
-    return {
+    const b: PlayerBody = {
       at, charType: ct, motion: go.body_start_motions[p], playTicks: 0,
       pos: vec3(), yaw: 0, motionFlags: MOTION_FLAGS_INIT,
-      scale: ActorModelScale(ct), lastFrame: -1, drawn: 0,
+      scale: ActorModelScale(ct), rootFrame: 0, rootBase: vec3(), drawn: 0,
     };
+    // `ActorBuildSkinnedModel` after the clip is written:
+    // `SkeletonBuildAndPose` seeds the baseline from its frame 0.
+    ActorSeedRootBaseline(b, BodyMotion(b));
+    return b;
   });
 }
 
@@ -104,7 +118,16 @@ export function PlayerBodiesCreate(): void {
 export function PlayerBodySetMotion(b: PlayerBody, motion: number): void {
   b.motion = motion;
   b.playTicks = 0;
-  b.lastFrame = -1;
+  if (b.motionFlags & MotionFlag.RootMotion) {
+    ActorSeedRootBaseline(b, BodyMotion(b));
+  } else {
+    b.rootFrame = 0;
+  }
+}
+
+/** `[port-only]` -- the body's clip, from its own character type's table. */
+function BodyMotion(b: PlayerBody): BakedMotion | undefined {
+  return T.types[String(b.charType)]?.motions[String(b.motion)];
 }
 
 /**
@@ -172,11 +195,13 @@ export function PlayerHookDrawBodyUntilMotionEnd(player: number): boolean {
  * the body and the pose keeps only its height.
  */
 function PlayerBodyDraw(b: PlayerBody): void {
-  const m = T.types[String(b.charType)]?.motions[String(b.motion)];
+  const m = BodyMotion(b);
   if (m && m.frames > 0) {
     const f = authoredFrameHeld(b.playTicks, m.fps, m.frames);
-    if ((b.motionFlags & MotionFlag.RootMotion) !== 0) {
-      const d = rootDelta(m, b.lastFrame, f);
+    const d = _step;
+    if (RootMotionStep(b.rootBase, b.rootFrame, m,
+                       m.play ?? Math.max(1, m.frames * 2 - 2), f, false,
+                       (b.motionFlags & MotionFlag.RootMotion) !== 0, d)) {
       if (d.x !== 0 || d.z !== 0) {
         const a = b.yaw * ((Math.PI * 2) / 65536);
         const s = Math.sin(a);
@@ -187,7 +212,7 @@ function PlayerBodyDraw(b: PlayerBody): void {
         b.pos.z += dz * c - dx * s;
       }
     }
-    b.lastFrame = f;
+    b.rootFrame = f;
   }
   b.drawn = 1;
 }

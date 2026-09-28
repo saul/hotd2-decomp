@@ -27,6 +27,7 @@ import type { Rng } from "../../core/rng";
 import type { BreakablePlacement } from "../../bundle";
 import { SpawnPropHitEffectScaled } from "../effects/sprite";
 import { G } from "../globals";
+import { CameraBlockViewToWorld } from "../camera/view";
 import { GameMode } from "../game_mode";
 import {
   MatrixLoadIdentity, MatrixRotateX, MatrixRotateY, MatrixRotateZ,
@@ -264,9 +265,10 @@ export function PropUpdateType76(p: BreakableProp, rng: Rng,
       // `obj+0x70..0x78` as nothing ever wrote them -- zero, from
       // `ActorClearGameFields`. That is the view-space origin, the camera
       // itself, and the port's point is in world space, so it is the camera's
-      // world position. No shipped spawn has a third door.
+      // world position -- the block `g_camera_index` names, whose view the
+      // shot test reads it under. No shipped spawn has a third door.
       _p.x = 0; _p.y = 0; _p.z = 0;
-      MatrixTransformPoint(G.g_camera_view_to_world, _p, _o);
+      MatrixTransformPoint(CameraBlockViewToWorld(G.g_camera_index), _p, _o);
       PropRegisterForShotTest(p, _o.x, _o.y, _o.z);
   }
 }

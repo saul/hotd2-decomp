@@ -24286,3 +24286,71 @@ sprint change (`30a0ebf0`), which alters which strike a shot zombie picks and
 so which poses show up in a given run; it was not that. A measurement that
 refreshes the state it measures agrees with any claim about it -- `L69`'s
 shape, one layer further in.
+
+
+## 2026-09-28 -- the boss banner's camera stopped turning: cutscenes are drawn from camera block 2
+
+Reported as "the camera no longer yaws when showing the boss banner", at
+`?stage=1&block=14&step=1&op=52&frame=830` -- JUDGMENT's tarot cards, on
+block 14's `wait_frames 300` after its last `cam_play`. Measured in the
+headless page with `__hotd2Drive`: at `96e4e31b` (main before the camera
+merge) the drawn forward swung from `(-0.57, 0.37, -0.74)` to
+`(-0.90, 0.12, 0.42)` across the banner; at `6706e323` (the merge of
+fix/camera-faithful) it held `(-0.97, 0.17, 0.16)` for all 300 frames while
+the banner's look-at swept round the boss. The regressing change is
+`3a28137a` ("the view from angles"): `UpdateSceneViewAndLight` built the view
+from **camera block 0's** angles and `render/camera.ts` drew
+`G.g_camera_view_to_world`, block 0's, on the claim written beside
+`g_camera_index` in `globals.ts` -- "every shipped write is 0 -- the only block
+the port has".
+
+It is not. `CameraInstallViewAngles` (`FUN_004039D0`), the installer of scene
+state (1, 3), is `MOV dword ptr [0x009c6f00], 0x2` at `0x004039D5`, and
+`functions.tsv` had said so, `[proved]`, the whole time. Every block's
+checkpoint enters (1, 3), so every cutscene is drawn from **block 2**, which
+`EvtRunQueuedActionsSyncViewBlock` refills at the head of every frame with
+block 0's eye and aims at block 0's **look-at**. The banner writes block 0's
+eye and look-at off its own path and no angle -- that reading was right --
+so block 0 keeps its heading, and the drawn block turns to the path's target
+a frame later. Before the camera became two tasks the port drew
+`lookAt(block eye, block target)` with no angles at all, which happened to be
+block 2's view. The nod was on the wrong block too: `UpdateSceneViewAndLight`
+nods only `g_camera_index`'s block (`CMP EBP, [0x009c6f00]` at `0x00401F4E`),
+so under (1, 3) block 0 is never nodded and its pitch does not creep --
+the port's had crept from 1614 to 1790 BAMS over the banner.
+
+Fixed: the (1, 3) cell writes the index (`CameraInstallViewAngles` in
+`camera/hooks.ts`); `UpdateSceneViewAndLight` nods the indexed block and
+builds block 2's two matrices (`g_camera_block2_view_to_world` `0x009A6388`,
+`..._world_to_view` `0x009A6348`); `CameraBlockViewToWorld` and
+`CameraBlockWorldToView` (`camera/view.ts`) read "block `i`" for the two
+blocks the port keeps; the
+host's view seams (`app/systems.ts`), the draw, `PropMatrixClearRotation` and
+type 76's third door read the indexed block; the seek's reseat syncs block 2
+under (1, 3). `CameraFromViewAngles` stays on block 0: it pushes `0x9a6040`
+by address. After: the drawn forward follows the banner's aim one frame late,
+about 77 degrees of yaw over the 300 frames, and block 0 holds 18042/1614.
+`render.test.ts` "the boss-name banner's flight, drawn" fails 66.4 degrees off
+on the old tree; of five new `port.test.ts` checks, three -- the index, the
+nod, the drawn view -- fail there.
+
+**Wrong turns.** Reading only the writers first, I got as far as "the exe does
+not turn the camera either": the banner calls no `CamBlockSetAnglesFromLookAt`,
+its callers are all inactive under a held driver, no writer of `0x009A60CC..D4`
+runs, and the view is built from angles. Every step of that was true. The
+step missing was the **reader**: which block `MatrixStackSetTopFromArray`
+puts on the stack, and that needs every writer of the index. An xref list and
+the `MOV [0x009c6f00], reg` forms found only zeroes; the byte pattern
+`C7 05 00 6F 9C 00` -- a store of an immediate -- found the 2. The existing
+port test "leaves the block's heading alone, so the view keeps it" was
+asserting the true half of that argument; it is reworded, and still passes.
+
+**Left open.** About thirty readers under `game/` and one in `render/` take
+block 0's eye or yaw where the exe reads `[... + g_camera_index * 0x1A4]`
+(the carrier strip's `0x004406AD` is `[ECX*4 + 0x9a60d0]`). Under (1, 3) they
+agree with block 2 except while something writes block 0's look-at without its
+angles, and several carry the old "0 in every shipped write" claim in a
+comment (`class41/items.ts`, `type62.ts`, `type72.ts`, `original_item.ts`,
+`draw_only.ts`, `class46/index.ts`). `type72.ts` is the one that could change
+play: by its own comment the exe reads the block's frame through the index,
+and block 2's `+0x110` is never written. `[open]`, handed on as its own sweep.

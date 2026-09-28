@@ -4183,5 +4183,80 @@ console.log("\na skinned part's joints stay current under a hidden node:");
         new V3().setFromMatrixPosition(joint.matrixWorld).x === 10);
 }
 
+// The boss-name banner's flight, drawn. Reported as "the camera no longer
+// yaws when showing the boss banner" at stage 1 block 14's `wait_frames 300`.
+// `BossIntroBannerUpdate` (`FUN_00437AC0`) writes camera block 0's eye and
+// look-at off its path and no angle, and the view is built from angles -- but
+// stage 1's banner runs under scene state (1, 3), whose installer
+// `CameraInstallViewAngles` (`FUN_004039D0`) makes `g_camera_index` 2, and
+// `EvtRunQueuedActionsSyncViewBlock` aims block 2 at block 0's look-at every
+// frame. So the camera drawn turns with the flight while block 0's heading
+// stays put. Driven through the engine's own frame order -- the camera
+// actor's task, then the banner's -- and read off the three.js camera the
+// rig places.
+{
+  console.log("\nthe boss-name banner's flight, drawn:");
+  const { CameraRig } = await import("../src/render/camera");
+  const { CameraActorTick } = await import("../src/game/camera/actor");
+  const { CheckpointResetCamera } = await import("../src/game/camera/actions");
+  const { CamBlockSetAnglesFromLookAt, CameraPoseBlock }
+    = await import("../src/game/camera/path");
+  const { BossBannersTick, BossIntroBannerSpawn }
+    = await import("../src/game/boss_banner");
+  const { NULL_HOST } = await import("../src/game/host");
+  const { PerspectiveCamera } = await import("three");
+  type HostT = import("../src/game/host").GameHost;
+  type CamPathT = import("../src/game/camera/curve").CamPath;
+  type V = { x: number; y: number; z: number };
+  ResetGameGlobals();
+  // Judgment's record (`0x00570EC8`) flies path 48. This one circles the
+  // origin at radius 20, a quarter turn over the slide, looking at it.
+  const R = 20;
+  const orbit = {
+    pose: (t: number, _roll: boolean,
+           out: { eye: V; target: V; roll: number }) => {
+      const a = (t * Math.PI / 2) / 0x50;
+      out.eye.x = R * Math.sin(a); out.eye.y = 0; out.eye.z = R * Math.cos(a);
+      out.target.x = 0; out.target.y = 0; out.target.z = 0;
+      out.roll = 0;
+      return out;
+    },
+  };
+  const host: HostT = {
+    ...NULL_HOST,
+    camPath: (slot) => (slot === 48 ? orbit as unknown as CamPathT : null),
+  };
+  CheckpointResetCamera();               // every block opens in (1, 3)
+  G.g_camera_block_eye = { x: 0, y: 0, z: R };
+  G.g_camera_block_target = { x: 0, y: 0, z: 0 };
+  CamBlockSetAnglesFromLookAt(CameraPoseBlock.Camera, G.g_camera_block_target,
+                              0);
+  CameraActorTick();
+  const yaw0 = G.g_camera_block_yaw_bams;
+  G.g_script_flags[2] = 1;
+  const banner = BossIntroBannerSpawn(0x00570ec8);
+  for (let f = 0; f < 60; f++) {
+    CameraActorTick();
+    BossBannersTick(host);
+  }
+  CameraActorTick();                     // the next frame's view: last pose
+  const cam = new PerspectiveCamera();
+  new CameraRig().draw({ walker: {}, camera: cam } as unknown as RenderContextT);
+  const e = G.g_camera_block_eye;
+  const fwd = cam.getWorldDirection(new Vector3());
+  const want = new Vector3(-e.x, -e.y, -e.z).normalize();
+  const deg = (fwd.angleTo(want) * 180) / Math.PI;
+  check("the banner is flying, a long way round from where it started",
+        banner.frame > 50 && Math.abs(e.x) > 15, `${banner.frame} ${e.x}`);
+  check("under (1, 3) the drawn camera turns with the flight onto its "
+        + "look-at, and sits at its eye",
+        deg < 0.05 && cam.position.distanceTo(new Vector3(e.x, e.y, e.z)) < 1e-3,
+        `${deg.toFixed(3)} deg off; drawn at ${cam.position.toArray()
+          .map((v) => v.toFixed(2)).join()}`);
+  check("...while camera block 0 keeps the heading it had",
+        Math.abs(G.g_camera_block_yaw_bams - yaw0) <= 1,
+        `${yaw0} -> ${G.g_camera_block_yaw_bams}`);
+}
+
 console.log(failures ? `\n${failures} failed` : "\nall passed");
 process.exit(failures ? 1 : 0);

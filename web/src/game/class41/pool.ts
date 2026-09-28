@@ -31,6 +31,7 @@ import {
   PropDrawOnlyType31, PropDrawOnlyType53, PropDrawOnlyType54,
 } from "./draw_only";
 import { GENERIC_ORIGINAL_MODE_ONLY } from "./generic";
+import { GENERIC_ROUTINES } from "./generic_routines";
 import { PropUpdateType13 } from "./type13";
 import { PropUpdateType35 } from "./type35";
 import { PropUpdateType43 } from "./type43";
@@ -88,7 +89,7 @@ export function BreakablePropPoolUpdate(rng: Rng, events?: Events,
       case PropFamily.ContainerFragment:
         FallingContainerFragmentUpdate(p, rng, events); break;
       case PropFamily.Lift: LiftUpdate(p, events); break;
-      case PropFamily.Generic: GenericPropUpdate(p, events); break;
+      case PropFamily.Generic: GenericPropUpdate(p, rng, events); break;
       case PropFamily.StoryModeSwitch: StoryModeSwitchPoolUpdate(p); break;
       case PropFamily.ScriptFlagEffect:
         ScriptFlagEffectUpdate(p, events); break;
@@ -185,7 +186,15 @@ const GENERIC_UPDATE: Partial<Record<number,
  * Every one of these routines masks `obj+0x34` itself, and a prop whose hit
  * bit survived the frame would answer its branch on every frame afterwards.
  */
-function GenericPropUpdate(p: BreakableProp, events?: Events): void {
+function GenericPropUpdate(p: BreakableProp, rng: Rng,
+                           events?: Events): void {
+  // A routine transcribed whole brings its own head and tail -- see
+  // `class41/generic_routines.ts` -- and nothing below is its.
+  const routine = GENERIC_ROUTINES[p.kind];
+  if (routine) {
+    routine(p, rng, events);
+    return;
+  }
   // `if (g_GameMode != 1) { ActorDespawn(obj); return; }` — Original Mode's
   // collectibles, gone on their first frame in Arcade.
   if (GENERIC_ORIGINAL_MODE_ONLY.has(p.kind) && G.g_GameMode !== 1) {

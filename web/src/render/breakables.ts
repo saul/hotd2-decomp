@@ -41,7 +41,7 @@ import type { System } from "../core/system";
 import type { RenderContext } from "./context";
 import { G } from "../game/globals";
 import {
-  BreakableState, PropFamily, type BreakableProp,
+  BreakableState, PropFamily, type BreakableProp, type PropDrawCall,
 } from "../game/class41/prop_state";
 import { T } from "../game/tables";
 import { KIND_SHADOW } from "../game/class41/kinded";
@@ -343,6 +343,12 @@ interface Live {
   /** Those parts' nodes, in list order. */
   partNodes?: Object3D[];
   /**
+   * For a prop whose routine records its draws: the slot of each node in
+   * `partNodes`, so `nodesForSlot` can find a canal tile drawn as one call of
+   * several.
+   */
+  partSlots?: number[];
+  /**
    * The second model of a routine that draws two under separate matrices:
    * `PropUpdateType13`'s falling part and `PropUpdateType35`'s second leaf.
    * A sibling in the layer's group, not a child — neither routine composes
@@ -448,6 +454,10 @@ export class BreakableLayer implements System<RenderContext> {
     const out: Object3D[] = [];
     for (const l of this.nodes.values()) {
       if (l.slot === slot && l.node.parent) out.push(l.node);
+      l.partSlots?.forEach((s, i) => {
+        const n = l.partNodes?.[i];
+        if (s === slot && n?.parent && l.node.parent) out.push(n);
+      });
     }
     return out;
   }
@@ -470,6 +480,13 @@ export class BreakableLayer implements System<RenderContext> {
 
     for (const p of G.g_breakable_props) {
       if (p.dead) continue;
+      // A routine that records its own draws (`game/class41/prop_draw.ts`)
+      // has already decided everything: which slots, under which matrices.
+      if (p.draws) {
+        seen.add(p.id);
+        this.drawCalls(p.id, p.draws);
+        continue;
+      }
       const parts = COMPOSITE_FAMILIES.has(p.family) ? PropParts(p) : null;
       if (parts) {
         seen.add(p.id);
@@ -695,6 +712,51 @@ export class BreakableLayer implements System<RenderContext> {
   }
 
   /**
+   * The `AssetDrawSlot` calls a transcribed routine recorded on its last
+   * frame, each a clone of its slot under the matrix the routine made it
+   * under. The group is rebuilt when the list of slots changes and has its
+   * matrices set every frame otherwise.
+   *
+   * The matrix is **set**, not decomposed: a routine that scales and then
+   * rotates would come out sheared, and a decomposition would quietly lose
+   * that. A slot with no template draws nothing, which is what the describe
+   * line reports.
+   */
+  private drawCalls(id: number, calls: readonly PropDrawCall[]): void {
+    const key = "calls:" + calls.map((c) => c.slot).join(",");
+    let l = this.nodes.get(id);
+    if (l && l.parts !== key) {
+      l.node.removeFromParent();
+      l.shadow?.removeFromParent();
+      l.second?.removeFromParent();
+      for (const d of l.debris ?? []) d.removeFromParent();
+      this.nodes.delete(id);
+      l = undefined;
+    }
+    if (!l) {
+      const root = new Group();
+      const made: Object3D[] = [];
+      for (const c of calls) {
+        const n = this.clone(c.slot) ?? new Group();
+        n.matrixAutoUpdate = false;
+        root.add(n);
+        made.push(n);
+      }
+      this.group.add(root);
+      this.nodes.set(id, (l = { node: root, shadow: null, slot: -1,
+                                parts: key, partNodes: made,
+                                partSlots: calls.map((c) => c.slot) }));
+    }
+    const kids = l.partNodes ?? [];
+    calls.forEach((c, i) => {
+      const n = kids[i];
+      if (!n) return;
+      n.matrix.fromArray(c.m);
+      n.matrixWorldNeedsUpdate = true;
+    });
+  }
+
+  /**
    * Hang the lift's four cage leaves and its overhead panel off the car.
    *
    * `MatrixStackPush(0)` duplicates the top of the stack, so the two hinges
@@ -876,7 +938,10 @@ export class BreakableLayer implements System<RenderContext> {
           + ` in the pool, waiting for a game frame`
         : "none placed";
     }
-    const generic = live.filter((p) => p.family === PropFamily.Generic).length;
+    // A routine that records its draws is transcribed; only the rest of the
+    // generic family is still standing in for a routine it does not run.
+    const generic = live.filter((p) => p.family === PropFamily.Generic
+                                     && !p.draws).length;
     // `+0x290` is the object kind for a kinded prop and the class-0x41 type
     // for a generic one, so the two have to be counted apart or the line
     // reports a kind as a type. Same offset, different meaning, again.
@@ -885,6 +950,12 @@ export class BreakableLayer implements System<RenderContext> {
     let effects = 0;
     const noTemplate = new Set<number>();
     for (const p of live) {
+      if (p.draws) {
+        for (const c of p.draws) {
+          if (!this.templates.has(c.slot)) noTemplate.add(c.slot);
+        }
+        continue;
+      }
       const slot = DrawSlotFor(p);
       if (slot !== null) {
         if (!this.templates.has(slot)) noTemplate.add(slot);

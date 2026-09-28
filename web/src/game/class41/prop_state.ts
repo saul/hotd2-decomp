@@ -200,6 +200,22 @@ export interface PosedNode {
 }
 
 /**
+ * One `AssetDrawSlot` a transcribed routine made this frame, and the matrix
+ * it made it under. See {@link BreakableProp.draws}.
+ */
+export interface PropDrawCall {
+  /** The slot handed to `AssetDrawSlot` (`FUN_00418560`), sign-extended. */
+  slot: number;
+  /**
+   * `g_MatrixStackTop` at the call, in `game/matrix.ts`'s layout, built from
+   * the identity rather than from the view the engine's stack starts on — so
+   * this is the model's **world** matrix, which is the view-space one with
+   * the camera taken back off.
+   */
+  m: number[];
+}
+
+/**
  * One of `PropUpdateType40`'s forty burst pieces, `garasu.bin` slot
  * `0xCA5 + i`.
  */
@@ -673,6 +689,24 @@ export interface BreakableProp {
    */
   drawSkipped: boolean;
   /**
+   * [port-only] Every `AssetDrawSlot` the object's routine made on its last
+   * frame, in the order it made them, each with the matrix it was made under
+   * — or `null` for a routine that does not record its draws, which
+   * `render/breakables.ts` then poses from the fields as it always has.
+   *
+   * The engine draws **inside** the routine, interleaved with the state it
+   * steps, so what a frame shows is the state at the moment of each call and
+   * not the state the routine leaves behind: `FUN_004668A0` draws its slot
+   * and then increments it, a sweep draws before it swings. A renderer that
+   * posed from the fields afterwards showed every such routine one step
+   * along. Recording the call where the routine makes it is what lets the
+   * draw be transcribed with the routine instead of rebuilt beside it. The
+   * routine clears the list at its head (`PropDrawBegin`, `class41/
+   * prop_draw.ts`), so a frame it returns early from draws nothing — which
+   * is also what the engine does.
+   */
+  draws: PropDrawCall[] | null;
+  /**
    * [port-only] Where the last shot on this prop was aimed, at the prop's own
    * camera depth — `g_crosshair_x/y` unprojected by `obj+0x78`, which is what
    * `SpawnPropHitEffectScaled` (`FUN_004666B0`) computes when a routine calls
@@ -776,6 +810,7 @@ export function makeBreakableProp(id: number, group: number,
     drawScale: [1, 1, 1],
     effectPoses: [],
     drawSkipped: false,
+    draws: null,
     hitAim: null,
     dead: false,
     flicker: null,

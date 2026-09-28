@@ -107,6 +107,7 @@ import {
   LIFT_FAR_CLOSED, LIFT_NEAR_CLOSED, LIFT_PANEL_CLOSED,
 } from "./lift";
 import { PlaceGenericPropType43 } from "./type43";
+import { GENERIC_PLACE_ARMS } from "./generic_routines";
 
 /**
  * The composition a class-0x41 generic type's routine applies the spawn
@@ -643,5 +644,8 @@ export function PlaceGenericProp(pl: BreakablePlacement,
     p.hingeB = LIFT_FAR_CLOSED;
     p.pitch = LIFT_PANEL_CLOSED;
   }
+  // The arms of the types whose routine is transcribed whole, each in its
+  // routine's own file. See `class41/generic_routines.ts`.
+  GENERIC_PLACE_ARMS[type]?.(p, pl, rng);
   return p;
 }

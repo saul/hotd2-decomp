@@ -13,12 +13,13 @@
  * computes the absolute position for frame *n* from the endpoints every time.
  */
 import type { ArcStage } from "../../bundle/characters";
-import type { Actor } from "../actor";
+import { ActorFlag, ThrowerFlag, type Actor } from "../actor";
+import { ActorSetOneShotBlended } from "../class30/motion_cue";
 import { GAME_HZ } from "../class30/states";
-import { MotionOf } from "../tables";
+import { MotionOf, SecondsToTicks } from "../tables";
 import { dist2d, vec3, type Vec3 } from "../vec";
 import {
-  ARC_MIN_FRAMES, ARC_MIN_FRAMES_FAST, ARC_SPEED_UNITS,
+  ARC_MIN_FRAMES, ARC_MIN_FRAMES_FAST, ARC_SPEED_UNITS, ThrowerState,
 } from "./states";
 
 /**
@@ -248,61 +249,147 @@ export function ActorClipLength(obj: Actor, motion: number): number {
   return m ? (m.frames / Math.max(1, m.fps)) * GAME_HZ : 0;
 }
 
+/**
+ * One stage of the script onto the clip: `ActorSetMotionBlended(obj+0x194,
+ * stage.motion, stage.start, stage.fade)`, on the channel the port keeps the
+ * arc on -- see {@link ActorSetOneShotBlended} for what the call does to the
+ * cursor, which is the whole reason it is not a plain assignment.
+ *
+ * `[port-only]` A stage whose clip the bundle does not carry is skipped,
+ * leaving the stage before it playing; the engine loads every clip it names.
+ */
 function playStage(obj: Actor, stage: ArcStage | undefined): void {
   if (!stage || stage.motion <= 0) return;
   if (!MotionOf(obj, stage.motion)) return;
-  obj.action = { motion: stage.motion, ticks: stage.start, loop: false };
-  obj.rootActionFrame = -1;
+  ActorSetOneShotBlended(obj, stage.motion, stage.start, stage.fade);
+}
+
+/**
+ * `(short)obj+0x1F4` in `0x16..0x19` -- `CMP EAX, 0x16 / JL` then
+ * `CMP EAX, 0x19 / JG`, three times over in `ActorArcStep`: the four class-0x31
+ * character types (`zsass`, `zskamere`, `zslman`, `zstin`), whose arcs raise
+ * and drop the flags below. The routine is shared with class 0x30, whose
+ * types fall outside the range.
+ */
+function ArcTypeTakesFlags(obj: Actor): boolean {
+  return obj.charType >= 0x16 && obj.charType <= 0x19;
 }
 
 /**
  * `ActorArcStep` — `FUN_0044D860`. One frame of an arc, script and all.
  * Returns false once the whole thing — flight *and* clip — is over.
  *
- * Phase 0 runs `FitArcScriptToDuration` first, which is what reconciles a clip
- * authored at one length with an arc that is however long the distance made
- * it.
+ * `[proved]` from the listing. The phase at `obj+0x1360` is a five-way jump
+ * table (`0x0044DA4C`) whose arms **fall into each other** -- each ends by
+ * incrementing `obj+0x1360` and runs straight on into the next -- so a stage
+ * whose start is already past its threshold hands on in the same frame:
+ *
+ * ```
+ * 0  0044d886  type 0x16..0x19 and state != 10 (the leap aside):
+ *                if (obj+0x34 & 0x100) obj+0x136C |= 0x200; obj+0x34 |= 0x100
+ *    0044d8c1  type 0x19 ? FitArcScriptByStartFrame : FitArcScriptByFadeLength
+ *    0044d901  ActorSetMotionBlended(obj+0x194, stage 0)      ; phase 1, on
+ * 1  0044d925  if (obj+0x19C < stage0.until) return 1
+ *    0044d94d  ActorSetMotionBlended(obj+0x194, stage 1)
+ *    0044d95c  type 0x16..0x19: if (!(obj+0x136C & 0x200)) obj+0x34 &= ~0x100
+ *                               obj+0x136C &= ~0x200            ; phase 2, on
+ * 2  0044d98a  ActorArcInterpolate(step)             ; its result is ignored
+ *    0044d9a1  if (obj+0x19C < stage1.until) return 1
+ *    0044d9c9  ActorSetMotionBlended(obj+0x194, stage 2)
+ *    0044d9dd  obj+0x1330 -= step                               ; phase 3, on
+ * 3  0044d9ed  if (ActorArcInterpolate(step) == 1) return 1
+ *    0044d9fc  ThrowerEmitGroundDust(0x50)                      ; phase 4, on
+ * 4  0044da20  if (obj+0x19C < stage2.until) return 1
+ *    0044da39  type 0x16..0x19: obj+0x136C |= 0x180000
+ *    0044da43  return 0
+ * ```
+ *
+ * **The windup cannot be shot.** Phase 0 raises `obj+0x34` bit `0x100`, which
+ * makes `ThrowerShotFeedback` force every hit to a ricochet, and the takeoff
+ * drops it again -- unless it was already up, which `obj+0x136C` bit `0x200`
+ * remembers, so a state that holds it for its own reasons (the leap to a
+ * point) keeps it. The leap aside does not raise it, but its takeoff still
+ * drops it.
+ *
+ * **Phase 2 flies whether or not the arc is over.** `ActorArcInterpolate` only
+ * refuses to move once the frame count passes the duration, so an arc that
+ * lands before the clip reaches stage 1's threshold waits there for the clip,
+ * and the landing clip still plays. `obj+0x1330 -= step` then gives back the
+ * frame phase 2 just flew, because phase 3 flies it again on the same frame.
+ *
+ * The step is per frame, and the port's `dt` may be several:
+ * `SecondsToTicks(dt) * step` stands in for the engine's calls one frame at a
+ * time.
+ *
+ * [diverges] `ThrowerEmitGroundDust` (`FUN_0044D260`) is not ported -- it is
+ * a sprite emitter keyed by a code, and its `0x50` arm and the `0x5A` arm it
+ * falls into are not read far enough to transcribe -- so the landing raises
+ * no dust.
  */
-export function ActorArcStep(obj: Actor, _step: number,
-                             dt: number): boolean {
+export function ActorArcStep(obj: Actor, step: number, dt: number): boolean {
   const script = obj.arcScript;
-  if (!script?.length) return false;
-  const frames = dt * GAME_HZ;
+  // `[port-only]` The engine's slot always holds twelve dwords, zeros for the
+  // `&DAT_007DCC70` sentinel; the port's is null when the bundle has none.
+  if (!script || script.length < 3) return false;
+  const frames = SecondsToTicks(dt) * step;
 
   if (obj.arcPhase === ArcPhase.Windup) {
-    // Phase 0 fits the script to the arc *before* the first stage plays, so
-    // the windup, the flight and the landing span the leap however long it is.
+    if (ArcTypeTakesFlags(obj) && obj.state !== ThrowerState.LeapAside) {
+      if (obj.flags & ActorFlag.ShotImmune) {
+        obj.flags2 |= ThrowerFlag.ArcSuppressedShotImmune;
+      }
+      obj.flags |= ActorFlag.ShotImmune;
+    }
+    // The fit runs *before* the first stage plays, so the windup, the flight
+    // and the landing span the leap however long the distance made it.
     FitArcScriptToDuration(obj);
     playStage(obj, script[0]);
     obj.arcPhase = ArcPhase.Crouched;
-    return true;
   }
   if (obj.arcPhase === ArcPhase.Crouched) {
     if (ActorClipFrame(obj) < script[0].until) return true;
     playStage(obj, script[1]);
+    if (ArcTypeTakesFlags(obj)) {
+      if (!(obj.flags2 & ThrowerFlag.ArcSuppressedShotImmune)) {
+        obj.flags &= ~ActorFlag.ShotImmune;
+      }
+      obj.flags2 &= ~ThrowerFlag.ArcSuppressedShotImmune;
+    }
     obj.arcPhase = ArcPhase.Flight;
   }
   if (obj.arcPhase === ArcPhase.Flight) {
-    if (!ActorArcInterpolate(obj, frames)) obj.arcPhase = ArcPhase.Settled;
-    else if (ActorClipFrame(obj) >= script[1].until) {
-      playStage(obj, script[2]);
-      obj.arcPhase = ArcPhase.Landing;
-    }
-    return true;
+    ActorArcInterpolate(obj, frames);
+    if (ActorClipFrame(obj) < script[1].until) return true;
+    playStage(obj, script[2]);
+    obj.arcFrames -= frames;
+    obj.arcPhase = ArcPhase.Landing;
   }
   if (obj.arcPhase === ArcPhase.Landing) {
     if (ActorArcInterpolate(obj, frames)) return true;
-    obj.arcPhase = ArcPhase.Settled;
-    // Snap to the point the arc named rather than to wherever the last
-    // partial frame left it.
+    // `[port-only]` Onto the point the arc named. A one-frame step's last
+    // flight frame is that point already; a `dt` of several frames can step
+    // past it, and the parabola keeps falling.
     obj.pos.x = obj.arcTo.x;
     obj.pos.y = obj.arcTo.y;
     obj.pos.z = obj.arcTo.z;
-    obj.vel.x = obj.vel.y = obj.vel.z = 0;
-    return true;
+    obj.arcPhase = ArcPhase.Settled;
   }
-  // Settled: the arc is down, and the state waits for the landing clip.
-  return obj.action !== null && ActorClipFrame(obj) < script[2].until;
+  if (obj.arcPhase === ArcPhase.Settled) {
+    // `[port-only]` `obj.action !== null`: the port's channel ends a one-shot
+    // at twice its authored frame count, past `g_motion_play_length + 1` where
+    // the engine's cursor wraps, so a threshold the clip never reaches -- or a
+    // stage the bundle has no clip for -- cannot park the actor here. No
+    // shipped script names one (`verify_combat.py` check 16), so on real data
+    // this is the engine's own test.
+    if (obj.action !== null && ActorClipFrame(obj) < script[2].until) {
+      return true;
+    }
+    if (ArcTypeTakesFlags(obj)) obj.flags2 |= ThrowerFlag.Collide;
+    return false;
+  }
+  // `JA 0x0044da45` with `EBX = 1`: a phase past 4 does nothing and reports
+  // the arc still running.
+  return true;
 }
 
 /**

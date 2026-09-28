@@ -286,6 +286,9 @@ import { ThrowerBeginKnockbackArc, ThrowerStateCorpse }
   from "../src/game/class31/death";
 import { ThrowerStateRestoreBothHands } from "../src/game/class31/standing";
 import { ActorClipLength } from "../src/game/class31/arc";
+import {
+  ActorArcBegin, ActorArcStep, ActorClipFrame, InstallArcMotionScript,
+} from "../src/game/class31/arc";
 import { ActorBodyConditionFromHands, SPENT_CONDITION }
   from "../src/game/class30/condition";
 import { ThrowerState, ThrowSub } from "../src/game/class31/states";
@@ -5730,6 +5733,19 @@ const DROP_SCRIPT = (motionId: number) => [
   { motion: motionId, start: 64, fade: 5, until: 98 },
 ];
 
+/**
+ * `CLASS31_ARC_SCRIPTS.wall_left` and `wall_right`, verbatim from `0x00564A68`
+ * and `0x00564A38`: 0..15, 16..33 and 34..43, inside the 44 of play length a
+ * 23-frame clip has. {@link ARC}'s 46 and 47 are past it, and `ActorArcStep`
+ * waits on the cursor reaching them whether or not the arc has landed -- the
+ * engine's cursor wraps back to 0 after 44, so the actor would wait for ever.
+ */
+const WALL_SCRIPT = (motionId: number) => [
+  { motion: motionId, start: 0, fade: 5, until: 15 },
+  { motion: motionId, start: 16, fade: 5, until: 33 },
+  { motion: motionId, start: 34, fade: 5, until: 43 },
+];
+
 const TYPE31: CharacterType = {
   ...TYPE,
   type: 0x19, name: "zstin", file: "zstin.bin",
@@ -5780,7 +5796,8 @@ const CLASS31 = {
   // The pose a corpse freezes on, by the clip it died in.
   corpse_frames: { "286": [74, 70], "285": [48, 40], "934": [44, 35] },
   scripts: {
-    wall_left: ARC(290), wall_right: ARC(291), ceiling: ARC(309),
+    wall_left: WALL_SCRIPT(290), wall_right: WALL_SCRIPT(291),
+    ceiling: ARC(309),
     aside: ARC(282), aside_attack3: ARC(282), aside_zsass: ARC(282),
     // `ThrowerStateLeapToPoint`'s three. `drop` and `drop_alt` are byte for
     // byte the same in the exe and are the same here, which is what lets the
@@ -5968,6 +5985,97 @@ console.log("\nEnemyThrowerInit: zslman is born NoDismember");
   check("...and no other thrower character type is",
         (zstin.flags & ActorFlag.NoDismember) === 0,
         `flags ${zstin.flags.toString(16)}`);
+}
+
+// `ActorArcStep` (`FUN_0044D860`) sets each stage with `ActorSetMotionBlended`
+// (`CALL 0x004119a0` at 0x0044D901, 0x0044D94D, 0x0044D9C9), and that writes
+// `obj+0x19C = start` and raises the fade bit `SkeletonAdvancePlayCursor`
+// (`FUN_004111A0`) holds the cursor on for the fade. The port's one-shot
+// channel started the stage running at once, so a state that tests the cursor
+// *before* it steps the arc -- `ThrowerStateDelayedPounce`'s `cursor > 66` --
+// never saw a stage's start frame at all.
+console.log("class 0x31, ActorArcStep holds each stage on its start frame:");
+{
+  const z = thrower(ThrowerState.LeapToPoint);
+  z.pos = vec3(0, 60, 80);
+  ActorArcBegin(z, vec3(0, 10, 80), 30);
+  InstallArcMotionScript(z, DROP_SCRIPT(300));
+  z.arcPhase = ArcPhase.Windup;
+  const before: number[] = [];
+  const after: number[] = [];
+  let immuneAtWindup = false;
+  let immuneInFlight = true;
+  let steps = 0;
+  let going = true;
+  while (going && steps++ < 200) {
+    // The director's order: the clocks, then the state.
+    ActorAdvanceMotion(z, 1 / 60);
+    before.push(ActorClipFrame(z));
+    going = ActorArcStep(z, 1, 1 / 60);
+    after.push(ActorClipFrame(z));
+    if (z.arcPhase === ArcPhase.Crouched) {
+      immuneAtWindup ||= (z.flags & ActorFlag.ShotImmune) !== 0;
+    }
+    if (z.arcPhase === ArcPhase.Flight) {
+      immuneInFlight &&= (z.flags & ActorFlag.ShotImmune) !== 0;
+    }
+  }
+  const s = z.arcScript!;
+  // The fit ran on the first step and grew the two fades onto the thirty
+  // frames: 30 - 5 - 0 - 63 + 56 = 18 of slack, nine onto each.
+  check("the fit grew stage 1's fade and stage 2's onto the arc",
+        s[1].fade === 9 && s[2].fade === 14,
+        `fades ${s.map((st) => st.fade).join(", ")}`);
+  const seen = (xs: number[], v: number) => xs.filter((x) => x === v).length;
+  // `fade + 1` frames on the start frame, counting the frame of the call --
+  // the base track's hold, and the engine's draws: it draws the start frame
+  // at weights 1/(fade+1) through 1.
+  check("stage 1 holds its start frame for its fade + 1",
+        seen(after, s[1].start) === s[1].fade + 1,
+        `${seen(after, s[1].start)} frames on ${s[1].start}`);
+  check("...and stage 2 its own",
+        seen(after, s[2].start) === s[2].fade + 1,
+        `${seen(after, s[2].start)} frames on ${s[2].start}`);
+  // A state that reads the cursor before it steps the arc sees stage 2's start
+  // on the frame after the handover, not the frame after that.
+  const firstPast = before.find((c) => c > s[1].until);
+  check("a test before the step sees stage 2's start, not the frame after it",
+        firstPast === s[2].start, `first past ${s[1].until}: ${firstPast}`);
+  check("...and every frame of stage 1 on the way",
+        Array.from({ length: s[1].until - s[1].start + 1 },
+                   (_, i) => s[1].start + i)
+          .every((c) => before.includes(c)),
+        before.join(","));
+  check("the arc ends once the cursor reaches stage 2's threshold",
+        !going && after[after.length - 1] >= s[2].until
+        && after[after.length - 2] < s[2].until,
+        `${after.slice(-2).join(" -> ")}`);
+  check("...standing on the point it named",
+        Math.abs(z.pos.y - 10) < 1e-6, `y ${z.pos.y}`);
+  // `0x0044D886`..`0x0044D8BE` and `0x0044D952`..`0x0044D97D`: types
+  // 0x16..0x19 cannot be shot in the windup, and can from the takeoff.
+  check("zstin cannot be shot in the windup, and can in flight",
+        immuneAtWindup && !immuneInFlight,
+        `windup ${immuneAtWindup} flight ${immuneInFlight}`);
+  // `OR dword ptr [ESI + 0x136c], 0x180000` at 0x0044DA39.
+  check("...and lands colliding with the world and with actors",
+        (z.flags2 & ThrowerFlag.Collide) === ThrowerFlag.Collide,
+        `flags2 0x${z.flags2.toString(16)}`);
+
+  // `CMP word ptr [ESI + 0x1310], 0xa / JZ` at 0x0044D89A: the leap aside's
+  // windup is the one that can be shot.
+  const w = thrower(ThrowerState.LeapAside);
+  w.state = ThrowerState.LeapAside;     // the spawn applies it on first update
+  w.flags &= ~ActorFlag.ShotImmune;
+  ActorArcBegin(w, vec3(0, 0, 60), 30);
+  InstallArcMotionScript(w, DROP_SCRIPT(300));
+  w.arcPhase = ArcPhase.Windup;
+  ActorAdvanceMotion(w, 1 / 60);
+  ActorArcStep(w, 1, 1 / 60);
+  check("the leap aside's windup is not shot-immune",
+        w.arcPhase === ArcPhase.Crouched
+        && (w.flags & ActorFlag.ShotImmune) === 0,
+        `phase ${w.arcPhase} flags 0x${(w.flags >>> 0).toString(16)}`);
 }
 
 console.log("class 0x31, ThrowerStateLeapToPoint:");

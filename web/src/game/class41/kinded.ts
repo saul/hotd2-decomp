@@ -129,6 +129,12 @@ export function KindedPropUpdate(p: BreakableProp, rng: Rng,
       // is left standing is the shadow and the shake.
       BreakablePropAwardHit(p.flags, false, rng);
       p.slot = SLOT_NONE;
+      // `obj+0x1D0 = g_camera_block_yaw_bams[g_camera_index]` at
+      // `0x004660A2`..`0x004660AE`, straight after the slot goes: the crate
+      // turns to face the camera block (`0x009A60D0`) as it cracks, the same
+      // write `BreakablePropUpdate` and `PropUpdateType43` make. The port had
+      // left it out. `[proved]`
+      p.yaw = G.g_camera_block_yaw_bams;
       p.shake = 1.0;
       events?.emit("prop.cracked", { id: p.id, sound: SFX_KINDED_CRACK });
     } else {

@@ -31,7 +31,7 @@ import { VecToAngles, type Vec3 } from "../vec";
 import { EvtActionHandler } from "./driver";
 
 /**
- * The two pose blocks `CamBlockSetAnglesFromLookAt` is handed a pointer to.
+ * The pose blocks `CamBlockSetAnglesFromLookAt` is handed a pointer to.
  * `[port-only]` as an enum: the engine passes the block's address.
  */
 export enum CameraPoseBlock {
@@ -39,6 +39,12 @@ export enum CameraPoseBlock {
   Camera = 0,
   /** `0x009C70C0` -- `g_cam_path_eye`, the deferred pose block. */
   Path = 1,
+  /**
+   * `0x009A6408` -- `g_camera_block2_eye`, camera block 2, which
+   * `EvtRunQueuedActionsSyncViewBlock` passes (`PUSH 0x9a6408` at
+   * `0x00402450`).
+   */
+  Block2 = 2,
 }
 
 /**
@@ -86,12 +92,18 @@ const s16 = (v: number): number => (Math.trunc(v) << 16) >> 16;
 export function CamBlockSetAnglesFromLookAt(block: CameraPoseBlock,
                                             target: Vec3, roll: number): void {
   const cam = block === CameraPoseBlock.Camera;
-  const eye = cam ? G.g_camera_block_eye : G.g_cam_path_eye;
+  const eye = cam ? G.g_camera_block_eye
+    : block === CameraPoseBlock.Block2 ? G.g_camera_block2_eye
+    : G.g_cam_path_eye;
   const a = VecToAngles(eye.x - target.x, eye.y - target.y, eye.z - target.z);
   if (cam) {
     G.g_camera_block_pitch_bams = s16(a.pitch);
     G.g_camera_block_yaw_bams = s16(a.yaw);
     G.g_camera_block_roll_bams = roll;
+  } else if (block === CameraPoseBlock.Block2) {
+    G.g_camera_block2_pitch_bams = s16(a.pitch);
+    G.g_camera_block2_yaw_bams = s16(a.yaw);
+    G.g_camera_block2_roll_bams = roll;
   } else {
     G.g_cam_path_pitch_bams = s16(a.pitch);
     G.g_cam_path_yaw_bams = s16(a.yaw);

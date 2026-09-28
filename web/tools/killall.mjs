@@ -181,7 +181,7 @@ for (const o of G.g_object_list) {
 }
 console.log(permitOwners());
 
-const n = ActorKillAll(0, rng);
+const n = ActorKillAll(rng);
 console.log(`\nActorKillAll -> ${n.enemies} enemies, ${n.civilians} civilians`);
 
 // Both enemy classes die through a **chain of states** and retire the counts

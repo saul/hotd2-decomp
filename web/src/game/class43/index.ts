@@ -95,6 +95,9 @@ export type { OwlTail } from "./state";
 /** BAMS to radians, and back. */
 const BAMS = (Math.PI * 2) / 65536;
 const TO_BAMS = 65536 / (Math.PI * 2);
+/** `FMUL float ptr [0x0055CB80]`, `0x3C888889`: 1/60, the two-player aim's
+ * share of the owl's distance from the eye. */
+const OWL_AIM_PER_UNIT = Math.fround(1 / 60);
 
 // -- the numbers the class spells as literals -------------------------------
 
@@ -326,10 +329,19 @@ export function OwlPickTargetPlayerAndAimOffset(obj: Actor, sub: OwlTail,
   if (G.g_players_in_play === 2) {
     const p = rng.int(2);
     obj.attackPermit = p;
-    const d = sub.swayRate * (1 / 60);
+    // `0x0044800D`..`0x00448105`: `d = ftol(sqrt(dx² + dz²)) / 60` from the
+    // camera block's eye (`0x009A60C0`/`C8`), and the offset is a quarter
+    // turn either side of the camera block's yaw, `g_camera_block_yaw_bams`
+    // (`0x009A60D0`), read at `0x00448050`. This took `d` from the sway rate
+    // and the heading from `g_camera_yaw_bams` (`0x009C71F0`), a camera
+    // heading turned half round, which swapped the two sides. `[proved]`
+    const e = G.g_camera_block_eye;
+    const d = Math.trunc(Math.sqrt((obj.pos.x - e.x) * (obj.pos.x - e.x)
+                                   + (obj.pos.z - e.z) * (obj.pos.z - e.z)))
+      * OWL_AIM_PER_UNIT;
     const off = p === 0 ? 0xc000 : 0x4000;
-    sub.aimX = Math.sin(s16(G.g_camera_yaw_bams + off) * BAMS) * d;
-    sub.aimZ = Math.cos(s16(G.g_camera_yaw_bams + off) * BAMS) * d;
+    sub.aimX = Math.sin((G.g_camera_block_yaw_bams + off) * BAMS) * d;
+    sub.aimZ = Math.cos((G.g_camera_block_yaw_bams + off) * BAMS) * d;
     return;
   }
   if (G.g_active_player === 0) obj.attackPermit = 0;
@@ -488,9 +500,13 @@ export function OwlResolveShot(obj: Actor, f: ClassFrame): boolean {
   if (sub.state === OwlState.WaitLaunch || sub.state === OwlState.FlyToCircle) {
     obj.flags |= ActorFlag.Reacting;
   }
-  // The corpse is thrown along the camera's own backward yaw at unit speed,
-  // on top of four tenths of whatever it was doing.
-  const a = s16(G.g_camera_yaw_bams + 0x8000) * BAMS;
+  // The corpse is thrown at unit speed along the camera block's yaw turned
+  // half round -- `g_camera_block_yaw_bams + 0x8000` (`0x009A60D0`, read at
+  // `0x0044627B` and `0x004462B6`), the camera's forward, away from the
+  // viewer -- on top of four tenths of whatever it was doing. This read
+  // `g_camera_yaw_bams` (`0x009C71F0`), a camera heading already turned half
+  // round, and threw the corpse at the camera. `[proved]`
+  const a = (G.g_camera_block_yaw_bams + 0x8000) * BAMS;
   sub.vx = sub.vx * OWL_DEATH_DAMP + Math.sin(a);
   sub.vz = sub.vz * OWL_DEATH_DAMP + Math.cos(a);
   sub.spin = OWL_CORPSE_SPIN;

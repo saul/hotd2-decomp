@@ -678,7 +678,7 @@ from `obj+0x32C`. The head is *thrown*:
 |---|---|
 | gravity | `-0.0204167` (`0xBCA740DA`) a frame, into `+0x50` |
 | launch up | `(rand() % 20 + 1) * 0.01 + 0.3`, so 0.31 to 0.50 |
-| launch out | `MatrixRotateY(camera yaw)` over `(0, 0, -0.2)` — always **away from the viewer** |
+| launch out | `MatrixRotateY(g_camera_block_yaw_bams)` over `(0, 0, -0.2)` (`0x0040A2A6`) — the camera's own −z, always **away from the viewer** |
 | spin | yaw `±(rand() % 0x800 + 0x800)`, pitch the same without the sign, BAMS a frame |
 | bounce | on `QueryGroundHeightAt`, `y` snaps to the ground and the vertical speed is negated and scaled by **0.25** |
 | bounce sound | `0x1116A9` for head slots `0x2015`/`0x1DC1`; else `0x4416A9` on a wet surface (`g_coli_hit_surface` `0x37` or 5) and `0x2616A9` otherwise |
@@ -710,8 +710,13 @@ if (obj[0x19C] >= play_length[obj[0x1B4]] - 1)   /* clip finished */
 ```
 
 `FUN_004560B0` picks the motion. Ignoring the special cases, it falls through to
-`FUN_00456220`, which is **directional**: `camera_yaw − actor_yaw` against four
-±45° arcs (`FUN_0040A040(angle, centre, 0x2000)`).
+`FUN_00456220`, which is **directional**: `g_camera_block_yaw_bams − actor_yaw`
+(the camera **block's** yaw, `0x009A60D0`, read at `0x00456248`) against four
+±45° arcs (`FUN_0040A040(angle, centre, 0x2000)`). The four are tested **in a
+row**, each setting the motion, so a heading exactly on a boundary passes two
+and the later one wins, drawing its `rand()` if it has one. The camera block's
+yaw is `VecToAngles(eye − target)`, pointing back at the viewer, so an actor
+facing the camera sits at `0x8000` and falls back. `[proved]`
 
 | Arc | Motion |
 |---|---|
@@ -2385,9 +2390,17 @@ that skips their own descriptor read. The walk arm raises `obj+0x34` bit
 > clear is a no-op.
 
 A second path reaches the same state: `ZombieShouldStandAndThrow`
-(`FUN_00458E10`) lets a **condition 8** walker stop and throw when the camera
-is already within `0x400` BAMS of the way it is facing. Fourteen spawns are
-condition 8, and they never turn to line the shot up.
+(`FUN_00458E10`) lets a **condition 8** walker stop and throw when
+`(g_camera_block_yaw_bams - 0x8000) & 0xFFFF` -- the camera block's yaw turned
+half round, which is the heading of an actor facing the camera -- is within
+`0x400` BAMS of the way it is facing (`0x00458E48`). Fourteen spawns are
+condition 8, and they never turn to line the shot up. **The claim and the
+hands come in the character type's order**: `znassb` (type 1) takes the permit
+first and then looks for a blade, so one with both shot away still holds the
+permit and answers no; the axe types 0x13 and 0x14 look first; any other type
+answers no without claiming. The port read `g_camera_yaw_bams` (`0x009C71F0`)
+here, half a turn from the block, and none of the fourteen ever threw.
+`[proved]`
 
 #### Where the recompute happens, and why it is the whole of condition 8
 

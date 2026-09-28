@@ -160,7 +160,7 @@ export function ChooseDeathMotion(obj: ZombieActor, rng: Rng): void {
     ActorSetMotionBlended(obj, motion, frame, MotionFade.Quick);
   };
   const directional = (): void => {
-    const m = ChooseDeathMotionDirectional(obj, G.g_camera_yaw_bams, rng);
+    const m = ChooseDeathMotionDirectional(obj, rng);
     if (m !== undefined && MotionOf(obj, m)) play(m);
   };
   // The shared tail at `0x0045620A`: the cue list for whichever clip is now

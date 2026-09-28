@@ -176,7 +176,7 @@ for (let i = 0; i < frames; i++) {
     if (cand) {
       const head = CharacterTypeOf(cand)?.head_bone ?? 2;
       for (let s = 0; s < 60 && !cand.dead; s++) {
-        ResolveHit(cand, head, G.g_camera_yaw_bams, host, rng);
+        ResolveHit(cand, head, host, rng);
       }
       console.log(`shot 0x${cand.at.toString(16)} in the head at frame ${i}:`
         + ` state ${cand.state}/${cand.sub} hp ${cand.hp}`

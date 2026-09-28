@@ -35,7 +35,7 @@ import { OBJ_BIT_80000, Class14Flag, Class14Phase, Class14State,
   type Boss2Tail } from "./state";
 import { Class14FollowSegment } from "./steer";
 import {
-  Class14BlendAnim, Class14CameraBlockYaw, Class14ClipLength, Class14Cursor,
+  Class14BlendAnim, Class14ClipLength, Class14Cursor,
   Class14Integrate, Class14Sound as Sound,
 } from "./motion";
 import {
@@ -595,7 +595,7 @@ export function Class14StateReposition(obj: Boss2Actor, f: ClassFrame): void {
   }
   if (c === 10) {
     obj.flags &= ~ActorFlag.NoCameraTrack;
-    StripAt(obj.pos, Class14CameraBlockYaw(), PropStripKind.Kind0,
+    StripAt(obj.pos, G.g_camera_block_yaw_bams, PropStripKind.Kind0,
             STRIP_SMALL, f);
   }
 }
@@ -654,7 +654,7 @@ export function Class14StateLeapFromSide(obj: Boss2Actor, f: ClassFrame): void {
       if (c === CUE_FREEZE_RISE) {
         obj.flags |= ActorFlag.PoseFrozen;
       } else if (c === 0x28) {
-        StripAt(obj.pos, Class14CameraBlockYaw(), PropStripKind.Kind0,
+        StripAt(obj.pos, G.g_camera_block_yaw_bams, PropStripKind.Kind0,
                 STRIP_SMALL, f);
       } else if (c === 0x2d) {
         // `EvtOpPlayDialogue2D` (`FUN_00435B80`) -- the same message groups
@@ -765,7 +765,7 @@ export function Class14StateScriptedBreak(obj: Boss2Actor, f: ClassFrame): void 
       obj.pos.y = Math.fround(WaterFieldSampleHeight(obj.pos));
       obj.pos.x = Math.fround(obj.pos.x - t.dir.x * BREAK_BACK);
       obj.pos.z = Math.fround(obj.pos.z - t.dir.z * BREAK_BACK);
-      const yaw = Class14CameraBlockYaw();
+      const yaw = G.g_camera_block_yaw_bams;
       obj.yaw = ((-0x8000 - ((yaw << 16) >> 16)) << 16) >> 16;
       StripAt(obj.pos, yaw, PropStripKind.Kind0, STRIP_LARGE, f);
       t.counter2 = 0x14;

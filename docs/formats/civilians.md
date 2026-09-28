@@ -164,6 +164,19 @@ alone — 0.6 for type 30, 0.7 for 31, 0.9 for 32..56, 1.0 otherwise — and
 operand verbatim into that float field. One command in the whole game runs it,
 with `0x42480000` = 50.0.
 
+**That one command puts Goldman on the arena's screen.** It is script 133,
+reached from table entry 64, which stage 4's two `player_gold` spawns (type 61,
+`0x8B74` and `0x9C3C`, blocks 23 and 25) run: wait a frame, clip 335 for ever,
+wait 95 frames, `SetScale 50.0`, then his dialogue lines. The same field is the
+`MatrixScale` of the whole draw (`SkeletonApplyRootMotion`, `0x00410FEA`), so
+at 50 he is a figure the size of the jumbotron the camera is looking at, and
+the port -- which drew every skinned actor at 1.0 until it drew them at this
+field -- showed a blank screen through the whole speech. `[likely]` that this is
+the effect it is for: the evidence is the size, the character, the timing
+against his lines, and what the port draws with it; nothing in the exe names
+it. The hit radii do not follow it: `SkeletonWalkNode` scaled them once, at
+build.
+
 Two consequences worth knowing, both the engine's:
 
 * **A block whose own wait is already satisfied is skipped.** Once the parked

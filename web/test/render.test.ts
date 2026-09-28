@@ -2279,6 +2279,148 @@ console.log("\ncivilian attachments: the face swaps, the hair is added");
 }
 
 /**
+ * **The model's size, `model+0x116C`, on every skinned actor.**
+ *
+ * `SkeletonApplyRootMotion` (`FUN_00410C50`) draws `T(obj+0x40)`, the actor's
+ * rotation, then `MatrixScale(model+0x116C)` (`0x00410FEA`..`0x00410FF7`) and
+ * only then the pose translate and the bones -- so a civilian, whose
+ * character type the build sizes at 0.9, is 0.9 of her model everywhere: the
+ * pose offset, every bone, every hit centre. The radius is the one part of a
+ * sphere the matrix does not reach, and the build scaled it instead
+ * (`SkeletonWalkNode`, `FUN_004107E0`, `0x00410837`).
+ *
+ * The port drew every skinned actor at 1.0 but the bat. Each assertion here is
+ * about what the scene graph and the two shot queries answer, and each fails
+ * on a root drawn at 1.0: the bone lands at `(102, 21, -53)` rather than
+ * `(101.8, 18.9, -52.7)`, and the sphere is 1.5 wide and in the wrong place.
+ */
+console.log("\nthe model's size: a civilian at 0.9, her bones and her spheres");
+{
+  const { CharacterLayer } = await import("../src/render/characters");
+  const { SpawnScriptedCharacters } = await import("../src/game/director");
+  const { G, ResetGameGlobals } = await import("../src/game/globals");
+  const { SetGameTables } = await import("../src/game/tables");
+  const { MotionFlag } = await import("../src/game/actor");
+  const { Object3D, Vector3 } = await import("three");
+
+  // `hito_gal`'s shape: bone 1 the torso at the root, bone 2 the head ten up
+  // it, each with a sphere a unit along its own y.
+  const TYPE = {
+    type: 0x26, name: "hito_gal", file: "hito_gal.bin", bone_count: 3,
+    actor_radius: 10,
+    bones: [
+      { bone: 1, part: "bone01_0eb9", slot: 0x0eb9, offset: [0, 0, 0],
+        parent: null, damage_rank: [], hit_radius: 2, hit_centre: [0, 1, 0],
+        steps: [] },
+      { bone: 2, part: "bone02_0eaf", slot: 0x0eaf, offset: [0, 10, 0],
+        parent: 0, damage_rank: [], hit_radius: 1.5, hit_centre: [0, 1, 0],
+        steps: [] },
+    ],
+    head_bone: 2, reactions: {}, attacks: {},
+    // One frame whose root sits off the origin in all three axes, and no
+    // rotation anywhere: the pose offset is then the whole of what moves the
+    // bones off the actor's position.
+    motions: {
+      "660": { bank: "people", frames: 1, fps: 30, root: [2, 11, -3],
+               rot: [0, 0, 0, 0, 0, 0, 0, 0, 0], play: 0 },
+    },
+  };
+  const AT = 0x8640;
+  const PLACE = {
+    at: AT, class: 0x10, char_type: 0x26, motion: 660, hp: 0, yaw: 0,
+    body_condition: 0, initial_state: 0, attack_state: 0, ring_set: 0,
+  };
+  const CHARS = {
+    types: { "38": TYPE }, placements: [PLACE],
+    approach: { rings: [{ inner: 25, mid: 38, outer: 51 }],
+                steps: { base: 2, mid_add: 3, outer_add: 4 },
+                ring_set_for_char0: 1 },
+    difficulty: { hp_delta: [0, 0, 0, 0, 0], hp_min: 1, hp_max: 300,
+                  initial_rank: [0, 0, 2, 0, 0], default: 2 },
+  };
+
+  const root = new Object3D();
+  const rig = new Object3D();
+  rig.name = "chr_hito_gal_spawn000";
+  rig.userData = { hod2_kind: "rig", hod2_rig: "chr_hito_gal",
+                   hod2_spawn_at: AT };
+  const torso = new Object3D();
+  torso.name = "chr_hito_gal_spawn000_bone01_0eb9";
+  const head = new Object3D();
+  head.name = "chr_hito_gal_spawn000_bone02_0eaf";
+  // Where the exporter puts a bone: at its offset in its parent's frame.
+  head.position.set(0, 10, 0);
+  torso.add(head);
+  rig.add(torso);
+  root.add(rig);
+
+  ResetGameGlobals();
+  SetGameTables(CHARS as never);
+  G.g_difficulty = 2;
+  const chars = new CharacterLayer();
+  const stage = new Scope("stage");
+  chars.build(root, stage, CHARS as never);
+  const made = SpawnScriptedCharacters(chars.readySpawns([{ at: AT }]));
+  const a = made[0];
+  check("the civilian is made, at her type's 0.9",
+        made.length === 1 && a.scale === Math.fround(0.9), `${a?.scale}`);
+  const s = a.scale;
+  a.visible = true;
+  a.pos.x = 100; a.pos.y = 0; a.pos.z = -50;
+  a.yaw = 0;
+  a.motion = 660;
+  // The gate clear, so the pose takes the clip's whole root -- the arm the
+  // `people.bin` clips 596, 598 and 600 are posed with.
+  a.motionFlags &= ~MotionFlag.RootMotion;
+  chars.syncSpawns([{ at: AT }], made);
+  chars.update({} as never);
+
+  check("her root is drawn at her size", rig.scale.x === s
+        && rig.scale.y === s && rig.scale.z === s, rig.scale.toArray().join());
+  const near = (v: { x: number; y: number; z: number },
+                x: number, y: number, z: number) =>
+    Math.hypot(v.x - x, v.y - y, v.z - z) < 1e-4;
+  const at = (x: number, y: number, z: number) =>
+    [100 + s * x, s * y, -50 + s * z] as const;
+  const w = { x: 0, y: 0, z: 0 };
+  check("the head is where the scaled pose puts it: the offset and the bone "
+        + "both 0.9 of the clip's",
+        chars.boneWorld(AT, 2, w) && near(w, ...at(2, 21, -3)),
+        `${w.x.toFixed(3)} ${w.y.toFixed(3)} ${w.z.toFixed(3)}`);
+  const c = new Vector3();
+  const r = chars.boneSphere(AT, 2, c);
+  check("the head's sphere: its centre through the scaled bone",
+        near(c, ...at(2, 22, -3)), c.toArray().map((v) => v.toFixed(3)).join());
+  check("...and its radius the build's, 0.9 of the table's 1.5",
+        r === Math.fround(s * 1.5), `${r}`);
+
+  // The shot, through the same sphere: along -z past the centre, 1.30 and
+  // 1.40 to one side -- inside 1.35 and outside it, both inside the table's
+  // own 1.5.
+  const shot = (dx: number) => chars.pickShot({
+    origin: { x: c.x + dx, y: c.y, z: 0 }, dir: { x: 0, y: 0, z: -1 } });
+  const hit = shot(1.3);
+  check("a shot 1.30 off the centre hits the head",
+        hit?.kind === "actor" && hit.at === AT && hit.bone === 2,
+        JSON.stringify(hit));
+  check("...and one 1.40 off misses it, inside the table's radius and "
+        + "outside hers", shot(1.4) === null, JSON.stringify(shot(1.4)));
+
+  // Op 0x27, the one later writer of the size: the whole drawing follows it,
+  // and the radii stay the build's.
+  a.scale = 50;
+  chars.update({} as never);
+  check("a size written after the build is the size she is drawn at",
+        rig.scale.x === 50, `${rig.scale.x}`);
+  check("...and leaves her radii where the build put them",
+        chars.boneSphere(AT, 2, c) === Math.fround(s * 1.5),
+        `${chars.boneSphere(AT, 2, c)}`);
+
+  stage.dispose();
+  G.g_object_list.length = 0;
+}
+
+/**
  * The vertex-blended parts: what three.js actually does with the skin the
  * exporter writes, and the veto that stops the rigid twin being drawn too.
  *

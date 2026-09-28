@@ -279,6 +279,7 @@
 00595058	g_item_pickup_slot	Per item kind, stride 0xC: the u16 asset slot the pickup is drawn with. g_item_score_table is the s16 two bytes further into the same record.
 0059505a	g_item_score_table	per-kind pickup score, stride 0xC
 00595060	g_item_pickup_y_offset	Per item kind, stride 0xC: the float height the pickup is released at above the prop that hid it.
+005950c8	g_prop_type63_items	Twelve {s8 kind; u8 pad[3]; float x; float z} records, ending at 0x00595158. PropUpdateType63 (0x0046FB50) walks them, sets its own +0x19C = x, +0x1A4 = z - 3.0 (+0x1A0 = 2498.7 once) and releases each through the item-set switch on kind (1 extra life, 2/5..8 score pickup, 3 golden frog, 4 nothing), then ActorKills itself. Stage 6's one type-63 spawn.
 005957d8	g_original_item_records	One 0xC record per Original Mode item id: u16 model slot, u16 second model slot, f32 draw scale, u16 pickup id passed to FUN_00475E40.
 00595aa0	g_original_item_tables	Pointer per scene index to that scene's Original Mode item table, read by PickOriginalModeItem: stride 8, entries at +0..+3 (item ids) and cumulative rand() weights at +4..+7.
 00595ab8	g_class44_subtypes	18 entries, indexed by obj+0x11C
@@ -398,6 +399,7 @@
 007dccf8	g_route_target	{s16 x, s16 y}: the waypoint the cursor walks to. [proved]
 007dccfc	g_route_screen_y	s16: the cursor's screen offset. [proved]
 007dccfe	g_route_cursor_x	s16: the cursor's map x. [proved]
+007dcd08	g_prop67_by_index	Three dwords: the class-0x41 type-67 object PlaceGenericProp case 0x43 last placed with each index 0..2 (the arm writes [(s16)placer+0x1F4] = obj at 0x004625AB), read by Type67MountedPartUpdate at 0x004702FF to find the parent whose matrix it draws on. Those are its only two references (operand and byte-pattern search).
 007dcd14	g_original_item_pickup_blocked	One byte with twelve writers across class 0x41 and 0x44 and exactly one reader: OriginalItemPropUpdate (FUN_004675A0) at 0x0046769E jumps past its whole pick-up arm -- the award, the g_original_items_taken tally, PlaySoundId(0x3616A9) and the 0x32-frame fade -- while it is non-zero. So a prop that sets it takes the original-mode collectibles out of play for as long as it holds it, and PropUpdateType75 is one of them: it clears the byte on the frame it is shot and sets it again 290 frames later when its ride ends. Not modelled in the port: nothing there transcribes the arm it gates.
 007dcd18	g_chain_segments	The chain segment table PlaceChainSegments fills and ChainSegmentUpdate re-registers into every frame, indexed [group * 0x14 + segment] over 20 segments a group. Segment 0's +0x1B0 is the latch that stops chain group 1 opening its route twice.
 007dcdb8	g_fragment_subkind1_intact	Twelve bytes, one per sub-kind-1 object: 1 until that object is broken outside Training. PlaceFragmentProps reads it to pick 0x17C6 (intact) or 0x17C7, PropUpdateType40 refuses a hit on a cleared one, and ResetFragmentSubkind1Intact sets all twelve back to 1 once a game.

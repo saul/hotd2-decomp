@@ -18,8 +18,8 @@
  * Run with `npm run test:port`.
  */
 import type {
-  ApproachJson, CharacterPlacement, CharactersJson, CharacterType,
-  PlayerDamageJson, TrackingJson,
+  ApproachJson, BreakablePlacement, CharacterPlacement, CharactersJson,
+  CharacterType, PlayerDamageJson, TrackingJson,
 } from "../src/bundle";
 import { Rng } from "../src/core/rng";
 import { Scope } from "../src/core/scope";
@@ -440,11 +440,65 @@ import {
   Type43ItemSet, TYPE43_PICKUP_SLOT,
 } from "../src/game/class41/type43";
 import {
-  PropDrawOnlyType33, PropDrawOnlyType33Tick,
+  PropDrawOnlyType33,
   SCRIPT_FLAG_TYPE54_DRIFT, TYPE31_DESPAWN_CAM_FRAME,
   TYPE31_DESPAWN_CAM_PATH, TYPE54_DRIFT_FRAMES,
+  TYPE31_EXTRA_SLOT, TYPE53_STRIP_A_SLOT, TYPE53_STRIP_B_SLOT,
 } from "../src/game/class41/draw_only";
 import { ClearPropShotTestList } from "../src/game/class41/shot_test";
+import { SCRIPT_FLAG_TYPE5_REMOVE } from "../src/game/class41/type05";
+import { TYPE10_FIRST_SLOT, TYPE6_FIRST_SLOT } from "../src/game/class41/type06";
+import {
+  TYPE12_DESPAWN_CAM_FRAME, TYPE12_DESPAWN_CAM_PATH,
+} from "../src/game/class41/type12";
+import { TYPE21_DRAW_LAYER, TYPE21_FIRST_SLOT } from "../src/game/class41/type21";
+import { TYPE63_ITEM_Y } from "../src/game/class41/type63";
+import {
+  PropType78LoadSlot, TYPE78_ARCADE_SLOT,
+} from "../src/game/class41/type78";
+import type { EffectDefJson } from "../src/bundle";
+import { BAMS_TO_RAD_F64 } from "../src/core/bams";
+import { MatrixScale } from "../src/game/matrix";
+import {
+  LIFT_CAR_SLOT, LIFT_HINGE_NEAR, LIFT_LEAF_SLOT, LIFT_PANEL_AT,
+  LIFT_PANEL_SLOT, PROP_HIT_SCORE,
+} from "../src/game/class41";
+import { PropWords } from "../src/game/class41/words";
+import { TYPE13_DROP_SLOT, TYPE13_JUDDER } from "../src/game/class41/type13";
+import {
+  TYPE35_LEAF_A, TYPE35_LEAF_A_SLOT, TYPE35_LEAF_B, TYPE35_LEAF_B_SLOT,
+} from "../src/game/class41/type35";
+import {
+  TYPE43_EFFECT7_SLOT, TYPE43_FLAG_TAKEN, TYPE43_PICKUP_TAG,
+  TYPE43_WORDS_ZERO, type Type43Words,
+} from "../src/game/class41/type43";
+import { SFX_FALLING_KNOCKED } from "../src/game/class44/container";
+import {
+  OriginalItemDropPhase, PickOriginalModeItem, SFX_ORIGINAL_ITEM_PICKUP,
+  SFX_TYPE07_HIT, TYPE07_SLOT,
+} from "../src/game/class41/type07";
+import {
+  SFX_TYPE8_PART_SPLASH, TYPE8_PART_ANGLES, TYPE8_PART_POSITIONS,
+} from "../src/game/class41/type08";
+import { SFX_TYPE14_HIT, Type14Phase } from "../src/game/class41/type14";
+import {
+  SFX_TYPE19_GIVE_UP, SFX_TYPE19_HIT, SFX_TYPE19_KNOCK, SFX_TYPE19_LINE,
+  SFX_TYPE19_OPEN, Type19Phase,
+} from "../src/game/class41/type19";
+import { SFX_TYPE20_HIT, TYPE20_SLOT } from "../src/game/class41/type20";
+import { SFX_TYPE25_HIT } from "../src/game/class41/type25";
+import { TYPE45_ROWS } from "../src/game/class41/type45";
+import { TYPE49_HULL } from "../src/game/class41/type49";
+import {
+  SFX_TYPE58_HIT, TYPE58_SLOT, Type58Phase,
+} from "../src/game/class41/type58";
+import {
+  SFX_TYPE60_HIT, TYPE60_SLOT, Type60Phase,
+} from "../src/game/class41/type60";
+import {
+  TYPE67_CARGO_CRACKED_SLOT, TYPE67_CARGO_CRATE_SLOT,
+  TYPE67_CARGO_TARGET_SLOT, TYPE67_SLOT, TYPE67_SLOT_INDEX2,
+} from "../src/game/class41/type67";
 import {
   CLASS21_FREED_START_CURSOR, CLASS21_HP_BY_RANK, CLASS21_MOTION_FREED,
   CLASS21_SINK_FRAMES, g_st2car_path_table, RescueTargetFreedDrift,
@@ -2597,12 +2651,14 @@ console.log("\nclass 0x44 selector 16's two pieces:");
   check("they start on the container's floor, the second two units up",
         f0.y === c.floorY && f1.y === c.floorY + 2 && f0.x === c.x
         && f0.floorY === c.floorY);
+  // The float32s the engine stores: 10 * 0.01f + 0.1f is 0.20000000298.
   check("one each way along x and z",
         f0.vx > 0 && f0.vz > 0 && f1.vx < 0 && f1.vz < 0
-        && Math.abs(f0.vx) >= 0.1 && Math.abs(f0.vx) <= 0.2 + 1e-9);
+        && Math.abs(f0.vx) >= 0.1
+        && Math.abs(f0.vx) <= Math.fround(0.2) + 1e-9);
   check("thrown up at 1.5..1.7 and 2.0..2.2, a half turn apart in pitch",
-        f0.vy >= 1.5 && f0.vy <= 1.7 + 1e-9 && f1.vy >= 2.0
-        && f1.vy <= 2.2 + 1e-9 && f0.pitch === 0x4000
+        f0.vy >= 1.5 && f0.vy <= Math.fround(1.7) + 1e-6 && f1.vy >= 2.0
+        && f1.vy <= Math.fround(2.2) + 1e-6 && f0.pitch === 0x4000
         && f1.pitch === -0x4000, `${f0.vy} ${f1.vy}`);
   check("...with the container's yaw and a cleared frame count",
         f0.yaw === c.yaw && f0.storyItem === 0 && f0.roll === 0);
@@ -2721,8 +2777,12 @@ console.log("\nclass 0x41, the generic props:");
     at: 0xa901, container: "generic", type: 6, slot: 0x1234,
     lifetime_evt_steps: 0, pos: [0, 0, 0],
   }, rng);
+  // Case 6's other literal is `obj+0x11C = 1`, and `PropUpdateType6` reads
+  // that word only through `PropExpireByStepLifetime`: a step lifetime, not
+  // the shot count this used to assert.
   check("a type whose arm overrides the slot uses the arm's",
-        door.slot === 0x1032 && door.hp === 1, door.slot.toString(16));
+        door.slot === 0x1032 && door.lifetime === 1 && door.hp === 0,
+        `${door.slot.toString(16)} ${door.lifetime} ${door.hp}`);
 }
 
 console.log("\nclass 0x41's three draw-only types:");
@@ -2814,7 +2874,7 @@ console.log("\nclass 0x41's three draw-only types:");
   // 0x174A (eff_shop.bin[0]), a roll word of 0x3B, and a `+0x11C` that is
   // the slot and would be a 5962-step "lifetime" to a prologue the routine
   // does not have. Driven through the real frame -- placer in the actor
-  // walk, step at the head of the next -- because the order is the fix.
+  // walk, the prop in the pool walk after it -- because the order is the fix.
   const rng = new Rng(33);
   const events = propScene(rng, GameMode.Arcade);
   const at = 0x6a14;
@@ -2833,16 +2893,17 @@ console.log("\nclass 0x41's three draw-only types:");
   placer.hp = 0x174a;       // +0x11C: the slot, for this type
   placer.condition = 33;    // +0x130C: PlaceGenericProp, g_class41_updates[33]
   const drawn: number[] = [];
-  let p: BreakableProp | undefined;
   for (let frame = 0; frame < 70; frame += 1) {
     // A step change every frame: nothing may count them against `+0x11C`.
     G.g_evt_step_index = frame & 0xff;
+    // The object as it was before the frame, so the frame that kills it --
+    // and takes it out of the pool -- can still be asked what it drew.
+    const before = G.g_breakable_props.find((q) => q.at === at);
     GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
-    p = G.g_breakable_props.find((q) => q.at === at);
-    // What `render/breakables.ts` hands the draw this frame, or nothing.
-    if (p && !p.dead) drawn.push(p.slot + p.storyItem);
+    const p = G.g_breakable_props.find((q) => q.at === at) ?? before;
+    if (p?.draws?.length) drawn.push(p.draws[0].slot);
   }
-  check("a type-33 prop is its own family, with the roll word as its length",
+  check("a type-33 prop draws a strip and its placer is gone",
         drawn.length > 0 && placer.dead, `${drawn.length} drawn`);
   check("...the sweep and 70 step changes do not retire it: no prologue",
         drawn.length === 60, `${drawn.length}`);
@@ -2857,7 +2918,8 @@ console.log("\nclass 0x41's three draw-only types:");
         !G.g_breakable_props.some((q) => q.at === at),
         `${G.g_breakable_props.length}`);
 
-  // The routine on its own: post-increment compare, `ActorKill`.
+  // The routine on its own: post-increment compare, `ActorKill`, and the
+  // draw of the last cursor is made by the call that kills.
   const q = PlaceGenericProp({
     at: 0xb133, container: "generic", type: 33, slot: 0x174a,
     lifetime_evt_steps: 0x174a, pos: [0, 0, 0], roll: 2,
@@ -2868,21 +2930,42 @@ console.log("\nclass 0x41's three draw-only types:");
   PropDrawOnlyType33(q);
   PropDrawOnlyType33(q);
   check("...a roll word of 2 survives the steps to cursors 1 and 2",
-        !q.dead && q.storyItem === 2, `${q.storyItem}`);
+        !q.dead && q.storyItem === 2 && q.draws?.[0]?.slot === 0x174b,
+        `${q.storyItem}`);
   PropDrawOnlyType33(q);
   check("...and the call that drew cursor 2 kills it: 3 > 2",
-        q.dead && q.storyItem === 3, `${q.storyItem}`);
-  // And the pool's own walk does not step it a second time.
+        q.dead && q.storyItem === 3 && q.draws?.[0]?.slot === 0x174c,
+        `${q.storyItem}`);
+  // And the pool's own walk steps it, once.
   const r = PlaceGenericProp({
     at: 0xb134, container: "generic", type: 33, slot: 0x174a,
     lifetime_evt_steps: 0x174a, pos: [0, 0, 0], roll: 5,
   }, rng);
   G.g_breakable_props.push(r);
   BreakablePropPoolUpdate(rng);
-  PropDrawOnlyType33Tick();
-  check("the pool walk leaves its cursor to the head-of-frame tick",
-        r.storyItem === 1 && G.g_breakable_props.includes(r),
-        `${r.storyItem}`);
+  check("the pool walk runs it: cursor 0 drawn, then stepped to 1",
+        r.storyItem === 1 && r.draws?.[0]?.slot === 0x174a
+        && G.g_breakable_props.includes(r), `${r.storyItem}`);
+
+  // A strip of one: the call that draws cursor 0 kills it. The engine
+  // submitted that draw before the object went, so the frame still shows it:
+  // the pool keeps it in `g_prop_final_draws` for the renderer, one frame.
+  G.g_breakable_props = [];
+  const last = PlaceGenericProp({
+    at: 0xb135, container: "generic", type: 33, slot: 0x174a,
+    lifetime_evt_steps: 0x174a, pos: [0, 0, 0], roll: 0,
+  }, rng);
+  G.g_breakable_props.push(last);
+  BreakablePropPoolUpdate(rng);
+  check("a prop that draws and then dies leaves its last draw for the "
+        + "renderer",
+        G.g_breakable_props.length === 0
+        && G.g_prop_final_draws.length === 1
+        && G.g_prop_final_draws[0].id === last.id
+        && G.g_prop_final_draws[0].draws[0]?.slot === 0x174a,
+        JSON.stringify(G.g_prop_final_draws.map((f) => f.id)));
+  BreakablePropPoolUpdate(rng);
+  check("...for that one frame only", G.g_prop_final_draws.length === 0);
 }
 
 {
@@ -2924,9 +3007,11 @@ console.log("\nclass 0x41's three draw-only types:");
     at: 0xb300, container: "generic", type: 53, slot: 0x002b,
     lifetime_evt_steps: 0x002b, field_1f4: 6, pos: [0, 0, 0],
   }, rng);
+  // Type 51, which opens with the shared prologue. (This was type 5, which
+  // has no prologue at all -- `PropDrawOnlyType5` is a flag test and a draw.)
   const q = PlaceGenericProp({
-    at: 0xb301, container: "generic", type: 5, slot: 0x0fd2,
-    lifetime_evt_steps: 6, pos: [0, 0, 0],
+    at: 0xb301, container: "generic", type: 51, slot: 0x1793,
+    lifetime_evt_steps: 0x1793, field_1f4: 6, pos: [0, 0, 0],
   }, rng);
   G.g_breakable_props.push(p, q);
   G.g_script_flags[0x77] = 1;
@@ -2935,6 +3020,2808 @@ console.log("\nclass 0x41's three draw-only types:");
         G.g_breakable_props.length === 1
         && G.g_breakable_props[0].family === PropFamily.DrawOnlyType53,
         `${G.g_breakable_props.map((r) => PropFamily[r.family]).join()}`);
+}
+
+console.log("\nclass 0x41 types 5, 6, 10, 12, 21, 51, 63, 78, transcribed whole:");
+{
+  const rng = new Rng(5);
+  const events = propScene(rng);
+  const tick = (k = 1) => {
+    for (let i = 0; i < k; i++) BreakablePropPoolUpdate(rng, events);
+  };
+  const place = (type: number, extra: Partial<BreakablePlacement> = {}) => {
+    const p = PlaceGenericProp({
+      at: 0xc500 + type, container: "generic", type, slot: 0,
+      lifetime_evt_steps: 0, pos: [0, 0, 0], pitch: 0, yaw: 0, roll: 0,
+      ...extra,
+    }, rng);
+    G.g_breakable_props.push(p);
+    return p;
+  };
+  const at = (m: number[]) => [m[12], m[13], m[14]].map((v) => +v.toFixed(3));
+
+  // ---- type 5: a flag test and a draw, and nothing else ----------------
+  // Stage 2 block 14 step 10's first one, exactly -- and stage 2 is scene 1,
+  // where the shared prologue's sweep would have cleared it.
+  G.g_scene_index = 1;
+  G.g_script_flags[0x77] = 1;
+  const five = place(5, { slot: 0xfd2, lifetime_evt_steps: 0xfd2,
+                          pos: [-965, -8.1, -1270], pitch: 0xf000,
+                          yaw: 0x8000 });
+  G.g_evt_step_index = 3;
+  tick();
+  check("type 5 has no prologue: the scene-1 sweep and a step change leave "
+        + "it standing", !five.dead && five.stepsElapsed === 0);
+  check("...and it draws its descriptor's slot at its own position",
+        five.draws?.length === 1 && five.draws[0].slot === 0xfd2
+        && at(five.draws[0].m).join() === "-965,-8.1,-1270",
+        JSON.stringify(five.draws?.map((c) => [c.slot, at(c.m)])));
+  // `Rz . Ry . Rx` with a half turn of yaw and a sixteenth of pitch: +X goes
+  // to -X, and the pitch leaves it there.
+  check("...under Rz.Ry.Rx of its own angles",
+        Math.abs((five.draws?.[0].m[0] ?? 0) + 1) < 1e-6,
+        String(five.draws?.[0].m.slice(0, 3)));
+  check("...and registers no shot sphere", !five.shotRegistered);
+  G.g_script_flags[0x77] = 0;
+  G.g_scene_index = 0;
+  G.g_script_flags[SCRIPT_FLAG_TYPE5_REMOVE] = 1;
+  const flagsBefore = five.flags;
+  tick();
+  check("flag 0x13 takes it with ActorKill, not ActorDespawn",
+        five.dead && five.flags === flagsBefore
+        && !G.g_breakable_props.includes(five));
+  G.g_script_flags[SCRIPT_FLAG_TYPE5_REMOVE] = 0;
+
+  // ---- types 6 and 10: the model is the cursor -------------------------
+  G.g_evt_step_index = 1;
+  const six = place(6, { slot: 1, lifetime_evt_steps: 1 });
+  const ten = place(10, { slot: 1, lifetime_evt_steps: 1,
+                          pos: [-1044.27, 2.4173, -1299.73] });
+  const drawn6: number[] = [];
+  const drawn10: number[] = [];
+  for (let i = 0; i < 52; i++) {
+    tick();
+    drawn6.push(six.draws?.[0]?.slot ?? -1);
+    drawn10.push(ten.draws?.[0]?.slot ?? -1);
+  }
+  check("type 6 plays 0x1032..0x1062, forty-nine frames, and wraps",
+        drawn6[0] === TYPE6_FIRST_SLOT && drawn6[48] === 0x1062
+        && drawn6[49] === TYPE6_FIRST_SLOT && drawn6[51] === 0x1034,
+        drawn6.slice(46, 52).map((x) => x.toString(16)).join());
+  check("type 10 plays 0x10C4..0x10CC, nine frames, and wraps",
+        drawn10.slice(0, 11).map((x) => x - TYPE10_FIRST_SLOT).join()
+        === "0,1,2,3,4,5,6,7,8,0,1",
+        drawn10.slice(0, 11).map((x) => x.toString(16)).join());
+  check("...the draw is the slot from before the step, and the step is kept",
+        six.slot === 0x1035 && ten.slot === TYPE10_FIRST_SLOT + 7,
+        `${six.slot.toString(16)} ${ten.slot.toString(16)}`);
+  // The arms' `obj+0x11C` literals are step lifetimes: 1 and 2.
+  G.g_evt_step_index = 2; tick();
+  check("one step change: both still up", !six.dead && !ten.dead);
+  G.g_evt_step_index = 3; tick();
+  check("the second retires type 6 (life 1) and not type 10 (life 2)",
+        six.dead && !ten.dead);
+  G.g_evt_step_index = 4; tick();
+  check("...and the third retires type 10", ten.dead);
+
+  // ---- type 12: a descriptor model at unit scale, and a camera cue -----
+  G.g_evt_step_index = 1;
+  const twelve = place(12, { slot: 0x17a5, lifetime_evt_steps: 0x17a5,
+                             field_1f4: 1, pos: [-585.1, -13.7, -1237],
+                             yaw: 0x4000, roll: 2 });
+  tick();
+  check("type 12 takes its lifetime from +0x1F4 and draws +0x11C's model",
+        twelve.lifetime === 1 && twelve.draws?.[0].slot === 0x17a5
+        && at(twelve.draws[0].m).join() === "-585.1,-13.7,-1237",
+        `${twelve.lifetime} ${JSON.stringify(twelve.draws)}`);
+  check("...scaled by the arm's 1.0 on all three axes",
+        twelve.restX === 1 && twelve.restY === 1 && twelve.restZ === 1);
+  G.g_active_cam_path = TYPE12_DESPAWN_CAM_PATH;
+  G.g_cam_path_frame = TYPE12_DESPAWN_CAM_FRAME - 1;
+  tick();
+  check("camera path 0x2F one frame short of 0x96 leaves it", !twelve.dead);
+  G.g_cam_path_frame = TYPE12_DESPAWN_CAM_FRAME;
+  tick();
+  check("...and frame 0x96 takes it, as ActorDespawn",
+        twelve.dead && ((twelve.flags & 0x80018000) >>> 0) === 0x80018000);
+  G.g_active_cam_path = -1;
+  G.g_cam_path_frame = 0;
+
+  // ---- type 21: g_frame_counter's strip, in draw layer 9 ---------------
+  const t21 = place(21, { slot: 2, lifetime_evt_steps: 2,
+                          pos: [-403, 0, -1347.8], yaw: 0xc000 });
+  G.g_frame_counter = 1237;
+  tick();
+  check("type 21 draws 0x132F + g_frame_counter % 10, in layer 9",
+        t21.draws?.[0].slot === TYPE21_FIRST_SLOT + 7
+        && t21.draws[0].layer === TYPE21_DRAW_LAYER,
+        JSON.stringify(t21.draws?.map((c) => [c.slot, c.layer])));
+
+  // ---- type 51: Ry . Rz . Rx, the one that is not Rz . Ry . Rx ---------
+  const van = place(51, { slot: 0x1793, lifetime_evt_steps: 0x1793,
+                          field_1f4: 4, yaw: 0x4000, roll: 0x2000 });
+  tick();
+  const yzx = MatIdentity();
+  MatrixRotateY(yzx, 0x4000); MatrixRotateZ(yzx, 0x2000);
+  MatrixRotateX(yzx, 0);
+  const zyx = MatIdentity();
+  MatrixRotateZ(zyx, 0x2000); MatrixRotateY(zyx, 0x4000);
+  const m51 = van.draws?.[0].m ?? [];
+  const same = (a: number[], b: number[]) =>
+    a.slice(0, 12).every((v, i) => Math.abs(v - b[i]) < 1e-6);
+  check("type 51 composes yaw before roll, and the other order differs",
+        van.draws?.[0].slot === 0x1793 && same(m51, yzx) && !same(m51, zyx));
+
+  // ---- type 63: twelve items off a table, then gone --------------------
+  const released: Array<[number, number, number, number]> = [];
+  events.on("item.released", (e) => released.push([e.set, e.x, e.y, e.z]));
+  const box = place(63, { pos: [1, 2, 3] });
+  tick();
+  check("type 63 releases the table's twelve items in order and dies",
+        released.length === 12 && box.dead
+        && released.map((r) => r[0]).join() === "6,5,7,2,3,1,1,1,2,3,6,5",
+        released.map((r) => r[0]).join());
+  check("...each at the record's x, z - 3.0, and y 2498.7",
+        released[0][1] === 419 && released[0][3] === -9385
+        && Math.abs(released[5][2] - (TYPE63_ITEM_Y + 1.0)) < 1e-9
+        && released[11][1] === 456 && released[11][3] === -9375,
+        JSON.stringify([released[0], released[5], released[11]]));
+
+  // ---- type 78: a load request and an ActorKill ------------------------
+  const loader = place(78, { slot: 1, lifetime_evt_steps: 1 });
+  tick();
+  check("type 78 kills itself on its first frame and draws nothing",
+        loader.dead && (loader.draws?.length ?? 0) === 0);
+  G.g_GameMode = GameMode.Arcade;
+  const arcade = PropType78LoadSlot();
+  G.g_GameMode = GameMode.Original;
+  check("...having asked for 0x1A60 in Arcade and 0xA6C otherwise",
+        arcade === TYPE78_ARCADE_SLOT && PropType78LoadSlot() === 0xa6c);
+}
+
+console.log("\nclass 0x41 type 13, its draws:");
+{
+  const rng = new Rng(1313);
+  const events = propScene(rng);
+  G.g_scene_index = 1;
+  G.g_evt_step_index = 4;
+  const p = PlaceGenericProp({ at: 0xec94, container: "generic", type: 13,
+    slot: 4, lifetime_evt_steps: 4, field_1f4: 0, pos: [-925, 180, -1297],
+    pitch: 0, yaw: 0, roll: 0 }, rng);
+  G.g_breakable_props.push(p);
+  const at = (x: number, y: number, z: number) => {
+    const m = MatIdentity(); MatrixTranslate(m, x, y, z); return m;
+  };
+  const same = (a: ArrayLike<number>, b: ArrayLike<number>) =>
+    Array.from({ length: 16 }, (_, i) => a[i] === b[i]).every(Boolean);
+  G.g_scene_tick_counter = 1;
+  BreakablePropPoolUpdate(rng, events);
+  check("type 13 draws its panel on the entry stack top, then the part under "
+        + "its own Translate",
+        p.draws?.length === 2 && p.draws[0].slot === TYPE13_PANEL_SLOT
+        && same(p.draws[0].m, MatIdentity())
+        && p.draws[1].slot === TYPE13_DROP_SLOT
+        && same(p.draws[1].m, at(-925, 180, -1297)),
+        JSON.stringify(p.draws?.map((d) => d.slot)));
+  G.g_scene_tick_counter = 40;
+  BreakablePropPoolUpdate(rng, events);
+  check("...the blink frame is drawn on the frame it is chosen",
+        p.slot === 0x1a4a && p.removeFlag === 1
+        && p.draws?.[0]?.slot === 0x1a4a);
+  G.g_script_flags[SCRIPT_FLAG_TYPE13_DROP] = 1;
+  BreakablePropPoolUpdate(rng, events);
+  let n = 0;
+  let drawnWhereItIs = true;
+  while (p.routinePhase === Type13Phase.Fall && n < 1000) {
+    BreakablePropPoolUpdate(rng, events);
+    n++;
+    if (p.draws?.[1]?.m[13] !== p.y) drawnWhereItIs = false;
+  }
+  check("...every falling frame draws the part at the y it just stepped to "
+        + "(the draw follows the step)",
+        drawnWhereItIs && n === 136, `${n}`);
+  check("...the landing frame draws the judder already added to Z",
+        p.vz === TYPE13_JUDDER
+        && p.draws?.[1]?.m[14] === Math.fround(-1297 + TYPE13_JUDDER),
+        `${p.draws?.[1]?.m[14]}`);
+  // The fifth step change kills it before the sweep is looked at, and a
+  // killed prop has drawn nothing that frame.
+  for (let b = 5; b <= 8; b++) {
+    G.g_evt_step_index = b;
+    BreakablePropPoolUpdate(rng, events);
+  }
+  G.g_script_flags[0x77] = 1;
+  const flags = p.flags;
+  G.g_evt_step_index = 9;
+  BreakablePropPoolUpdate(rng, events);
+  check("...its lifetime is counted before the scene-1 sweep, and it is "
+        + "ActorKill (no 0x80018000), with nothing drawn",
+        p.dead && p.flags === flags && p.draws?.length === 0,
+        p.flags.toString(16));
+}
+
+console.log("\nclass 0x41 type 31, its draws:");
+{
+  const rng = new Rng(3131);
+  propScene(rng);
+  G.g_evt_step_index = 1;
+  const pl: BreakablePlacement = { at: 0x5380, container: "generic", type: 31,
+    slot: 0x0d01, lifetime_evt_steps: 0x0d01, field_1f4: 4,
+    pos: [-1139, -12.899999618530273, -3962.5], pitch: 0x123, yaw: -11996,
+    roll: 9 };
+  const p = PlaceGenericProp(pl, rng);
+  G.g_breakable_props.push(p);
+  check("type 31's arm writes the scale 1.0 and the strip end, and it is a "
+        + "whole routine (no GENERIC_UPDATE row)",
+        p.restX === 1 && p.restY === 1 && p.restZ === 1 && p.removeFlag === 9
+        && p.lifetime === 4);
+  const want = MatIdentity();
+  MatrixTranslate(want, -1139, -12.899999618530273, -3962.5);
+  MatrixRotateZ(want, 9); MatrixRotateY(want, -11996);
+  MatrixRotateX(want, 0x123); MatrixScale(want, 1, 1, 1);
+  const close = (a: ArrayLike<number>, b: ArrayLike<number>) =>
+    Array.from({ length: 16 }, (_, i) => Math.abs(a[i] - b[i]) < 1e-9)
+      .every(Boolean);
+  const slots: number[] = [];
+  for (let i = 0; i < 12; i++) {
+    BreakablePropPoolUpdate(rng);
+    slots.push(p.draws?.[0]?.slot ?? -1);
+  }
+  check("...it draws cursor 0 on its first frame under T.Rz.Ry.Rx.S, and the "
+        + "loop is 0..9 with no lead",
+        slots.join() === [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1]
+          .map((c) => 0x0d01 + c).join()
+        && close(p.draws?.[0]?.m ?? [], want),
+        slots.map((s) => s.toString(16)).join());
+  p.flags |= 0x8;
+  BreakablePropPoolUpdate(rng);
+  check("...registers no sphere and never masks obj+0x34",
+        !p.shotRegistered && (p.flags & 0x8) !== 0);
+  G.g_scene_index = 2;
+  G.g_evt_block_index = 0xb;
+  G.g_scene_tick_counter = 10;
+  BreakablePropPoolUpdate(rng);
+  const w1 = want.slice(); MatrixTranslate(w1, 0, -55.125, 0);
+  const w2 = w1.slice(); MatrixRotateY(w2, 0x8000);
+  MatrixTranslate(w2, 0, 0, -3);
+  const extra = 10 % 7 + TYPE31_EXTRA_SLOT;
+  check("...in scene 2 block 11 it draws tick%7+0x1797 twice more: 55.125 "
+        + "down, then half a turn round and 3.0 along",
+        p.draws?.length === 3 && p.draws[1].slot === extra
+        && p.draws[2].slot === extra
+        && close(p.draws[1].m, w1) && close(p.draws[2].m, w2),
+        JSON.stringify(p.draws?.map((d) => d.slot)));
+  G.g_scene_index = 0;
+  G.g_evt_block_index = 0;
+  for (let s = 2; s <= 5; s++) {
+    G.g_evt_step_index = s;
+    BreakablePropPoolUpdate(rng);
+  }
+  const cursor = p.storyItem;
+  G.g_evt_step_index = 6;
+  BreakablePropPoolUpdate(rng);
+  check("...retired by its prologue it runs nothing more: no draw, no step "
+        + "(ActorDespawn does not return)",
+        p.dead && p.draws?.length === 0 && p.storyItem === cursor);
+}
+
+console.log("\nclass 0x41 type 35, its draws:");
+{
+  const rng = new Rng(3535);
+  const events = propScene(rng);
+  G.g_evt_step_index = 1;
+  const door = PlaceGenericProp({ at: 0x2504, container: "generic", type: 35,
+    slot: 4, lifetime_evt_steps: 4, pos: [0, 0, 0], pitch: 0, yaw: 0,
+    roll: 0 }, rng);
+  G.g_breakable_props.push(door);
+  const leaves = (yaw: number): boolean => {
+    const a = MatIdentity(); MatrixTranslate(a, ...TYPE35_LEAF_A);
+    MatrixRotateY(a, yaw);
+    const b = MatIdentity(); MatrixTranslate(b, ...TYPE35_LEAF_B);
+    MatrixRotateY(b, -yaw | 0);
+    const d = door.draws ?? [];
+    return d.length === 2 && d[0].slot === TYPE35_LEAF_A_SLOT
+      && d[1].slot === TYPE35_LEAF_B_SLOT
+      && d[0].m.every((v, i) => Math.abs(v - a[i]) < 1e-9)
+      && d[1].m.every((v, i) => Math.abs(v - b[i]) < 1e-9);
+  };
+  BreakablePropPoolUpdate(rng, events);
+  check("type 35 draws two leaves at the literal hinge words, not at its "
+        + "own position",
+        leaves(0) && door.draws?.[0]?.m[12] === -620.552001953125
+        && door.draws?.[1]?.m[14] === -980.8179931640625);
+  G.g_script_flags[SCRIPT_FLAG_TYPE35_RATTLE] = 1;
+  for (let i = 0; i < 20; i++) BreakablePropPoolUpdate(rng, events);
+  let each = true;
+  for (let i = 0; i < 7; i++) {
+    BreakablePropPoolUpdate(rng, events);
+    if (!leaves(door.yaw)) each = false;
+  }
+  check("...each swing frame draws leaf A at +yaw and leaf B at -yaw of "
+        + "that frame", each);
+  G.g_script_flags[SCRIPT_FLAG_TYPE35_RATTLE] = 0;
+  for (let s = 2; s <= 5; s++) {
+    G.g_evt_step_index = s;
+    BreakablePropPoolUpdate(rng, events);
+  }
+  G.g_script_flags[SCRIPT_FLAG_TYPE35_RATTLE] = 1;
+  door.routinePhase = Type35Phase.Count;
+  const count = door.storyItem;
+  G.g_evt_step_index = 6;
+  BreakablePropPoolUpdate(rng, events);
+  check("...retired by its prologue it does not count once more (ActorDespawn "
+        + "does not return) and draws nothing",
+        door.dead && door.storyItem === count && door.draws?.length === 0,
+        `${door.storyItem} vs ${count}`);
+}
+
+console.log("\nclass 0x41 type 53, its draws and the camera-facing strips:");
+{
+  const rng = new Rng(5353);
+  propScene(rng);
+  G.g_evt_step_index = 1;
+  G.g_evt_block_index = 2;
+  const pos: [number, number, number] =
+    [626.8999633789062, -71.0999984741211, -6422.599609375];
+  const p = PlaceGenericProp({ at: 0x2fc0, container: "generic", type: 53,
+    slot: 43, lifetime_evt_steps: 43, field_1f4: 6, pos, pitch: 0,
+    yaw: -21845, roll: 0 }, rng);
+  G.g_breakable_props.push(p);
+  BreakablePropPoolUpdate(rng);
+  check("type 53 draws its body alone outside blocks 4 and 5",
+        p.draws?.length === 1 && p.draws[0].slot === 43);
+  G.g_evt_block_index = 4;
+  G.g_scene_tick_counter = 37;
+  G.g_camera_block_eye.x = pos[0] + 100;
+  G.g_camera_block_eye.y = 0;
+  G.g_camera_block_eye.z = pos[2] - 50;
+  BreakablePropPoolUpdate(rng);
+  const d = p.draws ?? [];
+  check("...in block 4: body, then tick%15+0x135F, then (tick&7)+0xB67",
+        d.length === 3 && d[1].slot === 37 % 15 + TYPE53_STRIP_A_SLOT
+        && d[2].slot === (37 & 7) + TYPE53_STRIP_B_SLOT,
+        JSON.stringify(d.map((x) => x.slot)));
+  const len = Math.hypot(100, -50);
+  check("...both strips turn their +Z to the camera's eye about Y alone",
+        Math.abs(d[1].m[8] - 100 / len) < 1e-3 && Math.abs(d[1].m[9]) < 1e-9
+        && Math.abs(d[1].m[10] + 50 / len) < 1e-3
+        && Math.abs(d[2].m[8] / 7 - 100 / len) < 1e-3);
+  check("...strip A 5.0 up, strip B 8.0 up and 12.0 toward the eye, x7",
+        d[1].m[13] === Math.fround(pos[1] + 5)
+        && d[2].m[13] === Math.fround(pos[1] + 8)
+        && Math.abs(d[2].m[12] - (pos[0] + 1200 / len)) < 1e-2
+        && Math.abs(d[2].m[14] - (pos[2] - 600 / len)) < 1e-2);
+  G.g_evt_block_index = 5;
+  BreakablePropPoolUpdate(rng);
+  check("...and in block 5", p.draws?.length === 3);
+}
+
+console.log("\nclass 0x41 type 54, its draw:");
+{
+  const rng = new Rng(5454);
+  propScene(rng);
+  const p = PlaceGenericProp({ at: 0x3010, container: "generic", type: 54,
+    slot: 0x18a1, lifetime_evt_steps: 0x18a1, field_1f4: 5,
+    pos: [583, -67, -7773.39990234375], pitch: 0, yaw: 0, roll: 0 }, rng);
+  G.g_breakable_props.push(p);
+  G.g_script_flags[SCRIPT_FLAG_TYPE54_DRIFT] = 1;
+  BreakablePropPoolUpdate(rng);
+  check("type 54 drifts first and draws where it drifted to",
+        p.draws?.length === 1 && p.draws[0].slot === 0x18a1
+        && p.draws[0].m[12] === 588 && p.draws[0].m[13] === p.y
+        && p.y === Math.fround(-67 + 1.5));
+  for (let i = 0; i < TYPE54_DRIFT_FRAMES; i++) BreakablePropPoolUpdate(rng);
+  BreakablePropPoolUpdate(rng);
+  check("...and the frame that kills it draws nothing",
+        p.dead && p.draws?.length === 0);
+}
+
+console.log("\nclass 0x41 type 32, the lift's draw:");
+{
+  const rng = new Rng(32);
+  const events = propScene(rng, GameMode.Arcade);
+  const sounds: number[] = [];
+  events.on("sound.play", (e) => sounds.push(e.id));
+  const gate = PlaceGenericProp(
+    { at: 0xbdc0, container: "generic", type: 32, slot: 2,
+      lifetime_evt_steps: 2, pos: [-825.1, 40, -1871.7],
+      pitch: 0, yaw: 0, roll: 0 }, rng);
+  G.g_breakable_props.push(gate);
+  BreakablePropPoolUpdate(rng, events);
+  const s = (gate.draws ?? []).map((d) => d.slot);
+  check("LiftUpdate draws the car, four leaves and the panel, in order",
+        s.join() === [LIFT_CAR_SLOT, LIFT_LEAF_SLOT, LIFT_LEAF_SLOT,
+                      LIFT_LEAF_SLOT, LIFT_LEAF_SLOT, LIFT_PANEL_SLOT].join(),
+        s.map((x) => x.toString(16)).join());
+  const [, l1, l2, , , panel] = (gate.draws ?? []).map((d) => d.m);
+  check("...the near leaf at car + (9.619, 0.0451, -8.4127)",
+        Math.abs(l1[12] - (gate.x + LIFT_HINGE_NEAR[0])) < 1e-4
+        && Math.abs(l1[13] - (gate.y + LIFT_HINGE_NEAR[1])) < 1e-4
+        && Math.abs(l1[14] - (gate.z + LIFT_HINGE_NEAR[2])) < 1e-4);
+  // At rest the near pair's yaw is 0x4000, so the first leaf's x axis is -z
+  // and its partner hangs 6.5 along it: +6.5 in z.
+  check("...its partner 6.5 along the first leaf's turned x axis",
+        Math.abs(l2[12] - l1[12]) < 1e-4 && Math.abs(l2[14] - (l1[14] + 6.5)) < 1e-4);
+  check("...the panel on the car, not on a leaf: car + (-3.2134, 13 + 1, -2)",
+        Math.abs(panel[12] - (gate.x + LIFT_PANEL_AT[0])) < 1e-4
+        && Math.abs(panel[13] - (gate.y + 14)) < 1e-4
+        && Math.abs(panel[14] - (gate.z - 2)) < 1e-4);
+  check("...and no shot sphere", !gate.shotRegistered);
+
+  G.g_camera_block_eye.y = 100.3;
+  G.g_script_flags[LiftFlag.RideCamera] = 1;
+  BreakablePropPoolUpdate(rng, events);
+  check("flag 0x37: the floor is the float32 of eye - 15 (FSTP float)",
+        gate.y === Math.fround(100.3 - LIFT_RIDE_DROP), `${gate.y}`);
+  // `CMP [ESI+0x2A0],0x28 ; JL`: the panel swings on the frame the count of
+  // flag 0x6B reaches 0x28, the 40th.
+  G.g_script_flags[LiftFlag.OpenNear] = 1;
+  for (let i = 0; i < 39; i++) BreakablePropPoolUpdate(rng, events);
+  check("after 39 frames of flag 0x6B the panel has not moved",
+        gate.pitch === LIFT_PANEL_CLOSED && !sounds.includes(SFX_LIFT_PANEL));
+  BreakablePropPoolUpdate(rng, events);
+  check("...on the 40th it swings, with its sound",
+        gate.pitch === LIFT_PANEL_CLOSED + LIFT_HINGE_STEP
+        && sounds.filter((x) => x === SFX_LIFT_PANEL).length === 1);
+  for (let b = 1; b <= 3; b++) {
+    G.g_evt_step_index = b;
+    BreakablePropPoolUpdate(rng, events);
+  }
+  check("...and the frame it retires it draws nothing",
+        gate.dead && gate.draws?.length === 0);
+}
+
+console.log("\nclass 0x41 type 43, PlaceGenericProp case 0x2B and its routine:");
+{
+  const W = (p: BreakableProp): Type43Words => PropWords(p, TYPE43_WORDS_ZERO);
+  const ahead = (r: Rng, n: number): number => {
+    const t = new Rng(0); t.state = r.state;
+    for (let i = 0; i < n; i++) t.next();
+    return t.state;
+  };
+  {
+    const rng = new Rng(4343);
+    propScene(rng, GameMode.Arcade);
+    const expect = ahead(rng, 4);
+    const twin = new Rng(0); twin.state = rng.state;
+    const s1 = 0x60 - twin.int(2) * 0xa0 - twin.int(0x21);
+    const s2 = 0x60 - twin.int(2) * 0xa0 - twin.int(0x21);
+    const p = PlaceGenericProp({
+      at: 0xc300, container: "generic", type: 43, slot: 2,
+      lifetime_evt_steps: 2, field_1f4: 1, pos: [-376.4, -28, -2609],
+      pitch: 7, yaw: 0x4000, roll: 3,
+    }, rng);
+    check("the arm draws four rand()s, not the re-seed's five",
+          rng.state === expect);
+    check("...each spin 0x60 - 0xA0*(rand()&1) - rand()%0x21",
+          p.spin === s1 && p.rollSpin === s2, `${p.spin} ${p.rollSpin}`);
+    check("...a literal 1.5 amplitude and a 0x200 step",
+          p.shake === 1.5 && p.yawSpin === 0x200);
+    check("...the kind and the set in the object's own words, the type in kind",
+          W(p).o290 === 3 && W(p).o194 === 1 && p.kind === 43);
+    check("...and the shot rise from row (s8)placer+0x131B = 0, not the kind",
+          p.restHeight === (BREAKABLES.kinds[0]?.y_offset ?? -1));
+  }
+  {
+    const rng = new Rng(43);
+    const events = propScene(rng, GameMode.Arcade);
+    const sounds: number[] = [];
+    events.on("sound.play", (e) => sounds.push(e.id));
+    const p = PlaceGenericProp({
+      at: 0xc400, container: "generic", type: 43, slot: 3,
+      lifetime_evt_steps: 3, field_1f4: 1, pos: [10, 20, 30],
+      pitch: 0, yaw: 0x4000, roll: 3,
+    }, rng);
+    G.g_breakable_props.push(p);
+    BreakablePropPoolUpdate(rng, events);
+    const body = MatIdentity();
+    MatrixTranslate(body, p.x, p.y, p.z);
+    MatrixRotateZ(body, p.roll);
+    MatrixRotateY(body, p.yaw);
+    MatrixRotateX(body, p.pitch);
+    check("PropUpdateType43 draws the crate at this frame's tumble",
+          p.draws?.length === 1 && p.draws[0].slot === BreakableSlot.Default
+          && p.draws[0].m.every((v, i) => Math.abs(v - body[i]) < 1e-5));
+    check("...and registers at y + row 0's rise", p.shotRegistered
+          && p.shotY === Math.fround(p.y + p.restHeight));
+    check("...the bob in float32: frame 1 on its centre", p.y === 20);
+    BreakablePropPoolUpdate(rng, events);
+    check("...frame 2 at f32(sin(0x200 BAMS) * 1.5 + 20)",
+          p.y === Math.fround(Math.sin(0x200 * 2 * Math.PI / 65536) * 1.5 + 20));
+
+    G.g_camera_block_yaw_bams = 0x2000;
+    p.hitAim = { x: 1, y: 2 };
+    const fx = G.g_sprite_effects.length;
+    sounds.length = 0;
+    BreakablePropTakeShot(p, 0);
+    BreakablePropPoolUpdate(rng, events);
+    check("the crack sounds the kind's 0x1A16A9 and throws impact and spark",
+          sounds[0] === 0x1a16a9 && G.g_sprite_effects.length === fx + 2
+          && p.slot === BreakableSlot.Broken && p.yaw === 0x2000);
+    check("...and a cracked crate is not drawn as 0x19E6 (it draws effect 0)",
+          (p.draws ?? []).every((d) => d.slot !== BreakableSlot.Broken));
+    const fx1 = G.g_sprite_effects.length;
+    BreakablePropTakeShot(p, 0);
+    BreakablePropPoolUpdate(rng, events);
+    check("the break: radius 5, rise 1.5, an impact and no spark",
+          p.hitRadius === 5 && p.restHeight === 1.5 && p.effectFrames === 2
+          && G.g_sprite_effects.length === fx1 + 1
+          && p.shotY === Math.fround(1.5 + p.y));
+    check("...a set-1 wreck floats the heart 0x10C3 three above it",
+          (p.draws ?? []).some((d) => d.slot === 0x10c3
+                        && Math.abs(d.m[13] - Math.fround(p.y + 3)) < 1e-5));
+    G.g_camera_view_to_world = MatIdentity();
+    MatrixTranslate(G.g_camera_view_to_world, 5, 6, 7);
+    MatrixRotateY(G.g_camera_view_to_world, 0x3000);
+    const lives = G.g_player_lives[0];
+    BreakablePropTakeShot(p, 0);
+    BreakablePropPoolUpdate(rng, events);
+    const tag = p.draws?.find((d) => d.slot === TYPE43_PICKUP_TAG);
+    check("the wreck shot: a life, the heart, the tag and strip frame 0",
+          G.g_player_lives[0] === lives + 1
+          && (p.draws ?? []).map((d) => d.slot).join()
+             === [0x10c3, TYPE43_PICKUP_TAG, TYPE43_PICKUP_SLOT].join());
+    check("...the tag billboarded: the camera's axes, scaled 1.5",
+          !!tag && [0, 1, 2, 4, 5, 6, 8, 9, 10].every((i) =>
+            Math.abs(tag.m[i] - G.g_camera_view_to_world[i] * 1.5) < 1e-5)
+          && Math.abs(tag.m[13] - Math.fround(p.y + 4)) < 1e-5);
+    for (let i = 0; i < 47; i++) BreakablePropPoolUpdate(rng, events);
+    check("...the strip runs to frame 47 alive",
+          !p.dead && p.draws?.[2]?.slot === TYPE43_PICKUP_SLOT + 47);
+    BreakablePropPoolUpdate(rng, events);
+    check("...and the prop goes after drawing frame 48",
+          p.dead && p.draws?.[2]?.slot === TYPE43_PICKUP_SLOT + 48);
+    G.g_camera_view_to_world = MatIdentity();
+  }
+  {
+    // A kind 2 hiding nothing goes when g_motion_play_length[469] - 2 passes.
+    const rng = new Rng(143);
+    const events = propScene(rng, GameMode.Arcade);
+    const p = PlaceGenericProp({
+      at: 0xc500, container: "generic", type: 43, slot: 2,
+      lifetime_evt_steps: 2, field_1f4: 0, pos: [0, 0, 0], roll: 2,
+    }, rng);
+    G.g_breakable_props.push(p);
+    BreakablePropPoolUpdate(rng, events);
+    check("a kind 2 draws 0x17A9 lifted 0.8 in its own frame",
+          p.draws?.length === 1 && p.draws[0].slot === TYPE43_EFFECT7_SLOT);
+    BreakablePropTakeShot(p, 0);
+    BreakablePropPoolUpdate(rng, events);
+    for (let i = 0; i < 70; i++) BreakablePropPoolUpdate(rng, events);
+    check("...and is still up at cursor 72 (0x4A - 2)", !p.dead && p.effectFrames === 72);
+    BreakablePropPoolUpdate(rng, events);
+    check("...and gone at 73", p.dead);
+  }
+  {
+    // The re-seed, once a whole turn: 127 frames draw nothing, the 128th five.
+    const rng = new Rng(11);
+    const events = propScene(rng, GameMode.Arcade);
+    const p = PlaceGenericProp({
+      at: 0xc600, container: "generic", type: 43, slot: 9,
+      lifetime_evt_steps: 9, field_1f4: 0, pos: [0, 0, 0], roll: 3,
+    }, rng);
+    G.g_breakable_props.push(p);
+    for (let i = 0; i < 127; i++) BreakablePropPoolUpdate(rng, events);
+    const expect = ahead(rng, 5);
+    BreakablePropPoolUpdate(rng, events);
+    check("the bob re-seeds on the 128th frame with five rand()s",
+          rng.state === expect && p.shake !== 1.5);
+  }
+  {
+    // Set 2 in Original Mode: PickOriginalModeItem at the break, one rand().
+    const rng = new Rng(9);
+    const events = propScene(rng, GameMode.Original);
+    G.g_scene_index = 2;
+    const p = PlaceGenericProp({
+      at: 0xc700, container: "generic", type: 43, slot: 9,
+      lifetime_evt_steps: 9, field_1f4: 2, pos: [0, 0, 0], roll: 2,
+    }, rng);
+    G.g_breakable_props.push(p);
+    BreakablePropPoolUpdate(rng, events);
+    BreakablePropTakeShot(p, 0);
+    const t = new Rng(0); t.state = rng.state;
+    const id = [17, 17, 20, 28, -1][t.int(5)];
+    BreakablePropPoolUpdate(rng, events);
+    check("an Original Mode set-2 break picks from scene 2's row 0",
+          W(p).o290 === id, `${W(p).o290} vs ${id}`);
+  }
+}
+
+console.log("\nclass 0x41 type 34, PlaceGenericProp case 0x22:");
+{
+  const rng = new Rng(34);
+  const events = propScene(rng, GameMode.Arcade);
+  let cracked = -1;
+  events.on("prop.cracked", (e) => { cracked = e.sound; });
+  const t = new Rng(0); t.state = rng.state;
+  const count = t.int(2) + 1;
+  // Stage 1 evt 0x3A7C, as the descriptor holds it.
+  const c = PlaceGenericProp({
+    at: 0x3a7c, container: "generic", type: 34, slot: 5,
+    lifetime_evt_steps: 5, field_1f4: 3, pos: [-665, -8.1, -490],
+    pitch: 2, yaw: 0x4000, roll: 0,
+  }, rng);
+  G.g_breakable_props.push(c);
+  check("type 34 runs FallingContainerUpdate: two shots, 0xA50, radius 8",
+        c.family === PropFamily.Falling && c.hp === 2
+        && c.slot === FALLING_SLOT_WHOLE && c.hitRadius === 8);
+  check("...lifetime (u8)placer+0x11C in +0x199, set desc+0x24, story -1",
+        c.lifetime === 5 && c.itemSet === 3 && c.storyItem === -1);
+  check("...the set-size word stays on as its pitch, which selector 16 zeroes",
+        c.pitch === 2 && c.yaw === 0x4000 && c.roll === 0);
+  check("...and seeds the countdown rand() % 2 + 1",
+        G.g_item_set_countdown[3] === count);
+  BreakablePropPoolUpdate(rng, events);
+  check("standing, it draws 0xA50 and registers at its origin",
+        c.draws?.length === 1 && c.draws[0].slot === FALLING_SLOT_WHOLE
+        && c.shotRegistered && c.shotY === c.y);
+  BreakablePropTakeShot(c, 0);
+  BreakablePropPoolUpdate(rng, events);
+  check("the knock clears the hit bit itself and leaves one shot",
+        cracked === SFX_FALLING_KNOCKED && (c.flags & BreakableFlag.Hit) === 0
+        && c.hp === 1 && c.slot === FALLING_SLOT_LOOSE);
+  BreakablePropPoolUpdate(rng, events);
+  check("...and the next frame does not break it", !c.dead && c.hp === 1);
+}
+{
+  const rng = new Rng(35);
+  const events = propScene(rng, GameMode.Arcade);
+  const c = PlaceGenericProp({
+    at: 0x5448, container: "generic", type: 34, slot: 1,
+    lifetime_evt_steps: 1, field_1f4: 0, pos: [0, 10, 0],
+    pitch: 0, yaw: 0, roll: 0,
+  }, rng);
+  G.g_breakable_props.push(c);
+  G.g_evt_step_index = 1;
+  BreakablePropPoolUpdate(rng, events);
+  check("a type-34 container's lifetime is +0x199, not the shots in +0x11C",
+        !c.dead);
+  G.g_evt_step_index = 2;
+  BreakablePropPoolUpdate(rng, events);
+  check("...and it goes on the second step change with two shots left",
+        c.dead && c.hp === 2);
+}
+
+console.log("\nclass 0x41 types 7, 20, 58 and 60, transcribed whole:");
+{
+  const world = (ops: (m: number[]) => void): number[] => {
+    const m = MatIdentity(); ops(m); return m;
+  };
+  const same = (a: number[] | undefined, b: number[]): boolean =>
+    !!a && a.length === 16 && a.every((v, i) => Math.abs(v - b[i]) < 1e-6);
+  const put = (pl: Partial<BreakablePlacement>, rng: Rng): BreakableProp => {
+    const p = PlaceGenericProp({ at: 0x1000, container: "generic",
+                                 lifetime_evt_steps: 0, ...pl } as
+                               BreakablePlacement, rng);
+    G.g_breakable_props.push(p);
+    return p;
+  };
+  const listen = (events: Events) => {
+    const sounds: number[] = [];
+    const released: { kind?: number; y: number }[] = [];
+    const pickups: unknown[] = [];
+    events.on("sound.play", (d) => sounds.push(d.id));
+    events.on("item.released", (d) => released.push(d));
+    events.on("prop.pickup", (d) => pickups.push(d));
+    return { sounds, released, pickups };
+  };
+
+  // -- type 7 ---------------------------------------------------------------
+  {
+    const rng = new Rng(7);
+    const events = propScene(rng, GameMode.Arcade);
+    const { sounds } = listen(events);
+    G.g_scene_index = 0;
+    // Stage 1's one spawn: (0, 102, -54), descriptor +0x11C = 2.
+    const p = put({ type: 7, pos: [0, 102, -54], slot: 2,
+                    lifetime_evt_steps: 2 }, rng);
+    check("type 7: the arm sets the radius, 12.0", p.hitRadius === 12);
+    BreakablePropPoolUpdate(rng, events);
+    check("type 7: it draws 0x1736 at its origin",
+          p.draws?.length === 1 && p.draws[0].slot === TYPE07_SLOT
+          && same(p.draws[0].m, world((m) => MatrixTranslate(m, 0, 102, -54))));
+    check("type 7: the sphere is 57.0 below the origin",
+          p.shotRegistered && p.shotY === 45);
+    for (let i = 0; i < 4; i++) {
+      G.g_evt_step_index += 1; BreakablePropPoolUpdate(rng, events);
+    }
+    check("type 7: a literal lifetime of 4 step changes, not +0x11C's 2",
+          !p.dead);
+    G.g_evt_step_index += 1; BreakablePropPoolUpdate(rng, events);
+    check("type 7: the fifth change retires it and it draws nothing",
+          p.dead && p.draws?.length === 0 && sounds.length === 0);
+  }
+  {
+    const rng = new Rng(99);
+    const events = propScene(rng, GameMode.Arcade);
+    const { sounds } = listen(events);
+    G.g_scene_index = 1;
+    G.g_script_flags[0x77] = 1;
+    const p = put({ type: 7, pos: [0, 102, -54], lifetime_evt_steps: 2 }, rng);
+    BreakablePropPoolUpdate(rng, events);
+    check("type 7: no scene-1 sweep", !p.dead);
+    const twin = new Rng(rng.state);
+    BreakablePropTakeShot(p, 0);
+    BreakablePropPoolUpdate(rng, events);
+    const r1 = twin.int(0x201);
+    const r2 = twin.int(0x401) - 0x200;
+    const pr = r1 - Math.trunc(r1 / 48);
+    const rr = r2 - Math.trunc(r2 / 48);
+    check("type 7: a hit plays BULLET_MET1 and pays nothing",
+          sounds[0] === SFX_TYPE07_HIT && G.g_player_score[0] === 0);
+    check("type 7: rates rand() % 0x201 and rand() % 0x401 - 0x200, one spring step",
+          p.spin === pr && p.rollSpin === rr
+          && p.pitch === Math.trunc(pr / 4) && p.roll === Math.trunc(rr / 4),
+          `${p.spin}/${pr} ${p.rollSpin}/${rr}`);
+    check("type 7: the draw is T; RotZ(roll); RotX(pitch)",
+          same(p.draws?.[0]?.m, world((m) => {
+            MatrixTranslate(m, 0, 102, -54); MatrixRotateZ(m, p.roll);
+            MatrixRotateX(m, p.pitch);
+          })));
+    check("type 7: all three hit bits are clear, and no item in Arcade",
+          (p.flags & 0xe) === 0 && G.g_breakable_props.length === 1);
+    p.spin = -7; p.pitch = 0; p.rollSpin = 0; p.roll = 0;
+    BreakablePropPoolUpdate(rng, events);
+    check("type 7: the /4 truncates toward zero", p.pitch === -1);
+  }
+
+  // -- type 7's Original Mode item ------------------------------------------
+  {
+    const rng = new Rng(5);
+    const events = propScene(rng, GameMode.Original);
+    const { sounds, pickups } = listen(events);
+    G.g_scene_index = 0;
+    G.g_camera_fixed_eye_y = 6.5;
+    const p = put({ type: 7, pos: [0, 102, -54], lifetime_evt_steps: 2 }, rng);
+    BreakablePropTakeShot(p, 0);
+    BreakablePropPoolUpdate(rng, events);
+    const item = G.g_breakable_props.find((q) => q !== p);
+    check("type 7: Original Mode's first hit drops an item",
+          item?.family === PropFamily.OriginalItemDrop && p.storyItem === 1);
+    if (item) {
+      check("type 7 item: made at (x, 38.0, z + 1.0), radius 3, lifetime +0x11C + 2",
+            item.x === 0 && item.z === -53 && item.hitRadius === 3
+            && item.lifetime === 4);
+      check("type 7 item: scene 0 set 0 picks 3, 4, 16 or 17",
+            [3, 4, 16, 17].includes(item.words.o290));
+      BreakablePropTakeShot(p, 0);
+      BreakablePropPoolUpdate(rng, events);
+      check("type 7: a second hit drops nothing",
+            G.g_breakable_props.length === 2);
+      let n = 0, y = 38, v = 0;
+      const g = Math.fround(0.04083);
+      for (;;) { n++; y = Math.fround(y + v); v = Math.fround(v - g); if (7.5 > y) break; }
+      // The item already ran twice (the frame it was made and the one above).
+      let frames = 2, guard = 0;
+      while (item.routinePhase === OriginalItemDropPhase.Fall && guard++ < 999) {
+        BreakablePropPoolUpdate(rng, events); frames++;
+      }
+      check(`type 7 item: it bounces at floor + 1.0 on frame ${n}`,
+            frames === n && item.y === 7.5 && item.shake === Math.fround(0.7),
+            `${frames}`);
+      guard = 0;
+      while (item.routinePhase === OriginalItemDropPhase.Bounce && guard++ < 999) {
+        BreakablePropPoolUpdate(rng, events);
+      }
+      check("type 7 item: it lands on the floor, level",
+            item.y === 6.5 && item.pitch === 0 && item.roll === 0);
+      const d = item.draws ?? [];
+      const s = item.words.o2c4;
+      check("type 7 item: model, billboard, shadow",
+            d.length === 3 && d[0].slot === item.slot
+            && same(d[0].m, world((m) => {
+              MatrixTranslate(m, item.x, item.y, item.z);
+              MatrixRotateY(m, item.yaw); MatrixRotateZ(m, item.roll);
+              MatrixScale(m, s, s, s);
+            }))
+            && d[2].slot === 0x10d0 && same(d[2].m, world((m) => {
+              MatrixTranslate(m, item.x, Math.fround(6.5 + Math.fround(0.2)),
+                              item.z);
+              MatrixScale(m, 3, 1, 3);
+            })));
+      check("type 7 item: its sphere is 1.5 above it",
+            item.shotRegistered && item.shotY === 8);
+      sounds.length = 0;
+      BreakablePropTakeShot(item, 0);
+      BreakablePropPoolUpdate(rng, events);
+      check("type 7 item: a shot takes it once, player 0's strip",
+            sounds[0] === SFX_ORIGINAL_ITEM_PICKUP && pickups.length === 1
+            && item.removeFlag === 0x116a && item.storyItem === 1
+            && (item.draws ?? []).some((c) => c.slot === 0x116a)
+            && (item.flags & 0xa) === 0xa);
+      let alive = 1, faded: number | undefined;
+      while (!item.dead && alive < 200) {
+        BreakablePropPoolUpdate(rng, events);
+        if (!item.dead) alive++;
+        if (item.storyItem === 25) {
+          faded = (item.draws?.[0] as unknown as { alpha?: number }).alpha;
+        }
+      }
+      check("type 7 item: 49 pickup frames, faded from 25, then gone",
+            alive === 49 && item.dead && pickups.length === 1
+            && faded === Math.fround(1 - 25 * Math.fround(0.02)),
+            `${alive} ${faded}`);
+    }
+    const probe = (r: number): number => {
+      const q = { words: {}, slot: 0 } as unknown as BreakableProp;
+      PickOriginalModeItem(q, 0, { int: () => r } as unknown as Rng);
+      return q.words.o290;
+    };
+    check("PickOriginalModeItem: weights 6/7/13/14 over ids 3/4/16/17",
+          [0, 5, 6, 7, 12, 13].map(probe).join() === "3,3,4,16,16,17");
+  }
+
+  // -- type 20 ---------------------------------------------------------------
+  {
+    const rng = new Rng(20);
+    const events = propScene(rng, GameMode.Arcade);
+    const { sounds } = listen(events);
+    const p = put({ type: 20, pos: [-648.5, 67, -1325], slot: 4,
+                    lifetime_evt_steps: 4, yaw: 0x4000 }, rng);
+    check("type 20: the arm, radius 7.0 and rate 0x100",
+          p.hitRadius === 7 && p.yawSpin === 0x100);
+    BreakablePropPoolUpdate(rng, events);
+    check("type 20: turns by obj+0x68 alone; the descriptor's yaw is ignored",
+          p.draws?.length === 1 && p.draws[0].slot === TYPE20_SLOT
+          && same(p.draws[0].m, world((m) => {
+            MatrixTranslate(m, -648.5, 67, -1325); MatrixRotateY(m, 0x100);
+          })));
+    check("type 20: the sphere is 1.0 below", p.shotY === 66);
+    BreakablePropTakeShot(p, 0);
+    BreakablePropPoolUpdate(rng, events);
+    check("type 20: a hit adds 0x400, the frame takes 0x20",
+          p.yawSpin === 0x4e0 && sounds[0] === SFX_TYPE20_HIT);
+    let f = 1;
+    while (p.yawSpin > 0x180 && f < 99) { BreakablePropPoolUpdate(rng, events); f++; }
+    for (let i = 0; i < 10; i++) BreakablePropPoolUpdate(rng, events);
+    check("type 20: it settles at 0x180 in 28 frames and stays there",
+          f === 28 && p.yawSpin === 0x180);
+  }
+
+  // -- type 58 ---------------------------------------------------------------
+  {
+    const rng = new Rng(58);
+    const events = propScene(rng, GameMode.Arcade);
+    const { sounds, released } = listen(events);
+    const p = put({ type: 58, pos: [-600.8, 46, -1288.7], slot: 5,
+                    lifetime_evt_steps: 5, field_1f4: 4 }, rng);
+    check("type 58: the arm sets the radius, 3.0", p.hitRadius === 3);
+    BreakablePropPoolUpdate(rng, events);
+    check("type 58: 0x1D1 at its origin, and the sphere there",
+          p.draws?.[0]?.slot === TYPE58_SLOT && p.shotY === 46);
+    const x0 = p.x;
+    BreakablePropTakeShot(p, 0);
+    BreakablePropPoolUpdate(rng, events);
+    check("type 58: the shot pays 10, plays BULLET_WOD1 and knocks it away",
+          G.g_player_score[0] === PROP_HIT_SCORE && sounds[0] === SFX_TYPE58_HIT
+          && p.routinePhase === Type58Phase.Fly
+          && p.x === Math.fround(x0 + 0.5) && p.pitch === 0x200);
+    check("type 58: bit 3 cleared, the player's bit never",
+          (p.flags & 8) === 0 && (p.flags & 2) !== 0);
+    let fall = -1;
+    for (let i = 2; i <= 12; i++) {
+      const y = p.y; BreakablePropPoolUpdate(rng, events);
+      if (p.y !== y && fall < 0) fall = i;
+    }
+    check("type 58: Arcade drifts nine frames and falls from the tenth",
+          fall === 10 && released.length === 0, `${fall}`);
+    BreakablePropTakeShot(p, 1);
+    BreakablePropPoolUpdate(rng, events);
+    check("type 58: one shot only", sounds.length === 1
+          && G.g_player_score[1] === 0);
+  }
+  {
+    const rng = new Rng(58);
+    const events = propScene(rng, GameMode.Original);
+    const { released } = listen(events);
+    const p = put({ type: 58, pos: [-600.8, 46, -1288.7],
+                    lifetime_evt_steps: 5 }, rng);
+    BreakablePropTakeShot(p, 0);
+    BreakablePropPoolUpdate(rng, events);
+    check("type 58: Original releases story item 9 at y 44.2 and falls at once",
+          released.length === 1 && released[0].kind === 9
+          && released[0].y === Math.fround(44.2)
+          && p.y === Math.fround(46 - Math.fround(0.02722)));
+  }
+
+  // -- type 60 ---------------------------------------------------------------
+  {
+    const rng = new Rng(60);
+    const events = propScene(rng, GameMode.Arcade);
+    const { sounds } = listen(events);
+    const p = put({ type: 60, pos: [-642.53, 41.51, -1268.14], slot: 4,
+                    lifetime_evt_steps: 4, yaw: 4096 }, rng);
+    check("type 60: the arm sets the radius, 2.0", p.hitRadius === 2);
+    BreakablePropPoolUpdate(rng, events);
+    check("type 60: T; Rz; Ry(yaw); Rx; Scale(0.25, 0.5, 0.25); 0x1D8",
+          p.draws?.[0]?.slot === TYPE60_SLOT
+          && same(p.draws[0].m, world((m) => {
+            MatrixTranslate(m, -642.53, 41.51, -1268.14); MatrixRotateY(m, 4096);
+            MatrixScale(m, 0.25, 0.5, 0.25);
+          })));
+    const twin = new Rng(rng.state);
+    const x0 = p.x, y0 = p.y;
+    BreakablePropTakeShot(p, 0);
+    BreakablePropPoolUpdate(rng, events);
+    const r = twin.int(11);
+    check("type 60: the shot sets its speeds and does not move it yet",
+          sounds[0] === SFX_TYPE60_HIT && p.routinePhase === Type60Phase.Fly
+          && p.vx === Math.fround(r * Math.fround(0.1) - 0.5)
+          && p.vy === Math.fround(0.3) && p.vz === 0.5
+          && p.x === x0 && p.y === y0);
+    check("type 60: no award, and no hit bit is ever cleared",
+          G.g_player_score[0] === 0 && G.g_player_hit_count[0] === 0
+          && (p.flags & 0xa) === 0xa);
+    BreakablePropPoolUpdate(rng, events);
+    check("type 60: then it flies, falls and tumbles 0x400",
+          p.x === Math.fround(p.vx + x0) && p.pitch === 0x400
+          && p.y === Math.fround(Math.fround(0.3) - Math.fround(0.02722) + y0));
+  }
+}
+
+console.log("\nclass 0x41 type 49, the rim that rocks:");
+{
+  const rng = new Rng(49);
+  const events = propScene(rng);
+  const snd: number[] = [];
+  events.on("sound.play", ({ id }) => { snd.push(id); });
+  const near = (a: number, b: number, e = 1e-4) => Math.abs(a - b) <= e;
+  G.g_camera_fixed_eye_y = Math.fround(33.17);
+  // Stage 2 block 8 step 1's one spawn, descriptor 0x43B4.
+  const p = PlaceGenericProp({
+    at: 0x43b4, container: "generic", type: 49, slot: 1,
+    lifetime_evt_steps: 1, field_1f4: 0,
+    pos: [Math.fround(-585.7), Math.fround(33.3), -1225], pitch: 0, yaw: 0,
+    roll: 0,
+  }, rng);
+  G.g_breakable_props.push(p);
+  const x0 = p.x, y0 = p.y, z0 = p.z;
+  check("type 49's arm sets radius 5.0 and rests it on vertex 0",
+        p.hitRadius === 5 && p.contact === 0 && p.restY === y0
+        && p.restX === Math.fround(3228 * Math.fround(0.001) + x0)
+        && p.restZ === z0,
+        `${p.hitRadius} ${p.contact} ${p.restX} ${p.restY} ${p.restZ}`);
+
+  BreakablePropPoolUpdate(rng, events);
+  check("...unshot, it stays where the script put it",
+        near(p.x, x0) && near(p.y, y0) && near(p.z, z0) && p.contact === 0,
+        `${p.x} ${p.y} ${p.z} c${p.contact}`);
+  check("...draws the object 0x1D2 then the shadow 0x10D0",
+        p.draws?.length === 2 && p.draws[0].slot === 0x1d2
+        && p.draws[1].slot === 0x10d0,
+        JSON.stringify(p.draws?.map((d) => d.slot)));
+  const sh = p.draws![1].m;
+  check("...the shadow at the ground plane + 0.1, scaled (10, 1, 10)",
+        sh[13] === Math.fround(Math.fround(33.17) + Math.fround(0.1))
+        && sh[12] === p.x && sh[14] === p.z
+        && sh[0] === 10 && sh[5] === 1 && sh[10] === 10,
+        `${sh[12]} ${sh[13]} ${sh[14]} ${sh[0]} ${sh[5]} ${sh[10]}`);
+  check("...its shot point is (x, y + 1.0, z)",
+        p.shotRegistered && p.shotX === p.x
+        && p.shotY === Math.fround(p.y + 1) && p.shotZ === p.z,
+        `${p.shotX} ${p.shotY} ${p.shotZ}`);
+  check("...no angle moves while unshot",
+        p.pitch === 0 && p.yaw === 0 && p.roll === 0 && p.spin === 0);
+
+  // The kick: five draws in the exe's order.
+  const before = new Rng(); before.state = rng.state;
+  const score0 = G.g_player_score[0] ?? 0;
+  const hits0 = G.g_player_hit_count[0] ?? 0;
+  BreakablePropTakeShot(p, 0);
+  p.hitAim = { x: 1, y: 2 };
+  const zHit = p.z;
+  const fx49 = G.g_sprite_effects.length;
+  BreakablePropPoolUpdate(rng, events);
+  const e49 = G.g_sprite_effects[fx49];
+  check("...a hit spawns the scaled hit effect at the aim, z from +0x1A4",
+        G.g_sprite_effects.length === fx49 + 1 && e49.pos.x === 1
+        && e49.pos.y === 2 && e49.pos.z === zHit && e49.scale.x === 1.5,
+        JSON.stringify(e49));
+  const sx = 1 - before.int(2) * 2;
+  const kx = sx * (before.int(0x101) + 0x100);
+  const sz = 1 - before.int(2) * 2;
+  const kz = sz * (before.int(0x101) + 0x100);
+  const ky = before.int(0x201) - 0x300;
+  check("...a hit draws exactly five rands", before.state === rng.state);
+  const expSpin = kx - ((kx + ((kx >> 31) & 31)) >> 5);
+  const expYs = Math.trunc(ky * Math.fround(0.95));
+  check("...kicks the pitch spin and springs it the same frame",
+        p.spin === expSpin
+        && p.pitch === Math.trunc(expSpin * Math.fround(0.99)),
+        `${p.spin} vs ${expSpin}, pitch ${p.pitch}`);
+  check("...kicks the roll spin",
+        p.rollSpin === kz - ((kz + ((kz >> 31) & 31)) >> 5), `${p.rollSpin}`);
+  check("...and a negative yaw spin, decayed by 0.95 and added to the yaw",
+        p.yawSpin === expYs && p.yaw === expYs && expYs < 0,
+        `${p.yawSpin} ${p.yaw}`);
+  check("...plays BULLET_WOD1 once", snd.length === 1 && snd[0] === 0x1516a9,
+        JSON.stringify(snd));
+  check("...pays no score but counts the hit",
+        (G.g_player_score[0] ?? 0) === score0
+        && (G.g_player_hit_count[0] ?? 0) === hits0 + 1,
+        `${G.g_player_score[0]} ${G.g_player_hit_count[0]}`);
+  check("...and clears all three hit bits", (p.flags & 0xe) === 0,
+        p.flags.toString(16));
+
+  let seated = -1;
+  for (let f = 0; f < 60 && seated < 0; f++) {
+    BreakablePropPoolUpdate(rng, events);
+    if (p.contact !== 0) seated = f;
+  }
+  check("...a tilt seats it on a new rim vertex, lifted to the floor",
+        seated >= 0 && p.restY === G.g_camera_fixed_eye_y,
+        `f${seated} c${p.contact} ${p.restY}`);
+  const r = MatIdentity();
+  MatrixRotateY(r, p.yaw); MatrixRotateZ(r, p.roll); MatrixRotateX(r, p.pitch);
+  const h = TYPE49_HULL[p.contact];
+  const v = { x: 0, y: 0, z: 0 };
+  MatrixTransformPoint(r, { x: h[0] * 0.001, y: 0, z: h[1] * 0.001 }, v);
+  check("...and its position puts that vertex on the rest point",
+        near(p.x + v.x, p.restX, 1e-3) && near(p.y + v.y, p.restY, 1e-3)
+        && near(p.z + v.z, p.restZ, 1e-3),
+        `${p.x + v.x}/${p.restX} ${p.y + v.y}/${p.restY}`);
+  check("...and the shot point follows the re-seated position",
+        p.shotY === Math.fround(p.y + 1) && p.shotX === p.x);
+  for (let f = 0; f < 3000; f++) BreakablePropPoolUpdate(rng, events);
+  const st = [p.pitch, p.roll, p.spin, p.rollSpin, p.yaw, p.x, p.y, p.z].join();
+  BreakablePropPoolUpdate(rng, events);
+  // The ftols leave a fixed point short of level: roll -30, spin -1 is one.
+  check("...it rings down to a standstill, not quite level",
+        [p.pitch, p.roll, p.spin, p.rollSpin, p.yaw, p.x, p.y, p.z].join() === st
+        && p.yawSpin === 0 && Math.abs(p.pitch + p.spin) < 32
+        && Math.abs(p.roll + p.rollSpin) < 32,
+        `${p.pitch} ${p.roll} ${p.yawSpin} ${p.spin} ${p.rollSpin}`);
+
+  G.g_evt_step_index += 1;
+  BreakablePropPoolUpdate(rng, events);
+  check("...one step change: still here", G.g_breakable_props.includes(p));
+  G.g_evt_step_index += 1;
+  BreakablePropPoolUpdate(rng, events);
+  check("...the second step change despawns it",
+        !G.g_breakable_props.includes(p));
+}
+
+console.log("\nclass 0x41 type 11, the circler that drops:");
+{
+  const rng = new Rng(11);
+  const events = propScene(rng);
+  const snd: number[] = [];
+  events.on("sound.play", ({ id }) => { snd.push(id); });
+  const near = (a: number, b: number, e = 1e-9) => Math.abs(a - b) <= e;
+  G.g_camera_fixed_eye_y = Math.fround(-12.69);
+  G.g_frame_counter = 0;
+  // Stage 2's one spawn, descriptor 0x11F40 (blocks 23 and 26).
+  const p = PlaceGenericProp({
+    at: 0x11f40, container: "generic", type: 11, slot: 1,
+    lifetime_evt_steps: 1, field_1f4: 2,
+    pos: [Math.fround(-545.8), 15, Math.fround(-1310.2)], pitch: 0, yaw: 0,
+    roll: 0,
+  }, rng);
+  G.g_breakable_props.push(p);
+  check("type 11's arm sets radius 2.0", p.hitRadius === 2);
+  const before = new Rng(); before.state = rng.state;
+  BreakablePropPoolUpdate(rng, events);
+  const step = before.int(0x501) + 0x900;
+  check("...an unshot frame draws exactly one rand", before.state === rng.state);
+  check("...circles 0x400 and bobs 0x1000 a frame",
+        p.yaw === 0x400 && p.pitch === 0x1000 && p.yawSpin === step,
+        `${p.yaw} ${p.pitch} ${p.yawSpin}`);
+  const s = Math.sin(step * BAMS_TO_RAD_F64);
+  const amp = Math.fround(s * 1.5);
+  check("...radius 3 +/- 0.5 and bob 1.5 on the breathing phase",
+        p.shake === Math.fround(s * 0.5 + 3) && p.words.o2C4 === amp,
+        `${p.shake} ${p.words.o2C4}`);
+  const d = p.draws![0];
+  const a = 0x400 * BAMS_TO_RAD_F64;
+  check("...draws 0x1CF on an even frame counter",
+        p.draws!.length === 1 && d.slot === 0x1cf, `${d?.slot}`);
+  check("...at the orbit offset",
+        d.m[12] === Math.fround(Math.sin(a) * p.shake + p.x)
+        && d.m[13] === Math.fround(Math.sin(0x1000 * BAMS_TO_RAD_F64) * amp
+                                   + p.y)
+        && d.m[14] === Math.fround(Math.cos(a) * p.shake + p.z),
+        `${d.m[12]} ${d.m[13]} ${d.m[14]}`);
+  const ry = MatIdentity(); MatrixRotateY(ry, -0x400);
+  check("...turned by RotY(-yaw)",
+        near(d.m[0], ry[0]) && near(d.m[8], ry[8]) && near(d.m[2], ry[2]),
+        `${d.m[0]} ${d.m[2]} ${d.m[8]}`);
+  check("...and registers its raw origin, not the orbit",
+        p.shotRegistered && p.shotX === p.x && p.shotY === p.y
+        && p.shotZ === p.z);
+  G.g_frame_counter = 7;
+  BreakablePropPoolUpdate(rng, events);
+  check("...an odd frame counter draws 0x1D0", p.draws![0].slot === 0x1d0);
+
+  const score0 = G.g_player_score[0] ?? 0;
+  const yaw0 = p.yaw;
+  BreakablePropTakeShot(p, 0);
+  const before2 = new Rng(); before2.state = rng.state;
+  BreakablePropPoolUpdate(rng, events);
+  check("...a hit pays 10 and latches bit 30",
+        (G.g_player_score[0] ?? 0) === score0 + 10
+        && (p.flags & 0x40000000) !== 0,
+        `${G.g_player_score[0]} ${p.flags.toString(16)}`);
+  check("...stops the circling that same frame, with no rand",
+        p.yaw === yaw0 && before2.state === rng.state);
+  check("...and starts the fall that same frame",
+        p.vy === Math.fround(-Math.fround(0.02722)) && p.y < 15,
+        `${p.vy} ${p.y}`);
+  check("...no sound", snd.length === 0, JSON.stringify(snd));
+  check("...and the hit bits are never cleared", (p.flags & 0x8) !== 0);
+  BreakablePropPoolUpdate(rng, events);
+  check("...a second frame with the bit still set pays nothing more",
+        (G.g_player_score[0] ?? 0) === score0 + 10);
+  // 15 - 0.02722 * n(n+1)/2 < -12.69 first at n = 45; the hit frame was n = 1.
+  let n = 2;
+  while (p.y > G.g_camera_fixed_eye_y && n < 200) {
+    BreakablePropPoolUpdate(rng, events);
+    n++;
+  }
+  check("...it lands on the ground plane on its 45th falling frame",
+        n === 45 && p.y === G.g_camera_fixed_eye_y, `n=${n} y=${p.y}`);
+  check("...and the sphere is on the floor with it",
+        p.shotY === G.g_camera_fixed_eye_y);
+  G.g_scene_index = 1;
+  G.g_script_flags[0x77] = 1;
+  BreakablePropPoolUpdate(rng, events);
+  check("...the scene-1 sweep despawns it", !G.g_breakable_props.includes(p));
+  G.g_script_flags[0x77] = 0;
+}
+
+console.log("\nclass 0x41 type 8, the swaying object and its three parts:");
+{
+  const rng = new Rng(8);
+  const events = propScene(rng);
+  const snd: number[] = [];
+  events.on("sound.play", ({ id }) => { snd.push(id); });
+  const near = (a: number, b: number, e = 1e-4) => Math.abs(a - b) <= e;
+  G.g_camera_fixed_eye_y = -9;
+  G.g_camera_block_yaw_bams = 0x1234;
+  const before = new Rng(); before.state = rng.state;
+  // What the bridge must do: the object ahead of whatever its arm appended.
+  const n0 = G.g_breakable_props.length;
+  // Stage 2 block 9 step 4's first, descriptor 0x539C.
+  const p = PlaceGenericProp({
+    at: 0x539c, container: "generic", type: 8, slot: 0, lifetime_evt_steps: 0,
+    field_1f4: 0, pos: [Math.fround(-147.9), -26.25, -1505], pitch: 0,
+    yaw: 18432, roll: 0,
+  }, rng);
+  G.g_breakable_props.splice(n0, 0, p);
+  const ph = MsvcRand(before), s0 = MsvcRand(before), r0 = MsvcRand(before);
+  check("type 8's arm draws three rands: sway, pitch and roll phases",
+        before.state === rng.state && p.words.o298 === ph && p.spin === s0
+        && p.rollSpin === r0, `${p.words.o298} ${p.spin} ${p.rollSpin}`);
+  check("...and sets no radius on the object", p.hitRadius === 0);
+  const parts = G.g_breakable_props.filter((q) => q !== p);
+  check("...three parts (not eight), after the object",
+        parts.length === 3 && G.g_breakable_props[0] === p,
+        `${G.g_breakable_props.length}`);
+  check("...of their own family",
+        parts.every((q) => q.family === PropFamily.Type8Piece));
+  check("...each with its table position, angles, index, parent, radius, flags",
+        parts.every((q, i) => q.words.o194 === TYPE8_PART_POSITIONS[i][0]
+          && q.words.o198 === TYPE8_PART_POSITIONS[i][1]
+          && q.words.o19C === TYPE8_PART_POSITIONS[i][2]
+          && q.words.o1AC === TYPE8_PART_ANGLES[i][0]
+          && q.words.o1B0 === TYPE8_PART_ANGLES[i][1]
+          && q.words.o1B4 === TYPE8_PART_ANGLES[i][2]
+          && q.words.o1B8 === i && q.words.o1BC === p.id
+          && q.hitRadius === 2.5 && (q.flags >>> 0) === 0x80000001),
+        JSON.stringify(parts.map((q) => q.words)));
+  const f32 = (u: number) => new Float32Array(new Uint32Array([u]).buffer)[0];
+  check("...the table floats are the image's bits",
+        TYPE8_PART_POSITIONS[0][0] === f32(0x4057f972)
+        && TYPE8_PART_POSITIONS[2][2] === f32(0xc0ca4674)
+        && TYPE8_PART_POSITIONS[1][1] === f32(0x402a809d));
+
+  const before2 = new Rng(); before2.state = rng.state;
+  BreakablePropPoolUpdate(rng, events);
+  check("...a frame draws no rand", before2.state === rng.state);
+  check("...steps the sway 0x180 and both rock phases 0x100",
+        p.words.o298 === ph + 0x180 && p.spin === s0 + 0x100
+        && p.rollSpin === r0 + 0x100);
+  check("...pitch and roll are ftol(sin/cos(phase) * 384)",
+        p.pitch === Math.trunc(Math.sin(p.spin * BAMS_TO_RAD_F64) * 384)
+        && p.roll === Math.trunc(Math.cos(p.rollSpin * BAMS_TO_RAD_F64) * 384),
+        `${p.pitch} ${p.roll}`);
+  check("...draws 0x1A36 once, and stores that matrix at +0x2E4",
+        p.draws?.length === 1 && p.draws[0].slot === 0x1a36
+        && p.drawMatrix.length === 16
+        && p.drawMatrix.every((e, i) => e === p.draws![0].m[i]));
+  const m = p.drawMatrix;
+  const rowLen = (i: number) => Math.hypot(m[i], m[i + 1], m[i + 2]);
+  check("...scaled 2.5", near(rowLen(0), 2.5, 1e-6)
+        && near(rowLen(4), 2.5, 1e-6) && near(rowLen(8), 2.5, 1e-6));
+  const sway = p.words.o298 * BAMS_TO_RAD_F64;
+  const dx = Math.fround(Math.sin(sway) * Math.fround(0.15));
+  const dz = Math.fround(Math.cos(sway) * Math.fround(0.15));
+  const R = MatIdentity();
+  MatrixRotateY(R, p.yaw); MatrixRotateZ(R, p.roll); MatrixRotateX(R, p.pitch);
+  const o = { x: 0, y: 0, z: 0 };
+  MatrixTransformPoint(R, { x: dx, y: 0, z: dz }, o);
+  const ro = { x: 0, y: 0, z: 0 };
+  MatrixTransformPoint(R, { x: -Math.fround(o.x), y: -Math.fround(o.y),
+                            z: -Math.fround(o.z) }, ro);
+  check("...at (pos + sway), back by the rocked sway, rocked again",
+        near(m[12], Math.fround(dx + p.x) + ro.x)
+        && near(m[13], p.y + ro.y) && near(m[14], Math.fround(dz + p.z) + ro.z),
+        `${m[12]} ${m[13]} ${m[14]}`);
+  check("...the object registers no sphere", !p.shotRegistered);
+
+  const wp = { x: 0, y: 0, z: 0 };
+  const okPose = parts.every((q, i) => {
+    MatrixTransformPoint(p.drawMatrix, {
+      x: TYPE8_PART_POSITIONS[i][0], y: TYPE8_PART_POSITIONS[i][1],
+      z: TYPE8_PART_POSITIONS[i][2] }, wp);
+    return q.draws?.length === 1 && q.draws[0].slot === 0x1aaa
+      && near(q.hitPos.x, wp.x, 1e-3) && near(q.hitPos.y, wp.y, 1e-3)
+      && near(q.hitPos.z, wp.z, 1e-3)
+      && near(q.draws[0].m[12], q.hitPos.x, 1e-3);
+  });
+  check("...each part draws 0x1AAA on the object's matrix; +0x40 is its world point",
+        okPose, JSON.stringify(parts.map((q) => q.hitPos)));
+  check("...and registers there, above the -25 line",
+        parts.every((q) => q.shotRegistered && q.shotX === q.hitPos.x
+          && q.shotY === q.hitPos.y && q.hitPos.y > -25),
+        JSON.stringify(parts.map((q) => q.shotY)));
+
+  const [a, b, c] = parts;
+  const score0 = G.g_player_score[0] ?? 0;
+  const bY = b.words.o198;
+  BreakablePropTakeShot(a, 0);
+  a.hitAim = { x: 3, y: 4 };
+  const zA = a.hitPos.z;
+  const fx8 = G.g_sprite_effects.length;
+  BreakablePropPoolUpdate(rng, events);
+  const e8 = G.g_sprite_effects[fx8];
+  check("...a hit on a part spawns the scaled effect at the aim, z its world +0x48",
+        G.g_sprite_effects.length === fx8 + 1 && e8.pos.x === 3
+        && e8.pos.y === 4 && e8.pos.z === zA && e8.scale.x === 1.5,
+        JSON.stringify(e8));
+  check("...pays 10 and plays the crack",
+        (G.g_player_score[0] ?? 0) === score0 + 10 && snd.length === 1
+        && snd[0] === 0x1d16a9, `${G.g_player_score[0]} ${JSON.stringify(snd)}`);
+  check("...clears bit 3 only: the player bit stays",
+        (a.flags & 8) === 0 && (a.flags & 2) !== 0, a.flags.toString(16));
+  check("...knocks it loose (+0x1B9 = 1) and it falls that frame",
+        a.words.o1B9 === 1 && a.words.o1A4 === Math.fround(-Math.fround(0.006805))
+        && a.words.o1B4 === -0x200,
+        `${a.words.o1B9} ${a.words.o1A4} ${a.words.o1B4}`);
+  check("...and the others stay put", b.words.o198 === bY && b.words.o1B9 === 0);
+  BreakablePropTakeShot(b, 0);
+  BreakablePropPoolUpdate(rng, events);
+  BreakablePropTakeShot(b, 0);
+  BreakablePropPoolUpdate(rng, events);
+  check("...every hit on a part pays again (no latch)",
+        (G.g_player_score[0] ?? 0) === score0 + 30, `${G.g_player_score[0]}`);
+
+  let n = 0;
+  let lastY = a.hitPos.y;
+  while (!a.dead && n < 200) {
+    lastY = a.hitPos.y;
+    BreakablePropPoolUpdate(rng, events);
+    n++;
+  }
+  const fx = G.g_sprite_effects[G.g_sprite_effects.length - 1];
+  check("...part 0 falls below -25.0 and is gone in a splash",
+        !G.g_breakable_props.includes(a) && n > 0 && n < 60 && lastY >= -25
+        && snd.includes(SFX_TYPE8_PART_SPLASH),
+        `n=${n} lastY=${lastY} ${JSON.stringify(snd)}`);
+  check("...the splash is 0x8F8..0x903 at scale 8, facing the camera's yaw then",
+        fx && fx.slot === 0x8f8 && fx.lastSlot === 0x903 && fx.scale.x === 8
+        && fx.yaw === 0x1234 && fx.pos.y < -25 && fx.pos.x === a.hitPos.x,
+        JSON.stringify(fx));
+
+  for (let i = 0; i < 11; i++) {
+    G.g_evt_step_index += 1;
+    BreakablePropPoolUpdate(rng, events);
+  }
+  check("...eleven step changes: the object and the unfallen part live",
+        G.g_breakable_props.includes(p) && G.g_breakable_props.includes(c),
+        `${p.stepsElapsed}`);
+  G.g_evt_step_index += 1;
+  const cPos = JSON.stringify(c.hitPos);
+  BreakablePropPoolUpdate(rng, events);
+  check("...the twelfth kills the object and despawns the parts, same frame",
+        !G.g_breakable_props.includes(p) && !G.g_breakable_props.includes(c)
+        && (c.flags & 0x8000) !== 0, `${c.flags.toString(16)}`);
+  check("...and a despawned part stops there: no draw, no new position",
+        c.draws?.length === 0 && JSON.stringify(c.hitPos) === cPos,
+        `${c.draws?.length} ${JSON.stringify(c.hitPos)}`);
+}
+
+/**
+ * A one-bone effect whose single drawn node sits at `(frame, tag, 0)` on every
+ * play frame, so a recorded draw's translation says which cursor and which
+ * effect it was drawn at. Per-frame interpolation, one key per play frame.
+ */
+function g41t9Effect(tag: number, motion: number, playLength: number,
+                     slot: number): EffectDefJson {
+  const t: number[] = [];
+  const r: number[] = [];
+  for (let k = 0; k < playLength; k++) { t.push(k, tag, 0); r.push(0, 0, 0); }
+  return {
+    nodes: [{ slot: 0, bone: 0, children: [1] }, { slot, bone: 1, children: [] }],
+    interp: 0, motion, play_length: playLength, frames: playLength, bones: 1,
+    t, r, cues: [],
+  };
+}
+
+/** `propScene`, plus the six effect records these types draw, in a scene. */
+function g41t9Scene(rng: Rng, sceneIndex: number):
+    { events: Events; sounds: number[] } {
+  const events = propScene(rng, GameMode.Arcade);
+  SetGameTables(CHARS, { ...BREAKABLES, effects: {
+    ...BREAKABLES.effects,
+    // The real play lengths: g_motion_play_length[0x1D0/0x1D1/0x1D8/0x1D5/0x1C9].
+    "8": g41t9Effect(8, 0x1d0, 80, 0x1577),
+    "9": g41t9Effect(9, 0x1d1, 80, 0x1aed),
+    "1": g41t9Effect(1, 0x1d8, 110, 0x845),
+    "25": g41t9Effect(25, 0x1d8, 110, 0x1609),
+    "7": g41t9Effect(7, 0x1d5, 74, 0x10ef),
+    "10": g41t9Effect(10, 0x1c9, 100, 0x19e5),
+  } });
+  G.g_scene_index = sceneIndex;
+  G.g_evt_step_index = 1;
+  G.g_evt_block_index = 0;
+  G.g_script_branch_var = 0;
+  const sounds: number[] = [];
+  events.on("sound.play", ({ id }) => { sounds.push(id); });
+  return { events, sounds };
+}
+
+function g41t9Place(pl: Partial<BreakablePlacement>, rng: Rng): BreakableProp {
+  const p = PlaceGenericProp(
+    { at: 1, container: "generic", ...pl } as BreakablePlacement, rng);
+  G.g_breakable_props.push(p);
+  return p;
+}
+function g41t9Run(n: number, rng: Rng, events: Events): void {
+  for (let i = 0; i < n; i++) BreakablePropPoolUpdate(rng, events);
+}
+const g41t9Near = (a: number, b: number, e = 1e-4) => Math.abs(a - b) <= e;
+const g41t9Tr = (m: number[]) => [m[12], m[13], m[14]];
+const g41t9Live = (p: BreakableProp) =>
+  G.g_breakable_props.includes(p) && !p.dead;
+
+console.log("\nclass 0x41 type 9, the church window (PropUpdateType9):");
+{
+  const near = g41t9Near, tr = g41t9Tr, live = g41t9Live;
+  const rng = new Rng(9);
+  const { events } = g41t9Scene(rng, 0);
+  // Stage 1's one spawn: at the origin, descriptor lifetime 1.
+  const p = g41t9Place({ type: 9, slot: 1, lifetime_evt_steps: 1, field_1f4: 0,
+                         pos: [0, 0, 0], pitch: 0, yaw: 0, roll: 0 }, rng);
+  check("type 9's arm: effect 8 on motion 0x1D0, +0x1A8..0x1B0 = 1.0",
+        p.effect === 8 && p.effectVariant === 0x1d0
+        && p.restX === 1 && p.restY === 1 && p.restZ === 1);
+  g41t9Run(1, rng, events);
+  check("type 9 whole: one draw, 0x123B at world (0, 0, -5)",
+        p.draws?.length === 1 && p.draws[0].slot === 0x123b
+        && tr(p.draws[0].m).join() === "0,0,-5",
+        JSON.stringify(p.draws?.map((d) => [d.slot, tr(d.m)])));
+  G.g_script_flags[0x1f] = 2;
+  g41t9Run(3, rng, events);
+  check("type 9: flag 0x1F at 2 is not 1, the cursor stays 0",
+        p.effectFrames === 0, `${p.effectFrames}`);
+  G.g_script_flags[0x1f] = 1;
+  g41t9Run(1, rng, events);
+  const d = p.draws ?? [];
+  check("type 9's first broken frame: cursor 1, the frame and both trees",
+        p.effectFrames === 1 && d.length === 3 && d[0].slot === 0x123c
+        && d[1].slot === 0x1577 && d[2].slot === 0x1aed,
+        JSON.stringify(d.map((x) => x.slot)));
+  check("type 9's frame model at (0, 0, -5)", tr(d[0].m).join() === "0,0,-5");
+  const e8 = tr(d[1].m), e9 = tr(d[2].m);
+  check("type 9's tree 8 at the shatter offset, key 1",
+        near(e8[0], Math.fround(-0.7741) + 1) && near(e8[1], Math.fround(-0.0591) + 8)
+        && near(e8[2], -5 + Math.fround(-171.08)), e8.join());
+  check("type 9's tree 9 under the same matrix at the same cursor",
+        near(e9[0], Math.fround(-0.7741) + 1) && near(e9[1], Math.fround(-0.0591) + 9)
+        && near(e9[2], -5 + Math.fround(-171.08)), e9.join());
+  check("type 9 leaves 9/0x1D1 in its state block and prev frame 1",
+        p.effect === 9 && p.effectVariant === 0x1d1 && p.effectPrevFrame === 1);
+  g41t9Run(80, rng, events);
+  check("type 9's cursor holds on 0x4E", p.effectFrames === 0x4e,
+        `${p.effectFrames}`);
+  check("type 9 is not shootable", !p.shotRegistered);
+  G.g_scene_index = 1; G.g_script_flags[0x77] = 1;
+  g41t9Run(1, rng, events);
+  check("type 9 has no scene-1 sweep", live(p));
+  G.g_scene_index = 0; G.g_script_flags[0x77] = 0;
+  for (let s = 2; s <= 6; s++) { G.g_evt_step_index = s; g41t9Run(1, rng, events); }
+  check("type 9 lives through five step changes (its descriptor says 1)",
+        live(p), `stepsElapsed ${p.stepsElapsed}`);
+  G.g_evt_step_index = 7; g41t9Run(1, rng, events);
+  check("type 9 is killed on the sixth", !G.g_breakable_props.includes(p));
+
+  g41t9Scene(rng, 0);
+  const q = g41t9Place({ type: 9, slot: 1, lifetime_evt_steps: 1, field_1f4: 0,
+                         pos: [100, 20, -300], pitch: 0, yaw: 0x4000, roll: 0 },
+                       rng);
+  g41t9Run(1, rng, events);
+  check("type 9 never reads its own position or pose",
+        q.draws?.length === 1 && tr(q.draws[0].m).join() === "0,0,-5"
+        && q.draws[0].m[0] === 1);
+}
+
+console.log("\nclass 0x41 type 18, the bridge (PropUpdateType18):");
+{
+  const near = g41t9Near, tr = g41t9Tr, live = g41t9Live;
+  const rng = new Rng(18);
+  let { events } = g41t9Scene(rng, 1);
+  const pos: [number, number, number] = [229.36, 12.8, -2188];
+  const spawn = { type: 18, slot: 1, lifetime_evt_steps: 1, field_1f4: 0, pos,
+                  pitch: 0, yaw: 0, roll: 0 };
+  let p = g41t9Place(spawn, rng);
+  check("type 18's arm in scene 1: effect 1 on 0x1D8",
+        p.effect === 1 && p.effectVariant === 0x1d8);
+  g41t9Run(5, rng, events);
+  const t0 = tr(p.draws![0].m);
+  check("type 18, flag down: frame 0 of the clip at its position, no step",
+        p.effectFrames === 0 && p.draws!.length === 1 && near(t0[0], pos[0])
+        && near(t0[1], pos[1] + 1) && near(t0[2], pos[2]), t0.join());
+  G.g_evt_step_index = 2; g41t9Run(1, rng, events);
+  G.g_evt_step_index = 3; g41t9Run(1, rng, events);
+  check("type 18 has no lifetime", live(p));
+  G.g_evt_block_index = 0x25;
+  G.g_script_flags[0x5f] = 1;
+  g41t9Run(1, rng, events);
+  check("type 18 draws cursor 0 and then steps to 1 (the draw arm falls through)",
+        p.effectFrames === 1 && near(tr(p.draws![0].m)[0], pos[0]));
+  g41t9Run(106, rng, events);
+  check("type 18 alive having drawn cursor 106",
+        live(p) && p.effectFrames === 107
+        && near(tr(p.draws![0].m)[0], pos[0] + 106), `${p.effectFrames}`);
+  g41t9Run(1, rng, events);
+  check("type 18 is killed the frame its cursor reaches 0x6C",
+        !G.g_breakable_props.includes(p));
+  check("type 18 in block 0x25 leaves flag 0x5F up",
+        G.g_script_flags[0x5f] === 1);
+
+  ({ events } = g41t9Scene(rng, 1));
+  p = g41t9Place(spawn, rng);
+  G.g_evt_block_index = 0x26; G.g_script_flags[0x5f] = 1;
+  g41t9Run(108, rng, events);
+  check("type 18 outside block 0x25 lowers flag 0x5F as it dies",
+        !G.g_breakable_props.includes(p) && G.g_script_flags[0x5f] === 0);
+
+  ({ events } = g41t9Scene(rng, 4));
+  p = g41t9Place({ ...spawn, slot: 2, lifetime_evt_steps: 2,
+                   pos: [583.4, -81, -5041.5] }, rng);
+  check("type 18's arm in scene 4: effect 0x19 on 0x1D8",
+        p.effect === 0x19 && p.effectVariant === 0x1d8);
+  G.g_script_flags[0x5f] = 1;
+  g41t9Run(2, rng, events);
+  check("type 18 in scene 4 ignores flag 0x5F", p.effectFrames === 0);
+  G.g_script_flags[0x0b] = 2;
+  g41t9Run(2, rng, events);
+  check("type 18 in scene 4 steps on any non-zero flag 0x0B",
+        p.effectFrames === 2);
+
+  ({ events } = g41t9Scene(rng, 3));
+  p = g41t9Place({ ...spawn, pos: [0, 0, 0] }, rng);
+  G.g_script_flags[0x5f] = 1; G.g_script_flags[0x0b] = 1;
+  g41t9Run(3, rng, events);
+  check("type 18 in any other scene never steps",
+        p.effectFrames === 0 && live(p));
+}
+
+console.log("\nclass 0x41 type 27, the piece that bursts (PropKillOnBranchOneUpdate):");
+{
+  const near = g41t9Near, tr = g41t9Tr, live = g41t9Live;
+  const rng = new Rng(27);
+  let { events } = g41t9Scene(rng, 1);
+  const pos: [number, number, number] = [-591, -13.7, -1261.3];
+  const spawn = { type: 27, slot: 4, lifetime_evt_steps: 4, field_1f4: 0, pos,
+                  pitch: 0, yaw: 0, roll: 0 };
+  // A descriptor yaw the routine must not apply: it turns by obj+0x68.
+  let p = g41t9Place({ ...spawn, yaw: 0x4000 }, rng);
+  check("type 27's arm: effect 7 on 0x1D5",
+        p.effect === 7 && p.effectVariant === 0x1d5);
+  g41t9Run(1, rng, events);
+  const d0 = p.draws![0];
+  check("type 27, flag down: 0x17A9 at its position, unrotated whatever its yaw",
+        p.draws!.length === 1 && d0.slot === 0x17a9 && near(d0.m[0], 1)
+        && near(d0.m[10], 1) && near(tr(d0.m)[0], pos[0]));
+  G.g_script_flags[0x61] = 1;
+  g41t9Run(1, rng, events);
+  check("type 27, flag up: it steps before it draws (cursor 1 drawn)",
+        p.effectFrames === 1 && p.draws!.length === 1
+        && p.draws![0].slot === 0x10ef
+        && near(tr(p.draws![0].m)[0], pos[0] + 1));
+  g41t9Run(100, rng, events);
+  check("type 27 holds on play_length - 2 = 72",
+        p.effectFrames === 72 && near(tr(p.draws![0].m)[0], pos[0] + 72),
+        `${p.effectFrames}`);
+
+  ({ events } = g41t9Scene(rng, 1));
+  p = g41t9Place(spawn, rng);
+  G.g_script_flags[0x61] = 2;
+  g41t9Run(3, rng, events);
+  check("type 27 with flag 0x61 at 2: the effect, unstepped",
+        p.effectFrames === 0 && p.draws?.[0]?.slot === 0x10ef);
+  G.g_script_branch_var = 1;
+  g41t9Run(1, rng, events);
+  check("type 27 is killed when g_script_branch_var is 1",
+        !G.g_breakable_props.includes(p));
+
+  ({ events } = g41t9Scene(rng, 1));
+  p = g41t9Place(spawn, rng);
+  for (let s = 2; s <= 5; s++) { G.g_evt_step_index = s; g41t9Run(1, rng, events); }
+  check("type 27 alive after four step changes", live(p));
+  G.g_evt_step_index = 6; g41t9Run(1, rng, events);
+  check("type 27 despawned on the fifth", !G.g_breakable_props.includes(p));
+  check("type 27 never registers a shot sphere", !p.shotRegistered);
+
+  ({ events } = g41t9Scene(rng, 1));
+  p = g41t9Place(spawn, rng);
+  G.g_script_flags[0x77] = 1; g41t9Run(1, rng, events);
+  check("type 27 is swept by scene 1's flag 0x77",
+        !G.g_breakable_props.includes(p));
+}
+
+console.log("\nclass 0x41 type 28, the swing (PropUpdateType28):");
+{
+  const near = g41t9Near, tr = g41t9Tr, live = g41t9Live;
+  const rng = new Rng(28);
+  let { events, sounds } = g41t9Scene(rng, 1);
+  const pos: [number, number, number] = [-633.9, -13.7, -1302];
+  const spawn = { type: 28, slot: 3, lifetime_evt_steps: 3, field_1f4: 0, pos,
+                  pitch: 0, yaw: 0, roll: 0 };
+  let p = g41t9Place(spawn, rng);
+  check("type 28's arm: effect 10 on 0x1C9",
+        p.effect === 10 && p.effectVariant === 0x1c9);
+  g41t9Run(2, rng, events);
+  let t = tr(p.draws![0].m);
+  check("type 28 at rest: its node 6.5 along -Z from its origin",
+        near(t[0], pos[0]) && near(t[1], pos[1] + 10) && near(t[2], pos[2] - 6.5),
+        t.join());
+  G.g_script_flags[0x60] = 1;
+  g41t9Run(31, rng, events);
+  check("type 28, 31 frames into the swing: 0x3FF0 and no sound",
+        p.words.o64 === 0x3ff0 && sounds.length === 0, `${p.words.o64}`);
+  g41t9Run(1, rng, events);
+  check("type 28's 32nd frame: clamped to 0x4000, and the break sound",
+        p.words.o64 === 0x4000 && sounds.length === 1 && sounds[0] === 0x1a16a9);
+  t = tr(p.draws![0].m);
+  check("type 28 at the end of the swing: pivot + (0, 6.5, 0) + the node",
+        near(t[0], pos[0]) && near(t[1], pos[1] + 6.5, 1e-3)
+        && near(t[2], pos[2] + 10, 1e-3), t.join());
+  g41t9Run(20, rng, events);
+  check("type 28 stays at 0x4000 with one sound",
+        p.words.o64 === 0x4000 && sounds.length === 1);
+  check("type 28's effect cursor never moves",
+        p.effectFrames === 0 && p.effectPrevFrame === 0);
+  G.g_script_flags[0x60] = 0; g41t9Run(1, rng, events);
+  G.g_script_flags[0x60] = 1; g41t9Run(5, rng, events);
+  check("type 28 does not read its flag again once it has moved",
+        p.words.o64 === 0x4000 && sounds.length === 1);
+
+  ({ events, sounds } = g41t9Scene(rng, 1));
+  p = g41t9Place({ ...spawn, yaw: 0xc000 }, rng);
+  g41t9Run(1, rng, events);
+  t = tr(p.draws![0].m);
+  check("type 28 turns by the descriptor's yaw",
+        near(t[0], pos[0] + 6.5, 1e-3) && near(t[1], pos[1] + 10, 1e-3)
+        && near(t[2], pos[2], 1e-3), t.join());
+  G.g_script_flags[0x60] = 1;
+  g41t9Run(32, rng, events);
+  t = tr(p.draws![0].m);
+  check("type 28: yaw first, then the swing about X",
+        near(t[0], pos[0] - 10, 1e-3) && near(t[1], pos[1] + 6.5, 1e-3)
+        && near(t[2], pos[2], 1e-3), t.join());
+  for (let s = 2; s <= 4; s++) { G.g_evt_step_index = s; g41t9Run(1, rng, events); }
+  check("type 28 alive after three step changes", live(p));
+  G.g_evt_step_index = 5; g41t9Run(1, rng, events);
+  check("type 28 despawned on the fourth", !G.g_breakable_props.includes(p));
+}
+
+console.log("\nclass 0x41 type 30, the drop (PropUpdateType30):");
+{
+  const near = g41t9Near, tr = g41t9Tr, live = g41t9Live;
+  const rng = new Rng(30);
+  const { events } = g41t9Scene(rng, 1);
+  const pos: [number, number, number] = [-495.2, 66.3, -1351.8];
+  const p = g41t9Place({ type: 30, slot: 2, lifetime_evt_steps: 2, field_1f4: 0,
+                         pos, pitch: 0, yaw: 0x8000, roll: 0 }, rng);
+  g41t9Run(3, rng, events);
+  const d = p.draws![0];
+  check("type 30, flag down: 0x1DF at its position, turned half round",
+        p.draws!.length === 1 && d.slot === 0x1df && near(d.m[0], -1)
+        && near(tr(d.m)[0], pos[0]) && p.vy === 0);
+  const y0 = p.y, z0 = p.z;
+  G.g_script_flags[0x67] = 1;
+  g41t9Run(1, rng, events);
+  check("type 30's first frame: vy -0.02722, y and z moved, pitch -0x100, roll +0x100",
+        p.vy === -Math.fround(0.02722)
+        && p.y === Math.fround(y0 - Math.fround(0.02722))
+        && p.z === Math.fround(z0 + Math.fround(0.8))
+        && p.pitch === -0x100 && p.roll === 0x100,
+        `${p.vy} ${p.y} ${p.z} ${p.pitch} ${p.roll}`);
+  check("type 30 draws after it steps", near(tr(p.draws![0].m)[1], p.y));
+  g41t9Run(59, rng, events);
+  check("type 30 after 60 frames: y down by 0.02722 * 60 * 61 / 2, z up 48",
+        near(p.y, y0 - 0.02722 * 1830, 1e-2) && near(p.z, z0 + 48, 1e-2)
+        && p.pitch === -0x100 * 60, `${p.y} ${p.z}`);
+  check("type 30 is not shootable", !p.shotRegistered);
+  G.g_evt_step_index = 2; g41t9Run(1, rng, events);
+  G.g_evt_step_index = 3; g41t9Run(1, rng, events);
+  check("type 30 alive after two step changes", live(p));
+  G.g_evt_step_index = 4; g41t9Run(1, rng, events);
+  check("type 30 despawned on the third", !G.g_breakable_props.includes(p));
+}
+
+console.log("\nclass 0x41 type 59, the invisible target (PropUpdateType59):");
+{
+  const live = g41t9Live;
+  const rng = new Rng(59);
+  const { events, sounds } = g41t9Scene(rng, 2);
+  const pos: [number, number, number] = [-1101.5, 16.2, -3888];
+  const p = g41t9Place({ type: 59, slot: 3, lifetime_evt_steps: 3,
+                         field_1f4: 30, pos, pitch: 0, yaw: 0, roll: 0 }, rng);
+  check("type 59's arm: radius (s16)placer+0x1F4 * 0.1f = 3.0",
+        p.hitRadius === 3, `${p.hitRadius}`);
+  g41t9Run(1, rng, events);
+  check("type 59 draws nothing (an empty list, not the renderer's fallback)",
+        Array.isArray(p.draws) && p.draws.length === 0);
+  check("type 59 registers its own position",
+        p.shotRegistered && p.shotX === pos[0] && p.shotY === p.y
+        && p.shotZ === pos[2]);
+  const fx0 = G.g_sprite_effects.length;
+  p.hitAim = { x: -1100, y: 17 };
+  BreakablePropTakeShot(p, 0);
+  g41t9Run(1, rng, events);
+  check("type 59: a shot plays BULLET_MET1 and spawns the hit effect at 1.0",
+        sounds.length === 1 && sounds[0] === 0x0e16a9
+        && G.g_sprite_effects.length === fx0 + 1
+        && G.g_sprite_effects[fx0].scale.x === 1.5);
+  check("type 59 clears the hit and player bits", (p.flags & 0xe) === 0);
+  BreakablePropTakeShot(p, 1);
+  g41t9Run(1, rng, events);
+  check("type 59 rings on every shot (no latch)", sounds.length === 2);
+  check("type 59 still registered after a hit", p.shotRegistered);
+  G.g_scene_index = 1; G.g_script_flags[0x77] = 1; g41t9Run(1, rng, events);
+  check("type 59 has no scene-1 sweep", live(p));
+  G.g_script_flags[0x77] = 0;
+  for (let s = 2; s <= 4; s++) { G.g_evt_step_index = s; g41t9Run(1, rng, events); }
+  check("type 59 alive after three step changes", live(p));
+  G.g_evt_step_index = 5; g41t9Run(1, rng, events);
+  check("type 59 despawned on the fourth (ActorDespawn's flags)",
+        !G.g_breakable_props.includes(p) && (p.flags & 0x8000) !== 0);
+}
+
+console.log("\nclass 0x41 types 14, 19 and 25, the enemies standing still:");
+{
+  // A one-bone effect 10 on motion 0x1C9 with the engine's play length (100,
+  // `g_motion_play_length[0x1C9]` at 0x004E0B62), and a hinge curve 0 whose
+  // frame f is (10f, 100f, 20f).
+  const table = {
+    ...BREAKABLES,
+    effects: {
+      ...BREAKABLES.effects,
+      "10": {
+        nodes: [
+          { slot: 0, bone: 0, children: [1] },
+          { slot: 0x1500, bone: 1, children: [] },
+        ],
+        interp: 1, motion: 0x1c9, play_length: 100, frames: 51, bones: 1,
+        t: Array.from({ length: 51 * 3 }, () => 0),
+        r: Array.from({ length: 51 * 3 }, () => 0),
+        cues: [],
+      },
+    },
+    hinge_curves_xyz: {
+      "0": Array.from({ length: 60 }, (_, f) => [f * 10, f * 100, f * 20]),
+    },
+  };
+  const scene = (rng: Rng): Events => {
+    propScene(rng, GameMode.Arcade);
+    SetGameTables(CHARS, table);
+    const events = new Events();
+    return events;
+  };
+  const heard = (events: Events): number[] => {
+    const out: number[] = [];
+    events.on("sound.play", (d) => out.push(d.id));
+    return out;
+  };
+  const put = (pl: Omit<BreakablePlacement, "container">, rng: Rng) => {
+    const p = PlaceGenericProp({ ...pl, container: "generic" }, rng);
+    G.g_breakable_props.push(p);
+    return p;
+  };
+  const run = (rng: Rng, events: Events, n = 1): void => {
+    for (let i = 0; i < n; i++) BreakablePropPoolUpdate(rng, events);
+  };
+  const near = (a: number, b: number, e = 1e-4) => Math.abs(a - b) < e;
+  // The shipped spawns: stage 2 blocks 5, 7 and 23.
+  const SPAWN14 = { at: 7640, type: 14, slot: 0, lifetime_evt_steps: 0,
+    field_1f4: 2, pos: [-727.199951171875, 36.25, -1328.5] as [number, number, number],
+    pitch: 16384, yaw: 4096, roll: 0 };
+  const SPAWN19 = { at: 12664, type: 19, slot: 0, lifetime_evt_steps: 0,
+    field_1f4: 0,
+    pos: [-568.5399780273438, 33.69999694824219, -1299.2999267578125] as [number, number, number],
+    pitch: 0, yaw: 16384, roll: 0 };
+  const SPAWN25 = { at: 64204, type: 25, slot: 1, lifetime_evt_steps: 1,
+    field_1f4: 0,
+    pos: [-565.199951171875, -13.799999237060547, -1282.699951171875] as [number, number, number],
+    pitch: 0, yaw: 32768, roll: 0 };
+
+  // -- type 14: PlaceGenericProp case 0x0E and PropUpdateType14 ----------
+  {
+    const rng = new Rng(3);
+    const events = scene(rng);
+    const sounds = heard(events);
+    G.g_script_branch_var = 5;
+    const p = put(SPAWN14, rng);
+    check("type 14's arm puts it at y 36.0 whatever the spawn says", p.y === 36,
+          String(p.y));
+    check("...radius 2.0, +0x199 the placer's +0x1F4 byte",
+          p.hitRadius === 2 && p.words.o199 === 2);
+    check("...counts it into g_enemies_alive and seeds the route with +0x11C",
+          G.g_enemies_alive === 1 && G.g_script_branch_var === 0,
+          `${G.g_enemies_alive} ${G.g_script_branch_var}`);
+    run(rng, events);
+    check("...draws 0x10D2 at its position, scaled 0.4",
+          p.draws?.length === 1 && p.draws[0].slot === 0x10d2
+          && p.draws[0].m[13] === 36
+          && near(Math.hypot(p.draws[0].m[0], p.draws[0].m[1], p.draws[0].m[2]),
+                  0.4, 1e-6));
+    check("...and registers that position", p.shotRegistered
+          && p.shotX === p.x && p.shotY === 36 && p.shotZ === p.z);
+    run(rng, events, 0xd1 - 2);
+    check("unshot it is still counted in at frame 0xD0", G.g_enemies_alive === 1);
+    run(rng, events);
+    check("...and counted out on frame 0xD1, latched",
+          G.g_enemies_alive === 0 && (p.flags & 0x40000000) !== 0);
+    BreakablePropTakeShot(p, 0);
+    run(rng, events);
+    check("...after which a shot does nothing",
+          p.routinePhase === Type14Phase.Standing && G.g_script_branch_var === 0
+          && sounds.length === 0);
+    while (!p.dead && p.storyItem < 1000) run(rng, events);
+    check("...ActorKill on frame 0x1C2, with alive given back once only",
+          p.storyItem === 0x1c2 && G.g_enemies_alive === 0,
+          `${p.storyItem} ${G.g_enemies_alive}`);
+  }
+  {
+    const rng = new Rng(3);
+    const events = scene(rng);
+    const sounds = heard(events);
+    const p = put(SPAWN14, rng);
+    run(rng, events, 10);
+    const ref = new Rng(rng.state);
+    BreakablePropTakeShot(p, 0);
+    run(rng, events);
+    check("type 14 shot writes 1 - +0x11C and plays 0x1116A9",
+          G.g_script_branch_var === 1 && sounds.join() === String(SFX_TYPE14_HIT));
+    check("...tumbling at rand() % 0x81 + 0xC0 a frame, one draw",
+          p.spin === ref.int(0x81) + 0xc0 && rng.state === ref.state);
+    check("...and is still counted in, and still shootable",
+          G.g_enemies_alive === 1 && p.shotRegistered);
+    const hitAt = p.storyItem;
+    while (p.routinePhase !== Type14Phase.Rest && p.storyItem < 0x1c0) {
+      run(rng, events);
+    }
+    check("...lands on its +1 end -- the -1 end's latch is the frame counter",
+          p.words.o290 === 1 && p.cueCursorB === 1);
+    check("...pivots to pitch 0x4000 and gives alive back there, once",
+          p.pitch === 0x4000 && G.g_enemies_alive === 0
+          && p.storyItem - hitAt < 60, `${p.pitch} ${p.storyItem - hitAt}`);
+    check("...out of the shot test once landed", !p.shotRegistered);
+    check("...drawn about the pivot, 0.96 from it",
+          near(Math.hypot(p.x - p.restX, p.y - p.restY, p.z - p.restZ), 0.96,
+               1e-3));
+    run(rng, events, 0xd2 - p.storyItem);
+    check("...and frame 0xD1 does not give back again", G.g_enemies_alive === 0);
+    G.g_evt_block_index = 6;
+    run(rng, events);
+    check("g_evt_block_index 6 kills it", p.dead);
+  }
+
+  // -- type 19: PlaceGenericProp case 0x13 and PropUpdateType19 ----------
+  {
+    const rng = new Rng(5);
+    const events = scene(rng);
+    const sounds = heard(events);
+    G.g_script_branch_var = 5;
+    const p = put(SPAWN19, rng);
+    check("type 19's arm copies the position to +0x40, seeds the route, "
+          + "radius 1.5, slot 0x10D3",
+          p.hitPos.x === SPAWN19.pos[0] && p.hitPos.z === SPAWN19.pos[2]
+          && G.g_script_branch_var === 0 && p.hitRadius === 1.5
+          && p.slot === 0x10d3);
+    check("...and counts it into g_enemies_present", G.g_enemies_present === 1);
+    run(rng, events);
+    check("...draws 0x1CE and then 0x10D3",
+          p.draws?.map((d) => d.slot).join() === [0x1ce, 0x10d3].join());
+    // RotY(0xC000) carries (-9, 11 - 2, 0.5) to (-0.5, 9, -9).
+    check("...registers +0x40 + RotY(0xC000)(-9, 9, 0.5), not its placement",
+          near(p.shotX, SPAWN19.pos[0] - 0.5) && near(p.shotY, SPAWN19.pos[1] + 9)
+          && near(p.shotZ, SPAWN19.pos[2] - 9),
+          `${p.shotX}/${p.shotY}/${p.shotZ}`);
+    const knocks: number[] = [];
+    let out = -1;
+    for (let f = 2; f <= 200; f++) {
+      const n = sounds.length;
+      run(rng, events);
+      if (sounds.slice(n).includes(SFX_TYPE19_KNOCK)) knocks.push(f);
+      if (out < 0 && G.g_enemies_present === 0) out = f;
+    }
+    check("unshot it knocks at frames 30, 83, 126 and 179",
+          knocks.join() === "30,83,126,179", knocks.join());
+    check("...says its line once, and counts itself out as the fourth ends, "
+          + "frame 192", out === 192
+          && sounds.filter((s) => s === SFX_TYPE19_LINE).length === 1
+          && sounds.filter((s) => s === SFX_TYPE19_GIVE_UP).length === 1,
+          String(out));
+    check("...retired, so a shot now does nothing",
+          p.routinePhase === Type19Phase.Retired && (() => {
+            BreakablePropTakeShot(p, 0);
+            run(rng, events);
+            return G.g_script_branch_var === 0;
+          })());
+  }
+  {
+    const rng = new Rng(5);
+    const events = scene(rng);
+    const sounds = heard(events);
+    const p = put(SPAWN19, rng);
+    run(rng, events, 50);
+    BreakablePropTakeShot(p, 1);
+    run(rng, events);
+    check("type 19 shot writes 1 - +0x11C, plays 0xF16A9, counts it out",
+          G.g_script_branch_var === 1 && G.g_enemies_present === 0
+          && sounds.filter((s) => s === SFX_TYPE19_HIT).length === 1);
+    const y = p.shotY;
+    run(rng, events, 10);
+    check("...the part drops away and the shot point does not follow it",
+          p.restY < -1 && near(p.shotY, y));
+    // Another enemy present: the fourth knock takes it too, which is the
+    // engine's own double give-back on this path.
+    G.g_enemies_present = 1;
+    while (p.routinePhase !== Type19Phase.Retired && p.storyItem < 400) {
+      run(rng, events);
+    }
+    check("...it keeps knocking, and the fourth knock gives back again",
+          G.g_enemies_present === 0 && p.removeFlag === 4);
+  }
+  {
+    const rng = new Rng(5);
+    const events = scene(rng);
+    const sounds = heard(events);
+    const p = put(SPAWN19, rng);
+    run(rng, events, 5);
+    G.g_evt_step_index += 1;
+    run(rng, events);
+    BreakablePropTakeShot(p, 0);
+    run(rng, events);
+    check("type 19: a step change retires it unshootable, still counted in",
+          p.routinePhase === Type19Phase.Retired && G.g_script_branch_var === 0
+          && G.g_enemies_present === 1);
+    G.g_script_flags[0x21] = 1;
+    run(rng, events, 6);
+    check("...flag 0x21 swings it on curve 0: frame 5 on +0x64/+0x68/+0x6C",
+          p.routinePhase === Type19Phase.Opening && p.cueCursorB === 6
+          && p.words.o64 === 50 && p.words.o68 === 500 && p.words.o6C === 100
+          && sounds.filter((s) => s === SFX_TYPE19_OPEN).length === 1);
+    run(rng, events, 100);
+    check("...for sixty frames", p.cueCursorB === 60 && p.words.o68 === 5900);
+    G.g_evt_step_index += 1;
+    run(rng, events);
+    const second = !p.dead;
+    G.g_evt_step_index += 1;
+    run(rng, events);
+    check("...and the third step change despawns it, not the second",
+          second && p.dead);
+  }
+
+  // -- type 25: PlaceGenericProp case 0x19 and PropUpdateType25 ----------
+  {
+    const rng = new Rng(7);
+    const events = scene(rng);
+    const sounds = heard(events);
+    G.g_script_branch_var = 5;
+    G.g_evt_block_index = 0x17;
+    const p = put(SPAWN25, rng);
+    check("type 25's arm seeds 0, radius 12, effect 10 on motion 0x1C9, "
+          + "and counts it into g_enemies_present",
+          G.g_script_branch_var === 0 && p.hitRadius === 12 && p.effect === 10
+          && p.effectVariant === 0x1c9 && G.g_enemies_present === 1);
+    run(rng, events);
+    check("...draws effect 10, held on frame 0",
+          p.draws?.length === 1 && p.draws[0].slot === 0x1500
+          && p.effectFrames === 0);
+    check("...registered 12 above its origin", p.shotRegistered
+          && p.shotY === Math.fround(p.y + 12));
+    run(rng, events, 0xfe - 2);
+    const before = G.g_enemies_present;
+    run(rng, events);
+    check("...unshot, counted out on frame 0xFE and latched, still shootable",
+          before === 1 && G.g_enemies_present === 0
+          && (p.flags & 0x40000000) !== 0 && p.shotRegistered);
+    BreakablePropTakeShot(p, 0);
+    run(rng, events);
+    check("...after which a shot pays nothing",
+          G.g_script_branch_var === 0 && sounds.length === 0);
+  }
+  {
+    const rng = new Rng(7);
+    const events = scene(rng);
+    const sounds = heard(events);
+    G.g_evt_block_index = 0x16;
+    const p = put(SPAWN25, rng);
+    run(rng, events, 3);
+    BreakablePropTakeShot(p, 0);
+    run(rng, events);
+    check("type 25 shot outside block 0x17 does nothing",
+          G.g_script_branch_var === 0 && G.g_enemies_present === 1
+          && sounds.length === 0);
+    G.g_evt_block_index = 0x17;
+    run(rng, events);
+    check("...in block 0x17 writes 1, plays 0x2F16A9, counts it out",
+          G.g_script_branch_var === 1 && sounds.join() === String(SFX_TYPE25_HIT)
+          && G.g_enemies_present === 0);
+    check("...sets 0x44000000 and leaves the shot test, the clip starting",
+          (p.flags & 0x44000000) === 0x44000000 && !p.shotRegistered
+          && p.effectFrames === 1);
+    const drawn: number[] = [];
+    for (let i = 0; i < 140; i++) {
+      run(rng, events);
+      drawn.push(p.draws?.length ?? 0);
+    }
+    check("...plays to play_length - 2, then blinks on even counts to 29",
+          p.effectFrames === 98 && drawn.slice(0, 97).every((n) => n === 1)
+          && drawn.slice(97, 129).join("") === "01".repeat(14) + "0000",
+          drawn.slice(97, 129).join(""));
+  }
+  {
+    const rng = new Rng(7);
+    const events = scene(rng);
+    G.g_evt_block_index = 0x17;
+    const p = put(SPAWN25, rng);
+    run(rng, events, 174);
+    G.g_evt_step_index += 1;
+    run(rng, events);
+    const first = !p.dead;
+    G.g_evt_step_index += 1;
+    run(rng, events);
+    // The shipped unshot path: block 23 waits on alive, not present, and the
+    // second step change comes at about frame 176 of 254.
+    check("type 25 unshot dies on its second step change still counted in "
+          + "-- the engine's own leak", first && p.dead
+          && G.g_enemies_present === 1, String(G.g_enemies_present));
+  }
+}
+
+console.log("\nclass 0x41 type 64, stage 2's rocker:");
+{
+  const rng = new Rng(64);
+  const events = propScene(rng);
+  const tr = (p: BreakableProp, k: number) =>
+    [p.draws![k].m[12], p.draws![k].m[13], p.draws![k].m[14]];
+  const near = (a: number, b: number, e = 1e-4) => Math.abs(a - b) <= e;
+  G.g_scene_index = 1;
+  const p = PlaceGenericProp({
+    at: 0xbe88, container: "generic", type: 64, slot: 4,
+    lifetime_evt_steps: 4, field_1f4: 0, pos: [-671, 38.5, -1498],
+    pitch: 0, yaw: 0, roll: 0,
+  }, rng);
+  G.g_breakable_props.push(p);
+  check("type 64's arm: roll 0x400, rate -32, acceleration -2",
+        p.roll === 0x400 && p.storyItem === -32 && p.removeFlag === -2,
+        `${p.roll} ${p.storyItem} ${p.removeFlag}`);
+  BreakablePropPoolUpdate(rng, events);
+  check("...the roll takes the rate the frame started with",
+        p.roll === 0x400 - 32 && p.storyItem === -34,
+        `${p.roll} ${p.storyItem}`);
+  check("...draws 0x1A39 at the spawn, scaled 0.7",
+        p.draws?.length === 2 && p.draws[0].slot === 0x1a39
+        && near(tr(p, 0)[0], -671) && near(tr(p, 0)[1], 38.5)
+        && near(tr(p, 0)[2], -1498)
+        && p.draws[0].m[0] === Math.fround(0.7), String(tr(p, 0)));
+  check("...and 0x0C27 18 up the scaled body, rolled by +0x1D4",
+        p.draws![1].slot === 0x0c27
+        && near(tr(p, 1)[1], 38.5 + 18 * Math.fround(0.7))
+        && near(p.draws![1].m[1],
+                0.7 * Math.sin((0x400 - 32) * Math.PI * 2 / 65536), 1e-5),
+        String(tr(p, 1)));
+  for (let i = 1; i < 15; i++) BreakablePropPoolUpdate(rng, events);
+  check("...15 frames: the rate is at -62 and has not flipped",
+        p.storyItem === -62 && p.removeFlag === -2,
+        `${p.storyItem} ${p.removeFlag}`);
+  BreakablePropPoolUpdate(rng, events);
+  check("...frame 16 starts past 60, so the acceleration flips",
+        p.storyItem === -60 && p.removeFlag === 2,
+        `${p.storyItem} ${p.removeFlag}`);
+  let lo = 0, hi = 0;
+  for (let i = 0; i < 248; i++) {
+    BreakablePropPoolUpdate(rng, events);
+    lo = Math.min(lo, p.storyItem); hi = Math.max(hi, p.storyItem);
+  }
+  check("...the rate swings between -62 and +62", lo === -62 && hi === 62,
+        `${lo} ${hi}`);
+  check("...and nothing registers a sphere", !p.shotRegistered);
+  G.g_script_flags[0x77] = 1;
+  BreakablePropPoolUpdate(rng, events);
+  check("...it opens with PropExpireByStepLifetime: the scene-1 sweep",
+        p.dead && !G.g_breakable_props.includes(p));
+}
+
+console.log("\nclass 0x41 type 57, stage 1's shudder:");
+{
+  const rng = new Rng(57);
+  const events = propScene(rng);
+  const heard: number[] = [];
+  events.on("sound.play", (e) => heard.push(e.id));
+  const tr = (p: BreakableProp, k: number) =>
+    [p.draws![k].m[12], p.draws![k].m[13], p.draws![k].m[14]];
+  const f32 = Math.fround;
+  const p = PlaceGenericProp({
+    at: 0x3b3c, container: "generic", type: 57, slot: 4,
+    lifetime_evt_steps: 4, field_1f4: 0, pos: [0, 0, 0],
+    pitch: 0, yaw: 0, roll: 0,
+  }, rng);
+  G.g_breakable_props.push(p);
+  check("type 57's arm: radius 5.0", p.hitRadius === 5);
+  const s0 = rng.state;
+  BreakablePropPoolUpdate(rng, events);
+  check("...at rest it draws no rand()", rng.state === s0);
+  check("...0xD43 at its world literal, 0xD44 5.68 above it",
+        p.draws?.length === 2 && p.draws[0].slot === 0xd43
+        && p.draws[1].slot === 0xd44
+        && tr(p, 0)[0] === f32(-697.042) && tr(p, 0)[1] === f32(-12.701)
+        && tr(p, 0)[2] === f32(-529.244)
+        && Math.abs(tr(p, 1)[1] - tr(p, 0)[1] - f32(5.68)) < 1e-5,
+        `${tr(p, 0)} ${tr(p, 1)}`);
+  check("...registered every frame at the literal, not its position",
+        p.shotRegistered && p.shotX === f32(-697.042)
+        && p.shotY === f32(-9.861) && p.shotZ === f32(-529.244));
+  for (let s = 1; s <= 10; s++) {
+    G.g_evt_step_index = s;
+    BreakablePropPoolUpdate(rng, events);
+  }
+  check("...it has no lifetime at all", !p.dead);
+
+  BreakablePropTakeShot(p, 0);
+  p.hitAim = { x: 1, y: 2 };
+  const ref = new Rng(0);
+  ref.state = rng.state;
+  const nsprites = G.g_sprite_effects.length;
+  BreakablePropPoolUpdate(rng, events);
+  check("...a hit plays BULLET_WOD1 and clears every hit bit",
+        heard.length === 1 && heard[0] === 0x1516a9 && (p.flags & 0xe) === 0,
+        String(heard));
+  check("...the spark takes obj+0x1A4 before the hit writes it",
+        G.g_sprite_effects.length === nsprites + 1
+        && G.g_sprite_effects[nsprites].pos.z === 0
+        && p.z === f32(-529.244));
+  const j = () => f32((ref.int(101) - 50) * 1.0 * f32(0.01));
+  const ja = j(), jb = j(), jc = j(), jd = j();
+  check("...the hit frame jitters: four draws, a b c d",
+        rng.state === ref.state
+        && tr(p, 0)[0] === f32(ja - 697.042) && tr(p, 0)[2] === f32(jb - 529.244),
+        String(tr(p, 0)));
+  const h0 = tr(p, 0), h1 = tr(p, 1);
+  check("...the upper part jitters by (c - a, d - b) in the lower's frame",
+        Math.abs(Math.hypot(h1[0] - h0[0], h1[1] - h0[1], h1[2] - h0[2])
+                 - Math.hypot(f32(jc - ja), f32(5.68), f32(jd - jb))) < 1e-4);
+  check("...no score, no hit counted",
+        (G.g_player_hit_count[0] ?? 0) === 0 && (G.g_player_score[0] ?? 0) === 0);
+  let frames = 1;
+  for (let i = 0; i < 40; i++) {
+    const before = rng.state;
+    BreakablePropPoolUpdate(rng, events);
+    if (rng.state !== before) frames++;
+  }
+  check("...the shudder runs 29 frames, decaying by 0.85",
+        frames === 29 && tr(p, 0)[0] === f32(-697.042), String(frames));
+  G.g_active_cam_path = 0x2f;
+  G.g_cam_path_frame = 0x95;
+  BreakablePropPoolUpdate(rng, events);
+  check("...camera path 0x2F frame 0x95: still there", !p.dead);
+  G.g_cam_path_frame = 0x96;
+  BreakablePropPoolUpdate(rng, events);
+  check("...frame 0x96: ActorDespawn, and no sphere",
+        p.dead && ((p.flags & 0x80018000) >>> 0) === 0x80018000
+        && !p.shotRegistered);
+}
+
+console.log("\nclass 0x41 type 36, stage 3's three flickers:");
+{
+  const rng = new Rng(36);
+  const events = propScene(rng);
+  const tr = (p: BreakableProp, k: number) =>
+    [p.draws![k].m[12], p.draws![k].m[13], p.draws![k].m[14]];
+  const f32 = Math.fround;
+  G.g_scene_index = 2;
+  G.g_evt_step_index = 1;
+  const ref = new Rng(0);
+  ref.state = rng.state;
+  const p = PlaceGenericProp({
+    at: 0x0cfc, container: "generic", type: 36, slot: 1,
+    lifetime_evt_steps: 1, field_1f4: 0, pos: [0, 0, 0],
+    pitch: 0, yaw: 0, roll: 0,
+  }, rng);
+  G.g_breakable_props.push(p);
+  const seed = [0, 1, 2].map(() => ({
+    x: ref.int(9), y: ref.int(11), h: f32(ref.int(41) * f32(0.01) + f32(0.8)),
+  }));
+  check("type 36's arm: nine draws, x then y then height, per part",
+        rng.state === ref.state && p.words.o22c === seed[0].x
+        && p.words.o230 === seed[0].y && p.shake === seed[0].h
+        && p.words.o244 === seed[2].x && p.words.o2c8 === seed[2].h);
+  check("...and no timer: all three start at 0",
+        p.storyItem === 0 && p.removeFlag === 0 && p.cueCursorB === 0);
+  G.g_scene_tick_counter = 30;
+  BreakablePropPoolUpdate(rng, events);
+  check("...frame 1: all three show strip frame tick % 24",
+        p.draws?.length === 3 && p.draws.every((d) => d.slot === 0x161b + 6));
+  check("...at (x - 995, y - 12, -2970.7), scaled (0.2, h * 0.2, 0.2)",
+        tr(p, 0)[0] === seed[0].x - 995 && tr(p, 0)[1] === seed[0].y - 12
+        && tr(p, 0)[2] === f32(-2970.7) && p.draws![0].m[0] === f32(0.2)
+        && p.draws![0].m[5] === f32(seed[0].h * f32(0.2)), String(tr(p, 0)));
+  let clean = true;
+  for (let i = 2; i <= 11; i++) {
+    const s = rng.state;
+    BreakablePropPoolUpdate(rng, events);
+    clean &&= rng.state === s && p.draws?.length === 3;
+  }
+  check("...frames 2..11 draw and draw no rand()", clean);
+  const r2 = new Rng(0);
+  r2.state = rng.state;
+  BreakablePropPoolUpdate(rng, events);
+  const re = [0, 1, 2].map(() => ({
+    w: r2.int(31), x: r2.int(7), y: r2.int(5),
+    h: f32(r2.int(41) * f32(0.01) + f32(0.8)),
+  }));
+  check("...frame 12 (timer -12) draws at the old spot and reseeds from "
+        + "% 31, % 7, % 5", rng.state === r2.state && p.draws?.length === 3
+        && tr(p, 0)[0] === seed[0].x - 995 && p.storyItem === re[0].w
+        && p.words.o22c === re[0].x && p.words.o230 === re[0].y
+        && p.cueCursorB === re[2].w, JSON.stringify(re));
+  BreakablePropPoolUpdate(rng, events);
+  check("...frame 13: only the parts whose new wait is up",
+        p.draws?.length === re.filter((q) => q.w - 1 <= 0).length);
+  G.g_scene_index = 1;
+  G.g_script_flags[0x77] = 1;
+  BreakablePropPoolUpdate(rng, events);
+  check("...its inline lifetime has no scene-1 sweep", !p.dead);
+  G.g_evt_step_index = 2;
+  BreakablePropPoolUpdate(rng, events);
+  G.g_evt_step_index = 3;
+  BreakablePropPoolUpdate(rng, events);
+  check("...and ActorKill on the second step change", p.dead
+        && (p.flags & 0x8000) === 0 && !p.shotRegistered);
+}
+
+console.log("\nclass 0x41 type 62, stage 6's eight waters:");
+{
+  const rng = new Rng(62);
+  const events = propScene(rng);
+  const near = (a: number, b: number, e = 1e-4) => Math.abs(a - b) <= e;
+  // Effect 0x1C on motion 0x1C6, shaped like the real one: a root and six
+  // water pieces, one key a frame, a 100-frame clip standing at the origin.
+  SetGameTables(CHARS, { ...BREAKABLES, effects: {
+    ...BREAKABLES.effects,
+    "28": {
+      nodes: [
+        { slot: 0, bone: 0, children: [1, 2, 3, 4, 5, 6] },
+        ...Array.from({ length: 6 }, (_, i) => (
+          { slot: 0xcd - i, bone: i + 1, children: [] as number[] })),
+      ],
+      interp: 0, motion: 0x1c6, play_length: 100, frames: 100, bones: 6,
+      t: Array.from({ length: 100 * 6 * 3 }, () => 0),
+      r: Array.from({ length: 100 * 6 * 3 }, () => 0),
+      cues: [],
+    },
+  } });
+  const ref = new Rng(0);
+  ref.state = rng.state;
+  const p = PlaceGenericProp({
+    at: 0x2080, container: "generic", type: 62, slot: 1,
+    lifetime_evt_steps: 1, field_1f4: 0, pos: [0, 0, 0],
+    pitch: 0, yaw: 0, roll: 0,
+  }, rng);
+  G.g_breakable_props.push(p);
+  let last = 0;
+  for (let k = 0; k < 8; k++) last = ref.int(100);
+  check("type 62's arm: eight rand() into +0x2A0, the last one kept",
+        rng.state === ref.state && p.storyItem === last
+        && p.removeFlag === 0 && (p.words.o2bc ?? 0) === 0);
+  check("...effect 0x1C on motion 0x1C6",
+        p.effect === 0x1c && p.effectVariant === 0x1c6);
+  p.storyItem = 40;
+  G.g_camera_block_eye = { x: 79, y: 2510, z: -9505 };
+  BreakablePropPoolUpdate(rng, events);
+  const at = (c: number) =>
+    [p.draws![c * 6].m[12], p.draws![c * 6].m[13], p.draws![c * 6].m[14]];
+  check("...eight copies of the six-piece effect", p.draws?.length === 48,
+        String(p.draws?.length));
+  check("...each copy steps its own cursor; the block keeps copy 7's",
+        p.storyItem === 41 && p.words.o2bc === 1 && p.effectFrames === 1);
+  check("...two rows of four at y 2510",
+        near(at(0)[0], 79) && near(at(3)[0], 151) && near(at(0)[2], -9605)
+        && near(at(4)[0], 65) && near(at(7)[0], 137) && near(at(7)[2], -9568)
+        && near(at(0)[1], 2510), `${at(3)} ${at(7)}`);
+  check("...facing the eye from behind: yaw atan2 + 0x8000, scale 0.3",
+        near(p.draws![0].m[0], Math.fround(0.3), 1e-6)
+        && near(p.draws![0].m[2], 0, 1e-6));
+  G.g_camera_block_eye = { x: 179, y: 2510, z: -9605 };
+  BreakablePropPoolUpdate(rng, events);
+  check("...and turning a quarter as the eye moves round",
+        near(p.draws![0].m[0], 0, 1e-5)
+        && near(Math.abs(p.draws![0].m[2]), Math.fround(0.3), 1e-5));
+  p.storyItem = 99;
+  BreakablePropPoolUpdate(rng, events);
+  check("...a cursor may read 100", p.storyItem === 100);
+  BreakablePropPoolUpdate(rng, events);
+  check("...and past 100 goes to 0", p.storyItem === 0);
+  check("...nothing registers a sphere", !p.shotRegistered);
+  G.g_script_flags[0] = 1;
+  BreakablePropPoolUpdate(rng, events);
+  check("...g_script_flags[0] == 1: ActorKill", p.dead);
+}
+
+console.log("\nclass 0x41 type 45, stage 1's banners:");
+{
+  const rng = new Rng(45);
+  const events = propScene(rng);
+  const tr = (p: BreakableProp, k: number) =>
+    [p.draws![k].m[12], p.draws![k].m[13], p.draws![k].m[14]];
+  G.g_evt_step_index = 1;
+  G.g_evt_block_index = 3;
+  const s0 = rng.state;
+  const p = PlaceGenericProp({
+    at: 0x2d74, container: "generic", type: 45, slot: 7,
+    lifetime_evt_steps: 7, field_1f4: 0, pos: [0, 0, 0],
+    pitch: 0, yaw: 0, roll: 0,
+  }, rng);
+  G.g_breakable_props.push(p);
+  check("type 45 has no arm: the generator is untouched", rng.state === s0);
+  BreakablePropPoolUpdate(rng, events);
+  check("...the second line and the two posts: eight draws, in table order",
+        JSON.stringify(p.draws?.map((d) => d.slot)) === JSON.stringify(
+          [0x1732, 0x1731, 0x1733, 0x1734, 0x1731, 0x1732, 0x1735, 0x1735]));
+  check("...row 5 at its literal, 65 up, facing 0x3C4D",
+        tr(p, 0)[0] === TYPE45_ROWS[5][0] && tr(p, 0)[1] === 65
+        && tr(p, 0)[2] === TYPE45_ROWS[5][1]
+        && Math.abs(p.draws![0].m[0]
+                    - Math.cos(0x3c4d * Math.PI * 2 / 65536)) < 1e-6);
+  check("...the wave's clock, +0x1D0, steps 0x800 a frame", p.yaw === 0x800);
+  // The models' state, which the renderer walks: model k bent at the frame's
+  // start plus 0x200 k, and drawn -- before the walk -- as authored.
+  check("...model k is bent at the frame's start + 0x200 k",
+        JSON.stringify(G.g_prop45_wave_clock) === "[0,512,1024,1536]",
+        JSON.stringify(G.g_prop45_wave_clock));
+  check("...and this frame's draws went out against the models as authored",
+        JSON.stringify(G.g_prop45_wave_clock_drawn) === "[-1,-1,-1,-1]",
+        JSON.stringify(G.g_prop45_wave_clock_drawn));
+  G.g_active_cam_path = 0x2a;
+  G.g_cam_path_frame = 499;
+  BreakablePropPoolUpdate(rng, events);
+  check("...camera path 0x2A frame 499: the first line is still down",
+        p.draws?.length === 8);
+  check("...the next frame's draws show the last frame's bend, and the "
+        + "models step 0x800",
+        JSON.stringify(G.g_prop45_wave_clock_drawn) === "[0,512,1024,1536]"
+        && JSON.stringify(G.g_prop45_wave_clock)
+           === "[2048,2560,3072,3584]",
+        JSON.stringify([G.g_prop45_wave_clock_drawn, G.g_prop45_wave_clock]));
+  G.g_cam_path_frame = 500;
+  BreakablePropPoolUpdate(rng, events);
+  check("...frame 500 raises it: thirteen draws, row 0 first, facing 0x145E",
+        p.storyItem === 1 && p.draws?.length === 13
+        && p.draws[0].slot === 0x1731 && tr(p, 0)[0] === TYPE45_ROWS[0][0]
+        && Math.abs(p.draws[0].m[0]
+                    - Math.cos(0x145e * Math.PI * 2 / 65536)) < 1e-6);
+  check("...not shootable", !p.shotRegistered);
+  for (let s = 2; s <= 8; s++) {
+    G.g_evt_step_index = s;
+    BreakablePropPoolUpdate(rng, events);
+  }
+  check("...a seven-step life survives seven step changes", !p.dead);
+  G.g_evt_block_index = 0xe;
+  BreakablePropPoolUpdate(rng, events);
+  check("...block 0xE: ActorKill", p.dead && (p.flags & 0x8000) === 0);
+  const bent = JSON.stringify(G.g_prop45_wave_clock);
+  BreakablePropPoolUpdate(rng, events);
+  check("...and the models keep the bend they had when it went",
+        JSON.stringify(G.g_prop45_wave_clock) === bent
+        && G.g_prop45_wave_clock[0] !== -1, bent);
+}
+
+console.log("\nclass 0x41 types 41, 56, 69 and 73, transcribed whole:");
+{
+  const near = (a: number, b: number, eps = 1e-4) => Math.abs(a - b) <= eps;
+  const tr = (m: number[]) => [m[12], m[13], m[14]];
+  const BAMS = Math.PI * 2 / 65536;
+  // A synthetic hinge curve 0: frame i is (i, 100 i, -i), so any frame the
+  // routine reads is identifiable. The real one is `.rdata` at 0x00595B00.
+  const CURVE0 = Array.from({ length: 60 }, (_, i) => [i, 100 * i, -i]);
+  const withCurve = (): void => {
+    SetGameTables(CHARS, { ...BREAKABLES, hinge_curves_xyz: { "0": CURVE0 } });
+  };
+  // Object path 0x179 (377): flat-tangent keys at 0 and 105.
+  const key2 = (a: number, b: number) => [[0, a, 0, 0], [105, b, 0, 0]];
+  const withPath = (): void => {
+    SetCameraPaths(new CamPaths({ fps: 60, paths: {}, object_paths: {
+      "377": { file: "op_st4", index: 6, start: 0, duration: 105, channels: {
+        pos_x: key2(-326.7, -394.5623), pos_y: key2(32.8, 28.165),
+        pos_z: key2(-803, -798.7787), rot_x: key2(0, 12475.83),
+        rot_y: key2(0, 2408.98), rot_z: key2(0, 15430.44),
+      } },
+    } } as never));
+  };
+  const place = (rng: Rng, type: number, pos: [number, number, number],
+                 lifetime: number, yaw = 0, pitch = 0, roll = 0) => {
+    const p = PlaceGenericProp({ at: 0x5000 + type, container: "generic",
+                                 type, slot: lifetime,
+                                 lifetime_evt_steps: lifetime, field_1f4: 0,
+                                 pos, pitch, yaw, roll }, rng);
+    G.g_breakable_props.push(p);
+    return p;
+  };
+  const listen = (events: Events) => {
+    const out: number[] = [];
+    events.on("sound.play", (e) => out.push(e.id));
+    return out;
+  };
+
+  // -- type 56: stage 4 block 9. The flag swings it and opens the route; the
+  //    shot knocks a part off.
+  {
+    const rng = new Rng(56);
+    const events = propScene(rng);
+    withCurve();
+    const snd = listen(events);
+    G.g_evt_block_index = 9;
+    const POS: [number, number, number] = [-196.5, -76.5, -282.29998779296875];
+    const p = place(rng, 56, POS, 2, 0x1234, 0x40, 0x80);
+    check("type 56's arm: base point, radius 1.5, slot 0x10D3, +0x68 = yaw",
+          p.hitPos.x === POS[0] && p.hitPos.z === POS[2] && p.hitRadius === 1.5
+          && p.slot === 0x10d3 && p.words.o68 === 0x1234);
+    BreakablePropPoolUpdate(rng, events);
+    const d = p.draws ?? [];
+    check("...draws the body 0x1866 at the base and the part 0x10D3 off it",
+          d.length === 2 && d[0].slot === 0x1866 && d[1].slot === 0x10d3
+          && tr(d[0].m).every((v, i) => near(v, POS[i]))
+          && near(d[1].m[12], POS[0] + 4.8) && near(d[1].m[13], POS[1] - 0.55)
+          && near(d[1].m[14], POS[2] - 10.5),
+          JSON.stringify(d.map((x) => [x.slot, tr(x.m)])));
+    const a = (0x6b00 + 0x1234) * BAMS;
+    check("...the body turned RotY(0x6B00) then by +0x68",
+          d.length > 0 && near(d[0].m[0], Math.cos(a)), String(d[0]?.m[0]));
+    check("...the part scaled 1.1",
+          d.length > 1 && near(Math.hypot(d[1].m[0], d[1].m[1], d[1].m[2]), 1.1));
+    check("...and the sphere is the part's start, written over x/y/z",
+          p.shotRegistered && near(p.shotY, POS[1] - 0.55) && p.y === p.shotY);
+
+    G.g_script_flags[5] = 1;
+    BreakablePropPoolUpdate(rng, events);
+    check("flag 5 opens the route in block 9 and plays 0x2116A9",
+          G.g_script_branch_var === 2 && snd.join() === String(0x2116a9)
+          && p.routinePhase === 1, `${G.g_script_branch_var} ${snd}`);
+    check("...and the hinge's frame 0 lands the same frame (+0x68 := y alone)",
+          p.cueCursorB === 1 && p.words.o68 === 0 && p.words.o64 === 0x40
+          && p.words.o6C === 0x80, JSON.stringify(p.words));
+    for (let i = 0; i < 70; i++) BreakablePropPoolUpdate(rng, events);
+    check("...sixty frames of it, ending on frame 59",
+          p.cueCursorB === 60 && p.words.o68 === 5900
+          && p.words.o64 === 59 + 0x40 && p.words.o6C === -59 + 0x80,
+          `${p.cueCursorB} ${JSON.stringify(p.words)}`);
+    check("...and the latch fires once", snd.length === 1);
+
+    const score = G.g_player_score[0], hits = G.g_player_hit_count[0];
+    BreakablePropTakeShot(p, 0);
+    BreakablePropPoolUpdate(rng, events);
+    check("the shot raises flag 0x0E, plays 0xF16A9, pays no points",
+          G.g_script_flags[0x0e] === 1 && snd[1] === 0xf16a9
+          && G.g_player_score[0] === score
+          && G.g_player_hit_count[0] === hits + 1, `${snd}`);
+    check("...re-zeroes the hinge cursor (the swing replays)",
+          p.cueCursorB === 1 && p.words.o68 === 0, String(p.cueCursorB));
+    const g = Math.fround(0.02722);
+    check("...and the part falls from that frame, the sphere staying put",
+          p.vy === Math.fround(-g) && p.restY === Math.fround(-g)
+          && near(p.shotY, POS[1] - 0.55), `${p.vy} ${p.restY}`);
+    BreakablePropPoolUpdate(rng, events);
+    check("...no second hit arm, and the hit bit is never cleared",
+          snd.length === 2 && (p.flags & 8) !== 0);
+
+    G.g_scene_index = 1; G.g_script_flags[0x77] = 1;
+    BreakablePropPoolUpdate(rng, events);
+    check("type 56's lifetime has no scene-1 sweep", !p.dead);
+    for (let i = 0; i < 2; i++) {
+      G.g_evt_step_index += 1; BreakablePropPoolUpdate(rng, events);
+    }
+    check("...two step changes on a lifetime of 2 and alive", !p.dead);
+    G.g_evt_step_index += 1; BreakablePropPoolUpdate(rng, events);
+    check("...the third despawns it", p.dead);
+
+    propScene(rng, GameMode.Arcade);
+    withCurve();
+    G.g_evt_block_index = 9;
+    const q = place(rng, 56, POS, 2);
+    G.g_script_flags[5] = 1;
+    BreakablePropPoolUpdate(rng, events);
+    check("in arcade the flag swings it and writes no route",
+          q.routinePhase === 1 && G.g_script_branch_var === 0);
+  }
+
+  // -- type 69: stage 1's promotion, with no lifetime at all.
+  {
+    const rng = new Rng(69);
+    const POS: [number, number, number] =
+      [-138.64498901367188, 11.89109992980957, -324.0649719238281];
+    let events = propScene(rng, GameMode.Arcade);
+    let p = place(rng, 69, POS, 1);
+    BreakablePropPoolUpdate(rng, events);
+    check("type 69 despawns on its first frame in arcade", p.dead);
+    for (const blk of [8, 3]) {
+      events = propScene(rng);
+      G.g_evt_block_index = blk;
+      p = place(rng, 69, POS, 1);
+      BreakablePropPoolUpdate(rng, events);
+      check(`...and in block ${blk}`, p.dead);
+    }
+
+    events = propScene(rng);
+    const snd = listen(events);
+    const items: { kind?: number; x: number; y: number }[] = [];
+    events.on("item.released", (e) => items.push(e as never));
+    G.g_evt_block_index = 1;
+    p = place(rng, 69, POS, 1);
+    for (let i = 0; i < 5; i++) {
+      G.g_evt_step_index += 1; BreakablePropPoolUpdate(rng, events);
+    }
+    check("...has no lifetime: five step changes on a lifetime of 1", !p.dead);
+    const d = p.draws ?? [];
+    check("...draws 0x13F8 at itself and 0x13F7 at a fixed world point",
+          d.length === 2 && d[0].slot === 0x13f8 && d[1].slot === 0x13f7
+          && near(d[1].m[12], -138.338) && near(d[1].m[13], 25.5026),
+          JSON.stringify(d.map((x) => [x.slot, tr(x.m)])));
+    G.g_script_flags[0x23] = 1;
+    G.g_script_branch_var = 1;
+    BreakablePropPoolUpdate(rng, events);
+    check("...does not promote before it has been shot",
+          G.g_script_branch_var === 1 && items.length === 0);
+    BreakablePropTakeShot(p, 0);
+    BreakablePropPoolUpdate(rng, events);
+    check("...a shot plays 0x1D16A9 and knocks it off at -0.2",
+          snd.join() === String(0x1d16a9) && p.routinePhase === 1
+          && p.vy === Math.fround(-0.2), `${snd} ${p.vy}`);
+    const y0 = p.y;
+    BreakablePropPoolUpdate(rng, events);
+    check("...then promotes 1 to 2 and drops item set 1 at (-140.7, 3, -328.7)",
+          G.g_script_branch_var === 2 && items.length === 1
+          && items[0].kind === 1 && near(items[0].x, -140.7) && items[0].y === 3,
+          JSON.stringify(items));
+    check("...and puts its own position back",
+          p.x === POS[0] && p.z === POS[2] && p.storyItem === 1);
+    const vy = Math.fround(Math.fround(-0.2) - 0.02722);
+    check("...falling and tumbling -0x100 a frame, the sphere with it",
+          p.vy === vy && p.pitch === -0x100 && p.roll === -0x100
+          && p.y === Math.fround(vy + y0) && p.shotY === Math.fround(p.y + 1.5),
+          `${p.vy} ${p.pitch} ${p.y}`);
+  }
+
+  // -- type 73: stage 4 block 7, the key after the hit, and the ride.
+  {
+    const rng = new Rng(73);
+    const POS: [number, number, number] =
+      [-326.6999816894531, 32.79999923706055, -803];
+    let events = propScene(rng);
+    withPath();
+    G.g_app_state = AppState.Attract;
+    let p = place(rng, 73, POS, 3);
+    BreakablePropPoolUpdate(rng, events);
+    check("type 73 despawns in the attract demo", p.dead);
+
+    events = propScene(rng);
+    withPath();
+    p = place(rng, 73, [0, 0, 0], 3);
+    BreakablePropPoolUpdate(rng, events);
+    check("...is posed from object path 0x179, not its placement",
+          near(p.x, -326.7) && p.z === -803 && p.draws?.[0]?.slot === 0x1871
+          && near(p.shotY, 32.8 + 8), `${p.x} ${p.z} ${p.shotY}`);
+    for (let i = 0; i < 3; i++) {
+      G.g_evt_step_index += 1; BreakablePropPoolUpdate(rng, events);
+    }
+    G.g_evt_step_index += 1; BreakablePropPoolUpdate(rng, events);
+    check("...and ActorKill takes it on the fourth step change, not ActorDespawn",
+          p.dead && (p.flags & 0x8000) === 0, p.flags.toString(16));
+
+    events = propScene(rng, GameMode.Arcade);
+    withPath();
+    G.g_evt_block_index = 7; G.g_script_flags[0x12] = 1;
+    p = place(rng, 73, POS, 3);
+    const hits = G.g_player_hit_count[0];
+    BreakablePropTakeShot(p, 0);
+    BreakablePropPoolUpdate(rng, events);
+    check("...in arcade a shot is not taken and bit 3 stays up",
+          G.g_player_hit_count[0] === hits && (p.flags & 8) !== 0
+          && (p.flags & 6) === 0);
+
+    events = propScene(rng);
+    withPath();
+    let snd = listen(events);
+    G.g_evt_block_index = 7; G.g_script_flags[0x12] = 1;
+    G.g_original_item_slots[G.g_active_player] = [-1, -1];
+    p = place(rng, 73, POS, 3);
+    BreakablePropTakeShot(p, 0);
+    BreakablePropPoolUpdate(rng, events);
+    check("...without the key the shot is paid and the road stays shut",
+          snd.join() === String(0xe16a9) && (p.flags & 8) === 0
+          && G.g_script_branch_var === 0 && p.routinePhase === 0, `${snd}`);
+
+    events = propScene(rng);
+    withPath();
+    snd = listen(events);
+    G.g_evt_block_index = 7; G.g_script_flags[0x12] = 1;
+    G.g_original_item_slots[G.g_active_player] = [-1, 6];
+    p = place(rng, 73, POS, 3);
+    BreakablePropTakeShot(p, 0);
+    BreakablePropPoolUpdate(rng, events);
+    check("...with item 6 it writes 2, plays 0x381BA9 and starts the ride",
+          G.g_script_branch_var === 2
+          && snd.join() === [0xe16a9, 0x381ba9].join()
+          && p.routinePhase === 1 && p.shake === 1, `${snd} ${p.shake}`);
+    let cueAt = -1;
+    for (let i = 0; i < 120; i++) {
+      const n = snd.length;
+      BreakablePropPoolUpdate(rng, events);
+      if (snd.length > n && snd[n] === 0x371ba9) cueAt = p.shake;
+    }
+    check("...0x371BA9 once at cursor 70, and the ride stops at 105",
+          cueAt === 70 && snd.filter((s) => s === 0x371ba9).length === 1
+          && p.routinePhase === 2 && p.shake === 105, `${cueAt} ${p.shake}`);
+    check("...on the path's last key, angles truncated by __ftol",
+          near(p.x, -394.5623) && p.yaw === 2408 && p.pitch === 12475,
+          `${p.x} ${p.yaw} ${p.pitch}`);
+  }
+
+  // -- type 41: stage 1's two-panel hinge.
+  {
+    const rng = new Rng(41);
+    const events = propScene(rng, GameMode.Arcade);
+    const snd = listen(events);
+    const POS: [number, number, number] = [84, 1.7999999523162842, 112];
+    const p = place(rng, 41, POS, 2, 36864);
+    check("type 41's arm: the panel points, radius 7, +0x2A4 zero",
+          p.words.o238 === 92 && p.words.o240 === 111 && p.words.o244 === 102
+          && p.hitRadius === 7 && p.removeFlag === 0, JSON.stringify(p.words));
+    BreakablePropPoolUpdate(rng, events);
+    check("...draws 0x930 twice, at the placement and 8 along X, 1 back",
+          p.draws?.length === 2 && p.draws.every((x) => x.slot === 0x930)
+          && near(p.draws[1].m[12], 92) && near(p.draws[1].m[14], 111));
+    check("...its sphere 5.0 above the placement",
+          p.shotRegistered && p.shotY === Math.fround(POS[1] + 5));
+    const score = G.g_player_score[0];
+    BreakablePropTakeShot(p, 0);
+    BreakablePropPoolUpdate(rng, events);
+    check("...a shot pays ten, plays 0xE16A9 and swings the first at 0x230",
+          G.g_player_score[0] === score + 10 && snd.join() === String(0xe16a9)
+          && p.storyItem === 0x230 && p.words.o200 === 0x230);
+    let stop0 = -1, stop1 = -1;
+    for (let f = 2; f <= 60; f++) {
+      const n = snd.length;
+      BreakablePropPoolUpdate(rng, events);
+      if (f === 4) {
+        check("...frame 4: the second starts and the first is checked by 0x200",
+              p.words.o2AC === 1 && p.storyItem === 0xc0
+              && p.words.o206 === 0x20, p.storyItem.toString(16));
+      }
+      if (snd.length > n) { if (stop0 < 0) stop0 = f; else stop1 = f; }
+    }
+    check("...the first stops on frame 23 at 0x3800, the second on 35 at 0x3F00",
+          stop0 === 23 && stop1 === 35 && p.words.o200 === 0x3800
+          && p.words.o206 === 0x3f00, `${stop0} ${stop1}`);
+    check("...paid once; the hit bit is never cleared",
+          G.g_player_score[0] === score + 10 && (p.flags & 8) !== 0);
+    const m = p.draws?.[0]?.m ?? [];
+    const y = 0x9000 * BAMS, z = 0x3800 * BAMS;
+    check("...each panel is RotY(yaw) then RotZ(its hinge) then RotX(pitch)",
+          near(m[0], Math.cos(z) * Math.cos(y)) && near(m[1], Math.sin(z)),
+          `${m.slice(0, 3)}`);
+  }
+}
+
+console.log("\nclass 0x41 type 67, Training's boats and their cargo:");
+{
+  const SLOTS_A0 = 0x19ea;    // BREAKABLES.shatter.slots_a[0]
+  const SLOTS_B0 = 0x1a11;    // BREAKABLES.shatter.slots_b[0]
+  const near = (a: number, b: number, e = 1e-4) => Math.abs(a - b) < e;
+  const scene67 = (lesson: number) => {
+    const rng = new Rng(67);
+    const events = propScene(rng, GameMode.Training);
+    G.g_training_lesson = lesson;
+    G.g_evt_step_index = 1;
+    return { rng, events };
+  };
+  const place = (n: number, rng: Rng, life = 0): BreakableProp => {
+    const len = G.g_breakable_props.length;
+    const p = PlaceGenericProp({
+      at: 0x20d4 + 0x28 * n, container: "generic", type: 67, slot: life,
+      lifetime_evt_steps: life, field_1f4: n, pos: [0, 0, 0],
+      pitch: 0, yaw: 0, roll: 0,
+    }, rng);
+    G.g_breakable_props.splice(len, 0, p);
+    return p;
+  };
+  const cargoOf = (p: BreakableProp) => {
+    const i = G.g_breakable_props.indexOf(p);
+    return G.g_breakable_props.slice(i + 1, i + 4);
+  };
+  const kinds = (p: BreakableProp) => cargoOf(p).map((c) =>
+    c.slot === TYPE67_CARGO_CRATE_SLOT && c.hp === 2 && c.effect === 0 ? "C"
+      : c.slot === TYPE67_CARGO_TARGET_SLOT && c.hp === 1 && c.effect === 6
+        ? "T" : "?").join("");
+
+  // ---- the arm: three draws, index, slot, yaw, table, and the cargo ------
+  {
+    const { rng } = scene67(0);
+    const twin = new Rng(67);
+    const b0 = place(0, rng);
+    const want = [0, 1, 2].map(() => MsvcRand(twin) % 0x10000);
+    check("type 67's arm: three rand()s into +0x298, +0x1D8, +0x1E0",
+          b0.words.o298 === want[0] && b0.spin === want[1]
+          && b0.rollSpin === want[2] && rng.next() === twin.next(),
+          `${b0.words.o298} ${b0.spin} ${b0.rollSpin} vs ${want}`);
+    const b1 = place(1, rng);
+    const b2 = place(2, rng);
+    check("...yaw 0x4000 for index 0 and 0xC000 otherwise; 0x1A35 for 2",
+          b0.yaw === 0x4000 && b1.yaw === 0xc000 && b2.yaw === 0xc000
+          && b0.slot === TYPE67_SLOT && b1.slot === TYPE67_SLOT
+          && b2.slot === TYPE67_SLOT_INDEX2);
+    check("...0x7DCD08 names each boat by its index",
+          G.g_prop67_by_index.slice(0, 3).join()
+          === [b0.id, b1.id, b2.id].join());
+    check("...each boat is followed by its three cargo objects",
+          G.g_breakable_props.map((q) =>
+            q.family === PropFamily.Type67Piece ? "c" : "B").join("")
+          === "BcccBcccBccc");
+    check("...at the s8 table's offsets times 0.25",
+          cargoOf(b2).map((q) => [q.x, q.y, q.z].join()).join(" ")
+          === "1.75,11,4.25 -0.75,11,-7.5 -2,12.5,-17");
+    const t = cargoOf(b0)[0];
+    check("...a target: 0x1A0F, one shot, effect 6/0x1D9, radius 5, flags 1",
+          t.slot === 0x1a0f && t.hp === 1 && t.effect === 6
+          && t.effectVariant === 0x1d9 && t.hitRadius === 5 && t.flags === 1);
+  }
+  for (const [lesson, want] of [
+    [0, "TCT TCT TCT"], [1, "TCT TCC CCC"], [2, "CCT CCT CCT"],
+    [3, "CCC CCC CCC"], [0xff, "TCT TCT TCT"],
+  ] as Array<[number, string]>) {
+    const { rng } = scene67(lesson);
+    const bs = [place(0, rng), place(1, rng), place(2, rng)];
+    check(`...g_training_lesson ${lesson}: targets and crates ${want}`,
+          bs.map(kinds).join(" ") === want, bs.map(kinds).join(" "));
+  }
+
+  // ---- the boat: an object path, a sway, a rock, a draw ------------------
+  {
+    const { rng, events } = scene67(0);
+    // Object path 0x196 (406): keys at 0 and 1, so frame 0 and frame 1 read
+    // back distinct points. `PropEvalObjectPath6` on the stage's own paths.
+    const k = (a: number, b: number) => [[0, a, 0, 0], [1, b, 0, 0]];
+    SetCameraPaths(new CamPaths({ fps: 60, paths: {}, object_paths: {
+      "406": { file: "op_train", index: 0, start: 0, duration: 1, channels: {
+        pos_x: k(506, 507), pos_y: k(10, 11), pos_z: k(0, -2),
+        rot_x: k(0, 0), rot_y: k(0, 0), rot_z: k(0, 0),
+      } },
+    } } as never));
+    const b0 = place(0, rng);
+    const r1d8 = b0.spin, r1e0 = b0.rollSpin, sway0 = b0.words.o298;
+    BreakablePropPoolUpdate(rng, events);
+    const x0 = b0.x;
+    BreakablePropPoolUpdate(rng, events);
+    check("the boat rides path 0x196 + index, read at the frame before the "
+          + "1.0 step", x0 === 506 && b0.shake === 2
+          && b0.x === 507 && b0.y === 11 && b0.z === -2,
+          `${x0} ${b0.x} ${b0.y} ${b0.z} ${b0.shake}`);
+    const ep = Math.trunc(Math.sin((r1d8 + 0x200) * BAMS_TO_RAD_F64) * 640);
+    const er = Math.trunc(Math.cos((r1e0 + 0x200) * BAMS_TO_RAD_F64) * 640);
+    check("...sway +0x180, rock +0x100; pitch/roll = ftol(sin/cos * 640)",
+          b0.words.o298 === sway0 + 0x300 && b0.pitch === ep
+          && b0.roll === er, `${b0.pitch} ${b0.roll} vs ${ep} ${er}`);
+    // Phases that make this frame's pitch and roll exactly zero: the draw is
+    // then Translate(P + s); RotY(0x4000); Translate(-(s R)) = P + 2s.
+    b0.spin = -0x100;
+    b0.rollSpin = 0x4000 - 0x100;
+    BreakablePropPoolUpdate(rng, events);
+    const a = b0.words.o298 * BAMS_TO_RAD_F64;
+    const sx = Math.fround(Math.sin(a) * Math.fround(0.15));
+    const sz = Math.fround(Math.cos(a) * Math.fround(0.15));
+    const m = b0.draws?.[0]?.m ?? [];
+    check("...one draw of its slot at P + 2s, scaled 2.5",
+          b0.pitch === 0 && b0.roll === 0 && b0.draws?.length === 1
+          && b0.draws[0].slot === TYPE67_SLOT
+          && near(m[12], b0.x + 2 * sx) && near(m[13], b0.y)
+          && near(m[14], b0.z + 2 * sz)
+          && near(Math.hypot(m[0], m[1], m[2]), 2.5),
+          `${m.slice(12, 15)}`);
+    check("...and stores its matrix at scale 1.0 for the cargo",
+          near(Math.hypot(b0.drawMatrix[0], b0.drawMatrix[1],
+                          b0.drawMatrix[2]), 1.0, 1e-6));
+    BreakablePropTakeShot(b0, 0);
+    const f = b0.flags;
+    BreakablePropPoolUpdate(rng, events);
+    check("...no shot sphere and no mask on +0x34",
+          !b0.shotRegistered && b0.flags === f);
+  }
+
+  // ---- the cargo: the boat's frame, the crack, the burst -----------------
+  {
+    const { rng, events } = scene67(0);
+    const sounds: number[] = [];
+    events.on("sound.play", (e) => sounds.push(e.id));
+    const b0 = place(0, rng);
+    const [target, crate, third] = cargoOf(b0);
+    BreakablePropPoolUpdate(rng, events);
+    const pm = b0.drawMatrix;
+    const ex = pm[12] + target.x * pm[0] + target.y * pm[4] + target.z * pm[8];
+    const ey = pm[13] + target.x * pm[1] + target.y * pm[5] + target.z * pm[9];
+    const ez = pm[14] + target.x * pm[2] + target.y * pm[6] + target.z * pm[10];
+    const tm = target.draws?.[0]?.m ?? [];
+    check("type 67's cargo draws in this frame's boat matrix at its offset",
+          target.draws?.[0]?.slot === 0x1a0f && near(tm[12], ex)
+          && near(tm[13], ey) && near(tm[14], ez),
+          `${tm.slice(12, 15)} vs ${ex},${ey},${ez}`);
+    check("...+0x40 is that point and the sphere is 5.0 above it",
+          near(target.hitPos.x, ex) && target.shotRegistered
+          && near(target.shotY, ey + 5) && near(target.shotZ, ez));
+
+    BreakablePropTakeShot(crate, 1);
+    BreakablePropPoolUpdate(rng, events);
+    check("...a crate's first shot: 0x1A16A9, 0x19E6, half round from the "
+          + "boat, one shot left", sounds.join() === String(0x1a16a9)
+          && crate.hp === 1 && crate.slot === TYPE67_CARGO_CRACKED_SLOT
+          && crate.yaw === b0.yaw + 0x8000 && (crate.flags & 0xe) === 0
+          && crate.shotRegistered);
+
+    sounds.length = 0;
+    G.g_GameMode = GameMode.Arcade;   // where an award of 1 would pay
+    const score = G.g_player_score[0];
+    const n = G.g_prop_shatters.length;
+    BreakablePropTakeShot(target, 0);
+    BreakablePropPoolUpdate(rng, events);
+    const s = G.g_prop_shatters[n];
+    check("...a target's shot: the sound, a burst with no floor from table "
+          + "_b, ActorDespawn, no points",
+          sounds.join() === String(0x1a16a9) && target.dead
+          && ((target.flags & 0x80018000) >>> 0) === 0x80018000
+          && s?.group === 0x63 && s.pieces[0].slot === SLOTS_B0
+          && G.g_player_score[0] === score && target.draws?.length === 0);
+    BreakablePropTakeShot(crate, 0);
+    BreakablePropPoolUpdate(rng, events);
+    check("...the cracked crate's second shot bursts from table _a",
+          crate.dead
+          && G.g_prop_shatters[G.g_prop_shatters.length - 1].pieces[0].slot
+            === SLOTS_A0);
+    third.hp = 0;   // a count the arm never writes: neither arm runs
+    BreakablePropTakeShot(third, 0);
+    BreakablePropPoolUpdate(rng, events);
+    check("...the tail masks 0xFFFFFFF9, so bit 3 outlives a hit no arm took",
+          (third.flags & 0xe) === 0x8, third.flags.toString(16));
+  }
+
+  // ---- the lifetime: any step change, ActorKill, whatever +0x11C holds ---
+  {
+    const { rng, events } = scene67(0);
+    const b = place(1, rng, 5);
+    const cargo = cargoOf(b);
+    BreakablePropPoolUpdate(rng, events);
+    const flags = [b, ...cargo].map((q) => q.flags);
+    G.g_evt_step_index = 2;
+    BreakablePropPoolUpdate(rng, events);
+    check("type 67: the first step change takes the boat and its cargo "
+          + "(lifetime 5 notwithstanding), as ActorKill",
+          b.dead && cargo.every((c) => c.dead)
+          && [b, ...cargo].every((q, i) => q.flags === flags[i])
+          && !G.g_breakable_props.some((q) => q === b || cargo.includes(q)));
+  }
 }
 
 console.log("\nclass 0x41 type 43, stage 3's seven shootable props:");
@@ -2951,10 +5838,12 @@ console.log("\nclass 0x41 type 43, stage 3's seven shootable props:");
   }, rng);
   G.g_breakable_props.push(crate);
   check("a type-43 prop takes its kind from the third orientation word",
-        crate.kind === 3 && crate.family === PropFamily.Type43,
-        `kind ${crate.kind} ${PropFamily[crate.family]}`);
+        PropWords(crate, TYPE43_WORDS_ZERO).o290 === 3
+        && crate.kind === 43 && crate.family === PropFamily.Type43,
+        `kind ${PropWords(crate, TYPE43_WORDS_ZERO).o290} ${PropFamily[crate.family]}`);
   check("...its item set from desc+0x24, not from the byte above it",
-        crate.group === Type43ItemSet.ExtraLife, `${crate.group}`);
+        PropWords(crate, TYPE43_WORDS_ZERO).o194 === Type43ItemSet.ExtraLife,
+        `${PropWords(crate, TYPE43_WORDS_ZERO).o194}`);
   check("...the kind table's radius, effect and variant",
         crate.hitRadius === 5 && crate.effect === 0
         && crate.effectVariant === 473,
@@ -3008,7 +5897,8 @@ console.log("\nclass 0x41 type 43, stage 3's seven shootable props:");
   crate.flags |= BreakableFlag.Hit | BreakableFlag.HitByPlayer0;
   BreakablePropPoolUpdate(rng, events);
   check("a shot into the wreckage hands over the life",
-        G.g_player_lives[0] === lives + 1 && crate.branchLatched,
+        G.g_player_lives[0] === lives + 1
+        && (crate.flags & TYPE43_FLAG_TAKEN) !== 0,
         `${lives} -> ${G.g_player_lives[0]}`);
   check("...and the wreck wears the pickup's own model",
         crate.slot === TYPE43_PICKUP_SLOT, crate.slot.toString(16));
@@ -3058,9 +5948,10 @@ console.log("\nclass 0x41 type 43, stage 3's seven shootable props:");
   G.g_breakable_props.push(p);
   check("its bob keeps the descriptor's Y as the centre it swings about",
         p.restY === 50, `${p.restY}`);
-  check("...with an amplitude and two spin rates drawn at placement",
-        p.shake >= 0.25 && p.shake < 0.25 + 0.51
-        && p.spin !== 0 && p.rollSpin !== 0,
+  // The arm's amplitude is the literal 1.5 (`MOV [ESI+0x2C0],0x3FC00000`
+  // at 0x0046230E); only the routine's re-seed draws one.
+  check("...with an amplitude of 1.5 and two spin rates drawn at placement",
+        p.shake === 1.5 && p.spin !== 0 && p.rollSpin !== 0,
         `a${p.shake} ${p.spin}/${p.rollSpin}`);
   const pitch0 = p.pitch, roll0 = p.roll;
   BreakablePropPoolUpdate(rng, events);
@@ -6063,7 +8954,7 @@ console.log("\nclass 0x41 type 13, what drops out of stage 2's clock tower:");
         n === 136 && drop.y === TYPE13_FLOOR_Y, `${n} ${drop.y}`);
   check("...with the landing sound, and a 0.4 judder across Z",
         sounds[sounds.length - 1] === SFX_TYPE13_LAND
-        && Math.abs(drop.vz - 0.4) < 1e-9, `${drop.vz}`);
+        && drop.vz === TYPE13_JUDDER, `${drop.vz}`);
   n = 0;
   while (drop.routinePhase === Type13Phase.Judder && n < 1000) {
     tick(1); n++;

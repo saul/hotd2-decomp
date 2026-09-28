@@ -6,7 +6,6 @@
  * fixed pool and a snapshot, so the pools are arrays in `G` and something has
  * to walk them; this is that something, and it holds no behaviour of its own.
  */
-import { PropDrawOnlyType33Tick } from "../class41/draw_only";
 import { BloodSpraysTick, PointBloodSpraysTick } from "./blood";
 import { PlayerShotEffectsTick } from "./shot_effects";
 import { PropStripEffectsTick } from "./prop_strip";
@@ -26,7 +25,4 @@ export function ShotEffectsTick(): void {
   // The ground rings step before they draw, and so run after the actor walk
   // instead -- see `director.ts`.
   WaterRingsTick();
-  // ...and class 0x41 type 33's strip, which lives in the breakable-prop pool
-  // but draws before it steps like these do. See `class41/draw_only.ts`.
-  PropDrawOnlyType33Tick();
 }

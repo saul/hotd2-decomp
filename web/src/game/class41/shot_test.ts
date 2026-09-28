@@ -35,8 +35,11 @@
  * and its own offset — and they all differ. Type 11 registers its raw origin
  * while its *draw* orbits around it; type 7 registers 57 units **below** its
  * origin; type 57 ignores its position entirely and registers a hard-coded
- * world point. There is no general rule and this file does not invent one:
- * {@link PROP_SHOT_OFFSET} is a table read out of the routines one at a time.
+ * world point. There is no general rule and this file does not invent one: a
+ * routine transcribed whole (`class41/generic_routines.ts`) calls
+ * {@link PropRegisterForShotTest} itself with the point it builds, and
+ * {@link PROP_SHOT_OFFSET} is what stands in for the tail of the routines
+ * that are not, read out of them one at a time.
  *
  * [diverges] The engine's `obj+0x70..0x78` is a **view-space** point, because
  * `RayTestSphere` (`FUN_004062A0`) works in the shot's own frame. The port
@@ -90,32 +93,18 @@ export interface PropShotOffset {
 
 /**
  * What each **generic** type's routine adds to its own position before
- * registering, read one routine at a time out of the twenty that were read.
+ * registering, for the types whose routine is not transcribed whole — the
+ * rows the whole routines used to have here are their own tails now, and all
+ * fourteen of those were confirmed against the exe before they went.
  *
- * There is no general rule and this table does not invent one. Type 7
- * registers **57 units below** its origin against a radius of 12; type 11
- * registers its raw origin while its draw orbits around it; type 57 ignores
- * its position entirely; type 74's offset is a function of its own radius.
- * Eight of the twenty are a plain zero, which is why an absent entry means
- * that and not "unread" — {@link PROP_SHOT_READ} is what says which is which.
+ * There is no general rule and this table does not invent one: type 74's
+ * offset is a function of its own radius, and type 76's is three magnitudes
+ * on world axes. An absent entry means a zero offset, and
+ * {@link PROP_SHOT_READ} is what says whether that was read.
  */
 export const PROP_SHOT_OFFSET: Partial<Record<number, PropShotOffset>> = {
-  7: { y: -57.0 },     // `FUN_00466930`, against a radius of 12
-  11: {},              // `FUN_00467C80`; its DRAW orbits, the sphere does not
-  14: {},              // `PropUpdateType14`
-  19: {},              // `PropUpdateType19` -- see PROP_SHOT_DERIVED
-  20: { y: -1.0 },     // `FUN_00469380`
-  25: { y: 12.0 },     // `PropUpdateType25`
-  41: { y: 5.0 },      // `FUN_0046CC50`, a two-panel hinge; one sphere either way
-  49: { y: 1.0 },      // `FUN_0046E6E0` -- see PROP_SHOT_DERIVED
-  56: { x: 4.8, y: -0.55, z: -10.5 },   // `PropUpdateType56`, off the base
-  57: { world: [-697.042, -9.861, -529.244] },   // `FUN_0046F350`
-  58: {},              // `FUN_0046F580`
-  60: {},              // `FUN_0046F840`
-  69: { y: 1.5 },      // `PropUpdateType69`
   70: { y: 1.5 },      // `OriginalItemPropUpdate`; y is live on the bobbing one
   71: { y: 1.5 },      // the same routine
-  73: { y: 8.0 },      // `PropUpdateType73`; its DRAW adds +0x1C8 to z, this does not
   // `PropUpdateType76` arm 0. The same three magnitudes the sub-model is drawn
   // at -- but the draw applies them INSIDE its rotation frame and this applies
   // them on world axes. That is the exe's own inconsistency, not a reading.
@@ -126,37 +115,23 @@ export const PROP_SHOT_OFFSET: Partial<Record<number, PropShotOffset>> = {
 };
 
 /**
- * The types whose registration the routine **gates**, and on what.
+ * The types whose registration the routine **gates**, and on what, among
+ * those not transcribed whole.
  *
  * A gate here is the difference between a prop you can shoot once and a prop
- * you can shoot for ever. Type 25's is the sharpest: a scoring hit sets
- * `obj+0x34 |= 0x44000000` and bit 26 removes it from the shot test
- * permanently, which is why its route can only be opened once.
+ * you can shoot for ever.
  *
- * [port-only] as a *function*: three routines put their own test around their
- * own registration, and they are gathered here so a reader can see there are
- * three and not thirty. (Type 40 was the fourth; it has its own routine now,
- * `class41/type40.ts`, and its own tail.)
+ * [port-only] as a *function*: the routines put their own test around their
+ * own registration. Types 14, 25 and 40 were here and are not any more: each
+ * is transcribed whole and gates its own tail.
  */
 export function PropIsRegisteredThisFrame(p: BreakableProp): boolean {
   switch (p.kind) {
-    // `CMP AL,1 / JG` on `obj+0x192`: states 0 and 1 register, 2 and 3 do not.
-    case 14: return p.state <= BreakableState.Falling;
-    // `TEST [ESI+0x34], 0x4000000 / JNZ` -- one scoring hit ends it.
-    case 25: return (p.flags & PROP_SHOT_TEST_DONE) === 0;
     // The registration lives inside the state-1 arm; states 0 and 2 jump past.
     case 72: return p.state === BreakableState.Falling;
     default: return true;
   }
 }
-
-/**
- * `obj+0x34` bit 26 — `PropUpdateType25`'s "already answered, stop testing".
- * Its scoring hit sets `0x44000000`, and bit 26 is the half that gates the
- * registration; bit 30 alone (which the frame-0xFE timeout sets) stops the
- * award and leaves it shootable.
- */
-export const PROP_SHOT_TEST_DONE = 0x04000000;
 
 /**
  * The types whose registered point the engine **derives every frame** from a
@@ -168,30 +143,23 @@ export const PROP_SHOT_TEST_DONE = 0x04000000;
  * rather than left implicit, because a sphere in the wrong place is a shot
  * that misses and there is no other way to tell.
  *
- * * **19** — the point is `obj+0x40` plus `(-9.0, 11.0, 0.5)` put through
- *   `RotY(0xC000) * Rz(+0x6C) * RotY(+0x68) * Rx(+0x64) * Rx(+0x1E4)` and then
- *   `translate(0, -2, 0)`. All four angle fields are zero on a freshly placed
- *   prop, so only the constant `RotY(0xC000)` is missing at rest.
- * * **49** — the position is rewritten each frame by resting one of thirteen
- *   hull vertices on the floor; the port does not run the tumble.
  * * **75** — the model flies `CamEvalObjectPath6(0x178, ...)` and the sphere
  *   stays at the spawn point. **That is the engine's own behaviour**, not a
  *   divergence, and it is here so nobody `fixes` it.
  * * **77** — `pos + RotY(obj+0x1D0) * CamEvalObjectPath6(0x195, ...)`.
  */
-export const PROP_SHOT_DERIVED: ReadonlySet<number> = new Set([19, 49, 75, 77]);
+export const PROP_SHOT_DERIVED: ReadonlySet<number> = new Set([75, 77]);
 
 /**
- * Every generic type whose routine has been read for its shot point.
+ * Every generic type whose routine has been read for its shot point and is
+ * not transcribed whole — a whole routine registers itself and never reaches
+ * {@link GenericPropRegisterForShotTest}.
  *
- * A type **absent** from this set has not been read, and the port registers it
- * at its own origin — which is right for eight of the twenty that were read
- * and is a guess for the rest. Saying which is which is the whole point of
- * having the set.
+ * A type **absent** from both has not been read, and the port registers it at
+ * its own origin. Saying which is which is the whole point of having the set.
  */
 export const PROP_SHOT_READ: ReadonlySet<number> = new Set([
-  7, 11, 14, 19, 20, 25, 41, 49, 56, 57, 58, 60, 69, 70, 71, 72, 73, 74, 75,
-  76, 77,
+  70, 71, 72, 74, 75, 76, 77,
 ]);
 
 /**

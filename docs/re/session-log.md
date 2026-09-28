@@ -22752,3 +22752,97 @@ they pin).
   restore.
 * The sandbox refuses a shell line that runs `node` or `git` with a path held
   in a variable; the swaps had to be spelled out in full.
+
+## 2026-09-28 -- class 0x13's static props: the record's pitch, and every spawn site's three angles (branch `fix/newbugs2-class13-pitch`)
+
+The wall-climbers left this `[open]`: "five stage-2 scripted props (class
+0x13) also have a non-zero pitch in their spawn records, and their spawn code
+still takes only the yaw. Whether that is visible is `[open]`."
+
+What the exe does, all `[proved]` from the listing:
+
+* Class 0x13 is spawned by opcode 0x0C through `SpawnFromDescriptorSmall`
+  (`FUN_00408BC0`), not `SpawnFromDescriptor` -- the handler's `Init` reads
+  its tail at `obj+0x130C`. It copies the record's three orientation dwords
+  whole to `obj+0x64/0x68/0x6C` (`0x00408C01`..`0x00408C10`). So does
+  `EvtOpSpawnPlaced09` (`FUN_004088A0`, `0x00408925`..`0x00408934`), which
+  makes three allocators out of three.
+* `ScriptedPropInit13` (`FUN_0043FE10`) stores to `+0x1310`, `+0x1F4`,
+  `+0x14C`, `+0x3C` (-1) and `+0x00`, and nothing else on the object; the five
+  props take behaviour 0, and `g_prop_behaviours[0]` is `0x0041EBB0`, a bare
+  `RET`.
+* `ScriptedPropUpdate13` (`FUN_0043FE90`) calls no motion routine and draws
+  `T; RotX(+0x64); RotZ(+0x6C); RotY(+0x68); Scale` (`0x0043FEDE`..
+  `0x0043FF1E`). `MatrixRotateX/Y` were read again for their signs: both are
+  three.js's own rotations in the stack's row layout, so the product is a
+  three.js `Euler` in `"XZY"` -- which `render/slotmodels.ts` already used.
+  **`functions.tsv` said `"YZX"`**; a render test built on the port's matrix
+  transcription fails with `"YZX"` and passes with `"XZY"`, and the row is
+  corrected.
+
+So a static class-0x13 prop wears the record's pitch for its whole life and
+the game draws it; the port's spawn arm read `yaw` by name. The five
+(`komono_st1.bin[3]` at evt 48896/48952/49008/49064, pitches `0x1000`,
+`0x2800`, `0xF000`, `0xEC00`, yaw `0xC000`; `etc_1.bin[63]` at 84232, 15x,
+pitch `0x2800`) are the only class-0x13 records with a pitch or a roll.
+
+The fix is one helper, `PlacementOrientation` in `game/descriptor.ts`, which
+every spawn site now takes the three angles through: `SpawnScriptedCharacters`,
+every arm of `SpawnSlotActor` (0x52, 0x13, 0x26, 0x43, 0x16, 0x51, 0x33) and
+`SpawnHordePlacers`. Class 0x17 keeps its tail's signed pair. No shipped record
+of those other classes has a pitch or a roll, so only class 0x13 changes what
+is drawn. The exporter already emitted `pitch`/`roll` for these placements
+(the wall-climbers' change is in `Placement`, which every class goes through),
+so the bundle is unchanged.
+
+The survey of the other classes: a scan of every spawn descriptor in the six
+`st*evtbl.bin` finds non-zero pitch or roll only in classes 0x13, 0x31, 0x33,
+0x41 and 0x44. 0x31 was the climbers; 0x41's generic props already read both
+from the breakables placement, and its kinded (type 4) and falling (type 34)
+records and 0x44's selector 16 use the two words as a kind and a set size,
+which the placement carries by name. The port spawns none of: 0x41 type 37,
+0x44 selectors 10/14/15, 0x33 selectors 8/9 -- left for whoever ports them.
+
+What shows. At block 17's hold (camera 81 frame 425, `?stage=2&mode=play&
+block=17&step=1&op=34`, driven frame 420) two of the four wooden models on the
+far wall are in frame and now lean left (`web/shots/props13-before-f420*.png`
+against `-after-`); in free roam turned onto the wall all four do
+(`props13-free-before.png` / `-after.png`). From the street at the start of the
+step all four sit behind the window jamb, and at most ten pixels of the frame
+change. `etc_1.bin[63]` -- two blended quads whose texture is a lit crescent
+over a lunar surface, the moon `[likely]` -- is in the camera's frustum on
+path 86 frames 5..240 (block 20) and behind the tower's roof there: at most
+five pixels of any scripted frame change, sampled every 120 driven frames over
+blocks 16 and 20 and at 6 and 12 of block 16. Flown up past the roof in
+free roam it is a disc on edge before and a disc facing down after
+(`props13-moon-free-before.png` / `-after.png`). Blocks 35 and 39 place it and
+end the stage within the frame.
+
+**Wrong turns.**
+
+* The first harness picked "the nearest frame with all four in view" by
+  projecting their origins, and chose driven frame 6 -- where they are inside
+  the window's wall from the street. The before and after crops were
+  byte-identical, which read for a moment as "the renderer ignores the pitch".
+  Blowing the props up to 6x in the live page (debug only, through `G`) showed
+  nothing there either, and at 4x on the room's hold showed a leaning board.
+  The harness now shoots the frames it is told to.
+* Comparing whole-page screenshots before and after called every sampled
+  frame different: the header prints the bundle's age in minutes. Compared
+  inside the viewport, with a stdlib PNG decoder, blocks 16 and 20 differ by
+  five pixels at most.
+* The block-35 and block-39 runs compared two different frames of *stage 3*:
+  both blocks end stage 2 at once, and the two runs reached the next stage's
+  opening two path frames apart. Nothing about the prop.
+* I called the fifth prop "the moon" in a comment before I had seen it. It is
+  named by slot in the code; the docs say `[likely]`, with the texture as the
+  evidence.
+
+**Checks.** Four `port.test.ts` assertions (the five shipped records spawn
+with their pitch; a rolled record reaches `obj+0x6C`; the mouse's and the wave
+field's arms carry both; thirty `GameUpdate`s leave a static prop's angles
+alone) and two `render.test.ts` ones (a prop spawned from its record is drawn
+`T·Rx·Rz·Ry·S` element for element with three unequal angles and 15x; the
+shipped `etc_1.bin[63]` faces `(0, -sin, cos)`). Reverting the class-0x13 arm
+to the yaw fails three and two of them; drawing `"YZX"` fails the render one.
+The new lesson is `L66` (written as L64; main took L64 and L65 first).

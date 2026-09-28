@@ -43,20 +43,33 @@ const { page, state, close } = await openPlayer({
 
 /** Every group open: a collapsed one renders no rows to read. */
 const openAll = async () => {
-  const n = await page.locator("#right summary").count().catch(() => 0);
+  const n = await page.locator("#debug summary").count().catch(() => 0);
   for (let i = 0; i < n; i++) {
-    const el = page.locator("#right summary").nth(i);
+    const el = page.locator("#debug summary").nth(i);
     const open = await el.evaluate((e) => e.parentElement?.open ?? true)
       .catch(() => true);
     if (!open) await el.click().catch(() => {});
   }
   await page.evaluate(() => document.activeElement?.blur?.());
 };
+/**
+ * The value beside `label` in the sidebar, waiting up to two seconds for it.
+ *
+ * A panel opened by `openAll` renders its rows on the `<details>` element's
+ * `toggle` event, and the browser dispatches that as a task after the click
+ * -- so a read made straight after the clicks raced the render, and lost it
+ * often enough to fail three checks with "(no row)".
+ */
 const row = async (label) => {
-  const rows = (await page.locator("#right").innerText().catch(() => ""))
-    .split("\n").map((r) => r.trim());
-  const i = rows.indexOf(label);
-  return i < 0 ? "(no row)" : rows[i + 1] ?? "";
+  const t0 = Date.now();
+  for (;;) {
+    const rows = (await page.locator("#debug").innerText().catch(() => ""))
+      .split("\n").map((r) => r.trim());
+    const i = rows.indexOf(label);
+    if (i >= 0) return rows[i + 1] ?? "";
+    if (Date.now() - t0 > 2000) return "(no row)";
+    await page.waitForTimeout(100);
+  }
 };
 
 let bad = 0;
@@ -69,7 +82,7 @@ try {
   await waitForLoad(page);
   await openAll();
   mkdirSync(SHOTS, { recursive: true });
-  const box = await page.locator("#viewport").boundingBox();
+  const box = await page.locator("#view").boundingBox();
 
   // The two display choices, which are settings and not port state: the port
   // spawns the same records and marks the same materials whichever way they

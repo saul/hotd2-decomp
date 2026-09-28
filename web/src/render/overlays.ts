@@ -275,7 +275,7 @@ export class LabelCache {
     return tex;
   }
 
-  /** How many textures are live. The scope panel and the tests read this. */
+  /** How many textures are live. The tests read this. */
   get size(): number {
     return this.map.size;
   }

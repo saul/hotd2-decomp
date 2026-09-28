@@ -76,7 +76,7 @@ for (let f = 0; f < 60 * 40; f += 10) {
 }
 const before = await now();
 console.log(`  before shooting: ${before.a} ${before.c}`);
-const box = await page.locator("#viewport").boundingBox();
+const box = await page.locator("#view").boundingBox();
 let row = before;
 for (let v = 0; v < 120; v += 1) {
   for (let r = 0; r < 6; r += 1) {

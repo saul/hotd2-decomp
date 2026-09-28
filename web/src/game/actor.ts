@@ -94,8 +94,9 @@ export enum MotionFlag {
    * (`FUN_0040A620`, `TEST AL, 4` at `0x0040A649`) does the same for the
    * shadow. `EnemyZombieInit` (`OR EDX, 4` at `0x00452E21`) and
    * `EnemyThrowerInit` (`0x00449694`) raise it straight after
-   * `ActorBuildSkinnedModel`; `OneHitTargetInit` (`FUN_00448ED0`) raises only
-   * bit 1, so a class-0x20 ring sits at the body's own height.
+   * `ActorBuildSkinnedModel`, and so does `FrogInit` (`OR EDX, 4` at
+   * `0x0043A170`); `OneHitTargetInit` (`FUN_00448ED0`) raises only bit 1, so a
+   * class-0x20 ring sits at the body's own height.
    */
   TraceGround = 0x04,
   /**
@@ -1082,18 +1083,23 @@ export interface FadeRecord {
 }
 
 /**
- * A one-shot clip on its own track: a strike, a lunge, an entrance, a corpse.
+ * A one-shot clip on its own track: a strike, an arc stage, an entrance, a
+ * corpse. It plays once and `ActorAdvanceMotion` clears it at its end.
  *
  * `ticks`, not seconds, for the same reason {@link Actor.playTicks} is: the
  * engine counts frames and the port compares against frame numbers. Holding it
  * in seconds meant `ActorClipFrame` was `t * 60` over a float accumulation, so
  * a frame test written `===` could be stepped over -- which is what the
  * `struck` latch on this interface's owner used to exist to work around.
+ *
+ * There is no `loop`. The one clip that ever looped here was class 0x30's
+ * lunge, and the engine plays that on the ordinary track, where the cursor
+ * wraps by itself (`ZombieStateStrike`, `FUN_00455A40`). A clip that has to
+ * cycle belongs on {@link Actor.motion}.
  */
 export interface ActorClip {
   motion: number;
   ticks: number;
-  loop: boolean;
   /**
    * `[port-only]` The clip was set through `ActorSetOneShotBlended`, the
    * channel's `ActorSetMotionBlended` (`FUN_004119A0`), so the actor's fade is
@@ -2101,11 +2107,7 @@ export interface ActorBase {
    */
   rootFrame: number;
   rootActionFrame: number;
-  /**
-   * A one-shot at full weight: a swing, an arc stage, an entrance. The
-   * class-0x30 lunge used to be one and to loop here. It is on the ordinary
-   * track now, as `ZombieStateStrike` (`FUN_00455A40`) plays it.
-   */
+  /** A one-shot at full weight: a swing, an arc stage, an entrance. */
   action: ActorClip | null;
   /** The death clip, once. */
   death: { motion: number; ticks: number } | null;
@@ -2128,6 +2130,19 @@ export interface ActorBase {
   removed: number[];
   /** Per-bone asset slot overrides — the draw record at +0x20C + bone*0x90. */
   boneSlot: Record<string, number>;
+  /**
+   * Per-bone **hit-sphere radius** overrides — the same record's `+0x78`,
+   * `obj + 0x284 + bone*0x90`, which `SkeletonWalkNode` (`FUN_004107E0`)
+   * fills from the character type's table as the skeleton is built.
+   *
+   * A routine that writes the record wins over the table, as the engine's
+   * record does: `ShotTestBoneSphere` (`FUN_004047D0`) skips a bone whose
+   * radius is zero, and `BoneHitSpriteDrawAndTick` (`FUN_00407120`) and
+   * `DrawBloodSpray` (`FUN_00407230`) add it to the view-space depth. Empty
+   * until one does; `FrogAwardKillAndEnterDeath` (`FUN_0043A2E0`) zeroes the
+   * frog's bone 2 (`part+0x210`, `0x0043A35D`).
+   */
+  boneRadius: Record<string, number>;
   /**
    * Bones whose own rigid draw is vetoed, one bit per bone.
    *
@@ -2446,6 +2461,7 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     latched: [],
     removed: [],
     boneSlot: {},
+    boneRadius: {},
     suppressedBones: 0,
     attachments: [],
   };

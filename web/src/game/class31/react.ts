@@ -45,7 +45,7 @@ const TUMBLE_COOLDOWN = 0x14;
 
 function playOnce(obj: ThrowerActor, motion: number): void {
   if (!MotionOf(obj, motion)) return;
-  obj.action = { motion, ticks: 0, loop: false };
+  obj.action = { motion, ticks: 0 };
   obj.rootActionFrame = -1;
 }
 

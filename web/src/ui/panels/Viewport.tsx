@@ -51,13 +51,16 @@
  * now and says `"off"` from the same field this does.
  *
  * Source order here is the paint order for everything sharing a `z-index`, so
- * it is a decision rather than an accident: the canvas and the overlays come
- * first as `children`, then `.hud-layer` at `z-index: 1` — above the frame,
- * below the tool's own bars, which is what keeps a closed letterbox off the
- * skip bar — and `.crosshair` last, on top of the `z-index: 2` bars. The
- * crosshair stands in for the pointer that `#viewport.shooting { cursor: none }`
- * took away, and a pointer that disappears under the branch bar reads as the
- * mode having broken. Nothing under it becomes unclickable: `.crosshair` is
+ * it is a decision rather than an accident: the canvas and the loading overlay
+ * come first as `children`, then `.hud-layer` — above the frame — and
+ * `.crosshair` last. Nothing interactive is in here any more: the menu, the
+ * start screen, the skip prompt and the branch bar are in `#overlay`, a
+ * sibling painted above, because `render/shooting.ts` hears a press on this
+ * element natively and before React does, so a button in here could not keep
+ * its press from also being a shot. The crosshair stands in for the pointer
+ * that `#viewport.shooting { cursor: none }` took away, and over `#overlay`'s
+ * controls the system pointer is back, so the crosshair passing under one is
+ * the pointer changing shape rather than disappearing. `.crosshair` is
  * `pointer-events: none`.
  */
 import type { ReactNode, RefObject } from "react";
@@ -164,11 +167,9 @@ export function Viewport(
   );
 }
 
-export function PausedOverlay() {
-  const paused = useSlice((p) => p?.paused);
-  if (!paused) return null;
-  return <div id="paused-overlay"><span>PAUSED</span></div>;
-}
+// `PausedOverlay` was here. It is the start and pause screen now, and it has a
+// button, so it lives in `#overlay` with the other controls: see
+// `ui/panels/Overlays.tsx`.
 
 /**
  * What the page says before there is anything else to say.

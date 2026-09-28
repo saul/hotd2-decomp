@@ -259,6 +259,13 @@ export const G = {
    */
   g_attack_permits: [-1, -1] as number[],
   /**
+   * `g_hit_player_order` — 0x009C8908, two ints: which players' marks a shot
+   * handler resolves this frame and in what order, `-1` for an unused slot.
+   * `ChooseHitPlayerOrder` (`FUN_004093C0`) writes both before every reader
+   * walks them, so the zero the image starts with is never read.
+   */
+  g_hit_player_order: [0, 0] as number[],
+  /**
    * `g_max_attackers` — 0x009C8E84. `PlayerEnterPlay` (`FUN_00414770`) raises
    * it on row flag `0x20`, `PlayerContinueCountdown` (`FUN_00414280`) lowers
    * it when a continue runs out, and `CommitAppState` zeroes it.
@@ -2338,6 +2345,7 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   // Two permits, one a player, whatever `g_max_attackers` says: the array at
   // `0x009A2BA0` is fixed and `TryClaimAttackSlot` offers the first N of it.
   G.g_attack_permits = [-1, -1];
+  G.g_hit_player_order = [0, 0];
   G.g_attack_committed = 0;
   G.g_enemy_approach_rings = [];
   G.g_enemy_approach_ring_mid = [];

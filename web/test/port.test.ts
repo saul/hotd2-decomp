@@ -7035,13 +7035,13 @@ console.log("class 0x31, ThrowerStrikeConnect tests no range:");
   G.g_attack_permits[0] = z.at;
   z.attack = 0;
   z.thr.stance = 0;
-  z.action = { motion: 303, ticks: 62, loop: false };
+  z.action = { motion: 303, ticks: 62 };
   check("a swing on its hit frame connects from four hundred units away",
         ThrowerStrikeConnect(z, events) && hits === 1, `${hits} hits`);
   // ...and the cancel mask is the only thing that stops it.
   z.flags2 = 0;
   z.zones = 2;                          // attack 0 names zone 2, the right arm
-  z.action = { motion: 303, ticks: 62, loop: false };
+  z.action = { motion: 303, ticks: 62 };
   RunOutInvulnerability();
   const before = hits;
   ThrowerStrikeConnect(z, events);
@@ -13889,9 +13889,9 @@ console.log("\nthe shot queue:");
  * because nothing was stepping them. That is the "shots still register when
  * paused" report.
  *
- * **Step mode is not this case and never was**, which is the whole reason the
- * fix costs no debug capability: stepping runs the port at full rate while the
- * *script* stands still, so its ticks carry time and take the live path below.
+ * **Step mode was not this case and never was**, which is the whole reason the
+ * fix cost no debug capability: stepping ran the port at full rate while the
+ * *script* stood still, so its ticks carried time and took the live path below.
  * The two assertions are deliberately the same fixture one after the other.
  */
 console.log("\nthe shot queue, with the clock stopped:");
@@ -13927,8 +13927,8 @@ console.log("\nthe shot queue, with the clock stopped:");
   // `Loop.idle` and `pacer.ts`'s `STOPPED_TICK`, by value: wall time for the
   // layers that ride it, and no game time at all.
   const STOPPED: Tick = { dt: 0, frames: 0, wall: 1 / 60, frozen: true };
-  // What `stepOneFrame` hands the port on a tick that owes one -- play mode,
-  // and step mode, which is the case that must keep working.
+  // What `stepOneFrame` hands the port on a tick that owes one -- play mode.
+  // (Step mode, when there was one, was the case that had to keep working.)
   const LIVE: Tick = { dt: 1 / 60, frames: 1, wall: 1 / 60, frozen: false };
 
   QueueShotRequest(0, RAY);
@@ -13959,7 +13959,7 @@ console.log("\nthe shot queue, with the clock stopped:");
         G.g_camera_yaw_bams === yawBefore,
         `${G.g_camera_yaw_bams} vs ${yawBefore} (view ${ctx.view.yawBams})`);
 
-  // Step mode, and the frame after an unpause: the same request, the same
+  // The frame after an unpause: the same request, the same
   // fixture, a tick with time in it.
   game.update(ctx, LIVE);
   check("the first tick with time in it drains the queue",
@@ -14675,7 +14675,7 @@ console.log("class 0x30, a fatal hit lands *during* the swing:");
   z.state = ZombieState.Strike;
   z.sub = StrikeSub.Swinging;
   z.attack = 1;
-  z.action = { motion: atk.strike, ticks: 4, loop: false };
+  z.action = { motion: atk.strike, ticks: 4 };
   z.hp = 1;
 
   ActorSetMotionBlended(z, TYPE.motion_row["0"][MotionRow.BackAway], 0, 10);
@@ -14688,7 +14688,7 @@ console.log("class 0x30, a fatal hit lands *during* the swing:");
   // ...and the whole path: shoot it dead while the swing runs.
   z.state = ZombieState.Strike;
   z.sub = StrikeSub.Swinging;
-  z.action = { motion: atk.strike, ticks: 4, loop: false };
+  z.action = { motion: atk.strike, ticks: 4 };
   ResolveHit(z, 1, 0, NULL_HOST, rng);
   check("the shot kills it mid-swing", z.dead && z.pendingHit !== null);
   GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
@@ -14803,7 +14803,7 @@ console.log("class 0x30, the lunge and the swing hold through their fades:");
     // ...but with a one-shot over it, the one-shot is what is on screen.
     const z = striker(atk.distance + 20, {
       motion: atk.lunge, playTicks: 23,
-      action: { motion: 700, ticks: 9, loop: false },
+      action: { motion: 700, ticks: 9 },
     });
     ZombieStateStrike(z, EYE, rng);
     check("...while one under a one-shot is set again, out of the one-shot",
@@ -20442,10 +20442,13 @@ console.log("\nclass 0x33 selector 4: the scenery an actor shoves aside:");
     check("...and the alive count comes down while the present count does not",
           G.g_enemies_alive === 0 && G.g_enemies_present === 1,
           `${G.g_enemies_alive}/${G.g_enemies_present}`);
-    check("...with the corpse model on bone 1 and bones 2 and 3 blanked",
+    // `part+0x210` is bone 2's record at `+0x78` -- its hit radius -- and
+    // not bone 3's slot: bone 3's model stays on the corpse.
+    check("...with the corpse model on bone 1, bone 2 blanked and unshootable, "
+          + "and bone 3 left alone",
           a.boneSlot["1"] === 0xb91 && a.boneSlot["2"] === 0
-          && a.boneSlot["3"] === 0,
-          JSON.stringify(a.boneSlot));
+          && a.boneSlot["3"] === undefined && a.boneRadius["2"] === 0,
+          `${JSON.stringify(a.boneSlot)} ${JSON.stringify(a.boneRadius)}`);
   }
 
   {
@@ -20553,7 +20556,10 @@ console.log("\nclass 0x33 selector 4: the scenery an actor shoves aside:");
       check("a frog owed more than 30 degrees starts the left turn clip",
             a.motion === FrogMotion.TurnLeft && t.sub === 1,
             `motion 0x${a.motion.toString(16)} sub ${t.sub}`);
-      a.playTicks = 30;          // the clip's play length: this pass is done
+      // `part+0x08` -- the cursor the last draw left, which is what the states
+      // read -- at the clip's play length: this pass is done.
+      t.playCursor = 30;
+      a.playTicks = 30;
       a.fade = 0;                // ...and the fade into it long over
       const yaw0 = a.yaw;
       FrogStateHopWithinScreenWedge(a, frame(rng));
@@ -20589,6 +20595,7 @@ console.log("\nclass 0x33 selector 4: the scenery an actor shoves aside:");
       t.sub = 1;
       t.a = 0x5000;
       a.motion = FrogMotion.TurnLeft;
+      t.playCursor = 30;
       a.playTicks = 30;
       a.fadeFrom = null;
       a.fade = 0;
@@ -20610,7 +20617,7 @@ console.log("\nclass 0x33 selector 4: the scenery an actor shoves aside:");
       t.sub = 2;
       t.a = 0x800;
       a.motion = FrogMotion.Hop;
-      a.playTicks = 0x12;
+      t.playCursor = 0x12;
       const yaw0 = a.yaw;
       FrogStateHopWithinScreenWedge(a, frame(rng));
       check("the hop's launch frame also halves the turn it still owes",
@@ -20622,7 +20629,7 @@ console.log("\nclass 0x33 selector 4: the scenery an actor shoves aside:");
       t.sub = 2;
       t.a = 0x400;
       a.motion = FrogMotion.Leap;
-      a.playTicks = 0x1e;
+      t.playCursor = 0x1e;
       FrogStateLeapAtPlayer(a, frame(rng));
       check("...and so does the leap's",
             t.sub === 3 && t.a === 0x200
@@ -20643,6 +20650,7 @@ console.log("\nclass 0x33 selector 4: the scenery an actor shoves aside:");
             + "connected, over a fade of 2 and not 61",
             a.motion === FrogMotion.Leap
             && MotionPlayFrame(a) === FROG_LEAP_RECOVER_CURSOR
+            && t.playCursor === FROG_LEAP_RECOVER_CURSOR
             && a.fadeLen === 3 && t.sub === 5
             && (t.flags & (FrogFlag.CycleRunning | FrogFlag.CycleWrapped
                            | FrogFlag.NoGravity)) === 0,
@@ -20797,6 +20805,233 @@ console.log("\nclass 0x33 selector 4: the scenery an actor shoves aside:");
             a.pos.x === x0 && near(a.sphereCentre.x, 0)
             && near(a.sphereCentre.z, -50),
             `pos ${a.pos.x} sphere ${JSON.stringify(a.sphereCentre)}`);
+    }
+
+    // -- the death: `FrogAwardKillAndEnterDeath` and `FrogStateDieTumbleAndSink`
+    //
+    // Driven the way the director drives a frog -- `ActorAdvanceMotion`, then
+    // the update, a frame at a time -- because the hang this pins lived in
+    // the phase between the two. The camera is pitched down by asin(0.1),
+    // turned a quarter about Y and set somewhere `ClassFrame.eye` is not, so
+    // the kick has to be the camera's rotation of (0, 0, -0.5) and nothing
+    // else (L48).
+    {
+      const cam = vec3(7, 9, -3);
+      const SN = 0.1;
+      const CS = Math.sqrt(1 - SN * SN);
+      const host: GameHost = {
+        ...NULL_HOST,
+        viewPoint: (x, y, z, o) => {
+          o.x = cam.x + z * CS; o.y = cam.y + y + z * SN; o.z = cam.z - x;
+        },
+      };
+      const near = (u: number, v: number, e = 1e-9) => Math.abs(u - v) < e;
+      const deathScene = (seed: number) => {
+        const rng = new Rng(seed);
+        frogScene(rng);
+        const a = spawnFrog(0x9320, vec3(0, 0, -40), rng);
+        const pf = (): ClassFrame => ({ eye: EYE, dt: 1 / 60, rng, host });
+        // One frame as `SceneTaskWalk` runs it: the clock, then the update.
+        const step = (): void => {
+          ActorAdvanceMotion(a, 1 / 60);
+          FrogUpdate(a, pf());
+        };
+        return { rng, a, t: tailOf(a), step };
+      };
+
+      {
+        const { a, t, step } = deathScene(47);
+        const ground = a.pos.y;
+        check("a frog's Init raises the bit its ring and shadow trace the "
+              + "floor by, and publishes its sphere at its feet",
+              (a.motionFlags & MotionFlag.TraceGround) !== 0
+              && a.sphereCentre.x === 0 && a.sphereCentre.z === -40
+              && a.sphereCentre.y === ground,
+              `flags 0x${a.motionFlags.toString(16)} `
+              + JSON.stringify(a.sphereCentre));
+        for (let i = 0; i < 5; i++) step();
+        const slot = a.hitSlot;
+        // The descriptor's `+0x22`, which the spawn allocator puts in both
+        // words: 1 in all four shipped spawns.
+        a.hp = a.maxHp = 1;
+        const maxHp = a.maxHp;
+        const score = G.g_player_score[0];
+        const hits = G.g_player_hit_count[0];
+        a.attackPermit = 0;
+        G.g_attack_permits[0] = a.at;
+        a.lookAt.x = 1.5;
+        a.lookAt.z = -41.25;
+        G.g_ring_effects = [];
+        G.g_blood_sprays = [];
+        a.flags |= ActorFlag.Hit | ActorFlag.HitByPlayer0;
+        step();
+        check("the kill frame runs on into the tumble: the kick is already "
+              + "bounced, 0.6 of the camera's own -Z half a unit long",
+              t.state === FrogState.Die && t.sub === 1 && a.vel.y === 0
+              && near(a.vel.x, -0.5 * CS * 0.6) && a.vel.z === 0,
+              `${FrogState[t.state]}/${t.sub} vel ${a.vel.x}, ${a.vel.y}, `
+              + `${a.vel.z}`);
+        check("...and the death clip is blended in from the pose on screen, "
+              + "over a fade of 2",
+              a.motion === FrogMotion.Death
+              && a.fadeFrom?.motion === FrogMotion.Idle && a.fadeLen === 3,
+              `motion 0x${a.motion.toString(16)} from `
+              + `${JSON.stringify(a.fadeFrom)} fadeLen ${a.fadeLen}`);
+        check("...it leaves the shot test (0x8000) rather than going "
+              + "shot-immune (0x100)",
+              (a.flags & ActorFlag.NoShotTest) !== 0
+              && (a.flags & ActorFlag.ShotImmune) === 0
+              && (a.flags & ActorFlag.NoCameraTrack) !== 0,
+              `flags 0x${a.flags.toString(16)}`);
+        check("...the kill zeroes the u16 at +0x11C and nothing beside it",
+              a.hp === 0 && a.maxHp === maxHp, `${a.hp}/${a.maxHp}`);
+        check("...the alive count comes down, the permit is freed and the "
+              + "frog still names it, as the engine leaves obj+0x121",
+              G.g_enemies_alive === 0 && G.g_enemies_present === 1
+              && G.g_attack_permits[0] === -1 && a.attackPermit === 0,
+              `${G.g_enemies_alive}/${G.g_enemies_present} permits `
+              + `${G.g_attack_permits} own ${a.attackPermit}`);
+        check("...80 points, a hit counted, the order chosen, and the blood "
+              + "on bone 2",
+              G.g_player_score[0] - score === 80
+              && G.g_player_hit_count[0] - hits === 1
+              && G.g_hit_player_order[0] === 0
+              && G.g_hit_player_order[1] === -1
+              && G.g_blood_sprays.length === 1
+              && G.g_blood_sprays[0].at === a.at
+              && G.g_blood_sprays[0].bone === 2,
+              `score +${G.g_player_score[0] - score} order `
+              + `${G.g_hit_player_order} blood `
+              + JSON.stringify(G.g_blood_sprays));
+
+        // The frames that follow. The clip is held three frames on its start
+        // (a fade of 2), then steps a cursor a frame; the state freezes it
+        // when it reads `len - 1` = 9, which the draw at +11 computes, and
+        // reads 10 on the frame after. The slide is dead by then, so the
+        // ring goes down on +13.
+        let frozenAt = -1;
+        let ringAt = -1;
+        let goneAt = -1;
+        const cursors: number[] = [];
+        let ringVel = "";
+        for (let k = 1; k <= 400 && goneAt < 0; k++) {
+          const velBefore = `${a.vel.x},${a.vel.y},${a.vel.z}`;
+          step();
+          if (k <= 14) cursors.push(t.playCursor);
+          if (frozenAt < 0 && (a.flags & ActorFlag.PoseFrozen)) frozenAt = k;
+          if (ringAt < 0 && G.g_ring_effects.length) {
+            ringAt = k;
+            ringVel = velBefore;
+            check("...on the settling frame the corpse sinks at 0.035 and "
+                  + "counts 180",
+                  a.vel.x === 0 && a.vel.z === 0 && a.vel.y === -0.035
+                  && t.sub === 2 && t.a === 0xb4,
+                  `vel ${a.vel.x}, ${a.vel.y}, ${a.vel.z} sub ${t.sub} `
+                  + `a ${t.a}`);
+          }
+          if (a.despawned) goneAt = k;
+        }
+        check("the drawn cursor is held three frames on the death clip's "
+              + "start and then steps to its length",
+              cursors.join(",") === "0,0,1,2,3,4,5,6,7,8,9,10,10,10",
+              cursors.join(","));
+        check("the clip freezes on the frame the state reads len - 1",
+              frozenAt === 12, `${frozenAt}`);
+        const ring = G.g_ring_effects[0];
+        check("SpawnGroundRingEffect goes down on the frame the corpse, "
+              + "settled, reads the clip's length",
+              ringAt === 13 && ringVel === "0,0,0", `${ringAt} (${ringVel})`);
+        check("...under the tracked bone, on the traced ground plus 0.05, "
+              + "at the frog's yaw and scale 1",
+              ring !== undefined && ring.x === 1.5 && ring.z === -41.25
+              && ring.y === Math.fround(QueryGroundHeightAt(0, 0, 0) + 0.05)
+              && ring.yaw === a.yaw && ring.scale === 1
+              && ring.phase === RingEffectPhase.Spread,
+              JSON.stringify(ring));
+        check("the corpse despawns 181 frames after it settles, taking the "
+              + "present count and its hit slot",
+              goneAt === ringAt + 181 && G.g_enemies_present === 0
+              && G.g_enemies_alive === 0 && G.g_hit_slots[slot] === HIT_SLOT_NONE
+              && slot !== HIT_SLOT_NONE,
+              `gone ${goneAt} (ring ${ringAt}) `
+              + `${G.g_enemies_alive}/${G.g_enemies_present} slot ${slot}`);
+        check("...having sunk 0.035 a frame from the settling frame on",
+              near(a.pos.y, ground - 0.035 * 182, 1e-6),
+              `${a.pos.y} vs ${ground - 0.035 * 182}`);
+      }
+
+      // Every cursor test in the class reads the cursor the last draw left,
+      // not the counter the director has already stepped: the hop launches
+      // one frame after the counter reaches 0x12, as the engine's does.
+      {
+        const { a, t, step } = deathScene(53);
+        t.state = FrogState.HopToHeading;
+        t.sub = 2;
+        t.a = 0;
+        a.motion = FrogMotion.Hop;
+        a.fadeFrom = null;
+        a.fade = 0;
+        a.playTicks = 0x11;
+        t.playCursor = 0x11;
+        step();
+        const early = t.sub;
+        step();
+        check("a hop launches on the frame after the counter reaches its "
+              + "launch cursor, when the state reads the draw's",
+              early === 2 && t.sub === 3 && Math.hypot(a.vel.x, a.vel.z) > 0.99,
+              `sub ${early} then ${t.sub}`);
+      }
+
+      // Retired while it sinks, a corpse gives back the present count and
+      // not the alive count its death state already returned.
+      {
+        const { a, step } = deathScene(59);
+        a.flags |= ActorFlag.Hit | ActorFlag.HitByPlayer0;
+        step();
+        step();
+        g_class_handlers[SpawnClass.Frog]?.leave?.(a);
+        check("a sinking frog retired by the script leaves the room's alive "
+              + "count alone",
+              G.g_enemies_alive === 0 && G.g_enemies_present === 0
+              && a.despawned,
+              `${G.g_enemies_alive}/${G.g_enemies_present}`);
+      }
+
+      // The death frees the permit and leaves `obj+0x121`; a permit someone
+      // else has taken since is theirs when the corpse goes.
+      {
+        const { a, step } = deathScene(61);
+        a.attackPermit = 0;
+        G.g_attack_permits[0] = a.at;
+        a.flags |= ActorFlag.Hit | ActorFlag.HitByPlayer0;
+        step();
+        G.g_attack_permits[0] = 0x7777;
+        g_class_handlers[SpawnClass.Frog]?.onDeadSweep?.(a,
+                                                         DeadSweep.Despawned);
+        check("a dead frog's sweep does not free a permit another actor holds",
+              G.g_attack_permits[0] === 0x7777 && a.attackPermit === -1,
+              `${G.g_attack_permits} own ${a.attackPermit}`);
+      }
+
+      // Two players in: `ChooseHitPlayerOrder` draws its coin before the
+      // shooter's, so the kill frame takes one draw even for a shot only
+      // player 0 fired.
+      {
+        const { rng, a, step } = deathScene(67);
+        G.g_active_player = 2;
+        a.flags |= ActorFlag.Hit | ActorFlag.HitByPlayer0;
+        const ref = new Rng(1);
+        ref.state = rng.state;
+        const first = ref.int(2);
+        step();
+        check("with both players in, the kill draws the hit order and "
+              + "nothing else for a one-player shot",
+              rng.state === ref.state
+              && G.g_hit_player_order.join(",")
+                 === (first !== 0 ? "0,1" : "1,0"),
+              `order ${G.g_hit_player_order} state ${rng.state} vs `
+              + `${ref.state}`);
+      }
     }
   }
 

@@ -89,8 +89,7 @@ import { g_class_handlers } from "../registry";
 import type { SpawnClass } from "../spawn_class";
 import { DispatchHit, HitResultCode } from "./resolve_hit";
 import { ScoreAddForPlayer } from "./score";
-import { ProcessPlayerShotsTestList, ShotTestPickedBoneMeshes,
-         type ShotCandidate } from "./shot_test";
+import { ProcessPlayerShotsTestList, type ShotCandidate } from "./shot_test";
 
 /**
  * One queued trigger pull.
@@ -334,12 +333,8 @@ export function FireShotRequest(req: ShotRequest, host: GameHost, rng: Rng,
   events?.emit("sound.play", { id: gunshot });
   // Two answers to one question: the classes that register the engine's way,
   // through `g_shot_test_list`, and everything else through `render/`.
-  // A third, until the last class registers: the bone meshes of the classes
-  // `render/` picks, which it passes by (`ShotTestPickedBoneMeshes`).
-  const pick = MergeShotPicks(
-    MergeShotPicks(host.pickShot?.(req.ray) ?? null,
-                   ProcessPlayerShotsTestList(req.ray, host)),
-    ShotTestPickedBoneMeshes(req.ray, host));
+  const pick = MergeShotPicks(host.pickShot?.(req.ray) ?? null,
+                              ProcessPlayerShotsTestList(req.ray, host));
   // `g_shot_hit_something` — 0x009C9010, written by `ProcessPlayerShots`
   // (`FUN_00404570`) as `count > 0`. Its one reader kills the tracer on its
   // second frame, which is what makes a hit a stub of streak and a miss a

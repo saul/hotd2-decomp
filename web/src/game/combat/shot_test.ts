@@ -617,8 +617,7 @@ const _hit: ColiHit = { x: 0, y: 0, z: 0, nx: 0, ny: 0, nz: 0, surface: 0,
  * `ShotPushColiHitCandidate` (`FUN_00404CB0`) takes it.
  */
 function ShotTestBoneMesh(obj: Actor, node: CharacterBone, mesh: string,
-                          shot: Pick<ShotTest, "ray" | "host">,
-                          out: ShotCandidate[]): void {
+                          shot: ShotTest, out: ShotCandidate[]): void {
   const blob = T.coli?.blobs?.[mesh];
   if (!blob || !shot.host.boneMatrix?.(obj.at, node.bone, _bm)) return;
   MatCopy(_inv, _bm);
@@ -642,43 +641,6 @@ function ShotTestBoneMesh(obj: Actor, node: CharacterBone, mesh: string,
   out.push({ key: ShotCandidateKey(_c.z), at: obj.at, bone: node.bone,
              whole: false, point, mesh: { surface: _hit.surface, normal },
              t: alongShot(shot.ray, point) });
-}
-
-/**
- * The mesh arm of `ShotTestBoneTree` (`FUN_00404750`) for the classes
- * `render/` still picks, nearest along the shot.
- *
- * `[port-only]` A class the list's pick tests ({@link ShotTestPickedHere})
- * gets its bone meshes tested in {@link ProcessPlayerShotsTestList}, through
- * the same tree walk as the engine's. One it does not is picked by
- * `render/characters.ts`, which
- * tests bone spheres and passes a bone with a mesh by -- the mesh is the
- * game's data, and the renderer answers geometric questions rather than
- * running the engine's tests. So this runs `ShotTestBoneMesh` over every such
- * bone of every such actor, and `ResolveShot` merges the answer with the other
- * two the way it merges those. Class 0x30's weapon hands
- * (`EnemyZombieInitByCharType`, `FUN_00452FD0`) are the only bones it finds
- * in the shipped game. It goes when class 0x30 registers; see
- * `docs/formats/combat.md`, "What converting the rest takes".
- */
-export function ShotTestPickedBoneMeshes(ray: ShotRay,
-                                         host: GameHost): ShotCandidate | null {
-  const out: ShotCandidate[] = [];
-  const shot = { ray, host };
-  for (const obj of G.g_object_list) {
-    if (!obj.visible || obj.dead || obj.despawned) continue;
-    if (ShotTestPickedHere(obj)) continue;
-    if (obj.flags & ActorFlag.NoShotTest) continue;
-    const bones = CharacterTypeOf(obj)?.bones ?? [];
-    for (const b of bones) {
-      const mesh = obj.boneColi[String(b.bone)];
-      if (mesh === undefined || BoneDrawSlot(obj, b) === 0) continue;
-      ShotTestBoneMesh(obj, b, mesh, shot, out);
-    }
-  }
-  let best: ShotCandidate | null = null;
-  for (const c of out) if (c.t > 0 && (!best || c.t < best.t)) best = c;
-  return best;
 }
 
 /**

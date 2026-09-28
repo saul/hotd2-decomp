@@ -23967,9 +23967,17 @@ shipped rows both searches find agree, which `verify_combat` now holds.
 * The first render mesh arm called `BoneMeshSegmentHit` from
   `render/characters.ts`, and `verify_layers` failed `render-drives-the-port`,
   rightly: the renderer may read `Actor.boneColi` and may not run the
-  engine's test. The arm is `ShotTestPickedBoneMeshes` on the game side over
-  `GameHost.boneMatrix`, merged as a third answer until class 0x30 registers;
-  the pick only passes a mesh bone by.
+  engine's test. The second was `ShotTestPickedBoneMeshes`, a game-side pass
+  over the meshes of the classes the renderer picks, merged as a third
+  answer -- port-only logic standing in for a routine the port already had.
+  After the merge with main, whose shot test files every class and migrates
+  only the pick (`ShotTestPickedHere`), the faithful version was one flag:
+  class 0x30 picked through the list, where `ShotTestBoneTree`'s mesh arm
+  already runs. The one thing the flag needed was `obj+0x124` in
+  `Actor.hitRadius` -- the zombie wrote the word only as `Actor.radius`, the
+  port's other field for it. Stage 2 plays to the same GAME OVER at block 16
+  step 6 before and after (9825 frames, 10020), the runs parting at the first
+  volley.
 * I cited `0x0044F9E4`/`0x0044FA4C` for `ThrowerStateRestoreBothHands`' table
   loads from memory of the decompile and then disassembled: they are
   `0x0044F9E6` and `0x0044FA4E`.

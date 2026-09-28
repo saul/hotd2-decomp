@@ -77,7 +77,7 @@ import { ActorBuildSkinnedModel } from "../src/game/spawn";
 import {
   ColiSortHitCandidatesByDistance, ProcessPlayerShotsTestList, RayTestSphere,
   RegisterForShotTest, ShotCandidateKey, ShotRayAnglesFromView,
-  ShotTestListReset, ShotTestPickedBoneMeshes, ShotTestPickedHere,
+  ShotTestListReset, ShotTestPickedHere,
 } from "../src/game/combat/shot_test";
 import { ActorStrikeConnect } from "../src/game/class30/strike";
 import {
@@ -11201,8 +11201,8 @@ console.log("\nthe crowd push, as the exe runs it:");
           + "`0x00409BED` does for every caller -- the crowd push's list",
           G.g_shot_test_list.some((e) => e.at === a.at),
           String(G.g_shot_test_list.length));
-    check("...while the port's own pick still passes it over, because the "
-          + "renderer picks class 0x30", !ShotTestPickedHere(a));
+    check("...and the port's own pick tests it: class 0x30 is picked the "
+          + "engine's way, through the list", ShotTestPickedHere(a));
   }
 
   // -- the frame's order: published at the head of the frame ---------------
@@ -30747,9 +30747,9 @@ console.log("\nEnemyZombieInitByCharType's mesh hands:");
         (c2.flags2 & ZombieFlag2.EntryClipPlaying) === 0);
 
   // **The shot meets the mesh.** `ShotTestBoneTree` (`FUN_00404750`) takes
-  // `ShotTestBoneMesh` (`FUN_004048A0`) for these bones; class 0x30 does not
-  // register for the shot test yet, so `render/`'s pick passes them by and
-  // `ShotTestPickedBoneMeshes` runs the mesh arm over them.
+  // `ShotTestBoneMesh` (`FUN_004048A0`) for these bones, and class 0x30 is
+  // picked through the list: registered by its own update, broad phase at
+  // `obj+0x124` round the tracked point, then the tree.
   const rng = new Rng(4);
   const events = scene(0, rng);
   SetGameTables(tables);
@@ -30765,12 +30765,18 @@ console.log("\nEnemyZombieInitByCharType's mesh hands:");
     verts: [-0.5, -0.5, -1, -0.5, 0.5, -1, 0.5, 0.5, -1, 0.5, -0.5, -1],
     axis: [2], surface: [0x33],
   } } } as never;
-  // Bone 5 at (0, 10, 60), unrotated; the camera at the origin looking +z.
+  // Every bone at (0, 10, 60), unrotated -- the tracked point the broad phase
+  // is centred on included -- and no bone has a sphere; the camera at the
+  // origin looking +z.
   const host: GameHost = {
     ...NULL_HOST,
     pickShot: () => null,
-    boneMatrix: (_at, bone, out) => {
-      if (bone !== 5) return false;
+    boneWorld: (_at, _bone, out) => {
+      out.x = 0; out.y = 10; out.z = 60;
+      return true;
+    },
+    boneSphere: () => null,
+    boneMatrix: (_at, _bone, out) => {
       for (let i = 0; i < 16; i++) out[i] = i % 5 === 0 ? 1 : 0;
       out[12] = 0; out[13] = 10; out[14] = 60;
       return true;
@@ -30781,18 +30787,21 @@ console.log("\nEnemyZombieInitByCharType's mesh hands:");
     },
   };
   const RAY = { origin: vec3(0, 10, 0), dir: vec3(0, 0, 1) };
-  const cand = ShotTestPickedBoneMeshes(RAY, host);
+  // One frame for the update to file the actor; the shot tests what the last
+  // walk filed.
+  GameUpdate(EYE, 1 / 60, host, rng, events);
+  const cand = ProcessPlayerShotsTestList(RAY, host);
   check("a shot along the hand meets its mesh, not a sphere: bone 5, the "
         + "quad's surface, a unit short of the bone",
         cand?.bone === 5 && cand.mesh?.surface === 0x33
-        && Math.abs(cand.point.z - 59) < 1e-6 && Math.abs(cand.t - 59) < 1e-6,
+        && Math.abs(cand.point.z - 59) < 1e-6,
         JSON.stringify(cand));
   check("...and misses it a unit to the side",
-        ShotTestPickedBoneMeshes({ origin: vec3(1, 10, 0),
-                                   dir: vec3(0, 0, 1) }, host) === null);
-  z.removed.push(5);
-  check("...and not at all once the hand's draw slot is zero",
-        ShotTestPickedBoneMeshes(RAY, host) === null);
+        ProcessPlayerShotsTestList({ origin: vec3(1, 10, 0),
+                                     dir: vec3(0, 0, 1) }, host) === null);
+  z.removed.push(5, 8);
+  check("...and not at all once the hands' draw slots are zero",
+        ProcessPlayerShotsTestList(RAY, host) === null);
   z.removed.length = 0;
   const resolved: { kind: string; at?: number; bone?: number }[] = [];
   events.on("shot.resolved", (r) => resolved.push(r));
@@ -30803,7 +30812,7 @@ console.log("\nEnemyZombieInitByCharType's mesh hands:");
         + "`MarkActorShot` spawns it",
         rec?.surface === 0x33 && Math.abs(rec.z - 59) < 1e-6,
         JSON.stringify(rec));
-  check("...and the hit on bone 5 goes to the damage tables like any other",
+  check("...and the hit on the hand goes to the damage tables like any other",
         resolved.length === 1 && resolved[0].kind === "actor"
         && resolved[0].at === z.at && resolved[0].bone === 5,
         JSON.stringify(resolved));

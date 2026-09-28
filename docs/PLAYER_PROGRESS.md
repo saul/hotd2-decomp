@@ -6085,10 +6085,12 @@ the table):
   the port's notes had it loading -- and the same arm makes 2 and 3
   undismemberable and raises 2's entry latch, whose readers and whose
   clearer in `ZombieOnShot` were already ported. All 34 shipped spawns
-  name a blob (`bone_mesh_coli`). Class 0x30 does not register for the shot
-  test yet, so `ShotTestPickedBoneMeshes` tests those meshes on the game side
-  and `render/`'s pick passes a mesh bone by; a mesh hit sparks with the
-  quad's surface and reaches `ResolveHit` on the bone.
+  name a blob (`bone_mesh_coli`). Only `ShotTestBoneTree`'s walk tests a
+  mesh, so **class 0x30 (and 0x18) is picked through the shot-test list
+  now**, the engine's way: it registered every frame already, and the pick
+  was the renderer's. A mesh hit sparks with the quad's surface and reaches
+  `ResolveHit` on the bone; every other zombie shot takes `ShotTestSphere`'s
+  broad phase at `obj+0x124` round the tracked point before the bones.
 
 Not ported, and said where it lives: Original Mode's big-head item doubles
 bone 2's radius in both enemy `Init`s, which goes with the item; and
@@ -6097,9 +6099,9 @@ workstream's.
 
 Checked by `test:port` (the build's test; each search, both running, type
 0xB for 0xD, a slot-0 and a slot-1 swap, the headshot's zone bit, the sever;
-every hand writer; the three mesh arms; the mesh arm of the shot on a bone
-and a queued shot through it), `test:render` (a written centre is where the
-pick meets the sphere and not the row's; a mesh bone is passed by) -- each
+every hand writer; the three mesh arms; a zombie's hand met through the
+list and a queued shot through it), `test:render` (a written centre is where
+the pick meets the sphere and not the row's) -- each
 failing on a mutant of the change it covers -- and `tools/verify_combat.py`
 check 17: the gate's bytes
 and every row it refuses (`GATED`), the two restore states' loads, **type

@@ -811,14 +811,6 @@ export class CharacterLayer implements System {
         if (inst.a.removed.includes(b.bone)) continue;
         const node = inst.bones.get(b.bone);
         if (!node) continue;
-        // **A bone with a collision mesh is not a sphere** -- `ShotTestBoneTree`
-        // (`FUN_00404750`) forks on the record's `+0x74` bit `0x10` before it
-        // looks at a radius, and the routines that give a bone a mesh zero the
-        // radius anyway. The mesh is the game's to test
-        // (`ShotTestPickedBoneMeshes` in `game/combat/shot_test.ts`, over
-        // `GameHost.boneMatrix`); class 0x30's weapon hands are the ones this
-        // pick would otherwise meet.
-        if (inst.a.boneColi[String(b.bone)] !== undefined) continue;
         // The record's radius and centre -- `Actor.boneRadius` and
         // `Actor.boneCentre`, which the build wrote from the table (the
         // radius times the model's size, both zero where the row's slot is

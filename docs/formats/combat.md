@@ -251,10 +251,9 @@ skeleton build writes `0x21`, and two `Init`s raise the bit: `Boss4Init`, for
 the ten bones its descriptor gives a `coli4.bin` mesh, and
 `EnemyZombieInitByCharType`, for class 0x30's weapon hands (types 2 and 3's
 bones 5 and 8, 0xE's bone 5, the blob at the tail's `+0x10`) --
-`Actor.boneColi` either way. Class 0x30 does not register for the shot test
-yet, so its meshes are tested by `ShotTestPickedBoneMeshes`, a `[port-only]`
-third source `ResolveShot` merges with the other two, and `render/`'s pick
-passes a bone with a mesh by. The port tests the shot segment (`ShotBuildSegment`, a
+`Actor.boneColi` either way. Only the tree walk tests a mesh, so class 0x30
+(and 0x18, which runs its update) is picked through the list now -- see the
+table below. The port tests the shot segment (`ShotBuildSegment`, a
 thousand units) against the blob in the bone's frame, over
 `GameHost.boneMatrix` and `ColiSegmentVsMesh`, and the candidate
 (`ShotPushColiHitCandidate`, `FUN_00404CB0`) carries the point, the normal and
@@ -271,9 +270,13 @@ instead of `G.g_crosshair_ray`; with one pull a frame they are the same object.
 
 JUDGMENT's two classes set the flag (`game/class22/`, `game/class23/`), and
 so does Strength (`game/class19/`: `Boss4Update` calls
-`ActorRegisterCameraPoint(state+0x70)` at its `0x00491A49` line, and the mesh
-arm above is its alone), at the sites below; the other bosses are being ported
-in other workstreams and each will set it with its own module. The sites:
+`ActorRegisterCameraPoint(state+0x70)` at its `0x00491A49` line), at the
+sites below; the other bosses are being ported in other workstreams and each
+will set it with its own module. **Class 0x30 sets it too**, and 0x18 with
+it: the zombie registered every frame already, and the weapon hands'
+collision meshes are only tested by the tree walk. Its `obj+0x124` is the
+port's `Actor.hitRadius` as well as `Actor.radius` -- one word, two readers.
+The sites:
 
 | class | registers at | through | gate | `obj+0x124` | `0x80` | `0x8000` |
 |---|---|---|---|---|---|---|
@@ -285,6 +288,9 @@ in other workstreams and each will set it with its own module. The sites:
 | `0x23` | state 1 (`0x00490150`) `0x004901E9` | `RegisterForShotTest`, `obj+0x70` left from last frame | companion's HP ≤ own | `g_actor_radius_by_char[0x44]`, `Class23Init` `0x0048FE04` | build `0x0048FDE6` | set by `0x00490B00` at `0x00490B92` |
 | `0x23` | state 1 `0x00490917`; subtype-2 state 1 (`0x00490FD0`) `0x004912EA` | `ActorRegisterCameraPoint(6.0)` | none | | | |
 | `0x23` | state 2 (`0x00490B00`) `0x00490C3B` | `RegisterForShotTest`, after `obj+0x70 = view(obj+0x100)` inline | after its own `0x8000` | | | |
+| `0x30` | `EnemyZombieUpdate` `0x0045347A`, every path through `ZombieAdvanceMotion` | `ActorRegisterCameraPoint(4.0)` | none | `g_actor_radius_by_char[type]`, `EnemyZombieInit` `0x00452E72` | build `0x00452E13` | — |
+| `0x30` twin | `ZombieTwinFollowHost` `0x004533CB` | `RegisterForShotTest` | none | | | |
+| `0x18` | through `EnemyZombieUpdate`, as `0x30` | | | | | |
 | `0x45` head | `Boss3FightHeadUpdate` `0x004215AF` | `RegisterForShotTest`, after `obj+0x100 = obj+0x40` and `obj+0x70 = view(obj+0x100)` | `obj+0x1310 != 7` | `g_actor_radius_by_char`, `Boss3FightHeadInit` `0x0041FF81` | build `0x0041FF5C` | set `0x0041FF68`; cleared at `0x00420E81`, `0x00420F96`, `0x00422DD5` |
 | `0x45` body | `Boss3BodyUpdate` `0x00424160` | `RegisterForShotTest`, `obj+0x70 = view(obj+0x40..0x48)` at `0x00423FD1` | none at the call | `[0x004C4E48]`, `Boss3BodyInit` `0x004203C0` | build `0x004203A0` | — (`|= 0x80080000`) |
 
@@ -301,10 +307,9 @@ these sites. The pools that already model their own registration (class
 list instead:
 
 * `0x10` `CivilianUpdate` `0x0048ADB0` (camera point, 4.0); `0x11` `FrogUpdate`
-  `0x0043A2C7` (1.0); `0x30` `EnemyZombieUpdate` `0x0045347A` (4.0),
-  `ZombieTwinFollowHost` `0x004533CB`, the thrown weapon `0x0045A612`; `0x31`
+  `0x0043A2C7` (1.0); `0x30`'s thrown weapon `0x0045A612`; `0x31`
   `EnemyThrowerUpdate` `0x00449991` (0.0), its projectile
-  (`ThrownWeaponUpdate`) `0x004508AA`; `0x18` through `EnemyZombieUpdate`.
+  (`ThrownWeaponUpdate`) `0x004508AA`.
 * `0x13` `0x0043FFA4`; `0x20` `0x00449366`, `0x00449519`; `0x21` `0x00451D08`,
   `0x0045283A`; `0x26`'s boat `0x0048EE9C` (a mesh); `0x33` `0x004334D0`,
   `0x00433CC7`; `0x40` `0x0043C42A`, `0x0043D425`, `0x0043D7DD`, `0x0043D9DB`,

@@ -2475,24 +2475,6 @@ console.log("\nthe model's size: a civilian at 0.9, her bones and her spheres");
   check("...and not at the row's centre any more",
         shotAt(c.y) === null, JSON.stringify(shotAt(c.y)));
 
-  // **A bone with a collision mesh is not a sphere**: `ShotTestBoneTree`
-  // (`FUN_00404750`) forks on the record's `+0x74` bit `0x10` before it reads
-  // a radius. Class 0x30's weapon hands have one (`EnemyZombieInitByCharType`,
-  // `FUN_00452FD0`); the mesh is the game's to test
-  // (`ShotTestPickedBoneMeshes`), so this pick passes the bone by -- even
-  // with a radius left on it, which no routine that gives a mesh leaves.
-  const torsoAt = new Vector3();
-  const tr = chars.boneSphere(AT, 1, torsoAt);
-  const pick = () => chars.pickShot({
-    origin: { x: torsoAt.x, y: torsoAt.y, z: 0 }, dir: { x: 0, y: 0, z: -1 } });
-  const onSphere = pick();
-  check("the torso's sphere is shot while it has no mesh",
-        onSphere?.kind === "actor" && onSphere.bone === 1 && (tr ?? 0) > 0,
-        JSON.stringify(onSphere));
-  a.boneColi["1"] = "hand";
-  check("...and passed by once it has one: the mesh is the game's to test",
-        pick() === null, JSON.stringify(pick()));
-  delete a.boneColi["1"];
 
   stage.dispose();
   G.g_object_list.length = 0;

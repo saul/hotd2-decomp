@@ -20,23 +20,23 @@ is in `tools/verify_all.py`, beside the command that runs it.
 | Directory | Lines | Files | Layer |
 |---|---:|---:|---|
 | `game/` | 82636 | 277 | engine |
-| `hod2lib/` | 18316 | 35 | engine |
-| `render/` | 13592 | 49 | render |
-| `app/` | 7921 | 29 | app |
+| `hod2lib/` | 18350 | 35 | engine |
+| `render/` | 14107 | 50 | render |
+| `app/` | 7929 | 29 | app |
 | `script/` | 4773 | 27 | engine |
 | `ui/` | 3190 | 27 | ui |
 | `bundle/` | 2619 | 11 | engine |
 | `core/` | 949 | 9 | engine |
 | `hud/` | 491 | 1 | ui |
 | `audio/` | 390 | 1 | render |
-| **total** | **134877** | **466** | |
+| **total** | **135434** | **467** | |
 
 The largest files, which is where the pressure to split next is:
 
 * `game/globals.ts` — 2474
 * `game/actor.ts` — 2448
 * `hod2lib/exetab.ts` — 2212
-* `app/main.ts` — 2175
+* `app/main.ts` — 2183
 * `script/walker.ts` — 2162
 
 ## The port
@@ -56,9 +56,9 @@ The two declared seams between the UI and the player: **`PlayerCommands` has 53 
 
 | | |
 |---|---|
-| Named functions | 1258 in `ghidra/annotations/functions.tsv` |
-| Named globals | 620 in `ghidra/annotations/globals.tsv` |
-| Verifier scripts | 41 under `tools/`, run together by `verify_all.py` |
+| Named functions | 1263 in `ghidra/annotations/functions.tsv` |
+| Named globals | 624 in `ghidra/annotations/globals.tsv` |
+| Verifier scripts | 42 under `tools/`, run together by `verify_all.py` |
 
 Phase and format status is a judgement about what counts as solved,
 and lives in [`PROGRESS.md`](PROGRESS.md).
@@ -133,6 +133,7 @@ nothing exits 3 and is never counted as green.
 | `verify_effects` | that each of the 29 effect trees walks to exactly the node count `g_effect_bone_counts` declares, and that every motion the effect system plays divides by the stride that count implies -- the only check that reads a motion at the effect stride rather than a character's | game-dir |
 | `verify_horde` | that every number the class-0x40 horde is steered by -- its entry splines, spline rates, shot delays, wander grid, second skin and the emerge prop's corners -- is the EXE's, and that the seven descriptors split five hordes to two props on the byte PlaceHorde switches on | game-dir |
 | `verify_water` | that class 0x41 type 1, the canal water task, starts from the table the EXE indexes -- ten flat water tiles -- and that every slot, flag, camera cue and multiplier the port's copy of it tests is the immediate at the instruction that holds it; its fifteen spawns sit at the origin, so a wrong reading draws nothing and looks like nothing | game-dir |
+| `verify_draw_order` | that the player's two passes and translucent order are the EXE's: the blend and depth tables `render/draw_order.ts` copies, the alpha-test and blend-enable pushes, and the VIEW matrix and comparator bytes that make the sort nearest-first rather than the painter's order this repo's docs had -- plus that no mesh in `pol/` turns its depth write off, which is why translucent meshes occlude | game-dir |
 | `verify_bats` | that the class-0x46 bat's flight paths still line up with the descriptors that select them -- the only check on a class whose spawns are all at the world origin and take their whole position from an EXE table, so nothing about a wrong reading of them looks wrong in the data | game-dir |
 | `verify_attachments` | that every face and accessory a spawn's attachment list names has a model in the stage's glTF -- the check that would have caught the civilians having no hair, because a civilian's own head model is a shell open at the back and every count was right without it | game-dir |
 | `verify_bone_cels` | that every cel run `ZombieDrawBonePart` (`FUN_004534A0`) draws is still the arithmetic in the EXE and is still in the bundle -- no table in the image names those models, so this is the only thing standing between a hand-written run and `char_adv02` losing its midriff again | game-dir |
@@ -141,7 +142,7 @@ nothing exits 3 and is never counted as green.
 | `verify_geometry` | that every scenery part in a stage bundle holds every triangle its `pol/` models declare -- the only check that compares an export against the files it was made from rather than against another export | game-dir |
 | `baseline` | that the installed assets still hash to `manifest.csv` | game-dir |
 
-18 of them need the installed game and 15 need an exported
+19 of them need the installed game and 15 need an exported
 bundle. **That is a known hole, not a design:** a machine with
 neither cannot run the checks that compare two histories, and a
 bundle-free fixture is the open work that closes it.

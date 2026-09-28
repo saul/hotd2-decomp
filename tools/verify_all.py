@@ -299,6 +299,16 @@ CHECKS: list[Check] = [
           "at the origin, so a wrong reading draws nothing and looks like "
           "nothing",
           NEEDS_GAME),
+    Check("verify_draw_order", ".",
+          ["python3", "tools/verify_draw_order.py", "--game-dir",
+           "{game_dir}"],
+          "that the player's two passes and translucent order are the EXE's: "
+          "the blend and depth tables `render/draw_order.ts` copies, the "
+          "alpha-test and blend-enable pushes, and the VIEW matrix and "
+          "comparator bytes that make the sort nearest-first rather than the "
+          "painter's order this repo's docs had -- plus that no mesh in `pol/` "
+          "turns its depth write off, which is why translucent meshes occlude",
+          NEEDS_GAME),
     Check("verify_bats", ".",
           ["python3", "tools/verify_bats.py", "--game-dir", "{game_dir}"],
           "that the class-0x46 bat's flight paths still line up with the "

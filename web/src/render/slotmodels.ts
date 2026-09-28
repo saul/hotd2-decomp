@@ -45,7 +45,9 @@
  * way. This layer tests the ones that do not; `CharacterLayer.pickShot` says
  * what that costs them.
  */
-import { Group, Matrix4, Object3D, Ray, Vector3, type Mesh } from "three";
+import {
+  Group, Matrix4, Object3D, Ray, Vector3, type Material, type Mesh,
+} from "three";
 import type { System } from "../core/system";
 import type { RenderContext } from "./context";
 import { ActorFlag, MotionFlag, type Actor, type HumanoidActor }
@@ -66,6 +68,7 @@ import {
   CARRIER_WAKE_PAIR, type ScriptedPropTail,
 }
   from "../game/class13/state";
+import { applyForcedAlphaBlend } from "./draw_order";
 
 /**
  * The literals of the carrier routines' own draws, read off the disassembly
@@ -116,16 +119,23 @@ function mScale(m: Matrix4, x: number, y: number, z: number): void {
  * `AssetDrawSlotWithAlpha` (`FUN_004185A0`)'s alpha, on a clone. The clone
  * shares its template's materials, so it gets its own before its opacity is
  * touched -- and only once something has faded it, so an opaque draw keeps
- * sharing.
+ * sharing. The state is `DrawModelWithForcedAlphaBlend`'s (`FUN_004A8440`),
+ * at each mesh's own base alpha times this one; see `setSlotAlpha` in
+ * `boss3_effects.ts`, which is the same draw for the effect layers.
  */
 function setDrawAlpha(c: Object3D, alpha: number): void {
   if (alpha >= 1 && c.userData.drawAlpha === undefined) return;
   if (c.userData.drawAlpha === undefined) {
+    const own = (x: Material) => {
+      const m = x.clone();
+      m.userData.hod2BaseOpacity = x.opacity;
+      return m;
+    };
     c.traverse((o) => {
       const mesh = o as Mesh;
       if (!mesh.material) return;
       mesh.material = Array.isArray(mesh.material)
-        ? mesh.material.map((x) => x.clone()) : mesh.material.clone();
+        ? mesh.material.map(own) : own(mesh.material);
     });
   }
   c.userData.drawAlpha = alpha;
@@ -134,8 +144,8 @@ function setDrawAlpha(c: Object3D, alpha: number): void {
     const mats = !mesh.material ? []
       : Array.isArray(mesh.material) ? mesh.material : [mesh.material];
     for (const mat of mats) {
-      mat.transparent = true;
-      mat.opacity = Math.max(0, Math.min(1, alpha));
+      applyForcedAlphaBlend(
+        mat, alpha, (mat.userData.hod2BaseOpacity as number | undefined) ?? 1);
     }
   });
 }

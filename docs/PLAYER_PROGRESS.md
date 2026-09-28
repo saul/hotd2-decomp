@@ -4621,6 +4621,69 @@ What is not done: class 0x25's twin (`ScriptedHumanoidAimHeadAtCamera`, an
 absolute turn on two other words, switched by an op no exported program
 uses), and Training's hook swap, which is declared on both updates.
 
+### Translucent meshes are drawn the engine's way: two passes, depth written, nearest first
+
+The report was a car: `?stage=2&mode=free&entry=0&block=1&step=1&op=17`, the
+two parked cars in the opening street (`char_adv04`, class 0x33's
+`prop_0668_s`), "translucent windows, not rendering properly at all". Black
+slabs lay across the doors and the roof. The car's body is three translucent
+shells, and inside them, just smaller and sharing no vertex, three black
+copies that are the interior; the player drew the far side's interior over
+the near side's paint.
+
+The player had never used the engine's composite state. `GLTFLoader` turned
+every `alphaMode: BLEND` material into `transparent: true, depthWrite: false`
+with three.js's normal blend, and three.js sorted each glTF *primitive* on its
+own bounding sphere, farthest first. The engine does none of that
+(`render/draw_order.ts`, from `TranslatePvr2StateToD3D` `FUN_004A7780`,
+`WalkMeshChainAndDraw` `FUN_004A7EF0`, `RenderFlushCommandList` `FUN_004A88E0`
+and `RenderCommandCompare` `FUN_004A8A20`):
+
+* **The pass is the TSP's**, `(tsp & 0x180000) != 0x80000`, not the list type:
+  translucent-pass meshes blend and alpha-test at ALPHAREF 1, opaque-pass ones
+  do neither.
+* **Every mesh writes depth, translucent ones included**: ISP bit 26 is clear
+  and the compare is `LESSEQUAL` in all 82,494 meshes in `pol/`.
+* **The blend factors are the mesh's own.** 5,408 meshes are additive
+  (`SRCALPHA`/`ONE`) and 54 in `boss6` are `INVDESTCOLOR`/`ZERO`; all of them
+  had been ordinary blends. Stage 6's enemies' blades glow now.
+* **The translucent pass sorts whole models, nearest first**, each drawn in
+  chain order. The key is the least eye z of the model's origin and every mesh
+  pass 0 skipped, and the eye space looks down -z (`RenderInitStates` installs
+  `VIEW = diag(1, 1, -1, 1)`), so the sort is by the farthest point, nearest
+  first. The docs had it as "farthest first, painter's order".
+* **Layer 7** -- `RegionDrawResidentSet`'s draw mode 2, two stage-1 models --
+  sorts before the world's layer 8.
+* **A fading draw** (`AssetDrawSlotWithAlpha`, `DrawModelWithForcedAlphaBlend`
+  `FUN_004A8440`) is one path now for the effect layers, the slot models and
+  the rain: every mesh deferred, blended `SRCALPHA`/`INVSRCALPHA`, at the
+  mesh's own base alpha times the draw's (it had replaced the base alpha), and
+  still writing depth -- the rain had turned its depth write off "or the drops
+  occlude each other", which is what the engine lets them do.
+
+The exporter gives every primitive `hod2_model` (the rare rig part that draws
+two slots is two commands -- stage 1's car body) and `hod2_sphere`, the mesh
+header's own sphere, which is not the bounding box's centre for one mesh in
+ten. **Re-export every bundle**; an older one sorts on the geometry's sphere
+and treats a two-slot part as one command. `tools/verify_draw_order.py` checks
+the tables, the pushes and the sign of the sort against the EXE, and the
+corpus premise.
+
+What is not done: the opaque pass keeps three.js's front-to-back order rather
+than the engine's submission order, which differs only for coplanar opaque
+surfaces; the player's own transparent meshes (labels, debug overlays, the
+deep screen sprites) sort after the NL1 commands of their layer rather than by
+any exe rule, and the queued sprite quads' own layer (`0x007E78B8`, 0) is not
+modelled; and the exporter strips a texture's alpha for every mesh with
+`IgnoreTexAlpha` set, where nothing in the D3D translation reads that bit --
+so a fading opaque mesh, and the 112 translucent-pass meshes that set both
+bits 19 and 20 on an ARGB texture (`boss6`, `st_adver03`), blend on their base
+alpha alone where the engine would [likely] multiply the texture's in.
+
+**The water at block 16 step 14** (the report's second item) was already
+drawn by the time this was read -- main's class 0x41 type 1 port, above --
+and its four tiles are opaque-pass meshes, so none of this changes them.
+
 ## The bosses' shared furniture: the health bar, the name banner, the shot test
 
 Four bosses end stages 1-4 -- Judgment (class 0x22 with its companion 0x23),

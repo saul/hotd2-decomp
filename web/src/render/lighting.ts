@@ -108,6 +108,7 @@ import {
 } from "three";
 import type { System } from "../core/system";
 import type { RenderContext } from "./context";
+import { copyDrawState } from "./draw_order";
 
 /** 2*pi / 65536 — the constant both matrix rotators multiply by. */
 
@@ -448,6 +449,9 @@ export class SceneLighting implements System<RenderContext> {
         fog: b.fog,
         name: b.name,
       });
+      // The depth function and blend factors `TranslatePvr2StateToD3D`
+      // decided, which the constructor above does not take.
+      copyDrawState(b, twin);
       twin.userData = m.userData;
       // Keep the fog uniform hook the fog module installed.
       twin.onBeforeCompile = m.onBeforeCompile;

@@ -21865,3 +21865,90 @@ and move `ZombieShouldStandAndThrow` onto it, then check every other reader;
 port the `zslman` afterimage task (`ZslmanBladeEmitAfterimage`,
 `ZslmanBladeAfterimageFade`) once the renderer can tint a node; round-trip the
 annotations through `export-annotations` from the main checkout.
+
+## 2026-09-28 -- translucency: the two passes, the depth write, and a sort that runs nearest first
+
+**The reports** (`docs/NEW-BUGS-2.md`). (a) "depth rendering bugs with some
+meshes, e.g. this car that has translucent windows. it's not rendering
+properly at all" at `?stage=2&mode=free&entry=0&block=1&step=1&op=17`.
+(b) "the water plane at `?stage=2&mode=play&entry=0&block=16&step=14&op=1`
+doesn't render at all (maybe fixed now)".
+
+**(b) first, because it was already done.** Main's `3358eba3` (class 0x41
+type 1, `WaterSurfaceUpdate`) draws the canal; screenshots at the URL, before
+and after this session's change, show the water with its ripple at 500 ms and
+3 s of play. The four tiles (`st2_07` 0-3) are opaque-pass meshes
+(`tsp 0x20080464`), so the translucency work does not touch them.
+
+**(a), what was wrong.** The car is `prop_0668_s`, class 0x33 selector 2,
+model `char_adv04` 0: chain 0-2 translucent body shells, 3-6 opaque, 7-9 black
+translucent copies that share no vertex with the shells and sit just inside
+them. The player drew black slabs over the doors and the roof. Reading the
+draw path end to end:
+
+* `TranslatePvr2StateToD3D` (`0x004A7780`): ZFUNC from ISP 31-29 through
+  `g_ZFuncTable`, ZWRITEENABLE from ISP 26 inverted, SRC/DESTBLEND from TSP
+  through their tables, and **state 0x0F -- ALPHATESTENABLE -- from the pass
+  bits**. `functions.tsv` said that push was ALPHABLENDENABLE (27); it is not.
+* Blending is per pass: `RenderBeginCommandList` (`0x004A7A10`, named here)
+  pushes 0x1B = 0 when the list opens, `RenderFlushCommandList` 0x1B = 1
+  before the flush.
+* Corpus: all 82,494 meshes have ISP bit 26 clear and compare mode 4
+  (`LESSEQUAL`). Every translucent mesh writes depth.
+* The sort: `RenderCommandCompare` is layer ascending, then `+4` descending.
+  `+4` is seeded with the modelview `_43` and lowered (a minimum) by each
+  skipped mesh's sphere-centre z, including an opaque one outside the frustum
+  (`& 0xFFF000` on `ComputeSphereVisibility`'s status).
+* **The sign**: `RenderInitStates` installs `VIEW` = the matrix at
+  `0x00598B38`, diag(1, 1, -1, 1), and `BuildPerspectiveProjection` is
+  left-handed (`_34 = 1.0` at `0x004ABD76`). So stack eye z is negative in
+  front; the key is the farthest skipped point and descending is **nearest
+  first**.
+* `DrawModelWithForcedAlphaBlend` (`0x004A8440`), reached through
+  `RenderEnqueueCommandFaded` (`0x004A8390`) from `AssetDrawSlotWithAlpha`:
+  pass 0 skips every mesh; pass 1 draws them all with the TSP rewritten
+  `& 0x03FFFF7F | 0x94000080` and alpha = base alpha x the draw's; ISP kept.
+
+The player had `GLTFLoader`'s BLEND (no depth write, normal blend) and
+three.js's per-primitive far-first sort. `render/draw_order.ts` now applies
+the state at load and is the renderer's transparent sort; the exporter adds
+`hod2_model` and `hod2_sphere` to every primitive. Before/after shots of the
+car from four angles (scratch, not committed: `car_before_*`/`car_after_*`):
+black slabs gone, glass shows the interior and the street. Stage 6's blades
+became glowing beams (additive, as the TSP says). Driven, pixel-diffed frames
+at stages 2-6 differ by 0-0.5% elsewhere (hair edges, overlaps) except stage
+6's 3.3%, which is the blades.
+
+**Wrong turns.**
+
+* I started from `gltf.DRAW_ORDER` and `pipeline.md`, which said "farthest
+  first, painter's order", and planned a back-to-front sort with the nearest
+  mesh as the key. Reading `g_view_flip_z` reversed both halves: the minimum
+  of a negative-forward z is the farthest point, and descending is nearest
+  first. The comparator had been read right; the axis had been assumed
+  (L61 -- the commit message says L57; main took L57 to L60
+  while this was in review).
+* The user's URL is free roam at the rail start, where the car is not in
+  view. My first capture hook patched `WebGLRenderer.prototype.render`, which
+  three.js does not call (it assigns `render` per instance); patching
+  `Scene.prototype.onBeforeRender` and setting the camera there, after three
+  has updated its matrices and before it builds the frustum, worked.
+* I took the navy van in block 2 (`prop_0710_s`) for the car. Every one of its
+  meshes is opaque-pass; the car with the translucent shells is `prop_0668_s`
+  across the street.
+* Layer 7 first went on the model's `Group`. A group's `renderOrder` becomes
+  its children's `groupOrder`, which three.js compares before `renderOrder`,
+  so that would have drawn the model before the backdrop's -1000; it is on the
+  primitives.
+* `verify_draw_order.py`'s first byte pattern for `RenderBeginCommandList`
+  assumed the two pushes were adjacent; the compiler put `AND AL, 0xFC`
+  between them. The check failed on the tree, which is what it is for.
+* Two harness runs died on vite's "504 Outdated Optimize Dep": the worktree's
+  `node_modules` is a symlink to main's, so every agent's vite shares one
+  `.vite` cache. A re-run passed.
+
+**Open.** The opaque pass keeps three.js's order, not submission order. The
+exporter's `IgnoreTexAlpha` stripping has no counterpart in the D3D
+translation, so 112 translucent-pass meshes on ARGB textures (`boss6`,
+`st_adver03`) and a fading opaque mesh lose texture alpha the engine would
+[likely] use. The queued sprite quads' own layer is not modelled.

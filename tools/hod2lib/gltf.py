@@ -326,20 +326,34 @@ def _bams_euler_to_quat(rx: float, ry: float, rz: float
 
 
 #: How a frame is ordered, recorded so a target renderer can reproduce it
-#: rather than guess. Proved from `RenderFlushCommandList` (0x004A88E0) and
-#: its qsort comparator (0x004A8A20).
+#: rather than guess. Proved from `RenderFlushCommandList` (0x004A88E0), its
+#: qsort comparator `RenderCommandCompare` (0x004A8A20),
+#: `WalkMeshChainAndDraw` (0x004A7EF0) and `TranslatePvr2StateToD3D`
+#: (0x004A7780). The TypeScript writer's copy says the same; see its note on
+#: why the depth is nearest first (eye space looks down -z: `RenderInitStates`
+#: installs VIEW = diag(1, 1, -1, 1) under a left-handed projection).
 DRAW_ORDER = {
     "passes": ["opaque", "translucent"],
     "opaque": "drawn at submission time by RenderEnqueueCommand, in "
-              "submission order -- not sorted",
+              "submission order -- not sorted; ALPHABLENDENABLE off "
+              "(0x004A7A10 clears it when the command list is opened), no "
+              "alpha test",
     "translucent": "drawn by RenderFlushCommandList after sorting the whole "
-                   "command list",
+                   "command list; ALPHABLENDENABLE on, blend factors from "
+                   "TSP 31-26, alpha test on (ALPHAREF 1, GREATEREQUAL), "
+                   "z-write from ISP bit 26 -- which no mesh in the game "
+                   "sets, so translucent meshes write depth",
     "sort_key": "(draw_layer ASC, sort_depth DESC)",
     "sort_comparator": "0x004A8A20: layer = flags & 0xF compared ascending; "
-                       "on a tie, sort_depth compared descending, i.e. "
-                       "farthest first (back-to-front painter's order)",
-    "sort_depth": "command +0x04: seeded from the world matrix _43 and "
-                  "refined to the nearest mesh Z by the walker",
+                       "on a tie, sort_depth compared descending. Eye z is "
+                       "negative in front of the camera, so descending is "
+                       "nearest first",
+    "sort_depth": "command +0x04: seeded from the modelview matrix _43 (the "
+                  "model origin's eye z) and lowered by pass 0 of the walker "
+                  "to the least eye z of the sphere centre of every mesh it "
+                  "skips -- each translucent mesh, and each opaque one whose "
+                  "sphere is outside the frustum. The least z is the "
+                  "farthest of those points",
     "within_a_command": "meshes are walked in chain (file) order; meshes "
                         "belonging to the other pass are skipped",
     "pass_selector": "(tsp & 0x180000) == 0x80000 -> opaque; anything else "
@@ -347,15 +361,27 @@ DRAW_ORDER = {
     "default_draw_layer": 8,
     "note": "glTF cannot express render order, so primitives are emitted "
             "opaque-first then translucent, each in chain order, and every "
-            "primitive carries hod2_pass and hod2_chain_index in its extras.",
+            "primitive carries in its extras hod2_pass, hod2_chain_index, "
+            "hod2_model (which of the glTF mesh's NL1 models it belongs to: "
+            "one draw command each) and hod2_sphere (the mesh header's "
+            "centroid and radius, +0x10 and +0x1C, in model space).",
 }
 
 
-def _draw_order_extras(mesh, chain_index: int) -> dict:
-    """Per-primitive draw-order data, for a renderer that can honour it."""
+def _draw_order_extras(mesh, chain_index: int, model: int = 0) -> dict:
+    """Per-primitive draw-order data, for a renderer that can honour it.
+
+    ``model`` is the NL1 model the mesh came from within the one glTF mesh:
+    always 0 for level geometry, and a rig part that draws several slots is
+    several draw commands. ``hod2_sphere`` is the header's own sphere, which
+    ``WalkMeshChainAndDraw`` culls and sorts with.
+    """
     return {
         "hod2_pass": "opaque" if mesh.opaque_pass else "translucent",
         "hod2_chain_index": chain_index,
+        "hod2_model": model,
+        "hod2_sphere": [mesh.centroid[0], mesh.centroid[1], mesh.centroid[2],
+                        mesh.radius],
     }
 
 
@@ -1017,7 +1043,7 @@ def export_level(name, parts, out_dir, collision=None, rigs=None,
             node_by_part: dict[str, int] = {}
             for part, models in entry["parts"]:
                 prims = []
-                for model, bank, label in models:
+                for k, (model, bank, label) in enumerate(models):
                     for mesh in model.meshes:
                         if not mesh.triangles or not mesh.vertices:
                             continue
@@ -1034,7 +1060,7 @@ def export_level(name, parts, out_dir, collision=None, rigs=None,
                                 [i for tri in mesh.triangles for i in tri]),
                             "material": get_material(label, bank, mesh),
                             "mode": TRIANGLES,
-                            "extras": _draw_order_extras(mesh, len(prims)),
+                            "extras": _draw_order_extras(mesh, len(prims), k),
                         })
                 prims = _ordered_prims(prims)
                 if not prims:

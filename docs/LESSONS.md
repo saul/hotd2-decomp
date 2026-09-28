@@ -882,3 +882,19 @@ listing past every no-return call in each writer, and to the line after the
 allocation, before it is written: an engine that really read garbage there
 would spin its knives differently from throw to throw, which is itself a claim
 about the game that nobody had checked.
+
+**L61 -- A loader's default is a claim about the game, and so is the sign of
+an axis.** `GLTFLoader` turns `alphaMode: BLEND` into `depthWrite: false` and a
+normal blend, and three.js sorts transparent primitives farthest first. The
+player took both for as long as it existed, and they were three wrong claims
+about this engine at once: every one of its 82,494 meshes writes depth, 5,408
+of them add rather than blend, and its translucent pass orders whole models,
+nearest first. What made it visible was a car whose interior -- a black shell
+just inside the paint -- was drawn over the paint. The "farthest first,
+painter's order" in the docs came from reading `RenderCommandCompare`
+correctly (descending) and assuming the depth it compares was D3D's +z; it is
+the matrix stack's, and `RenderInitStates` flips z into D3D's view with
+`diag(1, 1, -1, 1)`. **When you port an order, find the matrix that defines
+the axis before you say which end comes first**, and treat any default a
+library supplies for state the exe sets explicitly as a divergence until it is
+shown to agree.

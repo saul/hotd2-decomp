@@ -21,6 +21,7 @@ import {
 } from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import type { ScriptJson } from "../bundle";
+import { prepareDrawCommands } from "./draw_order";
 import { subtreeResources } from "./scope3d";
 
 export interface ModelInfo {
@@ -64,6 +65,10 @@ export class StageScene {
 
   static async load(url: string, script: ScriptJson): Promise<StageScene> {
     const gltf = await new GLTFLoader().loadAsync(url);
+    // Before anything clones a node: every layer that draws a stage model
+    // copies it, and the copies must carry the engine's draw state and the
+    // primitive marks the translucent sort groups by. See `draw_order.ts`.
+    prepareDrawCommands(gltf.scene, gltf.parser.associations);
     return new StageScene(gltf.scene, script);
   }
 

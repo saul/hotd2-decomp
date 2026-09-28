@@ -642,8 +642,8 @@ export class EffectLayer implements System<RenderContext> {
    * `SpriteEffectDrawAndTick`), which blend over it. Every effect here is at
    * `renderOrder` 900 and the world at 0, and three.js sorts transparent
    * objects by `renderOrder` first, so 899 is exactly the exe's slot.
-   * Nothing translucent writes depth (the loader's `BLEND` materials), so the
-   * order is the whole of it.
+   * Translucent meshes write depth (see `draw_order.ts`), so within a layer
+   * `RenderCommandOrder` decides which of two overlapping ones survives.
    *
    * **Only while a task that draws it is the player's.** The draw is inside
    * `DamageOverlayUpdateAndDraw`, which only `PlayerUpdateInPlay` and

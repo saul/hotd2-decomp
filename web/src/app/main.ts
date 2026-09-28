@@ -35,6 +35,7 @@ import {
 import { CameraDrawSystem, CameraRig, CameraTakeSystem }
   from "../render/camera";
 import { StageScene } from "../render/stagescene";
+import { RenderCommandOrder } from "../render/draw_order";
 import { SpawnLayer } from "../render/overlays";
 import { FreeRoam, ownsKey } from "../render/freeroam";
 import { Walker, type CamCommand, type FeedEntry } from "../script/walker";
@@ -139,6 +140,8 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
   private readonly renderer: WebGLRenderer;
   readonly scene = new Scene();
   readonly camera: PerspectiveCamera;
+  /** The translucent pass's order. See `render/draw_order.ts`. */
+  private readonly drawOrder: RenderCommandOrder;
   /** React's, handed over once it has them. See `app/ui_root.ts`. */
   private readonly viewport: HTMLElement;
   private readonly canvas: HTMLCanvasElement;
@@ -465,6 +468,10 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
 
     // SetupSceneProjection: BuildPerspectiveProjection(0x1D3B, 4/3, 0.8, 8000).
     this.camera = new PerspectiveCamera(41.1, 4 / 3, 0.8, 8000);
+    // `RenderFlushCommandList`'s qsort: whole draw commands, nearest first,
+    // each walked in chain order -- not three.js's per-primitive far-first.
+    this.drawOrder = new RenderCommandOrder(this.camera);
+    this.renderer.setTransparentSort(this.drawOrder.compare);
     // Shooting needs a camera to cast through and a scene to cast at, and
     // this is the first moment both exist. It used to be handed them by the
     // Shoot toggle's command, which meant a click did nothing at all until
@@ -1658,6 +1665,7 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
 
   /** Draw, then publish. Every frame, whether or not it owed a tick. */
   endFrame(): void {
+    this.drawOrder.beginFrame();
     this.renderer.render(this.scene, this.camera);
     this.keepThumb();
     // The one update path, and it is unconditional on purpose. A projection a

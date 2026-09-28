@@ -121,6 +121,16 @@ CHECKS: list[Check] = [
           "that unchanged slices keep their identity across a frame"),
     Check("test:ui", "web", ["npm", "run", "--silent", "test:ui"],
           "that the page has the shape the stylesheet expects"),
+    Check("test:net-codec", "web", ["npm", "run", "--silent", "test:net-codec"],
+          "that netplay's state codec lands a replica on the host's state "
+          "exactly -- deep-equal and hash-equal on every tick it applies -- "
+          "over fuzzed trees with lost, reordered and late-acked packets; the "
+          "only check of the delta's window property and of pool identity"),
+    Check("test:signal", "web", ["npm", "run", "--silent", "test:signal"],
+          "that the netplay rendezvous keeps its protocol over real HTTP in "
+          "all three of its servers -- the dev server's, the standalone one "
+          "and the Cloudflare Worker's -- refusals, queues, reconnects, "
+          "rejoins and the TURN credentials included"),
     Check("test:pose", "web", ["npm", "run", "--silent", "test:pose"],
           "that a skeleton posed from a motion lands where the exporter says"),
     Check("test:render", "web", ["npm", "run", "--silent", "test:render"],
@@ -139,6 +149,12 @@ CHECKS: list[Check] = [
     Check("test:camera", "web", ["npm", "run", "--silent", "test:camera"],
           "that a camera path seats where the exe's own evaluation puts it",
           NEEDS_BUNDLE),
+    Check("test:net", "web", ["npm", "run", "--silent", "test:net"],
+          "that netplay's host and replica sessions keep a replica on the "
+          "host's state through a real stage on a lossy link -- every tick "
+          "hash-verified, a seek's epoch followed, player 2's START and "
+          "shots reaching player index 1 once each -- with no browser",
+          NEEDS_BUNDLE),
     Check("flag_gates", "web",
           ["node", "tools/run_ts.mjs", "tools/flag_gates.ts"],
           "that every `wait_script_flag` gate no `set_script_flag` on the "
@@ -150,6 +166,16 @@ CHECKS: list[Check] = [
           "class-0x30 state whose sole exit is a script flag a civilian's own "
           "stream raises",
           NEEDS_BUNDLE),
+    Check("net_pair", "web", ["npm", "run", "--silent", "net-pair", "--",
+                              "--seconds", "8"],
+          "that two-player netplay works in the page: a host and a replica "
+          "in two tabs and over real WebRTC through the dev server's "
+          "rendezvous, every tick the replica applies hash-equal to the "
+          "host's, player 2 joining and scoring, its aim checked against the "
+          "host's camera, and a pause, a reload and a stage change survived "
+          "-- the only check of the replica's install into G and of the "
+          "render layers following a state they did not make",
+          NEEDS_BUNDLE, LANE_BROWSER),
     Check("loops", "web", ["npm", "run", "--silent", "loops"],
           "that the looping sound effects reach an <audio> element, wrap "
           "rather than running out, and are still there when the stage is "

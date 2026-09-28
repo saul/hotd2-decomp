@@ -22,20 +22,20 @@ is in `tools/verify_all.py`, beside the command that runs it.
 | `game/` | 102160 | 336 | engine |
 | `hod2lib/` | 19029 | 35 | engine |
 | `render/` | 14873 | 54 | render |
-| `app/` | 8550 | 29 | app |
+| `app/` | 11721 | 41 | app |
 | `script/` | 4410 | 25 | engine |
-| `ui/` | 3181 | 24 | ui |
+| `ui/` | 3478 | 25 | ui |
+| `core/` | 2899 | 13 | engine |
 | `bundle/` | 2727 | 11 | engine |
-| `core/` | 978 | 9 | engine |
 | `audio/` | 973 | 2 | render |
 | `hud/` | 491 | 1 | ui |
-| **total** | **157372** | **526** | |
+| **total** | **162761** | **543** | |
 
 The largest files, which is where the pressure to split next is:
 
+* `app/main.ts` — 2896
 * `game/globals.ts` — 2793
 * `game/actor.ts` — 2629
-* `app/main.ts` — 2581
 * `hod2lib/bundle.ts` — 2322
 * `hod2lib/exetab.ts` — 2269
 
@@ -59,7 +59,7 @@ Both markers are counted in **every** `.ts`/`.tsx` file under `web/src/`, one pe
 | ui | `hud/`, `ui/` | 0 | 0 |
 | app | `app/` | 1 | 0 |
 
-The two declared seams between the UI and the player: **`PlayerCommands` has 52 members against `PlayerView`'s 34** — how much of the player a click can move, against how much of it the page can see. Neither can grow without a line appearing in the open.
+The two declared seams between the UI and the player: **`PlayerCommands` has 53 members against `PlayerView`'s 37** — how much of the player a click can move, against how much of it the page can see. Neither can grow without a line appearing in the open.
 
 ## The decomp
 
@@ -113,6 +113,8 @@ nothing exits 3 and is never counted as green.
 | `test:scope` | that lifetimes are given back | — |
 | `test:projection` | that unchanged slices keep their identity across a frame | — |
 | `test:ui` | that the page has the shape the stylesheet expects | — |
+| `test:net-codec` | that netplay's state codec lands a replica on the host's state exactly -- deep-equal and hash-equal on every tick it applies -- over fuzzed trees with lost, reordered and late-acked packets; the only check of the delta's window property and of pool identity | — |
+| `test:signal` | that the netplay rendezvous keeps its protocol over real HTTP in all three of its servers -- the dev server's, the standalone one and the Cloudflare Worker's -- refusals, queues, reconnects, rejoins and the TURN credentials included | — |
 | `test:pose` | that a skeleton posed from a motion lands where the exporter says | — |
 | `test:render` | that the renderers rebuild from engine state alone | — |
 | `test:texfilter` | that the texture filter modes match the D3D7 translation | — |
@@ -120,7 +122,9 @@ nothing exits 3 and is never counted as green.
 | `test:seek` | that a seek reaches the address it was asked for | bundle |
 | `test:state` | that a save/load and a seek reach the *same world* play did -- the only check that compares two histories rather than one | bundle |
 | `test:camera` | that a camera path seats where the exe's own evaluation puts it | bundle |
+| `test:net` | that netplay's host and replica sessions keep a replica on the host's state through a real stage on a lossy link -- every tick hash-verified, a seek's epoch followed, player 2's START and shots reaching player index 1 once each -- with no browser | bundle |
 | `flag_gates` | that every `wait_script_flag` gate no `set_script_flag` on the *route* to it can open has the actor that opens it placed on that same route -- the only check that reads a gate per entry block rather than per bundle, which is the difference between stage 3's block 2 on the entry-0 route and on the entry-7 one -- and the only check that asks the same question of an ACTOR, for the one class-0x30 state whose sole exit is a script flag a civilian's own stream raises | bundle |
+| `net_pair` | that two-player netplay works in the page: a host and a replica in two tabs and over real WebRTC through the dev server's rendezvous, every tick the replica applies hash-equal to the host's, player 2 joining and scoring, its aim checked against the host's camera, and a pause, a reload and a stage change survived -- the only check of the replica's install into G and of the render layers following a state they did not make | bundle |
 | `loops` | that the looping sound effects reach an <audio> element, wrap rather than running out, and are still there when the stage is reached by a deep link -- the only check in the tree that measures the mixer rather than the intent | bundle |
 | `bgm_loop` | that the page's music is the engine's stream -- the buffer the script's own track reaches Web Audio as is one period of the file from its first sample to end of file, looped, sample for sample -- and that it is audible | bundle |
 | `keys` | that the page's keys do what the `?` list says when pressed -- test:ui holds the list to the handlers' source, this reads back what a press did -- and that a click on a control over the game hands Space and Enter (START) back to the game rather than leaving them with the button | bundle |
@@ -158,7 +162,7 @@ nothing exits 3 and is never counted as green.
 | `verify_geometry` | that every scenery part in a stage bundle holds every triangle its `pol/` models declare -- the only check that compares an export against the files it was made from rather than against another export | game-dir |
 | `baseline` | that the installed assets still hash to `manifest.csv` | game-dir |
 
-22 of them need the installed game and 18 need an exported
+22 of them need the installed game and 20 need an exported
 bundle. **That is a known hole, not a design:** a machine with
 neither cannot run the checks that compare two histories, and a
 bundle-free fixture is the open work that closes it.

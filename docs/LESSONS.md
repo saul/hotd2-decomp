@@ -1107,3 +1107,24 @@ past. The check that holds it now reads the instruction bytes and the table
 together (`tools/verify_combat.py`, check 17). It is `L1`'s family: the
 decompiler presents the instruction stream as something it is not, and nothing
 marks the substitution.
+
+**L74 -- A fuzzer whose generator cannot make the real data's shape proves
+nothing about it.** Netplay's codec (`core/net/codec.ts`) passed ninety
+thousand fuzzed checks while the one array it was designed around -- the actor
+pool, diffed by identity so a filtered list does not re-send every actor after
+the gap -- was never treated as a pool at all. The port numbers the actors it
+makes itself below zero (`at` -4545), `poolAts` refused negative `at`s, and
+the fuzzer only ever minted positive ones. Nothing failed: indexed diffing is
+correct, merely slow and blind to identity, so every equality and every hash
+still agreed. A measurement on a real stage found it -- `g_object_list` was a
+pool on 22 of 2,400 ticks. **Run a generator's assumptions past the real data
+before trusting what it generated, and measure the property the design is
+for** (here: which arrays are pools), not only the one the test asserts.
+
+**L75 -- Playwright's `browser.newPage()` is a new browser context.** Two
+pages opened that way share nothing -- not a `BroadcastChannel`, not
+`localStorage`, not a cookie -- exactly as two browser profiles would not. The
+first two-tab netplay run (`tools/net_pair.mjs`) paired with nobody and
+reported every figure at zero, which read as a transport that did not work.
+Pages that must see each other take one `browser.newContext()` and call
+`context.newPage()` twice.

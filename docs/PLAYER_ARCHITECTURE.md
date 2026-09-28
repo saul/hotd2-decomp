@@ -479,6 +479,49 @@ What it is for, in rough order of value:
   tests call.)
 * **Resume.** The deep link already carries a stage, a block and a seed; a
   snapshot carries the rest.
+* **Netplay.** A second browser holds the host's state, applied a tick at a
+  time, and proves it by hash. See the next section.
+
+## Netplay: the state, replicated
+
+Two players over WebRTC (`docs/NETPLAY.md`) is this document's rules, used:
+the snapshot is the payload, the render layers rebuild from state, intent
+enters `G` in one place. It added four rules, and each is enforced by a hash
+the replica checks on every tick it applies -- **anything that breaks one
+shows up as a mismatch, with the section of the state it was in named**.
+
+**1. An event subscriber is an output.** It plays, draws or logs; it writes no
+state. The host records every event per tick through `Events.tap`, and the
+replica replays them onto its own bus, so the same subscribers run on both
+ends. A subscriber that wrote state would write it twice on a replica, in an
+order packet timing decides. The one that did -- the dialogue handler setting
+the caption -- now writes it only where the simulation runs. The walker's own
+sounds go out on the bus (`Player.playSound`) for the same reason: an output
+that is a direct call is one a replica never hears.
+
+**2. On a replica, nothing writes the state but the codec.** Its world holds
+dormant every system that writes state -- `GameSystem`'s update, the rain,
+the gun lights' build (`World.setDormant`, which `update` and `resync` both
+respect) -- and the player skips the script phase and sends its gun to the
+host. The role decides this, never the presence of a peer object, which is
+absent while a dropped link reconnects.
+
+**3. A keyframe is adopted, not copied.** `World.load(snap, ctx, { adopt: true })`
+hands each system its slice uncloned, so the decoded objects become `G`'s and
+every delta after lands on the very objects the render layers are bound to.
+Only for a snapshot nobody else holds; everything else takes the clone.
+
+**4. One gun entry point.** `gunInput(player, kind, ray?)` in `app/main.ts`
+is where a press becomes intent in `G`, for this page's gun and for player
+2's, which arrives off the network into player index 1's slots. Player 2 is
+not a special case below that line.
+
+The render layers needed no rule of their own, which is the evidence for the
+existing one (*render owns nothing*): with the character layer rebinding to
+the pool after each applied tick and the scene told the walker's streaming as
+it moves (`Player.replicaStreaming`), every layer follows a state it did not
+make.
+
 ## `script/`: the machine, and the state the script drives
 
 `walker.ts` is 1377 lines. Four separable things used to be fused in it;
@@ -801,6 +844,11 @@ web/src/
     device.ts     the phone as a gun: the flick that reloads, and the one press
                   that asks for fullscreen, landscape and the motion sensors
     stage_load.ts, walker_host.ts, urlstate.ts, viewprefs.ts
+    net/          two players over WebRTC: session.ts (roles, lobby,
+                  rejoin), host.ts and replica.ts (the two ends), rtc.ts,
+                  local.ts and signal.ts (the links and the rendezvous),
+                  player_hooks.ts (the player as netplay sees it), stats.ts.
+                  See docs/NETPLAY.md
   core/         the framework. No three.js, no DOM.
     system.ts     System { id; attach; update; detach; save?; load?; resync? }
                   and Context { walker, scope, session, view, stage, frame }
@@ -811,6 +859,9 @@ web/src/
     events.ts     a typed bus
     rng.ts        seeded, state exposed — snapshots need it
     bams.ts       BAMS_TO_RAD and the angle helpers. One definition.
+    net/          netplay's pure half: codec.ts (the host's shadow and
+                  change lists, the replica's apply, the state hash),
+                  protocol.ts, bytes.ts, hash.ts. No DOM, no three
   game/         the port. The only rules that matter live here.
     class10/ class11/ class14/ class16/ class17/ class19/ class20/ class21/
     class22/ class23/ class24/ class25/ class30/ class31/ class33/ class40/

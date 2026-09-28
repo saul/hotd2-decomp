@@ -67,9 +67,50 @@ export function ActorSpawn(at: number, cls: SpawnClass, charType: number,
  * The routine builds the skeletal model record at `obj+0x194`, and that
  * record is the renderer's hierarchy here -- but for an actor that carries
  * the whole block (`Actor.skel`, `game/skeleton.ts`), which gets the whole
- * build. What it does to every actor's own state is three things, and all
- * three are ported:
+ * build. What it does to every actor's own state is five things, and all
+ * five are ported:
  *
+ * * **The size**, `model+0x116C`, first and from the character type alone:
+ *   {@link ActorModelScale}, the jump table at `0x00410451`..`0x00410490`.
+ *   Every skinned actor gets it, not only the ones that carry the block --
+ *   `Actor.scale` is what the renderer draws the whole model under and what
+ *   the root motion steps by (`game/root_motion.ts`).
+ * * **Each bone's hit radius**, `+0x78` of its record (`obj + 0x284 +
+ *   bone*0x90`): `SkeletonBuildAndPose` (`FUN_00410590`) walks the tree
+ *   through `SkeletonWalkNode` (`FUN_004107E0`), which stores the type's
+ *   sphere radius **times the size just written** --
+ *
+ *   ```
+ *   00410837  FLD  float ptr [ECX + 0x1300]    ; g_cur_actor+0x1300 = model+0x116C
+ *   0041083D  FMUL float ptr [EAX + -0x4]      ; g_character_bone_spheres row's radius
+ *   00410840  FSTP float ptr [ESI + 0x78]      ; the record's
+ *   ```
+ *
+ *   -- and the centre, `+0x7C`, as the row has it, because the centre goes
+ *   through the node matrix, which carries the size already. So a civilian
+ *   drawn at 0.9 is shot through spheres 0.9 as wide, at bones 0.9 as far
+ *   apart. The record is `Actor.boneRadius`, written here in full so that
+ *   every reader -- both shot tests, the blood spray, the dropped-prop test
+ *   -- reads the engine's number and a class that writes over one (the
+ *   frog's bone 2) still wins, because its `Init` runs after this.
+ *
+ *   It is written once, here, and only here: op 0x27's later
+ *   `SetScale` (`CivilianRunScript`, `FUN_0048B9E0`) changes the drawn size
+ *   and leaves every radius as the build made it, as the engine's does.
+ *
+ *   [diverges] `SkeletonWalkNode` takes a row only when the row's own slot is
+ *   the node's -- `MOV EDX,[EAX-0x14]; CMP EDX,[EDI]; JNZ 0x00410876` at
+ *   `0x00410830`, and the other arm zeroes the radius and the centre -- and
+ *   the bundle's `hit_radius` is the row whatever slot it names. Among the
+ *   shipped types the two disagree on bones 5 and 8 of 0x03 and 0x16, 3 and
+ *   11 of 0x1A, 9..14 of 0x1B, 3 of 0x1F and 0x46, 2 of 0x21, 2 and 5 of 0x39
+ *   and 0x3A, 5 of 0x3B and 0x3C, and 9 of 0x3E, which therefore have spheres
+ *   here the engine's build leaves at zero. It wants porting
+ *   with the other writer of the same two fields,
+ *   `ResolveDamagedPartSphere` (`FUN_004099A0`), which `ActorSwapDamagedPart`
+ *   runs on every part swap and which looks the new slot up past the
+ *   per-bone rows -- the thrower's hands are where a sphere the build zeroes
+ *   is restored later, and porting the gate alone would leave them zero.
  * * The draw state: `model+0x64 = 3` — {@link MOTION_FLAGS_INIT}, `c7466403`
  *   at `0x004104C5` — and the vertex-blended parts' records. `model+0x3C` is
  *   `g_pCharacterExtraParts[type]->count` (`0x0052ED08`), `model+0x40` is
@@ -103,6 +144,16 @@ export function ActorSpawn(at: number, cls: SpawnClass, charType: number,
  */
 export function ActorBuildSkinnedModel(obj: Actor): void {
   const type = CharacterTypeOf(obj);
+  // `M[0x116C] = scale by character type`, the build's first write.
+  obj.scale = ActorModelScale(obj.charType);
+  // `SkeletonWalkNode`'s `R+0x78 = obj+0x1300 * row.radius`, for every bone
+  // the type has a sphere for. `fround`, because the engine's is an `FSTP`
+  // to a float.
+  for (const b of type?.bones ?? []) {
+    if (b.hit_radius) {
+      obj.boneRadius[String(b.bone)] = Math.fround(obj.scale * b.hit_radius);
+    }
+  }
   // `M[0x64] = 3` -- drawn, root motion -- and the part records, each
   // `{0, 1}`: the half of the build every skinned actor has.
   obj.motionFlags = MOTION_FLAGS_INIT;
@@ -121,7 +172,8 @@ export function ActorBuildSkinnedModel(obj: Actor): void {
     // parts: M[0x40] = ActorAllocSub(n * 8), each {0, 1}
     // SkeletonBuildAndPose(M, pos, recs)       ; the first pose, and the 0x80
     // ```
-    obj.scale = ActorModelScale(obj.charType);
+    //
+    // (The size is written above, for every actor.)
     skel.counter = 0;
     skel.prevFrame = 0;
     skel.frame = 0;

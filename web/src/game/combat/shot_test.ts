@@ -642,8 +642,9 @@ function ShotTestBoneSphere(obj: Actor, node: CharacterBone, shot: ShotTest,
                             out: ShotCandidate[]): void {
   // An actor that carries the engine's model block has the record itself:
   // `rec+0x68` is what its own `SkeletonEmitNode` wrote this frame, and
-  // `rec+0x78` the type's radius unless a class has written the record's
-  // (`Actor.boneRadius`). See `game/skeleton.ts`.
+  // `rec+0x78` is `Actor.boneRadius`: the type's radius times the model's
+  // size as the build wrote it, or what a class has written over it since.
+  // See `game/skeleton.ts` and `ActorBuildSkinnedModel` in `game/spawn.ts`.
   const rec = obj.skel?.bones[node.bone];
   if (rec) {
     _w.x = rec.hit[0]; _w.y = rec.hit[1]; _w.z = rec.hit[2];

@@ -307,6 +307,7 @@ import { CivilianAttachSet, CivilianCountMotionLoops, CivilianOp,
          CIVILIAN_SPHERE_BONE_MODE3_A, CIVILIAN_SPHERE_BONE_MODE3_B,
          PoseHookGrowAndPushOutOfWorld }
   from "../src/game/class10";
+import { CivilianLeaveField } from "../src/game/class10/update";
 import type { CivilianCmdJson, CivilianItemJson } from "../src/bundle/scene";
 import { GameMode } from "../src/game/game_mode";
 import {
@@ -3544,6 +3545,42 @@ console.log("\nclass 0x25, the object path's attachment offset:");
         && Math.abs(a.pos.z - (20 + r.dz)) < 1e-6
         && a.yaw === r.dyaw,
         `pos ${a.pos.x},${a.pos.y},${a.pos.z} yaw ${a.yaw}`);
+}
+
+console.log("\nclass 0x25, a path in mode 1 gives the rider all three angles:");
+{
+  // `0x00484B6E`-`0x00484B74`: `MOV [EDI+0x64],EAX; MOV [EDI+0x68],ECX;
+  // MOV [EDI+0x6c],EDX` out of `CamEvalObjectPath6`'s three ints, skipped in
+  // mode 2 by `CMP [EDI+0x1358],0x2 / JZ` at `0x00484B5D`. The port wrote the
+  // yaw alone, so a rider on a pitching path stood upright. Three unequal
+  // angles, so a dropped or swapped word shows. Record 0 is the no-offset
+  // sentinel, so nothing is added on top of the path's own yaw.
+  const rng = new Rng(4);
+  const ride = (mode: number) => {
+    const { a, events } = humanoidScene([
+      { op: HumanoidOp.FollowPath, mode, a: 5, b: 0 },
+      { op: HumanoidOp.WaitUntil, mode: HumanoidCond.Frames, a: 9999, b: 0 },
+    ]);
+    a.pitch = 0x0111; a.yaw = 0x0222; a.roll = 0x0333;
+    const host = {
+      ...NULL_HOST,
+      objectPath: () => ({ x: 10, y: 0, z: 20,
+                           pitch: 0x3d8e, yaw: 0x4000, roll: 0x0800 }),
+    };
+    ScriptedHumanoidUpdate(a, { eye: EYE, dt: 1 / 60, rng, host, events });
+    return a;
+  };
+  const one = ride(1);
+  check("mode 1 writes the path's pitch, yaw and roll onto the rider",
+        one.pitch === 0x3d8e && one.yaw === 0x4000 && one.roll === 0x0800,
+        `${one.pitch.toString(16)} ${one.yaw.toString(16)} `
+        + `${one.roll.toString(16)}`);
+  const two = ride(2);
+  check("...and mode 2 takes the position and leaves all three alone",
+        two.pos.x === 10 && two.pitch === 0x0111 && two.yaw === 0x0222
+        && two.roll === 0x0333,
+        `${two.pitch.toString(16)} ${two.yaw.toString(16)} `
+        + `${two.roll.toString(16)}`);
 }
 
 console.log("\nclass 0x25, it is not an enemy:");
@@ -9045,6 +9082,13 @@ console.log("class 0x31, a throw ends at the hub and state 29 re-arms it:");
   const TYPE_REARM = {
     ...TYPE31,
     type: 0x16, name: "zsass", file: "zsass.bin",
+    // Both hands carry a sphere, so the re-arm's write can be told from the
+    // throw's zero whichever hand the coin gives.
+    bones: [
+      ...TYPE31.bones,
+      { bone: 8, part: "l_hand", slot: 8, offset: [0, 0, 0], parent: null,
+        damage_rank: [], hit_radius: 1.5, steps: [] },
+    ],
     motions: {
       ...TYPE31.motions, "8": motion(24), "9": motion(24), "5": motion(20),
     },
@@ -9094,6 +9138,7 @@ console.log("class 0x31, a throw ends at the hub and state 29 re-arms it:");
   events.on("enemy.threw", () => { threw += 1; });
   const seen = new Set<number>();
   let weapon: (typeof G.g_thrown_weapons)[number] | undefined;
+  let radiusThrown: number | undefined;
   for (let i = 0; i < 600; i++) {
     GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
     weapon ??= G.g_thrown_weapons[0];
@@ -9104,6 +9149,7 @@ console.log("class 0x31, a throw ends at the hub and state 29 re-arms it:");
     }
     if (!bare && (z.zones & ARMS) !== 0) {
       bare = (z.zones & DamageZone.RightArm) !== 0 ? "5" : "8";
+      radiusThrown = z.boneRadius[bare];
     }
     if (bare && seen.has(ThrowerState.Rearm) && (z.zones & ARMS) === 0) break;
   }
@@ -9122,6 +9168,19 @@ console.log("class 0x31, a throw ends at the hub and state 29 re-arms it:");
         `bone ${bare} ${z.boneSlot[bare]}`);
   check("...with neither arm still counted destroyed", (z.zones & ARMS) === 0,
         `zones ${z.zones}`);
+  // **The emptied hand could not be shot, and the re-arm gives its sphere
+  // back.** `SpawnThrownWeapon` zeroes the bone record's `+0x78` in every arm
+  // (`0x004505E8` and `0x004505BF` for this type's two hands), and
+  // `ThrowerStateRearm` writes
+  // the table's radius back at `0x0044F831`/`0x0044F891` -- which in the port
+  // is the override coming off.
+  check("...the throw zeroed the bare hand's hit-sphere radius",
+        radiusThrown === 0, `bone ${bare} radius ${radiusThrown}`);
+  const tableR = TYPE_REARM.bones.find((b) => String(b.bone) === bare)
+    ?.hit_radius ?? 0;
+  check("...and the re-arm wrote the table's radius back, unscaled",
+        bare !== "" && tableR > 0 && z.boneRadius[bare] === tableR,
+        `${JSON.stringify(z.boneRadius)} table ${tableR}`);
   // **The permit left with the weapon.** `SpawnThrownWeapon` (`FUN_004504E0`)
   // copies `obj+0x121` onto the projectile and writes the thrower's to 0 --
   // `MOV [EDI+0x121], BL` at `0x004506D5` with `EBX` zeroed -- and the weapon
@@ -9812,6 +9871,25 @@ console.log("\nclass 0x10, the civilian and the rescue:");
                              { motion: 900 }, new Rng(3));
     check("the class Init's motion outlives the record's",
           posed.motion === 10, `motion ${posed.motion}`);
+  }
+
+  // **The leave frees the hit slot by its index.** `CivilianUpdate`'s tail
+  // does `if (obj+0x3C != -1) g_hit_slots[obj+0x3C] = 0` at `0x0048B085`
+  // before the count and the despawn, testing the index and not `obj+0x38`
+  // bit 0x40 -- so with the claim bit down, that write is the only one that
+  // can give the entry back. The port said the table was not modelled and
+  // left it to `ActorDespawn`'s release, which tests the bit.
+  {
+    civScene([[cmd(CivilianOp.Wait, 0)]]);
+    const c = ActorSpawn(0x4010, SpawnClass.Civilian, 1, "leaving", {},
+                         new Rng(3));
+    const slot = c.hitSlot;
+    c.flags38 &= ~HIT_SLOT_CLAIMED;
+    CivilianLeaveField(c);
+    check("a civilian that leaves the field gives its hit slot back",
+          slot !== HIT_SLOT_NONE && G.g_hit_slots[slot] === HIT_SLOT_NONE
+          && c.despawned,
+          `slot ${slot} entry ${G.g_hit_slots[slot]} gone ${c.despawned}`);
   }
 
   // **`LAB_0048b52e` is one label reached from three places.** The in-front
@@ -10786,6 +10864,57 @@ console.log("\nclass 0x30's placement: the ground snap and the two entrances:");
     check("...so now the same shot does stagger",
           ActorPlayHitReaction(z, 1, HitResultCode.Damaged) !== undefined
             && z.react !== null, JSON.stringify(z.react));
+  }
+
+  // **And two writes to `obj+0x136C`.** Sub 0 raises `0x100002`
+  // (`OR EAX, 0x100002` at `0x00458528`) -- or, when `obj+0x34` has
+  // `0x200000`, clears that and raises `0x10` (`OR AL, 0x10` at `0x0045851E`)
+  // -- and the hand-over drops `0x100000` (`AND EDX, 0xffefffff` at
+  // `0x004586B4`). `ZombieOnShot` reads `0x100000`, so a zombie killed while
+  // it climbs out dies through state 9; knockback reads `0x10` as its
+  // arc-target veto, which had no writer the port knew of.
+  {
+    const z = scene30();
+    z.pos = vec3(0, -5, 0);
+    z.emerge = { delay: 30, motion: 12 };
+    z.state = ZombieEntryState(ZombieState.Emerge);
+    EnemyZombieUpdate(z, { eye: EYE, dt: 1 / 60, rng, host: NULL_HOST });
+    check("sub 0 raises obj+0x136C 0x100002",
+          (z.flags2 & 0x100002) === 0x100002 && (z.flags2 & 0x10) === 0,
+          `0x136C 0x${(z.flags2 >>> 0).toString(16)}`);
+    for (let i = 0; i < 60 && z.state === ZombieState.Emerge; i++) {
+      EnemyZombieUpdate(z, { eye: EYE, dt: 1 / 60, rng, host: NULL_HOST });
+      if (z.motion === 12) z.playTicks = MotionPlayLength(z) - 1;
+    }
+    check("...and the hand-over takes 0x100000 back down",
+          z.state === ZombieState.AttackRun
+            && (z.flags2 & ZombieFlag2.Carried) === 0
+            && (z.flags2 & 0x2) !== 0,
+          `${ZombieState[z.state]} 0x136C 0x${(z.flags2 >>> 0).toString(16)}`);
+
+    const alt = scene30();
+    alt.flags |= 0x200000;
+    alt.emerge = { delay: 30, motion: 12 };
+    alt.state = ZombieEntryState(ZombieState.Emerge);
+    EnemyZombieUpdate(alt, { eye: EYE, dt: 1 / 60, rng, host: NULL_HOST });
+    check("...with obj+0x34 0x200000 it clears that and raises 0x10 instead",
+          (alt.flags & 0x200000) === 0 && (alt.flags2 & 0x10) !== 0
+            && (alt.flags2 & 0x100002) === 0,
+          `0x34 0x${(alt.flags >>> 0).toString(16)} `
+          + `0x136C 0x${(alt.flags2 >>> 0).toString(16)}`);
+
+    // What the bit is for: shot dead while the clip lifts it out.
+    const shot = scene30();
+    shot.emerge = { delay: 0, motion: 12 };
+    shot.state = ZombieEntryState(ZombieState.Emerge);
+    EnemyZombieUpdate(shot, { eye: EYE, dt: 1 / 60, rng, host: NULL_HOST });
+    shot.dead = true;
+    shot.flags |= ActorFlag.Dead;
+    shot.pendingHit = { bone: 1, result: 1 };
+    ZombieOnShot(shot);
+    check("...so a zombie killed on its way out dies through state 9",
+          shot.state === ZombieState.DeathKnockbackArc,
+          ZombieState[shot.state]);
   }
 
   // `ActorArcBeginFalling` counts its own frames from the gravity, which is
@@ -12819,6 +12948,26 @@ console.log("\nclass 0x30 state 33: the stationary thrower:");
     }
 
     {
+      // The retire arm also frees the hit slot, on the spot and with the
+      // index left standing: `if ((obj+0x38 & 0x40) && obj+0x3C != -1)
+      // g_hit_slots[obj+0x3C] = 0` at `0x00459535`. The port said the table
+      // was not ported and made no write, so the slot stayed held until the
+      // despawn, a descriptor's delay later.
+      const z = atTheEnding(STAND_THROW_RETIRE);
+      const slot = z.hitSlot;
+      for (let i = 0; i < 600 && z.sub !== 6 && !z.despawned; i++) {
+        if (!runFrame(z)) break;
+      }
+      check("the retire arm gives the hit slot back before the despawn",
+            slot !== HIT_SLOT_NONE && (z.flags38 & HIT_SLOT_CLAIMED) !== 0
+            && G.g_hit_slots[slot] === HIT_SLOT_NONE && !z.despawned,
+            `slot ${slot} entry ${G.g_hit_slots[slot]} sub ${z.sub} `
+            + `despawned ${z.despawned}`);
+      check("...and leaves obj+0x3C pointing at it, as the engine does",
+            z.hitSlot === slot, `${z.hitSlot} was ${slot}`);
+    }
+
+    {
       // The seven records that do *not* set the bit still walk away, and the
       // distance they cover is the descriptor's own. Same fixture, one bit
       // different: the two endings have to be told apart by that bit alone.
@@ -12906,6 +13055,72 @@ console.log("\nclass 0x30 state 33: the stationary thrower:");
     check("...rolled 0x800 and facing its target from the hand",
           w.rz === ZOMBIE_WEAPON_ROLL && ry0 !== 0,
           `rz ${w.rz} ry ${ry0}`);
+  }
+
+  // **Sub 0 tests `obj+0x34` bit 0x1000000 and writes `obj+0x136C`.**
+  // `0x004590E3`..`0x00459109`: holding already, neither write; otherwise
+  // `|= 1`, and `|= 0x100000` too while `obj+0x34` has 0x20000. The port
+  // raised the held-weapon bit here instead, and that is what sent stage 3's
+  // two type-19 axe men into state 12 when they died (PLAYER_HANGS 22, 24).
+  {
+    const z = thrower();
+    ZombieStateStandAndThrow(z, EYE, new Rng(1), NULL_HOST);
+    check("sub 0 raises obj+0x136C bit 1, not obj+0x34's held-weapon bit",
+          (z.flags2 & ZombieFlag2.LetGo) !== 0
+          && (z.flags & ActorFlag.HoldingWeapon) === 0,
+          `0x34 0x${(z.flags >>> 0).toString(16)} `
+          + `0x136C 0x${(z.flags2 >>> 0).toString(16)}`);
+    check("...and not 0x100000 on the ground",
+          (z.flags2 & ZombieFlag2.Carried) === 0);
+
+    const air = thrower();
+    air.flags |= GROUND_SNAP_EXEMPT;
+    ZombieStateStandAndThrow(air, EYE, new Rng(1), NULL_HOST);
+    check("...0x100000 as well when obj+0x34 has 0x20000",
+          (air.flags2 & (ZombieFlag2.LetGo | ZombieFlag2.Carried))
+          === (ZombieFlag2.LetGo | ZombieFlag2.Carried),
+          `0x136C 0x${(air.flags2 >>> 0).toString(16)}`);
+
+    const held = thrower();
+    held.flags |= ActorFlag.HoldingWeapon | GROUND_SNAP_EXEMPT;
+    ZombieStateStandAndThrow(held, EYE, new Rng(1), NULL_HOST);
+    check("...and neither when the record already holds a weapon",
+          (held.flags2 & (ZombieFlag2.LetGo | ZombieFlag2.Carried)) === 0
+          && (held.flags & ActorFlag.HoldingWeapon) !== 0,
+          `0x136C 0x${(held.flags2 >>> 0).toString(16)}`);
+
+    // What the write is for: a kill routes on the bit, not on who wrote it.
+    // `ZombieOnShot` sends a 0x100000 actor to state 9, and the held-weapon
+    // bit sends a state-6 death to state 12 -- which is where the port's
+    // raise used to put an airborne axe man with neither in his record.
+    air.dead = true;
+    air.flags |= ActorFlag.Dead;
+    air.pendingHit = { bone: 1, result: 1 };
+    ZombieOnShot(air);
+    check("...so an airborne thrower killed there dies through state 9",
+          air.state === ZombieState.DeathKnockbackArc,
+          ZombieState[air.state]);
+  }
+
+  // **The hand it throws from can no longer be shot.** `ZombieThrowHandWeapon`
+  // (`FUN_0045A240`) zeroes the bone record's `+0x78` -- `MOV [EDI + 0x554],
+  // EBX` for bone 5, `[EDI + 0x704]` for bone 8 -- which is the radius
+  // `ShotTestBoneSphere` skips on zero.
+  {
+    const z = thrower();
+    const host = {
+      ...NULL_HOST,
+      boneWorld: (_at: number, _bone: number, out: Vec3) => {
+        out.x = 0; out.y = 5; out.z = 60;
+        return true;
+      },
+    };
+    check("before the throw the hand has the radius the build gave it",
+          (z.boneRadius["5"] ?? 0) > 0, JSON.stringify(z.boneRadius));
+    ZombieThrowHandWeapon(z, 5, host);
+    check("the throw zeroes the emptied hand's hit-sphere radius",
+          z.boneRadius["5"] === 0 && z.boneRadius["8"] === undefined,
+          JSON.stringify(z.boneRadius));
   }
 
   // The other way in: a condition-8 walker already facing the camera. It
@@ -16710,9 +16925,10 @@ console.log("class 0x30, dying with a weapon still in hand:");
   z.visible = true;
   z.hp = 1;
   z.pos = vec3(0, 40, 0);
-  // `obj+0x34` bit 0x1000000, which `ZombieStateStandAndThrow` raises while a
-  // thrower has a weapon. `ChooseDeathMotion` gives it clip 0x3F9 and
-  // `ZombieStateDeath6` sub 2 reads the same bit.
+  // `obj+0x34` bit 0x1000000, which a spawn record carries for a thrower that
+  // starts with a weapon (`ActorInitFlags`); `ZombieStateStandAndThrow` only
+  // tests it. `ChooseDeathMotion` gives it clip 0x3F9 and `ZombieStateDeath6`
+  // sub 2 reads the same bit.
   z.flags |= ActorFlag.HoldingWeapon;
   z.dead = true;
   z.flags |= ActorFlag.Dead;
@@ -18794,6 +19010,27 @@ console.log("\nthe shot effects:");
   while (G.g_sprite_effects.length) { ShotEffectsTick(); frames++; }
   check("a sprite effect is one model a frame and no more",
         frames === 0x0e33 - 0x0e25 + 1, `${frames}`);
+
+  // ...unless the bone is one tested as a collision mesh: both of the arm's
+  // branches test the bone record's `+0x74` bit 0x10 (`obj + 0x280 +
+  // bone*0x90`) and `break` before the sprite, and the ricochet sound after
+  // the switch still plays. The port keeps that bit as `Actor.boneColi`.
+  {
+    const heard: number[] = [];
+    const ricochetEar = new Events();
+    ricochetEar.on("sound.play", (d) => heard.push(d.id));
+    z0.boneColi["4"] = "fixture";
+    G.g_hit_result = HitResultCode.NoEffect;
+    ActorShotFeedback(z0, 4, vec3(0, 0, -30), host, rng, ricochetEar);
+    check("a result-5 hit on a mesh-tested bone makes no sprite",
+          G.g_sprite_effects.length === 0,
+          `${G.g_sprite_effects.length} sprites`);
+    check("...and still ricochets",
+          heard.some((id) => id === 0x1116a9 || id === 0xf16a9),
+          JSON.stringify(heard));
+    delete z0.boneColi["4"];
+    G.g_sprite_effects = [];
+  }
 
   // -- the distance law replaces the base scale, it does not multiply -------
   SpawnSpriteEffect(vec3(0, 0, 5), 0, 0, SpriteEffectKind.Other, 0, 0, host);

@@ -107,8 +107,9 @@ export const SFX_TYPE13_LAND = 0x1916a9;
  * change), `+0x2A4` {@link BreakableProp.removeFlag} (the blink toggle) and
  * `+0x192` {@link BreakableProp.routinePhase}.
  *
- * `[open]` The skip arm — `g_script_flags[0x6D] == 1 && g_cutscene_skipping`
- * snaps it to the floor in {@link Type13Phase.Judder} — is not transcribed:
+ * `[diverges]` The skip arm —
+ * `g_script_flags[0x6D] == 1 && g_cutscene_skipping` snaps it to the floor in
+ * {@link Type13Phase.Judder} — is not transcribed:
  * `g_cutscene_skipping` (`0x009A2230`) has no port in `G`, the gap
  * `class25/index.ts` and `class21/index.ts` already declare. A skipped cut
  * scene therefore lets the part finish falling on its own, 136 frames.

@@ -84,8 +84,8 @@ export const TYPE54_DRIFT_FRAMES = 300;
  * after drawing already gets. `PropDrawOnlyType54`, which mutates *before* it
  * draws, has no lead at all.
  *
- * `[open]` In **scene 2 block 11 only** the routine draws two more copies of
- * `AssetDrawSlot(g_scene_tick_counter % 7 + 0x1797)`, one 55.0 lower and one
+ * `[diverges]` In **scene 2 block 11 only** the routine draws two more copies
+ * of `AssetDrawSlot(g_scene_tick_counter % 7 + 0x1797)`, one 55.0 lower and one
  * half a turn round and 3.0 further out. That arm is **unreachable in the
  * shipped data** and so is not ported: scene 2 is stage 3, whose only type-31
  * spawns are placed in block 4, and stage 3's route table reaches block 11
@@ -209,7 +209,7 @@ export function PropDrawOnlyType33Tick(): void {
  * sweep could not fire for them — which is the reason to write the routine
  * out rather than reuse the prologue, not a reason to reuse it (`L27`).
  *
- * `[open]` Past the `MatrixStackPop`, at `0x0046EC6D`–`0x0046EDB9`, the
+ * `[diverges]` Past the `MatrixStackPop`, at `0x0046EC6D`–`0x0046EDB9`, the
  * routine draws **two more parts whenever `g_evt_block_index` is 4 or 5** —
  * and block 4 is where one of the two spawns is placed, so this is live in the
  * shipped game. Both face the camera on a yaw computed from

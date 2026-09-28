@@ -364,7 +364,7 @@ export function PropUpdateType73(p: BreakableProp): void {
  * wants item 0, 2 or 0x0B first. Their records are `{7, -1, 21}` and
  * `{15, -1, 20}`.
  *
- * [open] The port has no `+0x194` for a generic prop, so the block-5 arm is
+ * [diverges] The port has no `+0x194` for a generic prop, so the block-5 arm is
  * gated on the block alone. That is the same condition for the shipped data —
  * only the block-5 spawn is in block 5 — and it would differ only for a
  * spawn that does not exist.

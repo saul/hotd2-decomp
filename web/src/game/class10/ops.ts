@@ -94,8 +94,8 @@ export enum CivilianOp {
    * after the `SetOnShot 0` that makes the civilian unshootable — that is,
    * after she is safe. A rescued civilian takes the alternate route.
    *
-   * It was `SetGlobalA`, and `[open]` on the grounds that the reader had not
-   * been read. The reader was two functions away.
+   * It was `SetGlobalA`, an open question on the grounds that the reader had
+   * not been read. The reader was two functions away.
    */
   SetRouteBranch = 0x19,
   /** `(a, b)` applied only when this civilian still has children. */
@@ -121,8 +121,8 @@ export enum CivilianOp {
    * has just killed runs a killed script whose fourth command is this one.
    *
    * 60 commands in the shared 136-block table run it, 30 with 1 and 30 with 3.
-   * It was `SetGlobalB` and `[open]` on the grounds that the target global had
-   * not been read; it had been named for two sessions.
+   * It was `SetGlobalB`, an open question on the grounds that the target
+   * global had not been read; it had been named for two sessions.
    */
   SetHudShutterState = 0x1B,
   /** Raise one `g_script_flags` byte. */
@@ -166,7 +166,7 @@ export enum CivilianOp {
    * A six-word command taken only while `g_app_state` is 6 — which is
    * **in play**, so this is the ordinary path and not a debug one. It used to
    * be called `DebugOnly` on the strength of that gate alone, back when
-   * `g_app_state`'s meaning was `[open]`.
+   * `g_app_state`'s meaning was an open question.
    *
    * ```
    * 0048C202  833d988e9c0006  CMP dword ptr [0x009c8e98], 0x6

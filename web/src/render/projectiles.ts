@@ -27,11 +27,8 @@
  * It is a gamma-space multiplier, converted as `render/lighting.ts` explains:
  * `L' = L^γ`.
  *
- * `[diverges]` The engine's light colour is global state and the afterimage
- * never puts it back, so whatever the task walk draws next without a light of
- * its own is lit by the last afterimage too — a blade thrown after one of its
- * sibling's afterimages among them. The port lights nothing in this group
- * but the afterimages, and each only by its own light.
+ * The engine's light colour is global state and the afterimage never puts it
+ * back; what the port does instead is declared on `applyLight`.
  */
 import {
   Color, Group, Mesh, Object3D, SRGBColorSpace, type Material,
@@ -131,6 +128,13 @@ export class ProjectileLayer implements System<RenderContext> {
   /**
    * `SetRenderLightColour(r, g, b)` for one node's draw: every mesh's colour
    * is its own times the light, clamped and taken out of gamma space.
+   *
+   * `[diverges]` The engine's light colour is global state, and
+   * `ZslmanBladeAfterimageFade` never puts it back, so whatever the task walk
+   * draws next without a light of its own is lit by the last afterimage too —
+   * a blade thrown after one of its sibling's afterimages among them. This
+   * tints only the node whose record set the light: the port lights nothing
+   * else in this group, and the scene's own light never reaches it.
    */
   private applyLight(id: number, node: Object3D,
                      rgb: readonly [number, number, number]): void {

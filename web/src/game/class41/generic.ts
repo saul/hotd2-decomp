@@ -77,7 +77,7 @@
  * {@link GENERIC_POSE_ORDER}, which `tools/verify_prop_pose.py` derives from
  * the EXE per type and is the authority on the count.
  *
- * The count that went with the `[open]` note was fifteen, and it was the wrong
+ * The count that went with the old open question was fifteen, and was the wrong
  * measure twice over. **The order only matters when yaw and roll are both
  * non-zero** — `Rx` is last in every one of these compositions, so all an
  * order can disagree about is whether `Ry` or `Rz` comes first, and with
@@ -300,7 +300,7 @@ export const GENERIC_SLOT_STRIP: ReadonlySet<number> = new Set([31, 33]);
  * `PropDrawOnlyType51`'s order and **only** its order: twenty-two of the
  * family compose `Rz·Ry·Rx`, five `Ry·Rz·Rx`, twelve rotate about Y alone, one
  * about Z alone, one `Rz·Rx` with no yaw at all, six apply none of the three
- * words, and three are `[open]`. Twenty shipped spawns came out in the wrong
+ * words, and three are unknown. Twenty shipped spawns came out in the wrong
  * place, four of them by more than a degree and the worst by 19.65° — all four
  * `PropDrawOnlyType12`, in stage 4's blocks 4, 7, 12 and 13.
  *

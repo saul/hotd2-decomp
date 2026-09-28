@@ -35,11 +35,9 @@
  * and its own offset — and they all differ. Type 11 registers its raw origin
  * while its *draw* orbits around it; type 7 registers 57 units **below** its
  * origin; type 57 ignores its position entirely and registers a hard-coded
- * world point. There is no general rule and this file does not invent one: a
- * routine transcribed whole (`class41/generic_routines.ts`) calls
- * {@link PropRegisterForShotTest} itself with the point it builds, and
- * {@link PROP_SHOT_OFFSET} is what stands in for the tail of the routines
- * that are not, read out of them one at a time.
+ * world point. There is no general rule and this file does not invent one:
+ * every routine (`class41/generic_routines.ts` for the generic types) calls
+ * {@link PropRegisterForShotTest} itself with the point it builds.
  *
  * [diverges] The engine's `obj+0x70..0x78` is a **view-space** point, because
  * `RayTestSphere` (`FUN_004062A0`) works in the shot's own frame. The port
@@ -51,9 +49,7 @@
  * where that lives instead.
  */
 import { G } from "../globals";
-import {
-  BreakableFlag, BreakableState, PropFamily, type BreakableProp,
-} from "./prop_state";
+import { BreakableFlag, PropFamily, type BreakableProp } from "./prop_state";
 
 /**
  * `obj+0x34` bit 15 — **do not register**. `ActorDespawn` (`FUN_00409CC0`)
@@ -79,88 +75,6 @@ export const FALLING_CONTAINER_RADIUS = 8.0;
  * only assigns the rise inside its `state == 0` arm.
  */
 export const BREAKABLE_STANDING_RISE = 3.770148;
-
-/** One type's shot-point offset, in the prop's own space. */
-export interface PropShotOffset {
-  x?: number;
-  y?: number;
-  z?: number;
-  /** A world point the routine uses **instead** of its own position. */
-  world?: readonly [number, number, number];
-  /** `y += hitRadius * 0.5` before the constant. Only type 74 does this. */
-  halfRadius?: boolean;
-}
-
-/**
- * What each **generic** type's routine adds to its own position before
- * registering, for the types whose routine is not transcribed whole — the
- * rows the whole routines used to have here are their own tails now, and all
- * fourteen of those were confirmed against the exe before they went.
- *
- * There is no general rule and this table does not invent one: type 74's
- * offset is a function of its own radius, and type 76's is three magnitudes
- * on world axes. An absent entry means a zero offset, and
- * {@link PROP_SHOT_READ} is what says whether that was read.
- */
-export const PROP_SHOT_OFFSET: Partial<Record<number, PropShotOffset>> = {
-  70: { y: 1.5 },      // `OriginalItemPropUpdate`; y is live on the bobbing one
-  71: { y: 1.5 },      // the same routine
-  // `PropUpdateType76` arm 0. The same three magnitudes the sub-model is drawn
-  // at -- but the draw applies them INSIDE its rotation frame and this applies
-  // them on world axes. That is the exe's own inconsistency, not a reading.
-  76: { x: -2.5, y: -30.0, z: -17.5 },
-  72: { y: 1.5 },      // `FUN_00470750`, and only while it is falling
-  74: { y: -2.0, halfRadius: true },    // `FUN_00470E20`; r*0.5 - 2, so 2.5 at r=9
-  75: {},              // `FUN_004710C0`; the sphere stays put while the model flies
-};
-
-/**
- * The types whose registration the routine **gates**, and on what, among
- * those not transcribed whole.
- *
- * A gate here is the difference between a prop you can shoot once and a prop
- * you can shoot for ever.
- *
- * [port-only] as a *function*: the routines put their own test around their
- * own registration. Types 14, 25 and 40 were here and are not any more: each
- * is transcribed whole and gates its own tail.
- */
-export function PropIsRegisteredThisFrame(p: BreakableProp): boolean {
-  switch (p.kind) {
-    // The registration lives inside the state-1 arm; states 0 and 2 jump past.
-    case 72: return p.state === BreakableState.Falling;
-    default: return true;
-  }
-}
-
-/**
- * The types whose registered point the engine **derives every frame** from a
- * matrix chain the port does not run.
- *
- * [diverges] For these the port registers the placed position plus whatever
- * of the offset is a constant, and the sphere therefore sits where the object
- * was put rather than where it has swung, fallen or flown to. Named here
- * rather than left implicit, because a sphere in the wrong place is a shot
- * that misses and there is no other way to tell.
- *
- * * **75** — the model flies `CamEvalObjectPath6(0x178, ...)` and the sphere
- *   stays at the spawn point. **That is the engine's own behaviour**, not a
- *   divergence, and it is here so nobody `fixes` it.
- * * **77** — `pos + RotY(obj+0x1D0) * CamEvalObjectPath6(0x195, ...)`.
- */
-export const PROP_SHOT_DERIVED: ReadonlySet<number> = new Set([75, 77]);
-
-/**
- * Every generic type whose routine has been read for its shot point and is
- * not transcribed whole — a whole routine registers itself and never reaches
- * {@link GenericPropRegisterForShotTest}.
- *
- * A type **absent** from both has not been read, and the port registers it at
- * its own origin. Saying which is which is the whole point of having the set.
- */
-export const PROP_SHOT_READ: ReadonlySet<number> = new Set([
-  70, 71, 72, 74, 75, 76, 77,
-]);
 
 /**
  * `ChainSegmentUpdate`'s link spacing — `MatrixTranslate(0, -1.5, 0)` at the
@@ -231,29 +145,6 @@ export function PropRegisterForShotTest(p: BreakableProp, x: number, y: number,
  */
 export function PropRegisterAtOrigin(p: BreakableProp): void {
   PropRegisterForShotTest(p, p.x, p.y, p.z);
-}
-
-/**
- * A generic prop's tail, from {@link PROP_SHOT_OFFSET} and
- * {@link PROP_SHOT_WORLD_POINT}.
- *
- * [port-only] as a *function*: the engine writes these three lines out at the
- * bottom of thirty routines. One here, driven by a table, because thirty
- * copies of `y + k` is thirty chances for one of them to be `y - k`.
- */
-export function GenericPropRegisterForShotTest(p: BreakableProp): void {
-  if (!PropIsRegisteredThisFrame(p)) {
-    p.shotRegistered = false;
-    return;
-  }
-  const off = PROP_SHOT_OFFSET[p.kind];
-  if (off?.world) {
-    PropRegisterForShotTest(p, off.world[0], off.world[1], off.world[2]);
-    return;
-  }
-  const rise = (off?.halfRadius ? p.hitRadius * 0.5 : 0) + (off?.y ?? 0);
-  PropRegisterForShotTest(p, p.x + (off?.x ?? 0), p.y + rise,
-                          p.z + (off?.z ?? 0));
 }
 
 /**

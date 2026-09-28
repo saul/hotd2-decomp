@@ -32,7 +32,12 @@ ask for:
 * every `generic` placement whose type is in `GENERIC_DESCRIPTOR_SLOT`, for
   which the descriptor's `+0x11C` is the asset slot rather than a lifetime;
 * every literal in `GENERIC_STATIC_SLOTS`, which is what those routines draw
-  regardless of the descriptor.
+  regardless of the descriptor;
+* for the Original Mode collectibles, types 70, 71 and 72, both models of
+  every item the placement's row can draw and both pickup strips -- the
+  descriptor's word is a lifetime for those, and `PickOriginalModeItem`
+  writes the model -- and the same for row 0 of a type 7 or 43, whose drop
+  picks from it, and for every story item's row.
 
 A generic type outside that set is *not* checked: its `+0x11C` is a lifetime,
 the port knows it, and demanding a model for `slot 4` would be demanding the
@@ -122,6 +127,88 @@ def strip_types() -> set[int]:
     return _int_list("GENERIC_SLOT_STRIP")
 
 
+def _int_const(name: str) -> int:
+    """One `export const <name> = <int>;` in the exporter."""
+    text = BUNDLE_TS.read_text(encoding="utf-8")
+    m = re.search(r"export const " + name + r"\s*=\s*(0x[0-9a-fA-F]+|\d+);",
+                  text)
+    if not m:
+        raise SystemExit(f"{BUNDLE_TS}: {name} not found")
+    return int(m.group(1), 0)
+
+
+def original_item_slots(breakables: dict, pl: dict,
+                        who: str | None = None) -> list[tuple[int, str]]:
+    """Every model a type-70, 71 or 72 placement can draw.
+
+    `PickOriginalModeItem` (`FUN_004629C0`) writes the chosen item's model over
+    `obj+0x28C`, so what the prop asks for is not the descriptor's word but
+    both models of every id its row can draw -- read out of the bundle's own
+    `original_items`, which is what the port picks from -- and the two pickup
+    strips `obj+0x2A4 - 1 + obj+0x2A0` walks when it is taken. A row or a
+    record the bundle does not carry is reported as slot -1: an item the port
+    cannot pick is a gap in its own right.
+    """
+    orig = breakables.get("original_items") or {}
+    row = (orig.get("rows") or {}).get(str(pl.get("field_1f4") or 0))
+    out: list[tuple[int, str]] = []
+    if row is None:
+        out.append((-1, f"{who or 'type ' + str(pl.get('type'))}'s item "
+                        f"row {pl.get('field_1f4')}"))
+        return out
+    recs = orig.get("records") or {}
+    for item in row["ids"]:
+        if item < 0:
+            continue
+        rec = recs.get(str(item))
+        if rec is None:
+            out.append((-1, f"item {item}'s record"))
+            continue
+        for key in ("slot", "slot2"):
+            if rec[key] not in (0, 0xFFFF):
+                out.append((rec[key], f"item {item}'s {key}"))
+    frames = _int_const("ORIGINAL_ITEM_PICKUP_FRAMES")
+    for base in sorted(_int_list("ORIGINAL_ITEM_PICKUP_STRIPS")):
+        out += [(base + i, f"frame {i} of the pickup strip at 0x{base:04x}")
+                for i in range(frames)]
+    return out
+
+
+def story_item_rows() -> dict[int, int]:
+    """`STORY_ITEM_ROW_BY_TYPE`, read out of the exporter: the rows types 74
+    and 75 hand `SpawnStoryModeItem` from an immediate of their own."""
+    text = BUNDLE_TS.read_text(encoding="utf-8")
+    m = re.search(r"STORY_ITEM_ROW_BY_TYPE[^{]*\{([^}]*)\}", text)
+    if not m:
+        raise SystemExit(f"{BUNDLE_TS}: STORY_ITEM_ROW_BY_TYPE not found")
+    return {int(k): int(v, 0) for k, v in
+            re.findall(r"(\d+)\s*:\s*(0x[0-9a-fA-F]+|\d+)", m.group(1))}
+
+
+def story_item_slots(breakables: dict, pl: dict) -> list[tuple[int, str]]:
+    """What a group member's or a falling container's story item can draw.
+
+    In Original Mode its destroy path hands `SpawnStoryModeItem`
+    (`FUN_00467B90`) its `+0x2A0`, and that makes a collectible out of the
+    row it names. Only a row the bundle carries is asked about here; a
+    member naming a row the bundle does not carry is reported like a
+    collectible's.
+    """
+    rows = []
+    if pl.get("container") == "falling":
+        rows.append(pl.get("story_item", -1))
+    else:
+        groups = breakables.get("groups") or []
+        g = pl.get("group")
+        if isinstance(g, int) and 0 <= g < len(groups):
+            rows += [m.get("story_item", -1) for m in groups[g]]
+    out: list[tuple[int, str]] = []
+    for row in rows:
+        if row is None or row < 0:
+            continue
+        out += original_item_slots(breakables, {"field_1f4": row},
+                                   "a story item")
+    return out
 #: One generated run, `Array.from({ length: N }, (_, i) => 0xBASE + i)`.
 _RUN = re.compile(r"Array\.from\(\{\s*length:\s*(\d+)\s*\}[^)]*\)\s*=>\s*"
                   r"(0x[0-9a-fA-F]+|\d+)\s*\+\s*i\s*\)")
@@ -266,6 +353,7 @@ def main() -> int:
 
     bad: list[str] = []
     checked = 0
+    items = 0
     doors = 0
     bodies = 0
     frames = 0
@@ -279,8 +367,11 @@ def main() -> int:
             continue
         stages += 1
         have = breakable_slots(glb_json(glb))
-        placements = (json.loads(script.read_text())
-                      .get("breakables", {}).get("placements", []))
+        breakables = json.loads(script.read_text()).get("breakables", {})
+        placements = breakables.get("placements", [])
+        collectible_types = _int_list("ORIGINAL_ITEM_TYPES")
+        row_zero_types = _int_list("ORIGINAL_ITEM_ROW_ZERO_TYPES")
+        story_rows = story_item_rows()
 
         for pl in placements:
             kind = pl.get("container")
@@ -313,12 +404,29 @@ def main() -> int:
                         frames += span
                 for lit in literals.get(ty, []):
                     want.append((lit, f"a literal type {ty} draws"))
+                if ty in collectible_types:
+                    want += original_item_slots(breakables, pl)
+                    items += 1
+                if ty in row_zero_types:
+                    # Type 7's drop and type 43's break pick from row 0.
+                    want += original_item_slots(
+                        breakables, {"field_1f4": 0}, f"type {ty}'s drop")
+                if ty in story_rows:
+                    want += original_item_slots(
+                        breakables, {"field_1f4": story_rows[ty]},
+                        f"type {ty}'s story item")
             elif kind == "fragment":
                 want += fragment_slots(pl.get("sub_kind") or 0)
             elif kind in TABLE_TS:
                 want += table_slots(kind)
+            if kind in ("group", "falling"):
+                want += story_item_slots(breakables, pl)
             for slot, why in want:
                 checked += 1
+                if slot < 0:
+                    bad.append(f"{name}: prop at {pl.get('at')} ({kind}) "
+                               f"needs {why}, and the bundle does not carry it")
+                    continue
                 if slot not in have:
                     bad.append(
                         f"{name}: prop at {pl.get('at')} ({kind}) names slot "
@@ -329,9 +437,9 @@ def main() -> int:
         print("SKIP  verify_prop_slots: the manifest names no stages")
         return 3
 
-    print(f"{stages} bundles: {checked} prop draw slots, all resolved "
+    print(f"{stages} bundles: {checked} prop draw slots checked "
           f"({doors} rising doors, {bodies} descriptor-slot props, "
-          f"{frames} extra strip frames)")
+          f"{frames} extra strip frames, {items} Original Mode collectibles)")
     if bad:
         for line in bad[:40]:
             print(f"  {line}")

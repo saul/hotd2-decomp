@@ -2,7 +2,7 @@
  * Class 0x41 type 75 — the one prop in the game that opens a
  * `wait_script_flag` gate.
  *
- * `PropUpdateType75` (`FUN_004710C0`) is `g_class41_updates[75]`, and it
+ * `PropUpdateType75` is `g_class41_updates[75]`, and it
  * raises `g_script_flags[20]` on **three** different instructions —
  * `0x004710D7`, `0x00471120` and `0x00471263`. Stage 4's block 2 step 7 opens
  * with `wait_script_flag 0x14`, no `set_script_flag` anywhere in stage 4 names
@@ -10,25 +10,24 @@
  * stage 4 block 2 step 5, script address 9580, a `generic` placement of type
  * 75 with `lifetime_evt_steps` 2.
  *
- * ## Why it is its own family and not another `GENERIC_UPDATE` row
+ * What the model it draws, `0xA6B`, depicts is `[open]`: the engine
+ * identifies the object by its type number and nothing else.
  *
- * Every other generic type runs the shared prologue —
- * `PropExpireByStepLifetime` (`FUN_00466640`) — and `class41/pool.ts` supplies
- * it around the type's own routine. This one does not call that function at
- * all. It **inlines a variant** of it: the `g_scene_index == 1 &&
- * g_script_flags[0x77]` sweep is left out, and two lines are folded into the
- * middle of the step-change arm, between spotting the change and charging the
- * lifetime for it. Nothing about that can be expressed by wrapping the shared
- * prologue around a table entry, so the object gets its own {@link PropFamily}
- * the way the lift and the story-mode switch do.
+ * ## Its head
  *
- * The head is the second reason. The other Original-Mode-only types — 70, 71,
- * 72 and 77, which is {@link GENERIC_ORIGINAL_MODE_ONLY} — open with a bare
- * `if (g_GameMode != 1) { ActorDespawn(obj); return; }`. This one **raises the
- * flag on its way out**, so putting it in that set would leave stage 4's gate
- * shut for ever in Arcade Mode, which is the mode the player runs in. That set
- * carried an open-question note guessing type 75 belonged in it; it does
- * not, and the note is now answered.
+ * It does not call `PropExpireByStepLifetime` (`FUN_00466640`). It **inlines
+ * a variant** of it: the `g_scene_index == 1 && g_script_flags[0x77]` sweep
+ * is left out, and two lines are folded into the middle of the step-change
+ * arm, between spotting the change and charging the lifetime for it. Like
+ * every generic routine it is a `GENERIC_ROUTINES` row
+ * (`class41/generic_routines.ts`) and brings its own head and tail.
+ *
+ * Its mode test is the other thing. Types 70, 71, 72 and 76 open with a bare
+ * `if (g_GameMode != 1) { ActorDespawn(obj); return; }` and 77 with the same
+ * test and a sound. This one **raises the flag on its way out**, so a plain
+ * despawn would leave stage 4's gate shut for ever in Arcade Mode, which is
+ * the mode the player runs in. Type 74 is the only other routine shaped like
+ * it: its Arcade exit raises `g_script_flags[0x13]` (`class41/type74.ts`).
  *
  * ## The three ways the flag goes up
  *
@@ -41,24 +40,36 @@
  * So the gate opens on its own in every configuration; shooting the prop only
  * changes how long it takes and what it drops on the way.
  *
- * Not transcribed: the crosshair spark (`FUN_004666B0`, a 0x50-byte object at
- * the aim point), the three sounds, the ride along object path 0x178 that
- * `obj+0x2C0` indexes, the `AssetDrawSlot(0xA6B)` draw, and
- * `g_original_item_pickup_blocked` (`0x007DCD14`) — the port transcribes
- * nothing that reads that byte. The ride moves the **model** and not the shot
- * sphere: `PropUpdateType75` registers at `obj+0x19C`, its placed origin, and
- * `PROP_SHOT_OFFSET[75]` already says so.
+ * ## What it draws, and where
+ *
+ * Every frame, shot or not, the tail evaluates `op_` path 0x178 at the
+ * cursor `obj+0x2C0` and draws `AssetDrawSlot(0xA6B)` **at the path's pose
+ * and nothing of its own**: `T(path xyz) RotZ(rz) RotY(ry) RotX(rx)`, the
+ * three `__ftol`ed angles `CamEvalObjectPath6` (`FUN_004042D0`) returns
+ * (`0x0047127A`..`0x004712CE`). Until it is shot the cursor is 0, so the
+ * model waits at the path's first point, which is not its placement; shot,
+ * it flies the path for 290 frames and stops at its end. The **shot sphere
+ * does not fly**: the registration after the draw is at `obj+0x19C`, the
+ * placed origin.
+ *
+ * `PoseHookNone` (`FUN_00420810`), which the shot arm calls with `(6,
+ * 0x1F4)` and the ride's end with `(0, 1)`, is an empty function and is not
+ * called here.
  */
 import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
+import { SpawnPropHitEffectScaled } from "../effects/sprite";
 import { GameMode } from "../game_mode";
 import { G } from "../globals";
 import { SpawnStoryModeItem } from "./items";
+import { PropEvalObjectPath6 } from "./object_path";
 import { BreakablePropAwardHit, ActorDespawnProp } from "./prop";
+import { PropDrawBegin, PropDrawSlot, PropMatrixPush, PropMatrixTRzRyRx }
+  from "./prop_draw";
 import {
   BreakableFlag, PropCuePhase, type BreakableProp,
 } from "./prop_state";
-import { GenericPropRegisterForShotTest } from "./shot_test";
+import { PropRegisterAtOrigin } from "./shot_test";
 
 /**
  * The `obj+0x130C` this module's routine belongs to — `g_class41_updates[75]`,
@@ -118,6 +129,18 @@ export const PROP75_STORY_ITEM = 1;
 export const PROP75_DROP_AT: readonly [number, number, number] =
   [142.0, -59.79999923706055, -888.7000122070312];
 
+/** `PUSH 0x178` — the `op_` path the model rides. */
+export const PROP75_PATH = 0x178;
+/** `PUSH 0xA6B` — what it draws. */
+export const PROP75_SLOT = 0x0a6b;
+/** `PUSH 0x3FC00000` — `SpawnPropHitEffectScaled`'s scale. */
+export const PROP75_HIT_EFFECT_SCALE = 1.5;
+/** `PlaySoundId(0xE16A9)` and `PlaySoundId(0x391BA9)` — shot. */
+export const SFX_PROP75_HIT = 0xe16a9;
+export const SFX_PROP75_RIDE = 0x391ba9;
+/** `PlaySoundId(0x3A1BA9)` — the ride ends. */
+export const SFX_PROP75_RIDE_END = 0x3a1ba9;
+
 /**
  * The shot arm, `0x00471169`..`0x00471226`.
  *
@@ -131,13 +154,23 @@ function PropType75OnShot(p: BreakableProp, rng: Rng, events?: Events): void {
   // `BreakablePropAwardHit(obj+0x34, 0)` — the second argument is 0, so this
   // pays no points; it still counts the hit for the accuracy grade.
   BreakablePropAwardHit(p.flags, false, rng);
+  // `SpawnPropHitEffectScaled(obj, (flags & 2) ? 0 : 1, 1.5f)`, at the aim
+  // `combat/shot.ts` left on the prop, at the prop's depth.
+  if (p.hitAim) {
+    SpawnPropHitEffectScaled(p.hitAim.x, p.hitAim.y, p.z,
+                             PROP75_HIT_EFFECT_SCALE);
+  }
+  events?.emit("sound.play", { id: SFX_PROP75_HIT });
+  events?.emit("sound.play", { id: SFX_PROP75_RIDE });
 
   // `obj+0x2A0 = 1`, then the position swap around `SpawnStoryModeItem`.
   p.storyItem = PROP75_STORY_ITEM;
   p.cuePhase = PropCuePhase.Riding;
   const [x, y, z] = [p.x, p.y, p.z];
   [p.x, p.y, p.z] = PROP75_DROP_AT;
-  SpawnStoryModeItem(p, events);
+  SpawnStoryModeItem(p, rng, events);
+  // `MOV byte ptr [0x007DCD14], 0` at `0x00471211`, inside the swap.
+  G.g_original_item_pickup_blocked = 0;
   [p.x, p.y, p.z] = [x, y, z];
 }
 
@@ -146,6 +179,7 @@ function PropType75OnShot(p: BreakableProp, rng: Rng, events?: Events): void {
  */
 export function PropUpdateType75(p: BreakableProp, rng: Rng,
                                  events?: Events): void {
+  PropDrawBegin(p);
   // `if (g_GameMode != 1) { g_script_flags[0x14] = 1; ActorDespawn(obj); }`
   if (G.g_GameMode !== GameMode.Original) {
     G.g_script_flags[PROP75_SCRIPT_FLAG] = 1;
@@ -185,14 +219,27 @@ export function PropUpdateType75(p: BreakableProp, rng: Rng,
     p.shake += PROP75_RIDE_STEP;
     if (p.shake >= PROP75_RIDE_LENGTH) {
       p.cuePhase = PropCuePhase.Done;
+      G.g_original_item_pickup_blocked = 1;
       G.g_script_flags[PROP75_SCRIPT_FLAG] = 1;
+      events?.emit("sound.play", { id: SFX_PROP75_RIDE_END });
     }
+  }
+
+  // `CamEvalObjectPath6(0x178, obj+0x2C0, &local)`, and the draw at the
+  // path's pose alone: `T(xyz) RotZ(rz) RotY(ry) RotX(rx)` on the three
+  // `__ftol`ed angles, `0x0047127A`..`0x004712D4`.
+  const at = PropEvalObjectPath6(PROP75_PATH, p.shake);
+  if (at) {
+    const m = PropMatrixPush();
+    PropMatrixTRzRyRx(m, at.x, at.y, at.z, at.rx, at.ry, at.rz);
+    PropDrawSlot(p, m, PROP75_SLOT);
   }
 
   // The tail. **The hit bits are not cleared** — this routine has no `AND` on
   // `obj+0x34` anywhere in its 617 bytes, unlike the thirty that share the
   // prologue, and `class41/pool.ts` therefore must not clear them for it
   // either. Nothing re-fires on a stale bit, because both arms that read it
-  // are latched on `obj+0x192`.
-  GenericPropRegisterForShotTest(p);
+  // are latched on `obj+0x192`. The point is its own origin: the sphere does
+  // not fly with the model.
+  PropRegisterAtOrigin(p);
 }

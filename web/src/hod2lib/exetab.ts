@@ -74,10 +74,17 @@ export const BANK_PALETTE_INDEX: ReadonlyMap<number, number> =
  * `scr_bosmater_st1`..`st6` (0x186..0x18B), which the byte table at
  * `0x0041CB90` all sends to jump-table entry 10, `MOV EAX, 0xA` at
  * `0x0041CA1A`. The boss health bar and the boss-name banner draw from them.
+ *
+ * And palette 0x14 for `0x156` and the 34 one-picture banks `0x193..0x1B4`,
+ * jump-table entry 2, `MOV EAX, 0x14` at `0x0041CA88`: the Original Mode
+ * item pictures `OriginalItemBannerUpdate` (`FUN_00475D00`) draws, one bank
+ * per `g_original_item_records[id].sprite` (`0x5BD..0x5DE`).
  */
 export const BANK_PALETTE_CONST: ReadonlyMap<number, number> = new Map([
   [0x177, 10], [0x186, 10], [0x187, 10], [0x188, 10], [0x189, 10],
-  [0x18a, 10], [0x18b, 10],
+  [0x18a, 10], [0x18b, 10], [0x156, 0x14],
+  ...Array.from({ length: 0x1b5 - 0x193 },
+                (_, i): [number, number] => [0x193 + i, 0x14]),
 ]);
 
 export class TexEntry {
@@ -908,6 +915,18 @@ export class ExeTables {
   static readonly PROP_KIND_PARAMS = 0x00593db8;
   static readonly PROP_KIND_COUNT = 11;
   /**
+   * `g_original_item_tables` -- one pointer per `g_scene_index` to that
+   * scene's rows, 8 bytes each; `PickOriginalModeItem` (`FUN_004629C0`)
+   * `MOVSX EAX, word ptr [0x009a1a08]; MOV ECX, [EAX*4 + 0x595aa0]` and then
+   * `LEA EDI, [ECX + row*8]`. No row count: the placer's byte is the index.
+   */
+  static readonly ORIGINAL_ITEM_TABLES = 0x00595aa0;
+  /**
+   * `g_original_item_records` -- 0xC a record, indexed by the item id a row
+   * names: `MOV CX, word ptr [EDX*4 + 0x5957d8]` with `EDX = id * 3`.
+   */
+  static readonly ORIGINAL_ITEM_RECORDS = 0x005957d8;
+  /**
    * `g_water_surface_slots`, s16[10]. `PlaceWaterSurface` indexes it with no
    * bound; the ten end where `PROP_KIND_PARAMS` begins, which four routines
    * address directly -- the table beside it, not a guess at its length (L6).
@@ -1634,6 +1653,44 @@ export class ExeTables {
       }
       return out;
     });
+  }
+
+  /**
+   * One row of `g_original_item_tables[scene]`: four s8 item ids and four s8
+   * cumulative weights, as `PickOriginalModeItem` (`FUN_004629C0`) reads
+   * them (`MOVSX ECX, byte ptr [EDI + 0x7]` is the modulus). `null` when the
+   * scene has no table or the row is off the end of the image.
+   */
+  originalItemRow(scene: number, row: number):
+      { ids: number[]; weights: number[] } | null {
+    const at = this.v2r(ExeTables.ORIGINAL_ITEM_TABLES + scene * 4);
+    if (at === null || at + 4 > this.data.length) return null;
+    const base = this.v2r(u32(this.data, at));
+    if (base === null) return null;
+    const o = base + row * 8;
+    if (o + 8 > this.data.length) return null;
+    const s8 = (k: number) => (this.data[o + k] << 24) >> 24;
+    return { ids: [0, 1, 2, 3].map(s8), weights: [4, 5, 6, 7].map(s8) };
+  }
+
+  /**
+   * `g_original_item_records[id]`: `{u16 slot, u16 slot2, f32 scale, u16
+   * sprite}`, which `PickOriginalModeItem` copies to `obj+0x28C`, `+0x28E`
+   * and `+0x2C4` and `OriginalItemPropUpdate` hands `SpawnOriginalItemBanner`
+   * (`+0x08`, `MOVSX EDX, word ptr [ECX*4 + 0x5957e0]`).
+   */
+  originalItemRecord(id: number):
+      { slot: number; slot2: number; scale: number; sprite: number } | null {
+    const base = this.v2r(ExeTables.ORIGINAL_ITEM_RECORDS);
+    if (base === null || id < 0) return null;
+    const o = base + id * 0xc;
+    if (o + 0xc > this.data.length) return null;
+    return {
+      slot: u16(this.data, o),
+      slot2: u16(this.data, o + 2),
+      scale: f32(this.data, o + 4),
+      sprite: i16(this.data, o + 8),
+    };
   }
 
   private hullPoints(va: number, count: number): [number, number, number][] {

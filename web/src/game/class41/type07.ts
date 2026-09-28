@@ -69,12 +69,20 @@ import { GameMode } from "../game_mode";
 import { G } from "../globals";
 import {
   MatrixRotateX, MatrixRotateY, MatrixRotateZ, MatrixScale, MatrixTranslate,
-  type Mat,
 } from "../matrix";
+import { T } from "../tables";
+import { SpawnOriginalItemBanner } from "./item_banner";
 import { PropExpireByStepLifetime } from "./lifetime";
+import {
+  ORIGINAL_ITEM_NONE, OriginalItemDrawMaybeFaded,
+  ORIGINAL_ITEM_PICKUP_FRAMES, ORIGINAL_ITEM_PICKUP_SLOT,
+  ORIGINAL_ITEM_PICKUP_SLOT_P1, ORIGINAL_ITEM_PICKUP_SLOT_STRIDE,
+  ORIGINAL_ITEM_SHOT_RISE, ORIGINAL_ITEM_TAKEN, ORIGINAL_ITEMS_TAKEN_CAP,
+  PICKED_ITEM_WORDS_ZERO, PickOriginalModeItem, SFX_ORIGINAL_ITEM_PICKUP,
+} from "./original_item";
 import { ActorDespawnProp, BreakablePropAwardHit } from "./prop";
 import {
-  PropDrawBegin, PropDrawSlot, PropDrawSlotWithAlpha, PropMatrixPush,
+  PropDrawBegin, PropDrawSlot, PropMatrixClearRotation, PropMatrixPush,
 } from "./prop_draw";
 import {
   BreakableFlag, makeBreakableProp, PropFamily, type BreakableProp,
@@ -200,139 +208,6 @@ export function PropUpdateType7(p: BreakableProp, rng: Rng,
 
 // -- the Original Mode item a shot knocks loose --------------------------------
 
-/**
- * `g_original_item_records` — `0x005957D8`, one `0xC`-byte record per Original
- * Mode item id: `{u16 model, u16 second model (0xFFFF for none), f32 draw
- * scale, u16 banner id}`. All 33 of them, ids 0..32, which is every id the
- * tables below can name (the largest is 32).
- *
- * Exe data, read with `read_memory` and not guessed. `[port-only]` as a TS
- * table; it belongs with the inventory in `game/original_mode.ts`, and lives
- * here only because this is the first routine ported that reads it.
- */
-export const ORIGINAL_ITEM_RECORDS: readonly (readonly [number, number, number,
-                                                       number])[] = [
-  [0x109e, -1, 1.0, 0x5bd], [0x109b, -1, 1.0, 0x5be],
-  [0x1087, -1, 1.0, 0x5bf], [0x10a5, 0x10a6, 1.0, 0x5c0],
-  [0x10a7, 0x10a8, 1.0, 0x5c1], [0x10a9, 0x10aa, 1.0, 0x5c2],
-  [0x10a3, 0x10a4, 1.0, 0x5c3], [0x107e, 0x107f, 1.0, 0x5c4],
-  [0x1080, 0x1081, 1.0, 0x5c5], [0x1082, 0x1083, 1.0, 0x5c6],
-  [0x107c, 0x107d, 1.0, 0x5c7], [0x1084, -1, 1.0, 0x5ce],
-  [0x1085, -1, 1.0, 0x5cf], [0x109c, -1, 1.0, 0x5d0],
-  [0x109a, 0x1098, 1.0, 0x5c8], [0x109a, 0x1099, 1.0, 0x5c9],
-  [0x108e, 0x108c, 1.0, 0x5ca], [0x108e, 0x108d, 1.0, 0x5cb],
-  [0x108e, 0x108b, 1.0, 0x5cc], [0x108e, 0x108a, 1.0, 0x5cd],
-  [0x1086, -1, 1.5, 0x5d1], [0x1096, -1, 1.5, 0x5d2],
-  [0x108f, -1, 1.0, 0x5d3], [0x1090, -1, 1.0, 0x5d4],
-  [0x1092, -1, 1.0, 0x5d8], [0x1092, -1, 1.0, 0x5d6],
-  [0x108f, -1, 1.0, 0x5d5], [0x1092, -1, 1.0, 0x5d9],
-  [0x1094, -1, 1.0, 0x5d7], [0x109f, -1, 1.0, 0x5de],
-  [0x1097, -1, 1.0, 0x5db], [0x10ab, -1, 1.0, 0x5dc],
-  [0x1088, -1, 1.0, 0x5dd],
-];
-
-/**
- * `g_original_item_tables` — `0x00595AA0`: one pointer per scene index to
- * that scene's item sets, eight bytes a set — four signed item ids (-1 for
- * none) and four cumulative `rand()` weights, the last of which is the total.
- *
- * Six scenes, the pointers at `0x00595968`, `0x00595988`, `0x005959E0`,
- * `0x00595A18`, `0x00595A68` and `0x00595A80`; the seventh word is code, so
- * the training scene has no table (and no Original Mode). How many sets each
- * scene has is `[likely]` from where the next scene's table starts — the
- * index is the caller's set number, and nothing bounds it. `[port-only]` as a
- * TS table; see {@link ORIGINAL_ITEM_RECORDS}.
- */
-export const ORIGINAL_ITEM_TABLES: readonly (readonly (readonly number[])[])[] = [
-  [ // scene 0, 0x00595968
-    [3, 4, 16, 17, 6, 7, 13, 14], [14, 16, 20, 21, 6, 10, 12, 13],
-    [7, 8, 3, 4, 5, 9, 14, 15], [7, 8, 11, -1, 10, 12, 13, 21],
-  ],
-  [ // scene 1, 0x00595988
-    [1, 28, 14, 3, 1, 2, 4, 7], [30, 0, 17, 18, 1, 4, 6, 9],
-    [22, 23, 14, 15, 1, 2, 4, 6], [22, 28, 3, 15, 1, 2, 4, 5],
-    [15, 18, 11, -1, 3, 4, 6, 6], [7, 8, 14, -1, 2, 3, 4, 6],
-    [3, 5, 31, 21, 2, 3, 4, 6], [16, 17, 11, -1, 2, 3, 4, 6],
-    [1, 14, 15, -1, 1, 4, 6, 6], [8, 9, 16, -1, 2, 3, 5, 5],
-    [13, 13, 13, 13, 1, 2, 3, 4],
-  ],
-  [ // scene 2, 0x005959E0
-    [17, 20, 28, -1, 2, 3, 4, 5], [17, 20, 28, -1, 1, 2, 3, 3],
-    [2, 29, 12, -1, 1, 2, 4, 4], [8, 9, 4, -1, 1, 2, 3, 4],
-    [25, 6, 12, -1, 1, 2, 5, 5], [0, 2, 4, 5, 1, 2, 5, 6],
-    [9, 18, 32, -1, 1, 2, 5, 5],
-  ],
-  [ // scene 3, 0x00595A18
-    [8, 9, 17, -1, 1, 2, 3, 5], [0, 10, 30, -1, 2, 3, 5, 5],
-    [1, 25, 21, -1, 1, 2, 4, 4], [23, 4, 5, -1, 1, 3, 4, 4],
-    [0, 1, -1, -1, 1, 2, 3, 3], [3, 4, 5, -1, 1, 2, 3, 3],
-    [16, 17, 18, -1, 1, 2, 3, 3], [15, 21, 26, -1, 1, 3, 4, 4],
-    [9, 14, 23, -1, 1, 2, 3, 3], [17, 18, 29, -1, 2, 4, 5, 5],
-  ],
-  [ // scene 4, 0x00595A68
-    [32, 13, 31, -1, 1, 2, 3, 3], [8, 9, 10, -1, 1, 2, 3, 3],
-    [17, 18, 19, -1, 1, 2, 3, 3],
-  ],
-  [ // scene 5, 0x00595A80
-    [5, 6, -1, -1, 2, 3, 3, 3], [10, 11, 12, -1, 1, 2, 3, 4],
-    [19, 19, 19, 19, 1, 2, 3, 4], [26, 26, 26, 26, 1, 2, 3, 4],
-  ],
-];
-
-/** `obj+0x290 == -1` — the table chose nothing. */
-export const ORIGINAL_ITEM_NONE = -1;
-
-/**
- * The words `PickOriginalModeItem` writes and the drop's routine reads.
- * Keyed by offset (`class41/words.ts`), so any other object that calls
- * `PickOriginalModeItem` reads the same three through the same keys.
- */
-type OriginalItemWords = {
-  /** `obj+0x28E` — the second model, drawn facing the camera; -1 for none. */
-  o28e: number;
-  /** `obj+0x290` — the item id; -1 when the table chose nothing. */
-  o290: number;
-  /** `obj+0x2C4` — the record's draw scale. */
-  o2c4: number;
-};
-const ORIGINAL_ITEM_WORDS_ZERO: OriginalItemWords = { o28e: 0, o290: 0, o2c4: 0 };
-
-/**
- * `PickOriginalModeItem` — `FUN_004629C0`.
- *
- * ```c
- * tbl = g_original_item_tables[g_scene_index];
- * r = rand() % (s8)tbl[set*8 + 7];               // the total weight
- * for (i = 0; tbl[set*8 + 4 + i] <= r && i < 3; i++) ;
- * obj->+0x290 = (s8)tbl[set*8 + i];
- * if (obj->+0x290 == -1) { obj->+0x28C = 0; obj->+0x28E = 0; obj->+0x2C4 = 1.0; return; }
- * obj->+0x28C = rec.model; obj->+0x28E = rec.model2; obj->+0x2C4 = rec.scale;
- * ```
- *
- * One `rand()`, taken before the table is walked; the modulus is recomputed
- * on each test in the engine and is the same number every time.
- */
-export function PickOriginalModeItem(p: BreakableProp, set: number,
-                                     rng: Rng): void {
-  const w = PropWords(p, ORIGINAL_ITEM_WORDS_ZERO);
-  const row = ORIGINAL_ITEM_TABLES[G.g_scene_index]?.[set];
-  const r = rng.int(row?.[7] ?? 0);
-  let i = 0;
-  while (i < 3 && (row?.[4 + i] ?? 0) <= r) i++;
-  const id = row?.[i] ?? ORIGINAL_ITEM_NONE;
-  w.o290 = id;
-  const rec = ORIGINAL_ITEM_RECORDS[id];
-  if (id === ORIGINAL_ITEM_NONE || !rec) {
-    p.slot = 0;
-    w.o28e = 0;
-    w.o2c4 = 1.0;
-    return;
-  }
-  p.slot = rec[0];
-  w.o28e = rec[1];
-  w.o2c4 = rec[2];
-}
-
 /** `obj+0x192` as {@link OriginalItemDropUpdate} switches on it. */
 export enum OriginalItemDropPhase {
   /** Falling from where it was dropped, until it is 1.0 above the floor. */
@@ -366,31 +241,12 @@ const ORIGINAL_ITEM_HALF_TURN = 0x8000;
 /** `ADD EAX,0x400` at `0x00466E14` — the idle spin, BAMS a frame. */
 const ORIGINAL_ITEM_SPIN = 0x400;
 
-/** `obj+0x34 |= 0x40000000` — taken; the pickup arm does not run again. */
-export const ORIGINAL_ITEM_TAKEN = 0x40000000;
-/** `COMMON\ITEM_22.WAV`, when it is taken. */
-export const SFX_ORIGINAL_ITEM_PICKUP = 0x3616a9;
-/** `CMP EAX,0x31` — the pickup animation runs to frame 49, then it despawns. */
-const ORIGINAL_ITEM_PICKUP_LAST = 0x31;
-/** `CMP EAX,0x19` — from frame 25 the models are drawn faded. */
-const ORIGINAL_ITEM_FADE_FROM = 0x19;
-/** `FMUL [0x004E3100]; FSUBR [0x004C4380]` — `1.0 - frame * 0.02`. */
-const ORIGINAL_ITEM_FADE_STEP = Math.fround(0.02);
-/**
- * The pickup strip: `0x116A + 50 * player`, `common.bin[203]` and
- * `common.bin[253]`, drawn at `+ frame - 1` for frames 1..49.
- */
-export const ORIGINAL_ITEM_PICKUP_SLOT = 0x116a;
-export const ORIGINAL_ITEM_PICKUP_SLOT_P1 = 0x119c;
-const ORIGINAL_ITEM_PICKUP_STRIDE = 50;
 /** `0x10D0` — `common.bin[200]`, the shadow, `Scale(3, 1, 3)`. */
 export const ORIGINAL_ITEM_SHADOW_SLOT = 0x10d0;
 /** `FADD [0x004D1D24]` — `0x3E4CCCCD`, the shadow's height over the floor. */
 const ORIGINAL_ITEM_SHADOW_RISE = Math.fround(0.2);
 const ORIGINAL_ITEM_SHADOW_SCALE_XZ = 3.0;
 const ORIGINAL_ITEM_SHADOW_SCALE_Y = 1.0;
-/** `FADD double [0x0055D7D0]` — 1.5: the sphere sits this far above it. */
-const ORIGINAL_ITEM_SHOT_RISE = 1.5;
 
 /**
  * `SpawnOriginalItemDrop` — `FUN_00466B40`.
@@ -483,19 +339,19 @@ export function SpawnOriginalItemDrop(y: number, set: number,
  * {@link BreakableProp.routinePhase}.
  *
  * From frame 25 the two item models go through `AssetDrawSlotWithAlpha`
- * (`FUN_004185A0`) at `1.0 - frame * 0.02`. Two things the pickup arm does
- * have nothing to land on in the port, the tally and the award, and each is
- * declared where the arm makes it.
+ * (`FUN_004185A0`) at `1.0 - frame * 0.02`. The pickup is the collectible's
+ * own -- the tally into `g_original_items_taken` and the banner -- and so is
+ * the item it picks (`class41/original_item.ts`).
  */
 export function OriginalItemDropUpdate(p: BreakableProp, rng: Rng,
                                        events?: Events): void {
   PropDrawBegin(p);
   if (PropExpireByStepLifetime(p)) return;
-  const w = PropWords(p, ORIGINAL_ITEM_WORDS_ZERO);
+  const w = PropWords(p, PICKED_ITEM_WORDS_ZERO);
 
   if (p.storyItem > 0) {
     p.storyItem += 1;
-    if (p.storyItem > ORIGINAL_ITEM_PICKUP_LAST) {
+    if (p.storyItem > ORIGINAL_ITEM_PICKUP_FRAMES) {
       ActorDespawnProp(p);
       return;
     }
@@ -509,33 +365,26 @@ export function OriginalItemDropUpdate(p: BreakableProp, rng: Rng,
       && (p.flags & BreakableFlag.Hit) !== 0) {
     BreakablePropAwardHit(p.flags, false, rng);
     p.flags |= ORIGINAL_ITEM_TAKEN;
-    // [diverges] `g_original_items_taken[id]++`, capped at 0x63: the tally
-    // (`0x009C90C0`) is not in `G`, so it is not kept.
-    // [diverges] `SpawnOriginalItemBanner(g_original_item_records[id]
-    // .banner)` (`0x00475E40`) is unported -- it is the award, and the
-    // inventory with it -- so the port emits `prop.pickup` below in its
-    // place, as `PropUpdateType43` does.
+    const id = w.o290;
+    const n = G.g_original_items_taken[id] ?? 0;
+    if (n < ORIGINAL_ITEMS_TAKEN_CAP) G.g_original_items_taken[id] = n + 1;
+    SpawnOriginalItemBanner(
+      T.breakables?.original_items?.records[String(id)]?.sprite ?? 0);
     events?.emit("sound.play", { id: SFX_ORIGINAL_ITEM_PICKUP });
     p.storyItem = 1;
     const p0 = (p.flags & BreakableFlag.HitByPlayer0) !== 0;
     const p1 = (p.flags & BreakableFlag.HitByPlayer1) !== 0;
-    let who: number;
     if (p0 && p1) {
       // `AND EAX,0x80000001` and the fixup: MSVC's signed `% 2` on a
       // non-negative `rand()`, so the draw is 0 or 1; then `LEA` x3 is
       // `0x116A + 50 * r`.
-      who = rng.int(2);
       p.removeFlag = ORIGINAL_ITEM_PICKUP_SLOT
-        + ORIGINAL_ITEM_PICKUP_STRIDE * who;
+        + ORIGINAL_ITEM_PICKUP_SLOT_STRIDE * rng.int(2);
     } else if (p0) {
-      who = 0;
       p.removeFlag = ORIGINAL_ITEM_PICKUP_SLOT;
     } else {
-      who = 1;
       p.removeFlag = ORIGINAL_ITEM_PICKUP_SLOT_P1;
     }
-    events?.emit("prop.pickup",
-                 { id: p.id, player: who, sound: SFX_ORIGINAL_ITEM_PICKUP });
   }
 
   const floor = G.g_camera_fixed_eye_y;
@@ -574,22 +423,20 @@ export function OriginalItemDropUpdate(p: BreakableProp, rng: Rng,
   p.yaw = (p.yaw + ORIGINAL_ITEM_SPIN) | 0;
 
   const s = w.o2c4;
-  const fade = p.storyItem >= ORIGINAL_ITEM_FADE_FROM
-    ? Math.fround(1.0 - p.storyItem * ORIGINAL_ITEM_FADE_STEP) : null;
   let m = PropMatrixPush();
   MatrixTranslate(m, p.x, p.y, p.z);
   MatrixRotateY(m, p.yaw);
   MatrixRotateZ(m, p.roll);
   MatrixScale(m, s, s, s);
   // `NoOpStub(s)` (`FUN_0041EBB0`) here and below: an empty function.
-  OriginalItemDrawMaybeFaded(p, m, p.slot, fade);
+  OriginalItemDrawMaybeFaded(p, m, p.slot);
 
   if (w.o28e !== -1) {
     m = PropMatrixPush();
     MatrixTranslate(m, p.x, p.y, p.z);
     PropMatrixClearRotation(m);
     MatrixScale(m, s, s, s);
-    OriginalItemDrawMaybeFaded(p, m, w.o28e, fade);
+    OriginalItemDrawMaybeFaded(p, m, w.o28e);
   }
 
   if (p.storyItem > 0) {
@@ -607,39 +454,4 @@ export function OriginalItemDropUpdate(p: BreakableProp, rng: Rng,
 
   PropRegisterForShotTest(p, p.x, Math.fround(p.y + ORIGINAL_ITEM_SHOT_RISE),
                           p.z);
-}
-
-/**
- * `AssetDrawSlot` (`FUN_00418560`) while `+0x2A0 < 0x19`, and
- * `AssetDrawSlotWithAlpha` (`FUN_004185A0`) at `alpha` from there on
- * (`CMP EAX,0x19; JGE` at `0x00466E7F`, and `FILD; FMUL [0x004E3100];
- * FSUBR [0x004C4380]; FSTP float` for the alpha).
- *
- * `[port-only]` as a function: the engine writes the branch out twice.
- */
-function OriginalItemDrawMaybeFaded(p: BreakableProp, m: Mat, slot: number,
-                                    alpha: number | null): void {
-  if (alpha === null) PropDrawSlot(p, m, slot);
-  else PropDrawSlotWithAlpha(p, m, slot, alpha);
-}
-
-/**
- * `MatrixClearRotation` (`FUN_004A9F70`) for a matrix recorded in world space.
- *
- * The engine writes the identity over the top's 3x3, which on its stack — the
- * camera's world-to-view times the translate — leaves the model at its point
- * and square to the screen. The port's matrices are the view one with the
- * camera taken back off (`class41/prop_draw.ts`), and the same result there is
- * the camera's own view-to-world rotation under the translate:
- * `[I | t_view] * view_to_world = [R_v2w | pos]`.
- *
- * `[port-only]` as a function. `g_camera_view_to_world` is the one
- * `UpdateSceneViewAndLight` (`FUN_00401F40`) left this tick (see
- * `game/camera/view.ts`), which is the view the engine's draw is under.
- */
-function PropMatrixClearRotation(m: Mat): void {
-  const v2w = G.g_camera_view_to_world;
-  for (let r = 0; r < 3; r++) {
-    for (let k = 0; k < 4; k++) m[r * 4 + k] = v2w[r * 4 + k];
-  }
 }

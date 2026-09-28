@@ -411,15 +411,32 @@ import {
   LIFT_RIDE_DROP, LIFT_HINGE_STEP, SFX_LIFT_GATE, SFX_LIFT_PANEL,
   PropExpireByStepLifetime, GENERIC_DRAW_SLOT, GENERIC_DESCRIPTOR_SLOT,
   GENERIC_LIFETIME_FROM_1F4,
-  GENERIC_ORIGINAL_MODE_ONLY, makeBreakableProp, type BreakableProp,
+  makeBreakableProp, type BreakableProp,
   WaterSurfaceFlag, WaterSurfacesTick, WATER_ARENA_ALT_PAIR_SLOT,
   WATER_ARENA_ALT_SLOT, WATER_ARENA_PAIR_SLOT, WATER_ARENA_SLOT,
   WATER_CANAL_SLOT, WATER_DEATH_ALT_SLOT, WATER_DEATH_CAM_PATH,
   WATER_DEATH_SLOT, WATER_PHASE_PER_TICK, WATER_SURFACE_ALSO_DRAWS,
   PropCuePhase, PropContainerRaisesScriptFlag, PROP75_DROP_AT,
-  PROP75_RIDE_LENGTH, PROP75_SCRIPT_FLAG, PROP75_TYPE,
+  PROP75_RIDE_LENGTH, PROP75_SCRIPT_FLAG, PROP75_TYPE, PROP75_PATH,
+  PROP75_SLOT, SFX_PROP75_HIT, SFX_PROP75_RIDE, SFX_PROP75_RIDE_END,
+  PickOriginalModeItem, ORIGINAL_ITEM_BOBS,
+  ORIGINAL_ITEM_PICKUP_SLOT, ORIGINAL_ITEM_PICKUP_SLOT_P1,
+  ORIGINAL_ITEM_TAKEN, SFX_ORIGINAL_ITEM_PICKUP, ORIGINAL_ITEM_FACING_SLOT,
+  OriginalItemBannersTick, ITEM_BANNER_FRAMES, ITEM_BANNER_FRAME_SPRITE,
+  Type72Phase, TYPE72_CUE_CAM_FRAME, TYPE72_CUE_CAM_PATH, TYPE72_GRAVITY,
+  TYPE72_SCRIPT_FLAG, TYPE72_THROW,
+  Type74Phase, TYPE74_DROP_AT, TYPE74_GATE_FLAG, TYPE74_SCRIPT_FLAG,
+  TYPE74_SLOT, SFX_TYPE74_HIT,
+  Type76Phase, TYPE76_PAIR_A_AT, TYPE76_PAIR_B_AT, TYPE76_PAIR_PLATE_AT,
+  TYPE76_PAIR_YAW, SFX_TYPE76_HIT, SFX_TYPE76_OPEN,
+  Type77Phase, TYPE77_PATH, TYPE77_SCORE, TYPE77_SLOT, SFX_TYPE77_APPEAR,
+  SFX_TYPE77_LEAVE, SFX_TYPE77_SHOT,
 } from "../src/game/class41";
 import { BreakablePropPoolUpdate } from "../src/game/class41/pool";
+import { GENERIC_ROUTINES } from "../src/game/class41/generic_routines";
+import { PropUpdateType75 } from "../src/game/class41/flag_prop";
+import { COLLECTIBLE_WORDS_ZERO } from "../src/game/class41/original_item";
+import { HiddenItemCopy, ReleaseHiddenItem } from "../src/game/class41/items";
 import {
   BreakablePropSpawnShatter, PropShattersTick,
   SHATTER_GRAVITY, SHATTER_PIECES,
@@ -476,8 +493,7 @@ import {
 } from "../src/game/class41/type43";
 import { SFX_FALLING_KNOCKED } from "../src/game/class44/container";
 import {
-  OriginalItemDropPhase, PickOriginalModeItem, SFX_ORIGINAL_ITEM_PICKUP,
-  SFX_TYPE07_HIT, TYPE07_SLOT,
+  OriginalItemDropPhase, SFX_TYPE07_HIT, TYPE07_SLOT,
 } from "../src/game/class41/type07";
 import {
   SFX_TYPE8_PART_SPLASH, TYPE8_PART_ANGLES, TYPE8_PART_POSITIONS,
@@ -1910,6 +1926,71 @@ const BREAKABLES: BreakablesJson = {
     },
   },
   level_height: 7.540296,
+  // Scene 1's rows 6 and 0, and the records they name, as the EXE has them
+  // (`g_original_item_tables` / `g_original_item_records`). Row 6 is the one
+  // stage 2's type-72 spawn names; row 9 is synthetic -- a row whose first id
+  // is -1, which is how a collectible comes to be nothing at all -- and so is
+  // record 29's scale, kept at the EXE's 1.0.
+  original_items: {
+    scene: 1,
+    rows: {
+      "0": { ids: [1, 28, 14, 3], weights: [1, 2, 4, 7] },
+      "6": { ids: [3, 5, 31, 21], weights: [2, 3, 4, 6] },
+      "9": { ids: [-1, 29, -1, -1], weights: [4, 5, 6, 6] },
+      // Rows 1 and 2: the ones types 75 and 74 hand `SpawnStoryModeItem`.
+      "1": { ids: [30, 0, 17, 18], weights: [1, 4, 6, 9] },
+      "2": { ids: [22, 23, 14, 15], weights: [1, 2, 4, 6] },
+    },
+    records: {
+      "1": { slot: 0x109b, slot2: 0xffff, scale: 1, sprite: 0x5be },
+      "3": { slot: 0x10a5, slot2: 0x10a6, scale: 1, sprite: 0x5c0 },
+      "5": { slot: 0x10a9, slot2: 0x10aa, scale: 1, sprite: 0x5c2 },
+      "14": { slot: 0x109a, slot2: 0x1098, scale: 1, sprite: 0x5c8 },
+      "21": { slot: 0x1096, slot2: 0xffff, scale: 1.5, sprite: 0x5d2 },
+      "28": { slot: 0x1094, slot2: 0xffff, scale: 1, sprite: 0x5d7 },
+      "29": { slot: 0x109f, slot2: 0xffff, scale: 1, sprite: 0x5de },
+      "31": { slot: 0x10ab, slot2: 0xffff, scale: 1, sprite: 0x5dc },
+      "0": { slot: 0x109e, slot2: 0xffff, scale: 1, sprite: 0x5bd },
+      "15": { slot: 0x109a, slot2: 0x1099, scale: 1, sprite: 0x5c9 },
+      "17": { slot: 0x108e, slot2: 0x108d, scale: 1, sprite: 0x5cb },
+      "18": { slot: 0x108e, slot2: 0x108b, scale: 1, sprite: 0x5cc },
+      "22": { slot: 0x108f, slot2: 0xffff, scale: 1, sprite: 0x5d3 },
+      "23": { slot: 0x1090, slot2: 0xffff, scale: 1, sprite: 0x5d4 },
+      "30": { slot: 0x1097, slot2: 0xffff, scale: 1, sprite: 0x5db },
+    },
+  },
+};
+
+/**
+ * `*g_pHingeCurvesXYZ`: curve 0's first five frames as the EXE has them, then
+ * a synthetic tail that holds the last -- what `PropUpdateType76` swings on.
+ */
+const HINGE_CURVE_0_HEAD = Array.from({ length: 60 }, (_, i) => (
+  [[0, 0, 0], [55, 2989, 55], [195, 5700, 195], [383, 8155, 383],
+   [585, 10377, 585]][Math.min(i, 4)]));
+
+/**
+ * Row 0 of scenes 0 and 2, and the records they name, as the EXE has them:
+ * what type 7's drop (stage 1) and type 43's break (stage 3) pick from.
+ */
+const ORIGINAL_ITEMS_SCENE0 = {
+  scene: 0,
+  rows: { "0": { ids: [3, 4, 16, 17], weights: [6, 7, 13, 14] } },
+  records: {
+    "3": { slot: 0x10a5, slot2: 0x10a6, scale: 1, sprite: 0x5c0 },
+    "4": { slot: 0x10a7, slot2: 0x10a8, scale: 1, sprite: 0x5c1 },
+    "16": { slot: 0x108e, slot2: 0x108c, scale: 1, sprite: 0x5ca },
+    "17": { slot: 0x108e, slot2: 0x108d, scale: 1, sprite: 0x5cb },
+  },
+};
+const ORIGINAL_ITEMS_SCENE2 = {
+  scene: 2,
+  rows: { "0": { ids: [17, 20, 28, -1], weights: [2, 3, 4, 5] } },
+  records: {
+    "17": { slot: 0x108e, slot2: 0x108d, scale: 1, sprite: 0x5cb },
+    "20": { slot: 0x1086, slot2: 0xffff, scale: 1.5, sprite: 0x5d1 },
+    "28": { slot: 0x1094, slot2: 0xffff, scale: 1, sprite: 0x5d7 },
+  },
 };
 
 /**
@@ -3614,6 +3695,7 @@ console.log("\nclass 0x41 type 43, PlaceGenericProp case 0x2B and its routine:")
     // Set 2 in Original Mode: PickOriginalModeItem at the break, one rand().
     const rng = new Rng(9);
     const events = propScene(rng, GameMode.Original);
+    SetGameTables(CHARS, { ...BREAKABLES, original_items: ORIGINAL_ITEMS_SCENE2 });
     G.g_scene_index = 2;
     const p = PlaceGenericProp({
       at: 0xc700, container: "generic", type: 43, slot: 9,
@@ -3772,7 +3854,8 @@ console.log("\nclass 0x41 types 7, 20, 58 and 60, transcribed whole:");
   {
     const rng = new Rng(5);
     const events = propScene(rng, GameMode.Original);
-    const { sounds, pickups } = listen(events);
+    SetGameTables(CHARS, { ...BREAKABLES, original_items: ORIGINAL_ITEMS_SCENE0 });
+    const { sounds } = listen(events);
     G.g_scene_index = 0;
     G.g_camera_fixed_eye_y = 6.5;
     const p = put({ type: 7, pos: [0, 102, -54], lifetime_evt_steps: 2 }, rng);
@@ -3825,13 +3908,23 @@ console.log("\nclass 0x41 types 7, 20, 58 and 60, transcribed whole:");
       check("type 7 item: its sphere is 1.5 above it",
             item.shotRegistered && item.shotY === 8);
       sounds.length = 0;
+      const id = item.words.o290;
+      const taken = G.g_original_items_taken[id] ?? 0;
       BreakablePropTakeShot(item, 0);
       BreakablePropPoolUpdate(rng, events);
       check("type 7 item: a shot takes it once, player 0's strip",
-            sounds[0] === SFX_ORIGINAL_ITEM_PICKUP && pickups.length === 1
+            sounds[0] === SFX_ORIGINAL_ITEM_PICKUP
             && item.removeFlag === 0x116a && item.storyItem === 1
             && (item.draws ?? []).some((c) => c.slot === 0x116a)
             && (item.flags & 0xa) === 0xa);
+      check("type 7 item: ...counted into g_original_items_taken, with the "
+            + "record's banner",
+            G.g_original_items_taken[id] === taken + 1
+            && G.g_original_item_banners.length === 1
+            && G.g_original_item_banners[0].sprite
+              === ORIGINAL_ITEMS_SCENE0.records[
+                String(id) as keyof typeof ORIGINAL_ITEMS_SCENE0.records]
+                .sprite);
       let alive = 1, faded: number | undefined;
       while (!item.dead && alive < 200) {
         BreakablePropPoolUpdate(rng, events);
@@ -3841,7 +3934,7 @@ console.log("\nclass 0x41 types 7, 20, 58 and 60, transcribed whole:");
         }
       }
       check("type 7 item: 49 pickup frames, faded from 25, then gone",
-            alive === 49 && item.dead && pickups.length === 1
+            alive === 49 && item.dead && G.g_original_items_taken[id] === taken + 1
             && faded === Math.fround(1 - 25 * Math.fround(0.02)),
             `${alive} ${faded}`);
     }
@@ -5496,9 +5589,11 @@ console.log("\nclass 0x41 types 41, 56, 69 and 73, transcribed whole:");
           snd.join() === String(0x1d16a9) && p.routinePhase === 1
           && p.vy === Math.fround(-0.2), `${snd} ${p.vy}`);
     const y0 = p.y;
+    G.g_original_item_pickup_blocked = 1;
     BreakablePropPoolUpdate(rng, events);
     check("...then promotes 1 to 2 and drops item set 1 at (-140.7, 3, -328.7)",
-          G.g_script_branch_var === 2 && items.length === 1
+          G.g_original_item_pickup_blocked === 0
+          && G.g_script_branch_var === 2 && items.length === 1
           && items[0].kind === 1 && near(items[0].x, -140.7) && items[0].y === 3,
           JSON.stringify(items));
     check("...and puts its own position back",
@@ -6013,11 +6108,11 @@ console.log("\nclass 0x41's pose orders come from the routines:");
   // * 43 -- its arm computes the field (`0x19E8` or `0xFFFF`) rather than
   //   leaving the prologue's, and it ages `obj+0x11C` as a lifetime. All seven
   //   of its stage-3 spawns carry 1, 2 or 3 there.
-  // * 70 and 71 -- `OriginalItemPropUpdate` ages `obj+0x11C` too, so the word
-  //   is a lifetime and the model comes from `g_original_item_records`.
-  // * 72 -- every code clause passes and the data one does not: its one
-  //   shipped spawn carries `+0x11C == 1`, so the engine hands
-  //   `AssetDrawSlot` a 1. `[open]`, and out until it is settled.
+  // * 70, 71 and 72 -- their arms call `PickOriginalModeItem`, which writes
+  //   the chosen item's model over `obj+0x28C`: the descriptor word is only
+  //   ever a lifetime (70, 71) or nothing (72). 72 was the one type that
+  //   passed every code clause and failed the data one, until the call was
+  //   read as the overwrite it is.
   check("the four types that draw obj+0x28C and are not descriptor slots",
         [43, 70, 71, 72].every((ty) => !GENERIC_DESCRIPTOR_SLOT.has(ty)),
         `${[43, 70, 71, 72].filter((ty) => GENERIC_DESCRIPTOR_SLOT.has(ty))}`);
@@ -7895,8 +7990,9 @@ console.log("\nclass 0x41 type 75: the writer of stage 4's flag 20:");
   {
     propScene(rng, GameMode.Arcade);
     const p = place75();
-    check("type 75 gets its own family, not `Generic`",
-          p.family === PropFamily.Type75, PropFamily[p.family]);
+    check("type 75 runs its own g_class41_updates row, as a generic prop",
+          p.family === PropFamily.Generic
+          && GENERIC_ROUTINES[75] === PropUpdateType75, PropFamily[p.family]);
     check("...and `PlaceGenericProp` seeds its `+0x2A4` at 0 and not -1",
           p.removeFlag === 0, String(p.removeFlag));
     check("...with flag 20 down before its first frame", flag20() === 0);
@@ -8002,8 +8098,8 @@ console.log("\nclass 0x41 type 75: the writer of stage 4's flag 20:");
     check("...and nothing for a `spawn_simple` record, which has no address",
           PropContainerRaisesScriptFlag({ class: 0x41, hp: 0 }) === undefined);
     check("...and the type it keys on is the engine's own 75",
-          PROP75_TYPE === 75 && GENERIC_DRAW_SLOT[PROP75_TYPE] === 0xa6b,
-          String(GENERIC_DRAW_SLOT[PROP75_TYPE]));
+          PROP75_TYPE === 75 && PROP75_SLOT === 0xa6b,
+          String(PROP75_SLOT));
   }
 
   // --- and therefore: the gate stops being excused -------------------------
@@ -8481,9 +8577,16 @@ console.log("\nprops are shot by a sphere, not by the model they draw:");
     check("type 57 ignores its position for a fixed world point",
           Math.abs(t57.shotX - -697.042) < 1e-3 && t57.shotY !== 100,
           `${t57.shotX}/${t57.shotY}/${t57.shotZ}`);
-    // Type 74's rise is a function of its own radius: `r * 0.5 - 2`.
-    check("type 74's rise comes from its own radius", at(74).shotY === 100 + 2.5,
-          String(at(74).shotY));
+    // Type 74's rise is a function of its own radius: `r * 0.5 - 2`. It is
+    // read in Original Mode, because in Arcade its first frame is its exit.
+    propScene(rng, GameMode.Original);
+    const t74 = PlaceGenericProp({ at: 0x9100 + 74, container: "generic",
+                                   type: 74, slot: 0, lifetime_evt_steps: 0,
+                                   pos: [0, 100, 0] }, rng);
+    G.g_breakable_props.push(t74);
+    BreakablePropPoolUpdate(rng);
+    check("type 74's rise comes from its own radius", t74.shotY === 100 + 2.5,
+          String(t74.shotY));
   }
 
   // The group props: half a stack level up while standing, the raw origin once
@@ -9246,10 +9349,848 @@ console.log("\nclass 0x41, Original Mode's collectibles in Arcade:");
   G.g_GameMode = GameMode.Original;
   BreakablePropPoolUpdate(rng, events);
   check("and survives in Original Mode", !q.dead);
-  check("the set is the four routines that were actually read",
-        [...GENERIC_ORIGINAL_MODE_ONLY].sort((a, b) => a - b)
-          .join(",") === "70,71,72,77");
+  check("70 to 77 each run their own g_class41_updates row, as generic props",
+        [70, 71, 72, 73, 74, 75, 76, 77].every((ty) => PlaceGenericProp(
+          { at: 0xbf80, container: "generic", type: ty, slot: 1,
+            lifetime_evt_steps: 1, pos: [0, 0, 0], pitch: 0, yaw: 0,
+            roll: 0 }, rng).family === PropFamily.Generic
+          && GENERIC_ROUTINES[ty] !== undefined)
+        && GENERIC_ROUTINES[70] === GENERIC_ROUTINES[71]);
   G.g_GameMode = GameMode.Arcade;
+}
+
+console.log("\nclass 0x41 types 70-77, Original Mode's collectibles and neighbours:");
+{
+  type Placement = Parameters<typeof PlaceGenericProp>[0];
+  const place = (type: number, rng: Rng, over: Partial<Placement> = {}) => {
+    const p = PlaceGenericProp(
+      { at: 0xc000 + type, container: "generic", type, slot: 1,
+        lifetime_evt_steps: 9, field_1f4: 6, pos: [10, 20, 30], pitch: 0,
+        yaw: 0, roll: 0, ...over }, rng);
+    G.g_breakable_props.push(p);
+    return p;
+  };
+  const heard = (events: Events): number[] => {
+    const out: number[] = [];
+    events.on("sound.play", (e) => out.push(e.id));
+    return out;
+  };
+  const alive = (p: { id: number }) =>
+    G.g_breakable_props.some((q) => q.id === p.id && !q.dead);
+  const W = (p: BreakableProp) => PropWords(p, COLLECTIBLE_WORDS_ZERO);
+  const world = (ops: (m: number[]) => void): number[] => {
+    const m = MatIdentity(); ops(m); return m;
+  };
+  const same = (a: number[] | undefined, b: number[]): boolean =>
+    !!a && a.length === 16 && a.every((v, i) => Math.abs(v - b[i]) < 1e-4);
+  const slots = (p: BreakableProp) => (p.draws ?? []).map((c) => c.slot);
+  /** Install one `op_` path; `k(a, b)` is a key at frame 0 and one at 1. */
+  const onPath = (slot: number, ch: Record<string, number[][]>) =>
+    SetCameraPaths(new CamPaths({ fps: 60, paths: {}, object_paths: {
+      [String(slot)]: { file: "op_test", index: 0, start: 0, duration: 1,
+                        channels: ch },
+    } } as never));
+  const k = (a: number, b = a) => [[0, a, 0, 0], [1, b, 0, 0]];
+  /** Row 6's walk, written out: weights 2, 3, 4, 6 over ids 3, 5, 31, 21. */
+  const row6 = (m: number) => (m < 2 ? 3 : m < 3 ? 5 : m < 4 ? 31 : 21);
+  const holdItem = (id: number) => {
+    G.g_players_in_play = 1;
+    G.g_active_player = 0;
+    G.g_original_item_slots[0] = [id, -1];
+  };
+
+  // --- PickOriginalModeItem: the model is the table's, not the descriptor's
+  {
+    propScene(new Rng(1));
+    let same6 = 0;
+    for (let seed = 1; seed <= 60; seed++) {
+      const q = makeBreakableProp(1, 0, 0);
+      PickOriginalModeItem(q, 6, new Rng(seed));
+      const want = row6(new Rng(seed).int(6));
+      const rec = BREAKABLES.original_items!.records[String(want)];
+      const w = W(q);
+      if (w.o290 === want && q.slot === rec.slot
+          && w.o28e === ((rec.slot2 << 16) >> 16) && w.o2c4 === rec.scale) {
+        same6++;
+      }
+    }
+    check("PickOriginalModeItem walks the row's cumulative weights",
+          same6 === 60, `${same6} of 60`);
+    const probe = (r: number): number => {
+      const q = makeBreakableProp(1, 0, 0);
+      PickOriginalModeItem(q, 6, { int: () => r } as unknown as Rng);
+      return W(q).o290;
+    };
+    check("...at the boundaries: 0,1 -> 3; 2 -> 5; 3 -> 31; 4,5 -> 21",
+          [0, 1, 2, 3, 4, 5].map(probe).join() === "3,3,5,31,21,21");
+    const rng = new Rng(4);
+    G.g_original_item_pickup_blocked = 1;
+    const p = place(70, rng);
+    check("...and a type 70's arm overwrites the descriptor's slot with it",
+          p.slot !== 1 && p.slot === BREAKABLES.original_items!
+            .records[String(W(p).o290)].slot,
+          `slot 0x${p.slot.toString(16)} item ${W(p).o290}`);
+    check("...keeps the descriptor word as its lifetime",
+          p.lifetime === 9, String(p.lifetime));
+    check("...writes the placer's byte to +0x194", W(p).o194 === 6,
+          String(W(p).o194));
+    check("...and clears g_original_item_pickup_blocked",
+          G.g_original_item_pickup_blocked === 0);
+  }
+  // A row whose draw is -1 is nothing, and leaves on its first frame.
+  {
+    propScene(new Rng(1));
+    let seed = 1;
+    while (new Rng(seed).int(6) >= 4) seed++;
+    const p = place(70, new Rng(seed), { field_1f4: 9 });
+    check("an item id of -1 zeroes both models and the scale is 1.0",
+          W(p).o290 === -1 && p.slot === 0 && W(p).o28e === 0
+          && W(p).o2c4 === 1, `${W(p).o290} ${p.slot}`);
+    BreakablePropPoolUpdate(new Rng(1));
+    check("...and OriginalItemPropUpdate despawns it", !alive(p));
+  }
+  // Case 0x46's scene-4 rule and case 0x47's seed.
+  {
+    propScene(new Rng(1));
+    G.g_scene_index = 4;
+    const a = place(70, new Rng(2), { field_1f4: 1 });
+    const b = place(70, new Rng(2), { field_1f4: 2 });
+    check("a scene-4 row-1 type 70 takes twice the radius",
+          a.hitRadius === 6 && b.hitRadius === 3,
+          `${a.hitRadius} / ${b.hitRadius}`);
+    G.g_scene_index = 1;
+    const rng = new Rng(71), mirror = new Rng(71);
+    const c = place(71, rng, { pitch: 0x100, roll: 0x200 });
+    mirror.int(6);                          // PickOriginalModeItem's draw
+    const rate = () => 0x60 - mirror.int(2) * 0xa0 - mirror.int(0x21);
+    const spin = rate(), roll = rate();
+    check("case 0x47 seeds 0x60 - (rand() % 2) * 0xA0 - rand() % 0x21",
+          c.spin === spin && c.rollSpin === roll,
+          `${c.spin}/${spin} ${c.rollSpin}/${roll}`);
+    check("...with the bob bit, an amplitude of 1.5, a 0x200 step and its "
+          + "centre at the placement",
+          (c.flags & ORIGINAL_ITEM_BOBS) !== 0 && c.shake === 1.5
+          && c.yawSpin === 0x200 && c.restY === 20);
+    check("...and drops the descriptor's pitch and roll",
+          c.pitch === 0 && c.roll === 0);
+  }
+
+  // --- OriginalItemPropUpdate: the draws and the pickup --------------------
+  {
+    const events = propScene(new Rng(1));
+    const sfx = heard(events);
+    G.g_scene_index = 1;
+    G.g_evt_block_index = 2;
+    // Item 3 of row 6: a model and a second model, scale 1.
+    let seed = 1;
+    while (row6(new Rng(seed).int(6)) !== 3) seed++;
+    const rng = new Rng(seed);
+    const p = place(70, rng, { pitch: 0x300, roll: 0x500 });
+    const id = W(p).o290;
+    const before = G.g_original_items_taken[id] ?? 0;
+    G.g_camera_view_to_world = world((m) => MatrixRotateY(m, 0x2000));
+    BreakablePropPoolUpdate(rng, events);
+    check("an untaken collectible registers 1.5 above its origin",
+          p.shotRegistered && p.shotY === 21.5, String(p.shotY));
+    check("...and a type 70 turns 0x400 a frame", p.yaw === 0x400,
+          String(p.yaw));
+    const d0 = p.draws ?? [];
+    check("it draws its model under T Rz Ry Rx and the record's scale",
+          id === 3 && d0.length === 2 && d0[0].slot === 0x10a5
+          && d0[0].alpha === undefined
+          && same(d0[0].m, world((m) => {
+            MatrixTranslate(m, 10, 20, 30); MatrixRotateZ(m, 0x500);
+            MatrixRotateY(m, 0x400); MatrixRotateX(m, 0x300);
+          })), JSON.stringify(slots(p)));
+    check("...and its second model square to the camera, 1.5 toward it",
+          d0[1]?.slot === 0x10a6 && same(d0[1].m, world((m) => {
+            MatrixTranslate(m, 10, 20, 30); MatrixRotateY(m, 0x2000);
+            MatrixTranslate(m, 0, 0, 1.5);
+          })));
+    G.g_camera_view_to_world = MatIdentity();
+    BreakablePropTakeShot(p, 1);
+    BreakablePropPoolUpdate(rng, events);
+    check("a shot takes it: +0x2A0 = 1 and the flag's taken bit",
+          p.storyItem === 1 && (p.flags & ORIGINAL_ITEM_TAKEN) !== 0,
+          String(p.storyItem));
+    check("...the strip is player 1's, 0x119C, drawn at +0x2A4 - 1 + +0x2A0",
+          p.removeFlag === ORIGINAL_ITEM_PICKUP_SLOT_P1
+          && slots(p)[2] === 0x119c, p.removeFlag.toString(16));
+    check("...the item is counted into g_original_items_taken",
+          G.g_original_items_taken[id] === before + 1);
+    check("...the pickup sound plays", sfx.includes(SFX_ORIGINAL_ITEM_PICKUP));
+    check("...and a banner goes up with the record's sprite",
+          G.g_original_item_banners.length === 1
+          && G.g_original_item_banners[0].sprite === BREAKABLES
+            .original_items!.records[String(id)].sprite
+          && G.g_original_item_banner_count === 1);
+    check("the routine clears bit 3 and leaves the player bits",
+          (p.flags & BreakableFlag.Hit) === 0
+          && (p.flags & BreakableFlag.HitByPlayer1) !== 0);
+    const drawn = G.g_screen_sprite_draws.filter(
+      (s) => s.id === ITEM_BANNER_FRAME_SPRITE);
+    check("the banner draws its frame sprite on the frame it is made",
+          drawn.length === 1 && drawn[0].alpha === 1);
+    // The strip: 0x31 frames counted from 1, and the frame after leaves.
+    for (let i = 0; i < 0x18 - 1; i++) BreakablePropPoolUpdate(rng, events);
+    check("frame 0x18 of the strip still draws the item plainly",
+          p.storyItem === 0x18 && p.draws?.[0]?.alpha === undefined);
+    for (let i = 0x18; i < 0x31; i++) BreakablePropPoolUpdate(rng, events);
+    check("...it plays the pickup strip to frame 0x31", alive(p)
+          && p.storyItem === 0x31, String(p.storyItem));
+    const fade = Math.fround(1 - 0x31 * 0.019999999552965164);
+    check("...drawing the strip frame 0x119C + 0x30 and both models faded "
+          + "at 1 - n * 0.02",
+          slots(p)[2] === 0x119c + 0x30 && p.draws?.[0]?.alpha === fade
+          && p.draws?.[1]?.alpha === fade,
+          (p.draws ?? []).map((q) => `${q.slot.toString(16)}:${q.alpha}`)
+            .join());
+    check("...still registered while it plays", p.shotRegistered);
+    BreakablePropPoolUpdate(rng, events);
+    check("...and is gone the frame after", !alive(p));
+  }
+  // An item with no second model draws one model.
+  {
+    propScene(new Rng(1));
+    G.g_scene_index = 1;
+    let seed = 1;
+    while (row6(new Rng(seed).int(6)) !== 21) seed++;
+    const rng = new Rng(seed);
+    const p = place(70, rng);
+    BreakablePropPoolUpdate(rng);
+    check("item 21 (no second model) draws one, at scale 1.5",
+          W(p).o28e === -1 && slots(p).join() === String(0x1096)
+          && Math.abs(Math.hypot(p.draws![0].m[0], p.draws![0].m[1],
+                                 p.draws![0].m[2]) - 1.5) < 1e-6);
+  }
+  // Two players on the same frame: rand() % 2 picks the strip.
+  {
+    propScene(new Rng(1));
+    G.g_scene_index = 1;
+    G.g_evt_block_index = 2;
+    const rng = new Rng(12);
+    const p = place(70, rng);
+    BreakablePropTakeShot(p, 0);
+    BreakablePropTakeShot(p, 1);
+    BreakablePropPoolUpdate(rng);
+    check("both players at once: a strip from 0x116A or 0x119C",
+          p.removeFlag === ORIGINAL_ITEM_PICKUP_SLOT
+          || p.removeFlag === ORIGINAL_ITEM_PICKUP_SLOT_P1,
+          p.removeFlag.toString(16));
+  }
+  // The blocked byte, the scene-1 block-1 refusal and scene 2's unblock.
+  {
+    const rng = new Rng(13);
+    propScene(rng);
+    G.g_scene_index = 1;
+    G.g_evt_block_index = 2;
+    const p = place(70, rng);
+    G.g_original_item_pickup_blocked = 1;
+    BreakablePropTakeShot(p, 0);
+    BreakablePropPoolUpdate(rng);
+    check("g_original_item_pickup_blocked refuses the pickup",
+          p.storyItem === 0 && (p.flags & BreakableFlag.Hit) === 0);
+    G.g_original_item_pickup_blocked = 0;
+    G.g_evt_block_index = 1;
+    BreakablePropTakeShot(p, 0);
+    BreakablePropPoolUpdate(rng);
+    check("...and so does scene 1 block 1", p.storyItem === 0);
+    G.g_scene_index = 2;
+    G.g_evt_block_index = 10;
+    G.g_cam_path_frame = 0x3d;
+    G.g_original_item_pickup_blocked = 1;
+    BreakablePropTakeShot(p, 0);
+    BreakablePropPoolUpdate(rng);
+    check("scene 2 block 10 past camera frame 0x3C clears the byte and takes it",
+          p.storyItem === 1 && G.g_original_item_pickup_blocked === 0);
+  }
+  // The route and the removals.
+  {
+    const rng = new Rng(14);
+    propScene(rng);
+    G.g_scene_index = 2;
+    G.g_evt_block_index = 4;
+    G.g_script_flags[0x13] = 1;
+    const p = place(70, rng);
+    G.g_script_branch_var = 0;
+    BreakablePropPoolUpdate(rng);
+    check("scene 2 block 4 with flag 0x13 writes the scene index, 2",
+          G.g_script_branch_var === 2 && alive(p));
+    const q = place(70, rng, { field_1f4: 5 });
+    G.g_evt_block_index = 9;
+    BreakablePropPoolUpdate(rng);
+    check("scene 2 block 9 takes the row-5 collectibles away",
+          !alive(q) && alive(p));
+    propScene(rng);
+    G.g_scene_index = 4;
+    G.g_evt_block_index = 3;
+    const r = place(70, rng, { field_1f4: 0 });
+    BreakablePropPoolUpdate(rng);
+    check("scene 4 block 3 keeps them while flag 0x0B is down", alive(r));
+    G.g_script_flags[0x0b] = 1;
+    BreakablePropPoolUpdate(rng);
+    check("...and takes them when it is raised", !alive(r));
+  }
+  // Type 70's facing model, and type 71's bob.
+  {
+    const rng = new Rng(15);
+    propScene(rng);
+    G.g_scene_index = 1;
+    const p = place(70, rng);
+    p.slot = ORIGINAL_ITEM_FACING_SLOT;
+    G.g_camera_block_eye.x = 10;
+    G.g_camera_block_eye.z = 40;          // straight down +z from the prop
+    BreakablePropPoolUpdate(rng);
+    // atan2(0, -10) is a half turn, 0x8000 as an s16 is -0x8000, and the
+    // routine turns it half round again.
+    check("model 0x109F faces the camera block's eye instead of turning",
+          p.yaw === 0, String(p.yaw));
+    const b = place(71, rng);
+    const y0 = b.y;
+    BreakablePropPoolUpdate(rng);
+    BreakablePropPoolUpdate(rng);
+    check("a type 71 bobs off its centre and tumbles",
+          b.y !== y0 && b.pitch !== 0 && b.yaw === 0x800,
+          `${b.y} ${b.pitch} ${b.yaw}`);
+  }
+  // The banner on its own: 0x96 frames, the fade, and scene 5's one-at-a-time.
+  {
+    const rng = new Rng(16);
+    propScene(rng);
+    G.g_scene_index = 1;
+    const p = place(70, rng);
+    BreakablePropTakeShot(p, 0);
+    BreakablePropPoolUpdate(rng);
+    const b = G.g_original_item_banners[0];
+    for (let i = 1; i < 0x8f; i++) {
+      G.g_screen_sprite_draws = [];
+      OriginalItemBannersTick();
+    }
+    G.g_screen_sprite_draws = [];
+    OriginalItemBannersTick();
+    const a = G.g_screen_sprite_draws[0]?.alpha ?? -1;
+    check("the banner fades after frame 0x87 at (0x96 - n) / 15",
+          b.frame === 0x90
+          && a === Math.fround((0x96 - 0x90) * 0.06666667014360428),
+          `${b.frame} ${a}`);
+    for (let i = 0x90; i < ITEM_BANNER_FRAMES; i++) OriginalItemBannersTick();
+    check("...is up for 0x96 frames",
+          G.g_original_item_banners.length === 1, String(b.frame));
+    OriginalItemBannersTick();
+    check("...and then gone, with the count back to 0",
+          G.g_original_item_banners.length === 0
+          && G.g_original_item_banner_count === 0);
+    propScene(rng);
+    G.g_scene_index = 5;
+    const c = place(70, rng, { field_1f4: 0 });
+    const d = place(70, rng, { field_1f4: 0 });
+    BreakablePropTakeShot(c, 0);
+    BreakablePropTakeShot(d, 0);
+    BreakablePropPoolUpdate(rng);
+    OriginalItemBannersTick();
+    check("in scene 5 only one banner survives two",
+          G.g_original_item_banners.length === 1
+          && G.g_original_item_banner_count === 1,
+          String(G.g_original_item_banners.length));
+  }
+
+  // --- type 72: the cue, the throw, the fall -------------------------------
+  {
+    const events = propScene(new Rng(1));
+    const rng = new Rng(72);
+    G.g_scene_index = 1;
+    const p = place(72, rng);
+    BreakablePropPoolUpdate(rng, events);
+    check("waiting, type 72 is neither drawn nor shootable",
+          alive(p) && !p.shotRegistered && p.draws?.length === 0);
+    G.g_active_cam_path = TYPE72_CUE_CAM_PATH;
+    G.g_cam_path_frame = TYPE72_CUE_CAM_FRAME;
+    BreakablePropPoolUpdate(rng, events);
+    check("its camera cue without flag 0x12 takes it away", !alive(p));
+
+    const q = place(72, rng);
+    G.g_script_flags[TYPE72_SCRIPT_FLAG] = 1;
+    BreakablePropPoolUpdate(rng, events);
+    check("with the flag it is thrown up at 1.2",
+          q.routinePhase === Type72Phase.Fall && q.vy === TYPE72_THROW
+          && q.restY === 20);
+    check("...and drawn from that frame, the item's model first",
+          q.draws?.[0]?.slot === q.slot);
+    G.g_cam_path_frame = TYPE72_CUE_CAM_FRAME + 1;
+    BreakablePropPoolUpdate(rng, events);
+    const v1 = Math.fround(TYPE72_THROW - TYPE72_GRAVITY);
+    check("...falls under 0.0381 a frame, and registers 1.5 above itself",
+          q.vy === v1 && q.shotRegistered
+          && q.shotY === Math.fround(Math.fround(v1 + 20) + 1.5),
+          `${q.vy} ${q.shotY}`);
+    let n = 1;
+    while (alive(q) && n < 200) { BreakablePropPoolUpdate(rng, events); n++; }
+    check("...and leaves once it is falling below where it was thrown from",
+          !alive(q) && n > 60 && n < 70, String(n));
+
+    const r = place(72, rng);
+    G.g_cam_path_frame = TYPE72_CUE_CAM_FRAME;
+    BreakablePropPoolUpdate(rng, events);
+    G.g_cam_path_frame = 0;
+    BreakablePropPoolUpdate(rng, events);
+    BreakablePropTakeShot(r, 0);
+    BreakablePropPoolUpdate(rng, events);
+    const y = r.y;
+    check("shot, it is taken", r.routinePhase === Type72Phase.Taken
+          && r.storyItem === 1 && r.removeFlag === ORIGINAL_ITEM_PICKUP_SLOT);
+    BreakablePropPoolUpdate(rng, events);
+    check("...stops falling and leaves the shot test",
+          r.y === y && !r.shotRegistered);
+    // `CMP word ptr [ESI + 0x28C], -1`: the second block is gated on the
+    // first model, so an item with no second model still asks for one.
+    W(r).o28e = -1;
+    BreakablePropPoolUpdate(rng, events);
+    check("...and its second block is gated on the first model, not the second",
+          slots(r).join() === [r.slot, -1, 0x116a + r.storyItem - 1].join(),
+          slots(r).join());
+  }
+
+  // --- type 74: three shots, the drop, the fall, flag 0x13 -----------------
+  {
+    const events = propScene(new Rng(1), GameMode.Arcade);
+    const rng = new Rng(74);
+    const p = place(74, rng, { lifetime_evt_steps: 3 });
+    BreakablePropPoolUpdate(rng, events);
+    check("in Arcade type 74 raises g_script_flags[0x13] and leaves",
+          !alive(p) && G.g_script_flags[TYPE74_SCRIPT_FLAG] === 1);
+
+    propScene(new Rng(1), GameMode.Arcade);
+    G.g_evt_step_index = 1;
+    const q = place(74, rng, { lifetime_evt_steps: 0 });
+    G.g_evt_step_index = 2;
+    BreakablePropPoolUpdate(rng, events);
+    check("...but its lifetime is charged first, and expiring raises nothing",
+          !alive(q) && (G.g_script_flags[TYPE74_SCRIPT_FLAG] ?? 0) === 0);
+  }
+  {
+    const events = propScene(new Rng(1));
+    const sfx = heard(events);
+    let drop: number[] = [];
+    events.on("item.released", (e) => { drop = [e.x, e.y, e.z]; });
+    const rng = new Rng(74);
+    const p = place(74, rng, { pitch: 0x10, yaw: 0x20, roll: 0x30 });
+    check("type 74 takes three shots",
+          p.words.o199 === 3 && p.hitRadius === 9);
+    BreakablePropPoolUpdate(rng, events);
+    check("...draws 0xA64 under T Rz Ry Rx",
+          p.draws?.length === 1 && p.draws[0].slot === TYPE74_SLOT
+          && same(p.draws[0].m, world((m) => {
+            MatrixTranslate(m, 10, 20, 30); MatrixRotateZ(m, 0x30);
+            MatrixRotateY(m, 0x20); MatrixRotateX(m, 0x10);
+          })));
+    check("...registering half its radius less 2 above itself",
+          p.shotY === Math.fround(9 * 0.5 + 20 - 2), String(p.shotY));
+    p.hitAim = { x: 1, y: 2 };
+    const fx = G.g_sprite_effects.length;
+    for (let i = 0; i < 2; i++) {
+      BreakablePropTakeShot(p, 0);
+      BreakablePropPoolUpdate(rng, events);
+    }
+    check("two shots spark and knock, and drop nothing",
+          p.routinePhase === Type74Phase.Standing && drop.length === 0
+          && sfx.filter((s) => s === SFX_TYPE74_HIT).length === 2
+          && G.g_sprite_effects.length === fx + 2);
+    check("...and the player bits are cleared every frame",
+          (p.flags & (BreakableFlag.HitByPlayer0
+                      | BreakableFlag.HitByPlayer1)) === 0);
+    G.g_original_item_pickup_blocked = 1;
+    BreakablePropTakeShot(p, 0);
+    BreakablePropPoolUpdate(rng, events);
+    check("the third drops its story item at the routine's literal point",
+          p.routinePhase === Type74Phase.Dropped && p.storyItem === 2
+          && Math.abs(drop[0] - TYPE74_DROP_AT[0]) < 1e-3
+          && Math.abs(drop[2] - TYPE74_DROP_AT[2]) < 1e-3,
+          drop.join());
+    check("...with its own position put back and the blocked byte cleared",
+          p.x === 10 && p.z === 30 && G.g_original_item_pickup_blocked === 0);
+    // `SpawnStoryModeItem` makes a collectible: row 2, at the drop point, on
+    // the dropping prop's own clock and lifetime, running type 70's routine.
+    const item = G.g_breakable_props.find(
+      (q) => q !== p && q.family === PropFamily.Generic && q.kind === 70
+        && !q.dead);
+    check("...and the story item is a collectible out of row 2",
+          !!item && W(item).o194 === 2 && item.hitRadius === 3
+          && [22, 23, 14, 15].includes(W(item).o290)
+          && Math.abs(item.x - TYPE74_DROP_AT[0]) < 1e-3
+          && Math.abs(item.z - TYPE74_DROP_AT[2]) < 1e-3,
+          `${item && W(item).o194} ${item && W(item).o290} ${item?.x}`);
+    check("...inheriting the prop's step clock and +0x11C, and running",
+          !!item && item.lifetime === p.lifetime
+          && item.stepsElapsed === p.stepsElapsed
+          && item.lastStepIndex === p.lastStepIndex && item.shotRegistered
+          && (item.draws?.length ?? 0) > 0
+          && G.g_original_item_banner_count === 0);
+    const y0 = p.y;
+    for (let i = 0; i < 40; i++) BreakablePropPoolUpdate(rng, events);
+    // From its placed 0x10, 0x200 a frame while below 0x4000: 0x4010.
+    check("...then it falls and tips forward a quarter turn and no more",
+          p.y < y0 - 40 && p.pitch === 0x4010, `${p.y} ${p.pitch}`);
+    BreakablePropTakeShot(p, 0);
+    const n = sfx.length;
+    BreakablePropPoolUpdate(rng, events);
+    check("...and a shot then does nothing", sfx.length === n);
+  }
+  {
+    const rng = new Rng(75);
+    propScene(rng);
+    G.g_evt_block_index = 5;
+    G.g_script_flags[TYPE74_GATE_FLAG] = 1;
+    const p = place(74, rng);
+    BreakablePropPoolUpdate(rng);
+    check("standing in block 5 with flag 0x15 up, it raises flag 0x13 at once",
+          G.g_script_flags[TYPE74_SCRIPT_FLAG] === 1);
+    G.g_script_flags[TYPE74_SCRIPT_FLAG] = 0;
+    p.routinePhase = Type74Phase.Dropped;
+    for (let i = 0; i < 0x32; i++) BreakablePropPoolUpdate(rng);
+    check("...and once it has dropped, only after fifty frames",
+          (G.g_script_flags[TYPE74_SCRIPT_FLAG] ?? 0) === 0);
+    BreakablePropPoolUpdate(rng);
+    check("...on the fifty-first", G.g_script_flags[TYPE74_SCRIPT_FLAG] === 1);
+  }
+
+  // --- type 75: what it draws -----------------------------------------------
+  {
+    const events = propScene(new Rng(1));
+    const sfx = heard(events);
+    const rng = new Rng(75);
+    onPath(PROP75_PATH, {
+      pos_x: k(0, 10), pos_y: k(1), pos_z: k(2),
+      rot_x: k(0x100 + 0.7), rot_y: k(-0x200 - 0.7), rot_z: k(3),
+    });
+    const p = place(75, rng, { lifetime_evt_steps: 9 });
+    BreakablePropPoolUpdate(rng, events);
+    check("type 75 draws 0xA6B at op_ path 0x178's pose alone, frame 0 until "
+          + "shot, the angles __ftol'ed",
+          p.draws?.length === 1 && p.draws[0].slot === PROP75_SLOT
+          && same(p.draws[0].m, world((m) => {
+            MatrixTranslate(m, 0, 1, 2); MatrixRotateZ(m, 3);
+            MatrixRotateY(m, -0x200); MatrixRotateX(m, 0x100);
+          })));
+    check("...and its shot sphere at its own placement",
+          p.shotX === 10 && p.shotY === 20 && p.shotZ === 30);
+    G.g_original_item_pickup_blocked = 1;
+    BreakablePropTakeShot(p, 0);
+    BreakablePropPoolUpdate(rng, events);
+    check("shot, it plays both its sounds and clears the blocked byte",
+          sfx.includes(SFX_PROP75_HIT) && sfx.includes(SFX_PROP75_RIDE)
+          && G.g_original_item_pickup_blocked === 0);
+    check("...and rides the path on its own cursor",
+          p.shake === 1 && p.draws?.[0]?.m[12] === 10, String(p.shake));
+    for (let i = 0; i < PROP75_RIDE_LENGTH; i++) {
+      BreakablePropPoolUpdate(rng, events);
+    }
+    check("at the ride's end it sets the blocked byte and plays 0x3A1BA9",
+          G.g_original_item_pickup_blocked === 1
+          && sfx.includes(SFX_PROP75_RIDE_END));
+    SetCameraPaths(null);
+  }
+
+  // --- type 76: the door, its route and its swing --------------------------
+  {
+    const rng = new Rng(76);
+    propScene(rng, GameMode.Arcade);
+    const p = place(76, rng, { field_1f4: 1 });
+    BreakablePropPoolUpdate(rng);
+    check("in Arcade type 76 leaves", !alive(p));
+  }
+  {
+    const events = propScene(new Rng(1));
+    SetGameTables(CHARS, { ...BREAKABLES,
+                           hinge_curves_xyz: { "0": HINGE_CURVE_0_HEAD } });
+    const sfx = heard(events);
+    const rng = new Rng(76);
+    G.g_evt_block_index = 5;
+    const pair = place(76, rng, { field_1f4: 1, pos: [0, 0, 0] });
+    const one = place(76, rng, { field_1f4: 0, yaw: 0x1000 });
+    BreakablePropPoolUpdate(rng, events);
+    const d = Math.hypot(pair.shotX - TYPE76_PAIR_A_AT[0],
+                         pair.shotZ - TYPE76_PAIR_A_AT[2]);
+    check("the pair's sphere is the plate on its first leaf",
+          Math.abs(pair.shotY - (TYPE76_PAIR_A_AT[1]
+                                 + TYPE76_PAIR_PLATE_AT[1])) < 1e-3
+          && Math.abs(d - Math.hypot(12.5, 0.5)) < 1e-3,
+          `${pair.shotX} ${pair.shotY} ${pair.shotZ}`);
+    check("...and the single door's is its position less (2.5, 30, 17.5), "
+          + "on world axes",
+          one.shotX === 7.5 && one.shotY === -10 && one.shotZ === 12.5);
+    const leafA = world((m) => {
+      MatrixTranslate(m, ...TYPE76_PAIR_A_AT);
+      MatrixRotateY(m, TYPE76_PAIR_YAW);
+    });
+    check("shut, the pair draws both leaves and the plate on the first",
+          slots(pair).join() === [0xa67, 0x10d3, 0xa68].join()
+          && same(pair.draws![0].m, leafA)
+          && same(pair.draws![1].m, world((m) => {
+            MatrixTranslate(m, ...TYPE76_PAIR_A_AT);
+            MatrixRotateY(m, TYPE76_PAIR_YAW);
+            MatrixTranslate(m, ...TYPE76_PAIR_PLATE_AT);
+          })), slots(pair).join());
+    check("...and the single door, and its plate turned and scaled 1.2 in its "
+          + "frame",
+          slots(one).join() === [0xa6d, 0x10d3].join()
+          && same(one.draws![1].m, world((m) => {
+            MatrixTranslate(m, 10, 20, 30); MatrixRotateY(m, 0x1000);
+            MatrixTranslate(m, -2.5, -30, -17.5); MatrixRotateY(m, 0x4000);
+            MatrixScale(m, 1.2000000476837158, 1.2000000476837158,
+                        1.2000000476837158);
+          })));
+    BreakablePropTakeShot(one, 0);
+    BreakablePropPoolUpdate(rng, events);
+    check("in block 5 the single door pays and knocks and does not open",
+          one.routinePhase === Type76Phase.Shut && sfx.includes(SFX_TYPE76_HIT)
+          && !sfx.includes(SFX_TYPE76_OPEN));
+    G.g_script_branch_var = 0;
+    BreakablePropTakeShot(pair, 0);
+    BreakablePropPoolUpdate(rng, events);
+    check("...and the pair opens: route 2, the open sound, the answered bit",
+          pair.routinePhase === Type76Phase.Open
+          && G.g_script_branch_var === 2 && sfx.includes(SFX_TYPE76_OPEN)
+          && (pair.flags & 0x40000000) !== 0);
+    check("...and swings on hinge curve 0",
+          pair.cueCursorB === 1 && pair.yaw === 0 && pair.hingeB === 0);
+    BreakablePropPoolUpdate(rng, events);
+    check("...frame by frame: yaw is -ry, the far leaf's yaw ry, roll sums rz",
+          pair.yaw === -2989 && pair.hingeB === 2989 && pair.roll === 55
+          && pair.pitch === -55 && pair.restPitch === 55,
+          `${pair.yaw} ${pair.hingeB} ${pair.roll}`);
+    check("...each leaf turned on its own three angles",
+          same(pair.draws![0].m, world((m) => {
+            MatrixTranslate(m, ...TYPE76_PAIR_A_AT);
+            MatrixRotateY(m, TYPE76_PAIR_YAW); MatrixRotateZ(m, 55);
+            MatrixRotateY(m, 2989); MatrixRotateX(m, 55);
+          }))
+          && same(pair.draws![1].m, world((m) => {
+            MatrixTranslate(m, ...TYPE76_PAIR_B_AT);
+            MatrixRotateY(m, TYPE76_PAIR_YAW); MatrixRotateZ(m, 55);
+            MatrixRotateY(m, -2989); MatrixRotateX(m, -55);
+          })));
+    for (let i = 0; i < 70; i++) BreakablePropPoolUpdate(rng, events);
+    check("...for sixty frames, and the plate is gone",
+          pair.cueCursorB === 60
+          && slots(pair).join() === [0xa67, 0xa68].join());
+  }
+  {
+    const rng = new Rng(77);
+    propScene(rng);
+    G.g_evt_block_index = 0x0e;
+    const one = place(76, rng, { field_1f4: 0 });
+    BreakablePropTakeShot(one, 0);
+    BreakablePropPoolUpdate(rng);
+    check("in block 0x0E the door wants a key", one.routinePhase === 0);
+    holdItem(2);
+    BreakablePropTakeShot(one, 0);
+    BreakablePropPoolUpdate(rng);
+    check("...and opens for a player holding item 2",
+          one.routinePhase === Type76Phase.Open
+          && G.g_script_branch_var === 2);
+    const third = place(76, rng, { field_1f4: 2 });
+    G.g_camera_view_to_world[12] = 5;
+    G.g_camera_view_to_world[13] = 6;
+    G.g_camera_view_to_world[14] = 7;
+    BreakablePropPoolUpdate(rng);
+    check("a third kind of door draws nothing and registers the view origin",
+          third.draws?.length === 0 && third.shotX === 5
+          && third.shotY === 6 && third.shotZ === 7);
+    G.g_camera_view_to_world = MatIdentity();
+  }
+
+  // --- type 77: item 0x1F, the ride, the payout ---------------------------
+  {
+    const events = propScene(new Rng(1));
+    const sfx = heard(events);
+    const rng = new Rng(77);
+    const p = place(77, rng);
+    BreakablePropPoolUpdate(rng, events);
+    check("type 77 leaves with 0x800A9 unless item 0x1F is held",
+          !alive(p) && sfx.includes(SFX_TYPE77_LEAVE));
+  }
+  {
+    let leave = 1, stay = 1;
+    while (new Rng(leave).int(3) !== 0) leave++;
+    while (new Rng(stay).int(3) === 0) stay++;
+    const events = propScene(new Rng(1));
+    const sfx = heard(events);
+    holdItem(0x1f);
+    const gone = place(77, new Rng(1));
+    BreakablePropPoolUpdate(new Rng(leave), events);
+    check("held, a first-frame rand() % 3 of 0 takes it away in silence",
+          !alive(gone) && sfx.length === 0);
+    onPath(TYPE77_PATH, { pos_x: k(5), pos_y: k(1), pos_z: k(0) });
+    const rng = new Rng(stay);
+    const p = place(77, rng, { yaw: 0x4000 });
+    const score = G.g_player_score[0];
+    BreakablePropPoolUpdate(rng, events);
+    check("...anything else plays 0x700A9 and it flies",
+          alive(p) && sfx.includes(SFX_TYPE77_APPEAR)
+          && p.shake === 1 && p.yawSpin === 0x400);
+    check("...at pos + RotY(yaw) * the path's point",
+          Math.abs(Math.hypot(p.shotX - 10, p.shotZ - 30) - 5) < 1e-3
+          && p.shotY === 21 && Math.abs(p.shotX - 10) < 1e-3,
+          `${p.shotX} ${p.shotY} ${p.shotZ}`);
+    check("...drawn twice size, 0x10AB, spinning on +0x1DC",
+          p.draws?.length === 1 && p.draws[0].slot === TYPE77_SLOT
+          && same(p.draws[0].m, world((m) => {
+            MatrixTranslate(m, 10, 20, 30); MatrixRotateY(m, 0x4000);
+            MatrixTranslate(m, 5, 1, 0); MatrixRotateY(m, 0x400);
+            MatrixScale(m, 2, 2, 2);
+          })));
+    p.hitAim = { x: 1, y: 2 };
+    const fx = G.g_sprite_effects.length;
+    BreakablePropTakeShot(p, 0);
+    BreakablePropPoolUpdate(rng, events);
+    check("shot, it pays 2000 and a spark four times the size",
+          G.g_player_score[0] === score + TYPE77_SCORE
+          && G.g_sprite_effects.length === fx + 1
+          && G.g_sprite_effects[fx].scale.x === 4
+          && sfx.includes(SFX_TYPE77_SHOT)
+          && p.routinePhase === Type77Phase.Shot);
+    const cursor = p.shake;
+    const last = [p.shotX, p.shotY, p.shotZ].join();
+    BreakablePropPoolUpdate(rng, events);
+    check("...stops on its path and blinks: nothing drawn on an odd frame",
+          p.shake === cursor && p.storyItem === 1 && p.draws?.length === 0);
+    // The declared divergence, pinned: the engine registers stack garbage on
+    // an odd frame, and the port the point its last draw computed.
+    check("...still registered there, at the point the last draw computed",
+          p.shotRegistered && [p.shotX, p.shotY, p.shotZ].join() === last);
+    BreakablePropPoolUpdate(rng, events);
+    check("...and drawn on an even one", p.draws?.length === 1);
+    let n = 2;
+    while (alive(p) && n < 100) {
+      BreakablePropPoolUpdate(rng, events); n++;
+    }
+    check("...for 0x3D frames and then gone", !alive(p) && n === 0x3e,
+          String(n));
+    SetCameraPaths(null);
+  }
+  {
+    let stay = 1;
+    while (new Rng(stay).int(3) === 0) stay++;
+    const events = propScene(new Rng(1));
+    const sfx = heard(events);
+    holdItem(0x1f);
+    const rng = new Rng(stay);
+    const p = place(77, rng);
+    for (let i = 0; i < 400; i++) BreakablePropPoolUpdate(rng, events);
+    check("unshot, it rides 400 frames", alive(p) && p.shake === 400);
+    BreakablePropPoolUpdate(rng, events);
+    check("...and leaves with 0x800A9 on the next",
+          !alive(p) && sfx.filter((s) => s === SFX_TYPE77_LEAVE).length === 1);
+  }
+
+  // --- the other writers of the blocked byte, and type 43's tally --------
+  {
+    const rng = new Rng(58);
+    propScene(rng);
+    G.g_original_item_pickup_blocked = 1;
+    const p = place(58, rng);
+    BreakablePropTakeShot(p, 0);
+    BreakablePropPoolUpdate(rng);
+    check("type 58's Original Mode hit clears g_original_item_pickup_blocked",
+          G.g_original_item_pickup_blocked === 0 && p.routinePhase === 1);
+  }
+  {
+    const rng = new Rng(43);
+    const events = propScene(rng);
+    SetGameTables(CHARS, { ...BREAKABLES, original_items: ORIGINAL_ITEMS_SCENE2 });
+    G.g_scene_index = 2;
+    const p = PlaceGenericProp({
+      at: 0xc780, container: "generic", type: 43, slot: 9,
+      lifetime_evt_steps: 9, field_1f4: 2, pos: [0, 0, 0], roll: 2,
+    }, rng);
+    G.g_breakable_props.push(p);
+    BreakablePropPoolUpdate(rng, events);
+    BreakablePropTakeShot(p, 0);
+    BreakablePropPoolUpdate(rng, events);
+    // Whatever the break picked, the wreck's pickup is this item's.
+    p.words.o290 = 20;
+    const before = G.g_original_items_taken[20] ?? 0;
+    BreakablePropTakeShot(p, 0);
+    BreakablePropPoolUpdate(rng, events);
+    check("type 43's Original item counts into g_original_items_taken and "
+          + "raises its banner",
+          G.g_original_items_taken[20] === before + 1
+          && G.g_original_item_banners.length === 1
+          && G.g_original_item_banners[0].sprite === 0x5d1,
+          `${G.g_original_items_taken[20]} ${G.g_original_item_banners.length}`);
+  }
+}
+
+console.log("\nclass 0x41, the three story arms of the item release:");
+{
+  // `BreakablePropUpdate`, `KindedPropUpdate` and `FallingContainerUpdate`
+  // each spell the release out, and their story arms differ in the blocked
+  // byte, the height and the falling container's `+0x11C`.
+  const release = (copy: HiddenItemCopy, over: Partial<BreakableProp>,
+                   storyRise = 0) => {
+    const events = propScene(new Rng(1));
+    G.g_scene_index = 1;
+    const p = makeBreakableProp(900, 0, 0);
+    Object.assign(p, { itemSet: 2, storyItem: 0, x: 1, y: 10, z: 3 }, over);
+    G.g_item_set_countdown[2] = 1;
+    G.g_original_item_pickup_blocked = 1;
+    const y0 = p.y;
+    ReleaseHiddenItem(p, new Rng(3), events, copy, 0.25, storyRise);
+    const item = G.g_breakable_props.find((q) => q.kind === 70);
+    return { p, y0, item };
+  };
+  {
+    const { p, y0, item } = release(HiddenItemCopy.Group, {});
+    check("a group member's story item clears the blocked byte after it",
+          !!item && item.y === y0 && p.y === y0
+          && G.g_original_item_pickup_blocked === 0);
+  }
+  {
+    const { p, y0, item } = release(HiddenItemCopy.Kinded, { kind: 2 }, 1.0);
+    check("a kind-2 kinded prop's story item comes out 1.0 up, the prop put "
+          + "back, the byte cleared",
+          !!item && item.y === Math.fround(y0 + 1) && p.y === y0
+          && G.g_original_item_pickup_blocked === 0,
+          `${item?.y} ${p.y}`);
+  }
+  {
+    const events = propScene(new Rng(1));
+    G.g_scene_index = 2;
+    G.g_evt_block_index = 4;
+    const p = makeBreakableProp(901, 0, 0);
+    Object.assign(p, { itemSet: 2, storyItem: 0, kind: 3, y: 10 });
+    G.g_item_set_countdown[2] = 1;
+    ReleaseHiddenItem(p, new Rng(3), events, HiddenItemCopy.Kinded);
+    check("...and in scene 2 block 4 the kinded copy blocks the pickup instead",
+          G.g_original_item_pickup_blocked === 1);
+  }
+  {
+    // Through `KindedPropUpdate`: the kind-2 lift is the routine's, whatever
+    // the set.
+    const rng = new Rng(4);
+    const events = propScene(rng);
+    G.g_scene_index = 1;
+    const k = PlaceKindedProp(0xd900, 2, ItemSet.Score2, 1, 5, 0, 10, 0, 0,
+                              rng);
+    k.storyItem = 0;
+    G.g_item_set_countdown[ItemSet.Score2] = 1;
+    G.g_breakable_props.push(k);
+    BreakablePropTakeShot(k, 0);
+    BreakablePropPoolUpdate(rng, events);
+    const item = G.g_breakable_props.find((q) => q.kind === 70);
+    check("a kind-2 prop broken in Original Mode lifts its story item 1.0",
+          !!item && item.y === 11 && k.y === 10, `${item?.y} ${k.y}`);
+  }
+  {
+    const { item } = release(HiddenItemCopy.Falling,
+                             { family: PropFamily.Falling, hp: 1, lifetime: 5,
+                               floorY: 4, y: 4 }, 0.5);
+    check("a falling container's story item inherits its +0x199 lifetime, "
+          + "0.5 over the floor, and clears the byte",
+          !!item && item.lifetime === 5 && item.y === 4.5
+          && G.g_original_item_pickup_blocked === 0,
+          `${item?.lifetime} ${item?.y}`);
+  }
 }
 
 console.log("\nclass 0x41 type 4, seven of the eleven kinds are effects:");

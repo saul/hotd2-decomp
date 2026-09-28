@@ -116,7 +116,7 @@ import { T } from "../tables";
 import { BAMS } from "../vec";
 import { MatrixTranslate } from "../matrix";
 import { SpawnPropHitEffectScaled } from "../effects/sprite";
-import { ReleaseHiddenItem } from "../class41/items";
+import { HiddenItemCopy, ReleaseHiddenItem } from "../class41/items";
 import { ActorDespawnProp, BreakablePropAwardHit } from "../class41/prop";
 import {
   PropDrawBegin, PropDrawSlot, PropMatrixPush, PropMatrixTRzRyRx,
@@ -601,6 +601,7 @@ function FallingContainerBreak(p: BreakableProp, rng: Rng,
   // routine writes `+0x1A0` only when the countdown empties; the object is
   // despawned on the next line either way.
   p.y = p.floorY;
-  ReleaseHiddenItem(p, events, 0, FALLING_STORY_ITEM_RISE);
+  ReleaseHiddenItem(p, rng, events, HiddenItemCopy.Falling, 0,
+                    FALLING_STORY_ITEM_RISE);
   ActorDespawnProp(p);
 }

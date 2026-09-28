@@ -29,6 +29,7 @@
  */
 import type { Rng } from "../../core/rng";
 import type { EffectDefJson } from "../../bundle";
+import { G } from "../globals";
 import { T } from "../tables";
 import {
   MatIdentity, MatrixRotateX, MatrixRotateY, MatrixRotateZ, MatrixScale,
@@ -61,6 +62,29 @@ export function PropDrawBegin(p: BreakableProp): void {
  */
 export function PropMatrixPush(m?: Mat): Mat {
   return m ? m.slice(0, 16) : MatIdentity();
+}
+
+/**
+ * `MatrixClearRotation` (`FUN_004A9F70`) on a recorded matrix.
+ *
+ * The engine writes the identity over the top's 3x3, which on its stack — the
+ * camera's world-to-view times whatever the routine composed — leaves the
+ * model at its point and square to the screen, and whatever the routine
+ * composes after it is in the camera's axes. The port's matrices are the
+ * view one with the camera taken back off (see the file comment), and the
+ * same result there is the camera's own view-to-world rotation under the
+ * translation: `[I | t_view] . view_to_world = [R_v2w | p]`.
+ *
+ * `g_camera_view_to_world` is the one `UpdateSceneViewAndLight`
+ * (`FUN_00401F40`) left this tick, which is the view the engine's draw is
+ * under. `[port-only]` as a *signature*: the engine's call takes no argument
+ * and edits the stack's top.
+ */
+export function PropMatrixClearRotation(m: Mat): void {
+  const v = G.g_camera_view_to_world;
+  for (let r = 0; r < 3; r++) {
+    for (let c = 0; c < 3; c++) m[r * 4 + c] = v[r * 4 + c];
+  }
 }
 
 /**

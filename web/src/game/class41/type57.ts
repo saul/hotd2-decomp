@@ -61,7 +61,7 @@
  * every later one at -529.244. That is the exe, and it is transcribed.
  *
  * The shot sphere: radius 5.0 from the arm, centred on the world literal the
- * `PROP_SHOT_OFFSET` row in `shot_test.ts` already carries — which was right,
+ * old per-type offset table in `shot_test.ts` carried — which was right,
  * `(0xC42E42B0, 0xC11DC6A8, 0xC4044F9E)`, and is registered every frame the
  * prop lives. `MatrixTransformPoint` (`FUN_004A8A80`) runs on the stack top
  * after the pop, which is the camera's view, so the engine's `obj+0x70` is

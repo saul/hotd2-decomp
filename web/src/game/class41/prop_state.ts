@@ -49,21 +49,6 @@ export enum PropFamily {
    */
   ScriptFlagEffect = 7,
   /**
-   * `PropUpdateType75` (`FUN_004710C0`) — class 0x41 type 75, and the one
-   * object in the game whose routine opens a `wait_script_flag` gate.
-   *
-   * Its own family and not `Generic` for the same reason
-   * {@link PropFamily.StoryModeSwitch} is: it does **not** call
-   * `PropExpireByStepLifetime`. It inlines a variant of that routine with the
-   * scene-1 sweep left out and its own flag tick folded into the middle, and
-   * its Arcade-Mode head raises `g_script_flags[20]` before despawning rather
-   * than just despawning. See `class41/flag_prop.ts`.
-   *
-   * Named for the type number because that is all the engine identifies it
-   * by: what the object at `AssetDrawSlot(0xA6B)` actually is, is `[open]`.
-   */
-  Type75 = 8,
-  /**
    * `RisingDoorUpdate` (`FUN_004753F0`) — class 0x44 selector 11, a door that
    * slides straight up when a script flag is raised. Two spawns in the game:
    * stage 3's roller shutter and stage 5's. See `class44/rising_door.ts`.
@@ -475,7 +460,7 @@ export interface BreakableProp {
   /**
    * `obj+0x2C0` — the shake a crack imparts; decays by 0.85 a frame.
    *
-   * **{@link PropFamily.Type75} reads it as a cursor**, not a displacement:
+   * **Class 0x41 type 75 reads it as a cursor**, not a displacement:
    * `PropUpdateType75` (`FUN_004710C0`) adds 1.0 to it every frame after the
    * prop is shot and hands it to `CamEvalObjectPath6` as the frame of object
    * path 0x178, and at 290.0 it raises `g_script_flags[20]`. Another of the
@@ -647,7 +632,7 @@ export interface BreakableProp {
    * into `g_script_flag_effect_cues_a` — so this is another of the offsets
    * L3 is about. Check the family.
    *
-   * And a third reading: for {@link PropFamily.Type75} it is a count of how
+   * And a third reading: for class 0x41 type 75 it is a count of how
    * many times `g_evt_step_index` has *changed* since the prop was placed,
    * which `PropUpdateType75` tests for equality with 2. That is a different
    * count from {@link BreakableProp.stepsElapsed} (`+0x197`) even though both
@@ -688,7 +673,7 @@ export interface BreakableProp {
    */
   branchLatched: boolean;
   /**
-   * `obj+0x192` for {@link PropFamily.Type75}. See {@link PropCuePhase}.
+   * `obj+0x192` for class 0x41 type 75. See {@link PropCuePhase}.
    *
    * The fourth port field standing for that one engine word, and the second
    * that is not {@link BreakableProp.state}. It is separate rather than shared

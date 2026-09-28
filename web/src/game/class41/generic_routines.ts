@@ -12,10 +12,10 @@
  * `obj+0x34` where it masks it, registers its shot sphere where and if it
  * registers one, and records its own draws (`class41/prop_draw.ts`).
  *
- * The older table in `pool.ts`, `GENERIC_UPDATE`, is the other shape: a
- * routine whose *branch arm* alone is ported, run inside a prologue and a tail
- * the pool supplies. A type moves from there to here when the rest of its
- * routine is read.
+ * Every generic type has a row now. The pool's older shape -- a routine whose
+ * *branch arm* alone was ported, run inside a prologue and a tail the pool
+ * supplied -- is left only for the chain links, which are not built by
+ * `PlaceGenericProp`.
  */
 import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
@@ -60,7 +60,15 @@ import { PropUpdateType63 } from "./type63";
 import { PlaceGenericPropType64, PropUpdateType64 } from "./type64";
 import { PlaceGenericPropType67, PropUpdateType67 } from "./type67";
 import { PlaceGenericPropType69, PropUpdateType69 } from "./type69";
+import {
+  OriginalItemPropUpdate, PlaceGenericPropType70, PlaceGenericPropType71,
+} from "./original_item";
+import { PlaceGenericPropType72, PropUpdateType72 } from "./type72";
 import { PlaceGenericPropType73, PropUpdateType73 } from "./type73";
+import { PlaceGenericPropType74, PropUpdateType74 } from "./type74";
+import { PropUpdateType75 } from "./flag_prop";
+import { PlaceGenericPropType76, PropUpdateType76 } from "./type76";
+import { PropUpdateType77 } from "./type77";
 import { PropUpdateType78 } from "./type78";
 import { PlaceGenericPropType34 } from "../class44/container";
 
@@ -116,7 +124,17 @@ export const GENERIC_ROUTINES: Partial<Record<number, GenericRoutine>> = {
   64: PropUpdateType64,
   67: PropUpdateType67,
   69: PropUpdateType69,
+  // One routine, two types: `g_class41_updates[70]` and `[71]` are both
+  // `0x004675A0`, and bit `0x200000` of `obj+0x34`, which 71's arm sets, is
+  // what makes it bob.
+  70: OriginalItemPropUpdate,
+  71: OriginalItemPropUpdate,
+  72: PropUpdateType72,
   73: PropUpdateType73,
+  74: PropUpdateType74,
+  75: PropUpdateType75,
+  76: PropUpdateType76,
+  77: PropUpdateType77,
   78: PropUpdateType78,
 };
 
@@ -160,5 +178,10 @@ export const GENERIC_PLACE_ARMS: Partial<Record<number, GenericPlaceArm>> = {
   64: PlaceGenericPropType64,
   67: PlaceGenericPropType67,
   69: PlaceGenericPropType69,
+  70: PlaceGenericPropType70,
+  71: PlaceGenericPropType71,
+  72: PlaceGenericPropType72,
   73: PlaceGenericPropType73,
+  74: PlaceGenericPropType74,
+  76: PlaceGenericPropType76,
 };

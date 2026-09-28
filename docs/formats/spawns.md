@@ -370,9 +370,36 @@ exactly 5, 12 and 33. Reading all 67 as slots resolved 46 of them to
 `char_adv03.bin`, `eff_boss4.bin` and `bg_adv10.bin`: characters and effects
 standing in for scenery.
 
-**[proved]** Types **70, 71, 72 and 77** open with
-`if (g_GameMode != 1) { ActorDespawn(obj); return; }` — they are Original
-Mode's collectibles and are gone on their first frame of an Arcade run.
+### Types 70 to 77: Original Mode's collectibles and their neighbours
+
+**[proved]** Types 70, 71, 72, 76 and 77 leave on their first Arcade frame
+(`if (g_GameMode != 1) ActorDespawn`, 77 with `PlaySoundId(0x800A9)` too);
+types 74 and 75 raise a script flag on the way out — `g_script_flags[0x13]`
+and `[0x14]`. Each is ported whole and records its own draws, as its
+`g_class41_updates` row (`game/class41/original_item.ts`, `flag_prop.ts`,
+`type72.ts`..`type77.ts`, registered in `generic_routines.ts`):
+
+| type | routine | spawns | what it is |
+|---|---|---:|---|
+| 70, 71 | `OriginalItemPropUpdate` (`FUN_004675A0`) | 20 | a collectible: turns (70) or bobs and tumbles (71); shot, it pays a hit, counts into `g_original_items_taken`, raises `SpawnOriginalItemBanner` (`FUN_00475E40`) and plays a 49-frame pickup strip from `0x116A`/`0x119C` while the item fades |
+| 72 | `PropUpdateType72` (`FUN_00470750`) | 1 | the same collectible, thrown up out of stage 2's canal at camera path `0x4E` frame `0x276` — if `g_script_flags[0x12]` is up, which stage 2's script never raises |
+| 74 | `PropUpdateType74` (`FUN_00470E20`) | 1 | three shots and it drops a story item at `(-286.6, -17.3, -302.5)`, then falls; draws `0xA64` |
+| 75 | `PropUpdateType75` (`FUN_004710C0`) | 1 | draws `0xA6B` at `op_` path `0x178`'s pose; shot, it rides the path 290 frames |
+| 76 | `PropUpdateType76` (`FUN_00471330`) | 2 | a door (`0xA6D`) or a pair of leaves (`0xA67`/`0xA68`) that a shot swings open on hinge curve 0, and route 2 |
+| 77 | `PropUpdateType77` (`FUN_004717A0`) | 24 | item 31's own model, `0x10AB`, flying `op_` path `0x195` at twice size while item 0x1F is held; shot, 2000 points |
+
+**The collectibles' model is not the descriptor's word.** Cases 0x46, 0x47
+and 0x48 call `PickOriginalModeItem` (`FUN_004629C0`) with the placer's
+`desc+0x24` byte as a row of `g_original_item_tables[g_scene_index]`, and it
+writes the drawn item's `g_original_item_records` model over `obj+0x28C`. So
+the `+0x11C` word is a lifetime for 70 and 71 and nothing at all for 72. The
+same function makes the model of every other Original Mode item: the story
+item `SpawnStoryModeItem` (`FUN_00467B90`) allocates -- the same object, run by
+`g_class41_updates[70]`'s routine -- type 7's drop and type 43's break (both
+row 0). The bundle carries the rows the stage's placements name and the
+records those rows name (`breakables.original_items`); the banner's pictures
+are one-picture tex banks `0x193..0x1B4`, palette `0x14`
+(`TexBankPaletteIndex`'s entry 2).
 
 ### Stage 1's church: class 0x41 types 38, 39, 40 and 44 build from tables
 
@@ -1203,13 +1230,13 @@ twenty that were read, as an offset from the object's own position:
 | 57 | `FUN_0046F350` | a world constant | 5 | never reads its own position |
 | 58, 60 | `FUN_0046F580`, `FUN_0046F840` | `(0, 0, 0)` | 3, 2 | |
 | 69 | `PropUpdateType69` | `(0, 1.5, 0)` | 4 | |
-| 70, 71 | `OriginalItemPropUpdate` | `(0, 1.5, 0)` | 3 | y is live on the bobbing one |
-| 72 | `FUN_00470750` | `(0, 1.5, 0)` | 3 | while falling only |
+| 70, 71 | `OriginalItemPropUpdate` | `(0, 1.5, 0)` | 3 | y is live on the bobbing one; 6 for a scene-4 row-1 prop |
+| 72 | `PropUpdateType72` | `(0, 1.5, 0)` | 3 | while falling only |
 | 73 | `PropUpdateType73` | `(0, 8.0, 0)` | 12 | the draw adds `+0x1C8` to z; this does not |
-| 74 | `FUN_00470E20` | `(0, r·0.5 − 2, 0)` | 9 | the only one that reads its own radius |
-| 75 | `FUN_004710C0` | `(0, 0, 0)` | 3 | the model flies a path, **the sphere stays** |
-| 76 | `PropUpdateType76` | `(−2.5, −30.0, −17.5)` | 3 | world axes; the draw applies them rotated |
-| 77 | `FUN_004717A0` | `pos + RotY · path` | 6 | |
+| 74 | `PropUpdateType74` | `(0, r·0.5 − 2, 0)` | 9 | the only one that reads its own radius |
+| 75 | `PropUpdateType75` | `(0, 0, 0)` | 3 | the model flies a path, **the sphere stays** |
+| 76 | `PropUpdateType76` | `(−2.5, −30.0, −17.5)` | 3 | the single door, on world axes; the pair's is its plate |
+| 77 | `PropUpdateType77` | `pos + RotY · path` | 6 | on an odd blink frame, whatever the stack held |
 
 The group props are half a stack level up (`3.770148`) while standing and at
 their raw origin once toppling, with a radius of 5; the kinded props take both
@@ -1254,7 +1281,8 @@ test. Six class-0x41 routines write world-scale negative literals there and
 nothing else does.
 
 Its object is its own type, not a sprite effect — no kind switch, no sound and
-no distance law — but the same flipbook shape. `FUN_00465950` steps the cursor
+no distance law — but the same flipbook shape. `PropHitSparkUpdate`
+(`FUN_00465950`) steps the cursor
 **before** it draws, so the slot it is seeded with (`0x904`) is never seen and
 the drawn run is `0x905..0x919`, the tail of the wood strip.
 

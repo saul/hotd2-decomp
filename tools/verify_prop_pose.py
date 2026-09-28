@@ -281,6 +281,11 @@ LIFETIME_FIELD = 0x11C
 F1F4_FIELD = 0x1F4
 #: `PropExpireByStepLifetime` (`FUN_00466640`), the shared prologue.
 EXPIRE_BY_STEP = 0x00466640
+#: `PickOriginalModeItem` (`FUN_004629C0`): the call cases 0x46, 0x47 and
+#: 0x48 make, which writes the chosen item's model over `obj+0x28C`. A call
+#: is an overwrite the literal-store scan cannot see, and missing it is what
+#: left type 72 looking like a descriptor-slot type for as long as it did.
+PICK_ORIGINAL_MODE_ITEM = 0x004629C0
 
 #: The empty band between a `+0x11C` that is a **lifetime in event steps** and
 #: one that is an **asset slot**, and the fourth clause of the descriptor-slot
@@ -328,6 +333,8 @@ def arm_facts(tables, va: int | None, limit: int = 0x180) -> tuple[bool, bool]:
 
     * `MOV word ptr [ESI+0x28C], imm16` always is — nine writes across seven
       arms, which is what rules out types 13, 34 and 67.
+    * `CALL PickOriginalModeItem` always is: it copies the chosen item's
+      model over the field, which is what rules out 70, 71 and 72.
     * `MOV word ptr [ESI+0x28C], r16` is an overwrite **unless** that register
       was loaded from `[EBP+0x11C]`, the placer's own copy: those arms are
       re-writing the value the prologue already put there. Type **43**'s is the
@@ -371,6 +378,13 @@ def arm_facts(tables, va: int | None, limit: int = 0x180) -> tuple[bool, bool]:
             life = True
             i += 7
             continue
+        if d[o] == 0xE8:
+            tgt = (va + i + 5
+                   + struct.unpack_from("<i", d, o + 1)[0]) & 0xFFFFFFFF
+            if tgt == PICK_ORIGINAL_MODE_ITEM:
+                lit = True
+                i += 5
+                continue
         if d[o] == 0xC3:
             break
         if d[o] == 0xE9:
@@ -696,13 +710,14 @@ def main() -> int:
 
     # -- the fourth clause, and the assertion -------------------------------
     #
-    # `code_says` is the three code clauses. It is not enough on its own, and
-    # type 72 is why: `FUN_00470750` takes `obj+0x28C` into the draw it makes
-    # for its first 25 frames, its arm writes no literal over that field and it
-    # never ages `obj+0x11C` -- every code clause passes -- and its one shipped
-    # spawn carries `+0x11C == 1`. The engine hands `AssetDrawSlot` a 1.
+    # `code_says` is the three code clauses. It was not enough on its own for
+    # as long as clause 2 looked only for a literal store: type 72
+    # (`PropUpdateType72`, `FUN_00470750`) passed all three and carried a 1,
+    # and was reported every run as an open type. Its arm calls
+    # `PickOriginalModeItem`, which overwrites the field; the scan counts the
+    # call now, and nothing is left on that list.
     #
-    # So the fourth clause is the shipped data, and the gap it rests on is
+    # The fourth clause is the shipped data, and the gap it rests on is
     # enormous and worth printing every run: across all twelve scenes the seven
     # descriptor-slot types' words run 0x2B..0x18BF and **every other type's
     # are 0, 1, 2, 3, 4, 5 and 7**. Nothing in between. A word below the gap is

@@ -74,7 +74,7 @@
  *                      obj+0x2A4 = 0x1256 + who; obj+0x28C = 0x116A + 50 * who
  * 0046d12f      set 2+, Original Mode only: PlaySoundId(0x3616A9); obj+0x2A0 = 1;
  *                      g_original_items_taken[obj+0x290]++ (to 0x63);
- *                      FUN_00475E40(g_original_item_records[obj+0x290].pickup);
+ *                      SpawnOriginalItemBanner(g_original_item_records[obj+0x290].sprite);
  *                      obj+0x28C = 0x116A + 50 * who
  *             }
  *           }
@@ -130,12 +130,15 @@ import {
 } from "../matrix";
 import { T } from "../tables";
 import { GrantExtraLife } from "./items";
-import { PickOriginalModeItem } from "./type07";
+import { SpawnOriginalItemBanner } from "./item_banner";
+import {
+  ORIGINAL_ITEMS_TAKEN_CAP, PickOriginalModeItem,
+} from "./original_item";
 import { PropStepLifetimeInline } from "./lifetime";
 import { ActorDespawnProp, BreakablePropAwardHit } from "./prop";
 import {
   PropDrawBegin, PropDrawEffect, PropDrawSlot, PropDrawSlotWithAlpha,
-  PropMatrixPush,
+  PropMatrixClearRotation, PropMatrixPush,
   PropMatrixTRzRyRx,
 } from "./prop_draw";
 import { PropRegisterForShotTest } from "./shot_test";
@@ -412,7 +415,7 @@ export function PropUpdateType43(p: BreakableProp, rng: Rng,
         const m = PropMatrixPush();
         // `FLD float; FADD double; FSTP float [ESP]` -- a float argument.
         MatrixTranslate(m, p.x, Math.fround(p.y + TYPE43_TAG_RISE), p.z);
-        Type43ClearRotation(m);
+        PropMatrixClearRotation(m);
         MatrixScale(m, TYPE43_TAG_SCALE, TYPE43_TAG_SCALE, TYPE43_TAG_SCALE);
         PropDrawSlot(p, m, p.removeFlag);
       }
@@ -522,10 +525,14 @@ function Type43WreckHit(p: BreakableProp, w: Type43Words, rng: Rng,
   if (G.g_GameMode !== GameMode.Original) return;
   events?.emit("sound.play", { id: SFX_TYPE43_PICKUP });
   p.storyItem = 1;
-  // [diverges] `g_original_items_taken[(s16)obj+0x290]++` (capped at 0x63,
-  // `0x0046D15A`) and `FUN_00475E40(g_original_item_records[obj+0x290]
-  // .pickup)` are not ported: neither the tally nor the inventory award
-  // exists in the port (see `g_original_item_slots` in `game/globals.ts`).
+  // `g_original_items_taken[(s16)obj+0x290]++`, capped at 0x63
+  // (`0x0046D15A`), and `SpawnOriginalItemBanner(g_original_item_records
+  // [obj+0x290].sprite)` (`0x0046D17F`) -- the collectible's own pickup.
+  const id = w.o290;
+  const n = G.g_original_items_taken[id] ?? 0;
+  if (n < ORIGINAL_ITEMS_TAKEN_CAP) G.g_original_items_taken[id] = n + 1;
+  SpawnOriginalItemBanner(
+    T.breakables?.original_items?.records[String(id)]?.sprite ?? 0);
   const who = both ? rng.int(2)
     : (f & BreakableFlag.HitByPlayer0) !== 0 ? 0 : 1;
   p.slot = TYPE43_PICKUP_SLOT + TYPE43_PICKUP_SLOT_STRIDE * who;
@@ -627,7 +634,7 @@ function Type43DrawOriginalItem(p: BreakableProp, w: Type43Words): void {
   if (w.o28e === -1) return;
   const s = PropMatrixPush();
   MatrixTranslate(s, p.x, p.y, p.z);
-  Type43ClearRotation(s);
+  PropMatrixClearRotation(s);
   MatrixTranslate(s, 0, 0, TYPE43_ITEM_SECOND_Z);
   MatrixScale(s, w.o2c4, w.o2c4, w.o2c4);
   Type43DrawMaybeFaded(p, s, w.o28e);
@@ -655,21 +662,3 @@ function Type43DrawMaybeFaded(p: BreakableProp, m: Mat, slot: number): void {
                         Math.fround(1.0 - p.storyItem * TYPE43_FADE_STEP));
 }
 
-/**
- * `MatrixClearRotation` (`0x004A9F70`) on a recorded matrix.
- *
- * The engine's stack has the camera's world-to-view under it, so wiping the
- * top 3x3 leaves a matrix whose axes are the **view's** — a billboard facing
- * the camera, still at the translated point. The port records world
- * matrices, so the same matrix is the camera's view-to-world rotation with
- * the translation kept: `[I | t_view] . V2W = [R_v2w | p]`.
- *
- * `[port-only]` as a function: the engine's call takes no argument and edits
- * the stack's top.
- */
-function Type43ClearRotation(m: Mat): void {
-  const v = G.g_camera_view_to_world;
-  for (let r = 0; r < 3; r++) {
-    for (let c = 0; c < 3; c++) m[r * 4 + c] = v[r * 4 + c];
-  }
-}

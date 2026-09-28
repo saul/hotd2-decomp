@@ -152,11 +152,10 @@ export function PropUpdateType69(p: BreakableProp, rng: Rng,
     p.storyItem = TYPE69_STORY_ITEM;
     p.lifetime = TYPE69_ITEM_LIFETIME;
     [p.x, p.y, p.z] = TYPE69_DROP_AT;
-    SpawnStoryModeItem(p, events);
-    // [diverges] `g_original_item_pickup_blocked` (`0x007DCD14`) = 0 is not
-    // written: the port's `G` has no such byte, and its one reader -- the
-    // pick-up arm of `OriginalItemPropUpdate` (`FUN_004675A0`) -- is not
-    // ported either, so nothing could see the write.
+    SpawnStoryModeItem(p, rng, events);
+    // `g_original_item_pickup_blocked` (`0x007DCD14`) = 0 at `0x004705B0`:
+    // the gate on `OriginalItemPropUpdate`'s pick-up arm, opened.
+    G.g_original_item_pickup_blocked = 0;
     [p.x, p.y, p.z] = [x, y, z];
   }
 

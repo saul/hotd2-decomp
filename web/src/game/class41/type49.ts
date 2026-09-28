@@ -70,8 +70,8 @@
  * spin -1 is such a fixed point. It stands still a sixth of a degree off.
  *
  * The shot point is `(x, y + 1.0, z)` of the position **as re-seated this
- * frame** — which is why `PROP_SHOT_DERIVED` listed it: the point moves, and
- * now the port moves it too.
+ * frame** — which is why `shot_test.ts`'s old derived-point list named it:
+ * the point moves, and now the port moves it too.
  *
  * Every float constant was read off the instruction stream (`L1`) and is
  * quoted beside its name.

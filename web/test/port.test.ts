@@ -6791,6 +6791,216 @@ console.log("\nclass 0x25, op 17 mode 0 holds the clip on its last cursor:");
         a.pos.y < 1000 - 0.01 * 70 * 71 && !a.dead, `y ${a.pos.y}`);
 }
 
+/**
+ * A character for class 0x25's two slot writers: bones 2 and 3 carry
+ * `znebi2`'s (type 0xF's) effect rows as the bundle does -- `[slot, next,
+ * damage]` per step, from `g_pBoneEffectSlots` -- and the table carries
+ * `g_player_hand_slots`' ten rows as `0x004EC9E0` holds them. The jetty zombies
+ * are type 0xF; the fixture keeps the id 1 the other class-0x25 tests use.
+ */
+const WOUND_CHARS = {
+  ...JETTY_CHARS,
+  types: { "1": { ...(JETTY_CHARS as { types: Record<string, CharacterType> })
+    .types["1"],
+    bones: [
+      { bone: 2, part: "head", slot: 0x1bf9, offset: [0, 0, 0], parent: null,
+        damage_rank: [], hit_radius: 1.5, hit_slot: 0x1bf9,
+        steps: [[0x1bfa, 0x1bfb, 100], [0x1bfb, 0, 120], [0, 0, 0], [0, 0, 0],
+                [0, 0, 0], [0, 0x1c00, 0]] },
+      { bone: 3, part: "l_upperarm", slot: 0x1bff, offset: [0, 0, 0],
+        parent: null, damage_rank: [], hit_radius: 1, hit_slot: 0x1bff,
+        steps: [[0x1c00, 0x1c01, 25], [0x1c01, 1, 35], [1, 0, 0]] },
+      { bone: 5, part: "r_hand", slot: 0x1591, offset: [0, 0, 0], parent: null,
+        damage_rank: [], hit_radius: 1, hit_slot: 0x1591, steps: [] },
+    ] } },
+  player_hand_slots: [
+    0x158f, 0x1591, 0x1592, 0x15a3, 0x15a4, 0x15a5, 0x15b5, 0x15b6, 0x15b7,
+    0x15c8, 0x15c9, 0x15ca, 0x0d3a, 0x0d3b, 0x0d3c, 0x0c4e, 0x0c4f, 0x0c50,
+    0x126e, 0x126f, 0x1270, 0x09cc, 0x09cd, 0x09ce, 0x0e41, 0x0e42, 0x0e43,
+    0x0f9d, 0x14b1, 0x14b2,
+  ],
+} as unknown as CharactersJson;
+
+/**
+ * {@link jettyScene} over {@link WOUND_CHARS}, driven from `ResetGameGlobals`
+ * through `GameUpdate`, with a host that records every `setBoneSlot` -- the
+ * call that reaches the renderer's draw record.
+ */
+function woundScene(cmds: HumanoidProgram["cmds"]):
+    { a: Actor; frame: () => void; swaps: number[][] } {
+  ResetGameGlobals();
+  EnterPlay();
+  SetGameTables(WOUND_CHARS, undefined, undefined, { "12288": {
+    charType: 1, removePath: 100, removeFrame: 65, flags2: 1,
+    motion: 1024, phase: 0, cmds,
+  } });
+  G.g_active_cam_path = 79;
+  G.g_cam_path_frame = 0;
+  const swaps: number[][] = [];
+  const host: GameHost = {
+    ...NULL_HOST,
+    setBoneSlot: (at, bone, slot) => { swaps.push([at, bone, slot]); },
+  };
+  const rng = new Rng(4);
+  const events = new Events();
+  const a = ActorSpawn(0x3000, SpawnClass.ScriptedHumanoid, 1, "wound",
+                       { pos: vec3(-1325, -23, -1834), visible: true }, rng);
+  return { a, swaps,
+           frame: () => GameUpdate(1 / 60, host, rng, events) };
+}
+
+console.log("\nclass 0x25, op 16: blood on the bone, then the wound (stage 2's "
+            + "jetty, evt 43584):");
+{
+  // The first half of evt 43584 as the bundle carries it: held until camera
+  // path 79 frame 100, then at frame 160 `op 16 a=2 b=0` and the stumble.
+  // The port stepped over both `op 16`s, so the zombie was shot on cue with
+  // no blood and no wound. `ScriptedHumanoidUpdate` at 0x00484972 calls
+  // `SpawnBloodSpray(obj, 2, 0.75f)` -- `PUSH 0x3f400000` -- and writes
+  // `g_pBoneEffectSlots[0xF][6*2 + 0]`, 0x1BFA, into bone 2's record.
+  const { a, frame, swaps } = woundScene([
+    { op: HumanoidOp.WaitThenHold, mode: HumanoidCond.Always, a: 0, b: 0 },
+    { op: HumanoidOp.WaitThenPlay, mode: HumanoidCond.CameraAt, a: 79, b: 100 },
+    { op: HumanoidOp.WaitUntil, mode: HumanoidCond.CameraAt, a: 79, b: 160 },
+    { op: HumanoidOp.SetBoneModel, mode: 0, a: 2, b: 0 },
+    { op: HumanoidOp.SetMotionBlended, mode: 5, a: 977, b: 0 },
+    { op: HumanoidOp.WaitUntil, mode: HumanoidCond.MotionFrame, a: -1, b: 0 },
+    { op: HumanoidOp.SetMotionBlended, mode: 5, a: 1024, b: 0 },
+    { op: HumanoidOp.WaitUntil, mode: HumanoidCond.Frames, a: 20, b: 0 },
+    { op: HumanoidOp.SetBoneModel, mode: 0, a: 2, b: 1 },
+    { op: HumanoidOp.WaitUntil, mode: HumanoidCond.Frames, a: 9999, b: 0 },
+  ]);
+  const radius = a.boneRadius["2"];
+  let shotAt = -1;
+  for (let f = 1; f <= 160 && shotAt < 0; f++) {
+    G.g_cam_path_frame = f;
+    frame();
+    if (G.g_blood_sprays.length) shotAt = f;
+  }
+  check("op 16 fires on the frame its wait opens, camera frame 160",
+        shotAt === 160, `first blood on frame ${shotAt}`);
+  const b0 = G.g_blood_sprays[0];
+  check("...spraying blood from bone 2 of this actor at severity 0.75",
+        G.g_blood_sprays.length === 1 && b0?.at === a.at && b0?.bone === 2
+        && b0?.severity === 0.75 && b0?.cel === 0,
+        JSON.stringify(G.g_blood_sprays));
+  check("...and redrawing bone 2 as 0x1BFA, g_pBoneEffectSlots[0xF][12]",
+        a.boneSlot["2"] === 0x1bfa, `bone 2 slot ${a.boneSlot["2"]}`);
+  check("...through GameHost.setBoneSlot, which is what reaches the draw",
+        swaps.length === 1 && swaps[0].join() === [0x3000, 2, 0x1bfa].join(),
+        JSON.stringify(swaps));
+  check("...and running on into the stumble in the same frame",
+        a.motion === 977, `motion ${a.motion}`);
+  check("...without touching the hit sphere, the step counter or a zone bit "
+        + "-- it is not ActorSwapDamagedPart",
+        a.boneRadius["2"] === radius && radius > 0
+        && (a.hits[2] ?? 0) === 0 && a.zones === 0,
+        `radius ${radius} -> ${a.boneRadius["2"]} hits ${a.hits[2]} `
+        + `zones ${a.zones}`);
+  for (let f = 161; f <= 260 && a.boneSlot["2"] !== 0x1bfb; f++) {
+    G.g_cam_path_frame = Math.min(f, 179);
+    frame();
+  }
+  check("the second op 16 (b 1) escalates the same bone to 0x1BFB, with "
+        + "blood again",
+        a.boneSlot["2"] === 0x1bfb
+        && swaps.map((s) => s[2]).join() === [0x1bfa, 0x1bfb].join()
+        && G.g_blood_sprays.filter((b) => b.bone === 2).length >= 1,
+        `slot ${a.boneSlot["2"]} swaps ${JSON.stringify(swaps)}`);
+}
+
+console.log("\nclass 0x25, op 16 leaves a control code alone, and reads the "
+            + "table flat:");
+{
+  // Bone 3's third step is 1 -- a sever code, not a slot -- and `CMP EAX, 0x2;
+  // JLE` at 0x004849B9 skips the store for it; the blood has already gone up.
+  // Then `a=2 b=6`: the index is 6*2 + 6 = 18, which is bone 3's first step,
+  // and it is bone **2**'s record that takes it (`ECX = a*0x90`).
+  const { a, frame, swaps } = woundScene([
+    { op: HumanoidOp.SetBoneModel, mode: 0, a: 3, b: 2 },
+    { op: HumanoidOp.WaitUntil, mode: HumanoidCond.Frames, a: 1, b: 0 },
+    { op: HumanoidOp.SetBoneModel, mode: 0, a: 2, b: 6 },
+    { op: HumanoidOp.WaitUntil, mode: HumanoidCond.Frames, a: 9999, b: 0 },
+  ]);
+  frame();
+  check("a control code sprays but swaps nothing",
+        G.g_blood_sprays.length === 1 && G.g_blood_sprays[0].bone === 3
+        && a.boneSlot["3"] === undefined && swaps.length === 0,
+        `blood ${JSON.stringify(G.g_blood_sprays)} swaps ${swaps.length}`);
+  frame();
+  frame();
+  check("6*a + b past the bone's six lands in the next bone's row, "
+        + "on bone a's record",
+        a.boneSlot["2"] === 0x1c00 && a.boneSlot["3"] === undefined,
+        `bone 2 ${a.boneSlot["2"]} bone 3 ${a.boneSlot["3"]}`);
+}
+
+console.log("\nclass 0x25, op 9 puts a row of g_player_hand_slots on bone 5:");
+{
+  // Stage 3 evt 38120, a 0x3A figure: `op 9 mode 2 a=0` -- row 0's third
+  // model, 0x1592 -- and later `op 9 mode 1 a=1`, its own hand, 0x15A4.
+  // `MOVSX EAX, word ptr [ECX*2 + 0x4ec9e0]` with ECX = 3*a + mode, into
+  // `[EDI + 0x4dc]`, which is bone 5's record.
+  const { a, frame, swaps } = woundScene([
+    { op: HumanoidOp.SetHandModel, mode: 2, a: 0, b: 0 },
+    { op: HumanoidOp.WaitUntil, mode: HumanoidCond.Frames, a: 1, b: 0 },
+    { op: HumanoidOp.SetHandModel, mode: 1, a: 1, b: 0 },
+    { op: HumanoidOp.WaitUntil, mode: HumanoidCond.Frames, a: 9999, b: 0 },
+  ]);
+  frame();
+  check("mode 2 of row 0 is 0x1592, on bone 5, with no blood",
+        a.boneSlot["5"] === 0x1592 && swaps.length === 1
+        && swaps[0].join() === [0x3000, 5, 0x1592].join()
+        && G.g_blood_sprays.length === 0,
+        `bone 5 ${a.boneSlot["5"]} swaps ${JSON.stringify(swaps)}`);
+  frame();
+  frame();
+  check("...and mode 1 of row 1 is 0x15A4, written although it is a "
+        + "skeleton's own slot -- op 9 has no filter",
+        a.boneSlot["5"] === 0x15a4 && swaps.length === 2,
+        `bone 5 ${a.boneSlot["5"]}`);
+}
+
+console.log("\nclass 0x25, op 9's row in Original Mode is the character byte:");
+{
+  // `DEC EAX; JNZ` on `g_GameMode` at 0x0048473E: in Original Mode an `a` of
+  // 0 or 1 is replaced by `g_original_character[a]`, and any other `a`
+  // stands. The reset leaves the byte the player index, so the row is the
+  // same -- which is why the test also moves the byte: a non-identity input is
+  // the only one that says the branch reads it (L48).
+  const cmds = [
+    { op: HumanoidOp.SetHandModel, mode: 0, a: 1, b: 0 },
+    { op: HumanoidOp.SetHandModel, mode: 0, a: 4, b: 0 },
+    { op: HumanoidOp.WaitUntil, mode: HumanoidCond.Frames, a: 9999, b: 0 },
+  ];
+  const seed = [...G.g_original_character];
+  let s = woundScene(cmds);
+  check("the character byte starts as its one writer leaves it, [0, 1]",
+        G.g_original_character.join() === "0,1",
+        G.g_original_character.join());
+  G.g_GameMode = GameMode.Original;
+  s.frame();
+  check("Original Mode with the byte as the reset leaves it: row 1 -- and "
+        + "a=4 is never remapped, 0x0D3A",
+        s.swaps.map((x) => x[2]).join() === [0x15a3, 0x0d3a].join(),
+        JSON.stringify(s.swaps));
+  s = woundScene(cmds);
+  G.g_GameMode = GameMode.Original;
+  G.g_original_character = [0, 3];
+  s.frame();
+  check("...and with player 2 on character 3 it is row 3, 0x15C8",
+        s.swaps[0]?.[2] === 0x15c8 && s.swaps[1]?.[2] === 0x0d3a,
+        JSON.stringify(s.swaps));
+  s = woundScene(cmds);
+  G.g_GameMode = GameMode.Arcade;
+  G.g_original_character = [0, 3];
+  s.frame();
+  check("...while Arcade Mode never reads it: row 1, 0x15A3",
+        s.swaps[0]?.[2] === 0x15a3, JSON.stringify(s.swaps));
+  G.g_original_character = seed;
+  G.g_GameMode = GameMode.Arcade;
+}
+
 console.log("\nclass 0x25, a motion wait counts the engine's cursor:");
 {
   // Stage 2 evt 54508 waits on `op 4 mode 2 a=66` over clip 805, which has 35

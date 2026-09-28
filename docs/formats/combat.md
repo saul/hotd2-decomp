@@ -990,6 +990,13 @@ fixed and bone-indexed, finds these, and the port has each on
 | `EnemyZombieInit` (`FUN_00452DA0`) / `EnemyThrowerInit` (`FUN_00449620`) | the head's radius × 2 (× 1.8 for type 0xE) under Original Mode's big-head item | **not ported** -- the item (`DAT_009C88A8`) is not, and the draw hook it installs is a declared divergence in both classes |
 | `ZombieHideBoneSubtree` (`0x0045DD70`) | radius 0 with the slot, for `ZombieInitHalved` and the split | another workstream's port of the halved crawler |
 
+Two routines write a record's `+0x00` slot and **not** its sphere, and so are
+not in the table: class 0x25's `op 9` (bone 5, from `g_player_hand_slots`) and
+`op 16` (bone `a`, from the effect table after `SpawnBloodSpray(obj, a, 0.75)`),
+both in `ScriptedHumanoidUpdate` (`0x00484739`, `0x00484972`). A scripted
+humanoid is never shot, so its wound keeps the sphere the build gave the bone;
+see [spawns.md](spawns.md), class 0x25.
+
 The build's test is why several types' rows never reach a record at all: some
 tables are a stub that ends in `-1` after a row or two and are read on past it,
 and on others a real row names another model than the node does. `zsass`'s two

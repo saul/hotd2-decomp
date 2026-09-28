@@ -477,6 +477,28 @@ def humanoid_motion_ids(evt, spawn_rec) -> list[int]:
     return out
 
 
+def humanoid_model_commands(evt, spawn_rec) -> list[tuple[int, int, int, int]]:
+    """Every `op 9` and `op 16` a class-0x25 program can run, as
+    ``(op, mode, a, b)`` -- the two commands that write a bone's draw slot.
+
+    `op 9` (`ScriptedHumanoidUpdate` at ``0x00484739``) writes bone 5's from
+    ``g_player_hand_slots[3*a + mode]``, and `op 16` (``0x00484972``) writes
+    bone ``a``'s from the character's effect table at ``6*a + b``.
+    `characters` resolves them against the tables, because the models they
+    name have to ride the character's hidden template for a swap to have
+    anything to clone.
+    """
+    out: list[tuple[int, int, int, int]] = []
+    if humanoid_block_offset(evt, spawn_rec) is None:
+        return out
+    raw = evt.raw
+    for off in humanoid_command_offsets(evt, spawn_rec):
+        op, mode, a, b = struct.unpack_from("<4h", raw, off)
+        if op in (9, 16):
+            out.append((op, mode, a, b))
+    return out
+
+
 def motion_for(tables, spawn_rec, cls: int) -> int | None:
     """The motion id a class handler starts this spawn in, or None."""
     rule = MOTION_RULES.get(cls)

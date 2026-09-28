@@ -24803,6 +24803,160 @@ are `[likely]` equal and unchanged; `ThrowerStateCloseAndStrike` also raises
 and clears `BackingOff` (`0x20000000`) where the exe raises and clears
 `0x10000000` (`0x0044EA50` sub 0, and the exit) -- not an eye, not touched.
 
+## 2026-09-28 -- class 0x25's `op 9` and `op 16`: the hands and the wounds
+
+The last declared divergence in `ScriptedHumanoidUpdate`'s switch said the two
+slot-writing commands "need routines this port has not read". There were no
+routines: the jump table at `0x00484CA8` (indexed `op + 1`, `LEA EDX,[EAX+1];
+CMP EDX,0x13` at `0x00484365`) sends `op 9` to `0x00484739` and `op 16` to
+`0x00484972`, and both are fourteen-odd instructions inline, read whole from
+the listing `[proved]`:
+
+* `op 9`: `EAX = g_GameMode; DEC EAX`; `a`; `JNZ` to the plain arm. In Original
+  Mode an `a` of 0 or 1 becomes the character byte at `0x009A2242` /
+  `0x009A2256` (`MOVSX EAX, byte ptr`), any other `a` stands; then
+  `MOVSX EAX, word ptr [(3*row + mode)*2 + 0x4ec9e0]` into `[EDI+0x4dc]` --
+  bone 5's `+0x00` (`0x20C + 5*0x90`). No filter.
+* `op 16`: `PUSH 0x3f400000; PUSH a; PUSH obj; CALL 0x00407310` --
+  `SpawnBloodSpray`, already ported in `effects/blood.ts` -- then `EBP =
+  [charType*4 + 0x4c7160]`, `XOR EAX,EAX; MOV AX,[EBP + (6a+b)*2]`, and bone
+  `a`'s record (`LEA ECX,[a*0x90 + EDI + 0x20c]`) takes it past `CMP EAX,EBX;
+  JL` / `CMP EAX,2; JLE`. The `JL` arm is dead on a zero-extended `u16`.
+
+Both end `MOV [EDI+0x1320], EBX; ADD ESI, 8; JMP 0x0048435D`: the next command
+runs in the same frame.
+
+**Wrong turns.** The brief expected `op 16` to be `ActorSwapDamagedPart` or to
+share its sphere search; it calls neither, and writes no sphere, no step
+counter and no zone bit, so `combat.md` §8a's writer table gains a note, not a
+row. The Init's declared divergence and both class-0x25 rows in
+`functions.tsv` said the character remap was **Boss Mode**; the test is `DEC
+EAX; JZ` on `g_GameMode` at `0x00484106`, which is 1, **Original** Mode. And I
+nearly collapsed `op 9`'s Original-Mode arm the way `PlayerBodiesCreate`'s note
+does ("the byte is only ever `p`"); it is transcribed instead, against a new
+`G.g_original_character` seeded as `ResetOriginalModeLoadout` leaves it, and
+`test:port` moves the byte to show the arm reads it. The one-writer claim is
+`[proved]` for every literal reference (byte searches `42229a00`: 8 hits,
+`56229a00`: 5, all loads); a masked search over the record's other bases came
+back inconsistent with the unmasked one, so "no other base reaches `+0x02`" is
+`[likely]`, and says so in `globals.tsv`.
+
+Named: `PlayerBodySetHandSlot` (`FUN_00416810`, the other reader of the hand
+table, same row arithmetic), `g_original_character` (`0x009A2242`); the rows
+for `g_player_hand_slots`, `ScriptedHumanoidInit` and `ScriptedHumanoidUpdate`
+rewritten. The hand table is **ten rows**: bounded by the index -- the readers
+of the character byte decode 0..9 -- and the word after row 9 is 0 (`L6`).
+
+Exporter, both halves: `playerHandSlots` / `player_hand_slots` and
+`boneEffectSlot` / `bone_effect_slot` in `combat`, `humanoidModelCommands` /
+`humanoid_model_commands` in `charmotion`, `humanoidModelSlots` /
+`humanoid_model_slots` in `characters`, which puts every slot either command
+can write on the character's hidden template, and
+`characters.player_hand_slots` in the bundle. Before, only the jetty wounds
+were in the bundle, and only because they have damaged-part sphere rows; none
+of the 117 `op 9` hands was. `verify_attachments.py` check 6 reads the table
+address and both strides out of the instructions, holds the bundle's copy to
+the exe's words and every written slot to a glTF model: 246 problems on the
+bundle from `eb232a6e`, 0 on this one, and 6 on a stage-2 export with the
+table address moved by one word.
+
+Survey (the six arcade stages; the Original Mode bundles repeat them): `op 9`
+117 commands in 114 programs, every stage -- rows 0 to 4, modes 0 to 2;
+`op 16` 8 commands in stage 2's four jetty zombies. Verified in the page on
+one seed with the step-over put back as the control: stage 2 block 16 step 15
+(the head and the bone-3 wound, frames 166 and 214) and stage 3 block 11
+step 1 (James's hand, frame 170); identical elsewhere, frame 150 byte for
+byte. Counts: divergences 132 -> 131, uncited exports 82 held.
+
+## 2026-09-28 -- class 0x28's sprites: the fringe and the dark column are the exe's
+
+Reported after the cels landed: the burning cars' sprites "don't render
+nicely" -- two huge dark columns rising into the sky, and a jagged pale-grey
+fringe round each flame. The question was whether the port draws them with
+the exe's blend, alpha test, depth, size and order. It does, in every term;
+nothing in the port changed.
+
+**The draw sets no state.** `PathRidingPropDraw` (`FUN_00432840`), read to
+its `RET` at `0x004329C8` past the first `MatrixStackPop` (L35): its only
+calls are MatrixStackPush/Pop, MatrixTranslate, MatrixRotateY, MatrixScale,
+`VecToAngles`, `NoOpStub` (`0x00432927` with 2.0 and `0x004329A2` with 7.0 --
+a bare `RET`) and the plain `AssetDrawSlot` (`0x00432941`, `0x004329B7`).
+So each cel composites by its own mesh header through
+`TranslatePvr2StateToD3D` (`FUN_004A7780`): ISP `0x83000000` -- LESSEQUAL,
+depth write on -- and TSP `0x94002453` (the `0x135F` loop) / `0x9400241B`
+(the `0xB67` loop): SRCALPHA / INVSRCALPHA, pass bits 0 so the translucent
+pass with ALPHATESTENABLE at ALPHAREF 1, bilinear (TSP 14-13 = 1, MIN/MAG
+LINEAR), and WRAP both ways (`g_TexAddressModeTable` at `0x00598AF0` starts
+`1`). `[proved]` The rig's parts are in the stage glTF, so
+`prepareDrawCommands` gives them exactly that at load -- measured on the live
+page: transparent, CustomBlending 204/205, alphaTest 1/255, depthWrite true,
+LessEqualDepth, on every drawn cel.
+
+**The size.** `Scale(1.5, 2.0, 1.0)` at `0x0043290E..0x0043291D` and
+`Scale(7, 7, 7)` at `0x00432989..0x00432998`, lifts 5.0 (`0x0055D2B4`) and
+8.0 (`0x004C43A0`), `T(0, 0, 12.0)` -- all `[proved]` from the bytes. The
+`0x135F` quad is a trapezoid, x +-14.2 at y 2.0 to +-17.8 at y 74.1, so the
+column is 43-53 wide and stands from 9 to 153 above the object: the "huge"
+is the model's own vertices times the exe's scale. The `0xB67` quad is
+3.2 square, 22.4 under the scale. The same models and the same textures
+(decoded and hashed) are in every file that lists those slots --
+`eff_1.bin`, `char_adv04.bin`, `char_adv00.bin` -- so which file supplied a
+slot does not matter.
+
+**Which end is dense.** The quads carry v = 0 at the top and v = -1 at the
+bottom, and the address mode is WRAP, so the texture's first row lands at the
+**bottom** of each quad: `DecodeTextureToSurface` writes rows top-down in
+texture order (layouts 0x100 and 0xD00: `0x2AAAB & 0x55555` steps the row
+into the even bits, `0x55556 & 0xAAAAA` the column into the odd, as `texbank`
+decodes), and
+glTF's v = 0 is the PNG's first row with `flipY` off. So the column is
+densest where it meets the car. The port passes the UVs through unchanged
+and matches.
+
+**The fringe is the sort.** `RenderCommandCompare` (`FUN_004A8A20`) puts the
+nearer command first (`verify_draw_order.py` holds that from the bytes). The
+`0xB67` cel stands 12.0 toward the eye, so it draws before the `0x135F`
+column and writes depth wherever its ARGB4444 texel alpha is at least 1 --
+including the faint rim round the flame, alpha 17/255 and up -- and the
+column behind is depth-rejected there. What shows through is the building.
+On `cp_st1` 47 frame 191, seed 1, the keys are -296.2 and -301.6 for the two
+flames against -310.1 and -315.5 for the two columns, and the page's draw
+order is those four in that order. Two diagnostics settle it (in-page, not
+fixes): with the `0x135F` loop's materials off the flames have no pale rim;
+with the `0xB67` loop's depth write off the rim goes and the column, drawn
+after, paints over the flames entirely. The filter is not it: the game's own
+filter ("as the game", bilinear, no mipmaps) gives the same rim as the
+default anisotropic one at this distance. On the Dreamcast the PVR2 sorts a
+translucent list per pixel and none of this would show; the PC port sorts
+commands nearest first and writes depth, and the browser port is the PC
+port.
+
+**Names.** The cel commit called `0x135F` "fire" and `0xB67` "smoke". The
+textures read the other way round -- a 32x64 near-black column, a 64x64
+flame -- `[likely]`, from the pictures and nothing else; the brief carried
+the old labels. New text names the loops by slot. The rig note in
+`tools/hod2lib/rigs.py` ("15 fire and 8 smoke") still has them backwards and
+is exporter output, so it waits for a commit that re-exports anyway.
+
+**Proof.** `render.test`, "class 0x28's sprite cels draw in their own meshes'
+state": the rig built as the bundle carries it, `prepareDrawCommands` over it
+as `StageScene.load` does, `RigLayer` driving it from a class-0x28 actor --
+each drawn cel's material is the words' state, and `RenderCommandOrder` sorts
+the `0xB67` cel first from the eye the sprites turn to. It is a pin, not a
+failing-first check: it passes on the tree as it was, because nothing was
+wrong. It fails when `RenderCommandOrder` is turned to farthest first (1
+check) and when `applyPvr2DrawState` drops the depth write for the
+translucent pass (2 checks) -- the two "fixes" that would make the picture
+nicer and the port wrong.
+
+**Wrong turn.** The stage-5 seek for class 0x41 type 53 (the same two loops,
+`?stage=5&block=4&step=0&op=25`) landed in block 7 both with and without the
+Space press, where type 53 draws no strips; that comparison was dropped. Its
+draw clones the same stage nodes (`Object3D.clone` shares materials), so it
+carries the same state by construction. Stage 2's type-33 strip
+(`?stage=2&block=11&step=1&op=20`, cam 57/371) is one sprite with no second
+one behind it to cut.
+
 ## 2026-09-29 -- class 0x31's strikes raise 0x10000000, not BackingOff
 
 The eye audit left one line open: `ThrowerStateCloseAndStrike` raised and

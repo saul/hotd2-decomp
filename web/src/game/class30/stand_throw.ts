@@ -30,7 +30,8 @@ import {
   ReleaseEnemyAliveCount, ReleaseEnemyPresentCount,
 } from "../combat/counts";
 import { ActorDespawn } from "../despawn";
-import { G } from "../globals";
+import { G, HIT_SLOT_NONE } from "../globals";
+import { HIT_SLOT_CLAIMED } from "../hit_slots";
 import { CameraSlotVacate } from "../camera/slots";
 import { AttackListOf, CharacterTypeOf, MotionPlayFrame, MotionPlayLength,
          MotionRowOf } from "../tables";
@@ -238,9 +239,31 @@ export function ZombieStateStandAndThrow(obj: ZombieActor, _eye: Vec3,
     // Only the stationary one arms itself here; a condition-8 walker that
     // routed in from `AttackRun` falls straight through to the claim.
     if (standing) {
+      // `004590E3`..`00459109`, before the hands are counted: the arm
+      // **tests** `obj+0x34` bit `0x1000000` and writes the second word.
+      //
+      //   TEST ECX, 0x1000000 / JNZ     ; holding already: neither write
+      //   OR   AL, 1                    ; obj+0x136C |= 1
+      //   TEST ECX, 0x20000 / JE        ; ActorFlag.Airborne
+      //   OR   EAX, 0x100000            ; obj+0x136C |= 0x100000
+      //
+      // `[proved]` from the database's listing; the routine's one reference is
+      // `g_class30_states[33]` (`0x00592B6C`). This raised
+      // {@link ActorFlag.HoldingWeapon} instead, which the engine only reads
+      // here -- the bit comes from the spawn record -- and so sent
+      // the two character-type-19 axe men of stage 3 block 2, whose records
+      // do not carry it, into `ZombieStateDeathFallAndBounce` when they died
+      // (`docs/PLAYER_HANGS.md` item 24). Bit `0x100000` is the one the
+      // carrier states name {@link ZombieFlag2.Carried}; `ZombieOnShot` and
+      // `ChooseDeathMotion` read the bit, not the name, so an airborne
+      // stand-and-throw spawn that does not start holding dies through
+      // state 9 as it does in the engine.
+      if (!(obj.flags & ActorFlag.HoldingWeapon)) {
+        obj.flags2 |= ZombieFlag2.LetGo;
+        if (obj.flags & ActorFlag.Airborne) obj.flags2 |= ZombieFlag2.Carried;
+      }
       const armed = ZombieArmedHands(obj);
       if (armed === 0) { ZombieReleaseAndDespawn(obj); return; }
-      obj.flags |= ActorFlag.HoldingWeapon;
       obj.zom.throwDelay = armed === 2
         ? (tail?.delay_two_hands ?? 0) : (tail?.delay_one_hand ?? 0);
     }
@@ -449,8 +472,15 @@ function ZombieStandAndThrowRetire(obj: ZombieActor,
   // keeps `g_enemy_slots` as the list of spawn addresses the fill rebuilds
   // each frame, so dropping this actor from it is the same statement.
   CameraSlotVacate(obj);
-  // `if ((obj+0x38 & 0x40) && obj+0x3C != -1) g_hit_slots[obj+0x3C] = 0` — the
-  // hit-slot system is not ported at all; see `Actor.flags38`.
+  // `if ((obj+0x38 & 0x40) && obj+0x3C != -1) g_hit_slots[obj+0x3C] = 0`
+  // (`0x00459535`). The index is **not** cleared, so the `ActorDespawn` at
+  // the end of sub 6 frees the same entry a second time -- from under any
+  // actor that has claimed it since, as the engine does; `hit_slots.ts` has
+  // the release that does clear it. This said the hit-slot table was not
+  // ported at all, which stopped being true when `hit_slots.ts` landed.
+  if ((obj.flags38 & HIT_SLOT_CLAIMED) && obj.hitSlot !== HIT_SLOT_NONE) {
+    G.g_hit_slots[obj.hitSlot] = HIT_SLOT_NONE;
+  }
   obj.zom.throwDelay = tail?.leave_delay ?? 0;
   obj.sub = Sub.Gone;
   obj.flags |= ActorFlag.NoCameraTrack | ActorFlag.ShotImmune;

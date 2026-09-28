@@ -814,7 +814,7 @@ function DragTargetCopyPose(obj: ZombieActor, t: Actor | null): void {
  *   blends, which differences bone 1's drawn world position against the pose
  *   the new clip would put it in. `game/` has no skeleton — that is the
  *   `GameHost` seam — so the actor lands a bone-offset away from where the
- *   engine puts it. `[open]`
+ *   engine puts it. `[diverges]`
  * * sub 0's `obj+0x1368 |= 0x10` (`0x0045C0ED`) is a kill-move death-clip
  *   selector, and the port models only bit 0 of that word. See
  *   `ZombieSubState.hasCooldown`.

@@ -27,8 +27,8 @@
  * `if (g_GameMode != 1) { ActorDespawn(obj); return; }`. This one **raises the
  * flag on its way out**, so putting it in that set would leave stage 4's gate
  * shut for ever in Arcade Mode, which is the mode the player runs in. That set
- * carried an `[open]` note guessing type 75 belonged in it; it does not, and
- * the note is now answered.
+ * carried an open-question note guessing type 75 belonged in it; it does
+ * not, and the note is now answered.
  *
  * ## The three ways the flag goes up
  *

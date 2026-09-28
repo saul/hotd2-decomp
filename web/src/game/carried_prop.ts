@@ -1202,7 +1202,8 @@ export function CarriedPropFallFree(p: CarriedProp, cam: CameraPair | null,
   }
 }
 
-/** `g_app_state` 10, in which a dropped prop hits nothing. `[open]` what screen it is. */
+/** `g_app_state` 10, in which a dropped prop hits nothing. Which screen that
+ *  is, is the open question `g_app_state`'s own note in `globals.ts` asks. */
 const APP_STATE_NO_TARGET_HIT = 10;
 /** `PlaySoundId(0x1D16A9)` — the prop landing on its target. */
 const TARGET_HIT_SOUND = 0x001d16a9;

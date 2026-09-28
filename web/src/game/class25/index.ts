@@ -231,10 +231,11 @@ export interface HumanoidPathOffset {
  * `b` names, on top of whatever object path the actor is riding.
  *
  * **Fifteen records**, `0x00596B18`..`0x00596C7F`, ending exactly where
- * `g_class25_bone_prop_cels` — `0x00596C80` begins; the extent used to be
- * `[open]` and that abutment is what closes it. Index 0 is the "no offset"
- * sentinel and is all zeroes. Record 1's `dyaw` of `0x8000` is exactly a half
- * turn, which is the check on the reading; shipped data reaches indices 1..5.
+ * `g_class25_bone_prop_cels` — `0x00596C80` begins; the extent used to be an
+ * open question, and that abutment is what answers it. Index 0 is the "no
+ * offset" sentinel and is all zeroes. Record 1's `dyaw` of `0x8000` is exactly
+ * a half turn, which is the check on the reading; shipped data reaches indices
+ * 1..5.
  *
  * `+0x0C` and `+0x14` are zero in all fifteen and nothing reads them.
  */
@@ -646,14 +647,21 @@ function HumanoidFrameTail(obj: HumanoidActor, f: ClassFrame): void {
       //
       // **The engine writes all three angles here**, not just the yaw:
       // `MOV [EDI+0x64],EAX; MOV [EDI+0x68],ECX; MOV [EDI+0x6c],EDX` at
-      // `0x00484B6E`-`0x00484B74`, out of `CamEvalObjectPath6`'s second half,
-      // and `CMP [EDI+0x1358],0x2 / JZ` at `0x00484B5D` is the mode-2 skip.
-      // `[open]` The port writes the yaw alone because the yaw is the only one
-      // `render/characters.ts` draws -- `inst.root.rotation.set(0, yaw, 0)` --
-      // so writing the other two would put a value on the actor that nothing
-      // reads. Giving a rider the path's pitch and roll is a renderer change
-      // and its own piece of work.
-      if (obj.hum.pathMode !== 2 && p.yaw !== undefined) obj.yaw = p.yaw;
+      // `0x00484B6E`-`0x00484B74`, out of `CamEvalObjectPath6`'s second half
+      // (its three ints, `L2`), and `CMP [EDI+0x1358],0x2 / JZ` at
+      // `0x00484B5D` is the mode-2 skip. `[proved]` The draw then turns the
+      // body by all three, in the order `ScriptedHumanoidInit` names --
+      // `render/characters/humanoid.ts`. This wrote the yaw alone for as long
+      // as the renderer drew only yaw, so `op_st3` 340's boat riders stood
+      // upright on a path whose `rot_x` runs to 15,758 BAMS.
+      //
+      // A host that publishes a position alone leaves the angles as they
+      // were; `GameHost.objectPath` has all six whenever it has a path.
+      if (obj.hum.pathMode !== 2) {
+        if (p.pitch !== undefined) obj.pitch = p.pitch;
+        if (p.yaw !== undefined) obj.yaw = p.yaw;
+        if (p.roll !== undefined) obj.roll = p.roll;
+      }
       // The offset vector, though, **is** rotated by all three, and that is
       // this file's own arithmetic rather than the renderer's.
       HumanoidApplyPathOffset(obj, p.pitch ?? 0, p.yaw ?? 0, p.roll ?? 0);
@@ -683,7 +691,7 @@ function HumanoidFrameTail(obj: HumanoidActor, f: ClassFrame): void {
  * last** — the same composition `class41/prop.ts` spells out for `Ry·Rz·Rx`.
  *
  * All three angles come from the path. This note used to declare a
- * `[diverges]` saying that `rx` and `rz` "arrive as zero, because
+ * divergence saying that `rx` and `rz` "arrive as zero, because
  * `GameHost.objectPath` publishes only the path's position and yaw" — and by
  * the time anyone read it the seam published all six, with `host.ts`'s own
  * comment saying the pitch and roll were added "so the attachment-offset

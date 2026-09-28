@@ -19,22 +19,22 @@ is in `tools/verify_all.py`, beside the command that runs it.
 
 | Directory | Lines | Files | Layer |
 |---|---:|---:|---|
-| `game/` | 91552 | 293 | engine |
-| `hod2lib/` | 18581 | 35 | engine |
-| `render/` | 14623 | 51 | render |
+| `game/` | 91738 | 293 | engine |
+| `hod2lib/` | 18583 | 35 | engine |
+| `render/` | 14666 | 52 | render |
 | `app/` | 7982 | 28 | app |
-| `script/` | 4388 | 25 | engine |
+| `script/` | 4390 | 25 | engine |
 | `ui/` | 3031 | 23 | ui |
 | `bundle/` | 2632 | 11 | engine |
 | `core/` | 949 | 9 | engine |
 | `audio/` | 907 | 2 | render |
 | `hud/` | 491 | 1 | ui |
-| **total** | **145136** | **478** | |
+| **total** | **145369** | **479** | |
 
 The largest files, which is where the pressure to split next is:
 
-* `game/globals.ts` — 2712
-* `game/actor.ts` — 2573
+* `game/globals.ts` — 2719
+* `game/actor.ts` — 2586
 * `app/main.ts` — 2340
 * `hod2lib/exetab.ts` — 2212
 * `script/walker.ts` — 2140
@@ -44,11 +44,20 @@ The largest files, which is where the pressure to split next is:
 | | |
 |---|---|
 | Gameplay coverage | **226 of 297** annotated functions in the gameplay address ranges have a port (76%) |
-| Ported outside those ranges | 482 (opcodes, and the classes whose handlers sit elsewhere) |
-| Citations checked | 708 ported functions match `functions.tsv` under the same name |
+| Ported outside those ranges | 483 (opcodes, and the classes whose handlers sit elsewhere) |
+| Citations checked | 709 ported functions match `functions.tsv` under the same name |
 | Spawn classes | **29 of 42** read classes have a module, covering 1535 of 1619 placements |
-| Declared `[diverges]` | **137** — where the port knowingly departs from the exe, each with its reason on the spot |
-| `[open]` markers in `game/` | **155** — questions the port is honest about not having answered |
+| Declared `[diverges]` | **136** — where the port knowingly departs from the exe, each with its reason on the spot |
+| `[open]` markers | **107** — questions the port and the exporter are honest about not having answered |
+
+Both markers are counted in **every** `.ts`/`.tsx` file under `web/src/`, one per occurrence, and only in comments — a word in code or in a string is not a marker (`verify_port.marker_lines`). Each departure and each question is written once, where it is made; everything that refers to it names it in words ([`PLAYER_ARCHITECTURE.md`](PLAYER_ARCHITECTURE.md), "One departure, one tag"). By layer, from the same table as the directories above:
+
+| Layer | Directories | `[diverges]` | `[open]` |
+|---|---|---:|---:|
+| engine | `core/`, `bundle/`, `script/`, `game/`, `hod2lib/` | 123 | 104 |
+| render | `render/`, `audio/` | 12 | 3 |
+| ui | `hud/`, `ui/` | 0 | 0 |
+| app | `app/` | 1 | 0 |
 
 The two declared seams between the UI and the player: **`PlayerCommands` has 48 members against `PlayerView`'s 31** — how much of the player a click can move, against how much of it the page can see. Neither can grow without a line appearing in the open.
 

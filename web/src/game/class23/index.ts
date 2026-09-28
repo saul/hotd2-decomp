@@ -34,7 +34,8 @@ import { Class23State, Class23Subtype } from "./state";
 
 /** `g_actor_radius_by_char[0x44]` — `0x004C4E38`, `0000f841`, 31.0. */
 const CLASS23_RADIUS = 31.0;
-/** `model+0x64 |= 4`. `[open]` meaning; kept on the word. */
+/** `model+0x64 |= 4` -- the bit class 0x22 raises too, whose meaning is
+ *  the open question beside its own write. Kept on the word. */
 const MOTION_FLAG_4 = 4;
 /** The ring's life, `CMP EAX, 0x50`, and its turn, `ADD EDX, 8`. */
 const RING_FRAMES = 0x50;

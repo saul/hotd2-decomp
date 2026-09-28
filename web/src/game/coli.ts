@@ -185,15 +185,19 @@ const DYNAMIC_COLI_REFUSE = 0x80008000;
  * The objects the moving-object passes test, in `g_coli_dynamic_list`'s
  * place.
  *
- * `[port-only]` as a *list*: the engine walks `g_coli_dynamic_list`
- * (`0x005A3098`), which `ColiPublishDynamicList` (`FUN_00405360`) copies from
- * what `RegisterForShotTest` collected, once a frame, from inside
- * `ProcessPlayerShots`' task. The port walks the pool, which holds the same
- * objects — an object with a blob registers every frame it draws, because its
- * `0x10` bit makes `RegisterForShotTest` take it whatever its depth — and
- * takes the matrix each one stored this frame or last. Which of the two a
- * given query sees in the engine depends on where in the task walk it runs,
- * and that ordering is `[open]`.
+ * [diverges] The engine walks `g_coli_dynamic_list` (`0x005A3098`), which
+ * {@link ColiPublishDynamicList} copies from what `RegisterForShotTest`
+ * collected, at the end of `ProcessPlayerShots` -- a task that runs before
+ * every actor -- so both of these passes see the objects that registered on
+ * the **previous** frame, whichever actor asks. The port walks the pool and
+ * takes the matrix each object holds now. An object with a blob does
+ * register every frame it draws: its `0x10` bit sends `RegisterForShotTest`
+ * past the depth test (`0x00405176`), through the matrix rebuild and on into
+ * the append at `0x004051D7` `[proved]`. So the set is the same and the
+ * difference is the frame: a moving object is met a frame ahead of where the
+ * engine meets it. `ColiTestSphereAgainstActors` already walks the published
+ * list; moving these two passes onto it needs every blob-carrying class to
+ * register at its exe site, which class 0x26's boat does not yet.
  */
 function ColiDynamicObjects(): Actor[] {
   const out: Actor[] = [];
@@ -321,7 +325,7 @@ export function ColiTraceSegmentVsObjectBlob(
  * the pass, which was true, and it was the bug: a zombie that leapt onto the
  * boat found the canal under it.
  *
- * [open] The engine keys its nearest-of-all pass on `trunc(distance * 10)`
+ * [diverges] The engine keys its nearest-of-all pass on `trunc(distance * 10)`
  * and radix-sorts **only the low sixteen bits**, so a hit beyond 6553.5 units
  * wraps and can win spuriously. This compares the distances directly; nothing
  * in the shipped data traces that far.
@@ -672,7 +676,7 @@ export function ColiTestSphereAgainstActors(self: Actor, cx: number, cy: number,
  * normal; this takes the face case alone, which is exact for a sphere resting
  * on a face and an approximation near an edge. It is also the one case that
  * still gets no push at all: a centre behind a wall whose projection has left
- * the quad. `[open]`
+ * the quad.
  */
 export function ColiTestSphereAgainstFullSet(cx: number, cy: number,
                                              cz: number, r: number): boolean {
@@ -722,8 +726,8 @@ const _sph: SphereHit = { hit: false, distSq: Infinity, depth: 0,
 
 /**
  * `ColiSphereVsMesh` (`FUN_004AAFF0`) — one blob, the nearest face hit, kept
- * in `acc` when it beats what is there. The face case only; see the
- * `[diverges]` on {@link ColiTestSphereAgainstFullSet}.
+ * in `acc` when it beats what is there. The face case only -- the divergence
+ * declared on {@link ColiTestSphereAgainstFullSet}.
  */
 function ColiSphereVsBlob(b: ColiBlob, cx: number, cy: number, cz: number,
                           r: number, acc: SphereHit): void {

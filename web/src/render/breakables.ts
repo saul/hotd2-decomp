@@ -783,22 +783,8 @@ export class BreakableLayer implements System<RenderContext> {
   }
 
   /**
-   * The nearest prop under *ray*, for the gun.
-   *
-   * The engine's own test is `RegisterForShotTest` plus a segment-versus-mesh
-   * pass over the collision meshes, and those are not in the bundle — so this
-   * measures against the drawn geometry's bounds instead, nearest first.
-   * [diverges] declared in `characters.ts` alongside the character pick, which
-   * makes the same trade.
-   *
-   * `id` rather than the prop: this feeds `GameHost.pickShot`, and what
-   * crosses that seam is what the engine identifies an object by, not a
-   * reference the port would then be free to write through. `t` is the
-   * distance along a unit-length direction, so the caller can sort props and
-   * bones into the one list the engine's shot test walks.
-   */
-  /**
-   * `ShotTestSphere` (`FUN_00404630`) for the prop pool.
+   * `ShotTestSphere` (`FUN_00404630`) for the prop pool: the nearest prop
+   * under *ray*, for the gun.
    *
    * **This used to be a bounding-box test on the drawn node**, which meant a
    * prop the port had no model for could not be shot at all — and the engine
@@ -813,6 +799,12 @@ export class BreakableLayer implements System<RenderContext> {
    * engine's `obj+0x78 <= 0` — its registration culls what is behind the
    * camera, and the port culls it here instead, because the port's point is in
    * world space rather than view space.
+   *
+   * `id` rather than the prop: this feeds `GameHost.pickShot`, and what
+   * crosses that seam is what the engine identifies an object by, not a
+   * reference the port would then be free to write through. `t` is the
+   * distance along a unit-length direction, so the caller can sort props and
+   * bones into the one list the engine's shot test walks.
    */
   pickRay(ray: Ray): { id: number; point: Vector3; t: number } | null {
     if (!this.enabled) return null;

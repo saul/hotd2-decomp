@@ -46,7 +46,7 @@
  * the exe's — one slot per bone, one model per slot — and the extra draw is
  * `render/characters/cels.ts`, because the extra draw is the hook's and not
  * `AssetDrawSlot`'s. See `game/class30/bonecels.ts` for the reading, and for
- * what the old `[open]` note here got wrong.
+ * what the old open-question note here got wrong.
  */
 import { Mesh, type Object3D } from "three";
 import { setUnfadedMaterial, unfadedMaterial } from "../draw_order";

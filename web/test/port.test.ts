@@ -578,10 +578,11 @@ import {
   type SetPieceParams,
 } from "../src/game/class24";
 import {
-  HumanoidCond, HumanoidOp, HumanoidTurn, ScriptedHumanoidUpdate,
-  g_class25_path_offsets,
+  HumanoidCond, HumanoidOp, HumanoidTurn, ScriptedHumanoidRun,
+  ScriptedHumanoidUpdate, g_class25_path_offsets,
   type HumanoidProgram,
 } from "../src/game/class25";
+import { HumanoidRoutine } from "../src/game/class25/state";
 
 import { GameOverCameraFlyTick } from "../src/game/game_over";
 import { SetGameOverTables } from "../src/game/tables";
@@ -6165,9 +6166,11 @@ function humanoidScene(cmds: HumanoidProgram["cmds"],
   return { a, events: new Events() };
 }
 
+// Through the routine the object has installed, as the director calls it:
+// once a program has ended the VM is no longer what runs.
 const hFrame = (a: HumanoidActor, events: Events, rng: Rng) =>
-  ScriptedHumanoidUpdate(a, { eye: EYE, dt: 1 / 60, rng, host: NULL_HOST,
-                              events });
+  ScriptedHumanoidRun(a, { eye: EYE, dt: 1 / 60, rng, host: NULL_HOST,
+                           events });
 
 /**
  * **The union's whole point, checked by the compiler.**
@@ -6372,7 +6375,8 @@ console.log("\nclass 0x25, the camera conditions:");
   G.g_cam_path_frame = 40;
   hFrame(a, events, rng);
   check("then runs on when the camera arrives",
-        a.pos.y === 12 && a.hum.pc === -1, `pc ${a.hum.pc} y ${a.pos.y}`);
+        a.pos.y === 12 && a.hum.routine === HumanoidRoutine.Idle,
+        `pc ${a.hum.pc} y ${a.pos.y}`);
 }
 
 console.log("\nclass 0x25, jumps and the stall guard:");
@@ -6455,7 +6459,7 @@ console.log("\nclass 0x25, op 10 picks an arm by g_active_player:");
     G.g_active_player = 0;
     hFrame(a, events, rng);
     check("a mismatched op 10 with no skip leaves the VM rather than killing",
-          !a.dead && a.visible && a.hum.pc === -1,
+          !a.dead && a.visible && a.hum.routine === HumanoidRoutine.Idle,
           `dead ${a.dead} pc ${a.hum.pc}`);
   }
   G.g_active_player = 0;
@@ -6513,8 +6517,10 @@ console.log("\nclass 0x25, the program ends into ScriptedHumanoidIdle:");
     { op: HumanoidOp.End, mode: 0, a: 0, b: 0 },
   ]);
   hFrame(a, events, rng);
+  // The cursor stays on the `op -1` it ran: the tail stores it as it stopped.
   check("the frame that runs op -1 still falls through the normal tail",
-        a.hum.pc === -1 && a.hum.stallFrames === 1 && a.hum.turnMode === HumanoidTurn.FaceCamera,
+        a.hum.routine === HumanoidRoutine.Idle && a.hum.pc === 1
+        && a.hum.stallFrames === 1 && a.hum.turnMode === HumanoidTurn.FaceCamera,
         `pc ${a.hum.pc} hold ${a.hum.stallFrames}`);
 
   const yaw = a.yaw;
@@ -6641,6 +6647,272 @@ console.log("\nclass 0x25, `op 4` mode 4 waits for the actor to RECEDE (B13):");
         `pc ${closing.a.hum.pc}`);
 }
 
+/**
+ * Stage 2's jetty, run the way the page runs it: `GameUpdate` steps the clip
+ * and then the class, one 60 Hz frame at a time, from `ResetGameGlobals`.
+ *
+ * `JETTY_TYPE` is the fixture's type 1 with the three clips the zombies play,
+ * at their real shape from `zom.bin`: 977 (16 frames, play length 29), 1024
+ * (91, 180) and 972 (31, 59) -- the fall back.
+ */
+const JETTY_CHARS = {
+  ...CHARS,
+  types: { "1": { ...TYPE, motions: {
+    ...TYPE.motions,
+    "977": motion(16, 0, 29), "1024": motion(91, 0, 180),
+    "972": motion(31, 0, 59), "805": motion(35, 0, 68), "900": motion(10, 0, 18),
+  } } },
+} as unknown as CharactersJson;
+
+function jettyScene(cmds: HumanoidProgram["cmds"], pos = vec3(-1325, -23, -1834),
+                    motion0 = 1024):
+    { a: Actor; rng: Rng; events: Events; frame: () => void } {
+  ResetGameGlobals();
+  EnterPlay();
+  SetGameTables(JETTY_CHARS, undefined, undefined, { "12288": {
+    charType: 1, removePath: 100, removeFrame: 65, flags2: 1,
+    motion: motion0, phase: 0, cmds,
+  } });
+  G.g_active_cam_path = 79;
+  G.g_cam_path_frame = 0;
+  const rng = new Rng(4);
+  const events = new Events();
+  const a = ActorSpawn(0x3000, SpawnClass.ScriptedHumanoid, 1, "jetty",
+                       { pos, visible: true }, rng);
+  return { a, rng, events,
+           frame: () => GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events) };
+}
+
+console.log("\nclass 0x25, op 17 mode 0: the jetty zombies fall back ONCE, "
+            + "and into the canal:");
+{
+  // Stage 2 block 16 step 15, evt 43584, as the bundle carries it: held until
+  // camera path 79 frame 100, shot at frame 160 (977, the stumble, to its last
+  // cursor), 1024 for twenty frames, then 972 -- the fall back -- and op 17
+  // mode 0. The port stepped over op 17 and ran into op -1, so the actor sat
+  // in the idle routine on clip 972 with the freeze flag clear, and the fall
+  // looped on the jetty until the boss's camera removed it.
+  const { a, frame } = jettyScene([
+    { op: HumanoidOp.WaitThenHold, mode: HumanoidCond.Always, a: 0, b: 0 },
+    { op: HumanoidOp.WaitThenPlay, mode: HumanoidCond.CameraAt, a: 79, b: 100 },
+    { op: HumanoidOp.WaitUntil, mode: HumanoidCond.CameraAt, a: 79, b: 160 },
+    { op: HumanoidOp.SetBoneModel, mode: 0, a: 2, b: 0 },
+    { op: HumanoidOp.SetMotionBlended, mode: 5, a: 977, b: 0 },
+    { op: HumanoidOp.WaitUntil, mode: HumanoidCond.MotionFrame, a: -1, b: 0 },
+    { op: HumanoidOp.SetMotionBlended, mode: 5, a: 1024, b: 0 },
+    { op: HumanoidOp.WaitUntil, mode: HumanoidCond.Frames, a: 20, b: 0 },
+    { op: HumanoidOp.SetBoneModel, mode: 0, a: 2, b: 1 },
+    { op: HumanoidOp.SetMotionBlended, mode: 5, a: 972, b: 0 },
+    { op: HumanoidOp.Handoff, mode: 0, a: 0, b: 0 },
+    { op: HumanoidOp.End, mode: 0, a: 0, b: 0 },
+  ]);
+  const slot = a.hitSlot;
+  let handoff = -1;
+  let deadAt = -1;
+  let wrapped = false;
+  let last = -1;
+  for (let f = 1; f <= 600 && deadAt < 0; f++) {
+    G.g_cam_path_frame = Math.min(f, 179);
+    frame();
+    if (handoff < 0 && a.motion === 972) handoff = f;
+    if (a.dead) { deadAt = f; break; }
+    if (handoff >= 0) {
+      const cur = MotionPlayFrame(a);
+      if (cur < last) wrapped = true;
+      last = cur;
+    }
+  }
+  check("the program reaches the fall back and the hand-off",
+        handoff > 0, `handoff frame ${handoff}`);
+  // `ScriptedHumanoidFallAndSplash` (0x00484DF0): vel.y -= 0.02 from rest, so
+  // after n frames y = -23 - 0.01 n (n + 1). n = 21 is -27.62, n = 22 is
+  // -28.06, and the routine ends at y <= -27.9998 -- the 22nd frame.
+  check("it drops through the surface and is gone on the 22nd frame after "
+        + "the hand-off, not left looping on the jetty",
+        deadAt - handoff === 22 && !a.visible,
+        `handoff ${handoff} dead ${deadAt} y ${a.pos.y.toFixed(3)}`);
+  check("...and the fall-back clip never wrapped on the way",
+        !wrapped, `last cursor ${last}`);
+  const splash = G.g_sprite_effects.find(
+    (e) => e.kind === SpriteEffectKind.Splash);
+  check("...splashing at the surface height, -24.9998, where it went in",
+        !!splash && Math.abs(splash.pos.y - -24.999799728393555) < 1e-6
+        && Math.abs(splash.pos.x - a.pos.x) < 1e-6
+        && Math.abs(splash.pos.z - a.pos.z) < 1e-6,
+        JSON.stringify(splash));
+  check("...and handing its hit slot back (`ActorFreeHitSlot`)",
+        slot !== HIT_SLOT_NONE && a.hitSlot === HIT_SLOT_NONE
+        && G.g_hit_slots[slot] === HIT_SLOT_NONE,
+        `slot ${slot} now ${a.hitSlot}`);
+}
+
+console.log("\nclass 0x25, op 17 mode 0 holds the clip on its last cursor:");
+{
+  // Placed high, so the fall outlasts the clip. 900 has a play length of 18:
+  // the routine raises the freeze when the cursor its last draw showed is 17,
+  // and that frame's draw has already stepped to 18 -- which is where the
+  // engine's clip holds, on the cursor that is the clip's last pose.
+  const { a, frame } = jettyScene([
+    { op: HumanoidOp.SetMotionBlended, mode: 0, a: 900, b: 0 },
+    { op: HumanoidOp.Handoff, mode: 0, a: 0, b: 0 },
+    { op: HumanoidOp.End, mode: 0, a: 0, b: 0 },
+  ], vec3(0, 1000, 0));
+  const seen: number[] = [];
+  for (let f = 1; f <= 80; f++) {
+    frame();
+    seen.push(MotionPlayFrame(a));
+  }
+  check("the freeze goes up", a.frozen === 1, `frozen ${a.frozen}`);
+  check("...on the clip's play length, and stays there",
+        seen.slice(19).every((c) => c === 18) && seen[18] === 18
+        && seen[17] === 17,
+        seen.slice(14, 24).join(","));
+  check("...while the body keeps falling",
+        a.pos.y < 1000 - 0.01 * 70 * 71 && !a.dead, `y ${a.pos.y}`);
+}
+
+console.log("\nclass 0x25, a motion wait counts the engine's cursor:");
+{
+  // Stage 2 evt 54508 waits on `op 4 mode 2 a=66` over clip 805, which has 35
+  // authored frames and a play length of 68. The VM compared authored frames,
+  // which never reach 66 on a 35-frame clip, so the actor parked there until
+  // its removal trigger. The engine compares `obj+0x19C`: the frame that runs
+  // op 3 draws cursor 0, frame n draws n - 1, and the VM reads the cursor the
+  // previous frame drew -- 66 on the 68th frame.
+  const { a, frame } = jettyScene([
+    { op: HumanoidOp.SetMotionBlended, mode: 0, a: 805, b: 0 },
+    { op: HumanoidOp.WaitUntil, mode: HumanoidCond.MotionFrame, a: 66, b: 0 },
+    { op: HumanoidOp.SetPos, mode: 1, a: 0, b: 0, f0: 5, f1: 0 },
+    { op: HumanoidOp.WaitUntil, mode: HumanoidCond.Frames, a: 9999, b: 0 },
+  ]);
+  for (let f = 1; f <= 67; f++) frame();
+  check("not before the cursor it names", a.pos.y === -23, `y ${a.pos.y}`);
+  frame();
+  check("...and on the frame the VM reads 66", a.pos.y === 5, `y ${a.pos.y}`);
+}
+
+console.log("\nclass 0x25, op 2 and the Init write the counter itself:");
+{
+  // Both write `obj+0x194` outright (`*piVar1 = blk+6` in the Init,
+  // `MOV [EBP], ECX` at 0x00484466 for op 2), in the counter's unit -- not an
+  // authored frame to be doubled -- and -1 is `rand() % 10`.
+  const rng = new Rng(4);
+  const { a, events } = humanoidScene([
+    { op: HumanoidOp.SetMotion, mode: 2, a: 10, b: 7 },
+    { op: HumanoidOp.WaitUntil, mode: HumanoidCond.Frames, a: 9999, b: 0 },
+  ], { phase: 5 });
+  check("the Init's phase is the counter", a.playTicks === 5,
+        `${a.playTicks}`);
+  hFrame(a, events, rng);
+  check("...and so is op 2's b", a.playTicks === 7, `${a.playTicks}`);
+  check("...and op 2 mode 2 raises obj+0x1F8 bit 4",
+        (a.motionFlags & MotionFlag.TraceGround) !== 0,
+        `0x${a.motionFlags.toString(16)}`);
+  const want = new Rng(4).int(10);
+  ResetGameGlobals();
+  SetGameTables(JETTY_CHARS, undefined, undefined, { "12288": {
+    charType: 1, removePath: 100, removeFrame: 65, flags2: 2, motion: 900,
+    phase: -1, cmds: [] } });
+  const seeded = ActorSpawn(0x3000, SpawnClass.ScriptedHumanoid, 1, "seed",
+                            { visible: true }, new Rng(4));
+  check("a phase of -1 is rand() % 10, drawn from the spawn's generator",
+        seeded.playTicks === want, `${seeded.playTicks} want ${want}`);
+  check("...and blk+2 == 2 raises bit 4 at the Init",
+        (seeded.motionFlags & MotionFlag.TraceGround) !== 0);
+}
+
+console.log("\nclass 0x25, op 17's other four modes:");
+{
+  // Mode 1, `ScriptedHumanoidLaunchAndDrop` (0x00484EA0): sub 0 seeds
+  // vel = (x - 231.5, 20) and falls through into sub 1, which steps a growing
+  // gravity of 0.027222222 a frame. Stage 2 block 37's bystanders stand near
+  // x = 243.
+  const g = 0.027222221717238426;
+  const up = jettyScene([
+    { op: HumanoidOp.Handoff, mode: 1, a: 0, b: 0 },
+    { op: HumanoidOp.End, mode: 0, a: 0, b: 0 },
+  ], vec3(243, 23, -2230));
+  up.frame();
+  check("mode 1 ends the VM's frame and moves nothing yet",
+        up.a.pos.y === 23 && up.a.pos.x === 243, `y ${up.a.pos.y}`);
+  up.frame();
+  check("...then launches: up 20 less one step of gravity, out 11.5 along x",
+        Math.abs(up.a.pos.y - (23 + 20 - g)) < 1e-9
+        && Math.abs(up.a.pos.x - (243 + 11.5)) < 1e-9,
+        `y ${up.a.pos.y} x ${up.a.pos.x}`);
+  // The routine's recurrence on its own, from the constants: step s is the
+  // frame s + 1 (frame 1 was the hand-off), and the actor dies on the first
+  // step that leaves y below 0.
+  let y = 23, vy = 20, acc = 0, step = 0;
+  do { acc -= g; vy += acc; y += vy; step++; } while (y >= 0);
+  let frames = 2;
+  while (!up.a.dead && frames < 400) { up.frame(); frames++; }
+  check("...and dies on the frame it first falls below y = 0",
+        up.a.dead && frames === step + 1,
+        `died on frame ${frames}, expected ${step + 1}`);
+
+  // Mode 4, `ScriptedHumanoidFallTimed` (0x00484F90): vel.y = -0.40833333
+  // at the hand-off, then the same gravity step, and death past 200 frames.
+  const t = jettyScene([
+    { op: HumanoidOp.Handoff, mode: 4, a: 0, b: 0 },
+    { op: HumanoidOp.End, mode: 0, a: 0, b: 0 },
+  ], vec3(1632, 500, -9774.9));
+  t.frame();
+  check("mode 4 sets the opening fall speed",
+        Math.abs(t.a.vel.y - -0.40833333134651184) < 1e-12, `${t.a.vel.y}`);
+  t.frame();
+  check("...and falls by it with one gravity step",
+        Math.abs(t.a.pos.y - (500 - 0.40833333134651184 - g)) < 1e-9,
+        `y ${t.a.pos.y}`);
+  for (let i = 0; i < 199; i++) t.frame();
+  check("...alive through its 200th frame", !t.a.dead);
+  t.frame();
+  check("...and gone on the 201st", t.a.dead && !t.a.visible);
+
+  // Modes 2 and 3 spawn a sprite and stay in the VM: the next command runs in
+  // the same frame. An unknown mode steps past and ends the frame.
+  const s = jettyScene([
+    { op: HumanoidOp.Handoff, mode: 2, a: 0, b: 0 },
+    { op: HumanoidOp.Handoff, mode: 3, a: 0, b: 0 },
+    { op: HumanoidOp.SetPos, mode: 1, a: 0, b: 0, f0: 7, f1: 0 },
+    { op: HumanoidOp.Handoff, mode: 7, a: 0, b: 0 },
+    { op: HumanoidOp.SetPos, mode: 1, a: 0, b: 0, f0: 9, f1: 0 },
+    { op: HumanoidOp.WaitUntil, mode: HumanoidCond.Frames, a: 9999, b: 0 },
+  ]);
+  s.frame();
+  const spark = G.g_sprite_effects.find((e) => e.kind === 0x34);
+  const plume = G.g_sprite_effects.find((e) => e.kind === 0x41);
+  check("mode 2 puts kind 0x34 at (-999.5, 3.24, -1296.2), yaw 0xC000",
+        !!spark && spark.pos.x === -999.5
+        && Math.abs(spark.pos.y - 3.24) < 1e-6
+        && Math.abs(spark.pos.z - -1296.2) < 1e-4 && spark.yaw === 0xc000,
+        JSON.stringify(spark));
+  check("mode 3 puts kind 0x41 at (-1264, -24.9, -1353) outside block 9",
+        !!plume && plume.pos.x === -1264 && plume.pos.z === -1353
+        && Math.abs(plume.pos.y - -24.9) < 1e-6, JSON.stringify(plume));
+  check("...both run on into the next command, and mode 7 ends the frame",
+        s.a.pos.y === 7, `y ${s.a.pos.y}`);
+  s.frame();
+  check("...stepped past, so the next frame runs what follows it",
+        s.a.pos.y === 9, `y ${s.a.pos.y}`);
+}
+
+console.log("\nclass 0x25, the removal trigger gives the hit slot back:");
+{
+  const { a, frame } = jettyScene([
+    { op: HumanoidOp.WaitUntil, mode: HumanoidCond.Frames, a: 9999, b: 0 },
+  ]);
+  const slot = a.hitSlot;
+  frame();
+  G.g_active_cam_path = 100;
+  G.g_cam_path_frame = 65;
+  frame();
+  check("the removal kills it and frees `g_hit_slots`",
+        a.dead && slot !== HIT_SLOT_NONE && a.hitSlot === HIT_SLOT_NONE
+        && G.g_hit_slots[slot] === HIT_SLOT_NONE,
+        `dead ${a.dead} slot ${slot} now ${a.hitSlot}`);
+}
+
 console.log("\nclass 0x25, an unbaked clip parks the VM (B13's mechanism):");
 {
   // The bug as reported was two stage-2 humanoids frozen on one frame. The
@@ -6681,7 +6953,7 @@ console.log("\nclass 0x25, an unbaked clip parks the VM (B13's mechanism):");
     hFrame(ok.a, ok.events, rng);
   }
   check("a baked clip reaches its last frame and the program ends",
-        ok.a.hum.pc === -1 && ok.a.frozen === 1,
+        ok.a.hum.routine === HumanoidRoutine.Idle && ok.a.frozen === 1,
         `pc ${ok.a.hum.pc} frozen ${ok.a.frozen}`);
 }
 

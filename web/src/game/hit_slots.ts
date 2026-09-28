@@ -136,3 +136,22 @@ export function ActorReleaseHitSlot(obj: Actor): void {
   G.g_hit_slots[obj.hitSlot] = HIT_SLOT_NONE;
   obj.hitSlot = HIT_SLOT_NONE;
 }
+
+/**
+ * `ActorFreeHitSlot` — `FUN_004092D0`. The release as a routine of its own:
+ *
+ * ```c
+ * g_hit_slots[obj+0x3C] = 0;
+ * obj+0x3C = -1;
+ * ```
+ *
+ * **No test at all** -- not the flag {@link ActorReleaseHitSlot} tests, and
+ * not the index either. Every caller makes the `obj+0x3C != -1` test itself
+ * before the call (class 0x25's four teardowns: `CMP [ESI+0x3C], -1; JZ` at
+ * `0x00484E6F`, `0x00484F14`, `0x00484FC3`, and the VM's removal test), so
+ * the port's callers make it too. Nor does it clear `obj+0x38` bit 0x40.
+ */
+export function ActorFreeHitSlot(obj: Actor): void {
+  G.g_hit_slots[obj.hitSlot] = HIT_SLOT_NONE;
+  obj.hitSlot = HIT_SLOT_NONE;
+}

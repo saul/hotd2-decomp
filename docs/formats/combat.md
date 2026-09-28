@@ -2380,6 +2380,16 @@ camera eye raised **15.0** (`FADD double [0x00565DD8]`) -- unless
 `T(eye) Ry(g_camera_block_yaw_bams)` applied to `((1 - 2*permit) * -1.2, 15,
 -1.5)`: 1.2 to the side of the player whose permit it holds. `[proved]`
 
+The eye in both branches is `g_camera_eye` (`0x009C71E0..E8`: the three
+`MOV`s at `0x00453DA3..0x00453DAE` that feed `MatrixTranslate`, and the
+`FLD`s at `0x00453E66`, `0x00453E7B`, `0x00453E8E`), and the routine takes no
+other eye -- its one argument is `pt`. `[proved]` That is the **gameplay** eye,
+which the path hooks write as the pose's eye with `y - 15.0` (`0x004C4398`),
+while the view is built from the camera block's eye. So on a path the `+ 15`
+undoes the drop and the target is the lens: a head level with the camera looks
+level into it. `[likely]` for "the block's eye is the pose's" -- in the port's
+page, stage 1 block 1, the lens sits at exactly `g_camera_eye.y + 15`.
+
 What follows from it, each `[proved]` from the same listings:
 
 * **A quarter turn each way, at `0xC0` a drawn frame.** A step that would
@@ -2397,7 +2407,11 @@ What follows from it, each `[proved]` from the same listings:
   class-0x30 corpse does (`ZombieEnterCorpseState` raises `0xC000` at
   `0x0045675E`), and nothing in the hook tests death, so a corpse's head keeps
   turning toward the camera from the point where it died, re-projected through
-  wherever the camera is now.
+  wherever the camera is now. The same holds for one frame on a live actor:
+  the record was written through the previous frame's view (`+0x68 =
+  MatrixTransformPoint(top, +0x7C)`, `0x0041168A..0x004116C9`) and is read
+  back through this frame's `g_camera_blocks`, so it comes back moved by the
+  camera's own move between the two.
 * **The angles start aimed.** `EnemyZombieInit` (`0x00452EAB`) and
   `EnemyThrowerInit` (`0x004496FE`) both seed `obj+0x1320`/`+0x1324` with
   `VecToAngles(eye + (0, 15, 0) - pos)` under the same `0x40000` test.

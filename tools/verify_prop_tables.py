@@ -15,6 +15,10 @@ What only this check can see: a table row mistyped, dropped or re-ordered in
 the port -- which would put a church chair a few units from where the engine
 draws it and nothing else would notice.
 
+Class 0x28's three tables ride along (`web/src/game/class28/index.ts`): the
+route table, the path lengths it is killed on and the `g_app_state` 10 poses
+-- a freeze frame one off would throw stage 1's burning cars a frame early.
+
     python3 tools/verify_prop_tables.py --game-dir ~/"THE HOUSE OF THE DEAD 2"
 """
 from __future__ import annotations
@@ -169,6 +173,25 @@ def main() -> int:
                 same_f32(f"{name}[{i}]", lit[i], raw)
             else:
                 same_int(f"{name}[{i}]", lit[i], struct.unpack("<i", raw)[0])
+
+    # Class 0x28 (`web/src/game/class28/index.ts`): g_class28_route_table
+    # {s16 slot, s16 freeze}, g_cam_path_length at each route's slot, and
+    # g_class28_fixed_poses as the raw words the image holds.
+    p28 = ROOT / "web" / "src" / "game" / "class28" / "index.ts"
+    routes = ts_literal(p28, "CLASS28_ROUTES")
+    lengths = ts_literal(p28, "CLASS28_ROUTE_LENGTH")
+    for i, (slot, freeze) in enumerate(routes):
+        got = struct.unpack("<2h", rd(0x00589AE0 + i * 4, 4))
+        same_int(f"CLASS28_ROUTES[{i}].slot", slot, got[0])
+        same_int(f"CLASS28_ROUTES[{i}].freeze", freeze, got[1])
+        same_int(f"CLASS28_ROUTE_LENGTH[0x{slot:x}]", lengths.get(slot, -1),
+                 struct.unpack("<i", rd(0x00576D38 + slot * 4, 4))[0])
+    same_int("CLASS28_ROUTE_LENGTH has one row per route", len(lengths),
+             len(routes))
+    for i, row in enumerate(ts_literal(p28, "CLASS28_FIXED_POSE_WORDS")):
+        got = struct.unpack("<6I", rd(0x0055DD18 + i * 0x18, 0x18))
+        for k in range(6):
+            same_int(f"CLASS28_FIXED_POSE_WORDS[{i}][{k}]", row[k], got[k])
 
     print(f"{checked} table words compared against the EXE")
     if bad:

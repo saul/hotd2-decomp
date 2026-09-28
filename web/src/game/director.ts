@@ -52,7 +52,7 @@ import { CreditBlinkTick, InputReadFrameCounters } from "./credit_prompt";
 import { SeveredHeadsTick } from "./effects/severed_head";
 import { BodyCreaturePoolUpdate } from "./body_creature";
 import { CarriedPropPoolUpdate } from "./carried_prop";
-import { DescriptorFromPlacement } from "./descriptor";
+import { DescriptorFromPlacement, PlacementOrientation } from "./descriptor";
 import type { CharacterPlacement } from "../bundle/characters";
 import { ActorByAt, AppState, G } from "./globals";
 import { ActorUpdateSuppressedBones } from "./parts";
@@ -219,8 +219,7 @@ export function SpawnScriptedCharacters(
                            // All three words of the record's orientation,
                            // `obj+0x64`/`+0x68`/`+0x6C`, as
                            // `SpawnFromDescriptor` copies them.
-                           pitch: p?.pitch ?? 0, yaw: p?.yaw ?? 0,
-                           roll: p?.roll ?? 0, pos: { ...req.pos },
+                           ...PlacementOrientation(p), pos: { ...req.pos },
                            visible: true },
                          rng, events));
   }
@@ -265,10 +264,10 @@ export function SpawnScriptedCharacters(
  * with one extra: its class id covers eleven different objects, so the test is
  * on the descriptor tail the bundle carries rather than on the class alone.
  *
- * The position and yaw come from the **spawn record**, because that is where
- * they are for every class; the descriptor tail comes from
- * `characters.placements`, which carries it for these classes even though the
- * renderer skips them. One source each.
+ * The position and the three angles come from the **spawn record**, because
+ * that is where they are for every class (see {@link PlacementOrientation});
+ * the descriptor tail comes from `characters.placements`, which carries it
+ * for these classes even though the renderer skips them. One source each.
  */
 export function SpawnSlotActors(spawns: readonly ScriptSpawn[],
                                 rng: Rng): void {
@@ -322,7 +321,8 @@ export function SpawnSlotActor(s: ScriptSpawn, rng: Rng): void {
     if (s.class === SpawnClassValue.Mouse) {
       G.g_slot_actors_built.push(s.at);
       const a = ActorSpawn(s.at, SpawnClassValue.Mouse, -1, "mouse",
-                           { class52: pl.class52 ?? null, yaw: pl.yaw ?? 0 },
+                           { class52: pl.class52 ?? null,
+                             ...PlacementOrientation(pl) },
                            rng);
       a.pos = vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0, s.pos?.[2] ?? 0);
       a.visible = true;
@@ -333,12 +333,14 @@ export function SpawnSlotActor(s: ScriptSpawn, rng: Rng): void {
     // one either.
     // Class 0x13 -- a script-driven prop. No character type and no skeleton:
     // one asset slot under a matrix, so it comes through here rather than
-    // through `render/characters.ts`.
+    // through `render/characters.ts`. Opcode 0x0C, `SpawnFromDescriptorSmall`
+    // (`FUN_00408BC0`): all three angles, which a static prop keeps for its
+    // whole life and draws `RotX` first.
     if (s.class === SpawnClassValue.ScriptedProp) {
       if (!pl.class13) return;
       G.g_slot_actors_built.push(s.at);
       const a = ActorSpawn(s.at, SpawnClassValue.ScriptedProp, -1, "prop",
-                           { class13: pl.class13, yaw: pl.yaw ?? 0,
+                           { class13: pl.class13, ...PlacementOrientation(pl),
                              pos: vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0,
                                        s.pos?.[2] ?? 0) },
                            rng);
@@ -354,7 +356,8 @@ export function SpawnSlotActor(s: ScriptSpawn, rng: Rng): void {
       G.g_slot_actors_built.push(s.at);
       const a = ActorSpawn(s.at, SpawnClassValue.Vehicle, -1, "boat",
                            { class26: pl.class26, hp: pl.hp, maxHp: pl.hp,
-                             yaw: pl.yaw ?? 0, flags: pl.init_flags ?? 0,
+                             ...PlacementOrientation(pl),
+                             flags: pl.init_flags ?? 0,
                              pos: vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0,
                                        s.pos?.[2] ?? 0) },
                            rng);
@@ -365,7 +368,7 @@ export function SpawnSlotActor(s: ScriptSpawn, rng: Rng): void {
       if (!pl.class43) return;
       G.g_slot_actors_built.push(s.at);
       const a = ActorSpawn(s.at, SpawnClassValue.FlyingEnemy, -1, "owl",
-                           { class43: pl.class43, yaw: pl.yaw ?? 0,
+                           { class43: pl.class43, ...PlacementOrientation(pl),
                              pos: vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0,
                                        s.pos?.[2] ?? 0) },
                            rng);
@@ -382,7 +385,7 @@ export function SpawnSlotActor(s: ScriptSpawn, rng: Rng): void {
       G.g_slot_actors_built.push(s.at);
       const a = ActorSpawn(s.at, SpawnClassValue.WaterWaveField, -1,
                            "wave field",
-                           { class16: pl.class16, yaw: pl.yaw ?? 0,
+                           { class16: pl.class16, ...PlacementOrientation(pl),
                              pos: vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0,
                                        s.pos?.[2] ?? 0) },
                            rng);
@@ -414,7 +417,7 @@ export function SpawnSlotActor(s: ScriptSpawn, rng: Rng): void {
       // the one class here whose `Init` reads it, into `sub+0x00..0x08`.
       G.g_slot_actors_built.push(s.at);
       const a = ActorSpawn(s.at, SpawnClassValue.WaterEnemy, -1, "fish",
-                           { class51: pl.class51, yaw: pl.yaw ?? 0,
+                           { class51: pl.class51, ...PlacementOrientation(pl),
                              pos: vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0,
                                        s.pos?.[2] ?? 0) },
                            rng);
@@ -437,7 +440,8 @@ export function SpawnSlotActor(s: ScriptSpawn, rng: Rng): void {
       const a = ActorSpawn(s.at, SpawnClassValue.ScriptedScenery, -1,
                            `scenery ${pl.hp}`,
                            { class33: pl.class33, class33Push: pl.class33_push,
-                             hp: pl.hp, maxHp: pl.hp, yaw: pl.yaw ?? 0,
+                             hp: pl.hp, maxHp: pl.hp,
+                             ...PlacementOrientation(pl),
                              // `ActorInitFlags` (`FUN_00408970`) makes the
                              // descriptor's own flags word `obj+0x34` before
                              // any `Init` runs, and selector 4's two spawns

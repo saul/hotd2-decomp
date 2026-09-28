@@ -4674,6 +4674,27 @@ the boat**: it ends the ride state at the `MatrixStackPop` and shows no
 `frame++`; the increment is at `0x00440323` and the whole tail past it.
 `game/class13/routine0.ts`.
 
+**...and the five static ones lean the way their records say.** Those five
+(`komono_st1.bin[3]` x4 at block 17 step 1, `etc_1.bin[63]` at 15x in blocks
+16, 20, 35 and 39) are the only class-0x13 records with a pitch, and
+`SpawnSlotActor` took the yaw alone -- the placement had carried `pitch` since
+the wall-climbers, and the arm read `yaw` by name. `SpawnFromDescriptorSmall`
+(`FUN_00408BC0`) copies all three words, behaviour 0 is a bare `RET`, and
+`ScriptedPropUpdate13` draws `T·Rx·Rz·Ry·S`, which `render/slotmodels.ts`
+already did; so the four wooden models on the far wall of the block-17 room
+stood upright where the game tips them `+22.5°`, `+56°`, `-22.5°` and `-28°`
+about x, and `etc_1.bin[63]` -- the moon, `[likely]` by its texture -- stood
+on edge to the ground where the game turns its face `56°` down toward it. Every spawn site now takes the three angles
+through one helper, `PlacementOrientation` (`game/descriptor.ts`) --
+`SpawnScriptedCharacters`, every arm of `SpawnSlotActor` and
+`SpawnHordePlacers`. What a player sees: at block 17's hold (camera 81 frame
+425, the civilian and the `znkage`) two of the four are in frame and lean
+left; the other two are off the right edge, and from the street at the start
+of the step all four sit behind the window jamb (at most ten pixels change).
+`etc_1.bin[63]` is in the frustum on camera 86 frames 5..240 and behind the
+tower's roof there: at most five pixels of a scripted frame change. `web/tools/props13_look.mjs`
+reads the three angles back off the page's own `G` and shoots the hold.
+
 **The draws are ported too.** Selector 0's wake (`char_adv06.bin[0..21]`
 under the boat's own pose, `Translate(0, 0, 27.5); Scale(1, 0.15, 1)`) and its
 splash (`eff_dokan.bin[0..93]` at the fixed point by the wall) are drawn by

@@ -16,9 +16,10 @@
  * the port and not the player.
  *
  * `SpawnScriptedCharacters` supplies the rest — the motion, the hit points
- * (`ActorInitHitPoints`), the three angles, and the position, which comes
- * from the glTF node rather than from the placement and so crosses from
- * `render/` as a `CharacterSpawnRequest`.
+ * (`ActorInitHitPoints`), the three angles ({@link PlacementOrientation},
+ * shared with every other spawn site), and the position, which comes from the
+ * glTF node rather than from the placement and so crosses from `render/` as a
+ * `CharacterSpawnRequest`.
  */
 import type { CharacterPlacement } from "../bundle/characters";
 import type { Actor } from "./actor";
@@ -126,4 +127,35 @@ export function DescriptorFromPlacement(p: CharacterPlacement | undefined):
     // low half of `obj+0x136C`. The exporter used to drop it.
     descFlags: p?.desc_flags ?? 0,
   };
+}
+
+/**
+ * The record's three orientation words, `obj+0x64`, `+0x68` and `+0x6C`, as
+ * the placement carries them: the yaw always, `pitch` and `roll` when either
+ * is not zero.
+ *
+ * **Every spawn allocator copies all three, whole, whatever the class**, before
+ * the class's `Init` runs: `SpawnFromDescriptorSmall` (`FUN_00408BC0`, opcode
+ * 0x0C) at `0x00408C01`..`0x00408C10`, `SpawnFromDescriptor` (`FUN_00408A20`,
+ * 0x0B and 0x0D) at `0x00408A61`..`0x00408A70`, and `EvtOpSpawnPlaced09`
+ * (`FUN_004088A0`, 0x09) at `0x00408925`..`0x00408934`. `[proved]` So no
+ * spawn site in the port chooses which of them it takes:
+ * `SpawnScriptedCharacters`, `SpawnSlotActor` and `SpawnHordePlacers` take
+ * them from here, and only class 0x17's arm reads its pitch and roll from its
+ * own tail, where the exporter keeps them signed for `WaterWaveSourceAdd`.
+ *
+ * Class 0x13 took the yaw alone for as long after the placement carried all
+ * three as `SpawnSlotActor` read the yaw by name, and stage 2's five static
+ * props -- four of `komono_st1.bin[3]` at block 17 step 1 and one of
+ * `etc_1.bin[63]` 1400 units up -- stood upright: `ScriptedPropUpdate13`
+ * (`FUN_0043FE90`) draws them `T; RotX(pitch); RotZ(roll); RotY(yaw)`, and
+ * with behaviour 0 (`NoOpStub`) nothing between the spawn and the draw
+ * writes an angle.
+ *
+ * `[port-only]` as a function: the engine copies the three dwords inline.
+ */
+export function PlacementOrientation(
+    pl: { pitch?: number; yaw?: number; roll?: number } | undefined):
+    Pick<Actor, "pitch" | "yaw" | "roll"> {
+  return { pitch: pl?.pitch ?? 0, yaw: pl?.yaw ?? 0, roll: pl?.roll ?? 0 };
 }

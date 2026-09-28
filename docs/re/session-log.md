@@ -23251,3 +23251,79 @@ sprite per part hit) and `RescueTargetInit`'s direct call of the ride-in on
 its own frame are unported; `obj+0x1FC`, the rotation order the rescue sets to
 2, has no field because nothing in `game/` composes a rotation from it.
 
+
+## 2026-09-28 -- the claim's pick and `NoCameraTrack`, re-checked against the exe (branch `claude/focused-haslett-4f0b00`)
+
+The brief asked for both of `TryClaimAttackSlot`'s declared divergences: the
+first-free player loop and the `NoCameraTrack` clear on a grant. **Both were
+already gone.** `6079ee0f` transcribed the pick and deleted the clear, and it
+was on `main` and in this branch's base. The brief described the tree as it
+stood before that commit (the stale-brief shape, this time in the other
+direction: the work had landed rather than being mid-flight in a peer). So this session re-checked that work
+against the exe independently and did not port it a second time.
+
+* **Both claim routines, read again in full** (`0x00455DE0..0x00455F39`,
+  `0x0044CA40..0x0044CB97`). `permits.ts` matches them instruction for
+  instruction: the `0xFF` void first, the latch read, the word switch on
+  `g_max_attackers`, the one-attacker arm with no fall-back, the two
+  `rand() % 2` arms (the `NOT` at `0x00455E69`), the `ActorScreenHalfSign`
+  arm, the `IsPlayerAttackable` void, and the off-screen latch (`OR EAX,
+  0x20000` / `OR AH, 0x80`). Neither routine stores to `obj+0x34`. `[proved]`
+* **Every clear of bit 16 of `obj+0x34`.** The Ghidra operand search for
+  `0xfffeffff` misses a mask that clears other bits as well:
+  `ZombieStateWaitForCameraFrame`'s clear is `AND EAX, 0xfff6feff`. So the
+  sweep ran over the exe itself: capstone, linear through each class's code,
+  every `AND` whose immediate has bit 16 clear and top byte `0xFF`, with the
+  field it lands on read from the load and store around it. Class 0x30
+  (`0x00452A00..0x0045F000`, 15,064 instructions) has 17 such masks. Seven
+  land on `obj+0x34`: `0x004576E5` WaitForCameraFrame, `0x00457A4E` Approach,
+  `0x004585EC` Emerge, `0x004587B5` state 28, `0x00458D52`
+  WaitScriptFlagThenEnter, `0x0045C00C` HoldForCameraCue, and `0x0045E72C`
+  (`0xfffefeff`, in a routine at `0x0045E660` that the TSV does not name). The
+  other ten land on `obj+0x136C`, `0x00455B77` among them, as the brief said.
+  Class 0x31 (`0x00449000..0x00452A00`, 11,559 instructions, all 69 of its
+  annotated routines) has **none**, and its only full-word write to `+0x34`
+  is `SpawnThrownWeapon`'s, on the weapon. `[proved]`
+* **The claimants that lower it**, from the 9 + 11 call sites in the xrefs:
+  WaitForCameraFrame (before its claim), Approach (after a grant), and class
+  0x30 state 28 (before its claim at `0x004587C4`). State 28 is unported
+  here and is being ported in a peer's tree (`worktree-agent-acc03416...`,
+  `pounce.ts`), which has the clear at `0x004587B5`. Per `L52` nothing was
+  named. `ZombieStateHoldForCameraCue` claims nothing itself. It lowers the
+  bit at the cue (`0x0045C008..0x0045C011`), after its delegate's claim, and
+  the port does the same.
+
+**What was added.** Nothing in `port.test.ts` asserted the case the brief
+names, a held captor staying off the camera while real claims run. The
+`GameUpdate`-driven held-captor fixture now checks that no granted claim in
+the wait lowers `NoCameraTrack`, and that the cue does. Putting the old
+clear back in `TryClaimAttackSlot` fails the first, along with the three
+existing claim checks. Deleting the hold's clear at the cue fails the second
+and the existing graduation check. `permits.ts`'s list of the callers that
+clear the bit gains state 28 and the scan that backs "class 0x31 nowhere".
+
+**`web/tools/throwers.mjs` was stale, and not because of the claim.** It
+failed at HEAD and at `6079ee0f^` alike: 9 stationary throwers, 0 throws.
+Three separate reasons, found in order:
+1. The reset leaves `g_max_attackers` at 0 and both players `Out`, and the
+   harness never put a player in play. Now it runs one player-task turn, as
+   `port.test.ts`'s `EnterPlay` does (`L49`).
+2. It set `g_scene_state_major` to 2 and **then** seeked a `Walker` to the
+   spawn's script address. The seek runs the script's scene-state ops into
+   `G` and left major 1, so `IsPlayerAttackable` refused every claim. A
+   trace showed `major=1` before the reorder and 2 after it. The scene state
+   is now set after the seek.
+3. Stage 3 block 2's two retiring axe men stand about 3,400 units from the
+   harness's fixed eye. A thrown axe keeps the permit until it lands (the
+   weapon releases it, `ReleaseAttackSlot`'s doc), so the second throw waits
+   out a thirteen-second flight, and they despawn at f2784 and f2849.
+   40 seconds was 2,400 frames, so the run is now 60.
+
+With all three: 9 of 9 throw both hands, 7 of 7 walk away, and 2 of 2 retire
+and despawn. Neither harness is in `verify_all.py`'s `CHECKS`, which is how
+this one rotted unseen.
+
+**Wrong turn.** The first check of whether class 0x31 routines live outside
+the scanned range used `awk`'s `strtonum`. macOS awk does not have it, and
+the command printed nothing, which read as "none" (`L13`). Redone in Python: 69 inside, and the five
+rows outside are shared helpers whose comments mention class 0x31.

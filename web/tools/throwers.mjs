@@ -23,6 +23,7 @@ import { ActorSpawn, GameUpdate } from "../src/game/director.ts";
 import { DescriptorFromPlacement } from "../src/game/descriptor.ts";
 import { G, ResetGameGlobals } from "../src/game/globals.ts";
 import { NULL_HOST } from "../src/game/host.ts";
+import { PlayerTasksRun } from "../src/game/player_shell.ts";
 import { SetGameTables } from "../src/game/tables.ts";
 import { SpawnClass } from "../src/game/spawn_class.ts";
 import { ZombieState } from "../src/game/class30/states.ts";
@@ -33,7 +34,13 @@ import { seekTo } from "../src/script/seek";
 const root = BUNDLE_ROOT;
 /** Far enough that "stood still" and "charged the camera" cannot be confused. */
 const EYE = vec3(0, 10, 0);
-const SECONDS = 40;
+/**
+ * Long enough for the two stage-3 block-2 axe men to retire. They stand about
+ * 3,400 units from `EYE`, and a thrown axe keeps its thrower's permit until it
+ * lands (the weapon releases it, not the throw clip), so their second throw
+ * waits out a thirteen-second flight. They despawn at about frame 2,850.
+ */
+const SECONDS = 60;
 
 let total = 0, stood = 0, threw = 0, left = 0, held = 0, pinned = 0;
 let retirers = 0, retired = 0;
@@ -95,10 +102,6 @@ for (let stage = 1; stage <= 6; stage++) {
   for (const p of throwers) {
     ResetGameGlobals();
     SetGameTables(chars, undefined, undefined, undefined, script.coli);
-    // The scene state the player gets from the walker: `IsPlayerAttackable`
-    // refuses a permit unless the major is 2, the `cam/` path camera row.
-    G.g_scene_state_major_entered = 2;
-    G.g_scene_state_major = 2;
     G.g_camera_fixed_eye_y = EYE.y;
     // One at a time: the permit queue is the pacing, and two throwers sharing
     // it would measure the queue rather than the state.
@@ -124,6 +127,18 @@ for (let stage = 1; stage <= 6; stage++) {
         G.g_camera_fixed_eye_y = w.groundY ?? 0;
       }
     }
+    // The scene state the player gets from the walker: `IsPlayerAttackable`
+    // refuses a permit unless the major is 2, the `cam/` path camera row.
+    // **After the seek**, which runs the script's scene-state ops into `G` and
+    // leaves major 1 behind it; set before it, the refusal was every frame's.
+    G.g_scene_state_major_entered = 2;
+    G.g_scene_state_major = 2;
+    // **And a player in play.** The reset leaves `g_max_attackers` at 0 and
+    // both players `Out`, so `TryClaimAttackSlot` offers no permit at all.
+    // The first player-task turn is where the reset's start press becomes
+    // player 1 in play, as `port.test.ts`'s `EnterPlay` has it -- nothing set
+    // by hand (L49).
+    PlayerTasksRun({ host: NULL_HOST, rng: new Rng(1) });
 
     const events = new Events();
     let thrown = 0;

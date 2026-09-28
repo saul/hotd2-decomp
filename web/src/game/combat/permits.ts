@@ -232,8 +232,10 @@ function PermitIsFree(p: number): boolean {
  * anywhere in either claim routine, so whether the camera may track the actor
  * is decided by each caller -- `ZombieStateApproach` clears `NoCameraTrack`
  * itself on a successful claim (`0x00457A4E`), `ZombieStateWaitForCameraFrame`
- * before it claims (`0x004576E5`), `ZombieStateHoldForCameraCue` at its cue
- * (`0x0045C00C`) -- and class 0x31 clears it nowhere. There is no queue-rank
+ * before it claims (`0x004576E5`), class 0x30 state 28 before its claim at
+ * `0x004587C4` (`0x004587B5`, not yet ported), `ZombieStateHoldForCameraCue`
+ * at its cue (`0x0045C00C`) -- and class 0x31 clears it nowhere: no AND in
+ * `0x00449000..0x00452A00` has a mask with bit 16 clear. There is no queue-rank
  * test either; that lives in `ZombieStateApproach` and the hub, before their
  * calls (`L11`).
  */

@@ -13289,6 +13289,7 @@ console.log("\na held captor's cue frame, and the finish_sequence that frees it:
   // The wait: claimed and bounced, every frame, and the table ends each frame
   // empty. `obj+0x121` keeps naming the slot, as the engine leaves it.
   let everHeld = false;
+  let everTracked = false;
   // The frame is published by the driver in the camera actor
   // (`CameraDriverSelectMode`: `g_cam_path_frame = __ftol(g_rail_frame)`),
   // so the fixture moves the word it publishes from.
@@ -13297,6 +13298,7 @@ console.log("\na held captor's cue frame, and the finish_sequence that frees it:
     G.g_cam_path_frame = f;
     GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
     if (G.g_attack_permits[0] !== -1) everHeld = true;
+    if (!(z.flags & ActorFlag.NoCameraTrack)) everTracked = true;
   }
   check("before the cue the hold bounces every claim",
         z.state === ZombieState.HoldForCameraCue && !everHeld
@@ -13304,6 +13306,12 @@ console.log("\na held captor's cue frame, and the finish_sequence that frees it:
         `state ${z.state} delegate ${z.zom.delegate} permit ${z.attackPermit} `
         + `permits ${JSON.stringify(G.g_attack_permits)} `
         + `refusal ${ZombieAttackRefusal(z)}`);
+  // Every one of those claims was granted, and neither claim routine stores to
+  // `obj+0x34`: the only clear on this path is the hold's own, at the cue
+  // (`0x0045C00C`). A claim that lowered the bit put the captor on camera for
+  // the whole wait.
+  check("...and no granted claim puts it on camera before the cue",
+        !everTracked, `flags 0x${(z.flags >>> 0).toString(16)}`);
 
   // The cue frame: it graduates into HoldAtRange **holding** the permit the
   // delegate claimed on this same frame.
@@ -13315,6 +13323,9 @@ console.log("\na held captor's cue frame, and the finish_sequence that frees it:
         && G.g_attack_permits[0] === z.at && z.attackPermit === 0,
         `state ${z.state} permit ${z.attackPermit} `
         + `permits ${JSON.stringify(G.g_attack_permits)}`);
+  check("...and the cue is what lowers NoCameraTrack",
+        (z.flags & ActorFlag.NoCameraTrack) === 0,
+        `flags 0x${(z.flags >>> 0).toString(16)}`);
 
   // Nothing in class 0x30 lets go of it: the hub's claim fails on its own
   // permit, and `TryClaimAttackSlot` voids `obj+0x121` first.

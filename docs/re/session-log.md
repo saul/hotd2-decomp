@@ -20743,6 +20743,98 @@ script JSONs, which read as "the glTF does not carry the note". macOS `grep`
 exits 1 on these `.glb` files and prints nothing, even with `-c` -- **L13**.
 Counting the bytes in Python found it in all four.
 
+---
+
+## 2026-09-27 -- the head aim: zombies and throwers look at you
+
+**Outcome:** `ActorAimHeadAtCamera` (`0x00453BE0`) and its target
+`ActorHeadAimAngles` (`0x00453D70`) read whole, named, and ported for classes
+0x30 and 0x31; class 0x25's twin `ScriptedHumanoidAimHeadAtCamera`
+(`0x00485BA0`) and its seed `ScriptedHumanoidSeedHeadAim` (`0x00485D70`) read
+and named, not ported. `combat.md`'s "do zombies aim their head" section is
+rewritten from the listing.
+
+**The reading.** Both node draw hooks push the matrix and, for bone 2, call the
+routine before anything else: `ZombieDrawBonePart` while `obj+0x34` lacks
+`0x40000`, `ThrowerDrawBonePart` also only while `obj+0x136C` has `0x100` or
+lacks `0x20` (ground or ceiling, not a wall). It steps `obj+0x1320`/`+0x1324`
+toward the eye raised 15 (a camera-space shoulder point with two attackers) at
+`0xC0` a draw, keeps each inside `0x4000` of level / of the body's facing
+`obj+0x68 - 0x8000` or steps it back, and rotates the pushed matrix
+`Ry(-centre) Ry(yaw) Rx(pitch)`. Its point is bone 2's view-space hit-sphere
+centre, which `SkeletonEmitNode` writes **after** the hook and not while
+`obj+0x34` has `0x8000` -- so it is always last frame's, and a corpse's
+(`ZombieEnterCorpseState` raises `0xC000`) is frozen where it died. Both combat
+`Init`s seed the angles toward the same point under the same `0x40000` test.
+
+**The data.** `0x40000` has no writer in `.text` (dword, byte and register
+forms scanned), so it is a spawn-record bit for life. 160 of the 608 class-0x30
+rows across the twelve bundles carry it -- all 138 that start or attack into one
+of the eleven states using `obj+0x1320` as a motion id, all 114 civilian
+captors, all 12 class-0x18 rows; none of the 42 class-0x31 rows. So the two
+readings of `obj+0x1320` never meet in one actor, and the port gives them two
+fields. No class-0x30/0x31 row carries `0x8000` without `0x40000`, but the
+corpse raises it, so the stale record is a shipped case and is carried
+(`headRecord` + a latch). Op 12, the only thing that switches class 0x25's aim
+on, is in none of the 274 exported class-0x25 programs.
+
+**The port.** `game/class30/head_aim.ts` (the stepping, the seed, the target,
+and two port-only halves of `SkeletonEmitNode`'s record write around the node
+walk); `game/class30/draw.ts` (`ZombieDrawBonePart`'s state half, called from
+`EnemyZombieUpdate` through main's new `ActorRunNodeDrawHooks`); the aim added
+to `class31/draw.ts`'s hook. `NodeDrawHook` now takes the `ClassFrame`, since
+the aim reads the camera. `G.g_camera_eye` is new, written by
+`GameSystem.update` beside `g_camera_yaw_bams`, for the `Init`s. `render/characters/head_aim.ts` turns bone
+2's own meshes in `onBeforeRender`/`onAfterRender` (and the shadow pair) --
+the engine's push and pop -- so attachments and the hit sphere keep the pose.
+Class 0x25's `boneDecoration`/`SetBoneDecoration` are now `aimsHead`/`SetHeadAim`,
+and op 12's missing seed is declared.
+
+**Checked.** Fourteen assertions in `port.test.ts`, each of eight mutants
+failing at least one. The page, stage 1 block 1 step 2 at frame 5, rendered
+with and without the render half: identical bodies, and with it the walking
+zombie's head faces the viewer instead of its walk.
+
+**Wrong turns.**
+
+* The prompt said `TurnAngleToward` and `AngleWithinTolerance` were already
+  ported exactly; in this worktree they were not -- a peer's agent had them
+  uncommitted. Asked rather than duplicated, and merged main once it landed.
+* I first planned to read the live pose for the aim point and call the
+  camera-motion residue a divergence. Reading `ZombieEnterCorpseState`'s
+  `0xC000` is what showed the stale record is ordinary play, not an edge.
+* My doc said a head whose target is out of reach "comes back to the front";
+  the arithmetic says it walks to the edge and alternates across the last
+  `0xC0`. Found writing the test's expected values.
+* I wrote "the 52 civilian captors" into `ActorFlag.NoHeadAim` from memory of
+  "fifty"; the count is 114 rows. Recounted before it went anywhere.
+* The first thrower gate assertion ANDed in `ThrowerHeadAims` itself, so a
+  mutant that dropped the gate from the hook passed. Now it asserts the hook's
+  output alone.
+* Two chained substitutions in my annotation batch made it non-idempotent;
+  collapsed into one.
+* `SkeletonEmitNode`'s pseudocode `return`s after the tracked-bone pop; the
+  listing falls through to the `+0x68` write and the children (L37's shape).
+* Main's `combat.md` said the pose hook has exactly two installers; both combat
+  `Init`s write their push-outs there as `obj+0x12F0`. Corrected in place.
+* I first wrote `G.g_camera_eye` in `syncPortGlobals`, in the script phase,
+  because the spawns there read it. `test:state` failed every stage at frame 0
+  after a load: that call runs before the frame's camera is placed, and the
+  camera is not in a snapshot, so a load's first frame read the pre-load
+  camera. Written in `GameSystem.update` from `ctx.view`, as the yaw is, a
+  spawn reads the previous tick's eye out of `G` and the replay holds.
+* The `boneDecoration` rename moved `builder_hash.ts`: `class25/state.ts` is in
+  the exporter's import closure. Regenerated with the change.
+
+**Next actions.**
+
+* Port class 0x25's twin if a program ever uses op 12 (none does).
+* Training's hook swap is declared on both updates; it needs a per-actor
+  hook pointer.
+* `SkeletonEmitNode` still has its tracked-bone `return` in Ghidra and
+  `SkeletonApplyRootMotion` the same after its root-motion pop; both are worth
+  the L55 check.
+
 
 ## 2026-09-27 -- the HUD shutter as the scene's task, and no pause at a branch
 

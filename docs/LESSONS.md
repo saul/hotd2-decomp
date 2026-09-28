@@ -780,7 +780,23 @@ drawer was class 0x41 type 1, a task no port had read. When a loaded model is
 missing or wrong, search `.text` for its slot as an immediate (and as bytes,
 for the ones in unfunctioned code): what draws it is whatever names it.
 
-**L55 -- A value computed at module load through an import cycle is a page
+**L55 — A body Ghidra cut short at a call may be one flow override, and it
+can be cleared.** `ActorAimHeadAtCamera` (`FUN_00453BE0`) decompiled as a
+transform and a `MatrixStackPop` and nothing else, which is L35's shape --
+and `MatrixStackPop` is not marked no-return: `ActorHeadAimAngles` flows past
+its own pop. What cut this body was a `CALL_RETURN` flow override on the one
+`CALL` instruction at `0x00453C78`, and class 0x25's twin had the same on its
+pop at `0x00485C38`. `clear_instruction_flow_override` with `dry_run: true`
+names it without touching anything; clearing it, disassembling the tail and
+re-creating the function gave both routines their whole pseudocode -- the
+stepping, the tolerance test and the three rotations the listing had been
+hiding for as long as the head aim was believed not to exist. So when a
+decompilation stops at a call that does return, **ask the instruction before
+the function**: L35 says read past the end, and this says the end may be
+movable. The override lives in the database and not in `ghidra/annotations/`,
+so a rebuild can bring it back; say so in the row.
+
+**L56 -- A value computed at module load through an import cycle is a page
 that does not start, behind a green `test:port`.** `game/globals.ts` imports
 `game/hud_shutter.ts` for `HudShutterTaskCreate`, and `hud_shutter.ts` imports
 `G` and the `ScreenFurniture` enum back. Calls across that cycle are fine; a

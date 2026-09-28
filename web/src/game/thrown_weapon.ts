@@ -457,14 +457,8 @@ export function ThrownWeaponShotDownTarget(w: ThrownWeapon,
 /** `FMUL float ptr [0x004C43A4]` — `0x41200000`, 10.0. */
 const SHOT_DOWN_SCATTER = 10.0;
 
-/**
- * `Vec3Normalize` — `FUN_004AAA00`. `out = v / |v|`, and the length comes
- * back in `ST0`, which both shot-down arms pop and discard. No zero test.
- */
-export function Vec3Normalize(v: Vec3, out: Vec3): number {
-  const len = Math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
-  out.x = v.x / len;
-  out.y = v.y / len;
-  out.z = v.z / len;
-  return len;
-}
+// `Vec3Normalize` (`FUN_004AAA00`) is `game/matrix.ts`'s, beside
+// `Vec3ScaleToUnitLength`; the crowd push calls it too, and `coli.ts` may not
+// import this module without entering its cycle (L56). Re-exported for the
+// two shot-down arms that take it from here.
+export { Vec3Normalize } from "./matrix";

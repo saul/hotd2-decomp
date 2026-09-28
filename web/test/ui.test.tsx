@@ -99,6 +99,8 @@ function projection(): UiProjection {
     filterMode: "asset",
     anisotropyLimit: 16,
     pillarbox: false,
+    pixelRatio: 1,
+    pixelRatioOptions: [1, 1.5, 2],
     wait: { sub: "0x3B wait_enemies_alive", lines: [{ text: "3 alive" }] },
     waitBoxed: true,
     actorPanel: { sub: "12 actors", groups: [] },
@@ -684,6 +686,10 @@ console.log("\nOne key per preference:\n");
   check("the Scene panel has the 4:3 switch, and it follows the projection",
         /<input type="checkbox" checked=""\/>\s*4:3 frame/.test(scene),
         scene.slice(scene.indexOf("view-settings"), scene.indexOf("view-settings") + 400));
+  const ratioSel = /<label class="view-ratio"[^]*?<\/label>/.exec(scene)?.[0] ?? "";
+  check("...and the Resolution select, offering the projection's steps",
+        (ratioSel.match(/<option /g) ?? []).length === 3
+        && /<option value="1" selected="">1×/.test(ratioSel), ratioSel);
 
   // An old save held every overlay's default as if chosen: every setting was
   // written whenever one moved. Read back as a choice, `rails: true` would put
@@ -700,6 +706,23 @@ console.log("\nOne key per preference:\n");
             JSON.stringify({ v: 2, toggles: { rails: true } }));
   check("...and a new save's overlays are a choice, and kept",
         readViewPrefs().toggles.rails === true);
+  // The 4:3 switch's default is the device's since version 3, so a pre-3
+  // `false` -- written whenever anything moved -- is not a choice and must not
+  // keep a phone filling the screen. A pre-3 `true` could only be chosen.
+  store.set("hod2.viewPrefs",
+            JSON.stringify({ v: 2, toggles: {}, fourByThree: false }));
+  check("a pre-3 save's 4:3 false is dropped, so the device decides",
+        readViewPrefs().fourByThree === undefined);
+  store.set("hod2.viewPrefs",
+            JSON.stringify({ v: 2, toggles: {}, fourByThree: true }));
+  check("...and its true is kept, being a choice",
+        readViewPrefs().fourByThree === true);
+  store.set("hod2.viewPrefs",
+            JSON.stringify({ v: 3, toggles: {}, fourByThree: false,
+                             pixelRatio: 1.5 }));
+  const v3 = readViewPrefs();
+  check("...and a version-3 choice either way is kept, the resolution too",
+        v3.fourByThree === false && v3.pixelRatio === 1.5, JSON.stringify(v3));
 
   // A browser set to block site data throws on the accessor. A layout
   // preference is not worth a blank page.

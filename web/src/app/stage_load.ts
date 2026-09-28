@@ -298,6 +298,8 @@ export async function loadStageInto(p: Player): Promise<void> {
   // -- a belief that had looked only at `bgm_entry_play` -- so the music
   // opened a step early and the script's own `se_play` of the same track,
   // which in the engine starts it from the top, found it already playing.
+  // The shader programs, while the loading screen still covers the cost.
+  p.warmShaders();
   p.setLoading(null);
   // The bundle screen's picker shows a frame of each stage, and this is the
   // **fallback** ask: a few frames along, so the script has placed the camera

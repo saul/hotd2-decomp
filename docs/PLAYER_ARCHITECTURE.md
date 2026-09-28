@@ -576,10 +576,14 @@ keeping from them moved:
   inspector and rigs panels, with the projection slices only they read. The
   gameplay camera's Track switch went too: it is the game, not a view of it.
 
-**Off by default, everything that is not the game.** The frame fills the
-window -- the vertical FOV is the game's, so a wide window shows more at the
-sides than the cabinet did, and the 4:3 switch is there for when what the
-game framed is the question. Every overlay (`ToggleSpec.kind === "debug"`)
+**Off by default, everything that is not the game.** On a desktop the frame
+fills the window -- the vertical FOV is the game's, so a wide window shows
+more at the sides than the cabinet did, and the 4:3 switch is there for when
+what the game framed is the question. **On a touch screen it is boxed to 4:3
+and drawn at 1x** (`Player.pillarbox`, `Player.pixelRatio`): a phone held
+sideways would show nearly 80 degrees across for the game's 53, and its own
+pixel ratio is nine times the pixels of a 640x480 game. Both are the device's
+defaults and saved only as choices, like the mute. Every overlay (`ToggleSpec.kind === "debug"`)
 and every debug aid starts off; a saved preference from before that
 (`viewprefs.ts`, version 2) keeps its game switches and forgets its overlay
 ones, because every setting used to be written whenever one moved.

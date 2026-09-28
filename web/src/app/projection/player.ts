@@ -54,6 +54,9 @@ export interface PlayerView {
   readonly anisotropyLimit: number;
   /** See {@link UiProjection.pillarbox}. */
   readonly pillarbox: boolean;
+  /** See {@link UiProjection.pixelRatio}. */
+  readonly pixelRatio: number;
+  readonly pixelRatioOptions: readonly number[];
   readonly toggles: Readonly<Record<ToggleName, boolean>>;
   readonly camEye: { x: number; y: number; z: number };
   readonly boxedClasses: ReadonlySet<number>;
@@ -115,6 +118,8 @@ export function buildProjection(v: PlayerView,
     filterMode: v.filterMode,
     anisotropyLimit: v.anisotropyLimit,
     pillarbox: v.pillarbox,
+    pixelRatio: v.pixelRatio,
+    pixelRatioOptions: v.pixelRatioOptions,
     // A slice nothing is showing is not built. Its *selection* still counts,
     // though — the highlight set is computed whatever the panels are showing.
     wait: w && v.wants("wait") ? waitProjection(w, eye) : null,

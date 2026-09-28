@@ -21,21 +21,21 @@ is in `tools/verify_all.py`, beside the command that runs it.
 |---|---:|---:|---|
 | `game/` | 91045 | 293 | engine |
 | `hod2lib/` | 18581 | 35 | engine |
-| `render/` | 14623 | 51 | render |
-| `app/` | 7979 | 28 | app |
+| `render/` | 14674 | 52 | render |
+| `app/` | 8094 | 28 | app |
 | `script/` | 4388 | 25 | engine |
-| `ui/` | 3031 | 23 | ui |
+| `ui/` | 3060 | 23 | ui |
 | `bundle/` | 2632 | 11 | engine |
 | `core/` | 949 | 9 | engine |
 | `audio/` | 907 | 2 | render |
 | `hud/` | 491 | 1 | ui |
-| **total** | **144626** | **478** | |
+| **total** | **144821** | **479** | |
 
 The largest files, which is where the pressure to split next is:
 
 * `game/globals.ts` — 2682
 * `game/actor.ts` — 2563
-* `app/main.ts` — 2340
+* `app/main.ts` — 2428
 * `hod2lib/exetab.ts` — 2212
 * `script/walker.ts` — 2140
 
@@ -50,7 +50,7 @@ The largest files, which is where the pressure to split next is:
 | Declared `[diverges]` | **138** — where the port knowingly departs from the exe, each with its reason on the spot |
 | `[open]` markers in `game/` | **160** — questions the port is honest about not having answered |
 
-The two declared seams between the UI and the player: **`PlayerCommands` has 48 members against `PlayerView`'s 31** — how much of the player a click can move, against how much of it the page can see. Neither can grow without a line appearing in the open.
+The two declared seams between the UI and the player: **`PlayerCommands` has 49 members against `PlayerView`'s 33** — how much of the player a click can move, against how much of it the page can see. Neither can grow without a line appearing in the open.
 
 ## The decomp
 

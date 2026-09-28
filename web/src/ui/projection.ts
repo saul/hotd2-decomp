@@ -346,13 +346,20 @@ export interface UiProjection {
   /**
    * Whether the frame is boxed to the game's 4:3, or fills the window.
    *
-   * Off by default: the page is the game, and a phone held sideways is twice
-   * as wide as it is tall. On is the cabinet's own shape -- the projection is
-   * a compile-time 4:3, so filling a wider window shows more of every shot
-   * than the game ever did -- and the HUD's letterbox measures itself against
-   * whichever frame is drawn.
+   * On is the cabinet's own shape -- the projection is a compile-time 4:3, so
+   * filling a wider window shows more of every shot than the game ever did --
+   * and the HUD's letterbox measures itself against whichever frame is
+   * drawn. On by default on a touch screen, where a phone held sideways shows
+   * nearly 80 degrees across for the game's 53; off on a desktop. See
+   * `Player.pillarbox`.
    */
   pillarbox: boolean;
+  /**
+   * Canvas pixels per CSS pixel, and the steps the Resolution select offers.
+   * 1 by default on a touch screen. See `Player.pixelRatio`.
+   */
+  pixelRatio: number;
+  pixelRatioOptions: readonly number[];
   wait: WaitProjection | null;
   /** The wait panel's `box` checkbox. See the `boxWait` command. */
   waitBoxed: boolean;

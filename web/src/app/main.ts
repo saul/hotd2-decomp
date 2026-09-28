@@ -98,7 +98,7 @@ import type { Snapshot } from "../core/snapshot";
 import { TICK } from "./loop";
 import { DRIVEN_TICK, Pacer, STOPPED_TICK, type PacerHost } from "./pacer";
 import { SnapshotRing } from "./ring";
-import { TiltReload, unlockDevice } from "./device";
+import { TiltReload, touchFirst, unlockDevice } from "./device";
 import {
   CharacterBindSystem, GameSystem, GunLightBuildSystem,
   ScriptSystem, drawSystem,
@@ -109,6 +109,7 @@ import { SeveredHeadLayer } from "../render/severed_heads";
 import { DebugBoxLayer } from "../render/debug";
 import { Hud as HudLayer } from "../hud/hud";
 import { Rain } from "../render/rain";
+import { updateVisibleMatrixWorld } from "../render/visible_world";
 import { RainSystem } from "../game/effects/rain";
 import { BreakableLayer } from "../render/breakables";
 import { PropShatterLayer } from "../render/prop_shatter";
@@ -133,7 +134,7 @@ const EMPTY_GROUPS: Readonly<Record<DebugGroupName, readonly StripRow[]>> = {
 /** The commands that change something worth remembering across a reload. */
 const PREF_COMMANDS: ReadonlySet<string> = new Set([
   "toggle", "setLightMode", "setFogMode", "setFilterMode", "toggleMute",
-  "setVolume", "setPillarbox",
+  "setVolume", "setPillarbox", "setPixelRatio",
 ]);
 
 /**
@@ -407,8 +408,42 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
   private mutePref: boolean | undefined = undefined;
   /** Reload by flicking the phone. See `app/device.ts`. */
   private readonly tilt: TiltReload;
-  /** Box the frame to 4:3; off fills the window. See {@link resize}. */
-  pillarbox = false;
+  /**
+   * Box the frame to 4:3; off fills the window. See {@link resize}.
+   *
+   * **On by default on a touch screen.** A phone held sideways is about 2.2
+   * to 1, and at the game's vertical FOV that is nearly 80 degrees across
+   * where the cabinet showed 53 -- every figure small, the sides of rooms the
+   * game never framed on screen, and the aspect of the whole reading as
+   * wrong. A desktop window is nearer 4:3 and fills by default.
+   */
+  pillarbox = touchFirst();
+  /**
+   * Canvas pixels per CSS pixel -- `WebGLRenderer.setPixelRatio`.
+   *
+   * **1 on a touch screen**, the screen's own up to 2 on a desktop. The game
+   * drew 640x480; a phone's screen is 3x denser than its CSS pixels, so its
+   * own ratio is nine times the pixels of 1x for a picture that was 640 wide,
+   * and 2 is still four -- which on a phone GPU is dropped frames, for detail
+   * the textures do not have. The debug sidebar's Scene panel offers the
+   * rest ({@link pixelRatioOptions}).
+   */
+  pixelRatio = touchFirst() ? 1 : Math.min(devicePixelRatio, 2);
+  /**
+   * What the Resolution select offers: the steps up to the screen's own
+   * ratio, and 1 always. Built once, so the projection hands the UI the same
+   * array every frame.
+   */
+  readonly pixelRatioOptions: readonly number[] = Object.freeze(
+    [1, 1.5, 2, 3].filter((r) => r === 1 || r <= devicePixelRatio));
+  /**
+   * The 4:3 switch and the resolution **as choices**, apart from the state,
+   * for the reason {@link mutePref} is: the defaults depend on the device,
+   * and a value written back only because some other setting moved would pin
+   * a phone to a desktop's default.
+   */
+  private boxPref: boolean | undefined = undefined;
+  private ratioPref: number | undefined = undefined;
   /** The camera's own state: the pose scratch and the rails. */
   readonly cam = new CameraRig();
   /** Everything a system is handed. Built once; the stage index moves. */
@@ -488,7 +523,7 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
       antialias: true,
       powerPreference: "high-performance",
     });
-    this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    this.renderer.setPixelRatio(this.pixelRatio);
     // For the gun lights' shadows (`render/gunlights.ts`). On for the life of
     // the page and free until one is live: three.js renders a shadow pass
     // only for a visible light with `castShadow`, and those two lights are
@@ -496,6 +531,9 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = PCFSoftShadowMap;
     this.scene.background = new Color(0x05070a);
+    // World matrices are brought up to date for the visible branches only,
+    // just before each render. See `render/visible_world.ts`.
+    this.scene.matrixWorldAutoUpdate = false;
 
     // SetupSceneProjection: BuildPerspectiveProjection(0x1D3B, 4/3, 0.8, 8000).
     this.camera = new PerspectiveCamera(41.1, 4 / 3, 0.8, 8000);
@@ -1187,7 +1225,15 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     if (prefs.filterMode) {
       this.runCommand({ kind: "setFilterMode", mode: prefs.filterMode });
     }
-    if (prefs.fourByThree) this.runCommand({ kind: "setPillarbox", on: true });
+    // Only a choice is restored, and only when it differs from this device's
+    // default -- so a phone that never chose still gets its own.
+    if (prefs.fourByThree !== undefined) {
+      this.runCommand({ kind: "setPillarbox", on: prefs.fourByThree });
+    }
+    if (prefs.pixelRatio !== undefined
+        && this.pixelRatioOptions.includes(prefs.pixelRatio)) {
+      this.runCommand({ kind: "setPixelRatio", ratio: prefs.pixelRatio });
+    }
     // Volume before mute, because `setVolume` does not unmute and the restored
     // pair has to land in the same state it was saved in.
     if (prefs.volume !== undefined) {
@@ -1223,6 +1269,22 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     this.bgm.setMuted(muted);
   }
 
+  /** The 4:3 switch, as a choice. See {@link pillarbox} and {@link boxPref}. */
+  setPillarbox(on: boolean): void {
+    this.boxPref = on;
+    this.pillarbox = on;
+    this.resize();
+  }
+
+  /** The Resolution select, as a choice. See {@link pixelRatio}. */
+  setPixelRatio(ratio: number): void {
+    if (!this.pixelRatioOptions.includes(ratio)) return;
+    this.ratioPref = ratio;
+    this.pixelRatio = ratio;
+    this.resize();
+    this.wake();
+  }
+
   /** Every setting worth remembering, as it stands now. */
   private saveViewPrefs(): void {
     writeViewPrefs({
@@ -1233,7 +1295,10 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
       // the viewer chose, and persisting it would carry one machine's ceiling
       // to another.
       filterMode: this.texFilter.filterMode,
-      fourByThree: this.pillarbox,
+      // Choices, not state: undefined until the viewer has moved them, so a
+      // device's own default is never written down as if somebody chose it.
+      fourByThree: this.boxPref,
+      pixelRatio: this.ratioPref,
       // The choice, not the state: undefined until the viewer has pressed
       // the speaker, and then whatever they pressed it to.
       muted: this.mutePref,
@@ -1812,9 +1877,29 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
    */
   private capturing = false;
 
+  /**
+   * Build every shader program the stage's materials need, now, while the
+   * loading screen is up -- rather than on the frame each one is first drawn.
+   *
+   * `WebGLRenderer` compiles a program the first time a material is rendered,
+   * synchronously, in that frame. On a desktop a program is ten milliseconds;
+   * on iOS every one goes through Metal's translator and is many times that,
+   * so a room turning into view, the first zombie of a kind or the first shot
+   * was a hitch mid-play. `compile` walks every material in the scene, hidden
+   * regions and the effect templates included, under the lights as they
+   * stand. A light turning on later can still ask for a variant; that is the
+   * rare case, not the common one. Called by `loadStageInto` before the
+   * loading screen lifts.
+   */
+  warmShaders(): void {
+    updateVisibleMatrixWorld(this.scene);
+    this.renderer.compile(this.scene, this.camera);
+  }
+
   /** Draw, then publish. Every frame, whether or not it owed a tick. */
   endFrame(): void {
     this.drawOrder.beginFrame();
+    updateVisibleMatrixWorld(this.scene);
     this.renderer.render(this.scene, this.camera);
     this.keepThumb();
     // The one update path, and it is unconditional on purpose. A projection a
@@ -2218,18 +2303,21 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
 
   /**
    * Size the frame to the viewport: the whole of it, or the game's 4:3 centred
-   * in it.
+   * in it -- and at {@link pixelRatio} canvas pixels to a CSS pixel.
    *
-   * Filling is the default, because the page is the game and a phone held
-   * sideways is twice as wide as it is tall. The vertical FOV is the game's
-   * compile-time constant either way, so filling a wider window shows more at
-   * the sides than the cabinet did -- which is what `pillarbox` is for, as a
-   * debug sidebar switch, when what the game framed is the question.
+   * The vertical FOV is the game's compile-time constant either way
+   * (`SetupSceneProjection`: 41.1 degrees at 4:3), so filling a wider window
+   * keeps the vertical and shows more at the sides than the cabinet ever did:
+   * 53 degrees across at 4:3, nearly 80 on a phone held sideways. Filling is
+   * the default on a desktop; see {@link pillarbox} for the phone.
    */
   resize(): void {
     const w = this.viewport.clientWidth;
     const h = this.viewport.clientHeight;
     if (w === 0 || h === 0) return;
+    if (this.renderer.getPixelRatio() !== this.pixelRatio) {
+      this.renderer.setPixelRatio(this.pixelRatio);
+    }
     if (this.pillarbox) {
       const aspect = 4 / 3;
       const cw = Math.min(w, h * aspect);

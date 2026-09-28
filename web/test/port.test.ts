@@ -11462,9 +11462,9 @@ console.log("\nthe shot queue:");
  * because nothing was stepping them. That is the "shots still register when
  * paused" report.
  *
- * **Step mode is not this case and never was**, which is the whole reason the
- * fix costs no debug capability: stepping runs the port at full rate while the
- * *script* stands still, so its ticks carry time and take the live path below.
+ * **Step mode was not this case and never was**, which is the whole reason the
+ * fix cost no debug capability: stepping ran the port at full rate while the
+ * *script* stood still, so its ticks carried time and took the live path below.
  * The two assertions are deliberately the same fixture one after the other.
  */
 console.log("\nthe shot queue, with the clock stopped:");
@@ -11500,8 +11500,8 @@ console.log("\nthe shot queue, with the clock stopped:");
   // `Loop.idle` and `pacer.ts`'s `STOPPED_TICK`, by value: wall time for the
   // layers that ride it, and no game time at all.
   const STOPPED: Tick = { dt: 0, frames: 0, wall: 1 / 60, frozen: true };
-  // What `stepOneFrame` hands the port on a tick that owes one -- play mode,
-  // and step mode, which is the case that must keep working.
+  // What `stepOneFrame` hands the port on a tick that owes one -- play mode.
+  // (Step mode, when there was one, was the case that had to keep working.)
   const LIVE: Tick = { dt: 1 / 60, frames: 1, wall: 1 / 60, frozen: false };
 
   QueueShotRequest(0, RAY);
@@ -11526,7 +11526,7 @@ console.log("\nthe shot queue, with the clock stopped:");
   check("...but it still takes the camera's yaw",
         G.g_camera_yaw_bams === ctx.view.yawBams);
 
-  // Step mode, and the frame after an unpause: the same request, the same
+  // The frame after an unpause: the same request, the same
   // fixture, a tick with time in it.
   game.update(ctx, LIVE);
   check("the first tick with time in it drains the queue",

@@ -84,8 +84,9 @@ export const TOGGLES: readonly ToggleSpec[] = [
     title: "Which enemies are wedged. ZombiePushOutOfWorldAndActors traces every zombie's body sphere against the selected collision each frame and shoves it back out; one frame of that is normal, half a second of it is an actor that cannot get where its state is taking it. Marks those in red at the sphere the push actually tests. Counts only the world half, not the shoulder-past-another-zombie half." },
   { name: "boxes", kind: "debug", label: "Boxes", on: false, group: "actors",
     title: "Bounding boxes on the actor holding an attack permit \u2014 the one about to swing, and the one SelectCameraLookAtTarget is aiming at \u2014 and, while wait_enemies_alive is blocking, on every enemy keeping it blocked." },
-  { name: "trackEnemies", kind: "game", label: "Track", on: true, group: "camera",
-    title: "The gameplay camera. With enemies registered, SelectCameraLookAtTarget aims at the one holding an attack permit -- the one about to swing -- or the midpoint of two, and TurnLookAtToward eases the camera onto it. Off restores the authored cam/ path exactly." },
+  // `trackEnemies` was here. It switched off the gameplay camera --
+  // `SelectCameraLookAtTarget` aiming at the permit holder -- which is the game
+  // and not a view of it, so it is always on now and is not a switch.
   { name: "muzzle", kind: "game", label: "Muzzle flash", on: false, group: "shooting",
     title: "The nine-frame flash and its second draw, at the crosshair on every shot \u2014 PlayerShotEffectSpawn's first ring. Off by default: it sits under the aim point because the cabinet's gun needed something bright there, and with a mouse it mostly covers what you are shooting. The port spawns the records either way; this only decides whether they are drawn." },
   { name: "redBlood", kind: "game", label: "Red blood", on: true, group: "shooting",
@@ -97,6 +98,5 @@ export const TOGGLE_DEFAULTS: Readonly<Record<ToggleName, boolean>> =
   Object.fromEntries(TOGGLES.map((t) => [t.name, t.on])) as
     Record<ToggleName, boolean>;
 
-// The component that drew the top bar's ungrouped switches was here. Every
-// toggle names a sidebar panel now, and `ui/panels/DebugGroup.tsx` draws them
-// all -- in two labelled halves, the game and the overlays over it.
+// Every toggle names a debug-sidebar panel, and `ui/panels/DebugGroup.tsx`
+// draws them all -- in two labelled halves, the game and the overlays over it.

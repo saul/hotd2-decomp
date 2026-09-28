@@ -22,7 +22,7 @@
  * **One stage at a time.** Every stage in both modes is 431 MB and the better
  * part of an hour of somebody's laptop, which is a strange thing to ask for
  * before they have seen anything at all. A stage is a minute. The rest are
- * built when they are asked for, from the top bar, into the same cache -- see
+ * built when they are asked for, from the menu, into the same cache -- see
  * `Player.buildStage` -- so choosing here is choosing where to start and not
  * what you are limited to.
  */
@@ -95,7 +95,7 @@ function ExportScreen({ onReady, onBuilt, onDismiss, reason,
   // screen remembers doing.
   const [have, setHave] = useState<Map<string, Origin>>(new Map());
   // Which of those were written by an older exporter than this page, and what
-  // moved. The button in the top bar can only say *that* something is out of
+  // moved. The item in the menu can only say *that* something is out of
   // date; this is the screen with room to say which and why.
   const [stale, setStale] = useState<Set<string>>(new Set());
   const [drift, setDrift] = useState<string[]>([]);
@@ -399,7 +399,7 @@ function ExportScreen({ onReady, onBuilt, onDismiss, reason,
           </div>
           <p className="export-note">
             About 35 MB and a minute each. The other stages are also built when
-            you pick them in the top bar, so <b>Build all</b> is for when you
+            you pick them from the menu, so <b>Build all</b> is for when you
             would rather wait once.{quota ? ` ${quota}.` : ""}
           </p>
         </section>

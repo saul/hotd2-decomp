@@ -8,10 +8,15 @@
  * because the URL does.
  *
  * What does not survive is the handful of controls that are pure viewing
- * preference: whether the rails are drawn, whether the dome is on, whether to
- * pillarbox, and whether there is any sound. Those are not part of "where playback is", so putting them in the
- * URL would make every shared link carry someone else's overlay choices. They
- * belong in `localStorage`, per browser, and that is all this module does.
+ * preference: whether the rails are drawn, whether the dome is on, how the
+ * scene is lit and filtered, and whether there is any sound. Those are not
+ * part of "where playback is", so putting them in the URL would make every
+ * shared link carry someone else's overlay choices. They belong in
+ * `localStorage`, per browser, and that is all this module does.
+ *
+ * A browser may still hold `pillarbox` and `speed` from before the 4:3 switch
+ * and the speed control went; nothing reads them, and the next write drops
+ * them.
  *
  * `allRegions` is deliberately **not** saved. It is URL state, and having two
  * sources of truth for it is how a deep link ends up quietly overridden by
@@ -35,8 +40,6 @@ export interface ViewPrefs {
   lightMode?: string;
   fogMode?: string;
   filterMode?: string;
-  pillarbox?: boolean;
-  speed?: number;
   /**
    * Whether sound is off, and how loud it is when it is not.
    *
@@ -48,6 +51,9 @@ export interface ViewPrefs {
    *
    * `muted` is stored rather than derived from `volume === 0`: the two are
    * different states in `Bgm`, and a viewer who muted at 80% expects 80% back.
+   * It is the viewer's **choice**, and absent until they have made one: Start
+   * turns the sound on for somebody who has never said, and must not for
+   * somebody who said no. See `Player.mutePref`.
    */
   muted?: boolean;
   /** 0..1, as `Bgm` holds it — the slider is the one that works in percent. */

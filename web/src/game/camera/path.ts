@@ -74,8 +74,8 @@ const _pose: CamPose = { eye: vec3(), target: vec3(), roll: 0 };
  * runs them in; what is the port's own is the *condition*. In the engine the
  * queued action simply stops being called once the shot reaches its end frame,
  * so there is no `advance` flag to read — the caller here has to say whether
- * the action is still live, because the player also has a frame scrubber, a
- * seek, and a Track toggle, none of which the engine has.
+ * the action is still live, because the player also has a seek, which the
+ * engine has not.
  *
  * The evaluated pose comes back so the draw can take the **roll** off it. Roll
  * is the one channel `CamEvalPath7` (`FUN_004041E0`) produces that the camera

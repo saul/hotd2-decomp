@@ -404,12 +404,15 @@ What it is for, in rough order of value:
   be. That check is three lines and it guards rules 1 through 3 permanently.
 * **Rewind in the debugger.** Built — `app/ring.ts`. A snapshot every half
   second, sixty deep: **thirty seconds of history for about three megabytes**
-  and 0.6 ms of work a second, both measured on the shipped bundle. The
-  `rewind` command goes through `World.load` → `resync`, the same path a Load
-  and a seek take, so it cannot leave a layer holding state play would never
-  produce; `test:state` asserts that a rewind lands on the state that was
-  saved and that the frames after it replay identically. The awkward "it only
-  happens after the second zombie dies" bug is now reproducible.
+  and 0.6 ms of work a second, both measured on the shipped bundle. A rewind
+  (the `←` key) goes through `World.load` → `resync`, the same path a seek
+  takes, so it cannot leave a layer holding state play would never produce;
+  `test:state` asserts that a rewind lands on the state that was saved and
+  that the frames after it replay identically. The awkward "it only happens
+  after the second zombie dies" bug is now reproducible. (There were Save and
+  Load buttons beside it once; nothing used them, and they went with the top
+  bar. `Player.saveSnapshot` and `loadSnapshot` are what the ring and the
+  tests call.)
 * **Resume.** The deep link already carries a stage, a block and a seed; a
   snapshot carries the rest.
 ## `script/`: the machine, and the state the script drives
@@ -521,6 +524,46 @@ length of `PlayerCommands` against `PlayerView`'s is a standing measurement of
 how much of the player a click can reach; both counts are in
 [`STATUS.md`](STATUS.md).
 
+### The page is the game
+
+The rendered frame fills the window, pillarboxed to the game's own 4:3, and
+every piece of chrome is either **over** it or in a **debug sidebar** closed
+until it is asked for. The top and bottom bars that framed the view grew one
+debugging need at a time until the game was the smallest thing on the page;
+they went, and what was worth keeping from them moved:
+
+* **Over the game** (`#overlay`): the breadcrumb menu (stage, entry, Original
+  Mode, restart, the bundle screen, the sidebar), the speaker, the start and
+  pause screen, the skip prompt, the branch bar and the game-over buttons.
+* **In the debug sidebar** (`#debug`): Play or free roam, pause, skip and
+  kill; then three tabs — the inspection panels (light, fog and filtering in
+  Scene), the script, and the event feed. A tab that is not showing renders
+  nothing, so a stage being played costs none of the script's rows.
+* **Gone:** the speed control, Step mode and the instruction steppers, the
+  frame scrubber, the 4:3 switch (the frame is always 4:3), Save and Load, and
+  the route graph, scopes, globals, inspector and rigs panels, with the
+  projection slices only they read. The gameplay camera's Track switch went
+  too: it is the game, not a view of it.
+
+**`#overlay` is a sibling of `#viewport`, not a child, and that is the input
+rule.** `render/shooting.ts` hears a press on `#viewport` natively, before any
+React handler, so a button inside the viewport could not keep its press from
+also being a shot. Everything that can be pressed is in `#overlay`, which is
+`pointer-events: none` wherever it is empty, so a press anywhere else reaches
+the gun. `test:ui` asserts there is no `<button>` inside `#viewport`.
+
+**A shot is aimed through the canvas, not the viewport.** The canvas is the
+4:3 frame centred in the viewport, and the ray is built from the pointer's
+place in the canvas's rectangle. A press in the bars beside it is a pull *off
+the screen* — the gun's reload — so a phone reloads with a thumb in the black
+bar, or (`app/device.ts`) with a flick of the wrist. Fullscreen, a landscape
+lock and the motion sensors are all granted only inside a press, which is what
+the start screen is for; `app/device.ts` does all three from it.
+
+The sidebar's open state is `ui/` state (`usePersisted`), not a command. The
+harnesses open it by setting that key before the page loads
+(`tools/lib/player.mjs`), because the panels are what they read.
+
 ### How a frame reaches the screen
 
 ```
@@ -591,7 +634,7 @@ the crosshair's position — React renders the node and hands it across through
 `no-dom-insertion` is an error at zero: nothing under `web/src/` calls
 `appendChild` or its siblings. A component reaching for a node **it rendered
 itself** is a different matter and is allowed where React's model is the wrong
-tool — the script tree's highlight and the minimap's canvas both do it.
+tool — the script tree's highlight does it.
 
 **7. State the script drives belongs to the script**, not to the layer that
 draws it. The shutter's state and slide counter and the caption's countdown all
@@ -604,12 +647,13 @@ nothing.
 re-scheduled itself. Without a boundary, a panel that throws on one bad value
 takes the whole tree with it and repeats sixty times a second.
 
-Six `ErrorBoundary`s: the top bar, the script tree, the viewport overlays, the
-sidebar, the transport, and a root backstop. Three constraints on them:
+Four `ErrorBoundary`s: the loading screen, the game overlay, the debug
+sidebar, and a root backstop. Three constraints on them:
 
-* **A healthy boundary renders no element of its own.** `#stagearea` places its
-  four columns by source order, so a wrapper `<div>` would move the column it
-  was meant to protect.
+* **A healthy boundary renders no element of its own.** `#shell` places the
+  stage and the sidebar by source order, and `#viewport` must hold the canvas
+  as its first child, so a wrapper `<div>` would move what it was meant to
+  protect.
 * **None may enclose the canvas.** `app/` holds the canvas and `#viewport` for
   the life of the session through `onHost`; a boundary able to unmount one
   would leave WebGL drawing into a detached node, which looks like a graphics
@@ -633,7 +677,7 @@ web/src/
   app/          the composition root: the only layer that sees all the others
     main.ts       `Player` — 1123 lines. See "why main.ts is this size" below
     loop.ts       the pacer: one fixed 60 Hz tick, never skipped, the
-                  catch-up spread rather than dropped. freeze and speed too
+                  catch-up spread rather than dropped, and freeze
     harness.ts    the drive seam: under `?drive=1` the accumulator is fed by
                   a driver instead of by the wall, and nothing else changes.
                   Inert without the flag; may do nothing a `UiCommand` cannot
@@ -641,7 +685,9 @@ web/src/
     commands.ts   the one exhaustive switch over `UiCommand`
     ui_root.ts    createRoot on #app, and the canvas coming back
     projection/   what the UI is told, assembled — player, sidebar, script,
-                  globals, hud, message, and `stable.ts`
+                  chrome, hud, message, and `stable.ts`
+    device.ts     the phone as a gun: the flick that reloads, and the one press
+                  that asks for fullscreen, landscape and the motion sensors
     stage_load.ts, walker_host.ts, urlstate.ts, viewprefs.ts
   core/         the framework. No three.js, no DOM.
     system.ts     System { id; attach; update; detach; save?; load?; resync? }
@@ -744,10 +790,13 @@ web/src/
     ErrorBoundary.tsx  one region dies instead of the page
     projection.ts what the UI is allowed to know
     commands.ts   what the UI is allowed to ask for
-    persist.ts    usePersisted — folds and widths, and nothing else
+    persist.ts    usePersisted — folds, tabs and whether the sidebar is open
     panels/       one file per panel, each subscribing to what it reads;
                   Viewport.tsx renders the canvas, hud nodes and crosshair;
-                  GameOver.tsx the game-over sprites and its two buttons
+                  Crumbs.tsx the breadcrumb menu; Overlays.tsx the start and
+                  pause screen, the speaker and the turn-your-phone notice;
+                  DebugSidebar.tsx the controls, the tabs and the panels;
+                  GameOver.tsx the game-over screen's two buttons
   hud/          hud.ts — the shutter and the caption, drawn. Holds no state
                 and imports nothing; React renders its nodes and hands them
                 over through `UiHost`
@@ -764,8 +813,8 @@ engine's frame:
 script -> game -> render -> hud
 ```
 
-`app/loop.ts` owns the accumulator, `speed` and `freeze`; systems receive an
-already-scaled `dt` and the count of 60 Hz frames advanced. Adding a system is
+`app/loop.ts` owns the accumulator and `freeze`; systems receive a
+`dt` and the count of 60 Hz frames advanced. Adding a system is
 one `world.add(...)` and never touches the loop. **A layer ticked by hand is a
 layer outside `save`/`load`/`resync`** — that is not a style point, it is the
 rig seek bug.
@@ -819,9 +868,9 @@ engine line, which `resync` would then have to rebuild — and at 60 Hz
 simulated it buys nothing until the display is faster. It is a visual nicety
 and it is not what correctness needed.
 
-`speed` scales what goes **into** the accumulator, never the size of a tick.
-Half speed is half as many ticks a second, each still exactly 1/60 s. There is
-no such thing as a short tick.
+There is no such thing as a short tick. (There was a `speed`, which scaled
+what went into the accumulator; it went with the transport bar, and a
+harness wanting another rate drives the clock instead.)
 
 `app/harness.ts` and `?drive=1` are the same loop with the **wall replaced by
 a driver** as the thing the accumulator is fed from. Nothing else changes: the
@@ -980,10 +1029,13 @@ them. Clearing both together leaves the node map indexed on props that no
 longer exist. A scope per lifetime cannot make that mistake; a `detachAll`
 cannot avoid it.
 
-### Seeing it: the scope panel
+### Seeing it: `Scope.snapshot()`
 
-A leak is invisible until it is counted, so the debug sidebar has a **Scopes**
-panel (`ui/panels/Scopes.tsx`) showing the live tree:
+A leak is invisible until it is counted, so every scope can describe its
+subtree. There was a **Scopes** panel in the sidebar that drew it live; it went
+when the page became the game, and nothing reads the snapshot at runtime now.
+`Scope.snapshot()` is still the whole tree, and `test:scope` is what asserts
+over it. What the panel drew, and what the snapshot still carries:
 
 ```
 app                                    opened f0      3 owned
@@ -1006,23 +1058,14 @@ Three things, and each of them makes a different leak legible:
 * **The owned count and its high-water mark** — growth with a flat scope tree
   means something is registering into a scope that never closes.
 
-The panel reads a **plain projection**, not the tree:
-
-```ts
-interface ScopeNode {
-  name: string; openedAt: number; owned: number;
-  children: ScopeNode[];
-}
-```
-
-`app/` builds it from the root and hands it over, so `ui/` needs no import
-from `core/`. It is an ordinary slice of the `UiProjection` and obeys the same
-rules as the rest: read-only, plain, and cheap to diff.
+The snapshot is plain data (`ScopeNode`: a name, `openedAt`, an owned count
+and the children), so a panel that wants it back is a projection slice away
+and needs no import from `core/`.
 
 One wrinkle worth knowing. `openedAt` is stamped from a **monotonic** frame
 counter, not `ctx.frame`, because `ctx.frame` restarts at zero on every stage
-load — and "was this opened before the current stage loaded" is the one
-question the panel exists to answer.
+load — and "was this opened before the current stage loaded" is the question
+the stamp exists to answer.
 
 ### A seek and a load are the same rebuild
 
@@ -1137,7 +1180,7 @@ commands is a case in one exhaustive switch.
 
 The extractions that were worth making are the ones that named a seam rather
 than moved lines: `stage_load.ts`, `commands.ts`, `walker_host.ts`, `pacer.ts`,
-`ring.ts`, `projection/{player,hud,chrome,sidebar,globals,script,stable}.ts`,
+`ring.ts`, `projection/{player,hud,chrome,sidebar,script,stable}.ts`,
 and the two interfaces `PlayerView` and `PlayerCommands`. A line count is not a
 design goal; a declared surface is.
 

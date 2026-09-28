@@ -199,7 +199,7 @@ export class GameSystem implements System {
     // left: pause, turn to look at something, shoot it, and the kill picked
     // its direction from where you had been facing. That drain is gone — see
     // below — so what still wants this line is everything else that reads the
-    // yaw while the transport is stopped: the globals panel, and a snapshot
+    // yaw while the transport is stopped: the Camera panel, and a snapshot
     // taken in free roam, which turns the camera every frame with no tick
     // under it.
     G.g_camera_yaw_bams = ctx.view.yawBams;
@@ -214,10 +214,10 @@ export class GameSystem implements System {
     //
     // This branch used to drain `g_shot_requests` anyway, on the argument that
     // a trigger pull is input rather than elapsed time. The argument does not
-    // survive the case it was made for: **step mode never reaches this
-    // branch.** Stepping stops the *script* and runs the port at full rate, so
-    // its ticks carry time and take the path below — the debug capability is
-    // the live path, not this one. What this branch actually served was
+    // survive the case it was made for: **step mode never reached this
+    // branch.** Stepping stopped the *script* and ran the port at full rate,
+    // so its ticks carried time and took the path below. (The mode has since
+    // gone; the argument stands without it.) What this branch actually served was
     // paused, free roam and `?freeze=1`, where the shot landed a hit, killed
     // the actor, scored it, and hung its muzzle flash and its blood on screen
     // for as long as the transport stayed stopped, because nothing was
@@ -513,8 +513,7 @@ export function seatCamera(rig: CameraRig, ctx: RenderContext,
   // everything else read `end`, and the next shot then moved the eye by two or
   // three frames' travel in one. See `CamCommand.retired`.
   const pose = CamSeatPathFrame(p, at, w.rollEnabled,
-                                force || (!over && !cam.retired)
-                                      || !rig.trackEnabled);
+                                force || (!over && !cam.retired));
   // Roll is the one channel the camera block has no word for, so the draw
   // takes it off the pose the seat evaluated. See `CamSeatPathFrame`.
   rig.pose.roll = pose.roll;
@@ -549,8 +548,8 @@ export function syncCamera(rig: CameraRig, ctx: RenderContext,
  * eased, the next on the rail, sixty times a second: a stage-1 measurement put
  * it at 3.5 degrees each way with one enemy registered.
  *
- * Nothing else needed it. The seek, the stage load and the frame slider all
- * seat the block through `Player.syncCameraToWalker`, which calls
+ * Nothing else needed it. The seek and the stage load both seat the block
+ * through `Player.syncCameraToWalker`, which calls
  * {@link syncCamera} directly and never went through this system; and the draw
  * still runs every rendered frame, because placing the three.js camera from a
  * block that has not changed is idempotent and a resize needs it.
@@ -560,7 +559,6 @@ export class CameraSeatSystem implements System<RenderContext> {
   constructor(private readonly rig: CameraRig) {}
 
   update(ctx: RenderContext, t: Tick): void {
-    if (!this.rig.driving) return;
     if (t.frozen || t.dt <= 0) return;
     seatCamera(this.rig, ctx);
   }

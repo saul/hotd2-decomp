@@ -15,7 +15,6 @@
  * whether `structuredClone` would round-trip it — the same test a snapshot
  * slice has to pass, for the same reason.
  */
-import type { ScopeRow } from "./panels/scope_types";
 import type { ToggleName } from "./commands";
 
 /** One row of a key/value readout: label, value, and whether it is hot. */
@@ -72,9 +71,9 @@ export interface BranchProjection {
 /**
  * The skip offer, shown under the game's own condition.
  *
- * The bar follows the **region**, not the offer: `canSkip` adds the firing
+ * The prompt follows the **region**, not the offer: `canSkip` adds the firing
  * gate, and gating visibility on that made the whole feature invisible
- * whenever the gate happened to be up. So the bar shows for the region and
+ * whenever the gate happened to be up. So the prompt shows for the region and
  * the button carries the gate. Null when no region is open.
  */
 export interface SkipProjection {
@@ -134,18 +133,6 @@ export interface TreeProjection {
   blocks: TreeBlock[];
 }
 
-/**
- * The route table, as a graph.
- *
- * All the minimap needs: which blocks exist, how each leaves, and where it
- * goes. Handing it the whole `ScriptJson` was the last thing in `hud/`
- * reading the exporter's shape.
- */
-export interface MinimapGraph {
-  entry: number;
-  nodes: { index: number; kind: string; next: number[] }[];
-}
-
 /** One line of the event feed. */
 export interface FeedRow {
   /**
@@ -176,81 +163,6 @@ export interface FeedRow {
   cat: string;
   status: string;
   title: string;
-}
-
-/**
- * One object rig, as the rigs panel lists it.
- *
- * A rig is a thing that rides an `op_` path — a vehicle, a shutter, a prop
- * assembled from a transcribed draw routine. `boxed` is this panel's own
- * selection, drawn as an outline in the scene by `render/rigs.ts`.
- */
-export interface RigRow {
-  name: string;
-  /** The `op_` slot the current route rides, or null when no route is live. */
-  slot: number | null;
-  visible: boolean;
-  /** The path ran out and the pose is held. */
-  frozen: boolean;
-  note: string;
-  /** How many routes this rig has. Exactly one is ever drawn. */
-  routes: number;
-  boxed: boolean;
-}
-
-/** The rigs panel. Null while it is folded. */
-export interface RigsProjection {
-  /** `12/335 showing`. */
-  sub: string;
-  rows: RigRow[];
-}
-
-/** One weapon in flight, as the globals panel lists it. */
-export interface ThrownRow {
-  id: number;
-  slot: number;
-  ttl: string;
-  state: string;
-}
-
-/** One actor, as the sidebar and the boxes both read it. */
-export interface ActorRow {
-  at: number;
-  cls: number;
-  /** The class's name, resolved by `app/` — `ui/` has no registry. */
-  className: string;
-  state: number;
-  stateName: string;
-  hp: number;
-  dead: boolean;
-  visible: boolean;
-  despawned: boolean;
-  /** Distance from the camera, already computed. */
-  range: number;
-  /** True while this actor is what the script is waiting on. */
-  blocking: boolean;
-  /** False when the class has no module, so nothing drives it. */
-  ported: boolean;
-  /** `obj+0x120`, the sub-state. */
-  sub: number;
-  /** "dead · permit 0 · no module" — already assembled. */
-  flags: string;
-}
-
-/** One row of the port's data segment. */
-export interface GlobalRow {
-  name: string;
-  value: string;
-  /** `0x009A2BA0`, or empty when `globals.ts` cites none. */
-  address: string;
-}
-
-/** The data segment as the panel draws it. Absent while the panel is shut. */
-export interface GlobalsProjection {
-  rows: GlobalRow[];
-  actors: ActorRow[];
-  liveActors: number;
-  thrown: ThrownRow[];
 }
 
 /** One line of a debug panel. `note` is the indented, dimmer kind. */
@@ -288,24 +200,28 @@ export interface ActorsProjection {
   groups: ActorGroup[];
 }
 
+/**
+ * The debug sidebar's transport: whether the clock runs, and which mode.
+ *
+ * What is left of the old bottom bar. The speed control, the instruction
+ * steppers, the frame scrubber and the rewind button went with it; what
+ * stayed is the part a viewer uses — play, pause, free roam — and the one
+ * readout the harnesses count game frames by.
+ */
 export interface TransportProjection {
   playing: boolean;
-  mode: "play" | "step" | "free";
-  speed: number;
-  frozen: boolean;
-  /** False when the shot has no path — free roam, or a stage with no cam. */
-  hasPath: boolean;
-  camFrame: number;
-  camFrameLo: number;
-  camFrameHi: number;
+  mode: "play" | "free";
+  /**
+   * `cp_st1[0] slot 32  frame 79 / 230` — the camera path and its frame.
+   *
+   * The one number on the page that moves once per *game* frame, which is
+   * what `tools/pacing.mjs` needs to tell a tick from a frame that was merely
+   * drawn.
+   */
   camLabel: string;
-  /** Is there a snapshot behind the present to go back to? */
-  canRewind: boolean;
-  /** What the rewind button says it will do, and how much history is held. */
-  rewindLabel: string;
 }
 
-/** The audio strip: what it is doing, and what the button should say. */
+/** The sound button, and the volume slider in the sidebar. */
 export interface SoundProjection {
   muted: boolean;
   /** 0..100, as the slider reads it. */
@@ -329,7 +245,7 @@ export interface LoadingProjection {
 }
 
 /**
- * The stage's line in the top bar.
+ * The stage's line, in the debug sidebar's header.
  *
  * The bundle note is separate because it carries its own tooltip -- the build
  * stamp and the tool that made it. A re-export changes the data under a page
@@ -348,7 +264,7 @@ export interface UiProjection {
   /**
    * Some stage the page can open was built by an older exporter.
    *
-   * A boolean because that is all the top bar can usefully say in the space it
+   * A boolean because that is all the menu can usefully say in the space it
    * has; which stages, and what moved, is the bundle screen's job. It is not a
    * refusal — the bundle reads, it is merely out of date — and the whole
    * reason it is on screen at all is that the previous silent version of this
@@ -363,7 +279,7 @@ export interface UiProjection {
    * last route record names the block it hands over, and stage 2 has two
    * endings that name different ones. So **stage 3 opens at block 0 or block
    * 7, and stage 4 at block 0 or block 4**; every other stage has one entry
-   * and the picker has nothing to offer.
+   * and the menu has nothing to offer.
    *
    * Empty before there is a stage. See `ScriptJson.entries`.
    */
@@ -373,7 +289,7 @@ export interface UiProjection {
   original: boolean;
   /** Null once the stage is up. */
   loading: LoadingProjection | null;
-  /** The stage's line in the top bar. */
+  /** The stage's line in the debug sidebar. */
   status: StatusProjection;
   /**
    * The clock is stopped and the viewer is meant to notice.
@@ -383,6 +299,16 @@ export interface UiProjection {
    * through with `PAUSED` would be worse than saying nothing.
    */
   paused: boolean;
+  /**
+   * The game has been started by a press in this page, so `paused` means
+   * PAUSED rather than the title card.
+   *
+   * A fact about the *page*, not the game: the press is the gesture a browser
+   * wants before it will play sound, go fullscreen or hand over the motion
+   * sensors, and it is taken once. A stage chosen from the menu after it plays
+   * straight away.
+   */
+  started: boolean;
   /**
    * The script is letting the player shoot.
    *
@@ -402,19 +328,12 @@ export interface UiProjection {
   /** Texture filtering, and the anisotropy the hardware actually allows. */
   filterMode: string;
   anisotropyLimit: number;
-  pillarbox: boolean;
   wait: WaitProjection | null;
   /** The wait panel's `box` checkbox. See the `boxWait` command. */
   waitBoxed: boolean;
   actorPanel: ActorsProjection | null;
-  /** Null while the panel is folded — it is the expensive one to build. */
-  globals: GlobalsProjection | null;
-  /** The object rigs. Null while the panel is folded. */
-  rigs: RigsProjection | null;
   /** Rebuilt on a stage load only, and held by reference until then. */
   tree: TreeProjection | null;
-  /** Also per stage; the minimap paints it to a canvas itself. */
-  minimap: MinimapGraph | null;
   /** Where the script is now, for the tree's highlight. */
   current: { block: number; step: number; op: number } | null;
   /**
@@ -424,8 +343,6 @@ export interface UiProjection {
    * between pushes and `stabilise` never walks its four hundred rows.
    */
   feed: readonly FeedRow[];
-  /** The inspector's body, already serialised. */
-  inspector: string;
   /** The Player strip: label, value, and whether it is worth the eye. */
   hudRows: readonly StripRow[];
   /**
@@ -439,8 +356,4 @@ export interface UiProjection {
   skip: SkipProjection | null;
   branch: BranchProjection | null;
   gameOver: GameOverProjection | null;
-  scopes: ScopeRow | null;
-  scopeContext: { frame: number; stageLoadedAt: number };
-  /** Whether a snapshot is held, so Load can be enabled. */
-  hasSaved: boolean;
 }

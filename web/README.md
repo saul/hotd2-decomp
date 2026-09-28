@@ -26,7 +26,7 @@ npm run export -- --game-dir "/path/to/THE HOUSE OF THE DEAD 2" --all
 npm run dev          # http://localhost:5173
 ```
 
-**Or build one from inside the page.** Press **Bundle...** in the top bar --
+**Or build one from inside the page.** Choose **Rebuild bundle…** in the menu --
 or open the client with no bundle at all, which goes straight there. Choose the
 install folder, pick a stage and a mode, and the export runs in a worker into
 the Origin Private File System. It survives a reload and downloads as a zip
@@ -36,7 +36,7 @@ run, and `docs/TS_PORT.md` says what "the same bundle" means down to the byte.
 **One stage at a time, and the rest on demand.** Every stage in both modes is
 431 MB and the better part of an hour, which is a strange thing to ask for
 before you have seen anything. So the screen builds the one stage you chose,
-and picking a stage in the top bar that neither bundle holds decodes it then,
+and picking a stage from the menu that neither bundle holds decodes it then,
 keeps it, and plays it -- about a minute, once. The stage picker therefore
 offers all six as soon as the page knows an install, whether or not they exist
 yet.
@@ -108,24 +108,44 @@ lands at 379 KB as JSON, which gzips hard.
 
 ---
 
-## The three modes
+## Playing it
+
+The page is the game: the 4:3 frame fills the window, and a stage opens under
+a **Start** button — the press a browser wants before it will play sound, go
+fullscreen or hand over a phone's motion sensors. Everything else is in two
+places:
+
+* **The menu** — `≡ HOTD2 › Stage N` in the top-left corner: pick a stage, the
+  block it opens at (stages 3 and 4 have two), Original Mode, restart, rebuild
+  the bundle, and the debug sidebar.
+* **The debug sidebar** — `` ` `` or the menu: Play or free roam, pause, skip
+  and kill; then the inspection panels (light, fog and texture filtering are
+  in Scene), the script (click an instruction to seek to it, which pauses
+  there) and the event feed.
 
 | Mode | Key | What it is |
 |---|---|---|
-| **Step** | `1` | block → step → instruction. Every op is seekable; a camera move gets a frame slider |
-| **Play** | `2` | 60 Hz with a speed control, pausing at every branch point |
-| **Free roam** | `3` | orbit and fly, detached from the rail |
+| **Play** | `1` | the game, at 60 Hz, pausing at every branch point |
+| **Free roam** | `2` | orbit and fly, detached from the rail |
 
-Space plays/pauses, `→` and `←` step one instruction, `1`/`2`/`3` switch mode,
-`Enter` skips a cutscene.
+Space plays and pauses, `Enter` skips a cutscene, `R` or the right button
+reloads, `S` is the pad's Start, `←` rewinds half a second, `` ` `` toggles
+the sidebar.
 
-A **Skip** bar rises from the bottom of the rendered view — the same anchoring
-as the branch bar — whenever the script is inside a `set_skippable_region` and
-the shutter's firing gate is down. That pair is exactly the condition both
-player-update routines test before looking at Start, so the bar marks the
-moments the game itself would have taken a skip. It differs from the branch bar
-in kind and says so in its colour: a branch is a decision playback is blocked
-on and counts down, a skip is an offer that changes nothing if you ignore it.
+**On a phone**, hold it sideways (the page asks you to). A tap is a shot; a
+tap in the black bars beside the 4:3 frame is a shot *off the screen*, which
+is how the arcade gun reloads; and so is a sharp flick of the phone — top edge
+towards you or away. The flick needs the motion sensors, which a browser only
+exposes over HTTPS (or `localhost`), and iOS asks permission for them when you
+press Start.
+
+A **Skip** prompt appears in the corner of the frame whenever the script is
+inside a `set_skippable_region`, and it can be pressed when the shutter's
+firing gate is down. That pair is exactly the condition both player-update
+routines test before looking at Start, so the prompt marks the moments the
+game itself would have taken a skip. It differs from the branch bar in kind
+and says so in its colour: a branch is a decision playback is blocked on and
+counts down, a skip is an offer that changes nothing if you ignore it.
 
 Taking it does what the game does: ends the current camera move where it
 stands, drops every `queue_event`, releases `wait_queued_events_done`,
@@ -169,8 +189,8 @@ so is the event feed.
 
 - **The projection.** 41.100° vertical (`0x1D3B` BAMS), 4:3, near 0.8, far
   8000, from `SetupSceneProjection`. It is a compile-time constant for the
-  whole game — there is no zoom and no per-camera FOV — so the only choice
-  offered is whether to pillarbox to 4:3 or fill the window.
+  whole game — there is no zoom and no per-camera FOV — so the frame is always
+  pillarboxed to 4:3. Filling a wider window would widen every shot.
 - **Hermite evaluation.** A transcription of `FUN_004040F0`, including its end
   behaviour: the game's binary search cannot leave the key array, so a time
   outside a curve extrapolates along the end segment rather than clamping.
@@ -354,7 +374,7 @@ web/
 `npm run check` typechecks without building.
 
 `npm run bundle-flow -- --game-dir "..."` drives the whole bundle flow in
-Chrome: the screen, an export, a stage built on demand from the top bar, and
+Chrome: the screen, an export, a stage built on demand from the menu, and
 the second visit coming out of the cache. It is minutes rather than seconds, so
 it is not in `verify_all`; run it when you touch `src/app/install/`,
 `src/app/bundles.ts` or the loader. Nothing else can see any of it -- a green

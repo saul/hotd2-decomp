@@ -1475,8 +1475,8 @@ export class Walker {
   }
 
   /**
-   * `[port-only]` -- put the shot's cursor at `frame`, for a seek, the
-   * scrubber or a restored URL. A stashed play's cursor is the rail's, which
+   * `[port-only]` -- put the shot's cursor at `frame`, for a seek or a
+   * restored URL. A stashed play's cursor is the rail's, which
    * `G` owns, so that is written too; writing only the shot would have the
    * next rail tick put the old frame back.
    */

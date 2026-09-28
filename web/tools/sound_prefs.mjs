@@ -4,7 +4,8 @@
  * Three things were reported together and they are checked together here,
  * because they are one change: whether sound is on had to become stored state,
  * the volume slider had to move to the sidebar, and the speaker had to move to
- * the top bar.
+ * the top bar. The top bar has gone since; the speaker is over the game, in
+ * its corner, and the volume is in the debug sidebar's Sound panel.
  *
  * The reload is the point. `localStorage` is per browser and per origin, so a
  * check that only clicked the button and read it back would pass with nothing
@@ -38,11 +39,10 @@ const places = () => page.evaluate(() => {
   const inside = (el, id) => !!el?.closest(`#${id}`);
   return {
     mute: !!mute,
-    muteInTopbar: inside(mute, "topbar"),
-    muteInTransport: inside(mute, "transport"),
+    muteOverGame: inside(mute, "overlay"),
+    muteInSidebar: inside(mute, "debug"),
     volume: !!vol,
     volumeInSidebar: inside(vol, "panel-sound"),
-    volumeInTransport: inside(vol, "transport"),
     value: vol ? Number(vol.value) : null,
     pressed: mute?.getAttribute("aria-pressed") ?? null,
   };
@@ -55,12 +55,12 @@ try {
 
   console.log("where the two controls live:");
   const at = await places();
-  check("the speaker is in the top bar", at.mute && at.muteInTopbar,
+  check("the speaker is over the game", at.mute && at.muteOverGame,
         JSON.stringify(at));
-  check("...and not in the transport bar any more", !at.muteInTransport);
+  check("...and not in the debug sidebar, which is closed while playing",
+        !at.muteInSidebar);
   check("the volume slider is in the sidebar's Sound panel",
         at.volume && at.volumeInSidebar, JSON.stringify(at));
-  check("...and not in the transport bar any more", !at.volumeInTransport);
 
   console.log("\nand they survive a reload:");
   // Sound starts muted, so one press is "on". Then move the slider.

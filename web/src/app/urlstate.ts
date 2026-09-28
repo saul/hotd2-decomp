@@ -14,7 +14,7 @@
 export interface PlayerState {
   stage: number;
   original: boolean;
-  mode: "step" | "play" | "free";
+  mode: "play" | "free";
   block?: number;
   step?: number;
   op?: number;
@@ -47,7 +47,7 @@ export interface PlayerState {
   drive?: boolean;
 }
 
-const DEFAULTS: PlayerState = { stage: 2, original: false, mode: "step" };
+const DEFAULTS: PlayerState = { stage: 2, original: false, mode: "play" };
 
 function num(v: string | null): number | undefined {
   if (v === null || v === "") return undefined;
@@ -80,9 +80,9 @@ export function readState(search = window.location.search): PlayerState {
   return {
     stage: num(q.get("stage")) ?? DEFAULTS.stage,
     original: bool(q.get("original")) ?? false,
-    mode: mode === "play" || mode === "free" || mode === "step"
-      ? mode
-      : DEFAULTS.mode,
+    // `mode=step` is an old link from when there was a Step mode; it opens
+    // paused at its address, which is what Step looked like, and plays.
+    mode: mode === "free" ? "free" : DEFAULTS.mode,
     entry: addr(q.get("entry")),
     block: addr(q.get("block")),
     step: addr(q.get("step")),

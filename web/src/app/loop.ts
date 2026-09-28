@@ -79,11 +79,10 @@
  * * **paused, or in free roam** — there is no game time to owe, and `Pacer`
  *   stops asking for frames at all rather than running an empty loop.
  *
- * ## `speed`
- *
- * Scales what goes *into* the accumulator, never the size of a tick. Half
- * speed is half as many ticks a second, each of them still exactly 1/60 s of
- * game time. There is no such thing as a short tick.
+ * There was a `speed` here, which scaled what went into the accumulator and
+ * never the size of a tick. It went with the transport bar's speed control;
+ * a harness that wants a different rate drives the clock (`?drive=1`) and
+ * asks for more or fewer frames.
  */
 import type { Tick } from "../core/system";
 
@@ -100,7 +99,6 @@ export const TICK = 1 / 60;
 const MAX_TICKS_PER_FRAME = 240;
 
 export class Loop {
-  speed = 1;
   freeze = false;
   /** False whenever game time is not advancing — paused, free roam, no stage. */
   running = false;
@@ -159,7 +157,7 @@ export class Loop {
     if (this.freeze || !this.running) {
       return { dt: 0, frames: 0, wall, frozen: true };
     }
-    this.accum += wall * this.speed;
+    this.accum += wall;
     let frames = 0;
     while (this.accum >= TICK && frames < MAX_TICKS_PER_FRAME) {
       this.accum -= TICK;

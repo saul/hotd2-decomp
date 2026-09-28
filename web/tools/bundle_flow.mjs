@@ -115,17 +115,52 @@ async function waitForThumb(budgetMs) {
   }
 }
 
+/**
+ * The breadcrumb menu, open. It is rendered only while it is open -- the
+ * stage picker and the bundle button are inside it -- so each use opens it,
+ * and a press on an item shuts it again.
+ */
+async function openMenu() {
+  if (!(await page.locator("#menu").count())) {
+    await page.locator(".crumb-trail").click();
+  }
+  await page.waitForSelector("#menu");
+}
+async function closeMenu() {
+  if (await page.locator("#menu").count()) await page.keyboard.press("Escape");
+  await page.waitForSelector("#menu", { state: "detached" });
+}
+/** The stages the menu offers, as its buttons say them. */
+async function stagesOffered() {
+  await openMenu();
+  const t = await page.locator("#stage-picker [data-stage]").allInnerTexts();
+  await closeMenu();
+  return t.map((x) => x.trim());
+}
+/** Pick a stage from the menu; the press shuts it. */
+async function pickStage(n) {
+  await openMenu();
+  await page.locator(`#stage-picker [data-stage="${n}"]`).click();
+}
+/** Open the bundle screen from the menu. */
+async function openBundles() {
+  await openMenu();
+  await page.locator(".bundle-open").click();
+}
+
 try {
   console.log("\nThe page opens on the bundle it was served:\n");
   await waitForLoad(page);
-  let opts = await page.locator("#stage-select option").allInnerTexts();
+  let opts = await stagesOffered();
   check("only the served stages are offered before an install is known",
         opts.join(",") === "1,2", opts.join(","));
-  check("and the way to the bundle screen is in the bar",
+  await openMenu();
+  check("and the way to the bundle screen is in the menu",
         await page.locator(".bundle-open").count() === 1);
+  await closeMenu();
 
   console.log("\nThe bundle screen:\n");
-  await page.locator(".bundle-open").click();
+  await openBundles();
   await page.waitForSelector(".export-card");
   check("one tile per stage", await page.locator(".export-tile").count() === 6);
   const notes = await page.locator(".export-tile-note").allInnerTexts();
@@ -250,7 +285,7 @@ try {
   check("and the player is on it", status.includes("stage3"), status);
 
   console.log("\nRebuilding the stage that is on screen:\n");
-  await page.locator(".bundle-open").click();
+  await openBundles();
   await page.waitForSelector(".export-card");
   const onTile = await page.locator(".export-tile.on .export-tile-name")
     .innerText();
@@ -282,21 +317,23 @@ try {
   console.log(`    stage 3 thumbnail ${ink.w}x${ink.h}, `
     + `${(100 * ink.lit).toFixed(0)}% not black, ${ink.colours} colours`);
 
-  await page.locator(".bundle-open").click();
+  await openBundles();
   await page.waitForSelector(".export-card");
   await page.keyboard.press("Escape");
   await page.waitForSelector(".export-card", { state: "detached" });
   check("escape closes the screen", true);
 
-  console.log("\nA stage in neither bundle, asked for from the top bar:\n");
+  console.log("\nA stage in neither bundle, asked for from the menu:\n");
+  await openMenu();
   await page.waitForFunction(
-    () => document.querySelectorAll("#stage-select option").length === 6,
+    () => document.querySelectorAll("#stage-picker [data-stage]").length === 6,
     null, { timeout: 10_000 }).catch(() => {});
-  opts = await page.locator("#stage-select option").allInnerTexts();
+  await closeMenu();
+  opts = await stagesOffered();
   check("with an install, every stage is offered",
         opts.join(",") === "1,2,3,4,5,6", opts.join(","));
 
-  await page.locator("#stage-select").selectOption("4");
+  await pickStage(4);
   await page.waitForSelector("#loading", { state: "attached", timeout: 10_000 });
   await waitForStage("stage 4", 900_000);
   check("stage 4 built itself and loaded", true);
@@ -304,10 +341,10 @@ try {
   check("and it is what the status line says", status.includes("stage4"), status);
 
   console.log("\nAnd again, which must come out of the cache:\n");
-  await page.locator("#stage-select").selectOption("1");
+  await pickStage(1);
   await waitForStage("stage 1", 120_000);
   const ms = await (async () => {
-    await page.locator("#stage-select").selectOption("4");
+    await pickStage(4);
     await page.waitForSelector("#loading", { state: "attached", timeout: 10_000 });
     return waitForStage("stage 4 again", 120_000);
   })();
@@ -334,19 +371,24 @@ try {
   await waitForLoad(page);
   await page.waitForTimeout(1000);
   const btn = page.locator(".bundle-open");
-  const warns = async () =>
-    ((await btn.getAttribute("class")) ?? "").split(/\s+/).includes("stale");
+  const warns = async () => {
+    await openMenu();
+    const cls = (await btn.getAttribute("class")) ?? "";
+    await closeMenu();
+    return cls.split(/\s+/).includes("stale");
+  };
   // The reload lands on stage 4, which this browser built and which the route
   // above did not touch -- the served entries are the doctored ones. So the
   // button must be quiet here and loud on stage 1.
   let status2 = await page.locator("#status").innerText();
   check("a current stage does not warn, even with stale ones beside it",
         !await warns(), status2);
-  await page.locator("#stage-select").selectOption("1");
+  await pickStage(1);
   await waitForStage("stage 1", 120_000);
   status2 = await page.locator("#status").innerText();
   check("the Bundle button warns on the stage that is out of date",
         await warns(), status2);
+  await openMenu();
   const tip = await btn.getAttribute("title");
   check("...and says what to do about it in one line",
         (tip ?? "").startsWith("Bundle needs rebuilding"), tip ?? "");

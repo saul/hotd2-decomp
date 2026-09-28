@@ -11,6 +11,13 @@
   --warn: #ff8c1a;
   --spawn: #ff4d6a;
   --ok: #4dff8f;
+  /* The game's own colour, for what sits over the game: the start button, the
+     game-over tag. The debug sidebar keeps the cyan it always had, so which of
+     the two you are looking at is never in doubt. */
+  --blood: #d0142c;
+  --glass: rgba(8, 10, 14, 0.62);
+  --glass-line: rgba(255, 255, 255, 0.12);
+  --debug-w: 360px;
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 }
 
@@ -19,42 +26,19 @@
 html, body {
   margin: 0;
   height: 100%;
-  background: var(--bg);
+  background: #000;
   color: var(--text);
   font: 13px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
   overflow: hidden;
+  /* A phone must not scroll, bounce or pull-to-refresh the page out from under
+     the game; every touch on it is a trigger pull. */
+  overscroll-behavior: none;
 }
 
-#app {
-  display: grid;
-  grid-template-rows: auto 1fr auto;
-  height: 100%;
-}
+#app { height: 100%; height: 100dvh; }
 
-/* ---- top bar ---- */
-
-#topbar {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 8px 12px;
-  background: var(--panel);
-  border-bottom: 1px solid var(--line);
-  flex-wrap: wrap;
-}
-
-.brand { font-weight: 650; letter-spacing: 0.2px; }
 .dim { color: var(--dim); }
-.grow { flex: 1; }
-.sep { width: 1px; height: 20px; background: var(--line); }
-
-#topbar label {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  color: var(--dim);
-  white-space: nowrap;
-}
+.mono { font-family: var(--mono); }
 
 select, input[type="search"] {
   background: var(--panel-2);
@@ -65,131 +49,562 @@ select, input[type="search"] {
   font: inherit;
 }
 
-.modes { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
-.mode {
-  background: var(--panel-2);
-  color: var(--dim);
-  border: 0;
-  padding: 5px 12px;
-  font: inherit;
-  cursor: pointer;
+kbd {
+  font-family: var(--mono); font-size: 11px; color: var(--dim);
+  border: 1px solid var(--line); border-radius: 3px; padding: 0 5px;
 }
-.mode + .mode { border-left: 1px solid var(--line); }
-.mode.active { background: var(--accent); color: #04222b; font-weight: 650; }
 
-/* The way back to the export screen, and the only control in the bar that is
-   drawn whether or not a bundle loaded -- it is what you press when one did
-   not. Quiet, because it is not part of playing a stage. */
-.bundle-open {
-  background: var(--panel-2); color: var(--dim); border: 1px solid var(--line);
-  border-radius: 5px; padding: 4px 10px; font: inherit; cursor: pointer;
+/* A mouse gets the key hints, a finger gets the touch hints. The media query
+   is the browser's own answer to which it is, so there is nothing to keep in
+   step with a flag. */
+@media (pointer: coarse) { .only-fine { display: none !important; } }
+@media not (pointer: coarse) { .only-coarse { display: none !important; } }
+
+/* ---- the page: the game, and the debug sidebar beside it ---- */
+
+/* One column until the sidebar opens, then two: on a wide screen the game
+   shrinks rather than being covered, because the point of opening it is to
+   watch the two together. Narrow screens get a drawer instead, below. */
+#shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  height: 100%;
 }
-.bundle-open:hover { color: var(--text); border-color: var(--accent); }
-
-/* Quiet is wrong when the bundle on screen is out of date: the whole failure
-   this replaces was a stale cached stage that looked exactly like a good one.
-   Amber rather than red -- it is playable, just not current. */
-.bundle-open.stale {
-  color: var(--warn); border-color: var(--warn);
-  background: #2a1a06;
-}
-.bundle-open.stale:hover { color: var(--text); border-color: var(--warn); }
-
-/* ---- layout ---- */
+#shell.debug-open { grid-template-columns: minmax(0, 1fr) var(--debug-w); }
 
 #stagearea {
-  display: grid;
-  /* Source order is left / splitter / viewport / right, so the columns land
-     where they are named -- grid auto-placement follows the DOM. */
-  grid-template-columns: var(--left-w, 190px) 5px 1fr 330px;
-  min-height: 0;
-}
-
-#left, #right {
-  background: var(--panel);
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-#left { border-right: 1px solid var(--line); }
-/* The column **scrolls**; the panels in it do not shrink.
-   As a plain flex column with `overflow: hidden`, every panel was a shrinkable
-   item, so opening two or three groups squeezed the ones below them to zero
-   height -- summary included -- and the clip hid what was left. There was no
-   way back from it either: the header you needed in order to fold something
-   was the header that had been squashed away. Each open body caps itself
-   below, so what scrolls here is a list of headers of known height. */
-#right {
-  border-left: 1px solid var(--line);
-  gap: 1px;
-  overflow-y: auto;
-  overflow-x: hidden;
-}
-/* A panel is exactly as tall as it needs to be. Never a flex item that can
-   lose its own header to make room for a sibling. */
-#right > .panel { flex: none; }
-
-/* ---- splitter ---- */
-
-.resizer {
-  background: var(--line);
-  cursor: col-resize;
   position: relative;
-  touch-action: none;
-}
-.resizer::after {
-  /* A 5px column is a small mouse target, so the grab area overhangs it. */
-  content: "";
-  position: absolute;
-  inset: 0 -4px;
-}
-.resizer:hover, .resizer:focus-visible, .resizer.dragging {
-  background: var(--accent);
-  outline: none;
-}
-body.resizing { cursor: col-resize; user-select: none; }
-
-/* The canvas is given an explicit pixel size by the renderer, so if it were a
-   flow child it could grow this grid row and push the transport bar off the
-   bottom of the window -- and because resize() measures the viewport, that
-   feeds back and keeps growing. Taking it out of layout entirely makes the
-   cell's size purely a function of the grid. */
-#viewport {
-  position: relative;
-  overflow: hidden;
   min-width: 0;
   min-height: 0;
-  background: #05070a;
+  overflow: hidden;
+  background: #000;
+}
+
+/* The canvas is given an explicit pixel size by the renderer and centred with
+   margins, so it is taken out of layout: if it were a flow child it could
+   grow the cell it sits in, and because resize() measures the viewport, that
+   feeds back and keeps growing. */
+#viewport {
+  position: absolute; inset: 0;
+  /* Its own stacking context, so the z-indexes inside it -- the loading
+     screen, the hud layer, the crosshair -- order themselves among each other
+     and all of them stay under `#overlay`. Without it the loading screen's
+     z-index outranked the overlay's, and the menu -- the way to the bundle
+     screen while nothing has loaded -- was painted over. */
+  z-index: 0;
+  overflow: hidden;
+  background: #000;
+  /* Every touch is a shot: no scroll, no pinch, no double-tap zoom, no
+     long-press callout, no text selection, no tap flash. */
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
 }
 #view { position: absolute; top: 0; left: 0; display: block; }
 /* Paused drains the colour out of the rendered frame -- and only out of the
-   frame: the canvas carries the filter rather than `#viewport`, so the debug
-   overlays, the crosshair and the message below keep theirs. */
-#viewport.paused #view { filter: grayscale(1) brightness(0.75); }
+   frame: the canvas carries the filter rather than `#viewport`. */
+#viewport.paused #view { filter: grayscale(1) brightness(0.6); }
+
+/* Everything that can be pressed, over the game. Empty space passes the press
+   straight through to `#viewport`, which is the gun; only the controls take
+   one. `container-type: size` so the bars can find the 4:3 frame inside it
+   the way `.hud-screen` does. */
+#overlay {
+  position: absolute; inset: 0;
+  pointer-events: none;
+  container-type: size;
+  z-index: 2;
+}
+#overlay > * { pointer-events: auto; }
+
+/* ---- the breadcrumb menu ---- */
+
+#crumbs {
+  position: absolute; z-index: 6;
+  top: max(10px, env(safe-area-inset-top));
+  left: max(10px, env(safe-area-inset-left));
+}
+.crumb-trail {
+  display: inline-flex; align-items: center; gap: 7px;
+  min-height: 34px; padding: 5px 12px 5px 10px;
+  background: var(--glass); color: #eef2f6;
+  border: 1px solid var(--glass-line); border-radius: 999px;
+  -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+  font: 600 12px/1 system-ui, -apple-system, "Segoe UI", sans-serif;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  /* Quiet while the game is being played: it is always there, and it is not
+     what you are looking at. */
+  opacity: 0.72;
+  transition: opacity 120ms ease-out, border-color 120ms ease-out;
+}
+.crumb-trail:hover, .crumb-trail:focus-visible, #crumbs.open .crumb-trail {
+  opacity: 1; border-color: rgba(255, 255, 255, 0.28); outline: none;
+}
+@media (pointer: coarse) { .crumb-trail { opacity: 0.85; min-height: 40px; } }
+.crumb-trail .burger { flex: none; }
+.crumb-trail .brand { letter-spacing: 0.12em; }
+.crumb-trail .sep { color: rgba(255, 255, 255, 0.35); }
+.crumb-warn {
+  display: inline-grid; place-items: center;
+  width: 16px; height: 16px; border-radius: 50%;
+  background: var(--warn); color: #241300; font-size: 11px; font-weight: 800;
+}
+
+#menu {
+  position: absolute; top: calc(100% + 8px); left: 0;
+  width: 272px; max-width: calc(100vw - 20px);
+  max-height: calc(100dvh - 70px); overflow: auto;
+  padding: 6px;
+  background: rgba(14, 18, 23, 0.94);
+  border: 1px solid var(--glass-line); border-radius: 12px;
+  -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
+  animation: menu-in 120ms ease-out;
+}
+@keyframes menu-in { from { opacity: 0; transform: translateY(-4px); } }
+@media (prefers-reduced-motion: reduce) { #menu { animation: none; } }
+#menu section { padding: 6px; }
+#menu section + section { border-top: 1px solid var(--line); }
+#menu h6 {
+  margin: 0 0 6px; font-size: 10px; font-weight: 700; color: var(--dim);
+  letter-spacing: 0.12em; text-transform: uppercase;
+}
+#menu button {
+  font: inherit; color: var(--text); cursor: pointer;
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 7px;
+}
+#menu button:hover { border-color: var(--accent); }
+#menu button.current, #menu button[aria-pressed="true"].current {
+  background: var(--accent); border-color: var(--accent); color: #04222b;
+  font-weight: 700;
+}
+.stage-grid {
+  display: grid; grid-template-columns: repeat(6, 1fr); gap: 5px;
+}
+.stage-grid button {
+  min-height: 36px; font-size: 15px !important; font-weight: 650 !important;
+}
+.entry-row {
+  display: flex; align-items: center; gap: 6px; margin-top: 8px;
+  font-size: 12px; flex-wrap: wrap;
+}
+.entry-row button { padding: 4px 9px; }
+.menu-check {
+  display: flex; align-items: center; gap: 6px; margin-top: 8px;
+  color: var(--dim); cursor: pointer; font-size: 12px;
+}
+.menu-check input { margin: 0; }
+.menu-actions { display: flex; flex-direction: column; gap: 4px; }
+.menu-actions button {
+  display: flex; align-items: center; gap: 9px; width: 100%;
+  min-height: 34px; padding: 6px 10px; text-align: left;
+  background: transparent !important; border-color: transparent !important;
+}
+.menu-actions button:hover { background: var(--panel-2) !important; }
+.menu-actions .mi {
+  width: 16px; text-align: center; color: var(--dim); flex: none;
+}
+.menu-actions kbd { margin-left: auto; }
+.menu-actions .debug-toggle[aria-pressed="true"] .mi { color: var(--accent); }
+/* Quiet is wrong when the bundle on screen is out of date: the whole failure
+   this replaces was a stale cached stage that looked exactly like a good one.
+   Amber rather than red -- it is playable, just not current. */
+.bundle-open.stale { color: var(--warn) !important; }
+.bundle-open.stale .mi {
+  color: #241300; background: var(--warn); border-radius: 50%;
+  font-weight: 800; font-size: 11px; line-height: 16px; height: 16px;
+}
+
+/* ---- the sound button ---- */
+
+#sound {
+  position: absolute; z-index: 6;
+  top: max(10px, env(safe-area-inset-top));
+  right: max(10px, env(safe-area-inset-right));
+  display: grid; place-items: center;
+  width: 36px; height: 36px; padding: 0;
+  background: var(--glass); color: #eef2f6;
+  border: 1px solid var(--glass-line); border-radius: 50%;
+  -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+  cursor: pointer; opacity: 0.72;
+  transition: opacity 120ms ease-out;
+}
+#sound:hover, #sound:focus-visible { opacity: 1; outline: none; }
+#sound[aria-pressed="false"] { color: var(--dim); }
+/* The one audio state that needs a press to clear: say so. */
+#sound.blocked { color: var(--warn); border-color: var(--warn); opacity: 1; }
+@media (pointer: coarse) { #sound { width: 42px; height: 42px; opacity: 0.85; } }
+
+/* ---- the start and pause screen ---- */
+
 #paused-overlay {
-  position: absolute; inset: 0; z-index: 2; display: grid; place-items: center;
+  position: absolute; inset: 0; z-index: 1;
+  display: grid; place-items: center;
+  background: radial-gradient(ellipse at center,
+              rgba(0, 0, 0, 0.1) 0%, rgba(0, 0, 0, 0.55) 70%);
+  /* A mouse keeps its trigger: only the button resumes, and a click anywhere
+     else is a shot the paused clock refuses, as it always was. */
   pointer-events: none;
 }
-#paused-overlay[hidden] { display: none; }
-#paused-overlay span {
-  font: 600 34px/1 var(--mono); letter-spacing: 0.42em; text-indent: 0.42em;
-  color: #eef2f6; text-shadow: 0 2px 18px rgba(0, 0, 0, 0.85);
+/* A finger has nothing better to do with a paused game than resume it. */
+@media (pointer: coarse) { #paused-overlay { pointer-events: auto; } }
+.title-card {
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+  text-align: center; padding: 0 16px;
+  text-shadow: 0 2px 18px rgba(0, 0, 0, 0.9);
+}
+.title-card .kicker {
+  font-size: clamp(10px, 1.6cqw, 13px); font-weight: 700;
+  letter-spacing: 0.32em; text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.72);
+}
+.title-card .title {
+  font: 800 clamp(30px, 8cqw, 76px)/1 system-ui, -apple-system,
+        "Segoe UI", sans-serif;
+  letter-spacing: 0.18em; text-indent: 0.18em;
+  color: #fff;
+}
+.is-paused .title-card .title { font-size: clamp(26px, 6cqw, 56px); }
+.start-btn {
+  pointer-events: auto;
+  margin-top: 8px;
+  display: inline-flex; align-items: center; gap: 10px;
+  min-height: 48px; padding: 10px 28px;
+  background: var(--blood); color: #fff;
+  border: 0; border-radius: 999px;
+  font: 800 15px/1 system-ui, -apple-system, "Segoe UI", sans-serif;
+  letter-spacing: 0.22em; text-transform: uppercase;
+  box-shadow: 0 8px 28px rgba(208, 20, 44, 0.45);
+  cursor: pointer;
+  text-shadow: none;
+}
+.start-btn:hover { background: #e8243e; }
+.start-btn:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+.title-card .hint {
+  font-size: 12px; color: rgba(255, 255, 255, 0.6);
+  max-width: 44ch;
 }
 
-.panel { background: var(--panel); border-bottom: 1px solid var(--line); min-height: 0; }
-.grow-panel { display: flex; flex-direction: column; min-height: 0; }
+/* ---- turn your phone ---- */
 
-.panel-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
+#rotate-hint { display: none; }
+@media (orientation: portrait) and (pointer: coarse) {
+  #rotate-hint {
+    position: fixed; inset: 0; z-index: 50;
+    display: flex; flex-direction: column; align-items: center;
+    justify-content: center; gap: 14px;
+    background: #05070a; color: #eef2f6;
+    font-size: 15px; font-weight: 600; letter-spacing: 0.04em;
+    pointer-events: auto;
+  }
+}
+
+/* ---- the skip prompt and the branch bar ----
+   Both hang off the bottom of the 4:3 frame rather than the window, so on a
+   wide screen they sit on the picture and not out in the black bars. The
+   frame is the largest 4:3 box that fits, centred -- the same sum
+   `.hud-screen` does. */
+
+#skipbar {
+  position: absolute; z-index: 2;
+  right: calc((100cqw - min(100cqw, 133.3333cqh)) / 2 + 14px);
+  bottom: calc((100cqh - min(75cqw, 100cqh)) / 2 + 14px);
+  display: flex; align-items: center; gap: 8px;
+  animation: pop-in 160ms ease-out;
+}
+#skipbar.stacked { bottom: calc((100cqh - min(75cqw, 100cqh)) / 2 + 64px); }
+#skipbar button {
+  display: inline-flex; align-items: center; gap: 8px;
+  min-height: 38px; padding: 8px 18px;
+  background: var(--glass); color: #fff;
+  border: 1px solid rgba(255, 225, 77, 0.7); border-radius: 999px;
+  -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+  font: 700 13px/1 system-ui, -apple-system, "Segoe UI", sans-serif;
+  letter-spacing: 0.14em; text-transform: uppercase;
+  cursor: pointer;
+}
+#skipbar button:hover:not(:disabled) { background: rgba(255, 225, 77, 0.18); }
+/* A skip you cannot take has to look like one: the region is open but the
+   shutter's firing gate is up, and the game would not poll Start. */
+#skipbar button:disabled {
+  color: rgba(255, 255, 255, 0.4); border-color: rgba(255, 255, 255, 0.2);
+  cursor: default;
+}
+.skip-key { background: var(--glass); }
+@keyframes pop-in { from { opacity: 0; transform: translateY(6px); } }
+@media (prefers-reduced-motion: reduce) { #skipbar { animation: none; } }
+
+#branchbar {
+  position: absolute; z-index: 2;
+  left: calc((100cqw - min(100cqw, 133.3333cqh)) / 2);
+  right: calc((100cqw - min(100cqw, 133.3333cqh)) / 2);
+  bottom: calc((100cqh - min(75cqw, 100cqh)) / 2);
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 12px 14px;
+  background: linear-gradient(rgba(11, 14, 18, 0), rgba(11, 14, 18, 0.92) 38%);
+  border-top: 1px solid var(--warn);
+  animation: branch-in 160ms ease-out;
+}
+@keyframes branch-in { from { transform: translateY(100%); } }
+@media (prefers-reduced-motion: reduce) { #branchbar { animation: none; } }
+#branchbar .tag {
+  background: var(--warn); color: #241300; font-weight: 700;
+  border-radius: 4px; padding: 2px 8px; font-size: 11px;
+  letter-spacing: 0.3px; text-transform: uppercase; flex: none;
+}
+/* The subtitle is the only `.dim` in this bar -- the countdown beside it
+   carries `.countdown`, which sets its own colour -- so the selector stays
+   exact without an id. */
+#branchbar .dim { font-size: 12px; flex: 1; min-width: 0; }
+#branchbar .routes { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+#branchbar .routes button {
+  min-height: 34px;
+  background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
+  border-radius: 6px; padding: 4px 14px; font: inherit; cursor: pointer;
+}
+#branchbar .routes button:hover { border-color: var(--warn); color: var(--accent-2); }
+.countdown { font-family: var(--mono); color: var(--dim); font-size: 12px; flex: none; }
+.countdown.paused { color: var(--accent-2); }
+/* A route with an arcade preview shot is worth hovering; one without is not. */
+#branchbar .routes button.has-preview { border-color: #4a5763; }
+#branchbar .routes button.has-preview::after { content: " ◉"; color: var(--accent); }
+/* The route the game itself is taking. Last, so it wins over `has-preview`'s
+   border: which way the stage is about to go outranks whether there is a shot
+   of it. The other buttons are an override and read as one. */
+#branchbar .routes button.chosen {
+  border-color: var(--accent); color: var(--accent-2); font-weight: 600;
+}
+
+/* ---- the game-over screen ----
+   The sprites are the HUD layer's; this is only the two port-only buttons,
+   along the foot of the frame where an offer about what to do next goes. A
+   click on the rest of the view is the trigger, which cuts the screen short,
+   so only the panel takes the pointer. */
+#gameover {
+  position: absolute; inset: 0; z-index: 3;
+  pointer-events: none !important;
+}
+#gameover .go-panel {
+  position: absolute;
+  left: calc((100cqw - min(100cqw, 133.3333cqh)) / 2);
+  right: calc((100cqw - min(100cqw, 133.3333cqh)) / 2);
+  bottom: calc((100cqh - min(75cqw, 100cqh)) / 2);
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 12px 14px;
+  background: linear-gradient(rgba(11, 14, 18, 0), rgba(11, 14, 18, 0.92) 38%);
+  border-top: 1px solid var(--blood);
+  pointer-events: auto;
+}
+#gameover .tag {
+  background: var(--blood); color: #fff; font-weight: 700;
+  border-radius: 4px; padding: 2px 8px; font-size: 11px;
+  letter-spacing: 0.3px; text-transform: uppercase; flex: none;
+  margin-right: auto;
+}
+#gameover button {
+  min-height: 34px;
+  background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
+  border-radius: 6px; padding: 4px 14px; font: inherit; cursor: pointer;
+  flex: none;
+}
+#gameover button:hover { border-color: var(--blood); color: #ff8080; }
+
+/* ---- loading ---- */
+
+#loading {
+  position: absolute; inset: 0; z-index: 3; display: grid; place-items: center;
+  align-content: center;
+  background: #05070a; gap: 12px; text-align: center; padding: 16px;
+}
+#loading p { color: var(--dim); font-family: var(--mono); font-size: 12px; max-width: 60ch; white-space: pre-wrap; margin: 0; }
+.spinner {
+  width: 26px; height: 26px; border: 2px solid var(--line);
+  border-top-color: var(--blood); border-radius: 50%;
+  animation: spin 0.8s linear infinite; margin: 0 auto;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
+
+.err { color: var(--spawn); }
+
+/* ---- the crosshair ----
+   It follows the pointer while the firing gate is open. Drawn here rather than
+   as a cursor so it is visible in a screenshot. A finger needs none: it is
+   where the shot goes, and a ring left behind wherever it last touched would
+   be a crosshair pointing at nothing. */
+#viewport.shooting { cursor: none; }
+.crosshair {
+  position: absolute; z-index: 2; pointer-events: none;
+  width: 21px; height: 21px; margin: -11px 0 0 -11px;
+  border: 1px solid rgba(255, 90, 90, 0.9);
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6), inset 0 0 0 1px rgba(0, 0, 0, 0.6);
+}
+.crosshair[hidden] { display: none; }
+.crosshair::after {
+  content: ""; position: absolute; inset: 9px;
+  background: rgba(255, 90, 90, 0.9); border-radius: 50%;
+}
+@media (pointer: coarse) { .crosshair { display: none; } }
+
+/* ---- HUD layer (evt 0x1F shutter, 0x2D message) ---- */
+
+/* The game draws both as view-space geometry at z = -1, i.e. a screen
+   overlay. DOM keeps them crisp at any canvas size and out of the depth
+   buffer, which is what the game's draw layer achieves. */
+/* `container-type` so the caption can be sized in cqw and track the rendered
+   view the way the game's fixed 11.2 px advance tracks its 640-wide screen. */
+.hud-layer {
+  position: absolute; inset: 0; pointer-events: none;
+  /* `size` rather than `inline-size` so `.hud-screen` can fit a 4:3 box by
+     both axes; the caption's `cqw` reads the same either way. */
+  container-type: size;
+  z-index: 1;
+}
+.hud-layer[hidden] { display: none; }
+.shutter {
+  position: absolute; left: 0; right: 0; height: 0;
+  background: #000;
+  transition: none;
+}
+.shutter-top { top: 0; }
+.shutter-bottom { bottom: 0; }
+/* The dialogue caption. `FUN_00436850` centres the line on x = 320 and draws
+   it on a 384 baseline in (1.0, 0.8, 0.8), so that is the position and the
+   colour here. The bitmap font itself is not reproduced -- there is no 2D
+   glyph pipeline in the player -- but the shadow stands in for the way the
+   game's glyphs sit over the scene without a panel behind them. */
+.screen-message {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  color: rgb(255, 204, 204);
+  font-family: var(--sans, system-ui, sans-serif);
+  font-weight: 600;
+  font-size: 15px;
+  font-size: 2.36cqw;
+  letter-spacing: 0.02em;
+  text-shadow: 0 1px 0 #000, 0 0 6px rgba(0, 0, 0, 0.9);
+  padding: 0;
+  white-space: nowrap;
+  max-width: 96cqw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.screen-message[hidden] { display: none; }
+/* The game's 640x480 screen, the largest 4:3 box that fits and centred --
+   which is exactly the pillarboxed view. */
+.hud-screen {
+  position: absolute; left: 50%; top: 50%;
+  width: min(100cqw, 133.3333cqh); height: min(75cqw, 100cqh);
+  transform: translate(-50%, -50%);
+}
+
+/* ---- the debug sidebar ---- */
+
+#debug {
+  display: flex; flex-direction: column;
+  min-width: 0; min-height: 0; overflow: hidden;
+  background: var(--panel);
+  border-left: 1px solid var(--line);
+}
+/* A narrow window, or a phone: over the game as a drawer, because a game
+   shrunk to half a phone's width is no use to anyone. */
+@media (max-width: 900px), (pointer: coarse) {
+  #shell.debug-open { grid-template-columns: minmax(0, 1fr); }
+  #debug {
+    position: fixed; z-index: 20;
+    top: 0; right: 0; bottom: 0;
+    width: min(var(--debug-w), 88vw);
+    padding-right: env(safe-area-inset-right);
+    box-shadow: -18px 0 40px rgba(0, 0, 0, 0.6);
+  }
+}
+
+.dbg-head {
+  display: flex; align-items: baseline; gap: 8px; flex: none;
+  padding: 8px 8px 6px 12px;
   border-bottom: 1px solid var(--line);
   background: var(--panel-2);
-  font-size: 12px;
 }
-.panel-head input[type="search"] { flex: 1; min-width: 0; font-size: 12px; }
+.dbg-head strong { font-size: 13px; letter-spacing: 0.04em; }
+#status {
+  flex: 1; min-width: 0; font-size: 11px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.icon-btn {
+  flex: none; align-self: center;
+  width: 28px; height: 28px; padding: 0;
+  background: transparent; color: var(--dim);
+  border: 1px solid transparent; border-radius: 6px;
+  font: inherit; cursor: pointer;
+}
+.icon-btn:hover { color: var(--text); border-color: var(--line); }
+
+#controls {
+  flex: none;
+  display: flex; flex-direction: column; gap: 7px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+}
+.seg {
+  display: grid; grid-auto-flow: column; grid-auto-columns: 1fr;
+  border: 1px solid var(--line); border-radius: 7px; overflow: hidden;
+}
+.mode {
+  min-height: 30px;
+  background: var(--panel-2); color: var(--dim);
+  border: 0; padding: 5px 12px;
+  font: inherit; cursor: pointer;
+}
+.mode + .mode { border-left: 1px solid var(--line); }
+.mode.active { background: var(--accent); color: #04222b; font-weight: 650; }
+.ctl-row { display: flex; gap: 6px; }
+.ctl-row button {
+  flex: 1; min-height: 30px;
+  background: var(--panel-2); color: var(--text);
+  border: 1px solid var(--line); border-radius: 6px;
+  padding: 4px 8px; font: inherit; cursor: pointer; white-space: nowrap;
+}
+.ctl-row button:hover:not(:disabled) { border-color: var(--accent); }
+.ctl-row button:disabled { color: var(--dim); cursor: default; opacity: 0.6; }
+/* The debug clear. Red, because it is the one control here that changes what
+   the game did rather than how you are looking at it. */
+.ctl-row button.kill {
+  background: #3d1414; border-color: #7a2424; color: #ffd9d9;
+}
+.ctl-row button.kill:hover { background: #5a1c1c; border-color: #a33; }
+#cam-label {
+  font-size: 11px; white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tabs {
+  flex: none; display: flex;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel-2);
+}
+.tabs button {
+  flex: 1; min-height: 32px;
+  background: transparent; color: var(--dim);
+  border: 0; border-bottom: 2px solid transparent;
+  font: inherit; font-weight: 600; cursor: pointer;
+}
+.tabs button:hover { color: var(--text); }
+.tabs button.active { color: var(--text); border-bottom-color: var(--accent); }
+
+.tab-body {
+  flex: 1; min-height: 0;
+  display: flex; flex-direction: column;
+}
+.tab-body.scroll { display: block; }
+.tab-tools {
+  flex: none; padding: 6px 8px;
+  border-bottom: 1px solid var(--line);
+}
+.tab-tools input[type="search"] { width: 100%; font-size: 12px; }
 
 .scroll { overflow: auto; min-height: 0; flex: 1; }
 
@@ -199,11 +614,123 @@ body.resizing { cursor: col-resize; user-select: none; }
 }
 .mini:hover { color: var(--text); }
 
-/* ---- script tree ---- */
+/* ---- the inspection panels ---- */
 
-/* The panel is narrow by default, so everything here is sized to survive
-   truncation: each row keeps its identity (index, opcode name) and lets the
-   operand summary ellipsize. The full text is on the row's `title`. */
+.panel { background: var(--panel); border-bottom: 1px solid var(--line); }
+
+.panel-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--panel-2);
+  font-size: 12px;
+}
+.fold[open] > .panel-head { border-bottom: 1px solid var(--line); }
+.fold > summary { cursor: pointer; list-style: none; }
+.fold > summary::-webkit-details-marker { display: none; }
+.fold > summary::before { content: "\25B8 "; color: var(--dim); }
+.fold[open] > summary::before { content: "\25BE "; }
+.panel-head .dim {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.panel-head .hl {
+  margin-left: auto; display: inline-flex; align-items: center; gap: 3px;
+  font-weight: normal; color: var(--dim);
+}
+.panel-head .hl input { margin: 0; }
+
+/* The player strip: label, value. */
+.kv {
+  padding: 8px 10px; display: grid; grid-template-columns: auto 1fr;
+  gap: 2px 10px; font-size: 12px;
+}
+.kv .k { color: var(--dim); }
+.kv .v { font-family: var(--mono); overflow-wrap: anywhere; }
+.kv .v.hot { color: var(--accent-2); }
+
+/* Light, fog and filter: the player's own choices about the draw. */
+.view-settings {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px;
+  padding: 8px 10px 0;
+}
+.view-settings label {
+  display: flex; flex-direction: column; gap: 3px; min-width: 0;
+  font-size: 11px; color: var(--dim);
+}
+.view-settings select { width: 100%; min-width: 0; font-size: 12px; }
+
+/* ---- debug groups: a subject's switches, then its numbers ---- */
+
+.grp { padding: 6px 10px 8px; }
+.grp-switches {
+  display: flex; flex-wrap: wrap; gap: 2px 12px;
+  padding-bottom: 6px; font-size: 12px;
+}
+.grp-switches label {
+  display: inline-flex; align-items: center; gap: 4px; cursor: pointer;
+}
+.grp-switches input { margin: 0; }
+
+/* Two kinds of switch, drawn apart and each named -- see `DebugGroup.tsx`.
+   The chip is what makes the split legible; without it the two rows read as
+   one wrapped row. The overlay half is dimmer because it is scaffolding, not
+   the game. */
+.grp-kind {
+  flex: 0 0 100%;
+  font-size: 10px; letter-spacing: 0.6px; text-transform: uppercase;
+  color: var(--dim); cursor: help;
+}
+.grp-debug { border-top: 1px dashed var(--line); padding-top: 5px; }
+.grp-debug label { color: var(--dim); }
+.grp-debug label:hover { color: var(--text); }
+.grp-rows {
+  display: grid; grid-template-columns: auto 1fr; gap: 2px 10px;
+  font-size: 12px;
+}
+.grp-rows .k { color: var(--dim); }
+.grp-rows .v { font-family: var(--mono); overflow-wrap: anywhere; }
+.grp-rows .v.hot { color: var(--accent-2); }
+
+.dbg { font: 11px/1.45 var(--mono); padding: 4px 6px; }
+/* These rows wrap, and it is not a nicety. An actor row is the *end* of the
+   line -- `0x1E00 char_adv00 . d=45 . AttackRun/0 . wants a permit` -- so an
+   ellipsis takes off exactly the part worth reading. The hanging indent is
+   what keeps a wrapped row readable as one row: the continuation sits under
+   the text rather than under the address, so a column of them still scans. */
+.dbg-row {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  padding-left: 1.2em;
+  text-indent: -1.2em;
+}
+.dbg-row.hot { color: var(--accent-2); }
+.dbg-row.dead { color: var(--dim); text-decoration: line-through; }
+/* `pre-wrap`, not `pre`: the notes are written with their own line breaks and
+   those have to survive, but a long one still has to come back onto the page. */
+.dbg-note { color: var(--dim); white-space: pre-wrap;
+            overflow-wrap: anywhere; }
+.dbg-group {
+  display: flex; align-items: center; gap: 5px; cursor: pointer;
+  margin-top: 4px; padding-top: 3px; border-top: 1px solid var(--line);
+  color: var(--text);
+}
+.dbg-group:first-child { margin-top: 0; border-top: 0; }
+.dbg-caret { color: var(--dim); width: 8px; }
+.dbg-gname { font-weight: 600; }
+.dbg-box { margin-left: auto; color: var(--dim); }
+.dbg-box:hover { color: var(--accent); }
+
+.volume { display: flex; align-items: center; gap: 6px; }
+#volume { flex: 1; min-width: 60px; accent-color: var(--accent); }
+#bgm-label { margin-top: 4px; overflow-wrap: anywhere; }
+#bgm-label.blocked { color: var(--warn); }
+
+/* ---- the script tab ---- */
+
+/* Everything here is sized to survive truncation: each row keeps its identity
+   (index, opcode name) and lets the operand summary ellipsize. The full text
+   is on the row's `title`. */
 #tree { font-family: var(--mono); font-size: 11px; }
 .blk { border-bottom: 1px solid var(--line); }
 .blk > summary {
@@ -254,62 +781,7 @@ body.resizing { cursor: col-resize; user-select: none; }
 .cat-audio .nm { color: #ff9ecd; }
 .cat-light .nm { color: #ffd18c; }
 
-/* ---- hud ---- */
-
-#hud { padding: 8px 10px; display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; font-size: 12px; }
-#hud .k { color: var(--dim); }
-#hud .v { font-family: var(--mono); }
-#hud .v.hot { color: var(--accent-2); }
-
-/* ---- debug groups: a subject's switches, then its numbers ---- */
-
-.grp { padding: 6px 10px 8px; }
-.grp-switches {
-  display: flex; flex-wrap: wrap; gap: 2px 12px;
-  padding-bottom: 6px; font-size: 12px;
-}
-.grp-switches label {
-  display: inline-flex; align-items: center; gap: 4px; cursor: pointer;
-}
-.grp-switches input { margin: 0; }
-
-/* Two kinds of switch, drawn apart and each named -- see `DebugGroup.tsx`.
-   The chip is what makes the split legible; without it the two rows read as
-   one wrapped row. The overlay half is dimmer because it is scaffolding, not
-   the game. */
-.grp-kind {
-  flex: 0 0 100%;
-  font-size: 10px; letter-spacing: 0.6px; text-transform: uppercase;
-  color: var(--dim); cursor: help;
-}
-.grp-debug { border-top: 1px dashed var(--line); padding-top: 5px; }
-.grp-debug label { color: var(--dim); }
-.grp-debug label:hover { color: var(--text); }
-.grp-rows {
-  display: grid; grid-template-columns: auto 1fr; gap: 2px 10px;
-  font-size: 12px;
-}
-.grp-rows .k { color: var(--dim); }
-.grp-rows .v { font-family: var(--mono); overflow-wrap: anywhere; }
-.grp-rows .v.hot { color: var(--accent-2); }
-
-/* ---- rigs ---- */
-
-.rig-row {
-  display: flex; align-items: baseline; gap: 6px;
-  padding: 1px 10px; font-size: 12px; font-family: var(--mono);
-}
-.rig-row.dead { color: var(--dim); }
-.rig-box { cursor: pointer; color: var(--dim); flex: none; }
-.rig-box:hover { color: var(--accent); }
-.rig-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.rig-slot { color: var(--dim); flex: none; }
-.rig-held { color: var(--warn); flex: none; }
-.rig-note { flex: none; }
-
-#minimap { display: block; width: 100%; }
-
-/* ---- feed ---- */
+/* ---- the feed tab ---- */
 
 #feed { font-family: var(--mono); font-size: 11px; }
 .fe { display: flex; gap: 6px; padding: 1px 8px; cursor: pointer; align-items: baseline; }
@@ -318,219 +790,7 @@ body.resizing { cursor: col-resize; user-select: none; }
 .fe .nm { min-width: 0; }
 .fe .note { color: var(--dim); font-style: italic; }
 
-/* ---- inspector ---- */
-
-#inspector-panel { display: flex; flex-direction: column; }
-#inspector { padding: 8px 10px; font-family: var(--mono); font-size: 11px; white-space: pre-wrap; word-break: break-word; }
-#inspector .k { color: var(--dim); }
-
-/* ---- transport ---- */
-
-#transport {
-  display: flex; align-items: center; gap: 10px;
-  padding: 7px 12px; background: var(--panel); border-top: 1px solid var(--line);
-}
-#transport button {
-  background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
-  border-radius: 5px; padding: 4px 11px; font: inherit; cursor: pointer;
-}
-#transport button:hover { border-color: var(--accent); }
-#transport button.playing { background: var(--accent); color: #04222b; border-color: var(--accent); }
-.speed { display: inline-flex; align-items: center; gap: 5px; color: var(--dim); }
-.framebar { flex: 1; display: flex; align-items: center; gap: 8px; min-width: 200px; }
-.framebar input[type="range"] { flex: 1; accent-color: var(--accent-2); }
-#frame-label { font-family: var(--mono); font-size: 11px; min-width: 16em; }
-#volume { width: 80px; accent-color: var(--accent); }
-#bgm-label { font-family: var(--mono); font-size: 11px; min-width: 11em; }
-#bgm-label.blocked { color: var(--warn); }
-/* The icon alone is ambiguous -- a speaker with a cross could be read as
-   "it is muted" or "press to mute". The button says which state it is IN,
-   and the colour backs that up. */
-#transport button.sound { min-width: 8.5em; text-align: left; }
-#transport button.sound[aria-pressed="true"] {
-  color: var(--ok); border-color: var(--ok);
-}
-#transport button.sound[aria-pressed="false"] { color: var(--dim); }
-
-/* The crosshair follows the pointer while Shoot is on. Drawn here rather than
-   as a cursor so it is visible in a screenshot. */
-#viewport.shooting { cursor: none; }
-.crosshair {
-  position: absolute; z-index: 2; pointer-events: none;
-  width: 21px; height: 21px; margin: -11px 0 0 -11px;
-  border: 1px solid rgba(255, 90, 90, 0.9);
-  border-radius: 50%;
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6), inset 0 0 0 1px rgba(0, 0, 0, 0.6);
-}
-.crosshair[hidden] { display: none; }
-.crosshair::after {
-  content: ""; position: absolute; inset: 9px;
-  background: rgba(255, 90, 90, 0.9); border-radius: 50%;
-}
-
-/* ---- HUD layer (evt 0x1F shutter, 0x2D message) ---- */
-
-/* The game draws both as view-space geometry at z = -1, i.e. a screen
-   overlay. DOM keeps them crisp at any canvas size and out of the depth
-   buffer, which is what the game's draw layer achieves. */
-/* `container-type` so the caption can be sized in cqw and track the rendered
-   view the way the game's fixed 11.2 px advance tracks its 640-wide screen. */
-.hud-layer {
-  position: absolute; inset: 0; pointer-events: none;
-  /* `size` rather than `inline-size` so `.hud-screen` can fit a 4:3 box by
-     both axes; the caption's `cqw` reads the same either way. */
-  container-type: size;
-  /* Above the canvas, below the tool's own bars. The layer is rendered after
-     the skip and branch bars -- it used to be appended after them, and since
-     step 26 React renders it there -- so without this the closed letterbox,
-     a 10 % band along the bottom, paints straight over the skip bar. And
-     because the layer takes no pointer events the button underneath stays
-     clickable, which is how you get a control you can press but cannot see. */
-  z-index: 1;
-}
-.hud-layer[hidden] { display: none; }
-.shutter {
-  position: absolute; left: 0; right: 0; height: 0;
-  background: #000;
-  transition: none;
-}
-.shutter-top { top: 0; }
-.shutter-bottom { bottom: 0; }
-/* The dialogue caption. `FUN_00436850` centres the line on x = 320 and draws
-   it on a 384 baseline in (1.0, 0.8, 0.8), so that is the position and the
-   colour here. The bitmap font itself is not reproduced -- there is no 2D
-   glyph pipeline in the player -- but the shadow stands in for the way the
-   game's glyphs sit over the scene without a panel behind them. */
-.screen-message {
-  position: absolute;
-  transform: translate(-50%, -50%);
-  color: rgb(255, 204, 204);
-  font-family: var(--sans, system-ui, sans-serif);
-  font-weight: 600;
-  font-size: 15px;
-  font-size: 2.36cqw;
-  letter-spacing: 0.02em;
-  text-shadow: 0 1px 0 #000, 0 0 6px rgba(0, 0, 0, 0.9);
-  padding: 0;
-  white-space: nowrap;
-  max-width: 96cqw;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.screen-message[hidden] { display: none; }
-/* The game's 640x480 screen, the largest 4:3 box that fits and centred --
-   which is exactly the pillarboxed view, and the middle of an unboxed one. */
-.hud-screen {
-  position: absolute; left: 50%; top: 50%;
-  width: min(100cqw, 133.3333cqh); height: min(75cqw, 100cqh);
-  transform: translate(-50%, -50%);
-}
-
-/* ---- overlays ---- */
-
-/* Anchored along the bottom of the rendered view. Not a modal and not a
-   backdrop: it covers only the strip it occupies, so the shot the branch is
-   asking you to choose between stays visible, and everything outside the
-   viewport stays live. */
-/* The skip bar shares the branch bar's geometry and animation so the two read
-   as one family, and differs in colour because they differ in kind: the branch
-   bar is a decision playback is blocked on (amber, counts down), the skip bar
-   is an offer that changes nothing if ignored (cyan, no timer). They stack
-   rather than overlap on the rare frame both apply. */
-#skipbar {
-  position: absolute;
-  z-index: 2;
-  left: 0; right: 0; bottom: 0;
-  display: flex; align-items: center; gap: 10px;
-  padding: 10px 14px;
-  background: linear-gradient(rgba(11, 14, 18, 0), rgba(11, 14, 18, 0.92) 38%);
-  border-top: 1px solid var(--accent-2);
-  animation: branch-in 160ms ease-out;
-}
-#skipbar[hidden] { display: none; }
-#skipbar.stacked { bottom: 47px; }
-@media (prefers-reduced-motion: reduce) { #skipbar { animation: none; } }
-#skipbar .tag {
-  background: var(--accent-2); color: #04171c; font-weight: 700;
-  border-radius: 4px; padding: 2px 8px; font-size: 11px;
-  letter-spacing: 0.3px; text-transform: uppercase; flex: none;
-}
-/* Structural, not by id: the subtitle and the button are roles inside a bar
-   that is already identified, and a role does not earn an id. `#skip-sub` and
-   `#skip-go` were ids on markup that lived in `index.html`; when the bar moved
-   into `SkipBar.tsx` the ids went and the rules stayed, so a skip you cannot
-   take looked exactly like one you can. */
-#skipbar .dim { font-size: 12px; flex: 1; min-width: 0; }
-#skipbar button {
-  background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
-  border-radius: 5px; padding: 4px 12px; font: inherit; cursor: pointer;
-  flex: none;
-}
-#skipbar button:hover:not(:disabled) { border-color: var(--accent-2); color: var(--accent-2); }
-#skipbar button:disabled { color: var(--dim); cursor: default; }
-.skip-key {
-  font-family: var(--mono); font-size: 11px; color: var(--dim);
-  border: 1px solid var(--line); border-radius: 3px; padding: 1px 5px;
-  flex: none;
-}
-
-#branchbar {
-  position: absolute;
-  z-index: 2;
-  left: 0; right: 0; bottom: 0;
-  display: flex; align-items: center; gap: 10px;
-  padding: 10px 14px;
-  background: linear-gradient(rgba(11, 14, 18, 0), rgba(11, 14, 18, 0.92) 38%);
-  border-top: 1px solid var(--warn);
-  animation: branch-in 160ms ease-out;
-}
-@keyframes branch-in { from { transform: translateY(100%); } }
-@media (prefers-reduced-motion: reduce) { #branchbar { animation: none; } }
-#branchbar[hidden] { display: none; }
-#branchbar .tag {
-  background: var(--warn); color: #241300; font-weight: 700;
-  border-radius: 4px; padding: 2px 8px; font-size: 11px;
-  letter-spacing: 0.3px; text-transform: uppercase; flex: none;
-}
-/* The subtitle is the only `.dim` in this bar -- the countdown beside it
-   carries `.countdown`, which sets its own colour -- so the selector stays
-   exact without an id. */
-#branchbar .dim { font-size: 12px; flex: 1; min-width: 0; }
-#branchbar .routes { display: inline-flex; gap: 6px; flex-wrap: wrap; }
-#branchbar .routes button {
-  background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
-  border-radius: 5px; padding: 4px 12px; font: inherit; cursor: pointer;
-}
-#branchbar .routes button:hover { border-color: var(--warn); color: var(--accent-2); }
-.countdown { font-family: var(--mono); color: var(--dim); font-size: 12px; flex: none; }
-.countdown.paused { color: var(--accent-2); }
-/* A route with an arcade preview shot is worth hovering; one without is not. */
-#branchbar .routes button.has-preview { border-color: #4a5763; }
-#branchbar .routes button.has-preview::after { content: " ◉"; color: var(--accent); }
-/* The route the game itself is taking. Last, so it wins over `has-preview`'s
-   border: which way the stage is about to go outranks whether there is a shot
-   of it. The other buttons are an override and read as one. */
-#branchbar .routes button.chosen {
-  border-color: var(--accent); color: var(--accent-2); font-weight: 600;
-}
-
-#loading {
-  position: absolute; inset: 0; z-index: 3; display: grid; place-items: center;
-  background: #05070a; gap: 12px; text-align: center;
-}
-#loading[hidden] { display: none; }
-#loading p { color: var(--dim); font-family: var(--mono); font-size: 12px; max-width: 60ch; white-space: pre-wrap; }
-.spinner {
-  width: 26px; height: 26px; border: 2px solid var(--line);
-  border-top-color: var(--accent); border-radius: 50%;
-  animation: spin 0.8s linear infinite; margin: 0 auto;
-}
-@keyframes spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
-
-.err { color: var(--spawn); }
-
-/* An `ErrorBoundary`'s fallback, standing in for the region that threw. It is
+/* ---- an `ErrorBoundary`'s fallback ----
    `position: relative` because one of its homes is inside `#viewport`, where
    `#view` is absolutely positioned and would otherwise paint over a static
    box -- an error message hidden behind the canvas is the failure this whole
@@ -547,128 +807,12 @@ body.resizing { cursor: col-resize; user-select: none; }
   white-space: pre-wrap; overflow-wrap: anywhere; margin: 3px 0 6px;
 }
 
-/* The debug clear, in the top bar beside Save and Load. */
-button.kill {
-  background: #6b1d1d;
-  border: 1px solid #a33;
-  color: #ffd9d9;
-  border-radius: 3px;
-  padding: 1px 8px;
-  font: inherit;
-  cursor: pointer;
-}
-button.kill:hover { background: #8c2626; }
-
-/* -- globals panel ------------------------------------------------------- */
-
-/* Every right-hand panel folds. There is far more worth showing than fits
-   vertically, so the sidebar scrolls and each group is closed until wanted;
-   a closed panel also costs nothing to render -- `GlobalsView` and the debug
-   panels both skip the work when `open` is false. */
-.fold > summary { cursor: pointer; list-style: none; }
-.fold > summary::-webkit-details-marker { display: none; }
-.fold > summary::before { content: "\25B8 "; color: var(--dim); }
-.fold[open] > summary::before { content: "\25BE "; }
-.fold[open] { display: flex; flex-direction: column; min-height: 0; }
-/* Open panels share the sidebar rather than one of them taking it all. */
-.fold[open] > .scroll { max-height: 32vh; }
-/* The feed is the one worth more room -- it is a transcript and reading back
-   through it is the point -- but it is bounded like the rest, because
-   `max-height: none` in a column that no longer stretches means a thousand
-   rows push every panel under it off the bottom. */
-#panel-feed[open] > .scroll { max-height: 48vh; }
-.panel-head .hl {
-  margin-left: auto; display: inline-flex; align-items: center; gap: 3px;
-  font-weight: normal; color: var(--dim);
-}
-.panel-head .hl input { margin: 0; }
-/* The toggle strip is one React node now, so it needs to lay its own labels
-   out the way the toolbar's flex row used to. */
-.toggles { display: contents; }
-
-/* Both bars are React's now and render nothing when there is no offer and no
-   question. They used to carry `hidden`; an empty grid row is the same thing
-   said in CSS, and it means the projection is the only thing deciding. */
-#skipbar:empty, #branchbar:empty { display: none; }
-
-/* -- the scope panel: the disposal tree, and where it is leaking ---------- */
-#scopes {
-  padding: 4px 8px 8px;
-  font-family: var(--mono);
-  font-size: 10px;
-  line-height: 1.5;
-}
-.scope-row { display: flex; align-items: baseline; gap: 6px; white-space: nowrap; }
-.scope-name { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; }
-/* The tally and the frame are the two numbers a leak shows up in, so they get
-   a fixed column each and never reflow as the tree changes shape. */
-.scope-count { flex: 0 0 auto; color: var(--dim); }
-.scope-frame { flex: 0 0 auto; color: var(--dim); opacity: 0.6; min-width: 44px;
-               text-align: right; }
-.scope-owned { flex: 0 0 auto; color: var(--dim); min-width: 26px;
-               text-align: right; }
-.scope-flag { flex: 0 0 auto; }
-.scope-warn { color: #ffb02e; }
-.scope-warn .scope-count,
-.scope-warn .scope-frame { color: #ffb02e; opacity: 0.85; }
-
-#globals {
-  padding: 4px 8px 8px;
-  font-family: var(--mono);
-  font-size: 10px;
-  line-height: 1.45;
-}
-table.gt { width: 100%; border-collapse: collapse; }
-table.gt td { padding: 0 4px 0 0; vertical-align: top; white-space: nowrap; }
-table.gt td.gv { white-space: normal; word-break: break-all; }
-.gk { color: var(--dim); }
-.gaddr { color: var(--dim); opacity: 0.55; text-align: right; }
-.gdim { color: var(--dim); white-space: normal; }
-tr.gdead td { opacity: 0.45; }
-.ghead {
-  margin: 6px 0 2px;
-  color: var(--dim);
-  border-top: 1px solid var(--line);
-  padding-top: 4px;
-}
-
-/* -- the debug panels ---------------------------------------------------- */
-.dbg { font: 11px/1.45 var(--mono); padding: 4px 6px; }
-/* These rows wrap, and it is not a nicety. An actor row is the *end* of the
-   line -- `0x1E00 char_adv00 . d=45 . AttackRun/0 . wants a permit` -- so an
-   ellipsis takes off exactly the part worth reading, and the panel is a fixed
-   width nobody wants to widen just to see one state name. The hanging indent
-   is what keeps a wrapped row readable as one row: the continuation sits under
-   the text rather than under the address, so a column of them still scans. */
-.dbg-row {
-  white-space: normal;
-  overflow-wrap: anywhere;
-  padding-left: 1.2em;
-  text-indent: -1.2em;
-}
-.dbg-row.hot { color: var(--accent-2); }
-.dbg-row.dead { color: var(--dim); text-decoration: line-through; }
-/* `pre-wrap`, not `pre`: the notes are written with their own line breaks and
-   those have to survive, but a long one still has to come back onto the page. */
-.dbg-note { color: var(--dim); white-space: pre-wrap;
-            overflow-wrap: anywhere; }
-.dbg-group {
-  display: flex; align-items: center; gap: 5px; cursor: pointer;
-  margin-top: 4px; padding-top: 3px; border-top: 1px solid var(--line);
-  color: var(--text);
-}
-.dbg-group:first-child { margin-top: 0; border-top: 0; }
-.dbg-caret { color: var(--dim); width: 8px; }
-.dbg-gname { font-weight: 600; }
-.dbg-box { margin-left: auto; color: var(--dim); }
-.dbg-box:hover { color: var(--accent); }
-
 /* ---- the export screen ----
    `app/install/ExportScreen.tsx`, which mounts in its own root over the page
-   when no bundle loaded, and from the top bar's button at any time. Class
-   selectors only: `verify_player_dom`
-   holds every `#id` in this file to something that renders one, and the host
-   element this covers is created imperatively rather than by a component. */
+   when no bundle loaded, and from the menu's Rebuild bundle at any time.
+   Class selectors only: `verify_player_dom` holds every `#id` in this file to
+   something that renders one, and the host element this covers is created
+   imperatively rather than by a component. */
 
 .export-screen {
   position: fixed;
@@ -698,9 +842,8 @@ tr.gdead td { opacity: 0.45; }
 .export-card section:first-of-type h2 { margin-top: 12px; }
 .export-card p { margin: 6px 0; }
 .export-card code { font-family: var(--mono); color: var(--accent); }
-/* The card styles its own buttons for the same reason the transport does:
-   there is no base rule, and a default-chrome button on this background is a
-   grey slab. */
+/* The card styles its own buttons: there is no base rule, and a
+   default-chrome button on this background is a grey slab. */
 .export-card button {
   margin-right: 8px;
   background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
@@ -770,39 +913,3 @@ tr.gdead td { opacity: 0.45; }
   white-space: pre-wrap; overflow-wrap: anywhere;
 }
 .export-warn { color: var(--warn); }
-
-/* The game-over screen (`ui/panels/GameOver.tsx`). The sprites stand in for
-   texbank 0x155's pictures, so they are placed in the 640x480 frame the
-   records use: the layer covers the rendered view and the percentages are of
-   it. The panel with the two port-only buttons sits at the foot, in the
-   branch bar's place, because it is an offer about what to do next. */
-#gameover {
-  position: absolute;
-  inset: 0;
-  z-index: 3;
-  /* No wash over the view: the screen under it is the game's own. */
-  /* A click on the view is the trigger, which cuts the screen short; only the
-     panel takes the pointer. */
-  pointer-events: none;
-}
-#gameover .go-panel {
-  position: absolute;
-  left: 0; right: 0; bottom: 0;
-  display: flex; align-items: center; gap: 10px;
-  padding: 10px 14px;
-  background: linear-gradient(rgba(11, 14, 18, 0), rgba(11, 14, 18, 0.92) 38%);
-  border-top: 1px solid #c01010;
-  pointer-events: auto;
-}
-#gameover .tag {
-  background: #c01010; color: #fff; font-weight: 700;
-  border-radius: 4px; padding: 2px 8px; font-size: 11px;
-  letter-spacing: 0.3px; text-transform: uppercase; flex: none;
-  margin-right: auto;
-}
-#gameover button {
-  background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
-  border-radius: 5px; padding: 4px 12px; font: inherit; cursor: pointer;
-  flex: none;
-}
-#gameover button:hover { border-color: #c01010; color: #ff8080; }

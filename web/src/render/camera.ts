@@ -40,8 +40,8 @@ import { applyPose, cameraEyeY, type CameraPose } from "./campath";
 import type { RailLayer } from "./overlays";
 
 /**
- * The state both halves share: the pose scratch, the rails, and the two
- * switches the player's own chrome owns.
+ * The state both halves share: the pose scratch, the rails, and whether the
+ * script owns the shot.
  *
  * The path table is **not** here. It is on the context, where every layer that
  * evaluates a shot already reads it; a copy of it on this class was a second
@@ -54,10 +54,10 @@ export class CameraRig {
    * shot must not fight them for it.
    */
   scripted = true;
-  /** False while the frame slider is driving the camera by hand. */
-  driving = true;
-  /** UI toggle — off pins the block to the rail and restores the authored shot. */
-  trackEnabled = true;
+  // `driving` and `trackEnabled` were here: the frame slider's hold on the
+  // pose, and a switch that pinned the block to the rail. The slider went with
+  // the bottom bar, and the gameplay camera is the game rather than a view of
+  // it, so it is not a switch any more.
 
   readonly pose: CameraPose = {
     eye: new Vector3(0, 0, 0),
@@ -172,7 +172,6 @@ export class CameraDrawSystem implements System<RenderContext> {
   constructor(private readonly rig: CameraRig) {}
 
   update(ctx: RenderContext): void {
-    if (!this.rig.driving) return;
     this.rig.draw(ctx);
   }
 

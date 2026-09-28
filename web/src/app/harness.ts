@@ -35,8 +35,8 @@
  *
  * ## What it may do
  *
- * Nothing the UI cannot. Stepping frames is the app's existing Step mode with
- * the count made explicit; reading state is the existing projection plus the
+ * Nothing the UI cannot. Stepping frames is Play and Pause with the count
+ * made explicit; reading state is the existing projection plus the
  * same globals the sidebar already shows. It grants no power over the game —
  * there is no "place this actor", no "set this flag", no way in at all. It is
  * a metronome and a tap.

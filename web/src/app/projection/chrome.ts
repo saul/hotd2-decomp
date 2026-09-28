@@ -2,12 +2,11 @@
  * The four small projections the chrome reads.
  *
  * Each is a read of the player's own state turned into plain values: the
- * transport's slider range and label, the audio strip, the skip offer and the
- * branch question. They sit beside `buildProjection` because they are the same
- * kind of thing — and out of `main.ts` because a composition root that also
- * formats strings is doing two jobs.
+ * transport's mode and camera label, the sound, the skip offer and the branch
+ * question. They sit beside `buildProjection` because they are the same kind
+ * of thing — and out of `main.ts` because a composition root that also formats
+ * strings is doing two jobs.
  */
-import { SnapshotRing } from "../ring";
 import type { Player } from "../main";
 import type {
   BranchProjection, GameOverProjection, SkipProjection, SoundProjection,
@@ -88,7 +87,7 @@ export function branchProjection(p: Player): BranchProjection | null {
       };
     }),
     countdown: !p.playing
-      ? "waiting -- Play runs the window"
+      ? "paused -- Play runs the window"
       : p.branchHover
         ? "window paused"
         : taking >= 0
@@ -98,45 +97,17 @@ export function branchProjection(p: Player): BranchProjection | null {
   };
 }
 
-/**
- * How much history the ring is holding, as a sentence.
- *
- * The button's own step is a cadence rather than a promise -- the newest slot
- * can be anything up to one cadence old -- so the label says the step it is
- * aiming at and then the window it has, which is the number that decides
- * whether a rewind can reach the thing you want to see again.
- */
-function rewindLabel(p: Player): string {
-  const h = p.history;
-  if (!h.depth) return "nothing to rewind to yet";
-  const step = (SnapshotRing.EVERY / 60).toFixed(1);
-  return `back ~${step} s  ·  ${(h.frames / 60).toFixed(0)} s of history`
-    + ` in ${h.depth} slot${h.depth === 1 ? "" : "s"}`;
-}
-
-/** The camera slider's range and label, which follow the current shot. */
+/** Play or free roam, running or not, and the shot's own label. */
 export function transportProjection(p: Player): TransportProjection {
   const w = p.walker;
   const cam = w?.cam;
   const path = cam ? p.paths?.paths.get(cam.slot) : undefined;
-  const base = {
-    playing: p.playing, mode: p.state.mode, speed: p.speed,
-    frozen: !!p.state.freeze,
-    canRewind: p.history.depth > 0,
-    rewindLabel: rewindLabel(p),
-  };
-  if (!cam || !path) {
-    return { ...base, hasPath: false, camFrame: 0, camFrameLo: 0,
-             camFrameHi: 1, camLabel: "no camera path" };
-  }
+  const base = { playing: p.playing, mode: p.state.mode };
+  if (!cam || !path) return { ...base, camLabel: "no camera path" };
   const lo = Math.min(cam.startFrame, cam.endFrame);
   const hi = Math.max(cam.startFrame, cam.endFrame, lo + 1);
   return {
     ...base,
-    hasPath: true,
-    camFrame: cam.frame,
-    camFrameLo: Math.floor(lo),
-    camFrameHi: Math.ceil(hi),
     camLabel: `${path.file}[${path.index}] slot ${cam.slot}  `
       + `frame ${cam.frame.toFixed(0)} / ${hi.toFixed(0)}`
       + (cam.isStatic ? "  (static pose)" : ""),
@@ -155,7 +126,7 @@ export function soundProjection(p: Player): SoundProjection {
     label: !bs.file
       ? "no bgm"
       : bs.blocked && on
-        ? "click 🔇 to allow audio"
+        ? "press the speaker to allow audio"
         : `${bs.file}${bs.source === "stage" ? " (stage)" : ""}`,
   };
 }

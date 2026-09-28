@@ -32,8 +32,7 @@ import type { UiSlice } from "../store";
 // subscribes to its own slice, so it re-renders when that slice moves whether
 // this component rendered again or not.
 export function Panel({
-  id, title, sub, subTitle, slice, defaultOpen = false, head, grow,
-  children,
+  id, title, sub, subTitle, slice, defaultOpen = false, head, children,
 }: {
   /** Also the CSS hook and the persistence key. */
   id: string;
@@ -52,7 +51,6 @@ export function Panel({
   defaultOpen?: boolean;
   /** Controls that belong in the header rather than the body. */
   head?: ReactNode;
-  grow?: boolean;
   children?: ReactNode;
 }) {
   const store = useStore();
@@ -66,7 +64,7 @@ export function Panel({
   }, [open, slice, store]);
 
   return (
-    <details id={id} className={`panel fold${grow ? " grow-panel" : ""}`}
+    <details id={id} className="panel fold"
              open={open} onToggle={(e) => setOpen(e.currentTarget.open)}>
       <summary className="panel-head">
         <strong>{title}</strong>

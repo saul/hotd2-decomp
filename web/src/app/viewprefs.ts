@@ -8,10 +8,18 @@
  * because the URL does.
  *
  * What does not survive is the handful of controls that are pure viewing
- * preference: whether the rails are drawn, whether the dome is on, whether to
- * pillarbox, and whether there is any sound. Those are not part of "where playback is", so putting them in the
- * URL would make every shared link carry someone else's overlay choices. They
- * belong in `localStorage`, per browser, and that is all this module does.
+ * preference: whether the rails are drawn, whether the dome is on, how the
+ * scene is lit and filtered, and whether there is any sound. Those are not
+ * part of "where playback is", so putting them in the URL would make every
+ * shared link carry someone else's overlay choices. They belong in
+ * `localStorage`, per browser, and that is all this module does.
+ *
+ * A browser may still hold `pillarbox` and `speed` from the old chrome, and
+ * nothing reads either: `speed` went with the transport bar, and `pillarbox`
+ * was written as `true` for every viewer whether or not they had touched it,
+ * because it was the default and every setting saved them all. The 4:3 switch
+ * is back, off by default, under a new name -- `fourByThree` -- so that an
+ * old automatic `true` cannot turn it on. The next write drops both.
  *
  * `allRegions` is deliberately **not** saved. It is URL state, and having two
  * sources of truth for it is how a deep link ends up quietly overridden by
@@ -24,19 +32,38 @@
  * `runCommand`, which is the same path a click takes.
  */
 import type { ToggleName } from "../ui/commands";
+import { TOGGLES } from "../ui/panels/Toggles";
 
 const KEY = "hod2.viewPrefs";
+
+/**
+ * What this file writes, so a reader can tell what an old save meant.
+ *
+ * **2**: the debug overlays start off. Every setting used to be saved whenever
+ * any one changed, so a browser that had ever moved the volume holds
+ * `rails: true` and `spawns: true` -- the old defaults, never chosen. Read as a
+ * choice they would put the camera line and the spawn labels straight back
+ * over the game, so a save from before 2 keeps its game switches and forgets
+ * its overlay ones.
+ */
+const VERSION = 2;
+
+/** The overlay switches, which a pre-2 save cannot be trusted about. */
+const OVERLAYS: ReadonlySet<string> =
+  new Set(TOGGLES.filter((t) => t.kind === "debug").map((t) => t.name));
 
 /** URL state, so never saved here. See the note above. */
 const NOT_SAVED: ReadonlySet<ToggleName> = new Set<ToggleName>(["allRegions"]);
 
 export interface ViewPrefs {
+  /** See {@link VERSION}. Absent in a save from before it existed. */
+  v?: number;
   toggles: Partial<Record<ToggleName, boolean>>;
   lightMode?: string;
   fogMode?: string;
   filterMode?: string;
-  pillarbox?: boolean;
-  speed?: number;
+  /** The frame boxed to 4:3 rather than filling the window. See the note above. */
+  fourByThree?: boolean;
   /**
    * Whether sound is off, and how loud it is when it is not.
    *
@@ -48,6 +75,9 @@ export interface ViewPrefs {
    *
    * `muted` is stored rather than derived from `volume === 0`: the two are
    * different states in `Bgm`, and a viewer who muted at 80% expects 80% back.
+   * It is the viewer's **choice**, and absent until they have made one: Start
+   * turns the sound on for somebody who has never said, and must not for
+   * somebody who said no. See `Player.mutePref`.
    */
   muted?: boolean;
   /** 0..1, as `Bgm` holds it — the slider is the one that works in percent. */
@@ -62,7 +92,13 @@ export function readViewPrefs(): ViewPrefs {
     const v: unknown = raw ? JSON.parse(raw) : null;
     if (!v || typeof v !== "object") return { toggles: {} };
     const p = v as ViewPrefs;
-    return { ...p, toggles: p.toggles ?? {} };
+    const toggles = { ...(p.toggles ?? {}) };
+    if ((p.v ?? 1) < VERSION) {
+      for (const k of Object.keys(toggles)) {
+        if (OVERLAYS.has(k)) delete toggles[k as ToggleName];
+      }
+    }
+    return { ...p, toggles };
   } catch {
     return { toggles: {} };
   }
@@ -74,7 +110,8 @@ export function writeViewPrefs(p: ViewPrefs): void {
     if (!NOT_SAVED.has(k as ToggleName)) toggles[k as ToggleName] = on;
   }
   try {
-    window.localStorage.setItem(KEY, JSON.stringify({ ...p, toggles }));
+    window.localStorage.setItem(KEY,
+                                JSON.stringify({ ...p, v: VERSION, toggles }));
   } catch {
     /* quota, private mode, or site data blocked -- nothing to do */
   }

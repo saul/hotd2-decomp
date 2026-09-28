@@ -1,18 +1,21 @@
 /**
  * The stage player.
  *
- * Three modes over one scene and one script walker:
+ * Two modes over one scene and one script walker:
  *
- *   Step       block -> step -> instruction, every one of them seekable, with
- *              a frame slider inside a camera move
- *   Play       60 Hz with a speed control; a branch goes as the game's does,
- *              unless the sidebar's "Pause at branches" debug aid holds it
+ *   Play       the game, at 60 Hz; a branch goes as the game's does, unless
+ *              the sidebar's "Pause at branches" debug aid holds it
  *   Free roam  orbit and fly, detached from the rail
+ *
+ * A seek -- a click in the debug sidebar's script tab -- replays to an
+ * instruction and pauses there; Play carries on from it.
  *
  * The camera is the game's own: 41.100 degrees vertical, 4:3, near 0.8, far
  * 8000, recovered from `SetupSceneProjection`. It is a compile-time constant
- * for the whole game -- there is no zoom and no per-camera FOV -- so the only
- * choice the player offers is whether to pillarbox to 4:3 or fill the window.
+ * for the whole game -- there is no zoom and no per-camera FOV -- so the
+ * frame either fills the window, keeping the vertical FOV and showing more at
+ * the sides than the game did, or is boxed to the game's own 4:3. Filling is
+ * the default; the debug sidebar has the switch.
  */
 
 import {
@@ -67,13 +70,12 @@ import type { ToggleName, UiCommand } from "../ui/commands";
 import { TOGGLE_DEFAULTS } from "../ui/panels/Toggles";
 import { feedRow } from "./projection/script";
 import type {
-  BranchProjection, FeedRow, LoadingProjection, MinimapGraph, SkipProjection,
+  BranchProjection, FeedRow, LoadingProjection, SkipProjection,
   SoundProjection, StatusProjection, TransportProjection, TreeProjection,
 } from "../ui/projection";
 import { highlightSet } from "./projection/sidebar";
 import { buildProjection, type PlayerView } from "./projection/player";
 import { groupRows, hudInputs, hudRows } from "./projection/hud";
-import type { RigSource } from "./projection/rigs";
 import type { DebugGroupName, StripRow } from "../ui/projection";
 import {
   branchProjection, skipProjection, soundProjection, transportProjection,
@@ -93,7 +95,8 @@ import { CameraFrame } from "../core/camera";
 import type { Snapshot } from "../core/snapshot";
 import { TICK } from "./loop";
 import { DRIVEN_TICK, Pacer, STOPPED_TICK, type PacerHost } from "./pacer";
-import { SnapshotRing, type HistoryView } from "./ring";
+import { SnapshotRing } from "./ring";
+import { TiltReload, unlockDevice } from "./device";
 import {
   CharacterBindSystem, GameSystem, GunLightBuildSystem,
   ScriptSystem, drawSystem,
@@ -127,8 +130,8 @@ const EMPTY_GROUPS: Readonly<Record<DebugGroupName, readonly StripRow[]>> = {
 
 /** The commands that change something worth remembering across a reload. */
 const PREF_COMMANDS: ReadonlySet<string> = new Set([
-  "toggle", "setLightMode", "setFogMode", "setFilterMode", "setPillarbox",
-  "setSpeed", "toggleMute", "setVolume",
+  "toggle", "setLightMode", "setFogMode", "setFilterMode", "toggleMute",
+  "setVolume", "setPillarbox",
 ]);
 
 /**
@@ -136,6 +139,17 @@ const PREF_COMMANDS: ReadonlySet<string> = new Set([
  * clock. See {@link Player.captureThumb} for why it is not zero.
  */
 const THUMB_FRAMES = 420;
+
+/** Where a tab keeps what a reload should bring back. See `Player.resumeMark`. */
+const SESSION_KEY = "hod2.session";
+
+function readSessionMark(): string | null {
+  try {
+    return sessionStorage.getItem(SESSION_KEY);
+  } catch {
+    return null;
+  }
+}
 
 export class Player implements PlayerView, PlayerCommands, PacerHost {
   private readonly renderer: WebGLRenderer;
@@ -237,7 +251,6 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
    * `Object.is` and goes no further.
    */
   treeProj: TreeProjection | null = null;
-  minimapGraphData: MinimapGraph | null = null;
   /**
    * The event feed, capped.
    *
@@ -311,11 +324,10 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
    *
    * `ctx.frame` restarts at zero on every stage load, so it cannot order two
    * scopes across a stage switch — and "was this opened before the current
-   * stage loaded" is the one question the panel exists to answer.
+   * stage loaded" is the question a scope's frame is stamped to answer.
    */
   lifeFrame = 0;
   stageScope: Scope | null = null;
-  stageLoadedAt = 0;
   /**
    * The stage's camera paths, and the one copy of them.
    *
@@ -332,14 +344,12 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
   private readonly ui: UiStore;
   /** The sidebar's own state: which classes are boxed, and which are folded. */
   readonly boxedClasses = new Set<number>();
-  /** The rigs panel's selection — see the `boxRig` command. */
-  readonly boxedRigs = new Set<string>();
   readonly shutClasses = new Set<number>();
   /** The wait panel's `box` checkbox — see the `boxWait` command. */
   boxWait = false;
   /** What the mounted panels are showing. See `UiStore.demand`. */
   readonly wants = (slice: UiSlice): boolean => this.ui.wants(slice);
-  /** The overlay over the viewport, and the stage's line in the top bar. */
+  /** The overlay over the viewport, and the stage's line in the sidebar. */
   loading: LoadingProjection | null = { text: "loading bundle…", failed: false };
   status: StatusProjection = { text: "", note: "", noteTitle: "" };
   /** The view toggles. Defaults come from the table the panel renders. */
@@ -376,16 +386,31 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
 
   state: PlayerState = readState();
   playing = false;
-  speed = 1;
-  /** The camera's own state: the pose scratch, the rails, and the two toggles. */
+  /**
+   * Whether the game has been started by a press in this page. See
+   * `UiProjection.started`: it is the gesture, and it is taken once.
+   */
+  started = false;
+  /**
+   * Whether the viewer has ever said sound on or sound off, as far as this
+   * browser remembers.
+   *
+   * Start turns the sound on -- a game that starts silent reads as a broken
+   * one -- but only for somebody who has never chosen. `Bgm` starts muted and
+   * the saved preference used to be written from whatever it held, so a
+   * viewer who changed the fog before ever touching the speaker had "muted"
+   * saved for them. This is the *choice*, kept apart from the state, and it
+   * is what is written back.
+   */
+  private mutePref: boolean | undefined = undefined;
+  /** Reload by flicking the phone. See `app/device.ts`. */
+  private readonly tilt: TiltReload;
+  /** Box the frame to 4:3; off fills the window. See {@link resize}. */
+  pillarbox = false;
+  /** The camera's own state: the pose scratch and the rails. */
   readonly cam = new CameraRig();
   /** Everything a system is handed. Built once; the stage index moves. */
   readonly ctx: RenderContext;
-  /** The last snapshot taken, for the Load button. */
-  saved: Snapshot | null = null;
-  /** Set while the frame slider is driving the camera by hand. */
-  scrubbing = false;
-  pillarbox = true;
 
   constructor(ui: UiStore, host: UiHost) {
     this.ui = ui;
@@ -396,8 +421,8 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     // insert into: the crosshair and the four hud divs are `#viewport`'s
     // children and `#viewport` is React's element, so React renders them and
     // hands them across in `UiHost`. See `ui/panels/Viewport.tsx`.
-    this.shooting = new Shooting(host.viewport, host.crosshair, this.chars,
-                                 this.appScope, this.events);
+    this.shooting = new Shooting(host.viewport, host.canvas, host.crosshair,
+                                 this.chars, this.appScope, this.events);
     // A click is input. The renderer says what the viewer did; the port owns
     // the queue and decides what it means. See `game/combat/shot.ts`.
     //
@@ -419,9 +444,7 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     // free-roam camera happened to be. Whether a click is *input* is the
     // transport's question and this is the one place intent enters `G`, so it
     // is answered here rather than in `game/`, which has no idea the player
-    // can be paused. Step mode is not stopped and is deliberately unaffected:
-    // the script stands still there while the port runs at full rate, so a
-    // shot fired in it queues and resolves on the very next tick.
+    // can be paused.
     //
     // The `wake` is unconditional. It is a redraw, not a tick — `Shooting.fire`
     // has already counted the click in the HUD's own shots tally — and the
@@ -438,14 +461,19 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     // exe makes of it: the PC mouse is a gun (`InputMapDevicesToMaple`,
     // `FUN_0041E530`), its right button is `g_mouse_gun_offscreen_pull`, and a
     // gun reloads by shooting outside the screen. Same transport rule as a
-    // click. `R` below is the port's own second way to say the same thing.
+    // click. `R` below is the port's own second way to say the same thing, a
+    // press in the black bars beside the 4:3 frame is a third -- the gun
+    // really is pointed off the screen there -- and on a phone a flick of the
+    // wrist is a fourth (`app/device.ts`).
     this.shooting.onOffscreenPull = () => this.offscreenPull();
+    this.tilt = new TiltReload(() => this.offscreenPull());
     // The aim, as `PollPlayerAimInput`'s mouse arm would record it: pixels
     // from the centre of the engine's frame, `+y` up. The frame is whatever
-    // the camera's own field of view spans at `g_projection_distance_px`, so
-    // this stays right with the 4:3 pillarbox off. A move only wakes the loop
-    // while a gun light is live -- it is then the one thing on screen that
-    // follows the pointer through a pause.
+    // the camera's own field of view spans at `g_projection_distance_px`, and
+    // `Shooting` reports the pointer against the canvas -- the 4:3 frame --
+    // so `nx = ±1` is the frame's edge. A move only wakes the loop while a
+    // gun light is live -- it is then the one thing on screen that follows
+    // the pointer through a pause.
     this.shooting.onAim = (nx, ny) => {
       const half = Math.tan((this.camera.fov * Math.PI) / 360)
         * PROJECTION_DISTANCE_PX;
@@ -506,10 +534,6 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     this.scene.add(this.rain.group);
     this.scene.add(this.spawns.group);
     this.scene.add(this.debug.group);
-    // The outlines the rigs panel draws. The rig roots themselves are nodes of
-    // the stage's own glTF and are already in the scene; this is only the
-    // boxes round the ones the sidebar has ticked.
-    this.scene.add(this.rigs.group);
     this.scene.add(this.breakables.group);
     this.scene.add(this.shatters.group);
     this.shatters.source = this.breakables;
@@ -705,7 +729,7 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
    */
   get stage(): number { return this.state.stage; }
   get original(): boolean { return !!this.state.original; }
-  get mode(): "play" | "step" | "free" { return this.state.mode; }
+  get mode(): "play" | "free" { return this.state.mode; }
   get frozen(): boolean { return !!this.state.freeze; }
   get lightMode(): string { return this.lighting.lightingMode; }
   get fogMode(): string { return this.sceneFog.fogMode; }
@@ -715,7 +739,6 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     return this.camera.position;
   }
   get tree(): TreeProjection | null { return this.treeProj; }
-  get minimap(): MinimapGraph | null { return this.minimapGraphData; }
   get feed(): readonly FeedRow[] { return this.feedRows; }
   get hudRows(): readonly StripRow[] {
     const w = this.walker;
@@ -728,11 +751,6 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     const x = hudInputs(this);
     return w && x ? groupRows(w, x) : EMPTY_GROUPS;
   }
-  /** Every rig in the stage, for the rigs panel. See `render/rigs.ts`. */
-  get rigList(): readonly RigSource[] { return this.rigs.list; }
-  get hasSaved(): boolean { return !!this.saved; }
-  /** How much rewindable history is held. See `app/ring.ts`. */
-  get history(): HistoryView { return this.ring.view; }
   get sound(): SoundProjection { return soundProjection(this); }
   get skip(): SkipProjection | null { return skipProjection(this); }
   get branch(): BranchProjection | null { return branchProjection(this); }
@@ -755,23 +773,38 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     // `app/pacer.ts` says they have to go in. It ends by asking for the first
     // frame, so the loop is turning for the whole of the fetch below.
     this.pacer.start(this.state);
+    await this.enter();
+  }
+
+  /**
+   * Open the stage the URL names -- or, on a first visit, the welcome.
+   *
+   * **A first visit** is a page with nothing to play and nothing to build
+   * from: no bundle served beside it and no install this browser remembers.
+   * The bundle screen is the answer, in its welcome form -- a paragraph, one
+   * folder to choose, and every stage in both modes built from it -- and when
+   * that is done this runs again, now with a bundle, and the page is in the
+   * stage the URL names: stage 1, for a page opened with nothing in its
+   * address. It used to reload the page instead, on the argument that the
+   * boot had given up before building a scene; but nothing the boot does is
+   * owed again except this, and a reload would drop the press that built it.
+   */
+  private async enter(): Promise<void> {
     // Both bundles are read, and which one a *stage* comes from is decided
     // per stage. See `app/bundles.ts`.
     await this.refreshStages();
     if (this.bundles.manifest === null && !this.canBuild) {
-      // Nothing to play and nothing to build from. The bundle screen is the
-      // answer to that, so it is offered rather than described -- the reason
-      // the server was refused is what it opens with.
       const why = this.bundles.refusals.get("server")
         ?? this.bundles.refusals.get("cache") ?? "no bundle";
+      // Under the welcome, for whoever dismisses it with devtools: the page
+      // says why there is nothing to play rather than spinning for ever.
       this.fail(`${why}\n\nBuild one from your own copy of the game.`);
       showExportScreen({
+        welcome: true,
         reason: why,
         onDismiss: null,
         onBuilt: () => {},
-        // The one place a reload is still right: `start` gave up before it
-        // built a scene, so there is nothing to swap a stage into.
-        onReady: () => { window.location.reload(); },
+        onReady: () => { void this.enter(); },
       });
       return;
     }
@@ -783,6 +816,62 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
 
     await this.loadStage();
     this.setMode(this.state.mode);
+    this.resumeAfterReload();
+  }
+
+  /**
+   * What this tab was doing before it reloaded: `"playing"`, `"started"`
+   * (paused, but past the start screen), or null. Read once, in the
+   * constructor, before the first frame can overwrite it.
+   *
+   * **A reload is not a new visit.** Vite reloads the whole page for every
+   * edit under `src/`, and a player that came back under the start screen,
+   * paused, every time a file was saved could not be worked on with the game
+   * running beside the code. The URL already brings back the stage, the
+   * address and the mode; this brings back the transport. Per tab --
+   * `sessionStorage` -- so a new tab, or tomorrow, starts at the start screen
+   * as a first visit should.
+   */
+  private readonly resumeMark: string | null = readSessionMark();
+  /** The mark as last written. See {@link noteSession}. */
+  private sessionMark: string | null = null;
+  /**
+   * Whether {@link resumeAfterReload} has had its turn. Until it has, the old
+   * mark is left where it is: frames run for the whole of the stage load, and
+   * one that wrote "not started" over it would lose it to a second reload
+   * made before the first had finished loading.
+   */
+  private resumed = false;
+
+  /**
+   * Put the transport back the way the tab left it. Never under a harness:
+   * `?drive=1` and `?freeze=1` own the clock, and a driver that pressed Space
+   * expects the page it opened, not the one it left.
+   */
+  private resumeAfterReload(): void {
+    if (this.resumed) return;
+    this.resumed = true;
+    const mark = this.resumeMark;
+    if (!mark || this.state.drive || this.state.freeze) return;
+    // Past the start screen: this tab pressed Start already. Its sound comes
+    // back on, held until the first press -- the browser's rule, and any press
+    // lifts it (`Bgm.unblock`). Fullscreen and the motion sensors cannot come
+    // back without a press, and a phone gets them from the next Start.
+    this.started = true;
+    this.soundOn();
+    if (mark === "playing" && this.state.mode === "play") this.playing = true;
+  }
+
+  /** Write what a reload should bring back, when it changes. Once a frame. */
+  private noteSession(): void {
+    if (!this.resumed) return;
+    const mark = !this.started ? null : this.playing ? "playing" : "started";
+    if (mark === this.sessionMark) return;
+    this.sessionMark = mark;
+    try {
+      if (mark) sessionStorage.setItem(SESSION_KEY, mark);
+      else sessionStorage.removeItem(SESSION_KEY);
+    } catch { /* storage blocked: a reload is a fresh visit, as before */ }
   }
 
   /**
@@ -823,7 +912,7 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
    * machine with `extract/player/` populated -- every developer's -- none of
    * it was reachable at all. Rebuilding a stage, switching to the copy the
    * browser exported for itself, and downloading that copy are all things you
-   * want *with* a bundle already open, so the top bar has a button now.
+   * want *with* a bundle already open, so the menu has an item for it now.
    */
   openBundles(): void {
     showExportScreen({
@@ -888,7 +977,7 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
    * Take the bundle screen down, and adopt whatever it did.
    *
    * **This used to be `window.location.reload()`**, on a comment claiming a
-   * stage was not hot-swappable from here. It is: the top bar's stage picker
+   * stage was not hot-swappable from here. It is: the menu's stage picker
    * has always been `state.stage = n; loadStage()`, which tears the scope down
    * and rebuilds it from whichever bundle now holds that stage. So the reload
    * bought nothing, and the *other* exit from the screen -- Back, and Escape
@@ -1031,19 +1120,16 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
       // worth drawing, and a paused player has no loop running to draw it.
       this.wake();
       if (e.code === "Space") { e.preventDefault(); this.togglePlay(); }
-      else if (e.code === "ArrowRight") { e.preventDefault(); this.stepOnce(); }
-      // Shift reads as "a bigger step back", and it is: `stepBack` moves one
-      // instruction, `rewind` moves half a second of game time. Deliberately
-      // not a letter -- `tools/pacing.mjs` presses `KeyZ` to prove that a key
-      // the player binds nothing to still wakes the loop, and every letter
-      // bound here is one that check can no longer use.
-      else if (e.code === "ArrowLeft") {
-        e.preventDefault();
-        if (e.shiftKey) this.rewind(); else this.stepBack();
-      }
-      else if (e.code === "Digit1") this.setMode("step");
-      else if (e.code === "Digit2") this.setMode("play");
-      else if (e.code === "Digit3") this.setMode("free");
+      // Half a second of game time back, through the snapshot ring. It has no
+      // button: it is a debugging reach for "watch that again", and it went
+      // with the bar it sat in. Deliberately not a letter -- `tools/pacing.mjs`
+      // presses `KeyZ` to prove that a key the player binds nothing to still
+      // wakes the loop, and every letter bound here is one that check can no
+      // longer use. With or without Shift, which is what it used to need when
+      // the plain arrow stepped the script back an instruction.
+      else if (e.code === "ArrowLeft") { e.preventDefault(); this.rewind(); }
+      else if (e.code === "Digit1") this.setMode("play");
+      else if (e.code === "Digit2") this.setMode("free");
       else if (e.code === "Enter") { e.preventDefault(); this.requestSkip(); }
       // The pad's START for player 1 (`g_pad_state` bit 8): a new game from
       // "out", a continue during the countdown. See `PadStartPressed`.
@@ -1061,11 +1147,24 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
       void this.loadStage();
     });
 
+    // Any press lets held audio go. The browser counts a shot, a key or a
+    // menu item alike as the gesture it wants, and a page that came back from
+    // a reload mid-game (`resumeAfterReload`) should have its sound back on
+    // the first thing the player does, not on a press of the speaker. Capture
+    // phase, so a control that stops its own event still counts.
+    for (const kind of ["pointerdown", "keydown"] as const) {
+      window.addEventListener(kind, () => this.bgm.unblock(), true);
+    }
+
     // The saved preferences go back through `runCommand`, which is the same
     // path a click takes -- there is deliberately no second way for a setting
     // to take effect, because two would drift.
     const prefs = readViewPrefs();
     for (const [name, on] of Object.entries(prefs.toggles)) {
+      // Only the switches that still exist. A browser that saved `trackEnemies`
+      // before the gameplay camera stopped being a switch would otherwise put
+      // a key into `toggles` that no panel draws and no case handles.
+      if (!(name in TOGGLE_DEFAULTS)) continue;
       this.runCommand({ kind: "toggle", name: name as ToggleName, on });
     }
     if (prefs.lightMode) {
@@ -1077,10 +1176,7 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     if (prefs.filterMode) {
       this.runCommand({ kind: "setFilterMode", mode: prefs.filterMode });
     }
-    if (prefs.pillarbox !== undefined) {
-      this.runCommand({ kind: "setPillarbox", on: prefs.pillarbox });
-    }
-    if (prefs.speed) this.runCommand({ kind: "setSpeed", speed: prefs.speed });
+    if (prefs.fourByThree) this.runCommand({ kind: "setPillarbox", on: true });
     // Volume before mute, because `setVolume` does not unmute and the restored
     // pair has to land in the same state it was saved in.
     if (prefs.volume !== undefined) {
@@ -1099,6 +1195,21 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     if (prefs.muted !== undefined && prefs.muted !== this.bgm.muted) {
       this.runCommand({ kind: "toggleMute" });
     }
+    // The choice itself, whichever way it went. Restoring "muted" sends no
+    // command -- `Bgm` starts muted -- so without this a viewer who chose
+    // silence would be read as one who never chose, and Start would give
+    // them sound.
+    this.mutePref = prefs.muted;
+  }
+
+  /**
+   * Sound on or off, as a choice the viewer made. See {@link mutePref}.
+   *
+   * The toggle's one path, so the choice and the state cannot disagree.
+   */
+  setMuted(muted: boolean): void {
+    this.mutePref = muted;
+    this.bgm.setMuted(muted);
   }
 
   /** Every setting worth remembering, as it stands now. */
@@ -1111,20 +1222,15 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
       // the viewer chose, and persisting it would carry one machine's ceiling
       // to another.
       filterMode: this.texFilter.filterMode,
-      pillarbox: this.pillarbox,
-      speed: this.speed,
-      muted: this.bgm.muted,
+      fourByThree: this.pillarbox,
+      // The choice, not the state: undefined until the viewer has pressed
+      // the speaker, and then whatever they pressed it to.
+      muted: this.mutePref,
       volume: this.bgm.volume,
     });
   }
 
-  /**
-   * The splitter between the script panel and the viewport.
-   *
-   * The panel starts narrow because the viewport is the point of the tool;
-   * the tree is a navigator, not the content. Width is a per-viewer
-   * convenience, so it lives in `localStorage` and nowhere else.
-   */
+  /** Play or free roam. */
   setMode(mode: PlayerState["mode"]): void {
     this.state.mode = mode;
     this.freeRoam.enabled = mode === "free";
@@ -1146,17 +1252,68 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
   }
 
   togglePlay(): void {
+    if (this.playing && this.state.mode === "play") this.pause();
+    else this.play();
+  }
+
+  /** Run the clock, leaving free roam if that is where the viewer was. */
+  play(): void {
     if (this.state.mode === "free") this.setMode("play");
-    this.playing = !this.playing;
-    if (this.playing && this.state.mode === "step") this.setMode("play");
+    this.playing = true;
+    this.unlock();
+  }
+
+  pause(): void {
+    this.playing = false;
   }
 
   /**
-   * Press Start during a skippable cutscene.
-   *
-   * The whole feature is live in the retail game -- region, Start poll, watcher
-   * task, and every consumer of the flag. See `Walker.skipRequested`.
+   * The start screen's button. See the `start` command: everything here that
+   * is not `play` is only allowed inside the press that called it.
    */
+  startGame(): void {
+    this.unlock();
+    this.play();
+  }
+
+  /**
+   * What the first press of a session is for.
+   *
+   * Idempotent, and reached from every way of starting -- the start screen,
+   * Space, the sidebar's Play -- because a viewer who starts with the keyboard
+   * should get the same game as one who clicks.
+   *
+   * * **Sound on**, for somebody who has never said otherwise. A game that
+   *   starts in silence reads as a broken one.
+   * * **The device**: fullscreen, a landscape lock and the motion sensors on
+   *   a touch screen, all of which a browser grants only inside a gesture. See
+   *   `app/device.ts`.
+   */
+  private unlock(): void {
+    if (this.started) return;
+    this.started = true;
+    this.soundOn();
+    unlockDevice(this.tilt);
+  }
+
+  /** Sound on, for somebody who has never said otherwise. */
+  private soundOn(): void {
+    if (this.mutePref === undefined && this.bgm.muted) this.bgm.setMuted(false);
+  }
+
+  /**
+   * A stage chosen from the menu, loaded and running.
+   *
+   * Only once the game has been started: before that, the stage opens under
+   * the start screen like the first one did, because the press that starts it
+   * is still owed.
+   */
+  loadAndPlay(): void {
+    void this.loadStage().finally(() => {
+      if (this.started && this.state.mode === "play") this.playing = true;
+    });
+  }
+
   /**
    * One trigger pull outside the screen for player 1 -- the mouse-gun's
    * reload. Queued only while the clock can consume it, as a click is.
@@ -1166,6 +1323,12 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     this.pacer.wake();
   }
 
+  /**
+   * Press Start during a skippable cutscene.
+   *
+   * The whole feature is live in the retail game -- region, Start poll, watcher
+   * task, and every consumer of the flag. See `Walker.skipRequested`.
+   */
   requestSkip(): void {
     const w = this.walker;
     if (!w || !w.requestSkip()) return;
@@ -1174,46 +1337,16 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     this.pushUrl();
   }
 
-
-  stepOnce(): void {
-    const w = this.walker;
-    if (!w) return;
-    this.playing = false;
-    w.stepOnce();
-    this.syncCameraToWalker();
-    this.markAddress();
-    this.pushUrl();
-  }
-
-  /**
-   * "Previous instruction" replays from the entry block to the op before this
-   * one. There is no undo: an instruction's effect on the region set, the
-   * streamed slots and the camera is not invertible, so the only correct way
-   * back is to run forward again.
-   */
-  stepBack(): void {
-    const w = this.walker;
-    if (!w) return;
-    this.playing = false;
-    if (w.opIndex > 0) this.seekTo(w.block, w.step, w.opIndex - 1);
-    else if (w.step > 0) {
-      const ops = w.currentBlock?.steps?.[w.step - 1]?.ops?.length ?? 1;
-      this.seekTo(w.block, w.step - 1, Math.max(0, ops - 1));
-    }
-  }
-
   /**
    * Back half a second of game time, through the snapshot ring.
    *
-   * **Not the same axis as `stepBack`,** which is why both exist. `stepBack`
-   * is a *script* step: it seeks to the previous instruction, and a seek
-   * replays from the entry block with the data segment cleared, so the fight
-   * you were watching is gone. This puts the world back exactly as it stood
-   * half a second ago, mid-fight, which is the thing the awkward bug wants —
-   * *it only happens after the second zombie dies*.
+   * **Not a seek.** A seek replays from the entry block with the data segment
+   * cleared, so the fight you were watching is gone. This puts the world back
+   * exactly as it stood half a second ago, mid-fight, which is the thing the
+   * awkward bug wants — *it only happens after the second zombie dies*.
    *
    * It goes through `loadSnapshot`, so it is the same `World.load` → `resync`
-   * a Load button press and a seek take. A rewind cannot leave a rig in a pose
+   * a snapshot load and a seek take. A rewind cannot leave a rig in a pose
    * play would never produce, because there is no second rebuild path for it
    * to take.
    *
@@ -1362,7 +1495,7 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
    *
    * Not a modal. A branch is a fact about where playback has got to, not a
    * question that has to be answered before anything else can happen -- so
-   * the script, the scrubber and free roam all stay usable while it is up,
+   * the script tab and free roam both stay usable while it is up,
    * and it never covers the shot you are choosing between.
    */
   /** True while the pointer is over the branch bar; freezes the countdown. */
@@ -1414,7 +1547,7 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
   /**
    * The frame has begun, before any tick it owes.
    *
-   * `lifeFrame` is the scope panel's clock — frames since the page loaded,
+   * `lifeFrame` is the scopes' clock — frames since the page loaded,
    * which never resets, because `ctx.frame` restarts on every stage load and
    * so cannot order two scopes across a stage switch.
    *
@@ -1443,7 +1576,6 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
   idleTick(t: Tick): void {
     if (!this.walker) return;
     this.pushPortGlobals();
-    this.cam.driving = !this.scrubbing;
     this.cam.scripted = this.state.mode !== "free";
     this.world.update(this.ctx, t);
   }
@@ -1700,9 +1832,7 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
    *
    * The answer is no more often than it looks: a paused player with no sprites
    * out has nothing to draw that is not already drawn, and `?freeze=1` means
-   * *one* frame by definition. Step mode is not in that list on purpose — the
-   * script stands still there but the port does not, which is what makes a
-   * zombie loop its walk while you read the tree.
+   * *one* frame by definition.
    *
    * **Free roam is above the freeze, and that is the whole of it.** `freeze`
    * stops *game* time; the free camera is not game state and flies on
@@ -1759,14 +1889,13 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
    *   it. `Loop.idle` has said "for the frozen and free-roam paths" since it
    *   was written; free roam simply never took it.
    *
-   * **Step mode is deliberately not here.** Stepping is for advancing the
-   * script an instruction at a time while the port keeps running underneath —
-   * that is what makes a zombie loop its walk while you read the tree — and it
-   * has its own mode button rather than a paused transport.
+   * There used to be a third mode, Step, in which the script stood still and
+   * the port ran on underneath it. It went with the instruction steppers; a
+   * seek pauses instead.
    */
   private get gameStopped(): boolean {
     if (this.state.mode === "free") return true;
-    return this.state.mode === "play" && !this.playing;
+    return !this.playing;
   }
 
   /**
@@ -1783,8 +1912,8 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
    * off a branch, the port runs unless the transport has stopped it, and
    * `world.update` is the one call for the whole tick order.
    *
-   * `speed` is deliberately not applied. Under the flag a frame is a frame;
-   * the driver sets the rate by asking for more or fewer of them.
+   * Under the flag a frame is a frame; the driver sets the rate by asking for
+   * more or fewer of them.
    */
   stepOneFrame(): boolean {
     const w = this.walker;
@@ -1804,7 +1933,6 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
       }
     }
     this.pushPortGlobals();
-    this.cam.driving = !this.scrubbing;
     this.cam.scripted = this.state.mode !== "free";
     // START, held for exactly the one tick after the key went down: the engine
     // reads `g_pad_state` once a frame and a press is a frame's worth of bit.
@@ -1853,11 +1981,14 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
   private gameOverNoted = false;
 
   /**
-   * `[port-only]` -- the game-over screen's two buttons: start a new game
-   * at a stage's entry, through exactly the path a page load takes (the reset
-   * boots the player block, the title's confirm seeds the credits, START
-   * enters play). `stage` is the current one for "restart", 1 for "from the
-   * start".
+   * `[port-only]` -- the game-over screen's two buttons and the menu's
+   * Restart: start a new game at a stage's entry, through exactly the path a
+   * page load takes (the reset boots the player block, the title's confirm
+   * seeds the credits, START enters play). `stage` is the current one for
+   * "restart", 1 for "from the start".
+   *
+   * It plays once loaded whether or not the start screen has been passed:
+   * every way here is a press, and a press is what the start screen waits for.
    */
   restartRun(stage: number): void {
     if (stage !== this.state.stage) this.state.entry = undefined;
@@ -1865,6 +1996,7 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     this.gameOverNoted = false;
     this.state.block = this.state.step = this.state.op = undefined;
     this.state.slot = this.state.frame = undefined;
+    this.unlock();
     this.pushUrl();
     void this.loadStage().finally(() => {
       if (this.state.mode === "play") this.playing = true;
@@ -1894,11 +2026,11 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
    * The player stops on the last stage instead.
    *
    * `[diverges]` **The stage carries its transport and its mode across.** The
-   * engine has one run and one transport; the port has a Play button and a
-   * Step button and a stage picker, and a viewer who stepped into the end of a
-   * stage does not want the next one running away from them. So the advance
-   * only fires in `play` mode with the transport running, which is the only
-   * arrangement that corresponds to a run at all.
+   * engine has one run and one transport; the port has a pause button, free
+   * roam and a stage picker, and a viewer who paused at the end of a stage, or
+   * seeked into it, does not want the next one running away from them. So the
+   * advance only fires in `play` mode with the transport running, which is
+   * the only arrangement that corresponds to a run at all.
    */
   private advanceScene(): void {
     if (this.advancing || this.capturing) return;
@@ -1927,8 +2059,8 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
   }
 
   /**
-   * The paused state, on screen: the rendered frame drains to grey and the
-   * word sits in the middle of it.
+   * The paused state, on screen: the rendered frame drains to grey under the
+   * start screen, or under `PAUSED` once the game has been started.
    *
    * Free roam stops the same clock but does **not** raise this — it is a mode
    * you chose, with its own lit button, and covering the view you are flying
@@ -2021,14 +2153,12 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     // drawn, so this is computed before anything is folded away.
     this.debug.highlight = highlightSet(
       this.walker, this.boxedClasses, this.boxWait);
-    // Same reasoning, one layer over: the composition root is what sees both
-    // the panel's selection and the layer that can draw it.
-    this.rigs.highlight = this.boxedRigs;
 
     // `stabilise` inside the builder hands back the value the store already
     // holds when nothing moved, so `publish` decides with an identity test.
     // There is no key, no counter and no list of fields to keep in step.
-    this.ui.publish(buildProjection(this, this.ctx, this.ui.getSnapshot()));
+    this.ui.publish(buildProjection(this, this.ui.getSnapshot()));
+    this.noteSession();
   }
 
   /** Put one back. Returns the reason it was refused, or null. */
@@ -2062,13 +2192,21 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
 
   // -- chrome ------------------------------------------------------------
 
+  /**
+   * Size the frame to the viewport: the whole of it, or the game's 4:3 centred
+   * in it.
+   *
+   * Filling is the default, because the page is the game and a phone held
+   * sideways is twice as wide as it is tall. The vertical FOV is the game's
+   * compile-time constant either way, so filling a wider window shows more at
+   * the sides than the cabinet did -- which is what `pillarbox` is for, as a
+   * debug sidebar switch, when what the game framed is the question.
+   */
   resize(): void {
     const w = this.viewport.clientWidth;
     const h = this.viewport.clientHeight;
     if (w === 0 || h === 0) return;
     if (this.pillarbox) {
-      // The game is 4:3 and its vertical FOV is fixed, so filling a wide
-      // window would either stretch the image or silently widen the shot.
       const aspect = 4 / 3;
       const cw = Math.min(w, h * aspect);
       const ch = cw / aspect;

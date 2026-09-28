@@ -1643,7 +1643,7 @@ console.log("\nan asset-slot actor is drawn, and can be shot:");
           `${beatAt(0)} vs ${beatAt(3)}`);
     // The inner chain is skipped for a corpse -- `if (obj+0x34 & 0x1000000)
     // goto tail` -- and the body model swaps.
-    o.flags |= 0x4000000;      // `ActorFlag.Dead`
+    o.flags |= 0x1000000;      // `OwlFlag.Corpse`, not `ActorFlag.Dead`
     owlLayer.update(ctx);
     const dg = owlLayer.nodeFor(0x4323);
     check("...and a dead one loses its inner chain and swaps its body",

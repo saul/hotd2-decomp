@@ -1373,14 +1373,46 @@ Fail, and the enemy keeps walking.
 * its **first** store is `obj+0x121 = 0xFF`, before any test — a refused claim
   always leaves the actor holding no index, whatever it held;
 * `g_attack_committed` set refuses at once;
-* it offers **one** player's permit, not the first free one: `g_active_player`'s
-  with one attacker; with two, `rand() % 2`'s while one player is in play, the
-  same pick `NOT`'d if taken while one enemy is present, and otherwise the
-  player on the actor's half of the screen (`ActorScreenHalfSign`,
-  `0x00409C90`); `IsPlayerAttackable` then voids the pick;
+* it offers **one** player's permit, not the first free one, and nothing ever
+  falls back to the other player:
+
+  | `g_max_attackers` | condition | offered | draws |
+  |---|---|---|---|
+  | 1 | — | `g_active_player`'s, if free (0 or 1; `2` offers nothing) | none |
+  | 2 | `g_players_in_play == 1` (s16) | `rand() % 2`'s, if free | one `rand()` |
+  | 2 | `g_enemies_present == 1` (s16) | `rand() % 2`'s; if taken, `~pick` — -1 or -2 (`0x00455E69`) | one `rand()` |
+  | 2 | otherwise | player 0's if `ActorScreenHalfSign` (`0x00409C90`) is -1, player 1's if 1, if free | none |
+  | other | — | nothing | none |
+
+  `ActorScreenHalfSign` is `P * obj+0x70 / obj+0x78` against 0.0: below (or
+  unordered) is 1, else -1 — the right of the frame for player 2 and the left
+  for player 1 `[likely]`, the halves following from the `-Z`-in-front view;
+* `IsPlayerAttackable((s8)obj+0x121)` then voids the pick (`0x00455ED5`), and
+  only `0xFF` fails (`0x00455EF0`): a `-2` it passes — attract mode, where it
+  answers true for any index — claims "permit -2", a 1 written to
+  `0x009A2B98`;
+* the grant raises the latch bit and `g_attack_committed` when
+  `ActorIsOnScreen` says no, and writes `g_attack_permits[obj+0x121] = 1`;
 * the permit table holds **0 or 1** — whether a permit is out, not who has it
-  (the port stores the holder's id and `-1` for free, for its debug panel);
-* it does **not** write `obj+0x34`.
+  (the port stores the holder's id and `-1` for free, for its debug panel —
+  and every reader in the port, the scripted attackers' own picks included,
+  has to test against `-1`, not against the engine's literals);
+* it does **not** write `obj+0x34`. Where a claimant lowers `NoCameraTrack`
+  (`0x10000`) is its own business, and only three do: `ZombieStateApproach`
+  after a grant (`0x00457A4E`), `ZombieStateWaitForCameraFrame` before its
+  claim and only for its hidden kind (`0x004576E5`), and
+  `ZombieStateHoldForCameraCue` at its cue (`0x0045C00C`). The hub, both
+  stand-and-throw routines, the scripted grab and state 28 have no clear, and
+  class 0x31 has none anywhere — it raises the bit only on its way to a corpse.
+
+The nine class-0x30 call sites are `0x0045583B` (hub), `0x004576FB` (state
+19), `0x00457A39` (state 22), `0x00457C18` (state 23), `0x004587C4` (state 28,
+`0x004586E0`, unported), `0x00458EB0`/`0x00458EC3` (`ZombieShouldStandAndThrow`
+— type 1 claims *before* its hand test, 0x13/0x14 after) and
+`0x0045920C`/`0x004592EE` (state 33). Class 0x31's twelve are listed in
+`functions.tsv`'s `ThrowerTryClaimAttackSlot` row; five of them are
+`ThrowerTryEnterState`'s, and the one for state 0x20 claims before its surface
+test and keeps the permit on a refusal.
 
 Two things free a permit other than its holder. `ZombieStateHoldForCameraCue`
 (`0x0045BFD0`) zeroes `g_attack_permits[obj+0x121]` when its delegate reaches

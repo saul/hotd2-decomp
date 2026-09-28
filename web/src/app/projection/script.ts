@@ -17,7 +17,7 @@ import type { BlockJson, OpJson, ScriptJson } from "../../bundle";
 import type { FeedEntry } from "../../script/walker";
 import { opStatus } from "../../script/walker";
 import { STATUS_TITLE } from "../../script/opstatus";
-import type { FeedRow, MinimapGraph, TreeBlock, TreeProjection, TreeStep }
+import type { FeedRow, TreeBlock, TreeProjection, TreeStep }
   from "../../ui/projection";
 
 /** A one-line operand summary for the tree and the feed. */
@@ -132,32 +132,3 @@ export function feedRow(e: FeedEntry, seq: number): FeedRow {
   };
 }
 
-/** The inspector's body: the opcode as pretty JSON. */
-export function inspectorText(op: OpJson | null,
-                              extra?: Record<string, unknown>): string {
-  if (!op) return "";
-  const body: Record<string, unknown> = {
-    opcode: `0x${op.op.toString(16).toUpperCase().padStart(2, "0")}`,
-    name: op.name,
-    category: op.cat,
-    file_offset: `0x${op.at.toString(16).toUpperCase()}`,
-  };
-  for (const [k, v] of Object.entries(op)) {
-    if (["i", "at", "op", "name", "cat"].includes(k)) continue;
-    body[k] = v;
-  }
-  if (extra) Object.assign(body, extra);
-  return JSON.stringify(body, null, 1);
-}
-
-/** The route table, flattened for the minimap. */
-export function minimapGraph(script: ScriptJson): MinimapGraph {
-  return {
-    entry: script.entry_block,
-    nodes: script.blocks.filter((b) => !b.hole).map((b) => ({
-      index: b.index,
-      kind: script.routes[b.index]?.kind ?? "end",
-      next: script.routes[b.index]?.next ?? [],
-    })),
-  };
-}

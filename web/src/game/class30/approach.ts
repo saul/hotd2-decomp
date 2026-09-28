@@ -37,7 +37,9 @@ export function ZombieStateApproach(obj: ZombieActor, eye: Vec3, rng: Rng,
                         rng, "clip", MotionFade.Quick);
 
   if (obj.rank < obj.allowance && obj.queueRank < QUEUE_CAP
-      && TryClaimAttackSlot(obj, host)) {
+      && TryClaimAttackSlot(obj, rng, host)) {
+    // `obj+0x34 &= 0xfffeffff` at `0x00457A4E` -- this state's own clear, the
+    // claim writes no `obj+0x34`. The rank tests stay out here too (`L11`).
     obj.flags &= ~ActorFlag.NoCameraTrack;
     obj.state = obj.attackState;
     obj.sub = 0;

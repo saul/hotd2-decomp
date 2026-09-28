@@ -898,3 +898,36 @@ the matrix stack's, and `RenderInitStates` flips z into D3D's view with
 the axis before you say which end comes first**, and treat any default a
 library supplies for state the exe sets explicitly as a divergence until it is
 shown to agree.
+
+**L62 -- A port state reads the play cursor a tick ahead of the engine's,
+and a clip frozen on one cursor while its state waits for the next never
+arrives.** The engine's states read `part+0x08`, which the class's draw
+computes from the frame counter *before* the class steps the counter after
+the draw; the port's director steps the counter before the update, so
+`MotionPlayFrame` in a state is the cursor the engine's state reads on the
+next frame. Mostly that is a frame early and nobody sees it. The frog's
+death freezes its clip (`obj+0x34 |= 0x4000`) on the frame it reads
+`len - 1` and waits to read `len`: in the engine the draw after the freeze
+computes `len` off the counter already stepped, and the state reads it next
+frame; in the port the freeze stopped the counter on `len - 1` and the
+corpse held `g_enemies_present` for ever -- stage 1's frog room, which read
+as the playthrough's failure to hit a frog. **When a state raises the freeze
+on cursor N, find the cursor it then waits for**; if it is N + 1, the class
+has to read the cursor its own draw left (`FrogTail.playCursor`), not the
+counter.
+
+**L63 -- A literal the engine compares against belongs to the engine's
+representation, and the port need not share it.** `g_attack_permits` holds 1
+or 0 in the exe and the holder's `at` or -1 in the port, a choice written down
+on the global. Two scripted attackers' player picks were transcribed
+instruction by instruction -- `CMP [g_attack_permits + p*4], 1` became
+`=== 1` and `TEST EAX, EAX` became `=== 0` -- so neither ever saw a permit a
+claim held, nor a free one: a scripted zombie took a player's permit from under
+the zombie that had it and never fell back to the other player. Every test
+passed, because those two routines' own writes to the table also used the
+exe's `1`, so they agreed with themselves and with nobody else. **When the port
+represents a value differently from the exe, transcribe the question the
+comparison asks ("is it taken"), not its constant** -- and before calling any
+reader of such a value faithful, grep every reader for the exe's literals.
+It is a cousin of `L3`: there one field means two things in two classes, here
+one table means one thing in two encodings.

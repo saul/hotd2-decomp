@@ -25,7 +25,7 @@ await waitForLoad(page);
 await page.keyboard.press("Space");
 const advance = (n) => page.evaluate((k) => globalThis.__hotd2Drive.advance(k), n);
 const now = () => page.evaluate(() => globalThis.__hotd2Drive.now());
-const box = await page.locator("#viewport").boundingBox();
+const box = await page.locator("#view").boundingBox();
 /**
  * Step 1's room has an ordinary enemy in it, and step 2 -- the one that lets
  * the horde in -- is behind it. `--shoot` fires a volley across the frame

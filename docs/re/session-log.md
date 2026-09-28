@@ -20428,7 +20428,151 @@ zeroed dive yaw, no hit slot, a splash at the caller's y, the splash stepped
 at the head of the frame, and a splash drawn one frame late each fail
 `npm run test:port`.
 
-## 2026-09-27 -- `ActorArcStep`'s stages, and the hold `ActorSetMotionBlended` puts on the cursor
+## 2026-09-27 -- the frog's turn fix-up and push-out, and four wrong ports beside them
+
+Class 0x11 declared two things unported: a "head-look fix-up" after each 45°
+turn, and `FrogPushOutOfActorCollision`, whose point was called undecided
+between view and world space because "the matrix chain says one and the use
+says the other". Both notes were wrong about the code, and reading the two
+turning states whole found four more wrong ports inside them.
+
+**The push-out's point is world space.** The chain is `MatrixStackPush(0);
+MatrixStackSetTopFromArray(g_camera_blocks[g_camera_index]);
+MatrixMultiply(part+0x130); MatrixGetTranslation` (`0x0043A504`..`0x0043A563`).
+`g_camera_blocks` is the camera block's `+0x40` matrix, which `globals.tsv`
+already had as view-to-world, and `part+0x130` is bone 1's draw record --
+records are `0x90` apart from `part+0x78`, the matrix at `+0x28` -- which
+`SkeletonEmitNode` stores under the camera, so in view space. View-to-world
+times view is world; `ActorShiftToHoldBone1Position` reads the identical chain
+the same way. The note had taken `g_camera_blocks` for world-to-view. The rest,
+from the listing with its FPU operands: skipped in state 6 but the point still
+written; `ColiTestSphereAgainstActors(point, obj+0x128)`; on a hit the push is
+`g_coli_hit_depth` times 0.05 below 0.1 of travel, times the travel times 0.3
+up to 0.6, times 0.3 above, added along the normal's x and z to both the
+position and the point; the point goes to `obj+0x12C` either way. The travel
+is measured from `0x007DCBB8`, now `g_frog_bone1_on_entry`, which `FrogUpdate`
+fills before any state runs from the same record through the same camera
+block -- one writer and one reader, by xref and by byte search. So the travel
+is between two readings of one record through one camera, the last draw's and
+this one's: bone 1's motion relative to the camera, not in the world.
+
+**The fix-up is not a head look.** `frog.bin`'s bone 1 is the node every other
+bone hangs from, and its turn clips carry their 45° in the root record (bone
+0's ry, 32767 to -24577 for `0x142`). After a pass the state adds the turn to
+the yaw and rewrites bone 1's angles as `MatrixToEulerZYX(R0⁻¹ RotY(-turn) R0
+R1)` -- there is no `MatrixDecomposeEuler`. Every draw rewrites those angles
+(`FUN_00411700`, now `SkeletonPoseNode`, stores all three of its arms at
+`record+0x04` -- the decompiler shows the fade arm returning early, the listing
+falls through to the store), so the rewrite survives only when the blend to the
+next clip snapshots it, which is exactly when the turn is done. The port
+already had that snapshot: `Actor.fadeFrom.records`, written for class 0x19's
+turn. Class 0x30 has no counterpart; neither Euler decomposition is called
+from a class-0x30 routine, so the note's "the same gap stops class 0x30's" was
+not so.
+
+**Four wrong ports in the same two routines**, each now pinned by a check that
+fails without its fix:
+
+* `0x004AD0B0` is `acos`, now `CrtAcos`: `atan2(sqrt((1+x)(1-x)), x)`, with
+  `FLDZ` at +1 and `FLDPI` at -1. The port had `asin`, marked likely because
+  asin "vanishes at the boundary" -- a reason about the result, not the code.
+* State 1's middle heading band was inverted: `[0x004C4D0C]` is -0.25, and the
+  frog between the two quarter lines gets the full `0x3000` window.
+* Both launch substates bump the substate and run on into substate 3's code
+  (`0x0043B03E`, `0x0043B6F2`), so the launch frame halves the owed turn too.
+  The port returned. That is now `L53`.
+* The leap's recovery is `ActorSetMotionBlended(0x13E, 0x3D, 2)`: the third
+  argument is the start cursor and the fourth the fade. The port had read a
+  61-frame fade from cursor 0, so the frog replayed its take-off.
+
+**What the port does, and how.** The draw half of `FrogDrawAndCycleBone2Slot`
+stores bone 1's record in view space on the frog's tail (`bone1View`) from the
+host's posed bone through this frame's camera; `FrogUpdate` and the push-out
+read it back through `viewPoint`, the camera block's view-to-world. The pose
+is the renderer's, so the record is the bone as last drawn -- the reading
+`ActorRegisterCameraPoint` takes. `ColiTestSphereAgainstActors` re-derives
+every other actor's sphere with class 0x30's formula; a new
+`ClassHandler.ownsSphereCentre` keeps the frog's published point. Classes
+0x31, 0x33 and 0x10 also write their own sphere and are still overwritten
+there; that is the shared routine's, not this change's.
+
+**Wrong turns.** A first draft named the constant and helpers "body" because
+bone 1 is what the corpse model replaces; that is naming by resemblance, and
+they are `FROG_BONE1` and `FrogBone1World` now.
+
+**Next actions.**
+
+* `ColiTestSphereAgainstActors`'s re-derivation should honour every class
+  that publishes its own `obj+0x12C` (0x31, 0x33, 0x10), or walk the
+  registered list as the engine does.
+* The death state plays `ActorSetMotionBlended(0x13F, 0, 2)` after writing
+  `obj.motion` itself, so the port's blend sees no change and cuts; and its
+  `SpawnGroundRingEffect` is not called. Neither was read for this.
+
+## 2026-09-28 -- the canal water is a task: class 0x41 type 1
+
+**The report.** `?stage=2&mode=play&entry=0&block=16&step=14&op=1`: the dock
+in block 16 stands over nothing -- black under the boards and between the
+pilings.
+
+**What was found.**
+
+* Region 29, where the walker stands, names four `st2_07` models and none of
+  the canal's flat green planes. The script loads two of those planes itself
+  (`asset_load_slot` `st2_07[3]` at step 0 and `st2_07[1]` at step 10), and a
+  slot that is only loaded is drawn by nothing: `RegionDrawResidentSet`
+  (`0x00401260`) walks the current region's list and no other `[proved]`.
+  Its loop tail (`0x00401443..0x0040145F`) sits outside Ghidra's function
+  body, so its decompile shows a single entry; the disassembly settles it.
+* The only references to those slots in `.text` are immediates in
+  unfunctioned code at `0x0046E3A0` -- now `WaterSurfaceUpdate` -- whose one
+  data xref is `g_class41_constructors[1]`, `FUN_00462F70`, now
+  `PlaceWaterSurface`. Class 0x41 type 1: a 0x44-byte task that draws
+  `g_water_surface_slots[obj+0x1F4]` (`0x00593DA4`, ten flat tiles) every
+  frame, ripples its UVs, flips its TSP filter bit to bilinear, pairs and
+  swaps tiles on script flags, and kills itself on five conditions.
+  Fifteen spawns: 5 stage 2, 7 stage 3, 3 training. Full reading in
+  `docs/formats/water.md` §2.
+
+**What the port does.** `game/class41/water.ts` transcribes both routines;
+the ripple is cumulative in the engine, so `G.g_water_surface_uv` keeps it as
+two sums per tile (`sin(a + b)` factors) and `render/water_surfaces.ts`
+applies them per geometry. The exporter emits a `water_surface` placement
+with the slot resolved through the table (schema change) and carries the
+`komono_boss2`/`komono_venis` tiles in `slots_actor`. `StageScene` no longer
+shows the task's tiles by its "loaded and unregioned" stand-in.
+`tools/verify_water.py` checks the chain, the table and every constant
+against the immediates; two mutations (a constant, the table address) fail it.
+
+**Wrong turns.**
+
+* `docs/formats/water.md` opened "There is no water renderer", and I spent
+  the first hour treating that as the frame: checking the region lists and
+  the materials of the region planes for a hiding reason. It was a negative
+  result (L17) that nobody had tested against a place the water was missing.
+* `water.bin`, which the block loads at step 1, looked like the answer by its
+  name. It is 63 effect models -- droplets, splash sheets and a fifty-frame
+  splash drawn from `0x004086F5` -- and no surface. Naming by resemblance
+  again; the slot search is what found the task.
+* The first cut of the exporter placement had no arm in `SpawnPropContainers`'
+  bridge, whose default is `PlaceBreakableGroup`: every water spawn would
+  have been placed as breakable group 0. Caught in the page, before commit,
+  by the placers' `condition` reading 0.
+* The first render layer called two `game/` functions and failed
+  `render-drives-the-port`; the closure became a table and the per-vertex half
+  of the phase moved into the renderer.
+
+**Next actions.**
+
+* Asset residency (`0x009A66A0`'s `+0xD` bit 0x80) is not modelled, so the
+  ripple's residency gate is `[diverges]` and the ripple is not reset when a
+  tile is reloaded. Both are bounded to a phase offset; a residency model
+  would clear them and is its own piece of work.
+* A seek runs every replayed placer's constructor on the first live frame, so
+  step lifetimes restart where the seek lands -- for every class-0x41 object,
+  not only this one.
+
+## 2026-09-28 -- `ActorArcStep`'s stages, and the hold `ActorSetMotionBlended` puts on the cursor
 
 Reported from the state-23 port: its `obj+0x19C > 66` test first fired at 68
 in the port. Read `ActorArcStep` (`FUN_0044D860`) from the listing. All three

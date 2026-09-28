@@ -1994,7 +1994,9 @@ export interface ActorBase {
    * clip's: a state that writes the drawn pose's records before it blends
    * (`Boss4StateTurnClipThenApproach`, `FUN_00494730`, rewrites records 1 and
    * 9 at `char+0x10C` and `+0x58C`) hands the renderer the BAMS it wrote, and
-   * the fade dissolves from those.
+   * the fade dissolves from those. The frog's two turning states do the same
+   * to record 1 after every pass of a turn clip (`FrogStateHopWithinScreenWedge`
+   * (`FUN_0043AA10`), `FrogStateLeapAtPlayer` (`FUN_0043B270`)).
    */
   fadeFrom: { motion: number; ticks: number; records?: FadeRecord[] } | null;
   /**

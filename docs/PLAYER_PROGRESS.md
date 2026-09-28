@@ -1781,9 +1781,7 @@ Three readings from these that are worth keeping:
 
 **What is not ported**, and each is declared where it lives: the owl's body
 chain (sixteen slots in one matrix chain against `render/slotmodels.ts`'s one
-per actor) and the four per-sub-type landings its corpse has; and the frog's
-head-look fix-up and its actor-versus-actor push, whose transformed point is
-`[open]` between view and world space.
+per actor) and the four per-sub-type landings its corpse has.
 
 **Their effects are.** The owl sheds forty feathers when it dies and eight
 on every strike, and leaves blood at its camera-space point; the fish leaves a
@@ -1797,6 +1795,24 @@ surface ring the port had them make: all three call `SpawnRingEffectAtPose`
 (`FUN_00408370`), the ring task `SpawnGroundRingEffect` makes too. The owl's
 ground impact ring and water splash are ported and wait on the landings, which
 are their only callers.
+
+The frog's two gaps, which this list used to name, are closed. Its **turn fix-up** — not a
+head look: after each 45° pass the engine turns bone 1, the node the whole of
+`frog.bin` hangs from, back by the turn it just put into the yaw, so the
+blend out of the turn clip starts from the pose on screen — rides the fade's
+snapshot as `Actor.fadeFrom.records`, the mechanism class 0x19's turn already
+uses. Its **actor-versus-actor push** is ported, and its point was never in
+doubt: `g_camera_blocks` is the view-to-world matrix and `part+0x130` a
+view-space draw record, so the product is bone 1 in the world. The push is
+scaled by bone 1's travel between two readings of that record through one
+camera block — relative to the camera — and the pushed point is the sphere
+the frog publishes; `ClassHandler.ownsSphereCentre` keeps
+`ColiTestSphereAgainstActors` from overwriting it with class 0x30's feet.
+Reading the two states whole also found four wrong ports inside them: the
+wedge clamp is `acos`, not `asin` (`CrtAcos`); state 1's middle heading band
+was inverted; both launch frames run on into the flight and halve the turn
+that frame too; and the leap's recovery resumes the clip at cursor `0x3D`
+over a fade of 2, where the port had played it from the start over 61.
 
 ## A fourth: the bat, class 0x46, and a flight path that is not in the script
 
@@ -4440,6 +4456,81 @@ cursor wraps there, so an actor on that data would wait out its landing for
 ever; the old port only finished because it bailed out when the arc landed.
 The fixture carries the exe's own wall script now, and `verify_combat.py`
 check 16 asserts that none of the 38 shipped scripts does that.
+
+### The canal is drawn by a task: class 0x41 type 1
+
+Stage 2's block 16 stood on a dock over **no water at all** --
+`?stage=2&mode=play&entry=0&block=16&step=14&op=1` showed a black void under
+the boards and between the pilings. `docs/formats/water.md` said the surface
+is region geometry and there is no water renderer, and for most of the canal
+that is true. It is not true here.
+
+Fifteen class-0x41 spawns in the game -- five in stage 2, seven in stage 3,
+three in training -- carry constructor byte **1**, `PlaceWaterSurface`
+(`FUN_00462F70`), which the port had never read: its entry in
+`g_class41_constructors` fell to the generic fallback, found no placement and
+did nothing. What it builds is a 0x44-byte task, `WaterSurfaceUpdate`
+(`FUN_0046E3A0`, not even a Ghidra function until now), that **draws a water
+tile every frame** -- `g_water_surface_slots[obj+0x1F4]` (`0x00593DA4`), ten
+flat tiles in `st2_07`, `st1_1`, `komono_boss2` and `komono_venis` -- and
+ripples its texture as it does. The script loads those tiles with opcode 0x50
+or `asset_load_polfile`, and a slot that is only *loaded* is drawn by nothing:
+`RegionDrawResidentSet` walks the current region's list and no other. Region
+29, where the report stands, names four models and no water.
+
+**What the task does**, all of it now in `game/class41/water.ts`:
+
+* a lifetime in changes of `g_evt_step_index`, and five kill arms -- the
+  canal tile at step 0xF, block 0x23 step 2 on stage 2, `flags[index + 0x0B]`
+  and `flags[4]` on stage 3, `flags[0x77]` on stage 2 -- none of them in
+  Boss mode;
+* **the ripple**: while the tile is resident and a gate is open (flag 8 for
+  the arena tile, camera path 0x6E for the death water, not flag 0x6A, not
+  path 0x7E at frame 0x163, and in Training flags 0xF1/0xF2), every vertex's
+  `u` gains `sin(phase(x)) * 0.00075` and `v` gains `cos(phase(z)) * 0.00075`,
+  the phase being `tick * 0x180 + ftol(coordinate) * 600` in BAMS; with index
+  0 only vertices at `z <= -1870` move. It is cumulative -- the model's UVs
+  are rewritten in place -- so it is state, and it lives in `G` as two sums
+  per tile (`G.g_water_surface_uv`): `sin(a + b)` factors, so the per-vertex
+  term comes out of the sum and `render/water_surfaces.ts` applies it;
+* every mesh header's TSP word gains `0x2000`, filter mode 1: a rippled tile
+  samples **bilinearly**, where the exporter had turned its filter mode 0
+  into `NEAREST`. Only the rippled tile -- `0x13A5`, drawn beside the arena
+  water but never walked, keeps its point sampling;
+* the draws: the tile, `0x13A5` beside `0x13A7`, `0x13AC` beside `0x13A9`;
+  then flag 9 swaps `0x13A7 -> 0x13A9` and `0x13A0 -> 0x13A2`, and
+  `0x13A2` turns back to `0x13A0` on path 0x6E -- in the same frame as the
+  swap, since that line reads the slot the swap just wrote.
+
+**How it is drawn.** A tile the stage glTF already holds is drawn as that
+node, because in the engine the task and `RegionDrawResidentSet` draw one
+model and the ripple shows in both; `StageScene.setWaterSlots` makes it
+visible while the player has it resident (0x50-loaded, or in the current
+region). The `komono_*` tiles are nobody's region, so they now travel in the
+`slots_actor` rig and are cloned from it. The tiles the task owns are taken
+**out** of `StageScene`'s "loaded and unregioned, so drawn" rule: that rule
+was standing in for this task, and left in it drew stage 2's two death-water
+tiles over each other and stage 3's before their task existed. A class-0x41
+type-12 prop draws `0x13B5` in the boss's blocks too, and it gets the same
+rippled model -- the layer rewrites every node drawing a tile, keyed by
+geometry.
+
+The bundle carries a `water_surface` placement per spawn with the slot
+already resolved through the table, so this is a schema change and every
+bundle needs re-exporting. `tools/verify_water.py` asserts the constructor
+chain, that the table is ten flat water tiles, the fifteen spawns, and every
+constant in the port against the immediate at its instruction.
+
+What it does not do: the engine's ripple state lives as long as the model
+and resets when a tile is unloaded and loaded again; the port keeps it for
+the scene (`[diverges]`, and the one shipped reload is at most 0.02 of a
+texture repeat out of phase). The walk's residency test is not modelled
+either -- the port has no asset residency (opcodes 0x52..0x58 are "shown") --
+so block 16 step 10's arena tile ripples three steps before `komono_boss2.bin`
+arrives, while it is not drawn. And a seek replays every placer and runs
+their constructors on the first live frame, so after a seek a task starts its
+lifetime where the seek lands -- the same thing every class-0x41 prop does,
+which is why the canal tile is still there after a seek into block 35.
 
 ## The bosses' shared furniture: the health bar, the name banner, the shot test
 

@@ -22165,3 +22165,388 @@ shipped script.
 * The Tower's `Boss3PublishCameraAngles` and `Boss3SeatCameraAngles`
   (`class45/body.ts`) compensate for a view built from the look-at. The view
   is built from the angles now, so both can go.
+
+## 2026-09-28 -- the frog's death, read whole, and why its corpse never went
+
+Class 0x11's death state had never been read. The last frog session left two
+notes -- the death cuts where it should blend, and `SpawnGroundRingEffect` is
+not called -- and the playthrough table above had stage 1 hung in the frogs'
+room with two frogs in `Die/1`. Both halves of the path were read from the
+listing: `FrogAwardKillAndEnterDeath` (`0x0043A2E0`..`0x0043A3C7`) and
+`FrogStateDieTumbleAndSink` (`0x0043B990`..`0x0043BD23`, with
+`0x0043BB68`..`0x0043BB8E` past the `MatrixStackPop` call Ghidra ends case 0
+on). `[proved]` throughout; the TSV rows now carry the whole reading.
+
+**Why the corpse never went.** Case 1 raises `obj+0x34` bit `0x4000` (the
+clip's freeze) when `part+0x08 == len - 1` and waits for `part+0x08 == len`.
+In the engine `part+0x08` is what the last draw computed, and
+`FrogDrawAndCycleBone2Slot` steps the counter *after* its draw, so the draw
+following the freeze computes `len` and the state reads it next frame. The
+port's director steps the counter before the update, so a port state reads the
+cursor the engine's reads a frame later; frozen on `len - 1`, the counter never
+got to `len`. That is `L62`. The class now keeps `part+0x08` on its sub-block
+(`FrogTail.playCursor`, written at the draw and at each blend it starts) and
+every state reads that -- which also moves the hop's launch and stop, the
+leap's launch and connect and every turn pass one frame later, onto the
+engine's frame.
+
+**What else was wrong**, each pinned by a check that fails on the old module
+(`web/test/port.test.ts`, 20 failures against `HEAD`'s `class11/index.ts`):
+
+* case 0 runs on into case 1 (`INC byte ptr [EAX+5]` at `0x0043BB8C`, then
+  `0x0043BB8F`, L53), so the kick is bounced on the frame of the kill;
+* the death clip is blended: `ActorSetMotionBlended` snapshots the drawn pose
+  unconditionally, and the port's primitive keys its snapshot on
+  `obj.motion`, which the port had written first;
+* `SpawnGroundRingEffect(obj)` at `0x0043BCD4`, on the settling frame;
+* the kick is the camera block's rotation of `(0, 0, -0.5)` with the
+  translation zeroed; the port subtracted `ClassFrame.eye` from a camera
+  point, which is wrong wherever the two cameras differ;
+* the kill's bit is `0x8000` (out of the shot test), not `0x100`: corpses were
+  stopping bullets. Whether that is what kept the playthrough off the third
+  frog, or only the corpses never leaving, is `[open]` -- the run below
+  changes both at once;
+* `part+0x210` is bone 2's record `+0x78`, its hit radius -- not bone 3's slot.
+  Bone 3's model is back on the corpse, and the radius is a new
+  `Actor.boneRadius` the pick, the shot test and the blood's depth read;
+* `ChooseHitPlayerOrder` (`0x004093C0`) is called, a draw with two players in;
+  `g_hit_player_order` is in `G`;
+* the kill zeroes the word at `+0x11C` and not `+0x11E`;
+* `FrogInit` raises `part+0x64` bit 4 (`0x0043A170`), which the ring's height
+  and the shadow read, and seeds `obj+0x12C` from the position;
+* two port-only exits: `leave` dropped `g_enemies_alive` again for a corpse,
+  and the sweep freed a permit the corpse no longer held.
+
+**Checks.** `tools/animals.mjs` gains a `frog death` row on the real bundle:
+every frog alive at frame 720 is marked shot, and each must despawn and leave
+one ring (it fails on the old module, one corpse standing). The harness also
+learned the character layer's `spent` set -- it rebuilt despawned actors.
+Stage 1 under `playthrough.mjs --continue`: on `HEAD` the frog room needs the
+debug clear (37 volleys, no damage; `0x2AB0` and `0x2B5C` in `Die/1`), on
+this branch it is shot clear and the stage ends at 9240. Screens of the death
+in the page, before and after, are
+`scratchpad/frog-death/shots/frog-{old,new}-*.png` of this session: the
+corpse keeps its head, and at +14 the ring's strips open round it.
+
+**Wrong turns.** The first stage-1 playthrough ended at block 1 with a
+GAME OVER and I took it for this branch's; the same run on a detached `HEAD`
+did the same thing (33 volleys at a `char_adv00` in `HoldAtRange` with no
+damage landing), so it predates this. The `+0x11E` assertion first passed on
+the old module too, because the fixture's `maxHp` was already 0.
+
+**Next actions.**
+
+* `ActorKillAll` marks an `ownsShotResult` class dead without raising bit 3,
+  so a frog the debug clear reaches never enters its death.
+* The engine stops writing a bone's sphere centre once its slot is 0 or
+  `obj+0x34` has `0x8000` (`SkeletonEmitNode`), so the frog's blood stays
+  where bone 2 was drawn; `render/effects.ts` reads the live bone.
+* `class30/throw.ts` and `SpawnThrownWeapon` zero a hand's hit radius and
+  declare that the actor has nowhere to keep it; `Actor.boneRadius` is that
+  place now.
+* Stage 1 block 1 on `6706e32`: no damage lands on the `HoldAtRange`
+  `char_adv00`, and a run without `--continue` ends there.
+* L62's pairing -- a freeze on one cursor and a wait for the next -- may be
+  in other classes; they read the counter.
+
+## 2026-09-28 -- the owl's corpse lands, and the owl's death path read again
+
+`OwlCorpseFallAndSettle` (`FUN_00448210`) was ported as a fall, a tumble and a
+121-frame life, with the four landings behind a declared divergence, and the
+owl's ground ring and water splash -- already ported -- had no caller. Both
+are in now, and re-reading the corpse and the death block beside it found six
+more things the first port had wrong.
+
+**The corpse** `[proved]`, from the listing (`0x00448210`..`0x004487B7`) and
+the jump table at `0x004487B8` (`0x00448397`, `0x004482BA`, `0x004485BA`,
+`0x0044872E` for sub-types 0..3):
+
+* The spin **decays**: `obj+0x64 += spin; spin = ftol(spin * 0.95)`
+  (`[0x0055CB40]`). The port added `-768` a frame for 121 frames.
+* Sub-type 0 is a stairwell. East of `x = -720.60425` -- both rails' last x,
+  bit for bit, which is what keeps the segment walk inside the rail -- each of
+  `g_class43_corpse_rails` picks the segment whose x span holds the corpse and
+  flips `vz` on the sign of a cross product: rail 0 on `> 0`, rail 1 on `< 0`
+  (`TEST DL, AH` with `DL = 1`). Worked through, that is an XOR: between the
+  rails both fire and cancel, beyond either one fires and turns it back. West
+  of `-739` it is stopped dead (`+0x600` spin). Under `35.91906` it lands
+  (ring at `35.93906`); above, a thirteen-step floor `n + 45` bounces it.
+* Sub-type 1 is a line through `(-630.6, -923.8)` along `(-34.9, -15.5)` --
+  the doubles, and the third is `-34.89999999999998`, `[likely]` the compiler
+  folding `-665.5 - -630.6`. One side is a flat: under `49.16` a ring at
+  `49.3`, **no thud and no clamp** (`0x00448319`). The other is
+  `OwlTestPositionBelowPlane(0, 0.979029, 0.203721, 140.1687)`: a ring a unit
+  under the corpse, pitched `0x1000`, and the thud (`0x00448376`).
+* Sub-type 2: an eight-step stair `n * 3.5 - 33` inside a box turns the fall
+  every time and bounces it across once (`obj+0x250`); at `-36` anywhere it
+  lands with a ring at `-35.98` (`0x00448710`, the tail sub-type 0 reaches by
+  `JMP 0x0044870C`).
+* Sub-type 3: at `-25` the splash (`0x00448758`) and `SIBUKI8`, and the corpse
+  sinks on through the surface.
+* `0x1E16A9` is `COMMON\DAMAGE5_22.WAV`, read off the SE record at
+  `0x00584BDC`.
+
+**The death path**, `OwlUpdateAndResolveShot` (`FUN_004460C0`) `[proved]`:
+
+* **The dead bit is `0x1000000`, not `0x4000000`.** `0x004461D6` raises it and
+  `OwlDrawBodyChain` reads it twice (`0x00447C94`, the dead body; `0x00447D4B`,
+  the inner chain). The port raised `ActorFlag.Dead` and `render/owl.ts` read
+  that, so the pair agreed with each other and not with the exe. It is
+  `OwlFlag.Corpse` in `class43/state.ts` now.
+* **The throw goes away from the camera.** The death reads
+  `g_camera_block_yaw_bams` (`0x009A60D0`) + `0x8000`; the port read
+  `g_camera_yaw_bams`, which is that block yaw already turned half round, so
+  every corpse flew back over the player's head. In the page a block-14 owl
+  shot at `z = -1144` came down at `z = -1061`, behind a camera at `-1070`;
+  it now comes down at `-1155`.
+* **Nothing clears the hit bit.** No instruction in the class ANDs `obj+0x34`
+  with a mask that drops bit 3 (swept every `AND` immediate in
+  `0x00445DB0..0x00448F00`; the generic ones are all class routines), and the
+  port cleared it every frame -- so a sub-type-0 owl shot before camera frame
+  682 forgot the bullet, where the exe's dies on the frame the guard lifts.
+* **The corpse is never a shot candidate.** The update ends
+  `view(obj+0x40) -> obj+0x70; RegisterForShotTest` (`0x0044644E`..
+  `0x00446488`) on every live frame, the death frame included, and the corpse
+  routine makes no such call. The owl was picked by its sphere from `render/`,
+  where a falling corpse kept taking the shots meant for the owl behind it; it
+  registers the engine's way now (`registersForShotTest`).
+* The yaw error runs `-0x7FFF..+0x8000` (`CMP ECX, 0x8000; JLE`), not `s16`.
+* The death zeroes `+0x24C`, `+0x250` and `+0x254`, not the settle flag at
+  `+0x26C`. `+0x254` has no other reference in the image.
+* `onDeadSweep` freed `g_class43_attack_token` whenever the despawned owl's
+  member index matched it -- in stage 2 block 5 that is an owl of the other
+  flock, mid-dive. It does nothing now: the death block already gave
+  everything back.
+
+**And one outside the death path**, found reading the yaw global:
+`OwlPickTargetPlayerAndAimOffset` (`0x00447FB0`) measures its two-player aim
+offset as `ftol(horizontal distance to g_camera_block_eye) / 60` along
+`g_camera_block_yaw_bams + 0xC000 / 0x4000`. The port used the sway rate for
+the length and `g_camera_yaw_bams` for the heading, so the two players' owls
+came in on each other's side. The TSV row had the length as `obj+0x204 / 60`,
+which the routine never reads.
+
+**Wrong turns.** The brief (and `effects/owl.ts`) had the ring calls as one per
+sub-type -- `0x00448319` for 0, `0x00448376` for 1, `0x00448710` for 2 -- and
+I started from that. The jump table says both `0x00448319` and `0x00448376`
+are sub-type 1's, and `0x00448710` is shared. `globals.tsv` described the
+rails as reflecting "on the outside of the first or the inside of the
+second", which is a reading of the two branch senses rather than of the
+arithmetic; working a point between them shows both fire. The first run of
+the new tests failed the blood test, which counted one call to
+`viewSpaceOfPoint` on the death frame -- the shot test's depth is the second.
+
+**Checked.** `test:port`: against the old port 27 assertions fail (26 new,
+and the amended blood count), and the throw and aim-offset ones added after
+fail under a mutation that puts the old lines back. In the page (`web/tools/creature_effects.mjs --which owl|owl2`,
+now reporting corpses, rings and splashes): stage 2 block 5 lands a sub-type-1
+corpse on the sloped street with its ring pitched to it, and block 14 a
+sub-type-2 corpse on the floor at the foot of the stair,
+`web/shots/owl-corpse-subtype1-slope.png` and
+`web/shots/owl-corpse-subtype2-floor.png` (gitignored). A sub-type-0 corpse
+was driven into the `-739` wall and landed at `35.92`; stage 3's water was not
+reached, because the deep link lands behind a room the harness does not clear.
+
+## 2026-09-28 -- the attack claim's one-player pick, and who lowers `NoCameraTrack` (branch `fix/newbugs2-claim-pick`)
+
+The mauler fix (`abea8507`) left two declared divergences in
+`combat/permits.ts`: the claim took the first free permit, and it cleared
+`obj+0x34` bit `0x10000`. Both are gone.
+
+**Read.** `TryClaimAttackSlot` (`FUN_00455DE0`) and
+`ThrowerTryClaimAttackSlot` (`FUN_0044CA40`) from the listing, all 93
+instructions of each, side by side: identical except `OR EAX, 0x20000` at
+`0x00455F10` against `OR AH, 0x80` at `0x0044CB70`. `[proved]`
+
+* Void `obj+0x121`; the latch; then on the s16 `g_max_attackers`: 1 ->
+  `g_active_player`'s permit if free (a taken one, or `g_active_player` 2,
+  offers nothing); 2 -> `rand() % 2` if the s16 `g_players_in_play` is 1, the
+  same pick NOT-ed when taken if the s16 `g_enemies_present` is 1, else
+  `ActorScreenHalfSign` (`FUN_00409C90`, twelve instructions, read and ported).
+  `IsPlayerAttackable` voids the pick; only `0xFF` fails, so a `-2` it passes
+  (attract mode) claims "permit -2" at `0x009A2B98`.
+* The only stores are `obj+0x121`, the latch bit, `g_attack_committed` and the
+  table. **No `obj+0x34`.**
+* `rand` is `0x004ABE60` -> `0x004ADED2`, the MSVC per-thread LCG, one draw a
+  call; `Rng.int(2)` is the port's spelling (`L46`).
+
+**Every caller** -- `get_xrefs_to` gave 9 and 12, and `search_instructions`
+for the `CALL` operand and a byte search for the address as a pointer agreed
+(no table holds either). For `NoCameraTrack` I swept every `AND` with an
+immediate clearing bit 16 and every `OR` setting it in `0x00449000`..
+`0x0045F000`, then read each claim site's own listing:
+
+| caller | clear of `0x10000` |
+|---|---|
+| `ZombieStateApproach` | after a grant, `0x00457A4E` (the port had it) |
+| `ZombieStateWaitForCameraFrame` | before the claim, hidden kind only, `0x004576E5` (the port had it) |
+| `ZombieStateHoldForCameraCue` (the hub's holder) | at the cue, `0x0045C00C` (the port had it) |
+| hub, both stand-and-throw routines, the scripted grab | none |
+| state 28 (`0x004586E0`) | before its claim, `0xfff6feff` at `0x004587B5`; not ported |
+| class 0x31, all twelve | none anywhere in the class; it raises the bit only on the way to a corpse |
+
+So the claim's clear was simply deleted; no caller needed one moved into it.
+
+**Found on the way, each at a claim site, each fixed:**
+
+* `ZombieShouldStandAndThrow` claims *before* its hand test for type 1
+  (`0x00458EC3`) and after it for 0x13/0x14 (`0x00458EB0`); the port tested
+  hands first for all three.
+* `ThrowerTryEnterState`'s state 0x20 (jump-table arm 9, `0x0044B0E4`) claims
+  and then tests surface `0x35` at `y + 4.5`; the port refused the state
+  without claiming and called the surface an open question, but
+  `QueryGroundSurfaceAt` has been ported for a while.
+* `ThrowerStateRideObjectPath` raises `0x100` for its ride and lowers it before
+  the claim; the port had neither.
+* `ThrowerStateBlinkInThreeHops` raises and lowers `obj+0x34` bit `0x100`
+  (`0x004514F3`, `0x004516B7`); the port wrote `NoCameraTrack` there. Found
+  by asking which class-0x31 routines the port lets touch `0x10000` -- the
+  exe has three, all death.
+* `ZombieScriptedPickPlayer` and `ThrowerGrabTakePermit` tested the permit
+  table with `=== 1` / `=== 0`, the engine's literals (`CMP ..., 1` at
+  `0x00457E32` and `0x0044F249`); the port's table holds the holder's `at` or
+  -1, so neither ever saw a claimed permit (`L63`). `ZombieStateStandAndThrow`'s
+  re-mark of the table after the claim (`0x00459260`) was missing too.
+
+**Wrong turns.**
+
+* My first mutant for the old pick replaced only the one-attacker arm and left
+  the two-attacker arms live; 7 of the 13 pick assertions failed on it and I
+  nearly took that as the proof. Replacing the whole chain with the old loop
+  fails all 13.
+* I wrote in `ActorScreenHalfSign`'s doc that `SkeletonEmitNode` writes
+  `obj+0x70/0x78`. That was from the name of a routine that writes a
+  *different* view-space triple (`obj+0x10C`); I have not read the writer of
+  `+0x70`, and the note now cites only its readers. `[open]` which routine
+  writes it for class 0x30.
+* The xref list named `0x004587C4` as in no function. By the time I read it
+  the live database had a function there called `ZombieStateDelayedPounce`
+  that no worktree's TSV contains -- a peer's, mid-flight. Per `L52` I named
+  nothing; state 28 stays unported and unnamed in the annotations.
+
+**Checks.** 32 new `port.test.ts` assertions; a mutation script restoring each
+old behaviour (the first-free loop, the claim's clear, the type-1 order, state
+0x20's missing claim, the ride's missing immunity, the blink's bit, the
+scripted `=== 1`) fails 13, 3, 3, 1, 1, 1 and 2 of them respectively.
+One-player play draws nothing new from the `Rng`, so determinism and
+`test:state` see only the behaviour changes.
+
+**Still declared:** a `-2` pick in attract mode is refused, not claimed (the
+port runs no attract mode and has no index -2).
+
+## 2026-09-28 -- the camera block's yaw, and the readers that took the other one (branch `fix/newbugs2-blade-throw-yaw`)
+
+**The report** (from the thrown-weapons session, `a237a5cc`): "znassb and
+condition-8 axe walkers never throw [likely]. `ZombieShouldStandAndThrow`
+(`FUN_00458E10`) reads the camera block's yaw at `0x009A60D0`. The port reads
+its own camera yaw instead, which is half a turn out."
+
+**What main had by then.** `fix/camera-faithful` (`6706e323`) had already made
+the camera the exe's two tasks: `CameraActorTick` runs the queued driver and
+`UpdateSceneViewAndLight`, so `G.g_camera_block_yaw_bams` is written every
+frame, before any actor, and read back through `MatrixGetAngles`. The "keep it
+current" half of the report was done; what was left was the readers.
+
+**The reading.** `ZombieShouldStandAndThrow`, from the listing: `obj+0x130C ==
+8`; `AngleWithinTolerance((block_yaw[g_camera_index] - 0x8000) & 0xFFFF,
+obj+0x68 & 0xFFFF, 0x400)` (`0x00458E48`, the index scaled by `0x69` dwords);
+then a switch on `(s16)obj+0x1F4` that the port had flattened -- type 1 claims
+the permit **before** it tests the blades (`0x00458EC2`), 0x13 and 0x14 test
+the axes first (`0x00458E7F`/`0x00458E97`), and every other type returns 0
+without claiming. The block's yaw is `VecToAngles(eye - target)`, the camera's
++z; an actor facing the camera has `obj+0x68 = VecToAngles(obj - eye)`, which
+is the block's plus half a turn, so the `- 0x8000` makes the window sit on the
+actor's own heading. `g_camera_yaw_bams` (`0x009C71F0`) is written by the
+scene state's hooks as a heading already turned half round (the rail pose's
+`+ 0x8000`), so `g_camera_yaw_bams - 0x8000` was the block's own yaw, half a
+turn from the window. `[proved]`
+
+**Every reader.** `get_xrefs_to 0x009A60D0` gave 62, an operand search for
+`9a60d0` 58 and the bytes `d0609a00` 63 (L32): the five the byte search adds
+are Boss3BodyUpdate's read and write (`0x004240D9`, `0x0042410F`), the body
+creature's launch (`0x0043E980`), an unnamed spawner at `0x00472A50` and a boss
+routine at `0x00498058` -- each in code Ghidra has no function for. Of the
+ported ones, these read `g_camera_yaw_bams` or something else and now read the
+block, each with its own address in the comment:
+`ZombieShouldStandAndThrow`; `ChooseDeathMotionDirectional` (it now reads the
+global itself, so `ResolveHit`, `DispatchHit` and `ActorKillAll` lose a
+parameter the exe never had, and `render/shooting.ts` loses the getter that fed
+it); `SeveredHeadUpdate` (the head flew at the camera); `OwlUpdateAndResolveShot`
+(so did the corpse) and `OwlPickTargetPlayerAndAimOffset` (whose distance was
+also the sway rate, where the exe takes `ftol(|owl - block eye|) / 60`);
+`BatDiveUpdate`/`BatSwarmUpdate`'s wobble; `WaterSplashUpdate`;
+`Class26Subtype2Update`'s latch (`+ 0x8000`, unmasked); `PropUpdateType43`
+(which carried an `[open]` saying the port did not have the word);
+`KindedPropUpdate`, whose crack made **no** write at all; the six class-0x14
+strips, through a `[port-only]` helper that returned the wrong global and is
+gone; the carrier's bow strips and `render/slotmodels.ts`'s drawn strip.
+Already right: `ActorHeadAimAngles`, `FallingContainerUpdate`,
+`BreakablePropUpdate`, class 0x45 and `render/boss3_effects.ts`, the camera's
+own routines. Unported, and left: class 0x2D's seven, `ZombieStateLeapStrike`
+(state 0x34), the target script's splash strip (`0x0045AD5C`), carrier
+routines 3/4/5/7/8, the backdrop's view-space presets, `ChapterCardInstall`'s
+light block, `FUN_0048F190`'s face-camera latch (its rig is drawn with no
+latch at all), and the body creature's `obj+0x68` (its draw rotates by X
+only). `g_camera_yaw_bams`'s own nineteen readers (class 0x31's leaps, the
+grab, class 0x22, the player bodies) were checked and were right.
+
+**The frog** reads camera block **2**'s yaw, `0x009A6418` -- one literal read
+in the image, `0x0043AB62`. Block 2 is written by `CameraBlocksReset` (zeroed),
+`EvtRunQueuedActionsSyncViewBlock` (block 0's pose copied in while the scene
+state is (1, 3), angles derived from it) and `UpdateSceneViewAndLight`'s loop
+over all four blocks (`ESI` from `0x009A60D4` to `0x009A6764`). The sync's
+other arm needs `0x009C6F1C == 5`, and both writers of that word store a
+zeroed `EBX` (`0x0040220E`, `0x0045EE2F`), so it is dead. The port now keeps
+block 2's eye, angles and look-at in `G`, runs the sync as the major-1 hook,
+zeroes it in the reset and rebuilds its angles each frame, and the frog reads
+it; the `[diverges]` that said the port had one camera yaw is gone.
+
+**Named.** `DrawBackdropSlotInViewSpace` (`0x00413620`), `CameraTaskCreateAtOrigin`
+(`0x00482C00`), `TitleMenuCameraTaskCreate` (`0x00496850`) -- the last two are
+the other direct writers of the block's yaw; five labels for block 2's words.
+
+**Verified.** `web/tools/blade_throw.mjs` drives the page under `?drive=1` from
+the spawn's own script address and prints, per sample, the actor's state and
+its facing error against both words. Stage 4's first `znassb` (evt 3740,
+`?stage=4&block=0&step=5&op=5`): before, it reached a facing error of 397 BAMS
+against the block and 20544 against the old word, never entered state 33 in
+1500 frames and threw nothing; after, it stands at frame 70 and both blades
+are in the air by 110. Stage 5's (2948): before, 322 against the block and
+never stood; after, stands by frame 40 and throws both. Stage 3's axe walker
+(8312) throws twice and stage 2's (26500) once. In `port.test.ts`: the
+condition-8 test builds the camera with the camera's own routines, runs the
+scene state's hook over it and turns the walker with `TurnActorTowardCamera`,
+and asserts the walker is inside the block's window and outside the old one;
+the character-type arms; the death arcs, the boundary draw included; the head,
+the fish, the owl, the carrier, the kinded crack, the boat latch, and block 2's
+sync, hold and reset. Mutating each reader back to `g_camera_yaw_bams` fails
+eleven checks, and the stand-and-throw alone six.
+
+**Wrong turns.** The first death-chain run failed three tests that had passed
+for as long as the fixture's camera and its zombie disagreed about nothing: the
+fixture's camera looks down +x at a zombie with yaw 0, which puts the death in
+the 0xC000 arc, and the fixture had no clip for the two side deaths, so
+`ChooseDeathMotion` played nothing and the actor went straight to the corpse.
+The old code had been handed `g_camera_yaw_bams` = 0, which the scene never
+wrote, and landed in the front arc by accident. The fix was to give the fixture
+the side clips the shipped banks have, not to steer the camera. And the
+thrown-weapon harnesses: `tools/throwers.mjs` reports 0 of 9 stationary
+throwers throwing and `tools/axeman.mjs` fails its despawn checks -- both
+**identically on `HEAD`**, run from a `git archive` of it, so neither is this
+branch's; they are left for whoever next opens them.
+
+**Found, not fixed.** `ActorShotFeedback`'s bursting head is spawned with
+`g_camera_yaw_bams` as its yaw, where `SpawnSeveredHead` copies the actor's
+`obj+0x330`/`0x334`; `ResolveHit`'s own call passes `(0, obj.yaw)` for the same
+two words. `ZombieShouldStandAndThrow` still calls `TryClaimAttackSlot`
+without a host, so an off-screen claim raises no latch: `ZombieStateAttackRun`
+is not handed one to pass. `ActorFacePlayerTarget`'s two-player arm is not
+ported.
+
+**Merged with main at `c9846149`.** The attack-slot claim merge had landed the
+same per-type order in `ZombieShouldStandAndThrow` from its side, with the
+claim's `rng`; the resolution keeps its order and argument and this branch's
+block-yaw window and `AngleWithinTolerance`, and its own test of the unarmed
+`znassb` now sets the block's yaw rather than `g_camera_yaw_bams`. The owl
+corpse merge had already moved `OwlPickTargetPlayerAndAimOffset` and the
+corpse's throw onto the block, the same way; main's text was kept for both.

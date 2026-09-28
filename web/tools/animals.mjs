@@ -20,6 +20,14 @@
  * The frog is the one case that needs a nudge: it waits on a camera path and
  * this harness has no camera, so the loop forces `g_active_cam_path` to the
  * path its descriptors name.
+ *
+ * A row may name a **kill frame**: on it every live actor of the class is
+ * marked shot as `MarkActorShot` marks one (`obj+0x34` bits 3 and 1), and
+ * the run then asserts each of them died, left a ground ring and left the
+ * pool. That is the frog's death on the real clips: its corpse waits for the
+ * death clip's play length after freezing it one short, and the port once
+ * read the cursor a tick early and froze it for good -- stage 1's frog room
+ * stood on two corpses in `Die/1` holding `g_enemies_present`.
  */
 
 import { readFileSync } from "node:fs";
@@ -32,6 +40,7 @@ import { Events } from "../src/core/events.ts";
 import { GameUpdate, SpawnScriptedCharacters, SpawnSlotActors }
   from "../src/game/director.ts";
 import { G, ResetGameGlobals } from "../src/game/globals.ts";
+import { ActorFlag } from "../src/game/actor.ts";
 import { NULL_HOST } from "../src/game/host.ts";
 import { SetGameTables } from "../src/game/tables.ts";
 import { g_class_handlers } from "../src/game/registry.ts";
@@ -39,9 +48,13 @@ import { vec3 } from "../src/game/vec.ts";
 import { Walker } from "../src/script/walker.ts";
 import { seekTo } from "../src/script/seek.ts";
 
-/** `[name, stage, block, step, class, states it must reach]`. */
+/**
+ * `[name, stage, block, step, class, states it must reach, entry, min travel,
+ * kill frame]`.
+ */
 const CASES = [
   ["frog", 1, 3, 1, 0x11, ["HopToHeading", "IdleAndCroak"]],
+  ["frog death", 1, 3, 1, 0x11, ["Die"], undefined, undefined, 60 * 12],
   ["owl st2", 2, 5, 1, 0x43, ["FlyToCircle", "Circle", "Approach", "Dive",
                               "OrbitAway"]],
   // The sub-type-0 pair, which is placed already diving and so never touches
@@ -83,7 +96,8 @@ function check(name, ok, detail = "") {
 // asserted nothing. `verify_all.py` counts a 3 separately and names it.
 if (!hasBundle()) skipNoBundle("animals");
 
-for (const [name, stage, block, step, cls, wanted, entry, minTravel] of CASES) {
+for (const [name, stage, block, step, cls, wanted, entry, minTravel,
+            killAt] of CASES) {
   const dir = join(BUNDLE_ROOT, `stage${stage}`);
   const script = JSON.parse(
     readFileSync(join(dir, `stage${stage}.script.json`), "utf8"));
@@ -131,9 +145,17 @@ for (const [name, stage, block, step, cls, wanted, entry, minTravel] of CASES) {
     check(`${name}: seek to ${stage}/${block}/${step}`, false);
     continue;
   }
+  // An actor that despawned under its own state machine is not built again
+  // while the script still lists it -- the character layer's `spent` set
+  // (`render/characters.ts`), because `SpawnFromDescriptor` builds an object
+  // once. Without it a frog that died here came straight back.
+  const spent = new Set();
   const sync = () => {
     const reqs = [];
+    const listed = new Set(walker.spawns.map((s) => s.at));
+    for (const at of spent) if (!listed.has(at)) spent.delete(at);
     for (const s of walker.spawns) {
+      if (spent.has(s.at)) continue;
       if (G.g_object_list.some((o) => o.at === s.at)) continue;
       const pl = placementAt.get(s.at);
       if (!pl) continue;
@@ -145,6 +167,11 @@ for (const [name, stage, block, step, cls, wanted, entry, minTravel] of CASES) {
     SpawnSlotActors(walker.spawns, rng);
   };
   let seated = false;
+  // The kill: who was marked, who has gone since, and the rings made after.
+  const killed = new Set();
+  const gone = new Set();
+  const rings = new Set();
+  let ringSeq = Infinity;
   for (let f = 0; f < 60 * 40; f += 1) {
     walker.tick(1 / 60);
     sync();
@@ -153,7 +180,20 @@ for (const [name, stage, block, step, cls, wanted, entry, minTravel] of CASES) {
       if (a) { eye = vec3(a.pos.x, a.pos.y + 4, a.pos.z + 30); seated = true; }
     }
     if (cls === 0x11) { G.g_active_cam_path = 41; G.g_cam_path_frame = f; }
+    if (f === killAt) {
+      ringSeq = G.g_creature_effect_seq;
+      for (const o of G.g_object_list) {
+        if (o.cls !== cls || o.despawned) continue;
+        o.flags |= ActorFlag.Hit | ActorFlag.HitByPlayer0;
+        killed.add(o.at);
+      }
+    }
     GameUpdate(eye, 1 / 60, host, rng, events);
+    for (const r of G.g_ring_effects) if (r.id >= ringSeq) rings.add(r.id);
+    for (const o of G.g_object_list) {
+      if (o.cls === cls && o.despawned) { gone.add(o.at); spent.add(o.at); }
+      else if (o.despawned) spent.add(o.at);
+    }
     for (const o of G.g_object_list) {
       if (o.cls !== cls) continue;
       found = Math.max(found, 1);
@@ -189,6 +229,19 @@ for (const [name, stage, block, step, cls, wanted, entry, minTravel] of CASES) {
   if (minTravel !== undefined) {
     check(`${name}: it travels at least ${minTravel} units`,
           travel >= minTravel, travel.toFixed(1));
+  }
+  if (killAt !== undefined) {
+    check(`${name}: the kill found someone to kill`, killed.size > 0,
+          `${killed.size}`);
+    check(`${name}: every one of them left the pool`,
+          [...killed].every((at) => gone.has(at)),
+          [...killed].filter((at) => !gone.has(at))
+            .map((at) => at.toString(16)).join(","));
+    check(`${name}: ...each leaving a ground ring as it settled`,
+          rings.size === killed.size, `${rings.size} rings, ${killed.size} killed`);
+    const left = G.g_object_list.filter((o) => o.cls === cls).length;
+    check(`${name}: ...and nothing of the class is left standing`,
+          left === 0, `${left}`);
   }
   // The counters are the reason these three were worth porting: a class that
   // joins them and never gives them back is a gate that never opens, and one

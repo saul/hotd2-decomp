@@ -44,6 +44,12 @@ import { CameraUpdateHook, EvtActionHandler }
   from "../src/game/camera/driver";
 import { CameraActorTick, CameraUpdateTick } from "../src/game/camera/actor";
 import { UpdateSceneViewAndLight } from "../src/game/camera/view";
+import { CameraFromViewAngles } from "../src/game/camera/hooks";
+import { CameraBlocksReset } from "../src/game/camera/actions";
+import { ChooseDeathMotionDirectional } from "../src/game/combat/resolve_hit";
+import { FishSpawnWaterSplash, WaterSplashUpdate }
+  from "../src/game/effects/fish";
+import { OwlResolveShot } from "../src/game/class43";
 import { MOTION_FLAGS_INIT, MotionFlag, makeActor, type Boss2Actor,
   type FishActor }
   from "../src/game/actor";
@@ -105,8 +111,9 @@ import {
   PROJECTION_DISTANCE_PX,
 } from "../src/game/class11";
 import { FrogFlag, FrogState, type FrogTail } from "../src/game/class11/state";
-import { OwlStateDiveAtCamera, OwlStateRideApproachSpline,
-  OwlUpdateAndResolveShot } from "../src/game/class43";
+import { OwlPickTargetPlayerAndAimOffset, OwlStateDiveAtCamera,
+  OwlStateRideApproachSpline, OwlUpdateAndResolveShot }
+  from "../src/game/class43";
 import {
   OWL_RING_PULSE_FRAMES, OwlEffectsTick, OwlGroundRingPhase,
   OwlSpawnGroundImpactRing, OwlSpawnWaterSplashFlipbook,
@@ -211,9 +218,15 @@ import {
 import { QUEUE_CAP, RANK_SLOTS, RankEnemiesByDistance }
   from "../src/game/combat/rank";
 import {
+  ActorScreenHalfSign,
   PROJECTION_DISTANCE_PX as G_PROJECTION_DISTANCE_PX, ReleaseAttackSlot,
   ThrowerReleaseAttackPermit, ThrowerTryClaimAttackSlot, TryClaimAttackSlot,
 } from "../src/game/combat/permits";
+import { ZombieStateApproach } from "../src/game/class30/approach";
+import { ZombieScriptedPickPlayer } from "../src/game/class30/scripted";
+import { ThrowerTryEnterState } from "../src/game/class31/router";
+import { ThrowerStateBlinkInThreeHops, ThrowerStateRideObjectPath }
+  from "../src/game/class31/scripted";
 import { EnemyZombieUpdate, ZombieEntryState } from "../src/game/class30";
 import { ZombieEnterCorpseState, ZombieReleasePermitAndUntrack }
   from "../src/game/class30/death";
@@ -640,6 +653,11 @@ const TYPE: CharacterType = {
     // exits on is expressed in the play clock, not in authored frames.
     "923": motion(41, 0.332, 79),
     "900": motion(30), "901": motion(30), "902": motion(30), "903": motion(30),
+    // 991 (0x3DF) and 992 (0x3E0), the two side deaths
+    // `ChooseDeathMotionDirectional` names by literal for the 0xC000 and
+    // 0x4000 arcs. The shipped banks carry them beside the two tables, and a
+    // fixture without them had half the circle falling to no clip at all.
+    "991": motion(30), "992": motion(30),
     "960": motion(39), "961": motion(39), "974": motion(29), "977": motion(29),
     "979": motion(29), "981": motion(29), "982": motion(29),
     // ...and the second stumble row, the one body condition 3 selects: 43
@@ -694,6 +712,14 @@ const TRACKING: TrackingJson = {
 };
 
 const PLAYER: PlayerDamageJson = { start_lives: 2 };
+
+/**
+ * Every clip `ChooseDeathMotionDirectional` can give this fixture: the 0x0000
+ * table's one, the 0x8000 table's one, and the two side literals. Which of
+ * them a death takes is the camera block's yaw against the actor's, so a test
+ * about the death *chain* accepts any of the four.
+ */
+const DIRECTIONAL_DEATHS = [900, 901, 991, 992];
 
 /** One stage's `characters` block, with only what the port reads filled in. */
 const CHARS = {
@@ -1293,13 +1319,13 @@ console.log("ActorIsOnScreen:");
     },
   };
   check("a second enemy cannot claim while the latch is up",
-        !TryClaimAttackSlot(other, onscreen), `permit ${other.attackPermit}`);
+        !TryClaimAttackSlot(other, new Rng(1), onscreen), `permit ${other.attackPermit}`);
 
   // Releasing the off-screen permit lifts it, and only then.
   ReleaseAttackSlot(z);
   check("releasing it lifts the latch", G.g_attack_committed === 0
         && (z.flags2 & ZombieFlag2.OffScreenPermit) === 0);
-  check("and the next enemy may claim", TryClaimAttackSlot(other, onscreen),
+  check("and the next enemy may claim", TryClaimAttackSlot(other, new Rng(1), onscreen),
         `permit ${other.attackPermit}`);
   ReleaseAttackSlot(other);
 
@@ -1312,7 +1338,7 @@ console.log("ActorIsOnScreen:");
   // `TryClaimAttackSlot`'s first line, and a crowd walked to the ring and
   // stood there wanting a permit nobody held.
   check("an off-screen attacker takes the latch again",
-        TryClaimAttackSlot(z, offscreen) && G.g_attack_committed === 1,
+        TryClaimAttackSlot(z, new Rng(1), offscreen) && G.g_attack_committed === 1,
         `latch ${G.g_attack_committed}`);
   z.dead = true;
   GameUpdate(EYE, 1 / 60, offscreen, rng, events);
@@ -1321,7 +1347,7 @@ console.log("ActorIsOnScreen:");
         && G.g_attack_permits.every((p) => p === -1),
         `latch ${G.g_attack_committed} permits ${JSON.stringify(G.g_attack_permits)}`);
   check("so the enemies still standing can attack",
-        TryClaimAttackSlot(other, onscreen), `permit ${other.attackPermit}`);
+        TryClaimAttackSlot(other, new Rng(1), onscreen), `permit ${other.attackPermit}`);
   ReleaseAttackSlot(other);
 }
 
@@ -1334,25 +1360,25 @@ console.log("ResolveHit:");
   const z = G.g_object_list[0];
   z.hp = 100;
   // Bone 4's effect table: four escalating stages, the fourth severing.
-  const out1 = ResolveHit(z, 4, 0, NULL_HOST, rng);
+  const out1 = ResolveHit(z, 4, NULL_HOST, rng);
   check("a hit takes hit points off", z.hp === 100 - 3, `hp ${z.hp}`);
   check("and swaps the bone's model", z.boneSlot["4"] === 0x11,
         JSON.stringify(z.boneSlot));
   check("and stumbles", out1.react !== undefined);
-  ResolveHit(z, 4, 0, NULL_HOST, rng);
-  ResolveHit(z, 4, 0, NULL_HOST, rng);
-  const out4 = ResolveHit(z, 4, 0, NULL_HOST, rng);
+  ResolveHit(z, 4, NULL_HOST, rng);
+  ResolveHit(z, 4, NULL_HOST, rng);
+  const out4 = ResolveHit(z, 4, NULL_HOST, rng);
   check("the fourth hit severs", out4.severed && out4.result === 3);
   check("and takes the forearm with it -- the whole subtree, not just the arm",
         z.removed.includes(5), `removed ${JSON.stringify(z.removed)}`);
   check("the destroyed-zone mask is set", (z.zones & 2) === 2, `${z.zones}`);
   const before = z.zones;
-  ResolveHit(z, 4, 0, NULL_HOST, rng);
+  ResolveHit(z, 4, NULL_HOST, rng);
   check("a fifth hit on a severed limb does not sever again",
         z.zones === before && z.removed.filter((b) => b === 5).length === 1);
 
   z.hp = 1;
-  const kill = ResolveHit(z, 1, 0, NULL_HOST, rng);
+  const kill = ResolveHit(z, 1, NULL_HOST, rng);
   check("zero hit points kills, once", kill.killed && z.dead);
   // **The clip is not `ResolveHit`'s.** Class 0x30 runs its own death states
   // now, so it is in `updatesWhenDead` and the shared directional clip is
@@ -1364,7 +1390,7 @@ console.log("ResolveHit:");
         z.death === null, `death ${JSON.stringify(z.death)}`);
   check("...and the hit its death chain reads is left on the actor",
         z.pendingHit !== null, `${JSON.stringify(z.pendingHit)}`);
-  const again = ResolveHit(z, 1, 0, NULL_HOST, rng);
+  const again = ResolveHit(z, 1, NULL_HOST, rng);
   check("a hit on a corpse scores nothing", !again.killed
         && again.result === 0);
 }
@@ -1392,10 +1418,10 @@ console.log("\nResolveHit's three suppression bits:");
   const nd = G.g_object_list[0];
   nd.hp = 100;
   nd.flags |= ActorFlag.NoDismember;
-  ResolveHit(nd, 4, 0, NULL_HOST, rng);
-  ResolveHit(nd, 4, 0, NULL_HOST, rng);
-  ResolveHit(nd, 4, 0, NULL_HOST, rng);
-  const sev = ResolveHit(nd, 4, 0, NULL_HOST, rng);
+  ResolveHit(nd, 4, NULL_HOST, rng);
+  ResolveHit(nd, 4, NULL_HOST, rng);
+  ResolveHit(nd, 4, NULL_HOST, rng);
+  const sev = ResolveHit(nd, 4, NULL_HOST, rng);
   check("`NoDismember`: the sever step does not sever",
         !sev.severed && sev.result !== 3, `result ${sev.result}`);
   check("...and the forearm stays on", !nd.removed.includes(5),
@@ -1403,7 +1429,7 @@ console.log("\nResolveHit's three suppression bits:");
   check("...but every hit still charged its damage", nd.hp < 100,
         `hp ${nd.hp}`);
   nd.hp = 1;
-  const ndKill = ResolveHit(nd, 1, 0, NULL_HOST, rng);
+  const ndKill = ResolveHit(nd, 1, NULL_HOST, rng);
   check("...and the torso death wound is skipped too", !ndKill.severed,
         `result ${ndKill.result}`);
   check("...while the actor still dies, because the kill block is outside "
@@ -1414,7 +1440,7 @@ console.log("\nResolveHit's three suppression bits:");
   const np = G.g_object_list[0];
   np.hp = 100;
   np.flags |= ActorFlag.NoPartSwap;
-  const npOut = ResolveHit(np, 4, 0, NULL_HOST, rng);
+  const npOut = ResolveHit(np, 4, NULL_HOST, rng);
   check("`NoPartSwap`: the bone keeps the model it had",
         np.boneSlot["4"] === undefined, JSON.stringify(np.boneSlot));
   check("...and nothing reports gore", !npOut.gore);
@@ -1426,7 +1452,7 @@ console.log("\nResolveHit's three suppression bits:");
   const nr = G.g_object_list[0];
   nr.hp = 100;
   nr.flags |= ActorFlag.NoHitResult;
-  const nrOut = ResolveHit(nr, 4, 0, NULL_HOST, rng);
+  const nrOut = ResolveHit(nr, 4, NULL_HOST, rng);
   check("`NoHitResult`: the shot reports nothing", nrOut.result === 0
         && G.g_hit_result === 0, `result ${nrOut.result}`);
   check("...and the swap it made before that still stands",
@@ -1437,11 +1463,11 @@ console.log("\nResolveHit's three suppression bits:");
   const att = G.g_object_list[0];
   att.hp = 100;
   const clean = att.flags;
-  ResolveHit(att, 4, 0, NULL_HOST, rng);
+  ResolveHit(att, 4, NULL_HOST, rng);
   check("in play the OR does not fire",
         (att.flags & 0xe00) === (clean & 0xe00), `flags ${att.flags.toString(16)}`);
   G.g_app_state = AppState.Attract;
-  ResolveHit(att, 4, 0, NULL_HOST, rng);
+  ResolveHit(att, 4, NULL_HOST, rng);
   check("out of play it raises all three at once",
         (att.flags & 0xe00) === 0xe00, `flags ${att.flags.toString(16)}`);
   check("...and that hit reported nothing", G.g_hit_result === 0,
@@ -1505,7 +1531,7 @@ console.log("the camera eases back onto the rail, it does not cut:");
   // Now kill it, the way a shot does: its death state raises `NoCameraTrack`
   // and it files no candidate from then on. Two frames later the fill has
   // nothing to deal.
-  ActorKillAll(0, rng);
+  ActorKillAll(rng);
   let worst = 0;
   let settled = -1;
   let settledOn = -1;
@@ -2167,12 +2193,18 @@ console.log("\nclass 0x41 type 4, the kinded props:");
         G.g_item_set_countdown[ItemSet.Score2] >= 1
         && G.g_item_set_countdown[ItemSet.Score2] <= 2);
 
-  // The crate kind survives its first shot; every other kind does not.
+  // The crate kind survives its first shot; every other kind does not. It
+  // also turns to the camera block's yaw as it cracks (`0x004660A2`), which
+  // the port had left out.
+  G.g_camera_block_yaw_bams = 0x2468;
+  G.g_camera_yaw_bams = 0x1234;
   BreakablePropTakeShot(b, 0);
   KindedPropUpdate(b, rng, events);
   check("the crate kind survives one shot and hides its model",
         cracked === 1 && broken === 0 && b.slot === SLOT_NONE,
         `slot ${b.slot.toString(16)}`);
+  check("...turning to the camera block's yaw as it cracks",
+        b.yaw === 0x2468, b.yaw.toString(16));
 
   const before = G.g_player_score[0];
   BreakablePropTakeShot(a, 0);
@@ -2901,8 +2933,11 @@ console.log("\nclass 0x41 type 43, stage 3's seven shootable props:");
         crate.shotRegistered, `${crate.shotRegistered}`);
 
   // The first shot cracks it: no points, the model swaps, and it turns to
-  // face the camera. `KindedPropUpdate` hides the model instead.
-  G.g_camera_yaw_bams = 0x2000;
+  // face the camera. `KindedPropUpdate` hides the model instead. The heading
+  // is the camera block's (`0x0046CF9C`); `g_camera_yaw_bams` is set to
+  // something else so that reading it cannot pass.
+  G.g_camera_block_yaw_bams = 0x2000;
+  G.g_camera_yaw_bams = 0x5555;
   const score = G.g_player_score[0];
   crate.flags |= BreakableFlag.Hit | BreakableFlag.HitByPlayer0;
   BreakablePropPoolUpdate(rng, events);
@@ -7128,7 +7163,7 @@ console.log("class 0x31, state 23 -- the wait, then the pounce at eye height:");
         `motion ${z.motion} action ${JSON.stringify(z.action)}`);
 
   // A shot during the wait ricochets: the state does not move.
-  ResolveHit(z, 4, 0, host, rng);
+  ResolveHit(z, 4, host, rng);
   GameUpdate(eye, 1 / 60, host, rng, events);
   check("a shot in the wait neither reacts nor interrupts it",
         z.state === ThrowerState.DelayedPounce && z.sub === 1
@@ -7468,7 +7503,7 @@ console.log("class 0x31, the stumble and the death chain:");
 
   // `ResolveHit` hands class 0x31 a *pending hit* instead of the shared
   // stagger and the shared directional death: the class picks its own.
-  ResolveHit(z, 4, 0, CAM_HOST, rng);
+  ResolveHit(z, 4, CAM_HOST, rng);
   check("a shot leaves a pending hit rather than a stumble clip",
         !!z.pendingHit && z.react === null, `${JSON.stringify(z.pendingHit)}`);
   GameUpdate(EYE, 1 / 60, CAM_HOST, rng, events);
@@ -7483,7 +7518,7 @@ console.log("class 0x31, the stumble and the death chain:");
   z.flags = 0;
   z.flags2 = 0;
   z.hp = 1;
-  ResolveHit(z, 1, 0, CAM_HOST, rng);
+  ResolveHit(z, 1, CAM_HOST, rng);
   check("the kill sets no directional death clip", z.death === null,
         `${JSON.stringify(z.death)}`);
   GameUpdate(EYE, 1 / 60, CAM_HOST, rng, events);
@@ -7512,7 +7547,7 @@ console.log("class 0x31, being knocked down is survivable:");
   // stumbles, and a fall it survives ends back at the hub.
   z.state = ThrowerState.LeapAside;
   z.sub = 0;
-  ResolveHit(z, 1, 0, CAM_HOST, rng);
+  ResolveHit(z, 1, CAM_HOST, rng);
   GameUpdate(EYE, 1 / 60, CAM_HOST, rng, events);
   check("a shot outside the hub knocks it over",
         z.state === ThrowerState.FallAndLand, `state ${z.state}`);
@@ -9124,7 +9159,7 @@ console.log("\nclass 0x10, the civilian and the rescue:");
     check("a civilian is in the count before the clear",
           G.g_civilians_alive === 1, `${G.g_civilians_alive}`);
 
-    const cleared = ActorKillAll(0, new Rng(2));
+    const cleared = ActorKillAll(new Rng(2));
     check("the clear counts her as a civilian, not an enemy",
           cleared.civilians === 1 && cleared.enemies === 0,
           JSON.stringify(cleared));
@@ -9139,7 +9174,7 @@ console.log("\nclass 0x10, the civilian and the rescue:");
       const safe = ActorSpawn(0x4020, SpawnClass.Civilian, 1, "behind glass");
       safe.visible = true;
       if (safe.civ) safe.civ.onShotScript = -1;
-      ActorKillAll(0, new Rng(4));
+      ActorKillAll(new Rng(4));
       // **A civilian the script stops listing leaves the count with it.** The
     // engine has no such moment — every one of `ActorDespawn`'s 171 call sites
     // is inside a class's own state machine — so `RetireUnlistedActor` is the
@@ -9989,7 +10024,7 @@ console.log("\nclass 0x30's placement: the ground snap and the two entrances:");
     // End to end, through the routine that actually calls it: the whole shot
     // lands, hit points come off, and the entrance clip is left alone.
     const before = z.hp;
-    ResolveHit(z, 1, 0, NULL_HOST, rng);
+    ResolveHit(z, 1, NULL_HOST, rng);
     check("...and a whole `ResolveHit` still leaves the entrance running",
           z.hp < before && z.react === null && z.motion === 12
             && z.state === ZombieState.Emerge,
@@ -11397,12 +11432,12 @@ console.log("\nIsPlayerAttackable: the scene has to be running:");
     G.g_scene_state_major_entered = 1;
     G.g_scene_state_major = 1;
     check("no permit is granted while a scripted camera drives",
-          !TryClaimAttackSlot(z) && z.attackPermit === -1,
+          !TryClaimAttackSlot(z, new Rng(1)) && z.attackPermit === -1,
           `permit ${z.attackPermit}`);
     G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
     G.g_scene_state_major = SCENE_MAJOR_PLAYING;
     check("...and one is the moment the path camera takes over",
-          TryClaimAttackSlot(z) && z.attackPermit === 0,
+          TryClaimAttackSlot(z, new Rng(1)) && z.attackPermit === 0,
           `permit ${z.attackPermit}`);
   }
 }
@@ -11939,21 +11974,125 @@ console.log("\nclass 0x30 state 33: the stationary thrower:");
           `rz ${w.rz} ry ${ry0}`);
   }
 
-  // The other way in: a condition-8 walker already facing the camera.
+  // The other way in: a condition-8 walker already facing the camera. It
+  // stands at (0, 0, 60) with the eye at the origin, so a camera looking at
+  // it has block yaw `atan2(0, -60)`, 0x8000, and an actor facing that camera
+  // has yaw 0 -- `VecToAngles(obj - eye)`, as `TurnActorTowardCamera` turns
+  // it. `g_camera_yaw_bams` is left at the value the old reading needed to
+  // fail.
+  const facing = (cond: number, yaw: number) => {
+    const z = thrower(cond);
+    z.state = ZombieState.AttackRun;
+    G.g_camera_block_yaw_bams = 0x8000;
+    G.g_camera_yaw_bams = 0;
+    z.yaw = yaw;
+    return z;
+  };
+  {
+    const z = facing(8, 0);                    // facing the camera
+    check("a condition-8 walker facing the camera stops and throws",
+          ZombieShouldStandAndThrow(z, new Rng(1)) && z.attackPermit >= 0,
+          `permit ${z.attackPermit}`);
+    const away = facing(8, 0x4000);            // ninety degrees off
+    check("...and one facing away does not",
+          !ZombieShouldStandAndThrow(away, new Rng(1)));
+    const edge = facing(8, 0x400);             // on the window's edge
+    check("...the window is inclusive: 0x400 off still throws",
+          ZombieShouldStandAndThrow(edge, new Rng(1)));
+    const past = facing(8, 0x401);
+    check("...and 0x401 off does not",
+          !ZombieShouldStandAndThrow(past, new Rng(1)));
+    const ordinary = facing(0, 0);
+    check("...nor does an ordinary body condition",
+          !ZombieShouldStandAndThrow(ordinary, new Rng(1)));
+  }
+
+  // **From the camera itself.** The window is the camera block's yaw turned
+  // half round (`0x00458E48`), and that is only a statement about the game if
+  // the block is the one the camera routines build and the walker faces the
+  // camera the way the walker's own turn leaves it. So: the camera seated on
+  // a look-at at the walker (`CamBlockSetAnglesFromLookAt`, then
+  // `UpdateSceneViewAndLight`), the scene state's hook run over it so
+  // `g_camera_yaw_bams` holds what the engine writes there -- the block's
+  // heading less half a turn -- and the walker turned by
+  // `TurnActorTowardCamera` until it stops. The port read `g_camera_yaw_bams`
+  // and missed by exactly half a turn; this is the measurement stage 4's
+  // `znassb` made in the player, in a form that can fail.
   {
     const z = thrower(8);
     z.state = ZombieState.AttackRun;
-    G.g_camera_yaw_bams = 0x8000;
-    z.yaw = 0;                                 // facing the camera's reverse
-    check("a condition-8 walker facing the camera stops and throws",
-          ZombieShouldStandAndThrow(z));
-    const away = thrower(8);
-    away.yaw = 0x4000;                         // ninety degrees off
-    check("...and one facing away does not", !ZombieShouldStandAndThrow(away));
-    const ordinary = thrower(0);
-    ordinary.yaw = 0;
-    check("...nor does an ordinary body condition",
-          !ZombieShouldStandAndThrow(ordinary));
+    z.pos = vec3(30, 0, 40);
+    SeatCamera(EYE, z.pos);
+    CameraFromViewAngles();
+    z.yaw = 0xc000;
+    for (let i = 0; i < 200; i++) TurnActorTowardCamera(z, EYE, 0x1a0, 1 / 60);
+    const exe = AngleWithinTolerance(
+      (G.g_camera_block_yaw_bams - 0x8000) & 0xffff, z.yaw & 0xffff, 0x400);
+    const old = AngleWithinTolerance(
+      (G.g_camera_yaw_bams - 0x8000) & 0xffff, z.yaw & 0xffff, 0x400);
+    check("a walker turned to a camera the camera routines built is inside "
+          + "the block's window, and outside the one g_camera_yaw_bams gives",
+          exe && !old,
+          `yaw ${z.yaw} block ${G.g_camera_block_yaw_bams} `
+          + `g_camera_yaw_bams ${G.g_camera_yaw_bams}`);
+    check("...so it stops to throw, and takes the permit",
+          ZombieShouldStandAndThrow(z, new Rng(1)) && z.attackPermit >= 0,
+          `permit ${z.attackPermit}`);
+  }
+
+  // **Which order the claim and the hands come in** is the character type's
+  // (`0x00458E6D`). `znassb` (type 1, this fixture's) claims first and looks
+  // at its hands after, so one with both blades gone still takes the permit
+  // and answers no; the two axe types look first and claim only if a hand is
+  // armed; any other type answers no and claims nothing, hands or none.
+  {
+    const bare = facing(8, 0);
+    bare.boneSlot["5"] = 7883;
+    bare.boneSlot["8"] = 7879;
+    check("a znassb with both hands empty answers no...",
+          ZombieArmedHands(bare) === 0
+          && !ZombieShouldStandAndThrow(bare, new Rng(1)));
+    check("...having claimed the permit first, as 0x00458EC3 does",
+          bare.attackPermit >= 0
+          && G.g_attack_permits[bare.attackPermit] === bare.at,
+          `permit ${bare.attackPermit}`);
+
+    const types = (ct: number) => {
+      ResetGameGlobals();
+      EnterPlay();
+      SetGameTables({
+        ...CHARS, types: { "1": TYPE, [String(ct)]: { ...TYPE, type: ct } },
+      } as unknown as CharactersJson);
+      G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+      G.g_scene_state_major = SCENE_MAJOR_PLAYING;
+      const z = spawnZombie(0x7510, ct, `type ${ct}`, {
+        initialState: ZombieState.AttackRun, condition: 8,
+      });
+      z.visible = true;
+      z.hp = z.maxHp = 100;
+      z.pos = vec3(0, 0, 60);
+      G.g_camera_block_yaw_bams = 0x8000;
+      z.yaw = 0;
+      return z;
+    };
+    const axe = types(0x14);
+    axe.boneSlot["5"] = 7883;
+    axe.boneSlot["8"] = 7879;
+    check("an axe walker with both hands empty answers no and claims nothing",
+          !ZombieShouldStandAndThrow(axe, new Rng(1)) && axe.attackPermit === -1
+          && G.g_attack_permits.every((x) => x === -1),
+          `permit ${axe.attackPermit}`);
+    const armedAxe = types(0x13);
+    check("...and one with its axes stops and throws",
+          ZombieShouldStandAndThrow(armedAxe, new Rng(1))
+          && armedAxe.attackPermit >= 0);
+    const other = types(2);
+    check("any other character type answers no, armed or not, and claims "
+          + "nothing",
+          ZombieArmedHands(other) === 2
+          && !ZombieShouldStandAndThrow(other, new Rng(1))
+          && other.attackPermit === -1,
+          `armed ${ZombieArmedHands(other)} permit ${other.attackPermit}`);
   }
 }
 
@@ -12778,15 +12917,288 @@ console.log("\na refused claim voids the index:");
   const a = spawnZombie(0x5200, 1, "stale");
   const b = spawnZombie(0x5204, 1, "holder");
   a.attackPermit = 0;                 // what state 42's bounce leaves behind
-  check("the holder claims", TryClaimAttackSlot(b) && b.attackPermit === 0,
+  check("the holder claims", TryClaimAttackSlot(b, new Rng(1)) && b.attackPermit === 0,
         `permit ${b.attackPermit}`);
   check("a refused claim leaves obj+0x121 at -1",
-        !TryClaimAttackSlot(a) && a.attackPermit === -1,
+        !TryClaimAttackSlot(a, new Rng(1)) && a.attackPermit === -1,
         `permit ${a.attackPermit}`);
   ReleaseAttackSlot(a);
   check("...so releasing it does not free the holder's permit",
         G.g_attack_permits[0] === b.at,
         `permits ${JSON.stringify(G.g_attack_permits)}`);
+}
+
+// `TryClaimAttackSlot` (`FUN_00455DE0`) offers **one** player's permit and
+// never the other's: `g_active_player`'s with one attacker, a `rand() % 2`
+// with two attackers and one player in play or one enemy present, and the
+// actor's own half of the screen otherwise (`ActorScreenHalfSign`,
+// `FUN_00409C90`). The port took the first free permit, which is the same
+// answer for player 1 alone and a different one everywhere else.
+console.log("\nthe claim's pick, one player and two:");
+{
+  const rng = new Rng(6);
+  scene(0, rng);
+  const z = spawnZombie(0x5300, 1, "claimant");
+  z.visible = true;
+  z.hp = 1000;
+  const reset = () => {
+    G.g_attack_permits = [-1, -1];
+    G.g_attack_committed = 0;
+    z.attackPermit = -1;
+  };
+  // Both players in play, so `IsPlayerAttackable` refuses neither.
+  G.g_player_state = [PlayerState.InPlay, PlayerState.InPlay];
+  /** A generator whose next `int(2)` is `want`, and the state one draw on. */
+  const seeded = (want: number) => {
+    let s = 1;
+    while (new Rng(s).int(2) !== want) s++;
+    const after = new Rng(s);
+    after.next();
+    return { r: new Rng(s), after: after.state };
+  };
+
+  G.g_max_attackers = 1;
+  G.g_active_player = 1;
+  reset();
+  const s0 = rng.state;
+  check("player 2 alone is offered player 2's permit",
+        TryClaimAttackSlot(z, rng) && z.attackPermit === 1
+        && G.g_attack_permits[1] === z.at && G.g_attack_permits[0] === -1,
+        `permit ${z.attackPermit} ${JSON.stringify(G.g_attack_permits)}`);
+  check("...and the one-attacker pick draws nothing", rng.state === s0);
+  reset();
+  G.g_attack_permits[1] = 0x77;
+  check("...with it held, player 1's free permit is not offered instead",
+        !TryClaimAttackSlot(z, rng) && z.attackPermit === -1
+        && G.g_attack_permits[0] === -1,
+        `permit ${z.attackPermit} ${JSON.stringify(G.g_attack_permits)}`);
+  G.g_active_player = 2;
+  reset();
+  check("g_active_player 2 with one attacker offers no permit at all",
+        !TryClaimAttackSlot(z, rng) && z.attackPermit === -1);
+  G.g_active_player = 0;
+  reset();
+  check("player 1 alone is still offered permit 0",
+        TryClaimAttackSlot(z, rng) && z.attackPermit === 0);
+
+  // Two attackers, one player in play: the coin.
+  G.g_max_attackers = 2;
+  G.g_players_in_play = 1;
+  G.g_enemies_present = 4;
+  let t = seeded(1);
+  reset();
+  check("two attackers, one player in play: rand() % 2 picks permit 1",
+        TryClaimAttackSlot(z, t.r) && z.attackPermit === 1,
+        `permit ${z.attackPermit}`);
+  check("...drawing exactly once", t.r.state === t.after);
+  t = seeded(1);
+  reset();
+  G.g_attack_permits[1] = 0x77;
+  check("...and a held pick is refused, not swapped for the free one",
+        !TryClaimAttackSlot(z, t.r) && z.attackPermit === -1
+        && G.g_attack_permits[0] === -1,
+        `permit ${z.attackPermit} ${JSON.stringify(G.g_attack_permits)}`);
+
+  // Two players and one enemy present: a held pick is NOT-ed, to -1 or -2.
+  G.g_players_in_play = 2;
+  G.g_enemies_present = 1;
+  t = seeded(0);
+  reset();
+  G.g_attack_permits[0] = 0x77;
+  check("one enemy present: ~0 is -1, refused",
+        !TryClaimAttackSlot(z, t.r) && z.attackPermit === -1
+        && t.r.state === t.after);
+  t = seeded(1);
+  reset();
+  G.g_attack_permits[1] = 0x77;
+  check("...and ~1 is -2, which IsPlayerAttackable refuses too",
+        !TryClaimAttackSlot(z, t.r) && z.attackPermit === -1
+        && G.g_attack_permits[0] === -1,
+        `permit ${z.attackPermit} ${JSON.stringify(G.g_attack_permits)}`);
+  t = seeded(1);
+  reset();
+  check("...while a free pick is taken", TryClaimAttackSlot(z, t.r)
+        && z.attackPermit === 1);
+
+  // Two players and a crowd: the actor's own half of the screen, no draw.
+  G.g_enemies_present = 3;
+  const side = (x: number) => ({
+    ...NULL_HOST,
+    viewSpaceOf: (_at: number, out: Vec3) => {
+      out.x = x; out.y = 0; out.z = -40;      // forty in front, on screen
+      return true;
+    },
+  });
+  check("ActorScreenHalfSign: the right half is 1 and the left -1",
+        ActorScreenHalfSign(z, side(5)) === 1
+        && ActorScreenHalfSign(z, side(-5)) === -1
+        && ActorScreenHalfSign(z, side(0)) === -1);
+  reset();
+  const s1 = rng.state;
+  check("an enemy on the right of the screen comes for player 2",
+        TryClaimAttackSlot(z, rng, side(5)) && z.attackPermit === 1,
+        `permit ${z.attackPermit}`);
+  check("...drawing nothing", rng.state === s1);
+  reset();
+  check("...and one on the left for player 1",
+        TryClaimAttackSlot(z, rng, side(-5)) && z.attackPermit === 0);
+  reset();
+  G.g_attack_permits[1] = 0x77;
+  check("...and the right with player 2's permit held is refused",
+        !TryClaimAttackSlot(z, rng, side(5)) && G.g_attack_permits[0] === -1);
+
+  // The gate runs after the pick and voids it.
+  G.g_max_attackers = 1;
+  G.g_active_player = 1;
+  G.g_player_state = [PlayerState.InPlay, PlayerState.Out];
+  reset();
+  check("a picked player out of play refuses the claim outright",
+        !TryClaimAttackSlot(z, rng) && z.attackPermit === -1
+        && G.g_attack_permits.every((p) => p === -1));
+
+  // The thrower's copy is the same pick with its own latch bit.
+  const w = spawnZombie(0x5304, 1, "stand-in");   // any Actor carries flags2
+  G.g_player_state = [PlayerState.InPlay, PlayerState.InPlay];
+  G.g_attack_permits = [-1, -1];
+  G.g_attack_committed = 0;
+  const offscreen = {
+    ...NULL_HOST,
+    viewSpaceOf: (_at: number, out: Vec3) => {
+      out.x = 900; out.y = 0; out.z = -40;
+      return true;
+    },
+  };
+  check("ThrowerTryClaimAttackSlot: player 2 alone gets permit 1 too",
+        ThrowerTryClaimAttackSlot(w, rng, offscreen) && w.attackPermit === 1);
+  check("...and off screen latches obj+0x136C bit 0x8000, not 0x20000",
+        (w.flags2 & ThrowerFlag.OffScreenPermit) !== 0
+        && (w.flags2 & ZombieFlag2.OffScreenPermit) === 0
+        && G.g_attack_committed === 1,
+        `flags2 0x${w.flags2.toString(16)}`);
+  G.g_active_player = 0;
+}
+
+// Neither claim routine stores to `obj+0x34`: `NoCameraTrack` is each
+// caller's to lower. `ZombieStateApproach` does it on a grant (`0x00457A4E`);
+// the hub does not (`0x00455845`..`0x0045587B`), which is what keeps a captor
+// that `ZombieStateHoldForCameraCue` is holding off the camera until its cue.
+console.log("\nthe claim leaves NoCameraTrack to its callers:");
+{
+  const rng = new Rng(7);
+  const events = scene(0, rng);
+  const z = spawnZombie(0x5400, 1, "untracked");
+  z.visible = true;
+  z.hp = 1000;
+  z.flags |= ActorFlag.NoCameraTrack;
+  check("a bare claim grants and leaves the bit up",
+        TryClaimAttackSlot(z, rng) && (z.flags & ActorFlag.NoCameraTrack) !== 0);
+  ReleaseAttackSlot(z);
+  check("...and so does the thrower's",
+        ThrowerTryClaimAttackSlot(z, rng)
+        && (z.flags & ActorFlag.NoCameraTrack) !== 0);
+  ThrowerReleaseAttackPermit(z);
+
+  z.pos = vec3(0, 0, 45);
+  z.motion = 10;
+  z.rank = 0;
+  z.queueRank = 0;
+  z.state = ZombieState.HoldAtRange;
+  z.sub = 0;
+  ZombieStateHoldAtRange(z, EYE, rng, NULL_HOST, events);
+  check("the hub's grant goes to the strike with the bit still up",
+        z.state === ZombieState.Strike && z.attackPermit === 0
+        && (z.flags & ActorFlag.NoCameraTrack) !== 0,
+        `state ${z.state} permit ${z.attackPermit} flags 0x${z.flags.toString(16)}`);
+  ReleaseAttackSlot(z);
+
+  z.state = ZombieState.Approach;
+  z.sub = 1;
+  z.allowance = 5;
+  z.attackState = ZombieState.AttackRun;
+  ZombieStateApproach(z, EYE, rng, NULL_HOST);
+  check("ZombieStateApproach lowers it itself on its grant",
+        z.state === ZombieState.AttackRun && z.attackPermit === 0
+        && (z.flags & ActorFlag.NoCameraTrack) === 0,
+        `state ${z.state} permit ${z.attackPermit} flags 0x${z.flags.toString(16)}`);
+  ReleaseAttackSlot(z);
+}
+
+// The callers around the claim that were read with it.
+console.log("\nthe claim's callers, as the exe orders them:");
+{
+  // `ZombieShouldStandAndThrow` (`FUN_00458E10`): type 1 claims *before* it
+  // tests its hands (`0x00458EC3`), so an unarmed `znassb` walker still takes
+  // the permit and is answered no.
+  scene(0, new Rng(8));
+  const z = spawnZombie(0x5500, 1, "bare znassb", { condition: 8 });
+  z.visible = true;
+  z.hp = 1000;
+  // The facing window is the camera block's yaw turned half round
+  // (`0x00458E48`): 0x8000 is a camera looking at a walker facing yaw 0.
+  G.g_camera_block_yaw_bams = 0x8000;
+  z.yaw = 0;
+  z.boneSlot["5"] = -2;
+  z.boneSlot["8"] = -2;
+  check("an unarmed type-1 walker is answered no...",
+        ZombieArmedHands(z) === 0 && !ZombieShouldStandAndThrow(z, new Rng(1)));
+  check("...but has claimed the permit on the way",
+        z.attackPermit === 0 && G.g_attack_permits[0] === z.at,
+        `permit ${z.attackPermit} ${JSON.stringify(G.g_attack_permits)}`);
+
+  // `ZombieScriptedPickPlayer`: "spoken for" is a held entry, whatever the
+  // port stored in it -- the holder's `at` from a claim included.
+  G.g_player_state = [PlayerState.InPlay, PlayerState.InPlay];
+  check("a scripted attacker named for a claimed player falls back to the other",
+        ZombieScriptedPickPlayer(0, new Rng(1)) === 1);
+  G.g_attack_permits[1] = 0x77;
+  check("...and gives up when both are held",
+        ZombieScriptedPickPlayer(0, new Rng(1)) === -1);
+
+  // `ThrowerTryEnterState` (`FUN_0044AFB0`) arm 9: state 0x20 claims first,
+  // then asks for surface 0x35 -- and a refusal on the surface keeps the
+  // permit.
+  const w = thrower(ThrowerState.StandAndDecide);
+  check("state 0x20 claims, and is refused off surface 0x35",
+        !ThrowerTryEnterState(w, ThrowerState.StrikeOnTheSpot, new Rng(1),
+                              NULL_HOST)
+        && w.attackPermit === 0 && G.g_attack_permits[0] === w.at
+        && w.state === ThrowerState.StandAndDecide,
+        `permit ${w.attackPermit} state ${w.state}`);
+
+  // `ThrowerStateRideObjectPath` (`FUN_0044E5D0`): shot-immune for the ride
+  // (`0x0044E603`), and the bit comes down before the claim (`0x0044E67D`).
+  const r = thrower(ThrowerState.StandAndDecide);
+  r.state = ThrowerState.RideObjectPath;
+  r.sub = 0;
+  ThrowerStateRideObjectPath(r, 1 / 60, new Rng(1), NULL_HOST);
+  check("the ride raises ShotImmune and nothing on the camera",
+        (r.flags & ActorFlag.ShotImmune) !== 0
+        && (r.flags & ActorFlag.NoCameraTrack) === 0
+        && r.state === ThrowerState.RideObjectPath);
+  r.slideTimer = 0xc4;
+  ThrowerStateRideObjectPath(r, 1 / 60, new Rng(1), NULL_HOST);
+  check("...and its last frame lowers it, claims and pounces",
+        (r.flags & ActorFlag.ShotImmune) === 0 && r.attackPermit === 0
+        && r.state === ThrowerState.Pounce,
+        `flags 0x${r.flags.toString(16)} state ${r.state}`);
+
+  // `ThrowerStateBlinkInThreeHops` (`FUN_00451480`): the bit is `0x100`.
+  const b = thrower(ThrowerState.StandAndDecide);
+  b.state = ThrowerState.BlinkIn;
+  b.sub = 0;
+  b.attackState = ThrowerState.StandAndDecide;
+  ThrowerStateBlinkInThreeHops(b, 1 / 60, 0);
+  check("the blink-in cannot be shot and is not hidden from the camera",
+        (b.flags & ActorFlag.ShotImmune) !== 0
+        && (b.flags & ActorFlag.NoCameraTrack) === 0,
+        `flags 0x${b.flags.toString(16)}`);
+  for (let i = 0; i < 400 && b.state === ThrowerState.BlinkIn; i++) {
+    ThrowerStateBlinkInThreeHops(b, 1 / 60, 0);
+  }
+  check("...and arriving lowers it",
+        b.state === ThrowerState.StandAndDecide
+        && (b.flags & ActorFlag.ShotImmune) === 0,
+        `state ${b.state} flags 0x${b.flags.toString(16)}`);
 }
 
 // -- the rain, which used to be unreachable from here ----------------------
@@ -12924,7 +13336,7 @@ console.log("\nrain: DrawRainParticles' simulation half");
   {
     const z = thrower(ThrowerState.StandAndDecide);
     check("a thrower off the side of the frame takes a permit and latches",
-          ThrowerTryClaimAttackSlot(z, offscreen)
+          ThrowerTryClaimAttackSlot(z, new Rng(1), offscreen)
           && G.g_attack_committed === 1
           && (z.flags2 & ThrowerFlag.OffScreenPermit) !== 0,
           `latch ${G.g_attack_committed} flags2 ${z.flags2.toString(16)}`);
@@ -12956,7 +13368,7 @@ console.log("\nrain: DrawRainParticles' simulation half");
     }
     check("a thrower that has pounced once can claim again",
           pounced && G.g_attack_committed === 0
-          && ThrowerTryClaimAttackSlot(z, offscreen),
+          && ThrowerTryClaimAttackSlot(z, new Rng(1), offscreen),
           `pounced ${pounced} latch ${G.g_attack_committed}`
           + ` state ${z.state} permit ${z.attackPermit}`);
     ThrowerReleaseAttackPermit(z);
@@ -13225,7 +13637,7 @@ console.log("\nrain: DrawRainParticles' simulation half");
     const before = G.g_enemies_alive;
     check("one thrower is one enemy alive", before === 1, `${before}`);
 
-    ActorKillAll(0, rng);
+    ActorKillAll(rng);
     check("the kill leaves the hit its death chain reads",
           z.dead && z.pendingHit !== null,
           `dead ${z.dead} hit ${JSON.stringify(z.pendingHit)}`);
@@ -13332,7 +13744,7 @@ console.log("\n`ActorDeadSweep`, and what each class gives back:");
   check("one zombie is one enemy alive and present",
         G.g_enemies_alive === 1 && G.g_enemies_present === 1,
         `${G.g_enemies_alive}/${G.g_enemies_present}`);
-  check("...and it takes a permit", TryClaimAttackSlot(z, NULL_HOST));
+  check("...and it takes a permit", TryClaimAttackSlot(z, new Rng(1), NULL_HOST));
 
   ActorDeadSweep(z, DeadSweep.Unloaded);
   check("an undrawn zombie gives the permit back",
@@ -13377,7 +13789,7 @@ console.log("\n`ActorDeadSweep`, and what each class gives back:");
         G.g_enemies_alive === 1 && G.g_enemies_present === 1,
         `${G.g_enemies_alive}/${G.g_enemies_present}`);
   check("...and it takes a permit in its own bit",
-        ThrowerTryClaimAttackSlot(w, NULL_HOST) && w.attackPermit >= 0);
+        ThrowerTryClaimAttackSlot(w, new Rng(1), NULL_HOST) && w.attackPermit >= 0);
 
   ActorDeadSweep(w, DeadSweep.Dead);
   check("a dead thrower gives the permit back",
@@ -14006,7 +14418,7 @@ console.log("\nthe strike anchor and the cooldown it gates:");
           ActorPlayHitReaction(z, 1, HitResultCode.Damaged) === undefined
             && z.react === null, JSON.stringify(z.react));
     const hp = z.hp;
-    ResolveHit(z, 1, 0, NULL_HOST, new Rng(6));
+    ResolveHit(z, 1, NULL_HOST, new Rng(6));
     check("...though the whole shot still lands, and the lunge goes on",
           z.hp < hp && z.react === null && z.state === ZombieState.Strike,
           `hp ${z.hp}/${hp} react ${JSON.stringify(z.react)} state ${z.state}`);
@@ -14281,9 +14693,9 @@ console.log("class 0x30, the death chain:");
   const present0 = G.g_enemies_present;
   check("one zombie, alive and present", alive0 === 1 && present0 === 1,
         `${alive0}/${present0}`);
-  TryClaimAttackSlot(z, NULL_HOST);
+  TryClaimAttackSlot(z, new Rng(1), NULL_HOST);
 
-  ResolveHit(z, 1, 0, NULL_HOST, rng);
+  ResolveHit(z, 1, NULL_HOST, rng);
   check("the killing shot leaves a hit record for `ZombieOnShot`",
         z.pendingHit !== null && z.dead);
   check("...and nothing has moved the actor into a state yet",
@@ -14298,7 +14710,8 @@ console.log("class 0x30, the death chain:");
   check("...at sub 2, because subs 0 and 1 are a fallthrough",
         z.sub === 2, `sub ${z.sub}`);
   check("...playing a death clip picked by `ChooseDeathMotion`",
-        z.motion === 900 || z.motion === 901, `motion ${z.motion}`);
+        DIRECTIONAL_DEATHS.includes(z.motion),
+        `motion ${z.motion} yaw ${z.yaw} block ${G.g_camera_block_yaw_bams}`);
   check("...with `obj+0x34` bits 0x22000 raised",
         (z.flags & (ActorFlag.Airborne | ActorFlag.NoHitReaction))
           === (ActorFlag.Airborne | ActorFlag.NoHitReaction),
@@ -14393,13 +14806,13 @@ console.log("class 0x30, a fatal hit lands *during* the swing:");
   z.state = ZombieState.Strike;
   z.sub = StrikeSub.Swinging;
   z.action = { motion: atk.strike, ticks: 4 };
-  ResolveHit(z, 1, 0, NULL_HOST, rng);
+  ResolveHit(z, 1, NULL_HOST, rng);
   check("the shot kills it mid-swing", z.dead && z.pendingHit !== null);
   GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
   check("one update takes it out of the swing and into `Death`",
         z.state === ZombieState.Death, `state ${z.state}`);
   check("...and the swing is gone, so the death clip is what is posed",
-        z.action === null && (z.motion === 900 || z.motion === 901),
+        z.action === null && DIRECTIONAL_DEATHS.includes(z.motion),
         `action ${JSON.stringify(z.action)} motion ${z.motion}`);
 }
 
@@ -14975,7 +15388,7 @@ console.log("class 0x30 state 9: the body is thrown, not dropped:");
     const rng = new Rng(21);
     const events = new Events();
     const z = shot(5);
-    TryClaimAttackSlot(z, camHost);
+    TryClaimAttackSlot(z, new Rng(1), camHost);
     kill(z);
     GameUpdate(EYE, 1 / 60, camHost, rng, events);
     check("body condition 5 dies through state 9, not state 6",
@@ -15483,7 +15896,7 @@ console.log("`ActorKillAll` routes class 0x30 through its death chain:");
   const rng = new Rng(15);
   const events = scene(2, rng);
   const [a, b] = G.g_object_list;
-  const n = ActorKillAll(0, rng);
+  const n = ActorKillAll(rng);
   check("the button kills both", n.enemies === 2 && a.dead && b.dead);
   // The whole reason to route rather than hand-assemble: what the old code set
   // by hand -- `dead`, the flag, a clip -- is three of the eleven things
@@ -15555,7 +15968,7 @@ console.log("\n`ActorKillAll` will not kill what a shot could not touch:");
   RegisterEnemySlot(plainZombie);
   RegisterEnemySlot(immuneThrower);
 
-  const n = ActorKillAll(0, rng);
+  const n = ActorKillAll(rng);
   check("the clear takes the one actor a shot could have reached",
         n.enemies === 1, `${n.enemies}`);
   check("...and leaves the shot-immune zombie its hit points",
@@ -15585,7 +15998,7 @@ console.log("\n`ActorKillAll` will not kill what a shot could not touch:");
   // clear -- or the next shot -- takes them in the ordinary way.
   immuneZombie.flags &= ~ActorFlag.ShotImmune;
   immuneThrower.flags &= ~ActorFlag.ShotImmune;
-  const m = ActorKillAll(0, rng);
+  const m = ActorKillAll(rng);
   check("with the bit down the same clear takes both",
         m.enemies === 2 && immuneZombie.dead && immuneThrower.dead,
         `${m.enemies}`);
@@ -15622,7 +16035,7 @@ console.log("\n`NoCameraTrack` is the caller's write, and it is guarded:");
     const z = spawnZombie(0x2400, 1, "zombie");
     z.visible = true;
     z.hp = 10;
-    check("a zombie takes a permit", TryClaimAttackSlot(z, NULL_HOST));
+    check("a zombie takes a permit", TryClaimAttackSlot(z, new Rng(1), NULL_HOST));
     ReleaseAttackSlot(z);
     check("`ReleaseAttackSlot` gives the permit back",
           z.attackPermit === -1 && G.g_attack_permits[0] === -1);
@@ -15634,7 +16047,7 @@ console.log("\n`NoCameraTrack` is the caller's write, and it is guarded:");
     w.visible = true;
     w.hp = 10;
     check("...and a thrower's release is the same routine, same silence",
-          ThrowerTryClaimAttackSlot(w, NULL_HOST)
+          ThrowerTryClaimAttackSlot(w, new Rng(1), NULL_HOST)
           && (ThrowerReleaseAttackPermit(w), w.attackPermit === -1)
           && (w.flags & ActorFlag.NoCameraTrack) === 0,
           `flags ${w.flags.toString(16)}`);
@@ -16476,6 +16889,172 @@ console.log("\na stashed path is played by a hook that steps first:");
         SeveredHeadUpdate(g, rng) === false, `timer ${g.timer}`);
 }
 
+// **The camera block's yaw, and the routines that read it.**
+//
+// `g_camera_block_yaw_bams` (`0x009A60D0`) is the heading of the camera block
+// `UpdateSceneViewAndLight` builds the view from: `VecToAngles(eye - target)`,
+// the camera's own +z, which points back at the viewer. `g_camera_yaw_bams`
+// (`0x009C71F0`) is a different word, which the scene state's hooks write as a
+// camera heading turned half round. The routines below read the first and
+// the port had them reading the second, so every one of them was half a turn
+// out. Each check sets the two apart -- the block at a quarter turn, the other
+// word at what the hook would write from it -- so a reader of the wrong one
+// cannot pass.
+console.log("\nthe camera block's yaw (0x009A60D0) and its readers:");
+{
+  const camera = (block: number) => {
+    G.g_camera_block_yaw_bams = block;
+    G.g_camera_yaw_bams = (block - 0x8000) & 0xffff;
+  };
+
+  // `ChooseDeathMotionDirectional` (`0x00456248`): the block's yaw less the
+  // actor's, and four inclusive arcs tested in a row.
+  {
+    ResetGameGlobals();
+    SetGameTables(CHARS);
+    const z = spawnZombie(0x7d00, 1, "dying");
+    const pick = (block: number, yaw: number, seed = 5) => {
+      camera(block);
+      z.yaw = yaw;
+      const r = new Rng(seed);
+      return { m: ChooseDeathMotionDirectional(z, r), state: r.state };
+    };
+    const drawn = (seed: number, n: number) => {
+      const r = new Rng(seed);
+      for (let i = 0; i < n; i++) r.next();
+      return r.state;
+    };
+    check("an actor facing the camera (0x8000 between them) falls back, "
+          + "from the 0x8000 table",
+          pick(0x8000, 0).m === 901, String(pick(0x8000, 0).m));
+    check("...one with its back to it falls forward, from the 0x0000 table",
+          pick(0, 0).m === 900, String(pick(0, 0).m));
+    check("...0x4000 is the literal 0x3E0 and 0xC000 the literal 0x3DF",
+          pick(0x4000, 0).m === 992 && pick(0xc000, 0).m === 991);
+    check("...and the literal arcs draw nothing",
+          pick(0x4000, 0).state === drawn(5, 0));
+    // 0x2000 is the edge of the 0x4000 arc and of the 0x0000 arc both; the
+    // 0x0000 test runs later, so it wins and draws its `rand()`.
+    const edge = pick(0x2000, 0);
+    check("a heading on a boundary takes the later arc, and its draw",
+          edge.m === 900 && edge.state === drawn(5, 1),
+          `${edge.m} ${edge.state === drawn(5, 1)}`);
+  }
+
+  // `SeveredHeadUpdate` (`0x0040A2A6`): `MatrixRotateY(block yaw)` on
+  // `(0, 0, -0.2)`. At 0x4000 the camera looks down -x, so the head goes -x.
+  {
+    ResetGameGlobals();
+    EnterPlay();
+    camera(0x4000);
+    SpawnSeveredHead(vec3(0, 40, 0), 0x1234, 0, 0);
+    const h = G.g_severed_heads[0]!;
+    SeveredHeadUpdate(h, new Rng(7));
+    check("a severed head is thrown away from the viewer, down the block's -z",
+          Math.abs(h.vel.x - -0.2) < 1e-6 && Math.abs(h.vel.z) < 1e-6,
+          `${h.vel.x.toFixed(3)},${h.vel.z.toFixed(3)}`);
+  }
+
+  // `WaterSplashUpdate` (`0x00439F5A`): `RotY(block yaw)` under the cel.
+  {
+    ResetGameGlobals();
+    camera(0x4000);
+    const f = spawnZombie(0x7d01, 1, "fish stand-in");
+    FishSpawnWaterSplash(f, 1, 0);
+    const s = G.g_fish_water_splashes[0]!;
+    WaterSplashUpdate(s);
+    check("a fish's splash faces the camera block's yaw",
+          s.shownYaw === 0x4000, String(s.shownYaw));
+  }
+
+  // `OwlUpdateAndResolveShot` (`0x0044627B`): the corpse is thrown at unit
+  // speed along `block yaw + 0x8000`, the camera's forward.
+  {
+    const rng = new Rng(37);
+    scene(0, rng);
+    const o = ActorSpawn(0x9601, SpawnClass.FlyingEnemy, -1, "owl", {
+      pos: vec3(0, 0, 40), class43: { subtype: 1, member: 0 },
+    }, rng);
+    const t = (o as { owl: OwlTail }).owl;
+    t.vx = 0;
+    t.vz = 0;
+    camera(0x4000);
+    o.flags |= ActorFlag.Hit | ActorFlag.HitByPlayer0;
+    const shot = OwlResolveShot(o, { eye: EYE, dt: 1 / 60, rng,
+                                     host: NULL_HOST });
+    check("a shot owl is thrown away from the viewer, down the camera's -x",
+          shot && Math.abs(t.vx - -1) < 1e-6 && Math.abs(t.vz) < 1e-6,
+          `${shot} ${t.vx.toFixed(3)},${t.vz.toFixed(3)}`);
+  }
+
+  // `CarrierPropRoutine6` (`0x004415D3`): the bow strip faces the block.
+  {
+    const rng = new Rng(66);
+    scene(0, rng);
+    G.g_civilians_alive = 1;
+    const host: GameHost = {
+      ...NULL_HOST,
+      objectPath: (slot, frame) =>
+        ({ x: frame, y: slot, z: 0, pitch: 0, yaw: 0, roll: 0 }),
+    };
+    const fr = (): ClassFrame => ({ eye: EYE, dt: 1 / 60, rng, host });
+    G.g_cam_path_frame = 0x600;
+    const boat = ActorSpawn(29241, SpawnClass.ScriptedProp, -1, "boat", {
+      class13: { slot: 6711, cam_path: 134, cam_frame: 340, scale: 1,
+                 behaviour: 8, selector: 6 },
+    }, rng);
+    const t = (boat as { prop13: ScriptedPropTail }).prop13;
+    ScriptedPropUpdate13(boat, fr());
+    t.state = CarrierState.RunPast;
+    t.pathFrame = 0x6a4;
+    G.g_prop_strip_effects = [];
+    camera(0x4000);
+    ScriptedPropUpdate13(boat, fr());
+    const bow = G.g_prop_strip_effects[0];
+    check("a carrier's bow strip faces the camera block's yaw",
+          !!bow && bow.yaw === 0x4000, String(bow?.yaw));
+  }
+
+  // Camera block 2, which the frog's wedge reads (`0x0043AB62`):
+  // `EvtRunQueuedActionsSyncViewBlock` (`0x004023D0`) copies block 0's pose
+  // into it while the scene state is (1, 3) and derives its angles, and
+  // nothing else moves it -- so on a rail it keeps the last turn's heading.
+  {
+    ResetGameGlobals();
+    const scene = (major: number, minor: number) => {
+      G.g_scene_state_major = G.g_scene_state_major_entered = major;
+      G.g_scene_state_minor = G.g_scene_state_minor_entered = minor;
+    };
+    check("camera block 2 starts at zero", G.g_camera_block2_yaw_bams === 0);
+    scene(1, 3);
+    SeatCamera(vec3(0, 0, 0), vec3(-10, 0, 0));   // looking down -x
+    CameraActorTick();
+    check("under a view-angle turn, (1, 3), block 2 takes block 0's heading",
+          Math.abs(G.g_camera_block2_yaw_bams - 0x4000) <= 1
+          && Math.abs(G.g_camera_block2_yaw_bams
+                      - G.g_camera_block_yaw_bams) <= 1,
+          `block2 ${G.g_camera_block2_yaw_bams} block0 `
+          + `${G.g_camera_block_yaw_bams}`);
+    const held = G.g_camera_block2_yaw_bams;
+    scene(2, 4);
+    SeatCamera(vec3(0, 0, 0), vec3(10, 0, 0));    // now looking down +x
+    CameraActorTick();
+    check("...and keeps it once the turn is over, whatever block 0 does",
+          G.g_camera_block2_yaw_bams === held
+          && Math.abs(G.g_camera_block_yaw_bams + 0x4000) <= 1,
+          `block2 ${G.g_camera_block2_yaw_bams} block0 `
+          + `${G.g_camera_block_yaw_bams}`);
+    scene(1, 1);
+    CameraActorTick();
+    check("...and another minor of major 1 does not copy either",
+          G.g_camera_block2_yaw_bams === held);
+    CameraBlocksReset();
+    check("`CameraBlocksReset` zeroes it with the other three",
+          G.g_camera_block2_yaw_bams === 0
+          && G.g_camera_block2_eye.x === 0 && G.g_camera_block2_target.x === 0);
+  }
+}
+
 // Which of the run pair a zombie takes, and who decides.
 //
 // `ZombieStateAttackRun` (`FUN_004554D0`) indexes its motion row with
@@ -16527,7 +17106,7 @@ console.log("\na stashed path is played by a hook that steps first:");
     z.flags = 0;
     z.removed.length = 0;
     z.boneSlot = {};
-    ResolveHit(z, 2, 0, NULL_HOST, rng);
+    ResolveHit(z, 2, NULL_HOST, rng);
     fired = G.g_severed_heads.length;
   }
   check("a headshot kill throws a head", fired === 1, `after ${tries} kills`);
@@ -16544,7 +17123,7 @@ console.log("\na stashed path is played by a hook that steps first:");
     a.charType = t;
     for (let i = 0; i < 40; i++) {
       a.hp = 1; a.dead = false; a.flags = 0; a.removed.length = 0;
-      ResolveHit(a, 2, 0, NULL_HOST, r);
+      ResolveHit(a, 2, NULL_HOST, r);
     }
     return G.g_severed_heads.length;
   };
@@ -20146,10 +20725,13 @@ console.log("\nclass 0x33 selector 4: the scenery an actor shoves aside:");
     check("...and the alive count comes down while the present count does not",
           G.g_enemies_alive === 0 && G.g_enemies_present === 1,
           `${G.g_enemies_alive}/${G.g_enemies_present}`);
-    check("...with the corpse model on bone 1 and bones 2 and 3 blanked",
+    // `part+0x210` is bone 2's record at `+0x78` -- its hit radius -- and
+    // not bone 3's slot: bone 3's model stays on the corpse.
+    check("...with the corpse model on bone 1, bone 2 blanked and unshootable, "
+          + "and bone 3 left alone",
           a.boneSlot["1"] === 0xb91 && a.boneSlot["2"] === 0
-          && a.boneSlot["3"] === 0,
-          JSON.stringify(a.boneSlot));
+          && a.boneSlot["3"] === undefined && a.boneRadius["2"] === 0,
+          `${JSON.stringify(a.boneSlot)} ${JSON.stringify(a.boneRadius)}`);
   }
 
   {
@@ -20257,7 +20839,10 @@ console.log("\nclass 0x33 selector 4: the scenery an actor shoves aside:");
       check("a frog owed more than 30 degrees starts the left turn clip",
             a.motion === FrogMotion.TurnLeft && t.sub === 1,
             `motion 0x${a.motion.toString(16)} sub ${t.sub}`);
-      a.playTicks = 30;          // the clip's play length: this pass is done
+      // `part+0x08` -- the cursor the last draw left, which is what the states
+      // read -- at the clip's play length: this pass is done.
+      t.playCursor = 30;
+      a.playTicks = 30;
       a.fade = 0;                // ...and the fade into it long over
       const yaw0 = a.yaw;
       FrogStateHopWithinScreenWedge(a, frame(rng));
@@ -20293,6 +20878,7 @@ console.log("\nclass 0x33 selector 4: the scenery an actor shoves aside:");
       t.sub = 1;
       t.a = 0x5000;
       a.motion = FrogMotion.TurnLeft;
+      t.playCursor = 30;
       a.playTicks = 30;
       a.fadeFrom = null;
       a.fade = 0;
@@ -20314,7 +20900,7 @@ console.log("\nclass 0x33 selector 4: the scenery an actor shoves aside:");
       t.sub = 2;
       t.a = 0x800;
       a.motion = FrogMotion.Hop;
-      a.playTicks = 0x12;
+      t.playCursor = 0x12;
       const yaw0 = a.yaw;
       FrogStateHopWithinScreenWedge(a, frame(rng));
       check("the hop's launch frame also halves the turn it still owes",
@@ -20326,7 +20912,7 @@ console.log("\nclass 0x33 selector 4: the scenery an actor shoves aside:");
       t.sub = 2;
       t.a = 0x400;
       a.motion = FrogMotion.Leap;
-      a.playTicks = 0x1e;
+      t.playCursor = 0x1e;
       FrogStateLeapAtPlayer(a, frame(rng));
       check("...and so does the leap's",
             t.sub === 3 && t.a === 0x200
@@ -20347,6 +20933,7 @@ console.log("\nclass 0x33 selector 4: the scenery an actor shoves aside:");
             + "connected, over a fade of 2 and not 61",
             a.motion === FrogMotion.Leap
             && MotionPlayFrame(a) === FROG_LEAP_RECOVER_CURSOR
+            && t.playCursor === FROG_LEAP_RECOVER_CURSOR
             && a.fadeLen === 3 && t.sub === 5
             && (t.flags & (FrogFlag.CycleRunning | FrogFlag.CycleWrapped
                            | FrogFlag.NoGravity)) === 0,
@@ -20400,7 +20987,10 @@ console.log("\nclass 0x33 selector 4: the scenery an actor shoves aside:");
     {
       const rng = new Rng(41);
       frogScene(rng);
-      G.g_camera_yaw_bams = 0;
+      // The rays hang off camera block 2's yaw (`0x0043AB62`), not the
+      // gameplay eye's heading, which is given something else here.
+      G.g_camera_block2_yaw_bams = 0;
+      G.g_camera_yaw_bams = 0x3000;
       const a = spawnFrog(0x9313, vec3(0, 0, 0), rng);
       const t = tailOf(a);
       const ray = s16(t.wedge - 0x8000) * (Math.PI * 2) / 65536;
@@ -20501,6 +21091,233 @@ console.log("\nclass 0x33 selector 4: the scenery an actor shoves aside:");
             a.pos.x === x0 && near(a.sphereCentre.x, 0)
             && near(a.sphereCentre.z, -50),
             `pos ${a.pos.x} sphere ${JSON.stringify(a.sphereCentre)}`);
+    }
+
+    // -- the death: `FrogAwardKillAndEnterDeath` and `FrogStateDieTumbleAndSink`
+    //
+    // Driven the way the director drives a frog -- `ActorAdvanceMotion`, then
+    // the update, a frame at a time -- because the hang this pins lived in
+    // the phase between the two. The camera is pitched down by asin(0.1),
+    // turned a quarter about Y and set somewhere `ClassFrame.eye` is not, so
+    // the kick has to be the camera's rotation of (0, 0, -0.5) and nothing
+    // else (L48).
+    {
+      const cam = vec3(7, 9, -3);
+      const SN = 0.1;
+      const CS = Math.sqrt(1 - SN * SN);
+      const host: GameHost = {
+        ...NULL_HOST,
+        viewPoint: (x, y, z, o) => {
+          o.x = cam.x + z * CS; o.y = cam.y + y + z * SN; o.z = cam.z - x;
+        },
+      };
+      const near = (u: number, v: number, e = 1e-9) => Math.abs(u - v) < e;
+      const deathScene = (seed: number) => {
+        const rng = new Rng(seed);
+        frogScene(rng);
+        const a = spawnFrog(0x9320, vec3(0, 0, -40), rng);
+        const pf = (): ClassFrame => ({ eye: EYE, dt: 1 / 60, rng, host });
+        // One frame as `SceneTaskWalk` runs it: the clock, then the update.
+        const step = (): void => {
+          ActorAdvanceMotion(a, 1 / 60);
+          FrogUpdate(a, pf());
+        };
+        return { rng, a, t: tailOf(a), step };
+      };
+
+      {
+        const { a, t, step } = deathScene(47);
+        const ground = a.pos.y;
+        check("a frog's Init raises the bit its ring and shadow trace the "
+              + "floor by, and publishes its sphere at its feet",
+              (a.motionFlags & MotionFlag.TraceGround) !== 0
+              && a.sphereCentre.x === 0 && a.sphereCentre.z === -40
+              && a.sphereCentre.y === ground,
+              `flags 0x${a.motionFlags.toString(16)} `
+              + JSON.stringify(a.sphereCentre));
+        for (let i = 0; i < 5; i++) step();
+        const slot = a.hitSlot;
+        // The descriptor's `+0x22`, which the spawn allocator puts in both
+        // words: 1 in all four shipped spawns.
+        a.hp = a.maxHp = 1;
+        const maxHp = a.maxHp;
+        const score = G.g_player_score[0];
+        const hits = G.g_player_hit_count[0];
+        a.attackPermit = 0;
+        G.g_attack_permits[0] = a.at;
+        a.lookAt.x = 1.5;
+        a.lookAt.z = -41.25;
+        G.g_ring_effects = [];
+        G.g_blood_sprays = [];
+        a.flags |= ActorFlag.Hit | ActorFlag.HitByPlayer0;
+        step();
+        check("the kill frame runs on into the tumble: the kick is already "
+              + "bounced, 0.6 of the camera's own -Z half a unit long",
+              t.state === FrogState.Die && t.sub === 1 && a.vel.y === 0
+              && near(a.vel.x, -0.5 * CS * 0.6) && a.vel.z === 0,
+              `${FrogState[t.state]}/${t.sub} vel ${a.vel.x}, ${a.vel.y}, `
+              + `${a.vel.z}`);
+        check("...and the death clip is blended in from the pose on screen, "
+              + "over a fade of 2",
+              a.motion === FrogMotion.Death
+              && a.fadeFrom?.motion === FrogMotion.Idle && a.fadeLen === 3,
+              `motion 0x${a.motion.toString(16)} from `
+              + `${JSON.stringify(a.fadeFrom)} fadeLen ${a.fadeLen}`);
+        check("...it leaves the shot test (0x8000) rather than going "
+              + "shot-immune (0x100)",
+              (a.flags & ActorFlag.NoShotTest) !== 0
+              && (a.flags & ActorFlag.ShotImmune) === 0
+              && (a.flags & ActorFlag.NoCameraTrack) !== 0,
+              `flags 0x${a.flags.toString(16)}`);
+        check("...the kill zeroes the u16 at +0x11C and nothing beside it",
+              a.hp === 0 && a.maxHp === maxHp, `${a.hp}/${a.maxHp}`);
+        check("...the alive count comes down, the permit is freed and the "
+              + "frog still names it, as the engine leaves obj+0x121",
+              G.g_enemies_alive === 0 && G.g_enemies_present === 1
+              && G.g_attack_permits[0] === -1 && a.attackPermit === 0,
+              `${G.g_enemies_alive}/${G.g_enemies_present} permits `
+              + `${G.g_attack_permits} own ${a.attackPermit}`);
+        check("...80 points, a hit counted, the order chosen, and the blood "
+              + "on bone 2",
+              G.g_player_score[0] - score === 80
+              && G.g_player_hit_count[0] - hits === 1
+              && G.g_hit_player_order[0] === 0
+              && G.g_hit_player_order[1] === -1
+              && G.g_blood_sprays.length === 1
+              && G.g_blood_sprays[0].at === a.at
+              && G.g_blood_sprays[0].bone === 2,
+              `score +${G.g_player_score[0] - score} order `
+              + `${G.g_hit_player_order} blood `
+              + JSON.stringify(G.g_blood_sprays));
+
+        // The frames that follow. The clip is held three frames on its start
+        // (a fade of 2), then steps a cursor a frame; the state freezes it
+        // when it reads `len - 1` = 9, which the draw at +11 computes, and
+        // reads 10 on the frame after. The slide is dead by then, so the
+        // ring goes down on +13.
+        let frozenAt = -1;
+        let ringAt = -1;
+        let goneAt = -1;
+        const cursors: number[] = [];
+        let ringVel = "";
+        for (let k = 1; k <= 400 && goneAt < 0; k++) {
+          const velBefore = `${a.vel.x},${a.vel.y},${a.vel.z}`;
+          step();
+          if (k <= 14) cursors.push(t.playCursor);
+          if (frozenAt < 0 && (a.flags & ActorFlag.PoseFrozen)) frozenAt = k;
+          if (ringAt < 0 && G.g_ring_effects.length) {
+            ringAt = k;
+            ringVel = velBefore;
+            check("...on the settling frame the corpse sinks at 0.035 and "
+                  + "counts 180",
+                  a.vel.x === 0 && a.vel.z === 0 && a.vel.y === -0.035
+                  && t.sub === 2 && t.a === 0xb4,
+                  `vel ${a.vel.x}, ${a.vel.y}, ${a.vel.z} sub ${t.sub} `
+                  + `a ${t.a}`);
+          }
+          if (a.despawned) goneAt = k;
+        }
+        check("the drawn cursor is held three frames on the death clip's "
+              + "start and then steps to its length",
+              cursors.join(",") === "0,0,1,2,3,4,5,6,7,8,9,10,10,10",
+              cursors.join(","));
+        check("the clip freezes on the frame the state reads len - 1",
+              frozenAt === 12, `${frozenAt}`);
+        const ring = G.g_ring_effects[0];
+        check("SpawnGroundRingEffect goes down on the frame the corpse, "
+              + "settled, reads the clip's length",
+              ringAt === 13 && ringVel === "0,0,0", `${ringAt} (${ringVel})`);
+        check("...under the tracked bone, on the traced ground plus 0.05, "
+              + "at the frog's yaw and scale 1",
+              ring !== undefined && ring.x === 1.5 && ring.z === -41.25
+              && ring.y === Math.fround(QueryGroundHeightAt(0, 0, 0) + 0.05)
+              && ring.yaw === a.yaw && ring.scale === 1
+              && ring.phase === RingEffectPhase.Spread,
+              JSON.stringify(ring));
+        check("the corpse despawns 181 frames after it settles, taking the "
+              + "present count and its hit slot",
+              goneAt === ringAt + 181 && G.g_enemies_present === 0
+              && G.g_enemies_alive === 0 && G.g_hit_slots[slot] === HIT_SLOT_NONE
+              && slot !== HIT_SLOT_NONE,
+              `gone ${goneAt} (ring ${ringAt}) `
+              + `${G.g_enemies_alive}/${G.g_enemies_present} slot ${slot}`);
+        check("...having sunk 0.035 a frame from the settling frame on",
+              near(a.pos.y, ground - 0.035 * 182, 1e-6),
+              `${a.pos.y} vs ${ground - 0.035 * 182}`);
+      }
+
+      // Every cursor test in the class reads the cursor the last draw left,
+      // not the counter the director has already stepped: the hop launches
+      // one frame after the counter reaches 0x12, as the engine's does.
+      {
+        const { a, t, step } = deathScene(53);
+        t.state = FrogState.HopToHeading;
+        t.sub = 2;
+        t.a = 0;
+        a.motion = FrogMotion.Hop;
+        a.fadeFrom = null;
+        a.fade = 0;
+        a.playTicks = 0x11;
+        t.playCursor = 0x11;
+        step();
+        const early = t.sub;
+        step();
+        check("a hop launches on the frame after the counter reaches its "
+              + "launch cursor, when the state reads the draw's",
+              early === 2 && t.sub === 3 && Math.hypot(a.vel.x, a.vel.z) > 0.99,
+              `sub ${early} then ${t.sub}`);
+      }
+
+      // Retired while it sinks, a corpse gives back the present count and
+      // not the alive count its death state already returned.
+      {
+        const { a, step } = deathScene(59);
+        a.flags |= ActorFlag.Hit | ActorFlag.HitByPlayer0;
+        step();
+        step();
+        g_class_handlers[SpawnClass.Frog]?.leave?.(a);
+        check("a sinking frog retired by the script leaves the room's alive "
+              + "count alone",
+              G.g_enemies_alive === 0 && G.g_enemies_present === 0
+              && a.despawned,
+              `${G.g_enemies_alive}/${G.g_enemies_present}`);
+      }
+
+      // The death frees the permit and leaves `obj+0x121`; a permit someone
+      // else has taken since is theirs when the corpse goes.
+      {
+        const { a, step } = deathScene(61);
+        a.attackPermit = 0;
+        G.g_attack_permits[0] = a.at;
+        a.flags |= ActorFlag.Hit | ActorFlag.HitByPlayer0;
+        step();
+        G.g_attack_permits[0] = 0x7777;
+        g_class_handlers[SpawnClass.Frog]?.onDeadSweep?.(a,
+                                                         DeadSweep.Despawned);
+        check("a dead frog's sweep does not free a permit another actor holds",
+              G.g_attack_permits[0] === 0x7777 && a.attackPermit === -1,
+              `${G.g_attack_permits} own ${a.attackPermit}`);
+      }
+
+      // Two players in: `ChooseHitPlayerOrder` draws its coin before the
+      // shooter's, so the kill frame takes one draw even for a shot only
+      // player 0 fired.
+      {
+        const { rng, a, step } = deathScene(67);
+        G.g_active_player = 2;
+        a.flags |= ActorFlag.Hit | ActorFlag.HitByPlayer0;
+        const ref = new Rng(1);
+        ref.state = rng.state;
+        const first = ref.int(2);
+        step();
+        check("with both players in, the kill draws the hit order and "
+              + "nothing else for a one-player shot",
+              rng.state === ref.state
+              && G.g_hit_player_order.join(",")
+                 === (first !== 0 ? "0,1" : "1,0"),
+              `order ${G.g_hit_player_order} state ${rng.state} vs `
+              + `${ref.state}`);
+      }
     }
   }
 
@@ -20731,9 +21548,11 @@ console.log("\nclass 0x33 selector 4: the scenery an actor shoves aside:");
     check("...each turned by half a turn at most, not a whole one",
           G.g_owl_feathers.every((f) => f.yaw >= 0 && f.yaw < 0x8000),
           `${Math.max(...G.g_owl_feathers.map((f) => f.yaw))}`);
+    // Two points go through the camera on the death frame: the blood's, and
+    // then -- the frame falls through to the tail -- the shot test's depth.
     check("...and leaves blood at its camera-space point",
           G.g_point_blood_sprays.length === blood + 1
-          && seen.length === 1 && seen[0].z === 40
+          && seen.length === 2 && seen[0].z === 40
           && G.g_point_blood_sprays[blood].pos.z === -60,
           `${G.g_point_blood_sprays.length - blood} ${JSON.stringify(seen)}`);
     // Standing still, the heading of its own motion is 0, and the death frame
@@ -20827,6 +21646,348 @@ console.log("\nclass 0x33 selector 4: the scenery an actor shoves aside:");
     check("...and draws its thirty cels once each, the last one included",
           cels.length === 30 && cels[0] === 0 && cels[29] === 29,
           `${cels.length} ${cels[0]}..${cels[cels.length - 1]}`);
+  }
+
+  // -- the owl's corpse: four landings, and the effects only they make -------
+  //
+  // `OwlCorpseFallAndSettle` (`FUN_00448210`) lands each sub-type on its own
+  // literals, and the ground ring and the water splash have no other caller.
+  // Every number below is the exe's own, written out rather than imported, so
+  // that a wrong constant in the port fails here.
+  {
+    const rng = new Rng(71);
+    const events = scene(0, rng);
+    G.g_players_in_play = 2;
+    G.g_scene_index = 0;
+    const sounds: number[] = [];
+    events.on("sound.play", (e) => sounds.push(e.id));
+    const THUD = 0x1e16a9;       // COMMON\DAMAGE5_22.WAV
+    const SIBUKI = 0x4616a9;     // COMMON\SIBUKI8_16.WAV
+    const BOBBLE = 0x118a9;      // the ring's own, in scene 0
+    const GRAV = Math.fround(0.020415);
+    let at = 0xa400;
+    // An owl of `subtype` shot where it stands, then put at (x, y, z) with
+    // the given velocity: the corpse's first frame is the next update.
+    const corpse = (subtype: number, x: number, y: number, z: number,
+                    vx = 0, vy = 0, vz = 0) => {
+      G.g_cam_path_frame = 700;
+      G.g_owl_ground_rings = [];
+      G.g_owl_water_splashes = [];
+      const o = ActorSpawn(at++, SpawnClass.FlyingEnemy, -1, "owl", {
+        pos: vec3(x, y, z), class43: { subtype, member: 0 },
+      }, rng);
+      const t = (o as { owl: OwlTail }).owl;
+      o.flags |= ActorFlag.Hit | ActorFlag.HitByPlayer0;
+      OwlUpdateAndResolveShot(o, frame(rng, events));
+      o.pos.x = x; o.pos.y = y; o.pos.z = z;
+      t.vx = vx; t.vy = vy; t.vz = vz;
+      sounds.length = 0;
+      const step = () => OwlUpdateAndResolveShot(o, frame(rng, events));
+      return { o, t, step };
+    };
+
+    {
+      const { o, t, step } = corpse(1, 0, 100, 0);
+      check("a shot owl is marked with the owl's corpse bit, 0x1000000, and "
+            + "not ActorFlag.Dead",
+            t.state === OwlState.Dead && (o.flags & 0x1000000) !== 0
+            && (o.flags & ActorFlag.Dead) === 0,
+            `flags 0x${o.flags.toString(16)}`);
+      const p0 = o.pitch;
+      step();
+      check("the corpse tumbles by its spin, and the spin keeps 0.95 of "
+            + "itself, truncated",
+            o.pitch === p0 - 768 && t.spin === -729,
+            `${o.pitch - p0} ${t.spin}`);
+      step();
+      check("...-768, then -729, then -692",
+            o.pitch === p0 - 768 - 729 && t.spin === -692,
+            `${o.pitch - p0} ${t.spin}`);
+      check("...and in the air nothing is made and nothing heard",
+            G.g_owl_ground_rings.length === 0
+            && G.g_owl_water_splashes.length === 0 && sounds.length === 0,
+            `${sounds}`);
+    }
+
+    // Sub-type 0: the stairwell.
+    {
+      const { t, step } = corpse(0, -690, 60, -1103, 0, 0, 0.1);
+      step();
+      check("sub-type 0, between its two rails: both flip z and cancel",
+            t.vz === 0.1, `${t.vz}`);
+    }
+    {
+      const { t, step } = corpse(0, -690, 60, -1095, 0, 0, 0.1);
+      step();
+      check("...beyond rail 0 one flips, and the corpse turns back",
+            t.vz === -0.1, `${t.vz}`);
+    }
+    {
+      const { t, step } = corpse(0, -690, 60, -1120, 0, 0, -0.1);
+      step();
+      check("...beyond rail 1 likewise, the other way", t.vz === 0.1,
+            `${t.vz}`);
+    }
+    {
+      const { t, step } = corpse(0, -725, 60, -1095, 0, 0, 0.1);
+      step();
+      check("...and west of the rails' last point neither is tested",
+            t.vz === 0.1, `${t.vz}`);
+    }
+    {
+      const { o, t, step } = corpse(0, -738.9, 60, -1100, -0.5, 0, 0.2);
+      step();
+      check("sub-type 0, past x = -739: stopped dead, and 0x600 on the spin",
+            o.pos.x === -739 && t.vx === 0 && t.vz === 0
+            && t.spin === -729 + 0x600,
+            `${o.pos.x} ${t.vx} ${t.vz} ${t.spin}`);
+    }
+    {
+      // x -689.5 is step n = -4 of `n * 6 - 671`: a floor at 41.
+      const { o, t, step } = corpse(0, -690, 41.01, -1103, 0.5, 0, 0);
+      step();
+      check("sub-type 0, on a step: onto it, x0.8 across, x-0.4 up, 0x400 "
+            + "off the spin, and the thud",
+            o.pos.y === 41 && t.vy === -GRAV * Math.fround(-0.4)
+            && t.vx === 0.5 * Math.fround(0.8) && t.spin === -729 - 0x400
+            && t.settled === 0 && sounds.join() === `${THUD}`
+            && G.g_owl_ground_rings.length === 0,
+            `${o.pos.y} ${t.vy} ${t.vx} ${t.spin} ${sounds}`);
+    }
+    {
+      const { o, t, step } = corpse(0, -730, 35.93, -1100);
+      o.yaw = 0x1234;
+      step();
+      const r = G.g_owl_ground_rings[0];
+      check("sub-type 0 lands for good under 35.91906, with a ring at "
+            + "35.93906 turned to its yaw",
+            o.pos.y === Math.fround(35.91906) && t.settled === 1
+            && G.g_owl_ground_rings.length === 1
+            && r.y === Math.fround(35.93906) && r.x === o.pos.x
+            && r.z === o.pos.z && r.scale === 0.75 && r.pitch === 0
+            && r.yaw === 0x1234,
+            `${o.pos.y} ${JSON.stringify(r)}`);
+      check("...to the ring's bobble and then the thud",
+            sounds.join() === `${BOBBLE},${THUD}`, `${sounds}`);
+      const pitch = o.pitch;
+      step();
+      check("a landed corpse sinks 0.03 a frame and does nothing else",
+            o.pos.y === Math.fround(35.91906) - Math.fround(0.03)
+            && o.pitch === pitch && G.g_owl_ground_rings.length === 1,
+            `${o.pos.y} ${o.pitch - pitch}`);
+    }
+
+    // Sub-type 1: a line between a flat and a slope.
+    {
+      const { o, t, step } = corpse(1, -600, 49.17, -950);
+      step();
+      const r = G.g_owl_ground_rings[0];
+      check("sub-type 1, on the flat side of its line: under 49.16, a ring "
+            + "at 49.3 turned 0xDC00 -- and no thud",
+            t.settled === 1 && r?.y === Math.fround(49.3) && r.pitch === 0
+            && r.yaw === 0xdc00 && r.scale === 0.75
+            && sounds.join() === `${BOBBLE}`,
+            `${t.settled} ${JSON.stringify(r)} ${sounds}`);
+      check("...and the corpse is left where it fell, not put on the flat",
+            o.pos.y === 49.17 - GRAV, `${o.pos.y}`);
+    }
+    {
+      const b = Math.fround(0.979029);
+      const c = Math.fround(0.203721);
+      const d = Math.fround(140.1687);
+      const z = -900;
+      const under = -(c * z + d) / b;
+      const { o, t, step } = corpse(1, -660, under + 0.5, z);
+      step();
+      check("sub-type 1, on the slope side: nothing while it is above the "
+            + "plane", t.settled === 0 && G.g_owl_ground_rings.length === 0,
+            `${o.pos.y} ${under}`);
+      o.pos.y = under + 0.01;
+      t.vy = 0;
+      step();
+      const r = G.g_owl_ground_rings[0];
+      check("...and under it, a ring a unit below the corpse, pitched "
+            + "0x1000, and the thud",
+            t.settled === 1 && r?.y === o.pos.y - 1 && r.pitch === 0x1000
+            && r.yaw === 0xdc00 && sounds.join() === `${BOBBLE},${THUD}`,
+            `${t.settled} ${JSON.stringify(r)} ${sounds}`);
+    }
+
+    // Sub-type 2: an eight-step stair in a box, and a floor at -36.
+    {
+      // z -1107.9 is step n = 2 of `-1098.7 - 3.7666 (n + 1)`: -26.
+      const { o, t, step } = corpse(2, -1120, -25.99, -1108, 0.2, 0, 0.1);
+      step();
+      check("sub-type 2, on a step in its box: onto it, x-0.5 on all three, "
+            + "0x600 on the spin, and the thud",
+            o.pos.y === -26 && t.vy === -GRAV * -0.5 && t.vx === 0.2 * -0.5
+            && t.vz === 0.1 * -0.5 && t.bounced === 1
+            && t.spin === -729 + 0x600 && t.settled === 0
+            && sounds.join() === `${THUD}`,
+            `${o.pos.y} ${t.vy} ${t.vx} ${t.vz} ${t.spin} ${sounds}`);
+      o.pos.y = -25.99;
+      t.vy = 0; t.vx = 0.2; t.vz = 0.1;
+      sounds.length = 0;
+      step();
+      check("...and the second time only its fall is turned: nothing "
+            + "across, no thud",
+            o.pos.y === -26 && t.vy === -GRAV * -0.5 && t.vx === 0.2
+            && t.vz === 0.1 && sounds.length === 0,
+            `${o.pos.y} ${t.vx} ${t.vz} ${sounds}`);
+    }
+    {
+      const { o, t, step } = corpse(2, -1100, -35.99, -1100);
+      o.yaw = 0x2345;
+      step();
+      const r = G.g_owl_ground_rings[0];
+      check("sub-type 2 lands at -36 outside its box, with a ring at -35.98",
+            o.pos.y === -36 && t.settled === 1
+            && r?.y === Math.fround(-35.98) && r.yaw === 0x2345
+            && r.pitch === 0 && sounds.join() === `${BOBBLE},${THUD}`,
+            `${o.pos.y} ${JSON.stringify(r)} ${sounds}`);
+    }
+
+    // Sub-type 3: water.
+    {
+      const { o, t, step } = corpse(3, 10, -24.99, 20, 0.1, 0, 0);
+      step();
+      const s = G.g_owl_water_splashes[0];
+      check("sub-type 3 meets the water at -25: the splash at its x and z, "
+            + "SIBUKI8, and no ring",
+            t.settled === 1 && s?.x === o.pos.x && s.z === o.pos.z
+            && s.y === -25 && G.g_owl_ground_rings.length === 0
+            && sounds.join() === `${SIBUKI}`,
+            `${t.settled} ${JSON.stringify(s)} ${sounds}`);
+      check("...and is not stopped at the surface",
+            o.pos.y === -24.99 - GRAV, `${o.pos.y}`);
+      const y1 = o.pos.y;
+      step();
+      check("...it sinks on through it", o.pos.y === y1 - Math.fround(0.03),
+            `${o.pos.y}`);
+      OwlEffectsTick(rng);
+      check("...and the splash it made runs",
+            G.g_owl_water_splashes.length === 1
+            && G.g_owl_water_splashes[0].shown === 0,
+            `${G.g_owl_water_splashes.length}`);
+    }
+  }
+
+  {
+    // The rest of the death path.
+    const rng = new Rng(73);
+    const events = scene(0, rng);
+    G.g_players_in_play = 2;
+
+    // A bullet on a sub-type-0 owl before frame 682 is kept: nothing in the
+    // class clears `obj+0x34` bit 3, so the owl dies the frame the guard lifts.
+    const o = ActorSpawn(0xa500, SpawnClass.FlyingEnemy, -1, "owl", {
+      pos: vec3(0, 0, 40), class43: { subtype: 0, member: 0 },
+    }, rng);
+    const t = () => (o as { owl: OwlTail }).owl;
+    G.g_cam_path_frame = 100;
+    o.flags |= ActorFlag.Hit | ActorFlag.HitByPlayer0;
+    OwlUpdateAndResolveShot(o, frame(rng, events));
+    check("an early bullet on a sub-type-0 owl is kept",
+          t().state !== OwlState.Dead && (o.flags & ActorFlag.Hit) !== 0,
+          `${OwlState[t().state]} 0x${o.flags.toString(16)}`);
+    G.g_cam_path_frame = 700;
+    OwlUpdateAndResolveShot(o, frame(rng, events));
+    check("...and kills it the frame 682 is passed, with no second shot",
+          t().state === OwlState.Dead, OwlState[t().state]);
+
+    // The shot test: every frame alive, the death frame too, never a corpse.
+    const p = ActorSpawn(0xa501, SpawnClass.FlyingEnemy, -1, "owl", {
+      pos: vec3(3, 4, 40), class43: { subtype: 1, member: 1 },
+    }, rng);
+    G.g_shot_test_list = [];
+    OwlUpdateAndResolveShot(p, frame(rng, events));
+    check("a live owl files itself for the shot test, at its own point",
+          G.g_shot_test_list.some((e) => e.at === p.at)
+          && p.shotCentre.x === p.pos.x && p.shotCentre.y === p.pos.y
+          && p.shotCentre.z === p.pos.z,
+          `${G.g_shot_test_list.length}`);
+    G.g_shot_test_list = [];
+    p.flags |= ActorFlag.Hit | ActorFlag.HitByPlayer1;
+    OwlUpdateAndResolveShot(p, frame(rng, events));
+    check("...on the frame it dies as well",
+          (p as { owl: OwlTail }).owl.state === OwlState.Dead
+          && G.g_shot_test_list.some((e) => e.at === p.at),
+          `${G.g_shot_test_list.length}`);
+    G.g_shot_test_list = [];
+    OwlUpdateAndResolveShot(p, frame(rng, events));
+    check("...and never as a corpse",
+          !G.g_shot_test_list.some((e) => e.at === p.at),
+          `${G.g_shot_test_list.length}`);
+
+    // A despawned corpse gives nothing back: the death block already did,
+    // and the token it would match on is another group's.
+    G.g_class43_attack_token = 1;
+    const alive = G.g_enemies_alive;
+    const present = G.g_enemies_present;
+    ActorDespawn(p);
+    ActorDeadSweep(p, DeadSweep.Despawned);
+    check("a despawned owl corpse frees no token and retires nothing twice",
+          G.g_class43_attack_token === 1 && G.g_enemies_alive === alive
+          && G.g_enemies_present === present,
+          `${G.g_class43_attack_token} ${G.g_enemies_alive}/`
+          + `${G.g_enemies_present}`);
+
+    // The yaw's error runs -0x7FFF..+0x8000: a heading straight behind turns
+    // the positive way. The death frame steers on the owl's own motion,
+    // which standing still is heading 0.
+    const q = ActorSpawn(0xa502, SpawnClass.FlyingEnemy, -1, "owl", {
+      pos: vec3(0, 0, 40), class43: { subtype: 1, member: 2 },
+    }, rng);
+    const qt = (q as { owl: OwlTail }).owl;
+    qt.prevX = q.pos.x;
+    qt.prevZ = q.pos.z;
+    q.yaw = 0x8000;
+    q.flags |= ActorFlag.Hit | ActorFlag.HitByPlayer0;
+    OwlUpdateAndResolveShot(q, frame(rng, events));
+    check("an owl turning to a heading exactly behind turns the positive way",
+          qt.state === OwlState.Dead && q.yaw === 0x8000 + 3276, `${q.yaw}`);
+
+    // The throw: `g_camera_block_yaw_bams + 0x8000`. The block's yaw faces
+    // back at the viewer -- `g_camera_yaw_bams` is it turned half round -- so
+    // a camera looking down -z throws the corpse on down -z, away from it.
+    G.g_camera_block_yaw_bams = 0;
+    G.g_camera_yaw_bams = 0x8000;
+    const r = ActorSpawn(0xa503, SpawnClass.FlyingEnemy, -1, "owl", {
+      pos: vec3(0, 0, -40), class43: { subtype: 1, member: 3 },
+    }, rng);
+    const rt = (r as { owl: OwlTail }).owl;
+    rt.vx = 0; rt.vy = 0; rt.vz = 0;
+    r.flags |= ActorFlag.Hit | ActorFlag.HitByPlayer0;
+    OwlUpdateAndResolveShot(r, frame(rng, events));
+    check("a shot owl is thrown away from the camera, along the block's yaw "
+          + "turned half round",
+          rt.state === OwlState.Dead && Math.abs(rt.vx) < 1e-9
+          && Math.abs(rt.vz + 1) < 1e-9,
+          `${rt.vx} ${rt.vz}`);
+
+    // The two-player aim offset: the owl's horizontal distance from the
+    // block's eye, truncated, over sixty, a quarter turn off the block's yaw
+    // -- 0xC000 for player 0, 0x4000 for player 1.
+    G.g_players_in_play = 2;
+    G.g_camera_block_eye.x = 0;
+    G.g_camera_block_eye.y = 0;
+    G.g_camera_block_eye.z = 0;
+    const s = ActorSpawn(0xa504, SpawnClass.FlyingEnemy, -1, "owl", {
+      pos: vec3(30.5, 7, 40.2), class43: { subtype: 3, member: 3 },
+    }, rng);
+    const st = (s as { owl: OwlTail }).owl;
+    const sides = new Set<number>();
+    for (let i = 0; i < 8; i += 1) {
+      OwlPickTargetPlayerAndAimOffset(s, st, rng);
+      const want = 50 * Math.fround(1 / 60) * (s.attackPermit === 0 ? -1 : 1);
+      sides.add(s.attackPermit);
+      check(`the two-player aim offset for player ${s.attackPermit} is the `
+            + "distance over sixty, a quarter turn off the block's yaw",
+            Math.abs(st.aimX - want) < 1e-9 && Math.abs(st.aimZ) < 1e-9,
+            `${st.aimX} ${st.aimZ} want ${want}`);
+    }
+    check("...and both players are drawn", sides.size === 2,
+          `${[...sides]}`);
   }
 
   {
@@ -21872,7 +23033,7 @@ console.log("\nznjoe's creature:");
     const rng = new Rng(11);
     const { joe, events } = joeScene(rng);
     const score = G.g_player_score[0];
-    const out = ResolveHit(joe, 1, 0, JOE_HOST, rng, 0);
+    const out = ResolveHit(joe, 1, JOE_HOST, rng, 0);
     check("a torso hit on znjoe plays no stagger and leaves it alive",
           out.react === undefined && out.result === 1 && joe.hp > 0
           && !joe.dead,
@@ -21898,7 +23059,7 @@ console.log("\nznjoe's creature:");
     joe.hp = 100;
     joe.flags &= ~(ActorFlag.ShotImmune as number);
     joe.flags2 &= ~(ZombieFlag2.DiedInFlight as number);
-    ResolveHit(joe, 1, 0, JOE_HOST, rng, 0);
+    ResolveHit(joe, 1, JOE_HOST, rng, 0);
     GameUpdate(EYE, 1 / 60, JOE_HOST, rng, events);
     check("a second torso hit does not open it again",
           joe.state !== ZombieState.ReleaseBodyCreature, `state ${joe.state}`);
@@ -21911,7 +23072,7 @@ console.log("\nznjoe's creature:");
     const other = spawnZombie(0x2000, 1, "not a znjoe", {}, rng);
     other.hp = 100;
     other.visible = true;
-    ResolveHit(other, 1, 0, JOE_HOST, rng, 0);
+    ResolveHit(other, 1, JOE_HOST, rng, 0);
     GameUpdate(EYE, 1 / 60, JOE_HOST, rng, events);
     check("another character type's torso hit is an ordinary hit",
           other.state !== ZombieState.ReleaseBodyCreature,
@@ -21920,7 +23081,7 @@ console.log("\nznjoe's creature:");
   {
     const rng = new Rng(13);
     const { joe, events } = joeScene(rng);
-    ResolveHit(joe, 4, 0, JOE_HOST, rng, 0);
+    ResolveHit(joe, 4, JOE_HOST, rng, 0);
     GameUpdate(EYE, 1 / 60, JOE_HOST, rng, events);
     check("and a znjoe shot in the arm is too -- the bone is bone 1",
           joe.state !== ZombieState.ReleaseBodyCreature, `state ${joe.state}`);
@@ -22227,12 +23388,17 @@ console.log("stage 3's boats -- the one the player rides and the one that "
         QueryGroundHeightAt(115, -10, 200) === -999);
   boat.flags &= ~0x8000;
   // The latch: on camera path 0x7C frame 0x140 the boat turns to face the
-  // camera, and at 0x29E it turns back.
-  G.g_camera_yaw_bams = 0x1000;
+  // camera, and at 0x29E it turns back. The yaw is the camera block's plus
+  // 0x8000, unmasked (`0x0048EDC6`), as the camera actor left it this frame;
+  // `g_camera_yaw_bams` holds something else, which the old reading took.
+  G.g_camera_block_yaw_bams = 0x1000;
+  G.g_camera_yaw_bams = 0x3000;
   G.g_cam_path_frame = 0x140;
   GameUpdate(EYE, 1 / 60, host, rng);
-  check("the face-camera latch turns it to the camera's yaw + 0x8000",
-        boat.yaw === 0x9000, `${boat.yaw.toString(16)}`);
+  check("the face-camera latch turns it to the camera block's yaw + 0x8000",
+        boat.yaw === G.g_camera_block_yaw_bams + 0x8000
+        && boat.yaw !== ((0x3000 + 0x8000) & 0xffff),
+        `${boat.yaw.toString(16)} block ${G.g_camera_block_yaw_bams}`);
   G.g_cam_path_frame = 0x29e;
   GameUpdate(EYE, 1 / 60, host, rng);
   check("...and the frame that drops it hands the yaw back to the path",
@@ -23713,7 +24879,7 @@ console.log("\nlight block 1 (the characters' light):");
   const alive = G.g_enemies_alive;
   GameUpdate(EYE, 1 / 60, host, rng);
   rider.hp = 1;
-  const kill = ResolveHit(rider, 1, 0, host, rng);
+  const kill = ResolveHit(rider, 1, host, rng);
   check("a rider shot to zero is killed", kill.killed && rider.dead);
   GameUpdate(EYE, 1 / 60, host, rng);
   check("...and its own update sends it into a death state",
@@ -23917,7 +25083,7 @@ console.log("class 0x30 states 46-48, a second reading of main's port:");
   // Shot dead: the hit reaches `ZombieOnShot`, which is `EnemyZombieUpdate`'s
   // and so class 0x18's too.
   for (let i = 0; i < 40 && !rider.dead; i++) {
-    ResolveHit(rider, 2, 0, NULL_HOST, rng);
+    ResolveHit(rider, 2, NULL_HOST, rng);
   }
   CarriedZombieUpdate18(rider, fr());
   check("a rider shot to zero hit points goes into its death state",
@@ -26150,15 +27316,17 @@ console.log("\nZombieStateAttackRun: the turn rate, the bands, and the wait clip
     // A condition-8 walker facing the camera, a free permit, both hands
     // armed. From band 3 it stops and throws; from band 2 the engine never
     // asks, and the port used to.
+    // The camera at the origin looking down +z at the walker: block yaw
+    // 0x8000, and a walker facing it has yaw 0.
     const near = runner(0, 30, 8);
-    G.g_camera_yaw_bams = 0x8000;
+    G.g_camera_block_yaw_bams = 0x8000;
     near.yaw = 0;
     ZombieStateAttackRun(near, EYE, 1 / 60, new Rng(1));
     check("band 2 does not ask to throw, and takes no permit",
           near.state === ZombieState.AttackRun && near.attackPermit === -1,
           `${ZombieState[near.state]} permit ${near.attackPermit}`);
     const far = runner(0, 45, 8);
-    G.g_camera_yaw_bams = 0x8000;
+    G.g_camera_block_yaw_bams = 0x8000;
     far.yaw = 0;
     ZombieStateAttackRun(far, EYE, 1 / 60, new Rng(1));
     check("...band 3 does",

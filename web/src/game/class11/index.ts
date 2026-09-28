@@ -31,13 +31,17 @@
  *
  * ## What is not ported
  *
- * `[diverges]` **The wedge clamp reads the wrong camera yaw.** The engine's
+ * **The wedge clamp reads camera block 2's yaw.** The engine's
  * `FrogStateHopWithinScreenWedge` clamps its chosen heading against two
- * screen-edge rays built from **camera block 2's** yaw, the s32 at
+ * screen-edge rays built from `g_camera_block2_yaw_bams`, the s32 at
  * `0x009A6418` — `g_camera_blocks + 2 * 0x1A4 + 0x90` — while the same class's
- * state 0 waits on **camera block 0's** path frame. The port has one camera
- * yaw, `g_camera_yaw_bams`, so it uses that for both. Why the engine is
- * asymmetric is `[open]`; nothing in the class explains it.
+ * state 0 waits on **camera block 0's** path frame. Block 2 is not the view:
+ * `EvtRunQueuedActionsSyncViewBlock` copies block 0's pose into it only while
+ * a scripted view-angle turn, scene state (1, 3), is running, so on a rail it
+ * holds the last such turn's heading, or zero after `CameraBlocksReset`. The
+ * port read `g_camera_yaw_bams` here, a heading the scene state's hooks write
+ * every frame, and now reads block 2's as the engine does. Why the frog's
+ * author reached for block 2 is `[open]`; nothing in the class explains it.
  *
  * ## Bone 1, and the two matrix chains that read it
  *
@@ -63,15 +67,17 @@
 import { ActorRegisterCameraPoint } from "../camera/track";
 import type { Rng } from "../../core/rng";
 import type { Events } from "../../core/events";
-import { ActorFlag, type Actor } from "../actor";
+import { ActorFlag, MotionFlag, type Actor } from "../actor";
 import { MotionFrameOf } from "../actor_pose";
 import { ActorSetMotionBlended } from "../class30/motion_cue";
 import { ColiTestSphereAgainstActors } from "../coli";
+import { ChooseHitPlayerOrder } from "../combat/hit_order";
 import { PlayerTakeDamage } from "../combat/player";
 import { ScoreAddForPlayer } from "../combat/score";
 import { ActorDespawn } from "../despawn";
 import { SpawnBoneHitSprite } from "../effects/blood";
-import { G } from "../globals";
+import { SpawnGroundRingEffect } from "../effects/ring_effect";
+import { G, HIT_SLOT_NONE } from "../globals";
 import type { GameHost } from "../host";
 import {
   MatCopy, MatIdentity, MatrixRotateX, MatrixRotateY, MatrixRotateZ,
@@ -177,8 +183,14 @@ export const PROJECTION_DISTANCE_PX = 640.2;
 export const FROG_BONE2_FIRST_SLOT = 0xb94;
 export const FROG_BONE2_MODELS = 30;
 export const FROG_BONE2_PERIOD = 0x3b;
-/** Bone 1's model once the frog is dead. */
+/** Bone 1's model once the frog is dead: `MOV [EDX+0x108], 0xB91`. */
 export const FROG_CORPSE_SLOT = 0xb91;
+/**
+ * Bone 2 -- the throat, whose thirty-model run the croak cycles. The kill
+ * blanks its slot (`part+0x198`) and zeroes its hit radius (`part+0x210`,
+ * the record's `+0x78`), and the blood goes on it.
+ */
+export const FROG_BONE2 = 2;
 /** The corpse: how hard it is thrown, how it bounces, and how long it sinks. */
 export const FROG_DEATH_KICK = -0.5;
 export const FROG_BOUNCE = -0.3;
@@ -255,9 +267,13 @@ export function FrogReadGroundPlaneY(): number {
   return G.g_camera_fixed_eye_y;
 }
 
-/** Has the current clip finished? `part+0x08 >= g_motion_play_length`. */
-function ClipDone(obj: Actor): boolean {
-  return MotionPlayFrame(obj) >= MotionPlayLength(obj, obj.motion);
+/**
+ * Has the current clip finished? `part+0x08 >= g_motion_play_length[part+0x20]`
+ * -- the cursor the last draw left ({@link FrogTail.playCursor}), against the
+ * length of the clip playing now.
+ */
+function ClipDone(obj: Actor, sub: FrogTail): boolean {
+  return sub.playCursor >= MotionPlayLength(obj, obj.motion);
 }
 
 /**
@@ -267,10 +283,15 @@ function ClipDone(obj: Actor): boolean {
  * The engine's third argument is the **play cursor** (`param_1[2] = param_3`,
  * with `param_3 / 2` as the authored frame); the port's primitive takes the
  * authored frame and rebuilds the cursor from it, so the cursor is halved on
- * the way in. `frog.bin` is authored at 30 Hz, which makes that exact.
+ * the way in. `frog.bin` is authored at 30 Hz, which makes that exact. The
+ * write to `part+0x08` is the one a state reads back before the next draw
+ * ({@link FrogTail.playCursor}).
  */
 function FrogPlay(obj: Actor, m: number, cursor = 0): void {
-  if (obj.motion !== m) ActorSetMotionBlended(obj, m, cursor / 2, FROG_FADE);
+  if (obj.motion === m) return;
+  ActorSetMotionBlended(obj, m, cursor / 2, FROG_FADE);
+  const sub = Tail(obj);
+  if (sub && obj.motion === m) sub.playCursor = cursor;
 }
 
 // -- the Init --------------------------------------------------------------
@@ -317,13 +338,22 @@ export function FrogArmScriptFromDescriptorTail(obj: Actor): void {
  * obj->+0x5C = -0.0272222;
  * obj->+0x1F4 = tail->+0x00;                // 0x1B, frog.bin
  * obj->+0x1B4 = tail->+0x02;                // 0x141 in all four
- * ActorBuildSkinnedModel(...);
+ * part[0] = 0;  part+0x08 = 0;              // the counter and the cursor
+ * ActorBuildSkinnedModel(part, obj+0x40, part+0x78);
+ * part+0x64 |= 4;  part+0x68 = 1;           // 0x0043A170, 0x0043A17C
+ * obj->+0x12C..0x134 = obj->+0x40..0x48;    // the published sphere, at the feet
  * obj->+0x124 = g_actor_radius_by_char[0x1B];   // 10.0
  * obj->+0x128 = 3.0;
  * g_enemies_present++;  g_enemies_alive++;
  * obj->+0x121 = -1;
  * *obj = FrogUpdate;
  * ```
+ *
+ * `part+0x64 |= 4` is {@link MotionFlag.TraceGround}: the ground ring the
+ * corpse leaves, and the shadow, stand on the collision under the frog rather
+ * than at its own height. The port did not raise it, and nothing showed until
+ * the corpse's ring was ported. `part+0x68 = 1` is the rotation order, which
+ * a frog -- yaw only -- cannot show.
  *
  * It never touches `obj+0x11C` or `+0x11E`: the spawn allocator has already
  * put the descriptor's `+0x22` in both, and nothing reads either again.
@@ -340,6 +370,11 @@ export function FrogInit(obj: Actor, _rng?: Rng): void {
   obj.accY = FROG_GRAVITY;
   obj.motion = p.motion;
   obj.playTicks = 0;
+  sub.playCursor = 0;
+  obj.motionFlags |= MotionFlag.TraceGround;
+  obj.sphereCentre.x = obj.pos.x;
+  obj.sphereCentre.y = obj.pos.y;
+  obj.sphereCentre.z = obj.pos.z;
   obj.hitRadius = FROG_HIT_RADIUS;
   obj.bodyRadius = FROG_BODY_RADIUS;
   G.g_enemies_present += 1;
@@ -351,35 +386,64 @@ export function FrogInit(obj: Actor, _rng?: Rng): void {
 
 /**
  * `FrogAwardKillAndEnterDeath` — `FUN_0043A2E0`. Run first, every frame.
+ * `[proved]`, every line of it from the listing (`0x0043A2E0`..`0x0043A3C7`):
  *
- * The whole damage model, and there is no arithmetic in it. `obj+0x11C` is
- * stored zero as a **u16**, which takes `obj+0x11E` with it, and neither is
- * read again — so the first shot that raises `obj+0x34` bit 3 kills.
- * `obj+0x34` bit `0x4000000` is the latch that stops a second shot in the same
- * frame paying twice.
+ * ```
+ * if (!(obj+0x34 & 8)) return
+ * (u16) obj+0x11C = 0                          ; MOV word ptr [ESI+0x11C], BX
+ * if (obj+0x34 & 0x4000000) return
+ * obj+0x34 |= 0x4000000
+ * sub+0x04 = 8;  sub+0x05 = 0;  sub+0x00 &= ~1
+ * obj+0x34 |= 0x8000                           ; OR DH, 0x80
+ * ChooseHitPlayerOrder()
+ * part+0x108 = 0xB91;  part+0x198 = 0;  part+0x210 = 0
+ * SpawnBoneHitSprite(obj, 2)
+ * p = (obj+0x34 & 6) == 2 ? 0 : == 4 ? 1 : rand() % 2
+ * ScoreAddForPlayer(p, 0x50);  g_player_hit_count[p]++
+ * PlaySoundId(0x716A9)                         ; COMMON\BLOOD07_16.WAV
+ * ```
  *
- * The corpse model goes on here rather than in the death state: bone 1 takes
- * `frog.bin` 3 and bones 2 and 3 are blanked.
+ * The whole damage model, and there is no arithmetic in it: `obj+0x11C` is
+ * zeroed and never read again, so the first shot that raises `obj+0x34` bit 3
+ * kills, and bit `0x4000000` is the latch that stops a second paying twice.
+ * The store is a **word** and it stops there -- `obj+0x11E` is not touched.
+ *
+ * Four things were ported wrongly here, each now pinned by a check:
+ *
+ * * the bit is `0x8000`, {@link ActorFlag.NoShotTest} -- `RegisterForShotTest`
+ *   stops filing the corpse, so a bullet goes through it to whatever is
+ *   behind. The port raised `0x100`, which only `DispatchHit` reads, and the
+ *   corpse went on stopping bullets for as long as it lay there;
+ * * `part+0x210` is not bone 3's slot. Records are `0x90` apart from
+ *   `part+0x78`, so it is **bone 2's record at `+0x78`, its hit radius** --
+ *   and bone 3's model, `0xBB2`, stays on the corpse. The port blanked it;
+ * * `ChooseHitPlayerOrder` was not called, and with both players in it is a
+ *   draw from the stream the shooter coin then takes the next of;
+ * * `obj+0x11E` was zeroed with `obj+0x11C`.
+ *
+ * The bone-hit sprite is spawned **after** the radius goes to zero, so the
+ * blood sits on bone 2's centre rather than on the near face of its sphere
+ * (`BoneHitSpriteDrawAndTick` adds `+0x284` to the depth). The corpse model
+ * goes on here rather than in the death state.
  */
 export function FrogAwardKillAndEnterDeath(obj: Actor, f: ClassFrame): void {
   const sub = Tail(obj);
   if (!sub) return;
   if (!(obj.flags & ActorFlag.Hit)) return;
   obj.hp = 0;
-  obj.maxHp = 0;
   if (obj.flags & ActorFlag.Dead) return;
   obj.flags |= ActorFlag.Dead;
   sub.state = FrogState.Die;
   sub.sub = 0;
   sub.flags &= ~FrogFlag.WantCommand;
-  obj.flags |= ActorFlag.ShotImmune;
-  obj.boneSlot["1"] = FROG_CORPSE_SLOT;
-  obj.boneSlot["2"] = 0;
-  obj.boneSlot["3"] = 0;
-  f.host.setBoneSlot(obj.at, 1, FROG_CORPSE_SLOT);
-  f.host.setBoneSlot(obj.at, 2, 0);
-  f.host.setBoneSlot(obj.at, 3, 0);
-  SpawnBoneHitSprite(obj.at, 2);
+  obj.flags |= ActorFlag.NoShotTest;
+  ChooseHitPlayerOrder(f.rng);
+  obj.boneSlot[String(FROG_BONE1)] = FROG_CORPSE_SLOT;
+  f.host.setBoneSlot(obj.at, FROG_BONE1, FROG_CORPSE_SLOT);
+  obj.boneSlot[String(FROG_BONE2)] = 0;
+  f.host.setBoneSlot(obj.at, FROG_BONE2, 0);
+  obj.boneRadius[String(FROG_BONE2)] = 0;
+  SpawnBoneHitSprite(obj.at, FROG_BONE2);
   const byP0 = (obj.flags & ActorFlag.HitByPlayer0) !== 0;
   const byP1 = (obj.flags & ActorFlag.HitByPlayer1) !== 0;
   const who = byP0 && !byP1 ? 0 : byP1 && !byP0 ? 1 : f.rng.int(2);
@@ -574,7 +638,8 @@ function FrogHeadingWindow(state: FrogState, aim: number,
 function FrogClampToWedge(obj: Actor, eye: { x: number; z: number },
                           wedge: number, win: { base: number; width: number }):
                           void {
-  const camYaw = G.g_camera_yaw_bams;
+  // `MOV EBP, [0x009A6418]` at `0x0043AB62`: camera block 2's yaw.
+  const camYaw = G.g_camera_block2_yaw_bams;
   const dx = obj.pos.x - eye.x;
   const dz = obj.pos.z - eye.z;
   const halfFov = Math.trunc(Math.atan2(320.0, PROJECTION_DISTANCE_PX)
@@ -635,14 +700,15 @@ function FrogClampToWedge(obj: Actor, eye: { x: number; z: number },
  * the snapshot is the clip's last pose under the turned yaw — 45° past where
  * the frog was drawn — and the blend swings the whole frog back through it.
  *
- * The drawn records are the clip's frame at the cursor, as
- * `Boss4StateTurnClipThenApproach` (`FUN_00494730`) reads them in the port:
- * the port draws whole authored frames. Null for a clip the bundle did not
- * bake, which leaves the blend to snapshot the clip as it always has.
+ * The drawn records are the clip's frame at the cursor the last draw left
+ * ({@link FrogTail.playCursor}), as `Boss4StateTurnClipThenApproach`
+ * (`FUN_00494730`) reads them in the port: the port draws whole authored
+ * frames. Null for a clip the bundle did not bake, which leaves the blend to
+ * snapshot the clip as it always has.
  */
-function FrogRebaseBone1ForTurn(obj: Actor, turn: number):
+function FrogRebaseBone1ForTurn(obj: Actor, sub: FrogTail, turn: number):
     [number, number, number] | null {
-  const drawn = MotionFrameOf(obj, obj.motion, MotionPlayFrame(obj) >> 1);
+  const drawn = MotionFrameOf(obj, obj.motion, sub.playCursor >> 1);
   if (!drawn) return null;
   const r0 = drawn.rot(0);
   const r1 = drawn.rot(FROG_BONE1);
@@ -684,12 +750,12 @@ function FrogRebaseBone1ForTurn(obj: Actor, turn: number):
  */
 function FrogFinishTurnPass(obj: Actor, sub: FrogTail, settle: number,
                             clip: FrogMotion): void {
-  if (!ClipDone(obj)) return;
+  if (!ClipDone(obj, sub)) return;
   const turn = obj.motion === FrogMotion.TurnLeft
     ? FROG_TURN_PER_CLIP : -FROG_TURN_PER_CLIP;
   obj.yaw = s16(obj.yaw + turn);
   sub.a -= turn;
-  const bone1 = FrogRebaseBone1ForTurn(obj, turn);
+  const bone1 = FrogRebaseBone1ForTurn(obj, sub, turn);
   if (Math.abs(sub.a) > settle) return;
   if (obj.motion !== clip) {
     FrogPlay(obj, clip);
@@ -762,7 +828,7 @@ export function FrogStateHopWithinScreenWedge(obj: Actor, f: ClassFrame): void {
       FrogFinishTurnPass(obj, sub, FROG_TURN_PER_CLIP, FrogMotion.Hop);
       return;
     case 2: {
-      if (MotionPlayFrame(obj) !== FROG_HOP_LAUNCH_FRAME) return;
+      if (sub.playCursor !== FROG_HOP_LAUNCH_FRAME) return;
       const th = s16(obj.yaw + sub.a) * BAMS;
       const s = Math.sin(th);
       const c = Math.cos(th);
@@ -791,7 +857,7 @@ export function FrogStateHopWithinScreenWedge(obj: Actor, f: ClassFrame): void {
       FrogHopInFlight(obj, sub);
       return;
     default:
-      if (ClipDone(obj)) sub.flags |= FrogFlag.WantCommand;
+      if (ClipDone(obj, sub)) sub.flags |= FrogFlag.WantCommand;
   }
 }
 
@@ -807,7 +873,7 @@ function FrogHopInFlight(obj: Actor, sub: FrogTail): void {
     obj.yaw = s16(obj.yaw + Math.trunc(sub.a / 2));
     sub.a = Math.trunc(sub.a / 2);
   }
-  if (MotionPlayFrame(obj) !== FROG_HOP_STOP_FRAME) return;
+  if (sub.playCursor !== FROG_HOP_STOP_FRAME) return;
   obj.vel.x = 0;
   obj.vel.z = 0;
   sub.sub = 4;
@@ -847,7 +913,7 @@ export function FrogStateHopInPlace(obj: Actor, f: ClassFrame): void {
       sub.a = 0;
     }
   }
-  if (ClipDone(obj)) sub.flags |= FrogFlag.WantCommand;
+  if (ClipDone(obj, sub)) sub.flags |= FrogFlag.WantCommand;
 }
 
 /**
@@ -910,7 +976,7 @@ export function FrogStateLeapAtPlayer(obj: Actor, f: ClassFrame): void {
       FrogFinishTurnPass(obj, sub, FROG_LEAP_TURN_THRESHOLD, FrogMotion.Leap);
       return;
     case 2: {
-      if (MotionPlayFrame(obj) !== FROG_LEAP_LAUNCH_FRAME) return;
+      if (sub.playCursor !== FROG_LEAP_LAUNCH_FRAME) return;
       const n = 1 / FROG_LEAP_FRAMES;
       obj.vel.x = (sub.targetX - obj.pos.x) * n;
       obj.vel.z = (sub.targetZ - obj.pos.z) * n;
@@ -935,11 +1001,15 @@ export function FrogStateLeapAtPlayer(obj: Actor, f: ClassFrame): void {
       return;
     }
     default: {
+      // `0x0043B7EB`..`0x0043B853`.
       if (obj.pos.y > FrogReadGroundPlaneY()) return;
       if (obj.attackPermit !== -1) G.g_attack_permits[obj.attackPermit] = -1;
       obj.attackPermit = -1;
       G.g_enemies_alive -= 1;
       G.g_enemies_present -= 1;
+      // `if (obj+0x3C != -1) g_hit_slots[obj+0x3C] = 0` at `0x0043B83A`, ahead
+      // of `ActorDespawn`'s own release of the same slot.
+      if (obj.hitSlot !== HIT_SLOT_NONE) G.g_hit_slots[obj.hitSlot] = HIT_SLOT_NONE;
       ActorDespawn(obj);
     }
   }
@@ -958,7 +1028,7 @@ function FrogLeapInFlight(obj: Actor, sub: FrogTail, f: ClassFrame): void {
     obj.yaw = s16(obj.yaw + Math.trunc(sub.a / 2));
     sub.a = Math.trunc(sub.a / 2);
   }
-  if (MotionPlayFrame(obj) !== FROG_LEAP_CONNECT_FRAME) return;
+  if (sub.playCursor !== FROG_LEAP_CONNECT_FRAME) return;
   obj.vel.x = 0;
   obj.vel.y = 0;
   obj.vel.z = 0;
@@ -1001,77 +1071,161 @@ export function FrogStateIdleAndCroak(obj: Actor, f: ClassFrame): void {
 }
 
 /**
- * `FrogStateDieTumbleAndSink` — `FUN_0043B990`. State 8.
+ * `FrogStateDieTumbleAndSink` — `FUN_0043B990`. State 8, entered only from
+ * `FrogAwardKillAndEnterDeath`'s `sub+0x04 = 8`. `[proved]` from the listing,
+ * `0x0043B990`..`0x0043BD23`, with the 39 bytes at `0x0043BB68`..`0x0043BB8E`
+ * that Ghidra leaves out after the `MatrixStackPop` call it marks no-return
+ * (L35):
  *
- * The corpse is **thrown away from the camera** — `(0, 0, -0.5)` rotated
- * through the camera basis — then bounced on the ground plane at thirty per
- * cent restitution with sixty per cent friction, eighty once it is flat, each
- * axis snapping to zero below 0.05. When it has settled on the last frame of
- * the death clip it sinks at 0.035 a frame for exactly 180 frames and goes.
+ * ```
+ * ground = FrogReadGroundPlaneY()
+ * switch (sub+0x05) {                                  ; 0, 1, 2; else nothing
+ * case 0:
+ *   part+0x20 = 0x13F;  MotionFrameAddress(part+0x60, 0x13F, 0)
+ *   ActorSetMotionBlended(part, 0x13F, 0, 2)           ; a blend, not a cut
+ *   obj+0x34 &= ~0x4000
+ *   if (!(obj+0x34 & 0x800000) || g_enemies_alive != 1) obj+0x34 |= 0x10000
+ *   g_enemies_alive--
+ *   vel = (0, 0, -0.5) through the camera block's rows, translation zeroed
+ *   sub+0x00 = 0                                       ; gravity back on, cycle off
+ *   if (obj+0x121 != -1) g_attack_permits[obj+0x121] = 0
+ *   sub+0x05++                                         ; 0x0043BB8C, and on into case 1
+ * case 1:
+ *   if (pos.y <= ground) {
+ *     pos.y = ground
+ *     if (vel.y == 0) vel.xz *= 0.8
+ *     else { vel.y *= -0.3; vel.xz *= 0.6; if (vel.y < 0.05) vel.y = 0 }
+ *     if (|vel.x| < 0.05) vel.x = 0;  if (|vel.z| < 0.05) vel.z = 0
+ *     if (vel == 0 && part+0x08 == g_motion_play_length[part+0x20]) {
+ *       SpawnGroundRingEffect(obj)                     ; 0x0043BCD4
+ *       vel.y = -0.035;  sub+0x18 = 0xB4;  sub+0x05++
+ *     }
+ *   }
+ *   if (part+0x08 == g_motion_play_length[part+0x20] - 1) obj+0x34 |= 0x4000
+ *   return
+ * case 2:
+ *   if (sub+0x18-- == 0) {
+ *     g_enemies_present--
+ *     if (obj+0x3C != -1) g_hit_slots[obj+0x3C] = 0
+ *     ActorDespawn(obj)
+ *   }
+ * }
+ * ```
  *
- * The alive count comes down here and the present count 180 frames later, and
- * that gap is the whole reason the two counters exist.
+ * The corpse is **thrown away from the camera**, bounced on the ground plane,
+ * and when it has settled on the last frame of the death clip it leaves the
+ * ground ring and sinks at 0.035 a frame for 181 frames. The alive count comes
+ * down on the frame it dies and the present count when it goes, and that gap
+ * is the whole reason the two counters exist.
  *
- * ⚠ 39 bytes dropped at `0x0043BB68`..`0x0043BB8E`, and they are the ones that
- * zero the flag word — which also turns gravity back on — and release the
- * attack permit.
+ * What the port had wrong, each now pinned by a check that fails without it:
+ *
+ * * **The corpse never went.** Substate 1 freezes the clip when it reads
+ *   `len - 1` and waits to read `len`. In the engine the draw after the
+ *   freeze computes `len` and the state reads it next frame; the port's
+ *   states read the counter the director had already advanced, so the freeze
+ *   stopped it on `len - 1` for good. Stage 1's frog room stood on two frogs
+ *   in `Die/1` holding `g_enemies_present`. The class now reads `part+0x08`
+ *   as the engine's states do -- {@link FrogTail.playCursor}.
+ * * **Substate 0 runs on into substate 1** (L53): `INC byte ptr [EAX+5]` at
+ *   `0x0043BB8C` is followed by `0x0043BB8F`, which is case 1's first
+ *   instruction. So the kick is damped by the first bounce on the frame of
+ *   the kill. The port returned.
+ * * **The clip is blended in.** The engine writes `part+0x20` itself and then
+ *   calls `ActorSetMotionBlended`, which is unconditional -- it snapshots the
+ *   pose last drawn whatever `part+0x20` holds. The port's primitive keys that
+ *   snapshot on `obj.motion`, so writing it first left nothing to fade from
+ *   and the death cut. The engine's own write feeds only `MotionFrameAddress`,
+ *   whose answer it throws away (a bank-residency request), and the
+ *   argument, which is `0x13F` either way.
+ * * **`SpawnGroundRingEffect` was never called.**
+ * * The kick subtracted `ClassFrame.eye` from a camera point; the engine
+ *   builds the rotation alone (`MatrixGetTranslation` of an identity into the
+ *   translation row), so it is the difference of two camera points here.
  */
 export function FrogStateDieTumbleAndSink(obj: Actor, f: ClassFrame): void {
   const sub = Tail(obj);
   if (!sub) return;
   const ground = FrogReadGroundPlaneY();
   if (sub.sub === 0) {
-    obj.motion = FrogMotion.Death;
-    ActorSetMotionBlended(obj, FrogMotion.Death, 0, 2);
+    ActorSetMotionBlended(obj, FrogMotion.Death, 0, FROG_FADE);
+    sub.playCursor = 0;
     obj.flags &= ~ActorFlag.PoseFrozen;
     if (!(obj.flags & ActorFlag.KeepCameraWhenLast) || G.g_enemies_alive !== 1) {
       obj.flags |= ActorFlag.NoCameraTrack;
     }
     G.g_enemies_alive -= 1;
-    // `(0, 0, -0.5)` through rows 0..2 of the camera block matrix with a zero
-    // translation: the corpse is thrown along the camera's own -Z, which is
-    // away from the eye and into the screen.
-    const away = { x: 0, y: 0, z: 0 };
-    f.host.viewPoint(0, 0, FROG_DEATH_KICK, away);
-    obj.vel.x = away.x - f.eye.x;
-    obj.vel.y = away.y - f.eye.y;
-    obj.vel.z = away.z - f.eye.z;
+    FrogDeathKick(obj, f.host);
     sub.flags = 0;
+    // `MOV [EDX*4 + 0x9A2BA0], EDI` with `EDI` zero, and `obj+0x121` is left
+    // as it was: the engine's free value is 0, the port's -1.
     if (obj.attackPermit !== -1) G.g_attack_permits[obj.attackPermit] = -1;
     sub.sub = 1;
+    // No return: on into substate 1, this frame.
+  } else if (sub.sub === 2) {
+    const t = sub.a;
+    sub.a = t - 1;
+    if (t !== 0) return;
+    G.g_enemies_present -= 1;
+    if (obj.hitSlot !== HIT_SLOT_NONE) G.g_hit_slots[obj.hitSlot] = HIT_SLOT_NONE;
+    ActorDespawn(obj);
+    return;
+  } else if (sub.sub !== 1) {
     return;
   }
-  if (sub.sub === 1) {
-    if (obj.pos.y <= ground) {
-      obj.pos.y = ground;
-      if (obj.vel.y === 0) {
-        obj.vel.x *= FROG_FRICTION_FLAT;
-        obj.vel.z *= FROG_FRICTION_FLAT;
-      } else {
-        obj.vel.y *= FROG_BOUNCE;
-        obj.vel.x *= FROG_FRICTION;
-        obj.vel.z *= FROG_FRICTION;
-        if (obj.vel.y < FROG_REST_SPEED) obj.vel.y = 0;
-      }
-      if (Math.abs(obj.vel.x) < FROG_REST_SPEED) obj.vel.x = 0;
-      if (Math.abs(obj.vel.z) < FROG_REST_SPEED) obj.vel.z = 0;
-      if (obj.vel.x === 0 && obj.vel.y === 0 && obj.vel.z === 0
-          && MotionPlayFrame(obj) === MotionPlayLength(obj, obj.motion)) {
-        obj.vel.y = FROG_SINK_SPEED;
-        sub.a = FROG_SINK_FRAMES;
-        sub.sub = 2;
-      }
+  const len = MotionPlayLength(obj, obj.motion);
+  if (obj.pos.y <= ground) {
+    obj.pos.y = ground;
+    if (obj.vel.y === 0) {
+      obj.vel.x *= FROG_FRICTION_FLAT;
+      obj.vel.z *= FROG_FRICTION_FLAT;
+    } else {
+      obj.vel.y *= FROG_BOUNCE;
+      obj.vel.x *= FROG_FRICTION;
+      obj.vel.z *= FROG_FRICTION;
+      if (obj.vel.y < FROG_REST_SPEED) obj.vel.y = 0;
     }
-    if (MotionPlayFrame(obj) === MotionPlayLength(obj, obj.motion) - 1) {
-      obj.flags |= ActorFlag.PoseFrozen;
+    if (Math.abs(obj.vel.x) < FROG_REST_SPEED) obj.vel.x = 0;
+    if (Math.abs(obj.vel.z) < FROG_REST_SPEED) obj.vel.z = 0;
+    if (obj.vel.x === 0 && obj.vel.y === 0 && obj.vel.z === 0
+        && sub.playCursor === len) {
+      SpawnGroundRingEffect(obj);
+      obj.vel.y = FROG_SINK_SPEED;
+      sub.a = FROG_SINK_FRAMES;
+      sub.sub = 2;
     }
-    return;
   }
-  const t = sub.a;
-  sub.a = t - 1;
-  if (t !== 0) return;
-  G.g_enemies_present -= 1;
-  ActorDespawn(obj);
+  if (sub.playCursor === len - 1) obj.flags |= ActorFlag.PoseFrozen;
+}
+
+const _kick = { x: 0, y: 0, z: 0 };
+const _kickFrom = { x: 0, y: 0, z: 0 };
+
+/**
+ * `[port-only]` as a function: the throw, `0x0043BA6B`..`0x0043BB63`.
+ *
+ * ```
+ * MatrixStackPush(0); MatrixLoadIdentity(); MatrixGetTranslation(&t)   ; t = 0
+ * m = { block[+0x40], [+0x44], [+0x48],  [+0x50], [+0x54], [+0x58],
+ *       [+0x60], [+0x64], [+0x68],  t }                                ; g_camera_index's
+ * MatrixSetTop3x4(m); MatrixTransformPoint((0, 0, -0.5), &obj+0x4C)
+ * ```
+ *
+ * `g_camera_blocks` (`0x009A6040`) is the block's `+0x40` matrix, view to
+ * world, and its translation is replaced by the identity's zero: the
+ * corpse's velocity is the camera's own `-Z`, half a unit long -- away from
+ * the eye and into the screen. `GameHost.viewPoint` is that matrix with its
+ * translation, so the rotation alone is two of its points apart. A host with
+ * no camera answers neither, and the kick is zero.
+ */
+function FrogDeathKick(obj: Actor, host: GameHost): void {
+  _kick.x = _kick.y = _kick.z = 0;
+  _kickFrom.x = _kickFrom.y = _kickFrom.z = 0;
+  host.viewPoint(0, 0, FROG_DEATH_KICK, _kick);
+  host.viewPoint(0, 0, 0, _kickFrom);
+  obj.vel.x = _kick.x - _kickFrom.x;
+  obj.vel.y = _kick.y - _kickFrom.y;
+  obj.vel.z = _kick.z - _kickFrom.z;
 }
 
 // -- the frame -------------------------------------------------------------
@@ -1102,6 +1256,12 @@ export function FrogIntegrateVelocityAndGravity(obj: Actor): void {
  * ending exactly where bone 3's own model begins. The wrap raises
  * {@link FrogFlag.CycleWrapped}, which is what the croak and the leap wait on.
  *
+ * The routine's last line is the clip's clock, `if (!(obj+0x34 & 0x4000))
+ * part[0]++` (`0x0043A4CB`..`0x0043A4D8`), after the draw. The port's director
+ * makes that step as `ActorAdvanceMotion` at the top of the next frame, under
+ * the same {@link ActorFlag.PoseFrozen} gate, which is why the cursor the
+ * draw computed has to be kept for the states ({@link FrogTail.playCursor}).
+ *
  * `[diverges]` in shape: the engine draws and cycles in one routine because a
  * task is its own renderer. `game/` may not draw, so this is the cycle and
  * `render/characters.ts` reads the slot.
@@ -1121,7 +1281,12 @@ export function FrogDrawAndCycleBone2Slot(obj: Actor, f: ClassFrame): void {
     }
   }
   // `DrawSkinnedModelAndShadow(part, obj+0x40, part+0x78)` at `0x0043A494`,
-  // on every frame, dead or alive -- and what it leaves on the actor.
+  // on every frame, dead or alive -- and what it leaves on the actor: the
+  // play cursor its `SkeletonAdvancePlayCursor` computed, which is what every
+  // state reads next frame (`FrogTail.playCursor`), and bone 1's record. The
+  // port's director has already stepped the counter this draw reads, so this
+  // frame's cursor is the one the renderer poses.
+  sub.playCursor = MotionPlayFrame(obj);
   FrogStoreBone1Record(sub, obj, f.host);
   if (obj.flags & ActorFlag.Dead) return;
   const slot = FROG_BONE2_FIRST_SLOT + sub.boneSlot;
@@ -1313,12 +1478,21 @@ export const FROG_CAMERA_RISE = 1.0;
 
 // -- the class -------------------------------------------------------------
 
-/** Give back what a frog holds — the pair its two exits run. */
+/**
+ * `[port-only]` -- give back a permit this frog still holds, for the two
+ * routes out the engine does not have (a script that stops listing the
+ * spawn, and the port's sweep).
+ *
+ * **Only if it still holds it.** The death state frees `g_attack_permits`
+ * and leaves `obj+0x121` as it was, as the engine does, so for as long as
+ * the corpse lies and sinks the frog still names a permit that may since
+ * have gone to another actor. This used to free it again on the way
+ * out, from under whoever had it.
+ */
 function FrogRelease(obj: Actor): void {
-  if (obj.attackPermit !== -1) {
-    G.g_attack_permits[obj.attackPermit] = -1;
-    obj.attackPermit = -1;
-  }
+  const p = obj.attackPermit;
+  if (p !== -1 && G.g_attack_permits[p] === obj.at) G.g_attack_permits[p] = -1;
+  obj.attackPermit = -1;
 }
 
 const handler: ClassHandler = {
@@ -1327,8 +1501,12 @@ const handler: ClassHandler = {
   updatesWhenDead: true,
   ownsShotResult: true,
   ownsSphereCentre: true,
+  // `[port-only]`: `RetireUnlistedActor`'s route out. A frog gives back what
+  // it still holds -- `g_enemies_alive` only until its death state has run,
+  // which drops it on the frame of the kill; the corpse retired while it
+  // sinks used to be counted out of the room twice.
   leave(obj: Actor): void {
-    G.g_enemies_alive -= 1;
+    if (Tail(obj)?.state !== FrogState.Die) G.g_enemies_alive -= 1;
     G.g_enemies_present -= 1;
     FrogRelease(obj);
     ActorDespawn(obj);

@@ -49,6 +49,7 @@
  * the "moves quite slowly" of `docs/NEW-BUGS-2.md`.
  */
 import type { Events } from "../../core/events";
+import type { Rng } from "../../core/rng";
 import type { ArcStage } from "../../bundle/characters";
 import { ActorFlag, type ThrowerActor } from "../actor";
 import { ThrowerTryClaimAttackSlot } from "../combat/permits";
@@ -107,7 +108,7 @@ export function PathLegScriptName(obj: ThrowerActor, style: number): string {
 const _dest = vec3();
 
 export function ThrowerStatePathFollow(obj: ThrowerActor, dt: number,
-                                       events?: Events,
+                                       rng: Rng, events?: Events,
                                        host?: GameHost): void {
   const path = obj.path;
   // `[port-only]` The engine walks whatever the descriptor holds;
@@ -138,7 +139,7 @@ export function ThrowerStatePathFollow(obj: ThrowerActor, dt: number,
     // terminator, so running off its end is the terminator; the engine only
     // ever arrives here with a real waypoint under the cursor.
     const wp = path.points[obj.thr.pathLeg];
-    if (!wp) { PathFollowEnd(obj, host); return; }
+    if (!wp) { PathFollowEnd(obj, rng, host); return; }
     _dest.x = wp.dest[0];
     _dest.y = wp.dest[1];
     _dest.z = wp.dest[2];
@@ -153,12 +154,12 @@ export function ThrowerStatePathFollow(obj: ThrowerActor, dt: number,
   // A sub-state past 3 is the jump table's `JA 0x0044ef74`: nothing.
   if (obj.sub !== PathSub.Travelling) return;
   const wp = path.points[obj.thr.pathLeg];
-  if (!wp) { PathFollowEnd(obj, host); return; }
+  if (!wp) { PathFollowEnd(obj, rng, host); return; }
   if (ActorArcStep(obj, wp.step, dt, host, events)) return;
   events?.emit("sound.play", { id: SND_PATH_LEG_LANDED });
   obj.thr.pathLeg++;
   if (obj.thr.pathLeg >= path.points.length) {
-    PathFollowEnd(obj, host);
+    PathFollowEnd(obj, rng, host);
     return;
   }
   obj.sub = PathSub.StartLeg;
@@ -172,13 +173,13 @@ export function ThrowerStatePathFollow(obj: ThrowerActor, dt: number,
  * roof and into shot. The claim's result is not tested (`CALL 0x0044ca40`,
  * then the state write), so the pounce happens with or without a permit.
  */
-function PathFollowEnd(obj: ThrowerActor, host?: GameHost): void {
+function PathFollowEnd(obj: ThrowerActor, rng: Rng, host?: GameHost): void {
   obj.flags &= ~ActorFlag.ShotImmune;
   obj.sub = 0;
   if (obj.charType === PATH_OWN_SCRIPT_TYPE) {
     obj.state = ThrowerState.StandAndDecide;
     return;
   }
-  ThrowerTryClaimAttackSlot(obj, host);
+  ThrowerTryClaimAttackSlot(obj, rng, host);
   obj.state = ThrowerState.Pounce;
 }

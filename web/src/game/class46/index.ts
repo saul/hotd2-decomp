@@ -428,11 +428,17 @@ function BatEaseYaw(obj: Actor, dx: number, dz: number, divisor: number): void {
  * to face it — scaled by `obj+0x13A8 * 3`. `MatrixRotateY(θ)` takes the x axis
  * to `(cos θ, 0, -sin θ)`, which `BuildSceneLightDirection` (`FUN_0040E0B0`)
  * is the proof of: it takes `(0, 0, 1)` to `(sin θ, 0, cos θ)`.
+ *
+ * The yaw is the camera block's, `g_camera_block_yaw_bams` (`0x009A60D0`),
+ * read at `0x0042E7FE` in the dive and `0x0042F0C9` in the swarm. This read
+ * `g_camera_yaw_bams` (`0x009C71F0`), which the scene state's hooks write as
+ * a camera heading turned half round, and so wobbled every bat the other way.
+ * `[proved]`
  */
 function BatApplyWobble(obj: Actor, sub: BatTail): void {
   sub.phase += BAT_WOBBLE_STEP;
   const s = Math.sin(sub.phase * BAMS);
-  const a = (G.g_camera_yaw_bams + 0x8000) * BAMS;
+  const a = (G.g_camera_block_yaw_bams + 0x8000) * BAMS;
   const k = sub.wobble * BAT_WOBBLE_SCALE;
   obj.pos.x += s * Math.cos(a) * k;
   obj.pos.z += -s * Math.sin(a) * k;

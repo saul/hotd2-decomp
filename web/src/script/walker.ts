@@ -25,13 +25,14 @@
  * block on, and `WaitPolicy` says what the walker did instead.
  */
 
-import { G } from "../game/globals";
+import { ActorByAt, G } from "../game/globals";
 import { CameraUpdateHook, EvtActionHandler } from "../game/camera/driver";
 import { EvtGotoSceneState, EvtQueueAction,
          EvtOpSetActionDrainMode33 } from "../game/camera/actions";
 import { CameraReplayFor, CameraReplaySettle, CameraReplayUntil }
   from "../game/camera/actor";
 import { SpawnClass } from "../game/spawn_class";
+import { g_class_handlers } from "../game/registry";
 import type { BlockJson, OpJson, ScriptJson, SpawnJson } from "../bundle";
 import type { OpStatus } from "./opstatus";
 import { OPS as OPS_TABLE } from "./ops";
@@ -1082,7 +1083,26 @@ export class Walker {
    */
   private retireGated(classes: ReadonlySet<number>): void {
     if (!this.replaying) return;
-    this.spawns = this.spawns.filter((s) => !classes.has(s.class));
+    // A class that counts for some records and not others answers per
+    // record: class 0x41's types 14, 19 and 25 are enemies standing still.
+    const enemies = classes === ENEMY_GATE_CLASSES;
+    this.spawns = this.spawns.filter((s) => {
+      if (classes.has(s.class)) return false;
+      if (!enemies) return true;
+      if (!g_class_handlers[s.class as SpawnClass]?.countsForEnemyGate?.(s)) {
+        return true;
+      }
+      // Its placer is already in the pool: a class-0x41 spawn enters it when
+      // the instruction runs (`script/ops/spawn.ts`), and a replay runs no
+      // frame to build the object. The gate is past, so what it counted is
+      // gone -- the placer with it, before it can build and count again.
+      const placed = s.at === undefined ? undefined : ActorByAt(s.at);
+      if (placed && !placed.dead) {
+        placed.dead = true;
+        placed.visible = false;
+      }
+      return false;
+    });
   }
 
   /**

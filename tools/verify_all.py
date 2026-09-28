@@ -26,15 +26,24 @@ under its own heading; it never disappears into a green line.
 
     python3 tools/verify_all.py                       # what runs without assets
     python3 tools/verify_all.py --game-dir ~/"THE HOUSE OF THE DEAD 2"
+    python3 tools/verify_all.py --quick               # the inner loop, ~20 s
     python3 tools/verify_all.py --list                # the table, run nothing
+
+The checks run in parallel, one per core, except the ones that drive a
+browser, which take turns in a lane of their own beside the rest (see
+`LANE_BROWSER`); `-j 1` is the old serial run. The whole list against the
+game is about a minute and a half, nearly all of it that lane.
 """
 from __future__ import annotations
 
 import argparse
+import os
 import shutil
 import subprocess
 import sys
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -60,6 +69,18 @@ class Check:
     cmd: list[str]        # argv; `{game_dir}` is substituted
     sees: str
     needs: str = NEEDS_NOTHING
+    #: Checks that share a lane run one at a time, in table order; every
+    #: check with none runs in the pool beside them. See `LANE_BROWSER`.
+    lane: str = ""
+
+
+#: Every check that drives a Chrome. **One at a time, always**: with a second
+#: headless Chrome open -- any, silent or not -- every media element in an
+#: audio check reads a peak of exactly zero (L29), and two vite servers
+#: starting together race on the dependency cache every worktree shares
+#: (`504 Outdated Optimize Dep`). The lane runs beside the pool, which holds
+#: no browser.
+LANE_BROWSER = "browser"
 
 
 #: Ordered cheapest-first, so a broken tree fails in seconds rather than
@@ -134,27 +155,27 @@ CHECKS: list[Check] = [
           "rather than running out, and are still there when the stage is "
           "reached by a deep link -- the only check in the tree that measures "
           "the mixer rather than the intent",
-          NEEDS_BUNDLE),
+          NEEDS_BUNDLE, LANE_BROWSER),
     Check("bgm_loop", "web", ["npm", "run", "--silent", "bgm-loop"],
           "that the page's music is the engine's stream -- the buffer the "
           "script's own track reaches Web Audio as is one period of the file "
           "from its first sample to end of file, looped, sample for sample -- "
           "and that it is audible",
-          NEEDS_BUNDLE),
+          NEEDS_BUNDLE, LANE_BROWSER),
     Check("keys", "web", ["npm", "run", "--silent", "keys"],
           "that the page's keys do what the `?` list says when pressed -- "
           "test:ui holds the list to the handlers' source, this reads back "
           "what a press did -- and that a click on a control over the game "
           "hands Space and Enter (START) back to the game rather than "
           "leaving them with the button",
-          NEEDS_BUNDLE),
+          NEEDS_BUNDLE, LANE_BROWSER),
     Check("continue", "web",
           ["node", "tools/continue_page.mjs", "--headless"],
           "that the last life lost with credits left puts CONTINUE? and its "
           "digit where the exe draws them, holds the script at its wait, and "
           "that START -- pressed on the corner button, the one START a phone "
           "has -- spends a credit and puts the player back in play",
-          NEEDS_BUNDLE),
+          NEEDS_BUNDLE, LANE_BROWSER),
     Check("animals", "web", ["npm", "run", "--silent", "animals"],
           "that the frog, the owl and the fish are placed from a real bundle "
           "and leave their opening state -- none of the three is a skinned "
@@ -424,8 +445,13 @@ CHECKS: list[Check] = [
 PASS, FAIL, SKIP = "pass", "fail", "skip"
 
 
-def run_one(c: Check, game_dir: str | None, timeout: int) -> tuple[str, str, float]:
+def run_one(c: Check, game_dir: str | None, timeout: int,
+            quick: bool = False) -> tuple[str, str, float]:
     """Returns (outcome, output, seconds). Exit 3 means it asserted nothing."""
+    if quick and c.lane == LANE_BROWSER:
+        return SKIP, "--quick leaves the browser lane out", 0.0
+    if quick and c.needs == NEEDS_GAME:
+        return SKIP, "--quick leaves the checks against the game out", 0.0
     if c.needs == NEEDS_GAME and not game_dir:
         return SKIP, "no --game-dir given", 0.0
     cmd = [a.replace("{game_dir}", game_dir or "") for a in c.cmd]
@@ -446,6 +472,53 @@ def run_one(c: Check, game_dir: str | None, timeout: int) -> tuple[str, str, flo
     return FAIL, out, dt
 
 
+def run_all(checks: list[Check], game_dir: str | None, timeout: int,
+            jobs: int, quick: bool = False) -> list[tuple[Check, str, str, float]]:
+    """Run `checks`, the pool in parallel and each lane in order beside it.
+
+    **Parallel because the list outgrew serial.** Fifty-odd checks one after
+    another were three and a half minutes with nothing dominating -- a long
+    tail of five-to-thirty-second suites, each waiting on the last. Every
+    check is its own process with its own temporary files and its own
+    port, so the only ones that cannot share the machine are the ones that
+    share a browser, and those keep their lane.
+
+    A line is printed as each check finishes, so the order on screen is the
+    order they finished in; the summary and every failure's output below it
+    stay in table order. `jobs` of 1 is the old serial run, lanes included.
+    """
+    w = max(len(c.name) for c in checks)
+    lock = threading.Lock()
+    done: dict[str, tuple[str, str, float]] = {}
+
+    def one(c: Check) -> None:
+        outcome, out, dt = run_one(c, game_dir, timeout, quick)
+        with lock:
+            done[c.name] = (outcome, out, dt)
+            print(f"  {c.name:<{w}}  ... {outcome.upper():<4} {dt:5.1f}s",
+                  flush=True)
+
+    def lane(members: list[Check]) -> None:
+        for c in members:
+            one(c)
+
+    if jobs <= 1:
+        lane(checks)
+    else:
+        lanes: dict[str, list[Check]] = {}
+        pool: list[Check] = []
+        for c in checks:
+            (lanes.setdefault(c.lane, []) if c.lane else pool).append(c)
+        with ThreadPoolExecutor(max_workers=jobs + len(lanes)) as ex:
+            # The lanes first: they are the long pole, and a slot taken by
+            # a lane is not a slot a pool check waits for.
+            futures = [ex.submit(lane, m) for m in lanes.values()]
+            futures += [ex.submit(one, c) for c in pool]
+            for f in futures:
+                f.result()
+    return [(c, *done[c.name]) for c in checks]
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--game-dir", help="the installed game, for the two "
@@ -457,6 +530,13 @@ def main() -> int:
     ap.add_argument("--strict", action="store_true",
                     help="exit 2 if any check was skipped")
     ap.add_argument("--timeout", type=int, default=900)
+    ap.add_argument("--quick", action="store_true",
+                    help="the inner loop: leave out the browser lane and the "
+                         "checks against the installed game, and say so -- "
+                         "they are skipped, never passed")
+    ap.add_argument("--jobs", "-j", type=int, default=os.cpu_count() or 4,
+                    help="checks run at once outside the browser lane "
+                         "(default: one per core; 1 runs them in table order)")
     args = ap.parse_args()
 
     if args.list:
@@ -472,13 +552,9 @@ def main() -> int:
         print(f"no such check: {', '.join(sorted(unknown))}", file=sys.stderr)
         return 1
 
-    results: list[tuple[Check, str, str, float]] = []
-    w = max(len(c.name) for c in checks)
-    for c in checks:
-        print(f"  {c.name:<{w}}  ... ", end="", flush=True)
-        outcome, out, dt = run_one(c, args.game_dir, args.timeout)
-        print(f"{outcome.upper():<4} {dt:5.1f}s")
-        results.append((c, outcome, out, dt))
+    t0 = time.time()
+    results = run_all(checks, args.game_dir, args.timeout, args.jobs, args.quick)
+    wall = time.time() - t0
 
     failed = [(c, o) for c, r, o, _ in results if r == FAIL for o in [o]]
     skipped = [(c, o) for c, r, o, _ in results if r == SKIP for o in [o]]
@@ -493,14 +569,18 @@ def main() -> int:
         print(f"skipped {len(skipped)}, and a skip asserted nothing:")
         for c, why in skipped:
             print(f"  {c.name}: {why.splitlines()[0] if why else ''}")
-        kinds = {c.needs for c, _ in skipped}
+        # A check `--quick` left out needs nothing it lacked.
+        kinds = {c.needs for c, why in skipped
+                 if not why.startswith("--quick")}
         if NEEDS_BUNDLE in kinds:
             print("  build a bundle with `cd web && npm run export`, or point "
                   "HOTD2_BUNDLE at one.")
         if NEEDS_GAME in kinds:
             print("  pass --game-dir for the checks that compare against the "
                   "installed game.")
-    print(f"{passed} passed, {len(failed)} failed, {len(skipped)} skipped")
+    cpu = sum(dt for _, _, _, dt in results)
+    print(f"{passed} passed, {len(failed)} failed, {len(skipped)} skipped "
+          f"in {wall:.0f}s ({cpu:.0f}s of checks)")
 
     if failed:
         return 1

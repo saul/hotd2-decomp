@@ -62,6 +62,8 @@ export type UiCommand =
   | { kind: "setFilterMode"; mode: string }
   /** The debug sidebar's 4:3 switch. See {@link UiProjection.pillarbox}. */
   | { kind: "setPillarbox"; on: boolean }
+  /** The Resolution select. See {@link UiProjection.pixelRatio}. */
+  | { kind: "setPixelRatio"; ratio: number }
   | { kind: "setVolume"; volume: number }
   | { kind: "toggleMute" }
   /** `F`: the page fullscreen, or back. A key press is the gesture it needs. */

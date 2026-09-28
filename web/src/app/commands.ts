@@ -75,8 +75,6 @@ export interface PlayerCommands {
   toggles: Readonly<Record<ToggleName, boolean>>;
   /** True while the pointer is over the branch bar; freezes the countdown. */
   branchHover: boolean;
-  /** Box the frame to 4:3, or fill the window. See `UiProjection.pillarbox`. */
-  pillarbox: boolean;
 
   // -- reached through --------------------------------------------------
 
@@ -120,6 +118,10 @@ export interface PlayerCommands {
   startGame(): void;
   /** Sound on or off, as the viewer's own choice. */
   setMuted(muted: boolean): void;
+  /** The 4:3 switch, as the viewer's choice. See `UiProjection.pillarbox`. */
+  setPillarbox(on: boolean): void;
+  /** The Resolution select, as the viewer's choice. */
+  setPixelRatio(ratio: number): void;
   requestSkip(): void;
   /** Player 1's START, both of its readers. See the `pressStart` command. */
   pressStart(): void;
@@ -220,10 +222,10 @@ export function runCommand(p: PlayerCommands, c: UiCommand): void {
       else p.cam.rails?.highlight(null);
       return;
     }
-    case "setPillarbox":
-      p.pillarbox = c.on;
-      p.resize();
-      return;
+    // Methods rather than assignments: each records the viewer's choice apart
+    // from the state, because the default is the device's.
+    case "setPillarbox": p.setPillarbox(c.on); return;
+    case "setPixelRatio": p.setPixelRatio(c.ratio); return;
     // No redraw here, and none needed: the projection is rebuilt every frame
     // from the one tick, so a setting that changes what a layer reports shows
     // up on the next one. Twenty controls each poking the UI was the second

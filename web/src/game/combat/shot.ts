@@ -523,7 +523,10 @@ function ResolveShotOnProp(req: ShotRequest, pick: { propId: number;
   // Types 38, 39, 40 and 44 call no `SpawnPropHitSpark` at all -- the first
   // three and 44 call `SpawnPropHitEffectScaled` from their own hit arm with
   // the point above, and 40 calls neither -- so the stand-in stays off them.
-  if (spark && !NO_PROP_SPARK.has(prop.family)) {
+  // So does every routine transcribed whole: one that records its own draws
+  // (`class41/prop_draw.ts`) also makes its own hit effect, where and if its
+  // routine makes one, from the point left on the prop here.
+  if (spark && !NO_PROP_SPARK.has(prop.family) && prop.draws === null) {
     SpawnPropHitSpark(spark.x, spark.y, prop.z);
   }
   events?.emit("shot.resolved", {

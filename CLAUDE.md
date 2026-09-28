@@ -31,11 +31,14 @@ boundaries still exist.
 python3 tools/verify_all.py --game-dir ~/"THE HOUSE OF THE DEAD 2"
 ```
 
-That is the whole thing. Without `--game-dir` it is seconds; with it, expect
-**two to three minutes**, nearly all of it `verify_combat` walking the attack
-tables of all 64 character types. It said "about ten seconds" for as long as
-that was true of a shorter list, which is `L16` about this file's own front
-door a second time. **`tools/verify_all.py`
+That is the whole thing. The checks run in parallel, except the ones that
+drive Chrome, which take turns in a lane of their own; that lane is most of
+the wall time, about a minute and a half with a bundle. **`--quick`** leaves
+the lane and the game-dir checks out -- counted as skipped, never as passed --
+and is the inner loop, about twenty seconds. This paragraph has said "about
+ten seconds" and "two to three minutes" in its time, each true for a while,
+which is `L16` about this file's own front door; the run prints its own wall
+time at the end, so believe that over this. **`tools/verify_all.py`
 is the canonical list of checks** — one authored table, rendered into
 `docs/STATUS.md` and printed by `--list`. It used to be a shell block copied
 into this file and three skills; four of the five copies were stale and three

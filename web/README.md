@@ -143,10 +143,12 @@ including one for each debug overlay -- `B` the actor boxes, `C` collision,
 the sidebar and say so for a moment over the game.
 
 **On a phone** (iOS Safari or Android Chrome), hold it sideways — the page
-asks you to, and on Android Start also goes fullscreen and locks landscape. A
+asks you to, and on Android Start also goes fullscreen and locks landscape.
+The frame is boxed to the game's 4:3 and drawn at 1x by default; both are in
+the sidebar's Scene panel (4:3 frame, Resolution). A
 tap is a shot. To reload, flick the phone sharply (top edge towards you or
-away), or tap with a second finger while the first is down, or, with the 4:3
-frame on, tap the black bar beside it: all three are a pull *off the screen*,
+away), or tap with a second finger while the first is down, or tap the black
+bar beside the frame: all three are a pull *off the screen*,
 which is how the arcade gun reloads. The flick needs the motion sensors,
 which a browser only exposes over HTTPS (or `localhost`); iOS also asks
 permission when you press Start. When the last life goes, the corner button
@@ -205,10 +207,11 @@ so is the event feed.
 
 - **The projection.** 41.100° vertical (`0x1D3B` BAMS), 4:3, near 0.8, far
   8000, from `SetupSceneProjection`. It is a compile-time constant for the
-  whole game — there is no zoom and no per-camera FOV. The page fills the
-  window by default, keeping the vertical FOV, so a wide window shows more at
-  the sides than the cabinet did; the Scene panel's **4:3 frame** switch boxes
-  it to exactly what the game framed.
+  whole game — there is no zoom and no per-camera FOV. On a desktop the page
+  fills the window by default, keeping the vertical FOV, so a wide window
+  shows more at the sides than the cabinet did; the Scene panel's **4:3
+  frame** switch boxes it to exactly what the game framed, and a phone gets
+  the box by default.
 - **Hermite evaluation.** A transcription of `FUN_004040F0`, including its end
   behaviour: the game's binary search cannot leave the key array, so a time
   outside a curve extrapolates along the end segment rather than clamping.

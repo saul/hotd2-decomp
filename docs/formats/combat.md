@@ -2584,7 +2584,17 @@ ActorArcInterpolate(n):      /* FUN_0044DD00, an absolute position */
 
 with the duration from `ActorArcBeginToAtSpeed` (`FUN_0044DB50`) for character
 type 0x19 — the horizontal distance at a fixed **30 units per `minFrames`**,
-so 2.0 units a frame — and from `ActorArcBeginTo` for the rest.
+so 2.0 units a frame — and from `ActorArcBeginTo` (`FUN_0044DC70`) for the
+rest: `n = (int)(dist2d * step)`, `T = n - n % step`, x and z only.
+
+**`n` advances by `step` a call, not by one.** `ActorArcStep(obj, step)` hands
+its step to `ActorArcInterpolate`, which adds it to `obj+0x1330` (`ADD EDX,
+ESI` at `0x0044DD85`), and every caller that begins with `ActorArcBeginTo`
+passes the same step to both. So a leg lasts `T / step` frames -- about **one
+unit of ground a frame whatever the step** -- and what the step changes is the
+arc's height, since the parabola is solved over `T = dist * step` parameter
+frames. `ThrowerStatePathFollow`'s waypoints carry step 1 or 3; the pounce, the
+leap aside and the surface leaps pass 1. `[proved]`
 
 Over it runs a **three-stage arc motion script**, twelve dwords that
 `InstallArcMotionScript` (`FUN_0044DA60`) copies into `g_arc_scripts`:
@@ -2593,12 +2603,28 @@ Over it runs a **three-stage arc motion script**, twelve dwords that
 { s32 motion, s32 start frame, s32 fade, s32 threshold } x 3
 ```
 
-A script is nearly always one clip cut into windup, flight and landing. Seven
-of the 38 that classes 0x30 and 0x31 can install end on a different clip —
-`zslman`'s leap aside in stances 1 and 3 (504 then 506, 494 then 496) and set
-3's attack 3 in all five stances — and every start and threshold of all 38 lies
-inside the play length of its own stage's clip, which `tools/verify_combat.py`
-check 16 asserts. `ActorArcStep` (`FUN_0044D860`) plays stage 0 on the spot,
+A script is nearly always one clip cut into windup, flight and landing. Some
+of the ones classes 0x30 and 0x31 can install switch clips — `zslman`'s leap
+aside in stances 1 and 3 (504 then 506, 494 then 496) and set 3's attack 3 in
+all five stances end on a different clip, and `ThrowerStatePathFollow`'s
+style-2 script flies on 300 between two stages of 301 — and every start and
+threshold of every one lies inside the play length of its own stage's clip,
+which `tools/verify_combat.py` check 16 asserts and counts.
+
+`ThrowerStatePathFollow` (`FUN_0044EE00`) picks its leg's script from the
+waypoint's style word, the `s16` at `+0x02`, and the bundle carries all four
+under `class31.scripts`:
+
+| style | address | name | bundle key | stages |
+|---|---|---|---|---|
+| 1 | `0x00565E58` | `g_class31_arc_path_style1` | `path_style1` | `{301,12,1,12}` three times |
+| 2 | `0x00565E88` | `g_class31_arc_path_style2` | `path_style2` | `{301,7,0,11}{300,48,1,65}{301,17,1,22}` |
+| other | `0x00565EB8` | `g_class31_arc_path_style0` | `path_style0` | `{301,0,0,8}{301,9,0,17}{301,18,0,23}` |
+| (type 0x17) | `0x00565E28` | `g_class31_arc_path_c17` | `drop_zskamere` | `{439,0,0,19}{439,20,0,31}{439,32,0,42}` |
+
+Style 1 is a pose, not a clip: 301 held on frame 12 by three stages whose
+thresholds are their own start frames, so the fit grows the fades over the
+whole leg and the actor flies it in one frame of the hop. `ActorArcStep` (`FUN_0044D860`) plays stage 0 on the spot,
 stage 1 once the clip frame reaches stage 0's threshold, stage 2 once it
 reaches stage 1's, and reports the arc over once the landing clip reaches
 stage 2's — **not** when the arc lands: its flight phase ignores
@@ -2617,6 +2643,30 @@ name is compared against that held cursor, and it is what the fit is fitting:
 `FitArcScriptByFadeLength` (`FUN_0044D5F0`) grows stages 1 and 2's fades to
 take up the slack of a long arc, so a long leap holds the flight clip's first
 frame through the air rather than playing it slowly. `[proved]`
+
+The two fits are different routines with different slacks, chosen by
+`CMP CX, 0x19` at `0x0044D8C1`:
+
+```
+FitArcScriptByFadeLength   (every type but 0x19)
+  slack = s1.start - s1.until + T                     ; no fades in it
+  > 0:  while (s1.fade + s2.fade < slack) both++
+        if (slack < s1.fade + s2.fade) s1.fade--      ; the odd frame is stage 2's
+        both clamped at 0x7F
+  < 0:  s1.fade = s2.fade = 1
+        until (fades + s1.until - s1.start <= T and s1.until - s1.start <= 1):
+          s1.start++, s1.until--
+        if (s1.until - s1.start < 1) s1.start--
+
+FitArcScriptByStartFrame   (0x19, zstin)
+  slack = T - s2.fade - s1.fade - s1.until + s1.start
+  k     = __ftol(|slack * 0.5|)
+  > 0:  both fades += k; the rest onto s1.fade; NO clamp
+  <= 0: both starts += k, each clamped at its own until; the rest onto s1.start
+```
+
+The port had one function for both, with the second's slack and `k`, until
+the rooftop route of NEW-BUGS-2 was read.
 
 > ⚠️ **Every one of those thresholds is in engine frames, at 60 Hz.** `mot/` is
 > authored at 30 Hz, so the baked clip's own index is half of it: clip 303

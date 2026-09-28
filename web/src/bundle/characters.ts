@@ -921,7 +921,8 @@ export interface DifficultyJson {
  * `ActorArcStep` (`FUN_0044D860`) walks them.
  *
  * A script is nearly always one clip cut into windup, flight and landing;
- * seven of the 38 end on a different clip, so each stage names its own.
+ * some switch clips between stages (`verify_combat.py` check 16 counts
+ * them), so each stage names its own.
  */
 export interface ArcStage {
   motion: number;

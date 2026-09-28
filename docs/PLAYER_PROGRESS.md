@@ -4710,7 +4710,52 @@ past the 44-frame play length of the 23-frame clips under them. The engine's
 cursor wraps there, so an actor on that data would wait out its landing for
 ever; the old port only finished because it bailed out when the arc landed.
 The fixture carries the exe's own wall script now, and `verify_combat.py`
-check 16 asserts that none of the 38 shipped scripts does that.
+check 16 asserts that none of the shipped scripts does that.
+
+### The rooftop route is flown at the waypoint's own step (NEW-BUGS-2)
+
+**Reported:** "the zombie that jumps across the rooftops at
+`?stage=2&original=1&mode=play&block=14&step=2&op=9&frame=372` moves quite
+slowly compared to the real game." It is spawn `0x7EA4`, a class-0x31 `zsass`
+in `ThrowerStatePathFollow` (`FUN_0044EE00`, state 26): a 45-frame wait, then
+five leaps -- one at step 1, four at step 3 -- and a pounce at the player.
+
+The waypoint's `step` goes to **both** `ActorArcBeginTo`, which makes the leg
+`dist2d * step` parameter frames long, and `ActorArcStep`, whose
+`ActorArcInterpolate` flies `step` of them a frame. The port handed it only to
+the first and flew one a frame, so every step-3 leg took three times as long:
+
+| leg | T | before | after (and the engine's arithmetic) |
+|---|---:|---:|---:|
+| 2, 8.2 units | 24 | 25 frames | 10 |
+| 3, 16.0 units | 48 | 49 | 18 |
+| 4, 15.3 units | 45 | 46 | 17 |
+| 5, 12.0 units | 36 | 37 | 14 |
+
+Measured in the running player at the report's URL: the route took frames
+45-220 and now takes 45-135; ground speed over the step-3 legs went from
+0.33-0.35 units a frame to 0.92-0.96. The parabola was already the engine's --
+it is solved over the same `T` -- so the hops are no higher, only three times
+quicker.
+
+The state was a sketch in the port and is a transcription now: the leg
+installs the style's arc motion script (`g_class31_arc_path_style0/1/2`, or
+`_c17` for character type 0x17) through `ActorArcBeginToWaypoint` and is
+flown by `ActorArcStep`, so the actor hops in clip 301 held on frame 12 where
+it used to slide in its idle; the route raises `obj+0x34` bit `0x100` for its
+whole length; every leg ends on `ENE_WALK6_22.WAV`. None of the three
+scripts was in the bundle -- no table the exporter read names them -- and
+nor was clip 301; `CLASS31_ARC_SCRIPTS` carries them now, and the bake list
+follows.
+
+`FitArcScriptByFadeLength` (`FUN_0044D5F0`), which every arc but `zstin`'s
+runs through, was also wrong: the port had one function for it and
+`FitArcScriptByStartFrame` (`FUN_0044E140`), with the latter's slack -- net of
+both fades -- and its halved `k` applied to every type. The engine's slack has
+no fades in it, grows both fades a frame at a time, gives the odd frame to
+stage 2, and resets both fades to 1 in the tight case. Both are transcribed now,
+under their own names, and the `zstin` one no longer clamps its fades at
+`0x7F`, because the engine's does not.
 
 ### The canal is drawn by a task: class 0x41 type 1
 

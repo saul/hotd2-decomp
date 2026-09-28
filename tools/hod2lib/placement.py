@@ -276,7 +276,7 @@ def entry_tail(rec, state: int, exit_state: int) -> dict | None:
 #:
 #: *step* is the arc's parameter-advance rate: `ActorArcBeginTo` sets the
 #: duration to ``dist2d * step`` rounded down to a multiple of *step*, and
-#: `ActorArcStepInterp` advances the counter by *step* a frame -- so the leg
+#: `ActorArcInterpolate` advances the counter by *step* a frame -- so the leg
 #: still takes about ``dist2d`` frames, at *step* times the resolution. It is
 #: **not** the arc kind: that is ``obj+0x1354``, which `SelectActorGravityAxis`
 #: writes from the surface the actor is attached to.

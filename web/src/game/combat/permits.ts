@@ -18,9 +18,23 @@ import { vec3 } from "../vec";
  * horizontally and `+/-240` vertically, which is how the half-height is known
  * to be 240; the same constant appears in the frustum test at `FUN_0045CA60`
  * with a literal 320 for the half-width.
+ *
+ * `[proved]` from its one writer, `SetupSceneProjection` (`FUN_004184C0`):
+ *
+ * ```
+ * 00418528  FLD   double ptr [0x004ed1d0]   ; 0.35866388296751145, 20.55 deg
+ * 0041852e  FPTAN
+ * 00418533  FSTP  ST0
+ * 00418535  FDIVR float ptr [0x004c49c8]    ; 240.0 / tan
+ * 0041853b  FSTP  float ptr [0x009a2d70]
+ * ```
+ *
+ * so `240 / tan(20.55 deg)` = 640.2079 -- half of the 41.1-degree vertical
+ * field over the half-height. It was written 640.2, derived from the field of
+ * view rather than read.
  */
 const SCREEN_HALF_H = 240;
-export const PROJECTION_DISTANCE_PX = 640.2;
+export const PROJECTION_DISTANCE_PX = 240 / Math.tan(0.35866388296751145);
 
 const _view = vec3();
 

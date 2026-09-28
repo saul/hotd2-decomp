@@ -744,23 +744,49 @@ reach decode with every opcode in `0..18` or `-1`.
 | 11 | ride an `op_` object path | 24 |
 | 13 | `PlaySoundId` | 14 |
 | 8 | set the position | 13 |
-| 17 | hand the object to another routine | 12 |
+| 17 | by mode: install one of three routines (0, 1, 4), or spawn a sprite and run on (2, 3) — see below | 12 |
 | 2 | set the motion | 10 |
 | 16 | swap one bone's draw slot | 8 |
 | 6 | stop turning, or face the camera | 8 |
 | 7 | face a point once | 4 |
 | 5 | turn by a fixed amount over N frames | 1 |
 
-The condition modes opcodes 0, 1 and 4 share: `0` a frame count, `1` the camera
-reaching a path at a frame, `2` a motion frame (`-1` for the clip's last), `3` a
-script flag, `4` "am I closer to this point than I was last frame", `-1`
-unconditional.
+The condition modes: `0` a frame count, `1` the camera reaching a path at a
+frame, `2` the play cursor `obj+0x19C` **equal** to `a` (`-1` for
+`g_motion_play_length - 1`) -- the engine's 60 Hz cursor, not an authored frame:
+`a=66` ships on a 35-frame clip whose play length is 68 -- `3` a script flag,
+`4` "am I **farther** from this point than I was last frame", `-1`
+unconditional. The two switches differ `[proved]`: `op 0`/`op 1` take 0, 1, 2,
+3 and -1 and block on anything else (so no mode 4), and `op 0` never proceeds
+on mode 2 (`CMP BP, BX; JZ` at `0x004843CD` tests the opcode); `op 4` takes 0 to 4 and blocks on -1.
+An opcode outside -1..18 parks the VM (`JA 0x00484a8d` at `0x0048436B`).
 
 **A command that cannot proceed does not advance the cursor.** It falls through
 to the per-frame tail and is retried next frame, so a run of setup commands all
 take effect at once and only a wait costs a frame. `op 11` evaluates its path
 at the **camera's** frame, which is what keeps a scripted actor in step with
 the shot it belongs to.
+
+`op 2` is `ActorSetMotion` and then a write to the **counter** `obj+0x194`: `b`,
+or `rand() % 10` for -1, the same as the Init's `blk+0x06`; its mode 1 clears
+`obj+0x1F8` bit 4 and mode 2 raises it (the Init raises it for `blk+0x02 == 2`).
+`op 3` is `ActorSetMotionBlended(obj+0x194, a, b, mode)` -- `b` the start
+cursor, `mode` the fade length.
+
+**`op 17` is five things by mode** (`0x004849CE`, jump table `0x00484D20`),
+all shipped:
+
+| Mode | What it does | Users |
+|---|---|---|
+| 0 | installs `ScriptedHumanoidFallAndSplash` (`FUN_00484DF0`) and ends the frame: `vel.y -= 0.02` a frame from rest, the freeze raised on the last cursor, and at `y <= -27.9998` a kind-0x61 splash at `(x, -24.9998, z)`, the hit slot freed, `ActorKill` | stage 2's four jetty zombies, evt 43584/43740 (block 16), 55372/55536 (block 20) |
+| 1 | installs `ScriptedHumanoidLaunchAndDrop` (`FUN_00484EA0`): `vel = (x - 231.5, 20)`, then a gravity that grows by 0.027222222 a frame, dead below y = 0 | stage 2 block 37's five, on script flag 95 |
+| 2 | calls `ScriptedHumanoidSpawnFixedImpact` (`FUN_00484F50`): kind 0x34 at `(-999.5, 3.24, -1296.2)`, yaw `0xC000`, and runs on | stage 2 evt 65768, 66004, three each |
+| 3 | kind 0x41 at `(-189.3, -24.9, -1505.0)` in evt block 9, `(-1264.0, -24.9, -1353.0)` elsewhere, faced by yaw, and runs on | stage 2 evt 21948, 42264, twice each |
+| 4 | `vel.y = -0.40833333`, installs `ScriptedHumanoidFallTimed` (`FUN_00484F90`): the same gravity step, dead past 200 frames | stage 6 evt 18820 |
+
+The three installed routines run no removal test and never read the command
+block again. A mode above 4 (or negative) steps past the command and ends the
+frame. Ported in `game/class25/`.
 
 ## Two name tables, not none
 

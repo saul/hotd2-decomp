@@ -24286,3 +24286,64 @@ sprint change (`30a0ebf0`), which alters which strike a shot zombie picks and
 so which poses show up in a given run; it was not that. A measurement that
 refreshes the state it measures agrees with any claim about it -- `L69`'s
 shape, one layer further in.
+
+
+## 2026-09-28 -- the jetty zombies' fall back looped: class 0x25's `op 17`
+
+Reported: at the end of stage 2, in the scripted sequence where the two zombies
+are shot from the boat, they play their fall-back animation on a loop. The
+scene is block 16 step 15 (block 20 step 2 on the other route): two class-0x25
+humanoids of character type 15, evt `43584` and `43740` (`55372`/`55536`),
+whose programs end `op 3 972` (the fall back, fade 5), **`op 17` mode 0**,
+`op -1`. Never worked: `op 17` has been stepped over since class 0x25 was
+ported (`77e235af`), so the actor ran into `op -1`, sat in
+`ScriptedHumanoidIdle` on clip 972 with `obj+0x1324` clear, and the clip
+wrapped every 60 frames until camera path 100 frame 65 removed it. Measured
+driven from `?stage=2&block=16&step=15&op=0&drive=1&seed=1`: handed over at
+frame 210, cursor 40 at 250, 30 at 300, 20 at 350, still at y -23 at 457.
+
+`op 17` (`0x004849CE`, mode table `0x00484D20`, read) is five things, all
+shipped: modes 0, 1 and 4 write a routine over `obj+0x00` and end the frame;
+2 and 3 spawn a sprite and run on; anything else steps past and ends the frame.
+Mode 0's routine at `0x00484DF0` had no Ghidra function (created, named
+`ScriptedHumanoidFallAndSplash`): gravity 0.02 from rest, the freeze when the
+cursor its last draw showed is `g_motion_play_length - 1`, and at
+`y <= -27.9998` a kind-0x61 splash at `(x, -24.9998, z)`, `ActorFreeHitSlot`,
+`ActorReleasePartList`, `ActorKill`. So the zombies sink 5 units and are gone
+22 frames after the hand-off. The other three were `FUN_`s, named
+`ScriptedHumanoidLaunchAndDrop` (`0x00484EA0`, sub 0 falls through into sub 1,
+L53), `ScriptedHumanoidSpawnFixedImpact` (`0x00484F50`) and
+`ScriptedHumanoidFallTimed` (`0x00484F90`). The routine installed is
+`HumanoidTail.routine` now, with the exe's pointer values; `pc = -1` is gone.
+
+**Rule 4, what the reading overturned.** The freeze test reads `obj+0x19C`, and
+so do the VM's `mode 2` waits -- the cursor, for equality -- where the port
+read the authored frame with `>=`. 24 of the 40 shipped literal cursors are
+past a clip's end in authored frames (`a=66`/`68` on a 35-frame clip, `a=73` on
+the 41-frame 855 in this same scene), so those actors parked. The port also
+steps the counter before the class runs, so a state reading it is a tick ahead
+(L62); the class keeps the cursor its draw sampled, `HumanoidTail.playCursor`,
+as the frog does. The same "authored frame" belief sat under `op 2`'s `b` and
+the Init's phase (both write the counter; the port doubled them and took -1 as
+0 where the exe draws `rand() % 10`) and `op 3` ignored its start and fade.
+`op 2` mode 1/2 and the Init's `blk+2 == 2` write `obj+0x1F8` bit 4, which the
+port did not. The two condition switches are the exe's own now (`op 0/1` have
+no mode 4 and `op 0` never passes mode 2 -- `CMP BP,BX / JZ` at `0x004843CD`,
+not `0x00484386` as the TSV row said, which is the table's `JMP`; `op 4` has no
+-1), an out-of-range opcode parks, and the removal paths free the hit slot they
+had left claimed. Three of the class-0x25 citations in `index.ts` were the
+parenthesised form of routines the file ports (L42): now bare addresses, and
+`verify_port`'s ported count went 754 to 761.
+
+Wrong turns: I first read the post-boss cut scene in block 35 (two class-0x25
+spawns on camera path 0x71) as the sequence -- they are the player characters.
+The zombies are identified by character type 15 against the players' 59/60.
+And the builder hash moved: `class25/state.ts` is in the exporter's closure
+because `hod2lib/bundle.ts` imports `HUMANOID_VARIANT3_SLOT` from it, so the
+tail fields regenerate `builder_hash.ts` although no exported byte changes.
+
+Test: `test:port`'s five new class-0x25 blocks (the jetty program driven by
+`GameUpdate`; the freeze holding on cursor 18 of an 18-long clip; the wait on
+`a=66`; `op 2` and the Init's counter; `op 17` modes 1-4 and 7; the removal's
+hit slot) -- 22 assertions that fail on `a3f5d167`. Counts: divergences 133
+held (the `op 9`/`op 16` stub keeps its tag), uncited exports 82 held.

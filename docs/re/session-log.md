@@ -23341,10 +23341,15 @@ camera point is untouched by any mode.
 
 **Declared.** A divergence: the switch reads the pose the renderer last drew,
 a tick behind the engine's same-routine draw for a moving civilian -- the
-same reading the camera point and the frog take, closed only by the
-skeleton's forward kinematics in `game/`. `[port-only]`: with no pose (a
-headless host, or the tick before the renderer adopts a spawn) a bone arm
-takes the position.
+same reading the camera point and the frog take. What closes it already
+exists for class 0x14: the engine's model block in `game/skeleton.ts`
+(`Actor.skel`), posed by the class's own `DrawSkinnedModelAndShadow` call.
+Moving civilians onto it moves their clip clock, root motion and draw off
+the director and the renderer's posing, and a carrier's matrix has to go
+under the walk -- a class-wide change, not this switch's, so it is declared
+here and left for its own session. `[port-only]`: with no pose (a headless
+host, or the tick before the renderer adopts a spawn) a bone arm takes the
+position.
 
 **In the page** (`?drive=1`, stage bundles exported in this worktree): on
 mode 2 the sphere equals bone 1 to the digit -- bone 1 is also the tracked

@@ -181,17 +181,19 @@ const _b = { x: 0, y: 0, z: 0 };
  * `0x910` and `0x760`, four draw records exactly. And `CivilianInit` writes
  * mode 2, so the arm left out was the one nearly every civilian runs: only
  * the one stream that selects mode 0 (stage 2's `0xA134`) ever wrote the
- * sphere, and both
- * readers re-derived class 0x30's feet-plus-radius-plus-one over whatever
- * was there.
+ * sphere, and both readers re-derived class 0x30's feet-plus-radius-plus-one
+ * over whatever was there.
  *
  * [diverges] The engine reads the pose it drew **this** frame, a few lines
  * up in the same routine, after the move step and the pose hook's push; the
  * port's pose is the renderer's and so the one it last drew, a tick behind
  * for a civilian that is moving. That is the reading `ActorRegisterCameraPoint`
- * and the frog's bone 1 take too, and closing it is the skeleton's forward
- * kinematics in `game/` (`docs/PLAYER_ARCHITECTURE.md`, the input replay
- * harness).
+ * and the frog's bone 1 take too. Closing it is giving the civilian the
+ * engine's model block (`Actor.skel`, `game/skeleton.ts`) and calling
+ * `DrawSkinnedModelAndShadow` where `CivilianUpdate` does, as class 0x14
+ * already does -- which moves the class's clip clock, its root motion and
+ * its draw off the director and the renderer's own posing, and on a carrier
+ * needs the carrier's matrix under the walk.
  *
  * `[port-only]` With no posed skeleton — a headless host, or the tick before
  * the renderer adopts a new spawn — a bone arm has no record to read, which

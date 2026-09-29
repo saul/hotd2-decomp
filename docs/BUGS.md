@@ -110,8 +110,16 @@ two numbers that say how finished the transcription is — are generated into
 
 ### Known red, and not caused by any of this
 
-* `web/tools/civilians.mjs` — rescued 20 of an expected 21, mauled 12 of an
-  expected 10. Confirmed identical before and after every change here.
+* `[fixed]` `web/tools/civilians.mjs` — rescued 20 of an expected 21, mauled
+  12 of an expected 10. **A stale harness, not a port defect**, and it got
+  worse before anyone looked: 919bcae4 (the whole-frame motion clock) let one
+  more maul cue land and nobody re-pinned, and after a41baa08 it read
+  `0 rescued` because its `dead = true` kill raised no bit for
+  `CivilianPruneDeadChildren` to see. It shoots through `DispatchHit` now,
+  spawns the class-0x18 captors, is pinned at 19 rescued / 12 mauled with
+  every civilian accounted for, and is a `verify_all.py` row. Fixing it found
+  one real defect: `ResolveHit` never wrote the killer byte `obj+0x131C`, so
+  every rescue paid both players.
 * `web/tools/cadence.mjs` — 0 strikes in 30 s, permit queue not throttling.
   Likewise pre-existing.
 * `web/tools/pacing.mjs` and `playthrough.mjs` cannot run under

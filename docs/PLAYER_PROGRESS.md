@@ -755,6 +755,19 @@ captors run a state that works on their own civilian**, and four civilians are
 mauled inside fifteen seconds — four that can no longer be rescued, which is
 why the rescue count in that harness went down.
 
+**2026-09-29: the rescue pays the shooter, and the harness is a check.** The
+harness had been failing since 919bcae4 and read `0 rescued` from a41baa08 on,
+both stale driving rather than the port; see `docs/re/session-log.md` for the
+bisect. It now kills through `DispatchHit` and runs in `verify_all.py`: 58 of
+60 captors (57 class 0x30, three class 0x18) work on their civilian, 12
+civilians are mauled, 19 are rescued. Driving the page showed the defect the
+harness then pinned: `ResolveHit`'s kill arm writes the shooter into
+`obj+0x131C` (`0x004097D1`) and the port did not, so `sub+0x6C` read -1 and
+every rescue paid 400 to **both** players — player 2 scored with nobody
+holding the gun. Played from their block starts with real pulls, stage 1's
+`0x18A8`, stage 2's `0x2C38` and stage 3's `0x3208` are each rescued, and
+each pays player 0 alone.
+
 **Class 0x25, the scripted humanoid, is ported** (`game/class25/`) — the
 second-largest class in the game and a **bytecode VM**. The spawn's tail points
 at a command block; the Init installs the interpreter and it walks 8-byte

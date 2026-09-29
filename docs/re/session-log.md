@@ -25103,3 +25103,72 @@ listing in ways this commit does not touch. It fires the connect on
 cry, `ActorPlayHitVoice(obj, 3)` (`CALL 0x0040a6f0` at `0x0044EC02`). And a
 port-only `!e` guard sends a missing strike entry to state 25 with
 `Committed` still up.
+
+## 2026-09-29 -- `civilians.mjs` read `0 rescued`: a stale harness, and a rescue that paid both players
+
+**The report.** `web/tools/civilians.mjs` gave 17 moved / 0 rescued / 14
+mauled against a pin of 37 / 21 / 10. The session that saw it (stage 1's bin
+civilian) got the same numbers with and without its change.
+
+**Bisect.** Every probe used that commit's own harness against a bundle its
+own exporter wrote (Python before 2165ccd0, TypeScript after), keyed on the
+exporter's tree so a bundle was reused only where the exporter had not moved.
+Over main's first-parent chain from b9bb4960 (the pin's commit, which passes)
+to 70910e4a: **the first failing commit is 919bcae4** ("the motion clock
+counts frames"). b885f3fe passes and 919bcae4 fails on the *same* bundle, so
+the cause is code: rescued 21 -> 20, mauled 10 -> 11, and a per-civilian
+dump names the one civilian that moved -- stage 1's `0x3C38`, rescued before
+and mauled after. That commit fixed the clock that skipped cursor values, so
+the maul cue landing inside fifteen seconds is `[likely]` the faithful answer
+and the pin was simply never updated; nothing ran the harness. The collapse
+to zero is later: eba685d7 gives 37 / 17 / 14 and **a41baa08 gives 18 / 0 /
+15 on the same bundle** `[proved]`. a41baa08 made `CivilianPruneDeadChildren`
+test the dead bit alone -- re-read here, `0x0048CA75 TEST dword ptr
+[EAX + 0x34], 0x4000000` is the loop's only test -- and the harness killed
+captors with a bare `dead = true`, which raises no bit (L49). A mutant with
+`dead = true` put back gives exactly 17 / 0 / 14 on today's tree.
+
+**Not new.** A peer found the same bisect on 2026-09-28 (5ba50455, "Two
+stale harnesses", on `claude/focused-brahmagupta-0631a9`), and it never
+reached main. Its harness predates the eye change (it passes an eye to
+`GameUpdate`), so this is a fresh fix on today's harness rather than a merge;
+its numbers reproduce independently (19 / 60 / 58 / 12).
+
+**Rescues in real play.** Driven in the page from block starts
+(`?stage=N&mode=play&entry=0&block=B&drive=1&seed=1`), shooting every enemy
+with real pulls aimed through the page's own projection: stage 1's `0x18A8`
+(captor `0x18E8`), stage 2's `0x2C38` (`0x2C78`) and stage 3's `0x3208`
+(`0x3244`) are each rescued -- the child list empties on the killing shot and
+`civilian.rescued` fires. So rescues were never broken. **But the first run
+paid them to player -1**: +400 to both players, player 2 scoring with no one
+on the gun. `ResolveHit` (`FUN_00409430`) ends its kill arm with
+`ScoreAddForPlayer(p, 0x50)` then `0x004097D1 MOV byte ptr [EDI + 0x131c],
+CL` -- the killer byte `CivilianPruneDeadChildren` copies to `sub+0x6C` -- and
+the port's kill arm raised the bit and stopped. It writes it now; the same
+three rescues pay player 0 alone.
+
+**Harness.** Kills through `DispatchHit` (the shot's own gate, so a
+shot-immune captor is tried again next frame), spawns and tracks every
+captor whatever its class, fails on a captor the bundle names and does not
+place, fails on a rescue paid to anyone but the shooter, and `--verbose`
+prints each civilian's outcome. Pin: 53 / 37 moved / 19 rescued / 4 holding /
+60 captors / 58 in a captor state / 12 mauled. Against the pin era, the only
+civilians whose outcome differs are stage 3's `0xBC0` and `0x7190`: in the
+pin era their class-0x18 captors had no placement (checked in b885f3fe's
+bundle), the harness spawned nothing for them and the old prune freed them
+for nothing; today they are mauled. Stage 2's `0xA134`, the third, is
+rescued by a real kill. It is a `verify_all.py` row (`civilians`, bundle-gated,
+exit 3 without one), about two seconds.
+
+**Wrong turns.** The real-play probe's first two runs "lost" stage 1's
+`0x1828` and `0x18A8` to what looked like stray shots; `civilian.shot` with
+player -1 is the *killed* arm, which a maul reaches as well as a bullet, and
+logging `shot.resolved` showed no pull had touched either. `0x1828` is mauled
+51 frames after she spawns, off screen, on every run -- not chased. The
+probe also aimed at `obj+0x70`, which for class 0x30 sits at the feet, and
+then kept out of a civilian's projected radius so wide that it never fired at
+the bin captor at all; it aims at torso and head heights now.
+
+**Left open.** The port's kill test is `!obj.dead && hp < 1 && result != 5`;
+the exe's is the dead *bit* and `hp < 1`, with result 5 gating only the head
+pop. Not changed here.

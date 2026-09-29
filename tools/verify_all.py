@@ -243,6 +243,16 @@ CHECKS: list[Check] = [
           "the stage's own gate, and the reason a non-enemy can be a camera "
           "candidate at all",
           NEEDS_BUNDLE),
+    Check("civilians", "web", ["npm", "run", "--silent", "civilians"],
+          "that every class-0x10 civilian in the six stages runs her shipped "
+          "stream beside her real captors -- none runs away, every captor "
+          "the bundle names is placed, the captors (class 0x30 and the "
+          "carrier's class 0x18) work on her rather than on the camera, and "
+          "shooting them pays the rescue to the player who shot -- the only "
+          "check over the whole corpus of streams rather than one room's, so "
+          "the one whose rescue and maul counts move when a captor class, the "
+          "motion clock or the prune changes under it",
+          NEEDS_BUNDLE),
     Check("props43", "web", ["npm", "run", "--silent", "props43"],
           "where in a real script a class-0x41 prop is actually placed, and "
           "that it takes a frame of `GameUpdate` to appear -- the only check "

@@ -930,6 +930,13 @@ export function ResolveHit(obj: Actor, bone: number,
     // `ResolveHit` also raises `obj+0x34` bit 0x4000000, which is what
     // `ThrowerOnShot` reads to tell a killing blow from a survivable one.
     obj.flags |= ActorFlag.Dead;
+    // ...and names the killer: `004097D1 888f1c130000 MOV byte ptr
+    // [EDI + 0x131c], CL`, CL the player argument, straight after the
+    // `ScoreAddForPlayer(p, 0x50)` the port charges in `FireShotRequest`.
+    // `CivilianPruneDeadChildren` (`FUN_0048CA60`) copies it off a dead
+    // captor into `sub+0x6C`, the rescue's payee; left at -1 every rescue
+    // paid both players.
+    obj.killedBy = player;
     if (!ownDeath) {
       death = ChooseDeathMotionDirectional(obj, rng);
       if (death !== undefined && MotionOf(obj, death)) {

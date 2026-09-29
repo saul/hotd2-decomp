@@ -1530,6 +1530,20 @@ console.log("ResolveHit:");
   const again = ResolveHit(z, 1, NULL_HOST, rng);
   check("a hit on a corpse scores nothing", !again.killed
         && again.result === 0);
+
+  // **The killer's byte.** The kill arm ends `obj+0x34 |= 0x4000000;
+  // ScoreAddForPlayer(p, 0x50); *(char *)(obj + 0x131C) = p` -- the store is
+  // `004097D1 888f1c130000 MOV byte ptr [EDI + 0x131c], CL`, CL the player
+  // argument. `CivilianPruneDeadChildren` reads it back off a dead captor as
+  // the rescue's payee. Player 1, so neither the field's `-1` nor the
+  // argument's default of 0 can pass for it.
+  const k1 = spawnZombie(0x1100, 1, "shot by player 1");
+  k1.visible = true;
+  k1.hp = 1;
+  ResolveHit(k1, 1, NULL_HOST, rng, 1);
+  check("the killing shot names its player at obj+0x131C",
+        (k1.flags & ActorFlag.Dead) !== 0 && k1.killedBy === 1,
+        `flags ${k1.flags.toString(16)} killedBy ${k1.killedBy}`);
 }
 
 // -- 4a. the three bits `ResolveHit` reads on `obj+0x34` ---------------------
@@ -14583,29 +14597,55 @@ console.log("\nclass 0x10, the civilian and the rescue:");
       cmd(CivilianOp.End),
     ]], [0x4100, 0x4200]);
     let paid = 0;
-    events.on("civilian.rescued", () => { paid += 1; });
+    let payee = -2;
+    events.on("civilian.rescued", (d) => { paid += 1; payee = d.player; });
     check("the civilian starts holding both its captors",
           a.civ?.childCount === 2, `${a.civ?.childCount}`);
     for (let i = 0; i < 5; i++) cFrame(a, events);
     check("...and the rescue does not pay while either is alive",
           G.g_player_score[0] === 0 && paid === 0,
           `score ${G.g_player_score[0]}`);
-    // `CivilianPruneDeadChildren` reads the child's `obj+0x34` bit and
-    // nothing else, so a kill here is the bit every real kill raises.
-    kids[0].dead = true;
-    kids[0].flags |= ActorFlag.Dead;
+    // Killed the way a shot kills (L49): `ResolveHit` (`FUN_00409430`) raises
+    // the bit `CivilianPruneDeadChildren` tests and writes the shooter into
+    // `obj+0x131C`, which the prune copies to `sub+0x6C`. Player **1** fires,
+    // so a payee of 0 or -1 cannot pass. `ResolveHit` pays no kill score here
+    // -- the port charges that in `FireShotRequest` -- so every point on the
+    // board below is the rescue's.
+    kids[0].hp = 1;
+    ResolveHit(kids[0], 1, NULL_HOST, rng, 1);
     cFrame(a, events);
     check("one captor down is not enough",
-          a.civ?.childCount === 1 && G.g_player_score[0] === 0,
-          `left ${a.civ?.childCount} score ${G.g_player_score[0]}`);
-    kids[1].dead = true;
-    kids[1].flags |= ActorFlag.Dead;
+          a.civ?.childCount === 1 && G.g_player_score[1] === 0,
+          `left ${a.civ?.childCount} score ${G.g_player_score.join("/")}`);
+    kids[1].hp = 1;
+    ResolveHit(kids[1], 1, NULL_HOST, rng, 1);
     cFrame(a, events);
-    check("the last captor down pays 400 -- to both players, since the port "
-          + "cannot name a shooter",
-          paid === 1 && G.g_player_score[0] === 400
-          && G.g_player_score[1] === 400,
-          `paid ${paid} ${G.g_player_score.join("/")}`);
+    // `CivilianApplyWaitWord` pays both players only when `sub+0x6C` is -1,
+    // the engine's "could not name one". A shot always names one.
+    check("the last captor down pays 400 to the player who shot it, and to "
+          + "nobody else",
+          paid === 1 && payee === 1 && G.g_player_score[1] === 400
+          && G.g_player_score[0] === 0,
+          `paid ${paid} to ${payee}, scores ${G.g_player_score.join("/")}`);
+  }
+  // ...and the other arm of `CivilianApplyWaitWord`'s payee test: a captor
+  // that died with `obj+0x131C` still at -1 names nobody, and both players
+  // are paid. The bit is set by hand because this checks the payee branch
+  // alone, not how a captor comes to die.
+  {
+    const { a, kids, events } = civScene([[
+      cmd(CivilianOp.Wait, CivilianWait.Free),
+      cmd(CivilianOp.SetChildrenGoal, 0),
+      cmd(CivilianOp.Wait, CivilianWait.ChildrenAlive),
+      cmd(CivilianOp.Wait, CivilianWait.Rescued),
+      cmd(CivilianOp.End),
+    ]], [0x4100]);
+    cFrame(a, events);
+    kids[0].flags |= ActorFlag.Dead;
+    cFrame(a, events);
+    check("a captor dead with no killer named pays both players 400",
+          G.g_player_score[0] === 400 && G.g_player_score[1] === 400,
+          `scores ${G.g_player_score.join("/")}`);
   }
 
   // Shooting one. `SetOnShot` is the gate: without it the hit bits are simply

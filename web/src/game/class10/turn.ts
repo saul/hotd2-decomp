@@ -8,21 +8,83 @@
  * written out twice before it did.
  */
 import type { Actor } from "../actor";
-import { G } from "../globals";
+import { CameraBlockWorldToView } from "../camera/view";
+import { CarrierMatrixCompose } from "../carrier";
+import { ActorByAt, G } from "../globals";
+import {
+  MatCopy, MatIdentity, MatrixInvert, MatrixLoadIdentity,
+  MatrixTransformPoint,
+} from "../matrix";
 import { CivilianTarget } from "./ops";
 
 /** `CivilianStepTurnToTarget`'s own cap, the literal at `0x0048C8FE`. */
 const CIVILIAN_TURN_CAP = 0x100;
 
 /**
- * Where `targetMode` says the target is, this frame.
+ * What a camera target's carrier arm composes the carrier onto.
+ *
+ * [port-only] The one instruction the two inline copies of the arm do not
+ * share, as a value: see {@link CivilianTargetPoint}.
+ */
+export enum CivilianCarrierBase {
+  /** `CivilianStepTurnToTarget`: `MatrixLoadIdentity` at `0x0048C8D4`. */
+  Identity,
+  /**
+   * `CivilianStepScript`: the push at `0x0048B3B0` and straight on to
+   * `MatrixTranslate` at `0x0048B3C0`, so the top as `CivilianUpdate` has it.
+   */
+  StackTop,
+}
+
+const _m = MatIdentity();
+
+/**
+ * Where `targetMode` says the target is, this frame, in the frame the
+ * civilian's own position is kept in.
  *
  * [port-only] No routine of its own: `CivilianStepTurnToTarget`
  * (`FUN_0048C850`) and `CivilianStepScript` (`FUN_0048B1E0`) each build the
  * point inline, by the same three rules. One copy, because two is how they
- * drift.
+ * drift -- and the copies do differ, by one instruction, in the arm a
+ * civilian on a carrier takes. That difference is `base`.
+ *
+ * **On a carrier, a camera target is taken into the carrier's frame**, where
+ * her position is kept. Both copies test `CMP dword ptr [EAX], 0x48b140` --
+ * her update is still `CivilianUpdateOnCarrier` (`FUN_0048B140`) -- after
+ * resolving a negative mode (`0x0048C8C1` in the turn, `0x0048B39D` in the
+ * step), then push, make the carrier's `Translate; RotX; RotZ; RotY`, and
+ * `MatrixInvert(0); MatrixTransformPoint` the point. Ghidra's pseudocode of
+ * the step stops at that arm's `MatrixStackPop` (`0x0048B429`); the bytes
+ * run on at `0x0048B42E` to store the result as the point and into the
+ * reach and turn tests (L35). A fixed point (`targetMode >= 0`) is read raw
+ * from `sub+0x30` in both, carrier or not. `[proved]`
+ *
+ * **The turn loads the identity first and the step does not.** So the turn
+ * inverts the carrier's matrix alone and gets the camera in her frame; the
+ * step inverts the carrier composed onto what the stack already holds --
+ * `UpdateSceneViewAndLight`'s world-to-view (`SetTop` at `0x00402136`) and
+ * `CivilianUpdateOnCarrier`'s own push of the same carrier -- so its `Reach`
+ * and `Face` tests measure against `(V·C·C)⁻¹·eye`, a point that is not the
+ * camera in any frame. That is the engine's own omission and the port keeps
+ * it. The push is `[proved]` (`MatrixStackPush` copies the top when handed
+ * 0); that the top is the view when `CivilianUpdate` starts is `[likely]`:
+ * `UpdateSceneViewAndLight` sets it before any actor, and `CivilianUpdate`'s
+ * sphere switch gets a world point back from the draw's records by
+ * multiplying them by the view-to-world matrix, which only works if the draw
+ * composed onto the world-to-view.
+ *
+ * Stage 3's `0x0BC0` (script 25, cmd 6: `Reach` within 18 of the camera,
+ * riding the boat) and stage 4's four riders (scripts 65 and 66, turning to
+ * the camera behind a counter wait) are the shipped inputs. The port had
+ * neither transform, and turned them toward the world eye from a
+ * carrier-relative position.
+ *
+ * `[port-only]` A rider whose carrier has left the pool keeps the point
+ * untransformed: the engine reads the freed block's last words through
+ * `sub+0x68`, and the pool keeps none -- the same seam
+ * `CarrierPublishWorld` handles by keeping the last world point.
  */
-export function CivilianTargetPoint(obj: Actor):
+export function CivilianTargetPoint(obj: Actor, base: CivilianCarrierBase):
     { x: number; y: number; z: number } {
   const sub = obj.civ;
   if (!sub) return { x: 0, y: 0, z: 0 };
@@ -30,11 +92,22 @@ export function CivilianTargetPoint(obj: Actor):
   // Both inline copies read `g_camera_eye` by address -- `0x0048C878..8B3`
   // here, `0x0048B356..38F` in the step -- the gameplay eye.
   const eye = G.g_camera_eye;
-  if (sub.targetMode === CivilianTarget.Camera) {
-    return { x: eye.x, y: eye.y, z: eye.z };
+  const p = sub.targetMode === CivilianTarget.Camera
+    ? { x: eye.x, y: eye.y, z: eye.z }
+    : { x: obj.pos.x * 2 - eye.x, y: eye.y, z: obj.pos.z * 2 - eye.z };
+  const carrier = obj.carrierAt >= 0 ? ActorByAt(obj.carrierAt) : undefined;
+  if (!carrier) return p;
+  const m = _m;
+  if (base === CivilianCarrierBase.StackTop) {
+    MatCopy(m, CameraBlockWorldToView(G.g_camera_index));
+    CarrierMatrixCompose(m, carrier);        // `CivilianUpdateOnCarrier`'s
+  } else {
+    MatrixLoadIdentity(m);
   }
-  return { x: obj.pos.x * 2 - eye.x, y: eye.y,
-           z: obj.pos.z * 2 - eye.z };
+  CarrierMatrixCompose(m, carrier);
+  MatrixInvert(m);
+  MatrixTransformPoint(m, p, p);
+  return p;
 }
 
 /**
@@ -72,7 +145,9 @@ export function HeadingError(obj: Actor, to: { x: number; z: number }): number {
 export function CivilianStepTurnToTarget(obj: Actor): void {
   const sub = obj.civ;
   if (!sub) return;
-  ActorTurnTowardPoint(obj, CivilianTargetPoint(obj), CIVILIAN_TURN_CAP);
+  ActorTurnTowardPoint(obj,
+                       CivilianTargetPoint(obj, CivilianCarrierBase.Identity),
+                       CIVILIAN_TURN_CAP);
 }
 
 /**

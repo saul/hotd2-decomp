@@ -78,6 +78,27 @@ giving civilian from her own spawn step: all five life-givers and four of
 the eight Original-item civilians give, in both modes; the other four sit
 behind op 0x1F's second arm, whose selector `DAT_009A2226` is `[open]`.
 
+**A civilian's op 0x10 calls a routine, and the routine installs a step.**
+The operand names one of four install routines, which both VMs call as
+`hook(obj, cmd + 2)`; what lands in `sub+0x5C` is the step each writes, and
+that is what `CivilianUpdate` calls every frame. The port stored the operand
+itself, inlined three of the installs into the action VM with the fall's
+gravity for all three, and ran the fall step for every one -- a fall step it
+also had moving `x` and `z` and zeroing the velocity on landing, neither of
+which the exe does. Read in full, `CivilianHookStartMoveY` (`FUN_0048DB90`)
+installs `y += vel.y` and `CivilianHookStartMoveLocal` (`FUN_0048DBD0`) the
+velocity turned by the actor's own rotation, both for ever, with no gravity
+and no ground: the renamed `LaunchUp` and `Launch`, which were neither. The
+reapply walk calls the install too -- its writes land -- and then puts
+`NoOpStub` back, where the port installed the hook; a null operand there
+writes nothing, where the port uninstalled. `hooks.ts` is the four installs
+and three of the steps now (the fourth is `children.ts`'s), `sub+0x18` is
+`hookDone`, and `SNAPSHOT_VERSION` is 5. Nothing moves in the six stages as
+exported: the move steps are reached only from streams 61/67/71/72, which no
+bundled spawn runs, and stage 3's two falling civilians never have an `x` or
+`z` velocity for the old step to have used. `npm run civilians` is identical
+before and after; `test:port`'s op-0x10 block is what holds it.
+
 **A rescued civilian holds the room while she speaks** (bug 18). There is no
 "wait for the dialogue" opcode: `CivilianUpdate` (`FUN_0048A920`) calls
 `ActorRegisterCameraPoint` every frame (`0x0048ADB0`), which tail-calls
@@ -185,6 +206,24 @@ only the body hit's 10. The civilians harness does not move (none of its
 civilians reaches an op 0x06 block or a passed block that sets a restored
 word, and every captor it shoots dies the same way); tests in `port.test.ts`,
 each seen failing on the base.
+
+**A civilian on a carrier sees the camera from the carrier, and her step sees
+it from somewhere else again.** Both places that resolve a camera target
+(mode −1, or the mirror) take it into the carrier's frame when the civilian
+rides one, because her position is kept there -- and the port did neither, so
+stage 4's four riders turned toward the world eye from a boat-relative
+position. The two copies of that arm are not the same: the turn
+(`CivilianStepTurnToTarget`, `0x0048C8D4`) loads the identity first and gets
+the camera in her frame, and `CivilianStepScript`'s copy does not, so its reach
+and face tests invert the carrier composed onto the view and the carrier the
+update already pushed -- `(V·C·C)⁻¹·eye`, a point that is not the camera. The
+port keeps both, from `game/matrix.ts` in the engine's call order; the shared
+`CivilianTargetPoint` now takes that one instruction as its argument. Stage 3's
+boat rider `0x0BC0` (script 25, a reach within 18) is the one shipped wait it
+decides. Three checks in `port.test.ts`, each failing on the base; a mutant
+that gives the step the turn's identity fails both reach checks. The civilians
+harness does not move (53/37/19/4/60/58/12): it counts steps, not headings, and
+no rider reaches the camera in 30 s either way.
 
 **...and the rest of `ResolveHit`'s tail is `ResolveHit`'s.** Read again from
 `0x004096F6` to the `RET` at `0x00409865`, the kill test above stands. Two
@@ -5749,6 +5788,31 @@ end on five.** It is chaos rather than one bug: putting back either the old
 rank or the old eye in `TurnActorTowardCamera` alone -- whose point turns by
 `ftol(eye.y)` BAMS, 49 against 34 -- restores the old run.
 
+**And the path frame** (2026-09-29). Each camera block has a path frame too,
+and block 2's, `g_cam_path_frame_2` (`0x009A6458`), is **always 0**: only
+`CameraBlocksReset`, a zeroing of all four blocks, and the path actions run as
+block 2 write it, and nothing ever runs as block 2 -- every action slot starts
+as `NoOpStub` and only an action already running in a block writes that
+block's slot. It is now in `G`. Two kinds of reader change:
+
+* **Through the index**, `[g_camera_index * 0x1A4 + 0x9A6110]`, read as
+  `CameraBlockPathFrame(G.g_camera_index)`: under scene state (1, 3) these see
+  0. The sub-type-0 owl cannot be shot then -- stage 2's is in the pool while
+  (1, 3) plays path 60's frames 707..845, where the port let it die -- and
+  neither path 0x7E's ripple pause nor type 72's cue can fire, though both
+  come round under index 0 in the shipped scripts, so neither moves.
+* **By address, as a second arm**: `g_cam_path_frame == c ||
+  g_cam_path_frame_2 == c` in class 0x30 states 18, 19 and 23,
+  `ThrowerStateGrabPlayer` and `ScriptedCarrierUpdate33`. That arm is "`c` is
+  0", and no shipped cue is 0, so the three `[diverges]` notes that said the
+  port had no second block are gone and nothing plays differently.
+
+The one remaining reader is class 0x33 selector 5,
+`ScriptedEffectAtCameraCue33` (`FUN_00433B00`, named): a camera-cued sprite
+effect, one stage-2 spawn at evt `0x12568`, cue 340, **not ported** -- the
+port builds nothing for it. The table is `docs/formats/cam.md` § *The path
+frame, and block 2's*.
+
 ### Stage 2 block 11: the fire strip ends
 
 Reported at `?stage=2&original=1&mode=play&block=11&step=1&op=28&frame=0`:
@@ -6892,6 +6956,39 @@ on moving `cam_frame` to `+0x0E`). In the page at
 doorway is boarded from the spawn (camera frame 640) on, the boards burst on
 the frame flag 34 rises, and 54 frames later they are gone.
 
+## The end of a stage: the result card, its figures and the life bonus
+
+Stages 1..4 end on a 420-frame flight through a part of the level, seen
+through the window of a framed card (`docs/re/stage-end.md`). All of it is
+ported now, where it was the card's lifetime and nothing else:
+
+* **The figures** -- one per civilian rescued in the scene, of the rescued
+  civilian's own type, at the scene's `g_result_figure_records` places, on
+  their clips (`ResultCardFigureInit`/`Update`/`DrawNode`); with none rescued,
+  the scene's own list, dead on the ground. Drawn from one hidden template row
+  per type, cloned per figure (`render/characters.ts`).
+* **The rescue record** both writers keep -- `g_civilians_rescued_total`,
+  `g_civilians_rescued_by_scene` and `g_rescued_char_types` (`game/rescue.ts`),
+  which is what the card reads.
+* **The life bonus**: `g_result_life_bonus[scene][min(rescues, 7)]` added to
+  both players' lives on the card's frame 302, capped at `g_max_lives` or, in
+  Original Mode, `g_original_life_cap`; figure 0 holds `common.bin[199]` up
+  from camera frame 260.
+* **The card**: the `scr_result` frame (deep screen sprites at depth 1.1), and
+  `result.bin` glyphs in camera space -- RESCUED counted up, LIFE BONUS, each
+  in-play player's SCORE and, past twenty shots, ACCURACY
+  (`render/view_slots.ts`).
+* **The score it shows includes the accuracy bonus**: opcodes `0x2B`
+  (`EvtOpAwardAccuracyBonus2B`) and `0x2F` (`EvtOpSuppressAccuracyStats2F`) are
+  ported, `g_player_shot_count` is counted at the pull under its suppression
+  guard (it used to be `g_nPlayerFired`, which is a flag), and `ResolveHit`
+  counts its hits.
+* Class 0x62 kills itself on its first frame instead of standing in the pool.
+
+`web/tools/result_card.mjs` plays the result steps of stage 1 (five rescues,
+and none), stage 2 (seven) and stage 4 (three) and checks them from `G`; see
+its header.
+
 ## Every opcode, and what the player does with it
 
 > The status column is a copy. The original lives on `Walker.OPS` in
@@ -6959,12 +7056,12 @@ missed. Meanings and confidence marks live in
 | `28` | `region_load` | region | shown | preloads a region's assets; everything is already resident here |
 | `29` | `region_enter` | region | **done** | **switches the drawn region** — the core of the streaming model |
 | `2A` | `unused_2a` | unused | n/a | dispatch slots that map to the empty stub; no shipped file encodes one |
-| `2B` | `award_accuracy_bonus` | flow | shown | end-of-stage accuracy bonus |
+| `2B` | `award_accuracy_bonus` | flow | **done** | `EvtOpAwardAccuracyBonus2B`: each in-play player with at least 20 counted shots is paid `g_accuracy_bonus_table[(hits*100/shots)/10]` -- the bonus the result card's score then shows (`game/combat/accuracy.ts`) |
 | `2C` | `set_skippable_region` | flow | **done** | opens/closes the skippable window (`DAT_009A2D7C`); raises the Skip bar once the shutter's firing gate is also down, which is exactly when the game polls Start |
 | `0D` | `spawn_obj_unless_skip` | spawn | **done** | spawns, unless a skip is in progress — `FUN_00408B70` walks the list either way |
 | `2D` | `play_dialogue` | hud | **done** | **plays the voice and shows the subtitles** — the real script text, centred on a 384 baseline, advancing line by line on the game's countdown |
 | `2E` | `stop_voice_if_skipped` | audio | **done** | `PlaySoundId(0x80000002)`, the voice channel's stop, when a skip actually happened; inert otherwise, as in the game |
-| `2F` | `suppress_accuracy_stats` | flow | shown | suppresses the counters 0x2B grades |
+| `2F` | `suppress_accuracy_stats` | flow | **done** | `g_accuracy_stats_suppressed` = the operand: while it is up a pull counts no shot, so a boss fight's shots stay out of 0x2B's grade; the checkpoint opcode and the scene's end put it back to 0 |
 | `30` | `queue_event` | camera | **done** | pushes onto the action ring and nothing more; the actions run in `CameraActorTick`'s `EvtRunQueuedActions`, one at a time, behind whatever handler holds the slot (`game/camera/actions.ts`) — see the selector table below |
 | `31` | `goto_scene_state` | flow | **done** | the end-of-room instruction: enters scene state (1, minor) and stamps it, drops the camera mode, the override latch and the eye ease, parks the action slot and retires the `queue_event 0x21` whose driver never retires itself. (1,3)'s hook, `CameraFromViewAngles`, puts the gameplay eye fifteen down the view's own axis |
 | `32` | `goto_scene_state_when_alive` | flow | done | as `0x31`, minus two clears, behind a gate: while either player is in state 4, 5 or 6 (`g_player_state_handlers` `+0x10` is 0) with no lives, it re-runs every frame (`Walker.holdHere`). The nineteen sites are the boss rooms |

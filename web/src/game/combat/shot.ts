@@ -314,9 +314,11 @@ export function FireShotRequest(req: ShotRequest, host: GameHost, rng: Rng,
   // `G.g_crosshair_ray`.
   G.g_crosshair_ray[player] = {
     origin: { ...req.ray.origin }, dir: { ...req.ray.dir } };
-  // `g_nPlayerFired` — the accuracy denominator. Counted here rather than
-  // where the click landed, so it counts shots the *game* saw.
-  G.g_nPlayerFired[player] = (G.g_nPlayerFired[player] ?? 0) + 1;
+  // `g_nPlayerFired[p] = 1`, then the accuracy denominator unless the boss
+  // block has suppressed it: `CMP word [0x009a5c48], 0` / `INC` at
+  // `0x00414A15` (`0x00414CC5` in the Original twin, which calls this too).
+  G.g_nPlayerFired[player] = 1;
+  if (G.g_accuracy_stats_suppressed === 0) G.g_player_shot_count[player] += 1;
   // **The muzzle flash and the round leave the gun before anything is tested.**
   // `PlayerFireAndReloadUpdate` (`FUN_00414940`) spawns them at the trigger,
   // between `BuildShotRay` and the gunshot sound, and `ProcessPlayerShots`
@@ -332,6 +334,9 @@ export function FireShotRequest(req: ShotRequest, host: GameHost, rng: Rng,
   // through `g_shot_test_list`, and everything else through `render/`.
   const pick = MergeShotPicks(host.pickShot?.(req.ray) ?? null,
                               ProcessPlayerShotsTestList(req.ray, host));
+  // `ProcessPlayerShots` writes the fired flag back to 0 once the shot is
+  // tested, before `MarkActorShot` (`FUN_00404570`, `*piVar1 = 0`).
+  G.g_nPlayerFired[player] = 0;
   // `g_shot_hit_something` — 0x009C9010, written by `ProcessPlayerShots`
   // (`FUN_00404570`) as `count > 0`. Its one reader kills the tracer on its
   // second frame, which is what makes a hit a stub of streak and a miss a

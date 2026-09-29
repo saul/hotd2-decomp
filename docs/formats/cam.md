@@ -374,10 +374,40 @@ hook `0x0048D1F0` (`0x0048D2D7..E9`, `g_camera_eye + 15`);
 `ScriptedCarrierUpdate33` and `Class26InstallSubtypeUpdate`;
 `PropHitSparkUpdate`; `PlaceFallingBreakableBatch`.
 
-**Left open**: `PropUpdateType72` reads the drawn block's **path frame**,
-`[g_camera_index * 0x1A4 + 0x9A6110]` (`0x0047095A`), and the port reads
-`g_cam_path_frame`; block 2's frame word has no writer found yet, so under
-(1, 3) the exe's cue may never fire. Not an eye, and Original Mode only.
+### The path frame, and block 2's -- [proved]
+
+Every block has a path frame at `+0xD0` (`0x009A6110 + b * 0x1A4`), and **block
+2's, `g_cam_path_frame_2` (`0x009A6458`), is always 0.** Its writers are
+`CameraBlocksReset`'s zero (`MOV [EAX + 0x38], EBX` at `0x004021EC`, `EAX` =
+block + `0xD8`), the `REP STOSD` over all four blocks at `0x0049F40C`, and the
+three path actions (`CamEvalStaticPose`, `CamStartPathPlayback`,
+`CamAdvancePathFrame`), which write the frame of the block they are called
+with (`[ESP + 4]` times `0x1A4`). An action runs as block `b` only from block
+`b`'s slot: `EvtRunQueuedActions` calls slot 0 with 0 (`PUSH 0; CALL
+[0x009a610c]` at `0x00402321`), `CameraActorTick` calls slots 1..3 with their
+number (`0x004022D5`). `CameraActorInit` fills all four slots with `NoOpStub`
+(`0x00576CA4`); every store that names a slot by address names slot 0's; and
+every other store to a slot is an action writing its own block's. So nothing
+ever runs as block 2, and blocks 1..3's slots are `NoOpStub` for good. The
+enumeration was every reference into `0x009A6000..0x009A6690` in `.text`, by
+the bytes of each displacement, plus every instruction that forms a pointer
+into the blocks (`MOV reg, imm`, `LEA`) and what it is passed to: the matrix
+pointers go only to `MatrixStackSetTopFromArray`, `MatrixMultiply` and
+`MatrixPremultiplyTop`.
+
+Two kinds of reader follow from it:
+
+| reads | where | so |
+|---|---|---|
+| `[g_camera_index * 0x1A4 + 0x9A6110]` | `OwlUpdateAndResolveShot` `0x004460EA`, `WaterSurfaceUpdate` `0x0046E50B`, `PropUpdateType72` `0x0047095A` | under (1, 3) the frame is 0: a sub-type-0 owl cannot be shot, path 0x7E's ripple pause cannot happen, type 72's cue cannot fire |
+| `[0x9a6110] == c \|\| [0x9a6458] == c` | class 0x30 states 18, 19, 23 (`0x004575F1`, `0x004576AE`, `0x00457BEA`), `ZombieStateArcScriptedEntrance` (`0x00458ABD`), `ThrowerStateGrabPlayer` (`0x0044F078`), `ScriptedCarrierUpdate33` (`0x004333DF`), `ScriptedEffectAtCameraCue33` (`0x00433B1A`, class 0x33 selector 5, not ported) | the second arm is "`c` is 0"; no shipped cue is 0 |
+
+The port reads the first kind through `CameraBlockPathFrame(G.g_camera_index)`
+(`game/camera/view.ts`) and the second as written, with `G.g_cam_path_frame_2`.
+Measured in the port on the shipped scripts: type 72's cue and path 0x7E's
+pause both come round under index 0 (scene states (2, 6) and (2, 7)), so
+neither moves; stage 2's sub-type-0 owl is in the pool while (1, 3) plays path
+60's frames 707..845, and there the exe's guard holds and the port's did not.
 
 ## Timebase
 

@@ -22,13 +22,13 @@ import { GameUpdate, SpawnScriptedCharacters, SpawnPropContainers }
 import { G, ResetGameGlobals } from "../src/game/globals.ts";
 import { SeatHarnessEye } from "./lib/harness_eye.ts";
 import { NULL_HOST } from "../src/game/host.ts";
-import { SetGameTables, CharacterTypeOf } from "../src/game/tables.ts";
+import { SetGameTables } from "../src/game/tables.ts";
 import { ActorIsEnemy } from "../src/game/registry.ts";
 import { SpawnClass } from "../src/game/spawn_class.ts";
 import { vec3 } from "../src/game/vec.ts";
 import { Walker } from "../src/script/walker.ts";
 import { seekTo } from "../src/script/seek.ts";
-import { ResolveHit } from "../src/game/combat/resolve_hit.ts";
+import { HEAD_BONE, ResolveHit } from "../src/game/combat/resolve_hit.ts";
 
 const args = process.argv.slice(2)
   .filter((a) => !a.endsWith(".mjs") && !a.endsWith(".ts"));
@@ -176,9 +176,8 @@ for (let i = 0; i < frames; i++) {
         - Math.hypot(b.pos.x - eye.x, b.pos.z - eye.z))[0];
     } else cand = live.find((o) => o.at === Number(killWho));
     if (cand) {
-      const head = CharacterTypeOf(cand)?.head_bone ?? 2;
       for (let s = 0; s < 60 && !cand.dead; s++) {
-        ResolveHit(cand, head, host, rng);
+        ResolveHit(cand, HEAD_BONE, host, rng);
       }
       console.log(`shot 0x${cand.at.toString(16)} in the head at frame ${i}:`
         + ` state ${cand.state}/${cand.sub} hp ${cand.hp}`

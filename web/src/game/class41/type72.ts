@@ -40,6 +40,7 @@ import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
 import type { BreakablePlacement } from "../../bundle";
 import { G } from "../globals";
+import { CameraBlockPathFrame } from "../camera/view";
 import { GameMode } from "../game_mode";
 import { MatrixRotateY, MatrixScale, MatrixTranslate } from "../matrix";
 import { ActorDespawnProp, BreakablePropAwardHit } from "./prop";
@@ -129,10 +130,13 @@ export function PropUpdateType72(p: BreakableProp, rng: Rng,
 
   switch (p.routinePhase as Type72Phase) {
     case Type72Phase.Wait:
-      // `g_camera_index` is 0 in every shipped write, so the block's frame is
-      // `g_cam_path_frame`.
+      // `CMP [EAX*4 + 0x9a6110], 0x276` at `0x0047095A`, `EAX` from `MOV ECX,
+      // [0x009c6f00]` times 0x69: the frame of the block `g_camera_index`
+      // names. Under scene state (1, 3) that is block 2's, always 0, so the
+      // cue cannot fire there; the one shipped spawn's path reaches 0x276
+      // under (2, 6), index 0.
       if (G.g_active_cam_path === TYPE72_CUE_CAM_PATH
-          && G.g_cam_path_frame === TYPE72_CUE_CAM_FRAME) {
+          && CameraBlockPathFrame(G.g_camera_index) === TYPE72_CUE_CAM_FRAME) {
         if ((G.g_script_flags[TYPE72_SCRIPT_FLAG] ?? 0) === 0) {
           ActorDespawnProp(p);
           return;

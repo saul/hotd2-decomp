@@ -15,7 +15,7 @@ import { G } from "../globals";
 import { MotionPlayFrame } from "../tables";
 import { CivilianOp, CivilianTarget, CivilianWait, CmdAt } from "./ops";
 import { CivilianReapplyWaitCommand } from "./script";
-import { CivilianTargetPoint, HeadingError } from "./turn";
+import { CivilianCarrierBase, CivilianTargetPoint, HeadingError } from "./turn";
 
 /**
  * `CivilianStepScript` — `FUN_0048B1E0`.
@@ -73,7 +73,7 @@ export function CivilianStepScript(obj: Actor): boolean {
 
     sub.timer = -1;
     ran = true;
-    sub.hookBusy = 0;
+    sub.hookDone = 0;
     let at = pc;
     if (sub.resumeScript >= 0) {
       sub.script = sub.resumeScript;
@@ -126,7 +126,7 @@ function CivilianWaitStillHolds(obj: Actor, word: number): boolean {
       && (obj.cursorStore ?? MotionPlayFrame(obj)) === sub.motionCompare) {
     return false;
   }
-  if ((word & CivilianWait.Hook) && sub.hookBusy !== 0) return false;
+  if ((word & CivilianWait.Hook) && sub.hookDone !== 0) return false;
   if (word & CivilianWait.Free) return false;
   // **Three conditions, not one**, and the port had only the middle one.
   // `0x0048B2F8`:
@@ -219,7 +219,9 @@ function CivilianArrived(obj: Actor, word: number): "advance" | "wait" {
 
   if ((word & (CivilianWait.Reach | CivilianWait.Face)) === 0) return tail();
 
-  const to = CivilianTargetPoint(obj);
+  // The camera modes on a carrier compose onto the stack, not an identity --
+  // see `CivilianTargetPoint`.
+  const to = CivilianTargetPoint(obj, CivilianCarrierBase.StackTop);
   if ((word & CivilianWait.Reach) === 0) {
     // Turn only: arrived the frame the heading error rounds to zero.
     if (HeadingError(obj, to) === 0) {

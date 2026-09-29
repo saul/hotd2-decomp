@@ -26,6 +26,9 @@
  */
 import type { Actor } from "./actor";
 import { BAMS_TO_RAD } from "../core/bams";
+import {
+  MatrixRotateX, MatrixRotateY, MatrixRotateZ, MatrixTranslate, type Mat,
+} from "./matrix";
 import type { Vec3 } from "./vec";
 
 /**
@@ -46,6 +49,25 @@ import type { Vec3 } from "./vec";
  * routine 1's state 6 raises on the boat itself as it goes to state 7.
  */
 export const CARRIER_RIDERS_DONE_BIT = 0x400000;
+
+/**
+ * `[port-only]` as a function -- the carrier's four calls on a matrix-stack
+ * top, in the engine's order: `MatrixTranslate(carrier+0x40, +0x44, +0x48);
+ * MatrixRotateX(+0x64); MatrixRotateZ(+0x6C); MatrixRotateY(+0x68)`.
+ *
+ * `CivilianUpdateOnCarrier` (`FUN_0048B140`) makes them around the whole
+ * update, and class 0x10 makes them **again** where it takes the camera into
+ * the carrier's frame: `CivilianStepTurnToTarget` (`FUN_0048C850`) onto an
+ * identity it loads first, and `CivilianStepScript` (`FUN_0048B1E0`) onto the
+ * stack as the update left it. `m` is the top they compose onto; this writes
+ * it in place, as {@link MatrixTranslate} does.
+ */
+export function CarrierMatrixCompose(m: Mat, carrier: Actor): void {
+  MatrixTranslate(m, carrier.pos.x, carrier.pos.y, carrier.pos.z);
+  MatrixRotateX(m, carrier.pitch);
+  MatrixRotateZ(m, carrier.roll);
+  MatrixRotateY(m, carrier.yaw);
+}
 
 /**
  * `[port-only]` — `T · Rx · Rz · Ry` applied to a carrier-relative point.

@@ -387,6 +387,7 @@ export function GameOverRunPhase(f: PlayerFrame, events?: Events): void {
   // `[port-only]` -- the frame's screen sprites start empty: the engine draws
   // immediate-mode, and this screen's task lists are what draw them.
   G.g_screen_sprite_draws = [];
+  G.g_view_slot_draws = [];
   switch (G.g_nRunPhase) {
     case GameOverPhase.Arm:
       // `FUN_004A7310` and `FUN_0041D510`: the stage is released -- every pol

@@ -69,7 +69,7 @@ reasons hold.
 | `0x00000080` | camera path `sub+0x10` reaches frame `sub+0x12` |
 | `0x00000100` | the clip's remaining loop count reaches zero |
 | `0x00000200` | the clip frame equals `sub+0x16` |
-| `0x00000400` | the installed frame hook raises `sub+0x18` |
+| `0x00000400` | `sub+0x18` is raised -- by `CivilianHookFallStep` on landing, the only writer of a 1 |
 | `0x00000800` | **never** — this bit makes the conjunction fail outright |
 | `0x00001000` | the camera's eased look-at has caught up |
 | `0x00002000` | `g_script_flags[sub+0x1A]` is raised |
@@ -116,6 +116,51 @@ followed by `SetHudShutterState 1`). None of the 16 wait words carrying
 `0x1000` (camera settled) also carries `0x40000`, which is consistent: a
 tracked camera never raises `g_camera_settled`, so a script untracks her before
 it waits for the camera.
+
+### Where the target is — and on a carrier, which frame
+
+Bits `0x10` and `0x20`, and the turn `CivilianUpdate` runs while `sub+0x40` is
+non-zero, resolve one point by three rules `[proved]`:
+
+| `sub+0x40` | The point |
+|---|---|
+| `-1` | the gameplay eye, `g_camera_eye` (`0x009C71E0`) |
+| other negative | the actor's position mirrored through the eye in `x` and `z`, the eye's `y` |
+| `>= 0` | `sub+0x30..0x38`, raw |
+
+Bit `0x40` does not resolve anything: it reads `sub+0x30..0x38` raw whatever
+the mode, through the actor's inverse orientation, and holds while the local
+`z` is not above `0.0` (`0x004C436C`).
+
+**On a carrier, a camera point is taken into the carrier's frame** -- the frame
+her position is kept in, since `CivilianUpdateOnCarrier` (`FUN_0048B140`) runs
+the whole update under the carrier's matrix. Both copies test
+`CMP dword ptr [EAX], 0x48b140` after resolving a negative mode, push, make the
+carrier's `Translate(+0x40); RotX(+0x64); RotZ(+0x6C); RotY(+0x68)`, invert and
+transform the point. A fixed point is never transformed. **The two copies
+differ by one instruction**:
+
+| | Composes onto | Gets |
+|---|---|---|
+| `CivilianStepTurnToTarget` (`FUN_0048C850`) | `MatrixLoadIdentity` at `0x0048C8D4` | `C⁻¹·eye`, the camera in her frame |
+| `CivilianStepScript` (`FUN_0048B1E0`) | the pushed copy of the top (`0x0048B3B0`, straight to `MatrixTranslate` at `0x0048B3C0`) | `(V·C·C)⁻¹·eye` |
+
+`V` is the world-to-view `UpdateSceneViewAndLight` leaves on the stack for
+every draw (`0x00402136`), and the first `C` is `CivilianUpdateOnCarrier`'s own
+push. So the step's reach and facing tests measure against a point that is not
+the camera in any frame, while the turn faces the camera correctly. The calls
+are `[proved]`; that the top is `V` when `CivilianUpdate` starts is `[likely]`,
+from `CivilianUpdate`'s sphere switch, which gets world points back out of the
+draw's records by multiplying by the view-to-world matrix. The step's
+pseudocode stops at this arm's `MatrixStackPop` (`0x0048B429`) and hides the
+store and the tests after it (L35).
+
+The shipped inputs: stage 3's `0x0BC0`, riding the boat, runs script 25 --
+`SetTarget(-1, 18)` at command 5 and a reach word at command 6 -- and stage 4's
+four riders (scripts 65 and 66) set mode `-1` behind a counter wait and turn to
+the camera until a later `SetTarget(0, 0)`. Of the seven riders (every script
+each can switch to followed), none uses the mirrored mode and `0x0BC0` is the
+only one with a reach or face word.
 
 ### The root-motion gate — `0x00100000`
 
@@ -230,8 +275,10 @@ Two consequences worth knowing, both the engine's:
   runs its actions. `CivilianReapplyWaitCommand` (`FUN_0048B760`) is what makes
   that safe: a second, smaller VM that re-applies only the opcodes a wait
   condition reads — the clip's loop count and play cursor (never the clip),
-  the target, the timer, the three count goals, the camera cue, the frame hook
-  and the flag index.
+  the target, the timer, the three count goals, the camera cue and the flag
+  index. Op 0x10 is the exception: it calls the install routine, whose
+  velocity and gravity writes land, and then puts `NoOpStub` back in the slot
+  (see *Op 0x10* below).
 * **…and eight of those are put back before the step returns.** The loop
   count, the three goals, the camera cue's path and frame, the frame compare
   and the flag index (`sub+0x0C`, `+0x20`, `+0x22`, `+0x24`, `+0x10`, `+0x12`,
@@ -258,7 +305,7 @@ Two consequences worth knowing, both the engine's:
 | `0x03` | `SetMotionBlend` | the fade of the next clip change, `sub+0xE`; the Init's default is 10. Its one reader is `CivilianApplyMotionPose`. It was `SetTurnRate`, which nothing read supported |
 | `0x04` | `SetMotionFrame` | the frame wait bit `0x200` looks for |
 | `0x05` | `SetTarget` | point pointer or mode, arrival radius |
-| `0x06` | `SetTargetPoint` | point pointer, kept at `sub+0x44`; the point goes to `sub+0x30..0x38` and **the mode at `sub+0x40` is not written** (`0x0048BC93`, `0x0048B84E`), so it turns nobody. All eleven shipped sit in a block waiting on `0x40`, the in-front test that reads `sub+0x30` raw. `[proved]` |
+| `0x06` | `SetTargetPoint` | point pointer, kept at `sub+0x44`; the point goes to `sub+0x30..0x38` and **the mode at `sub+0x40` is not written** (`0x0048BC93`, `0x0048B84E`), so it turns nobody. All eleven shipped sit in a block waiting on `0x40`, the in-front test that reads `sub+0x30` raw. `[proved]` Nothing in the class reads `sub+0x44` but these two arms: every instruction naming `g_cur_civilian` (a byte scan for `a0d07d00`) lies in `0x0048A41C..0x0048DDD3`, which the operand sweep for `[r + 0x44]` covered. The other road to the sub-block, `obj+0x1310`, has 416 operand hits in 216 functions of other classes, where the field is their own (L3), so "nothing outside the class" is `[likely]`. |
 | `0x07` | `SetTargetHeading` | BAMS; the point is 100 units along it |
 | `0x08` | `SetYaw` | |
 | `0x09` | `SetTimer` | frames |
@@ -299,24 +346,59 @@ Two consequences worth knowing, both the engine's:
 | `0x2C` | `Wait` | the wait word |
 | `0x2D` | `End` | |
 
-### Op 0x10's length
+### Op 0x10: an install routine, and the step it installs
 
-`CivilianRunScript` calls the hook as `next = hook(obj, cmd + 2)` and takes the
-pointer it returns, so **the hook decides how many dwords the command has**.
-Four appear in the shipped scripts:
+The operand is a pointer to an **install** routine, and both VMs *call* it:
+`next = hook(obj, cmd + 2)` (`CALL ECX` at `0x0048BD8D` in
+`CivilianRunScript`, at `0x0048B923` in `CivilianReapplyWaitCommand`). The
+routine writes a **step** into `sub+0x5C`, which `CivilianUpdate` calls once a
+frame (`CALL [EAX + 0x5C]` at `0x0048A962`, straight after the child prune),
+and returns the next command -- so **the install routine decides how many
+dwords the command has**. The exporter has to know each by address
+(`CIVILIAN_HOOK_LEN`) to decode the stream at all. Five operands appear in the
+shipped scripts:
 
-| Hook | Dwords | What it does |
-|---|---|---|
-| `0` | 2 | uninstall (`NoOpStub`) |
-| `0x0048D9F0` | 2 | zero the y velocity and start falling at `-0.02722` |
-| `0x0048DA90` | 2 | ride the surviving children |
-| `0x0048DB90` | 3 | take a launch y speed, raise `obj+0x34` bit `0x80000`, then fall |
-| `0x0048DBD0` | 5 | take a whole launch velocity, then fall |
+| Operand | Dwords | Install | Step it writes into `sub+0x5C` |
+|---|---|---|---|
+| `0` | 2 | none | -- |
+| `0x0048D9F0` | 2 | `CivilianHookStartFall`: `vel.y = 0`, `obj+0x5C = 0xBCDF0123` (-0.027222) | `CivilianHookFallStep` (`0x0048DA20`) |
+| `0x0048DA90` | 2 | `CivilianHookRideChildren` | `CivilianHookRideChildrenStep` (`0x0048DAB0`) |
+| `0x0048DB90` | 3 | `CivilianHookStartMoveY`: `vel.y` = the operand, `obj+0x34 \|= 0x80000` | `CivilianHookMoveYStep` (`0x0048DBC0`) |
+| `0x0048DBD0` | 5 | `CivilianHookStartMoveLocal`: `vel` = the three operands | `CivilianHookMoveLocalStep` (`0x0048DC10`) |
 
-The fall step (`0x0048DA20`) accelerates, moves, and stops the frame
-`QueryGroundHeightAt(x, y + 100, z)` is at or above the new height — snapping
-to it, raising `sub+0x18` (which wait bit `0x400` waits for) and uninstalling
-itself.
+The steps, all `[proved]` from their disassembly:
+
+* **`CivilianHookFallStep`** asks `QueryGroundHeightAt(x, y + 100, z)` at the
+  position *before* the move, then `vel.y += obj+0x5C; y += vel.y` -- the y
+  axis only. The frame the ground is at or above the new `y` it snaps `y` to
+  it, raises `sub+0x18` (wait bit `0x400`'s condition) and writes `NoOpStub`
+  back. The velocity is left as it landed.
+* **`CivilianHookRideChildrenStep`** turns the civilian toward the mean of her
+  captors at up to `0x80` BAMS a frame, and writes `NoOpStub` once she is dead.
+* **`CivilianHookMoveYStep`** is `y += vel.y` and nothing else: no gravity, no
+  ground, no uninstall, and `sub+0x18` never goes up.
+* **`CivilianHookMoveLocalStep`** adds the velocity turned by the actor's own
+  rotation -- `Translate(pos); RotateX(obj+0x64); RotateZ(obj+0x6C);
+  RotateY(obj+0x68); TransformPoint(vel)` -- every frame; likewise no gravity,
+  no ground and no uninstall.
+
+The two VMs handle the operand differently:
+
+* **`CivilianRunScript`** (`0x0048BD81`): `0` writes `NoOpStub` to `sub+0x5C`
+  and nothing else; anything else is called and then `sub+0x18 = 0`.
+* **`CivilianReapplyWaitCommand`** (`0x0048B913`): `0` writes **nothing**, so
+  the step already installed stands; anything else is called -- its velocity,
+  gravity and flag writes all land -- and then `sub+0x5C = NoOpStub` takes the
+  step straight back out. `sub+0x18` is not touched.
+
+Where they are used, in the shared table: `StartFall` once (stream 30, which
+stage 3's two spawns at `0x701C` and `0x70EC` run), `RideChildren` twice
+(stream 35, stage 4's `0x23F8`, and stream 58, which no spawn reaches),
+`StartMoveY` three times (streams 61, 67 and 71, each with -0.2, each the
+on-shot stream of 62, 68 or 72) and `StartMoveLocal` once (stream 72,
+`(0, 0, -0.05)`). **No spawn the bundle carries runs 58, 62, 68 or 72**, so
+neither move step is reached in the six stages as exported; `[open]` whether
+anything the exporter does not see spawns them.
 
 ## What the civilian looks like
 

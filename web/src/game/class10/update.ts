@@ -13,7 +13,7 @@ import { CarrierPublishWorld } from "../carrier";
 import { ActorDespawn } from "../despawn";
 import { ActorByAt, G, HIT_SLOT_NONE } from "../globals";
 import type { ClassFrame } from "../registry";
-import { T, SecondsToTicks } from "../tables";
+import { T } from "../tables";
 import { CivilianPruneDeadChildren } from "./children";
 import { CivilianRunFrameHook, PoseHookGrowAndPushOutOfWorld } from "./hooks";
 import { CivilianCountMotionLoops } from "./loops";
@@ -46,10 +46,8 @@ export function CivilianUpdate(obj: Actor, f: ClassFrame): void {
   if (obj.carrierAt >= 0) {
     CarrierPublishWorld(obj, ActorByAt(obj.carrierAt));
   }
-  const frames = SecondsToTicks(f.dt);
-
   CivilianPruneDeadChildren(obj);
-  CivilianRunFrameHook(obj, frames);
+  CivilianRunFrameHook(obj);
   if (sub.targetMode !== CivilianTarget.None) CivilianStepTurnToTarget(obj);
 
   // Op 0x26's move, which the engine steps by a per-frame delta and then snaps.

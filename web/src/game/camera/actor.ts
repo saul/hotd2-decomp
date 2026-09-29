@@ -49,8 +49,8 @@ export { CameraUpdateTick };
  * `SelectCameraLookAtTarget` clears it when no slot is claimed. The major
  * hooks are `[0]` and `[3]` `NoOpStub`, `[2]` `EvtRunQueuedActions` and `[1]`
  * {@link EvtRunQueuedActionsSyncViewBlock}. The handlers of evt-action blocks
- * 1..3 are the two-player camera blocks', and every one the shipped scripts
- * leave is `NoOpStub`. `[proved]`
+ * 1..3 are always `NoOpStub`: nothing but an action already running in a
+ * block writes that block's slot (`camera/actions.ts`). `[proved]`
  */
 export function CameraActorTick(): void {
   G.g_camera_settled = 0;

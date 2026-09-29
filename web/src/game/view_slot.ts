@@ -1,0 +1,47 @@
+/**
+ * Asset slots drawn in the camera's own space, recorded for the renderer.
+ *
+ * A routine that draws a model as screen furniture -- the result card's
+ * glyphs, `ResultCardDrawScore` (`FUN_004362E0`), `ResultCardDrawAccuracy`
+ * (`FUN_00436620`) -- does it with the same five calls every time:
+ *
+ * ```
+ * MatrixStackPush(0); MatrixLoadIdentity();
+ * MatrixTranslate(x, y, z); MatrixScale(s, s, s); NoOpStub(s);
+ * AssetDrawSlot(slot); MatrixStackPop(1)
+ * ```
+ *
+ * `MatrixLoadIdentity` is what puts the model in camera space: the stack's
+ * base is the view, and identity on top of it is the eye's own frame, `-z`
+ * ahead (`RenderInitStates` flips z into D3D's). The renderer may not call
+ * into the port, so the call is recorded into `G.g_view_slot_draws` --
+ * cleared at the head of every frame's player walk with the screen sprites --
+ * and `render/effects.ts` draws whatever the list holds, in its camera group.
+ */
+import { G } from "./globals";
+
+/**
+ * One `AssetDrawSlot` under `MatrixLoadIdentity`.
+ *
+ * `[port-only]` as a record: the engine draws the model at once. The fields
+ * are the calls' own arguments.
+ */
+export interface ViewSlotDraw {
+  /** The asset slot `AssetDrawSlot` (`FUN_00418560`) was handed. */
+  slot: number;
+  /** `MatrixTranslate`'s three arguments, in the camera's space. */
+  x: number;
+  y: number;
+  z: number;
+  /** `MatrixScale`'s, one value for all three axes at every caller. */
+  scale: number;
+}
+
+/**
+ * The five calls above, recorded. `[port-only]` as a function: the engine
+ * writes them out at each site; every argument is the site's own.
+ */
+export function DrawSlotInView(slot: number, x: number, y: number, z: number,
+                               scale: number): void {
+  G.g_view_slot_draws.push({ slot, x, y, z, scale });
+}

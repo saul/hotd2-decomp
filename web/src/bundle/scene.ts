@@ -226,8 +226,8 @@ export interface BreakablePlacement {
    */
   container: "group" | "kinded" | "falling" | "generic"
     | "chain" | "fragment" | "story_switch" | "script_flag_effect"
-    | "rising_door" | "flicker_light" | "table38" | "table39" | "table44"
-    | "table50" | "table66" | "water_surface";
+    | "rising_door" | "rise_to_height" | "flicker_light" | "table38"
+    | "table39" | "table44" | "table50" | "table66" | "water_surface";
   /** How many evt blocks it lives for. */
   lifetime_evt_steps: number;
   /** `group` only — the row of `g_breakable_group_ptrs` to build. */
@@ -240,8 +240,25 @@ export interface BreakablePlacement {
    * Class 0x44 selector 11, `RisingDoorUpdate` (`FUN_004753F0`). `slot` is the
    * model it draws and `remove_flag` the flag that deletes it; there is no
    * lifetime, so `lifetime_evt_steps` is 0 for these and means nothing.
+   *
+   * `rise_to_height` — the same, for class 0x44 selector 13,
+   * `RiseToHeightUpdate` (`FUN_004757F0`), whose constructor reads the tail
+   * at the same two bytes.
    */
   open_flag?: number;
+  /**
+   * `rise_to_height` only — the **i32 at tail `+0x14`**, the whole-number
+   * height `PropBuildRiseToHeight` (`FUN_00473640`) adds to the descriptor's
+   * `y` for the ceiling the object rises to (`obj+0x2C0`).
+   */
+  rise?: number;
+  /**
+   * `rise_to_height` only — the i32 at tail `+0x08`, which the constructor
+   * stores to `obj+0x14C` and the update tests against `-1` twice: to choose
+   * `ActorDespawn` over `ActorKill` on the remove flag, and to register for
+   * the shot test. `-1` in every shipped spawn.
+   */
+  coli?: number;
   /**
    * `generic` — the class-0x41 constructor type, and the spawn descriptor's
    * `+0x11C`.

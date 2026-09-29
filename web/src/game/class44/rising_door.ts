@@ -16,7 +16,7 @@
  * filename and the vertical rise together; `[proved]` that it is a door-shaped
  * model that translates upward on a script flag.
  *
- * ## The whole routine, `RisingDoorUpdate` (`FUN_004753F0`)
+ * ## The whole routine, `RisingDoorUpdate` at `0x004753F0`
  *
  * ```c
  * if (g_script_flags[obj->+0x2A4] == 1) { ActorKill(); return; }
@@ -91,7 +91,7 @@
  */
 import type { BreakablePlacement } from "../../bundle";
 import { G } from "../globals";
-import { ActorDespawnProp } from "../class41/prop";
+import { ActorKillProp } from "../class41/prop";
 import {
   BreakableFlag, BreakableState, makeBreakableProp, PropFamily,
   type BreakableProp,
@@ -202,9 +202,13 @@ export function RisingDoorUpdate(p: BreakableProp): void {
   // `(&g_script_flags)[obj->+0x2A4] == 1`. **No `>= 0` guard**, unlike
   // `HingeUpdate`: the engine indexes the array with whatever the byte holds,
   // and both shipped spawns carry a real flag. A `-1` would read the byte
-  // before the array, which is `g_script_flags[-1]` and not modelled.
-  if (p.removeFlag >= 0 && G.g_script_flags[p.removeFlag] === 1) {
-    ActorDespawnProp(p);
+  // before the array, which is `g_script_flags[-1]` and not modelled -- the
+  // port's array answers `undefined` there, which is not 1.
+  //
+  // The exit is `CALL 0x004A7040` at `0x00475417`: `ActorKill`, not
+  // `ActorDespawn`, so the flag word is left as it was.
+  if (G.g_script_flags[p.removeFlag] === 1) {
+    ActorKillProp(p);
     return;
   }
   const open = G.g_script_flags[p.storyItem] === 1;

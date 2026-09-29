@@ -763,6 +763,26 @@ export function containerPlacements(tables: ExeTables, evt: evtlib.EvtFile,
         lifetime_evt_steps: 0,
         pos: [...rec.pos], yaw: rec.orient[1],
       });
+    } else if (rec.hp === 13) {              // class 0x44 selector 13
+      // `PropBuildRiseToHeight` (`FUN_00473640`) -- an object that rises a
+      // unit a frame on a script flag until it stands a whole-number height
+      // above where it was placed. The tail is read at the same offsets and
+      // widths the constructor reads it: the u16 at `+0x04` is the slot
+      // `RiseToHeightUpdate` draws, the i32 at `+0x08` goes to `obj+0x14C`,
+      // the **i32** at `+0x14` is `FILD`ed into the ceiling at `0x004736C0`,
+      // and the two signed bytes at `+0x20`/`+0x21` are the rise flag and
+      // the remove flag. No lifetime: the remove flag is the object's whole
+      // life, as it is selector 11's.
+      out.push({
+        at: rec.offset, container: "rise_to_height",
+        slot: rec.param(0x04, "u16") || 0,
+        coli: rec.param(0x08, "i32") ?? -1,
+        rise: rec.param(0x14, "i32") ?? 0,
+        open_flag: rec.param(0x20, "i8") ?? 0,
+        remove_flag: rec.param(0x21, "i8") ?? -1,
+        lifetime_evt_steps: 0,
+        pos: [...rec.pos], yaw: rec.orient[1],
+      });
     } else if (rec.hp === 16) {              // class 0x44 selector 16
       const tail = rec.offset + 0x24;
       out.push({
@@ -1804,8 +1824,13 @@ export async function breakableSlotEntry(
         : TABLE_SLOTS[pl.container as string] ?? [];
     for (const slot of slots) if (!want.includes(slot)) want.push(slot);
   }
+  // ...and selector 13 the same: `RiseToHeightUpdate` draws its descriptor's
+  // slot, once, and names no other. Stage 5's `0x1892` and twelve of stage
+  // 6's are only ever drawn through it.
   for (const pl of placements) {
-    if (pl.container !== "rising_door") continue;
+    if (pl.container !== "rising_door" && pl.container !== "rise_to_height") {
+      continue;
+    }
     const slot = pl.slot as number;
     if (slot && !want.includes(slot)) want.push(slot);
   }

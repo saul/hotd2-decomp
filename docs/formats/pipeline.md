@@ -481,6 +481,15 @@ exporting its vertices as-is is correct.
 Whole-file loads (`0x52`) are excluded — those are spawnable actors, not placed
 scenery.
 
+**That is the set the stage *carries*, not the set it *draws*.** `0x50` makes
+a slot resident and draws nothing (`L54`): a slot no region lists is on screen
+only where some routine calls `AssetDrawSlot` on it, under that routine's own
+matrix. Stage 5 loads `st5.bin[1]`, `[8]` and `[9]` this way, and they are
+drawn by class 0x44 selector 13, a hinge and selector 11 at their descriptors'
+points. The player's `StageScene` still draws every other unregioned slot the
+script has loaded at the model's own origin, which is a stand-in; a layer that
+runs the real drawer claims its slots out of it (`StageScene.claimSlots`).
+
 **[measured]** Spawn positions checked against the bounding box of the geometry
 set, per stage:
 

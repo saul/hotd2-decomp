@@ -18,24 +18,24 @@ than a measurement. What each directory is for is in
 
 | Directory | Lines | Files | Layer |
 |---|---:|---:|---|
-| `game/` | 110248 | 361 | engine |
-| `hod2lib/` | 19994 | 35 | engine |
-| `render/` | 15804 | 60 | render |
-| `app/` | 12685 | 44 | app |
+| `game/` | 110497 | 362 | engine |
+| `hod2lib/` | 20019 | 35 | engine |
+| `render/` | 15884 | 60 | render |
+| `app/` | 12693 | 44 | app |
 | `script/` | 4495 | 25 | engine |
 | `ui/` | 3773 | 27 | ui |
 | `core/` | 3535 | 13 | engine |
-| `bundle/` | 2921 | 11 | engine |
+| `bundle/` | 2938 | 11 | engine |
 | `audio/` | 1053 | 3 | render |
 | `hud/` | 526 | 1 | ui |
-| **total** | **175034** | **580** | |
+| **total** | **175413** | **581** | |
 
 The largest files, which is where the pressure to split next is:
 
 * `game/globals.ts` — 3251
 * `app/main.ts` — 3202
 * `game/actor.ts` — 2744
-* `hod2lib/bundle.ts` — 2483
+* `hod2lib/bundle.ts` — 2508
 * `hod2lib/exetab.ts` — 2409
 
 ## The port
@@ -43,8 +43,8 @@ The largest files, which is where the pressure to split next is:
 | | |
 |---|---|
 | Gameplay coverage | **233 of 299** annotated functions in the gameplay address ranges have a port (77%) |
-| Ported outside those ranges | 591 (opcodes, and the classes whose handlers sit elsewhere) |
-| Citations checked | 824 ported functions match `functions.tsv` under the same name |
+| Ported outside those ranges | 594 (opcodes, and the classes whose handlers sit elsewhere) |
+| Citations checked | 827 ported functions match `functions.tsv` under the same name |
 | Spawn classes | **32 of 42** read classes have a module, covering 1549 of 1619 placements |
 | Declared `[diverges]` | **131** — where the port knowingly departs from the exe, each with its reason on the spot |
 | `[open]` markers | **122** — questions the port and the exporter are honest about not having answered |
@@ -64,9 +64,9 @@ The two declared seams between the UI and the player: **`PlayerCommands` has 54 
 
 | | |
 |---|---|
-| Named functions | 1455 in `ghidra/annotations/functions.tsv` |
+| Named functions | 1457 in `ghidra/annotations/functions.tsv` |
 | Named globals | 753 in `ghidra/annotations/globals.tsv` |
-| Checks | 70, run together by `tools/verify_all.py` (listed below) |
+| Checks | 71, run together by `tools/verify_all.py` (listed below) |
 
 ## Ratchets
 
@@ -148,6 +148,7 @@ nothing exits 3 and is never counted as green.
 | `game:prop_pose` | that every class-0x41 generic prop is posed in the order its own update routine poses it -- read out of the EXE per type and matched to the field each `MatrixRotate*` is handed -- that both copies of the generic slot tables are what the routines and the shipped `+0x11C` words say, and that `render/breakables.ts` composes a pose in one place, from the table | game-dir |
 | `game:prop_tables` | that the tables class 0x41 types 38, 39, 40, 44, 50 and 66 build their objects from -- positions, angles, hull corners, slots, counts, scales -- and class 0x28's route, length and pose tables are the EXE's own words, compared as 32-bit patterns against the values the port evaluates; a mistyped row puts a church chair where the engine does not, with nothing else to notice | game-dir |
 | `game:flag_strips` | that `class12Tail`, the exporter's read of class 0x12's descriptor tail, takes each field at the offset and width `ScriptedPropInit12` loads it, decoded out of the EXE; that every class-0x12 spawn on the disc is placed with exactly those fields; and, with a bundle, that every slot its strip can draw is in it | game-dir |
+| `game:rise_to_height` | that class 0x44 selector 13 -- stage 5's gate behind JUDGMENT and twelve objects in stage 6 -- is `g_class44_subtypes[13]`, that the exporter reads its tail at the offsets and widths `PropBuildRiseToHeight` loads it and the port's three constants are the update's own, that no shipped spawn carries the collision blob the port's prop pool cannot shoot, and, with a bundle, that every spawn is placed with exactly that tail and its model travels | game-dir |
 | `game:branches` | that every value a branch trigger can write into `g_script_branch_var` names a route slot its own block actually fills -- the one check that ties the gameplay half of branching to the route tables | game-dir |
 | `game:scene_exits` | that a terminal route record's `next[0]` is a live block of the *next* scene, and that a hole follows every one of them -- the only check that reads the handover from one stage to the next, and so the only thing that can say stage 3 and stage 4 have two entry points each | game-dir |
 | `game:looping_se` | that `PlaySoundId`'s two loop tables pair index for index -- every entry is `X.wav` against `X_OFF.wav` and no `_OFF` file ships, which is what says a stop id is a control word rather than a sound -- and that class 0x30's play and stop ids are the operands of the EXE's own PUSHes | game-dir |
@@ -165,7 +166,7 @@ nothing exits 3 and is never counted as green.
 | `game:bone_cels` | that every cel run `ZombieDrawBonePart` (`FUN_004534A0`) draws is the arithmetic in the EXE and is in the bundle -- no table in the image names those models, so this is the only thing standing between a hand-written run and a character losing a part | game-dir |
 | `baseline` | that the installed assets still hash to `manifest.csv` | game-dir |
 
-21 of them need the installed game and 28 need an exported
+22 of them need the installed game and 28 need an exported
 bundle. **That is a known hole, not a design:** a machine with
 neither cannot run the checks that compare two histories, and a
 bundle-free fixture is the open work that closes it.

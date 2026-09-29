@@ -173,6 +173,16 @@ export enum PropFamily {
    */
   DrawOnlyType12 = 22,
   /**
+   * `RiseToHeightUpdate` (`FUN_004757F0`) — class 0x44 selector 13, an
+   * object that rises a unit a frame on a script flag until it stands a
+   * whole-number height above where it was placed. Stage 5's, behind block
+   * 1's fight, and twelve in stage 6. See `class44/rise_to_height.ts`.
+   *
+   * Its own family for the reason {@link RisingDoor} is: its own
+   * constructor, and no `PropExpireByStepLifetime`.
+   */
+  RiseToHeight = 23,
+  /**
    * `OriginalItemDropUpdate` (`FUN_00466BE0`) — the Original Mode item
    * `SpawnOriginalItemDrop` (`FUN_00466B40`) releases, which
    * `PropUpdateType7`'s first hit does. See `class41/type07.ts`.
@@ -401,8 +411,8 @@ export interface BreakableProp {
    * A third meaning for one offset, and not the last: `LiftUpdate` uses
    * this word as the **frame counter** that releases the lift's overhead
    * panel,
-   * `ScriptFlagEffectUpdate` as the capture bone, `RisingDoorUpdate` as the
-   * script flag that starts the rise, and
+   * `ScriptFlagEffectUpdate` as the capture bone, `RisingDoorUpdate` and
+   * `RiseToHeightUpdate` as the script flag that starts the rise, and
    * several other generic routines use it as a state timer. Check the family
    * before reading it, exactly as for `kind`/`member` at `+0x290`.
    *
@@ -482,6 +492,11 @@ export interface BreakableProp {
    * prop is shot and hands it to `CamEvalObjectPath6` as the frame of object
    * path 0x178, and at 290.0 it raises `g_script_flags[20]`. Another of the
    * offsets `L3` is about — check the family.
+   *
+   * **And {@link PropFamily.RiseToHeight} reads it as its ceiling**: the `y`
+   * `RiseToHeightUpdate` (`FUN_004757F0`) climbs to, written once by its
+   * constructor and never changed. `render/breakables.ts` never sees it as a
+   * rattle there, because that family records its own draws.
    */
   shake: number;          // +0x2C0
   /**

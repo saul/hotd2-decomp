@@ -90,6 +90,9 @@ export abstract class NetPeer {
     transport.onMessage = (ch, data) => this.receive(ch, data);
     transport.onOpen = () => this.sendHello();
     transport.onClose = (reason) => this.gone(reason);
+    // A link found open before its peer was made (`LocalTransport.find`)
+    // will not open again.
+    if (transport.info.state === "open") this.sendHello();
   }
 
   /** The handshake's fixed half, and this peer's. */

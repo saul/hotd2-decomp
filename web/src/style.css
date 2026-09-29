@@ -430,6 +430,8 @@ kbd {
   user-select: all;
 }
 #net-lobby .net-link { margin-top: 10px; padding: 6px 12px; }
+#net-lobby .net-path { font: 11px/1.4 var(--mono); }
+#net-lobby .net-hint { color: #ffd9a0; text-align: left; line-height: 1.45; }
 #net-lobby .net-leave { margin-top: 14px; }
 
 .menu-net .net-host {

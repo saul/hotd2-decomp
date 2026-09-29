@@ -22,18 +22,18 @@ is in `tools/verify_all.py`, beside the command that runs it.
 | `game/` | 104331 | 339 | engine |
 | `hod2lib/` | 19312 | 35 | engine |
 | `render/` | 15087 | 54 | render |
-| `app/` | 11993 | 41 | app |
+| `app/` | 12277 | 41 | app |
 | `script/` | 4471 | 25 | engine |
-| `ui/` | 3478 | 25 | ui |
+| `ui/` | 3490 | 25 | ui |
 | `core/` | 2977 | 13 | engine |
 | `bundle/` | 2738 | 11 | engine |
 | `audio/` | 973 | 2 | render |
 | `hud/` | 491 | 1 | ui |
-| **total** | **165851** | **546** | |
+| **total** | **166147** | **546** | |
 
 The largest files, which is where the pressure to split next is:
 
-* `app/main.ts` — 2896
+* `app/main.ts` — 2898
 * `game/globals.ts` — 2848
 * `game/actor.ts` — 2688
 * `hod2lib/bundle.ts` — 2322

@@ -1,6 +1,6 @@
 # Two players over WebRTC
 
-**Status: built, 2026-09-28** (branch `worktree-netplay`). This began as a
+**Status: built, 2026-09-28; on `main` since 2026-09-29.** This began as a
 plan and now describes what is in the tree. Where the build departs from the
 plan, the section *Where it departs from the plan* says so and why. Read
 [`PLAYER_ARCHITECTURE.md`](PLAYER_ARCHITECTURE.md) first: netplay is written
@@ -63,6 +63,23 @@ own install. **No game data ever crosses the connection.** Player 2 presses
 START (Enter, or the corner button) to join the game with a credit, as at the
 cabinet.
 
+**The host's game waits for player 2.** From the moment the room is made
+until player 2's page answers, and again after a drop while player 2 finds
+their way back, the host's clock is held, as it is while player 2 loads a
+stage: nothing attacks a player who is still reading out the code. The card
+says so; *Cancel* plays on alone.
+
+**Two tabs of one browser do not use WebRTC.** The host listens for its room
+on a `BroadcastChannel` beside WebRTC, and a join looks there first, for
+400 ms. On one machine there is nothing to traverse, and it is the case
+WebRTC is worst at: Chrome hides every host address behind an mDNS `.local`
+name, which a Mac that has not given the browser Local Network access cannot
+resolve, and a home router seldom routes its own public address back in. On
+this machine exactly that happened: two tabs sat on "Finding a way through
+both networks" with one candidate pair to try and no answer. The overlay's
+transport line says `local` for a session that took this path; `?rtc=1` on
+both pages forces WebRTC.
+
 **The rendezvous.** The dev server has one at `/net/signal`, so two tabs, or a
 laptop and a phone on the LAN, need no cloud. For a hosted copy, run one: see
 [`web/tools/signal/README.md`](../web/tools/signal/README.md) for the
@@ -80,6 +97,7 @@ The page finds it through `?signal=<url>`, a build's `VITE_HOTD2_SIGNAL`, or
 | `&room=NAME` | keep several local pairs apart |
 | `&netsim=lat:80,jit:20,loss:5` | make this end's outgoing link that bad: ms, ms, percent |
 | `&relay=1` | force WebRTC through TURN (`iceTransportPolicy: "relay"`) |
+| `&rtc=1` | use WebRTC even between two tabs of one browser |
 
 The address keeps these, and the join hash, through every rewrite the player
 makes of it (`urlstate.ts`), so a reload finds them.
@@ -92,6 +110,17 @@ traffic is relayed. It turns amber when play will feel worse than it should,
 and red, with a pulsing dot, when the game on this screen may not be the
 host's: a desync, a link silent while the host's clock runs, a refused
 handshake. Press it, or `I`, for the overlay.
+
+**The lobby card, while WebRTC searches**, shows what it has to work with:
+the ICE state and how long it has been searching, the addresses each end
+offered by type (`host`, with how many are hidden as `.local`; `srflx`, the
+public address STUN reported; `relay`), and the candidate pairs tried and
+failed. After 8 s without a connection it adds the likeliest reason, in order:
+nothing arrived from the other end (the two pages are not on the same
+rendezvous); `?relay=1` with no TURN server; no STUN answer (outgoing UDP
+blocked); or no pair works (mDNS names that do not resolve, and a NAT or
+router that needs a TURN relay). Both ends show it (`describePath` in
+`app/net/transport.ts`).
 
 **The overlay** (`netStats`, key `I`; `app/projection/net.ts` judges every
 figure):
@@ -370,7 +399,7 @@ for it. The overlay's route row says whether a session is direct or relayed.
 | `test:net-codec` | fuzzed trees, lossy, reordered and duplicated delivery, acks up to 60 ticks late: every applied tick deep-equal and hash-equal to the host's; pool identity kept and a respawn a new object, asserted over every window, the only survivor's respawn included; a rebuilt list free; a `Map` refused by name. No bundle, about 20 s |
 | `test:net` | a real stage, host and replica sessions on a `MemoryLink` at clean, lossy and bad settings: every tick hash-verified, a whole-tree comparison every 30th, player 2's tab hidden for five seconds with the host's deltas staying narrow, a seek's epoch followed, every press of the final epoch taken once and none twice, player 2 scoring, the aim check exact for a true shot and catching a false one. Sabotaged once: a changed value and a removed actor caught and named, a lost desync report recovered by the replica's own retry. Needs a bundle |
 | `test:signal` | the rendezvous over real HTTP in its Node binding and its Worker: codes, TURN credentials, 404/409/403, queues, reconnects, rejoins, the sweep. It found three bugs, now fixed |
-| `net_pair` | the page: two tabs (clean, then 60±30 ms at 10% loss) and real WebRTC through the dev server's rendezvous, each playing stage 1 with player 2 joining and shooting through its own camera, and the replica's systems re-hashed against the host's. Then a pause (player 2 on the host's exact frame), a reload of player 2 (rejoined, matching) and a stage change (player 2 follows, matching). No console error anywhere |
+| `net_pair` | the page: a room whose link is opened in a second tab (the same-browser path, with the host's game held until player 2 is in), two tabs at 60±30 ms and 10% loss, and real WebRTC through the dev server's rendezvous, each playing stage 1 with player 2 joining and shooting through its own camera, and the replica's systems re-hashed against the host's. Then, on WebRTC, a pause (player 2 on the host's exact frame), a reload of player 2 (rejoined, matching) and a stage change (player 2 follows, matching). Last, WebRTC again in a Chrome that hides host addresses behind mDNS names, as every user's does: it either connects or, within 25 s, both lobby cards say why. On this machine it says why. No console error anywhere |
 
 All four are rows in `tools/verify_all.py`.
 
@@ -380,8 +409,9 @@ All four are rows in `tools/verify_all.py`.
   credentials are written, and the credential arithmetic is tested, but no
   session in this tree has gone through a relay. The first real test is a
   phone on cellular against a desktop on Wi-Fi, once with `?relay=1`.
-* **Two machines.** Every WebRTC session so far ran two pages of one Chrome,
-  whose ICE pairs are host candidates on loopback.
+* **Two machines.** Every WebRTC session so far ran two pages of one Chrome.
+  The ones that connected had mDNS turned off, which no user's browser has;
+  with it on, two tabs on this Mac do not connect at all (see *Using it*).
 * **A long session.** The runs are tens of seconds per stage. A whole
   playthrough with stage advances is the next soak.
 

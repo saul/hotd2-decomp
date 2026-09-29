@@ -988,5 +988,34 @@ console.log("\nThe shutter bars, as the HUD layer covers the frame:\n");
         frameOf(false) === "hud-frame", String(frameOf(false)));
 }
 
+// Two tabs on a Mac without Local Network access sat on "Finding a way
+// through both networks" for good: ICE had one pair to try and it never
+// answered. The lobby card now says what the search found, and once it has
+// run long enough to be stuck, why.
+console.log("\nnetplay: a connect that is not finishing says why");
+{
+  const { describePath, PATH_HINT_MS } = await import("../src/app/net/transport");
+  const base: import("../src/app/net/transport").IcePath = {
+    since: 0, local: { host: 1, srflx: 1 }, remote: { host: 1, srflx: 1 },
+    localMdns: 1, remoteMdns: 1, pairs: 1, failed: 0, turn: 0, relayOnly: false,
+  };
+  const early = describePath(base, "checking", 2000);
+  check("early on: what each end offered, and no verdict yet",
+        /this end offered 1 host \(1 hidden as \.local\), 1 srflx/.test(early.line)
+        && /1 pair tried/.test(early.line) && early.hint === null, early.line);
+  const stuck = describePath(base, "checking", PATH_HINT_MS + 1).hint ?? "";
+  check("stuck with both ends' addresses in hand: mDNS, Local Network, and no TURN",
+        /\.local/.test(stuck) && /Local Network/.test(stuck) && /has none/.test(stuck), stuck);
+  const why = (p: typeof base, ice = "checking") => describePath(p, ice, 9000).hint ?? "";
+  check("nothing from the other end: the rendezvous",
+        /Nothing has arrived/.test(why({ ...base, remote: {}, remoteMdns: 0 })));
+  check("?relay=1 with no TURN server: says so",
+        /\?relay=1/.test(why({ ...base, relayOnly: true, local: {} })));
+  check("no STUN answer: outgoing UDP",
+        /STUN/.test(why({ ...base, local: { host: 1 } })));
+  check("connected, or not yet searching: no verdict",
+        why(base, "connected") === "" && why({ ...base, since: NaN }, "new") === "");
+}
+
 console.log(failures ? `\n${failures} failed` : "\nall passed");
 process.exit(failures ? 1 : 0);

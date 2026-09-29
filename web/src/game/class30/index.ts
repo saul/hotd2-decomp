@@ -48,6 +48,8 @@ import {
 import { ZombieStateReleaseBodyCreature } from "./release_creature";
 import { ZombieState } from "./states";
 import { ZombieOnShot } from "./on_shot";
+import { ZombieClearHitReactionWhenDone, ZombieTickAltHitReaction }
+  from "./react";
 import {
   COND4_SPECIAL_BIT, ZombieStateCorpseBlink, ZombieStateCorpseSink,
   ZombieStateDeath6,
@@ -89,6 +91,12 @@ const ZOMBIE_BODY_RADIUS = 3.5;
 
 export function EnemyZombieUpdate(obj: ZombieActor, f: ClassFrame): void {
   const { dt, rng, host, events } = f;
+  // `CALL 0x004547C0` at `0x00453402` and `CALL 0x00454660` at `0x00453408`:
+  // the stumble's two per-frame halves, before anything else -- the bits a
+  // reaction raised come down here, so the state below sees them as the engine
+  // does. The port had neither, so nothing ever lowered what they guard.
+  ZombieTickAltHitReaction(obj);
+  ZombieClearHitReactionWhenDone(obj);
   // `EnemyZombieUpdate` (`FUN_004533F0`) runs the shot response **before** the
   // state, at 0x0045340E: the shot that killed this actor puts it in a death
   // state on the same frame that state first runs. Without this call class

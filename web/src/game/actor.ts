@@ -1080,16 +1080,23 @@ export enum ZombieFlag2 {
   ShotNearArcTarget = 0x8,
   /**
    * Bit `0x1000` — a hit-reaction clip is running on the **overlay** track,
-   * `obj+0x1B8`/`obj+0x1A0`.
+   * `obj+0x1B8`/`obj+0x1A0` ({@link Actor.react}).
    *
-   * `ActorPlayHitReaction` sets it, `FUN_00454660` tests and clears it when
-   * that track finishes (`0045468a`, `00454716`), and `ZombieSetMotionIfIdle`
-   * refuses to start an idle while either this or
-   * {@link ZombieFlag2.HitClipBase} is up (0x0045477E). `[proved]`
+   * `ActorPlayHitReaction` sets it, `ZombieClearHitReactionWhenDone`
+   * (`FUN_00454660`) clears it once that track is handed back or a quarter of
+   * its clip has played (`0045468a`, `00454716`), and while it is up
+   * `ZombieSetMotionIfIdle` changes only the legs' clip
+   * (`ActorSetMotionBlendedUnderOverlay`, `FUN_00411AC0`) so the stumble plays
+   * on. `[proved]`
    */
   HitClipOverlay = 0x1000,
-  /** Bit `0x2000` — the same, for the **base** track `obj+0x1B4`/`obj+0x19C`
-   *  (`FUN_00454660` at 0x004546CF and 0x00454734). `[proved]` */
+  /**
+   * Bit `0x2000` — a reaction clip cut onto the **base** track
+   * `obj+0x1B4`/`obj+0x19C`, for a hit on bone 9 or below it. While it is up
+   * `ZombieSetMotionIfIdle` changes nothing (`TEST DH, 0x20` at
+   * `0x0045477B`); `ZombieClearHitReactionWhenDone` drops it at the clip's
+   * end or a quarter of the way in (`0x004546CF`, `0x00454734`). `[proved]`
+   */
   HitClipBase = 0x2000,
   /**
    * Bit `0x200` — `ActorPlayHitReaction` raises it (`00454611`, `OR AH, 0x2`);
@@ -1113,16 +1120,36 @@ export enum ZombieFlag2 {
    */
   LetGo = 0x1,
   /**
-   * Bit `0x100` — the other half of that gate. `[open]`: nothing found raises
-   * it, and `ActorSnapToGroundHeight` (0x00454B3B) is the one reader.
+   * Bit `0x100` — the other half of that gate, and **nothing the shipped game
+   * runs raises it** on a class-0x30 actor. `[proved]` both ways a bit gets
+   * into this word: a sweep of class 0x30's code (`0x00452DA0`..`0x0045ECC0`)
+   * for every `OR` whose immediate carries it -- 32-bit, and the byte form on
+   * `AH`/`CH`/`DH`/`BH` -- finds eleven, and every one of them stores to
+   * `obj+0x34` (`ZombieApplyScriptMode`'s `0x0045CA59` and
+   * `ZombieStateCollapseToCondition4`'s `0x0045E69F` among them); and
+   * `EnemyZombieInit`'s copy of the descriptor's `+0x20` word carries it in
+   * none of the twelve bundles' class-0x30 records. Its readers are
+   * `ActorPlayHitReaction`'s alt arm, `ZombieTickAltHitReaction` and
+   * `ActorSnapToGroundHeight` (0x00454B3B), so all three are transcribed
+   * against a bit that stays down.
    *
    * This used to say `ZombieStateCorpseSink` (`FUN_00454F20`) and
    * `ZombieStateCorpseBlink` (`FUN_00454FD0`) clear it with
    * `AND EDX, 0xdffffdff`. **They do not**: `0xdffffdff` has bit 8 set, so
-   * that mask clears `0x20000000` and `0x200` and leaves this one alone. No
-   * writer of bit 0x100 has been found at all.
+   * that mask clears `0x20000000` and `0x200` and leaves this one alone.
    */
   HitReactionAlt = 0x100,
+  /**
+   * Bit `0x800` — with it up, `ActorPlayHitReaction` cuts **every** hit's
+   * reaction onto the base track, as it does a hit on bone 9 or below
+   * (`004544e0`..: `CMP bone, 9 / JGE` and `TEST AH, 0x8 / JNZ` to one arm).
+   * Nothing the shipped game runs raises it: the same sweep and census as
+   * {@link ZombieFlag2.HitReactionAlt} find no class-0x30 `OR` that stores it
+   * here -- the two `OR ?H, 0x8` in class 0x30 (`0x0045A951`, `0x0045B4D6`)
+   * write through a pointer at `obj+0x1310` -- and no descriptor that carries
+   * it. `[proved]`
+   */
+  ReactOnBaseTrack = 0x800,
   /**
    * Bit `0x10000000` — **this actor's position and yaw are an offset on
    * `g_carrier_object`**, and something re-seats it there every frame.
@@ -1205,6 +1232,63 @@ export interface ActorClip {
    * a fade, which is what it did before this existed.
    */
   held?: boolean;
+}
+
+/**
+ * Track 1 of the model block at `obj+0x194` -- the **overlay** a hit
+ * reaction plays on, beside the base track {@link Actor.motion} is.
+ *
+ * `MotionCrossFadeTo` (`FUN_00411B70`) starts it and `MotionStartOnTrack`
+ * (`FUN_004119F0`) hands it **a subtree**: `SkeletonAssignSubtreeTrack`
+ * (`FUN_00412200`) writes the track into the record of `bone` and of every
+ * bone below it, and `MotionWriteBoneAngles` (`FUN_00411D70`) poses a bone
+ * from the track its record names. Both callers pass bone 1, which is bones
+ * 1..8 -- torso, head, arms -- in every class-0x30 and class-0x31 skeleton,
+ * and `SkeletonPoseRootFrame` (`FUN_00410920`) takes the root translation and
+ * bone 0's rotation from track 0 with no track test at all. So a stumble moves
+ * the upper body and nothing else: the legs keep walking, and a crawler
+ * flinches its torso **on the floor**. The port used to blend the whole
+ * skeleton, root included, onto the clip, which stood every crawler up on a
+ * standing flinch.
+ *
+ * `SkeletonAdvanceOverlayCursor` (`FUN_004112E0`) is its clock and decides
+ * when it ends; `ActorSetMotion` and `ActorSetMotionBlended` end it too,
+ * because their `MotionStartOnTrack` puts the whole skeleton back on track 0
+ * and writes `model+0x36 = 0`.
+ */
+export interface OverlayTrack {
+  /** `track+0x24` -- `obj+0x1B8`, the clip. */
+  motion: number;
+  /**
+   * `track+0x04` -- `obj+0x198`, the counter, in the base track's
+   * {@link Actor.playTicks} encoding: held while a fade holds the cursor, and
+   * the cursor `obj+0x1A0` is it modulo the play length + 1.
+   */
+  ticks: number;
+  /** `track+0x35` -- `obj+0x1C9`: the root of the subtree it drives. */
+  bone: number;
+  /**
+   * Slot A: the pose a fade on this track dissolves from --
+   * `MotionLoadPoseSlot` (`FUN_00411C20`) mode 0xC's snapshot, held as the
+   * clip and cursor it was drawn from, as {@link Actor.fadeFrom} is.
+   */
+  fadeFrom: { motion: number; ticks: number } | null;
+  /** Frames of that fade left, in {@link Actor.fade}'s encoding. */
+  fade: number;
+  /** `track+0x31` -- the fade length + 1, as {@link Actor.fadeLen}. */
+  fadeLen: number;
+  /** `track+0x33` -- the fade back to the base clip, length + 1; 0 once spent. */
+  fadeOut: number;
+  /**
+   * `track+0x38` bit `0x10` -- fading back to the base clip, then holding its
+   * frame 0 until the base cursor comes round to it.
+   */
+  back: boolean;
+  /**
+   * `track+0x38` bit 3 -- `MotionCrossFadeAlt`'s (`FUN_00411B20`): the clip
+   * never ends on its own.
+   */
+  hold: boolean;
 }
 
 /**
@@ -2279,9 +2363,17 @@ export interface ActorBase {
   action: ActorClip | null;
   /** The death clip, once. */
   death: { motion: number; ticks: number } | null;
-  /** A stumble, blended over `blend` frames. */
-  react: { motion: number; ticks: number; blend: number; hard: boolean }
-    | null;
+  /** Track 1, the overlay a hit reaction plays on -- see {@link OverlayTrack}. */
+  react: OverlayTrack | null;
+  /**
+   * `obj+0x1319` -- the last zone a hit landed in, a signed byte:
+   * `ActorReactToHit` (`FUN_004543F0`) writes 2 for a shot on bone 2 and 1 for
+   * one on bone 1, before anything else, and nothing else. It indexes the
+   * motion row's second half, `row[4 + zone]`, for the reaction
+   * `ActorPlayHitReaction`'s `obj+0x136C` bit-0x100 arm and
+   * `ZombieTickAltHitReaction` play.
+   */
+  lastHitZone: number;      // +0x1319, s8
   /**
    * `ZombieStateMotionCue21`'s parameters — the descriptor's `+0x04` clip and
    * its `+0x08` hold, in frames. Six spawns across the game carry it, all of
@@ -2689,6 +2781,7 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     action: null,
     death: null,
     react: null,
+    lastHitZone: 0,
     intro: null,
     hits: {},
     latched: [],

@@ -106,8 +106,11 @@ export function ZombieOnShot(obj: ZombieActor): void {
   // holds `MOV EDX, [ESI+0x136c]`, inside the per-player loop, and the
   // encoding is the byte form. `[proved]`
   if (obj.flags & ActorFlag.ShotImmune) return;
-  // The loop head, `0x00453F14`..`0x00453F2A`: for every landed shot, before
-  // anything asks whether the actor is alive.
+  // The loop head, `0x00453F06`..`0x00453F2A`: for every landed shot, before
+  // anything asks whether the actor is alive -- the result into `obj+0x1364`
+  // (`MOV [ESI+0x1364], EAX` at `0x00453F1E`), which
+  // `ZombieClearHitReactionWhenDone` reads, and the two flag writes.
+  obj.zom.hitResult = hit.result;
   obj.flags2 &= ~ZombieFlag2.EntryClipPlaying;
   obj.flags |= ZOMBIE_SPRINTS;
   // `00453F3B TEST EAX, 0x80000000` / `JNZ 0x00454035` -- the latch comes

@@ -361,7 +361,8 @@ import {
 import { SND_PATH_LEG_LANDED } from "../src/game/class31/path";
 import { ActorBodyConditionFromHands, SPENT_CONDITION }
   from "../src/game/class30/condition";
-import { ThrowerState, ThrowSub } from "../src/game/class31/states";
+import { ThrowerMotion, ThrowerState, ThrowSub }
+  from "../src/game/class31/states";
 import { SpawnThrownWeapon, ThrowerStateThrow } from "../src/game/class31/thrower";
 import { ThrowerStrikeConnect } from "../src/game/class31/strike";
 import { ThrowerStanceOf } from "../src/game/class31/tables";
@@ -372,10 +373,14 @@ import { dist2d, vec3, type Vec3 } from "../src/game/vec";
 import { ActorPlayHitReaction, ActorReactToHit, EffectCode, HitResultCode,
   ResolveHit } from "../src/game/combat/resolve_hit";
 import {
-  LeapStrikeSub, LeapTargetMode, ZombieLeapStrikeTarget,
+  LeapStrikeSub, LeapTargetMode, ZombieLeapStrikeTarget, ZombieStateLeapStrike,
 } from "../src/game/class30/leap_strike";
 import { HALVED_STUMP_SLOT } from "../src/game/class30/halved";
-import { ActorSetMotionBlended } from "../src/game/class30/motion_cue";
+import { ActorSetMotionBlended, ZombieSetMotionIfIdle }
+  from "../src/game/class30/motion_cue";
+import { ZombieClearHitReactionWhenDone } from "../src/game/class30/react";
+import { OverlayCursor } from "../src/game/motion";
+import { ThrowerMotionOf } from "../src/game/class31/tables";
 import type { BreakablesJson, ScriptJson } from "../src/bundle";
 import { Walker, type BranchChoice } from "../src/script/walker";
 import {
@@ -40044,6 +40049,269 @@ console.log("\nthe crawler: born halved, and it leaps rather than strikes:");
           ActorReactToHit(z3, 4, HitResultCode.None) !== undefined
           && ActorReactToHit(z1, 4, HitResultCode.None) === undefined);
   }
+}
+
+/**
+ * The stumble is track 1, over bone 1's subtree -- and the crawler flinches on
+ * the floor.
+ *
+ * `ActorPlayHitReaction` (`FUN_004544C0`) plays an upper-body hit's clip with
+ * `MotionCrossFadeTo(obj+0x194, 1, clip, 0, 1, result3 ? 0x14 : 10)`: bone 1's
+ * subtree only, two frames in, 11 or 21 back out through
+ * `MotionFadeOverlayToBase` once the clip reaches its play length; a hit on
+ * bone 9 or below cuts the base track with `ActorSetMotion`. The bits it
+ * raises are lowered by `ZombieClearHitReactionWhenDone` (`FUN_00454660`) a
+ * quarter of the way into the clip, and `ZombieSetMotionIfIdle`
+ * (`FUN_00454770`) honours them. The port blended the whole skeleton onto the
+ * clip, root included -- a standing flinch that stood every `znkager` up --
+ * and had none of the rest.
+ */
+console.log("\nthe stumble: bone 1's subtree on track 1, and what lowers it:");
+{
+  // `znkager`'s skeleton in small: bone 1 with head (2) and two arm chains
+  // (3-5, 6-8), bone 9 with two leg chains (10-12, 13-15). `parent` is an
+  // index into the list, as the exporter writes it.
+  const kb = (bone: number, parent: number | null) =>
+    ({ bone, part: `b${bone}`, slot: 0x1d80 + bone, offset: [0, 0, 0],
+       parent, damage_rank: [], hit_radius: 2, steps: [] });
+  const bones = [
+    kb(1, null), kb(2, 0), kb(3, 0), kb(4, 2), kb(5, 3), kb(6, 0), kb(7, 5),
+    kb(8, 6), kb(9, null), kb(10, 8), kb(11, 9), kb(12, 10), kb(13, 8),
+    kb(14, 12), kb(15, 13),
+  ];
+  // The shipped row: condition 4's stumbles are the standing zombie's, which
+  // is why the port's whole-body blend stood a crawler up. 982 is bone 1's --
+  // group 2 in `g_bone_reaction_group` -- 16 frames, play length 29.
+  const ROW = [982, 977, 982, 981, 979, 974, 961, 960];
+  const CRAWL = 1054;
+  const OTHER = 1055;
+  const KAGER = {
+    ...TYPE, type: 0xc, name: "znkager", bones,
+    reactions: { "0": ROW, "4": ROW },
+    motion_row: { ...TYPE.motion_row,
+                  "4": [CRAWL, OTHER, 1051, 1051, 1049, 270, 270, 272] },
+    motions: {
+      ...TYPE.motions,
+      "982": motion(16, 0, 29), "961": motion(21, 0, 39),
+      [CRAWL]: motion(20, 0, 37), [OTHER]: motion(20, 0, 37),
+      "1051": motion(17, 0.6, 31), "1049": motion(21, 0, 39),
+    },
+  } as unknown as CharacterType;
+  const CHARS_REACT = {
+    ...CHARS,
+    // Type 1's leg stumble at `zom.bin` 961's real play length, 39.
+    types: { "1": { ...TYPE, reactions: { "0": ROW },
+                    motions: { ...TYPE.motions, "961": motion(21, 0, 39) } },
+             "12": KAGER },
+    reaction_groups: [0, 2, 1, 3, 3, 3, 4, 4, 4, 5, 6, 6, 6, 7, 7, 7],
+  } as unknown as CharactersJson;
+  const setup = () => {
+    ResetGameGlobals();
+    SetGameTables(CHARS_REACT);
+    G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    G.g_scene_state_major = SCENE_MAJOR_PLAYING;
+    EnterPlay();
+  };
+  const crawler = (at: number): ZombieActor => {
+    const z = spawnZombie(at, 0xc, "znkager",
+                          { condition: 4, initialState: ZombieState.AttackRun,
+                            attackState: -1 }, new Rng(3));
+    z.hp = z.maxHp = 100;
+    z.motion = CRAWL;
+    z.playTicks = 5;
+    return z;
+  };
+
+  // -- ActorPlayHitReaction's two arms ------------------------------------
+  setup();
+  {
+    const z = crawler(0x7d00);
+    const clip = ActorReactToHit(z, 1, HitResultCode.Damaged);
+    const t = z.react;
+    check("a torso hit on a crawler plays its clip on track 1, over bone 1's "
+          + "subtree",
+          clip === 982 && t !== null && t.motion === 982 && t.bone === 1,
+          JSON.stringify(t));
+    check("...fading in over two frames and back out over eleven -- "
+          + "MotionCrossFadeTo(obj+0x194, 1, clip, 0, 1, 10)",
+          t !== null && t.fade === 1 && t.fadeLen === 2 && t.fadeOut === 11
+          && !t.back && !t.hold, JSON.stringify(t));
+    check("...leaving the crawl on the base track, which the root and the legs "
+          + "keep",
+          z.motion === CRAWL && z.playTicks === 5,
+          `motion ${z.motion} ticks ${z.playTicks}`);
+    check("...and raising obj+0x136C 0x1000 and obj+0x34 0x40000000",
+          (z.flags2 & ZombieFlag2.HitClipOverlay) !== 0
+          && (z.flags2 & ZombieFlag2.HitClipBase) === 0
+          && (z.flags & ActorFlag.Reacting) !== 0,
+          `flags2 0x${z.flags2.toString(16)} flags 0x${z.flags.toString(16)}`);
+  }
+  {
+    const z = crawler(0x7d01);
+    ActorReactToHit(z, 1, HitResultCode.Severed);
+    check("a severing hit fades back out over 21 -- PUSH 0x14",
+          z.react?.fadeOut === 21, JSON.stringify(z.react));
+  }
+  {
+    const z = spawnZombie(0x7d02, 1, "walker",
+                          { condition: 0, initialState: ZombieState.AttackRun,
+                            attackState: -1 }, new Rng(3));
+    z.hp = z.maxHp = 100;
+    z.motion = 10;
+    const clip = ActorReactToHit(z, 10, HitResultCode.Damaged);
+    check("a leg hit cuts the whole base track onto its clip -- ActorSetMotion",
+          clip === 961 && z.motion === 961 && z.playTicks === 0
+          && z.react === null && z.fadeFrom === null,
+          `clip ${clip} motion ${z.motion} react ${JSON.stringify(z.react)}`);
+    check("...and raises obj+0x136C 0x2000, not 0x1000",
+          (z.flags2 & ZombieFlag2.HitClipBase) !== 0
+          && (z.flags2 & ZombieFlag2.HitClipOverlay) === 0
+          && (z.flags & ActorFlag.Reacting) !== 0,
+          `flags2 0x${z.flags2.toString(16)}`);
+    const rng = new Rng(4);
+    ZombieSetMotionIfIdle(z, 10, rng, "clip");
+    check("...which ZombieSetMotionIfIdle will not replace while it is up",
+          z.motion === 961, `motion ${z.motion}`);
+    // A quarter of 39 is 9: `ZombieClearHitReactionWhenDone` lowers the bit
+    // on the first frame the base cursor reaches it.
+    let lowered = -1;
+    for (let i = 1; i <= 40 && lowered < 0; i++) {
+      ActorAdvanceMotion(z, 1 / 60);
+      ZombieClearHitReactionWhenDone(z);
+      if (!(z.flags2 & ZombieFlag2.HitClipBase)) lowered = MotionPlayFrame(z);
+    }
+    check("...until a quarter of the clip has played, and then both bits drop",
+          lowered === 9 && (z.flags & ActorFlag.Reacting) === 0,
+          `lowered at cursor ${lowered}`);
+    ZombieSetMotionIfIdle(z, 10, rng, "clip");
+    check("...and the state's clip comes back", z.motion === 10,
+          `motion ${z.motion}`);
+  }
+
+  // -- the overlay's life: SkeletonAdvanceOverlayCursor ----------------------
+  setup();
+  {
+    const z = crawler(0x7d03);
+    ActorReactToHit(z, 1, HitResultCode.Damaged);
+    // Numbers from the exe, not measured: 982's play length is 29, a quarter
+    // of it 7; the fade back is `track+0x33` = 10 + 1 frames, weight
+    // k / 12; and the track is handed back on the frame the base cursor --
+    // which wraps at 37 + 1 -- comes round to the 0 this track holds.
+    let quarterAt = -1;
+    let backAt = -1;
+    let backFade = -1;
+    let backMotion = -1;
+    let offAt = -1;
+    let baseAtOff = -1;
+    for (let i = 1; i <= 200 && offAt < 0; i++) {
+      ActorAdvanceMotion(z, 1 / 60);
+      ZombieClearHitReactionWhenDone(z);
+      const t = z.react;
+      if (quarterAt < 0 && !(z.flags2 & ZombieFlag2.HitClipOverlay)) {
+        quarterAt = t ? OverlayCursor(z, t) : -1;
+      }
+      if (backAt < 0 && t?.back) {
+        backAt = i;
+        backFade = t.fade;
+        backMotion = t.motion;
+      }
+      if (!t) {
+        offAt = i;
+        baseAtOff = MotionPlayFrame(z);
+      }
+    }
+    check("ZombieClearHitReactionWhenDone drops 0x1000 a quarter of the way "
+          + "in -- cursor 7 of 29 -- and the reaction bit with it",
+          quarterAt === 7 && (z.flags & ActorFlag.Reacting) === 0,
+          `at cursor ${quarterAt}`);
+    check("the clip plays to its play length and then fades home: the base "
+          + "clip on the track, over eleven frames",
+          backAt === 1 + 29 && backMotion === CRAWL && backFade === 11,
+          `back at frame ${backAt}, fade ${backFade}, motion ${backMotion}`);
+    check("...and the track is handed back on the frame the base cursor is 0",
+          offAt > backAt + 11 && baseAtOff === 0,
+          `off at frame ${offAt}, base cursor ${baseAtOff}`);
+  }
+
+  // -- what ends it early, and what does not ----------------------------------
+  setup();
+  {
+    const z = crawler(0x7d04);
+    ActorReactToHit(z, 1, HitResultCode.Damaged);
+    ZombieSetMotionIfIdle(z, OTHER, new Rng(5), "clip");
+    check("ZombieSetMotionIfIdle under 0x1000 changes the legs' clip and the "
+          + "stumble plays on -- ActorSetMotionBlendedUnderOverlay",
+          z.motion === OTHER && z.react?.motion === 982,
+          `motion ${z.motion} react ${JSON.stringify(z.react)}`);
+    ActorSetMotionBlended(z, CRAWL, 0, 10);
+    check("...and ActorSetMotionBlended ends it: model+0x36 = 0",
+          z.motion === CRAWL && z.react === null, JSON.stringify(z.react));
+  }
+
+  // -- who staggers at all -----------------------------------------------------
+  setup();
+  {
+    const h = ActorSpawn(0x7d05, SpawnClass.ScriptedHumanoid, 1, "humanoid");
+    h.hp = h.maxHp = 100;
+    h.visible = true;
+    const out = ResolveHit(h, 4, NULL_HOST, new Rng(1));
+    check("a class-0x25 figure shot and alive does not stagger: "
+          + "ActorReactToHit's one caller is ZombieOnShot (0x0045401B)",
+          out.result === HitResultCode.Damaged && h.hp > 0
+          && h.react === null && (h.flags & ActorFlag.Reacting) === 0,
+          `result ${out.result} react ${JSON.stringify(h.react)}`);
+  }
+}
+
+/**
+ * `ZombieStateLeapStrike`'s recoil is turned by the camera **block's** yaw:
+ * `MOV ECX, [EAX*4 + 0x9a60d0]` at `0x0045E54A`. The two camera yaws are half
+ * a turn apart in play (L64), and the leap read `g_camera_yaw_bams`, so the
+ * crawler kicked itself back toward the player.
+ */
+console.log("\nthe crawler's recoil turns by the camera block's yaw:");
+{
+  ResetGameGlobals();
+  SetGameTables(CHARS);
+  EnterPlay();
+  const z = spawnZombie(0x7d10, 1, "leaper",
+                        { condition: 0, initialState: ZombieState.AttackRun,
+                          attackState: -1 }, new Rng(3));
+  G.g_camera_index = 0;
+  G.g_camera_block_yaw_bams = 0x4000;
+  G.g_camera_yaw_bams = 0xc000;
+  z.state = ZombieState.LeapStrike;
+  z.sub = LeapStrikeSub.Recoil;
+  z.attack = Number(Object.keys(TYPE.attacks["0"] ?? {})[0] ?? 0);
+  z.action = null;
+  // Well above the floor, which with no collision loaded is
+  // `g_camera_fixed_eye_y`: the bounce sub runs on the same frame, and must
+  // not land and clear the velocity it is being asked about.
+  G.g_camera_fixed_eye_y = 0;
+  z.pos = vec3(0, 100, 40);
+  ZombieStateLeapStrike(z, 1 / 60, new Rng(1), NULL_HOST);
+  // `RotY(0x4000) . (0, 0, -0.3)` is (-0.3, 0, 0); `RotY(0xC000)` gives +0.3.
+  check("the kick is RotY(g_camera_block_yaw_bams) . (0, 0, -0.3)",
+        z.sub === LeapStrikeSub.Bounce && Math.abs(z.vel.x + 0.3) < 1e-6
+        && Math.abs(z.vel.z) < 1e-6,
+        `sub ${z.sub} vel (${z.vel.x.toFixed(3)}, ${z.vel.z.toFixed(3)})`);
+}
+
+/**
+ * `ThrowerStateWalkDistance` (`FUN_0044E2A0`) starts its walk with class
+ * 0x31's own `SetCurrentActorMotionBlended` (`0x0044E358`). It used to borrow
+ * class 0x30's `ZombieSetMotionIfIdle`, whose `obj+0x136C` tests now read
+ * bits 0x1000 and 0x2000 -- `ThrowerFlag.Walking` and `BandLatched` on a
+ * thrower (L3).
+ */
+console.log("\nclass 0x31's walk is its own call:");
+{
+  const z = thrower(ThrowerState.WalkDistance, { walkDistance: 15 });
+  z.flags2 |= ThrowerFlag.BandLatched;
+  const walk = ThrowerMotionOf(z, ThrowerMotion.Walk);
+  GameUpdate(1 / 60, CAM_HOST, new Rng(11), new Events());
+  check("a thrower with obj+0x136C 0x2000 up still starts its walk",
+        walk !== undefined && z.motion === walk, `motion ${z.motion}`);
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

@@ -235,6 +235,7 @@ merging inline copies into one function, disassemble both and compare them
 call for call**, arms the pseudocode hides included; where they differ, the
 difference is the helper's argument, named for the instruction.
 
+
 ---
 
 **L89 -- A trap every session reads around is a defect in the database, and
@@ -261,6 +262,28 @@ is wrong: give it a prototype or a flag, prove it, commit it as a row, and
 every caller inherits it.** Choose rows, do not bulk-commit the decompiler's
 own guesses: committing all 2,520 of them took `extraout_` markers from 184 to
 880, because it guesses `void` for functions whose callers read EAX.
+
+**L91 -- An argument is named by the instruction that finally uses it, and
+that can be three calls down.** `MotionCrossFadeTo(obj+0x194, 1, clip, 0, 1,
+10)` was read as "track 1, fade in 10": the routine's own body stores the
+last argument at `track+0x33` and passes the second to `MotionStartOnTrack`,
+and both readings stopped there. `track+0x33` is read by
+`SkeletonAdvanceOverlayCursor` when the clip ends -- it is the fade **back
+out** -- and the `1` goes on through `MotionStartOnTrack` into
+`SkeletonAssignSubtreeTrack` as a **bone**: the track drives bone 1's subtree,
+the upper body, and nothing else. The port blended the whole skeleton, root
+height included, onto a standing flinch, and every crawler in stage 2 stood up
+when it was shot. The annotation on the subtree routine had carried `[likely]`
+with its recursive helper "unread" the whole time, and the doc said "track 1
+while the walk keeps running on track 0" -- true, and the reason nobody asked
+which bones.
+
+**Follow each argument of a primitive to the instruction that consumes it**,
+through every callee it is passed to, before naming it; a store into a
+structure is not a use until something reads that field back. And a
+`[likely]` on a routine a renderer depends on is an unread routine the
+renderer is guessing about.
+
 
 ## Transcribing behaviour into the port
 
@@ -767,7 +790,8 @@ write of that actor's state number, and count the spawns that take each arm of
 the branch that chooses it.** Search the image for the state's literal store
 -- the bytes `10 13 00 00 xx 00` of `MOV word [reg + 0x1310], xx` -- and read
 the `CMP` in front of each one; `web/tools/checks/split_unreachable.ts` does it
-for 0x32, 0x34 and 0x35. A one-line census of the field the branch tests would have turned "no stage-2 spawn" into "twenty".
+for 0x32, 0x34 and 0x35. A one-line census of the field the branch tests would
+have turned "no stage-2 spawn" into "twenty".
 
 ---
 

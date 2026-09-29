@@ -137,7 +137,7 @@ export function Viewport(
   // 4:3 is shorter than the viewport -- and the bars used to be measured off
   // the viewport there, covering the frame's black margin and a sliver of the
   // picture instead of a tenth of it.
-  const boxed = useSlice((p) => p?.pillarbox) === true;
+  const boxed = useSlice((p) => p?.boxed) === true;
   // Player 2's crosshair is blue, as the cabinet's second gun was.
   const player = useSlice((p) => p?.net?.player);
   return (

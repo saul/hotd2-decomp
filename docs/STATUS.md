@@ -20,20 +20,20 @@ than a measurement. What each directory is for is in
 |---|---:|---:|---|
 | `game/` | 110248 | 361 | engine |
 | `hod2lib/` | 19994 | 35 | engine |
-| `render/` | 15804 | 60 | render |
-| `app/` | 12685 | 44 | app |
+| `render/` | 15813 | 60 | render |
+| `app/` | 12713 | 44 | app |
 | `script/` | 4495 | 25 | engine |
-| `ui/` | 3773 | 27 | ui |
+| `ui/` | 3779 | 27 | ui |
 | `core/` | 3535 | 13 | engine |
 | `bundle/` | 2921 | 11 | engine |
 | `audio/` | 1053 | 3 | render |
 | `hud/` | 526 | 1 | ui |
-| **total** | **175034** | **580** | |
+| **total** | **175077** | **580** | |
 
 The largest files, which is where the pressure to split next is:
 
 * `game/globals.ts` — 3251
-* `app/main.ts` — 3202
+* `app/main.ts` — 3227
 * `game/actor.ts` — 2744
 * `hod2lib/bundle.ts` — 2483
 * `hod2lib/exetab.ts` — 2409
@@ -58,7 +58,7 @@ Both markers are counted in **every** `.ts`/`.tsx` file under `web/src/`, one pe
 | ui | `hud/`, `ui/` | 0 | 0 |
 | app | `app/` | 1 | 0 |
 
-The two declared seams between the UI and the player: **`PlayerCommands` has 54 members against `PlayerView`'s 41** — how much of the player a click can move, against how much of it the page can see. Neither can grow without a line appearing in the open.
+The two declared seams between the UI and the player: **`PlayerCommands` has 54 members against `PlayerView`'s 42** — how much of the player a click can move, against how much of it the page can see. Neither can grow without a line appearing in the open.
 
 ## The decomp
 

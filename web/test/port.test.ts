@@ -137,6 +137,13 @@ import {
   EmergePropState, type HordeTail,
 } from "../src/game/class40";
 import { makeSubModel, SubModelFlag } from "../src/game/class40/submodel";
+import {
+  WormClassUpdate, WormCountsForEnemyGate, WormDeathUpdate,
+  WormLoneDropUpdate, WormMemberAt, WormUpdate, WormBodyDraw, WormFlag,
+  WormRoutine, WormState, WORM_LONE_SLOT, SND_WORM_KILLED_A,
+  SND_WORM_KILLED_B, SND_WORM_LAND_A, SND_WORM_LAND_B, type WormTail,
+} from "../src/game/class42";
+import type { Class42Json } from "../src/bundle";
 import { BatChildAt, BatDiveUpdate, BatSplashesTick, BatUpdate, BatWingAt,
   BAT_CHAR_TYPE, BAT_CLIP, BAT_DIVE_BOB_SCALE, BAT_FLAG_80000,
   BAT_SCATTER_ACCEL_XZ, BAT_SCATTER_ACCEL_Y, BAT_SCATTER_CORPSE_DAMP,
@@ -361,7 +368,8 @@ import {
 import { SND_PATH_LEG_LANDED } from "../src/game/class31/path";
 import { ActorBodyConditionFromHands, SPENT_CONDITION }
   from "../src/game/class30/condition";
-import { ThrowerState, ThrowSub } from "../src/game/class31/states";
+import { ThrowerMotion, ThrowerState, ThrowSub }
+  from "../src/game/class31/states";
 import { SpawnThrownWeapon, ThrowerStateThrow } from "../src/game/class31/thrower";
 import { ThrowerStrikeConnect } from "../src/game/class31/strike";
 import { ThrowerStanceOf } from "../src/game/class31/tables";
@@ -369,9 +377,17 @@ import { ActorPlayCursor } from "../src/game/class31/arc";
 import { ThrowerPickLandingPoint } from "../src/game/class31/leap_down";
 import { SND_LEAP_LANDED } from "../src/game/class31/leap";
 import { dist2d, vec3, type Vec3 } from "../src/game/vec";
-import { ActorPlayHitReaction, EffectCode, HitResultCode, ResolveHit }
-  from "../src/game/combat/resolve_hit";
-import { ActorSetMotionBlended } from "../src/game/class30/motion_cue";
+import { ActorPlayHitReaction, ActorReactToHit, EffectCode, HitResultCode,
+  ResolveHit } from "../src/game/combat/resolve_hit";
+import {
+  LeapStrikeSub, LeapTargetMode, ZombieLeapStrikeTarget, ZombieStateLeapStrike,
+} from "../src/game/class30/leap_strike";
+import { HALVED_STUMP_SLOT } from "../src/game/class30/halved";
+import { ActorSetMotionBlended, ZombieSetMotionIfIdle }
+  from "../src/game/class30/motion_cue";
+import { ZombieClearHitReactionWhenDone } from "../src/game/class30/react";
+import { OverlayCursor } from "../src/game/motion";
+import { ThrowerMotionOf } from "../src/game/class31/tables";
 import type { BreakablesJson, ScriptJson } from "../src/bundle";
 import { Walker, type BranchChoice } from "../src/script/walker";
 import {
@@ -1174,19 +1190,20 @@ console.log("an unread class:");
 {
   const rng = new Rng(7);
   const events = scene(0, rng);
-  // Class 0x42 has no module in `g_class_handlers`, so it must not move. This
+  // Class 0x2D has no module in `g_class_handlers`, so it must not move. This
   // used to be the cat, until the cat was read: class 0x53 has a module now,
-  // and its clips are *meant* to carry it -- see "class 0x53, the cat".
-  const idle = ActorSpawn(0x2000, SpawnClass.FallingBreakables, 1, "unread");
+  // and its clips are *meant* to carry it -- see "class 0x53, the cat". Then
+  // it was class 0x42, until the worm was read.
+  const idle = ActorSpawn(0x2000, SpawnClass.LargeCreature, 1, "unread");
   idle.visible = true;
   idle.attackState = 1;
   idle.hp = 10;
   idle.pos = vec3(0, 0, 60);
   const start = { ...idle.pos };
   run(600, rng, events);
-  check("class 0x42 stayed where the script put it",
+  check("class 0x2D stayed where the script put it",
         idle.pos.x === start.x && idle.pos.z === start.z);
-  check("class 0x42 took no permit", idle.attackPermit === -1);
+  check("class 0x2D took no permit", idle.attackPermit === -1);
 }
 
 // -- 3. `attack_state` does not gate the swing ------------------------------
@@ -7976,6 +7993,61 @@ console.log("\nclass 0x24 is never shot:");
   }
 }
 
+console.log("\nclass 0x25 is never shot:");
+{
+  // Nothing class 0x25 runs calls `RegisterForShotTest` (`FUN_00405160`), in
+  // its thirteen routines or anything they reach. The program is stage 2's
+  // jetty zombie, evt 43584 -- one of the four class-0x25 spawns whose record
+  // leaves bit `0x8000` clear, so nothing but the class keeps it out -- from
+  // the reset, through every frame of its hold, its stumble, its fall back and
+  // its splash.
+  const JETTY_PROGRAM: HumanoidProgram["cmds"] = [
+    { op: HumanoidOp.WaitThenHold, mode: HumanoidCond.Always, a: 0, b: 0 },
+    { op: HumanoidOp.WaitThenPlay, mode: HumanoidCond.CameraAt, a: 79, b: 100 },
+    { op: HumanoidOp.WaitUntil, mode: HumanoidCond.CameraAt, a: 79, b: 160 },
+    { op: HumanoidOp.SetBoneModel, mode: 0, a: 2, b: 0 },
+    { op: HumanoidOp.SetMotionBlended, mode: 5, a: 977, b: 0 },
+    { op: HumanoidOp.WaitUntil, mode: HumanoidCond.MotionFrame, a: -1, b: 0 },
+    { op: HumanoidOp.SetMotionBlended, mode: 5, a: 1024, b: 0 },
+    { op: HumanoidOp.WaitUntil, mode: HumanoidCond.Frames, a: 20, b: 0 },
+    { op: HumanoidOp.SetBoneModel, mode: 0, a: 2, b: 1 },
+    { op: HumanoidOp.SetMotionBlended, mode: 5, a: 972, b: 0 },
+    { op: HumanoidOp.Handoff, mode: 0, a: 0, b: 0 },
+    { op: HumanoidOp.End, mode: 0, a: 0, b: 0 },
+  ];
+  const h = g_class_handlers[SpawnClass.ScriptedHumanoid];
+  check("it is picked the engine's way, through the registration list alone",
+        h?.registersForShotTest === true, `${h?.registersForShotTest}`);
+  {
+    const { a, frame } = jettyScene(JETTY_PROGRAM);
+    check("the pick is game/'s, not render/'s: ShotTestPickedHere",
+          ShotTestPickedHere(a) && (a.flags & ActorFlag.NoShotTest) === 0,
+          `flags 0x${a.flags.toString(16)}`);
+    let listed = 0;
+    let frames = 0;
+    for (let f = 1; f <= 600 && !a.dead; f++) {
+      G.g_cam_path_frame = Math.min(f, 179);
+      frame();
+      frames = f;
+      if (G.g_shot_test_list.some((e) => e.at === a.at)) listed += 1;
+    }
+    check("...and no frame of its program, to the splash, registers it",
+          listed === 0 && a.dead, `${listed} of ${frames} frames listed, `
+          + `dead ${a.dead}`);
+  }
+  // The debug clear takes only what a shot could.
+  {
+    const { a, rng } = jettyScene(JETTY_PROGRAM);
+    const hp = a.hp;
+    ActorKillAll(rng);
+    check("the Kill button leaves a scripted humanoid standing, with no death "
+          + "clip",
+          !a.dead && a.death === null && a.hp === hp
+          && (a.flags & ActorFlag.Dead) === 0,
+          `dead ${a.dead} death ${JSON.stringify(a.death)} hp ${a.hp}`);
+  }
+}
+
 console.log("\nclass 0x41, the props are in the save state:");
 {
   const rng = new Rng(21);
@@ -8416,6 +8488,13 @@ console.log("\na replay does not rebuild a rescue target it has played past:");
       motion: 0, hp: 0, body_condition: 0, initial_state: 0,
       attack_state: 0, ring_set: 0, yaw: 0,
       class46: { subtype: 2, group: 0, member: 0 },
+    }, {
+      // Class 0x42 answers per record too: the lone drop counts nothing, so
+      // the record here is the cog's batch, sub-type 0, whose members
+      // `PlaceWormBatch` counts one by one (`INC` `0x0042FBBF`/`0x0042FBC6`).
+      at: recAt(SpawnClass.Worm), class: SpawnClass.Worm, char_type: -1,
+      motion: 0, hp: 1, body_condition: 0, initial_state: 0,
+      attack_state: 0, ring_set: 0, yaw: 0, class42: { subtype: 0 },
     }] } as unknown as CharactersJson, undefined, undefined, undefined);
     const left: string[] = [];
     for (const cls of ENEMY_CLASSES) {
@@ -19161,7 +19240,7 @@ console.log("\nclass 0x30's twelve entrance states — do the waits end?");
           left > 0x14 && left <= 0x14 + 3, `left after ${left} frames`);
     check("...into state 10, which `g_class30_states` says is "
           + "`ZombieReleaseAndDespawn` (`FUN_00455490`) and not the "
-          + "`ActorAbortAttackAndLeave` this used to name",
+          + "routine at `0x0045D9F0` this used to name",
           z.state === ZombieState.Leave || z.despawned,
           `state ${z.state}${z.despawned ? " despawned" : ""}`);
   }
@@ -20818,7 +20897,7 @@ console.log("\nActorBodyConditionFromHands:");
   }
 }
 
-// -- 33c. the crawler's attack is meant to miss ------------------------------
+// -- 33c. the crawler's attack is a leap, and it lands ------------------------
 
 console.log("\nthe crawler's undamaged swing:");
 {
@@ -20839,16 +20918,20 @@ console.log("\nthe crawler's undamaged swing:");
    * Entry 2's hit frame is 40 against `g_motion_play_length[997]` = 20, and
    * `ZombieStateStrike` fires the hit on `obj+0x19C == entry+0x08` *exactly*
    * (`00455bdf`) while leaving the state at `play_length - 1` (`00455c0b`), so
-   * the equality is never reached: the engine's undamaged crawler swings and
-   * misses, every time. The frame counts and play lengths below are the real
-   * bake — 997 is 11 authored frames with a play length of 20, 1018 is 19 with
-   * 35, 1051 is 17 with 31.
+   * in **that** state the equality is never reached. The frame counts and play
+   * lengths below are the real bake — 997 is 11 authored frames with a play
+   * length of 20, 1018 is 19 with 35, 1051 is 17 with 31.
    *
-   * This is divergence 2, closed. The exporter used to drop entry 2 as an
-   * impossible row and `ZombiePickAttack` used to substitute another entry
-   * when the draw named one the bundle had no row for, which between them
-   * handed the crawler entry 3 — a swing that connects. Measured against the
-   * real stage-2 bundle: 29 hits landed in a minute before, 0 after.
+   * This section used to conclude from that that "the engine's undamaged
+   * crawler swings and misses, every time", and asserted no damage in a
+   * minute. **A crawler never runs `ZombieStateStrike`.**
+   * `ZombieStateHoldAtRange` sends body condition 4 to state 0x34
+   * (`0x0045585E`), `ZombieStateLeapStrike` (`FUN_0045E330`), which lands the
+   * entry through `ActorStrikeConnect` when its arc touches down and reads no
+   * hit frame at all -- so both entries connect: entry 2's cancel mask is the
+   * head, and a crawler that has lost its head draws entry 3, whose mask 8 can
+   * never cancel. The draw and the exported entry are unchanged; what this now
+   * asserts is the state that reads them. `L53`.
    */
   const CRAWL = {
     "2": { strike: 997, lunge: 1051, distance: 26, hit_frame: 40,
@@ -20866,10 +20949,21 @@ console.log("\nthe crawler's undamaged swing:");
     motion_row: { ...TYPE.motion_row, "4": [10, 10, 12, 12, 14] },
     reactions: { ...TYPE.reactions, "4": TYPE.reactions["0"] },
     motions: { ...TYPE.motions, "997": motion(11, 0.2, 20),
-               "1018": motion(19, 0.2, 35), "1051": motion(17, 0.6, 31) },
+               "1018": motion(19, 0.2, 35), "1051": motion(17, 0.6, 31),
+               // `g_class30_leap_strike_arc_script`'s two clips.
+               "1052": motion(40), "1053": motion(20) },
   } as unknown as CharacterType;
   const CHARS_CRAWLER = {
     ...CHARS, types: { "1": TYPE, "12": TYPE_CRAWLER },
+    combat: {
+      arc_scripts: {
+        leap_strike: [
+          { motion: 0x41c, start: 0, fade: 5, until: 10 },
+          { motion: 0x41c, start: 11, fade: 5, until: 38 },
+          { motion: 0x41d, start: 0, fade: 3, until: 0 },
+        ],
+      },
+    },
   } as unknown as CharactersJson;
 
   const crawler = (zones: number) => {
@@ -20936,32 +21030,41 @@ console.log("\nthe crawler's undamaged swing:");
     let damaged = 0;
     events.on("player.damaged", () => { damaged += 1; });
     let strikes = 0;
+    let leaps = 0;
     let was = false;
     const drawn = new Set<number>();
     for (let i = 0; i < 3600; i++) {
       GameUpdate(1 / 60, NULL_HOST, rng, events);
-      const now = z.state === ZombieState.Strike;
-      if (now && !was) strikes += 1;
+      if (z.state === ZombieState.Strike) strikes += 1;
+      const now = z.state === ZombieState.LeapStrike;
+      if (now && !was) leaps += 1;
       if (now && z.attack >= 0) drawn.add(z.attack);
       was = now;
     }
-    return { strikes, damaged, drawn: [...drawn].sort() };
+    return { strikes, leaps, damaged, drawn: [...drawn].sort() };
   };
 
   {
     const m = minute(0);
-    check("it gets its swing in", m.strikes > 10, `${m.strikes} strikes`);
+    // The fixture's player has two lives and a continue-less game, so the
+    // minute ends with the player down rather than with the crawler tired:
+    // three leaps, three hits, as measured when this was written.
+    check("it attacks by leaping, again and again until the player is down",
+          m.leaps >= 2 && G.g_player_lives[0] === 0,
+          `${m.leaps} leaps, lives ${G.g_player_lives[0]}`);
+    check("...and never once through ZombieStateStrike", m.strikes === 0,
+          `${m.strikes} frames in the strike`);
     check("...on entry 2", m.drawn.length === 1 && m.drawn[0] === 2,
           `drew {${m.drawn.join(",")}}`);
-    // The point of the whole change.
-    check("...and lands no damage at all, because clip 997 never reaches "
-          + "frame 40", m.damaged === 0, `${m.damaged} hits landed`);
+    // The point of the correction.
+    check("...and every leap connects: it has no hit frame to miss",
+          m.damaged === m.leaps, `${m.damaged} hits from ${m.leaps} leaps`);
   }
   {
-    // The other arm, so that "no damage" is a property of the entry and not
-    // of the fixture: shoot the head off and the same crawler connects.
+    // The other arm: shoot the head off and the same crawler draws entry 3,
+    // whose cancel mask of 8 is outside the zone bits, and still connects.
     const m = minute(DamageZone.Head);
-    check("a crawler with its head shot off draws entry 3 and does connect",
+    check("a crawler with its head shot off draws entry 3 and connects too",
           m.damaged > 0 && m.drawn.length === 1 && m.drawn[0] === 3,
           `${m.damaged} hits on {${m.drawn.join(",")}}`);
   }
@@ -22400,6 +22503,7 @@ console.log("\n`g_class_handlers`, filled by the classes themselves:");
     [SpawnClass.PropPlacer, "0x44 prop placer"],
     [SpawnClass.Boss3, "0x45 stage-3 boss"],
     [SpawnClass.HordeSpawner, "0x40 horde"],
+    [SpawnClass.Worm, "0x42 worm"],
     [SpawnClass.Bat, "0x46 bat"],
     [SpawnClass.WaterEnemy, "0x51 fish"],
     [SpawnClass.Mouse, "0x52 mouse / branch trigger"],
@@ -22418,12 +22522,12 @@ console.log("\n`g_class_handlers`, filled by the classes themselves:");
         && want.every(([c]) => PORTED_CLASSES.includes(c)),
         PORTED_CLASSES.map((c) => `0x${c.toString(16)}`).join(","));
   // The cat is 0x53 and now has one -- its sub-type 2 is a route-branch
-  // trigger -- and 0x40, the horde, has one too. Class 0x42, the falling
-  // breakables, still has none: an unported class must stay absent rather
-  // than fall back to anything, because an `if` is what had the cat running
-  // the zombie's state machine.
+  // trigger -- and 0x40, the horde, and 0x42, the worm, have one too. Class
+  // 0x2D still has none: an unported class must stay absent rather than fall
+  // back to anything, because an `if` is what had the cat running the
+  // zombie's state machine.
   check("a class with no module has no row",
-        g_class_handlers[0x42 as SpawnClass] === undefined);
+        g_class_handlers[SpawnClass.LargeCreature] === undefined);
 
   // Loud, not last-one-wins. A row silently overwritten by a second module is
   // a class whose behaviour depends on evaluation order.
@@ -22834,7 +22938,7 @@ console.log("\nwhere the camera follows an actor:");
  * `ZombieStateStrike` raises it when it captures `strikeStart`
  * (`00455b98 a900000400` / `00455ba5 0d00000400`) and **on the melee path
  * nothing ever clears it again**: the one `AND` in the program that does is in
- * `FUN_0045DA60` (`0045db39 25fffffbff`), which an ordinary zombie never
+ * `ZombieSplitUpdateSelf` (`0045db39 25fffffbff`), which an ordinary zombie never
  * reaches. The port modelled it as a boolean, cleared it in three places, and
  * left it out of the two tests in `ZombieStateHoldAtRange` that read it -- one
  * misreading with four separate symptoms, which is what these assert.
@@ -33888,6 +33992,458 @@ console.log("\nclass 0x40, the horde:");
         && CarrierDrawSlots(3).length === 0);
 }
 
+console.log("\nclass 0x42, the worm:");
+{
+  // The class's `.rdata` as `hod2lib/class42.ts` exports it -- every number
+  // here is the EXE's, and `web/tools/checks/worm.ts` holds the exporter to
+  // the image. The two half tracks are the one thing made up: a straight line
+  // down at two units a frame, x one unit out, so a frame can be read back
+  // off a position and frame 0 is not at the origin (L48).
+  const track = (x: number, y0: number) => ({
+    t: Array.from({ length: 60 }, (_, f) => [x, y0 - 2 * f, 0]).flat(),
+    r: Array.from({ length: 60 }, (_, f) => [f * 16, 0, 0]).flat(),
+  });
+  const WORM: Class42Json = {
+    offsets_6_8: [
+      0, 0, -60, -50, 61, 54, 0, 35, -36, -2, 30, 10, -10, 30,
+      10, -10,
+    ],
+    offsets_10_15: [
+      0, 0, -50, -30, 40, -40, 10, 30, -40, 20, 60, 35, 20, 10,
+      -20, -10, -10, -15, 10, 20, -30, 0, -30, 20, -20, 10, -10, -30,
+      0, -20,
+    ],
+    drop_delay: [
+      70, 90, 95, 105, 115, 125, 130, 135, 140, 145, 150, 155, 160, 165,
+      170,
+    ],
+    yaw_offsets: [
+      65024, 1024, 2560, 0, 2048, 3072, 65280, 0, 64000, 768, 2048, 1536, 384, 128,
+      928,
+    ],
+    orbit_phase: [
+      1024, 4096, 0, 2048, 256, 768, 1536, 512, 0, 0, 0, 0, 0, 0,
+      0,
+    ],
+    crawl_steps: [
+      0, -7, -14, -21, -29, -36, -43, -51, -58, -65, -73, -80, -87, -95,
+      -102, -109, -117, -124, -131, -139, -146, -153, -161, -168, -175, -183, -190, -197,
+      -205, -528, -835, -1128, -1405, -1667, -1915, -2148, -2367, -2572, -2764, -2941, -3106, -3257,
+      -3395, -3520, -3633, -3734, -3822, -3898, -3963, -4016, -4058, -4089, -4107, -4124, -4141, -4159,
+      -4177, -4196, -4215, -4235,
+    ],
+    crawl_scale: [
+      5278, 13510, 13501, 5422, 13253, 13390, 5698, 12970, 13173, 6089, 12667, 12863,
+      6580, 12347, 12473, 7154, 12016, 12015, 7797, 11678, 11503, 8491, 11338, 10950,
+      9221, 10999, 10367, 9970, 10666, 9769, 10690, 10355, 9194, 11344, 10077, 8672,
+      11934, 9830, 8200, 12464, 9613, 7777, 12935, 9424, 7400, 13352, 9260, 7068,
+      13715, 9121, 6777, 14029, 9004, 6526, 14296, 8907, 6313, 14518, 8829, 6135,
+      14699, 8768, 5990, 14841, 8722, 5877, 14946, 8689, 5792, 15018, 8668, 5735,
+      15059, 8657, 5702, 15072, 8654, 5691, 14955, 8712, 5785, 14635, 8871, 6040,
+      14156, 9108, 6421, 13566, 9400, 6892, 12910, 9726, 7415, 12234, 10061, 7954,
+      11584, 10383, 8472, 11005, 10670, 8933, 10544, 10899, 9301, 10161, 11089, 9606,
+      9786, 11275, 9905, 9420, 11457, 10197, 9063, 11633, 10482, 8717, 11805, 10758,
+      8382, 11971, 11025, 8059, 12131, 11282, 7750, 12285, 11529, 7454, 12431, 11765,
+      7173, 12571, 11989, 6907, 12702, 12200, 6658, 12826, 12399, 6426, 12941, 12584,
+      6213, 13047, 12754, 6018, 13144, 12910, 5843, 13230, 13049, 5688, 13307, 13172,
+      5555, 13373, 13278, 5444, 13428, 13367, 5357, 13471, 13437, 5293, 13503, 13487,
+      5254, 13522, 13518, 5241, 13529, 13529, 5260, 13520, 13515,
+    ],
+    leap_path: [
+      169, -193, 337, -387, 502, -584, 663, -784, 817, -986, 961, -1192, 1095, -1402,
+      1215, -1616, 1318, -1833, 1404, -2051, 1474, -2269, 1530, -2484, 1572, -2693, 1604, -2897,
+      1625, -3092, 1638, -3278, 1642, -3454, 1640, -3619, 1630, -3771, 1613, -3910, 1590, -4034,
+      1563, -4142, 1535, -4234, 1509, -4311, 1486, -4370, 1470, -4414, 1459, -4440, 1456, -4449,
+    ],
+    leap_scale: [
+      5278, 13510, 13501, 5350, 13528, 13411, 5552, 13580, 13157, 5868, 13663, 12760,
+      6280, 13772, 12243, 6768, 13905, 11629, 7317, 14058, 10941, 7907, 14227, 10199,
+      8521, 14410, 9428, 9141, 14603, 8650, 9749, 14802, 7886, 10327, 15004, 7160,
+      10858, 15206, 6493, 11323, 15404, 5909, 11704, 15595, 5430, 11985, 15775, 5078,
+      12193, 15948, 4802, 12372, 16115, 4538, 12520, 16273, 4293, 12638, 16417, 4074,
+      12727, 16543, 3886, 12786, 16645, 3735, 12815, 16719, 3628, 12814, 16761, 3570,
+      12784, 16767, 3569, 12724, 16731, 3629, 12635, 16650, 3758, 12516, 16518, 3961,
+      12368, 16331, 4245, 12191, 16085, 4615, 11985, 15775, 5078, 11217, 14600, 6853,
+      9809, 12440, 10110, 8439, 10317, 13282, 7785, 9250, 14801, 7733, 9070, 14935,
+      7710, 8926, 15001, 7714, 8817, 15004, 7744, 8739, 14950, 7797, 8690, 14844,
+      7870, 8668, 14692, 7961, 8671, 14498, 8067, 8694, 14268, 8187, 8737, 14008,
+      8319, 8797, 13722, 8458, 8871, 13416, 8604, 8956, 13095, 8754, 9051, 12765,
+      8906, 9152, 12430, 9056, 9258, 12097, 9204, 9365, 11770, 9346, 9472, 11456,
+      9480, 9575, 11158, 9604, 9673, 10883, 9715, 9763, 10635, 9811, 9841, 10421,
+      9890, 9907, 10245, 9950, 9957, 10112, 9987, 9989, 10029, 10000, 10000, 10000,
+    ],
+    halves: [{ motion: 0xbf, ...track(1, 2) }, { motion: 0xc0, ...track(-1, 3) }],
+  };
+  const worm = (o: Actor) => (o as { worm: WormTail }).worm;
+  const HOST: GameHost = { ...NULL_HOST };
+  const frame = (rng: Rng, events?: Events): ClassFrame =>
+    ({ dt: 1 / 60, rng, host: HOST, events });
+  const GROUND = 3.8;
+  // The three descriptors as they ship: stage 2, `desc+0x25` 1, 0 and 2.
+  const LONE_AT = 0xea04, COG_AT = 0xea2c, LARGE_AT = 0x11ec8;
+  const row = (at: number, subtype: number) => ({
+    at, class: SpawnClass.Worm, char_type: -1, motion: 0, hp: 1,
+    body_condition: 0, initial_state: 0, attack_state: 0, ring_set: 0,
+    yaw: 0, class42: { subtype },
+  });
+  const room = (rng: Rng, block: number, players = 1): Events => {
+    G.g_GameMode = GameMode.Arcade;
+    ResetGameGlobals();
+    SetGameTables({ ...CHARS, class42: WORM, placements: [
+      row(LONE_AT, 1), row(COG_AT, 0), row(LARGE_AT, 2),
+    ] } as unknown as CharactersJson);
+    G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    G.g_scene_state_major = SCENE_MAJOR_PLAYING;
+    EnterPlay();
+    if (players === 2) JoinPlayerTwo();
+    G.g_active_player = 0;
+    G.g_scene_index = 1;
+    G.g_evt_block_index = block;
+    G.g_camera_fixed_eye_y = GROUND;
+    void rng;
+    return new Events();
+  };
+  const place = (at: number, subtype: number, pos: Vec3, yaw: number,
+                 rng: Rng) =>
+    ActorSpawn(at, SpawnClass.Worm, -1, "worm placer",
+               { class42: { subtype }, pos, yaw, visible: true }, rng);
+  const member = (placer: number, i: number) =>
+    ActorByAt(WormMemberAt(placer, i));
+  const listen = (events: Events): number[] => {
+    const out: number[] = [];
+    events.on("sound.play", (e) => out.push(e.id));
+    return out;
+  };
+
+  {
+    // Block 21 step 4's cog batch, sub-type 0, at its descriptor's point and
+    // yaw. One player: six.
+    const rng = new Rng(71);
+    room(rng, 0x15);
+    const p = place(COG_AT, 0, vec3(-924, 74.8, -1336), 40432, rng);
+    const ms = [0, 1, 2, 3, 4, 5, 6].map((i) => member(COG_AT, i));
+    check("the cog's placer builds six worms for one player, and goes",
+          p.despawned && ms.slice(0, 6).every((m) => !!m && !m.despawned)
+          && !ms[6], ms.map((m) => (m ? "+" : "-")).join(""));
+    check("...each in both counters from the moment it is placed",
+          G.g_enemies_alive === 6 && G.g_enemies_present === 6
+          && G.g_worm_live_count === 6
+          && ms.slice(0, 6).every((m, i) => G.g_worm_members[i] === m!.at),
+          `${G.g_enemies_alive}/${G.g_enemies_present}/${G.g_worm_live_count}`);
+    // `g_worm_offsets_6_8` row 1 is (-60, -50), a tenth each; the yaw is the
+    // placer's plus `g_worm_yaw_offsets[1]`, 1024.
+    const m1 = ms[1]!;
+    check("member 1 sits a tenth of its offset from the placer, a quarter "
+          + "turn pitched, turned by its own offset",
+          Math.abs(m1.pos.x - (-924 - 6)) < 1e-4
+          && Math.abs(m1.pos.z - (-1336 - 5)) < 1e-4 && m1.pos.y === 74.8
+          && m1.pitch === 0x4000 && m1.yaw === 40432 + 1024
+          && m1.hitRadius === 2.2,
+          `${m1.pos.x},${m1.pos.z} pitch ${m1.pitch} yaw ${m1.yaw}`);
+    // In block 0x15 it rides the cog: radius idx + 5, about (-924, -1336),
+    // at `g_worm_orbit_phase[1] + 0x7800` -- a turn in which neither sin nor
+    // cos is 0 or 1 -- and the angle steps back 0x80 after it is read.
+    const a = (4096 + 0x7800) * ((2 * Math.PI) / 65536);
+    WormUpdate(m1, frame(rng));
+    check("on the cog, member 1 circles (-924, -1336) at radius six",
+          Math.abs(m1.pos.x - (6 * Math.sin(a) - 924)) < 1e-4
+          && Math.abs(m1.pos.z - (6 * Math.cos(a) - 1336)) < 1e-4
+          && worm(m1).orbit === 4096 + 0x7800 - 0x80,
+          `${m1.pos.x.toFixed(4)},${m1.pos.z.toFixed(4)}`);
+
+    // Member 0's delay is `g_worm_drop_delay[0]`, seventy: the counter passes
+    // it on the seventy-first frame.
+    const m0 = ms[0]!;
+    for (let i = 0; i < 70; i += 1) WormUpdate(m0, frame(rng));
+    check("member 0 holds on for its seventy frames",
+          worm(m0).state === WormState.Perch, WormState[worm(m0).state]);
+    WormUpdate(m0, frame(rng));
+    check("...and lets go on the seventy-first",
+          worm(m0).state === WormState.Fall, WormState[worm(m0).state]);
+    // From y 74.8 at 0.01633 a frame², it is under ground + 3.57 once
+    // 0.01633 n(n+1)/2 > 74.8 - 7.37, n(n+1) > 8258.4: n = 91.
+    const events = new Events();
+    const heard = listen(events);
+    for (let i = 0; i < 90; i += 1) WormUpdate(m0, frame(rng, events));
+    check("...falls for ninety frames without landing",
+          worm(m0).state === WormState.Fall && heard.length === 0,
+          `${WormState[worm(m0).state]} y ${m0.pos.y.toFixed(3)}`);
+    WormUpdate(m0, frame(rng, events));
+    check("...and lands on the ninety-first, 0.8 above the ground, level, "
+          + "with a PDMG_MORR from stage 2's bank",
+          worm(m0).state === WormState.Splat
+          && Math.abs(m0.pos.y - (GROUND + 0.8)) < 1e-6 && m0.pitch === 0
+          && heard.length === 1
+          && (heard[0] === SND_WORM_LAND_A || heard[0] === SND_WORM_LAND_B),
+          `${WormState[worm(m0).state]} y ${m0.pos.y} ${heard.map((x) => x.toString(16))}`);
+    // The splat: `++timer > 0x18`, so the twenty-fifth frame leaves it, with
+    // the crawl's first row 8.
+    for (let i = 0; i < 24; i += 1) WormUpdate(m0, frame(rng));
+    check("the splat holds twenty-four frames, drawing 0x85C + n",
+          worm(m0).state === WormState.Splat && worm(m0).timer === 24
+          && worm(m0).drawnBody === WormBodyDraw.Member,
+          WormState[worm(m0).state]);
+    WormUpdate(m0, frame(rng));
+    check("...and crawls from row 8 on the twenty-fifth",
+          worm(m0).state === WormState.Crawl && worm(m0).frame === 8,
+          `${WormState[worm(m0).state]} ${worm(m0).frame}`);
+    // On the cog the crawl runs twice, rows 8..0x3A and then 0..0x3A: 51 and
+    // 59 frames. Each row moves (step[i+1] - step[i]) * 0.01 * 0.6 * 0.8
+    // along the yaw, so the whole is (step[59] - step[8] + step[59] -
+    // step[0]) * 0.0048 = (-4177 - 4235) * 0.0048 from where it landed.
+    const from = { x: m0.pos.x, z: m0.pos.z };
+    for (let i = 0; i < 109; i += 1) WormUpdate(m0, frame(rng));
+    check("...crawls for 110 frames on the cog",
+          worm(m0).state === WormState.Crawl, WormState[worm(m0).state]);
+    WormUpdate(m0, frame(rng));
+    const go = (-4177 - 4235) * 0.01 * 0.6 * 0.800000011920929;
+    const yaw = m0.yaw * ((2 * Math.PI) / 65536);
+    check("...then waits, having crawled 40.4 units along its own yaw",
+          worm(m0).state === WormState.Wait
+          && Math.abs(m0.pos.x - (from.x + go * Math.sin(yaw))) < 1e-3
+          && Math.abs(m0.pos.z - (from.z + go * Math.cos(yaw))) < 1e-3,
+          `${WormState[worm(m0).state]} moved `
+          + `${(m0.pos.x - from.x).toFixed(3)},${(m0.pos.z - from.z).toFixed(3)}`);
+  }
+
+  {
+    // Two players: eight on the cog, and fifteen in block 26's batch.
+    const rng = new Rng(73);
+    room(rng, 0x15, 2);
+    place(COG_AT, 0, vec3(-924, 74.8, -1336), 40432, rng);
+    check("two players face eight on the cog",
+          !!member(COG_AT, 7) && !member(COG_AT, 8)
+          && G.g_enemies_alive === 8, `${G.g_enemies_alive}`);
+    room(rng, 0x1a, 2);
+    place(LARGE_AT, 2, vec3(-482, 29, -1333), 18730, rng);
+    check("...and fifteen in block 26",
+          !!member(LARGE_AT, 14) && G.g_enemies_alive === 15,
+          `${G.g_enemies_alive}`);
+    room(rng, 0x1a);
+    place(LARGE_AT, 2, vec3(-482, 29, -1333), 18730, rng);
+    check("one player faces ten there",
+          !!member(LARGE_AT, 9) && !member(LARGE_AT, 10)
+          && G.g_enemies_alive === 10, `${G.g_enemies_alive}`);
+  }
+
+  {
+    // **Shot before it lands, it splits.** The kill is in the member's own
+    // update, ahead of its state: blood, both counters, a WORM_TUBU and 80 to
+    // the shooter, and the halves' heights from their motions' first frames.
+    const rng = new Rng(79);
+    const events = room(rng, 0x15);
+    const heard = listen(events);
+    place(COG_AT, 0, vec3(-924, 74.8, -1336), 40432, rng);
+    const m2 = member(COG_AT, 2)!;
+    const score = G.g_player_score[0];
+    m2.flags |= ActorFlag.Hit | ActorFlag.HitByPlayer0;
+    WormUpdate(m2, frame(rng, events));
+    const y = m2.pos.y;
+    check("a worm shot on the cog splits, and its routine is the death's",
+          (m2.flags & WormFlag.Split) !== 0
+          && worm(m2).routine === WormRoutine.Death
+          && worm(m2).state === WormState.Dead, `${m2.flags.toString(16)}`);
+    check("...out of both counters and its slot on the shot, for 80 and a "
+          + "WORM_TUBU",
+          G.g_enemies_alive === 5 && G.g_enemies_present === 5
+          && G.g_worm_live_count === 5 && G.g_worm_members[2] === 0
+          && G.g_player_score[0] - score === 80
+          && heard.some((h) => h === SND_WORM_KILLED_A
+                         || h === SND_WORM_KILLED_B),
+          `${G.g_enemies_alive}/${G.g_enemies_present} `
+          + `+${G.g_player_score[0] - score} ${heard.map((h) => h.toString(16))}`);
+    check("...with its halves where their motions' first frames put them, "
+          + "and the kill frame still drawn whole",
+          worm(m2).halfY[0] === y + 2 && worm(m2).halfY[1] === y + 3
+          && worm(m2).drawnBody === WormBodyDraw.Member,
+          `${worm(m2).halfY}`);
+    check("...and the leaper is a live member",
+          G.g_worm_leaper !== 2 && G.g_worm_members[G.g_worm_leaper] !== 0,
+          `${G.g_worm_leaper}`);
+    WormClassUpdate(m2, frame(rng, events));
+    const h = worm(m2).drawnHalves;
+    check("the death draws both halves on frame 0 and steps them",
+          h.length === 2 && h[0]!.t[1] === 2 && h[1]!.t[1] === 3
+          && h[1]!.t[0] === -1 && worm(m2).halfFrame.join() === "1,1",
+          JSON.stringify(h.map((x) => x.t)));
+    // A half lands once its track's y, two down a frame from 2, puts it
+    // under ground + 1.5 = 5.3: 2 - 2f + y < 5.3.
+    const land = Math.floor((y + 2 - 5.3) / 2) + 1;
+    for (let i = 1; i < land; i += 1) WormDeathUpdate(m2, frame(rng, events));
+    const splashes = () => G.g_object_list.filter(
+      (o) => o.cls === SpawnClass.HordeSpawner
+             && (o as { horde: HordeTail }).horde.kind === HordeKind.Splash
+             && !o.despawned).length;
+    const before = splashes();
+    check("half 0 is still in the air on its frame " + (land - 1),
+          worm(m2).halfLanded[0] === 0, `${worm(m2).halfLanded}`);
+    WormDeathUpdate(m2, frame(rng, events));
+    check("...lands on frame " + land + " at the ground plus 1.5 and "
+          + "splashes, then sinks",
+          worm(m2).halfLanded[0] === 1 && splashes() === before + 1
+          && Math.abs(worm(m2).halfY[0] - (GROUND + 1.5 - 0.025)) < 1e-6,
+          `${worm(m2).halfLanded} ${worm(m2).halfY}`);
+    for (let i = land + 1; i < 61; i += 1) WormDeathUpdate(m2, frame(rng, events));
+    check("the death lasts sixty-one frames...", !m2.despawned);
+    WormDeathUpdate(m2, frame(rng, events));
+    check("...and is gone on the sixty-second", m2.despawned);
+    check("...having moved no counter of its own",
+          G.g_enemies_alive === 5 && G.g_enemies_present === 5,
+          `${G.g_enemies_alive}/${G.g_enemies_present}`);
+  }
+
+  {
+    // **Shot after it lands, it melts**: no split, the horde's splash where
+    // it stands, and the death strip, `0x87A + n`, holding at 0x15. And the
+    // shot is player 2's alone, so player 2 is paid.
+    const rng = new Rng(83);
+    const events = room(rng, 0x1a, 2);
+    place(LARGE_AT, 2, vec3(-482, 29, -1333), 18730, rng);
+    const m = member(LARGE_AT, 3)!;
+    for (let i = 0; i < 400 && worm(m).state !== WormState.Crawl; i += 1) {
+      WormUpdate(m, frame(rng, events));
+    }
+    const score = G.g_player_score[1];
+    m.flags |= ActorFlag.Hit | ActorFlag.HitByPlayer1;
+    WormUpdate(m, frame(rng, events));
+    const splash = G.g_object_list.find(
+      (o) => o.cls === SpawnClass.HordeSpawner
+             && (o as { horde: HordeTail }).horde.kind === HordeKind.Splash);
+    check("a worm shot on the ground does not split, and pays player 2",
+          (m.flags & WormFlag.Split) === 0 && worm(m).state === WormState.Dead
+          && G.g_player_score[1] - score === 80,
+          `${m.flags.toString(16)} +${G.g_player_score[1] - score}`);
+    check("...and leaves the horde's splash a hundredth per index over the "
+          + "ground",
+          !!splash && splash.pos.x === m.pos.x && splash.pos.z === m.pos.z
+          && Math.abs(splash.pos.y - (3 * 0.009999999776482582 + GROUND + 1))
+             < 1e-6, `${splash?.pos.y}`);
+    const strip: number[] = [];
+    for (let i = 0; i < 24; i += 1) {
+      WormDeathUpdate(m, frame(rng, events));
+      strip.push(worm(m).drawnStrip);
+    }
+    check("...then draws the death strip 0..0x15 and holds its last frame",
+          strip[0] === 0 && strip[0x15] === 0x15 && strip[23] === 0x15,
+          strip.join(","));
+  }
+
+  {
+    // **The leap.** Only the member `g_worm_leaper` names swells, for ten
+    // frames, to `g_worm_leap_scale` row 0, and then leaps sixty frames at
+    // the camera block `g_camera_index` names; unshot, it takes a life off
+    // its player and bounces away, and the turn passes to the next member.
+    const rng = new Rng(89);
+    const events = room(rng, 0x1a);
+    G.g_camera_block_eye = vec3(-470, 18, -1290);
+    place(LARGE_AT, 2, vec3(-482, 29, -1333), 18730, rng);
+    const L = G.g_worm_leaper;
+    const m = member(LARGE_AT, L)!;
+    for (let i = 0; i < 400 && worm(m).state !== WormState.Wait; i += 1) {
+      WormUpdate(m, frame(rng, events));
+    }
+    for (let i = 0; i < 9; i += 1) WormUpdate(m, frame(rng, events));
+    check("the leaper swells for nine frames...",
+          worm(m).state === WormState.Wait && worm(m).timer === 9,
+          `${WormState[worm(m).state]} ${worm(m).timer}`);
+    WormUpdate(m, frame(rng, events));
+    const eye = G.g_camera_block_eye;
+    const face = (Math.trunc(Math.atan2(m.pos.x - eye.x, m.pos.z - eye.z)
+                             * 10430.378350470453) << 16) >> 16;
+    const range = Math.hypot(eye.x - m.pos.x, eye.z - m.pos.z);
+    check("...and leaps on the tenth, turned square to the camera block",
+          worm(m).state === WormState.Leap && m.yaw === face
+          && Math.abs(worm(m).range - range) < 1e-9,
+          `${WormState[worm(m).state]} yaw ${m.yaw} vs ${face}`);
+    const from = { ...worm(m).leapFrom };
+    for (let i = 0; i < 0x21; i += 1) WormUpdate(m, frame(rng, events));
+    // Frame 0x20 is the path's first row, `{rise 169, reach -193}`.
+    const a = m.yaw * ((2 * Math.PI) / 65536);
+    check("frame 0x20 puts it the path's first row along its yaw",
+          Math.abs(m.pos.x - (-193 * 0.009999999776482582 * Math.sin(a) * range
+                              * 0.016179848047500653 + from.x)) < 1e-4
+          && Math.abs(m.pos.z - (-193 * 0.009999999776482582 * Math.cos(a)
+                                 * range * 0.016179848047500653 + from.z))
+             < 1e-4, `${m.pos.x},${m.pos.z}`);
+    const lives = G.g_player_lives[0];
+    for (let i = 0x21; i < 0x3b; i += 1) WormUpdate(m, frame(rng, events));
+    check("the leap has not landed by frame 0x3B",
+          worm(m).state === WormState.Leap && G.g_player_lives[0] === lives);
+    WormUpdate(m, frame(rng, events));
+    check("...and takes a life at the sixtieth, and bounces",
+          worm(m).state === WormState.Bounce
+          && G.g_player_lives[0] === lives - 1,
+          `${WormState[worm(m).state]} ${G.g_player_lives[0]}/${lives}`);
+    check("...handing the leap to the next member",
+          G.g_worm_leaper === (L + 1) % 10, `${G.g_worm_leaper} after ${L}`);
+    for (let i = 0; i < 400 && !m.despawned; i += 1) {
+      WormUpdate(m, frame(rng, events));
+    }
+    check("...which is gone under the ground, out of both counters",
+          m.despawned && G.g_enemies_alive === 9 && G.g_enemies_present === 9
+          && G.g_worm_members[L] === 0 && G.g_worm_live_count === 9,
+          `${G.g_enemies_alive}/${G.g_enemies_present}/${G.g_worm_live_count}`);
+  }
+
+  {
+    // Sub-type 1: one worm, counted nowhere, that drops from y 62 at 0.02722
+    // a frame² and goes under y 30: 0.02722 n(n+1)/2 > 32, n = 48.
+    const rng = new Rng(97);
+    room(rng, 0x15);
+    place(LONE_AT, 1, vec3(-912.7, 62, -1318.4), 37552, rng);
+    const lone = ActorByAt(WormMemberAt(LONE_AT, WORM_LONE_SLOT))!;
+    check("the lone drop is one worm in neither counter",
+          !!lone && worm(lone).routine === WormRoutine.LoneDrop
+          && G.g_enemies_alive === 0 && G.g_enemies_present === 0
+          && lone.hitRadius === 3.0 && lone.yaw === 37552,
+          `${G.g_enemies_alive}`);
+    for (let i = 0; i < 47; i += 1) WormLoneDropUpdate(lone, frame(rng));
+    check("...falling for forty-seven frames", !lone.despawned
+          && worm(lone).drawnBody === WormBodyDraw.Lone,
+          `${lone.pos.y}`);
+    WormLoneDropUpdate(lone, frame(rng));
+    check("...and gone on the forty-eighth, below y 30", lone.despawned,
+          `${lone.pos.y}`);
+
+    // Shot, it splits, and goes the frame half 0's track runs out.
+    room(rng, 0x15);
+    place(LONE_AT, 1, vec3(-912.7, 62, -1318.4), 37552, rng);
+    const shot = ActorByAt(WormMemberAt(LONE_AT, WORM_LONE_SLOT))!;
+    shot.flags |= ActorFlag.Hit | ActorFlag.HitByPlayer0;
+    const score = G.g_player_score[0];
+    WormLoneDropUpdate(shot, frame(rng));
+    check("shot, it splits on the same frame, for no score",
+          worm(shot).state === WormState.Dead
+          && worm(shot).drawnHalves.length === 2
+          && G.g_player_score[0] === score, `${worm(shot).drawnHalves.length}`);
+    for (let i = 1; i < 0x3b; i += 1) WormLoneDropUpdate(shot, frame(rng));
+    check("...draws its halves to frame 0x3A", !shot.despawned);
+    WormLoneDropUpdate(shot, frame(rng));
+    check("...and goes on the frame half 0 reaches 0x3B", shot.despawned);
+  }
+
+  {
+    // The replay's question is per record: the lone drop counts nothing.
+    const rng = new Rng(101);
+    room(rng, 0x15);
+    check("a replay retires the two batches at a room gate and not the lone "
+          + "drop",
+          WormCountsForEnemyGate({ at: COG_AT, class: 0x42, hp: 1 })
+          && WormCountsForEnemyGate({ at: LARGE_AT, class: 0x42, hp: 1 })
+          && !WormCountsForEnemyGate({ at: LONE_AT, class: 0x42, hp: 1 }));
+    // ...and the script's spawn reaches `PlaceWormBatch` through the
+    // director, which runs the members from the next frame's task walk.
+    SpawnSlotActor({ at: COG_AT, class: 0x42, pos: [-924, 74.8, -1336] }, rng);
+    const m = member(COG_AT, 1);
+    const before = m ? worm(m).orbit : 0;
+    run(1, rng, new Events());
+    check("the script's spawn builds the batch and the frame runs it",
+          !!m && worm(m).orbit === before - 0x80 && G.g_enemies_alive === 6,
+          `${m ? worm(m).orbit : "none"} vs ${before}`);
+    SetGameTables(CHARS);
+  }
+}
+
 console.log("\nclass 0x30 state 37 — the drum-carriers on stage 3's bridge:");
 {
   // -- the matrix helpers the carried prop is built on --------------------
@@ -39974,6 +40530,473 @@ console.log("\nthe crosshair and the device -- the mouse has one, the light gun 
         `modes ${G.g_input_mode}`);
   ResetGameGlobals();
   SetOptionsTables(undefined);
+}
+
+/**
+ * Stage 2's crawler, `znkager` -- character type 0xC, body condition 4 on all
+ * twenty of its spawns -- and the two routines that condition selects.
+ *
+ * `EnemyZombieInitByCharType` (`FUN_00452FD0`) raises `obj+0x136C` bit 0x80 on
+ * every `znkager` and, at condition 4, calls `ZombieInitHalved`
+ * (`FUN_0045DA10`): the bone-9 root hidden, a stump on bone 9, a smaller body
+ * sphere, bits `0x6000080`. Then `ZombieStateHoldAtRange` sends a condition-4
+ * claim to state 0x34 (`0x0045585E`), `ZombieStateLeapStrike` (`FUN_0045E330`),
+ * which lands the hit through `ActorStrikeConnect` on touching down.
+ *
+ * The port had none of it. Every assertion below fails on the tree before this
+ * section was written: the flags and the hidden bones were never set, bone 10
+ * could not be severed, and the crawler ran `ZombieStateStrike` -- where its
+ * attack, hit frame 40 on a clip whose play length is 20, can never land. The
+ * fixture pins that play length for exactly that reason: a crawler that is
+ * still in the strike deals **no** damage here, and one that leaps does.
+ */
+console.log("\nthe crawler: born halved, and it leaps rather than strikes:");
+{
+  // The EXE's type-0xC skeleton: two roots, bone 1 with the head (2) and two
+  // arm chains (3-5, 6-8), and bone 9 with two leg chains (10-12, 13-15).
+  // `parent` is an index into the list, as the exporter writes it.
+  const kb = (bone: number, parent: number | null,
+              steps: number[][] = []) =>
+    ({ bone, part: `b${bone}`, slot: 0x1d80 + bone, offset: [0, 0, 0],
+       parent, damage_rank: [], hit_radius: 2, steps });
+  const bones = [
+    kb(1, null), kb(2, 0), kb(3, 0), kb(4, 2), kb(5, 3),
+    kb(6, 0), kb(7, 5), kb(8, 6),
+    kb(9, null), kb(10, 8, [[0x1da9, EffectCode.Sever, 3]]), kb(11, 9),
+    kb(12, 10), kb(13, 8), kb(14, 12), kb(15, 13),
+  ];
+  const STRIKE = 997;
+  const LUNGE = 1051;
+  const WINDUP = 0x41c;
+  const LANDING = 0x41d;
+  const KAGER = {
+    ...TYPE, type: 0xc, name: "znkager", bones,
+    // `00566e70`: `{997, 1051, 26.0f, 40, 9, 1}`, the entry every undamaged
+    // crawler draws -- its cond-4 pick row is ten 2s per zone combo.
+    attacks: {
+      ...TYPE.attacks,
+      "4": { "2": { strike: STRIKE, lunge: LUNGE, distance: 26, hit_frame: 40,
+                    overlay_kind: 9, cancel_mask: 1 } },
+    },
+    attack_picks: { ...TYPE.attack_picks, "4": new Array(80).fill(2) },
+    motion_row: { ...TYPE.motion_row, "4": [10, 10, 12, 12, 14] },
+    motions: {
+      ...TYPE.motions,
+      // `g_motion_play_length[997]` is 0x14, 20, and `ZombieStateStrike`
+      // fires on `obj+0x19C == 40` exactly.
+      [STRIKE]: motion(11, 0, 20), [LUNGE]: motion(20, 0.6),
+      [WINDUP]: motion(40), [LANDING]: motion(20),
+    },
+  } as unknown as CharacterType;
+  const CHARS12 = {
+    ...CHARS,
+    types: { "1": TYPE, "3": { ...TYPE, type: 3 }, "12": KAGER },
+    // `g_class30_leap_strike_arc_script`, `0x00593180`, as exported.
+    combat: {
+      arc_scripts: {
+        leap_strike: [
+          { motion: WINDUP, start: 0, fade: 5, until: 10 },
+          { motion: WINDUP, start: 11, fade: 5, until: 38 },
+          { motion: LANDING, start: 0, fade: 3, until: 0 },
+        ],
+      },
+    },
+  } as unknown as CharactersJson;
+  const setup = () => {
+    ResetGameGlobals();
+    SetGameTables(CHARS12);
+    G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    G.g_scene_state_major = SCENE_MAJOR_PLAYING;
+    EnterPlay();
+    G.g_nFiringGate = 1;
+  };
+  const kager = (at: number, condition: number): ZombieActor => {
+    const z = spawnZombie(at, 0xc, "znkager",
+                          { condition, initialState: ZombieState.AttackRun,
+                            attackState: -1 }, new Rng(3));
+    z.visible = true;
+    z.hp = z.maxHp = 100;
+    z.pos = vec3(0, 0, 45);
+    z.motion = 12;
+    return z;
+  };
+  const range = (a: number, b: number) =>
+    Array.from({ length: b - a + 1 }, (_, i) => a + i);
+
+  // -- ZombieInitHalved ----------------------------------------------------
+  setup();
+  {
+    const z = kager(0x7c00, 4);
+    check("a znkager born at body condition 4 carries 0x6000080 in obj+0x136C",
+          (z.flags2 & 0x6000080) === 0x6000080, `0x${z.flags2.toString(16)}`);
+    check("...a body sphere of 0.8 of EnemyZombieInit's 3.5",
+          Math.abs(z.bodyRadius - 3.5 * 0.8) < 1e-9, String(z.bodyRadius));
+    check("...draws nothing from bone 10 to 15, and all of bones 1 to 9",
+          range(10, 15).every((b) => z.removed.includes(b))
+          && !range(1, 9).some((b) => z.removed.includes(b)),
+          JSON.stringify(z.removed));
+    check("...and draws the stump 0x1DA3 on bone 9",
+          z.boneSlot["9"] === HALVED_STUMP_SLOT, JSON.stringify(z.boneSlot));
+  }
+  {
+    const z = kager(0x7c01, 0);
+    check("one born at any other condition keeps its legs and still gets 0x80",
+          z.removed.length === 0
+          && (z.flags2 & ZombieFlag2.SeverAnyBone) !== 0
+          && (z.flags2 & ZombieFlag2.LowSphere) === 0,
+          `0x${z.flags2.toString(16)} ${JSON.stringify(z.removed)}`);
+    const out = ResolveHit(z, 10, NULL_HOST, new Rng(1));
+    check("...which is what opens ResolveHit's type-0xC gate below bone 9",
+          out.result === HitResultCode.Severed
+          && z.removed.includes(11) && z.removed.includes(12),
+          `result ${out.result} removed ${JSON.stringify(z.removed)}`);
+  }
+
+  // -- ZombieLeapStrikeTarget ----------------------------------------------
+  {
+    setup();
+    const calls: number[][] = [];
+    const host = {
+      ...NULL_HOST,
+      viewPoint: (x: number, y: number, zz: number, out: Vec3) => {
+        calls.push([x, y, zz]);
+        out.x = 7; out.y = 8; out.z = 9;
+      },
+    };
+    const z = kager(0x7c02, 4);
+    z.attackPermit = 1;
+    const was = G.g_max_attackers;
+    G.g_max_attackers = 2;
+    const p = vec3();
+    ZombieLeapStrikeTarget(z, p, LeapTargetMode.CameraSpace, host);
+    z.condition = 0;
+    ZombieLeapStrikeTarget(z, p, LeapTargetMode.CameraSpace, host);
+    G.g_max_attackers = was;
+    check("a crawler aims 3 under and 12.5 ahead of the camera, 2 to the "
+          + "permit's side negated; anyone else 12 and 12, not negated",
+          JSON.stringify(calls) === "[[2,-3,-12.5],[-2,-12,-12]]"
+          && p.x === 7 && p.y === 8 && p.z === 9, JSON.stringify(calls));
+  }
+
+  // -- the hub, the leap, the hit ------------------------------------------
+  {
+    setup();
+    const z = kager(0x7c03, 4);
+    const rng = new Rng(9);
+    const events = new Events();
+    const sounds: number[] = [];
+    events.on("sound.play", (d) => sounds.push(d.id));
+    const lives = G.g_player_lives[0];
+    let struck = false;
+    let leapt = false;
+    const subs = new Set<number>();
+    let backedOff = false;
+    let livesAtLanding = -1;
+    for (let i = 0; i < 2400 && !backedOff; i++) {
+      GameUpdate(1 / 60, NULL_HOST, rng, events);
+      if (z.state === ZombieState.Strike) struck = true;
+      if (z.state === ZombieState.LeapStrike) {
+        leapt = true;
+        subs.add(z.sub);
+        if (z.sub >= LeapStrikeSub.Recoil && livesAtLanding < 0) {
+          livesAtLanding = G.g_player_lives[0];
+        }
+      }
+      if (leapt && z.state === ZombieState.BackOff) backedOff = true;
+    }
+    check("the hub sends a condition-4 claim to state 0x34, the leap", leapt,
+          `state ${ZombieState[z.state] ?? z.state}`);
+    check("...and never to ZombieStateStrike", !struck);
+    check("...which is flown through its arc rather than skipped",
+          subs.has(LeapStrikeSub.Flight), JSON.stringify([...subs]));
+    check("...and lands the hit the strike could not: a life gone on touchdown",
+          G.g_player_lives[0] === lives - 1 && livesAtLanding === lives - 1,
+          `lives ${lives} -> ${G.g_player_lives[0]} (at landing ${livesAtLanding})`);
+    check("...then bounces, with ENE_WALK6_22 on the bounce, into the retreat",
+          backedOff && sounds.includes(0x2916a9),
+          `backed off ${backedOff}, sounds ${sounds.join(",")}`);
+    check("...back on the ground snap", (z.flags & ActorFlag.Airborne) === 0,
+          `0x${z.flags.toString(16)}`);
+  }
+
+  // -- ActorReactToHit's three arms ----------------------------------------
+  {
+    setup();
+    const z1 = spawnZombie(0x7c04, 1, "type 1");
+    const z3 = spawnZombie(0x7c05, 3, "type 3");
+    check("result 4 never staggers -- the split arm, whose split is not ported",
+          ActorReactToHit(z1, 1, HitResultCode.Split) === undefined
+          && ActorReactToHit(z1, 4, HitResultCode.Split) === undefined);
+    check("...result 1 always does", z1.react === null
+          && ActorReactToHit(z1, 4, HitResultCode.Damaged) !== undefined);
+    check("...and result 0 does for type 3, as 2 and 5 do: everything that is "
+          + "not 1, 3 or 4 is one arm",
+          ActorReactToHit(z3, 4, HitResultCode.None) !== undefined
+          && ActorReactToHit(z1, 4, HitResultCode.None) === undefined);
+  }
+}
+
+/**
+ * The stumble is track 1, over bone 1's subtree -- and the crawler flinches on
+ * the floor.
+ *
+ * `ActorPlayHitReaction` (`FUN_004544C0`) plays an upper-body hit's clip with
+ * `MotionCrossFadeTo(obj+0x194, 1, clip, 0, 1, result3 ? 0x14 : 10)`: bone 1's
+ * subtree only, two frames in, 11 or 21 back out through
+ * `MotionFadeOverlayToBase` once the clip reaches its play length; a hit on
+ * bone 9 or below cuts the base track with `ActorSetMotion`. The bits it
+ * raises are lowered by `ZombieClearHitReactionWhenDone` (`FUN_00454660`) a
+ * quarter of the way into the clip, and `ZombieSetMotionIfIdle`
+ * (`FUN_00454770`) honours them. The port blended the whole skeleton onto the
+ * clip, root included -- a standing flinch that stood every `znkager` up --
+ * and had none of the rest.
+ */
+console.log("\nthe stumble: bone 1's subtree on track 1, and what lowers it:");
+{
+  // `znkager`'s skeleton in small: bone 1 with head (2) and two arm chains
+  // (3-5, 6-8), bone 9 with two leg chains (10-12, 13-15). `parent` is an
+  // index into the list, as the exporter writes it.
+  const kb = (bone: number, parent: number | null) =>
+    ({ bone, part: `b${bone}`, slot: 0x1d80 + bone, offset: [0, 0, 0],
+       parent, damage_rank: [], hit_radius: 2, steps: [] });
+  const bones = [
+    kb(1, null), kb(2, 0), kb(3, 0), kb(4, 2), kb(5, 3), kb(6, 0), kb(7, 5),
+    kb(8, 6), kb(9, null), kb(10, 8), kb(11, 9), kb(12, 10), kb(13, 8),
+    kb(14, 12), kb(15, 13),
+  ];
+  // The shipped row: condition 4's stumbles are the standing zombie's, which
+  // is why the port's whole-body blend stood a crawler up. 982 is bone 1's --
+  // group 2 in `g_bone_reaction_group` -- 16 frames, play length 29.
+  const ROW = [982, 977, 982, 981, 979, 974, 961, 960];
+  const CRAWL = 1054;
+  const OTHER = 1055;
+  const KAGER = {
+    ...TYPE, type: 0xc, name: "znkager", bones,
+    reactions: { "0": ROW, "4": ROW },
+    motion_row: { ...TYPE.motion_row,
+                  "4": [CRAWL, OTHER, 1051, 1051, 1049, 270, 270, 272] },
+    motions: {
+      ...TYPE.motions,
+      "982": motion(16, 0, 29), "961": motion(21, 0, 39),
+      [CRAWL]: motion(20, 0, 37), [OTHER]: motion(20, 0, 37),
+      "1051": motion(17, 0.6, 31), "1049": motion(21, 0, 39),
+    },
+  } as unknown as CharacterType;
+  const CHARS_REACT = {
+    ...CHARS,
+    // Type 1's leg stumble at `zom.bin` 961's real play length, 39.
+    types: { "1": { ...TYPE, reactions: { "0": ROW },
+                    motions: { ...TYPE.motions, "961": motion(21, 0, 39) } },
+             "12": KAGER },
+    reaction_groups: [0, 2, 1, 3, 3, 3, 4, 4, 4, 5, 6, 6, 6, 7, 7, 7],
+  } as unknown as CharactersJson;
+  const setup = () => {
+    ResetGameGlobals();
+    SetGameTables(CHARS_REACT);
+    G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    G.g_scene_state_major = SCENE_MAJOR_PLAYING;
+    EnterPlay();
+  };
+  const crawler = (at: number): ZombieActor => {
+    const z = spawnZombie(at, 0xc, "znkager",
+                          { condition: 4, initialState: ZombieState.AttackRun,
+                            attackState: -1 }, new Rng(3));
+    z.hp = z.maxHp = 100;
+    z.motion = CRAWL;
+    z.playTicks = 5;
+    return z;
+  };
+
+  // -- ActorPlayHitReaction's two arms ------------------------------------
+  setup();
+  {
+    const z = crawler(0x7d00);
+    const clip = ActorReactToHit(z, 1, HitResultCode.Damaged);
+    const t = z.react;
+    check("a torso hit on a crawler plays its clip on track 1, over bone 1's "
+          + "subtree",
+          clip === 982 && t !== null && t.motion === 982 && t.bone === 1,
+          JSON.stringify(t));
+    check("...fading in over two frames and back out over eleven -- "
+          + "MotionCrossFadeTo(obj+0x194, 1, clip, 0, 1, 10)",
+          t !== null && t.fade === 1 && t.fadeLen === 2 && t.fadeOut === 11
+          && !t.back && !t.hold, JSON.stringify(t));
+    check("...leaving the crawl on the base track, which the root and the legs "
+          + "keep",
+          z.motion === CRAWL && z.playTicks === 5,
+          `motion ${z.motion} ticks ${z.playTicks}`);
+    check("...and raising obj+0x136C 0x1000 and obj+0x34 0x40000000",
+          (z.flags2 & ZombieFlag2.HitClipOverlay) !== 0
+          && (z.flags2 & ZombieFlag2.HitClipBase) === 0
+          && (z.flags & ActorFlag.Reacting) !== 0,
+          `flags2 0x${z.flags2.toString(16)} flags 0x${z.flags.toString(16)}`);
+  }
+  {
+    const z = crawler(0x7d01);
+    ActorReactToHit(z, 1, HitResultCode.Severed);
+    check("a severing hit fades back out over 21 -- PUSH 0x14",
+          z.react?.fadeOut === 21, JSON.stringify(z.react));
+  }
+  {
+    const z = spawnZombie(0x7d02, 1, "walker",
+                          { condition: 0, initialState: ZombieState.AttackRun,
+                            attackState: -1 }, new Rng(3));
+    z.hp = z.maxHp = 100;
+    z.motion = 10;
+    const clip = ActorReactToHit(z, 10, HitResultCode.Damaged);
+    check("a leg hit cuts the whole base track onto its clip -- ActorSetMotion",
+          clip === 961 && z.motion === 961 && z.playTicks === 0
+          && z.react === null && z.fadeFrom === null,
+          `clip ${clip} motion ${z.motion} react ${JSON.stringify(z.react)}`);
+    check("...and raises obj+0x136C 0x2000, not 0x1000",
+          (z.flags2 & ZombieFlag2.HitClipBase) !== 0
+          && (z.flags2 & ZombieFlag2.HitClipOverlay) === 0
+          && (z.flags & ActorFlag.Reacting) !== 0,
+          `flags2 0x${z.flags2.toString(16)}`);
+    const rng = new Rng(4);
+    ZombieSetMotionIfIdle(z, 10, rng, "clip");
+    check("...which ZombieSetMotionIfIdle will not replace while it is up",
+          z.motion === 961, `motion ${z.motion}`);
+    // A quarter of 39 is 9: `ZombieClearHitReactionWhenDone` lowers the bit
+    // on the first frame the base cursor reaches it.
+    let lowered = -1;
+    for (let i = 1; i <= 40 && lowered < 0; i++) {
+      ActorAdvanceMotion(z, 1 / 60);
+      ZombieClearHitReactionWhenDone(z);
+      if (!(z.flags2 & ZombieFlag2.HitClipBase)) lowered = MotionPlayFrame(z);
+    }
+    check("...until a quarter of the clip has played, and then both bits drop",
+          lowered === 9 && (z.flags & ActorFlag.Reacting) === 0,
+          `lowered at cursor ${lowered}`);
+    ZombieSetMotionIfIdle(z, 10, rng, "clip");
+    check("...and the state's clip comes back", z.motion === 10,
+          `motion ${z.motion}`);
+  }
+
+  // -- the overlay's life: SkeletonAdvanceOverlayCursor ----------------------
+  setup();
+  {
+    const z = crawler(0x7d03);
+    ActorReactToHit(z, 1, HitResultCode.Damaged);
+    // Numbers from the exe, not measured: 982's play length is 29, a quarter
+    // of it 7; the fade back is `track+0x33` = 10 + 1 frames, weight
+    // k / 12; and the track is handed back on the frame the base cursor --
+    // which wraps at 37 + 1 -- comes round to the 0 this track holds.
+    let quarterAt = -1;
+    let backAt = -1;
+    let backFade = -1;
+    let backMotion = -1;
+    let offAt = -1;
+    let baseAtOff = -1;
+    for (let i = 1; i <= 200 && offAt < 0; i++) {
+      ActorAdvanceMotion(z, 1 / 60);
+      ZombieClearHitReactionWhenDone(z);
+      const t = z.react;
+      if (quarterAt < 0 && !(z.flags2 & ZombieFlag2.HitClipOverlay)) {
+        quarterAt = t ? OverlayCursor(z, t) : -1;
+      }
+      if (backAt < 0 && t?.back) {
+        backAt = i;
+        backFade = t.fade;
+        backMotion = t.motion;
+      }
+      if (!t) {
+        offAt = i;
+        baseAtOff = MotionPlayFrame(z);
+      }
+    }
+    check("ZombieClearHitReactionWhenDone drops 0x1000 a quarter of the way "
+          + "in -- cursor 7 of 29 -- and the reaction bit with it",
+          quarterAt === 7 && (z.flags & ActorFlag.Reacting) === 0,
+          `at cursor ${quarterAt}`);
+    check("the clip plays to its play length and then fades home: the base "
+          + "clip on the track, over eleven frames",
+          backAt === 1 + 29 && backMotion === CRAWL && backFade === 11,
+          `back at frame ${backAt}, fade ${backFade}, motion ${backMotion}`);
+    check("...and the track is handed back on the frame the base cursor is 0",
+          offAt > backAt + 11 && baseAtOff === 0,
+          `off at frame ${offAt}, base cursor ${baseAtOff}`);
+  }
+
+  // -- what ends it early, and what does not ----------------------------------
+  setup();
+  {
+    const z = crawler(0x7d04);
+    ActorReactToHit(z, 1, HitResultCode.Damaged);
+    ZombieSetMotionIfIdle(z, OTHER, new Rng(5), "clip");
+    check("ZombieSetMotionIfIdle under 0x1000 changes the legs' clip and the "
+          + "stumble plays on -- ActorSetMotionBlendedUnderOverlay",
+          z.motion === OTHER && z.react?.motion === 982,
+          `motion ${z.motion} react ${JSON.stringify(z.react)}`);
+    ActorSetMotionBlended(z, CRAWL, 0, 10);
+    check("...and ActorSetMotionBlended ends it: model+0x36 = 0",
+          z.motion === CRAWL && z.react === null, JSON.stringify(z.react));
+  }
+
+  // -- who staggers at all -----------------------------------------------------
+  setup();
+  {
+    const h = ActorSpawn(0x7d05, SpawnClass.ScriptedHumanoid, 1, "humanoid");
+    h.hp = h.maxHp = 100;
+    h.visible = true;
+    const out = ResolveHit(h, 4, NULL_HOST, new Rng(1));
+    check("a class-0x25 figure shot and alive does not stagger: "
+          + "ActorReactToHit's one caller is ZombieOnShot (0x0045401B)",
+          out.result === HitResultCode.Damaged && h.hp > 0
+          && h.react === null && (h.flags & ActorFlag.Reacting) === 0,
+          `result ${out.result} react ${JSON.stringify(h.react)}`);
+  }
+}
+
+/**
+ * `ZombieStateLeapStrike`'s recoil is turned by the camera **block's** yaw:
+ * `MOV ECX, [EAX*4 + 0x9a60d0]` at `0x0045E54A`. The two camera yaws are half
+ * a turn apart in play (L64), and the leap read `g_camera_yaw_bams`, so the
+ * crawler kicked itself back toward the player.
+ */
+console.log("\nthe crawler's recoil turns by the camera block's yaw:");
+{
+  ResetGameGlobals();
+  SetGameTables(CHARS);
+  EnterPlay();
+  const z = spawnZombie(0x7d10, 1, "leaper",
+                        { condition: 0, initialState: ZombieState.AttackRun,
+                          attackState: -1 }, new Rng(3));
+  G.g_camera_index = 0;
+  G.g_camera_block_yaw_bams = 0x4000;
+  G.g_camera_yaw_bams = 0xc000;
+  z.state = ZombieState.LeapStrike;
+  z.sub = LeapStrikeSub.Recoil;
+  z.attack = Number(Object.keys(TYPE.attacks["0"] ?? {})[0] ?? 0);
+  z.action = null;
+  // Well above the floor, which with no collision loaded is
+  // `g_camera_fixed_eye_y`: the bounce sub runs on the same frame, and must
+  // not land and clear the velocity it is being asked about.
+  G.g_camera_fixed_eye_y = 0;
+  z.pos = vec3(0, 100, 40);
+  ZombieStateLeapStrike(z, 1 / 60, new Rng(1), NULL_HOST);
+  // `RotY(0x4000) . (0, 0, -0.3)` is (-0.3, 0, 0); `RotY(0xC000)` gives +0.3.
+  check("the kick is RotY(g_camera_block_yaw_bams) . (0, 0, -0.3)",
+        z.sub === LeapStrikeSub.Bounce && Math.abs(z.vel.x + 0.3) < 1e-6
+        && Math.abs(z.vel.z) < 1e-6,
+        `sub ${z.sub} vel (${z.vel.x.toFixed(3)}, ${z.vel.z.toFixed(3)})`);
+}
+
+/**
+ * `ThrowerStateWalkDistance` (`FUN_0044E2A0`) starts its walk with class
+ * 0x31's own `SetCurrentActorMotionBlended` (`0x0044E358`). It used to borrow
+ * class 0x30's `ZombieSetMotionIfIdle`, whose `obj+0x136C` tests now read
+ * bits 0x1000 and 0x2000 -- `ThrowerFlag.Walking` and `BandLatched` on a
+ * thrower (L3).
+ */
+console.log("\nclass 0x31's walk is its own call:");
+{
+  const z = thrower(ThrowerState.WalkDistance, { walkDistance: 15 });
+  z.flags2 |= ThrowerFlag.BandLatched;
+  const walk = ThrowerMotionOf(z, ThrowerMotion.Walk);
+  GameUpdate(1 / 60, CAM_HOST, new Rng(11), new Events());
+  check("a thrower with obj+0x136C 0x2000 up still starts its walk",
+        walk !== undefined && z.motion === walk, `motion ${z.motion}`);
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

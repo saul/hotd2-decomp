@@ -102,6 +102,7 @@ function projection(): UiProjection {
     filterMode: "asset",
     anisotropyLimit: 16,
     pillarbox: false,
+    boxed: false,
     pixelRatio: 1,
     pixelRatioOptions: [1, 1.5, 2],
     wait: { sub: "0x3B wait_enemies_alive", lines: [{ text: "3 alive" }] },
@@ -338,7 +339,14 @@ check("the menu button is the burger alone: no name, no stage",
 check("the frame fills the window by default, and #overlay knows",
       /<div id="overlay">/.test(warm)
       && /<div id="overlay" class="boxed">/.test(render({ ...projection(),
-                                                          pillarbox: true })));
+                                                          pillarbox: true,
+                                                          boxed: true })));
+// The result card boxes the frame with the switch off, and the layout follows
+// the frame rather than the switch.
+check("boxed by the result card with the switch off, #overlay is boxed",
+      /<div id="overlay" class="boxed">/.test(render({ ...projection(),
+                                                          pillarbox: false,
+                                                          boxed: true })));
 
 const paused = renderIn({ ...projection(), started: true },
                         createElement(PauseScreen));
@@ -761,6 +769,13 @@ console.log("\nOne key per preference:\n");
   check("the Scene panel has the 4:3 switch, and it follows the projection",
         /<input type="checkbox" checked=""\/>\s*4:3 frame/.test(scene),
         scene.slice(scene.indexOf("view-settings"), scene.indexOf("view-settings") + 400));
+  // ...the viewer's choice, not the frame: the result card boxes the frame
+  // and leaves the switch where it was.
+  const card = renderIn({ ...projection(), pillarbox: false, boxed: true },
+                        createElement(DebugSidebar, { onClose: () => {} }));
+  check("...the choice, not the frame: boxed by the result card, it stays off",
+        /<input type="checkbox"\/>\s*4:3 frame/.test(card),
+        card.slice(card.indexOf("view-settings"), card.indexOf("view-settings") + 400));
   const ratioSel = /<label class="view-ratio"[^]*?<\/label>/.exec(scene)?.[0] ?? "";
   check("...and the Resolution select, offering the projection's steps",
         (ratioSel.match(/<option /g) ?? []).length === 3
@@ -996,7 +1011,7 @@ console.log("\nThe shutter bars, as the HUD layer covers the frame:\n");
   // than 4:3 the canvas is a centred 4:3 box shorter than the viewport, and
   // bars measured off the viewport covered its black margin instead.
   const frameOf = (boxed: boolean) => {
-    const html = render({ ...projection(), pillarbox: boxed });
+    const html = render({ ...projection(), pillarbox: boxed, boxed });
     const layer = html.slice(html.indexOf('class="hud-layer"'));
     const m = /<div class="(hud-frame[^"]*)">\s*<div class="shutter shutter-top"/
       .exec(layer);

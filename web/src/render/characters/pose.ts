@@ -13,7 +13,7 @@
  * reaction.
  */
 import { Quaternion, Vector3 } from "three";
-import type { BakedMotion } from "../../bundle";
+import type { BakedMotion, CharacterType } from "../../bundle";
 import { BAMS_TO_RAD } from "../../core/bams";
 import { authoredFrameHeld, authoredFrameOfTicks }
   from "../../core/play_cursor";
@@ -21,12 +21,41 @@ import { MotionFlag, type FadeRecord, type FadeRoot } from "../../game/actor";
 import { MatrixToEulerZYX } from "../../game/matrix";
 import type { Instance } from "./instance";
 
-/** The port's clock. `mot/` authors at 30; the engine's frames are 60 Hz. */
-const GAME_HZ = 60;
-
 const AXIS_X = new Vector3(1, 0, 0);
 const AXIS_Y = new Vector3(0, 1, 0);
 const AXIS_Z = new Vector3(0, 0, 1);
+
+/**
+ * A clip's authored frame at a play cursor that wraps at the play length + 1,
+ * as `SkeletonAdvancePlayCursor` (`FUN_004111A0`) and track 1's clock take it.
+ */
+function cursorFrame(m: BakedMotion, ticks: number): number {
+  const play = m.play ?? Math.max(1, m.frames * 2 - 2);
+  return authoredFrameHeld(ticks % (play + 1), m.fps, m.frames);
+}
+
+const SUBTREES = new WeakMap<CharacterType, Map<number, readonly number[]>>();
+
+/**
+ * `bone` and every bone below it -- the records
+ * `SkeletonAssignSubtreeTrack` (`FUN_00412200`) hands a track. `parent` in
+ * the bundle is an index into the type's bone list.
+ */
+function subtreeOf(type: CharacterType, bone: number): readonly number[] {
+  let byBone = SUBTREES.get(type);
+  if (!byBone) SUBTREES.set(type, byBone = new Map());
+  let out = byBone.get(bone);
+  if (out) return out;
+  const list: number[] = [];
+  const walk = (b: number): void => {
+    list.push(b);
+    const i = type.bones.findIndex((x) => x.bone === b);
+    for (const c of type.bones) if (i >= 0 && c.parent === i) walk(c.bone);
+  };
+  walk(bone);
+  byBone.set(bone, out = list);
+  return out;
+}
 
 export class Poser {
   private readonly q = new Quaternion();
@@ -89,31 +118,59 @@ pose(inst: Instance): void {
       // The lunge itself is not here: it plays on the ordinary track, and
       // its fade of 10 is the base clip's, below.
       if (!this.blendFromFade(inst, am, af)) this.apply(inst, am, af);
-      return;
-    }
-  }
-
-  // The stumble, cross-faded over the loop. `ActorPlayHitReaction` starts it
-  // on track 1 with a fade length of 10 frames, or 20 when the hit severed
-  // something; a hit at bone 9 or above skips the fade entirely. Fading back
-  // out over the same length at the end is `[likely]` — the fade *in* is
-  // what `FUN_00411B70` states.
-  if (inst.a.react) {
-    const rm = inst.type.motions[String(inst.a.react.motion)];
-    const rf = rm ? authoredFrameOfTicks(inst.a.react.ticks, rm.fps,
-                                         rm.frames) : 0;
-    if (rm && rf < rm.frames) {
-      // `blend` is in **60 Hz game frames**; `rf` counts the clip's own
-      // frames, which mot/ authors at 30. Comparing them directly stretched
-      // the fade over twice the clip and the weight never reached 1.
-      const b = inst.a.react.hard ? 0 : inst.a.react.blend * rm.fps / GAME_HZ;
-      const w = b <= 0 ? 1
-        : Math.min(1, Math.min(rf, rm.frames - rf) / b);
-      this.applyBlend(inst, m, f, rm, Math.floor(rf), w);
+      this.poseOverlay(inst);
       return;
     }
   }
   if (!this.blendFromFade(inst, m, f)) this.apply(inst, m, f);
+  this.poseOverlay(inst);
+}
+
+/**
+ * Track 1 -- the stumble -- over the pose the base track has just drawn, on
+ * **its subtree only**.
+ *
+ * `MotionWriteBoneAngles` (`FUN_00411D70`) writes a bone's angles only from
+ * the track its record names, and `ActorPlayHitReaction` hands track 1 bone
+ * 1's subtree -- torso, head, arms. The root translation and bone 0's
+ * rotation come from track 0 whatever happens (`SkeletonPoseRootFrame`,
+ * `FUN_00410920`), and so do the pelvis and the legs. So a zombie shot in the
+ * chest flinches while it walks, and a crawler flinches on the floor; this
+ * blended the whole skeleton, root included, and stood the crawler up.
+ *
+ * The clip's frame is its cursor's, which wraps at the play length + 1 as the
+ * base track's does, and a fade on the track -- in, or back to the base clip
+ * -- dissolves from the snapshot `game/` recorded by
+ * `1 - fade / fadeLen`, the base track's weight.
+ */
+private poseOverlay(inst: Instance): void {
+  const t = inst.a.react;
+  if (!t) return;
+  const m = inst.type.motions[String(t.motion)];
+  if (!m || m.frames <= 0) return;
+  const from = t.fadeFrom
+    ? inst.type.motions[String(t.fadeFrom.motion)] : undefined;
+  const w = from && from.frames > 0 && t.fadeLen > 0
+    ? Math.min(1, Math.max(0, 1 - t.fade / t.fadeLen)) : 1;
+  const n = inst.type.bone_count;
+  const bb = cursorFrame(m, t.ticks) * n * 3;
+  const ba = from && w < 1 ? cursorFrame(from, t.fadeFrom!.ticks) * n * 3 : 0;
+  for (const bone of subtreeOf(inst.type, t.bone)) {
+    const node = inst.bones.get(bone);
+    if (!node) continue;
+    const ob = bb + bone * 3;
+    if (ob + 2 >= m.rot.length) continue;
+    const oa = ba + bone * 3;
+    if (from && w < 1 && oa + 2 < from.rot.length) {
+      node.quaternion
+        .copy(this.bams(from.rot[oa], from.rot[oa + 1], from.rot[oa + 2]))
+        .slerp(this.bams(m.rot[ob], m.rot[ob + 1], m.rot[ob + 2]), w);
+    } else {
+      node.quaternion.copy(this.bams(m.rot[ob], m.rot[ob + 1], m.rot[ob + 2]));
+    }
+  }
+  // The drawn pose is a mix of two tracks now, not one clip's frame.
+  inst.drawnFrom = null;
 }
 
 /**

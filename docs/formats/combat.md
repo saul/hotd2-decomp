@@ -91,12 +91,13 @@ list[n++] = {obj, obj+0x34, obj+0x12C, obj+0x130, obj+0x134}
 The depth test is `FCOMP [0x004C436C]` (`0.0`) / `TEST AH,0x41`, which passes
 on less, equal and unordered. A mesh object (`0x10`) is taken at any depth.
 
-**Who calls it.** `get_xrefs_to 0x00405160` lists 53 callers. A scan of the
-image for `E8`/`E9` rel32 whose target is `0x00405160` finds **95**, and there
-is no absolute pointer to it anywhere, so the 95 are the set. The 42 Ghidra
-misses are in bytes it has not disassembled, most past a `MatrixStackPop` it
-calls no-return (`L35`). The one that matters is `ActorRegisterCameraPoint`
-(`FUN_00409B70`):
+**Who calls it.** A scan of the image for `E8`/`E9` rel32 whose target is
+`0x00405160` finds **95**, and there is no absolute pointer to it anywhere, so
+the 95 are the set. `get_xrefs_to 0x00405160` listed 53 while the database
+carried `MatrixStackPop`'s flow overrides; since the repair (`L89`) it lists
+94, and the one it still misses is `BatSwarmUpdate`'s second call at
+`0x0042F5B3`, in bytes it has not disassembled. The site that hid longest is
+`ActorRegisterCameraPoint` (`FUN_00409B70`):
 
 ```
 00409BA3  obj+0x70..0x78 = g_camera_world_to_view * obj+0x100..0x108
@@ -257,6 +258,31 @@ The render pick offered them like any actor, and `ResolveHit` then gave the
 body a death clip -- stage 1's man under the library desk fell over again.
 The flag, with no registration site, is what keeps them out.
 
+**Class 0x25, the scripted humanoids, is the same** `[proved]`, and the
+evidence is the bytes rather than the xref list. The scan above finds 95
+calls to `RegisterForShotTest`, 17 to `ActorRegisterCameraPoint` and 22 to
+`RegisterForCameraTracking` (`FUN_00408EC0`), and no absolute pointer to any
+of them; none lies in the class's code, `0x004840D0`..`0x00485F8F`. A
+recursive descent from its thirteen routines -- `ScriptedHumanoidInit`, the VM
+`ScriptedHumanoidUpdate`, `ScriptedHumanoidIdle`, the four routines `op 17`
+installs or calls, `ScriptedHumanoidDraw`, `ScriptedHumanoidBoneDrawHook`, the
+head aim and its seed, and `SpawnTumblingModelAtBone5` (`FUN_00485DE0`) with
+the object it makes, `TumblingModelUpdate` (`FUN_00485F00`) -- treating every
+`CALL` as returning, following every jump table and every code pointer the
+reached code installs (the skinned model's hooks, the sprite and blood draw
+tasks), through all 233 routines it reaches, the part drawers
+`g_character_part_drawers` and `AssetRunJob`'s table included, reaches none
+of the 134 sites. The class never writes `obj+0x34`, either. So no shot in
+the game touches a scripted humanoid. 133 of its 137 spawns carry `0x8000` in
+their record, which `RegisterForShotTest` would refuse anyway and the render
+pick already honoured; the other four are stage 2's jetty zombies (evt
+43584 and 43740 in block 16, 55372 and 55536 in block 20), which the render
+pick could find: driven at `16/15/4` while the gun is live, its first pull
+found 43584 through the corner of the building it stands behind, and
+`ResolveHit` killed it for ninety points (`web/tools/humanoid_shot_page.mjs`;
+block 20's pair was not driven). The class sets the flag and registers nowhere, and answers
+`invulnerable`, so the debug clear leaves it too.
+
 **The mesh arm.** `ShotTestBoneTree` takes `ShotTestBoneMesh` (`FUN_004048A0`)
 for a record whose `+0x74` has bit `0x10` and whose `+0x88` names a blob; the
 skeleton build writes `0x21`, and two `Init`s raise the bit: `Boss4Init`, for
@@ -380,11 +406,14 @@ list instead:
   other site it listed, `0x0043FB76`, is `ScriptedPropUpdate12`'s, class
   0x12's door (`game/class12/`, now filed and tested as a mesh). Where
   `0x52` registers is `[open]`.
-* Class `0x25`: `[likely]` none. No site lies in its routines, and every shared
-  routine that registers is accounted for above. The exception is
-  `FUN_004825B0` (`0x00482991`), a task `FUN_00482070` allocates, whose owner
-  is `[open]`. Class `0x42`'s falling breakables register through
-  `FUN_0042FCA0` (`0x00430AF6`), which `PlaceFallingBreakableBatch` installs.
+* Class `0x25`: **none**, `[proved]` -- see *A class that never registers*
+  above. `FUN_004825B0` (`0x00482991`), a task `FUN_00482070` allocates, was
+  the one site this line could not rule out; nothing class 0x25 runs reaches
+  either routine, so whose task it is stays `[open]` and it is not class
+  0x25's. Class `0x42`'s worms register through `WormUpdate`
+  (`FUN_0042FCA0`, `0x00430AF6`) and `WormLoneDropUpdate` (`FUN_00431000`,
+  `0x004311EA`), which `PlaceWormBatch` installs, each as one sphere
+  (`game/class42/`).
 * And `ShotTestWorld` into the same sort, which `combat/shot.ts`'s
   `ShotHitWorld` declares it does not yet do.
 
@@ -906,7 +935,7 @@ decides:
 |---|---|
 | 1 damaged and swapped | **yes** |
 | 3 severed | **yes** |
-| 4 | `FUN_0045D9F0` instead, for bones 1 and 9 |
+| 4 | `ZombieSplitInTwo` (`FUN_0045D9F0`) instead, for bones 1 and 9 -- **and nothing in the image writes 4**, so the arm is dead; see `tools/verify_split_unreachable.py` |
 | 2 damaged only | only character types 3 and 0x12 |
 | 5 no effect | only character types 3 and 0x12 |
 
@@ -947,13 +976,36 @@ climbing out of the water plays its entrance through and does not stagger.
 ```c
 motion = g_pHitReactionMotions[char_type][obj+0x130C][g_bone_reaction_group[bone]];
 
+if (state == 3 && sub == 2) { state = 4; sub = 0; }    /* behind the gate: dead */
 if (bone < 9 && !(obj+0x136C & 0x800)) {
-    MotionCrossFadeTo(obj+0x194, 1, motion, 0, 1,
-                      (obj+0x1364 == 3) ? 20 : 10);     /* result 3 = severed */
+    if (!(obj+0x136C & 0x100)) {
+        obj+0x136C |= 0x1000;                           /* on the overlay */
+        MotionCrossFadeTo(obj+0x194, 1, motion, 0, 1,   /* bone 1's subtree */
+                          (obj+0x1364 == 3) ? 0x14 : 10);  /* the fade OUT */
+        obj+0x34 |= 0x40000000;
+        return;
+    }
+    MotionCrossFadeAlt(obj+0x194, 1, row[4 + obj+0x1319], 0, 10);
+    if (obj+0x1319) {
+        obj+0x34 |= 0x2000;
+        if (obj+0x130C != 4 && hp > 0) {
+            obj+0x136C |= 0x200; obj+0x34 |= 0x40000000; return;
+        }
+    }
 } else {
-    ActorSetMotion(obj+0x194, motion);                  /* legs: no fade */
+    obj+0x136C = (obj+0x136C & ~0x1000) | 0x2000;       /* on the base track */
+    ActorSetMotion(obj+0x194, motion);                  /* legs: a cut */
 }
+obj+0x34 |= 0x40000000;
 ```
+
+`obj+0x1319` is the last zone hit, which `ActorReactToHit` writes first: 2
+for a shot on bone 2, 1 for bone 1. No class-0x30 instruction and no shipped
+descriptor raises `obj+0x136C` 0x100 or 0x800 -- a sweep of every `OR` in the
+class's code, 32-bit and byte-on-a-high-register, finds each such write
+storing to `obj+0x34` or through a pointer, and the twelve bundles' `+0x20`
+words carry neither -- so the shipped game takes the first arm and the cut,
+and the alt arm and `ZombieTickAltHitReaction` never act. `[proved]`
 
 Two indices. `obj+0x130C` is the actor's **body condition**;
 `g_bone_reaction_group` (`DAT_004C84A8`, `u16[16]`) turns the bone into one of
@@ -999,11 +1051,54 @@ mistaken for them, and none of them is "the numbers look right":
   every bone, so a reaction hands back to the walk without a pop — which is
   what a one-shot laid over a loop has to do.
 
-The **legs are hard-set**: bone 9 and above skip the cross-fade entirely and
-snap into the stagger. Bones 1–8 fade in over 10 frames, or 20 when the hit
-severed something. Both go on to **track 1** of the actor's motion block —
-`MotionStartOnTrack`'s last argument — while the walk keeps running on track 0.
-That is what the cross-fade is between.
+**Where it plays is the other half, and it is not the whole body.**
+`MotionCrossFadeTo`'s second argument is a **bone**: `MotionStartOnTrack`
+hands it to `SkeletonAssignSubtreeTrack` (`FUN_00412200`), which writes the
+track into the record of that bone and every bone below it
+(`SkeletonAssignNodeTrack`, `FUN_00412290`), and `MotionWriteBoneAngles`
+(`FUN_00411D70`) poses each bone from the track its record names. Bone 1's
+subtree is bones 1–8 -- torso, head, arms -- in every class-0x30 and 0x31
+skeleton; bone 9 is the second root, pelvis and legs. `SkeletonPoseRootFrame`
+(`FUN_00410920`) takes the root translation and bone 0's rotation from track
+0 with no track test. So an upper-body hit **flinches the upper body over the
+walk**, and a crawler -- `znkager`, body condition 4, whose row above is the
+standing zombie's -- flinches its torso on the floor. `[proved]`
+
+The track's clock is `SkeletonAdvanceOverlayCursor` (`FUN_004112E0`), run
+from `SkeletonDrawWalk` beside the base track's sampler:
+
+* **In** over two frames -- the `1` is the fade in, `track+0x31 = 2`.
+* **Out** once the cursor reaches the play length: the last argument, `10`
+  or `0x14`, is stored `+ 1` at `track+0x33`, and
+  `MotionFadeOverlayToBase` (`FUN_00411BD0`) puts the **base** clip on the
+  track at cursor 0 and fades onto it over `track+0x33 + 1` frames -- 11, or 21
+  after a severing hit.
+* **Home** on the draw the base cursor comes round to 0: `model+0x36 = 0` and
+  the whole skeleton back on track 0.
+
+`ActorSetMotion` and `ActorSetMotionBlended` end it early -- their
+`MotionStartOnTrack(model, 0, ...)` writes `model+0x36 = 0` -- and
+`ZombieSetMotionIfIdle` avoids doing so: while `obj+0x136C` 0x1000 is up it
+calls `ActorSetMotionBlendedUnderOverlay` (`FUN_00411AC0`), which hands only
+bone 9's subtree to the new clip and puts `model+0x36` back to 1; while 0x2000
+(a clip cut onto the base track) is up it changes nothing.
+`ZombieClearHitReactionWhenDone` (`FUN_00454660`), first in every
+`EnemyZombieUpdate` with `ZombieTickAltHitReaction` before it, lowers 0x1000
+once the track is home or a quarter of its clip has played, 0x2000 once the
+base clip ends or a quarter of it has played -- both to the end after a
+severing hit (`obj+0x1364 == 3`) -- and `obj+0x34` 0x40000000 with the last
+of them.
+
+**The legs are cut**: bone 9 and above -- and anything with `obj+0x136C`
+0x800 -- go to `ActorSetMotion` on the **base** track, the whole skeleton,
+with no fade, and hold it for a quarter of its length against the states'
+`ZombieSetMotionIfIdle`.
+
+`ActorPlayHitReaction` has one caller, `ActorReactToHit`, and that has one,
+`ZombieOnShot` (`CALL` at `0x0045401B`, by an `E8` scan of `.text`) -- so only
+the classes whose update runs `EnemyZombieUpdate`, 0x30 and 0x18, stumble
+this way. `ThrowerStateHitReaction` makes the same two calls for class 0x31
+(`MotionCrossFadeTo(..., 0x14)` at `0x0044A3C9`).
 
 ### Body condition — `ActorUpdateBodyCondition`
 
@@ -2178,10 +2273,14 @@ and three shipped entries sit outside it: character types `0x07`, `0x0B` and
 `0x0C` share a body-condition-4 entry 2 at `0x00566E70`,
 `{997, 1051, 26.0f, 40, 9, 1}`, against `g_motion_play_length[997]` = 20. Those
 are the crawlers, their condition-4 pick row is ten 2s then ten 3s per zone
-combo, and so **an undamaged crawler swings and misses every time** while one
-with its head shot off draws entry 3 (clip 1018, hit frame 3) and connects.
-Nothing is aborted and nothing is retried: the strike simply never fires, the
-clip plays out and the actor retreats. `[proved]`
+combo, and so **in `ZombieStateStrike` an undamaged crawler would swing and
+miss every time** while one with its head shot off drew entry 3 (clip 1018,
+hit frame 3) and connected. `[proved]` of the strike -- and **no crawler runs
+it**: `ZombieStateHoldAtRange` sends body condition 4 to state 0x34,
+`ZombieStateLeapStrike` (`FUN_0045E330`), which reads the entry's lunge,
+distance, overlay kind and cancel mask and lands the hit through
+`ActorStrikeConnect` on touching down, with no hit frame at all. All twenty
+shipped `znkager` are condition 4. See L92.
 
 The exporter therefore keeps such an entry rather than rejecting it —
 `attackHitLands` in `web/src/hod2lib/combat.ts` carries the reading, and
@@ -3299,17 +3398,18 @@ hand-back: a `zsass` leaves sub 4 with **thirty frames of shot immunity**
 And a shot in the hub is usually not a knockdown at all. `ThrowerOnShot` sends
 state 7 to `ThrowerStateHitReaction` (`FUN_0044A360`), which below bone 9 plays
 the stumble with `MotionCrossFadeTo(obj+0x194, 1, clip, 0, 1, 0x14)` at
-`0x0044A3C9` -- **track 1**, over the loop, with no root of its own -- and
-leaves when **track 0's** cursor reaches its play length less one
+`0x0044A3C9` -- **track 1**, over bone 1's subtree as class 0x30's stumble
+is (above), with no root of its own -- and leaves when **track 0's** cursor
+reaches its play length less one
 (`0x0044A3EA`..`0x0044A401`). Bone 9 and up is `ActorSetMotion` on track 0
 instead. A second shot inside that window is a knockdown, because state 1 is
 not state 7, so the window's length is what decides how often a trigger held
 down turns into a handspring.
 
 The port had all of that a little wrong, in the direction of more push: it
-played the stumble on its one-shot channel, which carried the body with the
-stumble clip's root (up to 2.7 units back) and held state 1 for the whole
-clip; it read every cursor test in the fall against the clip's baked length
+played the stumble on its one-shot channel -- alongside track 1, once track 1
+was ported -- which carried the body with the stumble clip's root (up to 2.7
+units back) and held state 1 for the whole clip; it read every cursor test in the fall against the clip's baked length
 rather than the play length, so the handspring ran to its last frame (21.43);
 it left the thirty frames of immunity and the router out; and it rode the
 arc on a one-axis copy of `ActorArcVelocity` (`FUN_0044DE80`) rather than

@@ -52,11 +52,26 @@ what is committed**, and it is the project's record of every symbol recovered
 Add or rename a row with `python3 tools/annotate.py`, which upserts and keeps
 the address order.
 
-`ApplyAnnotations` only renames a symbol whose current name is still a Ghidra
-default, so it is idempotent, it never clobbers a name chosen in the GUI, and
-it can run before or after `ApplyKnownTables` without ordering trouble. It
+`ApplyAnnotations` only renames a symbol whose current name is still one
+Ghidra generated (the same prefixes `ExportAnnotations` refuses to export), so
+it is idempotent, it never clobbers a name chosen in the GUI, and it can run
+before or after `ApplyKnownTables` without ordering trouble. A curated name
+that differs from its row is reported as `renamed` and left alone. It
 *creates* functions that do not exist yet, because most of the interesting ones
 are only reachable through a dispatch table auto-analysis did not recognise.
+
+**Names and comments go opposite ways** (`L90`):
+
+| | `apply-annotations` | `export-annotations` |
+|---|---|---|
+| name | written only over a generated one | the database's wins, and each rename is printed |
+| comment | the file's is written whenever it differs | the file's wins; the database's fills only an empty row |
+
+So a comment is edited with `tools/annotate.py`, never over MCP: an export
+keeps the file's, lists every disagreement (`conflicts=`, and in full in
+`ghidra/out/export_comment_conflicts.tsv`), and the next apply writes the
+file's over the database's. Every comment an apply replaces is logged with its
+old text in `ghidra/out/apply_annotations.txt`.
 
 The `game:annotations` check (`web/tools/checks/annotations.ts`) holds every
 row against the EXE's own PE section table — that each address resolves, that
@@ -78,10 +93,11 @@ So when a session has renamed anything:
 git diff ghidra/annotations          # review, then commit
 ```
 
-`ExportAnnotations` **merges** into the TSVs: it keeps body comments and any
-row the database has no symbol for, and refuses a generated name over a curated
-one. It skips anything a fresh import would recreate — default names,
-`Catch@`/`Unwind@`, PE resources, Windows TEB fields, and the CRT/D3DX names
+`ExportAnnotations` **merges** into the TSVs: it keeps body comments, any row
+the database has no symbol for and any comment the file already has, and
+refuses a generated name over a curated one. It skips anything a fresh import
+would recreate — default names, `Catch@`/`Unwind@`, PE resources, Windows TEB
+fields, and the CRT/D3DX names
 the function ID analyser finds — so the committed file stays a record of
 *this project's* findings. Its filter is a prefix list, so read the diff: a
 Ghidra release that renames an auto-label prefix lets those labels through.
@@ -112,7 +128,12 @@ Two things fix it at the source:
 
 `python3 tools/verify_ghidra_db.py --game-dir ...` (in `verify_all`) runs
 both in report mode over a copy of the saved database -- so it works with the
-GUI open -- and fails unless they have nothing to do.
+GUI open -- and fails unless they have nothing to do. It also runs the export
+into a copy of the annotations and fails on the one name disagreement that
+loses work: a database name the file's history shows it renamed away from.
+Names and comments on their way in either direction -- rows not applied yet,
+MCP renames not exported yet -- are printed as `note` lines and do not fail,
+because they are usually someone else's work in progress.
 
 ## Layout
 

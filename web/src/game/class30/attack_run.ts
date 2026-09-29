@@ -17,7 +17,7 @@
  * 00455515  ZombieSetMotionIfIdle(motion, rand() % play_length, 10)
  * 0045551d  if ((rand() & 0xFF) < 4 && obj+0x136C & 0x2000000
  *                                  && obj+0x136C & 0x1000000)
- *             obj+0x136C &= ~0x1000000; ActorAbortAttackAndLeave()
+ *             obj+0x136C &= ~0x1000000; ZombieSplitInTwo()
  * 00455551  band = TestApproachRing(obj)
  *           band 1:            state 2, sub 0                     -- and out
  *           band < 2 or > 4:   TurnActorTowardCamera(obj, rate)   -- and out
@@ -86,9 +86,9 @@ const RUN_TURN_RATE = 416.0;
 const RUN_TURN_SPRINT_SCALE = 1.5;
 const RUN_TURN_BASE_SCALE = 1.0;
 
-/** `rand() & 0xFF < 4` — the abort roll, one frame in 64. */
-const ABORT_ROLL_RANGE = 0x100;
-const ABORT_ROLL_BELOW = 4;
+/** `rand() & 0xFF < 4` — the split roll, one frame in 64. */
+const SPLIT_ROLL_RANGE = 0x100;
+const SPLIT_ROLL_BELOW = 4;
 
 /** `ZombieStateAttackRun`'s turn rate for this actor. `[port-only]` as a name. */
 export function ZombieRunTurnRate(obj: ZombieActor): number {
@@ -106,19 +106,17 @@ export function ZombieStateAttackRun(obj: ZombieActor, dt: number,
                         MotionFade.Normal);
 
   // The roll is made every frame, armed or not, so it is drawn every frame.
-  const armed = ZombieFlag2.LowSphere | ZombieFlag2.AbortRollArmed;
-  if (rng.int(ABORT_ROLL_RANGE) < ABORT_ROLL_BELOW
+  const armed = ZombieFlag2.LowSphere | ZombieFlag2.SplitArmed;
+  if (rng.int(SPLIT_ROLL_RANGE) < SPLIT_ROLL_BELOW
       && (obj.flags2 & armed) === armed) {
-    obj.flags2 &= ~ZombieFlag2.AbortRollArmed;
-    // [diverges] `ActorAbortAttackAndLeave` (`FUN_0045D9F0`) is not ported.
-    // It takes no argument and makes three calls that work on the current
-    // actor: the routine at `0x0045DB70`, which allocates a second
-    // `EnemyZombieUpdate` object and copies this one into it; the one at
-    // `0x0045DA60`, which sets state 0x32 or moves the actor a unit back;
-    // and `0x0045DD30(9)`. None of them is read further, and between them they
-    // split the actor in two. Nothing the port has can reach this arm: the
-    // one writer of `AbortRollArmed` found is `g_class30_states[53]`, which
-    // the port does not have either.
+    obj.flags2 &= ~ZombieFlag2.SplitArmed;
+    // [diverges] `ZombieSplitInTwo` (`FUN_0045D9F0`) is not ported. It cuts
+    // this actor in two along its skeleton's two roots, allocating a second
+    // `EnemyZombieUpdate` object for one of them -- read in full now, and
+    // named with its callees in `class30/split.ts`. Nothing the shipped game
+    // runs can reach this arm: `SplitArmed`'s one class-0x30 writer is
+    // `ZombieStateCollapseToCondition4` (`FUN_0045E660`), and no instruction
+    // or data enters that state. `tools/verify_split_unreachable.py` holds it.
   }
 
   const band = TestApproachRing(obj);

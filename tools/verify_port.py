@@ -935,47 +935,41 @@ def check_class33_selectors() -> None:
                  f"draws one")
 
 
-#: The crawlers' undamaged attack, as the EXE holds it at `0x00566E70`:
-#: ``(character types, body condition, index, strike clip, hit frame)``.
-#: Types 0x07, 0x0B and 0x0C share the row; `hod2lib/combat.ts`'s `attackHitLands`
-#: is the long form and `web/tools/checks/combat.ts` checks the numbers against
-#: the EXE. Here they are only the join key into the bundle.
-CRAWLER_TYPES = (0x07, 0x0B, 0x0C)
+#: The crawler's undamaged attack, as the EXE holds it at `0x00566E70`:
+#: body condition 4's entry 2, ``{997, 1051, 26.0f, 40, 9, 1}``. Character type
+#: 0xC is the only one the shipped data gives condition 4
+#: (`web/tools/checks/split_unreachable.ts` holds that), so it is the only one
+#: this asks about.
+CRAWLER_TYPE = 0x0C
 CRAWLER_CONDITION = 4
 CRAWLER_INDEX = 2
-CRAWLER_CLIP = 997
-CRAWLER_HIT_FRAME = 40
+CRAWLER_LUNGE = 1051
+#: `g_class30_leap_strike_arc_script` (`0x00593180`) as the bundle names it.
+CRAWLER_ARC_SCRIPT = "leap_strike"
 
 
-def check_crawler_whiff() -> None:
-    """The attack that is meant to miss has to be **in** the bundle to miss.
+def check_crawler_leap() -> None:
+    """What a crawler attacks with has to be **in** the bundle.
 
-    `ZombieStateStrike` (`FUN_00455A40`) fires its hit on
-    ``obj+0x19C == entry+0x08`` exactly (``00455bdf``) and leaves the state at
-    ``g_motion_play_length[obj+0x1B4] - 1`` (``00455c0b``), so the shipped
-    condition-4 entry of clip 997 at hit frame 40 -- against a play length of
-    20 -- can never land. That is the engine's undamaged crawler, and it swings
-    and misses every time.
+    `ZombieStateHoldAtRange` sends body condition 4 to `ZombieStateLeapStrike`
+    (`FUN_0045E330`) and never to `ZombieStateStrike` (``0x0045585E``), so a
+    `znkager` reads its drawn entry for the lunge (``+0x02``), the distance it
+    closes to (``+0x04``) and, through `ActorStrikeConnect` on landing, the
+    overlay kind and cancel mask -- and **not** the strike clip or the hit
+    frame, which is why the entry's hit frame of 40 on a 20-frame clip is not a
+    whiff. It then flies `g_class30_leap_strike_arc_script`.
 
-    The exporter used to drop the entry as an impossible row, which left the
-    port drawing an index the bundle had no attack for; the substitute behind
-    that draw then handed the actor entry 3, a different clip at hit frame 3
-    that connects, and **the crawlers hurt the player where the engine's do
-    not**. There is nothing in `game/` left to check -- `ZombiePickAttack`
-    indexes blind now, the same as the engine -- so the only thing that can go
-    wrong again is the *bundle*, in either of two ways: the entry dropped
-    again, or the entry kept and clip 997 not baked, which is
-    `MotionPlayLength` 0 and a strike that ends on its first frame.
-
-    Both are asked of every exported stage that places one of these character
-    types. With no bundle this is a note, exactly as
-    {@func:`check_class31_literal_clips`} does it -- a check that cannot run
-    must not read as one that passed.
+    This used to hold the opposite: that the entry's swing stays unreachable,
+    because the crawler was believed to run `ZombieStateStrike` (`L92`). What
+    can still go wrong is the bundle -- the entry dropped, the lunge not
+    baked, or the arc script or its clips missing, any of which leaves the leap
+    with nothing to play. Asked of every exported stage that places a type-0xC
+    class-0x30 actor; with no bundle this is a note, as
+    {@func:`check_class31_literal_clips`} does it.
     """
     stages = sorted((ROOT / "extract" / "player").glob("stage*/stage*.script.json"))
     if not stages:
-        notes.append("the crawler's unreachable hit frame is unchecked "
-                     "(no bundle to look in)")
+        notes.append("the crawler's leap is unchecked (no bundle to look in)")
         return
     import json
     seen = 0
@@ -984,48 +978,47 @@ def check_crawler_whiff() -> None:
         chars = doc.get("characters") or {}
         placed = {p.get("char_type") for p in (chars.get("placements") or [])
                   if p.get("class") == 0x30}
-        for key, t in (chars.get("types") or {}).items():
-            ct = int(key)
-            if ct not in CRAWLER_TYPES or ct not in placed:
-                continue
-            rel = f"{path.parent.name}/{path.name} type {ct:#04x}"
-            row = (t.get("attacks") or {}).get(str(CRAWLER_CONDITION)) or {}
-            entry = row.get(str(CRAWLER_INDEX))
-            if entry is None:
-                failures.append(
-                    f"{rel}: body condition {CRAWLER_CONDITION} carries no "
-                    f"attack {CRAWLER_INDEX}, so an undamaged crawler draws an "
-                    f"index the bundle cannot satisfy -- the engine's own swing "
-                    f"is missing and whatever the port does instead is not it")
-                continue
-            seen += 1
-            if entry.get("strike") != CRAWLER_CLIP \
-                    or entry.get("hit_frame") != CRAWLER_HIT_FRAME:
-                failures.append(
-                    f"{rel}: attack {CRAWLER_INDEX} is clip "
-                    f"{entry.get('strike')} at hit frame "
-                    f"{entry.get('hit_frame')}, not {CRAWLER_CLIP} at "
-                    f"{CRAWLER_HIT_FRAME}")
-                continue
-            clip = (t.get("motions") or {}).get(str(CRAWLER_CLIP))
-            if not clip:
-                failures.append(
-                    f"{rel}: attack {CRAWLER_INDEX} names clip "
-                    f"{CRAWLER_CLIP} and the bundle does not bake it, so the "
-                    f"swing has no length and ends on its first frame")
-                continue
-            play = clip.get("play") or 0
-            if play <= 0 or entry["hit_frame"] < play:
-                failures.append(
-                    f"{rel}: clip {CRAWLER_CLIP} has play length {play}, "
-                    f"which puts hit frame {entry['hit_frame']} back inside "
-                    f"the clip -- the swing would connect")
+        t = (chars.get("types") or {}).get(str(CRAWLER_TYPE))
+        if CRAWLER_TYPE not in placed or t is None:
+            continue
+        rel = f"{path.parent.name}/{path.name}"
+        motions = t.get("motions") or {}
+        row = (t.get("attacks") or {}).get(str(CRAWLER_CONDITION)) or {}
+        entry = row.get(str(CRAWLER_INDEX))
+        if entry is None:
+            failures.append(
+                f"{rel}: body condition {CRAWLER_CONDITION} carries no attack "
+                f"{CRAWLER_INDEX}, so an undamaged crawler's leap has no lunge, "
+                f"no distance and no hit")
+            continue
+        if entry.get("lunge") != CRAWLER_LUNGE \
+                or str(CRAWLER_LUNGE) not in motions:
+            failures.append(
+                f"{rel}: attack {CRAWLER_INDEX}'s lunge is "
+                f"{entry.get('lunge')}, baked "
+                f"{str(entry.get('lunge')) in motions} -- the crawler would "
+                f"close on no clip")
+            continue
+        script = ((chars.get("combat") or {}).get("arc_scripts") or {}) \
+            .get(CRAWLER_ARC_SCRIPT)
+        if not script or len(script) != 3:
+            failures.append(f"{rel}: no three-stage {CRAWLER_ARC_SCRIPT} arc "
+                            f"script, so the leap flies with no clip")
+            continue
+        missing = [st["motion"] for st in script
+                   if str(st["motion"]) not in motions]
+        if missing:
+            failures.append(f"{rel}: the leap's clips {missing} are not baked "
+                            f"for character type 0xC")
+            continue
+        seen += 1
     if not seen:
-        failures.append("no exported stage places a crawler with its "
-                        "condition-4 attack, so nothing was checked")
+        failures.append("no exported stage places a crawler, so nothing was "
+                        "checked")
         return
-    notes.append(f"the crawler's unreachable hit frame checks out in {seen} "
-                 f"exported (stage, character type) pairs")
+    notes.append(f"the crawler's leap -- its entry, lunge and arc clips -- "
+                 f"checks out in {seen} exported stages")
+
 
 
 def check_docs_citations(named: dict[str, str]) -> None:
@@ -1084,7 +1077,7 @@ def main() -> int:
     check_frame_math()
     check_class31_literal_clips()
     check_class33_selectors()
-    check_crawler_whiff()
+    check_crawler_leap()
     check_docs_citations(named)
 
     for n in notes:

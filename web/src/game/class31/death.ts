@@ -125,8 +125,16 @@ const CHAR_ZSASS = 0x16;
 const CHAR_ZSKAMERE = 0x17;
 const CHAR_ZSLMAN = 0x18;
 
+/**
+ * A clip on the port's one-shot channel, standing in for a track-0 set in the
+ * engine (`ActorSetMotion` or `SetCurrentActorMotionBlended` at every call
+ * here). Each of those runs `MotionStartOnTrack(model, 0, ...)`, which writes
+ * `model+0x36 = 0` and hands the whole skeleton back to track 0 -- so it ends
+ * a stumble on track 1, as `ActorSetMotion` does in `class30/motion_cue.ts`.
+ */
 function playOnce(obj: ThrowerActor, motion: number): void {
   if (!MotionOf(obj, motion)) return;
+  obj.react = null;
   obj.action = { motion, ticks: 0 };
   obj.rootActionFrame = -1;
 }

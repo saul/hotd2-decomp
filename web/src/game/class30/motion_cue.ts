@@ -1,10 +1,21 @@
 /**
  * `ZombieSetMotionIfIdle` — `FUN_00454770`.
  *
- * Start a motion unless it is already playing. The states call this rather
- * than setting the motion outright so that a stumble in progress is not cut
- * off — the engine also checks `obj+0x136C` bits 0x1000 and 0x2000, which are
- * the reaction latches `ZombieOnShot` sets.
+ * Start a motion unless it is already playing -- and not over a stumble:
+ *
+ * ```
+ * 0045477b  TEST DH, 0x20 / JNZ ret          ; obj+0x136C: a cut reaction holds
+ * 00454785  CMP [obj+0x1b4], motion / JZ ret ; already playing
+ * 00454790  TEST DH, 0x10                    ; a reaction on the overlay?
+ * 004547a6  CALL ActorSetMotionBlendedUnderOverlay   ; yes: the legs only
+ * 004547b5  CALL ActorSetMotionBlended               ; no
+ * ```
+ *
+ * with this routine's own four arguments either way. The port called neither
+ * and had neither test, so a stumble on the overlay ran on regardless and a
+ * leg-hit clip on the base track was replaced by the next state's idle on the
+ * frame after it started. `ActorPlayHitReaction` sets the two bits and
+ * `ZombieClearHitReactionWhenDone` takes them down.
  *
  * **The start frame is random**, and that is not a detail. Every caller passes
  * one: `ZombieStateApproach` and `ZombieStateAttackRun` pass
@@ -25,7 +36,7 @@
  * 10 twice as far in as the exe's.
  */
 import type { Rng } from "../../core/rng";
-import type { Actor } from "../actor";
+import { ZombieFlag2, type Actor } from "../actor";
 import { MotionOf, MotionPlayLength } from "../tables";
 import { MotionFade } from "./states";
 import { SkeletonModelSetMotion, SkeletonModelSetMotionBlended }
@@ -40,20 +51,15 @@ export function ZombieSetMotionIfIdle(obj: Actor, motion: number | undefined,
   // A one-shot the state machine started -- a strike, a lunge -- owns the
   // actor until it ends, and the reaction runs on its own track.
   if (obj.action) return;
+  if (obj.flags2 & ZombieFlag2.HitClipBase) return;
   if (obj.motion === motion) return;
-  // Fade out of what is actually on screen. Right after a swing that is the
-  // strike clip, which `ActorAdvanceMotion` parked here as the outgoing one --
-  // taking `obj.motion` instead would fade out of the walk the swing had
-  // covered up, and the bite would still cut.
-  if (obj.fadeFrom && obj.fade > 0) {
-    ActorRestartFade(obj, fade);
-  } else {
-    ActorStartFade(obj, obj.motion, obj.playTicks, fade);
-  }
-  obj.motion = motion;
-  obj.playTicks = rng.int(spread === "clip"
+  const start = rng.int(spread === "clip"
     ? MotionPlayLength(obj, motion) : spread);
-  obj.rootFrame = -1;
+  if (obj.flags2 & ZombieFlag2.HitClipOverlay) {
+    ActorSetMotionBlendedUnderOverlay(obj, motion, start, fade);
+    return;
+  }
+  ActorSetMotionBlended(obj, motion, start, fade);
 }
 
 /**
@@ -77,6 +83,9 @@ export function ActorSetMotion(obj: Actor, motion: number): void {
   // leaves nothing to blend from, so the swing is dropped rather than faded.
   obj.action = null;
   obj.rootActionFrame = -1;
+  // `model+0x36 = 0; SkeletonAssignSubtreeTrack(0, 0)` (`0x00411950`..): the
+  // whole skeleton back on track 0, so a stumble on the overlay ends here.
+  obj.react = null;
   obj.motion = motion;
   obj.playTicks = 0;
   obj.fadeFrom = null;
@@ -181,6 +190,47 @@ export function ActorSetMotionBlended(obj: Actor, motion: number,
   }
   const m = MotionOf(obj, motion);
   if (!m) return;
+  // `MotionStartOnTrack(model, 0, motion, 0)` writes `model+0x36 = 0` and
+  // puts the whole skeleton back on track 0 (`SkeletonAssignSubtreeTrack(0,
+  // 0)`), so a stumble on the overlay ends with any change of clip -- and so
+  // does the play-out of a stumble a state never waited for.
+  obj.react = null;
+  BlendBaseTrack(obj, motion, start, fade);
+}
+
+/**
+ * `ActorSetMotionBlendedUnderOverlay` — `FUN_00411AC0`. The same stores as
+ * {@link ActorSetMotionBlended}, but `MotionStartOnTrack(model, 9, motion, 0)`
+ * and `model+0x36` put back to 1 when it was 1:
+ *
+ * ```
+ * 00411ac0  track[2] = start; track[6] = start / 2; track[10] = track[0] - 1
+ *           track[8] = motion; track+0x30 = fade + 1; track+0x37 = (& 0xDF) | 1
+ *           if (model+0x36 == 1) { MotionStartOnTrack(model, 9, motion, 0);
+ *                                  model+0x36 = 1; return }
+ *           MotionStartOnTrack(model, 9, motion, 0)
+ * ```
+ *
+ * Only bone 9's subtree -- pelvis and legs, which never left track 0 -- is
+ * handed to the new clip, and a stumble on bone 1's subtree plays on over it.
+ * `ZombieSetMotionIfIdle`'s bit-0x1000 arm is its one caller.
+ */
+export function ActorSetMotionBlendedUnderOverlay(obj: Actor, motion: number,
+                                                  start: number,
+                                                  fade: number): void {
+  if (!MotionOf(obj, motion)) return;
+  BlendBaseTrack(obj, motion, start, fade);
+}
+
+/**
+ * `[port-only]` -- the stores `ActorSetMotionBlended` and
+ * `ActorSetMotionBlendedUnderOverlay` share, and `MotionStartOnTrack`'s
+ * (`FUN_004119F0`) slot-A snapshot and slot-B load for track 0, in the port's
+ * encoding of the base track. The two routines differ only in which subtree
+ * they hand to track 0, which is the overlay's to keep or lose.
+ */
+function BlendBaseTrack(obj: Actor, motion: number, start: number,
+                        fade: number): void {
   // One track: writing it ends whatever one-shot was on it. See
   // {@link ActorEndOneShot} — this is the edge B5 was missing.
   ActorEndOneShot(obj, fade);
@@ -262,6 +312,9 @@ export function ActorSetOneShotBlended(obj: Actor, motion: number,
   } else {
     ActorStartFade(obj, obj.motion, obj.playTicks, fade);
   }
+  // The engine's call is `ActorSetMotionBlended`, and it ends a stumble on
+  // the overlay as that one does.
+  obj.react = null;
   obj.action = { motion, ticks: start, held: true };
   obj.rootActionFrame = -1;
 }

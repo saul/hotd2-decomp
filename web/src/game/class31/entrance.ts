@@ -14,11 +14,11 @@ import { ActorFlag, MotionFlag, ThrowerFlag, type ThrowerActor }
   from "../actor";
 import { ThrowerTryClaimAttackSlot } from "../combat/permits";
 import type { GameHost } from "../host";
-import { MotionOf, SecondsToTicks } from "../tables";
+import { MotionOf, MotionPlayLength, SecondsToTicks } from "../tables";
 import { G } from "../globals";
 import { vec3 } from "../vec";
 import { TurnAngleTowardFrames } from "../actor_turn";
-import { ActorSetMotionBlended, ZombieSetMotionIfIdle }
+import { ActorSetMotionBlended, SetCurrentActorMotionBlended }
   from "../class30/motion_cue";
 import { GAME_HZ, MotionFade } from "../class30/states";
 import {
@@ -45,8 +45,16 @@ const _dest = vec3();
  */
 export function ThrowerStateWalkDistance(obj: ThrowerActor, rng: Rng): void {
   if (obj.sub === 0) {
-    ZombieSetMotionIfIdle(obj, ThrowerMotionOf(obj, ThrowerMotion.Walk), rng,
-                          "clip", MotionFade.Quick);
+    // `SetCurrentActorMotionBlended(obj+0x194, walk, rand() % play_length, 5)`
+    // at `0x0044E358` -- class 0x31's own call, unconditional. This used to
+    // borrow class 0x30's `ZombieSetMotionIfIdle`, whose `obj+0x136C` tests
+    // read bits that mean something else on a thrower (L3).
+    const walk = ThrowerMotionOf(obj, ThrowerMotion.Walk);
+    if (walk !== undefined) {
+      SetCurrentActorMotionBlended(obj, walk,
+                                   rng.int(MotionPlayLength(obj, walk)),
+                                   MotionFade.Quick);
+    }
     obj.arcFrom = { x: obj.pos.x, y: obj.pos.y, z: obj.pos.z };
     obj.sub = 1;
   }

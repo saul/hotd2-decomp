@@ -262,6 +262,15 @@ CHECKS: list[Check] = [
           "shot test, which the render pick used to offer and `ResolveHit` "
           "then killed",
           NEEDS_BUNDLE, LANE_BROWSER),
+    Check("humanoid_shot", "web",
+          ["node", "tools/humanoid_shot_page.mjs", "--headless"],
+          "that stage 2's jetty zombies -- class-0x25 scripted humanoids, the "
+          "four in the game whose spawn record leaves bit 0x8000 clear -- "
+          "survive live pulls aimed through the page's own camera at their "
+          "bodies while the gun is up: the one check that fires real pointer "
+          "events at the class, which the render pick used to find through a "
+          "wall and `ResolveHit` then killed for ninety points",
+          NEEDS_BUNDLE, LANE_BROWSER),
     Check("crosshair", "web",
           ["node", "tools/crosshair_page.mjs", "--headless"],
           "that real pointer events reach HudDrawCrosshair as the exe's "
@@ -376,11 +385,14 @@ CHECKS: list[Check] = [
           ["python3", "tools/verify_ghidra_db.py", "--game-dir", "{game_dir}"],
           "that the Ghidra database every session decompiles from says what "
           "`ghidra/annotations/` says -- every prototype and no-return flag "
-          "in `prototypes.tsv` applied, no flag it does not declare -- and "
-          "that no `CALL` to a function that returns carries the "
-          "`CALL_RETURN` override that prints as a clean `return;`: the only "
-          "check that reads the database rather than the exe, and so the "
-          "only thing that can say the pseudocode is not missing code (L89). "
+          "in `prototypes.tsv` applied, no flag it does not declare, and no "
+          "database name one the file has renamed away from, which the next "
+          "`export-annotations` would put back (L90) -- and that no `CALL` "
+          "to a function that returns carries the `CALL_RETURN` override "
+          "that prints as a clean `return;`: the only check that reads the "
+          "database rather than the exe, and so the only thing that can say "
+          "the pseudocode is not missing code (L89). Names and comments still "
+          "on their way in either direction are counted, not failed. "
           "Asserts nothing without Ghidra or a project",
           NEEDS_GAME),
     game("prop_pose",
@@ -439,12 +451,27 @@ CHECKS: list[Check] = [
          "the *exact* set of attacks the engine can never land is asserted, "
          "which stops the crawlers' condition-4 swing being filtered out as "
          "an impossible row (L65, L71, L73)"),
+    game("split_unreachable",
+         "that nothing the shipped game runs reaches `ZombieSplitInTwo` "
+         "(`FUN_0045D9F0`) -- no store of 4 to `g_hit_result`, one writer "
+         "of the split bit and no way into its state, each beside a control "
+         "that must be found -- which is the whole of the case for the port "
+         "not transcribing the split, and the only check that can say when "
+         "that case stops holding"),
     game("horde",
          "that every number the class-0x40 horde is steered by -- its entry "
          "splines, spline rates, shot delays, wander grid, second skin and "
          "the emerge prop's corners -- is the EXE's, and that the seven "
          "descriptors split five hordes to two props on the byte PlaceHorde "
          "switches on"),
+    game("worm",
+         "that every scalar the class-0x42 worm's port names is the `.rdata` "
+         "word or the instruction operand the EXE loads, that its member "
+         "routine's jump table has the seven arms the port's switch has, that "
+         "its sounds and `buyo.bin` slots are the ones the port names, that "
+         "the game's three class-0x42 descriptors are sub-types 1, 0 and 2, "
+         "and, with a bundle, that the shadow the port draws without the "
+         "scene light array is a black no light can change"),
     game("continue_screen",
          "that the continue screen the port draws -- the run's CONTINUE? and "
          "digit, the two-player small ones, the small GAME OVER and the credit "

@@ -343,8 +343,9 @@ export interface ClassHandler {
    * shot, which is the engine's rule and the point of the flag.
    *
    * **A class whose routines never register sets it too**, and registers
-   * nowhere: class 0x24, whose set-pieces the exe never files, so no shot
-   * reaches them. Unset, `render/` would offer such an actor to every shot.
+   * nowhere: class 0x24, whose set-pieces the exe never files, and class
+   * 0x25, whose scripted humanoids it never files either, so no shot reaches
+   * them. Unset, `render/` would offer such an actor to every shot.
    *
    * Absent means the class is picked the way it always has been. See
    * `combat/shot_test.ts`.
@@ -412,6 +413,12 @@ export const ENEMY_CLASSES: ReadonlySet<number> = new Set([
   // share the class id and are not counted; `ClassHandler.onDeadSweep` and
   // `tracksCamera` are how the class tells them apart.
   SpawnClass.HordeSpawner,
+  // Class 0x42's batch members do both `INC`s in `PlaceWormBatch`
+  // (`FUN_0042F9B0`, `0x0042FBBF`/`0x0042FBC6`) and both `DEC`s on the kill
+  // and on the bounce's exit. The placer and sub-type 1's lone drop share the
+  // class id and are not counted; `ClassHandler.onDeadSweep` and
+  // `countsForEnemyGate` are how the class tells them apart.
+  SpawnClass.Worm,
 ]);
 
 /** Whether this actor is one the enemy counters count. */

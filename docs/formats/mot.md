@@ -104,9 +104,13 @@ toward zero) and which, held through the fade, plays the clip from 0.
 start: slot A from authored frame `f`, slot B from `f + 1`.
 `MotionWriteBoneAngles` (`FUN_00411D70`) writes a bone only when its record's
 track byte `+0x8E` matches the track being started, which
-`SkeletonAssignSubtreeTrack` (`FUN_00412200`) sets per subtree -- that is how
-the hit reaction on track 1 drives only the bones it owns. `[likely]` for the
-last clause; its helper `FUN_00412290` is unread.
+`SkeletonAssignSubtreeTrack` (`FUN_00412200`) sets per subtree, through its
+recursion `SkeletonAssignNodeTrack` (`FUN_00412290`) -- that is how the hit
+reaction on track 1 drives only the bones it owns: bone 1's subtree, the upper
+body, while `SkeletonPoseRootFrame` keeps the root on track 0. Track 1's clock
+is `SkeletonAdvanceOverlayCursor` (`FUN_004112E0`) and its fade home
+`MotionFadeOverlayToBase` (`FUN_00411BD0`); `docs/formats/combat.md` §7 has
+the schedule. `[proved]`
 
 ## Loading
 

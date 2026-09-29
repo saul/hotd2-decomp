@@ -16,6 +16,7 @@ import { ThrowerReleaseSlotOnDeath } from "../combat/counts";
 import { G } from "../globals";
 import type { GameHost } from "../host";
 import { MotionOf, MotionPlayLength, T } from "../tables";
+import { MotionCrossFadeTo } from "../motion";
 import { ActorSetMotion } from "../class30/motion_cue";
 import { GAME_HZ } from "../class30/states";
 import {
@@ -37,10 +38,15 @@ import { TraceActorSurfaceContactPoint } from "./surface";
  * `CMP EAX, 0xf; JLE` and a store of 15 back into `obj+0x1368` itself.
  */
 const REACT_BONE_MAX = 15;
-/** Bones below this cross-fade over 0x14 frames; 9 and up hard-cut. */
+/** Bones below this play on the overlay; 9 and up cut the base track. */
 const REACT_HARD_SET_BONE = 9;
-/** `MotionCrossFadeTo`'s (`FUN_00411B70`) last argument, `PUSH 0x14`. */
+/**
+ * `MotionCrossFadeTo`'s fade back out, fade in and bone -- `PUSH 0x14`,
+ * `PUSH 0x1` and `PUSH 0x1` at `0x0044A3B9`..`0x0044A3C6`.
+ */
 const REACT_FADE = 0x14;
+const REACT_FADE_IN = 1;
+const REACT_OVERLAY_BONE = 1;
 /** `ThrowerStateGetUp`'s clip — a `szom.bin` one, for every character type. */
 const GET_UP_CLIP = 0x127;
 /** The knock and get-up clips state 33 picks by stance. */
@@ -53,8 +59,16 @@ const TUMBLE_FRAME_CAP = 0x78;
 const TUMBLE_STANDOFF = 4.5;
 const TUMBLE_COOLDOWN = 0x14;
 
+/**
+ * A clip on the port's one-shot channel, standing in for a track-0 set in the
+ * engine (`ActorSetMotion` or `SetCurrentActorMotionBlended` at every call
+ * here). Each of those runs `MotionStartOnTrack(model, 0, ...)`, which writes
+ * `model+0x36 = 0` and hands the whole skeleton back to track 0 -- so it ends
+ * a stumble on track 1, as `ActorSetMotion` does in `class30/motion_cue.ts`.
+ */
 function playOnce(obj: ThrowerActor, motion: number): void {
   if (!MotionOf(obj, motion)) return;
+  obj.react = null;
   obj.action = { motion, ticks: 0 };
   obj.rootActionFrame = -1;
 }
@@ -72,12 +86,14 @@ function playOnce(obj: ThrowerActor, motion: number): void {
  * **The two arms put the clip on different tracks**, and that decides both
  * how the body moves and how long the state lasts:
  *
- * * bones below 9 -- `MotionCrossFadeTo(obj+0x194, 1, clip, 0, 1, 0x14)` at
- *   `0x0044A3C9`, the stumble on **track 1**, over the loop. Track 1 carries
- *   no root (`SkeletonPoseRootFrame` takes track 0's), so the flinch moves
- *   nothing, and the loop underneath keeps its own clock and its own root.
- *   The port's track 1 is `Actor.react`, as it is for class
- *   0x30's `ActorPlayHitReaction` (`FUN_004544C0`), which makes the same call.
+ * * bones below 9 -- `MotionCrossFadeTo` (`FUN_00411B70`) with `(obj+0x194,
+ *   1, clip, 0, 1, 0x14)` at `0x0044A3C9`: the stumble on **track 1**, over
+ *   bone 1's subtree, with the loop still posing the root and the legs.
+ *   Track 1 carries no root (`SkeletonPoseRootFrame` takes track 0's), so the
+ *   flinch moves nothing, and the loop underneath keeps its own clock. It is
+ *   the one track 1 the port has, `Actor.react` in `game/motion.ts`, the same
+ *   one class 0x30's `ActorPlayHitReaction` (`FUN_004544C0`) puts its stumble
+ *   on.
  * * bones 9 and up -- `ActorSetMotion(obj+0x194, clip)` at `0x0044A3DB`, a
  *   hard cut on **track 0**: the clip replaces the loop, root and all.
  *
@@ -104,8 +120,13 @@ export function ThrowerStateHitReaction(obj: ThrowerActor, rng: Rng,
   if (obj.sub === 0) {
     ClearCurrentActorVelocityAndAccel(obj);
     if (motion !== undefined && MotionOf(obj, motion)) {
+      // `0x0044A3C9 CALL MotionCrossFadeTo(obj+0x194, 1, clip, 0, 1, 0x14)`
+      // for a bone below 9 -- the clip on bone 1's subtree, faded back out
+      // over 0x14 -- and `ActorSetMotion(obj+0x194, clip)` for the rest.
+      // Nothing else: the one-shot channel is not a track the engine has.
       if (bone < REACT_HARD_SET_BONE) {
-        obj.react = { motion, ticks: 0, blend: REACT_FADE, hard: false };
+        MotionCrossFadeTo(obj, REACT_OVERLAY_BONE, motion, 0, REACT_FADE_IN,
+                          REACT_FADE);
       } else {
         ActorSetMotion(obj, motion);
       }

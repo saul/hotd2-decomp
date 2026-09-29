@@ -6719,12 +6719,24 @@ draw's), and the exporter: `class12Tail` (and `class12_tail` in the Python
 half), class 0x12 in `SLOT_DRAWN_CLASSES` for behaviour 0 only, and the strip's
 slots in the `slots_actor` rig -- **a fresh bundle is needed**.
 
-Not here: `ShotTestMesh` (`FUN_00404A00`) for an actor. The door's record
-carries `0x10`, so in the engine a shot at the boarded doorway is tested
-against `coli1.bin:5144` and stops on the boards until the strip starts; the
-port files the door and its pick passes a mesh entry by, as it did before any
-class raised the bit. Its `0x40` bit is clear, so neither collision pass takes
-the blob in either.
+**The boards stop a bullet** (`ShotTestMesh`, `FUN_00404A00`, ported after
+this landed). The door's record carries `0x10`, so a shot at the boarded
+doorway is traced against `coli1.bin:5144` -- one quad, surface 56 -- through
+the door's `obj+0x150`, which `ScriptedPropUpdate12` now stores, and the
+crossing is a candidate keyed on its depth with every sphere: the door is
+marked whole and `SpawnWorldImpact` throws surface 56's spark on the boards,
+until the strip starts and `0x8000` takes the door out of the list. Before,
+the pick passed the mesh entry by, and a pull at the boards went through them
+to the wall behind (surface 50, three units back). Its `0x40` bit is clear, so
+neither collision pass takes the blob, in the engine or here. It is the only
+object in the shipped game the port's mesh arm reaches; the rest --
+class 0x15's floating rows, class 0x26's boat, class 0x33's stage-2 carriers,
+class 0x44's hinges, doors and story switches -- are not filed in
+`G.g_shot_test_list`, and `docs/formats/combat.md` ("An object's own mesh")
+lists each with its site. Checked by `test:port` ("ShotTestMesh: the boards
+stop the shot": five fail with the old skip) and in the page at the same
+address: a pull at the boards' middle marks the door, impact surface 56 at the
+quad's centre, nobody else hit.
 
 Checked by `test:port` ("class 0x12, the door the bin captor bursts out of":
 the spawn, the Init, the wait, the flag frame, 54 frames of strip, the despawn,

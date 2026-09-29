@@ -136,7 +136,7 @@ export function PlaceStoryModeSwitch(pl: BreakablePlacement): BreakableProp {
   p.slot = pl.slot ?? 0;
   // `obj+0x2A0` and `obj+0x2A4`. `storyItem` is `+0x2A0`'s offset already.
   // `obj+0x124 = 8.0`, and only on the `desc+8 == -1` variant -- the other
-  // one goes to `ShotTestMesh`, which the port has not got. See
+  // one goes to `ShotTestMesh`, which the prop pool does not reach. See
   // `STORY_SWITCH_RADIUS`.
   p.hitRadius = (pl.volume ?? -1) === -1 ? STORY_SWITCH_RADIUS : 0;
   p.storyItem = pl.branch_flag ?? -1;

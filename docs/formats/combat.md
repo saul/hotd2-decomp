@@ -260,6 +260,48 @@ thousand units) against the blob in the bone's frame, over
 the quad's surface; `MarkActorShot` hands them to `SpawnWorldImpact`, which
 fills `g_shot_hit_records` for the boss's own `Boss4ResolveShot` to read.
 
+**An object's own mesh — `ShotTestMesh`, `FUN_00404A00`.** `ProcessPlayerShots`
+forks on the object's **live** `obj+0x34` (`TEST byte [obj+0x34], 0x10` at
+`0x004045A9`), not the word the entry recorded. The mesh arm copies `obj+0x150`
+to `g_coli_dynamic_matrix` and `obj+0x14C` to `g_coli_dynamic_blob`, and
+`ShotBuildSegment` (`FUN_00404AD0`) traces the shot record's origin to
+origin + direction x 1000.0 (`[0x004C49C4]`) **far end first** through
+`ColiTraceSegmentInObjectSpace` -- so the quad nearest the eye wins, and a quad
+is crossed only from the side the eye is on. No surface, no candidate; a blob
+of `-1` is refused inside the trace (`0x00404FDA`). On a hit the object-space
+normal is turned by the object's **angles**, `RotZ(+0x6C); RotY(+0x68);
+RotX(+0x64)` on the identity -- not by `obj+0x150`, and in that order whatever
+order the class draws in -- and `ShotPushMeshObjectCandidate` (`FUN_00404B50`)
+writes `+0x2C = obj+0x34 | 0x40`, `+0x24 = obj` and jumps into
+`ShotPushColiHitCandidate`, which ORs `0x10` in. `MarkActorShot` then marks the
+object **whole** (byte 1) and throws `SpawnWorldImpact` of the quad's surface.
+No sphere, no radius, no `obj+0x70`: the object is a candidate exactly where
+the shot crosses its mesh, sorted on the hit point's depth with every sphere
+-- so it stops a shot at an actor behind it, and not one at an actor in front.
+`obj+0x150` is the draw's `MatrixStore` with the view under it, and
+`RegisterForShotTest`'s `0x10` arm multiplies the camera block's `+0x40` matrix
+in on top (`0x00405190`..`0x004051CE`), which `[likely]` takes the view out;
+the port builds `Actor.coliMatrix` on the identity instead, and
+`combat/shot_test.ts` ports the arm, the segment and both pushes.
+
+Who reaches it, over every shipped record (`[proved]` writers: every store to
+`+0x14C` by instruction and byte scan, every `OR` of `0x50`/`0x51`, and the
+95 rel32 callers of `RegisterForShotTest`):
+
+| class | `0x10` and `+0x14C` from | registers at | shipped | in the port |
+|---|---|---|---|---|
+| `0x12` | record flags `0x10`; `ScriptedPropInit12` `0x0043F9FD` | `ScriptedPropUpdate12` `0x0043FB76` | stage 1 `0x3D88` (`coli1.bin:5144`, one quad, surface 56); stage 2 `0x15644` and stage 5 `0x2398` carry `0x8000` and never file | **tested**: the shot stops on the boards until flag 34 starts the strip |
+| `0x15` | record flags `0x50`; `FloatingPropRowSpawn` `0x0044180D` | `0x004420A9` | stage 2, 2 records | no module |
+| `0x26` subtype 2 | `Class26Subtype2Update` `0x0048EB0E` (`|= 0x51`), `0x0048EB16` | `0x0048EE9C` | stage 3's boat | not filed; its blob is traced only by the collision passes, and by `ShotHitWorld` on a miss |
+| `0x33` selector 1 | `ScriptedCarrierStepPath33` `0x0043389A` (`|= 0x50` when `tail+0x04 != -1`), `0x004338A3` | `ScriptedCarrierUpdate33` `0x004334D0` | stage 2's two name a mesh; stage 5's names none | not filed |
+| `0x33` selector 4 | `ScriptedPushableUpdate33` `0x00433BC9`, when `tail+0x04 != -1` | `0x00433CC7` | stage 1's two name none and carry `0x8000` | -- |
+| `0x44` 0-7, 11-13 | each builder, `|= 0x51` unconditionally, `+0x14C` from the descriptor | selector 0's `ScriptFlagEffectUpdate` `0x00473CDF`; 1, 2, 4's `HingeUpdate` `0x0047410B`; 3's `0x00474120` at `0x0047422F`; 6's `0x00474470` at `0x00474760`; 7's `0x00474770` at `0x004748B6`; 12's `0x004755B0` at `0x004757E0`; 13's `0x004757F0` at `0x004758C7`. **11's `RisingDoorUpdate` never registers**, and 5's `0x00474240` has no call of its own (it copies its blob to an object it makes, whose routine is `[open]`) | 0: 2, 1: 37, 2: 3 (two doors each), 3: 2, 4: 13, 5-7: 1 each, 11: 2, 12: 8, 13: 13 | 0 is in the prop pool, not filed; 11 files nothing in the engine either; the rest have no builder |
+| `0x44` 17 | `PlaceStoryModeSwitch` `0x00473ADB`, when `desc+0x08 != -1` | `StoryModeSwitchUpdate` `0x004753D7` | all nine name a volume | prop pool, not filed: unshootable |
+
+So the port's mesh arm changes exactly one object's behaviour, stage 1's
+boarded doorway. The bone meshes (`Boss4Init`, `EnemyZombieInitByCharType`)
+are the other routine, `ShotTestBoneMesh`, and unchanged.
+
 **Several pulls in one frame.** `[port-only]` The engine reads the trigger once
 a frame, so the shot record a class reads back on its update is always the
 pull that marked it. The port's queue lets one frame take several pulls per
@@ -323,9 +365,9 @@ list instead:
   `ActorRegisterOriginInViewSpace` (`FUN_0043F950`, the call at `0x0043F9C2`).
   That routine has **one** caller, `CatBranchTriggerUpdate` (`get_xrefs_to`),
   so this line used to be wrong to say both branch triggers call it; the
-  other site it listed, `0x0043FB76`, lies outside it, in the unfunctioned
-  code from `0x0043F9D0`. Whose routine that is, and where `0x52`
-  registers, is `[open]`.
+  other site it listed, `0x0043FB76`, is `ScriptedPropUpdate12`'s, class
+  0x12's door (`game/class12/`, now filed and tested as a mesh). Where
+  `0x52` registers is `[open]`.
 * Class `0x25`: `[likely]` none. No site lies in its routines, and every shared
   routine that registers is accounted for above. The exception is
   `FUN_004825B0` (`0x00482991`), a task `FUN_00482070` allocates, whose owner

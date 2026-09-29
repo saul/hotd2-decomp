@@ -417,9 +417,11 @@ export enum ActorFlag {
    * `obj+0x34` bit `0x10` — test this object as **a collision mesh**, not a
    * sphere. `ProcessPlayerShots` (`FUN_00404570`) sends it to `ShotTestMesh`
    * (`FUN_00404A00`) instead of `ShotTestSphere`, and `RegisterForShotTest`
-   * takes it whatever its depth. Class 0x26's boat raises it with
-   * `obj+0x34 |= 0x51`, and so does a story switch whose descriptor names a
-   * mesh.
+   * takes it whatever its depth. Class 0x12's stage-1 door carries it in its
+   * record's flags word, class 0x26's boat raises it with `obj+0x34 |= 0x51`,
+   * and so does a story switch whose descriptor names a mesh. The test is
+   * `combat/shot_test.ts`'s, on {@link Actor.coliBlob} through
+   * {@link Actor.coliMatrix}.
    */
   ShotTestMesh = 0x10,
   /**

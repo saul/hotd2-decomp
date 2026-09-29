@@ -48,9 +48,9 @@
  * `[port-only]` **The shot test is not registered.** `PropBuildScriptFlagEffect`
  * sets `obj+0x34 |= 0x51`, and bit `0x10` sends `RegisterForShotTest`
  * (`FUN_00405160`) to `ShotTestMesh` rather than to the sphere — the same path
- * the story-mode switch's volume takes, and the same one `class41/shot_test.ts`
- * says the port has not got. `hitRadius` carries the engine's 40.0 so the day
- * it is written the number is already right.
+ * the story-mode switch's volume takes, and one the port runs for actors in
+ * `G.g_shot_test_list` and not for the prop pool (`class41/shot_test.ts`).
+ * `hitRadius` carries the engine's 40.0, which `ShotTestMesh` never reads.
  */
 import type { EffectDefJson } from "../../bundle";
 import {

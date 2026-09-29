@@ -211,6 +211,24 @@ function ColiDynamicObjects(): Actor[] {
   return out;
 }
 
+/**
+ * `MatrixStore(obj+0x150)` (`MatrixStore`, `FUN_004A8CA0`) for a draw that
+ * builds its matrix on `game/matrix.ts`' stack top: the sixteen floats in the
+ * stack's row-vector layout, into {@link Actor.coliMatrix}'s row-major 3x4.
+ *
+ * `[port-only]` as a function, and in the layout it converts to. The engine
+ * stores the top as it stands and every reader takes it as it was stored; the
+ * port's 3x4 is the transpose of the top's first three columns, so a point is
+ * `R·p + t` either way.
+ */
+export function ColiStoreObjectMatrix(obj: Actor, top: ArrayLike<number>):
+    void {
+  const m = obj.coliMatrix ?? (obj.coliMatrix = new Array(12).fill(0));
+  m[0] = top[0]; m[1] = top[4]; m[2] = top[8]; m[3] = top[12];
+  m[4] = top[1]; m[5] = top[5]; m[6] = top[9]; m[7] = top[13];
+  m[8] = top[2]; m[9] = top[6]; m[10] = top[10]; m[11] = top[14];
+}
+
 /** `R^T (p - t)`: a world point into the object's space. The matrix is rigid. */
 function ColiToObject(m: readonly number[], x: number, y: number, z: number,
                       out: { x: number; y: number; z: number }): void {

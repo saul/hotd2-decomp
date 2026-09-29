@@ -1,6 +1,6 @@
 /**
- * The engine's shot test: who is a candidate, the sphere every candidate is
- * measured against first, and the fork into the bones.
+ * The engine's shot test: who is a candidate, the sphere or the collision
+ * mesh each is measured against, and the fork into the bones.
  *
  * ## How the engine does it
  *
@@ -62,15 +62,26 @@
  * is passed over here because `render/characters.ts` still picks it the way
  * it did before this file existed. `docs/formats/combat.md`, "The shot test",
  * lists what moving each of them across would take.
+ *
+ * ## The two tests, and the one list they share
+ *
+ * An entry whose object carries `obj+0x34` bit `0x10` is tested against its
+ * own collision mesh ({@link ShotTestMesh}) and every other against its sphere
+ * ({@link ShotTestSphere}). Both push into the same candidate list and the
+ * same depth sort decides between them, so a mesh nearer the eye than an
+ * actor's sphere takes the shot, and one behind it does not.
  */
 import { ActorFlag, type Actor } from "../actor";
 import type { CharacterBone } from "../../bundle/characters";
 import { ActorByAt, G } from "../globals";
 import { g_class_handlers } from "../registry";
 import type { GameHost, ShotRay } from "../host";
-import { ColiSegmentVsMesh, type ColiHit } from "../coli";
 import {
-  MatCopy, MatrixInvert, MatrixTransformPoint, MatrixTransformVector,
+  ColiSegmentVsMesh, ColiTraceSegmentInObjectSpace, type ColiHit,
+} from "../coli";
+import {
+  MatCopy, MatrixInvert, MatrixLoadIdentity, MatrixRotateX, MatrixRotateY,
+  MatrixRotateZ, MatrixTransformPoint, MatrixTransformVector, type Mat,
 } from "../matrix";
 import { BoneHitRadius, CharacterTypeOf, T } from "../tables";
 import { VecToAngles, type Vec3 } from "../vec";
@@ -149,8 +160,9 @@ export interface ShotCandidate {
   /** The node's `+0x14` for a bone; 0 for an object hit whole. */
   bone: number;
   /**
-   * Hit as one sphere, `ShotTestSphere`'s else arm. `MarkActorShot` records
-   * `1` in `obj+0x190 + player` for it rather than a bone index.
+   * Hit whole: `ShotTestSphere`'s else arm, or a mesh object
+   * ({@link ShotPushMeshObjectCandidate}). `MarkActorShot` records `1` in
+   * `obj+0x190 + player` for it rather than a bone index.
    */
   whole: boolean;
   /** Where, in world space — the port's effects need the point. */
@@ -158,10 +170,11 @@ export interface ShotCandidate {
   /** `[port-only]` The candidate is a thrown weapon, by id. See {@link ShotTestEntry.thrown}. */
   thrown?: number;
   /**
-   * A bone hit on its collision mesh (`ShotTestBoneMesh`): the surface code
-   * and the face's normal the segment test found, which the candidate record
-   * carries at `+0x30` and `+0x18..0x20` and `MarkActorShot` hands to the
-   * world impact. Absent for a sphere hit.
+   * A hit on a collision mesh -- a bone's ({@link ShotTestBoneMesh}) or an
+   * object's ({@link ShotTestMesh}): the surface code and the face's normal
+   * the segment test found, which {@link ShotPushColiHitCandidate} puts at
+   * `+0x30` and `+0x18..0x20` with `+0x2C` bit `0x10`, and `MarkActorShot`
+   * hands to the world impact. Absent for a sphere hit.
    */
   mesh?: { surface: number; normal: Vec3 };
   /**
@@ -306,10 +319,16 @@ const _view = { x: 0, y: 0, z: 0 };
  * headless run — there is no depth to test, and the object is taken, as an
  * unordered comparison would take it. Nothing picks in a headless run.
  *
- * The mesh arm's matrix copy is not transcribed. It rebuilds `obj+0x150` for
- * `ShotTestMesh`, which the port has not got for an actor (see
- * {@link ProcessPlayerShotsTestList}), and the port's {@link Actor.coliMatrix}
- * is already the world matrix it produces.
+ * The mesh arm's matrix product is not transcribed, because the port has
+ * nothing for it to undo. It is `Push; SetTop(g_camera_blocks[g_camera_index]
+ * + 0x40); MatrixMultiply(obj+0x150); MatrixStore(obj+0x150); Pop`
+ * (`0x00405190`..`0x004051CE`): the class's draw stored `obj+0x150` with the
+ * view under it, and this multiplies the camera block's `+0x40` matrix in on
+ * top, which `[likely]` takes the view back out -- {@link ShotTestMesh} and
+ * the two collision passes trace **world** points through the result, which is
+ * only meaningful if it does ({@link Actor.coliMatrix}). A class here stores
+ * {@link Actor.coliMatrix} built on the identity instead of on the view, which
+ * is the matrix that product leaves.
  */
 export function RegisterForShotTest(obj: Actor, host: GameHost): void {
   const flags = obj.flags;
@@ -362,15 +381,21 @@ const _w = { x: 0, y: 0, z: 0 };
  * the list, and the sort `MarkActorShot` (`FUN_00404DB0`) opens with: every
  * registered object tested, the candidates sorted, the nearest returned.
  *
- * `0x004045A0`..`0x004045C9` is the loop. An object with `obj+0x34` bit `0x10`
- * goes to `ShotTestMesh` (`FUN_00404A00`), which the port has not got for an
- * actor. One class that registers here raises the bit: class 0x12, whose
- * stage-1 door (`0x3D88`) carries `0x10` in its record and files itself every
- * frame until its strip starts (`game/class12/`) -- so in the engine a shot
- * at the boarded doorway stops on the boards, and here it is passed by. The
- * other family that raises it — the story switch — is
- * `class41/shot_test.ts`'s. The mesh arm is skipped, and says so rather than
- * falling into the sphere.
+ * `0x004045A0`..`0x004045C9` is the loop:
+ *
+ * ```
+ * 004045A9  TEST byte ptr [obj+0x34], 0x10    ; the object's LIVE word
+ * 004045AD  JNZ -> 004045B6 CALL ShotTestMesh  ; a collision mesh
+ * 004045AF  CALL ShotTestSphere                 ; everything else
+ * ```
+ *
+ * The fork reads the object, not the word the entry recorded, so a bit
+ * raised or dropped since registration counts. Of the classes whose pick is
+ * here, one raises it: class 0x12, whose stage-1 door (`0x3D88`) carries
+ * `0x10` in its record and files itself every frame until its strip starts
+ * (`game/class12/`), so a shot at the boarded doorway stops on the boards.
+ * The other families that raise it are not in this list in the port -- see
+ * `docs/formats/combat.md`, "The shot test".
  *
  * What is not here is `ShotTestWorld` (`FUN_00404B80`). In the engine the
  * static collision's hits are candidates in the same list, which is what
@@ -409,8 +434,8 @@ export function ProcessPlayerShotsTestList(ray: ShotRay, host: GameHost):
     const obj = ActorByAt(entry.at);
     if (!obj) continue;
     if (!ShotTestPickedHere(obj)) continue;
-    if (obj.flags & ActorFlag.ShotTestMesh) continue;
-    ShotTestSphere(obj, shot, out);
+    if (obj.flags & ActorFlag.ShotTestMesh) ShotTestMesh(obj, shot, out);
+    else ShotTestSphere(obj, shot, out);
   }
   if (!out.length) return null;
   return ColiSortHitCandidatesByDistance(out)[0];
@@ -444,9 +469,9 @@ function alongShot(ray: ShotRay, p: Vec3): number {
  * 0040468C  whole: key = __ftol(-obj+0x78 * 10.0); the object is one candidate
  * ```
  *
- * **The sphere at `obj+0x124` is the broad phase for every object**, per-bone
- * or not: a shot that would clip a bone lying outside it finds nothing,
- * because the bone walk is never reached. Bit `0x80` is what
+ * **The sphere at `obj+0x124` is the broad phase for every object this arm
+ * takes**, per-bone or not: a shot that would clip a bone lying outside it
+ * finds nothing, because the bone walk is never reached. Bit `0x80` is what
  * `SkeletonBuildAndPose` (`FUN_00410590`) raises for every actor whose
  * skeleton has nodes as its `Init` builds it; without it, or with `0x8000`,
  * the object is hit whole and `MarkActorShot` records bone byte 1.
@@ -586,7 +611,10 @@ function BoneRecordFlags(obj: Actor, b: CharacterBone): number {
     ? BONE_RECORD_BUILT | 0x51 : BONE_RECORD_BUILT;
 }
 
-/** `ShotBuildSegment` (`FUN_00404AD0`): the crosshair's line, this long. */
+/**
+ * `[0x004C49C4]`, read as `00007a44`: `1000.0`. The shot segment's length,
+ * which the routine at `0x00404AD0` multiplies the shot record's direction by.
+ */
 const SHOT_SEGMENT_LENGTH = 1000;
 
 const _bm = new Array<number>(16).fill(0);
@@ -596,6 +624,131 @@ const _a = { x: 0, y: 0, z: 0 };
 const _b = { x: 0, y: 0, z: 0 };
 const _hit: ColiHit = { x: 0, y: 0, z: 0, nx: 0, ny: 0, nz: 0, surface: 0,
                         distSq: 0 };
+const _rot: Mat = new Array<number>(16).fill(0);
+
+/**
+ * `ShotBuildSegment` — `FUN_00404AD0`. The shot, traced against the object's
+ * own collision mesh.
+ *
+ * ```
+ * 00404ADD  origin = shot record +0x18..0x20            ; 0x009A2CA0 + p*0x68
+ * 00404AEC  far    = origin + (+0x24..0x2C) * [0x004C49C4]   ; 1000.0
+ * 00404B3B  ColiTraceSegmentInObjectSpace(&far, &origin)
+ * ```
+ *
+ * **The far end first**: `ColiSegmentVsMesh` (`FUN_004AAA40`) keeps the hit
+ * nearest its second endpoint, so the quad nearest the eye wins, and a quad
+ * is crossed only from its front -- the side the eye is on. The trace runs
+ * through the inverse of `g_coli_dynamic_matrix` against
+ * `g_coli_dynamic_blob`, which the caller has just set: here the object's
+ * {@link Actor.coliMatrix} and {@link Actor.coliBlob}, which is what the port's
+ * `ColiTraceSegmentInObjectSpace` reads in their place. It writes
+ * `g_coli_hit_surface`, 0 for a miss, and the hit into `out`.
+ *
+ * The routine's other caller, {@link ShotTestBoneMesh}, traces the same
+ * segment inline, because the matrix it sets is the host's posed bone, in the
+ * matrix stack's own layout rather than {@link Actor.coliMatrix}'s.
+ */
+function ShotBuildSegment(obj: Actor, ray: ShotRay, out: ColiHit): void {
+  const o = ray.origin, d = ray.dir;
+  ColiTraceSegmentInObjectSpace(obj,
+                                o.x + d.x * SHOT_SEGMENT_LENGTH,
+                                o.y + d.y * SHOT_SEGMENT_LENGTH,
+                                o.z + d.z * SHOT_SEGMENT_LENGTH,
+                                o.x, o.y, o.z, out);
+}
+
+/**
+ * `ShotTestMesh` — `FUN_00404A00`. One registered object against its own
+ * collision mesh: `ProcessPlayerShots`' arm for an object whose `obj+0x34`
+ * has bit `0x10` ({@link ActorFlag.ShotTestMesh}).
+ *
+ * ```
+ * 00404A0F  g_coli_dynamic_matrix = obj+0x150       ; REP MOVSD, sixteen dwords
+ * 00404A20  g_coli_dynamic_blob   = obj+0x14C
+ * 00404A2C  ShotBuildSegment(player)
+ * 00404A31  CMP g_coli_hit_surface, 0; JZ out       ; nothing crossed
+ * 00404A41  Push; LoadIdentity; RotZ(obj+0x6C); RotY(obj+0x68); RotX(obj+0x64)
+ * 00404A8F  normal = MatrixTransformPoint(normal); Pop
+ * 00404AB9  ShotPushMeshObjectCandidate(obj)
+ * ```
+ *
+ * `[proved]`, from the disassembly. No sphere, no radius and no registered
+ * point: `obj+0x70..0x78` and `obj+0x124` are not read, and the object is a
+ * candidate only where the shot crosses a quad of its mesh. A blob of `-1`
+ * is refused inside the trace (`0x00404FDA`), which is
+ * {@link Actor.coliBlob} `null`.
+ *
+ * **The normal is turned by the object's angles, not by its matrix**, and in
+ * `Z`, `Y`, `X` order whatever order the class draws in -- class 0x12 draws
+ * `RotX; RotZ; RotY`. It goes through `MatrixTransformPoint` on a matrix built
+ * from the identity, so no translation reaches it, and it is not
+ * renormalised. What reads it is `SpawnWorldImpact`, through the candidate.
+ */
+function ShotTestMesh(obj: Actor, shot: ShotTest, out: ShotCandidate[]): void {
+  ShotBuildSegment(obj, shot.ray, _hit);
+  if (G.g_coli_hit_surface === 0) return;
+  MatrixLoadIdentity(_rot);
+  MatrixRotateZ(_rot, obj.roll);
+  MatrixRotateY(_rot, obj.yaw);
+  MatrixRotateX(_rot, obj.pitch);
+  const normal = { x: 0, y: 0, z: 0 };
+  MatrixTransformPoint(_rot, { x: _hit.nx, y: _hit.ny, z: _hit.nz }, normal);
+  ShotPushMeshObjectCandidate(obj, { x: _hit.x, y: _hit.y, z: _hit.z },
+                              normal, _hit.surface, shot, out);
+}
+
+/**
+ * `ShotPushMeshObjectCandidate` — `FUN_00404B50`. The mesh object's half of
+ * the candidate record, and on into the push.
+ *
+ * ```
+ * 00404B65  candidate[n]+0x2C = obj+0x34
+ * 00404B6B  candidate[n]+0x24 = obj
+ * 00404B71  candidate[n]+0x2C |= 0x40
+ * 00404B78  JMP ShotPushColiHitCandidate           ; which ORs 0x10 in
+ * ```
+ *
+ * So the record's flags are the object's own word with `0x50` raised, and
+ * `MarkActorShot` (`FUN_00404DB0`) reads them as **the object, whole**:
+ * bit `0x20` is clear (no `obj+0x34` of a mesh object carries it), and `0x10`
+ * with `0x40` takes the whole-object arm -- `obj+0x34 |= shooter | 8`,
+ * `obj+0x190 + p = 1` -- and then, for the `0x10`, `SpawnWorldImpact`
+ * (`FUN_00405260`) at the quad. The object is at `+0x24`, where a bone
+ * candidate keeps its node.
+ */
+function ShotPushMeshObjectCandidate(obj: Actor, point: Vec3, normal: Vec3,
+                                     surface: number, shot: ShotTest,
+                                     out: ShotCandidate[]): void {
+  ShotPushColiHitCandidate(obj.at, 0, true, point, normal, surface, shot,
+                           out);
+}
+
+/**
+ * `ShotPushColiHitCandidate` — `FUN_00404CB0`. A collision hit as a
+ * candidate, keyed on its depth.
+ *
+ * ```
+ * 00404CB4  Push; SetTop(g_camera_blocks[g_camera_index])   ; world to view
+ * 00404D04  MatrixTransformPoint(g_coli_hit point)
+ * 00404D09  key = __ftol(-z * 10.0)
+ * 00404D45  +0x00..0x08 = the world point; +0x18..0x20 = g_coli_hit normal
+ * 00404D87  +0x30 = g_coli_hit_surface; +0x2C |= 0x10; n++; Pop
+ * ```
+ *
+ * The caller has written `+0x24..0x2C` -- which object, which node, which
+ * flags -- and this completes the record. `+0x2C` bit `0x10` is
+ * {@link ShotCandidate.mesh}: the candidate `MarkActorShot` throws a world
+ * impact for. The port's view space is the host's camera, as for every other
+ * candidate here.
+ */
+function ShotPushColiHitCandidate(at: number, bone: number, whole: boolean,
+                                  point: Vec3, normal: Vec3, surface: number,
+                                  shot: ShotTest, out: ShotCandidate[]): void {
+  if (!shot.host.viewSpaceOfPoint?.(point, _c)) return;
+  out.push({ key: ShotCandidateKey(_c.z), at, bone, whole, point,
+             mesh: { surface, normal }, t: alongShot(shot.ray, point) });
+}
 
 /**
  * `ShotTestBoneMesh` — `FUN_004048A0`. One bone's collision mesh.
@@ -612,14 +765,14 @@ const _hit: ColiHit = { x: 0, y: 0, z: 0, nx: 0, ny: 0, nz: 0, surface: 0,
  * ```
  *
  * `g_coli_dynamic_matrix` is the bone's world matrix -- `GameHost.boneMatrix`,
- * the pose three.js last drew. The segment (`ShotBuildSegment`,
- * `FUN_00404AD0`: the crosshair's origin to a thousand units along it) goes
- * through its inverse into the bone's frame, `ColiSegmentVsMesh`
- * (`FUN_004AAA40`) finds the quad nearest the eye by testing **from the far
- * end back**, as the world trace does, and the point comes back through the
- * matrix and the normal through its rotation (`MatrixTransformVector` at
- * `0x00404982`, not renormalised). The key is taken from the point, as
- * `ShotPushColiHitCandidate` (`FUN_00404CB0`) takes it.
+ * the pose three.js last drew. The segment ({@link ShotBuildSegment}'s: the
+ * crosshair's origin to a thousand units along it) goes through its inverse
+ * into the bone's frame -- inline here, because the matrix is the host's and
+ * in the stack's layout -- `ColiSegmentVsMesh` (`FUN_004AAA40`) finds the quad
+ * nearest the eye by testing **from the far end back**, as the world trace
+ * does, and the point comes back through the matrix and the normal through its
+ * rotation (`MatrixTransformVector` at `0x00404982`, not renormalised).
+ * {@link ShotPushColiHitCandidate} then keys it on the point's depth.
  */
 function ShotTestBoneMesh(obj: Actor, node: CharacterBone, mesh: string,
                           shot: ShotTest, out: ShotCandidate[]): void {
@@ -642,10 +795,9 @@ function ShotTestBoneMesh(obj: Actor, node: CharacterBone, mesh: string,
   const normal = { x: 0, y: 0, z: 0 };
   MatrixTransformPoint(_bm, _hit, point);
   MatrixTransformVector(_bm, { x: _hit.nx, y: _hit.ny, z: _hit.nz }, normal);
-  if (!shot.host.viewSpaceOfPoint?.(point, _c)) return;
-  out.push({ key: ShotCandidateKey(_c.z), at: obj.at, bone: node.bone,
-             whole: false, point, mesh: { surface: _hit.surface, normal },
-             t: alongShot(shot.ray, point) });
+  // `+0x24 = node, +0x28 = obj, +0x2C = rec+0x74 | 0x40`: a bone, bit 0x20.
+  ShotPushColiHitCandidate(obj.at, node.bone, false, point, normal,
+                           _hit.surface, shot, out);
 }
 
 /**

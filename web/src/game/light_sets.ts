@@ -26,6 +26,7 @@
  * | `SetPiecePropDrawAndTick` (`FUN_004834F0`) | 0x24 |
  * | `ScriptedHumanoidDraw` (`FUN_00484FF0`) | 0x25 |
  * | `HordeMemberUpdate` (`FUN_0043C440`), `HordeDeformedPropUpdate` (`FUN_0043F010`) | 0x40, members and the rug |
+ * | `WormUpdate` (`FUN_0042FCA0`), `0x00430135`..`0x00430A66` -- **the live member's draw only** | 0x42 |
  * | `OwlCorpseFallAndSettle` (`FUN_00448210`) -- **the corpse only** | 0x43 |
  * | `BatDiveUpdate`, `BatScatterUpdate`, `BatSwarmUpdate` | 0x46 |
  * | `FishDraw` (`FUN_00439860`), `FishSwimAwayTick` (`FUN_00439C20`) | 0x51 |
@@ -47,6 +48,7 @@ import type { Actor } from "./actor";
 import { SpawnClass } from "./spawn_class";
 import { OwlState } from "./class43/state";
 import { ResultCardRoutine } from "./class61/state";
+import { WormBodyDraw } from "./class42/state";
 
 /** The classes whose every draw is under block 1. */
 const SECONDARY_LIGHT_CLASSES: ReadonlySet<SpawnClass> = new Set([
@@ -73,5 +75,11 @@ export function ActorDrawsUnderSecondaryLights(obj: Actor): boolean {
   }
   // The owl's live update does not make the call; `OwlCorpseFallAndSettle`,
   // the update it is swapped for on death, does.
+  // The worm's member routine brackets its body and shadow with the pair;
+  // its death routine and the lone drop make neither call. Which of them drew
+  // this frame is on the tail, and on the kill frame it is the member's.
+  if (obj.cls === SpawnClass.Worm) {
+    return obj.worm.drawnBody === WormBodyDraw.Member;
+  }
   return obj.cls === SpawnClass.FlyingEnemy && obj.owl.state === OwlState.Dead;
 }

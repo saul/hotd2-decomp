@@ -383,8 +383,10 @@ list instead:
 * Class `0x25`: `[likely]` none. No site lies in its routines, and every shared
   routine that registers is accounted for above. The exception is
   `FUN_004825B0` (`0x00482991`), a task `FUN_00482070` allocates, whose owner
-  is `[open]`. Class `0x42`'s falling breakables register through
-  `FUN_0042FCA0` (`0x00430AF6`), which `PlaceFallingBreakableBatch` installs.
+  is `[open]`. Class `0x42`'s worms register through `WormUpdate`
+  (`FUN_0042FCA0`, `0x00430AF6`) and `WormLoneDropUpdate` (`FUN_00431000`,
+  `0x004311EA`), which `PlaceWormBatch` installs, each as one sphere
+  (`game/class42/`).
 * And `ShotTestWorld` into the same sort, which `combat/shot.ts`'s
   `ShotHitWorld` declares it does not yet do.
 

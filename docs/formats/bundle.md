@@ -56,6 +56,18 @@ whatever a list's overflow records name) and `common.bin[199]` on the type's
 template. The renderer clones a template for each figure the card allocates;
 `web/tools/checks/result_card.ts` holds the block to the EXE.
 
+A stage that spawns class 0x42 -- the worm, stage 2 -- carries
+`characters.class42`: the class's `.rdata`, each table cut at the extent its
+reader's index reaches (`web/src/hod2lib/class42.ts`) -- the member offsets
+for six-to-eight and ten-to-fifteen batches, the drop delays, yaw offsets and
+orbit phases, the crawl's steps and scales, the leap's path rows `0x20..0x3B`
+and scales -- and `halves`, motions `0xBF` and `0xC0` as the two-node
+effect-layout frames `MotionFrameRecord` (`FUN_00412FB0`) reads, sixty each,
+`t` and `r` flat. Each class-0x42 placement carries `class42: {subtype}`,
+`desc+0x25`, and the hidden `slots_actor` rig carries `buyo.bin` 0..53
+(`0x85A..0x88F`). `web/tools/checks/worm.ts` holds the port's scalars to the
+EXE; see [`docs/re/worm.md`](../re/worm.md).
+
 `screen_sprites` also carries the continue screen's sprites -- CONTINUE?, the
 64x128 countdown digits, the credit line's words and the small GAME OVER --
 from `CONTINUE_SCREEN_SPRITES` in `web/src/game/hud_sprites.ts` (see

@@ -445,6 +445,14 @@ CHECKS: list[Check] = [
          "the emerge prop's corners -- is the EXE's, and that the seven "
          "descriptors split five hordes to two props on the byte PlaceHorde "
          "switches on"),
+    game("worm",
+         "that every scalar the class-0x42 worm's port names is the `.rdata` "
+         "word or the instruction operand the EXE loads, that its member "
+         "routine's jump table has the seven arms the port's switch has, that "
+         "its sounds and `buyo.bin` slots are the ones the port names, that "
+         "the game's three class-0x42 descriptors are sub-types 1, 0 and 2, "
+         "and, with a bundle, that the shadow the port draws without the "
+         "scene light array is a black no light can change"),
     game("continue_screen",
          "that the continue screen the port draws -- the run's CONTINUE? and "
          "digit, the two-player small ones, the small GAME OVER and the credit "

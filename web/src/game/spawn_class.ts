@@ -129,8 +129,16 @@ export enum SpawnClass {
   HordeSpawner = 0x40,
   /** `FUN_00461CD0` — breakable-prop / item-container placer. */
   PropContainerPlacer = 0x41,
-  /** `FUN_0042F9B0` — a batch of falling shootable breakables. */
-  FallingBreakables = 0x42,
+  /**
+   * `PlaceWormBatch` (`FUN_0042F9B0`) — **the worm**, settled by its kill
+   * sound, `STAGE2_SE\WORM_TUBU1_44.wav` / `WORM_TUBU2_44.wav`, and drawn from
+   * `buyo.bin`. A placer: sub-types 0 and 2 build a counted batch of six to
+   * fifteen that drop, crawl toward the camera and take turns to leap at it;
+   * sub-type 1 builds one uncounted worm that drops past. Three spawns, all
+   * stage 2: block 21's cog (sub-types 1 and 0) and block 26 (sub-type 2).
+   * **Ported** (`game/class42/`).
+   */
+  Worm = 0x42,
   /**
    * `PlaceOwlFlockMember` (`FUN_00445DB0`) — **the owl**, settled by
    * `owl.bin` and by `COMMON2\FUKUROU1_22.wav`. A placer: it builds a

@@ -334,6 +334,7 @@ at `0x0042F147`/`53`) -- each already read `G.g_camera_block_eye`.
 | the fish | `FishBeginRise`, `FishLungeTestBite`, `FishCheckShot` | `0x0043879B/A4`, `0x004397E1..F3`, `0x00438DE3/EC` | block 0, the lens, the lens |
 | the bats' homing | `BatDiveUpdate`, `BatSwarmUpdate` | `0x0042E6C5..73A`, `0x0042EFE4..F05B` | block 0 |
 | the horde's dive (eye and pitch) | `HordeTryStartDive`, `HordeMemberUpdate` | `0x0043D61E/27`, `0x0043CA99..CB38` | block 0 |
+| the worm: its turn, its leap's heading, range and height | `WormUpdate` | `0x00430464/6F`, `0x004305CE/D9`, `0x0043061E/27`, `0x004306B1` | new with the class |
 | class 0x41 | `PropDrawOnlyType53`, `PropUpdateType62`, `LiftUpdate`, `OriginalItemPropUpdate`, `SpawnStoryModeItem` | `0x0046EC9F/AB`, `0x0046FAB2/BC`, `0x0046A38C`, `0x004677D7/E3`, `0x00467C03/0F` | block 0 |
 | class 0x23's sparks | `SpawnSpriteEffectsTowardEye` | `0x00407C1D..36` | block 0 |
 
@@ -371,7 +372,7 @@ hook `0x0048D1F0` (`0x0048D2D7..E9`, `g_camera_eye + 15`);
 `PlacePlayerEntityFromViewPose`; the camera-facing sprites drawn by
 `CarriedPropDeflectedFlight`, `CatBranchTriggerUpdate`,
 `ScriptedCarrierUpdate33` and `Class26InstallSubtypeUpdate`;
-`PropHitSparkUpdate`; `PlaceFallingBreakableBatch`.
+`PropHitSparkUpdate`.
 
 ### The path frame, and block 2's -- [proved]
 

@@ -420,6 +420,22 @@ export function SpawnSlotActor(s: ScriptSpawn, rng: Rng): void {
       a.visible = true;
       return;
     }
+    // Class 0x42 -- the worm's placer. No character type: every draw of the
+    // class is an asset slot. `PlaceWormBatch` runs as the `Init`, builds the
+    // batch -- or the lone drop -- and despawns itself; the sub-type is the
+    // descriptor's `+0x25`, and the position and the three angles are the
+    // spawn record's, which is all `EvtOpSpawnPlaced09` gives it.
+    if (s.class === SpawnClassValue.Worm) {
+      if (!pl.class42) return;
+      G.g_slot_actors_built.push(s.at);
+      ActorSpawn(s.at, SpawnClassValue.Worm, -1, "worm placer",
+                 { class42: pl.class42, ...PlacementOrientation(pl),
+                   pos: vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0,
+                             s.pos?.[2] ?? 0),
+                   visible: true },
+                 rng);
+      return;
+    }
     // Classes 0x16 and 0x17 -- the stage-2 boss arena's wave field and its
     // sources. They draw nothing and kill themselves the frame they run, so
     // they have no character type either; the position is the one thing

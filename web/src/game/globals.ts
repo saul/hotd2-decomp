@@ -1873,6 +1873,35 @@ export const G = {
   /** `[port-only]` — see {@link BatSplash.id}. */
   g_bat_splash_seq: 0,
 
+  // -- the worm, class 0x42 ----------------------------------------------
+  /**
+   * `g_worm_members` — 0x007DCA4C. Fifteen slots, one per member index.
+   * Every member writes itself back at the top of each `WormUpdate`
+   * (`FUN_0042FCA0`); the kill and the bounce's exit write 0. Three things
+   * read it: the three picks of {@link Globals.g_worm_leaper}, each of which
+   * skips an empty slot.
+   *
+   * `[port-only]` spawn addresses rather than pointers, so the array survives
+   * `clonePlain`; 0 is the engine's empty slot and no spawn address is 0. The
+   * array is BSS, so it starts as fifteen zeros, and a batch overwrites only
+   * the slots it has members for.
+   */
+  g_worm_members: new Array(15).fill(0) as number[],
+  /**
+   * `g_worm_live_count` — 0x007DCA49, s8. Members of the batch not yet killed
+   * or gone: `PlaceWormBatch` (`FUN_0042F9B0`) zeroes and counts it, and the
+   * kill and the bounce's exit take one off. The leaper is picked again only
+   * while it is above zero.
+   */
+  g_worm_live_count: 0,
+  /**
+   * `g_worm_leaper` — 0x007DCA48, s8. The member index whose turn it is to
+   * swell and leap (`WormUpdate` state 4). Drawn at random by the placer and
+   * again after each kill, handed to the next live index after a leap, and
+   * moved on by any member that finds its slot empty.
+   */
+  g_worm_leaper: 0,
+
   // -- the horde, class 0x40 ---------------------------------------------
   /**
    * `g_horde_members` — 0x007DCC20. Ten slots, one per member index.
@@ -3130,6 +3159,9 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   // The splash is a task, and the scene's task list goes with the scene.
   G.g_bat_splashes = [];
   G.g_bat_splash_seq = 0;
+  G.g_worm_members = new Array(15).fill(0);
+  G.g_worm_live_count = 0;
+  G.g_worm_leaper = 0;
   G.g_horde_members = [];
   G.g_horde_live_count = 0;
   G.g_horde_diver = 0;

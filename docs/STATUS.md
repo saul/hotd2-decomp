@@ -18,24 +18,24 @@ than a measurement. What each directory is for is in
 
 | Directory | Lines | Files | Layer |
 |---|---:|---:|---|
-| `game/` | 110248 | 361 | engine |
-| `hod2lib/` | 19994 | 35 | engine |
-| `render/` | 15813 | 60 | render |
+| `game/` | 111522 | 363 | engine |
+| `hod2lib/` | 20145 | 36 | engine |
+| `render/` | 15962 | 61 | render |
 | `app/` | 12713 | 44 | app |
 | `script/` | 4495 | 25 | engine |
 | `ui/` | 3779 | 27 | ui |
 | `core/` | 3535 | 13 | engine |
-| `bundle/` | 2921 | 11 | engine |
+| `bundle/` | 2977 | 11 | engine |
 | `audio/` | 1053 | 3 | render |
 | `hud/` | 526 | 1 | ui |
-| **total** | **175077** | **580** | |
+| **total** | **176707** | **584** | |
 
 The largest files, which is where the pressure to split next is:
 
-* `game/globals.ts` — 3251
+* `game/globals.ts` — 3283
 * `app/main.ts` — 3227
-* `game/actor.ts` — 2744
-* `hod2lib/bundle.ts` — 2483
+* `game/actor.ts` — 2756
+* `hod2lib/bundle.ts` — 2501
 * `hod2lib/exetab.ts` — 2409
 
 ## The port
@@ -43,17 +43,17 @@ The largest files, which is where the pressure to split next is:
 | | |
 |---|---|
 | Gameplay coverage | **233 of 299** annotated functions in the gameplay address ranges have a port (77%) |
-| Ported outside those ranges | 591 (opcodes, and the classes whose handlers sit elsewhere) |
-| Citations checked | 824 ported functions match `functions.tsv` under the same name |
-| Spawn classes | **32 of 42** read classes have a module, covering 1549 of 1619 placements |
+| Ported outside those ranges | 593 (opcodes, and the classes whose handlers sit elsewhere) |
+| Citations checked | 826 ported functions match `functions.tsv` under the same name |
+| Spawn classes | **33 of 42** read classes have a module, covering 1552 of 1619 placements |
 | Declared `[diverges]` | **131** — where the port knowingly departs from the exe, each with its reason on the spot |
-| `[open]` markers | **122** — questions the port and the exporter are honest about not having answered |
+| `[open]` markers | **123** — questions the port and the exporter are honest about not having answered |
 
 Both markers are counted in **every** `.ts`/`.tsx` file under `web/src/`, one per occurrence, and only in comments — a word in code or in a string is not a marker (`verify_port.marker_lines`). Each departure and each question is written once, where it is made; everything that refers to it names it in words ([`PLAYER.md`](PLAYER.md#one-departure-one-tag), "One departure, one tag"). By layer, from the same table as the directories above:
 
 | Layer | Directories | `[diverges]` | `[open]` |
 |---|---|---:|---:|
-| engine | `core/`, `bundle/`, `script/`, `game/`, `hod2lib/` | 118 | 118 |
+| engine | `core/`, `bundle/`, `script/`, `game/`, `hod2lib/` | 118 | 119 |
 | render | `render/`, `audio/` | 12 | 4 |
 | ui | `hud/`, `ui/` | 0 | 0 |
 | app | `app/` | 1 | 0 |
@@ -64,9 +64,9 @@ The two declared seams between the UI and the player: **`PlayerCommands` has 54 
 
 | | |
 |---|---|
-| Named functions | 1455 in `ghidra/annotations/functions.tsv` |
-| Named globals | 753 in `ghidra/annotations/globals.tsv` |
-| Checks | 70, run together by `tools/verify_all.py` (listed below) |
+| Named functions | 1463 in `ghidra/annotations/functions.tsv` |
+| Named globals | 765 in `ghidra/annotations/globals.tsv` |
+| Checks | 71, run together by `tools/verify_all.py` (listed below) |
 
 ## Ratchets
 
@@ -155,6 +155,7 @@ nothing exits 3 and is never counted as green.
 | `game:root_pose` | that a clip's root translation either moves the object or offsets the pose -- the two arms of one `model+0x64` bit, quoted as bytes -- which actors the posing arm can move, measured over every motion block and paired with the class-0x10 wait word that governs it, and that `ActorModelScale` is `ActorBuildSkinnedModel`'s per-type switch, decoded from its jump table | game-dir |
 | `game:combat` | that the exporter's shot and damage readings hold together across every character type and match the EXE's bytes -- and the only place the *exact* set of attacks the engine can never land is asserted, which stops the crawlers' condition-4 swing being filtered out as an impossible row (L65, L71, L73) | game-dir |
 | `game:horde` | that every number the class-0x40 horde is steered by -- its entry splines, spline rates, shot delays, wander grid, second skin and the emerge prop's corners -- is the EXE's, and that the seven descriptors split five hordes to two props on the byte PlaceHorde switches on | game-dir |
+| `game:worm` | that every scalar the class-0x42 worm's port names is the `.rdata` word or the instruction operand the EXE loads, that its member routine's jump table has the seven arms the port's switch has, that its sounds and `buyo.bin` slots are the ones the port names, that the game's three class-0x42 descriptors are sub-types 1, 0 and 2, and, with a bundle, that the shadow the port draws without the scene light array is a black no light can change | game-dir |
 | `game:continue_screen` | that the continue screen the port draws -- the run's CONTINUE? and digit, the two-player small ones, the small GAME OVER and the credit line -- is at the EXE's positions, scales and sprite ids, read as instruction bytes and `.rdata` rows; that only one credit-line drawer can run; and that all eight wait opcodes read the gameplay gate that holds the script while nobody is in play | game-dir |
 | `game:options` | that the profile reading is right on the user's own save -- the four disguised files deciphered with the key taken out of `ProfileCipher`'s instructions, and the block's byte sum and version checked -- that Blood Color is dead in this build, and that the options screen's factory tables, sprite ids, positions and glyph table are the EXE's, with the bundle's `options` block when there is one | game-dir |
 | `game:result_card` | that every constant the result card's port transcribes is the immediate at its instruction; that the `.rdata` span the card reads with no bound is the EXE's bytes; that every rescuable civilian's type has an attachment list the unbounded lookup can find; and, with a bundle, that each stage placing the card carries a figure template and every clip for every type it can show | game-dir |
@@ -165,7 +166,7 @@ nothing exits 3 and is never counted as green.
 | `game:bone_cels` | that every cel run `ZombieDrawBonePart` (`FUN_004534A0`) draws is the arithmetic in the EXE and is in the bundle -- no table in the image names those models, so this is the only thing standing between a hand-written run and a character losing a part | game-dir |
 | `baseline` | that the installed assets still hash to `manifest.csv` | game-dir |
 
-21 of them need the installed game and 28 need an exported
+22 of them need the installed game and 28 need an exported
 bundle. **That is a known hole, not a design:** a machine with
 neither cannot run the checks that compare two histories, and a
 bundle-free fixture is the open work that closes it.

@@ -39,6 +39,7 @@ import { makePathRidingPropTail, type PathRidingPropTail }
 import { makeBatTail, type BatTail } from "./class46/state";
 import { makeBoss3Tail, type Boss3Tail } from "./class45/state";
 import { makeHordeTail, type HordeTail } from "./class40/state";
+import { makeWormTail, type WormTail } from "./class42/state";
 import { makeFishTail, type FishTail } from "./class51/state";
 import { makeMouseTail, type MouseTail } from "./class52/state";
 import { makeCatTail, type CatTail } from "./class53/state";
@@ -1719,6 +1720,12 @@ export interface ActorBase {
    * it pushes up. Only the placer carries it; a member is built with none.
    */
   class40: CharacterPlacement["class40"];
+  /**
+   * Class 0x42's descriptor byte, `desc+0x25` -- the sub-type
+   * `PlaceWormBatch` (`FUN_0042F9B0`) switches on. Only the placer carries
+   * it; the objects it builds are allocated with none.
+   */
+  class42: CharacterPlacement["class42"];
   class51: CharacterPlacement["class51"];
   class52: CharacterPlacement["class52"];
   /**
@@ -2423,6 +2430,7 @@ export type Actor =
   | (ActorBase & { cls: SpawnClass.Bat; bat: BatTail })
   | (ActorBase & { cls: SpawnClass.Boss3; boss3: Boss3Tail })
   | (ActorBase & { cls: SpawnClass.HordeSpawner; horde: HordeTail })
+  | (ActorBase & { cls: SpawnClass.Worm; worm: WormTail })
   | (ActorBase & { cls: SpawnClass.ScriptedScenery;
                    scenery: ScriptedSceneryTail })
   | (ActorBase & { cls: SpawnClass.ResultCard; card: ResultCardTail })
@@ -2438,7 +2446,7 @@ export type Actor =
       | SpawnClass.CarriedZombie
       | SpawnClass.ScriptedScenery | SpawnClass.Vehicle
       | SpawnClass.PathRidingProp | SpawnClass.HordeSpawner
-      | SpawnClass.ResultCard> });
+      | SpawnClass.Worm | SpawnClass.ResultCard> });
 
 /** An actor already narrowed to class 0x25, for that class's own routines. */
 export type HumanoidActor = Extract<Actor,
@@ -2598,6 +2606,7 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     class46: null,
     class45: null,
     class40: null,
+    class42: null,
     class51: null,
     class52: null,
     class14: null,
@@ -2733,6 +2742,9 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
   }
   if (cls === SpawnClass.HordeSpawner) {
     return { ...head, cls, horde: makeHordeTail() };
+  }
+  if (cls === SpawnClass.Worm) {
+    return { ...head, cls, worm: makeWormTail() };
   }
   if (cls === SpawnClass.ScriptedScenery) {
     return { ...head, cls, scenery: makeScriptedSceneryTail() };

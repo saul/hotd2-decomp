@@ -61,6 +61,7 @@ import { g_class_handlers } from "../game/registry";
 import { ScriptedScenerySelector } from "../game/class33/state";
 import { OwlBodyChain, type OwlPart } from "./owl";
 import { deformHordeSheet, HordeDrawParts, type HordePart } from "./horde";
+import { WormDrawParts, type WormPart } from "./worm";
 import { SpawnClass } from "../game/spawn_class";
 import { BAMS_TO_RAD } from "../core/bams";
 import {
@@ -185,6 +186,10 @@ function DrawSlotFor(a: Actor): number | null {
       // A chain too: the member's shadow, the emerge prop's two halves, the
       // splash and its ripple -- `render/horde.ts` composes the matrices, in
       // world space. The member's own model is the character layer's.
+      return -1;
+    case SpawnClass.Worm:
+      // A chain: the body and its shadow, the death strip, or two halves and
+      // their cut -- `render/worm.ts` composes the matrices, in world space.
       return -1;
     case SpawnClass.ScriptedHumanoid:
       // Only the object-path arm. The three fixed-point arms draw at points
@@ -329,6 +334,8 @@ export class SlotModelLayer implements System<RenderContext> {
   private readonly _parts: OwlPart[] = [];
   /** Scratch for class 0x40's chain. */
   private readonly _hordeParts: HordePart[] = [];
+  /** Scratch for class 0x42's chain. */
+  private readonly _wormParts: WormPart[] = [];
   private enabled = true;
 
   constructor() {
@@ -466,8 +473,10 @@ export class SlotModelLayer implements System<RenderContext> {
         live.node.position.set(a.pos.x, a.pos.y, a.pos.z);
         live.node.rotation.set(a.pitch * BAMS_TO_RAD, a.yaw * BAMS_TO_RAD,
                                a.roll * BAMS_TO_RAD, "XZY");
-      } else if (a.cls === SpawnClass.HordeSpawner) {
-        // `render/horde.ts` hands back world-space matrices.
+      } else if (a.cls === SpawnClass.HordeSpawner
+                 || a.cls === SpawnClass.Worm) {
+        // `render/horde.ts` and `render/worm.ts` hand back world-space
+        // matrices.
         live.node.visible = true;
         live.node.position.set(0, 0, 0);
         live.node.rotation.set(0, 0, 0);
@@ -678,8 +687,11 @@ export class SlotModelLayer implements System<RenderContext> {
    * the matrices are rewritten every frame either way, because the angles do.
    */
   private chain(a: Actor, live: Live | undefined): Live | null {
-    const parts: (OwlPart | HordePart)[] = a.cls === SpawnClass.HordeSpawner
-      ? HordeDrawParts(a, this._hordeParts) : OwlBodyChain(a, this._parts);
+    const parts: (OwlPart | HordePart | WormPart)[] =
+      a.cls === SpawnClass.HordeSpawner
+        ? HordeDrawParts(a, this._hordeParts)
+        : a.cls === SpawnClass.Worm ? WormDrawParts(a, this._wormParts)
+          : OwlBodyChain(a, this._parts);
     if (!parts.length) {
       // Nothing drawn this frame -- a member that is not drawing its shadow.
       // Hide what the last frame drew rather than leave it standing.
@@ -723,8 +735,9 @@ export class SlotModelLayer implements System<RenderContext> {
       c.matrix.copy(parts[i].m);
       c.visible = true;
       if ((parts[i] as Partial<HordePart>).deform) deformHordeSheet(c, a);
-      // `AssetDrawSlotWithAlpha` (`FUN_004185A0`): the one fading draw in a
-      // chain, class 0x40's ripple. Every other part is `AssetDrawSlot`.
+      // `AssetDrawSlotWithAlpha` (`FUN_004185A0`): the fading draws in a
+      // chain, class 0x40's ripple and class 0x42's shadow. Every other part
+      // is `AssetDrawSlot`.
       setDrawAlpha(c, (parts[i] as Partial<HordePart>).alpha ?? null);
     }
     while (live.node.children.length > parts.length) {

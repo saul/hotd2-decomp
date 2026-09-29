@@ -98,6 +98,12 @@ export interface ScriptJson {
    * carrier routine 2 steps its two doors through.
    */
   carrier_door_yaw?: number[];
+  /**
+   * The result card's `.rdata` -- see `ExeTables.resultCardTables` in the
+   * exporter. Absent in a bundle written before it, which stands no figure
+   * and awards no life.
+   */
+  result_card?: ResultCardJson;
   rain?: RainJson;
   /** The `coli/` blobs this scene loads — see {@link ColiJson}. */
   coli?: ColiJson;
@@ -140,6 +146,30 @@ export interface Boss4CameraCueJson {
 }
 
 /** `script.json`'s `boss4` block -- class 0x19's `.rdata`. */
+/**
+ * The result card's `.rdata` (`docs/re/stage-end.md`), one block for the whole
+ * game, as `game_over` is.
+ */
+export interface ResultCardJson {
+  /**
+   * The address {@link bytes} starts at: `g_result_figure_records`,
+   * `0x0055DD80`.
+   */
+  base: number;
+  /**
+   * `0x0055DD80..0x0055E074`, hex: the figure records, the six list
+   * pointers, `g_result_figure_attachments`, the four glyph strings and
+   * `g_result_life_bonus`, as one span -- because `ResultCardInstall` reads a
+   * scene's records with no bound, and a scene with more rescues than records
+   * reads whatever follows them.
+   */
+  bytes: string;
+  /** `g_result_figure_lists`, `0x0055DF50`: six addresses, one per scene. */
+  lists: number[];
+  /** `g_accuracy_bonus_table`, `0x00567990`: s16[11]. */
+  accuracy_bonus: number[];
+}
+
 export interface Boss4TablesJson {
   /** `g_boss4_phase_hp_fraction`, `0x00570490`, f32[18]. */
   phase_hp_fraction: number[];

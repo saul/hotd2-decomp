@@ -9,6 +9,8 @@ import type { OpImpl } from "../walker";
 import { G } from "../../game/globals";
 import { CheckpointResetCamera, EvtPlayersClearOfDeath }
   from "../../game/camera/actions";
+import { EvtOpAwardAccuracyBonus2B, EvtOpSuppressAccuracyStats2F }
+  from "../../game/combat/accuracy";
 
 export const OPS: Record<number, OpImpl> = {
 
@@ -108,6 +110,24 @@ export const OPS: Record<number, OpImpl> = {
         return undefined;
       },
     },
+    // -- the accuracy grade ------------------------------------------------
+    0x2f: {                                     // suppress_accuracy_stats
+      // `EvtOpSuppressAccuracyStats2F` (`FUN_0045FE20`): the s16 at `+4`.
+      status: "done",
+      run: (_w, op) => {
+        EvtOpSuppressAccuracyStats2F(op.raw?.length
+          ? Number.parseInt(op.raw[0], 16) : 0);
+        return undefined;
+      },
+    },
+    0x2b: {                                     // award_accuracy_bonus
+      // `EvtOpAwardAccuracyBonus2B` (`FUN_0045FE40`).
+      status: "done",
+      run: () => {
+        EvtOpAwardAccuracyBonus2B();
+        return undefined;
+      },
+    },
     0x4d: {                                     // checkpoint
       // `ResetSceneCombatState` (`FUN_0045EEC0`) ends by recording the block
       // in the run's route history -- `g_route_history[scene][count++] =
@@ -115,6 +135,9 @@ export const OPS: Record<number, OpImpl> = {
       status: "tracked",
       run: (w) => {
         w.checkpointBlock = w.block;
+        // `MOV word ptr [0x009a5c48], BX` at `0x0045EF24`: the accuracy
+        // counters run again.
+        G.g_accuracy_stats_suppressed = 0;
         // The camera half: the published frame to 0, scene state (1,3), the
         // frames-left sentinel, the override latch, the starters' reseat, the
         // eye ease, the held driver, the roll channel and the fixed eye.

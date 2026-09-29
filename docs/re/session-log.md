@@ -26257,6 +26257,90 @@ is not ported and is left as its own task.
 all seven fail with the `src/` change reversed and pass with it.
 `verify_port`: divergences 134 -> 131, uncited exports 81 held.
 
+## 2026-09-29 -- the result card read: figures, the life bonus, the score
+
+Read in full for the end-of-stage port: `ResultCardInstall` (`FUN_00434EF0`),
+`ResultCardTally` (`FUN_00435930`), the figure task the card allocates
+(`ResultCardFigureInit` / `Update` / `DrawNode`, `FUN_004356A0` /
+`FUN_00435760` / `FUN_004357F0`, named here), `ResultCardDrawScore` and
+`ResultCardDrawAccuracy` (`FUN_004362E0`, `FUN_00436620`), the two accuracy
+opcodes (`0x2B`, `0x2F`) and both rescue writers. The whole sequence, per
+stage, is [`docs/re/stage-end.md`](stage-end.md); twelve globals and seven
+functions went into the TSVs.
+
+**What was believed and was wrong.** Three claims in the record did not
+survive the reading. (1) "Sub 1 hands over to the score count-up once the
+dwell is at or below `0x78`" -- `spawns.md` and the class-0x61 module both
+said it. Sub 2, which that test reaches, is the **life bonus**: both players'
+lives go up by `g_result_life_bonus[scene][min(rescues, 7)]`, capped, once, on
+the card's frame 302. There is no score count-up on the card at all; the
+count that climbs is the *rescues*, one every twenty frames from frame 31.
+(2) "Class 0x62 loads sound `0x7C`" -- `0x7C` is a pol **file** index
+(`result.bin`), through `PolFileQueueLoad` (`FUN_0041D650`, job kind 3, the
+call evt opcode `0x52` makes); `0x16A` is `scr_result`. The class is a loader,
+and it is `0x61` that walks the rescue list. (3) The decompile of
+`ResultCardInstall` ends at `PlaySoundId` in sub 0 and after one glyph in the
+draw (L72, L35) -- the figures, the whole card draw and the countdown are all
+past those two calls; the decompiles of both digit routines stop after their
+first digit the same way.
+
+**How the life is shown.** Only by the first rescued figure: at camera frame
+`0x104` it changes to motion `0x180` and holds `common.bin[199]` (slot
+`0x10C3`, which is also `civilians.items[0]`) up on bone 5 for cursor
+`0x1E..0x57`. `g_rescued_char_types` (`0x009C8EC0`, s16 `[scene*10 + n]`) is
+where both rescue writers record the rescued civilian's character type, and it
+is what makes the figures *the civilians you saved* rather than a fixed cast.
+
+**Found on the way.** The port's `G.g_nPlayerFired` is used as the shot count,
+but `0x009A5C78` is a flag (`= 1` at the pull) and the count is
+`g_player_shot_count` (`0x009A5C84`), guarded by `g_accuracy_stats_suppressed`
+(`0x009A5C48`, evt opcode `0x2F`). Opcodes `0x2B` and `0x2F` were unported, so
+the accuracy bonus the card's score includes was never paid.
+
+## 2026-09-29 -- the result card ported: figures, the life bonus, the score and accuracy
+
+The end of stages 1..4 is ported whole (`docs/re/stage-end.md` section 7):
+class 0x61's figures and life bonus and its draw, class 0x62's kill, the
+rescue record both rescue writers keep, opcodes `0x2B`/`0x2F`, the shot count
+at the pull, and `ResolveHit`'s hit counts. The bundle carries the card's
+`.rdata` as one span, its tiles and glyphs, and one hidden template row per
+figure type; `render/` clones a template per figure, draws the glyphs in
+camera space and the tiles as deep sprites. `web/tools/result_card.mjs` plays
+stage 1 (five rescues, and none), stage 2 (seven) and stage 4 (three) through
+their own result steps; `tools/verify_result_card.py` holds the immediates and
+the span to the EXE. The picture confirmed the font reading (`RESCUED X`,
+`LIFE BONUS X`, `1P SCORE`, `75% ACCURACY`), the waving clips, the life box
+figure 0 holds up, and the no-rescue figures lying dead.
+
+**Wrong turns.** (1) A figure row per (place, type) in the glTF was the first
+plan; the rig writer writes each placement's meshes out again, so stage 2 would
+have carried ~130 civilians' geometry. One template per type, cloned by the
+character layer (geometry shared, as the horde's mirror clones), instead.
+(2) I read the four scene lists as one 0x14 stride from `0x0055DD80`; scene 3's
+list follows scene 2's terminator by four bytes, and `verify_result_card.py`'s
+first run said so. The exporter now reads each list from its own pointer.
+(3) The freeze test (`model+0x08 == 0x80`) first read the counter, a frame
+ahead of the cursor the last draw sampled (L62); the figure keeps the drawn
+cursor on its tail and the test reads that -- the harness shows cursor 0x81,
+the clip's last, held. (4) `g_original_max_lives` and a `g_max_lives` of my
+own collided with main's `g_original_life_cap`/`g_max_lives` from the held-item
+work, landed while I worked; main's names and `GrantExtraLife` were taken and
+mine dropped. (5) `G.g_nPlayerFired` had been the port's shot count; it is the
+per-player "fired this frame" flag `ProcessPlayerShots` clears, and the count
+is `g_player_shot_count`, guarded by `g_accuracy_stats_suppressed` -- every test
+that counted shots through the flag reads the count now.
+(6) The two hit counts in `ResolveHit`'s tail I first put in
+`FireShotRequest`'s copy of that tail; main's `ResolveHit` work (e8e0a55f)
+moved the tail into `ResolveHit` and counts them there, and the merge took
+its version.
+
+**Left open.** What the clips depict is `[likely]`, from the render. A figure
+beyond its scene's list stands where the bytes after it say, on the clip they
+name, as the EXE's would; the exporter bakes record `i`'s clip for all ten
+indices, past the terminator included, so that such a figure is posed at all.
+Whether any shipped scene offers more rescues than its list has places is
+`[open]`; I did not count.
+
 ## 2026-09-29 -- class 0x10 op 0x10: the install routines, and the steps they install
 
 Picked up the "found on the way, not fixed" note in the 2026-09-29 entry

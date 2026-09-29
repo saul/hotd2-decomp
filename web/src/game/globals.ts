@@ -53,6 +53,7 @@ import type {
   Boss3Splash,
 } from "./class45/state";
 import type { ScreenSpriteAnim } from "./game_over";
+import type { ViewSlotDraw } from "./view_slot";
 import type { Boss4HitMark } from "./class19/hit_mark";
 import type { BatSplash } from "./class46/splash";
 import type { PlayerBody } from "./player_body";
@@ -477,6 +478,15 @@ export const G = {
    */
   g_original_character: [0, 1] as number[],
   /**
+   * `g_original_item_part_scale` — 0x009C88AC, u8. Original Mode items
+   * `0x0C` and `0x14` set it (`FUN_00416240`, unported: nothing in the port
+   * fills an item slot), and while it is set in Original Mode a character's
+   * bone 2 is drawn `(1.5, 1, 1.5)` and bones 5, 8, 12, 15 `(2, 1, 2)` --
+   * `ActorDrawAttachedParts`, `Boss3BystanderPoseHook`,
+   * `ResultCardFigureDrawNode`.
+   */
+  g_original_item_part_scale: 0,
+  /**
    * The four auto-fire bytes at `+0x10..+0x13` of `g_original_item_slots`
    * (`0x009A2250 + player*0x14`), which `OriginalWeaponLoadFireParams`
    * (`FUN_00416420`) loads and `PlayerFireOriginalModeWeapon` counts down:
@@ -499,6 +509,13 @@ export const G = {
    * this field was named that until the two were noticed side by side.
    */
   g_screen_sprite_draws: [] as ScreenSprite[],
+  /**
+   * `[port-only]` -- the asset slots this frame drew in the camera's own
+   * space, in draw order: every `MatrixLoadIdentity`, `MatrixTranslate`,
+   * `MatrixScale`, `AssetDrawSlot` a routine made. See `game/view_slot.ts`.
+   * Cleared where {@link g_screen_sprite_draws} is, for the same reason.
+   */
+  g_view_slot_draws: [] as ViewSlotDraw[],
   /**
    * `g_screen_sprite_queue` — `0x007C21A8`. The layered sprite queue
    * `DrawScreenSpriteLayered` (`FUN_0041C800`) fills and
@@ -1071,8 +1088,52 @@ export const G = {
    * clears it on row flag 4.
    */
   g_player_score: [0, 0],
-  /** `g_nPlayerFired` — 0x009A5C78. Shots taken, for the accuracy grade. */
+  /**
+   * `g_nPlayerFired` — 0x009A5C78 + player*0x130. **A flag, not a count**:
+   * `PlayerFireAndReloadUpdate` (`FUN_00414940`) and its Original twin write
+   * 1 at a pull that fires, and `ProcessPlayerShots` (`FUN_00404570`) tests
+   * the shot for that player and writes 0 back. The count is
+   * {@link g_player_shot_count}; this used to be kept as the count, under this
+   * name.
+   */
   g_nPlayerFired: [0, 0],
+  /**
+   * `g_player_shot_count` — 0x009A5C84 + player*0x130, s16. Shots fired,
+   * the accuracy denominator: `+= 1` at every pull that fires unless
+   * {@link g_accuracy_stats_suppressed} is up (`0x00414A15`, `0x00414CC5`).
+   * `ResetSceneOnEnter` zeroes it; `EvtOpAwardAccuracyBonus2B` and
+   * `ResultCardDrawAccuracy` read it -- and the latter writes 1 over a 0.
+   */
+  g_player_shot_count: [0, 0],
+  /**
+   * `g_accuracy_stats_suppressed` — 0x009A5C48, s16. While it is non-zero a
+   * pull counts no shot, so a boss fight's shots do not count against the
+   * accuracy grade. Evt opcode `0x2F` writes its operand
+   * (`EvtOpSuppressAccuracyStats2F`, `FUN_0045FE20`); the checkpoint opcode's
+   * `ResetSceneCombatState` (`0x0045EF24`) and `MarkSceneOver` (`0x0045EDA1`)
+   * write 0.
+   */
+  g_accuracy_stats_suppressed: 0,
+  /**
+   * `g_civilians_rescued_total` — 0x009CA0EC, s16. Every rescue of the run.
+   * `ResetGameOnStart` zeroes it and no scene load does, so it rides a stage
+   * step as the engine's does: `ResetGameGlobals` leaves it.
+   */
+  g_civilians_rescued_total: 0,
+  /**
+   * `g_civilians_rescued_by_scene` — 0x009C89C0, s16 per scene. The rescues
+   * in each scene; `ResetSceneOnEnter` zeroes this scene's and
+   * `ResetGameOnStart` six. What the result card counts, and the index into
+   * its life bonus.
+   */
+  g_civilians_rescued_by_scene: [0, 0, 0, 0, 0, 0] as number[],
+  /**
+   * `g_rescued_char_types` — 0x009C8EC0, s16 `[scene*10 + n]`: the
+   * character type of each scene's `n`-th rescue, written at the
+   * pre-increment count by both rescue writers. The result card stands one
+   * figure of each in the scene. Neither writer bounds `n`.
+   */
+  g_rescued_char_types: new Array<number>(60).fill(0),
   /**
    * `g_nFiringGate` — `0x009C8E00`. Non-zero and the trigger works; zero and
    * it does nothing at all.
@@ -2730,9 +2791,11 @@ export type Globals = typeof G;
  *
  * `ResetGameOnStart` is ported for its rank half (`game/run_phase.ts`), and
  * that routine declares the rest -- the scene and block index, the loadout,
- * the civilian and route tallies -- as the app's stage load. The run totals
- * it owns (`g_civilians_seen_total`, `g_civilians_rescued_total`) are not in
- * `G`, so the run/scene split only half exists here. This said the port had
+ * the civilian and route tallies -- as the app's stage load. Of the run
+ * totals it owns, `g_civilians_rescued_total`, `g_civilians_rescued_by_scene`
+ * and `g_rescued_char_types` are zeroed by `ResetGameGlobals`' new-game arm
+ * and left by a stage step, as the engine leaves them;
+ * `g_civilians_seen_total` is not in `G`. This said the port had
  * no equivalent at all, as an open question, before `run_phase.ts`.
  *
  * **The engine's body, line for line, and what the port does with each.** This
@@ -2745,11 +2808,11 @@ export type Globals = typeof G;
  * | `g_weapon_loop_holders = 0` (`0x0045EF3D`) | ✅ |
  * | the whole 0x100-byte `g_script_flags` | ✅ |
  * | per player: `g_head_combo_bonus`, `g_player_hit_count` | ✅ |
- * | per player: `g_player_shot_count` (0x009A5C84) | ❌ not in `G` — nothing
- *   in the port counts shots, so there is no accuracy denominator to zero.
- *   `EvtOpAwardAccuracyBonus2B` (`FUN_0045FE40`) is what reads the pair. |
- * | `g_civilians_seen_by_scene`, `g_civilians_rescued_by_scene` | ❌ neither
- *   tally exists; the port raises a `civilian.rescued` event instead. |
+ * | per player: `g_player_shot_count` (0x009A5C84, at `0x0045EE01`) | ✅ |
+ * | `g_civilians_rescued_by_scene[g_scene_index]` | ✅ -- `app/stage_load.ts`
+ *   puts the new scene's index in first, as `RunPhaseStepToNextScene` does |
+ * | `g_civilians_seen_by_scene[g_scene_index]` | ❌ not in `G`: nothing the
+ *   port runs reads it |
  * | `g_hit_slots` — the 14-slot table `ActorClaimHitSlot` claims | ✅ claimed,
  *   released and cleared. `obj+0x3C` is the phase of every cel a class-0x30
  *   bone draws, so the port needed it; `game/hit_slots.ts` says which parts of
@@ -2796,10 +2859,14 @@ export function ResetSceneOnEnter(): void {
   G.g_weapon_loop_holders = 0;
   // `for (i = 0x40; i--;) *p++ = 0` over `g_script_flags` — all 0x100 bytes.
   G.g_script_flags = [];
+  // This scene's rescues -- the result card's count and its life bonus's
+  // index. The run's total and the other scenes' counts are left.
+  G.g_civilians_rescued_by_scene[G.g_scene_index] = 0;
   // The per-player shot statistics, so the accuracy grade is per scene rather
-  // than per run. The third of the triple, `g_player_shot_count`, has no
-  // counterpart in `G`.
+  // than per run: `g_head_combo_bonus`, `g_player_shot_count` (`0x0045EE01`)
+  // and `g_player_hit_count`.
   G.g_head_combo_bonus = [0, 0];
+  G.g_player_shot_count = [0, 0];
   G.g_player_hit_count = [0, 0];
   // `g_nFiringGate = 0` at 0x0045EEAC, the last write but one in the engine's
   // body. A scene starts with the trigger dead and the script raises the gate;
@@ -2887,6 +2954,10 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   G.g_one_hit_target_kills = 0;
   G.g_player_score = [0, 0];
   G.g_nPlayerFired = [0, 0];
+  // Every scene the engine loads was left by `MarkSceneOver` (`0x0045EDA1`),
+  // which zeroes it, or starts a game with it never raised; a seek arrives
+  // by neither, so the port's reset stands in for both.
+  G.g_accuracy_stats_suppressed = 0;
   // Input, and a scene that is starting has none pending. A seek that left a
   // click queued would otherwise fire it into the replayed world.
   G.g_shot_requests = [];
@@ -2984,6 +3055,7 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   G.g_shot_hit_something = [0, 0];
   G.g_original_weapon_kind = [0, 0];
   G.g_screen_sprite_draws = [];
+  G.g_view_slot_draws = [];
   G.g_camera_is_tracking = 0;
   G.g_camera_lookat_target = vec3();
   G.g_camera_block_target = vec3();
@@ -3141,6 +3213,13 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
     // runs after the reset.
     G.g_route_history = Array.from({ length: 10 },
                                    () => new Array(16).fill(-1));
+    // ...and its civilian half: the run total, six scenes' rescue counts
+    // (`0x0045FF71`..`0x0045FF9B`) and the rescued types (`0x0045FFA2`, the
+    // first twelve bytes of each scene's twenty -- the rest are only ever read
+    // after this run has written them, so zeroing all of it reads the same).
+    G.g_civilians_rescued_total = 0;
+    G.g_civilians_rescued_by_scene = [0, 0, 0, 0, 0, 0];
+    G.g_rescued_char_types = new Array<number>(60).fill(0);
     PlayerStartGameFromTitle(G.g_GameMode);
   }
   // The player turn taken above is the port's sequencing, not a frame the
@@ -3148,6 +3227,7 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   // what it drew would be the HUD of a shutter state nobody has chosen yet --
   // on screen for as long as a freshly loaded stage sits paused.
   G.g_screen_sprite_draws = [];
+  G.g_view_slot_draws = [];
 }
 
 /**

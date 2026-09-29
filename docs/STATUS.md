@@ -19,34 +19,34 @@ is in `tools/verify_all.py`, beside the command that runs it.
 
 | Directory | Lines | Files | Layer |
 |---|---:|---:|---|
-| `game/` | 108770 | 352 | engine |
-| `hod2lib/` | 19597 | 35 | engine |
-| `render/` | 15539 | 58 | render |
-| `app/` | 12661 | 44 | app |
-| `script/` | 4471 | 25 | engine |
+| `game/` | 109974 | 360 | engine |
+| `hod2lib/` | 19802 | 35 | engine |
+| `render/` | 15804 | 60 | render |
+| `app/` | 12667 | 44 | app |
+| `script/` | 4498 | 25 | engine |
 | `ui/` | 3773 | 27 | ui |
 | `core/` | 3535 | 13 | engine |
-| `bundle/` | 2876 | 11 | engine |
+| `bundle/` | 2907 | 11 | engine |
 | `audio/` | 1053 | 3 | render |
 | `hud/` | 526 | 1 | ui |
-| **total** | **172801** | **569** | |
+| **total** | **174539** | **579** | |
 
 The largest files, which is where the pressure to split next is:
 
-* `app/main.ts` — 3200
-* `game/globals.ts` — 3171
-* `game/actor.ts` — 2724
-* `hod2lib/bundle.ts` — 2464
-* `hod2lib/exetab.ts` — 2370
+* `game/globals.ts` — 3251
+* `app/main.ts` — 3202
+* `game/actor.ts` — 2733
+* `hod2lib/bundle.ts` — 2478
+* `hod2lib/exetab.ts` — 2411
 
 ## The port
 
 | | |
 |---|---|
 | Gameplay coverage | **233 of 299** annotated functions in the gameplay address ranges have a port (77%) |
-| Ported outside those ranges | 585 (opcodes, and the classes whose handlers sit elsewhere) |
-| Citations checked | 818 ported functions match `functions.tsv` under the same name |
-| Spawn classes | **31 of 42** read classes have a module, covering 1544 of 1619 placements |
+| Ported outside those ranges | 590 (opcodes, and the classes whose handlers sit elsewhere) |
+| Citations checked | 823 ported functions match `functions.tsv` under the same name |
+| Spawn classes | **32 of 42** read classes have a module, covering 1549 of 1619 placements |
 | Declared `[diverges]` | **131** — where the port knowingly departs from the exe, each with its reason on the spot |
 | `[open]` markers | **121** — questions the port and the exporter are honest about not having answered |
 
@@ -65,9 +65,9 @@ The two declared seams between the UI and the player: **`PlayerCommands` has 54 
 
 | | |
 |---|---|
-| Named functions | 1447 in `ghidra/annotations/functions.tsv` |
-| Named globals | 742 in `ghidra/annotations/globals.tsv` |
-| Verifier scripts | 47 under `tools/`, run together by `verify_all.py` |
+| Named functions | 1454 in `ghidra/annotations/functions.tsv` |
+| Named globals | 753 in `ghidra/annotations/globals.tsv` |
+| Verifier scripts | 48 under `tools/`, run together by `verify_all.py` |
 
 Phase and format status is a judgement about what counts as solved,
 and lives in [`PROGRESS.md`](PROGRESS.md).
@@ -132,6 +132,7 @@ nothing exits 3 and is never counted as green.
 | `bgm_loop` | that the page's music is the engine's stream -- the buffer the script's own track reaches Web Audio as is one period of the file from its first sample to end of file, looped, sample for sample -- and that it is audible | bundle |
 | `keys` | that the page's keys do what the `?` list says when pressed -- test:ui holds the list to the handlers' source, this reads back what a press did -- and that a click on a control over the game hands Space and Enter (START) back to the game rather than leaving them with the button | bundle |
 | `continue` | that the last life lost with credits left puts CONTINUE? and its digit where the exe draws them, holds the script at its wait, and that START -- pressed on the corner button, the one START a phone has -- spends a credit and puts the player back in play | bundle |
+| `result_card` | that the end of stages 1, 2 and 4 plays in the real page from their own result steps: one figure per rescue, of the rescued type, at the scene's places; the scene's own list, dead, with none; the count climbing from frame 31; the life bonus on frame 302, capped; figure 0 holding the life up from camera frame 260 and freezing on cursor 0x81; the score and the accuracy drawn; the flag on frame 420 and the scene over after it | bundle |
 | `options` | that the menu's Options reaches the game's options screen in the real page, that its title and red highlighted row are on the HUD canvas, that the page's arrows and Enter drive the list -- lives and continues changed, the hidden rows stepped over, a held arrow running the sound test -- and that EXIT saves the profile in the browser and starts a game with five lives, four credits and the chosen crosshair on the reticle, and that a reload boots what was saved in place of the free-play default | bundle |
 | `crosshair` | that real pointer events reach HudDrawCrosshair as the exe's devices -- a mouse move is input mode 6 and the reticle is the Sight Graphic's sprite out of the bundle, sized to the frame and centred on the pointer; a touch is the light gun, 0xD, and the game draws no crosshair until the mouse moves again; and a phone, with no fine pointer, never shows one | bundle |
 | `animals` | that the frog, the owl and the fish are placed from a real bundle and leave their opening state -- none of the three is a skinned enemy the character layer can build, and two have no character type at all | bundle |
@@ -160,6 +161,7 @@ nothing exits 3 and is never counted as green.
 | `verify_horde` | that every number the class-0x40 horde is steered by -- its entry splines, spline rates, shot delays, wander grid, second skin and the emerge prop's corners -- is the EXE's, and that the seven descriptors split five hordes to two props on the byte PlaceHorde switches on | game-dir |
 | `verify_continue` | that the continue screen the port draws -- the run's CONTINUE? and digit, the two-player small ones, the small GAME OVER and the credit line -- is at the EXE's positions, scales and sprite ids, read as instruction bytes and `.rdata` rows; that only one credit-line drawer can run, because the credit costs are stored once, as 1; and that all eight wait opcodes read the gameplay gate that holds the script while nobody is in play. Nothing else looks at a picture that, when wrong, is simply not there | game-dir |
 | `verify_options` | that the profile reading is right on the user's own save -- the four disguised files deciphered with the key taken out of `ProfileCipher`'s instructions, and the block's byte sum and version checked -- that Blood Color is dead in this build (one store of its gate, no reader of its byte), and that the options screen's factory tables, sprite ids, positions and glyph table are the EXE's, with the bundle's `options` block when there is one | game-dir |
+| `verify_result_card` | that every constant the result card's port transcribes -- the dwell, the bonus's dwell, the count's, the camera frame figure 0 turns on, the cursor it freezes on, the slot it holds up -- is the immediate at its instruction; that the `.rdata` span the card reads with no bound is the EXE's bytes; that every rescuable civilian's type has an attachment list the unbounded lookup can find; and, with a bundle, that each stage placing the card carries a figure template for every type its list names or it can rescue, with every clip the card can put that type on baked | game-dir |
 | `verify_water` | that class 0x41 type 1, the canal water task, starts from the table the EXE indexes -- ten flat water tiles -- and that every slot, flag, camera cue and multiplier the port's copy of it tests is the immediate at the instruction that holds it; its fifteen spawns sit at the origin, so a wrong reading draws nothing and looks like nothing | game-dir |
 | `verify_draw_order` | that the player's two passes and translucent order are the EXE's: the blend and depth tables `render/draw_order.ts` copies, the alpha-test and blend-enable pushes, and the VIEW matrix and comparator bytes that make the sort nearest-first rather than the painter's order this repo's docs had -- plus that no mesh in `pol/` turns its depth write off, which is why translucent meshes occlude | game-dir |
 | `verify_texture_alpha` | that a texture's alpha reaches the bundle as the bank stores it, because the EXE's D3D path keeps it: the upload's format table and the A1R5G5B5 test, stage 0's alpha args, and a disassembly of the D3D module finding TSP bit 19 read only as half of the pass selector -- plus the corpus premise that makes a glTF alphaMode from the pass right, and, on a current bundle, no `_opaque` image and the IgnoreTexAlpha ARGB images byte-equal to the bank's alpha | game-dir |
@@ -171,7 +173,7 @@ nothing exits 3 and is never counted as green.
 | `verify_geometry` | that every scenery part in a stage bundle holds every triangle its `pol/` models declare -- the only check that compares an export against the files it was made from rather than against another export | game-dir |
 | `baseline` | that the installed assets still hash to `manifest.csv` | game-dir |
 
-24 of them need the installed game and 25 need an exported
+25 of them need the installed game and 26 need an exported
 bundle. **That is a known hole, not a design:** a machine with
 neither cannot run the checks that compare two histories, and a
 bundle-free fixture is the open work that closes it.

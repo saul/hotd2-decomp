@@ -50,10 +50,6 @@
  * that answers stage 2's first branch came to be standing at the world origin,
  * and how its death came to leave no ground ring: the ring is
  * `RescueTargetFreedState`'s, on the frame the draw reports its clip over.
- * * The rescue tallies. `g_civilians_rescued_total` and
- *   `g_civilians_rescued_by_scene` are not in `G` — see `ResetSceneOnEnter`'s
- *   table — so the port raises `civilian.rescued`, which is what class 0x10's
- *   rescue already does.
  */
 import type { Rng } from "../../core/rng";
 import type { Actor } from "../actor";
@@ -67,6 +63,7 @@ import { ActorDespawn } from "../despawn";
 import { SpawnGroundRingEffect } from "../effects/ring_effect";
 import { G, HIT_SLOT_NONE } from "../globals";
 import { ActorFreeHitSlot } from "../hit_slots";
+import { RecordRescue, RESCUE_TARGET_CHAR_TYPE } from "../rescue";
 import { ActorAdvanceMotion } from "../motion";
 import {
   registerClass, type ActorDebug, type ClassFrame, type ClassHandler,
@@ -403,7 +400,8 @@ export function RescueTargetRideInState(obj: Actor, f: ClassFrame): void {
  * if (obj->+0x11C < 1) {
  *     g_script_branch_var = 1;                    // THE ROUTE
  *     g_civilians_rescued_total += 1;
- *     g_civilians_rescued_by_scene[g_scene_index] += 1;
+ *     n = g_civilians_rescued_by_scene[g_scene_index]++;
+ *     g_rescued_char_types[g_scene_index * 10 + n] = 0x36;
  *     ScoreAddForPlayer(who, 0x50);
  *     ScoreAddForPlayer(who, 400);
  *     g_enemies_alive -= 1;  g_enemies_present -= 1;
@@ -582,6 +580,9 @@ function RescueTargetRescued(obj: Actor, f: ClassFrame): void {
   G.g_script_branch_var = 1;
   ActorPlayHitVoice(obj, ActorVoice.Killed, f.rng,
                     (id) => f.events?.emit("sound.play", { id }));
+  // The two tallies and the rescued type, `0x00451AFF`..`0x00451B21` --
+  // this class's type is the literal `0x36`, not the actor's.
+  RecordRescue(RESCUE_TARGET_CHAR_TYPE);
 
   const bits = obj.flags & (ActorFlag.HitByPlayer0 | ActorFlag.HitByPlayer1);
   const who = bits === ActorFlag.HitByPlayer0 ? 0
@@ -610,8 +611,7 @@ function RescueTargetRescued(obj: Actor, f: ClassFrame): void {
   obj.dead = true;
   obj.killedBy = who;
   t.state = RescueTargetState.Freed;
-  // The engine's two tallies are not in `G`; this is what class 0x10's rescue
-  // raises and the HUD already listens for.
+  // `[port-only]` -- what class 0x10's rescue also raises, for the feed.
   f.events?.emit("civilian.rescued",
                  { at: obj.at, player: who, score: CLASS21_SCORE_RESCUE });
 }

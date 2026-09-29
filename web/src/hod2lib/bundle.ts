@@ -62,13 +62,18 @@ import { GAME_OVER_LOGO_SPRITES, ROUTE_FIGURE_SHADOW_SLOT, ROUTE_MARK_SLOTS }
 // in its routines; its glyphs, crosshairs and sliders are `.rdata` read below.
 import { OPTIONS_SCREEN_SPRITES, SCREEN_IDLE_DIM_SLOT }
   from "../game/options_data";
+// And the result card's: its seventeen tiles and its glyph models are
+// immediates in `ResultCardInstall`.
+import { RESULT_CARD_SPRITES, RESULT_GLYPH_SLOTS }
+  from "../game/class61/state";
 import { f32, i16, i32, u32 } from "./bytes";
 import * as C from "./container";
 import { encodeRgba } from "./png";
 import * as texbank from "./texbank";
 import { BODY_CREATURE_SLOTS, CARRIED_PROP_BREAK, CARRIED_PROP_SLOTS }
   from "./combat";
-import { charactersJson, resolveForStage as resolveCharacters } from "./characters";
+import { charactersJson, resolveForStage as resolveCharacters,
+         stagePlacesResultCard } from "./characters";
 import * as charmotion from "./charmotion";
 import * as degraded from "./degraded";
 import type { Degradation } from "./degraded";
@@ -2139,6 +2144,9 @@ export async function buildStage(stage: Stage, sink: BundleSink,
     // ...and the shell screens' idle dimmer, which the options screen draws
     // over itself after five minutes of nothing held.
     SCREEN_IDLE_DIM_SLOT,
+    // ...and the result card's `result.bin` glyphs, drawn in view space by
+    // `render/view_slots.ts`, for a stage that places the card.
+    ...(prog && stagePlacesResultCard(prog) ? RESULT_GLYPH_SLOTS : []),
   ]);
   // Which materials draw blood, so the client can offer the colour the game's
   // own option offers. See `bloodTexturePredicate`.
@@ -2200,6 +2208,10 @@ export async function buildStage(stage: Stage, sink: BundleSink,
   // the stage's, and a few kilobytes is not worth a per-stage decision.
   scriptJson.boss4 = tables.boss4Tables();
   scriptJson.carrier_door_yaw = tables.carrierDoorYaw();
+  // The result card's `.rdata`, one block for the whole game as `game_over`
+  // is: the figures' records and lists, their attachment lists, the glyph
+  // strings, the life bonus and the accuracy bonus.
+  scriptJson.result_card = tables.resultCardTables();
   const routeTiles = (gameOver.route_tiles as number[]).flatMap((base) =>
     Array.from({ length: ROUTE_TILES_PER_SCREEN }, (_u, i) => base + i));
   // The options screen (app state 0x0C): one block for the whole game, as
@@ -2219,7 +2231,9 @@ export async function buildStage(stage: Stage, sink: BundleSink,
      // `OriginalItemBannerUpdate`'s two sprites, for the ids this stage's
      // collectibles can be.
      ...originalItemSprites(originalItemsJson(tables, placements,
-                                              stage.scene))]);
+                                              stage.scene)),
+     // The result card's frame, for a stage that places the card.
+     ...(prog && stagePlacesResultCard(prog) ? RESULT_CARD_SPRITES : [])]);
   await sink.write(`${outDir}/${name}.script.json`, dumpsStrict(scriptJson));
 
   let nSpawns = 0;

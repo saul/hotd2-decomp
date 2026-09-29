@@ -185,6 +185,10 @@ export async function loadStageInto(p: Player): Promise<void> {
   // (`FUN_00414770`), from `g_start_lives`; the bundle's `start_lives` was a
   // second answer to that question and nothing in the image read it.
   G.g_GameMode = bundle.script.game_mode;
+  // ...and so does the scene, for the same reason: `RunPhaseStepToNextScene`
+  // (`FUN_004603B0`) steps `g_scene_index` before `LoadSceneAndReset` runs,
+  // and `ResetSceneOnEnter` zeroes *that* scene's rescue count.
+  G.g_scene_index = bundle.script.scene ?? 0;
   p.world.attach(p.ctx);
   p.applyGameTables(bundle.script);
   // Characters are already in the stage glTF, one hierarchy per spawn;

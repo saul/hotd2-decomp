@@ -134,6 +134,17 @@ async function untilDigit(d) {
 
 try {
   await waitForLoad(page);
+  // The port starts in free play (`g_option_credits` -1), where a continue
+  // spends nothing and the credit line has no count. This check is of the
+  // counted continue, so it puts the factory options' credits back the way
+  // the title's confirm seeds them: `SetBothPlayerCounters(
+  // ModeStartCounterValue(mode))` with the setting at 5.
+  await page.evaluate(async () => {
+    const { G } = await import("/src/game/globals.ts");
+    const c = await import("/src/game/credits.ts");
+    G.g_option_credits = c.OPTION_CREDITS_FACTORY;
+    c.SetBothPlayerCounters(c.ModeStartCounterValue(G.g_GameMode));
+  });
   await page.evaluate(() => document.activeElement?.blur?.());
   await page.keyboard.press("Space");
   await advance(120);

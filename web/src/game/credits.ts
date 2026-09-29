@@ -23,16 +23,17 @@ import { GameMode } from "./game_mode";
 export function ModeStartCounterValue(mode: number): number {
   if (mode === GameMode.Original) return 6;
   if (mode > GameMode.Original && mode < 4) return 1;
-  if (OPTION_CREDITS === -1) return -1;
-  return OPTION_CREDITS + 1;
+  if (G.g_option_credits === -1) return -1;
+  return G.g_option_credits + 1;
 }
 
 /**
- * `0x009C9F25`, the options' credit setting, at its factory value: the reset
- * `FUN_00401130` writes 5. The port has no options screen and no saved
- * options, so the factory value is the only one it can claim.
+ * What the factory reset `FUN_00401130` writes to `g_option_credits`
+ * (`0x009C9F25`): 5, so an Arcade game starts with six credits -- the start
+ * and five continues. The port starts at free play instead; see
+ * `g_option_credits`.
  */
-export const OPTION_CREDITS: number = 5;
+export const OPTION_CREDITS_FACTORY = 5;
 
 /**
  * `SetBothPlayerCounters` — `FUN_00406F60`. -1 is free play

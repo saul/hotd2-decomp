@@ -695,6 +695,18 @@ export const G = {
   g_credit_is_continue: [0, 0],
   /** `g_free_play` — 0x009C8E70. 1: every spend succeeds. */
   g_free_play: 0,
+  /**
+   * `g_option_credits` — 0x009C9F25, a signed byte: the options' credit
+   * setting. An Arcade start seeds the count with it plus one, or free play
+   * when it is -1 (`ModeStartCounterValue`, `MOV AL,[0x009c9f25]; CMP AL,0xff`
+   * at `0x00496B86`). The factory reset `FUN_00401130` writes
+   * `OPTION_CREDITS_FACTORY`, 5.
+   *
+   * [diverges] Starts at -1, free play, by the user's choice: the port has no
+   * options screen or saved options yet, and free play is a value that screen
+   * offers, so the port starts as if it had been picked there.
+   */
+  g_option_credits: -1,
   /** `g_credits_per_player` — 0x009C8E74. 0: one shared count. */
   g_credits_per_player: 0,
   /**

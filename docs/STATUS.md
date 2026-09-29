@@ -19,7 +19,7 @@ is in `tools/verify_all.py`, beside the command that runs it.
 
 | Directory | Lines | Files | Layer |
 |---|---:|---:|---|
-| `game/` | 104568 | 339 | engine |
+| `game/` | 104581 | 339 | engine |
 | `hod2lib/` | 19312 | 35 | engine |
 | `render/` | 15087 | 54 | render |
 | `app/` | 12047 | 41 | app |
@@ -29,12 +29,12 @@ is in `tools/verify_all.py`, beside the command that runs it.
 | `bundle/` | 2740 | 11 | engine |
 | `audio/` | 973 | 2 | render |
 | `hud/` | 491 | 1 | ui |
-| **total** | **166336** | **547** | |
+| **total** | **166349** | **547** | |
 
 The largest files, which is where the pressure to split next is:
 
 * `app/main.ts` — 2963
-* `game/globals.ts` — 2848
+* `game/globals.ts` — 2860
 * `game/actor.ts` — 2694
 * `hod2lib/bundle.ts` — 2322
 * `hod2lib/exetab.ts` — 2276
@@ -47,14 +47,14 @@ The largest files, which is where the pressure to split next is:
 | Ported outside those ranges | 533 (opcodes, and the classes whose handlers sit elsewhere) |
 | Citations checked | 764 ported functions match `functions.tsv` under the same name |
 | Spawn classes | **30 of 42** read classes have a module, covering 1541 of 1619 placements |
-| Declared `[diverges]` | **131** — where the port knowingly departs from the exe, each with its reason on the spot |
+| Declared `[diverges]` | **132** — where the port knowingly departs from the exe, each with its reason on the spot |
 | `[open]` markers | **121** — questions the port and the exporter are honest about not having answered |
 
 Both markers are counted in **every** `.ts`/`.tsx` file under `web/src/`, one per occurrence, and only in comments — a word in code or in a string is not a marker (`verify_port.marker_lines`). Each departure and each question is written once, where it is made; everything that refers to it names it in words ([`PLAYER_ARCHITECTURE.md`](PLAYER_ARCHITECTURE.md), "One departure, one tag"). By layer, from the same table as the directories above:
 
 | Layer | Directories | `[diverges]` | `[open]` |
 |---|---|---:|---:|
-| engine | `core/`, `bundle/`, `script/`, `game/`, `hod2lib/` | 117 | 118 |
+| engine | `core/`, `bundle/`, `script/`, `game/`, `hod2lib/` | 118 | 118 |
 | render | `render/`, `audio/` | 13 | 3 |
 | ui | `hud/`, `ui/` | 0 | 0 |
 | app | `app/` | 1 | 0 |
@@ -66,7 +66,7 @@ The two declared seams between the UI and the player: **`PlayerCommands` has 53 
 | | |
 |---|---|
 | Named functions | 1378 in `ghidra/annotations/functions.tsv` |
-| Named globals | 676 in `ghidra/annotations/globals.tsv` |
+| Named globals | 677 in `ghidra/annotations/globals.tsv` |
 | Verifier scripts | 45 under `tools/`, run together by `verify_all.py` |
 
 Phase and format status is a judgement about what counts as solved,

@@ -37,13 +37,12 @@ import { GameSystem, ScriptSystem, syncPortGlobals }
 import { ResetPropContainers } from "../src/game/class41/index.ts";
 import { CamPaths } from "../src/game/camera/curve.ts";
 import { ActorFlag } from "../src/game/actor.ts";
-import { DispatchHit } from "../src/game/combat/resolve_hit.ts";
+import { DispatchHit, HEAD_BONE } from "../src/game/combat/resolve_hit.ts";
 import { SpawnScriptedCharacters, SpawnSlotActors }
   from "../src/game/director.ts";
 import { G, ResetGameGlobals } from "../src/game/globals.ts";
 import { ActorIsEnemy, g_class_handlers } from "../src/game/registry.ts";
-import { CharacterTypeOf, SetCameraPaths, SetGameTables }
-  from "../src/game/tables.ts";
+import { SetCameraPaths, SetGameTables } from "../src/game/tables.ts";
 import { SpawnClass } from "../src/game/spawn_class.ts";
 import { CivilianItemCallback } from "../src/game/class10/items.ts";
 import { Walker } from "../src/script/walker.ts";
@@ -220,9 +219,8 @@ function play(bundle, at) {
       if (o.despawned || (o.flags & ActorFlag.Dead)) continue;
       if (!o.visible || !ActorIsEnemy(o.cls)) continue;
       if (g_class_handlers[o.cls]?.invulnerable?.(o)) continue;
-      const head = CharacterTypeOf(o)?.head_bone ?? 2;
       for (let s = 0; s < 60 && !(o.flags & ActorFlag.Dead); s++) {
-        if (!DispatchHit(o, head, NULL_HOST, rng, SHOOTER)) break;
+        if (!DispatchHit(o, HEAD_BONE, NULL_HOST, rng, SHOOTER)) break;
       }
     }
     const before = civ?.civ ? civ.civ.items.map((e) => e.record) : [];

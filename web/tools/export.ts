@@ -23,7 +23,9 @@ import { join } from "node:path";
 import { BUNDLE_FORMAT, buildStage, writeManifest } from "../src/hod2lib/bundle";
 import * as degraded from "../src/hod2lib/degraded";
 import { Stage } from "../src/hod2lib/stage";
-import { BUNDLE_ROOT } from "./lib/bundle_root";
+import { BUNDLE_ROOT, repoRoot } from "./lib/bundle_root";
+import { spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { NodeAssetSource, NodeBundleSink, absolute,
          nodeDeflate } from "./lib/node_io";
 
@@ -37,12 +39,13 @@ interface Args {
   gltf: boolean;
   noTextures: boolean;
   lit: boolean;
+  noDeploy: boolean;
 }
 
 function parseArgs(argv: string[]): Args {
   const a: Args = {
     gameDir: "", stages: [], all: false, arcade: false, original: false,
-    out: "", gltf: false, noTextures: false, lit: false,
+    out: "", gltf: false, noTextures: false, lit: false, noDeploy: false,
   };
   for (let i = 0; i < argv.length; i++) {
     const k = argv[i];
@@ -56,6 +59,7 @@ function parseArgs(argv: string[]): Args {
       case "--gltf": a.gltf = true; break;
       case "--no-textures": a.noTextures = true; break;
       case "--lit": a.lit = true; break;
+      case "--no-deploy": a.noDeploy = true; break;
       case "-h": case "--help":
         console.log(USAGE);
         process.exit(0);
@@ -77,7 +81,9 @@ const USAGE = `usage: npm run export -- --game-dir DIR (--all | --stage N ...)
   --out DIR        where the bundle goes (default: extract/player)
   --gltf           write .gltf + .bin + loose PNGs instead of one .glb
   --no-textures    skip the PNGs (only meaningful with --gltf)
-  --lit            do not mark materials KHR_materials_unlit`;
+  --lit            do not mark materials KHR_materials_unlit
+  --no-deploy      do not deploy the site after (it is, into the default
+                   directory, when r2site/.deploy.env sets a deploy up)`;
 
 /**
  * What this export could not read, printed at the end where it is read.
@@ -298,6 +304,21 @@ async function main(): Promise<number> {
     console.error(`degraded: ${short.map(([n, k]) => `${n} (${k})`).join(", ")}`);
     console.error("the bundle is written but incomplete; this is a failure");
     return 1;
+  }
+
+  // **Every rebundle is deployed**, where a deploy is set up: the site in the
+  // R2 bucket (`tools/deploy.ts`) is then never a bundle behind. Only an
+  // export into the default directory -- one into `--out` somewhere else is
+  // a scratch copy, and deploying it would put that on the phone.
+  const deployEnv = join(repoRoot(), "r2site", ".deploy.env");
+  if (!args.noDeploy && out === BUNDLE_ROOT && existsSync(deployEnv)) {
+    console.log("\ndeploying the site (--no-deploy to skip)");
+    const r = spawnSync("node", ["tools/run_ts.mjs", "tools/deploy.ts"],
+                        { cwd: join(repoRoot(), "web"), stdio: "inherit" });
+    if (r.status !== 0) {
+      console.error("the bundle is written, and the deploy failed");
+      return 1;
+    }
   }
   return 0;
 }

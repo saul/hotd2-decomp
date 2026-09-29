@@ -741,9 +741,10 @@ is charged inside the kill block, which the result does not gate either.
 **"The head" is bone 2, an immediate.** Both readers -- the tail's
 `004097D7 CMP EBP, 0x2` and the burst's `00409760 CMP EBP, 0x2` -- compare
 `EBP`, which the prologue loads from `g_shot_bone[p]` (`0040943A MOV EBP,
-[EAX*4 + 0x9a2d88]`), with a literal; no table is read. The exporter writes a
+[EAX*4 + 0x9a2d88]`), with a literal; no table is read. The exporter wrote a
 `head_bone` of 2 for every character type, and the port read that until
-2026-09-29 -- the same answer, from the wrong place.
+2026-09-29 -- the same answer, from the wrong place. The field has left the
+bundle; `HEAD_BONE` in `web/src/game/combat/resolve_hit.ts` is the only copy.
 
 **The whole tail is `ResolveHit`'s**: four `ScoreAddForPlayer` calls (the
 kill's 0x50 in the kill block; then 0x78 and the combo, or 10), the combo and

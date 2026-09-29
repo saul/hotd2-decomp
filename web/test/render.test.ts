@@ -629,7 +629,7 @@ console.log("\ncharacter spawns: readySpawns -> the port -> adopt");
     type: 1, name: "test", file: "t.bin", bone_count: 2, actor_radius: 10,
     bones: [{ bone: 0, part: "bone00_1", slot: 1, offset: [0, 0, 0],
               parent: null, damage_rank: [], hit_radius: 2, steps: [] }],
-    head_bone: 2, reactions: {}, attacks: {}, motions: { "10": {} },
+    reactions: {}, attacks: {}, motions: { "10": {} },
   };
   const PLACE = {
     at: 0x100, class: 0x30, char_type: 1, motion: 10, hp: 7, yaw: 0x2000,
@@ -1707,7 +1707,7 @@ console.log("\nrig layer: only the rigs its own block names");
     type: 1, name: "test", file: "t.bin", bone_count: 2, actor_radius: 10,
     bones: [{ bone: 0, part: "bone00_1", slot: 1, offset: [0, 0, 0],
               parent: null, damage_rank: [], hit_radius: 2, steps: [] }],
-    head_bone: 2, reactions: {}, attacks: {}, motions: { "10": {} },
+    reactions: {}, attacks: {}, motions: { "10": {} },
   };
   const CHARS = {
     types: { "1": TYPE },
@@ -2527,7 +2527,7 @@ console.log("\ncivilian attachments: the face swaps, the hair is added");
       { bone: 2, part: "bone02_0eaf", slot: 0x0eaf, offset: [0, 0, 0],
         parent: 0, damage_rank: [], hit_radius: 2, steps: [] },
     ],
-    head_bone: 2, reactions: {}, attacks: {},
+    reactions: {}, attacks: {},
     // One authored frame, three bones' worth of BAMS: enough that `Poser`
     // runs for real rather than being stepped round.
     motions: {
@@ -2712,7 +2712,7 @@ console.log("\ncivilian held items: on the hand as the draw puts them, and gone 
       { bone: 5, part: "bone05_0eb0", slot: 0x0eb0, offset: [0, 0, 0],
         parent: 0, damage_rank: [], hit_radius: 2, steps: [] },
     ],
-    head_bone: 2, reactions: {}, attacks: {},
+    reactions: {}, attacks: {},
     motions: {
       "660": { bank: "people", frames: 1, fps: 30, root: [0, 0, 0],
                rot: [0, 0, 0, 0, 0, 0, 0, 0, 0], play: 0 },
@@ -2932,7 +2932,7 @@ console.log("\nthe model's size: a civilian at 0.9, her bones and her spheres");
         parent: 0, damage_rank: [], hit_radius: 1.5, hit_centre: [0, 1, 0],
         hit_slot: 0x0eaf, steps: [] },
     ],
-    head_bone: 2, reactions: {}, attacks: {},
+    reactions: {}, attacks: {},
     // One frame whose root sits off the origin in all three axes, and no
     // rotation anywhere: the pose offset is then the whole of what moves the
     // bones off the actor's position.
@@ -3191,7 +3191,7 @@ console.log("\nthe pelvis veto: bone 9's own draw, and not its legs");
       { bone: 10, part: "bone10_1111", slot: 0x1111, offset: [0, 0, 0],
         parent: 0, damage_rank: [], hit_radius: 2, steps: [] },
     ],
-    head_bone: 2, reactions: {}, attacks: {},
+    reactions: {}, attacks: {},
     motions: { "660": { bank: "b", frames: 1, fps: 30, root: [0, 0, 0],
                         rot: [0, 0, 0, 0, 0, 0, 0, 0, 0], play: 0 } },
   });
@@ -3316,7 +3316,7 @@ console.log("\nthe draw gates: the skeleton, and each part by index");
         parent: 0, damage_rank: [], hit_radius: 2, steps: [] },
     ],
     parts: [part(0x0f22), part(0x0f23)],
-    head_bone: 2, reactions: {}, attacks: {},
+    reactions: {}, attacks: {},
     motions: { "660": { bank: "b", frames: 1, fps: 30, root: [0, 0, 0],
                         rot: [0, 0, 0, 0, 0, 0, 0, 0, 0], play: 0 } },
   };
@@ -3563,7 +3563,7 @@ console.log("\nthe player's character survives its own op 10:");
     bone_count: 1, actor_radius: 10,
     bones: [{ bone: 1, part: "bone01_158c", slot: 0x158c, offset: [0, 0, 0],
               parent: null, damage_rank: [], hit_radius: 2, steps: [] }],
-    head_bone: 2, reactions: {}, attacks: {},
+    reactions: {}, attacks: {},
     motions: { "890": { bank: "people", frames: 1, fps: 30, root: [0, 0, 0],
                         rot: [0, 0, 0, 0, 0, 0], play: 0 } },
   };
@@ -3711,7 +3711,7 @@ console.log("\nthe shot: a character with no bone sphere is one sphere");
     actor_radius: 10,
     bones: [{ bone: 1, part: "bone01_1b01", slot: 0x1b01, offset: [0, 0, 0],
               parent: null, steps: [[0, 0, 10]] }],
-    head_bone: 2, reactions: {}, attacks: {},
+    reactions: {}, attacks: {},
     // One authored frame, so the poser has something real to read: the shot
     // is what is under test, not the pose.
     motions: { "1031": { bank: "z", frames: 1, fps: 30,
@@ -4085,14 +4085,14 @@ console.log("\nthe bat's wings: a synthetic row, adopted not spawned");
   const M = { bank: "z", frames: 1, fps: 30, root: [0, 0, 0], rot: [0, 0, 0] };
   const BODY = {
     type: 0x1e, name: "zabat", file: "zabat.bin", bone_count: 2,
-    actor_radius: 10, head_bone: 2, reactions: {}, attacks: {},
+    actor_radius: 10, reactions: {}, attacks: {},
     bones: [{ bone: 1, part: "bone01_1b01", slot: 0x1b01, offset: [0, 0, 0],
               parent: null }],
     motions: { "1031": M },
   };
   const WING = {
     type: 0x1f, name: "zabat_wing", file: "zabat_wing.bin", bone_count: 7,
-    actor_radius: 10, head_bone: 2, reactions: {}, attacks: {},
+    actor_radius: 10, reactions: {}, attacks: {},
     bones: [{ bone: 1, part: "bone01_1b03", slot: 0x1b03, offset: [0, 0, 0],
               parent: null }],
     motions: { "1030": M },
@@ -4186,14 +4186,14 @@ console.log("\nthe bat's runtime children: rows at the placer's addresses");
                       rot: [0, 0, 0, 0, 0, 0] };
   const BODY = {
     type: 0x1e, name: "zabat", file: "zabat.bin", bone_count: 2,
-    actor_radius: 10, head_bone: 2, reactions: {}, attacks: {},
+    actor_radius: 10, reactions: {}, attacks: {},
     bones: [{ bone: 1, part: "bone01_1b01", slot: 0x1b01, offset: [0, 0, 0],
               parent: null }],
     motions: { "1031": BODY_CLIP },
   };
   const WING = {
     type: 0x1f, name: "zabat_wing", file: "zabat_wing.bin", bone_count: 2,
-    actor_radius: 10, head_bone: 2, reactions: {}, attacks: {},
+    actor_radius: 10, reactions: {}, attacks: {},
     bones: [{ bone: 1, part: "bone01_1b03", slot: 0x1b03,
               offset: [0, 1.674, -0.7731], parent: null }],
     motions: { "1030": WING_CLIP },

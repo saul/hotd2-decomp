@@ -21,6 +21,23 @@ About, Certificate Trust Settings. Then open the HTTPS address and add it to
 the Home Screen, which is the full screen on an iPhone or an iPad
 (`app/device.ts`, `appleTouch`).
 
+**Or Tailscale**, which needs no certificate installed anywhere: its HTTPS
+certificates are real ones, for `<machine>.<tailnet>.ts.net`, and it reaches
+the Mac from wherever the phone is. With MagicDNS and HTTPS certificates
+turned on for the tailnet (the admin console's DNS page), and the phone in
+the tailnet:
+
+```sh
+tailscale serve --bg 5174        # https://<machine>.<tailnet>.ts.net -> the dev server
+tailscale serve status
+tailscale serve --https=443 off  # and to stop
+```
+
+`serve`, never `funnel`: the page serves the game's data, and `serve` keeps
+it inside the tailnet. The dev server takes any `.ts.net` host
+(`allowedHosts` in `vite.config.ts`); Vite refuses a host it does not know
+with a 403.
+
 Over HTTPS the page registers a **service worker** (`web/public/sw.js`) that
 keeps the page and every stage played on the device. **While the server can
 be reached, nothing kept is ever shown without asking it first:** each load's

@@ -349,6 +349,13 @@ export default defineConfig({
   // `tools/site.mjs`.
   base: "./",
   // `npm run dev-https` sets `HOTD2_HTTPS`: see `tools/https_cert.ts`.
-  server: { port: 5173, open: false, https: httpsOptions() },
+  //
+  // `allowedHosts`: Vite answers 403 to a request for a host it does not
+  // know, and `tailscale serve` hands it the tailnet's name for this machine
+  // -- `<machine>.<tailnet>.ts.net`, with a certificate a phone already
+  // trusts, which is the other way to give one a secure context and so the
+  // service worker (`docs/HOSTING.md`). Addresses and `localhost` it takes
+  // anyway.
+  server: { port: 5173, open: false, https: httpsOptions(), allowedHosts: [".ts.net"] },
   build: { target: "es2022", chunkSizeWarningLimit: 2000 },
 });

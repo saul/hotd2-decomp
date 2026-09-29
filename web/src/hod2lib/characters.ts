@@ -70,6 +70,13 @@ import { resolveSpawn } from "./spawnres";
 import type { Stage } from "./stage";
 // Data only -- see the head of that file for why `hod2lib` may import it.
 import { PLAYER_BODY_AT, ROUTE_FIGURES } from "../game/player_body_data";
+// Data only, for the same reason: the result card's clips, its template rows'
+// address, and the car rescue's type.
+import {
+  RESCUE_TARGET_CHAR_TYPE, RESCUE_TARGET_CLASS, RESULT_FIGURE_IDLE_MOTION_BASE,
+  RESULT_FIGURE_IDLE_MOTIONS, RESULT_FIGURE_LIFE_MOTION,
+  RESULT_FIGURE_LIFE_SLOT, ResultFigureTemplateAt,
+} from "../game/class61/state";
 // Data only, for the same reason: the clips JUDGMENT's two classes name.
 import {
   CLASS22_MOTIONS, CLASS22_NODE2_CYCLE_A, CLASS22_NODE2_CYCLE_B,
@@ -799,6 +806,138 @@ async function hordeMemberPlacements(stage: Stage, tables: ExeTables,
     m.parent_at = sp.at as number;
     m.synthetic = true;
     out.push(m);
+  }
+  return out;
+}
+
+/** Class 0x61, the result card: `spawn_simple 0x0097723C`'s record. */
+const CLASS61 = 0x61;
+/** Class 0x10, whose rescues the card stands. */
+const CLASS10 = 0x10;
+
+/**
+ * Whether this stage's script places the result card -- a `spawn_simple`
+ * whose record is class 0x61. Only stages 1..4 do.
+ */
+export function stagePlacesResultCard(prog: Program): boolean {
+  for (const b of prog.liveBlocks()) {
+    for (const st of b.steps) {
+      for (const o of st.ops) {
+        const simple = (o.detail.simple as { class: number }[]) ?? [];
+        if (simple.some((r) => r.class === CLASS61)) return true;
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * The template rows the result card's figures are drawn from, one per
+ * character type the card can stand in this stage.
+ *
+ * `ResultCardInstall` (`FUN_00434EF0`) allocates its figures with no
+ * descriptor, as many as the scene's rescues, each of the rescued civilian's
+ * own type (`g_rescued_char_types`) or, with none, the scene's own list's
+ * (`g_result_figure_records`). So the renderer cannot be handed a row per
+ * figure -- which type stands in which place is decided in play -- and is
+ * handed one hidden row per type instead, which it clones for each figure
+ * (`render/characters.ts`). The types: every class-0x10 placement's in the
+ * stage, the car rescue's `0x36` where class 0x21 is placed, and the scene
+ * list's. Each is baked every clip a figure can be on: the records' own
+ * (read out of the whole span, since a scene with more rescues than places
+ * reads past its list), figure 0's `0x180`, and `0x18B..0x18D`. The
+ * attachment lists `g_result_figure_attachments` gives each type go on the
+ * type, so `goreEntry` carries their models.
+ *
+ * Returns nothing for a stage that places no result card.
+ */
+async function resultFigureTemplates(stage: Stage, tables: ExeTables,
+                                     prog: Program, placements: Placement[],
+                                     chars: Map<number, Character>):
+    Promise<Placement[]> {
+  if (!stagePlacesResultCard(prog)) return [];
+  const rc = tables.resultCardTables() as {
+    base: number; bytes: string; lists: number[];
+  };
+  const bytes = new Uint8Array(rc.bytes.length >> 1);
+  for (let i = 0; i < bytes.length; i++) {
+    bytes[i] = Number.parseInt(rc.bytes.slice(i * 2, i * 2 + 2), 16);
+  }
+  const dv = new DataView(bytes.buffer);
+  const s16 = (va: number): number | null => {
+    const off = va - rc.base;
+    return off >= 0 && off + 2 <= dv.byteLength ? dv.getInt16(off, true) : null;
+  };
+  // `g_result_figure_records`: 0x14-byte records, each scene's list from its
+  // own pointer (they are not one stride from the span's start: scene 3's
+  // follows scene 2's terminator by four bytes).
+  const RECORD = 0x14;
+  const RESCUES_PER_SCENE = 10;
+  const types = new Set<number>();
+  for (const p of placements) {
+    if (p.cls === CLASS10 && !p.synthetic && p.char_type >= 0) {
+      types.add(p.char_type);
+    }
+    if (p.cls === RESCUE_TARGET_CLASS) types.add(RESCUE_TARGET_CHAR_TYPE);
+  }
+  const list = rc.lists[stage.scene];
+  for (let va = list; list !== undefined; va += RECORD) {
+    const t = s16(va);
+    if (t === null || t === -1) break;
+    types.add(t);
+  }
+  const clips = new Set<number>([RESULT_FIGURE_LIFE_MOTION]);
+  for (let i = 0; i < RESULT_FIGURE_IDLE_MOTIONS; i++) {
+    clips.add(RESULT_FIGURE_IDLE_MOTION_BASE + i);
+  }
+  // The rescued figures' clips: record `i`'s `+0x02` from this scene's list,
+  // for as many as `g_rescued_char_types` holds a scene -- ten -- because
+  // `ResultCardInstall` reads record `i` for rescue `i` with no bound, and
+  // past the terminator that is whatever follows.
+  for (let i = 0; list !== undefined && i < RESCUES_PER_SCENE; i++) {
+    const m = s16(list + i * RECORD + 2);
+    if (m !== null) clips.add(m);
+  }
+  const attachRecords = tables.attachmentRecords();
+  const out: Placement[] = [];
+  for (const ct of [...types].sort((a, b) => a - b)) {
+    if (!chars.has(ct)) {
+      const file = tables.characterAssetFile(ct);
+      if (!file) continue;
+      const built = build(tables, ct, file);
+      if (built === null) continue;
+      chars.set(ct, built);
+    }
+    const c = chars.get(ct)!;
+    for (const mid of [...clips].sort((a, b) => a - b)) {
+      if (c.motions.has(mid)) continue;
+      const baked = await bake(stage.source, tables, mid, c.boneCount);
+      if (baked !== null) c.motions.set(mid, baked);
+    }
+    // `g_result_figure_attachments[type - 0x20]`, up to its first negative.
+    for (let va = 0x0055df68 + (ct - 0x20) * 6; ; va += 2) {
+      const id = s16(va);
+      if (id === null || id < 0) break;
+      const arec = attachRecords[id];
+      if (arec && arec.slot) c.attachmentSlots.add(arec.slot);
+    }
+    // `common.bin[199]`, which figure 0 holds up on bone 5
+    // (`ResultCardFigureDrawNode`), rides the type's hidden template for the
+    // renderer to clone, as a civilian's held item does.
+    c.heldSlots.add(RESULT_FIGURE_LIFE_SLOT);
+    const first = [...clips].sort((a, b) => a - b)
+      .find((m) => c.motions.has(m));
+    if (first === undefined) continue;
+    const t = new Placement();
+    t.at = ResultFigureTemplateAt(ct);
+    t.cls = CLASS61;
+    t.char_type = ct;
+    t.motion = first;
+    t.hp = 0;
+    t.spawn = { at: t.at, class: CLASS61, pos: [0, 0, 0], yaw_deg: 0,
+                orient: [0, 0, 0] };
+    t.synthetic = true;
+    out.push(t);
   }
   return out;
 }
@@ -2027,6 +2166,17 @@ export async function resolveForStage(
     let blist = perType.get(body.char_type);
     if (!blist) { blist = []; perType.set(body.char_type, blist); }
     blist.push(body.spawn);
+  }
+
+  // -- the result card's figures -------------------------------------------
+  //
+  // One hidden row per type the card can stand; see `resultFigureTemplates`.
+  for (const t of await resultFigureTemplates(stage, tables, prog, placements,
+                                              chars)) {
+    placements.push(t);
+    let flist = perType.get(t.char_type);
+    if (!flist) { flist = []; perType.set(t.char_type, flist); }
+    flist.push(t.spawn);
   }
 
   const order = [...perType.keys()].sort((a, b) => a - b);

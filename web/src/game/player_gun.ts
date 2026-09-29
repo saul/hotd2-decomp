@@ -182,8 +182,8 @@ export function PlayerRefillMagazine(player: number, events?: Events): void {
  * Not transcribed: `FUN_00415710`, which copies the aim record into the
  * player block (the port's aim is written by `SetPlayerAimFromPointer`), and
  * the tail's skip poll, which the walker's `requestSkip` owns. The
- * `0x009A5C48` guard on `g_player_shot_count` has no counterpart because the
- * count itself is `g_nPlayerFired` in the port (see `combat/shot.ts`).
+ * `g_player_shot_count` count and its `0x009A5C48` guard are
+ * `FireShotRequest`'s first lines (`combat/shot.ts`).
  */
 export function PlayerFireAndReloadUpdate(player: number, f: GunFrame): void {
   for (const req of TakeDueShotRequests(player)) {

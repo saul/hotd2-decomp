@@ -1874,9 +1874,9 @@ wait_camera_path_frame 448
 1. Class 0x30 state 19's cue test is **two** globals, at `0x004576A2`:
    `CMP dword ptr [0x009a6110], EAX` / `JE`, then
    `CMP dword ptr [0x009a6458], EAX` / `JNE` — `g_cam_path_frame` **or**
-   `g_cam_path_frame_2`, camera blocks 0 and 2. The port tests the first only,
-   which is the `[diverges]` `CamCueHit` already declares for states 18 and
-   23; state 19 does not even go through that helper.
+   `g_cam_path_frame_2`, camera blocks 0 and 2. The port tested the first
+   only, a `[diverges]` on `CamCueHit`; it tests both now, for states 18, 19
+   and 23, and block 2's is always 0 (below).
 2. `CamAdvancePathFrame` (`FUN_004035E0`) publishes the cursor to
    `g_cam_path_frame` **before** the end test and increments the cursor
    afterwards, so a play that ends at 430 leaves `g_cam_path_frame == 430`
@@ -1904,9 +1904,13 @@ corpus sees. And it contradicts a fix already in the tree: the note on
 `581..660` being needed to publish **660**, because `0xA030`'s captor cue is
 that frame — which on reading 3 the engine cannot meet from block 0 either. So
 something else carries a stashed range's frame to a cue-waiting actor, and
-what that is is **`[open]`**: `g_cam_path_frame_2` is read at seven sites and
-written only by `CamAdvancePathFrame` with block index 2, and what drives block
-2 is unread.
+what that is is **`[open]`** -- and it is **not** `g_cam_path_frame_2`. That
+word is written only by `CameraBlocksReset`'s zero, the `REP STOSD` at
+`0x0049F40C`, and the path actions run as block 2, and nothing ever runs as
+block 2: an action runs as block `b` only from block `b`'s slot, every slot
+starts as `NoOpStub`, and only an action already running in a block writes
+that block's slot (`camera/actions.ts`). So block 2's frame is 0 for good
+`[proved]`, and the second arm of every "either block" cue is "the cue is 0".
 
 `tools/cam_cues.mjs` reports this spawn as `ok ... left after 551 frames`,
 which is worth knowing about the check: leaving 551 frames late, when a later

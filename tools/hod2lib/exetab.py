@@ -1409,6 +1409,26 @@ class ExeTables:
             "sight_speed_sprites": [s16(0x0056AFE0 + i * 2) for i in range(4)],
         }
 
+    def result_card_tables(self) -> dict:
+        """The result card's ``.rdata``, for ``script.json``'s ``result_card``
+        block. The TypeScript half's ``resultCardTables`` says what each field
+        is and where it comes from; this is the same read."""
+        base, end = 0x0055DD80, 0x0055E074
+        hexs = []
+        for va in range(base, end):
+            r = self._v2r(va)
+            hexs.append(f"{self.data[r] if r is not None else 0:02x}")
+        lists = []
+        for i in range(6):
+            r = self._v2r(0x0055DF50 + i * 4)
+            lists.append(struct.unpack_from("<I", self.data, r)[0] if r is not None else 0)
+        bonus = []
+        for i in range((0x005679FC - 0x00567990) // 2):
+            r = self._v2r(0x00567990 + i * 2)
+            bonus.append(struct.unpack_from("<h", self.data, r)[0] if r is not None else 0)
+        return {"base": base, "bytes": "".join(hexs), "lists": lists,
+                "accuracy_bonus": bonus}
+
     def carrier_door_yaw(self) -> list[int]:
         """``g_carrier2_door_yaw`` (0x005926D0), s16[59] -- the swing
         `CarrierPropRoutine2` (FUN_004408A0) steps its two doors through."""

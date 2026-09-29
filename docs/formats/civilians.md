@@ -69,7 +69,7 @@ reasons hold.
 | `0x00000080` | camera path `sub+0x10` reaches frame `sub+0x12` |
 | `0x00000100` | the clip's remaining loop count reaches zero |
 | `0x00000200` | the clip frame equals `sub+0x16` |
-| `0x00000400` | the installed frame hook raises `sub+0x18` |
+| `0x00000400` | `sub+0x18` is raised -- by `CivilianHookFallStep` on landing, the only writer of a 1 |
 | `0x00000800` | **never** — this bit makes the conjunction fail outright |
 | `0x00001000` | the camera's eased look-at has caught up |
 | `0x00002000` | `g_script_flags[sub+0x1A]` is raised |
@@ -230,8 +230,10 @@ Two consequences worth knowing, both the engine's:
   runs its actions. `CivilianReapplyWaitCommand` (`FUN_0048B760`) is what makes
   that safe: a second, smaller VM that re-applies only the opcodes a wait
   condition reads — the clip's loop count and play cursor (never the clip),
-  the target, the timer, the three count goals, the camera cue, the frame hook
-  and the flag index.
+  the target, the timer, the three count goals, the camera cue and the flag
+  index. Op 0x10 is the exception: it calls the install routine, whose
+  velocity and gravity writes land, and then puts `NoOpStub` back in the slot
+  (see *Op 0x10* below).
 * **…and eight of those are put back before the step returns.** The loop
   count, the three goals, the camera cue's path and frame, the frame compare
   and the flag index (`sub+0x0C`, `+0x20`, `+0x22`, `+0x24`, `+0x10`, `+0x12`,
@@ -299,24 +301,59 @@ Two consequences worth knowing, both the engine's:
 | `0x2C` | `Wait` | the wait word |
 | `0x2D` | `End` | |
 
-### Op 0x10's length
+### Op 0x10: an install routine, and the step it installs
 
-`CivilianRunScript` calls the hook as `next = hook(obj, cmd + 2)` and takes the
-pointer it returns, so **the hook decides how many dwords the command has**.
-Four appear in the shipped scripts:
+The operand is a pointer to an **install** routine, and both VMs *call* it:
+`next = hook(obj, cmd + 2)` (`CALL ECX` at `0x0048BD8D` in
+`CivilianRunScript`, at `0x0048B923` in `CivilianReapplyWaitCommand`). The
+routine writes a **step** into `sub+0x5C`, which `CivilianUpdate` calls once a
+frame (`CALL [EAX + 0x5C]` at `0x0048A962`, straight after the child prune),
+and returns the next command -- so **the install routine decides how many
+dwords the command has**. The exporter has to know each by address
+(`CIVILIAN_HOOK_LEN`) to decode the stream at all. Five operands appear in the
+shipped scripts:
 
-| Hook | Dwords | What it does |
-|---|---|---|
-| `0` | 2 | uninstall (`NoOpStub`) |
-| `0x0048D9F0` | 2 | zero the y velocity and start falling at `-0.02722` |
-| `0x0048DA90` | 2 | ride the surviving children |
-| `0x0048DB90` | 3 | take a launch y speed, raise `obj+0x34` bit `0x80000`, then fall |
-| `0x0048DBD0` | 5 | take a whole launch velocity, then fall |
+| Operand | Dwords | Install | Step it writes into `sub+0x5C` |
+|---|---|---|---|
+| `0` | 2 | none | -- |
+| `0x0048D9F0` | 2 | `CivilianHookStartFall`: `vel.y = 0`, `obj+0x5C = 0xBCDF0123` (-0.027222) | `CivilianHookFallStep` (`0x0048DA20`) |
+| `0x0048DA90` | 2 | `CivilianHookRideChildren` | `CivilianHookRideChildrenStep` (`0x0048DAB0`) |
+| `0x0048DB90` | 3 | `CivilianHookStartMoveY`: `vel.y` = the operand, `obj+0x34 \|= 0x80000` | `CivilianHookMoveYStep` (`0x0048DBC0`) |
+| `0x0048DBD0` | 5 | `CivilianHookStartMoveLocal`: `vel` = the three operands | `CivilianHookMoveLocalStep` (`0x0048DC10`) |
 
-The fall step (`0x0048DA20`) accelerates, moves, and stops the frame
-`QueryGroundHeightAt(x, y + 100, z)` is at or above the new height — snapping
-to it, raising `sub+0x18` (which wait bit `0x400` waits for) and uninstalling
-itself.
+The steps, all `[proved]` from their disassembly:
+
+* **`CivilianHookFallStep`** asks `QueryGroundHeightAt(x, y + 100, z)` at the
+  position *before* the move, then `vel.y += obj+0x5C; y += vel.y` -- the y
+  axis only. The frame the ground is at or above the new `y` it snaps `y` to
+  it, raises `sub+0x18` (wait bit `0x400`'s condition) and writes `NoOpStub`
+  back. The velocity is left as it landed.
+* **`CivilianHookRideChildrenStep`** turns the civilian toward the mean of her
+  captors at up to `0x80` BAMS a frame, and writes `NoOpStub` once she is dead.
+* **`CivilianHookMoveYStep`** is `y += vel.y` and nothing else: no gravity, no
+  ground, no uninstall, and `sub+0x18` never goes up.
+* **`CivilianHookMoveLocalStep`** adds the velocity turned by the actor's own
+  rotation -- `Translate(pos); RotateX(obj+0x64); RotateZ(obj+0x6C);
+  RotateY(obj+0x68); TransformPoint(vel)` -- every frame; likewise no gravity,
+  no ground and no uninstall.
+
+The two VMs handle the operand differently:
+
+* **`CivilianRunScript`** (`0x0048BD81`): `0` writes `NoOpStub` to `sub+0x5C`
+  and nothing else; anything else is called and then `sub+0x18 = 0`.
+* **`CivilianReapplyWaitCommand`** (`0x0048B913`): `0` writes **nothing**, so
+  the step already installed stands; anything else is called -- its velocity,
+  gravity and flag writes all land -- and then `sub+0x5C = NoOpStub` takes the
+  step straight back out. `sub+0x18` is not touched.
+
+Where they are used, in the shared table: `StartFall` once (stream 30, which
+stage 3's two spawns at `0x701C` and `0x70EC` run), `RideChildren` twice
+(stream 35, stage 4's `0x23F8`, and stream 58, which no spawn reaches),
+`StartMoveY` three times (streams 61, 67 and 71, each with -0.2, each the
+on-shot stream of 62, 68 or 72) and `StartMoveLocal` once (stream 72,
+`(0, 0, -0.05)`). **No spawn the bundle carries runs 58, 62, 68 or 72**, so
+neither move step is reached in the six stages as exported; `[open]` whether
+anything the exporter does not see spawns them.
 
 ## What the civilian looks like
 

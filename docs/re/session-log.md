@@ -26115,6 +26115,315 @@ takes the box at f675, gives it at f710, lives 3 -> 4, LIFE UP on screen, hand
 empty from f711; on the old tree the box floats beside the hand and is still
 held at f795 with lives 3.
 
+## 2026-09-29 -- ResolveHit's tail: the payout, the hit count and bone 2
+
+The brief was the kill test -- `killed` read `Actor.dead` and refused result
+5, where `0x0040972A`/`0x00409733` test the dead bit and the hit points and
+result 5 gates only the head pop (`0x0040976F`). **Main already had it**
+(8354e06e, earlier the same day); the brief described the tree before that
+commit. Read again from `LAB_004096f6` to the `RET` at `0x00409865` with
+`disassemble_bytes` rather than trusting the citation: the `0x800` overwrite,
+the bit's two tests (result 2 -> 0 at `0x0040971F`, then the jump past the kill
+block at `0x0040972D`), the hit-point test, the pop's gates and the kill's
+bit / `0x50` / `obj+0x131C` all match the port as it stood. `wasDead` is read
+at entry where the exe reads the bit after the dispatch; nothing between writes
+`0x4000000`, so it is the same word.
+
+What the reading found instead is the tail after `0x004097D7`:
+
+* **`g_player_hit_count` was never counted by a shot.** The head arm
+  (`0x0040980A`) counts every bone-2 hit, the body arm (`0x0040983B`) every
+  other hit whose `g_hit_result` is not 5. The port's `FireShotRequest` paid
+  the score and moved the combo and never touched the count, so the accuracy
+  grade's numerator (read by evt `0x2B`, `FUN_0045FE40`, not yet ported) moved
+  only for props and projectiles.
+* **The payout was in the wrong function**, summed into one call. It is four
+  `ScoreAddForPlayer` calls inside `ResolveHit`: the kill's `0x50` in the kill
+  block, then `0x78` and the combo, or 10. Moved in; `FireShotRequest` reports
+  `out.points`.
+* **The head was a bundle field.** Both head tests are `CMP EBP, 0x2`, and
+  `EBP` is `g_shot_bone[p]` (`0x0040943A`, L71). The port compared with
+  `type.head_bone`, which the exporter writes as 2 for every type. Now an
+  immediate in `game/`; the bundle field has no reader left.
+
+Readers reconciled: `FireShotRequest` (the only caller, via `DispatchHit`);
+`ActorReleaseBodyCreatureOnHit`, which raises the bit without `dead` and pays
+its own `0x50` (the next shot sees the bit, reports 0 and pays a body hit's
+10, which is the exe); the civilian (`ownsShotResult`, never reaches
+`ResolveHit`); class 0x31 and 0x18 (`updatesWhenDead`, no shared clip).
+
+**Wrong turns.** None in the reading. Three tests were calibrated on the old
+shape and failed on the move, as they should: the shot queue's "headshots"
+rode bone 1 with the fixture's `head_bone` pointed at it, and the rescue and
+`znjoe` checks said in so many words that a bare `ResolveHit` pays nothing.
+Rewritten to the exe's numbers (a kill shot on a body bone is `0x50 + 10`).
+Also a corpse hit: this file and the code both said it "scores nothing"; it
+reports result 0, which is not 5, so it is worth its 10 -- in the old port too,
+through `FireShotRequest`. Only the words were wrong.
+
+Proof: seven new checks in `port.test.ts` "ResolveHit:", all failing on the
+base; restoring only the `head_bone` read fails five of them.
+
+## 2026-09-29 -- `head_bone` leaves the bundle
+
+e8e0a55f made `ResolveHit`'s head the immediate it is -- `CMP EBP, 0x2` at
+`0x00409760` and `0x004097D7`, on `g_shot_bone[p]` -- and left the bundle's
+`head_bone` written with nothing in `game/` reading it: a `.text` immediate
+carried as data, which `/gameplay-port` keeps in `game/`. Removed from both
+writers (`web/src/hod2lib/charbuild.ts`, `tools/hod2lib/charbuild.py`) and
+from `CharacterType`, in one commit; `schema_hash.ts` and `builder_hash.ts`
+regenerated before the export (L33). `BUNDLE_FORMAT` stays at 15: a field is
+the schema digest's to catch.
+
+**"No reader left" was not quite true.** Three harnesses -- `civ_gives.mjs`,
+`civilians.mjs` and `zombies.mjs` -- aimed their headshots at
+`CharacterTypeOf(o)?.head_bone ?? 2`, which the fallback would have kept right
+without anyone noticing the field had gone. They import `HEAD_BONE` from
+`resolve_hit.ts` now, exported for them. `render.test.ts`'s fixtures and
+`port.test.ts`'s `TYPE` dropped the field.
+
+**The mislabelled type.** "ResolveHit:" proved bone 2 is the head by pointing
+`head_bone` at bone 1. With the field gone it relabels the table instead:
+the type's bone-1 record is the part `head` and bone 2's the part `torso` --
+a part name is the only thing left in a type that could claim to say where
+the head is -- and a new check reads back through `CharacterTypeOf` that the
+table does call bone 1 the head, so the swap cannot be vacuous. Mutation:
+taking the head from `bones.find(part === "head")` fails five checks, the two
+head/body checks and the three whose numbers ride on the combo.
+
+Proof: all twelve stages exported to a private bundle -- 246 character types,
+none carrying `head_bone`, where the shared `extract/player` has it on all 246.
+`verify_all.py --game-dir` against it: 67 passed, and two failed. `status`
+failed because STATUS.md had not been regenerated yet; regenerated from the
+staged tree, it is clean. `net_pair` timed out loading the replica in its last
+scenario, the TURN relay, with five peer Chromes running; it passed all three
+scenarios run alone (L29). `verify_geometry` skips under `HOTD2_BUNDLE` and
+passed run with `--bundle`. `zombies.mjs` is not in the suite and stops on HEAD
+before it shoots (`walker.flags is not iterable`, line 165), so its edit is
+proved only as far as the import linking; left for its own task.
+
+## 2026-09-29 -- camera block 2's path frame is always 0, and who reads it
+
+**The brief was a tree behind.** It asked for the ~30 readers of block 0's eye
+and yaw that 581a0a6c had left, and for five class-0x41 comments claiming
+"`g_camera_index` is 0 in every shipped write". d248ef5d ("Which eye") had
+already moved every one of those readers onto `CameraBlockEye`/`CameraBlockYaw`
+and rewritten the comments; `git log` on `camera/view.ts` showed it before any
+edit. What it had not done is the path frame: it enumerated the eye and angle
+bytes and left `PropUpdateType72`'s indexed frame `[open]`. The brief's grep
+still finds two `render/` sites; both already pick the block by the index.
+
+**The reading.** Every reference into the four blocks (`0x009A6000..0x009A6690`)
+in `.text`, by the bytes of each displacement, decoded by majority vote over
+sliding starts. `+0x110` (by `0x009A6000`; `+0xD0` by `g_camera_blocks`) has
+nine indexed references: three readers -- `OwlUpdateAndResolveShot`
+`0x004460EA`, `WaterSurfaceUpdate` `0x0046E50B`, `PropUpdateType72`
+`0x0047095A`, each after `MOV reg, [0x009c6f00]` times 0x69 -- and six in the
+path actions, which take the block as `[ESP + 4]`. Block 2's word
+(`0x009A6458`) has seven readers, every one a `CMP` by address as the second
+arm of a cue, and no writer by address. The actions run as block `b` only from
+block `b`'s slot (`EvtRunQueuedActions` `PUSH 0; CALL [0x009a610c]`,
+`CameraActorTick`'s loop `PUSH EDI; CALL [ESI]` for 1..3); `CameraActorInit`
+fills every slot with `NoOpStub` (`0x00576CA4`, four entries read); every store
+naming a slot by address names slot 0's; the rest are actions writing their
+own block's (`EvtActionSetContinuation13`, `CamStartPathPlayback`, the
+retires). So block 2's frame is written only by zeroes: `g_cam_path_frame_2`
+is always 0 `[proved]`.
+
+**Wrong turn.** The first scan said nothing zeroes it, because the reset's
+store is `MOV [EAX + 0x38], EBX` with `EAX` = block + `0xD8` -- a
+register-relative form a displacement scan cannot see. It is L32 again, one
+addressing mode down. The pointer-forming instructions were then listed
+(`MOV reg, imm`, `LEA`) and each followed to what it is passed to: the
+`0x0049F40C` `REP STOSD` over all four blocks, and 181 matrix pointers, all
+into `MatrixStackSetTopFromArray`, `MatrixMultiply` or `MatrixPremultiplyTop`.
+
+**What moved.** `G.g_cam_path_frame_2`, zeroed by `CameraBlocksReset`;
+`CameraBlockPathFrame(i)` beside `CameraBlockEye`. The three indexed readers
+read the drawn block's frame. `CamCueHit` (states 18, 19, 23),
+`ThrowerStateGrabPlayer` and `ScriptedCarrierUpdate33` test both words, and
+their three `[diverges]` went. A headless probe on the real `Walker`
+(scratch, not committed) found type 72's cue (path 0x4E frame 0x276) and
+water's pause (0x7E, 0x163) arrive under index 0 in the shipped scripts, so
+neither moves; stage 2's sub-type-0 owl is in the pool through a (1, 3)
+stretch of path 60 (707..845), where the exe's guard reads 0 and the port's
+read 707+. No shipped either-block cue is 0 (every class-0x30/0x31/0x33
+placement read). `FUN_00433B00` is class 0x33 selector 5's update, named
+`ScriptedEffectAtCameraCue33`; its one stage-2 spawn (evt `0x12568`, cue 340)
+is not ported and is left as its own task.
+
+**Proof.** Seven new `port.test` checks, each driven through
+`CheckpointResetCamera` or `ResetGameGlobals` rather than a hand-set index;
+all seven fail with the `src/` change reversed and pass with it.
+`verify_port`: divergences 134 -> 131, uncited exports 81 held.
+
+## 2026-09-29 -- the result card read: figures, the life bonus, the score
+
+Read in full for the end-of-stage port: `ResultCardInstall` (`FUN_00434EF0`),
+`ResultCardTally` (`FUN_00435930`), the figure task the card allocates
+(`ResultCardFigureInit` / `Update` / `DrawNode`, `FUN_004356A0` /
+`FUN_00435760` / `FUN_004357F0`, named here), `ResultCardDrawScore` and
+`ResultCardDrawAccuracy` (`FUN_004362E0`, `FUN_00436620`), the two accuracy
+opcodes (`0x2B`, `0x2F`) and both rescue writers. The whole sequence, per
+stage, is [`docs/re/stage-end.md`](stage-end.md); twelve globals and seven
+functions went into the TSVs.
+
+**What was believed and was wrong.** Three claims in the record did not
+survive the reading. (1) "Sub 1 hands over to the score count-up once the
+dwell is at or below `0x78`" -- `spawns.md` and the class-0x61 module both
+said it. Sub 2, which that test reaches, is the **life bonus**: both players'
+lives go up by `g_result_life_bonus[scene][min(rescues, 7)]`, capped, once, on
+the card's frame 302. There is no score count-up on the card at all; the
+count that climbs is the *rescues*, one every twenty frames from frame 31.
+(2) "Class 0x62 loads sound `0x7C`" -- `0x7C` is a pol **file** index
+(`result.bin`), through `PolFileQueueLoad` (`FUN_0041D650`, job kind 3, the
+call evt opcode `0x52` makes); `0x16A` is `scr_result`. The class is a loader,
+and it is `0x61` that walks the rescue list. (3) The decompile of
+`ResultCardInstall` ends at `PlaySoundId` in sub 0 and after one glyph in the
+draw (L72, L35) -- the figures, the whole card draw and the countdown are all
+past those two calls; the decompiles of both digit routines stop after their
+first digit the same way.
+
+**How the life is shown.** Only by the first rescued figure: at camera frame
+`0x104` it changes to motion `0x180` and holds `common.bin[199]` (slot
+`0x10C3`, which is also `civilians.items[0]`) up on bone 5 for cursor
+`0x1E..0x57`. `g_rescued_char_types` (`0x009C8EC0`, s16 `[scene*10 + n]`) is
+where both rescue writers record the rescued civilian's character type, and it
+is what makes the figures *the civilians you saved* rather than a fixed cast.
+
+**Found on the way.** The port's `G.g_nPlayerFired` is used as the shot count,
+but `0x009A5C78` is a flag (`= 1` at the pull) and the count is
+`g_player_shot_count` (`0x009A5C84`), guarded by `g_accuracy_stats_suppressed`
+(`0x009A5C48`, evt opcode `0x2F`). Opcodes `0x2B` and `0x2F` were unported, so
+the accuracy bonus the card's score includes was never paid.
+
+## 2026-09-29 -- the result card ported: figures, the life bonus, the score and accuracy
+
+The end of stages 1..4 is ported whole (`docs/re/stage-end.md` section 7):
+class 0x61's figures and life bonus and its draw, class 0x62's kill, the
+rescue record both rescue writers keep, opcodes `0x2B`/`0x2F`, the shot count
+at the pull, and `ResolveHit`'s hit counts. The bundle carries the card's
+`.rdata` as one span, its tiles and glyphs, and one hidden template row per
+figure type; `render/` clones a template per figure, draws the glyphs in
+camera space and the tiles as deep sprites. `web/tools/result_card.mjs` plays
+stage 1 (five rescues, and none), stage 2 (seven) and stage 4 (three) through
+their own result steps; `tools/verify_result_card.py` holds the immediates and
+the span to the EXE. The picture confirmed the font reading (`RESCUED X`,
+`LIFE BONUS X`, `1P SCORE`, `75% ACCURACY`), the waving clips, the life box
+figure 0 holds up, and the no-rescue figures lying dead.
+
+**Wrong turns.** (1) A figure row per (place, type) in the glTF was the first
+plan; the rig writer writes each placement's meshes out again, so stage 2 would
+have carried ~130 civilians' geometry. One template per type, cloned by the
+character layer (geometry shared, as the horde's mirror clones), instead.
+(2) I read the four scene lists as one 0x14 stride from `0x0055DD80`; scene 3's
+list follows scene 2's terminator by four bytes, and `verify_result_card.py`'s
+first run said so. The exporter now reads each list from its own pointer.
+(3) The freeze test (`model+0x08 == 0x80`) first read the counter, a frame
+ahead of the cursor the last draw sampled (L62); the figure keeps the drawn
+cursor on its tail and the test reads that -- the harness shows cursor 0x81,
+the clip's last, held. (4) `g_original_max_lives` and a `g_max_lives` of my
+own collided with main's `g_original_life_cap`/`g_max_lives` from the held-item
+work, landed while I worked; main's names and `GrantExtraLife` were taken and
+mine dropped. (5) `G.g_nPlayerFired` had been the port's shot count; it is the
+per-player "fired this frame" flag `ProcessPlayerShots` clears, and the count
+is `g_player_shot_count`, guarded by `g_accuracy_stats_suppressed` -- every test
+that counted shots through the flag reads the count now.
+(6) The two hit counts in `ResolveHit`'s tail I first put in
+`FireShotRequest`'s copy of that tail; main's `ResolveHit` work (e8e0a55f)
+moved the tail into `ResolveHit` and counts them there, and the merge took
+its version.
+
+**Left open.** What the clips depict is `[likely]`, from the render. A figure
+beyond its scene's list stands where the bytes after it say, on the clip they
+name, as the EXE's would; the exporter bakes record `i`'s clip for all ten
+indices, past the terminator included, so that such a figure is posed at all.
+Whether any shipped scene offers more rescues than its list has places is
+`[open]`; I did not count.
+
+## 2026-09-29 -- class 0x10 op 0x10: the install routines, and the steps they install
+
+Picked up the "found on the way, not fixed" note in the 2026-09-29 entry
+"class 0x10's op 0x06 and step restore, ...": the reapply walk's op 0x10 and
+the hooks behind it.
+
+**The reading.** Op 0x10's operand is a pointer to an **install** routine and
+both VMs *call* it, `next = hook(obj, cmd + 2)`. `CivilianRunScript`'s arm
+(`0x0048BD81`, table entry `[0x10]` at `0x0048C298` read out of the image):
+`0` writes `NoOpStub` to `sub+0x5C` and nothing else; anything else is `PUSH
+ESI; PUSH EDI; CALL ECX; MOV ESI, EAX` and then `MOV word [EAX+0x18], BP`.
+`CivilianReapplyWaitCommand`'s (`0x0048B913`, byte table `0x0048B9A4[0x10] =
+0x0B`, jump table entry 11 = `0x0048B913`): `0` is `JZ` straight to the length
+bump -- nothing written -- and anything else is the same call followed by `MOV
+dword [ECX+0x5C], 0x0041EBB0`. The installs, each disassembled whole:
+
+* `CivilianHookStartFall` (`FUN_0048D9F0`): step `0x0048DA20`, `vel.y = 0`,
+  `obj+0x5C = 0xBCDF0123` (-0.027222222; the port had -0.02722). No operand.
+* `CivilianHookFallStep` (`FUN_0048DA20`): ground query first, at the old
+  position; `vel.y += acc; y += vel.y`; `FCOM / TEST AH,1 / JNZ` -- land when
+  the ground is at or above the new `y`, snap, `sub+0x18 = 1`, `NoOpStub`.
+  **y only, and the velocity is kept.** The port moved `x` and `z` too, zeroed
+  all three on landing and scaled each term by the frame count.
+* `CivilianHookRideChildren` (`FUN_0048DA90`): step `0x0048DAB0`, nothing else.
+* `CivilianHookStartMoveY` (`FUN_0048DB90`, was `CivilianHookLaunchUp`): step
+  `0x0048DBC0`, `vel.y` = the operand, `obj+0x34 |= 0x80000`, **no** `obj+0x5C`.
+  Its step, now `CivilianHookMoveYStep` (`FUN_0048DBC0`, created), is `FLD
+  [xform+0x10]; FADD [xform+4]; FSTP [xform+4]; RET` -- `y += vel.y`, for ever.
+* `CivilianHookStartMoveLocal` (`FUN_0048DBD0`, was `CivilianHookLaunch`): step
+  `0x0048DC10`, the velocity from three operands. Its step, now
+  `CivilianHookMoveLocalStep` (`FUN_0048DC10`, created), is `Push(0);
+  LoadIdentity; Translate(pos); RotateX(+0x64); RotateZ(+0x6C); RotateY(+0x68);
+  TransformPoint(vel -> out); pos = out; Pop(1)`, with `ADD ESP,0x40; RET` past
+  the pop Ghidra marks no-return (L35; only the stack cleanup is past it).
+
+**Renamed**, in the TSV and the live database: `CivilianHookLaunchUp` ->
+`CivilianHookStartMoveY`, `CivilianHookLaunch` -> `CivilianHookStartMoveLocal`.
+Neither launches anything -- the one shipped `StartMoveY` operand is -0.2, a
+steady sink, and neither step has gravity. The MCP naming gate refused
+`CivilianHookMoveY` as a token subset of its step's name; `Start...` is the
+family's own pattern (`StartFall` / `FallStep`).
+
+**Where they are used.** A scan of the shared table (the same 136 streams in
+every stage): `StartFall` in stream 30 (stage 3, `0x701C` and `0x70EC`, after
+the rescue), `RideChildren` in 35 (stage 4 `0x23F8`) and 58, `StartMoveY` in
+61, 67 and 71 (each -0.2), `StartMoveLocal` in 72 (`(0, 0, -0.05)`), and null
+operands in 12, 34, 58 and 72. Streams 58, 62, 68 and 72 are spawned by
+nothing the bundle carries and referenced by no command, so 61/67/71 (their
+on-shot streams) are unreached too: **neither move step runs in the six
+stages as exported.** `[open]` whether something the exporter does not see
+spawns them.
+
+**The port.** `hooks.ts` is the four installs and three steps (the fourth is
+`CivilianHookRideChildrenStep` in `children.ts`, which now reads the count
+word `sub+0x1E` as the exe does), with `CivilianCallHookInstall` for op 0x10's
+`CALL ECX` that both VMs use. `sub.hook` holds the **step's** address, as
+`sub+0x5C` does, starting at `NoOpStub` (`0x0041EBB0`) where `CivilianInit`
+writes it; `CivilianHook` split into `CivilianHookInstall` and
+`CivilianFrameHook`. `sub+0x18` was `hookBusy`, documented as "raised while
+the hook is still running" -- its one writer raises it when the fall *lands* --
+and is `hookDone`. `SNAPSHOT_VERSION` 4 -> 5 for both. `FALL_ACCEL` is gone.
+
+**What moved.** Nothing measurable in the shipped stages: `npm run civilians
+-- --verbose` is byte-identical on the old and new trees (private bundle).
+Stage 3's fallers have no `x`/`z` velocity for the old step to have used and
+nothing reads `vel.y` after they land. The difference is in the unreached
+streams and in the reapply walk, which no stage exercises on an op 0x10 block
+(op 0x11 is unused, and a passed block would need a hook in it).
+
+**Proof.** `test:port`, "Op 0x10 calls a routine; the routine installs a
+step": 19 checks, and all 19 fail on the tree before the change and nothing
+else does -- the slot held the install address, `x` moved 0.5 a frame, the
+sink stopped on the floor, the local move went along -Z with no turn, the
+reapply walk installed `0x48DB90` without its velocity and uninstalled on a
+null operand. The local move's case (yaw and pitch both `0x4000`) pins the
+order: with the Y turn first -Z goes to -X and the X turn leaves it; X first
+would have put it in `y`.
+
+**Wrong turns.** None in the reading that I know of; two in the doing. The
+first rename was refused by the naming gate (above), and the first scan of the
+bundle assumed `civilians.spawns` was a list -- it is keyed by spawn address --
+and crashed rather than miscounting, which is the better way round.
+
 ## 2026-09-29 -- the story-mode switch and the window are shot through their mesh
 
 **The task.** Every shipped story-mode switch (class 0x44 selector 17, nine in

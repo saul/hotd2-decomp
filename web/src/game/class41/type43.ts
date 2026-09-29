@@ -516,7 +516,7 @@ function Type43WreckHit(p: BreakableProp, w: Type43Words, rng: Rng,
     // Both bits: `rand() & 1` picks. One: player 0 if its bit is set.
     const who = both ? rng.int(2)
       : (f & BreakableFlag.HitByPlayer0) !== 0 ? 0 : 1;
-    GrantExtraLife(who);
+    GrantExtraLife(who, events);
     p.removeFlag = TYPE43_PICKUP_TAG + who;
     p.slot = TYPE43_PICKUP_SLOT + TYPE43_PICKUP_SLOT_STRIDE * who;
     events?.emit("prop.pickup",

@@ -14,7 +14,7 @@ import { authoredFrameOfTicks, ticksOfSeconds } from "../core/play_cursor";
 import type { Actor } from "./actor";
 import type { SetPieceParams } from "./class24";
 import type { CiviliansJson } from "../bundle/scene";
-import type { Boss4TablesJson, GameOverJson, OptionsJson }
+import type { Boss4TablesJson, GameOverJson, OptionsJson, ResultCardJson }
   from "../bundle/stage";
 import type { HumanoidProgram } from "./class25";
 import { G } from "./globals";
@@ -82,6 +82,13 @@ export const T = {
    */
   carrierDoorYaw: [] as number[],
   /**
+   * The result card's `.rdata`: the figure records and lists, the per-type
+   * attachment lists, the glyph strings, the life bonus and the accuracy
+   * bonus. One block for the whole game; null in a bundle written before
+   * it. Read through `game/class61/rdata.ts`.
+   */
+  resultCard: null as ResultCardJson | null,
+  /**
    * The turn-rate curves and the approach radii — the two `.rdata` tables the
    * camera director reads. The immediates that used to sit beside them in this
    * block are in `game/camera/constants.ts` now; see `docs/formats/bundle.md`.
@@ -110,6 +117,11 @@ export function SetBoss4Tables(json: Boss4TablesJson | undefined,
 /** `[port-only]` -- the options block, from the same `script.json`. */
 export function SetOptionsTables(json: OptionsJson | undefined): void {
   T.options = json ?? null;
+}
+
+/** `[port-only]` -- the result card's block, from the same `script.json`. */
+export function SetResultCardTables(json: ResultCardJson | undefined): void {
+  T.resultCard = json ?? null;
 }
 
 /** `[port-only]` -- the game-over block, from the same `script.json`. */

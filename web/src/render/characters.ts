@@ -101,6 +101,9 @@ import { alphaGatesWholeActor, applyDrawGates }
   from "./characters/draw_gates";
 import { applyHeadAim } from "./characters/head_aim";
 import { clearHeldItems, syncHeldItems } from "./characters/held_items";
+import { syncResultFigure } from "./characters/result_figure";
+import { RESULT_FIGURE_AT_BIT, RESULT_FIGURE_TEMPLATE_BIT }
+  from "../game/class61/state";
 import {
   placeJudgmentRoot, seatJudgmentSubActors, syncJudgmentWings,
 } from "./characters/judgment";
@@ -123,6 +126,16 @@ interface Pending {
   place: CharacterPlacement | undefined;
   parentAt?: number;
   home: { x: number; y: number; z: number };
+}
+
+/**
+ * A result card figure's address: bit 26 without the template's bit 25 --
+ * `ResultFigureAt` in `game/class61/state.ts`, written out, because a
+ * renderer may not call into the port.
+ */
+function isFigureAt(at: number): boolean {
+  return at > 0 && (at & RESULT_FIGURE_AT_BIT) !== 0
+    && (at & RESULT_FIGURE_TEMPLATE_BIT) === 0;
 }
 
 export class CharacterLayer implements System {
@@ -177,6 +190,16 @@ export class CharacterLayer implements System {
   readonly posed = new Set<number>();
 
   /**
+   * The result card's figure templates, by character type: the hidden rows
+   * `hod2lib/characters.ts` emits at `RESULT_FIGURE_AT_BIT |
+   * RESULT_FIGURE_TEMPLATE_BIT | type`. A figure has no row of its own --
+   * which type stands in which place is decided in play -- so each is a
+   * clone of its type's, made the frame the port puts the figure in the pool.
+   * The clone shares the template's geometry and materials.
+   */
+  private readonly figureTemplates = new Map<number, Pending>();
+
+  /**
    * Adopt every character hierarchy the stage's glTF carries.
    *
    * The exporter emits one instance per spawn descriptor, so this is a
@@ -203,6 +226,7 @@ export class CharacterLayer implements System {
       this.spent.clear();
       this.home.clear();
       this.posed.clear();
+      this.figureTemplates.clear();
       this.json = null;
     });
     this.json = json ?? null;
@@ -299,6 +323,14 @@ export class CharacterLayer implements System {
       // not made until the script's spawn opcode asks for it, which is when
       // `SpawnFromDescriptor` (`FUN_00408A20`) makes the engine's. See
       // `syncSpawns`.
+      if ((at & (RESULT_FIGURE_AT_BIT | RESULT_FIGURE_TEMPLATE_BIT))
+          === (RESULT_FIGURE_AT_BIT | RESULT_FIGURE_TEMPLATE_BIT)) {
+        this.figureTemplates.set(type.type, {
+          at, type, root: node, pivot, bones, motion, place: p,
+          home: { x: 0, y: 0, z: 0 },
+        });
+        continue;
+      }
       this.pending.set(at, {
         at, type, root: node, pivot, bones, motion,
         // `parent_at` is the general form and `civilian_child` the one the
@@ -331,6 +363,13 @@ export class CharacterLayer implements System {
   /** Which adopted hierarchies the script is asking for, this frame. */
   private wantedSpawns(spawns: readonly { at: number }[]): Set<number> {
     const want = new Set<number>();
+    // **The result card's figures are in no list either.** The card
+    // allocates them itself (`ResultCardInstall`, `FUN_00434EF0`) and nothing
+    // ever takes them out but the scene's end, so each is wanted for as long
+    // as the pool holds it.
+    for (const o of G.g_object_list) {
+      if (!o.despawned && isFigureAt(o.at)) want.add(o.at);
+    }
     // A parent with no hierarchy of its own still has children that do: a
     // class-0x40 placer is drawn by nothing and `ActorKill`s itself, and its
     // members are rows parented to it. Listed is enough to want them.
@@ -409,6 +448,14 @@ export class CharacterLayer implements System {
     // was decided by `SpawnScriptedCharacters`, and all that happens here is
     // that a set of nodes learns which object it draws.
     this.adopt(made);
+    // A figure the card has just allocated gets its hierarchy here, cloned
+    // from its type's template, and is then adopted as any other orphan.
+    for (const at of want) {
+      if (!isFigureAt(at) || this.pending.has(at) || this.live.has(at)) continue;
+      const a = G.g_object_list.find((o) => o.at === at && !o.despawned);
+      const t = a ? this.figureTemplates.get(a.charType) : undefined;
+      if (t) this.pending.set(at, this.cloneTemplate(t, at));
+    }
     // ...and the objects the port made by a route that does not go through
     // `SpawnScriptedCharacters` at all. A class that builds a child of its own
     // — `SpawnBatWings` (`FUN_0042E060`) inside `PlaceBats` — puts it straight
@@ -579,6 +626,9 @@ export class CharacterLayer implements System {
         syncHeldItems(inst, this.civilians?.items ?? [],
                       (slot) => this.cloneSlot(slot), _ctx);
       }
+      // `ResultCardFigureDrawNode` (`FUN_004357F0`)'s own draws -- see
+      // `render/characters/result_figure.ts`.
+      syncResultFigure(inst, (slot) => this.cloneSlot(slot));
       // Last, so that a cel or a gore piece hung on a bone this frame arrives
       // under the gate and an attachment made this frame is known to be one.
       applyDrawGates(inst);
@@ -1064,6 +1114,34 @@ export class CharacterLayer implements System {
     return false;
   }
 
+
+  /**
+   * A figure's hierarchy: its type's template, cloned deep -- geometry and
+   * materials shared -- beside it in the scene, with its pose group and its
+   * bones found again by the names `build` matched them by. Hidden until the
+   * frame's update shows it.
+   */
+  private cloneTemplate(t: Pending, at: number): Pending {
+    const root = t.root.clone(true);
+    root.name = `${t.root.name}_figure${at.toString(16)}`;
+    root.visible = false;
+    t.root.parent?.add(root);
+    const pivot = (root.children.find((c) => c.name === t.pivot.name)
+      ?? root) as Group;
+    const bones = new Map<number, Object3D>();
+    pivot.traverse((o) => {
+      for (const b of t.type.bones) {
+        if (bones.has(b.bone)) continue;
+        if (o.name.endsWith(boneSuffix(b.part))) {
+          bones.set(b.bone, o);
+          break;
+        }
+      }
+    });
+    this.posed.add(at);
+    return { at, type: t.type, root, pivot, bones, motion: t.motion,
+             place: t.place, home: { x: 0, y: 0, z: 0 } };
+  }
 
   /**
    * A clone of the model at *slot*, from the hidden per-type template the

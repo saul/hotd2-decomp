@@ -192,6 +192,11 @@ CHECKS: list[Check] = [
           "reached by a deep link -- the only check in the tree that measures "
           "the mixer rather than the intent",
           NEEDS_BUNDLE, LANE_BROWSER),
+    Check("test:r2site", "web", ["npm", "run", "--silent", "test:r2site"],
+          "the deployed site's Worker, against a bucket in a Map: nothing "
+          "served outside the secret path, and under it the 304s, the ranges "
+          "and the stored-compressed bundle with its decoded length that the "
+          "page's service worker and loading bar rely on"),
     Check("offline", "web", ["npm", "run", "--silent", "offline-check"],
           "that the service worker never shows a stale copy while the server "
           "answers -- a bundle file changed on disk is the new one on the next "
@@ -217,6 +222,16 @@ CHECKS: list[Check] = [
           "digit where the exe draws them, holds the script at its wait, and "
           "that START -- pressed on the corner button, the one START a phone "
           "has -- spends a credit and puts the player back in play",
+          NEEDS_BUNDLE, LANE_BROWSER),
+    Check("result_card", "web",
+          ["node", "tools/result_card.mjs", "--headless"],
+          "that the end of stages 1, 2 and 4 plays in the real page from "
+          "their own result steps: one figure per rescue, of the rescued "
+          "type, at the scene's places; the scene's own list, dead, with "
+          "none; the count climbing from frame 31; the life bonus on frame "
+          "302, capped; figure 0 holding the life up from camera frame 260 "
+          "and freezing on cursor 0x81; the score and the accuracy drawn; "
+          "the flag on frame 420 and the scene over after it",
           NEEDS_BUNDLE, LANE_BROWSER),
     Check("options", "web",
           ["node", "tools/options_page.mjs", "--headless"],
@@ -479,6 +494,18 @@ CHECKS: list[Check] = [
           "store of its gate, no reader of its byte), and that the options "
           "screen's factory tables, sprite ids, positions and glyph table are "
           "the EXE's, with the bundle's `options` block when there is one",
+          NEEDS_GAME),
+    Check("verify_result_card", ".",
+          ["python3", "tools/verify_result_card.py", "--game-dir", "{game_dir}"],
+          "that every constant the result card's port transcribes -- the "
+          "dwell, the bonus's dwell, the count's, the camera frame figure 0 "
+          "turns on, the cursor it freezes on, the slot it holds up -- is the "
+          "immediate at its instruction; that the `.rdata` span the card reads "
+          "with no bound is the EXE's bytes; that every rescuable civilian's "
+          "type has an attachment list the unbounded lookup can find; and, "
+          "with a bundle, that each stage placing the card carries a figure "
+          "template for every type its list names or it can rescue, with "
+          "every clip the card can put that type on baked",
           NEEDS_GAME),
     Check("verify_water", ".",
           ["python3", "tools/verify_water.py", "--game-dir", "{game_dir}"],

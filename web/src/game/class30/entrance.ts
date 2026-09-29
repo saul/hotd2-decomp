@@ -93,8 +93,16 @@ const ARC_CROUCH_OTHER = { motion: 0x39f, hold: 0x2c };
  *
  * The engine accepts **either** `g_cam_path_frame` (camera block 0) or
  * `g_cam_path_frame_2` (block 2) — the same `+0xD0` field of two different
- * blocks. `ZombieStateScriptedGrabAndDespawn` (`FUN_00457B50`) does it at
- * `0x00457BE2` and `0x00457BEA`.
+ * blocks, each named by address. State 18's routine below does it at
+ * `0x004575E7`/`0x004575F1`,
+ * `ZombieStateWaitForCameraFrame` (`FUN_00457620`) at `0x004576A6`/`0x004576AE`
+ * and `ZombieStateScriptedGrabAndDespawn` (`FUN_00457B50`) at
+ * `0x00457BE2`/`0x00457BEA`.
+ *
+ * Block 2's frame is always 0 (see the global), so the second arm is "the cue
+ * is frame 0": a cue of 0 fires on any frame of any path. No shipped spawn
+ * in the three states has a cue of 0 (every placement in the twelve bundles
+ * was read), so for the shipped game the second arm never decides anything.
  *
  * **The test is an equality on a frame that passes once**, which is the thing
  * to know about it: an actor that exists while its cue frame goes by fires,
@@ -103,18 +111,12 @@ const ARC_CROUCH_OTHER = { motion: 0x39f, hold: 0x2c };
  * lists it; the port builds it from the same list on the same frame, which is
  * what keeps that true here.
  *
- * [diverges] The port models one camera block, so this tests the one it has.
- * A spawn whose cue is authored against block 2 waits on block 0's frame
- * instead; none of the 47 spawns across states 18, 19 and 23 was observed to
- * need the second, because a stage that is running block 2 is running a
- * cutscene camera the port does not drive either.
- *
  * One function rather than the test written out, because it **was** written
  * out twice — here and in `class30/scripted.ts` — and only one copy carried
- * the divergence.
+ * the note that it tested one block.
  */
 export function CamCueHit(frame: number): boolean {
-  return G.g_cam_path_frame === frame;
+  return G.g_cam_path_frame === frame || G.g_cam_path_frame_2 === frame;
 }
 
 /**

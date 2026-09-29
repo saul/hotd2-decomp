@@ -41,6 +41,22 @@ The `.text` immediates that are join keys (the logo sprite ids, the figures'
 clips, the disc and footprint slots) live in `web/src/game/player_body_data.ts`,
 which the exporter imports.
 
+`script.json` also carries a
+`result_card` block -- the result card's `.rdata`, read by
+`ExeTables.resultCardTables` in both halves: `bytes`, the span
+`0x0055DD80..0x0055E074` as hex (the figure records, the six list pointers,
+the per-type attachment lists, the four glyph strings and the life bonus, as
+one span because the card reads a scene's records with no bound), `lists`
+decoded, and `accuracy_bonus`, `g_accuracy_bonus_table` and the words after
+it to `0x005679FC`. A stage that places the card (1..4) also carries the
+seventeen `scr_result` tiles in `screen_sprites`, the `result.bin` glyphs as
+effect slots, and one hidden **template row** per character type the card
+can stand, at `0x06000000 | type` (`ResultFigureTemplateAt`), with the
+figures' clips (`0x17C`, `0x17D`, `0x17F`, `0x180`, `0x18B..0x18D`, and
+whatever a list's overflow records name) and `common.bin[199]` on the type's
+template. The renderer clones a template for each figure the card allocates;
+`tools/verify_result_card.py` holds the block to the EXE.
+
 `screen_sprites` also carries the continue screen's sprites -- CONTINUE?, the
 64x128 countdown digits, the credit line's words and the small GAME OVER --
 from `CONTINUE_SCREEN_SPRITES` in `web/src/game/hud_sprites.ts` (see

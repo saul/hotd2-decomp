@@ -1572,6 +1572,47 @@ export class ExeTables {
   }
 
   /**
+   * The result card's `.rdata`, for `script.json`'s `result_card` block
+   * (`docs/re/stage-end.md`).
+   *
+   * * `base`, `bytes` -- `0x0055DD80..0x0055E074` as one hex span:
+   *   `g_result_figure_records` (0x14-byte `{s16 type, s16 motion, f32 x, y,
+   *   z, s32 yaw}`, four lists), the six `g_result_figure_lists` pointers,
+   *   `g_result_figure_attachments` (s16[3] per type from 0x20), the four
+   *   glyph strings and `g_result_life_bonus` (u8[6][8]). One span because
+   *   `ResultCardInstall` (`FUN_00434EF0`) reads a scene's records with no
+   *   bound and `ResultCardFigureInit` (`FUN_004356A0`) the attachment lists
+   *   with none: a read past a table reads the next, and the port reads the
+   *   same bytes.
+   * * `lists` -- `g_result_figure_lists`, `0x0055DF50`, u32[6], decoded.
+   * * `accuracy_bonus` -- `g_accuracy_bonus_table`, `0x00567990`, s16, and
+   *   the words after it up to `0x005679FC`: `EvtOpAwardAccuracyBonus2B`
+   *   (`FUN_0045FE40`) indexes it by `(hits*100/shots)/10` unbounded, which
+   *   passes the table's eleven entries whenever hits outrun counted shots.
+   */
+  resultCardTables(): Record<string, unknown> {
+    const base = 0x0055dd80;
+    const end = 0x0055e074;
+    let hex = "";
+    for (let va = base; va < end; va++) {
+      const r = this.v2r(va);
+      const b = r === null ? 0 : this.data[r];
+      hex += b.toString(16).padStart(2, "0");
+    }
+    return {
+      base,
+      bytes: hex,
+      lists: Array.from({ length: 6 }, (_u, i) =>
+        this.ru32(0x0055df50 + i * 4) ?? 0),
+      accuracy_bonus: Array.from({ length: (0x005679fc - 0x00567990) / 2 },
+        (_u, i) => {
+          const v = this.ru16(0x00567990 + i * 2) ?? 0;
+          return v >= 0x8000 ? v - 0x10000 : v;
+        }),
+    };
+  }
+
+  /**
    * The options screen's `.rdata` (app state `0x0C`, `OptionsRunPhase`,
    * `0x004869E0`), for `script.json`'s `options` block. Every field is read
    * by the routine named beside it; `docs/re/options-screen.md` has the

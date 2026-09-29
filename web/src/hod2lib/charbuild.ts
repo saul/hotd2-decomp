@@ -173,9 +173,6 @@ export class Character {
         supported: p.supported,
       }),
       gore: obj(this.gore),
-      // Bone 2 is the head on every 15-bone humanoid, and the head is what the
-      // score model keys on; carried rather than assumed by the client.
-      head_bone: 2,
       torso_stages: this.torsoStages,
       actor_radius: this.actorRadius,
       reactions: obj(this.reactions),

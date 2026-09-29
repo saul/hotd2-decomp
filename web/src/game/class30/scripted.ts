@@ -162,7 +162,7 @@ export function ZombieStateWaitForCameraFrame(obj: ZombieActor, dt: number,
       ActorSetMotion(obj, t.motion);
     }
     // `0x004576A6`/`0x004576AE`: either camera block's frame, which is
-    // `CamCueHit` and its declared divergence.
+    // `CamCueHit`.
     if (!CamCueHit(t?.cue_frame ?? -1)) return;
     obj.sub = 2;
   }
@@ -244,7 +244,7 @@ export function ZombieStateScriptedGrabAndDespawn(obj: ZombieActor,
 
   if (obj.sub === 1) {
     // `-1` fires at once; otherwise the camera path frame must equal it —
-    // **either camera block's**, which is `CamCueHit` and its divergence.
+    // **either camera block's**, which is `CamCueHit`.
     if (obj.zom.holdFrames !== -1 && !CamCueHit(obj.zom.holdFrames)) return;
     if (t.motion === GRAB_MOTION_PAIRED) {
       ActorSetMotionBlended(obj, GRAB_MOTION_PAIRED, 0, 1);

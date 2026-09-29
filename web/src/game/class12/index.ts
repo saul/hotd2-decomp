@@ -158,7 +158,8 @@ const _top: Mat = new Array<number>(16).fill(0);
  * `RegisterForShotTest` in `combat/shot_test.ts` for why that is the matrix
  * `ShotTestMesh` reads -- and only the two routines behind `obj+0x34` bit
  * `0x10` read it. Every shipped descriptor has scale 1.0, so the scale arm
- * never runs, and the trace's inverse (a transpose, in `coli.ts`) is exact.
+ * never runs -- and the trace inverts the matrix in general (`coli.ts`), as
+ * `MatrixInvert` does, so a scale would be exact too.
  */
 export function ScriptedPropUpdate12(obj: Actor, f: ClassFrame): void {
   const sub = Tail(obj);

@@ -113,7 +113,8 @@ from . import degraded
 from .bams import bams_from_matrix, rot_matrix
 
 __all__ = ["Hinge", "StaticProp", "hinge_curve", "resolve_for_stage",
-           "props_json", "EffectNode", "effect_tree", "effect_sound_cues"]
+           "props_json", "EffectNode", "effect_tree", "effect_sound_cues",
+           "story_switch_tail", "script_flag_effect_coli"]
 
 #: `FUN_00472B10`'s 18 builders, indexed by ``obj+0x11C``.
 PROP_BUILDERS = 0x00595AB8
@@ -514,6 +515,61 @@ SCRIPT_FLAG_EFFECT_MOTION = 0x1D7
 SCRIPT_FLAG_EFFECT_SLOT_A = 0x13F5
 SCRIPT_FLAG_EFFECT_A = (2, 2)      # (effect id, capture bone)
 SCRIPT_FLAG_EFFECT_B = (3, 1)
+
+#: A stand-in for "the pointer lands on no blob header", which is what a
+#: wrong reading looks like; ``None`` is the descriptor's own ``-1``.
+COLI_UNRESOLVED = "unresolved"
+
+
+def _coli_key(word, sets):
+    """A relocated collision pointer as the ``coli.blobs`` key.
+
+    ``None`` for the descriptor's ``-1`` and `COLI_UNRESOLVED` for a word that
+    lands on no blob of either file (or when ``sets`` is not given); the
+    TypeScript half returns ``undefined`` for that case, which JSON drops.
+    """
+    from . import coli as colilib
+    if word is None:
+        return COLI_UNRESOLVED
+    if word == 0xFFFFFFFF:
+        return None
+    hit = colilib.pointer_to_offset(word, sets[0], sets[1]) if sets else None
+    return f"{hit[0]}:{hit[1]}" if hit else COLI_UNRESOLVED
+
+
+def script_flag_effect_coli(rec, sets=None):
+    """`PropBuildScriptFlagEffect`'s ``obj+0x14C``: the dword at
+    ``tail+0x08`` (`FUN_00472B30`), the mesh its ``obj+0x34 |= 0x51`` sends
+    `ShotTestMesh` (`FUN_00404A00`) and the moving-object collision passes to.
+    The TypeScript half's ``scriptFlagEffectColi`` is the same read."""
+    return _coli_key(rec.param(0x08, "u32"), sets)
+
+
+def story_switch_tail(rec, sets=None) -> dict:
+    """`PlaceStoryModeSwitch` (`FUN_00473A70`), class 0x44 selector 17: every
+    word of the tail it copies, at the width it copies it
+    (``0x00473A89``..``0x00473B7A``). The TypeScript half's
+    ``storySwitchTail`` has the offset table; this is the same read, field
+    for field.
+
+    ``coli`` is ``tail+0x08`` resolved to the ``coli.blobs`` key -- ``None``
+    for ``-1``, the arm that sets bit 31 and an 8.0 sphere, and
+    `COLI_UNRESOLVED` for a pointer that lands on no blob.
+    """
+    def p(at, kind, default):
+        v = rec.param(at, kind)
+        return default if v is None else v
+    return {
+        "hinge_curve": p(0x00, "i8", 0),
+        "slot": p(0x04, "i16", 0),
+        "coli": _coli_key(rec.param(0x08, "u32"), sets),
+        "swing_sign": p(0x0C, "i32", 0),
+        "branch_flag": p(0x10, "i8", -1),
+        "remove_flag": p(0x11, "i8", -1),
+        "scale": [p(0x14, "f32", 0.0), p(0x18, "f32", 0.0),
+                  p(0x1C, "f32", 0.0)],
+        "keys": [p(0x20 + k, "i8", -1) for k in range(4)],
+    }
 #: `g_script_flag_effect_cues_a` — 0x005961F0, and its neighbour.
 SCRIPT_FLAG_EFFECT_CUES_A = 0x005961F0
 SCRIPT_FLAG_EFFECT_CUES_B = 0x00596204

@@ -32,7 +32,7 @@ import { T } from "../tables";
 import { PlaceFallingContainer } from "./container";
 import { PropBuildRisingDoor } from "./rising_door";
 import { PropBuildScriptFlagEffect } from "./script_flag_effect";
-import { PlaceStoryModeSwitch } from "../class41/triggers";
+import { PlaceStoryModeSwitch } from "./story_switch";
 
 /**
  * `obj+0x11C` for this class — the builder index.
@@ -61,7 +61,7 @@ export enum Class44Selector {
   /**
    * `PlaceStoryModeSwitch` (`FUN_00473A70`) — the **route-branch trigger with
    * the widest reach**: twelve spawns over four stages, and five of the game's
-   * sixteen branch records are answered by one. See `game/class41/branch.ts`.
+   * sixteen branch records are answered by one. See `class44/story_switch.ts`.
    */
   StoryModeSwitch = 17,
 }
@@ -88,7 +88,8 @@ export const g_class44_subtypes: Partial<Record<number, Class44Builder>> = {
       (q) => q.at === obj.at && q.container === "script_flag_effect");
     if (!pl) return;
     G.g_breakable_props.push(...PropBuildScriptFlagEffect(
-      obj.at, pl.effect ?? 0, pl.capture_bone ?? 0, pl.motion ?? 0));
+      obj.at, pl.effect ?? 0, pl.capture_bone ?? 0, pl.motion ?? 0,
+      pl.coli ?? null));
   },
   [Class44Selector.StoryModeSwitch]: (obj, f) => {
     void f;
@@ -146,6 +147,7 @@ export const Class44PlacerHandler: ClassHandler = {
 export * from "./container";
 export * from "./rising_door";
 export * from "./script_flag_effect";
+export * from "./story_switch";
 
 /**
  * The same shape: a placer that builds and dies. Four of the eighteen

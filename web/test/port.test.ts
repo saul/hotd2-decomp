@@ -474,7 +474,9 @@ import {
   TYPE31_DESPAWN_CAM_PATH, TYPE54_DRIFT_FRAMES,
   TYPE31_EXTRA_SLOT, TYPE53_STRIP_A_SLOT, TYPE53_STRIP_B_SLOT,
 } from "../src/game/class41/draw_only";
-import { ClearPropShotTestList } from "../src/game/class41/shot_test";
+import {
+  ClearPropShotTestList, PropInShotTestList, PropRegisterForShotTest,
+} from "../src/game/class41/shot_test";
 import { SCRIPT_FLAG_TYPE5_REMOVE } from "../src/game/class41/type05";
 import { TYPE10_FIRST_SLOT, TYPE6_FIRST_SLOT } from "../src/game/class41/type06";
 import {
@@ -549,9 +551,7 @@ import {
   CAT_TRIGGER_STOP_X, CatTriggerState, type CatTail,
 } from "../src/game/class53";
 import { CAT_CLIPS, CAT_MOTIONS } from "../src/game/class53/records";
-import {
-  PlaceChainSegments, PlaceStoryModeSwitch,
-} from "../src/game/class41/triggers";
+import { PlaceChainSegments } from "../src/game/class41/triggers";
 import {
   MatrixFromZYX, MatrixInterpolateSwingTwist, MatrixToZYX,
 } from "../src/game/class44/swing_twist";
@@ -572,8 +572,9 @@ import {
   TYPE44_WHOLE_SLOT, TYPE44_EFFECT,
 } from "../src/game/class41/type44";
 import {
-  STORY_SWITCH_FLAG_AT, STORY_SWITCH_SCRIPT_FLAG,
-} from "../src/game/class41/branch";
+  PlaceStoryModeSwitch, STORY_SWITCH_FLAG_AT, STORY_SWITCH_SCRIPT_FLAG,
+  StoryModeSwitchPhase,
+} from "../src/game/class44/story_switch";
 import {
   BamsHalfway, FallingContainerUpdate, PlaceFallingContainer,
   PropBuildScriptFlagEffect, ScriptFlagEffectFlag, ScriptFlagEffectUpdate,
@@ -2162,9 +2163,20 @@ function propScene(rng: Rng, mode: GameMode = GameMode.Original): Events {
   SetGameTables(CHARS, BREAKABLES);
   EnterPlay();
   G.g_camera_fixed_eye_y = 0;
+  // The drawn block's eye, a thousand units out along +z and looking down
+  // -z, so every fixture here is in front of it. `RegisterForShotTest`
+  // (`FUN_00405160`) refuses a sphere object whose view depth is behind the
+  // eye, and the prop pool takes that depth through this matrix; with the
+  // reset's identity every fixture at a positive z would be behind it.
+  G.g_camera_world_to_view = MatIdentity();
+  MatrixTranslate(G.g_camera_world_to_view, 0, 0, -PROP_SCENE_EYE_Z);
+  G.g_camera_view_to_world = MatIdentity();
+  MatrixTranslate(G.g_camera_view_to_world, 0, 0, PROP_SCENE_EYE_Z);
   void rng;
   return new Events();
 }
+/** How far out along +z {@link propScene} stands the eye. */
+const PROP_SCENE_EYE_Z = 1000;
 
 /** Shoot a prop `n` times, running its update after each. */
 function shoot(p: { id: number }, n: number, rng: Rng, events: Events): void {
@@ -3294,7 +3306,7 @@ console.log("\nclass 0x41 types 5, 6, 10, 12, 21, 51, 63, 78, transcribed whole:
   check("...under Rz.Ry.Rx of its own angles",
         Math.abs((five.draws?.[0].m[0] ?? 0) + 1) < 1e-6,
         String(five.draws?.[0].m.slice(0, 3)));
-  check("...and registers no shot sphere", !five.shotRegistered);
+  check("...and registers no shot sphere", !PropInShotTestList(five));
   G.g_script_flags[0x77] = 0;
   G.g_scene_index = 0;
   G.g_script_flags[SCRIPT_FLAG_TYPE5_REMOVE] = 1;
@@ -3509,7 +3521,7 @@ console.log("\nclass 0x41 type 31, its draws:");
   p.flags |= 0x8;
   BreakablePropPoolUpdate(rng);
   check("...registers no sphere and never masks obj+0x34",
-        !p.shotRegistered && (p.flags & 0x8) !== 0);
+        !PropInShotTestList(p) && (p.flags & 0x8) !== 0);
   G.g_scene_index = 2;
   G.g_evt_block_index = 0xb;
   G.g_scene_tick_counter = 10;
@@ -3679,7 +3691,7 @@ console.log("\nclass 0x41 type 32, the lift's draw:");
         Math.abs(panel[12] - (gate.x + LIFT_PANEL_AT[0])) < 1e-4
         && Math.abs(panel[13] - (gate.y + 14)) < 1e-4
         && Math.abs(panel[14] - (gate.z - 2)) < 1e-4);
-  check("...and no shot sphere", !gate.shotRegistered);
+  check("...and no shot sphere", !PropInShotTestList(gate));
 
   G.g_camera_block_eye.y = 100.3;
   G.g_script_flags[LiftFlag.RideCamera] = 1;
@@ -3755,7 +3767,7 @@ console.log("\nclass 0x41 type 43, PlaceGenericProp case 0x2B and its routine:")
     check("PropUpdateType43 draws the crate at this frame's tumble",
           p.draws?.length === 1 && p.draws[0].slot === BreakableSlot.Default
           && p.draws[0].m.every((v, i) => Math.abs(v - body[i]) < 1e-5));
-    check("...and registers at y + row 0's rise", p.shotRegistered
+    check("...and registers at y + row 0's rise", PropInShotTestList(p)
           && p.shotY === Math.fround(p.y + p.restHeight));
     check("...the bob in float32: frame 1 on its centre", p.y === 20);
     BreakablePropPoolUpdate(rng, events);
@@ -3888,7 +3900,7 @@ console.log("\nclass 0x41 type 34, PlaceGenericProp case 0x22:");
   BreakablePropPoolUpdate(rng, events);
   check("standing, it draws 0xA50 and registers at its origin",
         c.draws?.length === 1 && c.draws[0].slot === FALLING_SLOT_WHOLE
-        && c.shotRegistered && c.shotY === c.y);
+        && PropInShotTestList(c) && c.shotY === c.y);
   BreakablePropTakeShot(c, 0);
   BreakablePropPoolUpdate(rng, events);
   check("the knock clears the hit bit itself and leaves one shot",
@@ -3955,7 +3967,7 @@ console.log("\nclass 0x41 types 7, 20, 58 and 60, transcribed whole:");
           p.draws?.length === 1 && p.draws[0].slot === TYPE07_SLOT
           && same(p.draws[0].m, world((m) => MatrixTranslate(m, 0, 102, -54))));
     check("type 7: the sphere is 57.0 below the origin",
-          p.shotRegistered && p.shotY === 45);
+          PropInShotTestList(p) && p.shotY === 45);
     for (let i = 0; i < 4; i++) {
       G.g_evt_step_index += 1; BreakablePropPoolUpdate(rng, events);
     }
@@ -4055,7 +4067,7 @@ console.log("\nclass 0x41 types 7, 20, 58 and 60, transcribed whole:");
               MatrixScale(m, 3, 1, 3);
             })));
       check("type 7 item: its sphere is 1.5 above it",
-            item.shotRegistered && item.shotY === 8);
+            PropInShotTestList(item) && item.shotY === 8);
       sounds.length = 0;
       const id = item.words.o290;
       const taken = G.g_original_items_taken[id] ?? 0;
@@ -4242,7 +4254,7 @@ console.log("\nclass 0x41 type 49, the rim that rocks:");
         && sh[0] === 10 && sh[5] === 1 && sh[10] === 10,
         `${sh[12]} ${sh[13]} ${sh[14]} ${sh[0]} ${sh[5]} ${sh[10]}`);
   check("...its shot point is (x, y + 1.0, z)",
-        p.shotRegistered && p.shotX === p.x
+        PropInShotTestList(p) && p.shotX === p.x
         && p.shotY === Math.fround(p.y + 1) && p.shotZ === p.z,
         `${p.shotX} ${p.shotY} ${p.shotZ}`);
   check("...no angle moves while unshot",
@@ -4371,7 +4383,7 @@ console.log("\nclass 0x41 type 11, the circler that drops:");
         near(d.m[0], ry[0]) && near(d.m[8], ry[8]) && near(d.m[2], ry[2]),
         `${d.m[0]} ${d.m[2]} ${d.m[8]}`);
   check("...and registers its raw origin, not the orbit",
-        p.shotRegistered && p.shotX === p.x && p.shotY === p.y
+        PropInShotTestList(p) && p.shotX === p.x && p.shotY === p.y
         && p.shotZ === p.z);
   G.g_frame_counter = 7;
   BreakablePropPoolUpdate(rng, events);
@@ -4491,7 +4503,7 @@ console.log("\nclass 0x41 type 8, the swaying object and its three parts:");
         near(m[12], Math.fround(dx + p.x) + ro.x)
         && near(m[13], p.y + ro.y) && near(m[14], Math.fround(dz + p.z) + ro.z),
         `${m[12]} ${m[13]} ${m[14]}`);
-  check("...the object registers no sphere", !p.shotRegistered);
+  check("...the object registers no sphere", !PropInShotTestList(p));
 
   const wp = { x: 0, y: 0, z: 0 };
   const okPose = parts.every((q, i) => {
@@ -4506,7 +4518,7 @@ console.log("\nclass 0x41 type 8, the swaying object and its three parts:");
   check("...each part draws 0x1AAA on the object's matrix; +0x40 is its world point",
         okPose, JSON.stringify(parts.map((q) => q.hitPos)));
   check("...and registers there, above the -25 line",
-        parts.every((q) => q.shotRegistered && q.shotX === q.hitPos.x
+        parts.every((q) => PropInShotTestList(q) && q.shotX === q.hitPos.x
           && q.shotY === q.hitPos.y && q.hitPos.y > -25),
         JSON.stringify(parts.map((q) => q.shotY)));
 
@@ -4669,7 +4681,7 @@ console.log("\nclass 0x41 type 9, the church window (PropUpdateType9):");
   g41t9Run(80, rng, events);
   check("type 9's cursor holds on 0x4E", p.effectFrames === 0x4e,
         `${p.effectFrames}`);
-  check("type 9 is not shootable", !p.shotRegistered);
+  check("type 9 is not shootable", !PropInShotTestList(p));
   G.g_scene_index = 1; G.g_script_flags[0x77] = 1;
   g41t9Run(1, rng, events);
   check("type 9 has no scene-1 sweep", live(p));
@@ -4797,7 +4809,7 @@ console.log("\nclass 0x41 type 27, the piece that bursts (PropKillOnBranchOneUpd
   check("type 27 alive after four step changes", live(p));
   G.g_evt_step_index = 6; g41t9Run(1, rng, events);
   check("type 27 despawned on the fifth", !G.g_breakable_props.includes(p));
-  check("type 27 never registers a shot sphere", !p.shotRegistered);
+  check("type 27 never registers a shot sphere", !PropInShotTestList(p));
 
   ({ events } = g41t9Scene(rng, 1));
   p = g41t9Place(spawn, rng);
@@ -4889,7 +4901,7 @@ console.log("\nclass 0x41 type 30, the drop (PropUpdateType30):");
   check("type 30 after 60 frames: y down by 0.02722 * 60 * 61 / 2, z up 48",
         near(p.y, y0 - 0.02722 * 1830, 1e-2) && near(p.z, z0 + 48, 1e-2)
         && p.pitch === -0x100 * 60, `${p.y} ${p.z}`);
-  check("type 30 is not shootable", !p.shotRegistered);
+  check("type 30 is not shootable", !PropInShotTestList(p));
   G.g_evt_step_index = 2; g41t9Run(1, rng, events);
   G.g_evt_step_index = 3; g41t9Run(1, rng, events);
   check("type 30 alive after two step changes", live(p));
@@ -4911,7 +4923,7 @@ console.log("\nclass 0x41 type 59, the invisible target (PropUpdateType59):");
   check("type 59 draws nothing (an empty list, not the renderer's fallback)",
         Array.isArray(p.draws) && p.draws.length === 0);
   check("type 59 registers its own position",
-        p.shotRegistered && p.shotX === pos[0] && p.shotY === p.y
+        PropInShotTestList(p) && p.shotX === pos[0] && p.shotY === p.y
         && p.shotZ === pos[2]);
   const fx0 = G.g_sprite_effects.length;
   p.hitAim = { x: -1100, y: 17 };
@@ -4925,7 +4937,7 @@ console.log("\nclass 0x41 type 59, the invisible target (PropUpdateType59):");
   BreakablePropTakeShot(p, 1);
   g41t9Run(1, rng, events);
   check("type 59 rings on every shot (no latch)", sounds.length === 2);
-  check("type 59 still registered after a hit", p.shotRegistered);
+  check("type 59 still registered after a hit", PropInShotTestList(p));
   G.g_scene_index = 1; G.g_script_flags[0x77] = 1; g41t9Run(1, rng, events);
   check("type 59 has no scene-1 sweep", live(p));
   G.g_script_flags[0x77] = 0;
@@ -5013,7 +5025,7 @@ console.log("\nclass 0x41 types 14, 19 and 25, the enemies standing still:");
           && p.draws[0].m[13] === 36
           && near(Math.hypot(p.draws[0].m[0], p.draws[0].m[1], p.draws[0].m[2]),
                   0.4, 1e-6));
-    check("...and registers that position", p.shotRegistered
+    check("...and registers that position", PropInShotTestList(p)
           && p.shotX === p.x && p.shotY === 36 && p.shotZ === p.z);
     run(rng, events, 0xd1 - 2);
     check("unshot it is still counted in at frame 0xD0", G.g_enemies_alive === 1);
@@ -5044,7 +5056,7 @@ console.log("\nclass 0x41 types 14, 19 and 25, the enemies standing still:");
     check("...tumbling at rand() % 0x81 + 0xC0 a frame, one draw",
           p.spin === ref.int(0x81) + 0xc0 && rng.state === ref.state);
     check("...and is still counted in, and still shootable",
-          G.g_enemies_alive === 1 && p.shotRegistered);
+          G.g_enemies_alive === 1 && PropInShotTestList(p));
     const hitAt = p.storyItem;
     while (p.routinePhase !== Type14Phase.Rest && p.storyItem < 0x1c0) {
       run(rng, events);
@@ -5054,7 +5066,7 @@ console.log("\nclass 0x41 types 14, 19 and 25, the enemies standing still:");
     check("...pivots to pitch 0x4000 and gives alive back there, once",
           p.pitch === 0x4000 && G.g_enemies_alive === 0
           && p.storyItem - hitAt < 60, `${p.pitch} ${p.storyItem - hitAt}`);
-    check("...out of the shot test once landed", !p.shotRegistered);
+    check("...out of the shot test once landed", !PropInShotTestList(p));
     check("...drawn about the pivot, 0.96 from it",
           near(Math.hypot(p.x - p.restX, p.y - p.restY, p.z - p.restZ), 0.96,
                1e-3));
@@ -5178,14 +5190,14 @@ console.log("\nclass 0x41 types 14, 19 and 25, the enemies standing still:");
     check("...draws effect 10, held on frame 0",
           p.draws?.length === 1 && p.draws[0].slot === 0x1500
           && p.effectFrames === 0);
-    check("...registered 12 above its origin", p.shotRegistered
+    check("...registered 12 above its origin", PropInShotTestList(p)
           && p.shotY === Math.fround(p.y + 12));
     run(rng, events, 0xfe - 2);
     const before = G.g_enemies_present;
     run(rng, events);
     check("...unshot, counted out on frame 0xFE and latched, still shootable",
           before === 1 && G.g_enemies_present === 0
-          && (p.flags & 0x40000000) !== 0 && p.shotRegistered);
+          && (p.flags & 0x40000000) !== 0 && PropInShotTestList(p));
     BreakablePropTakeShot(p, 0);
     run(rng, events);
     check("...after which a shot pays nothing",
@@ -5209,7 +5221,7 @@ console.log("\nclass 0x41 types 14, 19 and 25, the enemies standing still:");
           G.g_script_branch_var === 1 && sounds.join() === String(SFX_TYPE25_HIT)
           && G.g_enemies_present === 0);
     check("...sets 0x44000000 and leaves the shot test, the clip starting",
-          (p.flags & 0x44000000) === 0x44000000 && !p.shotRegistered
+          (p.flags & 0x44000000) === 0x44000000 && !PropInShotTestList(p)
           && p.effectFrames === 1);
     const drawn: number[] = [];
     for (let i = 0; i < 140; i++) {
@@ -5287,7 +5299,7 @@ console.log("\nclass 0x41 type 64, stage 2's rocker:");
   }
   check("...the rate swings between -62 and +62", lo === -62 && hi === 62,
         `${lo} ${hi}`);
-  check("...and nothing registers a sphere", !p.shotRegistered);
+  check("...and nothing registers a sphere", !PropInShotTestList(p));
   G.g_script_flags[0x77] = 1;
   BreakablePropPoolUpdate(rng, events);
   check("...it opens with PropExpireByStepLifetime: the scene-1 sweep",
@@ -5321,7 +5333,7 @@ console.log("\nclass 0x41 type 57, stage 1's shudder:");
         && Math.abs(tr(p, 1)[1] - tr(p, 0)[1] - f32(5.68)) < 1e-5,
         `${tr(p, 0)} ${tr(p, 1)}`);
   check("...registered every frame at the literal, not its position",
-        p.shotRegistered && p.shotX === f32(-697.042)
+        PropInShotTestList(p) && p.shotX === f32(-697.042)
         && p.shotY === f32(-9.861) && p.shotZ === f32(-529.244));
   for (let s = 1; s <= 10; s++) {
     G.g_evt_step_index = s;
@@ -5370,7 +5382,7 @@ console.log("\nclass 0x41 type 57, stage 1's shudder:");
   BreakablePropPoolUpdate(rng, events);
   check("...frame 0x96: ActorDespawn, and no sphere",
         p.dead && ((p.flags & 0x80018000) >>> 0) === 0x80018000
-        && !p.shotRegistered);
+        && !PropInShotTestList(p));
 }
 
 console.log("\nclass 0x41 type 36, stage 3's three flickers:");
@@ -5438,7 +5450,7 @@ console.log("\nclass 0x41 type 36, stage 3's three flickers:");
   G.g_evt_step_index = 3;
   BreakablePropPoolUpdate(rng, events);
   check("...and ActorKill on the second step change", p.dead
-        && (p.flags & 0x8000) === 0 && !p.shotRegistered);
+        && (p.flags & 0x8000) === 0 && !PropInShotTestList(p));
 }
 
 console.log("\nclass 0x41 type 62, stage 6's eight waters:");
@@ -5503,7 +5515,7 @@ console.log("\nclass 0x41 type 62, stage 6's eight waters:");
   check("...a cursor may read 100", p.storyItem === 100);
   BreakablePropPoolUpdate(rng, events);
   check("...and past 100 goes to 0", p.storyItem === 0);
-  check("...nothing registers a sphere", !p.shotRegistered);
+  check("...nothing registers a sphere", !PropInShotTestList(p));
   G.g_script_flags[0] = 1;
   BreakablePropPoolUpdate(rng, events);
   check("...g_script_flags[0] == 1: ActorKill", p.dead);
@@ -5561,7 +5573,7 @@ console.log("\nclass 0x41 type 45, stage 1's banners:");
         && p.draws[0].slot === 0x1731 && tr(p, 0)[0] === TYPE45_ROWS[0][0]
         && Math.abs(p.draws[0].m[0]
                     - Math.cos(0x145e * Math.PI * 2 / 65536)) < 1e-6);
-  check("...not shootable", !p.shotRegistered);
+  check("...not shootable", !PropInShotTestList(p));
   for (let s = 2; s <= 8; s++) {
     G.g_evt_step_index = s;
     BreakablePropPoolUpdate(rng, events);
@@ -5641,7 +5653,7 @@ console.log("\nclass 0x41 types 41, 56, 69 and 73, transcribed whole:");
     check("...the part scaled 1.1",
           d.length > 1 && near(Math.hypot(d[1].m[0], d[1].m[1], d[1].m[2]), 1.1));
     check("...and the sphere is the part's start, written over x/y/z",
-          p.shotRegistered && near(p.shotY, POS[1] - 0.55) && p.y === p.shotY);
+          PropInShotTestList(p) && near(p.shotY, POS[1] - 0.55) && p.y === p.shotY);
 
     G.g_script_flags[5] = 1;
     BreakablePropPoolUpdate(rng, events);
@@ -5844,7 +5856,7 @@ console.log("\nclass 0x41 types 41, 56, 69 and 73, transcribed whole:");
           p.draws?.length === 2 && p.draws.every((x) => x.slot === 0x930)
           && near(p.draws[1].m[12], 92) && near(p.draws[1].m[14], 111));
     check("...its sphere 5.0 above the placement",
-          p.shotRegistered && p.shotY === Math.fround(POS[1] + 5));
+          PropInShotTestList(p) && p.shotY === Math.fround(POS[1] + 5));
     const score = G.g_player_score[0];
     BreakablePropTakeShot(p, 0);
     BreakablePropPoolUpdate(rng, events);
@@ -5996,7 +6008,7 @@ console.log("\nclass 0x41 type 67, Training's boats and their cargo:");
     const f = b0.flags;
     BreakablePropPoolUpdate(rng, events);
     check("...no shot sphere and no mask on +0x34",
-          !b0.shotRegistered && b0.flags === f);
+          !PropInShotTestList(b0) && b0.flags === f);
   }
 
   // ---- the cargo: the boat's frame, the crack, the burst -----------------
@@ -6017,7 +6029,7 @@ console.log("\nclass 0x41 type 67, Training's boats and their cargo:");
           && near(tm[13], ey) && near(tm[14], ez),
           `${tm.slice(12, 15)} vs ${ex},${ey},${ez}`);
     check("...+0x40 is that point and the sphere is 5.0 above it",
-          near(target.hitPos.x, ex) && target.shotRegistered
+          near(target.hitPos.x, ex) && PropInShotTestList(target)
           && near(target.shotY, ey + 5) && near(target.shotZ, ez));
 
     BreakablePropTakeShot(crate, 1);
@@ -6026,7 +6038,7 @@ console.log("\nclass 0x41 type 67, Training's boats and their cargo:");
           + "boat, one shot left", sounds.join() === String(0x1a16a9)
           && crate.hp === 1 && crate.slot === TYPE67_CARGO_CRACKED_SLOT
           && crate.yaw === b0.yaw + 0x8000 && (crate.flags & 0xe) === 0
-          && crate.shotRegistered);
+          && PropInShotTestList(crate));
 
     sounds.length = 0;
     G.g_GameMode = GameMode.Arcade;   // where an award of 1 would pay
@@ -6106,7 +6118,7 @@ console.log("\nclass 0x41 type 43, stage 3's seven shootable props:");
   // It registers a shot sphere every frame, at the kind's own rise.
   BreakablePropPoolUpdate(rng, events);
   check("...and it publishes that sphere each frame",
-        crate.shotRegistered, `${crate.shotRegistered}`);
+        PropInShotTestList(crate), `${PropInShotTestList(crate)}`);
 
   // The first shot cracks it: no points, the model swaps, and it turns to
   // face the camera. `KindedPropUpdate` hides the model instead. The heading
@@ -9143,6 +9155,9 @@ console.log("\nthe branch writers: every route the game can choose:");
   }
 
   // The story-mode switch: a scene-and-block table, a script flag, and a key.
+  // The throw is one frame and the route the next: `obj+0x192` is 0 on the
+  // frame the shot is read, and the route is in the arm that runs once it is
+  // 1 (`0x00474FC8`).
   {
     propScene(rng);
     G.g_scene_index = 1;
@@ -9153,8 +9168,16 @@ console.log("\nthe branch writers: every route the game can choose:");
                                       pos: [0, 0, 0] });
     G.g_breakable_props.push(sw);
     hitAndTick(sw);
-    check("the switch opens scene 1 block 3", G.g_script_branch_var === 2,
-          String(G.g_script_branch_var));
+    BreakablePropPoolUpdate(rng);
+    check("a thrown switch whose script flag is down opens nothing: "
+          + "`g_script_flags[obj+0x2A0] == 1` is the route's first test",
+          sw.routinePhase === StoryModeSwitchPhase.Thrown
+          && G.g_script_branch_var === 0 && sw.storyItem === 114,
+          `${sw.routinePhase} ${G.g_script_branch_var} ${sw.storyItem}`);
+    G.g_script_flags[114] = 1;
+    BreakablePropPoolUpdate(rng);
+    check("the switch opens scene 1 block 3 once its flag is up",
+          G.g_script_branch_var === 2, String(G.g_script_branch_var));
     G.g_script_branch_var = 0;
     BreakablePropPoolUpdate(rng);
     check("...once: `+0x2A0` goes to -1 with the route",
@@ -9164,12 +9187,14 @@ console.log("\nthe branch writers: every route the game can choose:");
     propScene(rng);
     G.g_scene_index = 1;
     G.g_evt_block_index = 2;                       // not in the table
+    G.g_script_flags[114] = 1;
     const sw2 = PlaceStoryModeSwitch({ at: 0x4001, container: "story_switch",
                                        lifetime_evt_steps: 1, branch_flag: 114,
                                        remove_flag: 62, keys: [-1, -1, -1, -1],
                                        pos: [0, 0, 0] });
     G.g_breakable_props.push(sw2);
     hitAndTick(sw2);
+    BreakablePropPoolUpdate(rng);
     check("...and a block the table does not name writes nothing",
           G.g_script_branch_var === 0, String(G.g_script_branch_var));
 
@@ -9177,16 +9202,19 @@ console.log("\nthe branch writers: every route the game can choose:");
     propScene(rng);
     G.g_scene_index = 1;
     G.g_evt_block_index = 3;
+    G.g_script_flags[115] = 1;
     const keyed = PlaceStoryModeSwitch({ at: 0x4002, container: "story_switch",
                                         lifetime_evt_steps: 1,
                                         branch_flag: 115, remove_flag: 116,
                                         keys: [0, 2, 5, 6], pos: [0, 0, 0] });
     G.g_breakable_props.push(keyed);
     hitAndTick(keyed);
+    BreakablePropPoolUpdate(rng);
     check("a keyed switch refuses a player carrying nothing",
           G.g_script_branch_var === 0, String(G.g_script_branch_var));
     G.g_original_item_slots[0] = [5, -1];
     hitAndTick(keyed);
+    BreakablePropPoolUpdate(rng);
     check("...and opens for one carrying item 5", G.g_script_branch_var === 2,
           String(G.g_script_branch_var));
   }
@@ -9272,13 +9300,12 @@ console.log("\nthe branch writers: every route the game can choose:");
           flag() === 0, String(flag()));
 
     // `obj+0x192 == 0` -- unthrown. A thrown switch hands the flag to the
-    // second write, behind the mode gate and the item spawn, which is not
-    // ported: see `StoryModeSwitchUpdate`.
+    // second write, behind the mode gate and the item spawn.
     propScene(rng, GameMode.Arcade);
     G.g_scene_index = SCENE;
     G.g_evt_block_index = BLOCK;
     const thrown = place();
-    thrown.branchLatched = true;
+    thrown.routinePhase = StoryModeSwitchPhase.Thrown;
     BreakablePropPoolUpdate(rng);
     check("a thrown switch stops raising it", flag() === 0, String(flag()));
 
@@ -9429,7 +9456,7 @@ console.log("\nprops are shot by a sphere, not by the model they draw:");
     check("a prop with no model still gets its radius", p.hitRadius === 12,
           String(p.hitRadius));
     BreakablePropPoolUpdate(rng);
-    check("...and publishes a sphere", p.shotRegistered);
+    check("...and publishes a sphere", PropInShotTestList(p));
     check("...12 units above its own origin, which is where the routine puts it",
           p.shotX === 10 && p.shotY === 12 && p.shotZ === -5,
           `${p.shotX}/${p.shotY}/${p.shotZ}`);
@@ -9439,7 +9466,7 @@ console.log("\nprops are shot by a sphere, not by the model they draw:");
     p.flags |= 0x04000000;
     BreakablePropPoolUpdate(rng);
     check("...until one scoring hit sets bit 26, and then never again",
-          !p.shotRegistered);
+          !PropInShotTestList(p));
   }
 
   // The offsets are per type and they are not all up. Type 7 registers 57
@@ -9495,7 +9522,7 @@ console.log("\nprops are shot by a sphere, not by the model they draw:");
           `${p.shotY} vs ${p.y}`);
     p.state = BreakableState.Removed;
     BreakablePropPoolUpdate(rng);
-    check("...and nothing at all once it is removed", !p.shotRegistered);
+    check("...and nothing at all once it is removed", !PropInShotTestList(p));
   }
 
   // The list is rebuilt every frame, which is what makes a prop that returned
@@ -9505,9 +9532,9 @@ console.log("\nprops are shot by a sphere, not by the model they draw:");
     PlaceBreakableGroup(1, 4, rng);
     const p = G.g_breakable_props[0];
     BreakablePropPoolUpdate(rng);
-    check("a prop is in the list after its own frame", p.shotRegistered);
+    check("a prop is in the list after its own frame", PropInShotTestList(p));
     ClearPropShotTestList();
-    check("...and out of it the moment the list is cleared", !p.shotRegistered);
+    check("...and out of it the moment the list is cleared", !PropInShotTestList(p));
   }
 
   // The chain's twenty links are twenty spheres, dropping 1.5 apiece. Placing
@@ -9545,7 +9572,7 @@ console.log("\nprops are shot by a sphere, not by the model they draw:");
     pair[0].branchLatched = true;
     BreakablePropPoolUpdate(rng);
     check("...until one is broken, and then that one is out of the test",
-          !pair[0].shotRegistered && pair[1].shotRegistered);
+          !PropInShotTestList(pair[0]) && PropInShotTestList(pair[1]));
   }
 }
 
@@ -9628,7 +9655,7 @@ console.log("\nclass 0x41 types 38, 39, 40 and 44 -- stage 1's church (new bugs 
 
   BreakablePropPoolUpdate(rng, events);
   check("all four families register for the shot test on their own tails",
-        [t38[0], t39[0], frag[0], t44[0]].every((q) => q.shotRegistered));
+        [t38[0], t39[0], frag[0], t44[0]].every((q) => PropInShotTestList(q)));
   check("...type 38 one unit below its origin, type 44 five above",
         Math.abs(t38[0].shotY - (t38[0].y - 1)) < 1e-6
         && Math.abs(t44[0].shotY - (t44[0].y + 5)) < 1e-6);
@@ -9671,7 +9698,7 @@ console.log("\nclass 0x41 types 38, 39, 40 and 44 -- stage 1's church (new bugs 
   BreakablePropTakeShot(st, 0);
   BreakablePropPoolUpdate(rng, events);
   check("a shot stack pays ten and stops registering",
-        G.g_player_score[0] === score0 + 10 && !st.shotRegistered,
+        G.g_player_score[0] === score0 + 10 && !PropInShotTestList(st),
         `${G.g_player_score[0]}`);
   let blinked = false;
   for (let f = 0; f < 400 && !st.dead; f++) {
@@ -9690,7 +9717,7 @@ console.log("\nclass 0x41 types 38, 39, 40 and 44 -- stage 1's church (new bugs 
   BreakablePropPoolUpdate(rng, events);
   check("a shot sub-kind-0 object bursts into forty pieces and swaps to 0x123F",
         g.burst.length === FRAGMENT_BURST_PIECES
-        && g.slot === FRAGMENT_SUBKIND0_SLOT_HIT && !g.shotRegistered,
+        && g.slot === FRAGMENT_SUBKIND0_SLOT_HIT && !PropInShotTestList(g),
         `${g.burst.length} ${g.slot.toString(16)}`);
   check("...with one of the routine's two break sounds",
         sounds.includes(0x2d16a9) || sounds.includes(0x2c16a9));
@@ -9715,7 +9742,7 @@ console.log("\nclass 0x41 types 38, 39, 40 and 44 -- stage 1's church (new bugs 
         && c0.effectPoses.some((q, i) => q.y !== before[i]),
         `${c0.effectFrames} ${c0.effectPoses.length}`);
   check("a shot whole chair pays and leaves the shot test, but stays drawn",
-        c6.effectFrames >= 1 && !c6.shotRegistered
+        c6.effectFrames >= 1 && !PropInShotTestList(c6)
         && c6.slot === TYPE44_WHOLE_SLOT && !c6.dead);
 
   // The step lifetime: four step changes and they are all gone.
@@ -9793,7 +9820,7 @@ console.log("\nclass 0x41 constructors 50 and 66 -- the table scenery (stage 1's
         crate.length === 5
         && crate.every((q) => q.restX === 1 && q.restY === 1 && q.restZ === 1
                        && q.hitRadius === 0 && q.flags === 0
-                       && !q.shotRegistered));
+                       && !PropInShotTestList(q)));
   check("...and each draws its slot, placed where its row says",
         crate.length === 5
         && crate.every((q) => q.draws?.length === 1
@@ -9851,11 +9878,11 @@ console.log("\nclass 0x41 constructors 50 and 66 -- the table scenery (stage 1's
         && signs.every((q) => q.flags === (0x80000001 | 0)
                        || q.flags === 0x80000001));
   check("only 0x10DC, 0x10DD and 0x10DE register, at y + the +0x2C0 drop",
-        signs.filter((q) => q.shotRegistered).map((q) => q.slot.toString(16))
+        signs.filter((q) => PropInShotTestList(q)).map((q) => q.slot.toString(16))
           .join() === "10dc,10dd,10dd,10dc,10dc,10dd"
         && sign(1).shotY === Math.fround(sign(1).y - 5)
         && sign(3).shotY === Math.fround(sign(3).y - 3.5),
-        signs.filter((q) => q.shotRegistered).map((q) => q.slot.toString(16))
+        signs.filter((q) => PropInShotTestList(q)).map((q) => q.slot.toString(16))
           .join());
 
   // The hit: bit 3 cleared, the ricochet, no points, and a swing rate of
@@ -10165,7 +10192,7 @@ console.log("\nclass 0x41 type 13, what drops out of stage 2's clock tower:");
         drop.slot === TYPE13_PANEL_LIT_SLOT, drop.slot.toString(16));
   check("and it has not moved and made no sound",
         drop.y === 180 && sounds.length === 0 && !drop.dead);
-  check("it never registers a shot sphere", !drop.shotRegistered);
+  check("it never registers a shot sphere", !PropInShotTestList(drop));
 
   // A step change stops the blink for good and resets the panel.
   G.g_evt_step_index = 5;
@@ -10627,7 +10654,7 @@ console.log("\nclass 0x41 types 70-77, Original Mode's collectibles and neighbou
     G.g_camera_view_to_world = world((m) => MatrixRotateY(m, 0x2000));
     BreakablePropPoolUpdate(rng, events);
     check("an untaken collectible registers 1.5 above its origin",
-          p.shotRegistered && p.shotY === 21.5, String(p.shotY));
+          PropInShotTestList(p) && p.shotY === 21.5, String(p.shotY));
     check("...and a type 70 turns 0x400 a frame", p.yaw === 0x400,
           String(p.yaw));
     const d0 = p.draws ?? [];
@@ -10681,7 +10708,7 @@ console.log("\nclass 0x41 types 70-77, Original Mode's collectibles and neighbou
           && p.draws?.[1]?.alpha === fade,
           (p.draws ?? []).map((q) => `${q.slot.toString(16)}:${q.alpha}`)
             .join());
-    check("...still registered while it plays", p.shotRegistered);
+    check("...still registered while it plays", PropInShotTestList(p));
     BreakablePropPoolUpdate(rng, events);
     check("...and is gone the frame after", !alive(p));
   }
@@ -10838,7 +10865,7 @@ console.log("\nclass 0x41 types 70-77, Original Mode's collectibles and neighbou
     const p = place(72, rng);
     BreakablePropPoolUpdate(rng, events);
     check("waiting, type 72 is neither drawn nor shootable",
-          alive(p) && !p.shotRegistered && p.draws?.length === 0);
+          alive(p) && !PropInShotTestList(p) && p.draws?.length === 0);
     G.g_active_cam_path = TYPE72_CUE_CAM_PATH;
     G.g_cam_path_frame = TYPE72_CUE_CAM_FRAME;
     BreakablePropPoolUpdate(rng, events);
@@ -10856,7 +10883,7 @@ console.log("\nclass 0x41 types 70-77, Original Mode's collectibles and neighbou
     BreakablePropPoolUpdate(rng, events);
     const v1 = Math.fround(TYPE72_THROW - TYPE72_GRAVITY);
     check("...falls under 0.0381 a frame, and registers 1.5 above itself",
-          q.vy === v1 && q.shotRegistered
+          q.vy === v1 && PropInShotTestList(q)
           && q.shotY === Math.fround(Math.fround(v1 + 20) + 1.5),
           `${q.vy} ${q.shotY}`);
     let n = 1;
@@ -10876,7 +10903,7 @@ console.log("\nclass 0x41 types 70-77, Original Mode's collectibles and neighbou
           && r.storyItem === 1 && r.removeFlag === ORIGINAL_ITEM_PICKUP_SLOT);
     BreakablePropPoolUpdate(rng, events);
     check("...stops falling and leaves the shot test",
-          r.y === y && !r.shotRegistered);
+          r.y === y && !PropInShotTestList(r));
     // `CMP word ptr [ESI + 0x28C], -1`: the second block is gated on the
     // first model, so an item with no second model still asks for one.
     W(r).o28e = -1;
@@ -10958,7 +10985,7 @@ console.log("\nclass 0x41 types 70-77, Original Mode's collectibles and neighbou
     check("...inheriting the prop's step clock and +0x11C, and running",
           !!item && item.lifetime === p.lifetime
           && item.stepsElapsed === p.stepsElapsed
-          && item.lastStepIndex === p.lastStepIndex && item.shotRegistered
+          && item.lastStepIndex === p.lastStepIndex && PropInShotTestList(item)
           && (item.draws?.length ?? 0) > 0
           && G.g_original_item_banner_count === 0);
     const y0 = p.y;
@@ -11193,7 +11220,7 @@ console.log("\nclass 0x41 types 70-77, Original Mode's collectibles and neighbou
     // The declared divergence, pinned: the engine registers stack garbage on
     // an odd frame, and the port the point its last draw computed.
     check("...still registered there, at the point the last draw computed",
-          p.shotRegistered && [p.shotX, p.shotY, p.shotZ].join() === last);
+          PropInShotTestList(p) && [p.shotX, p.shotY, p.shotZ].join() === last);
     BreakablePropPoolUpdate(rng, events);
     check("...and drawn on an even one", p.draws?.length === 1);
     let n = 2;
@@ -32776,10 +32803,10 @@ console.log("\nclass 0x41 type 48, the lamp:");
         a0 === 0.02 && e.att2 !== a0 && Math.abs(e.att2 - 0.02) <= 0.01,
         `${a0} -> ${e.att2}`);
   check("...and it is shootable, 1.2 below its origin, radius 3",
-        lamp.shotRegistered && Math.abs(lamp.shotY - 11.5) < 1e-9
+        PropInShotTestList(lamp) && Math.abs(lamp.shotY - 11.5) < 1e-9
         && lamp.hitRadius === 3);
   lamp.flags |= 0x8 | 0x2;          // hit by player 0
-  lamp.shotRegistered = false;      // the pool clears it at the top of a frame
+  ClearPropShotTestList();          // the pool clears it at the top of a frame
   const score = G.g_player_score[0] ?? 0;
   PropUpdateType48FlickerLight(lamp, rng, events);
   check("a shot breaks it: sound, score, thirty pieces",
@@ -32789,7 +32816,7 @@ console.log("\nclass 0x41 type 48, the lamp:");
         `sounds ${sounds} pieces ${lamp.flicker!.debris.length} `
         + `score ${score} -> ${G.g_player_score[0]}`);
   check("...and the light stays on, fading",
-        e.enabled && Math.abs(e.att2 - 0.02) < 1e-9 && !lamp.shotRegistered);
+        e.enabled && Math.abs(e.att2 - 0.02) < 1e-9 && !PropInShotTestList(lamp));
   const y0 = lamp.flicker!.debris[0].y;
   for (let i = 0; i < 30; i++) PropUpdateType48FlickerLight(lamp, rng, events);
   check("...the pieces fly up and fall", lamp.flicker!.debris[0].y !== y0);
@@ -37961,6 +37988,301 @@ console.log("\nShotTestMesh: the boards stop the shot:");
         && !!turned.mesh && Math.abs(turned.mesh.normal.x - nW.x) < 1e-4
         && Math.abs(turned.mesh.normal.z - nW.z) < 1e-4,
         `${JSON.stringify(turned)} plane ${onPlane}`);
+  T.coli = null;
+  SetGameTables(CHARS);
+  ResetGameGlobals();
+}
+
+// -- The class-0x44 meshes: the story-mode switch and the window --------------
+//
+// `PlaceStoryModeSwitch` (`FUN_00473A70`) ORs `0x50` into `obj+0x34` when its
+// descriptor's `+0x08` names a collision blob -- all nine shipped switches do
+// -- and `StoryModeSwitchUpdate` (`FUN_00474F30`) draws, stores the matrix
+// at `obj+0x150` and calls `RegisterForShotTest` at `0x004753D7`. So the
+// switch is shot through `ShotTestMesh` (`FUN_00404A00`), in the list every
+// actor is in, and sorted with every sphere on the depth where the shot
+// crosses its mesh. The port kept the prop pool out of that list and gave the
+// switch no mesh and no matrix, so no shipped switch could be shot, and five
+// of the game's route branches are answered by one. Stage 1's window (class
+// 0x44 selector 0) is the same arm through `ScriptFlagEffectUpdate`'s capture.
+console.log("\nclass 0x44's meshes: the story-mode switch and the window are "
+            + "shot through their collision:");
+{
+  const rng = new Rng(0x17);
+  const sounds: number[] = [];
+  /**
+   * One quad in the plane `z = 0` of its own space, facing `+z`, wound so the
+   * winding test takes it: `x0..x1` by `y0..y1`.
+   */
+  const faceZ = (x0: number, x1: number, y0: number, y1: number,
+                 surface: number) =>
+    coliQuad([0, 0, 1, 0], 2,
+             [x0, y0, 0, x1, y0, 0, x1, y1, 0, x0, y1, 0], surface);
+  /** A static wall in the plane `x = X`, facing `+x`. */
+  const faceX = (X: number, surface: number) =>
+    coliQuad([1, 0, 0, -X], 0,
+             [X, -10, -70, X, 20, -70, X, 20, -40, X, -10, -40], surface);
+  // The switch: stage 2's scaled kind of descriptor, turned a quarter (L48)
+  // so the matrix's layout and order are both on test, and scaled 2 along its
+  // own x and 0.5 along its own z so that the inverse the trace needs is not
+  // the transpose, and the object-space distance is not the world one.
+  const P = vec3(100, 0, -50);
+  const SW: BreakablePlacement = {
+    at: 0x4100, container: "story_switch", coli: "sw", hinge_curve: 0,
+    swing_sign: 1, scale: [2, 1, 0.5], branch_flag: 114, remove_flag: 62,
+    keys: [-1, -1, -1, -1], slot: 0x17d7, lifetime_evt_steps: 1,
+    pos: [P.x, P.y, P.z], yaw: 0x4000,
+  };
+  const scene = (mode = GameMode.Original): Events => {
+    const ev = propScene(rng, mode);
+    ev.on("sound.play", (d) => sounds.push(d.id));
+    // Scene 1 block 3 is one of the five pairs the switch opens a route in,
+    // and flag 114 is the one it waits on.
+    G.g_scene_index = 1;
+    G.g_evt_block_index = 3;
+    G.g_script_flags[114] = 1;
+    T.coli = { files: ["t"], blobs: {
+      sw: faceZ(1, 5, 0, 6, 57), wall: faceX(50, 52) } } as never;
+    return ev;
+  };
+  // An eye 60 units out along +x from the switch, looking down -x. In view
+  // space `-z` is in front: `z = x - eye.x`.
+  const EYE = vec3(160, 3, -56);
+  const host: GameHost = {
+    ...NULL_HOST,
+    pickShot: () => null,
+    viewSpaceOfPoint: (p, out) => {
+      out.x = p.z - EYE.z; out.y = p.y - EYE.y; out.z = p.x - EYE.x;
+      return true;
+    },
+  };
+  // The quad, in world space: local (x, y, 0) scaled to (2x, y, 0) and
+  // turned so local +x is world -z -- the plane x = 100, z from -52 to -60.
+  const at = (z: number) => ({ origin: vec3(EYE.x, EYE.y, z),
+                               dir: vec3(-1, 0, 0) });
+
+  let events = scene();
+  let sw = PlaceStoryModeSwitch(SW);
+  G.g_breakable_props.push(sw);
+  check("a switch whose descriptor names a mesh is a mesh object: `0x51`, "
+        + "bit 31 clear, no sphere, its blob at +0x14C",
+        sw.flags === 0x51 && sw.hitRadius === 0 && sw.coliBlob === "sw",
+        `0x${sw.flags.toString(16)} ${sw.hitRadius} ${sw.coliBlob}`);
+  BreakablePropPoolUpdate(rng, events);
+  const entry = G.g_shot_test_list.find((e) => e.prop === sw.id);
+  check("...its own frame files it in the one list, as a mesh, at any depth",
+        !!entry && entry.flags === 0x51 && PropInShotTestList(sw),
+        JSON.stringify(G.g_shot_test_list));
+  const m = sw.draws?.[0]?.m ?? [];
+  const probe = { x: 0, y: 0, z: 0 };
+  MatrixTransformPoint(m, { x: 1, y: 2, z: 4 }, probe);
+  check("...and its draw is T . RotY(yaw) . Rz . Ry . Rx . Scale: local "
+        + "(1, 2, 4) lands at (102, 2, -52)",
+        sw.draws?.length === 1 && sw.draws[0].slot === 0x17d7
+        && Math.abs(probe.x - 102) < 1e-4 && Math.abs(probe.y - 2) < 1e-4
+        && Math.abs(probe.z + 52) < 1e-4,
+        JSON.stringify(probe));
+  check("...which is the matrix it keeps at +0x150",
+        !!sw.coliMatrix && Math.abs(sw.coliMatrix[3] - P.x) < 1e-6
+        && Math.abs(sw.coliMatrix[11] - P.z) < 1e-6
+        && Math.abs(sw.coliMatrix[2] - 0.5) < 1e-6,
+        JSON.stringify(sw.coliMatrix));
+
+  const hit = ProcessPlayerShotsTestList(at(-56), host);
+  check("a shot 6 units along the switch's turned, scaled x hits the quad: "
+        + "the switch, whole, surface 57, on the plane x = 100",
+        hit?.prop === sw.id && hit.whole && hit.mesh?.surface === 57
+        && Math.abs(hit.point.x - 100) < 1e-3
+        && Math.abs(hit.point.z + 56) < 1e-3,
+        JSON.stringify(hit));
+  check("...keyed on the crossing's depth, __ftol(-z * 10) = 600",
+        hit?.key === 600, String(hit?.key));
+  check("...and its normal turned by +0x64/+0x68/+0x6C alone, which are 0 "
+        + "until it swings: the quad's own +z, NOT the draw's RotY(+0x1D0)",
+        !!hit?.mesh && Math.abs(hit.mesh.normal.z - 1) < 1e-6
+        && Math.abs(hit.mesh.normal.x) < 1e-6,
+        JSON.stringify(hit?.mesh?.normal));
+  check("a shot at local x 1.5 still hits -- a transpose for the inverse "
+        + "would have read it as 6 and missed",
+        ProcessPlayerShotsTestList(at(-53), host)?.prop === sw.id);
+  check("...and one at the switch's own origin, where a sphere would be, "
+        + "misses: no quad there",
+        ProcessPlayerShotsTestList(at(P.z), host) === null);
+  check("...as does one past the quad's far edge",
+        ProcessPlayerShotsTestList(at(-61), host) === null);
+
+  // One sort: a sphere prop behind the switch loses to it, one in front
+  // wins. Both register the prop pool's way, through the camera's depth.
+  const sphere = (x: number) => {
+    const q = makeBreakableProp(G.g_breakable_next_id++, 0, 0);
+    q.flags = 0x80000001;
+    q.hitRadius = 3;
+    PropRegisterForShotTest(q, x, EYE.y, -56);
+    G.g_breakable_props.push(q);
+    return q;
+  };
+  const behind = sphere(80);
+  check("a sphere prop behind the switch is in the list, and the switch's "
+        + "crossing is nearer: the switch takes the shot",
+        PropInShotTestList(behind)
+        && ProcessPlayerShotsTestList(at(-56), host)?.prop === sw.id);
+  const front = sphere(130);
+  check("...and one in front of it takes the shot instead",
+        ProcessPlayerShotsTestList(at(-56), host)?.prop === front.id);
+  G.g_breakable_props = G.g_breakable_props.filter(
+    (q) => q !== behind && q !== front);
+  G.g_shot_test_list = G.g_shot_test_list.filter(
+    (e) => e.prop !== behind.id && e.prop !== front.id);
+
+  // The whole pull: `MarkActorShot` (`FUN_00404DB0`) marks the switch whole
+  // and throws the impact at the quad; the switch's next frame throws it and
+  // opens the route. `g_script_branch_var` is written by nothing else here
+  // (L47).
+  sounds.length = 0;
+  FireShotRequest({ player: 0, frame: 0, ray: at(-56), onScreen: 1 }, host,
+                  rng, events);
+  const rec = G.g_shot_hit_records[0];
+  check("the pull marks the switch (bit 3, player 0) and throws surface 57's "
+        + "impact at the quad",
+        (sw.flags & 0xa) === 0xa && rec?.surface === 57
+        && Math.abs(rec.x - 100) < 1e-3,
+        `0x${sw.flags.toString(16)} ${JSON.stringify(rec)}`);
+  G.g_script_branch_var = 0;
+  BreakablePropPoolUpdate(rng, events);
+  check("...its next frame throws it, with the throw's sound, and writes no "
+        + "route yet",
+        sw.routinePhase === StoryModeSwitchPhase.Thrown
+        && G.g_script_branch_var === 0 && sounds.includes(0x2116a9),
+        `phase ${sw.routinePhase} var ${G.g_script_branch_var} ${sounds}`);
+  BreakablePropPoolUpdate(rng, events);
+  check("...and the one after opens scene 1 block 3's route: 2",
+        G.g_script_branch_var === 2 && sw.storyItem === -1,
+        `var ${G.g_script_branch_var} +0x2A0 ${sw.storyItem}`);
+
+  // The two moving-object passes read the same registration, a frame later:
+  // `ColiPublishDynamicList` hands the list to them. The switch's crossing is
+  // 60 from the eye and the static wall's 110, so the switch is nearer --
+  // but in the switch's own space, scaled 0.5 along the segment, its
+  // crossing is 120 away, and ranking by that put the wall first.
+  G.g_coli_full_set = ["wall"];
+  G.g_coli_dynamic_list = [];
+  const far = { x: EYE.x - 1000, y: EYE.y, z: -56 };
+  ColiTraceSegmentAllSets(far.x, far.y, far.z, EYE.x, EYE.y, -56);
+  check("before its registration is published the trace meets the wall",
+        G.g_coli_hit_surface === 52 && Math.abs(G.g_coli_hit_x - 50) < 1e-3,
+        `${G.g_coli_hit_surface} ${G.g_coli_hit_x}`);
+  ColiPublishDynamicList();
+  ColiTraceSegmentAllSets(far.x, far.y, far.z, EYE.x, EYE.y, -56);
+  check("...and once published it meets the switch, nearest in the world",
+        G.g_coli_hit_surface === 57 && Math.abs(G.g_coli_hit_x - 100) < 1e-3,
+        `${G.g_coli_hit_surface} ${G.g_coli_hit_x}`);
+
+  // One switch thrown throws every one standing: `g_story_switch_thrown`
+  // (`0x009A26EC`). Stage 2's gateway: two doors at one point, swing signs
+  // -1 and 1, and one shot.
+  events = scene();
+  sounds.length = 0;
+  const left = PlaceStoryModeSwitch({ ...SW, at: 0x4101, swing_sign: -1 });
+  const right = PlaceStoryModeSwitch({ ...SW, at: 0x4102, swing_sign: 1 });
+  G.g_breakable_props.push(left, right);
+  BreakablePropTakeShot(right, 0);
+  BreakablePropPoolUpdate(rng, events);
+  check("a shot on the second door throws it; the first, walked before it, "
+        + "stands until the next frame",
+        left.routinePhase === StoryModeSwitchPhase.Standing
+        && right.routinePhase === StoryModeSwitchPhase.Thrown,
+        `${left.routinePhase} ${right.routinePhase}`);
+  BreakablePropPoolUpdate(rng, events);
+  check("...where the latch throws it too, and the throw sounded once",
+        left.routinePhase === StoryModeSwitchPhase.Thrown
+        && right.routinePhase === StoryModeSwitchPhase.Thrown
+        && sounds.filter((s) => s === 0x2116a9).length === 1
+        && G.g_story_switch_thrown === 1,
+        `${left.routinePhase} ${right.routinePhase} ${sounds}`);
+  const again = PlaceStoryModeSwitch({ ...SW, at: 0x4103 });
+  check("...and the next placement puts the latch down again",
+        G.g_story_switch_thrown === 0 && !!again);
+
+  // Nothing in the routine clears `obj+0x34`'s hit bits: a keyed switch shot
+  // by a player carrying none of its items throws on the frame one arrives.
+  events = scene();
+  const keyed = PlaceStoryModeSwitch({ ...SW, at: 0x4104, keys: [5, 6, 6, 6] });
+  G.g_breakable_props.push(keyed);
+  BreakablePropTakeShot(keyed, 0);
+  BreakablePropPoolUpdate(rng, events);
+  check("a keyed switch shot without its item stands, its hit bit still up",
+        keyed.routinePhase === StoryModeSwitchPhase.Standing
+        && (keyed.flags & 0x8) !== 0,
+        `${keyed.routinePhase} 0x${keyed.flags.toString(16)}`);
+  G.g_original_item_slots[0] = [5, -1];
+  BreakablePropPoolUpdate(rng, events);
+  check("...and throws, with no second shot, once the player holds item 5",
+        keyed.routinePhase === StoryModeSwitchPhase.Thrown);
+
+  // The swing: sixty frames of the curve on `obj+0x64/0x68/0x6C`, mirrored
+  // for a sign below 1 -- and the draw and the mesh swing with it.
+  events = propScene(rng);
+  SetGameTables(CHARS, { ...BREAKABLES, hinge_curves_xyz: {
+    "0": Array.from({ length: 60 }, (_, i) => [3 * i, 100 * i, -i]) } });
+  G.g_scene_index = 3;
+  const swing = PlaceStoryModeSwitch({ ...SW, at: 0x4105, swing_sign: -1 });
+  G.g_breakable_props.push(swing);
+  BreakablePropTakeShot(swing, 0);
+  for (let i = 0; i < 6; i++) BreakablePropPoolUpdate(rng, events);
+  const w = swing.words;
+  check("a thrown switch with sign -1 swings on the curve mirrored: "
+        + "+0x64 = -rx, +0x68 = -ry, +0x6C = rz, frame 4 after five frames",
+        swing.cueCursorB === 5 && w.o64 === -12 && w.o68 === -400
+        && w.o6C === -4,
+        `${swing.cueCursorB} ${w.o64} ${w.o68} ${w.o6C}`);
+  for (let i = 0; i < 70; i++) BreakablePropPoolUpdate(rng, events);
+  check("...and stops at sixty", swing.cueCursorB === 60
+        && w.o68 === -5900, `${swing.cueCursorB} ${w.o68}`);
+
+  // The window: `ScriptFlagEffectUpdate`'s capture is `obj+0x150`, and the
+  // three angles come from the rotation row at the RAW cursor.
+  const PL = BREAKABLES.placements.find(
+    (q) => q.container === "script_flag_effect")!;
+  events = propScene(rng);
+  T.coli = { files: ["t"], blobs: { win: faceZ(-5, 5, 0, 10, 61) } } as never;
+  const [win] = PropBuildScriptFlagEffect(PL.at, PL.effect!, PL.capture_bone!,
+                                          PL.motion!, "win");
+  G.g_breakable_props.push(win);
+  check("the window is a mesh object with its descriptor's blob",
+        win.flags === 0x51 && win.coliBlob === "win");
+  BreakablePropPoolUpdate(rng, events);
+  check("...its frame files it, and +0x150 is bone 2's pose at key 0: "
+        + "(-13, 0, -362), unturned",
+        PropInShotTestList(win) && !!win.coliMatrix
+        && win.coliMatrix[3] === -13 && win.coliMatrix[11] === -362
+        && win.coliMatrix[0] === 1,
+        JSON.stringify(win.coliMatrix));
+  const WEYE = vec3(-13, 5, -300);
+  const whost: GameHost = {
+    ...NULL_HOST,
+    viewSpaceOfPoint: (p, out) => {
+      out.x = p.x - WEYE.x; out.y = p.y - WEYE.y; out.z = p.z - WEYE.z;
+      return true;
+    },
+  };
+  const back = makeBreakableProp(G.g_breakable_next_id++, 0, 0);
+  back.flags = 0x80000001;
+  back.hitRadius = 4;
+  PropRegisterForShotTest(back, -13, 5, -400);
+  G.g_breakable_props.push(back);
+  const wh = ProcessPlayerShotsTestList(
+    { origin: WEYE, dir: vec3(0, 0, -1) }, whost);
+  check("a shot at the window stops on it, not on the prop behind",
+        wh?.prop === win.id && wh.mesh?.surface === 61
+        && Math.abs(wh.point.z + 362) < 1e-3,
+        JSON.stringify(wh));
+  G.g_script_flags[0x12] = 1;
+  BreakablePropPoolUpdate(rng, events);
+  check("...and on cursor 1 its angles are the RAW key 1's (+0x68 = 0x4000) "
+        + "while the pose blends keys 0 and 1 (yaw 0x2000)",
+        win.effectFrames === 1 && win.words.o68 === 0x4000
+        && win.yaw === 0x2000,
+        `${win.effectFrames} ${win.words.o68} ${win.yaw}`);
   T.coli = null;
   SetGameTables(CHARS);
   ResetGameGlobals();

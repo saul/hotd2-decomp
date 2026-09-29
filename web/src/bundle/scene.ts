@@ -298,14 +298,34 @@ export interface BreakablePlacement {
   branch_flag?: number;
   remove_flag?: number;
   /**
-   * `story_switch` only — the descriptor's `+0x08`, which decides **how it is
-   * shot**. `-1` sends it to `ShotTestSphere` with a radius of 8 and a centre
-   * the routine never writes, so it answers any shot on screen; anything else
-   * sets `obj+0x34` bit 4 and sends it to `ShotTestMesh`, which the prop pool
-   * does not reach. Every shipped switch names one. See
-   * `game/class41/shot_test.ts`.
+   * `story_switch` and `script_flag_effect` — the descriptor's `+0x08`, which
+   * the constructor copies to `obj+0x14C`: the `coli.blobs` key of the mesh
+   * `ShotTestMesh` (`FUN_00404A00`) and the two moving-object collision
+   * passes trace, `null` for the descriptor's `-1`, and absent when the
+   * pointer lands on no blob (the exporter reports it).
+   *
+   * For the switch it also decides **how it is shot**: `null` sends it to
+   * `ShotTestSphere` with a radius of 8 and a centre the routine never
+   * writes, so it answers any shot on screen; a key sets `obj+0x34 |= 0x50`.
+   * Every shipped switch and both windows name one. See
+   * `game/class41/branch.ts`.
    */
-  volume?: number;
+  coli?: string | null;
+  /**
+   * `story_switch` only — `tail+0x00`, the `g_pHingeCurvesXYZ` curve its
+   * throw swings on for sixty frames (`obj+0x194`), and `tail+0x0C`, the
+   * swing's sign (`obj+0x1DC`): below 1 the curve's x and y are mirrored.
+   * The shipped pairs of doors carry -1 and 1.
+   */
+  hinge_curve?: number;
+  swing_sign?: number;
+  /**
+   * `story_switch` only — `tail+0x14..0x1C`, the `MatrixScale` its draw
+   * makes after its turns (`obj+0x1A8..0x1B0`). It is in the matrix the
+   * mesh is traced through, so three shipped switches are shot through a
+   * matrix that is not rigid.
+   */
+  scale?: [number, number, number];
   /**
    * `story_switch` only — the four Original Mode item ids that throw the
    * switch without a shot. `-1` in the first means it has no key and any shot

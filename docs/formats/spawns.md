@@ -1336,7 +1336,7 @@ Which of the three tests an object gets is `obj+0x34` bit 4:
 | bit 4 | routine | what it measures |
 |---|---|---|
 | clear | `ShotTestSphere` (`FUN_00404630`) | `obj+0x70..0x78`, radius `obj+0x124` |
-| set | `ShotTestMesh` (`FUN_00404A00`) | the volume at `obj+0x14C` / `obj+0x150` |
+| set | `ShotTestMesh` (`FUN_00404A00`) | the collision blob at `obj+0x14C`, through the matrix at `obj+0x150` |
 
 ### Where the sphere is
 
@@ -1377,8 +1377,15 @@ origin at a radius of 8.
 writes `obj+0x70..0x78` **nowhere**. `PlaceStoryModeSwitch` decides which
 consumer sees it, from the descriptor's `+0x08`:
 
-* not `-1` — `obj+0x34 |= 0x51`, bit 4 **set**, so it goes to `ShotTestMesh`
-  against the volume at `obj+0x14C`. All **nine** shipped switches are this.
+* not `-1` — `obj+0x34 |= 0x50` (with the `1` already there, `0x51`), bit 4
+  **set**, so it goes to `ShotTestMesh` against the collision blob at
+  `obj+0x14C`, traced through the matrix the draw stores at `obj+0x150` --
+  `T(obj+0x19C) . RotY(+0x1D0) . Rz(+0x6C) . Ry(+0x68) . Rx(+0x64) .
+  Scale(+0x1A8..0x1B0)`, scaled for three of them. All **nine** shipped
+  switches are this, and bit 31 is clear, so the two moving-object collision
+  passes trace the same blob. The exporter resolves the pointer to its
+  `coli.blobs` key (`coli`), and `tools/verify_prop_meshes.py` holds every
+  one to the disc. The port shoots it: `game/class44/story_switch.ts`.
 * `-1` — bit 4 clear, radius 8, and the centre is still `(0, 0, 0)` because
   nothing ever wrote it. `RayTestSphere` is a perpendicular-distance test with
   no divide, so a centre at the origin is distance zero from every ray: the

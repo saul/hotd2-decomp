@@ -2564,6 +2564,15 @@ export const G = {
    */
   g_original_item_pickup_blocked: 0,
   /**
+   * `g_story_switch_thrown` — `0x009A26EC`, one byte, and only the story-mode
+   * switch touches it. `PlaceStoryModeSwitch` (`FUN_00473A70`) writes 0 for
+   * every switch it places; `StoryModeSwitchUpdate` (`FUN_00474F30`) throws a
+   * standing switch when it is up, and the first switch thrown raises it --
+   * so one throw throws every switch still standing. See
+   * `class44/story_switch.ts`.
+   */
+  g_story_switch_thrown: 0,
+  /**
    * `g_original_item_banner_count` — 0x007DCD04, how many
    * `OriginalItemBannerUpdate` banners are up. In scene 5 a banner that finds
    * more than one dies.
@@ -3063,6 +3072,9 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   // `g_original_items_taken` is not here on purpose: it is the options
   // block's, and a game's reset leaves it alone.
   G.g_original_item_pickup_blocked = 0;
+  // In the engine only a placement writes it back to 0, and nothing reads it
+  // before a placement has; cleared here so no reset can carry one over.
+  G.g_story_switch_thrown = 0;
   G.g_original_item_banner_count = 0;
   G.g_original_item_banners = [];
   // ...and the life markers, which are tasks on the same list.

@@ -67,7 +67,6 @@ import { g_class_handlers } from "../game/registry";
 import type { Scope } from "../core/scope";
 import type { Context, System } from "../core/system";
 import type { ShotPick, ShotRay } from "../game/host";
-import type { BreakableLayer } from "./breakables";
 import type { SlotModelLayer } from "./slotmodels";
 import type { CreatureSphereSource } from "./effects";
 import { boss3Drawn, poseBoss3 } from "./characters/boss3";
@@ -721,9 +720,10 @@ export class CharacterLayer implements System {
    *
    * The sphere is `PTR_DAT_004D032C`'s centre and radius, carried on the bone
    * and therefore moving with the animation exactly as `FUN_004107E0` makes it.
-   * Nearest along the ray wins, matching `FUN_00404DB0`'s sort — and the props
-   * are in the same sort, because the engine walks **one** candidate list: a
-   * barrel in front of a zombie stops the bullet.
+   * Nearest along the ray wins, matching `FUN_00404DB0`'s sort. The props are
+   * not here: they register the engine's way (`game/class41/shot_test.ts`)
+   * and `game/combat/shot_test.ts` tests them in the one list, so a barrel in
+   * front of a zombie stops the bullet through `MergeShotPicks`.
    *
    * What the hit *means* is not decided here and must not be. That is
    * `game/combat/shot.ts`, which is what the port calls this from.
@@ -802,15 +802,6 @@ export class CharacterLayer implements System {
                    point: { x: this._c.x, y: this._c.y, z: this._c.z } };
         }
       }
-    }
-    // The props ride the same list. `BreakableLayer.pick` measures distance
-    // rather than the along-ray parameter, which for a normalised direction is
-    // the same number.
-    const prop = this.breakables?.pickRay(this._ray) ?? null;
-    if (prop && prop.t < bestT) {
-      bestT = prop.t;
-      best = { kind: "prop", propId: prop.id,
-               point: { x: prop.point.x, y: prop.point.y, z: prop.point.z } };
     }
     // ...and so do the asset-slot actors, through the **sphere** the engine
     // tests them with. `ShotTestSphere` (`FUN_00404630`) descends into a bone
@@ -891,12 +882,10 @@ export class CharacterLayer implements System {
     return null;
   }
 
-  /** The breakable props, so a barrel in front of a zombie takes the shot. */
-  breakables: BreakableLayer | null = null;
   /**
    * The asset-slot actors, so a mouse in front of a wall takes the shot.
    *
-   * Set from `app/`, the same way `breakables` is, because this layer owns the
+   * Set from `app/`, because this layer owns the
    * ray and that one owns the spheres.
    */
   slotModels: SlotModelLayer | null = null;

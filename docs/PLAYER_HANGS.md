@@ -1251,7 +1251,9 @@ is **L26** exactly: a divergence described in prose, never pinned by an
 assertion, and therefore never looked at. The whole of the head that sits above
 the mode gate now lives in `StoryModeSwitchPoolUpdate`, where the two despawn
 tests already were, and the scene-2 arm is written as the `else` of the scene-1
-one because in the engine it is.
+one because in the engine it is. (Since then the whole routine is transcribed
+as one function, `StoryModeSwitchUpdate` in `class44/story_switch.ts`, and the
+split is gone.)
 
 **The checks, and there are two halves.**
 

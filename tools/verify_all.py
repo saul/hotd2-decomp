@@ -238,6 +238,16 @@ CHECKS: list[Check] = [
           "game draws no crosshair until the mouse moves again; and a phone, "
           "with no fine pointer, never shows one",
           NEEDS_BUNDLE, LANE_BROWSER),
+    Check("story_switch", "web",
+          ["node", "tools/story_switch_page.mjs", "--headless"],
+          "that in the real page a story-mode switch opens its branch when "
+          "it is shot through its mesh: stage 2 in Original Mode, a pull at "
+          "the gateway door's own blob throws it, and the walker leaves "
+          "block 1 for block 29, where the same address with no pull goes to "
+          "block 2 -- the route five of the game's branch records hang on, "
+          "which no shot could reach while the prop pool was outside the "
+          "shot-test list",
+          NEEDS_BUNDLE, LANE_BROWSER),
     Check("animals", "web", ["npm", "run", "--silent", "animals"],
           "that the frog, the owl and the fish are placed from a real bundle "
           "and leave their opening state -- none of the three is a skinned "
@@ -362,6 +372,16 @@ CHECKS: list[Check] = [
           "its bundle -- the check for stage 1's door, the wood the bin "
           "captor bursts out of, which the port built nothing for until the "
           "class had a module",
+          NEEDS_GAME),
+    Check("verify_prop_meshes", ".",
+          ["python3", "tools/verify_prop_meshes.py", "--game-dir", "{game_dir}"],
+          "that the story-mode switch and stage 1's window are still, in the "
+          "EXE, shot through the blob at `obj+0x14C` and the matrix their "
+          "draw stores at `obj+0x150`, that the exporter reads their tails "
+          "where the builders do, and that every one on the disc is placed "
+          "with its blob resolved and in its stage's `coli.blobs` -- the "
+          "check for the five route branches a switch answers, none of which "
+          "the port could shoot while the bundle carried a raw pointer",
           NEEDS_GAME),
     Check("verify_annotations", ".",
           ["python3", "tools/verify_annotations.py", "--game-dir", "{game_dir}"],

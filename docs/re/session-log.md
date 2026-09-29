@@ -26114,3 +26114,84 @@ op-0x1F civilians twice. In the page (stage 1 `?block=6&step=1`, 0x3C38): she
 takes the box at f675, gives it at f710, lives 3 -> 4, LIFE UP on screen, hand
 empty from f711; on the old tree the box floats beside the hand and is still
 held at f795 with lives 3.
+
+## 2026-09-29 -- the story-mode switch and the window are shot through their mesh
+
+**The task.** Every shipped story-mode switch (class 0x44 selector 17, nine in
+the arcade bundles) names a collision blob in its descriptor's `+0x08`, so the
+exe shoots it through `ShotTestMesh` (`FUN_00404A00`), and five of the game's
+route branches are answered by one. The port kept the prop pool outside
+`g_shot_test_list`, carried the blob as a raw relocated pointer and had no
+`obj+0x150`: no switch could be shot. Stage 1's window (selector 0) was the
+same arm with the same gap.
+
+**The reading.** `PlaceStoryModeSwitch` (`0x00473A70`..`0x00473B88`): the
+`-1` arm ORs bit 31 and writes the 8.0 radius, the other ORs `0x50` and not bit
+31 -- so the switch is in the two moving-object collision passes too -- and the
+tail also carries the hinge curve (`+0x00 -> +0x194`), the swing's sign
+(`+0x0C -> +0x1DC`) and a `MatrixScale` (`+0x14..0x1C -> +0x1A8..0x1B0`), not
+1.0 on three shipped switches. `StoryModeSwitchUpdate` (`0x00474F30`) read in
+full from the listing: the throw arm the pseudocode stops at `PlaySoundId`
+(L72) goes on to `PoseHookNone(3, 0x14)` and raises `0x009A26EC`, which only
+this routine and the placement touch (four references by operand and by byte
+pattern) -- one thrown switch throws every one standing, so the paired doors
+open together; nothing in the routine clears `obj+0x34`'s hit bits; the route
+tests `g_script_flags[obj+0x2A0] == 1` before its scene/block table; scene 4's
+count reads the flag again after the route has set `+0x2A0 = -1`, i.e. the
+byte at `0x009C71FF`, which no instruction names (`[likely]` zero); and the
+draw `T . RotY(+0x1D0) . Rz(+0x6C) . Ry(+0x68) . Rx(+0x64) . Scale`, the
+`MatrixStore(obj+0x150)` and `RegisterForShotTest` at `0x004753D7` are all
+past the pop the decompiler stops at (L35). `ScriptFlagEffectUpdate`
+(`0x00473B90`): `EffectDrawNode` (`0x0040DE50`) stores the capture node's
+matrix right after posing it, the routine copies it to `obj+0x150`, takes
+`+0x64..0x6C` from `EffectFrameRotations` at the **raw** cursor and registers
+at `0x00473CDF`. `ColiTraceSegmentInObjectSpace` and the sphere pass call
+`MatrixInvert` (`0x004A8D20`, the general inverse); `ColiPushObjectHitCandidate`
+(`0x00405620`) ranks an object's hit on the world distance. Named
+`g_story_switch_thrown`; four rows rewritten.
+
+**The change.** The exporter resolves `+0x08` to its `coli.blobs` key in both
+halves and carries the switch's curve, sign and scale (`verify_prop_meshes.py`
+holds all 18 switch and 4 window placements to the disc). The switch is
+transcribed whole in `class44/story_switch.ts`; the window registers with its
+capture. The whole prop pool files itself in the one list, and
+`combat/shot_test.ts` tests its sphere or mesh in the same sort as the actors;
+`render/` no longer picks props. `coli.ts` inverts in general, ranks on the
+world distance, and takes the prop pool into the moving-object passes out of
+the published list.
+
+**Wrong turns.** Three of my own first assertions were wrong about the exe and
+the fixes were to the tests: `ShotTestMesh` turns a hit's normal by
+`+0x64..0x6C` alone, which are 0 on an unthrown switch, so its normal is the
+quad's own and not turned by the draw's `RotY(+0x1D0)`; the route lands the
+frame **after** the throw, because the throw frame's arm is `obj+0x192 == 0`'s;
+and the second door throws on the frame after the first (the pool is walked in
+order). A test fixture keyed `[5, -1, -1, -1]` threw on any shot, because a
+player holding nothing "holds" item -1 -- no shipped switch has that shape.
+The old switch tests passed only because the old port skipped the route's
+flag test; they now raise the flag. `propScene`'s identity camera put every
+fixture with a positive z behind the eye once the prop pool took the engine's
+depth gate, so the fixture's eye stands at z = +1000 now. My first page check
+played stage 2 from block 0 and never reached block 1: block 0's arm 1 is the
+class-0x21 rescue's (L45), and the deep link into block 1 cannot get there
+either; stage 5 block 4 has no such fork. A `cite` in the parenthesised form
+for the two routines in the file that ports them would have dropped both from
+coverage (L42) and was caught before commit.
+
+**Proof.** `test:port`, "class 0x44's meshes", and seven mutants each
+caught (props never filed: 43 failures; the transpose inverse: 9; object-space
+ranking, masked hit bits, no latch, the half-rate key, the route without its
+flag: 1-2 each). `tools/story_switch_page.mjs` in headless Chrome, stage 5
+Original block 4: both doors file as `0x51` mesh objects, a pull at a door's
+blob throws it and flag 16 writes `g_script_branch_var = 2` with both doors'
+`+0x2A0` spent; the unshot run writes nothing. With the prop filing reverted it
+fails: 29 pulls, nothing thrown, no route.
+
+**Declared and left.** The window's angles past key 100 read beyond motion
+471's block in the exe (`[open]`; possibly the next motion's bytes, which
+would need the motion loader read); the crowd push passes over class 0x41 type
+67's mounted parts, the one prop family that registers with neither refusing
+bit. Found and not chased: from `?stage=5&original=1&block=4&step=1`,
+`g_enemies_alive` stays at 1 at `4/2/12` after every actor in the pool is dead,
+debug clear or not, so the page check stops at the route rather than playing
+to block 6.

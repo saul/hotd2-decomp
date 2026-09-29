@@ -59,7 +59,7 @@ import type { ScriptJson } from "../src/bundle";
 import { SetGameTables } from "../src/game/tables";
 import { ScriptFlagsThisBundleCanRaise } from "../src/script/waits/flag";
 import { PROP75_SCRIPT_FLAG } from "../src/game/class41";
-import { STORY_SWITCH_SCRIPT_FLAG } from "../src/game/class41/branch";
+import { STORY_SWITCH_SCRIPT_FLAG } from "../src/game/class44/story_switch";
 import { DRAG_RELEASE_FLAG } from "../src/game/class30/target";
 import { ZombieState } from "../src/game/class30/states";
 import "../src/game/classes";

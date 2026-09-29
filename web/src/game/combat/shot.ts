@@ -70,13 +70,14 @@ import { PropFamily } from "../class41/prop_state";
  * The prop families whose routine never calls `SpawnPropHitSpark`
  * (`FUN_00465860`) — read off that function's nine call sites, none of which
  * is in `PropUpdateType38`, `PropUpdateType39`, `PropUpdateType40`,
- * `PropUpdateType44` or `FallingContainerUpdate` -- the container's knock
- * calls `SpawnPropHitEffectScaled` at one and a half size instead, and its
- * break calls neither.
+ * `PropUpdateType44`, `FallingContainerUpdate` or `ScriptFlagEffectUpdate`
+ * -- the container's knock calls `SpawnPropHitEffectScaled` at one and a half
+ * size instead, and its break calls neither; the window has no hit arm at
+ * all, and a shot on it throws only `MarkActorShot`'s world impact.
  */
 const NO_PROP_SPARK: ReadonlySet<PropFamily> = new Set([
   PropFamily.Type38, PropFamily.Type39, PropFamily.Type40, PropFamily.Type44,
-  PropFamily.Falling,
+  PropFamily.Falling, PropFamily.ScriptFlagEffect,
 ]);
 import { ColiTraceSegmentAllSets } from "../coli";
 import { PlayerShotEffectSpawn } from "../effects/shot_effects";
@@ -257,9 +258,10 @@ export function DropDueShotRequests(): void {
  *
  * The engine has one candidate list and one sort, `MarkActorShot`
  * (`FUN_00404DB0`)'s, keyed on each candidate's view-space depth. The port
- * has that list for the classes that register the engine's way
- * (`combat/shot_test.ts`, which sorts it exactly) and `render/`'s own pick for
- * the rest, which answers with the nearest thing by distance along the ray.
+ * has that list for the classes that register the engine's way and for the
+ * prop pool (`combat/shot_test.ts`, which sorts it exactly), and `render/`'s
+ * own pick for the rest, which answers with the nearest thing by distance
+ * along the ray.
  *
  * [diverges] Between the two, the nearer **along the ray** wins, which is the
  * order `render/` has always merged its own sources in. The engine would
@@ -276,6 +278,11 @@ export function MergeShotPicks(picked: ShotPick | null,
   if (registered.thrown !== undefined) {
     return { kind: "thrown", thrownId: registered.thrown,
              point: registered.point, t: registered.t };
+  }
+  if (registered.prop !== undefined) {
+    return { kind: "prop", propId: registered.prop, point: registered.point,
+             ...(registered.mesh ? { mesh: registered.mesh } : {}),
+             t: registered.t };
   }
   return { kind: "actor", at: registered.at, bone: registered.bone,
            whole: registered.whole, point: registered.point,
@@ -508,14 +515,22 @@ export function FireShotRequest(req: ShotRequest, host: GameHost, rng: Rng,
  * what cracks the prop, pays the ten points through `BreakablePropAwardHit`
  * and releases whatever it was hiding.
  */
-function ResolveShotOnProp(req: ShotRequest, pick: { propId: number;
-                                                     point: { x: number;
-                                                              y: number;
-                                                              z: number } },
+function ResolveShotOnProp(req: ShotRequest,
+                           pick: { propId: number; point: Vec3;
+                                   mesh?: { surface: number; normal: Vec3 } },
                            host: GameHost, events?: Events): void {
   const prop = G.g_breakable_props.find((p) => p.id === pick.propId);
   if (!prop) return;
   BreakablePropTakeShot(prop, req.player);
+  // `MarkActorShot` (`FUN_00404DB0`)'s last test, `+0x2C & 0x10`: a mesh
+  // object's candidate carries it (`ShotPushColiHitCandidate` ORs it in), so
+  // the shot throws `SpawnWorldImpact` (`FUN_00405260`) at the quad it
+  // crossed, the spark of that surface's kind -- as it does for the
+  // class-0x12 door and a boss's bone.
+  if (pick.mesh) {
+    SpawnWorldImpact(req.player, pick.point, pick.mesh.normal,
+                     pick.mesh.surface, host, events);
+  }
   // `SpawnPropHitSpark` (`FUN_00465860`): the crosshair unprojected to the
   // prop's own camera depth, with `z` then replaced by the prop's `+0x1A4`.
   // The prop routines call it themselves on the frame they read the hit bit;

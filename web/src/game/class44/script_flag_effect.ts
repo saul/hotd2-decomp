@@ -33,8 +33,13 @@
  *     PlaySoundId(0x1816A9);
  *     if (cues[++cursor] == -1) cursor = 0;
  * }
- * if (g_motion_slots[471].state == 2)                  // the motion is resident
- *     EffectDrawWithCapture(obj + 0x324, obj->+0x2A0, -1);
+ * if (g_motion_slots[471].state == 2) {                // the motion is resident
+ *     EffectDrawWithCapture(obj + 0x324, obj->+0x2A0, -1);  // -> obj+0x338
+ *     rot = EffectFrameRotations(obj + 0x324, obj->+0x32C);
+ *     obj+0x150 = obj+0x338;                            // REP MOVSD, 0x00473CBB
+ *     obj->+0x64 = rot[obj->+0x2A0 - 1].x;  +0x68 = .y;  +0x6C = .z;
+ *     RegisterForShotTest(obj);                         // 0x00473CDF
+ * }
  * ```
  *
  * Three script flags and a clip, and the sound is on the *play* cursor rather
@@ -45,14 +50,28 @@
  * unconditionally, so the port's answer to "is it resident" is always yes; a
  * loader the port does not have cannot be asked.
  *
- * `[port-only]` **The shot test is not registered.** `PropBuildScriptFlagEffect`
- * sets `obj+0x34 |= 0x51`, and bit `0x10` sends `RegisterForShotTest`
- * (`FUN_00405160`) to `ShotTestMesh` rather than to the sphere — the same path
- * the story-mode switch's volume takes, and one the port runs for actors in
- * `G.g_shot_test_list` and not for the prop pool (`class41/shot_test.ts`).
- * `hitRadius` carries the engine's 40.0, which `ShotTestMesh` never reads.
+ * ## It is shot through its mesh, and it is in the way
+ *
+ * `PropBuildScriptFlagEffect` sets `obj+0x34 |= 0x51` and copies the
+ * descriptor's `+0x08` to `obj+0x14C` -- `coli1.bin` 5248 and 5712 for the two
+ * halves. Bit `0x10` sends `ProcessPlayerShots` to `ShotTestMesh`
+ * (`FUN_00404A00`) rather than a sphere, so a shot at the window stops on the
+ * window and not on the zombie behind it; with `0x40` and no bit 31 the two
+ * moving-object collision passes in `coli.ts` trace the same mesh, so it is a
+ * wall to the crowd push as well. The matrix it is traced through is the
+ * **capture**: `EffectDrawNode` (`FUN_0040DE50`) stores the matrix of the node
+ * whose bone is `obj+0x2A0`, right after posing it, and the routine copies it
+ * to `obj+0x150` (`EffectCaptureMatrix`). `hitRadius` carries the engine's
+ * 40.0, which `ShotTestMesh` never reads.
  */
 import type { EffectDefJson } from "../../bundle";
+import { ColiStoreObjectMatrix } from "../coli";
+import {
+  MatIdentity, MatrixRotateX, MatrixRotateY, MatrixRotateZ, MatrixTranslate,
+  type Mat,
+} from "../matrix";
+import { PropShotTestRegister } from "../class41/shot_test";
+import { PropWords } from "../class41/words";
 import {
   MatrixFromZYX, MatrixInterpolateSwingTwist, MatrixToZYX,
 } from "./swing_twist";
@@ -131,6 +150,7 @@ function EffectDefOf(effect: number) {
  */
 export function PropBuildScriptFlagEffect(
     at: number, effect: number, captureBone: number, motion: number,
+    coli: string | null = null,
 ): BreakableProp[] {
   const def = EffectDefOf(effect);
   if (!def) return [];
@@ -153,9 +173,10 @@ export function PropBuildScriptFlagEffect(
     p.storyItem = captureBone;
     p.removeFlag = 0;
     p.cueCursorB = 0;
-    // `obj+0x34 |= 0x51`, and `obj+0x124 = 40.0`.
+    // `obj+0x34 |= 0x51`, `obj+0x124 = 40.0` and `obj+0x14C = tail+0x08`.
     p.flags = BreakableFlag.Live | 0x10 | 0x40;
     p.hitRadius = SCRIPT_FLAG_EFFECT_RADIUS;
+    p.coliBlob = coli;
     // `[port-only]` The node index this prop draws, so the pose can find its
     // bone. The engine reaches it through the tree it is walking.
     p.kind = i;
@@ -181,9 +202,113 @@ export function ScriptFlagEffectUpdate(p: BreakableProp,
     p.effectFrames += 1;
   }
   // The engine has one object and one cursor; the port has one prop per
-  // drawable node, so only the first of them owns the sound.
+  // drawable node, so only the first of them owns the sound -- and the
+  // capture and the registration below, which are the object's.
   if (p.member === 0) ScriptFlagEffectSoundCue(p, def.cues, events);
+  if (p.member === 0) {
+    // `EffectDrawWithCapture` -- the capture, taken with the frame the draw
+    // poses, before `EffectPoseNode` moves the previous frame on.
+    const m = MatIdentity();
+    if (EffectCaptureMatrix(def, p.storyItem, p.effectFrames,
+                            p.effectPrevFrame, m)) {
+      ColiStoreObjectMatrix(p, m);
+    }
+  }
   EffectPoseNode(p);
+  if (p.member === 0) {
+    // The routine at `0x0040E070`, on `obj+0x324` and `obj+0x32C`, at the
+    // **raw** cursor, not the half-rate key the pose above samples, and the
+    // capture bone's row of it.
+    const w = PropWords(p, SCRIPT_FLAG_EFFECT_WORDS_ZERO);
+    const r = EffectFrameRotations(def, p.effectFrames, p.storyItem - 1);
+    // [diverges] Motion 471 has 101 keys and the cursor runs to 198, so past
+    // key 100 the engine reads beyond the motion's block, into whatever the
+    // motion buffer holds after it -- `[open]`, and not in the bundle. The
+    // port keeps the angles the last key in the block wrote. The only reader
+    // is `ShotTestMesh`'s turn of a hit's normal, so what differs is the
+    // angle of the impact sprite on a window half shot after it has swung
+    // past key 100 (`g_script_flags[0x12]` up, stage 1 blocks 2 and 10).
+    if (r) {
+      w.o64 = r[0];
+      w.o68 = r[1];
+      w.o6C = r[2];
+    }
+    PropShotTestRegister(p);
+  }
+}
+
+/**
+ * The window's words beyond the common fields, by offset: the actor rotation
+ * words `obj+0x64`/`+0x68`/`+0x6C`, which `ShotTestMesh` turns a hit's normal
+ * by. Nothing else in the family reads them.
+ */
+interface ScriptFlagEffectWords {
+  o64: number;
+  o68: number;
+  o6C: number;
+}
+const SCRIPT_FLAG_EFFECT_WORDS_ZERO: ScriptFlagEffectWords = {
+  o64: 0, o68: 0, o6C: 0,
+};
+
+/**
+ * `EffectFrameRotations` — `FUN_0040E070`. One frame's rotation row for one
+ * bone: `motion + 4 + frame * stride + translations`, three BAMS shorts. Null
+ * past the motion's last key, where the engine reads on into memory the
+ * bundle does not carry.
+ */
+export function EffectFrameRotations(def: EffectDefJson, frame: number,
+                                     bone: number):
+    readonly [number, number, number] | null {
+  if (frame < 0 || frame >= def.frames || bone < 0 || bone >= def.bones) {
+    return null;
+  }
+  const i = (frame * def.bones + bone) * 3;
+  return [def.r[i], def.r[i + 1], def.r[i + 2]];
+}
+
+/**
+ * The capture half of `EffectDrawTree` (`FUN_0040DDC0`) and `EffectDrawNode`
+ * (`FUN_0040DE50`): the matrix the stack holds right after the node whose
+ * bone is `captureBone` is posed, which `EffectDrawNode` `MatrixStore`s into
+ * the state block's `+0x14` (`0x0040DF29`).
+ *
+ * Every node pushes, poses itself when its bone is 1 or more (the root never
+ * does), draws, captures, recurses into its children and pops, so a node's
+ * matrix is its ancestors' poses composed with its own. Built on the
+ * identity: the world matrix, where the engine's has the view under it --
+ * see `RegisterForShotTest` in `combat/shot_test.ts`. False when no node has
+ * the bone.
+ *
+ * `[port-only]` as a function: the draw half is `render/`'s, from the poses
+ * {@link EffectPoseNode} leaves on each prop.
+ */
+export function EffectCaptureMatrix(def: EffectDefJson, captureBone: number,
+                                    cursor: number, prevFrame: number,
+                                    out: Mat): boolean {
+  const pose: EffectNodePose = { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0 };
+  const walk = (node: number, parent: Mat): boolean => {
+    const n = def.nodes[node];
+    if (!n) return false;
+    const m = parent.slice(0, 16);
+    if (n.bone > 0) {
+      if (EffectSampleNode(def, node, cursor, prevFrame, pose)) {
+        MatrixTranslate(m, pose.x, pose.y, pose.z);
+        MatrixRotateZ(m, pose.roll);
+        MatrixRotateY(m, pose.yaw);
+        MatrixRotateX(m, pose.pitch);
+      }
+      if (n.bone === captureBone) {
+        for (let i = 0; i < 16; i++) out[i] = m[i];
+        return true;
+      }
+    }
+    for (const c of n.children) {
+      if (walk(c, m)) return true;
+    }
+    return false;
+  };
+  return walk(0, MatIdentity());
 }
 
 /**

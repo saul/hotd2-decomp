@@ -295,12 +295,39 @@ Who reaches it, over every shipped record (`[proved]` writers: every store to
 | `0x26` subtype 2 | `Class26Subtype2Update` `0x0048EB0E` (`|= 0x51`), `0x0048EB16` | `0x0048EE9C` | stage 3's boat | not filed; its blob is traced only by the collision passes, and by `ShotHitWorld` on a miss |
 | `0x33` selector 1 | `ScriptedCarrierStepPath33` `0x0043389A` (`|= 0x50` when `tail+0x04 != -1`), `0x004338A3` | `ScriptedCarrierUpdate33` `0x004334D0` | stage 2's two name a mesh; stage 5's names none | not filed |
 | `0x33` selector 4 | `ScriptedPushableUpdate33` `0x00433BC9`, when `tail+0x04 != -1` | `0x00433CC7` | stage 1's two name none and carry `0x8000` | -- |
-| `0x44` 0-7, 11-13 | each builder, `|= 0x51` unconditionally, `+0x14C` from the descriptor | selector 0's `ScriptFlagEffectUpdate` `0x00473CDF`; 1, 2, 4's `HingeUpdate` `0x0047410B`; 3's `0x00474120` at `0x0047422F`; 6's `0x00474470` at `0x00474760`; 7's `0x00474770` at `0x004748B6`; 12's `0x004755B0` at `0x004757E0`; 13's `0x004757F0` at `0x004758C7`. **11's `RisingDoorUpdate` never registers**, and 5's `0x00474240` has no call of its own (it copies its blob to an object it makes, whose routine is `[open]`) | 0: 2, 1: 37, 2: 3 (two doors each), 3: 2, 4: 13, 5-7: 1 each, 11: 2, 12: 8, 13: 13 | 0 is in the prop pool, not filed; 11 files nothing in the engine either; the rest have no builder |
-| `0x44` 17 | `PlaceStoryModeSwitch` `0x00473ADB`, when `desc+0x08 != -1` | `StoryModeSwitchUpdate` `0x004753D7` | all nine name a volume | prop pool, not filed: unshootable |
+| `0x44` 0-7, 11-13 | each builder, `|= 0x51` unconditionally, `+0x14C` from the descriptor | selector 0's `ScriptFlagEffectUpdate` `0x00473CDF`; 1, 2, 4's `HingeUpdate` `0x0047410B`; 3's `0x00474120` at `0x0047422F`; 6's `0x00474470` at `0x00474760`; 7's `0x00474770` at `0x004748B6`; 12's `0x004755B0` at `0x004757E0`; 13's `0x004757F0` at `0x004758C7`. **11's `RisingDoorUpdate` never registers**, and 5's `0x00474240` has no call of its own (it copies its blob to an object it makes, whose routine is `[open]`) | 0: 2, 1: 37, 2: 3 (two doors each), 3: 2, 4: 13, 5-7: 1 each, 11: 2, 12: 8, 13: 13 | 0 is **tested**: the window files itself from the prop pool with the capture as `obj+0x150` (`class44/script_flag_effect.ts`); 11 files nothing in the engine either; the rest have no builder |
+| `0x44` 17 | `PlaceStoryModeSwitch` `0x00473ADB`, when `desc+0x08 != -1` | `StoryModeSwitchUpdate` `0x004753D7`, past the draw's pop | all nine name a blob | **tested**: filed from the prop pool, traced through the draw's scaled matrix (`class44/story_switch.ts`) |
 
-So the port's mesh arm changes exactly one object's behaviour, stage 1's
-boarded doorway. The bone meshes (`Boss4Init`, `EnemyZombieInitByCharType`)
-are the other routine, `ShotTestBoneMesh`, and unchanged.
+So the port's mesh arm decides three kinds of object: stage 1's boarded
+doorway, stage 1's window, and every story-mode switch -- the last of which is
+what five of the game's route branches are answered by. The bone meshes
+(`Boss4Init`, `EnemyZombieInitByCharType`) are the other routine,
+`ShotTestBoneMesh`, and unchanged.
+
+**The prop pool is in the one list.** Every class-0x41 and class-0x44 object
+files itself in `G.g_shot_test_list` at its routine's own
+`RegisterForShotTest` (`game/class41/shot_test.ts`, an entry with `prop` beside
+the placement's `at`), with the engine's gate: bit `0x8000` refuses it, a
+sphere object behind the eye (view `z > 0`, through the drawn block's
+world-to-view) is not taken, a mesh object is taken at any depth. The list
+walk forks on the live bit `0x10` as it does for an actor, so a prop is a
+sphere candidate or a mesh candidate in the same sort as every actor's, and
+`render/` no longer picks props at all. The list's second reader, the crowd
+push, refuses nearly every prop by the same live-word test the engine makes;
+the one family that passes it, class 0x41 type 67's mounted parts, is passed
+over and declared at the site (`coli.ts`). The two moving-object collision
+passes walk the **published** list for the prop pool, so a switch or a window
+is in them from the frame after it registered, as in the engine.
+
+**The trace inverts `obj+0x150` in general.** `ColiTraceSegmentInObjectSpace`
+and the sphere pass call `MatrixInvert` (`FUN_004A8D20`, `0x00404F76`,
+`0x00405886`), a cofactor inverse, and the port used the transpose. The switch's
+draw ends `MatrixScale(obj+0x1A8..0x1B0)` and three shipped switches are not
+scaled by 1.0 (stage 1's 1.02 x 1.04, stage 2's 0.888 x 0.820 and
+0.770 x 0.715), so for them the transpose puts the shot in the wrong place.
+And the segment pass ranks an object's hit on the **world** distance
+`ColiPushObjectHitCandidate` (`FUN_00405620`) measures, not the object-space
+one the blob test chose its quad by.
 
 **Several pulls in one frame.** `[port-only]` The engine reads the trigger once
 a frame, so the shot record a class reads back on its update is always the
@@ -344,9 +371,9 @@ the reading.
 **What converting the rest takes.** Each class below is picked by `render/`
 with no registration and no broad phase, which is that file's declared
 divergence. Converting one means setting the flag and calling the routine at
-these sites. The pools that already model their own registration (class
-0x41's props, the carried props, the body creatures) would move into the one
-list instead:
+these sites. The pools that already model their own registration (the carried
+props and the body creatures) would move into the one list instead, as class
+0x41's and 0x44's props have:
 
 * `0x10` `CivilianUpdate` `0x0048ADB0` (camera point, 4.0); `0x11` `FrogUpdate`
   `0x0043A2C7` (1.0); `0x30`'s thrown weapon `0x0045A612`; `0x31`
@@ -359,8 +386,9 @@ list instead:
   boat's sphere took the pulls aimed at its riders; `0x20` `0x00449366`, `0x00449519`; `0x21` `0x00451D08`,
   `0x0045283A`; `0x26`'s boat `0x0048EE9C` (a mesh); `0x33` `0x004334D0`,
   `0x00433CC7`; `0x40` `0x0043C42A`, `0x0043D425`, `0x0043D7DD`, `0x0043D9DB`,
-  `0x0043E330`; `0x43` `0x00446488`; `0x44` eight sites `0x00473CDF`..
-  `0x004758C7`; `0x46` `0x0042E9B7`, `0x0042ED16`, `0x0042F401`, `0x0042F5B3`;
+  `0x0043E330`; `0x43` `0x00446488`; `0x44`'s unported selectors, whose
+  builders the port has not got (`0x0047410B`..`0x004758C7` in the table
+  above; selector 0's and 17's are ported); `0x46` `0x0042E9B7`, `0x0042ED16`, `0x0042F401`, `0x0042F5B3`;
   `0x51` `FishProjectToScreen` `0x00439BE3`; the class-0x53 trigger through
   `ActorRegisterOriginInViewSpace` (`FUN_0043F950`, the call at `0x0043F9C2`).
   That routine has **one** caller, `CatBranchTriggerUpdate` (`get_xrefs_to`),

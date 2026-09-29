@@ -1,7 +1,20 @@
 /**
  * `RegisterForShotTest` for the prop pool, and the sphere it publishes.
  *
- * ## The thing this file exists to fix
+ * ## One list
+ *
+ * A prop files itself in `G.g_shot_test_list`, the list every actor files in,
+ * and `combat/shot_test.ts` tests it there: a sphere, or its own collision
+ * mesh when `obj+0x34` has bit `0x10`, sorted with every actor's candidate on
+ * the view depth. That is the engine's arrangement -- the class-0x41 and
+ * class-0x44 objects are tasks like any other and `RegisterForShotTest`
+ * (`FUN_00405160`) takes whatever calls it -- and it is what lets a mesh
+ * object stop a shot at a zombie behind it. The port used to keep a flag on
+ * each prop and let `render/` pick props by the distance along the ray; the
+ * class-0x44 meshes (the story-mode switch, stage 1's window) could not be
+ * shot at all that way.
+ *
+ * ## The thing this file existed to fix first
  *
  * The port used to pick a prop by the **bounding box of its drawn node**. The
  * engine has never needed a model to shoot something:
@@ -25,9 +38,8 @@
  * port could not shoot for exactly this reason — three of them draw no static
  * model at all, and one of those, class 0x41 type 25, was the only branch in
  * arcade mode the port could not reach. Five of the nine are the story-mode
- * switch, and the sphere is **not** what opens those: see
- * {@link STORY_SWITCH_RADIUS}. This closes four of the nine and arcade
- * outright, and names what is left.
+ * switch, and the sphere is **not** what opens those: every shipped switch is
+ * a mesh object, and the mesh is what is shot (`class44/story_switch.ts`).
  *
  * ## Where the point comes from
  *
@@ -39,16 +51,16 @@
  * every routine (`class41/generic_routines.ts` for the generic types) calls
  * {@link PropRegisterForShotTest} itself with the point it builds.
  *
- * [diverges] The engine's `obj+0x70..0x78` is a **view-space** point, because
- * `RayTestSphere` (`FUN_004062A0`) works in the shot's own frame. The port
- * stores the world-space point and lets `render/` do the ray test, for the
- * same reason `render/slotmodels.ts` does: the perpendicular distance from a
- * ray to a point is the same number in either frame. The one thing that does
- * *not* survive the change is the `obj+0x78 <= 0` half of the gate above,
- * which is "in front of the camera" — the renderer's own `t <= 0` test is
- * where that lives instead.
+ * The engine's `obj+0x70..0x78` is a **view-space** point; the port stores
+ * the world point ({@link BreakableProp.shotX}) and takes it into view space
+ * through the drawn block's world-to-view -- here for the depth half of the
+ * gate, and in `combat/shot_test.ts` for `RayTestSphere` -- which is the
+ * matrix the engine's routine multiplied it by.
  */
+import { CameraBlockWorldToView } from "../camera/view";
+import type { ShotTestEntry } from "../combat/shot_test";
 import { G } from "../globals";
+import { MatrixTransformPoint } from "../matrix";
 import { BreakableFlag, PropFamily, type BreakableProp } from "./prop_state";
 
 /**
@@ -59,6 +71,14 @@ import { BreakableFlag, PropFamily, type BreakableProp } from "./prop_state";
  * routines are written exactly that way.
  */
 export const SHOT_TEST_SUPPRESSED = 0x8000;
+
+/**
+ * `obj+0x34` bit 4 -- test this object against its own collision mesh
+ * (`ShotTestMesh`, `FUN_00404A00`) rather than a sphere, and take it at any
+ * depth. The prop pool's name for `ActorFlag.ShotTestMesh`; a literal here
+ * because this module must not read `actor.ts` at load (`L56`).
+ */
+export const SHOT_TEST_MESH = 0x10;
 
 /**
  * `PlaceBreakableGroup` writes `obj+0x124 = 5.0` for every group member.
@@ -88,55 +108,75 @@ export const BREAKABLE_STANDING_RISE = 3.770148;
 export const CHAIN_LINK_DROP = -1.5;
 
 /**
- * `StoryModeSwitchUpdate` **never writes `obj+0x70..0x78`**, and calls
- * `RegisterForShotTest` anyway.
- *
- * `PlaceStoryModeSwitch` decides which consumer sees it, from the descriptor's
- * `+0x08`:
- *
- * * `!= -1` — `obj+0x34 |= 0x51`, so **bit 4 is set** and `ProcessPlayerShots`
- *   sends it to `ShotTestMesh` (`FUN_00404A00`), the volume test on
- *   `obj+0x14C`/`+0x150`. The port has that routine for an actor
- *   (`combat/shot_test.ts`), but the prop pool files itself in its own flag,
- *   not in `G.g_shot_test_list`, and carries neither the volume as a blob nor
- *   a matrix, so these are unshootable here. **Every shipped switch names a
- *   volume** -- all nine records in the arcade bundles -- so this is the arm
- *   the game takes.
- * * `== -1` — bit 4 clear, radius 8.0, and the sphere centre is **still
- *   `(0, 0, 0)`** because nothing ever wrote it. `RayTestSphere`
- *   (`FUN_004062A0`) is a perpendicular-distance test with no divide, so a
- *   centre at the origin is distance 0 from every ray: **the switch answers
- *   any shot fired anywhere on screen.**
- *
- * That is what the binary does. Whether it is intentional is `[open]` — but it
- * is the only reading that explains a switch with no visible target, and the
- * port reproduces it rather than inventing a hitbox the engine has not got.
- */
-export const STORY_SWITCH_RADIUS = 8.0;
-
-/**
- * `RegisterForShotTest` (`FUN_00405160`), the prop half.
- *
- * Publishes the sphere centre and marks the object as being in
- * `g_shot_test_list` for this frame. The suppression bit is the engine's; the
- * in-front-of-the-camera half of its condition is the renderer's, per the file
- * comment.
+ * The lines every sphere-registering routine ends with: `obj+0x70..0x78` =
+ * the point, then `RegisterForShotTest` (`FUN_00405160`).
  *
  * [port-only] as a *signature*: the engine's routine takes the object and
- * reads the point out of it, because the point was already written to
- * `obj+0x70..0x78` on the two lines above the call. The port passes it in
- * rather than making every caller write three fields first.
+ * reads the point out of it, because the point was already written on the
+ * lines above the call. The port passes it in rather than making every caller
+ * write three fields first. The point is written whether or not the object is
+ * then taken, as the caller's own stores are.
  */
 export function PropRegisterForShotTest(p: BreakableProp, x: number, y: number,
                                         z: number): void {
-  if ((p.flags & SHOT_TEST_SUPPRESSED) !== 0 || p.dead) {
-    p.shotRegistered = false;
-    return;
-  }
   p.shotX = x;
   p.shotY = y;
   p.shotZ = z;
-  p.shotRegistered = true;
+  PropShotTestRegister(p);
+}
+
+const _view = { x: 0, y: 0, z: 0 };
+
+/**
+ * `RegisterForShotTest` (`FUN_00405160`), for an object of the prop pool.
+ *
+ * ```
+ * 00405165  MOV EAX,[EDI+0x34]; TEST AH,0x80; JNZ out     ; bit 0x8000: never
+ * 00405171  MOV ECX,EAX; AND ECX,0x10; JNZ take            ; a mesh: always
+ * 00405178  FLD [EDI+0x78]; FCOMP [0x004C436C]             ; view z against 0.0
+ * 00405181  FNSTSW AX; TEST AH,0x41; JZ out                ; z > 0: behind, out
+ * 004051D7  list[g_shot_test_count++] = {obj, obj+0x34, obj+0x12C..0x134}
+ * ```
+ *
+ * `obj+0x78` is the view depth of the point the caller wrote, taken here
+ * through the drawn block's world-to-view -- the matrix the routine's caller
+ * multiplied it by -- and `TEST AH,0x41` passes on "less", "equal" and
+ * "unordered", so only a depth strictly behind the eye is refused. A mesh
+ * object ({@link SHOT_TEST_MESH}) is taken at any depth, and its registered
+ * point is never read.
+ *
+ * The entry's `obj+0x12C..0x134` is zero for every prop: `ActorClearGameFields`
+ * zeroes it and no class-0x41 or class-0x44 routine is among the writers of
+ * `[reg + 0x12c]` (`ColiTestSphereAgainstActors` in `coli.ts` has the search),
+ * `[likely]`.
+ *
+ * [port-only] as a separate function from `combat/shot_test.ts`'s: the
+ * engine has one routine for every object, and the port's props are not
+ * `Actor`s, so the entry names the prop by `prop` beside the placement's `at`.
+ * `p.dead` is the port's pool bookkeeping for an object that has already left.
+ */
+export function PropShotTestRegister(p: BreakableProp): void {
+  if ((p.flags & SHOT_TEST_SUPPRESSED) !== 0 || p.dead) return;
+  if ((p.flags & SHOT_TEST_MESH) === 0) {
+    MatrixTransformPoint(CameraBlockWorldToView(G.g_camera_index),
+                         { x: p.shotX, y: p.shotY, z: p.shotZ }, _view);
+    if (_view.z > 0) return;
+  }
+  const entry: ShotTestEntry = {
+    at: p.at, flags: p.flags, x: 0, y: 0, z: 0, prop: p.id,
+  };
+  G.g_shot_test_list.push(entry);
+}
+
+/**
+ * Whether this prop is in `g_shot_test_list` (`0x0059D8E8`) now: whether its
+ * routine reached `RegisterForShotTest` since the list was last emptied.
+ *
+ * [port-only] A reading of the list, for the debug panel and the tests; the
+ * engine never asks.
+ */
+export function PropInShotTestList(p: BreakableProp): boolean {
+  return G.g_shot_test_list.some((e) => e.prop === p.id);
 }
 
 /**
@@ -152,16 +192,19 @@ export function PropRegisterAtOrigin(p: BreakableProp): void {
 }
 
 /**
- * Nothing is registered this frame until its own routine says so — the engine
- * rebuilds `g_shot_test_list` from zero every frame and
- * `ProcessPlayerShots` resets the count at the end of its pass.
+ * Nothing of the pool's is registered this frame until its own routine says
+ * so — the engine rebuilds `g_shot_test_list` from zero every frame:
+ * `ProcessPlayerShots` resets the count at the end of its pass
+ * (`0x0040461E`), which the director runs as `ShotTestListReset` before any
+ * task after the player's.
  *
- * [port-only] The port has no list to clear, so this clears the flag on every
- * prop instead. Called at the top of the pool's frame, which is where
- * `FUN_00404570`'s `DAT_005A4C80 = 0` effectively puts it.
+ * [port-only] So in the game this finds nothing to drop. It is here because
+ * the pool is also stepped on its own, with no director around it, and a
+ * step taken that way would otherwise see the last step's props still filed.
+ * Called at the top of the pool's frame.
  */
 export function ClearPropShotTestList(): void {
-  for (const p of G.g_breakable_props) p.shotRegistered = false;
+  G.g_shot_test_list = G.g_shot_test_list.filter((e) => e.prop === undefined);
 }
 
 /**

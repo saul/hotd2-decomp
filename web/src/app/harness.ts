@@ -302,6 +302,11 @@ export class Harness {
                    thrown: e.thrown });
         continue;
       }
+      // The prop pool files itself here too, and the port's pick tests it --
+      // but no driver has ever aimed at a prop, and offering them would send
+      // every aimed volley at the route switches and the breakables. Its
+      // `at` is the placement's, which can also be a dead placer's.
+      if (e.prop !== undefined) continue;
       const obj = G.g_object_list.find((o) => o.at === e.at);
       if (!obj || !ShotTestPickedHere(obj)) continue;
       const p = project(obj.shotCentre);

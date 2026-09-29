@@ -123,10 +123,10 @@ because every future case of "the renderer knows something the port needs"
 should take it:
 
 * **The renderer answers questions; it never decides.** `GameHost.pickShot`
-  (`ShotTestSphere`, `FUN_00404630`) returns the nearest actor-and-bone or prop
-  along a segment, for the classes the port's own pick has not taken over.
-  For those it has (`ClassHandler.registersForShotTest`), **who is a
-  candidate is the game's**. Every class's update calls `RegisterForShotTest`
+  (`ShotTestSphere`, `FUN_00404630`) returns the nearest actor-and-bone along
+  a segment, for the classes the port's own pick has not taken over. For those
+  it has (`ClassHandler.registersForShotTest`) and for the whole class-0x41 and
+  class-0x44 prop pool, **who is a candidate is the game's**. Every class's update calls `RegisterForShotTest`
   into `G.g_shot_test_list` where the exe's does -- the list is also the
   crowd push's, a frame later -- and `game/combat/shot_test.ts` picks from
   the entries of the classes that have moved across, running the broad phase,
@@ -212,7 +212,8 @@ the other end: replaying a log headlessly needs a `pickShot` that a run with no
 renderer can answer, which means the skeleton's forward kinematics in `game/`.
 The registered half is most of the way there. It needs only a bone's sphere
 and a view transform from the host, and an object hit whole needs no pose at
-all.
+all -- which is every prop, sphere or mesh, since the prop pool files itself
+in the list.
 Until that exists a headless replay resolves every shot as a miss, so the
 harness is deliberately not shipped rather than shipped half-working.
 `web/test/port.test.ts` drives the queue with a stubbed `pickShot`, which is

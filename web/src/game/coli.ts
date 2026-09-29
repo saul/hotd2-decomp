@@ -24,7 +24,7 @@ import type { Actor, ActorRef } from "./actor";
 import { ColiSortHitCandidatesByDistance } from "./combat/shot_test";
 import { ActorByAt, G } from "./globals";
 import {
-  FtolS16, MatrixLoadIdentity, MatrixRotateX, MatrixRotateY,
+  FtolS16, MatrixInvert, MatrixLoadIdentity, MatrixRotateX, MatrixRotateY,
   MatrixTransformPoint, MatrixTranslate, Vec3Normalize,
 } from "./matrix";
 import { T } from "./tables";
@@ -39,7 +39,10 @@ export interface ColiHit {
   x: number; y: number; z: number;
   nx: number; ny: number; nz: number;
   surface: number;
-  /** Squared distance from the segment's start, which is how nearest is judged. */
+  /**
+   * Squared distance from the segment's **second** endpoint, which is how
+   * nearest is judged -- see {@link quadVsSegment}.
+   */
   distSq: number;
 }
 
@@ -182,6 +185,18 @@ const DYNAMIC_COLI_NEED = 0x10 | 0x40;
 const DYNAMIC_COLI_REFUSE = 0x80008000;
 
 /**
+ * `[port-only]` What the moving-object passes read off an object, whichever
+ * of the port's pools keeps it: `obj+0x14C` and `obj+0x150`. An `Actor` and a
+ * `BreakableProp` are both one.
+ */
+export interface ColiObject {
+  /** `obj+0x14C`, as the `coli.blobs` key; `null` is the engine's `-1`. */
+  coliBlob: string | null;
+  /** `obj+0x150`, in the row-major 3x4 {@link ColiStoreObjectMatrix} writes. */
+  coliMatrix: number[] | null;
+}
+
+/**
  * The objects the moving-object passes test, in `g_coli_dynamic_list`'s
  * place.
  *
@@ -189,24 +204,41 @@ const DYNAMIC_COLI_REFUSE = 0x80008000;
  * {@link ColiPublishDynamicList} copies from what `RegisterForShotTest`
  * collected, at the end of `ProcessPlayerShots` -- a task that runs before
  * every actor -- so both of these passes see the objects that registered on
- * the **previous** frame, whichever actor asks. The port walks the pool and
- * takes the matrix each object holds now. An object with a blob does
- * register every frame it draws: its `0x10` bit sends `RegisterForShotTest`
- * past the depth test (`0x00405176`), through the matrix rebuild and on into
- * the append at `0x004051D7` `[proved]`. So the set is the same and the
- * difference is the frame: a moving object is met a frame ahead of where the
- * engine meets it. `ColiTestSphereAgainstActors` already walks the published
- * list; moving these two passes onto it needs every blob-carrying class to
- * register at its exe site, which class 0x26's boat does not yet.
+ * the **previous** frame, whichever actor asks. For the actor pool the port
+ * walks the pool and takes the matrix each object holds now. An object with a
+ * blob does register every frame it draws: its `0x10` bit sends
+ * `RegisterForShotTest` past the depth test (`0x00405176`), through the matrix
+ * rebuild and on into the append at `0x004051D7` `[proved]`. So the set is
+ * the same and the difference is the frame: a moving actor is met a frame
+ * ahead of where the engine meets it. Moving the actors onto the published
+ * list needs every blob-carrying class to register at its exe site, which
+ * class 0x26's boat does not yet.
+ *
+ * **The prop pool is walked the engine's way**, out of the published list:
+ * every class-0x44 object with a mesh registers at its routine's own site
+ * (`StoryModeSwitchUpdate`, `ScriptFlagEffectUpdate`), and not every one
+ * that carries a blob does -- `RisingDoorUpdate` never registers, so it is
+ * never in these passes. A prop is never `g_cur_actor` in the port, and none
+ * of the pool's routines calls either pass.
  */
-function ColiDynamicObjects(): Actor[] {
-  const out: Actor[] = [];
+function ColiDynamicObjects(): ColiObject[] {
+  const out: ColiObject[] = [];
   for (const o of G.g_object_list) {
     if (o.despawned || !o.coliBlob || !o.coliMatrix) continue;
     if (o.at === G.g_cur_actor) continue;
     if (o.flags & DYNAMIC_COLI_REFUSE) continue;
     if ((o.flags & DYNAMIC_COLI_NEED) !== DYNAMIC_COLI_NEED) continue;
     out.push(o);
+  }
+  for (const e of G.g_coli_dynamic_list) {
+    if (e.prop === undefined) continue;
+    const p = G.g_breakable_props.find((q) => q.id === e.prop);
+    if (!p || !p.coliBlob || !p.coliMatrix) continue;
+    // The live word, as for an actor: a switch that despawned since it
+    // registered carries `0x80018000` now.
+    if (p.flags & DYNAMIC_COLI_REFUSE) continue;
+    if ((p.flags & DYNAMIC_COLI_NEED) !== DYNAMIC_COLI_NEED) continue;
+    out.push(p);
   }
   return out;
 }
@@ -221,21 +253,43 @@ function ColiDynamicObjects(): Actor[] {
  * port's 3x4 is the transpose of the top's first three columns, so a point is
  * `R·p + t` either way.
  */
-export function ColiStoreObjectMatrix(obj: Actor, top: ArrayLike<number>):
-    void {
+export function ColiStoreObjectMatrix(obj: ColiObject,
+                                      top: ArrayLike<number>): void {
   const m = obj.coliMatrix ?? (obj.coliMatrix = new Array(12).fill(0));
   m[0] = top[0]; m[1] = top[4]; m[2] = top[8]; m[3] = top[12];
   m[4] = top[1]; m[5] = top[5]; m[6] = top[9]; m[7] = top[13];
   m[8] = top[2]; m[9] = top[6]; m[10] = top[10]; m[11] = top[14];
 }
 
-/** `R^T (p - t)`: a world point into the object's space. The matrix is rigid. */
-function ColiToObject(m: readonly number[], x: number, y: number, z: number,
+/**
+ * `MatrixStackSetTopFromArray(g_coli_dynamic_matrix); MatrixInvert(0)` --
+ * the object's matrix back in the stack's layout, and its **general**
+ * inverse, which is what `MatrixInvert` (`FUN_004A8D20`) computes
+ * (`0x00404F6F`..`0x00404F76` for the segment, `0x00405886` for the sphere).
+ *
+ * This used to be `R^T (p - t)` under a note that the matrix is a rotation
+ * and a translation and nothing else. The class-0x12 door and the boat's are;
+ * the story-mode switch's is not -- its draw ends `MatrixScale(obj+0x1A8..)`,
+ * and three shipped switches are scaled by something other than 1.0 -- and
+ * the transpose of a scaled matrix is not its inverse.
+ *
+ * `[port-only]` as a function: two calls in each of the engine's passes.
+ */
+function ColiInverseOf(m: readonly number[], out: number[]): void {
+  out[0] = m[0]; out[1] = m[4]; out[2] = m[8]; out[3] = 0;
+  out[4] = m[1]; out[5] = m[5]; out[6] = m[9]; out[7] = 0;
+  out[8] = m[2]; out[9] = m[6]; out[10] = m[10]; out[11] = 0;
+  out[12] = m[3]; out[13] = m[7]; out[14] = m[11]; out[15] = 1;
+  MatrixInvert(out);
+}
+
+const _inv: number[] = new Array(16).fill(0);
+
+/** A world point into the object's space, through {@link ColiInverseOf}. */
+function ColiToObject(inv: readonly number[], x: number, y: number,
+                      z: number,
                       out: { x: number; y: number; z: number }): void {
-  const dx = x - m[3], dy = y - m[7], dz = z - m[11];
-  out.x = m[0] * dx + m[4] * dy + m[8] * dz;
-  out.y = m[1] * dx + m[5] * dy + m[9] * dz;
-  out.z = m[2] * dx + m[6] * dy + m[10] * dz;
+  MatrixTransformPoint(inv, { x, y, z }, out);
 }
 
 /** `R p + t` — `MatrixTransformPoint` (`FUN_004A8A80`). */
@@ -272,14 +326,15 @@ const _w = { x: 0, y: 0, z: 0 };
  * trace and the transform back are at `0x00404FDA`..`0x00405074`.
  */
 export function ColiTraceSegmentInObjectSpace(
-    obj: Actor, ax: number, ay: number, az: number,
+    obj: ColiObject, ax: number, ay: number, az: number,
     bx: number, by: number, bz: number, out: ColiHit): boolean {
   G.g_coli_hit_surface = 0;
   const blob = obj.coliBlob ? T.coli?.blobs?.[obj.coliBlob] : undefined;
   const m = obj.coliMatrix;
   if (!blob || !m) return false;
-  ColiToObject(m, ax, ay, az, _oa);
-  ColiToObject(m, bx, by, bz, _ob);
+  ColiInverseOf(m, _inv);
+  ColiToObject(_inv, ax, ay, az, _oa);
+  ColiToObject(_inv, bx, by, bz, _ob);
   if (!ColiSegmentVsMesh(blob, _oa.x, _oa.y, _oa.z, _ob.x, _ob.y, _ob.z,
                          out, false)) {
     return false;
@@ -307,22 +362,28 @@ export function ColiTraceSegmentInObjectSpace(
  * this matters to read only the hit's height, and a reader of this normal gets
  * what the engine's gets.
  *
- * The object-space distance the blob test ranks by is the world distance,
- * because the matrix is a rotation and a translation and nothing else.
+ * **The candidate is ranked on the world distance**, not the object-space one
+ * the blob test chose its quad by: `ColiPushObjectHitCandidate`
+ * (`FUN_00405620`, `0x00405680`..) measures the second endpoint against
+ * `g_coli_hit_x/y/z`, which the trace has already carried back through the
+ * matrix. The two agree for a rigid matrix and not for the story-mode
+ * switch's scaled one.
  */
 export function ColiTraceSegmentVsObjectBlob(
-    obj: Actor, ax: number, ay: number, az: number,
+    obj: ColiObject, ax: number, ay: number, az: number,
     bx: number, by: number, bz: number,
     best: ColiHit, found: boolean): boolean {
   if (!ColiTraceSegmentInObjectSpace(obj, ax, ay, az, bx, by, bz, _dyn)) {
     return found;
   }
-  if (found && _dyn.distSq >= best.distSq) return found;
+  const dx = _dyn.x - bx, dy = _dyn.y - by, dz = _dyn.z - bz;
+  const distSq = dx * dx + dy * dy + dz * dz;
+  if (found && distSq >= best.distSq) return found;
   ColiToWorldPoint(obj.coliMatrix!, _dyn.nx, _dyn.ny, _dyn.nz, _w);
   best.x = _dyn.x; best.y = _dyn.y; best.z = _dyn.z;
   best.nx = _w.x; best.ny = _w.y; best.nz = _w.z;
   best.surface = _dyn.surface;
-  best.distSq = _dyn.distSq;
+  best.distSq = distSq;
   return true;
 }
 
@@ -595,6 +656,21 @@ export function ColiTestSphereAgainstActors(self: Actor, cx: number, cy: number,
   const candidates: ColiCandidate[] = [];
   for (const e of G.g_coli_dynamic_list) {
     if (e.thrown !== undefined) continue;
+    // An object of the prop pool: the two refusals are on its live word as
+    // on an actor's, and nearly every prop has one -- `0x80000001` from its
+    // constructor, or `0x10` for the class-0x44 meshes.
+    //
+    // [diverges] The one family that registers with neither is class 0x41
+    // type 67's three mounted parts (`BreakableFlag.Live` alone,
+    // `class41/type67.ts`), which the engine's push would test at the
+    // `obj+0x12C` the entry carries -- zero for every prop, `[likely]` (see
+    // `PropShotTestRegister`), so a sphere of `obj+0x128`-or-`0x124` at the
+    // world origin -- and push onto the part's own `obj+0x138..0x148`, which
+    // nothing of the part reads. The port passes it over: the candidate's
+    // `+0x24` is `g_coli_hit_object`, an actor reference here, and a prop
+    // cannot be named by one. It matters only to an actor standing within
+    // that radius of the world origin while a stage-3 boat carries its parts.
+    if (e.prop !== undefined) continue;
     const o = ActorByAt(e.at);
     if (!o || o === self) continue;
     if (o.flags & ACTOR_PUSH_REFUSE) continue;
@@ -710,7 +786,8 @@ export function ColiTestSphereAgainstFullSet(cx: number, cy: number,
     const blob = T.coli?.blobs?.[o.coliBlob!];
     const m = o.coliMatrix!;
     if (!blob) continue;
-    ColiToObject(m, cx, cy, cz, _oa);
+    ColiInverseOf(m, _inv);
+    ColiToObject(_inv, cx, cy, cz, _oa);
     const before = _sph.distSq;
     ColiSphereVsBlob(blob, _oa.x, _oa.y, _oa.z, r, _sph);
     if (_sph.distSq < before) {

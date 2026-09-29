@@ -36,7 +36,7 @@
  * drawn in `BreakablePropUpdate`; every other family's rattle is still drawn
  * here, from this layer's own generator, where it does not reach the port.
  */
-import { Group, Matrix4, Object3D, Ray, Vector3 } from "three";
+import { Group, Matrix4, Object3D } from "three";
 import type { System } from "../core/system";
 import type { RenderContext } from "./context";
 import { G } from "../game/globals";
@@ -106,10 +106,11 @@ const SLOT_PART = /_slot_([0-9a-f]{4})$/;
  * family until `GENERIC_POSE_ORDER` was read out of the EXE.
  *
  * `[open]` It stays the default for the families whose own routine has **not**
- * been read for its rotation order — the group props, the kinded props, the
- * break puff and the story-mode switch. Keeping the behaviour those four had
- * is deliberate: changing it would be a guess in the other direction.
- * (`PropUpdateType75` was a fifth; its routine records its draws now.)
+ * been read for its rotation order — the group props, the kinded props and
+ * the break puff. Keeping the behaviour those three had is deliberate:
+ * changing it would be a guess in the other direction. (`PropUpdateType75`
+ * and the story-mode switch were two more; their routines record their draws
+ * now.)
  * `RisingDoorUpdate` (`FUN_004753F0`) is the one that is
  * read, and it is one `MatrixRotateY` and nothing else, so it gets a row.
  */
@@ -242,8 +243,6 @@ export class BreakableLayer implements System<RenderContext> {
   private readonly templates = new Map<number, Object3D>();
   private readonly nodes = new Map<number, Live>();
   private enabled = true;
-  private readonly _c = new Vector3();
-  private readonly _hit = new Vector3();
   /** Draw-time noise only — see `shake`. Reseeded by `adopt`. */
   private readonly rng = new Rng(SHAKE_SEED);
   private readonly _m = new Matrix4();
@@ -642,47 +641,6 @@ export class BreakableLayer implements System<RenderContext> {
     if (p.shake <= 0.01) return [0, 0];
     const sq = [SHAKE_SPREAD, SHAKE_CENTRE] as const;
     return [draw(sq), draw(sq)];
-  }
-
-  /**
-   * `ShotTestSphere` (`FUN_00404630`) for the prop pool: the nearest prop
-   * under *ray*, for the gun.
-   *
-   * **This used to be a bounding-box test on the drawn node**, which meant a
-   * prop the port had no model for could not be shot at all — and the engine
-   * has never needed a model. `RegisterForShotTest` (`FUN_00405160`) publishes
-   * a point and `obj+0x124`, and the sphere is the whole hit test: a prop has
-   * no skeleton, so it is always that routine's else-arm. Nine route-branch
-   * triggers were unreachable because of the box, three of them because their
-   * routine draws no static model at all.
-   *
-   * `game/class41/shot_test.ts` owns which props are registered and where
-   * their spheres are; this owns the ray. The `t <= 0` test below is the
-   * engine's `obj+0x78 <= 0` — its registration culls what is behind the
-   * camera, and the port culls it here instead, because the port's point is in
-   * world space rather than view space.
-   *
-   * `id` rather than the prop: this feeds `GameHost.pickShot`, and what
-   * crosses that seam is what the engine identifies an object by, not a
-   * reference the port would then be free to write through. `t` is the
-   * distance along a unit-length direction, so the caller can sort props and
-   * bones into the one list the engine's shot test walks.
-   */
-  pickRay(ray: Ray): { id: number; point: Vector3; t: number } | null {
-    if (!this.enabled) return null;
-    let best: { id: number; point: Vector3; t: number } | null = null;
-    for (const p of G.g_breakable_props) {
-      if (p.dead || !p.shotRegistered || p.hitRadius <= 0) continue;
-      this._c.set(p.shotX, p.shotY, p.shotZ);
-      ray.closestPointToPoint(this._c, this._hit);
-      const t = this._hit.clone().sub(ray.origin).dot(ray.direction);
-      if (t <= 0) continue;                        // behind the muzzle
-      if (ray.distanceSqToPoint(this._c) > p.hitRadius * p.hitRadius) continue;
-      if (!best || t < best.t) {
-        best = { id: p.id, point: this._c.clone(), t };
-      }
-    }
-    return best;
   }
 
   /**

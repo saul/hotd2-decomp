@@ -6875,6 +6875,50 @@ on moving `cam_frame` to `+0x0E`). In the page at
 doorway is boarded from the spawn (camera frame 640) on, the boards burst on
 the frame flag 34 rises, and 54 frames later they are gone.
 
+## Class 0x44's meshes: the story-mode switch and the window are shot
+
+Every one of the game's nine story-mode switches -- class 0x44 selector 17,
+the branch writer behind five of the sixteen route records -- names a
+collision blob in its descriptor's `+0x08`, and so does each half of stage
+1's window (selector 0). `PlaceStoryModeSwitch` (`FUN_00473A70`) ORs `0x50`
+for it and `PropBuildScriptFlagEffect` (`FUN_00472B30`) `0x51`: bit `0x10`
+sends the shot test to `ShotTestMesh` (`FUN_00404A00`) on `obj+0x14C`, through
+the matrix the object's draw stores at `obj+0x150`. The port had the prop pool
+outside the shot-test list, a raw pointer for the blob and no matrix, so **no
+shipped switch could be shot** and the window let a bullet through to the
+zombies behind it.
+
+* **The exporter** resolves the descriptor's `+0x08` to its `coli.blobs` key
+  in both halves (`storySwitchTail`/`story_switch_tail`,
+  `scriptFlagEffectColi`/`script_flag_effect_coli`), and carries the switch's
+  hinge curve, swing sign and draw scale, which its matrix needs.
+  `tools/verify_prop_meshes.py` quotes every instruction the reading rests on
+  out of the image and holds all 18 switch placements and 4 window placements
+  to the disc.
+* **The switch is transcribed whole** (`game/class44/story_switch.ts`): the
+  head, the throw -- with `g_story_switch_thrown` (`0x009A26EC`), so one thrown
+  door throws its pair -- the sixty-frame swing, the route (which tests its
+  script flag: the port had not), scene 4's count, scene 2's two items and the
+  second flag-0x15 write, the blink, the draw `T . RotY . Rz . Ry . Rx .
+  Scale`, the `MatrixStore` and the registration past the pop. Its hit bits
+  are never cleared, as in the exe.
+* **The window** registers where `ScriptFlagEffectUpdate` does, with the
+  captured node's matrix as `obj+0x150` and the three angles from the
+  rotation row at the raw cursor.
+* **The prop pool is in the one list.** Every prop files itself in
+  `G.g_shot_test_list` through the engine's gate (the depth half now through
+  the drawn block's world-to-view), and `combat/shot_test.ts` tests its sphere
+  or its mesh in the same sort as every actor; `render/` no longer picks props.
+* **The moving-object collision passes** take the prop pool out of the
+  published list, invert `obj+0x150` in general (`MatrixInvert`, not the
+  transpose: three switches are scaled) and rank an object's hit on its world
+  distance, as `ColiPushObjectHitCandidate` (`FUN_00405620`) does.
+
+Declared: the window's angles past key 100 read beyond motion 471's block in
+the exe (`[open]`; the port keeps the last key's), and the crowd push passes
+over class 0x41 type 67's mounted parts, the one prop family that registers
+without either of its refusing bits.
+
 ## Every opcode, and what the player does with it
 
 > The status column is a copy. The original lives on `Walker.OPS` in

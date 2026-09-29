@@ -70,6 +70,7 @@ import { BODY_CREATURE_SLOTS, CARRIED_PROP_BREAK, CARRIED_PROP_SLOTS }
   from "./combat";
 import { charactersJson, resolveForStage as resolveCharacters } from "./characters";
 import * as charmotion from "./charmotion";
+import * as colilib from "./coli";
 import * as degraded from "./degraded";
 import type { Degradation } from "./degraded";
 import * as evtlib from "./evt";
@@ -586,8 +587,9 @@ function genericTypes(tables: ExeTables): Set<number> {
  * decrement the same `g_item_set_countdown` and the port has to place them all
  * before any of the countdowns mean anything.
  */
-export function containerPlacements(tables: ExeTables, evt: evtlib.EvtFile,
-                                    spawnRecords: Spawn[]):
+export function containerPlacements(
+    tables: ExeTables, evt: evtlib.EvtFile, spawnRecords: Spawn[],
+    sets: [colilib.ColiFile, colilib.ColiFile] | null = null):
     Record<string, unknown>[] {
   const raw = evt.raw;
   const out: Record<string, unknown>[] = [];
@@ -724,21 +726,25 @@ export function containerPlacements(tables: ExeTables, evt: evtlib.EvtFile,
       // `PlaceStoryModeSwitch` -- the branch writer with the widest reach.
       // `obj+0x11C` is written as the LITERAL 1 by the constructor, so it is
       // not a lifetime here; `+0x2A4` names the script flag that removes it.
+      // Every word of the tail the constructor copies -- see
+      // `propslib.storySwitchTail`. `coli` is the descriptor's `+0x08`
+      // resolved to the `coli.blobs` key, which decides how the switch is
+      // shot: `null` (the descriptor's -1) is the sphere arm, and a key is
+      // `ShotTestMesh`'s mesh. A pointer that resolves to no blob is left out
+      // and reported, and the port places the switch as a mesh object with
+      // no mesh -- one no shot can find, which is what it cannot answer.
+      const tail = propslib.storySwitchTail(rec, sets);
+      if (tail.coli === undefined) {
+        degraded.note("hod2lib.bundle.container_placements",
+                      `story switch at 0x${rec.offset.toString(16)}`,
+                      "the switch cannot be shot: its mesh is not carried",
+                      "its tail+0x08 lands on no blob of either coli file");
+      }
+      const { coli, ...rest } = tail;
       out.push({
         at: rec.offset, container: "story_switch",
-        slot: rec.param(0x04, "i16") || 0,
-        // The script flag the route waits on, and the one that removes the
-        // object. Both signed bytes, and -1 means "none".
-        // The descriptor's `+0x08`, which decides how the switch is shot:
-        // -1 is the sphere path (radius 8, centre never written, so it answers
-        // any shot on screen) and anything else is the mesh volume, which the
-        // port has not got. See `game/class41/shot_test.ts`.
-        volume: rec.param(0x08, "i32"),
-        branch_flag: rec.param(0x10, "i8"),
-        remove_flag: rec.param(0x11, "i8"),
-        // The four Original Mode item ids that throw the switch without a
-        // shot. -1 in the first means the switch has no key at all.
-        keys: [0, 1, 2, 3].map((k) => rec.param(0x20 + k, "i8")),
+        ...rest,
+        ...(coli === undefined ? {} : { coli }),
         lifetime_evt_steps: 1,
         pos: [...rec.pos], yaw: rec.orient[1],
       });
@@ -787,6 +793,13 @@ export function containerPlacements(tables: ExeTables, evt: evtlib.EvtFile,
       const a = (rec.param(0x04, "u32") ?? 0) === propslib.SCRIPT_FLAG_EFFECT_SLOT_A;
       const pick = a ? propslib.SCRIPT_FLAG_EFFECT_A
                      : propslib.SCRIPT_FLAG_EFFECT_B;
+      const effColi = propslib.scriptFlagEffectColi(rec, sets);
+      if (effColi === undefined) {
+        degraded.note("hod2lib.bundle.container_placements",
+                      `script flag effect at 0x${rec.offset.toString(16)}`,
+                      "the selector-0 effect cannot be shot: its mesh is not carried",
+                      "its tail+0x08 lands on no blob of either coli file");
+      }
       out.push({
         at: rec.offset, container: "script_flag_effect",
         effect: pick.effect,
@@ -795,6 +808,9 @@ export function containerPlacements(tables: ExeTables, evt: evtlib.EvtFile,
         // `obj+0x28C`, which this family never draws through: the routine
         // reads its own node slots out of the tree instead.
         slot: rec.param(0x04, "u16") ?? 0,
+        // `obj+0x14C`, the mesh the builder's `obj+0x34 |= 0x51` sends the
+        // shot test and the moving-object collision passes to.
+        ...(effColi === undefined ? {} : { coli: effColi }),
         // `ScriptFlagEffectUpdate` has no `PropExpireByStepLifetime`; script
         // flag 0x13 is its whole lifetime.
         lifetime_evt_steps: 0,
@@ -2092,7 +2108,9 @@ export async function buildStage(stage: Stage, sink: BundleSink,
 
   // Before the glTF: the template rig has to include every asset slot the
   // stage's generic props name, and only the script knows which those are.
-  const placements = evt ? containerPlacements(tables, evt, spawnRecords) : [];
+  const placements = evt
+    ? containerPlacements(tables, evt, spawnRecords, await stage.colisets())
+    : [];
   const carriedEffects = await carriedPropEffectsJson(
     stage, charPlaces as unknown as Record<string, unknown>[]);
   const flagEffects = {

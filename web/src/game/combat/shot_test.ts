@@ -83,6 +83,7 @@ import {
   MatCopy, MatrixInvert, MatrixLoadIdentity, MatrixRotateX, MatrixRotateY,
   MatrixRotateZ, MatrixTransformPoint, MatrixTransformVector, type Mat,
 } from "../matrix";
+import type { BreakableProp } from "../class41/prop_state";
 import { BoneHitRadius, CharacterTypeOf, T } from "../tables";
 import { VecToAngles, type Vec3 } from "../vec";
 
@@ -113,6 +114,13 @@ export interface ShotTestEntry {
    * of their own (`game/thrown_weapon.ts`), so the entry says which pool.
    */
   thrown?: number;
+  /**
+   * `[port-only]` An object of the prop pool registered this entry, by its id
+   * in `G.g_breakable_props`, and `at` is its placement's script address. The
+   * same reason as {@link thrown}: the class-0x41 and class-0x44 objects are
+   * not `Actor`s in the port (`game/class41/shot_test.ts`).
+   */
+  prop?: number;
 }
 
 /**
@@ -169,6 +177,8 @@ export interface ShotCandidate {
   point: Vec3;
   /** `[port-only]` The candidate is a thrown weapon, by id. See {@link ShotTestEntry.thrown}. */
   thrown?: number;
+  /** `[port-only]` The candidate is a prop, by id. See {@link ShotTestEntry.prop}. */
+  prop?: number;
   /**
    * A hit on a collision mesh -- a bone's ({@link ShotTestBoneMesh}) or an
    * object's ({@link ShotTestMesh}): the surface code and the face's normal
@@ -390,12 +400,17 @@ const _w = { x: 0, y: 0, z: 0 };
  * ```
  *
  * The fork reads the object, not the word the entry recorded, so a bit
- * raised or dropped since registration counts. Of the classes whose pick is
- * here, one raises it: class 0x12, whose stage-1 door (`0x3D88`) carries
- * `0x10` in its record and files itself every frame until its strip starts
- * (`game/class12/`), so a shot at the boarded doorway stops on the boards.
- * The other families that raise it are not in this list in the port -- see
- * `docs/formats/combat.md`, "The shot test".
+ * raised or dropped since registration counts. Of the objects whose pick is
+ * here, three kinds raise it: class 0x12, whose stage-1 door (`0x3D88`)
+ * carries `0x10` in its record and files itself every frame until its strip
+ * starts (`game/class12/`), so a shot at the boarded doorway stops on the
+ * boards; and from the prop pool, every story-mode switch and stage 1's
+ * window (`game/class44/`). The other families that raise it are not in this
+ * list in the port -- see `docs/formats/combat.md`, "The shot test".
+ *
+ * **The prop pool files itself here too**, an entry with `prop` beside the
+ * placement's `at` (`game/class41/shot_test.ts`), and is tested in the same
+ * pass and the same sort as every actor: its sphere, or its mesh.
  *
  * What is not here is `ShotTestWorld` (`FUN_00404B80`). In the engine the
  * static collision's hits are candidates in the same list, which is what
@@ -431,11 +446,25 @@ export function ProcessPlayerShotsTestList(ray: ShotRay, host: GameHost):
       ShotTestSphereThrownWeapon(entry.thrown, shot, out);
       continue;
     }
+    if (entry.prop !== undefined) {
+      const p = G.g_breakable_props.find((q) => q.id === entry.prop);
+      if (!p) continue;
+      // The same fork on the same live word as below.
+      if (p.flags & ActorFlag.ShotTestMesh) {
+        ShotTestMesh(PropMeshObject(p), { at: p.at, prop: p.id }, shot, out);
+      } else {
+        ShotTestSphereProp(p, shot, out);
+      }
+      continue;
+    }
     const obj = ActorByAt(entry.at);
     if (!obj) continue;
     if (!ShotTestPickedHere(obj)) continue;
-    if (obj.flags & ActorFlag.ShotTestMesh) ShotTestMesh(obj, shot, out);
-    else ShotTestSphere(obj, shot, out);
+    if (obj.flags & ActorFlag.ShotTestMesh) {
+      ShotTestMesh(obj, { at: obj.at }, shot, out);
+    } else {
+      ShotTestSphere(obj, shot, out);
+    }
   }
   if (!out.length) return null;
   return ColiSortHitCandidatesByDistance(out)[0];
@@ -521,6 +550,32 @@ function ShotTestSphereThrownWeapon(id: number, shot: ShotTest,
   out.push({ key: ShotCandidateKey(c.z), at: w.from, bone: 0, whole: true,
              point: { x: p.x, y: p.y, z: p.z }, t: alongShot(shot.ray, p),
              thrown: w.id });
+}
+
+/**
+ * `ShotTestSphere`'s arms (`0x0040463A`..`0x0040468C`), for an object of the
+ * prop pool: `RayTestSphere` at the point the routine published
+ * (`obj+0x70..0x78`, {@link BreakableProp.shotX}) with radius `obj+0x124`,
+ * and on a hit the whole object is one candidate keyed on that point's depth.
+ *
+ * The fork into the skeleton never runs: it wants `obj+0x34` bit `0x80`,
+ * which only `SkeletonBuildAndPose` (`FUN_00410590`) raises, and no
+ * constructor of the pool builds a skeleton -- the two class-0x41 builders
+ * that do, `0x00463E50` and `0x004641F0`, clear the bit straight after.
+ * `[port-only]` as a separate function, for the reason
+ * {@link ShotTestSphereThrownWeapon} is one.
+ */
+function ShotTestSphereProp(p: BreakableProp, shot: ShotTest,
+                            out: ShotCandidate[]): void {
+  _w.x = p.shotX; _w.y = p.shotY; _w.z = p.shotZ;
+  if (!shot.host.viewSpaceOfPoint?.(_w, _c)) return;
+  if (RayTestSphere(shot.angles, _c.x - shot.eye.x, _c.y - shot.eye.y,
+                    _c.z - shot.eye.z, p.hitRadius) <= 0) {
+    return;
+  }
+  out.push({ key: ShotCandidateKey(_c.z), at: p.at, bone: 0, whole: true,
+             point: { x: _w.x, y: _w.y, z: _w.z }, t: alongShot(shot.ray, _w),
+             prop: p.id });
 }
 
 /**
@@ -649,7 +704,8 @@ const _rot: Mat = new Array<number>(16).fill(0);
  * segment inline, because the matrix it sets is the host's posed bone, in the
  * matrix stack's own layout rather than {@link Actor.coliMatrix}'s.
  */
-function ShotBuildSegment(obj: Actor, ray: ShotRay, out: ColiHit): void {
+function ShotBuildSegment(obj: ShotMeshObject, ray: ShotRay, out: ColiHit):
+    void {
   const o = ray.origin, d = ray.dir;
   ColiTraceSegmentInObjectSpace(obj,
                                 o.x + d.x * SHOT_SEGMENT_LENGTH,
@@ -679,13 +735,19 @@ function ShotBuildSegment(obj: Actor, ray: ShotRay, out: ColiHit): void {
  * is refused inside the trace (`0x00404FDA`), which is
  * {@link Actor.coliBlob} `null`.
  *
+ * The object is an actor, or one of the prop pool's -- the class-0x44
+ * story-mode switch and stage 1's window -- through {@link PropMeshObject};
+ * `who` is how the candidate names it, since the port keeps the two in
+ * different pools and the engine's `+0x24` is simply the object.
+ *
  * **The normal is turned by the object's angles, not by its matrix**, and in
  * `Z`, `Y`, `X` order whatever order the class draws in -- class 0x12 draws
  * `RotX; RotZ; RotY`. It goes through `MatrixTransformPoint` on a matrix built
  * from the identity, so no translation reaches it, and it is not
  * renormalised. What reads it is `SpawnWorldImpact`, through the candidate.
  */
-function ShotTestMesh(obj: Actor, shot: ShotTest, out: ShotCandidate[]): void {
+function ShotTestMesh(obj: ShotMeshObject, who: ShotCandidateOwner,
+                      shot: ShotTest, out: ShotCandidate[]): void {
   ShotBuildSegment(obj, shot.ray, _hit);
   if (G.g_coli_hit_surface === 0) return;
   MatrixLoadIdentity(_rot);
@@ -694,8 +756,43 @@ function ShotTestMesh(obj: Actor, shot: ShotTest, out: ShotCandidate[]): void {
   MatrixRotateX(_rot, obj.pitch);
   const normal = { x: 0, y: 0, z: 0 };
   MatrixTransformPoint(_rot, { x: _hit.nx, y: _hit.ny, z: _hit.nz }, normal);
-  ShotPushMeshObjectCandidate(obj, { x: _hit.x, y: _hit.y, z: _hit.z },
+  ShotPushMeshObjectCandidate(who, { x: _hit.x, y: _hit.y, z: _hit.z },
                               normal, _hit.surface, shot, out);
+}
+
+/**
+ * `[port-only]` What `ShotTestMesh` reads off an object, whichever of the
+ * port's pools keeps it: `obj+0x14C`, `obj+0x150`, and the three angles
+ * `+0x64`/`+0x68`/`+0x6C` the hit's normal is turned by. An `Actor` is one as
+ * it stands.
+ */
+export interface ShotMeshObject {
+  /** `obj+0x14C`, as the `coli.blobs` key; `null` is the engine's `-1`. */
+  coliBlob: string | null;
+  /** `obj+0x150`, in `Actor.coliMatrix`'s 3x4. */
+  coliMatrix: number[] | null;
+  /** `obj+0x64`, `obj+0x68`, `obj+0x6C` -- BAMS. */
+  pitch: number;
+  yaw: number;
+  roll: number;
+}
+
+/** `[port-only]` Which object a candidate is, in the pool that keeps it. */
+interface ShotCandidateOwner {
+  at: number;
+  prop?: number;
+}
+
+/**
+ * `[port-only]` A prop as {@link ShotMeshObject}: its own `obj+0x14C` and
+ * `obj+0x150`, and the three angle words, which the prop pool keeps by offset
+ * in {@link BreakableProp.words} -- `+0x64..0x6C` are the shared actor
+ * fields, and a prop's routine writes them where it writes them at all.
+ */
+function PropMeshObject(p: BreakableProp): ShotMeshObject {
+  return { coliBlob: p.coliBlob, coliMatrix: p.coliMatrix,
+           pitch: p.words.o64 ?? 0, yaw: p.words.o68 ?? 0,
+           roll: p.words.o6C ?? 0 };
 }
 
 /**
@@ -717,11 +814,11 @@ function ShotTestMesh(obj: Actor, shot: ShotTest, out: ShotCandidate[]): void {
  * (`FUN_00405260`) at the quad. The object is at `+0x24`, where a bone
  * candidate keeps its node.
  */
-function ShotPushMeshObjectCandidate(obj: Actor, point: Vec3, normal: Vec3,
-                                     surface: number, shot: ShotTest,
+function ShotPushMeshObjectCandidate(who: ShotCandidateOwner, point: Vec3,
+                                     normal: Vec3, surface: number,
+                                     shot: ShotTest,
                                      out: ShotCandidate[]): void {
-  ShotPushColiHitCandidate(obj.at, 0, true, point, normal, surface, shot,
-                           out);
+  ShotPushColiHitCandidate(who, 0, true, point, normal, surface, shot, out);
 }
 
 /**
@@ -742,12 +839,14 @@ function ShotPushMeshObjectCandidate(obj: Actor, point: Vec3, normal: Vec3,
  * impact for. The port's view space is the host's camera, as for every other
  * candidate here.
  */
-function ShotPushColiHitCandidate(at: number, bone: number, whole: boolean,
-                                  point: Vec3, normal: Vec3, surface: number,
-                                  shot: ShotTest, out: ShotCandidate[]): void {
+function ShotPushColiHitCandidate(who: ShotCandidateOwner, bone: number,
+                                  whole: boolean, point: Vec3, normal: Vec3,
+                                  surface: number, shot: ShotTest,
+                                  out: ShotCandidate[]): void {
   if (!shot.host.viewSpaceOfPoint?.(point, _c)) return;
-  out.push({ key: ShotCandidateKey(_c.z), at, bone, whole, point,
-             mesh: { surface, normal }, t: alongShot(shot.ray, point) });
+  out.push({ key: ShotCandidateKey(_c.z), at: who.at, bone, whole, point,
+             mesh: { surface, normal }, t: alongShot(shot.ray, point),
+             ...(who.prop !== undefined ? { prop: who.prop } : {}) });
 }
 
 /**
@@ -796,7 +895,7 @@ function ShotTestBoneMesh(obj: Actor, node: CharacterBone, mesh: string,
   MatrixTransformPoint(_bm, _hit, point);
   MatrixTransformVector(_bm, { x: _hit.nx, y: _hit.ny, z: _hit.nz }, normal);
   // `+0x24 = node, +0x28 = obj, +0x2C = rec+0x74 | 0x40`: a bone, bit 0x20.
-  ShotPushColiHitCandidate(obj.at, node.bone, false, point, normal,
+  ShotPushColiHitCandidate({ at: obj.at }, node.bone, false, point, normal,
                            _hit.surface, shot, out);
 }
 

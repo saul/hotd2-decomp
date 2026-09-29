@@ -94,7 +94,7 @@ try {
         slot: p.slot, slotB: p.words?.o28e, item: p.words?.o290,
         phase: p.routinePhase, cue: p.cuePhase, strip: p.storyItem,
         pos: [p.x, p.y, p.z], shot: [p.shotX, p.shotY, p.shotZ],
-        reg: p.shotRegistered,
+        reg: G.g_shot_test_list.some((e) => e.prop === p.id),
         draws: (p.draws ?? []).map((c) => c.slot),
         cam: `${G.g_active_cam_path}/${G.g_cam_path_frame}`,
         mode: G.g_GameMode,

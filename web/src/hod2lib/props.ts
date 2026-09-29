@@ -29,6 +29,7 @@
 
 import { BAMS_TO_RAD, bamsFromMatrix, rotMatrix } from "./bams";
 import { i16, u16, u32 } from "./bytes";
+import * as colilib from "./coli";
 import type { Spawn } from "./evt";
 import type { ExeTables } from "./exetab";
 import type { Model } from "./nl1";
@@ -466,6 +467,72 @@ export const SCRIPT_FLAG_EFFECT_MOTION = 0x1d7;
 export const SCRIPT_FLAG_EFFECT_SLOT_A = 0x13f5;
 export const SCRIPT_FLAG_EFFECT_A = { effect: 2, captureBone: 2 };
 export const SCRIPT_FLAG_EFFECT_B = { effect: 3, captureBone: 1 };
+
+/**
+ * A relocated collision pointer resolved to the `"<file>:<offset>"` key the
+ * bundle's `coli.blobs` is keyed by: `null` for the descriptor's `-1`, and
+ * `undefined` for a word that lands on no blob header of either file -- which
+ * is what a wrong reading looks like, and which the caller reports.
+ */
+function coliKey(word: number | null,
+                 sets: [colilib.ColiFile, colilib.ColiFile] | null):
+    string | null | undefined {
+  if (word === null) return undefined;
+  if (word === 0xffffffff) return null;
+  const hit = sets ? colilib.pointerToOffset(word, sets[0], sets[1]) : null;
+  return hit ? `${hit[0]}:${hit[1]}` : undefined;
+}
+
+/**
+ * `PropBuildScriptFlagEffect`'s `obj+0x14C` -- the dword at `tail+0x08`
+ * (`FUN_00472B30`), the mesh its `obj+0x34 |= 0x51` sends `ShotTestMesh`
+ * (`FUN_00404A00`) and the two moving-object collision passes to. Both
+ * shipped windows name one: `coli1.bin` at 5248 and 5712. The port of
+ * `props.py`'s `script_flag_effect_coli`.
+ */
+export function scriptFlagEffectColi(
+    rec: Spawn, sets: [colilib.ColiFile, colilib.ColiFile] | null):
+    string | null | undefined {
+  return coliKey(rec.param(0x08, "u32"), sets);
+}
+
+/**
+ * `PlaceStoryModeSwitch` (`FUN_00473A70`) -- class 0x44 selector 17 -- and
+ * every word of the tail at `placer+0x1390` it copies, at the width it copies
+ * it:
+ *
+ * ```
+ * +0x00 s8   -> obj+0x194   the g_pHingeCurvesXYZ curve its throw swings on
+ * +0x04 s16  -> obj+0x28C   the asset slot
+ * +0x08 u32  -> obj+0x14C   a relocated coli pointer; -1 is the sphere arm
+ * +0x0C s32  -> obj+0x1DC   the swing's sign: < 1 mirrors the curve
+ * +0x10 s8   -> obj+0x2A0   the script flag the route waits on
+ * +0x11 s8   -> obj+0x2A4   the script flag that removes it
+ * +0x14 f32 x3 -> obj+0x1A8..0x1B0   the draw's MatrixScale
+ * +0x20 s8 x4 -> obj+0x1FC/0x202/0x208/0x20E   the four keys, as s16
+ * ```
+ *
+ * `[proved]`, `0x00473A89`..`0x00473B7A`. `coli` is `tail+0x08` resolved to
+ * the `coli.blobs` key: `null` is the descriptor's `-1`, the arm that sets
+ * bit 31 and an 8.0 sphere; `undefined` is a pointer that lands on no blob,
+ * which the caller reports. Every one of the nine shipped switches resolves.
+ * Three carry a scale other than 1.0, so the matrix the mesh is traced
+ * through is not rigid. The port of `props.py`'s `story_switch_tail`.
+ */
+export function storySwitchTail(
+    rec: Spawn, sets: [colilib.ColiFile, colilib.ColiFile] | null) {
+  return {
+    hinge_curve: rec.param(0x00, "i8") ?? 0,
+    slot: rec.param(0x04, "i16") ?? 0,
+    coli: coliKey(rec.param(0x08, "u32"), sets),
+    swing_sign: rec.param(0x0c, "i32") ?? 0,
+    branch_flag: rec.param(0x10, "i8") ?? -1,
+    remove_flag: rec.param(0x11, "i8") ?? -1,
+    scale: [rec.param(0x14, "f32") ?? 0, rec.param(0x18, "f32") ?? 0,
+            rec.param(0x1c, "f32") ?? 0] as [number, number, number],
+    keys: [0, 1, 2, 3].map((k) => rec.param(0x20 + k, "i8") ?? -1),
+  };
+}
 /** `g_script_flag_effect_cues_a` -- 0x005961F0, and its neighbour. */
 export const SCRIPT_FLAG_EFFECT_CUES_A = 0x005961f0;
 export const SCRIPT_FLAG_EFFECT_CUES_B = 0x00596204;

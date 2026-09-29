@@ -1281,3 +1281,20 @@ with no clip playing -- never has its word loaded, and a test of anything the
 word triggers (the held item's give) sees nothing happen. **Give a hand-written
 fixture's block a condition that holds, or drop the one that cannot**, and
 check the word arrived (`sub.wait`) before asserting what it does.
+
+**L86 -- A shared routine specialised for the objects it has met is wrong for
+the next one, and the engine's call is the specification.**
+`ColiTraceSegmentInObjectSpace` took the world into an object's space with
+`R^T (p - t)`, under a note that the matrix "is a rotation and a translation
+and nothing else" -- true of the class-0x12 door and the stage-3 boat, the
+only objects that reached it. The exe calls `MatrixInvert` (`FUN_004A8D20`), a
+general cofactor inverse, and the story-mode switch's draw ends with a
+`MatrixScale` that three shipped switches set to something other than 1.0, so
+the transpose put the shot a factor of the scale away from the mesh -- and the
+same note had let the segment pass rank an object's hit on the object-space
+distance, where `ColiPushObjectHitCandidate` measures the world one. Nothing
+failed until an object with a scale arrived. **When a shared routine is
+transcribed, transcribe the primitive the engine calls, not a cheaper one the
+current callers' data happens to allow**; a property of the inputs is a claim
+about every future caller (`L57`'s "name the inputs that would make it
+matter"), and in a routine every class shares it is never checked again.

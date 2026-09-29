@@ -19,24 +19,24 @@ is in `tools/verify_all.py`, beside the command that runs it.
 
 | Directory | Lines | Files | Layer |
 |---|---:|---:|---|
-| `game/` | 108328 | 352 | engine |
-| `hod2lib/` | 19600 | 35 | engine |
-| `render/` | 15539 | 58 | render |
-| `app/` | 12661 | 44 | app |
+| `game/` | 108971 | 353 | engine |
+| `hod2lib/` | 19685 | 35 | engine |
+| `render/` | 15486 | 58 | render |
+| `app/` | 12664 | 44 | app |
 | `script/` | 4471 | 25 | engine |
 | `ui/` | 3773 | 27 | ui |
 | `core/` | 3533 | 13 | engine |
-| `bundle/` | 2875 | 11 | engine |
+| `bundle/` | 2895 | 11 | engine |
 | `audio/` | 1053 | 3 | render |
 | `hud/` | 526 | 1 | ui |
-| **total** | **172359** | **569** | |
+| **total** | **173057** | **570** | |
 
 The largest files, which is where the pressure to split next is:
 
 * `app/main.ts` — 3200
-* `game/globals.ts` — 3146
+* `game/globals.ts` — 3158
 * `game/actor.ts` — 2724
-* `hod2lib/bundle.ts` — 2464
+* `hod2lib/bundle.ts` — 2482
 * `hod2lib/exetab.ts` — 2370
 
 ## The port
@@ -44,17 +44,17 @@ The largest files, which is where the pressure to split next is:
 | | |
 |---|---|
 | Gameplay coverage | **233 of 299** annotated functions in the gameplay address ranges have a port (77%) |
-| Ported outside those ranges | 578 (opcodes, and the classes whose handlers sit elsewhere) |
-| Citations checked | 811 ported functions match `functions.tsv` under the same name |
+| Ported outside those ranges | 579 (opcodes, and the classes whose handlers sit elsewhere) |
+| Citations checked | 812 ported functions match `functions.tsv` under the same name |
 | Spawn classes | **31 of 42** read classes have a module, covering 1544 of 1619 placements |
-| Declared `[diverges]` | **134** — where the port knowingly departs from the exe, each with its reason on the spot |
+| Declared `[diverges]` | **135** — where the port knowingly departs from the exe, each with its reason on the spot |
 | `[open]` markers | **122** — questions the port and the exporter are honest about not having answered |
 
 Both markers are counted in **every** `.ts`/`.tsx` file under `web/src/`, one per occurrence, and only in comments — a word in code or in a string is not a marker (`verify_port.marker_lines`). Each departure and each question is written once, where it is made; everything that refers to it names it in words ([`PLAYER_ARCHITECTURE.md`](PLAYER_ARCHITECTURE.md), "One departure, one tag"). By layer, from the same table as the directories above:
 
 | Layer | Directories | `[diverges]` | `[open]` |
 |---|---|---:|---:|
-| engine | `core/`, `bundle/`, `script/`, `game/`, `hod2lib/` | 121 | 118 |
+| engine | `core/`, `bundle/`, `script/`, `game/`, `hod2lib/` | 122 | 118 |
 | render | `render/`, `audio/` | 12 | 4 |
 | ui | `hud/`, `ui/` | 0 | 0 |
 | app | `app/` | 1 | 0 |
@@ -66,8 +66,8 @@ The two declared seams between the UI and the player: **`PlayerCommands` has 54 
 | | |
 |---|---|
 | Named functions | 1444 in `ghidra/annotations/functions.tsv` |
-| Named globals | 742 in `ghidra/annotations/globals.tsv` |
-| Verifier scripts | 47 under `tools/`, run together by `verify_all.py` |
+| Named globals | 743 in `ghidra/annotations/globals.tsv` |
+| Verifier scripts | 48 under `tools/`, run together by `verify_all.py` |
 
 Phase and format status is a judgement about what counts as solved,
 and lives in [`PROGRESS.md`](PROGRESS.md).
@@ -133,6 +133,7 @@ nothing exits 3 and is never counted as green.
 | `continue` | that the last life lost with credits left puts CONTINUE? and its digit where the exe draws them, holds the script at its wait, and that START -- pressed on the corner button, the one START a phone has -- spends a credit and puts the player back in play | bundle |
 | `options` | that the menu's Options reaches the game's options screen in the real page, that its title and red highlighted row are on the HUD canvas, that the page's arrows and Enter drive the list -- lives and continues changed, the hidden rows stepped over, a held arrow running the sound test -- and that EXIT saves the profile in the browser and starts a game with five lives, four credits and the chosen crosshair on the reticle, and that a reload boots what was saved in place of the free-play default | bundle |
 | `crosshair` | that real pointer events reach HudDrawCrosshair as the exe's devices -- a mouse move is input mode 6 and the reticle is the Sight Graphic's sprite out of the bundle, sized to the frame and centred on the pointer; a touch is the light gun, 0xD, and the game draws no crosshair until the mouse moves again; and a phone, with no fine pointer, never shows one | bundle |
+| `story_switch` | that in the real page a story-mode switch opens its branch when it is shot through its mesh: stage 2 in Original Mode, a pull at the gateway door's own blob throws it, and the walker leaves block 1 for block 29, where the same address with no pull goes to block 2 -- the route five of the game's branch records hang on, which no shot could reach while the prop pool was outside the shot-test list | bundle |
 | `animals` | that the frog, the owl and the fish are placed from a real bundle and leave their opening state -- none of the three is a skinned enemy the character layer can build, and two have no character type at all | bundle |
 | `horde` | that each of the five class-0x40 hordes is built from a real bundle, walks in, dives and bites, and that shooting every member gives both counters back and lets the walker past the room's wait_enemies_alive -- the members are runtime children with no descriptor, so only the placer's own spawn can bring them into play | bundle |
 | `dives` | that a class-0x43 dive reaches the camera it is aimed at, strikes and comes round again -- the only check that drives a class against the stage's own `cam_play` rather than an eye the harness made up, which is what every other owl check does and why none of them could see a run-in parked five units under the eye | bundle |
@@ -148,6 +149,7 @@ nothing exits 3 and is never counted as green.
 | `verify_prop_pose` | that every class-0x41 generic prop is posed in the order its own update routine poses it -- read out of the EXE per type, matched to the field each `MatrixRotate*` is handed. `render/breakables.ts` composed one order for all fifty, and it was type 51's alone: twenty shipped spawns came out somewhere else, four of them by more than a degree and the worst by 19.65 | game-dir |
 | `verify_prop_tables` | that the tables class 0x41 types 38, 39, 40, 44, 50 and 66 build their objects from -- positions, angles, hull corners, slots, counts, scales -- are the EXE's own words, and class 0x28's route, length and pose tables with them: the port carries them as literals, and a mistyped row would put a church chair somewhere the engine does not, with nothing else to notice | game-dir |
 | `verify_flag_strips` | that the exporter reads class 0x12's descriptor tail at the offsets and widths `ScriptedPropInit12` reads it, quoted out of the EXE, that every class-0x12 spawn on the disc is placed with exactly those fields, and that every slot its strip can draw is in its bundle -- the check for stage 1's door, the wood the bin captor bursts out of, which the port built nothing for until the class had a module | game-dir |
+| `verify_prop_meshes` | that the story-mode switch and stage 1's window are still, in the EXE, shot through the blob at `obj+0x14C` and the matrix their draw stores at `obj+0x150`, that the exporter reads their tails where the builders do, and that every one on the disc is placed with its blob resolved and in its stage's `coli.blobs` -- the check for the five route branches a switch answers, none of which the port could shoot while the bundle carried a raw pointer | game-dir |
 | `verify_annotations` | that every annotated address is a real function in the EXE | game-dir |
 | `verify_branches` | that every value a branch trigger can write into `g_script_branch_var` names a route slot its own block actually fills -- the one check that ties the gameplay half of branching to the route tables | game-dir |
 | `verify_scene_exits` | that a terminal route record's `next[0]` is a live block of the *next* scene, and that a hole follows every one of them -- the only check that reads the handover from one stage to the next, and so the only thing that can say stage 3 and stage 4 have two entry points each | game-dir |
@@ -170,7 +172,7 @@ nothing exits 3 and is never counted as green.
 | `verify_geometry` | that every scenery part in a stage bundle holds every triangle its `pol/` models declare -- the only check that compares an export against the files it was made from rather than against another export | game-dir |
 | `baseline` | that the installed assets still hash to `manifest.csv` | game-dir |
 
-24 of them need the installed game and 25 need an exported
+25 of them need the installed game and 26 need an exported
 bundle. **That is a known hole, not a design:** a machine with
 neither cannot run the checks that compare two histories, and a
 bundle-free fixture is the open work that closes it.

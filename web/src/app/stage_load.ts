@@ -208,10 +208,8 @@ export async function loadStageInto(p: Player): Promise<void> {
   // Class 0x41's props are built at run time, so only the templates are
   // adopted here; the nodes follow `G.g_breakable_props`.
   p.breakables.adopt(p.scene3d.root);
-  p.chars.breakables = p.breakables;
-  // ...and the same two lines for the actors whose model is an asset slot.
-  // `chars` owns the ray; this layer owns the spheres `ShotTestSphere`
-  // measures against.
+  // The actors whose model is an asset slot: `chars` owns the ray; this layer
+  // owns the spheres `ShotTestSphere` measures against.
   p.slotModels.adopt(p.scene3d.root);
   p.chars.slotModels = p.slotModels;
   // ...and the canal water, which draws the stage's own tiles where it has

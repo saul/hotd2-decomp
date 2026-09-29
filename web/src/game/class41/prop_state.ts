@@ -389,7 +389,13 @@ export interface BreakableProp {
    * bridge placing the same prop twice.
    */
   at: number;
-  /** `obj+0x194` — which breakable group placed it. */
+  /**
+   * `obj+0x194` — which breakable group placed it.
+   *
+   * **The story-mode switch reads it as its hinge curve**: `PlaceStoryModeSwitch`
+   * copies the tail's first byte here and `StoryModeSwitchUpdate` indexes
+   * `g_pHingeCurvesXYZ` with it (`L3`). Check the family.
+   */
   group: number;          // +0x194
   /** `obj+0x290` — its index within that group, and its `supports` key. */
   member: number;         // +0x290
@@ -447,7 +453,11 @@ export interface BreakableProp {
    *
    * Only {@link PropFamily.DrawOnlyType54} has one, and `PlaceGenericProp`
    * case 0x36 seeds it `-0x400` against {@link BreakableProp.spin}'s `0x300`,
-   * so the drift tumbles on two axes at once. Zero for every other family.
+   * so the drift tumbles on two axes at once.
+   *
+   * **The story-mode switch reads it as the sign of its swing**, the tail's
+   * `+0x0C`: below 1, `StoryModeSwitchUpdate` mirrors the hinge curve's x and
+   * y (`L3`). Zero for every other family.
    */
   yawSpin: number;        // +0x1DC
   /**
@@ -470,7 +480,13 @@ export interface BreakableProp {
   topple: number;         // +0x1FE
   /** `obj+0x198` — which hull point it came to rest on. */
   contact: number;        // +0x198
-  /** `obj+0x1A8`/`+0x1AC`/`+0x1B0` — the seated origin the settle computes. */
+  /**
+   * `obj+0x1A8`/`+0x1AC`/`+0x1B0` — the seated origin the settle computes.
+   *
+   * Two families read them as a **scale** instead (`L3`): `PlaceTable50Props`'
+   * objects and the story-mode switch, whose draw is `MatrixScale` of the
+   * tail's `+0x14..0x1C` after its turns.
+   */
   restX: number;          // +0x1A8
   restY: number;          // +0x1AC
   restZ: number;          // +0x1B0
@@ -546,7 +562,11 @@ export interface BreakableProp {
    *
    * The first list's cursor is `obj+0x2A4`, which this struct already carries
    * as {@link BreakableProp.removeFlag}: check the family before reading
-   * either. Zero for every other family, which never touch this word.
+   * either.
+   *
+   * **The story-mode switch and type 56 read it as a hinge cursor** — the
+   * frame of `g_pHingeCurvesXYZ` their swing is on, counted to 60 (`L3`).
+   * Zero for every other family, which never touch this word.
    */
   cueCursorB: number;     // +0x2A8
   /** Which update function this object runs. See {@link PropFamily}. */
@@ -611,16 +631,24 @@ export interface BreakableProp {
   shotY: number;          // +0x74
   shotZ: number;          // +0x78
   /**
-   * Whether this prop is in `g_shot_test_list` (0x0059D8E8) this frame.
-   *
-   * [port-only] The engine has a list and a count; the port has a flag on the
-   * object, because its shot test walks the pool rather than a published
-   * array. Cleared for every prop at the top of the pool's frame and set again
-   * by whichever routine reaches its own `RegisterForShotTest`, which is what
-   * makes a prop that returned early — despawned, retired, mid-break —
-   * unshootable for exactly as long as the engine makes it.
+   * `obj+0x14C` — the collision mesh, as the `coli.blobs` key, or `null` for
+   * the engine's `-1`. Only the class-0x44 builders write one, and of the
+   * ported selectors only two: `PlaceStoryModeSwitch` and
+   * `PropBuildScriptFlagEffect`, from their descriptors' `+0x08`. With
+   * `obj+0x34` bit `0x10` it is what `ShotTestMesh` (`FUN_00404A00`) traces
+   * the shot against instead of a sphere, and with `0x40` as well the two
+   * moving-object collision passes in `coli.ts` trace it too.
    */
-  shotRegistered: boolean;
+  coliBlob: string | null;  // +0x14C
+  /**
+   * `obj+0x150` — the matrix {@link coliBlob} is traced through: what the
+   * routine's draw `MatrixStore`s, rebuilt on the identity rather than the
+   * view (see `RegisterForShotTest` in `combat/shot_test.ts`), in
+   * `Actor.coliMatrix`'s row-major 3x4. `null` until the routine's first
+   * draw. It carries the draw's scale where the routine has one -- the story
+   * switch's -- so it is not always rigid.
+   */
+  coliMatrix: number[] | null;  // +0x150
   /**
    * `obj+0x1AC` — which chain a `ChainSegmentUpdate` segment belongs to, and
    * `obj+0x1AD` its index 0..19 within it.
@@ -681,12 +709,12 @@ export interface BreakableProp {
    * twice.
    *
    * One port field for the engine offsets of the routines ported only as far
-   * as their branch arm — `obj+0x34` bit `0x40000000` for type 76,
-   * `obj+0x192` for the story switch, `obj+0x1B0` of a chain's **segment 0**
-   * for the chain — and `obj+0x1B9` for type 40. Types 14, 19, 25, 56, 69
-   * and 73 used to be here too; they are transcribed whole now and keep
-   * their latch in the word their routine does. Where the rest are ported,
-   * this splits the same way.
+   * as their branch arm — `obj+0x34` bit `0x40000000` for type 76 and
+   * `obj+0x1B0` of a chain's **segment 0** for the chain — and `obj+0x1B9`
+   * for type 40. Types 14, 19, 25, 56, 69 and 73 and the story-mode switch
+   * used to be here too; they are transcribed whole now and keep their latch
+   * in the word their routine does. Where the rest are ported, this splits
+   * the same way.
    */
   branchLatched: boolean;
   /**
@@ -780,9 +808,10 @@ export interface BreakableProp {
    */
   hitAim: { x: number; y: number } | null;
   /**
-   * `obj+0x192` for the two generic routines that keep a small state machine
-   * there: {@link PropFamily.Type13}'s drop (`Type13Phase`) and type 35's
-   * door rattle (`Type35Phase`).
+   * `obj+0x192` for the routines that keep a small state machine there:
+   * {@link PropFamily.Type13}'s drop (`Type13Phase`), type 35's door rattle
+   * (`Type35Phase`), and the story-mode switch's `0` standing / `1` thrown
+   * (`StoryModeSwitchPhase`).
    *
    * The fifth port field for that one engine word, and separate for the same
    * reason {@link BreakableProp.cuePhase} is (`L3`): each routine's `1` means
@@ -857,7 +886,8 @@ export function makeBreakableProp(id: number, group: number,
     hitPos: { x: 0, y: 0, z: 0 },
     hitRadius: 0,
     shotX: 0, shotY: 0, shotZ: 0,
-    shotRegistered: false,
+    coliBlob: null,
+    coliMatrix: null,
     chainGroup: 0,
     chainIndex: 0,
     subKind: 0,

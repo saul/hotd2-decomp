@@ -67,7 +67,15 @@ export type ShotPick =
        */
       mesh?: { surface: number; normal: Vec3 };
     }
-  | { kind: "prop"; propId: number; point: Vec3 }
+  | {
+      kind: "prop"; propId: number; point: Vec3;
+      /**
+       * **A prop shot-tested against its own collision mesh** (`obj+0x34`
+       * bit `0x10`, `ShotTestMesh`): the quad's surface and normal, which
+       * `MarkActorShot` hands to `SpawnWorldImpact`. Absent for a sphere.
+       */
+      mesh?: { surface: number; normal: Vec3 };
+    }
   /**
    * One of `znjoe`'s released creatures — `G.g_body_creatures`, identified by
    * its `id`.

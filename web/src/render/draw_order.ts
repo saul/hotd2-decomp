@@ -307,16 +307,27 @@ function unfadedOf(m: Material): Material {
   return fadedFrom.get(m) ?? m;
 }
 
+/**
+ * A copy of `under` for a faded draw: the clone, with what `Material.copy`
+ * does not carry. Its program is `under`'s without `OPAQUE` once
+ * {@link applyForcedAlphaBlend} has run on it -- which the lighting's shader
+ * warm-up compiles ahead too (`Lighting.warm`).
+ */
+export function fadedCopy(under: Material): Material {
+  const c = under.clone();
+  // `Material.copy` carries neither, and the fog hook and the lighting
+  // twins' shaders both live in them (`render/fog.ts`).
+  c.onBeforeCompile = under.onBeforeCompile;
+  c.customProgramCacheKey = under.customProgramCacheKey;
+  c.userData.hod2BaseOpacity = under.opacity;
+  return c;
+}
+
 /** One unfaded material's clone, made once, at the fade's alpha. */
 function fadedClone(f: MeshFade, under: Material): Material {
   let c = f.clones.get(under);
   if (!c) {
-    c = under.clone();
-    // `Material.copy` carries neither, and the fog hook and the lighting
-    // twins' shaders both live in them (`render/fog.ts`).
-    c.onBeforeCompile = under.onBeforeCompile;
-    c.customProgramCacheKey = under.customProgramCacheKey;
-    c.userData.hod2BaseOpacity = under.opacity;
+    c = fadedCopy(under);
     fadedFrom.set(c, under);
     f.clones.set(under, c);
   }

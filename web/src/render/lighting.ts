@@ -110,8 +110,29 @@ import {
 import type { System } from "../core/system";
 import type { RenderContext } from "./context";
 import {
-  copyDrawState, setUnfadedMaterial, unfadedMaterial,
+  applyForcedAlphaBlend, copyDrawState, fadedCopy, setUnfadedMaterial, unfadedMaterial,
 } from "./draw_order";
+
+/**
+ * What of a mesh and its material goes into its twins' programs, as far as
+ * this layer's materials vary: the program three.js builds depends on these
+ * and not on which texture or colour. Generous rather than exact -- a kind
+ * split too finely costs a compile that hits the cache.
+ */
+function programKind(mesh: Mesh, m: Material): string {
+  const b = m as MeshBasicMaterial;
+  const g = mesh.geometry;
+  const colour = g?.attributes.color;
+  return [
+    (mesh as { isSkinnedMesh?: boolean }).isSkinnedMesh ? "skin" : "",
+    g?.morphAttributes && Object.keys(g.morphAttributes).length ? "morph" : "",
+    colour ? `col${colour.itemSize}` : "", g?.attributes.normal ? "n" : "",
+    m.type, b.map ? `map${b.map.colorSpace}` : "", b.alphaMap ? "amap" : "",
+    m.alphaTest > 0 ? "atest" : "", m.transparent ? "tr" : "", m.blending,
+    m.vertexColors ? "vc" : "", m.side, b.fog ? "fog" : "", m.premultipliedAlpha ? "pma" : "",
+    m.customProgramCacheKey(),
+  ].join("|");
+}
 
 /** 2*pi / 65536 — the constant both matrix rotators multiply by. */
 
@@ -308,6 +329,51 @@ export class SceneLighting implements System<RenderContext> {
    */
   beforeRender(): void {
     if (this.mode === "scene") this.applyMaterials(true);
+  }
+
+  /**
+   * Compile, now, both twins every kind of drawable can be given -- the
+   * primary Lambert and the block-1 one -- so neither is compiled on the
+   * frame a mesh first needs it.
+   *
+   * The twins are made lazily, as meshes come into view, and the block-1
+   * twin carries its own shader (`secondarylit`): the stage's warm-up never
+   * saw one, and every character first met in a block-1 region compiled one
+   * or two programs as it appeared -- stage 1's boss at the start, a civilian
+   * and the partner half a minute in. A program depends on the material's
+   * kind and the mesh's (skinned, vertex colours, sides, alpha), not on the
+   * texture, so one mesh of each kind stands for all of them: a few dozen
+   * compiles, where twins for every one of a stage's five thousand materials
+   * would be memory a phone does not have.
+   *
+   * Each twin faded too, as `render/draw_order.ts` draws a character fading
+   * in or out: its own blended copy, which three.js compiles without
+   * `OPAQUE`. The copies are dropped here, and their programs stay, being
+   * pinned (`render/program_pins.ts`) -- or, never disposed, simply still in
+   * use as far as three.js can tell.
+   */
+  warm(drawables: readonly Object3D[], compile: (o: Object3D) => void): void {
+    if (this.mode !== "scene") return;
+    const seen = new Set<string>();
+    for (const o of drawables) {
+      const mesh = o as Mesh;
+      if (!mesh.isMesh || !mesh.material || Array.isArray(mesh.material)) continue;
+      const base = this.baseOf(unfadedMaterial(mesh) as Material);
+      if (base.userData?.gunLit) continue;
+      const kind = programKind(mesh, base);
+      if (seen.has(kind)) continue;
+      seen.add(kind);
+      const was = mesh.material;
+      for (const twin of [this.twinOf(base), this.secondaryTwinOf(base)]) {
+        mesh.material = twin;
+        compile(mesh);
+        const faded = fadedCopy(twin);
+        applyForcedAlphaBlend(faded, 0.5, twin.opacity);
+        mesh.material = faded;
+        compile(mesh);
+      }
+      mesh.material = was;
+    }
   }
 
   /** A layer that clones its own meshes outside the stage root. */

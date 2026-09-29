@@ -42,6 +42,13 @@ export type Visibility = "region" | "all";
 export class StageScene {
   readonly root = new Group();
   readonly models: ModelInfo[] = [];
+  /**
+   * Everything drawable the glTF held when it was parsed. The layers take
+   * their templates out of the tree -- a character, an effect, a prop is
+   * copied from its template when it spawns -- and a shader warm-up that
+   * walked only the tree missed every one of them (`Player.warmShaders`).
+   */
+  readonly drawables: Object3D[] = [];
   readonly bounds = new Box3();
   readonly boundingSphere = new Sphere();
 
@@ -87,6 +94,8 @@ export class StageScene {
     this.root.add(scene);
 
     scene.traverse((node) => {
+      const d = node as Partial<Mesh> & { isPoints?: boolean; isLine?: boolean; isSprite?: boolean };
+      if (d.isMesh || d.isPoints || d.isLine || d.isSprite) this.drawables.push(node);
       const extras = (node.userData ?? {}) as Record<string, unknown>;
       if (!("hod2_regions" in extras)) return;
       const regions = (extras.hod2_regions as number[]) ?? [];

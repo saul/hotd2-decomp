@@ -4704,5 +4704,29 @@ console.log("\na skinned part's joints stay current under a hidden node:");
         `${yaw0} -> ${G.g_camera_block_yaw_bams}`);
 }
 
+// A shader program, once compiled, stays: a material disposed after an
+// effect must not take the program with it, or the next effect compiles it
+// again mid-play (`render/program_pins.ts`).
+console.log("\nShader programs are kept:\n");
+{
+  const { ProgramPins } = await import("../src/render/program_pins");
+  const programs: { usedTimes: number }[] = [{ usedTimes: 1 }, { usedTimes: 2 }];
+  const renderer = { info: { programs } } as never;
+  const pins = new ProgramPins();
+  pins.pin(renderer);
+  pins.pin(renderer);
+  check("each program gets one more user, once however often it is asked",
+        programs[0].usedTimes === 2 && programs[1].usedTimes === 3,
+        JSON.stringify(programs));
+  programs.push({ usedTimes: 1 });
+  pins.pin(renderer);
+  check("...and a program compiled later gets its one too",
+        programs[2].usedTimes === 2 && programs[0].usedTimes === 2, JSON.stringify(programs));
+  // What three.js does when the last material using a program is disposed.
+  const release = (p: { usedTimes: number }) => --p.usedTimes === 0;
+  check("...so the material that compiled it can go without the program going",
+        !release(programs[2]), JSON.stringify(programs[2]));
+}
+
 console.log(failures ? `\n${failures} failed` : "\nall passed");
 process.exit(failures ? 1 : 0);

@@ -6917,6 +6917,39 @@ on moving `cam_frame` to `+0x0E`). In the page at
 doorway is boarded from the spawn (camera frame 640) on, the boards burst on
 the frame flag 34 rises, and 54 frames later they are gone.
 
+## The end of a stage: the result card, its figures and the life bonus
+
+Stages 1..4 end on a 420-frame flight through a part of the level, seen
+through the window of a framed card (`docs/re/stage-end.md`). All of it is
+ported now, where it was the card's lifetime and nothing else:
+
+* **The figures** -- one per civilian rescued in the scene, of the rescued
+  civilian's own type, at the scene's `g_result_figure_records` places, on
+  their clips (`ResultCardFigureInit`/`Update`/`DrawNode`); with none rescued,
+  the scene's own list, dead on the ground. Drawn from one hidden template row
+  per type, cloned per figure (`render/characters.ts`).
+* **The rescue record** both writers keep -- `g_civilians_rescued_total`,
+  `g_civilians_rescued_by_scene` and `g_rescued_char_types` (`game/rescue.ts`),
+  which is what the card reads.
+* **The life bonus**: `g_result_life_bonus[scene][min(rescues, 7)]` added to
+  both players' lives on the card's frame 302, capped at `g_max_lives` or, in
+  Original Mode, `g_original_life_cap`; figure 0 holds `common.bin[199]` up
+  from camera frame 260.
+* **The card**: the `scr_result` frame (deep screen sprites at depth 1.1), and
+  `result.bin` glyphs in camera space -- RESCUED counted up, LIFE BONUS, each
+  in-play player's SCORE and, past twenty shots, ACCURACY
+  (`render/view_slots.ts`).
+* **The score it shows includes the accuracy bonus**: opcodes `0x2B`
+  (`EvtOpAwardAccuracyBonus2B`) and `0x2F` (`EvtOpSuppressAccuracyStats2F`) are
+  ported, `g_player_shot_count` is counted at the pull under its suppression
+  guard (it used to be `g_nPlayerFired`, which is a flag), and `ResolveHit`
+  counts its hits.
+* Class 0x62 kills itself on its first frame instead of standing in the pool.
+
+`web/tools/result_card.mjs` plays the result steps of stage 1 (five rescues,
+and none), stage 2 (seven) and stage 4 (three) and checks them from `G`; see
+its header.
+
 ## Every opcode, and what the player does with it
 
 > The status column is a copy. The original lives on `Walker.OPS` in
@@ -6984,12 +7017,12 @@ missed. Meanings and confidence marks live in
 | `28` | `region_load` | region | shown | preloads a region's assets; everything is already resident here |
 | `29` | `region_enter` | region | **done** | **switches the drawn region** — the core of the streaming model |
 | `2A` | `unused_2a` | unused | n/a | dispatch slots that map to the empty stub; no shipped file encodes one |
-| `2B` | `award_accuracy_bonus` | flow | shown | end-of-stage accuracy bonus |
+| `2B` | `award_accuracy_bonus` | flow | **done** | `EvtOpAwardAccuracyBonus2B`: each in-play player with at least 20 counted shots is paid `g_accuracy_bonus_table[(hits*100/shots)/10]` -- the bonus the result card's score then shows (`game/combat/accuracy.ts`) |
 | `2C` | `set_skippable_region` | flow | **done** | opens/closes the skippable window (`DAT_009A2D7C`); raises the Skip bar once the shutter's firing gate is also down, which is exactly when the game polls Start |
 | `0D` | `spawn_obj_unless_skip` | spawn | **done** | spawns, unless a skip is in progress — `FUN_00408B70` walks the list either way |
 | `2D` | `play_dialogue` | hud | **done** | **plays the voice and shows the subtitles** — the real script text, centred on a 384 baseline, advancing line by line on the game's countdown |
 | `2E` | `stop_voice_if_skipped` | audio | **done** | `PlaySoundId(0x80000002)`, the voice channel's stop, when a skip actually happened; inert otherwise, as in the game |
-| `2F` | `suppress_accuracy_stats` | flow | shown | suppresses the counters 0x2B grades |
+| `2F` | `suppress_accuracy_stats` | flow | **done** | `g_accuracy_stats_suppressed` = the operand: while it is up a pull counts no shot, so a boss fight's shots stay out of 0x2B's grade; the checkpoint opcode and the scene's end put it back to 0 |
 | `30` | `queue_event` | camera | **done** | pushes onto the action ring and nothing more; the actions run in `CameraActorTick`'s `EvtRunQueuedActions`, one at a time, behind whatever handler holds the slot (`game/camera/actions.ts`) — see the selector table below |
 | `31` | `goto_scene_state` | flow | **done** | the end-of-room instruction: enters scene state (1, minor) and stamps it, drops the camera mode, the override latch and the eye ease, parks the action slot and retires the `queue_event 0x21` whose driver never retires itself. (1,3)'s hook, `CameraFromViewAngles`, puts the gameplay eye fifteen down the view's own axis |
 | `32` | `goto_scene_state_when_alive` | flow | done | as `0x31`, minus two clears, behind a gate: while either player is in state 4, 5 or 6 (`g_player_state_handlers` `+0x10` is 0) with no lives, it re-runs every frame (`Walker.holdHere`). The nineteen sites are the boss rooms |

@@ -16,6 +16,7 @@ import { ActorFlag, MotionFlag, type Actor } from "../actor";
 import type { Rng } from "../../core/rng";
 import { ScoreAddForPlayer } from "../combat/score";
 import { G } from "../globals";
+import { RecordRescue } from "../rescue";
 import type { ClassFrame } from "../registry";
 import { NULL_HOST, type GameHost } from "../host";
 import { CivilianAddHeldItem, CivilianAddPickedItem, CivilianPickHeldItem }
@@ -314,6 +315,12 @@ function CivilianApplyWaitWord(obj: Actor, word: number,
     obj.flags |= ActorFlag.NoCameraTrack;
   }
   if (!(sub.wait & CivilianWait.Rescued)) return;
+
+  // **The rescue's bookkeeping** (`0x0048BA8C`..`0x0048BAC4`), before a
+  // point is paid: the run's total, this scene's count, and at the count
+  // *before* the increment the civilian's own character type (`model+0x60`)
+  // -- the list the result card stands its figures from.
+  RecordRescue(obj.charType);
 
   // **The rescue.** `sub+0x6C` is the player whose shot killed the last
   // captor, `-1` when the engine could not name one — and then both are paid.

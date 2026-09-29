@@ -193,6 +193,7 @@ export function ActorSetMotionBlended(obj: Actor, motion: number,
   }
   obj.motion = motion;
   obj.playTicks = start;                         // `track[2] = start`
+  obj.cursorStore = null;                        // ...over any store to it
   obj.rootFrame = -1;
 }
 

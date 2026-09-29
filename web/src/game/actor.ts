@@ -2159,6 +2159,23 @@ export interface ActorBase {
    */
   playTicks: number;
   /**
+   * `model+0x08` (`obj+0x19C`) where a store has put a value the sampler has
+   * not yet recomputed -- `null` when the cursor is what {@link playTicks}
+   * gives, which is every frame but one.
+   *
+   * The engine keeps two words: the counter at `model+0x00`, which the class
+   * steps, and the cursor at `model+0x08`, which `SkeletonAdvancePlayCursor`
+   * (`FUN_004111A0`) recomputes from it on every draw (`model[2] = model[0]
+   * % (play + 1)`, `0x004111DD`) unless the fade bit holds it. The port keeps
+   * one, {@link playTicks}, and derives the cursor from it. A store to the
+   * cursor alone -- `CivilianReapplyWaitCommand`'s ops 0x00 and 0x01
+   * (`FUN_0048B760`) -- therefore has nowhere to go but here: it reaches
+   * whatever reads the cursor before the next draw and nothing after it.
+   * Written through `ActorStorePlayCursor`; cleared by `ActorAdvanceMotion`
+   * (the next sample) and by `ActorSetMotionBlended` (`track[2] = start`).
+   */
+  cursorStore: number | null;
+  /**
    * The clip being faded *out* of, and how far into it.
    *
    * `ActorSetMotionBlended` (`FUN_004119A0`) takes a fade length as its fourth
@@ -2604,6 +2621,7 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     visible: false,
     motion: 0,
     playTicks: 0,
+    cursorStore: null,
     fadeFrom: null,
     fade: 0,
     fadeLen: 0,

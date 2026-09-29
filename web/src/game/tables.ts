@@ -205,6 +205,11 @@ export function MotionOf(a: Actor, id: number): BakedMotion | null {
  * That is what left the civilians alive under their captors: stage 1's four
  * maul cues are 24, 30, 62 and 64 against clips of 41, 26, 43 and 46 frames,
  * so only the 24 ever fired.
+ *
+ * This is the cursor as the draw samples it from the counter. A store to the
+ * cursor alone since the last sample (`Actor.cursorStore`) is not in it: the
+ * one reader that must see such a store, `CivilianStepScript`'s `0x200`
+ * test, reads it first.
  */
 export function MotionPlayFrame(a: Actor): number {
   const m = MotionOf(a, a.motion);

@@ -25423,3 +25423,86 @@ start, continue and game over; the continue screen's credit line) failed;
 they set `OPTION_CREDITS_FACTORY` now, which is why the setting had to be a
 field and not a constant. New checks: the port starts in free play, and
 twenty continues all succeed and take nothing.
+
+## Stage 1's first civilian spun: the reapply walk stores the cursor, not the clock
+
+Reported: "the first civilian that says 'I don't wanna die' in stage 1 seems
+to spin in place when they say it", a regression.
+
+**Which civilian.** Not settled by ear -- nothing here can hear a WAV -- so
+every stage-1 civilian was measured instead. The fountain man `0x1828`
+(block 1 step 7, stream 1: `0x8300000`, 399 for ever; on-shot stream 0) is
+the one that turned: after 378 plays once and holds, the `0x8200` block
+changes to 377, and in the page (`?stage=1&block=1&step=7&op=0&drive=1&seed=1`,
+captors shot) `yaw` went 20480 -> 46825 in one frame and bone 1's drawn
+heading jumped 28120 BAMS, then swung back through the ten-frame fade. The
+pre-merge tree (1603f7f5, `git archive`d, same bundle) holds his heading at
+22018 across the same change. The session log's older note calls 399 "the I
+don't wanna die"; voice 5 (`COM\56_1_Y_W`) is queued by `0x18A8` (block 1
+step 9) and by the bin girl `0x3C38`, and neither of those turned `yaw` at
+all -- but both popped at fade starts from the same cause, so the fix is the
+same whichever the reporter meant. `[likely]` it is `0x1828`.
+
+**Cause.** `CivilianStepScript` (`FUN_0048B1E0`) resumes a block by running
+`CivilianReapplyWaitCommand` (`FUN_0048B760`) over it -- `0x0048B6C3` -- before
+`CivilianUpdate` hands the frame to `CivilianRunScript` (`0x0048AAB3`). The
+walk's op 0x00 is `MOV ECX, [0x007DD09C]; MOV dword ptr [ECX + 0x8], 0x0`
+(`0x0048B78E`/`0x0048B794`) and op 0x01's `MOV dword ptr [ECX + 0x8], EDX`
+(`0x0048B7BA`): `model+0x08`, the **cursor**. `SkeletonAdvancePlayCursor`
+(`FUN_004111A0`) recomputes it from the counter at `model+0x00` on every draw
+unless the fade bit holds it, and `CivilianApplyMotionPose` (`FUN_0048C310`)
+reads the draw records `model+0x7C`/`+0x10C` for the drawn heading and
+`ActorSetMotionBlended` snapshots them -- neither reads `model+0x08`. The one
+reader of the store is the step loop's own `0x200` test
+(`*(int *)(g_cur_actor_model + 8) != sub+0x16`); the loop arm reads the cursor
+after the draw (`0x0048AA30`), and nothing in `CivilianUpdate` after the step
+reads the model's `+0x08`. `[proved]`, and the walk's callers by an `E8` byte
+scan: `0x0048B699` and `0x0048B6C3`, both the step's.
+
+The port's walk wrote `obj.playTicks = 0` -- its one clock, the counter -- so
+the outgoing clip was on frame 0 when the pose routine read "the drawn pose"
+through `MotionPlayFrame`. While the clip change was a cut (before 16ba4b4e)
+that cost nothing visible but restarting a re-stated clip; 16ba4b4e's
+`CivilianApplyMotionPose` turns by the drawn heading under `0x18000` and fades
+from the drawn pose, and both came from frame 0: 378's first frame faces
+145 degrees from its last. Regressing change: `class10/pose.ts`'s
+`const drawn = MotionFrameOf(obj, obj.motion, MotionPlayFrame(obj) >> 1)` and
+the blend's `ActorStartFade(obj, obj.motion, obj.playTicks, ...)`, reading a
+clock the walk had reset one call earlier (the reset itself predates it).
+
+**Fix.** `ActorStorePlayCursor` (`game/motion.ts`): while a fade holds the
+cursor the port's held clock *is* the cursor, so the store goes there; else it
+waits in `Actor.cursorStore`, which the `0x200` test reads first and
+`ActorAdvanceMotion` (the next sample) and `ActorSetMotionBlended`
+(`track[2] = start`) clear. It is L79's shape once more -- one port field for
+two engine words, and a writer of the one the port did not have.
+
+**Numbers.** Fountain man, in the page: mean |dyaw| 51.4 -> 0.0 BAMS a frame
+over 513 frames; the step at the 377 change 28120 -> 0. `0x18A8`: largest
+one-frame drawn step 6072 (the fade into 588 starting from 587's first frame)
+-> 2357 (the clip's own). Bin girl, block 6: the climb-off's fade start popped
+13935 BAMS -> 0; her `0x148100` turn into 373 read 669's first frame, 8143,
+where the drawn cursor gives 6875. Headless over all 53 civilians (the
+civilians harness's run, 30 s): 22 of 32 checked clip changes faded from
+their clip's first frame -> 0, which the harness now fails on.
+
+**Wrong turns.** The first probe measured `obj.yaw` at 5-frame steps from
+`step=8`, where the captor mauls the man before path 39 ever reaches the
+cue that moves his dying script on -- so it saw a constant yaw and moved on.
+Then 0x18A8 and the bin girl were chased as the likely speakers, and their
+`yaw` never spun either. What found it was reading bone 1's drawn heading off
+the renderer for every civilian at once, with the captors shot so the stage
+moves. A drawn-heading metric is ill-conditioned when a body lies flat -- the
+man's 377 shows a 12498 one-frame "step" at cursor 188 on both trees, which
+is the clip -- so the verdict rests on `yaw` and on the pre-merge tree.
+
+**Left open.** Two divergences seen on the way, in the same two routines, not
+changed here: op 0x06 `SetTargetPoint` writes `sub+0x44` and the point but not
+`sub+0x40` (`puVar9[0x11] = param_2[1]` in `CivilianRunScript`, and the walk
+the same), while the port sets `targetMode` -- and `CivilianUpdate`'s turn
+step is gated on `+0x40` (`CMP [ECX+0x40], EBX` at `0x0048A970`), so the port
+turns a civilian toward an op-6 point the exe does not; and
+`CivilianStepScript`'s restore of the eight saved sub fields sits after its
+loop in the decompile, on every exit that reaches `0x0048B6D6`, where the port
+restores only when nothing resumed. And the port's "drawn" cursor is still a
+tick ahead of the engine's draw (L62), for every class.

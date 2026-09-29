@@ -108,6 +108,31 @@ state 35 replayed the burst -- the target blob's entry -- and bounced back to
 "class 0x10's clip change" and "the bin captor's walk" in `port.test.ts`, and
 `tools/verify_civilian_scripts.py`'s pose check.
 
+**...and that port made stage 1's first civilian spin.** The fountain man
+(`0x1828`, block 1, stream 1's on-shot stream 0) plays 378 once, holds its
+last frame, and changes to 377 under `0x8200`. `CivilianStepScript` runs
+`CivilianReapplyWaitCommand` (`FUN_0048B760`) over that block before
+`CivilianRunScript` does, and the walk's op 0x00 is `MOV dword ptr [ECX +
+0x8], 0x0` (`0x0048B794`): the **cursor**, `model+0x08`, which the next draw
+recomputes from the counter at `model+0x00`. The port has one clock and wrote
+it, so 378 was back on frame 0 when `CivilianApplyMotionPose` -- which reads
+the draw records, never `model+0x08` -- took the drawn heading: `yaw` jumped
++26345 BAMS (145 degrees) in one frame, the body's drawn heading 28120, and the
+fade from 378's first frame swung it back over ten. Harmless while the clip
+change was a cut; 16ba4b4e made it turn and fade from the drawn pose. The
+store now reaches the port's clock only while a fade holds the cursor
+(`ActorStorePlayCursor`), and otherwise waits in `Actor.cursorStore` for its
+one reader, the step's own `0x200` test. Measured in the page from
+`?stage=1&block=1&step=7&op=0&drive=1&seed=1`, captors shot: the fountain
+man's yaw changes 0 in 513 frames (it was 51.4 BAMS a frame on average, one
+step of 26345), and the change to 377 draws no step at all. Every civilian's
+fade had the same fault -- 22 of the 32 clip changes the civilians harness
+checks started from frame 0 of their clip, now none; the bin girl's climb-off
+popped 77 degrees at the fade's start and her `0x8000` turn read 669's first
+frame for 8143 BAMS where her drawn cursor gives 6875. Tests: "class 0x10's
+resume stores the cursor, not the clock" (four assertions, three failing on
+the base) and the civilians harness's fade check.
+
 **And they have a size.** `EnemyZombieInit` writes two radii — `obj+0x124`
 from `g_actor_radius_by_char`, which is the shot sphere, and `obj+0x128` = 3.5,
 which is the **body** sphere every collision uses — and the port wrote neither.

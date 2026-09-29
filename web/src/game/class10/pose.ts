@@ -136,6 +136,10 @@ export function CivilianApplyMotionPose(obj: Actor, oldWord: number,
   // `MotionFrameAddress(type, model+0x20, start / 2)`: `CDQ; SUB EAX, EDX;
   // SAR EAX, 1` at `0x0048C325`, a signed halving toward zero.
   const f = MotionFrameOf(obj, motion, Math.trunc(start / 2));
+  // The draw records, `model+0x7C`/`+0x10C`, which this routine reads and
+  // never `model+0x08`: the cursor the last draw sampled from the counter.
+  // The reapply walk has just stored 0 (or op 0x01's start) into the cursor
+  // word, and that store -- `Actor.cursorStore` -- is not what was drawn.
   const drawn = MotionFrameOf(obj, obj.motion, MotionPlayFrame(obj) >> 1);
   let turn = 0;
   let root0: [number, number, number] | null = null;

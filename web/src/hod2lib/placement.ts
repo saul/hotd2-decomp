@@ -476,6 +476,12 @@ export class Placement {
    */
   class33_push: Record<string, unknown> | null = null;
   /**
+   * Class 0x33 **selector 5's** tail -- the one camera frame
+   * `ScriptedEffectAtCameraCue33` goes off on. Selector 5 only, and never set
+   * on the same placement as {@link class33} or {@link class33_push}.
+   */
+  class33_cue: Record<string, unknown> | null = null;
+  /**
    * The spawn's attachment list -- `obj+0x1170`, ids into
    * `g_actor_attachment_records`.
    *
@@ -564,6 +570,7 @@ export class Placement {
     if (this.class45) d.class45 = this.class45;
     if (this.class33) d.class33 = this.class33;
     if (this.class33_push) d.class33_push = this.class33_push;
+    if (this.class33_cue) d.class33_cue = this.class33_cue;
     if (this.attachments.length) d.attachments = [...this.attachments];
     return d;
   }

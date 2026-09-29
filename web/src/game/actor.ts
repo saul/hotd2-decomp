@@ -1800,6 +1800,16 @@ export interface ActorBase {
    */
   class33Push: CharacterPlacement["class33_push"];
   /**
+   * Class 0x33 **selector 5's** tail — one word, the camera frame
+   * `ScriptedEffectAtCameraCue33` (`FUN_00433B00`) goes off on.
+   *
+   * The third of the class's mutually exclusive blocks, on the same terms as
+   * {@link class33} and {@link class33Push}: the exporter keys it on the
+   * descriptor's `+0x22`, so its presence *is* the selector. See
+   * `class33/effect_cue.ts`.
+   */
+  class33Cue: CharacterPlacement["class33_cue"];
+  /**
    * `obj+0x124` — the radius `ShotTestSphere` (`FUN_00404630`) measures the
    * shot against, and the **whole** hit test for an actor with no skeleton.
    *
@@ -2601,6 +2611,7 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     class23: null,
     class33: null,
     class33Push: null,
+    class33Cue: null,
     class53: null,
     hitRadius: 0,
     entranceMotion: 0,

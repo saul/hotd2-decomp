@@ -17,12 +17,12 @@
  * any `Init` runs, and the class reads it as a selector. That is `L3`, and it
  * has already caught someone on this class.
  *
- * Only the three the port has read are members. The other nine are, by the
+ * Only the ones the port has read are members. The rest are, by the
  * dispatch's own jump table:
  *
  * ```
  * 3  -> 0x00433AC0    6  -> 0x00433E30    9  -> 0x00434100
- * 5  -> 0x00433B00    7  -> 0x00433E90   10  -> 0x00433F40
+ *                     7  -> 0x00433E90   10  -> 0x00433F40
  *                     8  -> 0x00433FE0   11  -> 0x00434260
  *                                        99  -> 0x00433160
  * ```
@@ -49,6 +49,13 @@ export enum ScriptedScenerySelector {
    * spawns, both stage 1's chairs.
    */
   Pushable = 4,
+  /**
+   * `ScriptedEffectAtCameraCue33` (`FUN_00433B00`) — a sprite effect that goes
+   * off when the camera reaches a frame, and nothing else: no draw, no sphere,
+   * no state. **Ported**, in `class33/effect_cue.ts`. One shipped spawn,
+   * stage 2's `0x12568`.
+   */
+  EffectAtCameraCue = 5,
 }
 
 /**

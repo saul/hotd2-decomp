@@ -69,6 +69,19 @@ export enum SpriteEffectKind {
    */
   DeflectedWeapon = 0x52,
   /**
+   * Slots `0xFD4..0x1031` at base scale 1.0 -- the `case 0x44:` arm of
+   * `SpawnSpriteEffectFromParams` -- which is **the whole of `eff_dokan.bin`**,
+   * entries 0..93, through `g_asset_slots`. `PlayImpactSoundForMaterial` gives
+   * it `COMMON\BOMB1_11.WAV`. Named for its file, which is the fact. What it
+   * depicts is `[open]`: the sound's name says a bomb, and drawn at stage 2's
+   * cue the ninety-four models are a tall pale spray rising at the canal's
+   * edge -- which is the render, not a reading. Class 0x33 throws it twice:
+   * `ScriptedCarrierUpdate33` on every slot but `0x1B0E`, and
+   * `ScriptedEffectAtCameraCue33` at its cue. Stage 2's script loads the file
+   * in blocks 9, 16 and 27 and frees it after each.
+   */
+  Dokan = 0x44,
+  /**
    * The Original Mode blast `MarkActorShot` (`FUN_00404DB0`) adds for weapon
    * kind 3. Seeds a random roll, and takes the 35-unit scale law.
    */

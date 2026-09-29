@@ -23,11 +23,11 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
   "approach.ts": "f2458fca4f4f943e775d2f73237eef7bf925b37dc38ba653bc89f80d3e800443",
   "arcscript.ts": "7caad5bd4d03804b253c16c8beabccf0f3f1787485e6bbe553d8f32e0395719f",
   "bams.ts": "f03b1290866a63ab2ae764d49bd15c57bd53c6b1a03794f7a0357e8dd842eb8f",
-  "bundle.ts": "a8d0d4c56dc73f91f562ad708547dc10d46eb7b9597d407c383cf6ee6c51c2b0",
+  "bundle.ts": "eeb5322430407ffaa868bf699ed4c1dd612f73d3212e7fb8d1e5f1f4978fa963",
   "bytes.ts": "59b2f363e98da56e88ada59458239032e40cad3a27342659e213d849c0967168",
   "cam.ts": "fe50200cb57c6578681a121766e7a5f4ed2425d91996169f83a82e8375dd63c3",
   "campaths.ts": "fbe28df3265d37b60a006e937a926eca8546609aa29cc5d80e7f1fc9afd639be",
-  "characters.ts": "681782aeee0d88648e0b95b8e6cfc6e3d88082f0a6a2dcb456796ca6f5e0dd1d",
+  "characters.ts": "32c3328eea892c5af67ce535cdbb41946a4d4310447f86f824d4bcd5bf0f30ba",
   "charbuild.ts": "4465ae2e3969285b810f71c36a544d777cd1dda0326abe24bc41730dfc766b65",
   "charmotion.ts": "ff8ee2ae3fe5c9f0c41c6c389b8c864660e99cf79e741d46f7041852a476b825",
   "class14.ts": "e143aab15d3067812e27d18bdd8b35b4b6fc45d6091948c7b8920bf4350a512a",
@@ -58,7 +58,7 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
   "lz.ts": "dddff2029ebd1cafc686d25b57da5e5ad8e22fdb2febf4af4988651d627aa80e",
   "mot.ts": "114f3ffa4e967dcdb69ea6919ec21b83d6ff9d1f6754d2a7f9e0fd1d3d1a3952",
   "nl1.ts": "317558dbf8e53791395e7dd24c85b18487576ee110545cc284b6ab65cdff82bd",
-  "placement.ts": "4e84e24ecd99b555774b396d0a9bb8f76602bb5f3ed68ade000b3b9a5d2c5b15",
+  "placement.ts": "d6039914c923c8c05537977136c72aaaeaacc87a96cd93f72ecfed9b569ec5b6",
   "png.ts": "326d5417b68475ad54b90e2a91a1f68ca3859d6ba044582928a13459b4afa50b",
   "props.ts": "7186ef2c37d5b64e8893cee5b51e1894f09972ce14c7f487f10e125e2e49bc30",
   "pyjson.ts": "693a387ed9d4ef67ee50cb7da5502d9dc8132871893eff3a0a0009047c5feb5a",
@@ -72,4 +72,4 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
 };
 
 /** One digest over {@link BUILDER_FILES}, in filename order. */
-export const BUILDER_HASH = "ee098091fd677673c04a1677ef221cb7ad745d4cd4d4227bc39b81fc66a9f04c";
+export const BUILDER_HASH = "74f10e8bc45300f32ffc66bd0f0d9ed539f5c015283c303ef93fe2ab336ea84d";

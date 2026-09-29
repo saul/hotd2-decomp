@@ -473,18 +473,19 @@ export function SpawnSlotActor(s: ScriptSpawn, rng: Rng): void {
     // `SpawnFromDescriptor` (`FUN_00408A20`) copies the raw `s16` at
     // `desc+0x22` into `obj+0x11C`, and `ScriptedSceneryDispatch33`
     // (`FUN_00432FF0`) switches on it. The bundle carries a tail block for the
-    // two sub-handlers this port has read and for no other -- `class33` for
-    // selector 1, `class33_push` for selector 4 -- and never both on one
-    // spawn, so a placement with neither is a sub-handler nothing here can run
-    // and gets no object. That is the same refusal `SpawnPropContainers` makes
-    // for an unnamed class-0x44 kind, rather than a default arm that would run
-    // the wrong handler.
+    // three sub-handlers this port has read and for no other -- `class33` for
+    // selector 1, `class33_push` for selector 4, `class33_cue` for selector 5
+    // -- and never two on one spawn, so a placement with none is a
+    // sub-handler nothing here can run and gets no object. That is the same
+    // refusal `SpawnPropContainers` makes for an unnamed class-0x44 kind,
+    // rather than a default arm that would run the wrong handler.
     if (s.class === SpawnClassValue.ScriptedScenery) {
-      if (!pl.class33 && !pl.class33_push) return;
+      if (!pl.class33 && !pl.class33_push && !pl.class33_cue) return;
       G.g_slot_actors_built.push(s.at);
       const a = ActorSpawn(s.at, SpawnClassValue.ScriptedScenery, -1,
                            `scenery ${pl.hp}`,
                            { class33: pl.class33, class33Push: pl.class33_push,
+                             class33Cue: pl.class33_cue,
                              hp: pl.hp, maxHp: pl.hp,
                              ...PlacementOrientation(pl),
                              // `ActorInitFlags` (`FUN_00408970`) makes the

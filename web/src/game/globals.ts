@@ -2035,9 +2035,9 @@ export const G = {
    *
    * Two kinds of reader: the cues that accept **either** block's frame --
    * class 0x30 states 18, 19 and 23, `ThrowerStateGrabPlayer`,
-   * `ScriptedCarrierUpdate33`, and two the port has not got,
-   * `ZombieStateArcScriptedEntrance`'s camera arm and class 0x33 selector 5
-   * (`ScriptedEffectAtCameraCue33`) -- read it by address; `PropUpdateType72`,
+   * `ScriptedCarrierUpdate33`, `ScriptedEffectAtCameraCue33` (class 0x33
+   * selector 5), and one the port has not got,
+   * `ZombieStateArcScriptedEntrance`'s camera arm -- read it by address; `PropUpdateType72`,
    * `WaterSurfaceUpdate` and `OwlUpdateAndResolveShot` read it as the
    * drawn block's frame, `CameraBlockPathFrame(G.g_camera_index)`, so under
    * scene state (1, 3) they read 0.

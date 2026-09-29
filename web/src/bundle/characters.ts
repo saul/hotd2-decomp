@@ -759,6 +759,20 @@ export interface CharacterPlacement {
     push_flag: number;
     despawn_flag: number;
   } | null;
+  /**
+   * Class 0x33 **selector 5's** tail — a sprite effect that goes off when the
+   * camera reaches a frame.
+   *
+   * `ScriptedEffectAtCameraCue33` (`FUN_00433B00`) reads one word of the
+   * descriptor, `tail+0x00`, and compares it with `g_cam_path_frame` and
+   * `g_cam_path_frame_2`; that word is `cue`. The third of the class's
+   * mutually exclusive blocks, beside {@link class33} and
+   * {@link class33_push}, and the port takes its presence as the selector the
+   * same way.
+   */
+  class33_cue?: {
+    cue: number;
+  } | null;
 }
 
 /** The directional death set — see docs/formats/combat.md. */

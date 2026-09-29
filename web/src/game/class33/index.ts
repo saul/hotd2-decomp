@@ -9,12 +9,15 @@
  * update and never runs again. See {@link ScriptedScenerySelector} for the
  * jump table.
  *
- * **Two of the twelve are ported.** Selector 4 is the pushable scenery in
- * `class33/pushable.ts` — stage 1's two chairs. Selector 1 is here: the object
- * stage 5 block 2's room is held by, and stage 2's two riders leave on:
+ * **Three of the twelve are ported.** Selector 4 is the pushable scenery in
+ * `class33/pushable.ts` — stage 1's two chairs. Selector 5 is the sprite
+ * effect stage 2 throws at a camera frame, in `class33/effect_cue.ts`.
+ * Selector 1 is here: the object stage 5 block 2's room is held by, and stage
+ * 2's two riders leave on:
  *
  * ```
- * ScriptedSceneryDispatch33   FUN_00432FF0   the switch, and g_carrier_object
+ * ScriptedSceneryDispatch33   FUN_00432FF0   the switch, g_carrier_object, the
+ *                                            hit slot every arm claims
  * ScriptedCarrierUpdate33     FUN_004331D0   the two bits, the effect, the exit
  * ScriptedCarrierStepPath33   FUN_00433860   the ride along the op_ path
  * ```
@@ -56,13 +59,14 @@
  *
  * ## What is not ported, by name
  *
- * * **The other nine sub-handlers.** Selector 2's ten spawns already reach the
+ * * **The other sub-handlers.** Selector 2's ten spawns already reach the
  *   player through the bundle's `props`; the rest are unread and the bundle
- *   carries no tail for them, so they keep the nothing they had.
- * * `ActorClaimHitSlot` (`FUN_00409270`), which every arm of the dispatch
- *   ends with. `g_hit_slots` is not ported at all — `game/globals.ts` records
- *   the whole 14-slot table as absent, and one class is not the place to
- *   start it.
+ *   carries no tail for them, so the director builds no object for them and
+ *   they keep the nothing they had -- **including the hit slot**, which their
+ *   dispatch arms claim in the engine like every other arm's. So while one of
+ *   them would be alive, a skinned actor spawned after it can take a lower
+ *   `obj+0x3C` in the port than in the game, and that index is its cel phase
+ *   (`game/hit_slots.ts`).
  * * `RegisterForShotTest` (`FUN_00405160`), at `0x004334D0` in the tail of
  *   the draw. The carrier's sphere is `tail+0x08`, which is `0.1` on stage
  *   5's and `0.0` on stage 2's two, and `tail+0x04 != -1` puts stage 2's on
@@ -81,17 +85,20 @@ import { type Actor, ActorFlag, type ScriptedSceneryActor } from "../actor";
 import { ActorDespawn } from "../despawn";
 import { SpawnSpriteEffect } from "../effects/sprite";
 import { G } from "../globals";
+import { ActorClaimHitSlot } from "../hit_slots";
 import type { GameHost } from "../host";
 import {
   registerClass, type ActorDebug, type ClassFrame, type ClassHandler,
 } from "../registry";
 import { SpawnClass } from "../spawn_class";
 import { vec3 } from "../vec";
+import { ScriptedEffectAtCameraCue33 } from "./effect_cue";
 import { ScriptedPushableUpdate33, SCENERY_SKIP_COLLISION }
   from "./pushable";
 import { ScriptedScenerySelector } from "./state";
 
 export { ScriptedScenerySelector };
+export { ScriptedEffectAtCameraCue33 } from "./effect_cue";
 export { ScriptedPushableUpdate33 } from "./pushable";
 
 /**
@@ -153,19 +160,27 @@ const SLOT_CAR_X_BIAS = 5.0;
 /**
  * `ScriptedSceneryDispatch33` — `FUN_00432FF0`. Class 0x33's `Init`.
  *
- * The engine's switch installs one of twelve update pointers and every arm
- * then calls `ActorClaimHitSlot`. The port has one of the twelve, so this is
- * the switch with one arm and no default — an actor whose selector is not
- * {@link ScriptedScenerySelector.Carrier} keeps the nothing it had, which is
- * what {@link ScriptedSceneryUpdate33} spells out.
+ * The engine's switch installs one of twelve update pointers into `*obj`, and
+ * **every** arm then calls `ActorClaimHitSlot` (`FUN_00409270`): `PUSH EAX` /
+ * `CALL 0x00409270` closes each of them, `0x00433020` for selector 1 through
+ * `0x004330AC` for 11, and the default at `0x004330B9` -- which selector 99's
+ * arm falls into after installing `0x00433160`, and which an out-of-range
+ * selector jumps to directly, installing nothing. So the claim is not a
+ * choice between arms and is not written as one.
  *
- * `MOV [0x009a5c34], EAX` at `0x00433014` is inside the arm, so the carrier
- * publishes itself **here** as well as on every frame of its update: a state
- * that reads `g_carrier_object` on the same frame the object is made finds it.
+ * The install itself is {@link ScriptedSceneryUpdate33}'s test on the
+ * selector, because the port has one table entry per class.
+ *
+ * `MOV [0x009a5c34], EAX` at `0x00433014` is inside selector 1's arm, so the
+ * carrier publishes itself **here** as well as on every frame of its update:
+ * a state that reads `g_carrier_object` on the same frame the object is made
+ * finds it.
  */
 export function ScriptedSceneryDispatch33(obj: Actor): void {
-  if (obj.hp !== ScriptedScenerySelector.Carrier) return;
-  G.g_carrier_object = obj.at;
+  if (obj.hp === ScriptedScenerySelector.Carrier) {
+    G.g_carrier_object = obj.at;
+  }
+  ActorClaimHitSlot(obj);
 }
 
 /**
@@ -330,7 +345,9 @@ export function ScriptedCarrierUpdate33(obj: ScriptedSceneryActor,
  * [port-only] The engine chooses between the twelve sub-handlers once, in the
  * `Init`, by writing one of them to `*obj`. The port has one table entry per
  * class, so the choice is a test on the selector here — the same shape
- * `MouseUpdate` has, and for the same reason.
+ * `MouseUpdate` has, and for the same reason. Each arm is the pointer the
+ * dispatch's jump table installs for that selector: `0x004331D0` at
+ * `0x0043301A`, `0x00433B70` at `0x00433044`, `0x00433B00` at `0x00433052`.
  */
 export function ScriptedSceneryUpdate33(obj: Actor, f: ClassFrame): void {
   if (obj.cls !== SpawnClass.ScriptedScenery) return;
@@ -340,6 +357,10 @@ export function ScriptedSceneryUpdate33(obj: Actor, f: ClassFrame): void {
   }
   if (obj.hp === ScriptedScenerySelector.Pushable) {
     ScriptedPushableUpdate33(obj, f);
+    return;
+  }
+  if (obj.hp === ScriptedScenerySelector.EffectAtCameraCue) {
+    ScriptedEffectAtCameraCue33(obj, f);
   }
 }
 
@@ -365,6 +386,16 @@ function ScriptedSceneryDebug33(obj: Actor): ActorDebug {
         + ` · despawn flag ${t?.despawn_flag ?? -1}`,
       ],
       hot: obj.pushedBy >= 0,
+    };
+  }
+  if (obj.hp === ScriptedScenerySelector.EffectAtCameraCue) {
+    const cue = obj.class33Cue?.cue ?? -1;
+    return {
+      summary: `effect at camera frame ${cue}`,
+      detail: [`camera at ${G.g_cam_path_frame}`
+               + ` · kind 0x44 at (${obj.pos.x.toFixed(2)},`
+               + ` ${obj.pos.y.toFixed(2)}, ${obj.pos.z.toFixed(2)})`],
+      hot: false,
     };
   }
   if (obj.hp !== ScriptedScenerySelector.Carrier) {

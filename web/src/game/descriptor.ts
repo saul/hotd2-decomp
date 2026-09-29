@@ -106,6 +106,8 @@ export function DescriptorFromPlacement(p: CharacterPlacement | undefined):
     // sub-handler the port has: the exporter emits exactly one of the
     // two per spawn, so whichever arrives is the selector.
     class33Push: p?.class33_push ?? null,
+    // ...and selector 5's, the third reading: one word, a camera frame.
+    class33Cue: p?.class33_cue ?? null,
     // Class 0x14's, on the same terms: `Class14Init` (`FUN_00475E90`) reads
     // `tail+0x00` as a character type and `tail+0x01` as the state the boss
     // starts in, which are class 0x30's body condition and initial state.

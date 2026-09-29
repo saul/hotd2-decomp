@@ -1317,6 +1317,17 @@ export const EFFECT_SLOTS_BY_CLASS: Record<number, number[]> = {
   // `LifeGrantedMarkerUpdate` draws in camera space. See
   // `game/class10/life_marker.ts`.
   0x10: [0x1256, 0x1257],
+  // Class 0x33, the two sprite kinds its ported routines throw:
+  // `SpawnSpriteEffectFromParams`' `case 0x44:` run `0xFD4..0x1031`, all 94 of
+  // `eff_dokan.bin` (`ScriptedEffectAtCameraCue33`, `FUN_00433B00`, and
+  // `ScriptedCarrierUpdate33`, `FUN_004331D0`, on every slot but `0x1B0E`),
+  // and its `case 0x45:` run `0x174A..0x1785`, all 60 of `eff_shop.bin`
+  // (the carrier on slot `0x1B0E`). Stage 2's script loads `eff_dokan.bin` in
+  // the steps that spawn them, and stage 5's `eff_shop.bin`.
+  0x33: [
+    ...Array.from({ length: 0x1031 - 0xfd4 + 1 }, (_, i) => 0xfd4 + i),
+    ...Array.from({ length: 0x1785 - 0x174a + 1 }, (_, i) => 0x174a + i),
+  ],
 };
 
 /** {@link EFFECT_SLOTS_BY_CLASS} for the classes a stage spawns. */
@@ -1624,8 +1635,9 @@ export async function actorSlotEntry(
  * 0x5B, 0x5C, 0x5D — which live in `water_hamon`, `eff_dokan`, `eff_shop`,
  * `eff_2`, `eff_org5b` and `boss1q`, and which nothing on the shot path can
  * reach. Nor the splash, 0x61, and the dust, 0x46: those are `common.bin`
- * (307..336 and 25..39) and ride {@link EFFECT_SLOTS_BY_CLASS} with the class
- * whose routines spawn them. Kind 0x51 is the one exception a shot could reach — a
+ * (307..336 and 25..39). Each of these that a ported class throws rides
+ * {@link EFFECT_SLOTS_BY_CLASS} with that class -- 0x44 and 0x45 with class
+ * 0x33, 0x5B..0x5D with class 0x22. Kind 0x51 is the one exception a shot could reach — a
  * ricochet off character type 3 — and it is in `eff_2.bin`; it is carried, and
  * a bundle whose stage does not ship that file simply has no models for it.
  */

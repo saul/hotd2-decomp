@@ -39,9 +39,6 @@
  *   sends the shot to `ShotTestMesh` rather than `ShotTestSphere`
  *   (`combat/shot_test.ts`), and this class does not register. Both shipped
  *   spawns carry `-1`, and `0x8000` besides, so neither reaches that arm.
- * * **`ActorClaimHitSlot` (`FUN_00409270`)**, which every arm of the dispatch
- *   ends with. `g_hit_slots` is not ported at all; `game/globals.ts` records
- *   the whole 14-slot table as absent.
  * * **The draw.** `MatrixTranslate(obj+0x40..0x48)` / `RotZ(obj+0x6C)` /
  *   `RotY(obj+0x68)` / `RotX(obj+0x64)` / `AssetDrawSlot(obj+0x13F0)` is
  *   `render/slotmodels.ts`', the same arrangement class 0x52's mouse has.

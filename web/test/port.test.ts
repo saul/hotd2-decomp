@@ -29935,6 +29935,177 @@ console.log("\nclass 0x33 selector 4: the scenery an actor shoves aside:");
   }
 }
 
+// -- class 0x33 selector 5: the effect a camera frame sets off ---------------
+//
+// `ScriptedEffectAtCameraCue33` (`FUN_00433B00`): on the frame
+// `g_cam_path_frame` or `g_cam_path_frame_2` equals `tail+0x00`, throw one
+// kind-0x44 sprite at the object's own position and despawn. Nothing else --
+// no draw, no sphere, no state. The dispatch (`FUN_00432FF0`) installs it from
+// jump-table entry 4, `0x00433051`, and like every arm then calls
+// `ActorClaimHitSlot`.
+//
+// The one shipped spawn is stage 2's `0x12568`, block 27 step 1 op 19: cue
+// 340 at `(-367.08, -10.67, -1532.01)`. Before this the bundle carried no tail
+// block for selector 5 and the director built nothing for it -- `L83`'s shape
+// inside a class that has a module, so no audit of class 0x33's arms saw it.
+//
+// Driven through the front, as C8 above is: the placement the exporter emits,
+// `SpawnSlotActors`, then `GameUpdate` and nothing else. The sprite table is
+// `SpawnSpriteEffectFromParams`' own `case 0x44:` row, `0xFD4..0x1031` at 1.0
+// (`eff_dokan.bin` 0..93), and `PlayImpactSoundForMaterial`'s `BOMB1_11.WAV`.
+
+console.log("\nclass 0x33 selector 5: the effect a camera frame sets off:");
+{
+  const CUE_AT = 0x12568;
+  const CUE = 340;
+  const POS: [number, number, number] = [-367.08, -10.67, -1532.01];
+  const DOKAN_FIRST = 0xfd4;
+  const DOKAN_LAST = 0x1031;
+  const BOMB1 = 0x0b16a9;
+
+  const tables = (cue: number) => ({
+    ...CHARS,
+    combat: {
+      impact_sprite: { [String(SpriteEffectKind.Dokan)]:
+                         [DOKAN_FIRST, DOKAN_LAST, 1.0] },
+      impact_sprite_default: [0x0904, 0x0904, 0.1],
+      ricochet: { [String(SpriteEffectKind.Dokan)]:
+                    { id: BOMB1, file: "COMMON\\BOMB1_11.WAV" } },
+    },
+    placements: [{
+      at: CUE_AT, class: 0x33, char_type: -1, motion: null,
+      hp: ScriptedScenerySelector.EffectAtCameraCue, init_flags: 0,
+      yaw: 0, class33_cue: { cue },
+    }],
+  } as unknown as CharactersJson);
+  const reset = (cue = CUE) => {
+    ResetGameGlobals();
+    EnterPlay();
+    SetGameTables(tables(cue));
+    G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    G.g_scene_state_major = SCENE_MAJOR_PLAYING;
+    G.g_players_in_play = 1;
+  };
+  const build = (rng: Rng) => {
+    SpawnSlotActors([{ at: CUE_AT, class: SpawnClass.ScriptedScenery,
+                       pos: [...POS] as [number, number, number] }], rng);
+    return G.g_object_list.find((o) => o.at === CUE_AT);
+  };
+  const dokans = () => G.g_sprite_effects.filter(
+    (e) => e.kind === SpriteEffectKind.Dokan);
+
+  // -- E1. the wiring, and the claim every arm of the dispatch makes --------
+  {
+    reset();
+    const rng = new Rng(55);
+    const o = build(rng);
+    check("a placement carrying only `class33_cue` is spawned -- the gate "
+          + "takes the third block as well as the carrier's and the chair's",
+          !!o && o.cls === SpawnClass.ScriptedScenery
+          && o.hp === ScriptedScenerySelector.EffectAtCameraCue,
+          o ? `class ${o.cls} hp ${o.hp}` : "no actor");
+    if (!o) throw new Error("no selector-5 object");
+    const k = o.hitSlot;
+    check("...and its dispatch claims a hit slot, as `CALL 0x00409270` at "
+          + "`0x00433058` closes selector 5's arm",
+          k !== HIT_SLOT_NONE && G.g_hit_slots[k] === CUE_AT
+          && (o.flags38 & HIT_SLOT_CLAIMED) !== 0,
+          `slot ${k} holds ${G.g_hit_slots[k]}, flags38 0x${o.flags38.toString(16)}`);
+  }
+
+  // -- E2. the other two ported arms claim too ------------------------------
+  //
+  // The claim closes **every** arm -- `0x00433020` for the carrier and
+  // `0x0043304A` for the chair -- and the port used to make it for neither.
+  {
+    reset();
+    const carrier = ActorSpawn(0x12590, SpawnClass.ScriptedScenery, -1, "carrier",
+                               { class33: { slot: 0x1a35 } as Actor["class33"],
+                                 hp: ScriptedScenerySelector.Carrier,
+                                 maxHp: ScriptedScenerySelector.Carrier });
+    const chair = ActorSpawn(0x1a40, SpawnClass.ScriptedScenery, -1, "chair",
+                             { class33Push: { slot: 0x1064 } as Actor["class33Push"],
+                               hp: ScriptedScenerySelector.Pushable,
+                               maxHp: ScriptedScenerySelector.Pushable });
+    check("the carrier's and the chair's arms claim the first two free slots, "
+          + "in the order the objects were made",
+          carrier.hitSlot === 0 && chair.hitSlot === 1
+          && G.g_hit_slots[0] === 0x12590 && G.g_hit_slots[1] === 0x1a40,
+          `${carrier.hitSlot}/${chair.hitSlot}`);
+  }
+
+  // -- E3. one frame, by equality, and the effect it throws -----------------
+  {
+    reset();
+    const rng = new Rng(56);
+    const events = new Events();
+    const sounds: number[] = [];
+    events.on("sound.play", (e) => sounds.push(e.id));
+    const o = build(rng);
+    if (!o) throw new Error("no selector-5 object");
+    const k = o.hitSlot;
+
+    G.g_cam_path_frame = CUE - 1;
+    GameUpdate(1 / 60, NULL_HOST, rng, events);
+    G.g_cam_path_frame = CUE + 1;
+    GameUpdate(1 / 60, NULL_HOST, rng, events);
+    check("on 339 and on 341 nothing happens -- the compare at `0x00433B16` "
+          + "is an equality, so a frame either side is no frame at all",
+          !o.despawned && dokans().length === 0 && sounds.length === 0,
+          `despawned ${o.despawned}, ${dokans().length} effects`);
+
+    G.g_cam_path_frame = CUE;
+    GameUpdate(1 / 60, NULL_HOST, rng, events);
+    const fx = dokans();
+    const e = fx[0];
+    check("on 340 one kind-0x44 sprite goes off at the object's own position, "
+          + "facing (0, 0) -- `params = {obj+0x40..0x48, 0, 0, 0}`",
+          fx.length === 1 && !!e
+          && e.pos.x === POS[0] && e.pos.y === POS[1] && e.pos.z === POS[2]
+          && e.pitch === 0 && e.yaw === 0,
+          e ? `${fx.length} at (${e.pos.x}, ${e.pos.y}, ${e.pos.z}) `
+              + `facing (${e.pitch}, ${e.yaw})` : "none");
+    check("...and it is `eff_dokan.bin`'s run, `0xFD4..0x1031`, not the "
+          + "default arm's single `0x904`",
+          !!e && e.lastSlot === DOKAN_LAST
+          && e.slot >= DOKAN_FIRST && e.slot <= DOKAN_FIRST + 1,
+          e ? `0x${e.slot.toString(16)}..0x${e.lastSlot.toString(16)}` : "none");
+    check("...with the sprite's own `BOMB1_11.WAV` and no other sound",
+          sounds.length === 1 && sounds[0] === BOMB1,
+          sounds.map((s) => `0x${s.toString(16)}`).join(","));
+    check("...and the object despawns, giving its hit slot back",
+          o.despawned && G.g_hit_slots[k] === HIT_SLOT_NONE
+          && o.hitSlot === HIT_SLOT_NONE,
+          `despawned ${o.despawned}, slot ${k} holds ${G.g_hit_slots[k]}`);
+
+    GameUpdate(1 / 60, NULL_HOST, rng, events);
+    check("a second frame on 340 throws nothing more: the object is gone",
+          dokans().length === 1, String(dokans().length));
+  }
+
+  // -- E4. the second compare, block 2's frame, read as written --------------
+  //
+  // `CMP dword ptr [0x009a6458], EAX` at `0x00433B1A`. Block 2's frame is 0
+  // after the reset and nothing moves it, so a cue of 0 fires on whatever
+  // frame block 0 is at. No shipped spawn has one; this is the arm.
+  {
+    reset(0);
+    const rng = new Rng(57);
+    const o = build(rng);
+    if (!o) throw new Error("no selector-5 object");
+    G.g_cam_path_frame = 123;
+    GameUpdate(1 / 60, NULL_HOST, rng, new Events());
+    check("a cue of 0 goes off with block 0 at frame 123, because "
+          + "`g_cam_path_frame_2` is 0",
+          G.g_cam_path_frame_2 === 0 && o.despawned && dokans().length === 1,
+          `frame_2 ${G.g_cam_path_frame_2}, despawned ${o.despawned}`);
+  }
+
+  // Put the fixture back: everything after this expects `CHARS` with no
+  // placements and no combat table.
+  SetGameTables(CHARS);
+}
+
 // -- 30. the three flying and swimming enemies -------------------------------
 //
 // Class 0x11, 0x43 and 0x51, each of which had no module until now. Every

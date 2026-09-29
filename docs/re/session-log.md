@@ -25584,3 +25584,65 @@ from the port too; not the wall, and not chased here.
 after, at `?stage=1&block=6&step=1&op=0&drive=1&seed=1` with `0x3C7C` shot at
 frame 60: an open doorway before, boards after, bursting on the frame flag 34
 rises.
+
+## 2026-09-29 -- `ShotTestMesh`: the boards stop the shot
+
+`ProcessPlayerShots` (`FUN_00404570`) forks on the object's live `obj+0x34`
+bit `0x10` (`TEST byte [EAX+0x34], 0x10` at `0x004045A9`) into `ShotTestMesh`
+(`FUN_00404A00`), which the port skipped. Read from the disassembly: `obj+0x150`
+to `g_coli_dynamic_matrix` (`REP MOVSD`), `obj+0x14C` to the blob,
+`ShotBuildSegment` (`FUN_00404AD0`) traces origin + dir x 1000.0 (`[0x004C49C4]`
+= `00007a44`) far end first through `ColiTraceSegmentInObjectSpace`, no surface
+returns, the normal is turned by `RotZ(+0x6C) RotY(+0x68) RotX(+0x64)` on the
+identity (the angles, not the matrix), and `0x00404B50` -- named
+`ShotPushMeshObjectCandidate` -- writes `+0x2C = obj+0x34 | 0x40`, `+0x24 = obj`
+and jumps into `ShotPushColiHitCandidate`. `MarkActorShot` marks it whole and
+throws `SpawnWorldImpact`. `[proved]`. Ported in `combat/shot_test.ts` with
+`ShotBuildSegment` and `ShotPushColiHitCandidate` as functions of their own
+(`ShotTestBoneMesh` now pushes through the latter), reusing `coli.ts`'s
+`ColiTraceSegmentInObjectSpace` and `ColiSegmentVsMesh`; `ScriptedPropUpdate12`
+stores the door's `T * Rx * Rz * Ry [* S]` as `Actor.coliMatrix`
+(`ColiStoreObjectMatrix`, the layout seam). No exporter change: `coli1.bin:5144`
+was already in the bundle.
+
+**Survey.** Every store to `+0x14C` (instruction search and byte scan agree:
+19 register stores, 5 immediates), every `OR` of `0x50`/`0x51`, and the 95
+rel32 callers of `RegisterForShotTest` mapped to their routines. Mesh objects
+that register: class 0x12 (stage 1 only -- stages 2 and 5 carry `0x8000`),
+0x15 (stage 2, unported), 0x26's boat (not filed in the port), 0x33 selector 1
+(stage 2's two name a mesh; not filed), 0x44 selectors 0, 1-4, 6, 7, 12, 13
+and 17 (prop pool or no builder). All nine story switches name a volume, so
+none takes the sphere-at-the-origin arm. **The one the port now changes is
+stage 1's door.** Found: `RisingDoorUpdate` (0x44 selector 11) never calls
+`RegisterForShotTest` at all, so its `|= 0x51` reaches nothing -- the port's
+note called its missing shot test port-only; it is the engine's (rewritten,
+and the TSV row carries the scan).
+
+**Wrong turns.** Mapping the 95 callers to `functions.tsv` rows lumped
+`0x0047422F`, `0x00474760`, `0x004748B6` into `HingeUpdate` and `0x004757E0`,
+`0x004758C7` into `RisingDoorUpdate`: the TSV has no rows for the unfunctioned
+selector-3/6/7/12/13 updates between them, and nearest-row-below is not
+ownership. Reading each builder's `PUSH imm32` before `ActorAlloc` put them
+right, and that is what showed the rising door files nothing. The first test
+fixture put the captor's head sphere exactly 2 from the shot with radius 2 --
+`RayTestSphere`'s `<=` on a distance computed through `sin(pi)` is not exact,
+and one of the two rays missed; and the quarter-turn case found `T.coli`
+gone after `SetGameTables`. Both were the fixture, not the port.
+
+**Also found, not fixed.** `FireShotRequest` zeroes `g_head_combo_bonus` for
+every `ownsShotResult` class on a mark; `MarkActorShot` does not, so a pull on
+the boards now resets the combo where the engine would not (a chip was
+raised).
+
+**Proof.** `test:port` "ShotTestMesh: the boards stop the shot": through the
+boards the door takes it (whole, surface 56, on the plane, keyed nearer than
+the head), past the edge the captor's head does, the queued pull marks the
+door and nobody else, after flag 34 the shot reaches the head, and a door
+turned a quarter is hit on its turned plane with its normal turned; five fail
+with the old skip, one with the yaw's sign flipped. The page at
+`?stage=1&block=6&step=1&op=0&drive=1&seed=1`, frame 15 (6/1/9), a pull at the
+boards' middle, read after `advance(2)`: before, door unmarked, impact surface
+50 at (-675.2, -0.2, -549.9) -- the wall behind; after, door flags
+`0x11 -> 0x1B`, byte 1, impact surface 56 at (-668.3, -0.2, -546.9), no actor
+touched. (The captor carries `0x8000` in its order wait, so at that frame no
+actor stood behind the boards to be hit.)

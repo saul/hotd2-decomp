@@ -96,8 +96,12 @@ export const CHAIN_LINK_DROP = -1.5;
  *
  * * `!= -1` — `obj+0x34 |= 0x51`, so **bit 4 is set** and `ProcessPlayerShots`
  *   sends it to `ShotTestMesh` (`FUN_00404A00`), the volume test on
- *   `obj+0x14C`/`+0x150`. The port has no mesh test, so those are `[open]` and
- *   unshootable here.
+ *   `obj+0x14C`/`+0x150`. The port has that routine for an actor
+ *   (`combat/shot_test.ts`), but the prop pool files itself in its own flag,
+ *   not in `G.g_shot_test_list`, and carries neither the volume as a blob nor
+ *   a matrix, so these are unshootable here. **Every shipped switch names a
+ *   volume** -- all nine records in the arcade bundles -- so this is the arm
+ *   the game takes.
  * * `== -1` — bit 4 clear, radius 8.0, and the sphere centre is **still
  *   `(0, 0, 0)`** because nothing ever wrote it. `RayTestSphere`
  *   (`FUN_004062A0`) is a perpendicular-distance test with no divide, so a

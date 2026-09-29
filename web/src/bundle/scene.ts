@@ -292,8 +292,9 @@ export interface BreakablePlacement {
    * `story_switch` only — the descriptor's `+0x08`, which decides **how it is
    * shot**. `-1` sends it to `ShotTestSphere` with a radius of 8 and a centre
    * the routine never writes, so it answers any shot on screen; anything else
-   * sets `obj+0x34` bit 4 and sends it to `ShotTestMesh`, which the port has
-   * not got. See `game/class41/shot_test.ts`.
+   * sets `obj+0x34` bit 4 and sends it to `ShotTestMesh`, which the prop pool
+   * does not reach. Every shipped switch names one. See
+   * `game/class41/shot_test.ts`.
    */
   volume?: number;
   /**

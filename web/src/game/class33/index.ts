@@ -66,8 +66,9 @@
  * * `RegisterForShotTest` (`FUN_00405160`), at `0x004334D0` in the tail of
  *   the draw. The carrier's sphere is `tail+0x08`, which is `0.1` on stage
  *   5's and `0.0` on stage 2's two, and `tail+0x04 != -1` puts stage 2's on
- *   the **mesh** test (`obj+0x34 |= 0x50`), which the port has not got — see
- *   `game/class41/shot_test.ts`.
+ *   the **mesh** test (`obj+0x34 |= 0x50`), `ShotTestMesh` in
+ *   `combat/shot_test.ts`, which this class would reach by registering at
+ *   that site with its blob and its matrix on the actor.
  * * Everything from `0x00433463` to `0x0043382F`, which is drawing: the two
  *   22-slot sprite loops at `obj+0x1354`/`+0x1358`, the 45-degree spin at
  *   `obj+0x135C`, and the five sub-models slot `0x1B0E` carries. It is in

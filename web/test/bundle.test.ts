@@ -79,7 +79,7 @@ console.log("\nschema drift names the declaration files that moved");
   // that the right seven are covered, only that seven things are.
   //
   // Which files belong on the list is `schema.SOURCES`, and
-  // `verify_exporters.py` reads the directory and fails both ways — a listed
+  // `web/tools/repo/exporters.ts` reads the directory and fails both ways — a listed
   // file that grows runtime code, and a declaration file nobody listed. This
   // asserts the client compiled against the same set.
   const WANT = ["cameras.ts", "characters.ts", "manifest.ts", "scene.ts",

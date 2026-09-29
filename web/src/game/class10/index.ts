@@ -134,7 +134,7 @@ import { CivilianInit } from "./init";
 import { CivilianLeaveField, CivilianUpdate } from "./update";
 import type { CivilianState } from "./state";
 
-// The class as one name, for `port.test.ts` and for `class30/target.ts`, which
+// The class as one name, for `test/port/` and for `class30/target.ts`, which
 // reads one wait bit. A file that wants one routine should import that file --
 // `./ops` for the enums is the common case -- rather than the whole class.
 export * from "./ops";

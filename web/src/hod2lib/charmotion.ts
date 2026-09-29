@@ -176,7 +176,7 @@ export const BODY_CREATURE_HOST_CLIPS: Record<number, readonly number[]> = {
  *   that sets it is class 0x30**: stage 1's state-26 leapers, stage 3's two
  *   state-33 axe men, and twelve `ZombieStateCarryProp` spawns — which is the
  *   corroboration that the bit means *this actor has hold of something*.
- *   `tools/verify_death_clips.py` counts them, so this does not (`L16`).
+ *   `web/tools/checks/death_clips.ts` counts them, so this does not (`L16`).
  * * `0x3F8` — the landing clip `ZombieStateDeathFallAndBounce`
  *   (`FUN_00456DF0`) cuts to when the body hits the ground. It travels with
  *   `0x3F9` because `ZombieStateDeath6` (`FUN_00454D20`) reads that same bit
@@ -435,8 +435,9 @@ export function humanoidSkipTarget(raw: Uint8Array, off: number): number | null 
  * One walk, shared by the two things that need it: `bundle` emits the commands
  * and `characters` bakes the clips they name. It was two, and the second one
  * did not exist -- `op 2` and `op 3` name a motion the actor plays for the
- * rest of its program, and nothing added those to the bake list, so 118 of the
- * 263 (program, clip) pairs the six stages carry had no frames at all.
+ * rest of its program, and nothing added those to the bake list, so some of
+ * the 385 (program, clip) pairs the six stages' 137 programs carry had no
+ * frames at all.
  *
  * **`op 10` has two successors and only one of them is the next command.**
  * It is the engine's `if (g_active_player == mode)`, and the arm it skips to

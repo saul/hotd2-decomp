@@ -22,7 +22,7 @@ const ORDER: Phase[] = ["script", "game", "render", "hud"];
 /**
  * Timing each system's update, from outside.
  *
- * The engine reads no clock (`tools/verify_layers.py`: a clock cannot be
+ * The engine reads no clock (`web/tools/repo/layers.ts`: a clock cannot be
  * replayed from a snapshot), so the clock is the caller's: `app/perf.ts`
  * installs one of these while the perf meter is on, and the world only hands
  * it each system as it runs. Nothing the systems do depends on it, and with

@@ -18,7 +18,7 @@
  *
  * This drives every path through the poser well past the end of every clip and
  * asserts the arithmetic stays finite. It uses three.js, which is why it is
- * its own file rather than a case in `port.test.ts`: `Quaternion` and
+ * its own file rather than a case in `test/port/`: `Quaternion` and
  * `Object3D` are the units the poser works in, and swapping them for stubs
  * would test something else.
  *

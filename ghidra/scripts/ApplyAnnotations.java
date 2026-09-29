@@ -28,7 +28,7 @@
  * file.
  *
  * Without HOTD2_APPLY this is a report of what would change, and
- * tools/verify_ghidra_db.py asserts that report is empty: a database that
+ * web/tools/repo/ghidra_db.ts asserts that report is empty: a database that
  * says what the committed files say.
  *
  * @category HOTD2
@@ -95,7 +95,7 @@ public class ApplyAnnotations extends GhidraScript {
                 apply, fnNamed, fnCreated, fnSkipped, fnFailed,
                 gNamed, gSkipped, gFailed);
         println(summary);
-        // Its own line, in a fixed shape: verify_ghidra_db.py parses it.
+        // Its own line, in a fixed shape: web/tools/repo/ghidra_db.ts parses it.
         println(String.format(
                 "[hotd2] prototypes: apply=%b changed=%d same=%d kept=%d missing=%d"
                 + " failed=%d flags=%d",

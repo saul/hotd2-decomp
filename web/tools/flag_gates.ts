@@ -34,7 +34,7 @@
  *
  * That is printed as a work-list for all twelve bundles and asserted for the
  * one this pass was written for. The other half of that assertion lives in
- * `web/test/port.test.ts`: this says the shipped data puts the switch on the
+ * `web/test/port/`: this says the shipped data puts the switch on the
  * route, and that says the port's switch raises the flag when it is there.
  *
  * ## The captor pass
@@ -370,7 +370,7 @@ for (const suffix of ["", "_original"]) {
 // The route pass's own assertion. It is about the *shipped data*, not about
 // the port: it says that stage 3's block-2 gate really does depend on an
 // actor, and that the actor which raises its flag is placed on the same route.
-// `web/test/port.test.ts` is the other half — that the port's class-0x44
+// `web/test/port/` is the other half — that the port's class-0x44
 // selector 17 raises `g_script_flags[0x15]` when it stands there.
 for (const suffix of ["", "_original"]) {
   const name = `${STAGE_WITH_FLAG_21_GATE}${suffix}`;

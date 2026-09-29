@@ -1,8 +1,9 @@
 # `cam/` camera and object paths
 
-**Status:** solved. All 24 files parse at **100.0000 % byte coverage** — every
+**Status:** solved. All 23 files parse at **100.0000 % byte coverage** — every
 byte is claimed by exactly one of {offset table, curve, path descriptor}.
-Implemented in [`web/src/hod2lib/cam.ts`](../../web/src/hod2lib/cam.ts).
+Implemented in [`web/src/hod2lib/cam.ts`](../../web/src/hod2lib/cam.ts);
+`web/tools/checks/corpus.ts` holds the coverage.
 
 A `cam/` file is a pool of independent **scalar cubic-Hermite animation
 curves**, plus one small descriptor per path naming the curve that drives each
@@ -20,7 +21,7 @@ channels are not interleaved, they are separate curves.
 The terminator makes the file self-describing: `n` can be recovered without
 reference to `Hod2.exe`. It agrees with the EXE's per-file count table
 (`0x004C476C`, **`u16` stride** — see the warning under *Binding*) for all
-24 files.
+23 files, which `web/tools/checks/corpus.ts` asserts.
 
 Curve indices inside a descriptor are **dword indices relative to `base`**:
 
@@ -356,7 +357,7 @@ two-player arm (`0x00453DD1`), `ZombieStateTargetMotionScript`,
 `...LeapFromSide`, `...ScriptedBreak`), the owl's two and the bats' wobble.
 `Boss3BodyUpdate` and `Boss3PathEffectUpdate` read block 0's by address and
 still do. Under scene state (1, 3) the two differ by whatever block 0's own
-angles say against its look-at: the test in `port.test.ts` ("which eye")
+angles say against its look-at: the test in `test/port/` ("which eye")
 puts block 0 a quarter turn off, and a body facing the drawn camera falls
 back rather than sideways.
 
@@ -410,9 +411,10 @@ neither moves; stage 2's sub-type-0 owl is in the pool while (1, 3) plays path
 
 ## Timebase
 
-Times are **frame numbers at 60 Hz**. 99.68 % of the 44,750 real keyframe times
-sit within 0.01 of an integer; the residue is f32 accumulation error in whatever
-tool exported them, not a finer subdivision. The longest curve runs to frame
+Times are **frame numbers at 60 Hz**. 99.68 % of the 44,800 real keyframe times
+sit within 0.01 of an integer (`web/tools/checks/corpus.ts` holds both
+figures); the residue is f32 accumulation error in whatever tool exported them,
+not a finer subdivision. The longest curve runs to frame
 3600 — exactly 60 seconds.
 
 Path durations run from 55 frames (0.9 s) to 1810 frames (30 s).
@@ -591,8 +593,9 @@ The channels really are BAMS, not radians: over all `op_` files they span
 ### Binding: a slot constant in the object's draw routine
 
 An object names its route by the **global** path slot, the same index space the
-cameras use. `CamEvalObjectPath6` has 48 call sites in 31 functions; some pass
-a slot from the object, others a literal:
+cameras use. `CamEvalObjectPath6` has 52 call sites (every `E8` in `.text`
+that targets `0x004042D0`); some pass a slot from the object, others a
+literal:
 
 | Call site | Slot | Resolves to |
 |---|---|---|
@@ -603,7 +606,8 @@ a slot from the object, others a literal:
 | `0x00426BA3` | `0x185` | `op_st6` local 3 (class 45, game mode 3 only) |
 | `0x0047F715` | `0x180` | `op_st5` local 6 (class 50) |
 
-**[measured]** every one lands in an `op_` file and none in a `cp_` one.
+**[measured]** every one lands in an `op_` file and none in a `cp_` one;
+`web/tools/checks/objects.ts` holds the table.
 
 ### Worked example — the stage-1 jeep
 
@@ -661,7 +665,9 @@ The transforms and slot ids are `PUSH imm32` in the instruction stream
 distinct functions call `AssetDrawSlot`**, and the engine's only table-driven
 draw path is `RegionDrawResidentSet` for static scenery. NL1 has no node
 hierarchy either. So a rig exists only as instructions, and each one has to be
-read by hand — 31 functions call `CamEvalObjectPath6`; one is transcribed.
+read by hand — `CamEvalObjectPath6` has 52 call sites, and `RIGS`
+(`web/src/hod2lib/rigs_data.ts`) holds 12 transcribed rigs, whose gates and
+routes `web/tools/checks/objects.ts` holds to the exe's cam tables.
 
 What *is* data is the play length: `0x00576D38` holds one dword per global path
 slot saying how many frames the game runs that path for, and the draw routines

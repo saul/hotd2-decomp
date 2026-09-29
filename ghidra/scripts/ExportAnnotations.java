@@ -21,7 +21,7 @@
  *     headers in the body ("# --- combat: shots, damage, ..."); every one of
  *     them was destroyed on export.
  *  3. **It dropped what the database did not have.** A row added with
- *     tools/annotate.py and not yet applied simply vanished -- and globals
+ *     npm run annotate and not yet applied simply vanished -- and globals
  *     were written as `address, name` with no third column at all, so a
  *     single export deleted the comment on 195 of the 282 global rows.
  *
@@ -173,7 +173,7 @@ public class ExportAnnotations extends GhidraScript {
                     Entry e = db.get(addr);
                     if (e == null) {
                         // In the file, not in the database: a row added with
-                        // tools/annotate.py and not yet applied, or a symbol
+                        // npm run annotate and not yet applied, or a symbol
                         // deleted in the GUI. Either way the committed file is
                         // the source of truth and this is not the script that
                         // gets to drop it.
@@ -235,7 +235,7 @@ public class ExportAnnotations extends GhidraScript {
      *
      * These used to be appended at the tail, which is where every merge
      * conflict in `ghidra/annotations/` has come from: two branches adding
-     * unrelated rows to the same last line. `tools/annotate.py` inserts in
+     * unrelated rows to the same last line. `npm run annotate` inserts in
      * order from the other end, and this keeps the invariant whole -- the
      * header block and its blank line stay put, every data row after it is
      * sorted by address.
@@ -429,7 +429,7 @@ public class ExportAnnotations extends GhidraScript {
      * "drops TEB". It does not: Ghidra's synthetic TEB block *is* initialized,
      * so 86 Windows thread-block fields — `TlsSlots`, `LockCount`,
      * `TxnScopeContext`, at addresses like `0xffdfffd4` — were exported as
-     * though they were program globals. `verify_annotations.py` rejects every
+     * though they were program globals. `web/tools/checks/annotations.ts` rejects every
      * one of them with "is in no section", which is the check this should have
      * been making all along: the same one, asked here.
      */

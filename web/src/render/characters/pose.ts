@@ -49,7 +49,7 @@ pose(inst: Instance): void {
       // that causes it: the engine has no death track, so the gate decides a
       // death clip like any other and the port's early return is what makes
       // this override necessary. The reason lives there rather than here so
-      // that `verify_port.py` counts it.
+      // that `web/tools/repo/port.ts` counts it.
       this.apply(inst, dm, f, true);
       return;
     }

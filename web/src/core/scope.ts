@@ -26,7 +26,7 @@
  *
  * * **`game/` never gets a scope.** The port transcribes a fixed object pool
  *   and `ActorDespawn`; there is no hierarchy and no arena in the binary, and
- *   inventing one is what `verify_port.py` exists to catch.
+ *   inventing one is what `web/tools/repo/port.ts` exists to catch.
  * * **Nothing a scope owns can be game state.** `World.save()` puts every
  *   slice through `clonePlain`, and a graph of disposal closures cannot
  *   survive that.

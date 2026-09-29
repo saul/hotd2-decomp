@@ -23,7 +23,9 @@ Every file produces **exactly** the byte count its header declares.
 ```
 
 Callers read the `u32` themselves and pass `src = file + 4` to the decompressor.
-A size of 0 means an empty file (23 `tex/` entries are exactly this).
+A size of 0 means an empty file. 23 `tex/` files hold no data: twelve are this
+4-byte zero header and eleven are zero bytes long (`web/tools/checks/corpus.ts`
+holds the count).
 
 ## Algorithm
 

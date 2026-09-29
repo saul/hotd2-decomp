@@ -190,8 +190,8 @@ if (*(int *)(g_cur_actor_model + 0x20) != param_2[1]) {   // a different clip
 
 `*g_cur_civilian` is the wait word that opened the block, so the answer to
 *"does this civilian walk or does she animate in place"* is per block and it is
-in the script. **289 of the 596 shipped wait commands set the bit and 297 do
-not.** `[proved]`
+in the script. **289 of the 596 shipped wait commands set the bit and 307 do
+not.** `[proved]` `web/tools/checks/script_corpus.ts` counts them.
 
 The same bit decides the *draw* at the end of that routine: with it set the
 clip's horizontal root translation has already moved the object, so the pose is
@@ -436,10 +436,11 @@ The count is arithmetic, not a scan: the record array runs
 it ends.
 
 **The ids split at `0x24` and the two halves do opposite things.** `[proved]`
+`web/tools/checks/attachments.ts` holds the table.
 
 | Ids | Files | What happens |
 |---|---|---|
-| `0x00`–`0x23` | `hito_kao_*`, `etc_*_kao` | `ActorBindPartList` writes the record's slot **over** `bone_records[bone].slot`. All 36 are bone 2. *Kao* (顔) is **face**: `hito_kao_gal.bin` alone holds 60 heads of the same 149 vertices and 234 triangles as `hito_gal`'s own, differing only in texture — three skins × twenty mouth positions. The skeleton's head is the default, not the character. |
+| `0x00`–`0x23` | `hito_kao_*`, `etc_*_kao`; `0x02`, `0x03` and `0x0E` are `char_adv02`, `char_adv01` and `char_adv07` | `ActorBindPartList` writes the record's slot **over** `bone_records[bone].slot`. All 36 are bone 2. *Kao* (顔) is **face**: `hito_kao_gal.bin` alone holds 60 heads of the same 149 vertices and 234 triangles as `hito_gal`'s own, differing only in texture — three skins × twenty mouth positions. The skeleton's head is the default, not the character. |
 | `0x24`–`0x50` | `etc_komono_*` | `ActorDrawAttachedParts` draws the record's slot **as well**, in the matrix of the record's bone. *Komono* (小物) is **small item**: hair and hats on bone 2, bags and aprons on bone 1, shoes on bones 12 and 15. |
 
 `ActorDrawAttachedParts` also scales bone 2 by `1.5, 1.0, 1.5` and bones 5, 8,
@@ -477,9 +478,10 @@ Beside the attachment list there is a second set of parts the skeleton does not
 name: `g_pCharacterExtraParts` (`0x0052ED08`), one or two per character type,
 built by `BuildCharacterPart` (`FUN_00419520`) and drawn by
 `DrawCharacterPart` (`FUN_0041A300`) through `g_character_part_drawers`
-(`0x004EDAEC`). **45 of the 54 character types a bundle poses have at least
+(`0x004EDAEC`). **52 of the 64 character types a bundle poses have at least
 one**, so this is nearly every character in the game and not a civilian
-speciality.
+speciality; `web/tools/checks/parts.ts` holds every bundle's part table to the
+exe's.
 
 A descriptor is 14 dwords:
 
@@ -891,8 +893,9 @@ no life. Either way the civilian switches to its on-shot script and cries out.
 They are not attacking the player. Eleven of the 54 states in
 `g_class30_states` never look at the camera at all — they work on
 **`obj+0x1394`**, the object the actor was built for, and `CivilianInit` is
-what writes the civilian there. 59 class-0x30 spawns across the game reach one,
-and 47 of them are a civilian's captors.
+what writes the civilian there. 70 class-0x30 spawns across the game reach one
+(76 with class 0x18's), and 55 of them are among the 57 class-0x30 captors the
+civilians name; `web/tools/checks/script_corpus.ts` holds the 76 and the 57.
 
 | State | Name | What it does |
 |---|---|---|
@@ -915,8 +918,8 @@ blob while the actor is in the tail's attack state (`tail+0x03`), and the
 `+0x04` blob otherwise. Each opens with a header shaped by the state that
 *entered* it and continues as a list of `s16[4]` `{motion, frame, loops, mode}`
 entries; the cursor at `obj+0x1398` is shared, which is how the walk hands the
-maul a half-walked list. All 86 blobs the six stages reach decode and
-terminate.
+maul a half-walked list. All 117 blobs the six stages' 76 captor spawns reach
+decode and terminate, which `web/tools/checks/script_corpus.ts` asserts.
 
 | Entering state | Header |
 |---|---|

@@ -216,7 +216,7 @@ export const GENERIC_SLOT_STRIP = [31, 33];
  * an Original Mode item can wear are not here: they are the item records'
  * (`originalItemSlots`), for every row `originalItemsJson` carries -- which
  * is how type 7's and type 43's drops, the collectibles and the story items
- * all come by theirs. `tools/verify_prop_slots.py` holds every placed type to
+ * all come by theirs. `web/tools/checks/prop_slots.ts` holds every placed type to
  * its row.
  */
 export const GENERIC_STATIC_SLOTS: Record<number, number[]> = {
@@ -2326,7 +2326,7 @@ export async function writeManifest(
     format: BUNDLE_FORMAT,
     schema: { hash: SCHEMA_HASH, files: SCHEMA_FILES },
     // Which exporter wrote it, so a bundle can be told it is out of date
-    // rather than merely unreadable. See `tools/gen_builder_hash.py`.
+    // rather than merely unreadable. See `web/tools/gen/builder_hash.ts`.
     builder: { hash: BUILDER_HASH, files: BUILDER_FILES },
     tool: "hod2lib",
     tool_version: TOOL_VERSION,

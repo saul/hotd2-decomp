@@ -3,7 +3,7 @@
  *
  * Eleven of the 54 states in `g_class30_states` never look at the camera. They
  * walk at, maul, drag, pounce on or wait beside *the object the actor was
- * built for* — and for 47 of the 59 spawns that use one, that object is the
+ * built for* — and for 55 of the 70 spawns that use one, that object is the
  * class-0x10 civilian whose `CivilianInit` built them. This is the answer to
  * "why do the zombies in a set piece go for the hostage": they were never
  * going for the player. They have their own script.

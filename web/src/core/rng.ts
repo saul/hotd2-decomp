@@ -6,7 +6,7 @@
  * read is a piece of the game that a save state silently drops. Two loads of
  * the same snapshot must draw the same attack.
  *
- * `Math.random()` is banned inside `game/` for that reason; `verify_port.py`
+ * `Math.random()` is banned inside `game/` for that reason; `web/tools/repo/port.ts`
  * greps for it.
  */
 export class Rng {

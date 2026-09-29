@@ -17,7 +17,7 @@
  * through `ActorSpawn` and leaves it through `GameUpdate`, and both live
  * there. A class that is missing from this list has no behaviour at all and
  * the port says nothing about it — which is deliberate, and is what
- * `port.test.ts`'s registration assertion is for.
+ * `test/port/`'s registration assertion is for.
  */
 import { g_class_handlers } from "./registry";
 import type { SpawnClass } from "./spawn_class";
@@ -56,7 +56,7 @@ import "./class61";
 import "./class62";
 
 /**
- * The classes with a ported behaviour, for the UI and `verify_port.py`.
+ * The classes with a ported behaviour, for the UI and `web/tools/repo/port.ts`.
  *
  * A `const` and not a scan at every call because it is computed **after** the
  * imports above have run: ESM evaluates every dependency before the importing

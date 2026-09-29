@@ -605,7 +605,7 @@ export function ColiTestSphereAgainstActors(self: Actor, cx: number, cy: number,
     //     00405bb7  MOV   dword ptr [EBX + 0x128], EAX
     //
     // so the object keeps the filled-in radius and every later reader -- the
-    // class's own push, the debug marker -- sees it too. `port.test.ts`'s
+    // class's own push, the debug marker -- sees it too. `test/port/`'s
     // "engine fallback" assertion is on the field after the call.
     if (o.bodyRadius === 0) o.bodyRadius = o.radius;
     const dx = cx - e.x, dy = cy - e.y, dz = cz - e.z;

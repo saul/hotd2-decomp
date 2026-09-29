@@ -1,8 +1,9 @@
 # `evt/` event tables
 
 **Status:** solved structurally. The relocation scheme, the container, the
-routing graph and the bytecode are all recovered; 16,991 instructions across all
-13 files decode with zero errors. What remains is *semantics* — most opcodes are
+routing graph and the bytecode are all recovered; 17,150 instructions across all
+10 files decode with zero errors (`web/tools/checks/corpus.ts` holds the count).
+What remains is *semantics* — most opcodes are
 identified only by which global they touch.
 
 Implemented in [`web/src/hod2lib/evt.ts`](../../web/src/hod2lib/evt.ts).
@@ -1168,20 +1169,20 @@ which classes read it which way is being resolved handler by handler.
 **This is the route to the remaining 20 % of the bytes.** Each handler reads its
 descriptor tail through object +0x1390 (`0x0B`/`0x0D`) or +0x130C (`0x0C`), so
 the tail layout is recoverable one class at a time. Ten classes account for most of the
-data: 65 (347 descriptors), 48 (283), 37 (169), 68 (132).
+data: 65 (350 descriptors), 48 (345), 37 (169), 68 (132).
 
 **Confirmed:**
 
 - Position is float and in level space. Sampled against the bounding box of
-  each stage's own geometry set, **1546 of 1546** spawns across all six stages
+  each stage's own geometry set, **1625 of 1625** spawns across all six stages
   fall inside their own stage. That is the
-  strongest available check that the offsets are right. (An earlier revision
-  reported 1216/1216 over five stages.)
-- **35 distinct class ids are used and every one is defined** in the handler
+  strongest available check that the offsets are right.
+- **36 distinct class ids are used and every one is defined** in the handler
   table at `0x00593358`; an undefined id would dispatch to the empty stub, so
-  this is a real check rather than a tautology.
+  this is a real check rather than a tautology. `web/tools/checks/objects.ts`
+  holds this and the bullet above.
 - `+0x22` is hit points: it is written to *both* a current and a maximum field,
-  and takes values 0–18 across 1410 descriptors.
+  and takes values 0–6,333 across the 1,298 descriptors stages 1–6 reach.
 - `+0x18` is a BAMS yaw — its range covers ±65536 (`0x4000` = 90°), while the
   other two orientation words are almost always 0 with a small integer tail.
 
@@ -1190,25 +1191,28 @@ data: 65 (347 descriptors), 48 (283), 37 (169), 68 (132).
 distributions (mostly 0, otherwise 1–10) do not look like angles. Do not export
 them as rotations without checking.
 
-1410 descriptors are reachable; class ids fall in the bands 16–27, 32–51, 64–70,
-80–86 and 109, with class 65 accounting for 347 of them.
+1,492 descriptors are reachable across the ten files, 1,298 of them in stages
+1–6; class ids fall in the bands 16–27, 32–51, 64–70, 80–86 and 109, with class
+65 accounting for 350 of the 1,492 (and 441 of stages 1–6's 1,625 spawns).
 
 ## Coverage
 
-79.4 % of `evt/` bytes are reached by walking root → blocks → steps → bytecode →
-spawn descriptor headers. The uncovered 20.6 % (60,296 bytes) attributes as:
+80.3 % of `evt/` bytes are reached by walking root → blocks → steps → bytecode →
+spawn descriptor headers (every `evt.SPAWN_OPCODES` operand, a `0x09` descriptor
+at its `0x28` stride and every other at `0x24`). The uncovered 19.7 % (57,668
+bytes) attributes as follows, each uncovered run going to the instruction
+operand that points nearest at or below its start, within 1 KB:
 
 | Source | Bytes | Share of residue |
 |---|---|---|
-| `0x0B` `spawn_obj` behaviour tails | 43,178 | 71.6 % |
-| `0x0C` `spawn_obj_c` behaviour tails | 11,464 | 19.0 % |
-| `0x20`/`0x24` `view_set` float constants | 1,888 | 3.1 % |
-| `0x23` `view_tween_time` float constants | 916 | 1.5 % |
-| `0x0D`, `0x03`, `0x04`, `0x07`, `0x09`, `0x0A` descriptors | 1,522 | 2.5 % |
-| `0x1A` `set_g_8e58` operands | 532 | 0.9 % |
-| no pointer within 1 KB — unexplained | 796 | 1.3 % |
+| `0x0B` `spawn_obj` and its gated `0x03`/`0x07` behaviour tails | 40,774 | 70.7 % |
+| `0x0C` `spawn_obj_c` and its gated `0x04`/`0x08` behaviour tails | 11,928 | 20.7 % |
+| `0x20`/`0x23`/`0x24` light float constants | 2,804 | 4.9 % |
+| `0x0D`, `0x09`, `0x0A` descriptors | 994 | 1.7 % |
+| `0x1A` `set_ground_plane_y` operands | 372 | 0.6 % |
+| no pointer within 1 KB — unexplained | 796 | 1.4 % |
 
-So **90.6 % of the residue is spawn behaviour tails**, and the class table above
+So **91.4 % of the residue is spawn behaviour tails**, and the class table above
 is the way in. The float-constant pools are trivially markable; the 796
 unexplained bytes are the only part with no identified owner.
 

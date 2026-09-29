@@ -11,7 +11,7 @@
  * deleted.
  *
  * So the boundary is now structural: `gen_schema_hash.py` names the declaration files
- * it hashes, and `verify_exporters.py` fails if one of them grows runtime
+ * it hashes, and `web/tools/repo/exporters.ts` fails if one of them grows runtime
  * code. Declarations describe what a bundle contains; this file decides what
  * to do about it, and only the former can be disagreed with by a bundle.
  */
@@ -143,7 +143,7 @@ export function manifestRefusal(m: Manifest | null | undefined): string | null {
   //
   // The cost of refusing is one re-export, and only when a declaration
   // actually changed: the digest covers the declarations, not the file, so
-  // editing a doc comment here costs nothing. See `tools/gen_schema_hash.py`.
+  // editing a doc comment here costs nothing. See `web/tools/gen/schema_hash.ts`.
   if (m.schema?.hash !== SCHEMA_HASH) {
     const drift = schemaDrift(m.schema?.files);
     return `this bundle was exported against a different web/src/bundle/ `

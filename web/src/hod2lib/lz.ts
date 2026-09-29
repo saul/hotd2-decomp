@@ -53,7 +53,8 @@ function maxOutput(n: number): number {
  * Belt and braces beside {@link maxOutput}: a large enough blob can carry a
  * garbage header that is still under the arithmetic bound, and nothing should
  * commit hundreds of megabytes before a single byte has been decoded. The
- * biggest file in the game decompresses to 21 MB, so no real file ever grows.
+ * largest output in the game is 2,457,600 bytes (`tex/scr_bunki.bin`), so no
+ * real file ever grows.
  */
 const FIRST_ALLOC = 32 << 20;
 

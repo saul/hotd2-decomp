@@ -330,7 +330,7 @@ export interface BreakablePlacement {
   yaw?: number;
   /**
    * `flicker_light` only -- every asset slot `PropUpdateType48FlickerLight`
-   * draws, so `tools/verify_prop_slots.py` can hold the bundle to them.
+   * draws, so `web/tools/checks/prop_slots.ts` can hold the bundle to them.
    */
   slots?: number[];
 }

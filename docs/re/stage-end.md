@@ -146,7 +146,7 @@ render (section 7).
 A scene with more rescues than list records reads the terminator record
 (type -1, all zero: the origin, motion 0) and then whatever follows it in
 `.rdata` -- scene 0's sixth figure stands at the origin and its seventh at
-scene 1's first place. The exe does it, so the port does.
+scene 1's first place.
 
 ### Sub 1 (`0x00435107`) and sub 2 (`0x00434F4D`): the award
 
@@ -324,12 +324,9 @@ while it is non-zero `PlayerFireAndReloadUpdate` does not count shots
 
 ## 7. The port, and what the render showed
 
-Ported: `game/class61/` (the card, its figures, the two number draws, the
-`.rdata` read by address), `game/class62/`, `game/rescue.ts` (both writers'
-three stores), `game/combat/accuracy.ts` (opcodes `0x2B`, `0x2F`), the shot
-count and its guard in `combat/shot.ts`, `ResolveHit`'s two hit counts, and
-`g_view_slot_draws` for the glyphs. The bundle's `result_card` block and the
-figure templates are `docs/formats/bundle.md`'s.
+The port is `web/src/game/class61/` (the card and its figures),
+`game/class62/`, `game/rescue.ts` and `game/combat/accuracy.ts`; the bundle's
+`result_card` block and the figure templates are `docs/formats/bundle.md`'s.
 
 Rendered in the page (`web/tools/result_card.mjs`), stage 1 with five
 rescues: the frame's window shows the flight through region `0x0B`; the

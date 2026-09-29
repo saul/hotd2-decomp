@@ -135,9 +135,7 @@ registered sends a per-bone actor to the whole arm.
 the bit. Every skinned class's `Init` points `g_cur_actor` at itself before it
 builds, so civilians, zombies, throwers and every boss carry it. Six builders
 clear it again with `AND 0x7F` straight after: `PlaceBats`, `SpawnBatWings`,
-`CatInit`, `SpawnGoldenFrog`, and `0x00463E50` / `0x004641F0` (class 0x41). This
-file used to say that no civilian ever has the bit; the build gives it to
-every one of them.
+`CatInit`, `SpawnGoldenFrog`, and `0x00463E50` / `0x004641F0` (class 0x41).
 
 ### Per bone — `FUN_00404700` → `FUN_00404750` → `FUN_004047D0`
 
@@ -160,8 +158,7 @@ indexed `bone − 1`:
 
 `SkeletonWalkNode` (`FUN_004107E0`) copies it into the bone's draw record
 (base `obj+0x20C`, stride `0x90`) **once, when the skeleton is built**. Its only
-caller is `SkeletonBuildAndPose`. (This said "each frame" until the callers
-were counted.) It scales the radius by `obj+0x1300` and zeroes the sphere
+caller is `SkeletonBuildAndPose`. It scales the radius by `obj+0x1300` and zeroes the sphere
 unless the entry's slot equals the node's. It writes `rec+0x74 = 0x21`, so the
 mesh arm is never taken for a built skeleton. The view-space centre at
 `rec+0x68..0x70` is what `SkeletonEmitNode` (`FUN_004114C0`) writes every
@@ -225,49 +222,30 @@ if (flags & 0x10) SpawnWorldImpact(player);   /* the world, a mesh, a bone mesh 
 
 Then, in Original Mode with weapon kind 3, sprite effect `0x53` at the hit.
 
-### The port
+### The shot test, class by class
 
-`web/src/game/combat/shot_test.ts` ports `RegisterForShotTest`,
-`ShotTestSphere`, the three bone routines, `RayTestSphere` (with
-`BuildShotRay`'s angle quantisation) and `ColiSortHitCandidatesByDistance`, for
-the classes that set `ClassHandler.registersForShotTest`. Such a class calls
-`RegisterForShotTest`, or `ActorRegisterCameraPoint` (`camera/track.ts`, which
-now carries the tail call), from its own update at the exe's site, and
-`render/`'s pick passes it by. (The director files no class itself; it records
-the posed bone point, `SkeletonRecordCameraPoint`, and nothing more.) **Every class that calls `ActorRegisterCameraPoint` is filed**, flag or
-no flag, as `0x00409BED` files it, because the list's second reader is the
-crowd push (see section 10); the pick is what migrates, and
-`ShotTestPickedHere` is where it passes over the entries of a class
-`render/` still picks. `ColiPublishDynamicList` and then `ShotTestListReset`
-run where `ProcessPlayerShots` ends, straight after the player tasks.
-`ActorSpawn` runs `ActorBuildSkinnedModel`, which raises
-`0x80` on a type with bones, and `CatInit` clears it. The port holds
-`obj+0x70..0x78` in world space (`Actor.shotCentre`) and takes the depth
-through the camera its frame reads.
+`ActorRegisterCameraPoint` files every caller in the list (`0x00409BED`),
+whatever its class; the list's second reader is the crowd push (see section
+10). `ColiPublishDynamicList` and then the list's reset run where
+`ProcessPlayerShots` ends, straight after the player tasks.
 
-**A class that never registers sets the flag too.** Class 0x24, the
-set-pieces, calls none of `RegisterForShotTest`, `ActorRegisterCameraPoint` or
+**Class 0x24 never registers.** The set-pieces call none of
+`RegisterForShotTest`, `ActorRegisterCameraPoint` or
 `RegisterForCameraTracking` anywhere -- not in `SetPiecePropInit`
 (`FUN_00482CE0`), its six states, `SetPiecePropDrawAndTick` (`FUN_004834F0`)
 or its per-bone hook `SetPiecePropDrawBonePart` (`FUN_004835D0`), whose tail
 past the `MatrixStackPop` was read from the bytes (`L35`) `[proved]`. So no
 shot in the game touches a set-piece: 28 of the class's 29 spawns are people,
 among them the bodies lying on the floor, and a bullet passes through them.
-The render pick offered them like any actor, and `ResolveHit` then gave the
-body a death clip -- stage 1's man under the library desk fell over again.
-The flag, with no registration site, is what keeps them out.
 
 **The mesh arm.** `ShotTestBoneTree` takes `ShotTestBoneMesh` (`FUN_004048A0`)
 for a record whose `+0x74` has bit `0x10` and whose `+0x88` names a blob; the
 skeleton build writes `0x21`, and two `Init`s raise the bit: `Boss4Init`, for
 the ten bones its descriptor gives a `coli4.bin` mesh, and
 `EnemyZombieInitByCharType`, for class 0x30's weapon hands (types 2 and 3's
-bones 5 and 8, 0xE's bone 5, the blob at the tail's `+0x10`) --
-`Actor.boneColi` either way. Only the tree walk tests a mesh, so class 0x30
-(and 0x18, which runs its update) is picked through the list now -- see the
-table below. The port tests the shot segment (`ShotBuildSegment`, a
-thousand units) against the blob in the bone's frame, over
-`GameHost.boneMatrix` and `ColiSegmentVsMesh`, and the candidate
+bones 5 and 8, 0xE's bone 5, the blob at the tail's `+0x10`). Only the tree
+walk tests a mesh. It traces the shot segment (`ShotBuildSegment`, a thousand
+units) against the blob in the bone's frame, and the candidate
 (`ShotPushColiHitCandidate`, `FUN_00404CB0`) carries the point, the normal and
 the quad's surface; `MarkActorShot` hands them to `SpawnWorldImpact`, which
 fills `g_shot_hit_records` for the boss's own `Boss4ResolveShot` to read.
@@ -292,45 +270,23 @@ the shot crosses its mesh, sorted on the hit point's depth with every sphere
 -- so it stops a shot at an actor behind it, and not one at an actor in front.
 `obj+0x150` is the draw's `MatrixStore` with the view under it, and
 `RegisterForShotTest`'s `0x10` arm multiplies the camera block's `+0x40` matrix
-in on top (`0x00405190`..`0x004051CE`), which `[likely]` takes the view out;
-the port builds `Actor.coliMatrix` on the identity instead, and
-`combat/shot_test.ts` ports the arm, the segment and both pushes.
+in on top (`0x00405190`..`0x004051CE`), which `[likely]` takes the view out.
 
 Who reaches it, over every shipped record (`[proved]` writers: every store to
 `+0x14C` by instruction and byte scan, every `OR` of `0x50`/`0x51`, and the
 95 rel32 callers of `RegisterForShotTest`):
 
-| class | `0x10` and `+0x14C` from | registers at | shipped | in the port |
-|---|---|---|---|---|
-| `0x12` | record flags `0x10`; `ScriptedPropInit12` `0x0043F9FD` | `ScriptedPropUpdate12` `0x0043FB76` | stage 1 `0x3D88` (`coli1.bin:5144`, one quad, surface 56); stage 2 `0x15644` and stage 5 `0x2398` carry `0x8000` and never file | **tested**: the shot stops on the boards until flag 34 starts the strip |
-| `0x15` | record flags `0x50`; `FloatingPropRowSpawn` `0x0044180D` | `0x004420A9` | stage 2, 2 records | no module |
-| `0x26` subtype 2 | `Class26Subtype2Update` `0x0048EB0E` (`|= 0x51`), `0x0048EB16` | `0x0048EE9C` | stage 3's boat | not filed; its blob is traced only by the collision passes, and by `ShotHitWorld` on a miss |
-| `0x33` selector 1 | `ScriptedCarrierStepPath33` `0x0043389A` (`|= 0x50` when `tail+0x04 != -1`), `0x004338A3` | `ScriptedCarrierUpdate33` `0x004334D0` | stage 2's two name a mesh; stage 5's names none | not filed |
-| `0x33` selector 4 | `ScriptedPushableUpdate33` `0x00433BC9`, when `tail+0x04 != -1` | `0x00433CC7` | stage 1's two name none and carry `0x8000` | -- |
-| `0x44` 0-7, 11-13 | each builder, `|= 0x51` unconditionally, `+0x14C` from the descriptor | selector 0's `ScriptFlagEffectUpdate` `0x00473CDF`; 1, 2, 4's `HingeUpdate` `0x0047410B`; 3's `0x00474120` at `0x0047422F`; 6's `0x00474470` at `0x00474760`; 7's `0x00474770` at `0x004748B6`; 12's `0x004755B0` at `0x004757E0`; 13's `0x004757F0` at `0x004758C7`. **11's `RisingDoorUpdate` never registers**, and 5's `0x00474240` has no call of its own (it copies its blob to an object it makes, whose routine is `[open]`) | 0: 2, 1: 37, 2: 3 (two doors each), 3: 2, 4: 13, 5-7: 1 each, 11: 2, 12: 8, 13: 13 | 0 is in the prop pool, not filed; 11 files nothing in the engine either; the rest have no builder |
-| `0x44` 17 | `PlaceStoryModeSwitch` `0x00473ADB`, when `desc+0x08 != -1` | `StoryModeSwitchUpdate` `0x004753D7` | all nine name a volume | prop pool, not filed: unshootable |
+| class | `0x10` and `+0x14C` from | registers at | shipped |
+|---|---|---|---|
+| `0x12` | record flags `0x10`; `ScriptedPropInit12` `0x0043F9FD` | `ScriptedPropUpdate12` `0x0043FB76` | stage 1 `0x3D88` (`coli1.bin:5144`, one quad, surface 56); stage 2 `0x15644` and stage 5 `0x2398` carry `0x8000` and never file |
+| `0x15` | record flags `0x50`; `FloatingPropRowSpawn` `0x0044180D` | `0x004420A9` | stage 2, 2 records |
+| `0x26` subtype 2 | `Class26Subtype2Update` `0x0048EB0E` (`|= 0x51`), `0x0048EB16` | `0x0048EE9C` | stage 3's boat |
+| `0x33` selector 1 | `ScriptedCarrierStepPath33` `0x0043389A` (`|= 0x50` when `tail+0x04 != -1`), `0x004338A3` | `ScriptedCarrierUpdate33` `0x004334D0` | stage 2's two name a mesh; stage 5's names none |
+| `0x33` selector 4 | `ScriptedPushableUpdate33` `0x00433BC9`, when `tail+0x04 != -1` | `0x00433CC7` | stage 1's two name none and carry `0x8000` |
+| `0x44` 0-7, 11-13 | each builder, `|= 0x51` unconditionally, `+0x14C` from the descriptor | selector 0's `ScriptFlagEffectUpdate` `0x00473CDF`; 1, 2, 4's `HingeUpdate` `0x0047410B`; 3's `0x00474120` at `0x0047422F`; 6's `0x00474470` at `0x00474760`; 7's `0x00474770` at `0x004748B6`; 12's `0x004755B0` at `0x004757E0`; 13's `0x004757F0` at `0x004758C7`. **11's `RisingDoorUpdate` never registers**, and 5's `0x00474240` has no call of its own (it copies its blob to an object it makes, whose routine is `[open]`) | 0: 2, 1: 37, 2: 3 (two doors each), 3: 2, 4: 13, 5-7: 1 each, 11: 2, 12: 8, 13: 13 |
+| `0x44` 17 | `PlaceStoryModeSwitch` `0x00473ADB`, when `desc+0x08 != -1` | `StoryModeSwitchUpdate` `0x004753D7` | all nine name a volume |
 
-So the port's mesh arm changes exactly one object's behaviour, stage 1's
-boarded doorway. The bone meshes (`Boss4Init`, `EnemyZombieInitByCharType`)
-are the other routine, `ShotTestBoneMesh`, and unchanged.
-
-**Several pulls in one frame.** `[port-only]` The engine reads the trigger once
-a frame, so the shot record a class reads back on its update is always the
-pull that marked it. The port's queue lets one frame take several pulls per
-player -- a driver's volley arrives whole between two driven frames (`L50`) --
-so `MarkActorShot` also keeps each marking pull's ray beside the bone byte,
-per player, in `Actor.shotRays`. Class 0x14's weak-point gates read that
-instead of `G.g_crosshair_ray`; with one pull a frame they are the same object.
-
-JUDGMENT's two classes set the flag (`game/class22/`, `game/class23/`), and
-so does Strength (`game/class19/`: `Boss4Update` calls
-`ActorRegisterCameraPoint(state+0x70)` at its `0x00491A49` line), at the
-sites below; the other bosses are being ported in other workstreams and each
-will set it with its own module. **Class 0x30 sets it too**, and 0x18 with
-it: the zombie registered every frame already, and the weapon hands'
-collision meshes are only tested by the tree walk. Its `obj+0x124` is the
-port's `Actor.hitRadius` as well as `Actor.radius` -- one word, two readers.
-The sites:
+The per-bone classes' registration sites `[proved]`:
 
 | class | registers at | through | gate | `obj+0x124` | `0x80` | `0x8000` |
 |---|---|---|---|---|---|---|
@@ -348,17 +304,10 @@ The sites:
 | `0x45` head | `Boss3FightHeadUpdate` `0x004215AF` | `RegisterForShotTest`, after `obj+0x100 = obj+0x40` and `obj+0x70 = view(obj+0x100)` | `obj+0x1310 != 7` | `g_actor_radius_by_char`, `Boss3FightHeadInit` `0x0041FF81` | build `0x0041FF5C` | set `0x0041FF68`; cleared at `0x00420E81`, `0x00420F96`, `0x00422DD5` |
 | `0x45` body | `Boss3BodyUpdate` `0x00424160` | `RegisterForShotTest`, `obj+0x70 = view(obj+0x40..0x48)` at `0x00423FD1` | none at the call | `[0x004C4E48]`, `Boss3BodyInit` `0x004203C0` | build `0x004203A0` | — (`|= 0x80080000`) |
 
-Ghidra's live database has other workstreams' newer names for some class-0x23
-routines (`Class23FightBesideCompanion` at `0x00490150`, `Class23Collapse` at
-`0x00490B00`, `Class23TrainingFightAlone` at `0x00490FD0`). The addresses are
-the reading.
+`0x00490150` is `Class23FightBesideCompanion`, `0x00490B00`
+`Class23Collapse` and `0x00490FD0` `Class23TrainingFightAlone`.
 
-**What converting the rest takes.** Each class below is picked by `render/`
-with no registration and no broad phase, which is that file's declared
-divergence. Converting one means setting the flag and calling the routine at
-these sites. The pools that already model their own registration (class
-0x41's props, the carried props, the body creatures) would move into the one
-list instead:
+**The other registration sites** `[proved]`:
 
 * `0x10` `CivilianUpdate` `0x0048ADB0` (camera point, 4.0); `0x11` `FrogUpdate`
   `0x0043A2C7` (1.0); `0x30`'s thrown weapon `0x0045A612`; `0x31`
@@ -367,26 +316,20 @@ list instead:
 * `0x13` `0x0043FFA4` -- which takes nothing: all fifteen class-0x13 records
   carry `0x8000` in their flags word (`ActorInitFlags`), no class-0x13 routine
   read clears it, so stage 3's boats and their 40-unit `obj+0x124` are never in
-  the list. The port's spawn arm dropped the word until 2026-09-28, and the
-  boat's sphere took the pulls aimed at its riders; `0x20` `0x00449366`, `0x00449519`; `0x21` `0x00451D08`,
+  the list. `0x20` `0x00449366`, `0x00449519`; `0x21` `0x00451D08`,
   `0x0045283A`; `0x26`'s boat `0x0048EE9C` (a mesh); `0x33` `0x004334D0`,
   `0x00433CC7`; `0x40` `0x0043C42A`, `0x0043D425`, `0x0043D7DD`, `0x0043D9DB`,
   `0x0043E330`; `0x43` `0x00446488`; `0x44` eight sites `0x00473CDF`..
   `0x004758C7`; `0x46` `0x0042E9B7`, `0x0042ED16`, `0x0042F401`, `0x0042F5B3`;
   `0x51` `FishProjectToScreen` `0x00439BE3`; the class-0x53 trigger through
   `ActorRegisterOriginInViewSpace` (`FUN_0043F950`, the call at `0x0043F9C2`).
-  That routine has **one** caller, `CatBranchTriggerUpdate` (`get_xrefs_to`),
-  so this line used to be wrong to say both branch triggers call it; the
-  other site it listed, `0x0043FB76`, is `ScriptedPropUpdate12`'s, class
-  0x12's door (`game/class12/`, now filed and tested as a mesh). Where
-  `0x52` registers is `[open]`.
+  That routine has **one** caller, `CatBranchTriggerUpdate` (`get_xrefs_to`).
+  Where `0x52` registers is `[open]`.
 * Class `0x25`: `[likely]` none. No site lies in its routines, and every shared
   routine that registers is accounted for above. The exception is
   `FUN_004825B0` (`0x00482991`), a task `FUN_00482070` allocates, whose owner
   is `[open]`. Class `0x42`'s falling breakables register through
   `FUN_0042FCA0` (`0x00430AF6`), which `PlaceFallingBreakableBatch` installs.
-* And `ShotTestWorld` into the same sort, which `combat/shot.ts`'s
-  `ShotHitWorld` declares it does not yet do.
 
 ## 4. Resolving the hit — `DispatchHit` -> `ResolveHit`
 
@@ -430,14 +373,12 @@ the metal clinks, no blood, and `ResolveHit` never ran so there is no score and
 no head combo either. Class 0x30 reaches the shared `ActorShotFeedback`
 (`FUN_00454050`) with `g_hit_result` **left over from the last resolved hit**,
 because `DispatchHit` writes the bone and not the result; that is an
-uninitialised read and the port does not reproduce it.
+uninitialised read.
 
-The two halves of this rule are easy to separate and expensive to separate:
-`ThrowerOnShot` (`FUN_004499A0`) and `ZombieOnShot` (`FUN_00453EB0`) test the
-same bit and refuse to pick a *reaction*, so a port that gates the reaction and
-not the damage kills actors in the one window where nothing is listening for a
-kill: the stage-2 `zsass` at evt `0x8094` plays its death voice under such a
-port and keeps coming.
+The reaction half of the rule is separate code: `ThrowerOnShot`
+(`FUN_004499A0`) and `ZombieOnShot` (`FUN_00453EB0`) test the same bit and
+refuse to pick a *reaction*. In the window neither the damage nor a reaction
+happens, and nothing is listening for a kill.
 
 ### The bone records those indices address
 
@@ -553,7 +494,7 @@ What is special about character type `0x0C` here is **[open]**.
 
 ### `[i + 1]` is a control code, not the next slot
 
-This is the whole shape of the system and it was read wrong once. `ResolveHit`
+This is the whole shape of the system. `ResolveHit`
 does not treat `code` as a slot — it **branches** on it:
 
 | `code` | What the hit does |
@@ -641,9 +582,8 @@ plays at rank 5, not 1, and on Very Easy at 1, not 0. `[likely]` that this is
 the design rather than an accident: the table's negative entries only make
 sense with that +4 coming, and nothing clamps the seed. The clock
 (`0x009C8A7C`) counts while `0x009A2C30` is set, so rank rises by 1 every 30
-seconds without a hit, 2 while the player is healthy. The earlier reading
-here -- "Normal starts at rank 1, so two headshots kill a stage-2 zombie
-exactly" -- was computed at rank 1, and is `[open]` again at rank 5.
+seconds without a hit, 2 while the player is healthy. Whether two headshots
+still kill a stage-2 zombie on Normal at rank 5 is `[open]`.
 
 ### Hit points — `ActorInitHitPoints`
 
@@ -749,32 +689,24 @@ tested in one place in the tail, `CMP [g_hit_result + p*4], 5 / JZ` at
 nothing and does not count towards accuracy. The head arm (`0x004097DC`) has
 no such test and pays its 120 and combo whatever the result, and the kill's 80
 is charged inside the kill block, which the result does not gate either.
-`[proved]` The port zeroed all three until 2026-09-29.
+`[proved]`
 
 **"The head" is bone 2, an immediate.** Both readers -- the tail's
 `004097D7 CMP EBP, 0x2` and the burst's `00409760 CMP EBP, 0x2` -- compare
 `EBP`, which the prologue loads from `g_shot_bone[p]` (`0040943A MOV EBP,
-[EAX*4 + 0x9a2d88]`), with a literal; no table is read. The exporter wrote a
-`head_bone` of 2 for every character type, and the port read that until
-2026-09-29 -- the same answer, from the wrong place. The field has left the
-bundle; `HEAD_BONE` in `web/src/game/combat/resolve_hit.ts` is the only copy.
+[EAX*4 + 0x9a2d88]`), with a literal; no table is read.
 
 **The whole tail is `ResolveHit`'s**: four `ScoreAddForPlayer` calls (the
 kill's 0x50 in the kill block; then 0x78 and the combo, or 10), the combo and
 `g_player_hit_count`, reached by every hit the damage tables charged -- a
-corpse's included, which reports result 0 and is still worth its 10. The port
-paid it from `FireShotRequest` in one summed call and never counted a hit, so
-the accuracy grade's numerator (`0x009A5C86`) moved only for props and
-projectiles. Since 2026-09-29 `ResolveHit` pays and counts it in the exe's
-order, and `FireShotRequest` reports what it paid.
+corpse's included, which reports result 0 and is still worth its 10.
+`g_player_hit_count` (`0x009A5C86`) is the accuracy grade's numerator.
 
 **The kill** is two tests: `obj+0x34 & 0x4000000` clear (`0x0040972A`) and
 the s16 at `obj+0x11C` not above zero (`0x00409733`). Then the bit, the 80 and
 the killer's byte at `obj+0x131C`. The result gates only the head burst below.
-The port also refused the kill on a result-5 hit, and read its own
-`Actor.dead` rather than the bit -- which a captor released by
-`ZombieStateDragTarget`, or a body creature let go, carries without the
-field.
+A captor released by `ZombieStateDragTarget`, or a body creature let go,
+already carries the bit, so the first test refuses it.
 
 **The headshot burst.** When a head hit is the one that kills, `ResolveHit`
 rolls `rand() % 4` and on a zero runs three routines: `SpawnBoneHitSprite`
@@ -785,9 +717,8 @@ character type not 3/0x12/0x18, the shot bone 2 (`0x00409760`),
 `obj+0x3B8 < 2` and `g_hit_result != 5` (`0x0040976F`), in that order, and the
 roll is drawn only past all of them.
 
-**`FUN_0040A130` is not a blood spray**, which is what this page said until
-2026-09-04 and why the port removed the head and drew nothing in its place. It
-is `ActorAlloc(SeveredHeadUpdate, 0x1A8)` — an independent object with its own
+**`FUN_0040A130` is not a blood spray.** It is
+`ActorAlloc(SeveredHeadUpdate, 0x1A8)` — an independent object with its own
 per-frame routine, seeded at `obj+0x394` and carrying the head's own asset slot
 from `obj+0x32C`. The head is *thrown*:
 
@@ -870,8 +801,7 @@ read, so the two are independent.
 
 `obj+0x1368` is **not** the destroyed-zone mask — that is `obj+0x1318`, a
 different field 0x50 bytes earlier. What sets `obj+0x1368`'s bits 3, 4, 6 and 7
-is `[open]`, so these four are not implemented and a character whose arm has
-come off still plays a directional death.
+is `[open]`.
 
 ## 7. Reacting — the stumble
 
@@ -887,10 +817,9 @@ if (obj->flags & 8) {                       /* was shot this frame */
             ActorReactToHit(player);        /* <- the stumble */
             if (g_hit_result[player] != 5) ActorPlayHitVoice(obj, 0);
         } else {
-            /* The kind is the RESULT CODE. Nothing here tests the bone --
-               this line read `bone == 2 ? 2 : 1` until 0x00453F6E was
-               disassembled; see the voice section below. */
-            ActorPlayHitVoice(obj, g_hit_result[player] == 2 ? 2 : 1);
+            /* The kind is the SHOT BONE (0x00453F6E); see the voice
+               section below. */
+            ActorPlayHitVoice(obj, g_shot_bone[player] == 2 ? 2 : 1);
             state = 6;                      /* the death */
         }
 }
@@ -1015,9 +944,8 @@ its own death, motion 0x3DB. So the destroyed-zone mask does reach the death
 after all, just not through `obj+0x1368`.
 
 The rest of `FUN_00454270` reads `obj+0x4DC` and `obj+0x68C` against literal
-asset slots, and what those two fields are is `[open]`. The player holds the
-body condition at 0, which for every character in its stages selects the same
-row as conditions 1, 2 and 4.
+asset slots, and what those two fields are is `[open]`. For every character in
+the six stages, conditions 0, 1, 2 and 4 select the same row.
 
 ## 8. The gore swap — `ResolveDamagedPartSphere`
 
@@ -1042,9 +970,8 @@ The copy is `rec+0x78 = row.radius; rec+0x7C..+0x84 = row.centre`,
 and the comparison is against `rec+0x00`, which the caller has just written; the
 slot pushed as the second argument is never read.
 
-`FUN_004098E0` calls it twice, and **both calls always run**: this page said the
-second was a fallback for a character with no variant of its own, but the
-routine returns 0 on both of its paths (`XOR EAX,EAX` at `0x004099D7` and
+`FUN_004098E0` calls it twice, and **both calls always run**: the routine
+returns 0 on both of its paths (`XOR EAX,EAX` at `0x004099D7` and
 `0x004099F7`), so the `TEST EAX,EAX; JNZ` at `0x00409943` never skips the
 second. A row for the slot in type 7's table (or 0x0B's, for type 0x0D)
 therefore overwrites the actor's own. In the shipped data every slot both
@@ -1052,31 +979,25 @@ searches find has the same row in both tables, so the difference cannot be
 seen; `web/tools/checks/combat.ts` check 17 holds that, and that every tail a
 search can reach ends in its `-1`.
 
-The bundle carries the tails as `characters.part_spheres`, by character type,
-for every type a stage builds and for 7 and 0xB, keeping the rows whose slot
-some effect table names -- which leaves every search's first match where it
-was. Ported as `ResolveDamagedPartSphere` in `game/combat/resolve_hit.ts`.
-
 ### 8a. Every writer of a bone record's hit sphere
 
 `+0x78` is the radius and `+0x7C..+0x84` the centre, in the bone's own space,
 of `obj + 0x20C + bone*0x90`. A sweep of `.text` for writes to those offsets,
-fixed and bone-indexed, finds these, and the port has each on
-`Actor.boneRadius` / `Actor.boneCentre`:
+fixed and bone-indexed, finds these:
 
-| Writer | What | Where in the port |
-|---|---|---|
-| `SkeletonWalkNode` (`FUN_004107E0`), at build | row `bone-1` of the type's table, radius × model size, **only when the row's slot is the node's** (`0x00410830`); zero otherwise | `ActorBuildSkinnedModel` |
-| `ActorSwapDamagedPart` (`FUN_004098E0`) | radius 0 for slot 0 or 1; otherwise the two searches above | `combat/resolve_hit.ts` |
-| `RemoveBoneSubtree` (`FUN_00409AF0`) | radius 0 with the slot, down the subtree | `combat/resolve_hit.ts` |
-| `SpawnThrownWeapon` (`FUN_004504E0`), `ZombieThrowHandWeapon` (`FUN_0045A240`) | the emptied hand's radius 0 | `class31/thrower.ts`, `class30/throw.ts` |
-| `ThrowerStateRearm` (`FUN_0044F7A0`) | type 0x16's rows 4 and 7 into bones 5 and 8, unscaled -- a load through `[0x004D0384]` the decompiler shows as float literals | `class31/standing.ts` |
-| `ThrowerStateRestoreBothHands` (`FUN_0044F900`) | the actor's own rows 4 and 7, unscaled | `class31/standing.ts` |
-| `EnemyZombieInitByCharType` (`FUN_00452FD0`) | radius 0 on the bones it gives a collision mesh: 5 and 8 of types 2 and 3, 5 of 0xE | `class30/init_char.ts` |
-| `Boss4Init` (`FUN_004917E0`) | radius 0 on the ten bones it gives a mesh | `class19/` (as `Actor.boneColi`) |
-| `FrogAwardKillAndEnterDeath` (`FUN_0043A2E0`) | the frog's bone 2 | `class11/` |
-| `EnemyZombieInit` (`FUN_00452DA0`) / `EnemyThrowerInit` (`FUN_00449620`) | the head's radius × 2 (× 1.8 for type 0xE) under Original Mode's big-head item | **not ported** -- the item (`DAT_009C88A8`) is not, and the draw hook it installs is a declared divergence in both classes |
-| `ZombieHideBoneSubtree` (`0x0045DD70`) | radius 0 with the slot, for `ZombieInitHalved` and the split | another workstream's port of the halved crawler |
+| Writer | What |
+|---|---|
+| `SkeletonWalkNode` (`FUN_004107E0`), at build | row `bone-1` of the type's table, radius × model size, **only when the row's slot is the node's** (`0x00410830`); zero otherwise |
+| `ActorSwapDamagedPart` (`FUN_004098E0`) | radius 0 for slot 0 or 1; otherwise the two searches above |
+| `RemoveBoneSubtree` (`FUN_00409AF0`) | radius 0 with the slot, down the subtree |
+| `SpawnThrownWeapon` (`FUN_004504E0`), `ZombieThrowHandWeapon` (`FUN_0045A240`) | the emptied hand's radius 0 |
+| `ThrowerStateRearm` (`FUN_0044F7A0`) | type 0x16's rows 4 and 7 into bones 5 and 8, unscaled -- a load through `[0x004D0384]` the decompiler shows as float literals |
+| `ThrowerStateRestoreBothHands` (`FUN_0044F900`) | the actor's own rows 4 and 7, unscaled |
+| `EnemyZombieInitByCharType` (`FUN_00452FD0`) | radius 0 on the bones it gives a collision mesh: 5 and 8 of types 2 and 3, 5 of 0xE |
+| `Boss4Init` (`FUN_004917E0`) | radius 0 on the ten bones it gives a mesh |
+| `FrogAwardKillAndEnterDeath` (`FUN_0043A2E0`) | the frog's bone 2 |
+| `EnemyZombieInit` (`FUN_00452DA0`) / `EnemyThrowerInit` (`FUN_00449620`) | the head's radius × 2 (× 1.8 for type 0xE) under Original Mode's big-head item (`DAT_009C88A8`) |
+| `ZombieHideBoneSubtree` (`0x0045DD70`) | radius 0 with the slot, for `ZombieInitHalved` and the split |
 
 Two routines write a record's `+0x00` slot and **not** its sphere, and so are
 not in the table: class 0x25's `op 9` (bone 5, from `g_player_hand_slots`) and
@@ -1151,7 +1072,6 @@ The two fade arms are the whole of what moves a class-0x30 actor's alpha;
 stepping `1/60`, type 0x12 at 0 stepping `1/30`, both with a hundred-draw wait
 and `obj+0x1368` bit `0x20` up -- and type 0x12's arm allocates the type-9
 twin, which `ZombieTwinFollowHost` (`FUN_00453290`) keeps on the host's pose.
-Ported in `game/class30/draw.ts`, `init_char.ts` and `twin.ts`.
 
 Two arms are not draws at all and wrap this one: `ZombieDrawBoneSlotOnly`
 (`0x00453B30`) is the plain one-slot hook `ZombieAdvanceMotion` installs in
@@ -1180,22 +1100,18 @@ resolves to that type's own `pol/` file, which is the check on the reading:
 | `0x0D` | `znkagex.bin` | `0x1DCD`, `0x1E00` |
 | `0x12` | `znele.bin` | `0x1C6C` |
 
-### Why this took so long to find
+### `char_adv02`'s midriff
 
-`char_adv02`'s midriff. Bone 1 escalates to `0x1B70` on the first torso hit and
-that model is chest-only — `y 1.35..5.53` against the undamaged `0x1B3D`'s
-`y -2.02..5.53` — while the pelvis tops out at `y -0.45`. Type 0 is one of the
-21 with a **null** `g_pCharacterExtraParts` descriptor, so the soft waist 68
-other types carry gives it nothing, and the band had nothing drawing it.
+Bone 1 escalates to `0x1B70` on the first torso hit and that model is
+chest-only — `y 1.35..5.53` against the undamaged `0x1B3D`'s `y -2.02..5.53` —
+while the pelvis tops out at `y -0.45`. Type 0 is one of the 21 with a **null**
+`g_pCharacterExtraParts` descriptor, so the soft waist 68 other types carry
+gives it nothing: the band is drawn by the cel run alone.
 
-The search that stalled had ruled out the right things and drawn the wrong
-conclusion from them: "`AssetDrawSlot` draws one model per slot, so a bone
-cannot draw two" — true premise, false inference, because the hook calls the
-draw as many times as it likes. It then went looking for a table, found that
-`0x1B6B..0x1B6F` are referenced by **no table in the image**, and stopped
-there. That scan was correct. What it proves is that the selection is not
-data: the run is `0x1B52..0x1B6F`, **thirty** models, and the five were its
-last five.
+`AssetDrawSlot` draws one model per slot, but the hook calls it as many times
+as it likes, so a bone can draw two. `0x1B6B..0x1B6F` are referenced by **no
+table in the image**: the selection is not data. The run is `0x1B52..0x1B6F`,
+**thirty** models, and those five are its last five.
 
 The models say the same thing. All twenty of `0x1B3E..0x1B51` carry 3 meshes
 and 138 vertices with textures `[8, 9, 1]`, and 98 of the 138 vertices differ
@@ -1248,13 +1164,10 @@ scale)` — an animated sprite that runs the range and dies. Material 1 is slots
 and the default arm is a single frame at 0.1, so a shot into untagged geometry
 barely shows.
 
-This paragraph called `FUN_004073B0` `SpawnImpactSprite` until 2026-09-03,
-against a TSV that called it `SpriteEffectSlotRange` — and *both* were wrong.
-The routine allocates the effect actor and plays its sound, so it is not a
-slot-range lookup; and impact is one of its fourteen kinds, not what it is
-for: `0x53` is rain and `0x5A` spawns two more effects beside itself. Worse,
-`SpawnImpactSprite` would have collided with the wrapper's own name one
-address up.
+`SpawnSpriteEffectFromParams` allocates the effect actor and plays its sound,
+so it is not a slot-range lookup; and impact is one of its fourteen kinds, not
+what it is for: `0x53` is rain and `0x5A` spawns two more effects beside
+itself.
 
 ### Firing — `g_gunshot_sound_ids`
 
@@ -1348,14 +1261,9 @@ the same: `LEA EBP` of the same address at `0x004499D4`, `MOV EAX, [EBP]` at
 `0x00449A70`, `CMP EAX, 0x2` at `0x00449A76`. Neither tests whether the actor
 died of *this* shot — only that it is dead and its death not yet latched.
 `web/tools/checks/combat.ts` check 15 reads those operands out of the image.
-
-This page said `bone == 2 ? 2 : 1` when the routine was first read, which was
-right. A later session read `[EBP]` at `0x00453F6E` as `g_hit_result` — the
-other of the two pointers, the one in `EBX` — rewrote this section, the
-player's shot path and its tests to "the result is 2", and said so here as a
-correction. It is corrected back, with the register this time. What made either
-reading easy to hold is the table below: kind 2's voice pair *is* kind 1's, so
-what changes between them is the impact and not the line.
+`[EBP]` is the shot bone and `[EBX]` the result; the two are easy to confuse
+because kind 2's voice pair *is* kind 1's (below), so what changes between
+them is the impact and not the line.
 
 `ActorPlayHitVoice` (`FUN_0040A6F0`) plays **two** sounds — a flesh impact and
 a voice:
@@ -1367,9 +1275,8 @@ a voice:
 | dead, the head (kind 2) | `BLOOD01` or `BLOOD05` | `ZOMBIE_019` / `ZOMBIE_018` |
 | attack cry (kind 3) | *none* | a coin flip **within** the set's own pair |
 
-Kinds 1 and 2 carry the **same voice pair**, which is checked against every
-shipped bundle rather than taken on trust: the exporter writes `voice.kill` and
-`voice.head` and they come out identical. So the only audible difference
+Kinds 1 and 2 carry the **same voice pair** (`web/tools/checks/combat.ts`
+check 15 reads both out of the image). So the only audible difference
 between them is the impact table — five body impacts against two head ones —
 and *that* is what a headshot kill sounds like in this game, not a different
 cry.
@@ -1404,8 +1311,7 @@ MatrixTranslate(rec[0x274], rec[0x278], z);
 AssetDrawSlot(cel + 0x3A);
 ```
 
-Four things follow, and three of them were wrong in this document until
-2026-09-06.
+Four things follow.
 
 * **It is twenty-five different models, not one texture animated.** Slots
   `0x3A..0x52` are `pol/common.bin` entries 0 to 24. There is no texture
@@ -1480,9 +1386,7 @@ the camera's axes. The kind-5 arm (`CMP EAX, 0x5` at `0x00416CBE`) also
 `MatrixTranslate`s by `CamEvalObjectPath6(0x194, frame % 0x18)` first -- two
 translations, summed (L5) -- and draws `0x109D` (`etc_1.bin` entry 41), the
 only draw of that slot in the program. `op_` `0x194` is `op_org` 0, so only an
-Original Mode stage has the path. The exporter once placed that arm as the rig
-`obj_416b00` at the path's own pose, which stood in front of Goldman's desk in
-stage 2's opening; it is not a placeable rig.
+Original Mode stage has the path.
 
 Two smaller findings from the same routine:
 
@@ -1510,7 +1414,7 @@ obj+0x1358 = steps;
 ```
 
 Three concentric radii per ring set — but the number they yield is **not a step
-count**, which is what an earlier revision of this section said. `FUN_004090B0`
+count**. `FUN_004090B0`
 sorts every live enemy by distance to the camera once a frame and writes each
 actor's **rank** in that queue to `obj+0x131D`. Sub-state 1's test is:
 
@@ -1537,12 +1441,9 @@ so the script tunes the approach distances per encounter.
 
 ### The camera does follow the enemies
 
-**Correction.** An earlier revision of this section said it did not, on the
-strength of an xref sweep: nothing that writes `g_camera_yaw_bams` reads an
-actor. That is true and it is not the question, because **the tracking never
-writes a yaw**. It writes a *point*, and a separate damped step turns the
-camera toward it. The same trap as the skip flag earlier in this project —
-absence in one narrow query taken for absence in the program.
+Nothing that writes `g_camera_yaw_bams` reads an actor, and that is not the
+question: **the tracking never writes a yaw**. It writes a *point*, and a
+separate damped step turns the camera toward it.
 
 There are three pieces.
 
@@ -1596,10 +1497,8 @@ Fail, and the enemy keeps walking.
   `0x009A2B98`;
 * the grant raises the latch bit and `g_attack_committed` when
   `ActorIsOnScreen` says no, and writes `g_attack_permits[obj+0x121] = 1`;
-* the permit table holds **0 or 1** — whether a permit is out, not who has it
-  (the port stores the holder's id and `-1` for free, for its debug panel —
-  and every reader in the port, the scripted attackers' own picks included,
-  has to test against `-1`, not against the engine's literals);
+* the permit table holds **0 or 1** — whether a permit is out, not who has
+  it;
 * it does **not** write `obj+0x34`. Where a claimant lowers `NoCameraTrack`
   (`0x10000`) is its own business, and only three do: `ZombieStateApproach`
   after a grant (`0x00457A4E`), `ZombieStateWaitForCameraFrame` before its
@@ -1610,7 +1509,7 @@ Fail, and the enemy keeps walking.
 
 The nine class-0x30 call sites are `0x0045583B` (hub), `0x004576FB` (state
 19), `0x00457A39` (state 22), `0x00457C18` (state 23), `0x004587C4` (state 28,
-`0x004586E0`, unported), `0x00458EB0`/`0x00458EC3` (`ZombieShouldStandAndThrow`
+`0x004586E0`), `0x00458EB0`/`0x00458EC3` (`ZombieShouldStandAndThrow`
 — type 1 claims *before* its hand test, 0x13/0x14 after) and
 `0x0045920C`/`0x004592EE` (state 33). Class 0x31's twelve are listed in
 `functions.tsv`'s `ThrowerTryClaimAttackSlot` row; five of them are
@@ -1652,16 +1551,14 @@ in particular:
   and 109 do exactly that: measured over their 160 frames the eye travels
   **0.00 units** while the target travels 150 and the yaw sweeps **110°**.
 
-Both are worth knowing because they are the shape the player has to reproduce:
-position and aim are separate, and the aim has a mind of its own.
+So position and aim are separate, and the aim has a mind of its own.
 
-A note on finding these at all: `CameraSnapToPathEye`,
-`CameraStepDeferredRailWithFrameExport`, `CameraPathWithImpulseShake` and
-`CameraPlayStashedPath` each **re-point `g_camera_update_hook` at an address
-inside themselves** (`0x40C470`, `0x40C790`, `0x40C5C0`, `0x40C8B0`), so the
-named function is the *first frame* and the steady state is a separate entry
-Ghidra had not split out. Decompiling the name alone shows setup code and hides
-the loop.
+`CameraSnapToPathEye`, `CameraStepDeferredRailWithFrameExport`,
+`CameraPathWithImpulseShake` and `CameraPlayStashedPath` each **re-point
+`g_camera_update_hook` at an address inside themselves** (`0x40C470`,
+`0x40C790`, `0x40C5C0`, `0x40C8B0`), so the named function is the *first frame*
+and the steady state is a separate entry. Decompiling the name alone shows
+setup code and hides the loop.
 
 ### Registering, and the slot table
 
@@ -1769,9 +1666,8 @@ once it is back outside the inner ring, or after 240 frames. So the next enemy
 cannot begin until this one has actually backed away — the turn-taking and the
 spacing are the same mechanism.
 
-`g_class30_motion_rows` is `PTR_PTR_00592CBC`, which is not an alternate
-reaction table as an earlier revision of this file called it: it is the
-character's general motion row, indexed by body condition. 0 and 1 are the walk
+`g_class30_motion_rows` is `PTR_PTR_00592CBC`, the character's general motion
+row, indexed by body condition -- not a reaction table. 0 and 1 are the walk
 variants `ZombieStateApproach` picks between on `obj+0x136C` bit 21, 2 and 3
 the attack run, and **4 the back-away** — 256 for `char_adv02`, 1008 for
 `char_adv00`, both about 70 frames.
@@ -1905,7 +1801,7 @@ the shared path twice, by two copies of `CMP word ptr [ESI+0x1f4], 0x18`
 landing surface — one address, two readings, both inside class 0x31, and no
 `cls` test separates them.
 
-**That mapping is `.text`, and does not travel in the bundle.** The 32-byte
+**That mapping is `.text`.** The 32-byte
 table at `0x0044FD1C` it indexes is a compiler-emitted dense switch, not a
 data table: `.rdata` starts at 0x004C4000, the table sits inside
 `ThrowerStateThrow`'s own body, it has exactly one xref in the program (the
@@ -1915,10 +1811,7 @@ function, and the clip ids are `MOV` immediates in its arms
 (`b8f7010000` = `MOV EAX, 0x1F7`). Only eight of its 32 bytes are reachable —
 `handIdx` is 0 or 1 and `stance` is 0..3, so the indices that can occur are
 0, 1, 10, 11, 20, 21, 30 and 31; the other 24 all hold `0x08`, the default
-arm's selector, because a dense switch has to be dense. Under
-`docs/formats/bundle.md`'s rule it is transcribed in
-`web/src/game/class31/thrower.ts`, where `THROW_BY_STANCE_ZSLMAN` and
-`ZSLMAN_RELEASE_FRAME` carry the citation.
+arm's selector, because a dense switch has to be dense.
 
 `[open]` — the exe's stance is a **sum**, not a selector. If two surface bits
 were ever set at once it would exceed 3, the index would leave the table, and
@@ -1927,8 +1820,7 @@ the default arm would run: it plays **the actor pointer itself** as a motion id
 `PUSH EDI` is the routine's one and only argument — Ghidra renders it
 `iVar3 = param_1`) and **does not write `obj+0x1350` at all**, so the compare
 would then read a landing surface as a frame number. Whether the engine can set
-two at once is undetermined. An earlier note here called it "the routine's
-second argument"; `ThrowerStateThrow` has no second argument.
+two at once is undetermined.
 
 **The clip does not start at frame zero.** `ActorSetMotionBlended`
 (`FUN_004119A0`) is `param_1[2] = param_3; param_1[6] = param_3 / 2` — so its
@@ -2026,8 +1918,8 @@ unless the throwing hand is bone 5. `obj+0x64` and `obj+0x6C` are zero through
 the flight (`ActorClearGameFields` cleared them), so a knife starts square to
 the world, leans by its type's `obj+0x1364` (`0x600` for `zsass`, 0 for
 `zslman`) and spins flat about the vertical. `[proved]` The write is past a
-`MatrixStackPop` the decompiler has marked no-return (`L35`); an earlier
-reading of the pseudocode alone concluded that nothing writes the rate.
+`MatrixStackPop` the decompiler has marked no-return (`L35`), so the
+pseudocode alone shows no writer of the rate.
 
 On arrival it faces the **eye** — `VecToAngles(g_camera_eye - pos)` into the
 yaw, pitch zeroed — with a random pitch kick of `±(rand()&2)*0x100` and a yaw
@@ -2093,17 +1985,9 @@ no hand test on the spin.
 calls `ZombieThrowHandWeapon` a second time for character type 1 after a
 `TryClaimAttackSlot` it does not look at (`0x004592E4`..`0x00459301`).
 
-## 11. What the player implements
+## 11. Attacking the player
 
-Everything this document reads is transcribed in `web/src/game/` — the hit
-spheres, hit points, damage escalation, the control codes, the sever and its
-cascade, the stumble, the directional death, the gore swap, the score, the
-sounds of §9, the advance rings, the attack permit, the strike and the
-tracking camera. Where the port departs from a reading, or a reading is still
-open, it says so beside the code with `[diverges]` or `[open]`, and
-[`../STATUS.md`](../STATUS.md) counts them.
-
-Two readings the port rests on that are easy to get wrong:
+Two readings that are easy to get wrong:
 
 * **The live-enemy waits (evt `0x43` / `0x44`) are real**: the script holds
   until the enemies are dead, which is the game's own condition.
@@ -2111,8 +1995,8 @@ Two readings the port rests on that are easy to get wrong:
   writes a velocity; `SkeletonApplyRootMotion` (`FUN_00410C50`) moves the
   object by the frame-to-frame root delta, gated by `model+0x64` bit 1, which
   `ActorBuildSkinnedModel` sets for every skeletal actor. The approach plays
-  an in-place walk while it waits its turn, and the attack run closes fast.
-  `web/src/game/root_motion.ts` has the measurements.
+  an in-place walk while it waits its turn, and the attack run closes fast
+  (measurements under "Locomotion is the clips'", below).
 
 ### The strike — `ZombieStateHoldAtRange` and `ZombieStateStrike`
 
@@ -2165,7 +2049,7 @@ The entry is 0x10 bytes:
 | `+0x02` | s16 lunge motion, played while still beyond *distance* |
 | `+0x04` | f32 distance inside which the strike starts |
 | `+0x08` | s16 the frame of the clip on which the hit lands |
-| `+0x0A` | s16 the motion the **player** plays when hit |
+| `+0x0A` | s16 the **damage overlay kind** the hit shows (below) |
 | `+0x0C` | u16 cancel mask |
 
 Both operators in sub 2 are load-bearing, and together they make some attacks
@@ -2183,13 +2067,9 @@ with its head shot off draws entry 3 (clip 1018, hit frame 3) and connects.
 Nothing is aborted and nothing is retried: the strike simply never fires, the
 clip plays out and the actor retreats. `[proved]`
 
-The exporter therefore keeps such an entry rather than rejecting it —
-`attackHitLands` in `web/src/hod2lib/combat.ts` carries the reading, and
 `web/tools/checks/combat.ts` asserts that exact set of three instead of
 imposing the bound, because a row misread out of the *next* character's
 attacks looks the same from the outside.
-The bound was right for as long as the reader scanned a fixed number of
-entries; it has been indexed by the pick table for longer than that.
 
 ### Shooting a limb off changes the attack, twice over
 
@@ -2212,34 +2092,25 @@ for a different attack in the first place: `char_adv00` with an intact head
 always draws attack 2 (strike 1013, cancelled by a destroyed head) and with the
 head gone always draws attack 3 (strike 983, mask `0x8`, uncancellable).
 
-### Three ways the player's version of this went wrong
-
-Recorded because each is a different kind of mistake and the first two are
-invisible from the code alone.
+### Facing, permits, and whose approach it is
 
 **Facing.** `TurnActorTowardCamera` turns the actor's yaw toward
 `VecToAngles(obj.x - p.x, 0, obj.z - p.z)` — the angle of **actor minus
-camera**. Written the other way round it is a clean 180 degrees, and because
-the turn is gradual the result is a zombie rotating slowly *away* from you
-rather than snapping backwards. Easy to write, hard to spot. (The port also
-had the turn itself wrong for a long time -- an ease of a fifteenth of the
-remaining angle a frame, where `TurnAngleToward` (`FUN_00409E00`) is a flat
-`0x1A0`/`0x410` a frame -- and a negative rate faked with a 0x8000 flip of the
-target. See `web/src/game/actor_turn.ts`.)
+camera**. The other way round is a clean 180 degrees, and because the turn is
+gradual the result is a zombie rotating slowly *away* from you rather than
+snapping backwards. The turn is `TurnAngleToward` (`FUN_00409E00`), a flat
+`0x1A0`/`0x410` a frame, not an ease.
 
 **Permits held by actors that cannot attack.** There are only
 `g_max_attackers` permits — one in single player — and an actor that takes one
 and then sits in a state with no handler blocks every other enemy permanently.
-Two ways in: an `attack_state` of 0 is `g_class30_states[0]`, the engine's
-no-op, and **161 of the game's class-0x30 spawns carry 0 or −1**; and the
-states that are not 1, 2 or 3 (10, 15, 26, 30, 38 — 51 more spawns) are
-approach variants that a client not modelling them will sit in for ever. Both
-must be refused a permit or mapped onto a state that terminates.
+An `attack_state` of 0 is `g_class30_states[0]`, the engine's no-op, and **161
+of the game's class-0x30 spawns carry 0 or −1**; the states that are not 1, 2
+or 3 (10, 15, 26, 30, 38 — 51 more spawns) are approach variants.
 
 **Actors that are not class 0x30 at all.** `g_class30_states` belongs to class
 0x30. The cat is class 0x53, civilians 0x10, scripted humanoids 0x25 — 279
-placements across the game — and running the zombie's approach on them walks
-scenery at the camera.
+placements across the game — and none of them runs the zombie's approach.
 
 ### Damage to the player — `PlayerTakeDamage`
 
@@ -2259,21 +2130,20 @@ if (major_entered != 2 && major != 2 && g_player_lives[player] < 1)
 ```
 
 `[proved]`, `FUN_00415300`. **One strike costs exactly one life.** There is no
-variable damage against the player -- the attack entry's `+0x0A` is a
-not an amount. It is the **damage overlay kind** (`overlay_kind` in the
-bundle, `g_player_damage_overlay_kind` in the exe's names -- both were called
-the "player motion" until format 10, and nothing reads it as a motion): its
-one reader is the damage overlay, below. The `latch` argument is 1 at every call site but the
+variable damage against the player -- the attack entry's `+0x0A` is not an
+amount. It is the **damage overlay kind** (`g_player_damage_overlay_kind`;
+nothing reads it as a motion): its one reader is the damage overlay, below. The `latch` argument is 1 at every call site but the
 `obj+0x34 & 0x2000000` arms of `ActorStrikeConnect` and `ThrowerStrikeConnect`,
 which pass 0. `g_damage_rank_pending -= 2` closes a loop from section 4: being
 hit lowers the adaptive rank, which raises the per-bone damage modifier, so the
 game gets easier the worse you do. **The damage sprite is not spawned here**:
 the per-player `+0x7C` hook turns `g_player_was_hit` and the kind into it
-(`0x00415180` -> `FUN_00417440`); see `game/player_shell.ts`.
+(`0x00415180` -> `FUN_00417440`).
 
 **On the path camera the last life goes.** `PlayerUpdateInPlay`
 (`FUN_00413E90`) then takes the player out of play on its next turn --
-`g_players_in_play -= 1`, state 4 -- and the player shell runs the continue:
+`g_players_in_play -= 1`, state 4 -- and the player's own states run the
+continue:
 
 | state | handler | what it does |
 |---:|---|---|
@@ -2353,12 +2223,9 @@ mesh each with the same state:
 | texture | 26..33, ARGB4444 VQ 128x128 | alpha 0 over 55-84% of each; of the texels the mark covers, 31-82% are 255 (the thin claw marks, texture 27, are mostly edge) and the rest a 4-bit soft edge |
 
 So what reaches the screen is the texel's alpha: a solid mark with feathered
-edges, not a translucent one, and the same on all 59 frames. The port draws
-exactly that -- `web/tools/hurt_alpha.mjs` measures it off the page's pixels
-(stage 2's kind 4: 66.5% of the covered pixels at alpha exactly 1.0 against
-texture 28's 65.4% of covered texels at 255; stage 1's kind 0: 74.2% against
-texture 33's 75.9%), and `web/tools/checks/texture_alpha.ts` holds the call, the
-words, the base alpha, the textures and the bundle's images to it.
+edges, not a translucent one, and the same on all 59 frames.
+`web/tools/checks/texture_alpha.ts` holds the call, the words, the base alpha
+and the textures to it.
 
 `[likely]` **Its colour is lit.** `AssetDrawSlot` draws under
 `SetLightingDefaultSingle`'s light, and no immediate `PUSH 0x89`
@@ -2369,16 +2236,13 @@ with the model's normals `(0, 0, 1)` put through a modelview scaled by 0.02
 and `NORMALIZENORMALS` never set. That can tint the mark with the scene's
 light and darken it where the light is behind it. Alpha is untouched by it
 (the lit diffuse alpha is the material's, 1.0). `[open]` how far: that turns
-on how the device transforms an unnormalised normal. The port draws every
-effect model unlit (`render/lighting.ts`), so it shows the texture's own
-orange.
+on how the device transforms an unnormalised normal.
 
 The zombie attack tables' `+0x0A` values span 0, 1, 2, 3 (type 0x0D only), 4,
 5, 7, 8 and 9; the literals at the other call sites are 0/1 (the thrower's
 grab), 4 (the axe), 6 (arcing throws, the stage-2 boss), 7 (leaps, rolled
 props), 8 (boss 4), 9 (bats, fish, frog, owl, body creature) and 10 (the
-horde). With two players the overlays sit at x = -0.22 and +0.22. The port is
-`web/src/game/effects/damage_overlay.ts`.
+horde). With two players the overlays sit at x = -0.22 and +0.22.
 
 **The second argument decides whether there is an overlay at all.** It gates
 the latch, and it is 1 at every call site but three: `ActorStrikeConnect` and
@@ -2389,12 +2253,8 @@ passes 0 as well. A life is still taken; no overlay and no shake.
 
 ### Do zombies aim their torso and head at the player? The body, and the head.
 
-This section answered "no" for a long time, on three bullets. The first is
-still true, the second was about the wrong hook, and the third was wrong: the
-head **is** aimed, by the per-node draw hook rather than the pose hook, which
-is why the search that settled it looked in the wrong place (L39: a negative
-result about the wrong question). The routine that does it had no function in
-Ghidra, so its callers were in no xref list either (L35).
+The bone pose is not aimed; the head **is**, by the per-node draw hook rather
+than the pose hook.
 
 * **The bone pose is pure motion.** `SkeletonWalkNode` takes every bone's
   rotation from `g_frame_bone_rotations`, which points straight into the loaded
@@ -2402,10 +2262,9 @@ Ghidra, so its callers were in no xref list either (L35).
 * **The pose hook rotates nothing.** `SkeletonApplyRootMotion` calls the hook
   at `model+0x115C` -- `obj+0x12F0` -- and for these two classes that is their
   push-out: `EnemyZombieInit` writes `ZombiePushOutOfWorldAndActors` there and
-  `EnemyThrowerInit` `ThrowerPushOutOfWorld`, both as `obj+0x12F0`, which is
-  why a count of writes to `+0x115C` found only `PoseHookNone` and
-  `PoseHookGrowAndPushOutOfWorld` and called the zombie's hook empty. None of
-  the four rotates a bone. `[proved]`
+  `EnemyThrowerInit` `ThrowerPushOutOfWorld`, both as `obj+0x12F0`; the only
+  writes of `+0x115C` by that name are `PoseHookNone` and
+  `PoseHookGrowAndPushOutOfWorld`. None of the four rotates a bone. `[proved]`
 * **The node draw hook aims bone 2.** `ZombieDrawBonePart` (`FUN_004534A0`)
   pushes the matrix, and for bone 2 while `obj+0x34` lacks `0x40000` calls
   `ActorAimHeadAtCamera` (`FUN_00453BE0`) at `0x004534EA`, before its switch;
@@ -2442,8 +2301,8 @@ other eye -- its one argument is `pt`. `[proved]` That is the **gameplay** eye,
 which the path hooks write as the pose's eye with `y - 15.0` (`0x004C4398`),
 while the view is built from the camera block's eye. So on a path the `+ 15`
 undoes the drop and the target is the lens: a head level with the camera looks
-level into it. `[likely]` for "the block's eye is the pose's" -- in the port's
-page, stage 1 block 1, the lens sits at exactly `g_camera_eye.y + 15`.
+level into it. `[likely]` for "the block's eye is the pose's" -- measured in the
+player on stage 1 block 1, the lens sits at exactly `g_camera_eye.y + 15`.
 
 What follows from it, each `[proved]` from the same listings:
 
@@ -2488,38 +2347,27 @@ What follows from it, each `[proved]` from the same listings:
   it raises `obj+0x1364`; op 12 is in none of the 274 class-0x25 programs the
   twelve bundles carry, so in the exported data this twin never runs.
 
-**Ported** for classes 0x30 and 0x31: `game/class30/head_aim.ts` steps the
-angles, which live on both arms as `HeadAimWords`, from the two hooks the node
-walk runs in each class's update; `render/characters/head_aim.ts` draws the
-turn around each mesh the hook draws, as the engine's push and pop.
-`web/test/port.test.ts` asserts the seed, the rate, the window and its edge,
-the quarter-turned centre, the stale record, both gates and the two-attacker
-target. Class 0x25's twin is not ported.
-
 So the aiming you see is the **whole actor turning**, plus the head. The body
 turn is `TurnActorTowardCamera` (`FUN_00409ED0`), a rate limit of `0x1A0`
 BAMS a frame jogging and `0x410` sprinting toward a point 1.5 units from the
 eye -- along world +Z turned by `__ftol(g_camera_eye_y)`, the eye's *height*,
-which at the stages' heights is a few dozen BAMS, not "in front of the
-camera" as this said. Then the motion variants the game selects: two walks
+which at the stages' heights is a few dozen BAMS: the point is not "in front
+of the camera". Then the motion variants the game selects: two walks
 chosen by `obj+0x136C` bit 21, the attack run by bit 27, the per-region
 stumbles, and the four-arc deaths.
 
-The pose-hook half took a hook search rather than an xref sweep to establish,
-because the pose is reached through a stored function pointer -- the same
-shape that made the camera tracking invisible earlier in this file. That hook
-was found and read, and it rotates nothing; the head's aim is in the draw hook
-beside it.
+The pose hook is reached through a stored function pointer, so a hook search
+finds it and an xref sweep does not.
 
-### Locomotion is still open, but narrower
+### Locomotion is the clips'
 
-`SkeletonApplyRootMotion` **does** turn motion root translation into world
-movement when `obj+0x64` bit 1 is set. That is not what walks a zombie in,
-though: measured over the baked clips, the walk loop's root nets **+0.00** in
-both x and z — it only bobs, ±0.22 — while the deaths net **−8.7** and
-**−15.7**. So root motion carries a falling body and nothing else, and the
-approach velocity is still `[open]`. No `fstp [reg+0x4c]` exists anywhere in
-`0x455000..0x459000`, so it is not written in the zombie's own code.
+`SkeletonApplyRootMotion` turns motion root translation into world movement
+when `model+0x64` bit 1 is set, and `ActorBuildSkinnedModel` sets it for every
+skeletal actor. No `fstp [reg+0x4c]` exists anywhere in `0x455000..0x459000`:
+no class-0x30 state writes a velocity. Measured over `char_adv02`'s own clips,
+the walk loop's root nets **+0.02** -- it only bobs, ±0.22 -- so the approach
+is an in-place walk; the run nets **−19.3** over 16 frames and the back-away
+**+15.0** over 36, and the deaths **−8.7** and **−15.7**.
 
 `web/tools/checks/combat.ts` is the check: it re-derives the step tables from raw
 bytes, asserts the control-code/slot gap across all 86 character types,
@@ -2588,6 +2436,23 @@ makes its fall and its knock-back physical.
 | 11 | `ThrowerStateFallToSurface` | fall until the ground catches — how a wall-crawler comes down |
 | **14, 15, 16** | `ThrowerStateLeapToSurface` | **onto the far wall, the near wall, the ceiling** |
 | 17 | `ThrowerStateGetUp` | motion `0x127`, and **only after a decapitation** |
+| **18** | `ThrowerStateWalkDistance` | walk the descriptor's own distance — class 0x30's state 15 is the same routine on the same `f32` at tail `+0x04` |
+| **19** | `ThrowerStateEntranceClip` | play the descriptor's own clip |
+| 20 | `ThrowerStateLeapToPoint` | the scripted drop |
+| 21 | `ThrowerStateRideObjectPath` | object path `0x14F` for 0xC4 frames — **cut content** |
+| 22 | `ThrowerStateLeapStrike` | a pounce off the descriptor — **dead code** |
+| **23** | `ThrowerStateDelayedPounce` | wait, then leap at the camera's own height |
+| 24 | `ThrowerStateCloseAndStrike` | `zskamere`'s standing swing |
+| **25** | `ThrowerStateWithdraw` | back off, then stand |
+| 26 | `ThrowerStatePathFollow` | a route walked before fighting |
+| 27 | `ThrowerStateGrabPlayer` | a camera-relative grab — stage 5's four `zslman` |
+| 28 | `ThrowerStateWaitForCue` | wait on a timer, a path frame or a flag |
+| 29, 30 | `ThrowerStateRearm` / `ThrowerStateRestoreBothHands` | the weapon goes back |
+| 31 | `ThrowerStateThrow` | see §10 |
+| 32 | `ThrowerStateStrikeOnTheSpot` | `zskamere` perched on surface `0x35`, swinging for ever |
+| 33 | `ThrowerStateKnockedTumbling` | `zslman`'s shot reaction: bounced along its stance's axis |
+| 34 | `ThrowerStateBlinkInThreeHops` | stage 6's blinking materialisation |
+
 ### The spawn record's flags word
 
 `ActorInitFlags` (`FUN_00408970`) is two lines and it matters more than its
@@ -2618,8 +2483,8 @@ its own bits on top. Everything the shipped records set:
 collision is **two vertical quads** — `coli1.bin:4968`, both `axis 2` with a
 zero-Y normal — so `QueryGroundHeightAt` finds nothing under him and falls back
 to the script's ground plane sixty-two units below. The flag is what keeps him
-on the ledge, and without it he dropped through it and threw from behind the
-wall he had been standing on.
+on the ledge; without it he would drop through it and throw from behind the
+wall he stands on.
 
 ### Class 0x30 state 33 — the stationary thrower
 
@@ -2654,8 +2519,7 @@ where Ghidra renders the same address as `bone * 0x90 + 0x284`. **[proved]**
 equals the slot it has just written, and writes four zeroes otherwise — so the
 general rule is that **a bone drawing anything but the model
 `PTR_DAT_004D032C` names for it has no hit sphere**, which covers every gore
-variant as well as a bare hand. `render/characters.ts` tests the static table
-instead; that is `[diverges]`, declared in `game/class30/throw.ts`.
+variant as well as a bare hand.
 
 The sub-states are `Arm → Wait → Claim → Release → Recover → Leave`, and the
 first three are a fallthrough: with zero delays a spawn arms, waits and claims
@@ -2697,14 +2561,14 @@ units below their feet. The bit is how the game says *this one does not back
 away*, and both counters going back at once is why the block it was holding
 carries on rather than waiting out a walk. `[proved]`
 
-With the bit clear, the descriptor's `tail+0x03` — the same byte the port
-carries as `attack_state` — chooses between the two moving endings. **0** walks
-away through state 15 with the distance at `tail+0x10`; **26** leaps through
-state 26 to the point at `tail+0x10`..`+0x18` with the gravity at `tail+0x20`.
-Both are entered at **sub 1**, which is why those two states have a sub-1 arm
-that skips their own descriptor read. The walk arm raises `obj+0x34` bit
-`0x20000000`, and this is the one place in the game that reaches
-`ZombieStateWalkDistance`'s retire-instead-of-attack branch.
+With the bit clear, the descriptor's `tail+0x03` — the attack state — chooses
+between the two moving endings. **0** walks away through state 15 with the
+distance at `tail+0x10`; **26** leaps through state 26 to the point at
+`tail+0x10`..`+0x18` with the gravity at `tail+0x20`. Both are entered at **sub
+1**, which is why those two states have a sub-1 arm that skips their own
+descriptor read. The walk arm raises `obj+0x34` bit `0x20000000`, and this is
+the one place in the game that reaches `ZombieStateWalkDistance`'s
+retire-instead-of-attack branch.
 
 > ⚠️ `obj+0x34` bit `0x1000000`, which sub 0 tests and the walk arm clears, is
 > written by **nothing in the image** — an exhaustive scan of every `OR`
@@ -2720,9 +2584,8 @@ condition 8, and they never turn to line the shot up. **The claim and the
 hands come in the character type's order**: `znassb` (type 1) takes the permit
 first and then looks for a blade, so one with both shot away still holds the
 permit and answers no; the axe types 0x13 and 0x14 look first; any other type
-answers no without claiming. The port read `g_camera_yaw_bams` (`0x009C71F0`)
-here, half a turn from the block, and none of the fourteen ever threw.
-`[proved]`
+answers no without claiming. The test reads the camera block's yaw, not
+`g_camera_yaw_bams` (`0x009C71F0`), which is half a turn from it. `[proved]`
 
 #### Where the recompute happens, and why it is the whole of condition 8
 
@@ -2770,24 +2633,7 @@ hand reads `0x1EF9` armed or `0x1EF6` bare and neither is `0x1EF5`, so its left
 hand can never count as armed. Every `znonoopa` that reaches the ring therefore
 lands on **condition 1** with `DamageZone.LeftArm` already set, which puts its
 attack pick in row 40..49 — ten copies of attack 0, the right-arm swing at
-nineteen units. `[proved]`, and the port keeps it.
-
-| **18** | `ThrowerStateWalkDistance` | walk the descriptor's own distance — class 0x30's state 15 is the same routine on the same `f32` at tail `+0x04` |
-| **19** | `ThrowerStateEntranceClip` | play the descriptor's own clip |
-| 20 | `ThrowerStateLeapToPoint` | the scripted drop |
-| 21 | `ThrowerStateRideObjectPath` | object path `0x14F` for 0xC4 frames — **cut content** |
-| 22 | `ThrowerStateLeapStrike` | a pounce off the descriptor — **dead code** |
-| **23** | `ThrowerStateDelayedPounce` | wait, then leap at the camera's own height |
-| 24 | `ThrowerStateCloseAndStrike` | `zskamere`'s standing swing |
-| **25** | `ThrowerStateWithdraw` | back off, then stand |
-| 26 | `ThrowerStatePathFollow` | a route walked before fighting |
-| 27 | `ThrowerStateGrabPlayer` | a camera-relative grab — stage 5's four `zslman` |
-| 28 | `ThrowerStateWaitForCue` | wait on a timer, a path frame or a flag |
-| 29, 30 | `ThrowerStateRearm` / `ThrowerStateRestoreBothHands` | the weapon goes back |
-| 31 | `ThrowerStateThrow` | see §10 |
-| 32 | `ThrowerStateStrikeOnTheSpot` | `zskamere` perched on surface `0x35`, swinging for ever |
-| 33 | `ThrowerStateKnockedTumbling` | `zslman`'s shot reaction: bounced along its stance's axis |
-| 34 | `ThrowerStateBlinkInThreeHops` | stage 6's blinking materialisation |
+nineteen units. `[proved]`
 
 ### What a spawn can actually be placed in
 
@@ -2904,9 +2750,10 @@ dest = local(∓4.5, 0, 0) from the hit point
 units short of the face**. `ThrowerFindCeilingAbove` (`FUN_0044C0B0`) is the
 same question straight up, over a thousand units.
 
-Run against the game's own `coli/` sets at every class-0x31 spawn in the game,
-those two queries say **24 of the 49 can reach a wall and 14 have something
-overhead**, 9 and 4 of them in stage 2. The climb is
+Run as the port's probes (`game/class31/surface.ts`) against the game's own
+`coli/` sets at every class-0x31 spawn in the game, those two queries say **23
+of the 51 can reach a wall and 11 have something overhead**, 10 and 2 of them
+in stage 2; `web/tools/checks/thrower_walls.ts` holds the counts. The climb is
 level design, not unreachable data.
 
 ### The pounce — `ThrowerStateLeapDown`, `FUN_0044B670`
@@ -3036,11 +2883,9 @@ sub 2  if (++obj+0x1338 < 0x5A && |obj - eye|xz < 50.0) return
 | `0x00564D08` + `0x60` * row `aside_zslman_<row>` | type 0x18, row = `3*bit8 + 2*bit7 + bit6`, 1..3, else 0 |
 | `0x00564AC8` `aside` | every other type |
 
-`zslman`'s four sit **`0x60` apart**, each after the pounce script set 3
-names for attack 3 in that stance; the exporter read them at `0x30` until
-this was read, which gave rows 1 and 3 a pounce and row 2 row 1's leap.
-`web/tools/checks/combat.ts` check 16 holds the export to the four
-`MOV ESI, imm32` the state picks them with.
+`zslman`'s four sit **`0x60` apart**, each after the pounce script set 3 names
+for attack 3 in that stance. `web/tools/checks/combat.ts` check 16 holds the
+export to the four `MOV ESI, imm32` the state picks them with.
 
 So the ordinary thrower lands five units to one side of the camera and fifty
 in front, **in the camera's yaw-only frame**, and stands there for ninety
@@ -3148,15 +2993,14 @@ threshold of every one lies inside the play length of its own stage's clip,
 which `web/tools/checks/combat.ts` check 16 asserts and counts.
 
 `ThrowerStatePathFollow` (`FUN_0044EE00`) picks its leg's script from the
-waypoint's style word, the `s16` at `+0x02`, and the bundle carries all four
-under `class31.scripts`:
+waypoint's style word, the `s16` at `+0x02`:
 
-| style | address | name | bundle key | stages |
-|---|---|---|---|---|
-| 1 | `0x00565E58` | `g_class31_arc_path_style1` | `path_style1` | `{301,12,1,12}` three times |
-| 2 | `0x00565E88` | `g_class31_arc_path_style2` | `path_style2` | `{301,7,0,11}{300,48,1,65}{301,17,1,22}` |
-| other | `0x00565EB8` | `g_class31_arc_path_style0` | `path_style0` | `{301,0,0,8}{301,9,0,17}{301,18,0,23}` |
-| (type 0x17) | `0x00565E28` | `g_class31_arc_path_c17` | `drop_zskamere` | `{439,0,0,19}{439,20,0,31}{439,32,0,42}` |
+| style | address | name | stages |
+|---|---|---|---|
+| 1 | `0x00565E58` | `g_class31_arc_path_style1` | `{301,12,1,12}` three times |
+| 2 | `0x00565E88` | `g_class31_arc_path_style2` | `{301,7,0,11}{300,48,1,65}{301,17,1,22}` |
+| other | `0x00565EB8` | `g_class31_arc_path_style0` | `{301,0,0,8}{301,9,0,17}{301,18,0,23}` |
+| (type 0x17) | `0x00565E28` | `g_class31_arc_path_c17` | `{439,0,0,19}{439,20,0,31}{439,32,0,42}` |
 
 Style 1 is a pose, not a clip: 301 held on frame 12 by three stages whose
 thresholds are their own start frames, so the fit grows the fades over the
@@ -3203,8 +3047,7 @@ FitArcScriptByStartFrame   (0x19, zstin)
 
 > ⚠️ **Every one of those thresholds is in engine frames, at 60 Hz.** `mot/` is
 > authored at 30 Hz, so the baked clip's own index is half of it: clip 303
-> bakes to 34 keys and the hit frame is 62. Reading the baked index is why the
-> port's pounce landed and never connected.
+> bakes to 34 keys and the hit frame is 62.
 
 ### The tables
 
@@ -3220,8 +3063,7 @@ FitArcScriptByStartFrame   (0x19, zstin)
 Two of those rows are shared and it matters: `g_class31_melee_attacks` gives
 set 0 and set 3 five stances and sets 1 and 2 a single one, packed end to end
 with no count, so reading a fixed eight walks into the neighbour's entries.
-That is the adjacent-array trap, and the exporter bounds each row by the start
-of the next.
+That is the adjacent-array trap: each row ends where the next begins.
 
 ### Being shot — `ThrowerOnShot`, `FUN_004499A0`
 
@@ -3269,7 +3111,7 @@ one-stance one. The "four behaviour sets" are really two skeletons and two
 variations. `[proved]` by the banks: row A's reactions are `0x3A1`–`0x3AB`,
 all bank 47, and row B's are `0x1BD`–`0x1BF`, all bank 20.
 
-One consequence is an engine bug, left as it is: `ThrowerStateGetUp` plays
+One consequence is an engine bug: `ThrowerStateGetUp` plays
 motion `0x127` with no character-type branch, and `0x127` is a `szom.bin` clip.
 `zskamere` can reach that state and has no such clip on its rig.
 
@@ -3296,16 +3138,15 @@ response on the same bit besides — `ThrowerOnShot` at `0x004499F5`
 **So one shot lands per knockdown cycle.** The cycle is the knockback arc, the
 bounce down to `0.15` on the gravity axis or `obj+0x1338` reaching `0x78`, a
 settle of `(rand() % 10 + 1) * 3` frames, the get-up clip, and then the twenty
-frames of `obj+0x133C`. Measured in the port on stage 6's three rooms: 130 hit
+frames of `obj+0x133C`. Measured in the player on stage 6's three rooms: 130 hit
 points, 35 a hit, so `130 → 95 → 60 → 15 → dead`, with about 120 frames between
 one landed hit and the next whatever the rate of fire. Three of them together
 cleared in 420, 435 and 285 frames.
 
-This is the designed behaviour and not a bug in either the engine or the port,
-but it is a **trap for any harness that measures a room in shots**: firing
-twenty rounds into one frame lands exactly one of them. `web/tools/playthrough.mjs`
-therefore gives up on frames in which nothing took damage rather than on frames
-elapsed — see its header.
+This is the designed behaviour and not an engine bug, but it is a **trap for
+any harness that measures a room in shots**: firing twenty rounds into one
+frame lands exactly one of them. `web/tools/playthrough.mjs` gives up on frames
+in which nothing took damage rather than on frames elapsed — see its header.
 
 ### The carrier's two bits, and which word they are in
 
@@ -3324,5 +3165,4 @@ the evt's `hp` field is what picks it. It writes itself into `g_carrier_object`
 Both reads are `[EAX + 0x34]`. **Not `obj+0x136C`**: `0x40000000` there is
 `ZombieFlag2.CollideActors`, half of the `|= 0x60000000` that `EnemyZombieInit`
 (`FUN_00452DA0`) seeds on every class-0x30 spawn, so a test against that word
-answers yes for every zombie in the game and no for the carrier. The port had
-exactly that mistake in `ZombieDelayedStrikeGiveUp`; see `class30/scripted.ts`.
+answers yes for every zombie in the game and no for the carrier.

@@ -312,7 +312,7 @@ export enum CivilianWait {
    * `2` is the one and only gate `SkeletonApplyRootMotion` (`FUN_00410C50`)
    * tests before it moves the actor. So the answer to "do the engine's
    * civilians use root motion" is **yes, and their script says so block by
-   * block**: 289 of the 596 shipped wait words carry this bit and 297 do not.
+   * block**: 289 of the 596 shipped wait words carry this bit and 307 do not.
    * `[proved]`
    *
    * It is read at the moment op 0x00 runs, which is *inside* the block its own

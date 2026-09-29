@@ -81,10 +81,10 @@ peer session may be live.
 Get the baseline green before changing anything, so a failure later is yours:
 
 ```sh
-python3 tools/verify_all.py
+cd web && npm run verify
 ```
 
-`verify_all.py` is the canonical list of checks — see `CLAUDE.md`. A check that
+`web/tools/verify_all.ts` is the canonical list of checks — see `CLAUDE.md`. A check that
 asserted nothing exits 3 and is reported as a **skip**, never as a pass, so
 read the summary line and not just the exit code.
 
@@ -200,7 +200,7 @@ Two questions decide the shape of the fix:
   `get_xrefs_to` before transcribing.
 
 Everything you understood gets named in `ghidra/annotations/functions.tsv` and
-`globals.tsv` via `python3 tools/annotate.py` — **in the same commit as the
+`globals.tsv` via `npm run annotate` — **in the same commit as the
 finding**. It inserts in address order, which is the order those files are
 kept in; do not reorder them by anything else.
 
@@ -236,7 +236,7 @@ Three things, in this order:
 Then the full suite, and a worktree build so the commit stands alone:
 
 ```sh
-python3 tools/verify_all.py --game-dir ~/"THE HOUSE OF THE DEAD 2"
+cd web && npm run verify -- --game-dir ~/"THE HOUSE OF THE DEAD 2"
 git worktree add --detach /tmp/standalone HEAD && cd /tmp/standalone/web \
   && npm ci && npx tsc --noEmit        # a commit here was already broken by
                                        # staging a hunk that needed a peer's file

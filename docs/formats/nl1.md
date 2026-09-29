@@ -18,8 +18,9 @@ A model header is recognised by:
 - `u32 @0x04` has bit 0 set
 - `u32 @0x04` has no bits above bit 4 set
 
-Every HOD2 model observed so far has `objFormat == 1` (Super Index) and
-`globalFlag == 0x1`.
+All 9,112 models in the unprefixed `pol/` files have `objFormat == 1` (Super
+Index), which `web/tools/checks/corpus.ts` asserts. `globalFlag` is `0x1` on
+6,572 of them, `0x3` on 2,277, `0x5` on 236 and `0x7` on 27.
 
 ## Object header — 0x18 bytes
 

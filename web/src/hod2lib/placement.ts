@@ -80,9 +80,10 @@ export const PATH_STATES: Record<number, number[]> = { 0x31: [26] };
  * `+0x04`.
  *
  * Class 0x30 was missing here, and it is the commonest scripted entrance in
- * the game after the attack run: fifty spawns, every one of them an exact
- * integer between 3 and 30. Without the field the port had nothing to walk and
- * sent all fifty straight at the camera from their first frame.
+ * the game after the attack run: 63 spawns, every one of them an exact
+ * integer between 3 and 40 (`web/tools/checks/walk_distance.ts` holds it).
+ * Without the field the port had nothing to walk and sent all 63 straight at
+ * the camera from their first frame.
  */
 export const WALK_DISTANCE_STATES: Record<number, number[]> =
   { 0x30: [15], 0x31: [18] };

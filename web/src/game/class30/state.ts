@@ -206,7 +206,7 @@ export interface ZombieTail extends HeadAimWords {
    * compiles on a zombie, because the head keeps a field of that name for
    * class 0x24. It is a different word and it is always zero here. A test
    * assertion read it that way the moment this field moved, and `tsc` could
-   * not say so; `port.test.ts` now reads `zom.holdFrames` and says why.
+   * not say so; `test/port/` now reads `zom.holdFrames` and says why.
    */
   holdFrames: number;         // +0x1330, aliases `throwDelay` and `arcFrames`
   /**

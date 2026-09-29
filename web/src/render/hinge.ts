@@ -4,7 +4,7 @@
  *
  * Split out of `props.ts` because it is the only part of that file that is a
  * *transcription*: pure integer BAMS arithmetic, no three.js, no node, no
- * bundle. That makes it the part worth asserting on, and `test/port.test.ts`
+ * bundle. That makes it the part worth asserting on, and `test/port/`
  * does. The rest of `props.ts` — binding names to glTF nodes, quaternions,
  * the overlay — is the renderer's own work and has no counterpart in the exe.
  *

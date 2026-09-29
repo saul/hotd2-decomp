@@ -11,7 +11,7 @@ This document is the player's shape: the layers, the rules that keep it one
 shape, the checks that make the rules real, the bundle it loads, netplay and
 hosting. How to run it and play it is in the [README](../README.md). Every
 count — lines, coverage, divergences, ratchets — is in
-[`STATUS.md`](STATUS.md), which is generated; nothing here quotes one.
+`npm run status`, which measures it from the tree; nothing here quotes one.
 
 **If a rule here cannot be satisfied by the work in front of you, that is a
 finding, not an obstacle.** Say so, name the refactor that would satisfy it,
@@ -48,7 +48,7 @@ app       app/                                   the composition root. sees ever
 
 Dependencies point **down and never up**. `app` may import anything; `render`
 and `ui` may import `engine`; `engine` imports nothing above itself. `render`
-and `ui` may not import each other. `tools/verify_layers.py` holds all of it.
+and `ui` may not import each other. `web/tools/repo/layers.ts` holds all of it.
 
 Each boundary earns its place by what it makes possible:
 
@@ -200,7 +200,7 @@ one tag:
 
 * **The tag goes where the port's code departs** — on the routine or branch
   that does something other than the exe, or, for a departure in
-  representation, on the declaration of that field. `verify_port.py` fails a
+  representation, on the declaration of that field. `web/tools/repo/port.ts` fails a
   tag with no reason.
 * **Two routines that depart for one reason are two departures**, each with
   its tag: each is a transcription someone will compare against Ghidra, and
@@ -210,7 +210,7 @@ one tag:
   fixed — without writing the token (`L41`).
 
 `[open]` follows the same rule: it marks an unanswered question about the
-binary, once, where it is asked. Both markers are counted by `tools/status.py`
+binary, once, where it is asked. Both markers are counted by `npm run status`
 in every `.ts`/`.tsx` file under `web/src/`, in comments only.
 
 ### The boundary that makes it enforceable
@@ -364,7 +364,7 @@ would have written the block: a seek, a reset, a deep link.
 `g_shot_requests` is plain data, so a snapshot carries any pull not yet
 drained and a per-frame record of it is an input log. Replaying one headlessly
 needs a `pickShot` a run with no renderer can answer — the skeleton's forward
-kinematics in `game/` — so that harness is not built; `web/test/port.test.ts`
+kinematics in `game/` — so that harness is not built; `web/test/port/`
 drives the queue with a stubbed `pickShot`.
 
 ## `script/`: the machine and the state it drives
@@ -485,7 +485,7 @@ the hook three times.
 
 Two rules need an AST, and `web/tools/verify_ui.mjs` (`npm run verify:ui`)
 holds them: `useSlice` selectors return fields, and `store.demand` is called
-only inside `useEffect`. The rest is held by `verify_layers.py`, the type
+only inside `useEffect`. The rest is held by `web/tools/repo/layers.ts`, the type
 system and the runtime tests; a rule for something another mechanism already
 holds is worse than none.
 
@@ -569,13 +569,14 @@ mysteriously wrong, the same principle as `manifest.csv`.
 
 **Two digests.** `schema.hash` is a hash of the declarations in
 `web/src/bundle/` (generated into `bundle/schema_hash.ts` by
-`tools/gen_schema_hash.py`); a bundle that does not match is **refused**,
+`web/tools/gen/schema_hash.ts`); a bundle that does not match is **refused**,
 naming the files that drifted. `builder.hash` is a hash of the exporter's own
 code — every `.ts` under `hod2lib/` and every module it imports values from,
-comments stripped (`bundle/builder_hash.ts`, by `tools/gen_builder_hash.py`);
+comments stripped (`bundle/builder_hash.ts`, by `web/tools/gen/builder_hash.ts`);
 a stage that does not match is **stale**: it loads, the `≡` button shows `!`,
 and the bundle screen lists what drifted. Regenerate both before you export,
-not after (`L33`); `tools/verify_exporters.py` fails when either is stale.
+not after (`npm run gen:hashes`, `L33`); `web/tools/repo/exporters.ts` fails
+when either is stale.
 
 **No silent losses.** A `catch` in the exporter that gives something up
 records it through `degraded.note`, and the count reaches the manifest and the
@@ -624,7 +625,7 @@ and **Clear cache**.
 
 `npm run bundle-flow -- --game-dir ...` drives the whole flow in Chrome — the
 screen, an export, a stage built on demand, and the second visit out of the
-cache. It takes minutes, so it is not in `verify_all.py`; run it when you
+cache. It takes minutes, so it is not in `npm run verify`; run it when you
 touch `app/install/`, `app/bundles.ts` or the loader.
 
 ## Netplay
@@ -831,11 +832,12 @@ its caches. `npm run offline-check` holds both promises.
 
 ## Checks and harnesses
 
-`python3 tools/verify_all.py` is the canonical list and runs everything;
-`docs/STATUS.md` renders the list with the sentence saying what only each
-check can see. The ones that hold this document's rules:
+`npm run verify` (`web/tools/verify_all.ts`) is the canonical list and runs
+everything; `npm run verify -- --list` prints it with the sentence saying what
+only each check can see, and `npm run status` prints every count the checks
+measure. The ones that hold this document's rules:
 
-* **`tools/verify_layers.py`** — the layer direction; three.js, DOM and
+* **`layers`** (`web/tools/repo/layers.ts`) — the layer direction; three.js, DOM and
   `Math.random` in the engine; engine or actor writes and engine calls from
   `render/`; `ui/` reading anything but the projection; one BAMS constant; no
   DOM insertion; every exported `render/` class with an `update` handed to
@@ -843,7 +845,7 @@ check can see. The ones that hold this document's rules:
   thing it is about rather than a proxy (`render-drives-the-port` counts
   engine functions *called*, not addresses cited), and a rule that reports
   zero must be seen to be looking at something.
-* **`tools/verify_port.py`** — every exe citation in `game/` matches
+* **`port`** (`web/tools/repo/port.ts`) — every exe citation in `game/` matches
   `functions.tsv` and `globals.tsv` under the same name; coverage of the
   gameplay address ranges; every `[diverges]` has a reason; every
   `game/class<NN>/` has a `SpawnClass` member and a row in
@@ -851,8 +853,9 @@ check can see. The ones that hold this document's rules:
   port. `uncited-exports` is the repository's one ratchet: every exported
   function in `game/` cites the exe function it ports or declares itself
   `[port-only]`, and the count may only fall.
-* **`npm run test:port`** — `web/test/port.test.ts` imports `game/` and nothing
-  else and runs the state machines against hand-written tables: permits,
+* **`npm run test:port`** — `web/test/port/`, one file per area run in order
+  by `index.ts`, imports `game/` and nothing else and runs the state machines
+  against hand-written tables: permits,
   swings and lives, the retreat, the rings, inert classes, hits, severs and
   zones, snapshot round-trips through `structuredClone` and JSON, and two runs
   from one seed agreeing.
@@ -860,17 +863,21 @@ check can see. The ones that hold this document's rules:
   `test:render`, `test:ui`** — the save state, the seek, the scopes, the
   projection's identity, the renderers' rebuild, the page's shape.
 
-**Checks against the installed game** live in `web/tools/checks/`, read the
-game through `web/src/hod2lib/` with the frame in `web/tools/lib/exe_check.ts`,
-and hold the port's literals and the exporter's readings to the exe's own
-bytes. **Browser checks** (`net_pair`, `loops`, `keys`, `continue_page`,
+**Checks against the installed game** (`game:*`) live in `web/tools/checks/`,
+read the game through `web/src/hod2lib/` with the frame in
+`web/tools/lib/exe_check.ts`, and hold the port's literals and the exporter's
+readings to the exe's own bytes, and the corpus figures the format docs state
+to the disc. The `bundle:*` checks there read an exported bundle.
+**Repository checks** (`layers`, `port`, `player_dom`, `exporters`,
+`ghidra_db`) live in `web/tools/repo/`; the source ones read the TypeScript
+through the compiler API. **Browser checks** (`net_pair`, `loops`, `keys`, `continue_page`,
 `result_card`, `options_page`, `crosshair_page`, ...) drive the real page in
 headless Chrome through `web/tools/lib/player.mjs`, one at a time.
 
 **Headless harnesses** in `web/tools/` drive the real port against a real
 bundle with no browser, through `node tools/run_test.mjs tools/<name>.mjs` —
 never node's bare `--experimental-strip-types`, which fails on the first
-`enum`. Some are in `verify_all.py` (`horde`, `dives`, `civilians`,
+`enum`. Some are in `npm run verify` (`horde`, `dives`, `civilians`, `bats`,
 `handback`, ...); the rest are diagnostics kept for the class of bug that
 produced them: `replay.mjs` (`npm run replay -- 2 3 1`: one block/step's
 spawns through `GameUpdate`), `entrances.mjs`, `lifetime.mjs`, `leaps.mjs`,
@@ -880,7 +887,7 @@ to an end block in Chrome and fails on a hang
 `shot.mjs` takes a screenshot of any deep link into `web/shots/`.
 
 **A refactor is byte-identical.** Capture the headless harnesses' output
-before, compare after, and run `verify_all.py`. A fix legitimately moves an
+before, compare after, and run `npm run verify`. A fix legitimately moves an
 output; what it owes instead is the failing assertion that named it. **A green
 build is not a working page** (`L15`): `tsc` and `vite build` pass over a page
 with a blank column, which is what the browser checks and `shot.mjs` are for.

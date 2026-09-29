@@ -287,8 +287,9 @@ makes `0x11` read as scenery that stops a bullet but not a body.
 `ThrowerFindWallBeside`, `ThrowerFindCeilingAbove` and
 `TraceActorSurfaceContactPoint` are the class-0x31 probes built on top of them
 — the wall search that decides whether a `zstin` may climb, and the per-frame
-snap that holds it on the wall it climbed. Against the real data, **24 of the
-game's 49 class-0x31 spawns have a wall within reach and 14 have a ceiling**.
+snap that holds it on the wall it climbed. Against the real data, through the
+port's probes, **23 of the game's 51 class-0x31 spawns have a wall within reach
+and 11 have a ceiling** (`web/tools/checks/thrower_walls.ts` holds it).
 
 ### Surface `0x35` is the commonest one in the game
 

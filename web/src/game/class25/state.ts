@@ -169,7 +169,7 @@ export interface HumanoidTail {
    * `*(int16*)(obj+0x1390 + 6)` fresh on every draw, and `obj+0x1390` is
    * written once by the spawn — so the value cannot change and caching it is
    * exact rather than an approximation. It is cached because the *renderer*
-   * is the half that needs it, and `tools/verify_layers.py`'s
+   * is the half that needs it, and `web/tools/repo/layers.ts`'s
    * `render-drives-the-port` rule says a render layer may not call into
    * `game/` to ask: `render/slotmodels.ts` reads `a.hum.drawVariant` the same
    * way it reads `a.mouse.frame`, which is a field and not a decision.

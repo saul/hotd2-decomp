@@ -1,9 +1,10 @@
 /**
  * The schema digest this client was compiled against. **Generated file.**
  *
- * Written by `tools/gen_schema_hash.py` and committed; re-run it after
- * changing any declaration in this directory. `tools/verify_exporters.py`
- * fails when this file is stale, so it cannot quietly drift from its sources.
+ * Written by `web/tools/gen/schema_hash.ts` (`npm run gen:hashes`) and
+ * committed; re-run it after changing any declaration in this directory.
+ * `web/tools/repo/exporters.ts` fails when this file is stale, so it cannot
+ * quietly drift from its sources.
  *
  * The exporter imports {@link SCHEMA_HASH} and stamps it into
  * `manifest.json`, and `bundle/load.ts` refuses a bundle whose digest is not

@@ -41,7 +41,7 @@
  * does not declare. Whether a function returns is a claim to prove, not
  * something a repair script gets to decide.
  *
- * Idempotent; a clean database reports zeroes, and verify_ghidra_db.py
+ * Idempotent; a clean database reports zeroes, and web/tools/repo/ghidra_db.ts
  * asserts it does.
  *
  * @category HOTD2
@@ -153,7 +153,7 @@ public class RepairFlowDamage extends GhidraScript {
             notes.add("[hotd2] flow no-return flag not in prototypes.tsv: " + u);
         }
 
-        // Its own line, in a fixed shape: verify_ghidra_db.py parses it.
+        // Its own line, in a fixed shape: web/tools/repo/ghidra_db.ts parses it.
         println(String.format(
             "[hotd2] flow: apply=%b discovered=%b stale=%d dropped=%d undeclared=%d"
             + " bookmarks=%d repaired=%d grown=%d md5=%s",

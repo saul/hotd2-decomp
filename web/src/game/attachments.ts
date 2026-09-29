@@ -85,5 +85,5 @@ export function ActorBindPartList(obj: Actor): void {
 // The other half of the split -- which ids are *drawn* -- is
 // `ActorDrawAttachedParts` (`FUN_004124F0`), and that is a draw routine, so it
 // is `render/characters.ts`. It reads the same constant, off the bundle, and
-// falls back on the one above; `verify_layers.py`'s `render-drives-the-port`
+// falls back on the one above; `web/tools/repo/layers.ts`'s `render-drives-the-port`
 // is why the filter is not a function here that the renderer calls.

@@ -1,6 +1,6 @@
 # Class 0x19 — the stage-4 boss: a transcription-grade reading
 
-Read 2026-09-27 from `Hod2.exe` over the Ghidra MCP, for the port into
+Read from `Hod2.exe` over the Ghidra MCP; the port is
 `web/src/game/class19/`. Every function in `0x004917E0..0x00495EAF` was
 disassembled end to end (`disassemble_bytes`, not the pseudocode — Ghidra
 truncates `Boss4ResolveShot`, `Boss4DrawAndAgeBoneHitMark` and
@@ -54,7 +54,7 @@ stages do have:
   at `0x0042D490` seats character type **`0x51` = `b6boss4.bin`**
   (`MOV word ptr [EDI+0x60], 0x51` at `0x0042D4CE`) on clip `0x79`, with its own
   update `Class2DChildKind3Update` (`0x0042D530`). None of class 0x19's code
-  runs for it. It belongs to whoever ports class 0x2D.
+  runs for it.
 
 ## 1. Globals the class publishes
 
@@ -67,9 +67,6 @@ every other routine reads them instead of taking arguments `[proved]`:
 | `0x007DD0A8` | `obj+0x194` — the model record ("char" below) |
 | `0x007DD0B0` | `obj+0x40` — the transform block (pos `+0x00`, rot `+0x24/+0x28/+0x2C`) |
 | `0x007DD0AC` | `obj+0x1310` — the 0xA4-byte state block ("st" below) |
-
-The port keeps the block on the actor (`obj.boss4`) and passes it; that is the
-existing, declared shape (`state.ts`).
 
 ## 2. The state block (`st`, 0xA4 bytes at `obj+0x1310`)
 
@@ -105,11 +102,9 @@ nothing in the class `[proved]`.
 | `+0x88` | f32 | the turn point's z | arena, ChooseAction |
 | `+0x94` | ptr | the carried prop being thrown | `Boss4SpawnHeldProp` |
 
-**Correction to `state.ts`:** `+0x70` is not a walk speed; it is the float
-`ActorRegisterCameraPoint` (`FUN_00409B70`) is handed every frame at
-`0x00491A49` (`index.ts` already feeds it to `cameraRise`, under the wrong
-field name). `+0x10` is the carrier and `+0x10..+0x1B` is **not** a path (the
-TSV said so before; it was wrong).
+`+0x70` is not a walk speed: it is the float `ActorRegisterCameraPoint`
+(`FUN_00409B70`) is handed every frame at `0x00491A49`. `+0x10` is the carrier,
+and `+0x10..+0x1B` is **not** a path.
 
 ## 3. Flags
 
@@ -140,8 +135,6 @@ strike's end; raised with it by the throw), `0x40000000` reacting,
 
 ## 4. `Boss4Init` — `FUN_004917E0` `[proved]`
 
-Verified against `index.ts`; what the port lacks is marked **new**.
-
 ```
 st = ActorAllocSub(0xA4); obj+0x1310 = st
 obj+0x34 |= 0x8000                                       004917e0..826
@@ -149,17 +142,17 @@ char+0x60 = (u16)tail[0]    (0x4A)                       0049182e
 char+0x20 = 0x7C; char+0x00 = 0; char+0x08 = 0           0049183e..852
 ActorBuildSkinnedModel(char, obj+0x40, char+0x78)        00491866
 char+0x68 = 1                                            00491871
-char+0x348 = 0x444   -- bone 5's slot (record 5 +0x00)   0049187b  **new**
+char+0x348 = 0x444   -- bone 5's slot (record 5 +0x00)   0049187b
 obj+0x124 = 30.0f (0x41F00000)                           00491885
 g_enemies_present++; g_enemies_alive++                   0049188f, 00491896
 obj+0x121 = obj+0x120 = 0xFF                             0049189d, 004918a4
-RegisterEnemySlot(obj)                                   004918ab  **new**
+RegisterEnemySlot(obj)                                   004918ab
 st+0x04 = tail[1]
 st+0x04 <= 1 ? (st+0x00 = 1, st+0x10 = g_civilian_carrier) : st+0x00 = 0
 st+0x05 = 0
-st+0x0B = GetDamageRank()        -- g_damage_rank         004918eb  **new** (the port leaves 0)
+st+0x0B = GetDamageRank()        -- g_damage_rank         004918eb
 st+0x0C = 0
-st+0x0D = (u8)g_player_lives[0]; st+0x0E = (u8)g_player_lives[1]   0049190e, 0049191c  **new**
+st+0x0D = (u8)g_player_lives[0]; st+0x0E = (u8)g_player_lives[1]   0049190e, 0049191c
 for i in 1..15:                                          0049192d..97b
     char[i*0x90 + 0x100] = tail dword +4+4*(i-1)         -- bone record i +0x88
     if != -1: char[i*0x90+0xEC] |= 0x51; char[i*0x90+0xF0] = 0   -- +0x74 flags, +0x78 sphere radius
@@ -308,9 +301,7 @@ ninth lost moves it one model further.
 `players + rank*2`, 33 entries): one player / two players per rank 0..15 =
 26/22, 24/20, 23/19, 22/18, 21/17, 20/16, 19/15, 18/14, 17/13, 16/12, 15/11,
 15/11, 14/10, 14/10, 13/9, 13/9. Index 0 (no player) reads the last byte of the
-float before it, 0. **The port's `BOSS4_HEAD_DAMAGE` has 32 entries and drops
-index 32 (= 9)**, and `state.ts`/the TSV had the last pair as "9/13"; it is 13
-for one player and 9 for two.
+float before it, 0; index 32 is the last entry, 9.
 
 ### 6.2 `Boss4SpawnBoneHitMark` — `FUN_004920C0`; `Boss4DrawAndAgeBoneHitMark` — `FUN_00492210` `[proved]`
 
@@ -325,8 +316,7 @@ to `+0x64`, `+0x68`.
 The update: `SetTop(*sub)`, `Translate(+0x40)`, `RotY(+0x68)`, `RotX(+0x64)`;
 life < 0x3C → `s = life * [0x0055CB80]` (1/60), `MatrixScale(s,s,s)` and
 `NoOpStub(s)`; `AssetDrawSlot(0x3CD)` (`boss4.bin[7]`); pop; if the boss is not
-dead: `--life == 0` → `ActorKill`. Render-side in the port (a decal on a bone),
-but the lifetime is game state.
+dead: `--life == 0` → `ActorKill`.
 
 ### 6.3 `Boss4AdjustRank` — `FUN_004934D0` `[proved]`
 
@@ -345,13 +335,13 @@ if (g_players_in_play == 1) {
 clamp st.rank to 0..15
 ```
 
-The rank starts at `GetDamageRank()` (`g_damage_rank`, `G.g_damage_rank`) and
-indexes the head damage and the attack picks.
+The rank starts at `GetDamageRank()` (`g_damage_rank`) and indexes the head
+damage and the attack picks.
 
 ### 6.4 How the boss hurts the player
 
-Every connecting attack is `PlayerTakeDamage(player, 1, motion)` (`FUN_00415300`,
-ported in `combat/player.ts`): **one life each**, -100 score, 90 frames of
+Every connecting attack is `PlayerTakeDamage(player, 1, motion)`
+(`FUN_00415300`): **one life each**, -100 score, 90 frames of
 invulnerability. `player` is `(s8)obj+0x121`, written by `ActorPickTargetPlayer`
 (`FUN_00426170`) when an attack is committed.
 
@@ -454,9 +444,12 @@ Cues 5, 7, 11 and 16 keep flag `0x80` up **after** they start, so
 
 **This is the frame the arena reads, and the boss drives it through the
 script's own camera.** The script's camera for the fight is `cam_play 185
-0..0` (static: it stashes path 185, or 193 in block 25, with a zero-length
-range) followed by `finish_sequence 6` — scene state (2,6) `[proved]` (stage 4
-block 23 step 1). That installs two things, and both run for the whole fight:
+0..0` followed by `finish_sequence 6` — scene state (2,6) `[proved]` (stage 4
+block 23 step 1). The `cam_play` is a static pose, not a stash:
+`EvtActionCamPlay40` tests `start == end` first, and `CamEvalStaticPose` sets
+`g_active_cam_path` to 185 (193 in block 25) and stashes nothing, so the rail
+below runs over the stash words as they stand. The `finish_sequence` installs
+two things, and both run for the whole fight:
 
 * the **camera update hook** `CameraStepDeferredRailWithFrameExport`
   (`g_scene_state_table[2][6]` = `CameraInstallDeferredRail`), whose body
@@ -475,9 +468,9 @@ block 23 step 1). That installs two things, and both run for the whole fight:
   ```
 * the **evt action handler** `CameraDriverSelectMode` (`FUN_00402650`,
   `g_camera_action_starters[6]`), which forces camera mode 6 (`PoseHookNone`)
-  while `[0x009CA094] == 1` (`0x004026AB`) and, after the mode hook, stores
-  `g_cam_path_frame = ftol([0x009C70BC])` (`0x004026F7..0x00402705`) every
-  frame.
+  while `[0x009CA094]` (`g_camera_driver_held`) is 1 (`0x004026AB`) and, after
+  the mode hook, stores `g_cam_path_frame = ftol([0x009C70BC])` (`g_rail_frame`,
+  `0x004026F7..0x00402705`) every frame.
 
 So `Boss4PlayCameraCue` sets the stashed range to the cue's `[start, end]` and
 then re-seats `g_stashed_path_frame` at its own fractional frame every frame;
@@ -492,18 +485,10 @@ cues the stashed frame sits at the last cue's end, the rail tick does nothing
 and both eyes stay where the cue left them. `g_active_cam_path` stays 185 or
 193 throughout.
 
-**In the port** the (2,6) install is the walker's (`finish_sequence` in
-`script/state/camera_action.ts`), and it had refused to install over no stash;
-the boss blocks' `cam_play 185 0..0` is a static pose, not a stash
-(`EvtActionCamPlay40` tests `start == end` first), so the rail never ran and
-`g_cam_path_frame` stayed 0. Fixed in phase 2: with nothing stashed the
-install rides the current shot's path over the stash words as they stand.
-
 `[open]` whether `[0x009C70BC]` is last written by the boss or by the rail
 tick in a given frame — the task order of the camera tick, the evt task and the
 boss (which the evt task spawned, so runs after it) was not read. The
-difference is one frame of `g_cam_path_frame`; the transcription does not
-depend on it, but a frame-exact comparison would.
+difference is one frame of `g_cam_path_frame`.
 
 ### 7.4 `Boss4AdvanceArenaWaypoint` — `FUN_004928D0` `[proved]`
 
@@ -512,8 +497,7 @@ Runs only while st flag 8 is up. Switch on `phase - 1` (jump table
 `g_cam_path_frame`; "ahead(x, z)" is `ActorPointIsAhead(obj+0x64, obj+0x40,
 &{x, pos.y, z})`; "below: state 7 or 4 → 5 when ahead(x, z)" means: when
 `f` is under the threshold and the state is 7 or 4, set state 5 sub 0 if the
-point is ahead, otherwise do nothing (**no turn happens here**; the existing
-TSV said it turned).
+point is ahead, otherwise do nothing (**no turn happens here**).
 
 | phase | at `f >=` | seat (pos.x, pos.z), yaw `obj+0x68` | clip | next state | tail | below |
 |---|---|---|---|---|---|---|
@@ -609,9 +593,8 @@ return 1
 ```
 
 Constants: `0.0` at `0x004C436C`, `-1.0` at `0x004C4C64`. It is
-`Class14FollowSegment`'s algorithm with a push flag (class 14's port has it
-without one); the port should give class 0x19 its own copy under this name,
-because the exe has two functions.
+`Class14FollowSegment`'s algorithm with a push flag; the exe has two
+functions.
 
 ### 7.7 The two arm-when-inside checks `[proved]`
 
@@ -696,8 +679,7 @@ Pop; LightsRestoreScene()
 Root motion happens inside the draw (`SkeletonApplyRootMotion` from
 `SkeletonDrawWalk`, `model+0x64` bit 1 set by `ActorBuildSkinnedModel`), so the
 boss's walking is the clips' root motion — no state writes a velocity except
-the knock-down. The port's generic `ActorAdvanceMotion` stands in for the
-motion half; the carrier transform while riding and the two held props are
+the knock-down. The carrier transform while riding and the two held props are
 the class's own.
 
 The held-prop records (`g_boss4_held_props`, `0x005704F8`), 0x20 bytes each:
@@ -728,19 +710,34 @@ all 24 agree with `Boss4State`; the next dword is `g_boss4_intro_banners`.
 RotX(-pitch)`, and `ActorTurnTowardXZ` adds it (clamped to the step) to the
 yaw, so the turn drives the offset onto local **+z**. Every call in this class
 passes `pos - target` **except** ChooseAction, Withdraw sub 2 and the flinch's
-non-camera arm, which pass `P0 - pos`. That is the exe; the port must keep both
-signs. `ActorPointIsAhead` tests local z > 0 in the same frame.
+non-camera arm, which pass `P0 - pos`. `ActorPointIsAhead` tests local z > 0 in
+the same frame.
 
-### 8.1 States 0–3: the entrances — **ported; verified**
+### 8.1 States 0–3: the entrances
 
 `Boss4StateEntranceCarried` (`FUN_004938B0`, 0 and 2) and
 `Boss4StateEntranceDropped` (`FUN_00493B40`, 1 and 3) differ in exactly three
 constants (banner `0x005972F8`/`0x00597338`, phase 0/9, "standing" state 2/3)
-`[proved]`. Against `entrance.ts`:
+`[proved]`:
 
-* sub 0 — as ported. The port's `Boss4EntranceHold` is **`Boss4ChainsawOn`**
-  (`0x00493AF5`, `0x00493D81`): flags `|= 0x410` and the chainsaw sound; the
-  standing arm then clears `0x10` (`0x00493B01`).
+```
+sub 0: BossIntroBannerSpawn(banner); phase = 0 or 9; st+0x24 = maxhp * frac[phase]
+       standing: ActorSetMotion(0x75); Boss4ChainsawOn(); flags &= ~0x10; sub = 2
+       riding:   ActorSetMotion(0x7C); sub++
+sub 1: !g_script_flags[30]: return
+       Boss4ChainsawOn(); flags &= ~1
+       the carrier's T RotX RotZ RotY times the boss's -> pos and angles, world space
+       blend(0x75, 0, 10); PlaySoundId(0x231BA9); sub++
+sub 2: char+0x20 == 0x75 && cursor == 0x5A: blend(0x74, 0, 10)
+       g_bHudShutterState != 1: return
+       g_script_flags[31] = 1; Boss4QueueCameraCue(phase); obj+0x34 &= ~0x8000
+       Boss4LoadPhaseArena(); BossHpBarSpawn(320.0, 35.0); flags |= 0x12
+       state 7; sub 0; blend(0x6B, 0, 0x16); [0x009CA0EA] = 1
+```
+
+* sub 0 — the hold is **`Boss4ChainsawOn`** (`0x00493AF5`, `0x00493D81`):
+  flags `|= 0x410` and the chainsaw sound; the standing arm then clears `0x10`
+  (`0x00493B01`).
 * sub 1 — also calls `Boss4ChainsawOn` first (`0x00493989`), then `flags &=
   ~1`, then the carrier compose. **The rotation order is X, Z, Y**
   (`MatrixRotateX`, `MatrixRotateZ` `0x004A9BD0`, `MatrixRotateY`), for the
@@ -748,17 +745,17 @@ constants (banner `0x005972F8`/`0x00597338`, phase 0/9, "standing" state 2/3)
   read back with `MatrixGetTranslation` into `obj+0x40` and the angles with
   `MatrixToEulerBams` (`FUN_00401AE0`) into `+0x64/+0x68/+0x6C`. Then blend
   `0x75` (0, 10) and `PlaySoundId(0x231BA9)` (`BOSS4_HASHIRI1`).
-* sub 2 — as ported, plus the five calls the port skips, in order after the
-  flag write: `Boss4QueueCameraCue(phase)` (`0x00493916`), `obj.flags &=
-  ~0x8000`, `Boss4LoadPhaseArena()` (`0x00493928`), **`BossHpBarSpawn(320.0,
-  35.0)`** (`0x00493937`: `PUSH 0x420C0000; PUSH 0x43A00000`, so x = 320.0,
-  y = 35.0; `0x00493BC5` in the twin), `flags |= 0x12`, state 7, blend `0x6B`
-  (0, `0x16`), `[0x009CA0EA] = 1`.
+* sub 2 — in order after the flag write: `Boss4QueueCameraCue(phase)`
+  (`0x00493916`), `obj.flags &= ~0x8000`, `Boss4LoadPhaseArena()`
+  (`0x00493928`), **`BossHpBarSpawn(320.0, 35.0)`** (`0x00493937`: `PUSH
+  0x420C0000; PUSH 0x43A00000`, so x = 320.0, y = 35.0; `0x00493BC5` in the
+  twin), `flags |= 0x12`, state 7, blend `0x6B` (0, `0x16`), `[0x009CA0EA] =
+  1`.
 
 `[0x009CA0EA]` has seventeen writes across the boss code (classes 0x14, 0x22,
 0x2D, 0x32, the `Boss3*` routines and this class's entrances and death) and two
 reads, both in `BossModeChapterCardUpdate` `[proved]` (xrefs). `[likely]` a
-"boss fight in progress" byte; unnamed, and not this class's to name.
+"boss fight in progress" byte, named `g_boss_engaged`.
 
 **The carrier.** In blocks 23 and 25 the boss is spawned in the same
 `spawn_obj_c` as a class-0x13 prop at evt `0x8C10` (slot 2383 =
@@ -767,11 +764,9 @@ reads, both in `BossModeChapterCardUpdate` `[proved]` (xrefs). `[likely]` a
 -10)` is relative to it. Selector 2's routine is `FUN_004408A0` `[proved]`: it
 rides `op_` path `0x175` by `PropSeatOnObjectPath` over camera frames 190..360
 (sound `0xB16A9` at 350), then on paths `0xB4`/`0xBC` at frame >= 250 plays
-`0x2316A9` (`DOORKICK3_22K`) and swings two door angles over 59 frames from the
-table at `0x005926D0`; selector 9 (blocks 27/29) seats it at frame 360 already
-open. Ported in phase 2 as `CarrierPropRoutine2`
-(`web/src/game/class13/routine2.ts`) for selectors 2 and 9, doors drawn by
-`render/slotmodels.ts`.
+`0x2316A9` (`DOORKICK3_22K`) and swings two door angles over 59 frames from
+`g_carrier2_door_yaw` (`0x005926D0`, 59 s16); selector 9 (blocks 27/29) seats
+it at frame 360 already open.
 
 ### 8.2 State 4 — `Boss4StateApproachCamera` `FUN_00493DC0` `[proved]`
 
@@ -800,7 +795,7 @@ k == 0: (0xF, 50.0);  k == 1: (0x10, 70.0 0x428C0000);  k == 2: (0x11, 70.0);  e
 `g_boss4_approach_picks` (`0x005709B4`), per rank the count of 0s then 1s:
 ranks 0–1: 7/2; 2: 6/3; 3–4: 5/4; 5–6: 4/5; 7: 3/6; 8–9: 2/7; 10–11: 1/8;
 12–15: 0/9. **No entry is 2**, so state 0x11 (clip `0x7B`) is never chosen
-`[proved]`; the port should still carry it, since the table is data.
+`[proved]`.
 
 ### 8.4 State 5 — `Boss4StateChooseAction` `FUN_00494010` `[proved]`
 
@@ -848,8 +843,8 @@ Boss4PickApproachAttack(obj); state 4; sub 1
 ### 8.7 State 8 — `Boss4StatePlayArrivalClip` `FUN_004945A0` `[proved]`
 
 `sub 0: set(0x72); sub 1.` `sub 1: if (cursor == len) — exactly the length, not
-len-1 — { blend(0x78, 0, 10); state 7; sub 0 }`. (Class 14's port reaches
-`cursor == len` too, `AtClipEnd(obj, 0)`.)
+len-1 — { blend(0x78, 0, 10); state 7; sub 0 }`. It is entered on a seat's
+arrival (§7.4); what clip `0x72` depicts is `[open]`.
 
 ### 8.8 State 9 — `Boss4StateTurnToStoredPoint` `FUN_00494610` `[proved]`
 
@@ -863,7 +858,7 @@ sub 1: q = (st+0x84, pos.y, st+0x88)
 
 `[open]` how often the exit fires: the turn drives `err` towards 0, so it
 passes only while the boss still has the point nearly behind him (by the
-convention above). Transcribe it as it is.
+convention above).
 
 ### 8.9 State 0xA — `Boss4StateTurnClipThenApproach` `FUN_00494730` `[proved]`
 
@@ -905,8 +900,8 @@ sub 1: the turn window
        cursor == len-1: state 5; sub 0; obj.flags &= 0xEFFFDFFF
 ```
 
-**Corrected in phase 2** `[proved]` (`0x00494B43`, `0x00494C39`, `0x00494D29`):
-the `&= ~0x2000` is **inside** the flag-8 test -- `TEST byte [EDX], 8; JNZ`
+`[proved]` (`0x00494B43`, `0x00494C39`, `0x00494D29`): the `&= ~0x2000` is
+**inside** the flag-8 test -- `TEST byte [EDX], 8; JNZ`
 jumps past both the damage and the clear -- so a strike landing during an arena
 transition leaves bit `0x2000` up until the clip's last frame. Sub 0's blend is
 unguarded (no "unless playing"), and the turn window tests `g_max_attackers`
@@ -958,7 +953,7 @@ prop+0x121 = -1; prop+0x3C = -1
 != 0x0A` → `CarriedPropRelease(prop)`; view-space point to `+0x70`,
 `RegisterForShotTest`, `CarriedPropCheckShot`. Its only direct reader is
 `Boss4SpawnHeldProp`. Release in mode 4 then hands it to
-`CarriedPropThrowAtCamera` (ported), which does `PlayerTakeDamage(+0x121, 1,
+`CarriedPropThrowAtCamera`, which does `PlayerTakeDamage(+0x121, 1,
 7)` on arrival; type 2's hit and break sounds are `BULLET_MET1/2` (metal), and
 the throw sound is `AXE_44K.wav` — `[likely]` the two props are axes.
 
@@ -980,18 +975,18 @@ sub 2: c = cursor
        else if (c == 0x47) { st+0x70 = 6.0; PlayerTakeDamage((s8)obj+0x121, 1, 8) }
 ```
 
-### 8.13 `Boss4ResumeAfterHit` `FUN_004952A0` — **ported; add the cue** `[proved]`
+### 8.13 `Boss4ResumeAfterHit` `FUN_004952A0` `[proved]`
 
 No arguments. `g_players_in_play <= 0` → state 0xD sub 0. Else
 `Boss4QueueCameraCue(0x12)` in phase 5, `0x13` in 7, `0x14` in 11, `0x15` in 16
 (bytes `0x00495334[phase-5]`, jumps `0x00495320`), then blend `0x6B` (0, 10),
 state 7, sub 0.
 
-### 8.14 State 0x14 — `Boss4StateFlinch` `FUN_00495340` — **ported; add the turn** `[proved]`
+### 8.14 State 0x14 — `Boss4StateFlinch` `FUN_00495340` `[proved]`
 
-The port's switch matches the exe (`0x00495463`, tables `0x0049553C` and
-`0x0049555C` = `0 1 2 3 4 7 7 7 7 5 5 5 5 6`). What it lacks is sub 1's turn,
-which runs every frame before the clip-end test:
+Its switch is at `0x00495463`, tables `0x0049553C` and `0x0049555C` =
+`0 1 2 3 4 7 7 7 7 5 5 5 5 6` (`web/src/game/class19/` transcribes it). Sub 1
+turns every frame before the clip-end test:
 
 ```
 if (st+0x06 != 0x13) {
@@ -1025,14 +1020,14 @@ sub 2: if (cursor == len-1) { Boss4ResumeAfterHit(); obj.flags &= ~0x40000000 }
 `k` is the double at `0x004C4378` (BAMS per radian); the angles go back
 through `[0x004C4370]` (radians per BAMS) before `FSIN`/`FCOS`.
 
-### 8.16 State 0x16 — `Boss4StateDeath` `FUN_00495770` — **ported; verified** `[proved]`
+### 8.16 State 0x16 — `Boss4StateDeath` `FUN_00495770` `[proved]`
 
-As `death.ts` has it, with the missing pieces: sub 0 `PlaySoundId(0x241BA9)`
-and `[0x009CA0EA] = 0`; frame `0x46`'s placement — phase 8: `(270.0, 42.6,
--1789.4)` (`43870000 422A6666 C4DFACCD`) yaw 0; otherwise `(-515.1, 42.6,
--1718.4)` (`C400C666 422A6666 C4D6CCCD`) yaw `0x8000`, all three components;
-frame `0x82`: `PlaySoundId(0xB16A9)`, `Boss4ChainsawOff`,
-`g_screen_shake_frames = 0x32`. (`death.ts` quotes 42.65; the word is 42.6.)
+`web/src/game/class19/death.ts` transcribes the routine. Sub 0
+`PlaySoundId(0x241BA9)` and `[0x009CA0EA] = 0`; frame `0x46`'s placement —
+phase 8: `(270.0, 42.6, -1789.4)` (`43870000 422A6666 C4DFACCD`) yaw 0;
+otherwise `(-515.1, 42.6, -1718.4)` (`C400C666 422A6666 C4D6CCCD`) yaw
+`0x8000`, all three components; frame `0x82`: `PlaySoundId(0xB16A9)`,
+`Boss4ChainsawOff`, `g_screen_shake_frames = 0x32`.
 
 ### 8.17 State 0xB — `Boss4StateWalkToPoint` `FUN_004958F0` `[proved]`
 
@@ -1107,7 +1102,7 @@ Arena 2 (block 25) is the same over phases 9..17 with the throw at 13
 (→ Withdraw → 14) and the last phase 17 (no threshold: it goes straight to
 state 7).
 
-## 10. The health bar (the coordinator's) — the sites
+## 10. The health bar — the sites
 
 * `BossHpBarSpawn(320.0, 35.0)` at `0x00493937` and `0x00493BC5`
   (`PUSH 0x420C0000; PUSH 0x43A00000; CALL 0x00435E50`); the spawn itself
@@ -1117,65 +1112,10 @@ state 7).
   FSTP`), and reads it back at `0x00491F2F`/`0x00491F42` for the head model.
   Nothing else in the class touches it.
 
-## 11. What phase 2 did
-
-Phase 2 (branch `boss/strength`) ported every routine in §4..§8 into
-`web/src/game/class19/` and the pieces around it. What each item of the old
-"needs" list became:
-
-* **The bundle** (format 13): the seven `.rdata` tables
-  travel in `script.json` as `boss4` (`exetab.ts` `boss4Tables()`), with
-  `carrier_door_yaw` (`0x005926D0`); the placements carry `class19` (the
-  entrance, the fifteen per-bone mesh words as `coli.blobs` keys, the despawn
-  pair); `BOSS4_CLIPS` bakes all twenty-one clips; the swap and effect slots
-  ride the character's gore rig and the effect set.
-* **The shot test.** Class 0x19 registers the engine's way (main's
-  `combat/shot_test.ts`): `Boss4Update` calls `ActorRegisterCameraPoint`
-  itself, and `ShotTestBoneTree` takes `ShotTestBoneMesh` for the ten mesh
-  bones, in `game/` over `GameHost.boneMatrix` and `ColiSegmentVsMesh`, so a
-  candidate carries its surface and normal to `MarkActorShot` and
-  `SpawnWorldImpact` fills `g_shot_hit_records`.
-* **The camera** was the coordinator's refactor on main (the stashed rail in
-  `G`); `Boss4PlayCameraCue` writes it as the exe does.
-* **The carrier** is `CarrierPropRoutine2`; **the carried prop** is
-  `CarriedPropHeldInBone8Update` and `CarriedPropDeflectedFlight` in
-  `carried_prop.ts`, seeded directly by `Boss4SpawnHeldProp`.
-* **Shared helpers**: `ActorTurnTowardXZ`/`ActorHeadingErrorTo` (main),
-  `ActorPointIsAhead` (moved to `actor_turn.ts`), `ActorPickTargetPlayer`
-  (`actor_target.ts`), `ActorShiftToHoldBone1Position` and `MotionFrameOf`
-  (`actor_pose.ts`), `MatrixScale`.
-* **State 0xA's pose** is computed in `game/` from the baked clips and handed
-  to the renderer as the fade snapshot's `records` (`Actor.fadeFrom`).
-* Every correction of §11.4 (as it stood) is in: 33 head-damage entries from
-  the bundle, the full Init, the two-shooter loop, `Boss4ChainsawOn`, the
-  camera rise, the flag names, `42.6`.
-
-## 12. Renames (applied in phase 2, in one commit)
-
-| address | was | now | why |
-|---|---|---|---|
-| `0x004922C0` | `Boss4EndPlacementWalk` | `Boss4TrackWhenInsideArena` | no walk; clears `0x10000` when inside |
-| `0x00492350` | `Boss4AdvancePhaseWhenWalkDone` | `Boss4ArmPhaseWhenInsideArena` | no walk, no phase change |
-| `0x00494D60` | `Boss4StatePinPlayer` | `Boss4StateThrowHeldProp` | it throws a carried prop |
-| `0x004944A0` | `Boss4StateWaitForCameraInRange` | `Boss4StateFaceCamera` | a facing test, not a range |
-| `0x00494730` | `Boss4StateLookAtCamera` | `Boss4StateTurnClipThenApproach` | bakes clip `0x76`'s turn into the yaw |
-| `0x004945A0` | `Boss4StateRiseThenIdle` | `Boss4StatePlayArrivalClip` | clip content is unknown; entered on arrival |
-| `0x00570510` | `g_boss4_pin_picks` | `g_boss4_held_props` at `0x005704F8` | the label sits at the record's `+0x18` |
-
-Each was cited in `web/src/game/class19/*.ts` and in this document, so each
-rename landed in one commit across Ghidra, the TSVs, the TypeScript and the
-docs. The enum members moved with them: `Boss4State.FaceCamera`,
-`PlayArrivalClip`, `TurnClipThenApproach`, `ThrowHeldProp`, and
-`Boss4Flag.TrackPending` / `ArmPending` for the two gates.
-
-## 13. Open questions
+## 11. Open questions
 
 1. `[open]` Which routine enters blocks 27 and 29 (`[likely]` Boss Mode).
 2. `[open]` Whether state 9's exit (`|err| > 0x7000` after a turn that shrinks
-   `err`) is reached in play; the transcription does not depend on it.
-3. Named on main since: `g_boss_engaged` (`0x009CA0EA`),
-   `g_camera_driver_held` (`0x009CA094`), `g_rail_frame` (`0x009C70BC`).
-4. `[open]` What `boss4.bin[2]`, `[7]`, `[23]..[26]` look like. The throw sound
+   `err`) is reached in play.
+3. `[open]` What `boss4.bin[2]`, `[7]`, `[23]..[26]` look like. The throw sound
    says axe; the rest is for a render to settle.
-5. Resolved: `g_carrier2_door_yaw` (`0x005926D0`, 59 s16) and the two door
-   offsets are read and ported (`CarrierPropRoutine2`).

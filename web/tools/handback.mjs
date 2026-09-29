@@ -17,7 +17,7 @@
  * frame the last zombie died. Reported as the camera snapping and the pacing
  * running away from the player.
  *
- * Nothing else in the tree could see it. `port.test.ts` drives the mode
+ * Nothing else in the tree could see it. `test/port/` drives the mode
  * machine directly and proves the rule; this proves the *pacing*, which needs
  * the stage's own camera path, its own script and its own enemies — so it
  * plays them, lets each room's fight run for `FIGHT_FRAMES` once its gate

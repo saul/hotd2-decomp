@@ -8,9 +8,9 @@
  * `condition` are fields, and the comment above each rig carries what was
  * read to establish it.
  *
- * Twelve of the 31 `CamEvalObjectPath6` callers are here; the other 19
- * evaluate a path but never call `AssetDrawSlot`, so they position an object
- * that some other routine draws. `docs/re/rig-survey.md` covers all 31.
+ * These are the `CamEvalObjectPath6` callers that draw; the others evaluate a
+ * path but never call `AssetDrawSlot`, so they position an object that some
+ * other routine draws. `docs/re/rig-survey.md` surveys them all.
  */
 
 import type { Rig } from "./rigs";

@@ -39,7 +39,7 @@
  * cry in `combat/voice.ts`. There is one copy, in `combat/voice.ts`, and this
  * file is what the shot path calls it from — because the engine's three shot
  * kinds are played by `game/` code and a renderer may not call into the engine
- * (`verify_layers.py`'s `render-drives-the-port`, and it is right).
+ * (`web/tools/repo/layers.ts`'s `render-drives-the-port`, and it is right).
  *
  * Three things came with the move, and each is a correction rather than a
  * cost.
@@ -97,7 +97,7 @@
  * open question in the body saying so — for no better reason than that the
  * tables it reads were on the other side of the layer line. That question is
  * answered; the marker is gone with it, which is the only thing that moves the
- * count in `STATUS.md`.
+ * count `npm run status` prints.
  */
 import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";

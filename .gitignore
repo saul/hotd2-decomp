@@ -21,9 +21,8 @@ game/
 *.gltf
 *.glb
 
-# Explicit allowances (generated metadata, no asset content)
+# Explicit allowance (generated metadata, no asset content)
 !manifest.csv
-!inventory.csv
 
 # Web player
 # The client's source is committed; nothing it consumes or produces is.
@@ -44,13 +43,6 @@ web/playwright-report/
 *.rep/
 ghidra/project/
 ghidra/out/
-
-# Python
-__pycache__/
-*.py[cod]
-.venv/
-venv/
-*.egg-info/
 
 # Editors / OS
 .DS_Store

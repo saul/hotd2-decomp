@@ -211,7 +211,7 @@ function ScriptFlag(n: number): number {
  * Both tables are `.rdata` and travel in the bundle: `breakables
  * .original_items` carries the rows this scene's spawns can name, keyed by
  * row, and the records those rows name (`OriginalItemsJson`). A row the
- * bundle does not have is an exporter gap, which `verify_prop_slots.py`
+ * bundle does not have is an exporter gap, which `web/tools/checks/prop_slots.ts`
  * reports; here it reads as an id of -1, which every caller despawns.
  */
 export function PickOriginalModeItem(p: BreakableProp, row: number,

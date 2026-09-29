@@ -31,7 +31,6 @@ The steps individually, if you want them:
 HOTD2_APPLY=1 ./ghidra/run.sh script ApplyKnownTables.java
 HOTD2_APPLY=1 ./ghidra/run.sh apply-annotations
 HOTD2_APPLY=1 ./ghidra/run.sh repair-flow
-./ghidra/run.sh script ExportInventory.java   # regenerate ghidra/out/
 ```
 
 `HOTD2_PROJECT_DIR` points any of these at a scratch database instead of
@@ -41,7 +40,7 @@ HOTD2_APPLY=1 ./ghidra/run.sh repair-flow
 
 The database is derived data and is not committed. **`annotations/*.tsv` is
 what is committed**, and it is the project's record of every symbol recovered
-(the counts are in `docs/STATUS.md`):
+(`npm run status` in `web/` prints the counts):
 
 | File | Contents |
 |---|---|
@@ -49,7 +48,7 @@ what is committed**, and it is the project's record of every symbol recovered
 | `annotations/globals.tsv` | `address`, `name`, optional comment — sorted by address |
 | `annotations/prototypes.tsv` | `address`, C prototype, attributes (`noreturn`, `returns`, custom storage), optional comment — sorted by address |
 
-Add or rename a row with `python3 tools/annotate.py`, which upserts and keeps
+Add or rename a row with `npm run annotate` (in `web/`), which upserts and keeps
 the address order.
 
 `ApplyAnnotations` only renames a symbol whose current name is still a Ghidra
@@ -64,7 +63,7 @@ functions land in `.text`, that nothing is listed twice. Run it before
 committing an annotation change:
 
 ```sh
-python3 tools/verify_all.py --only game:annotations --game-dir ~/"THE HOUSE OF THE DEAD 2"
+cd web && npm run verify -- --only game:annotations --game-dir ~/"THE HOUSE OF THE DEAD 2"
 ```
 
 ### After exploring over MCP, export
@@ -110,7 +109,7 @@ Two things fix it at the source:
   returns, and regrows the bodies. A no-return flag `prototypes.tsv` does not
   declare is reported, not changed.
 
-`python3 tools/verify_ghidra_db.py --game-dir ...` (in `verify_all`) runs
+`web/tools/repo/ghidra_db.ts` (the `ghidra_db` check in `npm run verify`) runs
 both in report mode over a copy of the saved database -- so it works with the
 GUI open -- and fails unless they have nothing to do.
 
@@ -121,16 +120,17 @@ GUI open -- and fails unless they have nothing to do.
 | `run.sh` | yes | headless driver |
 | `scripts/` | yes | GhidraScripts, **written in Java** |
 | `project/` | no | the `.gpr` / `.rep` database |
-| `out/` | no | logs and exported CSV/TXT |
+| `out/` | no | logs and the scripts' reports |
 
 ## Write scripts in Java, not Python
 
 This Ghidra is not launched with PyGhidra, so `.py` GhidraScripts fail with
 `Ghidra was not started with PyGhidra. Python is not available`.
 
-Use Java. `scripts/ExportInventory.java` is a working template: extend
-`GhidraScript`, override `run()`, read the output directory from the `HOTD2_OUT`
-environment variable, and print a line prefixed `[hotd2]` so `run.sh` surfaces it.
+Use Java. `scripts/TagLibraryFunctions.java` is a short working template:
+extend `GhidraScript`, override `run()`, read the output directory from the
+`HOTD2_OUT` environment variable, and print a line prefixed `[hotd2]` so
+`run.sh` surfaces it.
 
 ## Ghidra MCP
 

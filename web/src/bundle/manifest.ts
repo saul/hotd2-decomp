@@ -113,7 +113,7 @@ export const SUPPORTED_FORMAT = 15;
  *
  * Compared against `schema_hash.ts`, which is generated from the same sources
  * and compiled into the client. See {@link SCHEMA_HASH} and
- * `tools/gen_schema_hash.py`.
+ * `web/tools/gen/schema_hash.ts`.
  */
 export interface SchemaDigest {
   /** One digest over {@link SchemaDigest.files}, in filename order. */
@@ -133,7 +133,7 @@ export interface SchemaDigest {
  *
  * Absent on anything built before this existed, which is itself out of date.
  *
- * See `tools/gen_builder_hash.py` for why it is here at all -- an exporter fix
+ * See `web/tools/gen/builder_hash.ts` for why it is here at all -- an exporter fix
  * that changes no declaration used to leave a stale copy in the browser's
  * cache winning over the rebuilt one for ever.
  */

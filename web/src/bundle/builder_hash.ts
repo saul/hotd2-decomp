@@ -1,10 +1,11 @@
 /**
  * The digest of the exporter that wrote a bundle. **Generated file.**
  *
- * Written by `tools/gen_builder_hash.py` and committed; it covers the code in
+ * Written by `web/tools/gen/builder_hash.ts` (`npm run gen:hashes`) and
+ * committed; it covers the code in
  * `web/src/hod2lib/`, which is the only thing that decides what a bundle
  * contains, and every module it imports a value from, followed transitively.
- * `tools/verify_exporters.py` fails when this file is stale.
+ * `web/tools/repo/exporters.ts` fails when this file is stale.
  *
  * The exporter stamps it into `manifest.json` and onto every stage entry, and
  * `bundle/load.ts` compares -- but **warns rather than refuses**. A schema

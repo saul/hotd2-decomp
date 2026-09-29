@@ -98,7 +98,7 @@ exporter prints which stages a partial run left behind.
 **3. The schema digest, which nobody has to remember.** `manifest.json` carries
 a SHA-256 over the *declarations* in `web/src/bundle/` — per file, plus one
 digest over those — and the client compares it against the same digest
-generated into `web/src/bundle/schema_hash.ts`. `tools/gen_schema_hash.py` is
+generated into `web/src/bundle/schema_hash.ts`. `web/tools/gen/schema_hash.ts` is
 the one implementation of it, and the exporter *imports* what it generates
 rather than recomputing it — so a bundle agrees with the client that built it
 by construction.
@@ -113,7 +113,7 @@ and is not hashed.
 
 The named list has the opposite hazard — a new declaration file nobody adds to
 it is a block of the bundle that **nothing checks**, silently — so
-`verify_exporters.py` reads the directory and fails both ways: a listed file
+`web/tools/repo/exporters.ts` reads the directory and fails both ways: a listed file
 that grows runtime code, and a `.ts` that declares part of the bundle and is
 not listed.
 
@@ -129,8 +129,8 @@ not listed.
   not a check. The remedy is one re-export, and the error names which
   declaration files moved, because "the bundle does not match" is true and
   useless.
-* **`schema_hash.ts` is generated and committed.** `tools/gen_schema_hash.py`
-  writes it, and `tools/verify_exporters.py` re-derives it and **fails when the
+* **`schema_hash.ts` is generated and committed.** `web/tools/gen/schema_hash.ts`
+  writes it, and `web/tools/repo/exporters.ts` re-derives it and **fails when the
   committed copy is stale** — which is what makes it impossible to forget: the
   digest catches a stale bundle, and that check catches a stale digest.
 * The generated file is excluded from its own digest, because a file that
@@ -143,8 +143,8 @@ different questions with different remedies.
 
 `manifest.json` carries a second SHA-256, over the code in
 `web/src/hod2lib/`, and every stage entry carries the same hash on its own.
-`tools/gen_builder_hash.py` generates it into `web/src/bundle/builder_hash.ts`
-in the same shape as the schema one, `verify_exporters.py` fails when the
+`web/tools/gen/builder_hash.ts` generates it into `web/src/bundle/builder_hash.ts`
+in the same shape as the schema one, `web/tools/repo/exporters.ts` fails when the
 committed copy is stale, and the exporter imports rather than recomputes it.
 
 * **It warns; it does not refuse.** A schema mismatch means the bundle cannot
@@ -194,7 +194,7 @@ The failure this closes is specific. `90` used to be exported as
 beside the Ghidra citation that proves it, while `PlayerTakeDamage`
 (`FUN_00415300`) in `game/combat/player.ts` read it as `d?.invuln_frames ?? 90`
 — a bare literal, uncited, in the file whose whole job is to be the
-transcription. `tools/verify_port.py` scans `game/` and could see neither half.
+transcription. `web/tools/repo/port.ts` scans `game/` and could see neither half.
 And the `??` fallback is a *second copy that nothing compares against the
 first*: `T.tracking?.face_offset ?? 12` sat next to a table that said `1.5`,
 and neither number was wrong enough for anyone to notice.

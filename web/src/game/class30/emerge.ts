@@ -275,7 +275,7 @@ export function ZombieStateDelayedLeap(obj: ZombieActor, dt: number, rng: Rng,
     // seeded from the spawn record by `ActorInitFlags` (`FUN_00408970`) and
     // stage 1's three state-26 spawns are the shipped records that carry it,
     // so 0x399 and its wind-up below are the arm those three actually run.
-    // `tools/verify_death_clips.py` counts the records; `CLASS30_DEATH_CLIPS`
+    // `web/tools/checks/death_clips.ts` counts the records; `CLASS30_DEATH_CLIPS`
     // in `hod2lib/charmotion` is the same discovery on the death side, where
     // the clip was missing rather than merely believed unused.
     const alt = (obj.flags & ActorFlag.HoldingWeapon) !== 0;

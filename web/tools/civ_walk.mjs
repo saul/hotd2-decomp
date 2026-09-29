@@ -17,7 +17,7 @@
  * * `root on` and the position changes — her clip is carrying her.
  * * `root off` and it does not — **the engine's own answer.**
  *   `CivilianRunScript` clears `model+0x64` bit 1 for any block whose wait
- *   word has no `0x00100000`, and 297 of the 596 shipped wait words do not.
+ *   word has no `0x00100000`, and 307 of the 596 shipped wait words do not.
  *   Those clips animate in place.
  * * `root on` and the position never changes — the report.
  *

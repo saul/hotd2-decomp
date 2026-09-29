@@ -351,7 +351,7 @@ export enum ActorFlag {
    *
    * **It comes from the spawn record**, not from a state. `ActorInitFlags`
    * ORs the record's `+0x04` word with 1 into `obj+0x34`, and shipped
-   * class-0x30 records set this bit — `tools/verify_death_clips.py` counts
+   * class-0x30 records set this bit — `web/tools/checks/death_clips.ts` counts
    * them, and `CLASS30_DEATH_CLIPS` in `hod2lib/charmotion` says which clips
    * they therefore need baked.
    *

@@ -11,8 +11,8 @@ Two halves that must not drift apart:
   inside the page. Workflow: **`/gameplay-port`** for anything under
   `web/src/game/`, **`/hang-investigation`** for a player that stops.
 
-The repository is TypeScript apart from its checkers and generators under
-`tools/`, which are Python with no third-party packages.
+The repository is TypeScript throughout: the checks, generators and tools
+are in `web/tools/` and run from `web/` through `npm run`.
 
 Read `README.md` for the layout, and `docs/PLAYER.md` before changing the
 player's shape.
@@ -22,22 +22,24 @@ player's shape.
 Run these before you commit:
 
 ```sh
-python3 tools/verify_all.py --game-dir ~/"THE HOUSE OF THE DEAD 2"
+cd web && npm run verify -- --game-dir ~/"THE HOUSE OF THE DEAD 2"
 ```
 
-**`tools/verify_all.py` is the canonical list of checks** — one authored
-table, rendered into `docs/STATUS.md` and printed by `--list`. Do not copy it
-anywhere; add a row to `CHECKS` instead, with the one sentence saying what
+**`web/tools/verify_all.ts` is the canonical list of checks** — one authored
+table, printed by `npm run verify -- --list`. Do not copy it anywhere; add a
+row to `CHECKS` instead, with the one sentence saying what
 only that check can see. The checks run in parallel, except the ones that
 drive Chrome, which take turns in a lane of their own. **`--quick`** leaves
 that lane and the game-dir checks out -- counted as skipped, never as passed --
 and is the inner loop. The run prints its own wall time.
 
 **Exit 0 means a check ran and asserted things; 1 means it found them wrong;
-3 means it asserted nothing.** `verify_all.py` counts skips separately from
+3 means it asserted nothing.** `npm run verify` counts skips separately from
 passes and names them. Some checks need an exported bundle (`cd web && npm run
 export -- --game-dir ... --all`, or point `HOTD2_BUNDLE` at one) and some need
-`--game-dir`; `docs/STATUS.md` says which.
+`--game-dir`; `--list` says which. Every count the repo states about itself
+(coverage, divergences, ratchets) is printed by `npm run status`, measured
+from the tree; no document quotes one.
 
 A check against the installed game lives in `web/tools/checks/`, reads the game
 through `web/src/hod2lib/`, and uses the frame in `web/tools/lib/exe_check.ts`.
@@ -60,7 +62,7 @@ same thing as saying it holds exactly what `resync` must be able to rebuild.
 **`game/` never gets one**: the port transcribes a fixed object pool, and a
 snapshot slice has to survive `clonePlain`.
 
-`tools/verify_layers.py` and `tools/verify_port.py` enforce the boundaries with
+`web/tools/repo/layers.ts` and `web/tools/repo/port.ts` enforce the boundaries with
 two severities: **error** rules must be zero, **ratchet** rules record a count
 that may fall but never rise.
 
@@ -102,7 +104,7 @@ the `/decomp` skill for the patch-filtering recipe. Leave their uncommitted
 work exactly as you found it, and never rewrite history.
 
 `ghidra/annotations/*.tsv` is written by both workstreams and is **sorted by
-address**. Add rows with `python3 tools/annotate.py`, which upserts rather than
+address**. Add rows with `npm run annotate` (in `web/`), which upserts rather than
 duplicating and inserts in address order, so two branches adding unrelated
 rows touch different parts of the file.
 

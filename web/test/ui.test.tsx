@@ -2,7 +2,7 @@
  * The page has the shape the stylesheet expects.
  *
  * A green `tsc` and a green `vite build` say nothing about whether the chrome
- * renders — that lesson is already written into `verify_player_dom.py`, and
+ * renders — that lesson is already written into `web/tools/repo/player_dom.ts`, and
  * it applied again the moment `index.html` became a mount point: moving the
  * sidebar out of a portal once dropped the element the stylesheet placed it
  * by, and the page lost a column with nothing anywhere failing. Types cannot
@@ -21,12 +21,12 @@
  * held to the ids the stylesheet and the harnesses reach them by.
  *
  * It also lists the ids each render must carry. That is not a duplicate of
- * `verify_player_dom.py`: that tool reads `id="..."` out of the source, so it
+ * `web/tools/repo/player_dom.ts`: that tool reads `id="..."` out of the source, so it
  * goes on passing when a component that carries one stops being *rendered*.
  * Here they have to come out of a render.
  *
  * It covers the elements inside `#viewport` that `hud/` and `render/` are
- * handed. None of them carries an id, so `verify_player_dom.py` is
+ * handed. None of them carries an id, so `web/tools/repo/player_dom.ts` is
  * structurally unable to see them: this is the only check that they are
  * rendered, that they are rendered *inside* the viewport, and that `hidden`
  * on the two React owns follows the projection rather than the layer.
@@ -541,7 +541,7 @@ console.log("\nEverything inside #viewport is React's:\n");
 // and appended them here once, and `render/` did the same with `.crosshair`,
 // so the element React renders held five children React had never heard of.
 // They are rendered here now and handed to the layers through `UiHost`. None
-// of them carries an id, so `verify_player_dom.py` cannot see them and this
+// of them carries an id, so `web/tools/repo/player_dom.ts` cannot see them and this
 // is the only check there is that they exist at all.
 const HUD_NODES = ['class="hud-layer"', 'class="shutter shutter-top"',
                    'class="shutter shutter-bottom"',

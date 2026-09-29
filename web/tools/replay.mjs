@@ -6,7 +6,7 @@
  * `block/step/n` labels the debug boxes show — so a report like "3/1/2 is
  * stuck in WaitTurn" can be reproduced here in a second instead of guessed at.
  *
- * The synthetic test in `test/port.test.ts` guards the state machine against
+ * The synthetic test in `test/port/` guards the state machine against
  * data written by hand. This guards it against the data the game ships.
  */
 import { readFileSync } from "node:fs";

@@ -6,7 +6,7 @@
  * `tools/props43.mjs` asks whether stage 3 places its class-0x41 props; this
  * asks the question that report was really about — **whether the page agrees**
  * — and it is the only check in the tree that reads the Props panel at all.
- * `L15`: a green build is not a working page, and `verify_player_dom.py` can
+ * `L15`: a green build is not a working page, and `web/tools/repo/player_dom.ts` can
  * say an id is rendered but not what is written next to it.
  *
  * ## What it is guarding, and what it was written after

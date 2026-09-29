@@ -9,7 +9,7 @@
  * **There is one copy, and it is this one.** The renderer's went when the shot
  * kinds moved to `combat/feedback.ts`, which is where the engine plays them
  * from — `ZombieOnShot` (`FUN_00453EB0`) and `ThrowerOnShot` (`FUN_004499A0`)
- * are `game/` code, and `verify_layers.py`'s `render-drives-the-port` refuses
+ * are `game/` code, and `web/tools/repo/layers.ts`'s `render-drives-the-port` refuses
  * `render/` to call an engine function, rightly. Three things came with that
  * move and each is written up where it landed: the kind is the **hit-result
  * code** and not `killed`/`head` (`feedback.ts`), the pick is the world's
@@ -104,7 +104,7 @@ import type { Rng } from "../../core/rng";
  * callers reached the mixer differently. Every caller is `game/` now and every
  * one of them passes the same `sound.play` emit, so the indirection has one
  * job left and it is a real one: it keeps the routine callable from
- * `test/port.test.ts` with a list to push into, which is how the five kinds
+ * `test/port/` with a list to push into, which is how the five kinds
  * are asserted.
  */
 export type PlaySound = (id: number) => void;

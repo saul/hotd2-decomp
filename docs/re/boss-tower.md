@@ -1,13 +1,13 @@
 # Class 0x45 — the stage-3 boss ("the Tower")
 
-A transcription-grade reading of spawn class `0x45`, written before any of it
-is ported. Every address below was read from the instruction stream, not from
-the pseudocode: this class is the worst case for L35 in the image — Ghidra
-treats `MatrixStackPop` (`0x004A9840`) as no-return, so **most of this
-class's function bodies stop in the middle** and the code after each pop (a whole state machine
-in one case, the camera-tracking publish in another) appears in no
-decompilation and no xref list. The tails are listed in
-[Ghidra hazards](#ghidra-hazards-l35-and-l1).
+A transcription-grade reading of spawn class `0x45`; the port is
+`web/src/game/class45/`. Every address below was read from the instruction
+stream, not from the pseudocode: this class is the worst case for L35 in the
+image — Ghidra treats `MatrixStackPop` (`0x004A9840`) as no-return, so **most
+of this class's function bodies stop in the middle** and the code after each
+pop (a whole state machine in one case, the camera-tracking publish in another)
+appears in no decompilation and no xref list. The tails are listed in [Ghidra
+hazards](#ghidra-hazards-l35-and-l1).
 
 Markers follow the project convention: `[proved]` the code says so,
 `[likely]` inference with the evidence named, `[open]` undetermined.
@@ -98,8 +98,8 @@ It **reads** flags 0–4, and the scripts raise all five themselves
 | 4 | the body despawns | `0x008AD0` | `0x009A9C` | `0x00A6AC` | `0x00AB28` | — |
 
 The gates are **`wait_enemies_present 0`** (op `0x43`, which reads
-`g_enemies_present` `0x009C7006` and additionally needs `g_camera_free` in
-this port's walker), two per stage-3 block and one in stage 6 `[proved]`:
+`g_enemies_present` `0x009C7006` and also waits for `g_camera_free`), two per
+stage-3 block and one in stage 6 `[proved]`:
 
 | block | gate at | opened by |
 |---|---|---|
@@ -120,8 +120,8 @@ camera, `CameraDriverSelectMode`); the heads are in `g_enemy_slots`
 (`RegisterEnemySlot` at init, cleared on death), so the hand-back that raises
 `g_camera_free` is the ordinary one `[likely]` — nothing in the class writes
 `g_camera_free` except the body's death. During the body phase the class sets
-`0x009CA094` (being named `g_camera_driver_held` on main) to 1, which forces
-camera mode 6 and leaves the camera to the body `[proved]`
+`g_camera_driver_held` (`0x009CA094`) to 1, which forces camera mode 6 and
+leaves the camera to the body `[proved]`
 (`CameraDriverSelectMode` at `0x004026AB`).
 
 `goto_scene_state_when_alive 3` (op `0x32`) and `wait_script_flag 0xFE` in the
@@ -237,6 +237,19 @@ space), `+0x7C..+0x84` its local offset; `+0x1158` (`obj+0x12EC`) pose hook.
 flags from the frame counter each draw, and holds the cursor while a cross-fade
 is up.
 
+**What is drawn** `[proved]`: `SkeletonEmitNode` (`FUN_004114C0`) draws a
+node **only through the pose hook** at `model+0x1158` (then computes the bone
+point unless `obj+0x34 & 0x8000`). `ActorBuildSkinnedModel` installs
+`SkeletonDrawNodeSlot` (`FUN_00411050`) there -- `NoOpStub(model scale);
+AssetDrawSlot(node slot)` -- and `PoseHookNone` at `+0x115C`. The opening
+head keeps the build's draw hook; the civilians install
+`Boss3BystanderPoseHook`; the heads and the body install `PoseHookNone` at
+`+0x1158`, so their `DrawSkinnedModelAndShadow` draws **nothing**, and
+`Boss3DrawBoneParts` draws bones `1..n-1` from the (possibly composed)
+matrices. The body skips `Boss3DrawBoneParts` in states 8 and 9, so it is not
+drawn at all while it builds its path. Draw byte 5 is the object matrix's
+form, `T(pos) Rz Ry Rx S(scale) T(root)`.
+
 The **state block** (`ActorAllocSub(0x77C4)`, zeroed by `REP STOSD` of
 `0x1DF1` dwords) `[proved]`:
 
@@ -301,11 +314,10 @@ every frame `[proved]` — no shipped spawn has one.
 
 ## Timing: three functions, three frames
 
-The handler replaces `obj+0x00` with the subtype's init and returns; the init
-replaces it with the update and returns. `[likely]`: each runs on its own
-frame (the task walker calls `obj+0x00` once per actor per frame; no re-dispatch
-of a replaced handler has been seen) — so a spawn's first update is two frames
-after the spawn op.
+The handler replaces `obj+0x00` with the subtype's init and returns
+(`0x0041FD54`..`0x0041FD89`); the init replaces it with the update and returns;
+the task walk calls `obj+0x00` once a frame `[proved]`. So each runs on its own
+frame, and a spawn's first update is two frames after the spawn op.
 
 **Every handler run with subtype ≠ 5 re-seeds the class globals and draws one
 `rand()`** (for `g_boss3_attack_delay`). Block 11 spawns ten class-0x45 actors;
@@ -317,7 +329,6 @@ stand `[proved]` (the handler has no guard).
 ## `Boss3ClassHandler` — `0x0041FC00`
 
 Callers: `g_class_handlers[0x45]` (via `EvtOpSpawnPlaced09`'s allocation).
-Ghidra had no function here; created this session.
 
 ```
 // 0x0041FC00
@@ -436,9 +447,15 @@ were on the original hardware is `[open]`.
 ### `Boss3BystanderPoseHook` — `0x004208F0` (render-only)
 
 Both bystander subtypes' per-node draw: while `g_app_state == 6`,
-`g_GameMode == 1` and the byte at `0x009C88AC` is set `[open: what that byte
-is]`, node 2 is scaled (1.5, 1, 1.5) and nodes 5, 8, 12, 15 by 2; then
-`AssetDrawSlot` of the node's slot. Tables above.
+`g_GameMode == 1` and the byte at `0x009C88AC` is set, node 2 is scaled (1.5,
+1, 1.5) and nodes 5, 8, 12, 15 by 2; then `AssetDrawSlot` of the node's slot.
+Tables above.
+
+The byte at `0x009C88AC` is an **Original Mode item effect** `[proved]`:
+`FUN_00416240` (called only from `FUN_004163D0`) walks the player's two item
+slots and, through the byte table at `0x00416314`, sets it for item `0x0C`
+(arm `0x00416284`, which also resets the weapon block) or `0x14` (arm
+`0x0041629A`); `ResetOriginalModeLoadout` clears it.
 
 ## Subtype 3 — the held bystanders
 
@@ -586,7 +603,7 @@ if (variant == 2) {
         if (g_script_flags[1] == 1 && idx == 0 && obj+0x1330 == 0) { ActorAlloc(Boss3IntroCardUpdate, 0x13F4).state = 0; obj+0x1330 = 1; }
         if (g_script_flags[2] == 1) {
             g_boss3_phase = 1; obj+0x1330 = 0; state = 4; obj+0x34 &= ~0x8000;
-            if (g_GameMode == 3) [0x009CA0EA] = 1;
+            if (g_GameMode == 3) g_boss_engaged = 1;           // 0x009CA0EA
             if (idx == 0) { BossHpBarSpawn(320.0, 35.0) /*0x00420FD2*/; g_boss_hp_fraction = 1.0 /*0x00420FDA*/; }
         }
     }
@@ -752,7 +769,7 @@ model.frame = 0;
 ```
 
 The set-B window is `0x00588F4A` — `{100, 85}` — not the hit path's `{85, 86}`
-`[proved]`; transcribe, do not "fix".
+`[proved]`.
 
 ### `Boss3BigHeadJawSway` — `0x00422C70`
 
@@ -814,7 +831,7 @@ if ((state == 11 || state == 12)
         g_enemies_present--; g_enemies_alive--;        // 0x0042340C, 0x00423413: THE SECOND GATE
         g_camera_driver_held (0x009CA094) = 0;  g_camera_free = 1;  g_camera_hand_back_started = 0;
         free g_enemy_slots[obj+0x120];  Boss3PlayStageSound(7);
-        if (g_GameMode == 3) [0x009CA0EA] = 0;
+        if (g_GameMode == 3) g_boss_engaged = 0;           // 0x009CA0EA
     }
 } else { PlaySoundId(0x1216A9); Boss3SpawnBoneSpark(obj, obj+0x190[p]); }
 obj+0x34 &= 0xFFFFFFF1;
@@ -1111,13 +1128,15 @@ Walked from `g_character_skeletons` (`0x004E0430`) with no depth limit
 `[proved]`:
 
 * `boss3.bin` (`0x49`): root block (node 0), a single chain of nodes 1..17
-  (offsets `(3, 0, 0)`, slot 914; node 17 slot 913), node 17 — **the weak
-  bone** — has two children, 18 (slot 911) and 19 (slot 912), **both at
-  offset `(3.662, −0.189, 0)`**: the jaws. 20 bones
-  (`characterBoneCount` 20).
-* `boss3l.bin` (`0x48`): chain 1..24 (offsets `(4, 0, 0)`), node 24 the weak
-  bone with jaws 25 (slot 898) and 26 (slot 899) at `(4.881, −0.252, 0)`.
-  27 bones.
+  (node 1 at the origin, 2..17 each `(3, 0, 0)` from its parent; slot 914,
+  node 17 slot 913), node 17 — **the weak bone** — has two children, 18
+  (slot 911) and 19 (slot 912), **both at offset `(3.662, −0.189, 0)`**: the
+  jaws. 20 bones (`characterBoneCount` 20).
+* `boss3l.bin` (`0x48`): chain 1..24 (node 1 at the origin, 2..24 each
+  `(4, 0, 0)` from its parent), node 24 the weak bone with jaws 25 (slot 898)
+  and 26 (slot 899) at `(4.881, −0.252, 0)`. 27 bones.
+
+`web/tools/checks/skeletons.ts` holds both trees.
 
 `Boss3ComposeBonePose`'s own walk follows the first child down and, at the
 weak bone, keeps `child0.children[1]` for the second jaw — which for these
@@ -1165,8 +1184,8 @@ The bodies continue past `MatrixStackPop` at `0x00421D6F` and `0x00421E56`.
 * `Boss3SpawnSplashAt` — `0x004248B0` / `Boss3SplashUpdate` — `0x00424800`:
   kind 0 cels `0x1339..0x1355` (scale 3), kind 1 `0x94..0xA1`.
 * `Boss3SpawnMeshBulge` — `0x00424D90` / `Boss3MeshBulgeUpdate` —
-  `0x00424C10`: variant 1 only; **raises** (phase 1 said "pushes down": the
-  store is skipped by `FCOMPP; TEST AH,0x41` unless the arc is higher) the
+  `0x00424C10`: variant 1 only; **raises** (the store is skipped by `FCOMPP;
+  TEST AH,0x41` unless the arc is higher) the
   vertices of slot `0x1850`'s own model -- the asset record at `0x009BEBA4` is
   `0x009A66A4 + 0x1850*0x10`, the table the horde's sheet reads at
   `0x009B7394` -- near the body up to
@@ -1191,12 +1210,12 @@ step 1: if (frame == 0x50) step = 2 (and fall into step 2);
                 piece[i].yaw += (i == 0) ? -0x300 : -0x200;  clamp at -0x8000;
                 if (piece[i].yaw == -0x4200) piece[i].z = -1.0 - (8 - i)*0.01;
             }
-            FUN_004759C0(piece[i].yaw);                          // [open], see below
+            CurlModelSlot3F7ByYaw(piece[i].yaw);                 // FUN_004759C0, inert: see below
             identity; T(piece.xyz); RotY(yaw); Scale(scale); AssetDrawSlot(g_boss3_card_piece_slots[i]);
 step 2: if (frame == 300) ActorKill();
         for i < 8: if (i != 6) { scale -= 0.005; if (scale <= 0) scale = 0; }
                    else if (scale < 0.06) { scale += 0.001; x -= 0.004; y += 0.002; }
-                   draw as above (no FUN_004759C0);
+                   draw as above (no CurlModelSlot3F7ByYaw);
 2 <= step <= 3 && frame >= 0x50:
         a = min((frame - 0x50) / 60, 1.0);
         SpriteDrawCheckedBank({0xBC, 344.0, 96.0, 1.0, 1,1, …, alpha a, -1, 0});
@@ -1204,11 +1223,13 @@ step 2: if (frame == 300) ActorKill();
 frame++;
 ```
 
-It writes **no** flag and **no** shutter. The two sprites are
-`scr_bosmater_st3` entries 0 and 1, 256×64 each (the texbank the blocks load at
-`0x008710`/`0x00977C`); that they are the boss's name is `[likely]` (a
-512×64 banner across the top of the screen, in the stage-3 boss bank), and
-not yet looked at.
+It writes **no** flag and **no** shutter. `CurlModelSlot3F7ByYaw` is the
+routine the shared banner calls per card; it curls slot `0x3F7`
+(`boss4_kls_hod1.bin[30]`), which no shipped stage script loads, so it changes
+nothing here `[proved]`. The two sprites are `scr_bosmater_st3` entries 0 and
+1, 256×64 each (the texbank the blocks load at `0x008710`/`0x00977C`),
+exported and looked at: the gold-on-black **"TOWER"** plate and the **"Type
+8000"** line `[proved]`.
 
 ## Damage model
 
@@ -1287,12 +1308,10 @@ Through the globals and through each other's actors, never through a parent
 * The body shares nothing with the heads but `g_boss3_variant` and the
   scripts' flags; it is spawned after the first gate.
 
-## What the exporter must carry
+## What the class reads from the game's files
 
-1. **A character-type rule for class 0x45** — `CHAR_TYPE_RULES` in
-   `web/src/hod2lib/spawnres.ts` gives it its own (`class45Type`), because no
-   single-field rule kind fits: the type depends on the subtype byte and, for
-   subtype 2, on the index word `[proved]`:
+1. **The character type** depends on the subtype byte and, for subtype 2, on
+   the index word `[proved]`:
 
    | `desc+0x25` | type |
    |---|---|
@@ -1306,73 +1325,25 @@ Through the globals and through each other's actors, never through a parent
    `boss3.bin`/`boss3l.bin`). **`0x50` (`b6boss3.bin`) and `0x54`
    (`boss3_hod1.bin`) are not this class's** — no instruction in the class
    writes either `[proved]`; who uses them is `[open]`.
-2. **A motion rule** (the clip each opens in) and the clip lists to bake:
-   * opening head: `0x5A` (block 11) or `0x5B` — the rule has to know the
-     block;
+2. **The clip each opens in**:
+   * opening head: `0x5A` (block 11) or `0x5B` (block 13);
    * bystanders: `0x23D` (subtype 1), `0x21E` (subtype 3);
    * heads: idx 2 → 67; others → `g_boss3_idle_motions_a/b[idx]` (A for even,
      B for odd), **except** outside Boss Mode idx 0/4 open in `0x58`;
    * body: `0x42`.
+
    Clips reachable: `boss3.bin` 74–100 (74, 75, 76 `0x4C`, 77, 78, 79, 80–84,
    85, 86, 87 `0x57`, 88 `0x58`, 89 `0x59`, 90 `0x5A`, 91 `0x5B`, 92, 93–98, 99,
    100); `boss3l.bin` 59–62, 64–73 (`0x3B`–`0x3E`, 64, 65 `0x41`, 66 `0x42`,
    67–72, 73 `0x49`); bystanders `0x21D`, `0x21E`, `0x21F`, `0x23D`, `0x24F`,
    `0x264`. `g_motion_play_length` of each is load-bearing (the heads' and
    body's timings read the cursor and clip end).
-   **And the skeletons themselves must be whole**: the weak bone and both
-   jaws of `boss3.bin` and `boss3l.bin` sit deep in the tree (see
-   [the skeletons](#the-skeletons)).
-3. **The two index words and the subtype** on each placement (`desc+0x22`,
-   `desc+0x25`), and `desc+0x24` for the bystanders.
-4. Object paths `op_st3` 354–370 and camera paths `cp_st3` 137–144, 150–158:
-   already in every stage-3 bundle's `cam.json` (it exports every slot)
-   `[likely]` — check in phase 2.
-5. The asset slots the effects draw (render only): `etc_2.bin[2..3]`,
+3. The asset slots the effects draw (render only): `etc_2.bin[2..3]`,
    `boss3.bin[5]`, `eff_boss3.bin[0..54]`, `common.bin[25..38, 183..197,
    200, 307..335]`, `car_pl.bin[16..39]`, `st1_1.bin[35]`,
    `st3_tika_bos.bin[0..9]`, and screen sprites `0xBC`, `0xCA`.
 
 No per-instance model overrides: the op-0x09 descriptor has a two-byte tail.
-
-## What the port needs that `game/` cannot compute headlessly
-
-* **Animated bone rotations.** Both hit tests read the jaw bones' Z rotation
-  as the motion posed it (`bone+0x0C`), and the heads' state 5 sums the neck's
-  Z rotations into `+0x5A4`. The port's skeleton is three.js's; `GameHost`
-  has `boneWorld` and `boneMatrix` but no local-rotation query. Needs a new
-  seam (`boneLocalRotation(at, bone)`) or a motion sampler in `game/`.
-* **The class's own pose.** The render layer must apply `extra*` to the heads
-  and build the body's chain from the path points; otherwise `boneWorld` of the
-  weak bone — which feeds `g_boss3_track_point`, the body's `obj+0x100`, the
-  camera aim and the shot pick — is the wrong point.
-* `CamEvalObjectPath6` (`host.objectPath`) for 2313/2349 path points, and
-  `CamEvalPath7` (`host.camPath`) for the camera the body drives. Both seams
-  exist.
-* The shot pick (`host.pickShot`) must return this skeleton's node numbering
-  (weak bones 17/24).
-* Camera-space transforms for `obj+0x70` (`host.cameraMatrices`).
-
-## Phase-2 notes (layering and shared files)
-
-* **`g_camera_driver_held` (`0x009CA094`)** forces camera mode 6 and the body
-  then writes camera block 0's eye (via `CamEvalPath7`), yaw and pitch. The
-  port's `game/camera/mode.ts` records the override as unmodelled; the port
-  needs it, and the body's writes must reach the same camera state the
-  director uses. Shared file.
-* **`script/walker.ts`'s `ENEMY_GATE_CLASSES`** must include `0x45`, or the
-  walker's own view of which classes a `wait_enemies_present` waits on is
-  wrong. Shared file, `script/` layer.
-* `g_bHudShutterState` 5/1 and `EvtOpPlayDialogue2D(0x83)` from the body.
-* The path points (2400 × 3 floats) live in the state block. If the block is
-  an actor field they go through `clonePlain` on every save; they are a pure
-  function of the variant and the paths, so recomputing them on load is the
-  alternative. A design decision, not a divergence to pick silently.
-* `+0x7640` is a gameplay clock advanced by a draw routine (L7): in the port
-  the increment belongs in `game/`, with `Boss3DrawBoneParts` split as the exe
-  splits nothing — keep the function, move nothing across its boundary, and
-  let the render layer draw from the state it leaves.
-* Sounds are all known by id (table above); `PoseHookNone(n, m)` calls are
-  no-ops and can be ported as calls to a no-op.
 
 ## Ghidra hazards (L35 and L1)
 
@@ -1405,42 +1376,6 @@ The **Boss Mode stage-select** routines after the class
 ## Open questions
 
 * What `obj+0x34` bits `0x80000` and `0x80000000` do for this class. `[open]`
-  The port carries both as the Inits write them.
 * Whether any stage-6 actor raises `g_script_flags[0]` before block 2's
   `set_script_flag 0` at `0x001E9C` — it would start the stage-6 fight at
-  once. Flags are zeroed only per scene. `[open]`; the port runs the same
-  actors, and its stage-6 playthrough reaches the fight on the script's own
-  write.
-
-Answered since phase 1:
-
-* `0x009CA0EA` is `g_boss_engaged` (named on main). `[proved]`
-* `FUN_004759C0` is `CurlModelSlot3F7ByYaw`, and main proved it inert for the
-  shared banner (`405c17c`); the card's calls are the same routine. `[proved]`
-* The byte at `0x009C88AC` is an **Original Mode item effect**:
-  `FUN_00416240` (called only from `FUN_004163D0`) walks the player's two item
-  slots and, through the byte table at `0x00416314`, sets it for item `0x0C`
-  (arm `0x00416284`, which also resets the weapon block) or `0x14` (arm
-  `0x0041629A`); `ResetOriginalModeLoadout` clears it. The port fills no item
-  slot (`SpawnOriginalItemBanner`, `FUN_00475E40`, only raises a banner), so
-  the byte is never set there and the
-  bystanders' scaling never applies -- as in the engine without the item.
-  `[proved]`
-* Handler → init → update is three frames: the handler stores the init in
-  `obj+0x00` and returns (`0x0041FD54`..`0x0041FD89`), each init stores the
-  update and returns, and the task walk calls `obj+0x00` once a frame.
-  `[proved]`
-* Screen sprites `0xBC`/`0xCA`, exported and looked at: the gold-on-black
-  **"TOWER"** plate and the **"Type 8000"** line. `[proved]`
-* Draw byte 5 and what is drawn: `SkeletonEmitNode` (`FUN_004114C0`) draws a
-  node **only through the pose hook** at `model+0x1158` (then computes the
-  bone point unless `obj+0x34 & 0x8000`). `ActorBuildSkinnedModel` installs
-  `SkeletonDrawNodeSlot` (`FUN_00411050`) there -- `NoOpStub(model scale);
-  AssetDrawSlot(node slot)` -- and `PoseHookNone` at `+0x115C`. The opening
-  head keeps the build's draw hook; the civilians install
-  `Boss3BystanderPoseHook`; the heads and the body install `PoseHookNone` at
-  `+0x1158`, so their `DrawSkinnedModelAndShadow` draws **nothing**, and
-  `Boss3DrawBoneParts` draws bones `1..n-1` from the (possibly composed)
-  matrices. The body skips `Boss3DrawBoneParts` in states 8 and 9, so it is
-  not drawn at all while it builds its path. Draw byte 5 is the object
-  matrix's form, `T(pos) Rz Ry Rx S(scale) T(root)`. `[proved]`
+  once. Flags are zeroed only per scene. `[open]`

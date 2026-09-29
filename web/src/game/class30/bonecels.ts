@@ -195,7 +195,7 @@ export const ZOMBIE_BONE_CEL_UNPORTED: readonly number[] = [
  * `IDIV`'s remainder against the run's count, which **truncates toward zero**,
  * so a `-1` hit slot gives a negative index and the engine lands below the
  * run. Both are one expression and neither is a function here on purpose:
- * `tools/verify_layers.py`'s `render-drives-the-port` rule allows a render
+ * `web/tools/repo/layers.ts`'s `render-drives-the-port` rule allows a render
  * layer a constant and not a call, and the only reader is the renderer. The
  * arithmetic is written out at the site, in `render/characters/cels.ts`.
  */

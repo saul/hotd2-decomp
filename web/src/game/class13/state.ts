@@ -72,7 +72,7 @@ export enum CarrierRoutine2State {
 /**
  * The `CarrierPropSelectRoutine` (`FUN_00440190`) selectors this port runs —
  * the keys of `g_carrier_prop_routines` in `class13/index.ts`, which
- * `test/port.test.ts` holds equal to this.
+ * `test/port/` holds equal to this.
  *
  * Data-only and here rather than in `index.ts` so the exporter can read it
  * without importing the class registry: a carrier whose routine is not ported

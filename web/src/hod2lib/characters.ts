@@ -491,7 +491,7 @@ const CLASS46_WING_CLIP = 0x406;
  *
  * The engine keys nothing on an address; the port's pool does, so a placer's
  * child needs one, and it takes its body's with bit 30 set. One definition,
- * here and in `game/class46/` (`BatWingAt`), and `verify_port.py` has no way
+ * here and in `game/class46/` (`BatWingAt`), and `web/tools/repo/port.ts` has no way
  * to check that they agree — so the two carry each other's names in a
  * comment, and `render.test.ts` adopts one through the other.
  */
@@ -595,7 +595,7 @@ const ZOMBIE_TWIN_SUPPRESS_FLAG = 0x10000000;
  * `[port-only]` — the bit a twin's spawn address carries over its host's.
  * The other half of the pair is `ZOMBIE_TWIN_AT_BIT` / `ZombieTwinAt` in
  * `game/class30/twin.ts`; nothing can check the two agree, so each names the
- * other, and `web/test/port.test.ts` holds them equal.
+ * other, and `web/test/port/` holds them equal.
  */
 const ZOMBIE_TWIN_AT_BIT = 0x08000000;
 
@@ -2049,10 +2049,12 @@ export async function resolveForStage(
     // four arms are deliberately still out.
     if (cls === 0x30) entryClips.push(...CLASS30_DEATH_CLIPS);
     // Class 0x25's own clips: the ones its command block names with `op 2` and
-    // `op 3`. Baking only the header's motion left 118 of the six stages' 263
-    // (program, clip) pairs with no frames, and a class-0x25 actor whose clip
-    // has none is not merely undrawn -- its `op 1` mode 2 wait on the clip's
-    // last frame can never fire, so the VM parks for the rest of the stage.
+    // `op 3`. Baking only the header's motion leaves some of the six stages'
+    // 385 (program, clip) pairs, across 137 programs, with no frames, and a
+    // class-0x25 actor whose clip has none is not merely undrawn -- its `op 1`
+    // mode 2 wait on the clip's last frame can never fire, so the VM parks for
+    // the rest of the stage. `web/tools/checks/script_corpus.ts` holds every
+    // pair baked.
     if (cls === 0x25) entryClips.push(...humanoidMotionIds(evt, rec));
     // ...and the models its `op 9` and `op 16` put on a bone. Each is a slot
     // the skeleton may not name -- the hand another character holds, a

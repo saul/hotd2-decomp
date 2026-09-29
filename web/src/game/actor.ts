@@ -1108,6 +1108,16 @@ export interface FadeRecord {
 }
 
 /**
+ * A fade snapshot's root translation where a routine wrote it before the
+ * blend, axis by axis. See {@link ActorBase.fadeFrom}.
+ */
+export interface FadeRoot {
+  x?: number;
+  y?: number;
+  z?: number;
+}
+
+/**
  * A one-shot clip on its own track: a strike, an arc stage, an entrance, a
  * corpse. It plays once and `ActorAdvanceMotion` clears it at its end.
  *
@@ -2137,8 +2147,18 @@ export interface ActorBase {
    * the fade dissolves from those. The frog's two turning states do the same
    * to record 1 after every pass of a turn clip (`FrogStateHopWithinScreenWedge`
    * (`FUN_0043AA10`), `FrogStateLeapAtPlayer` (`FUN_0043B270`)).
+   * `CivilianApplyMotionPose` (`FUN_0048C310`) rewrites records 1 and 9 the
+   * same way, or record 0 -- the root's own rotation.
+   *
+   * `root` is the same for the root translation, `model+0x6C..0x74`, which
+   * `MotionLoadPoseSlot` mode 0xC copies into slot A beside the angles: an
+   * axis present here is the one the fade dissolves from, an absent one is
+   * the clip's. `CivilianApplyMotionPose` is its writer -- all three when it
+   * has just moved the actor to hold bone 1, x and z when the outgoing block
+   * walked on its clip.
    */
-  fadeFrom: { motion: number; ticks: number; records?: FadeRecord[] } | null;
+  fadeFrom: { motion: number; ticks: number; records?: FadeRecord[];
+              root?: FadeRoot } | null;
   /**
    * Frames of the cross-fade left. It starts at the fade length and the
    * fade is over when it goes **below zero**, so the incoming clip is held on

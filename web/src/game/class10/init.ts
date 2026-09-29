@@ -15,7 +15,7 @@ import { CivilianRunScript } from "./script";
 import { makeCivilianState } from "./state";
 
 /** `CivilianInit`'s literals. */
-const DEFAULT_TURN_RATE = 10;
+const DEFAULT_MOTION_BLEND = 10;
 
 /**
  * `CivilianInit` — `FUN_0048A3E0`.
@@ -43,7 +43,7 @@ export function CivilianInit(obj: Actor, rng?: Rng): void {
   //   obj[0] = CivilianUpdateOnCarrier; }` at `0x0048A747`-`0x0048A75E`.
   // Seven of the game's 47 civilians ride something; this one does.
   if (obj.hp !== 0) obj.carrierAt = G.g_civilian_carrier;
-  sub.turnRate = DEFAULT_TURN_RATE;
+  sub.motionBlend = DEFAULT_MOTION_BLEND;
   // `obj+0x124 = g_actor_radius_by_char[type]`, `obj+0x128 = 1.0`. The first
   // is the shot sphere and is ten units for every civilian; the second is the
   // radius `PoseHookGrowAndPushOutOfWorld` ramps, which op 0x16 retargets.

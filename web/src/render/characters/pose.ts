@@ -17,7 +17,7 @@ import type { BakedMotion } from "../../bundle";
 import { BAMS_TO_RAD } from "../../core/bams";
 import { authoredFrameHeld, authoredFrameOfTicks }
   from "../../core/play_cursor";
-import { MotionFlag, type FadeRecord } from "../../game/actor";
+import { MotionFlag, type FadeRecord, type FadeRoot } from "../../game/actor";
 import { MatrixToEulerZYX } from "../../game/matrix";
 import type { Instance } from "./instance";
 
@@ -147,7 +147,7 @@ private blendFromFade(inst: Instance, m: BakedMotion, f: number): boolean {
   const pf = authoredFrameOfTicks(fade.ticks, pm.fps, pm.frames);
   const w = 1 - inst.a.fade / inst.a.fadeLen;
   this.applyBlend(inst, pm, pf, m, f, Math.min(1, Math.max(0, w)),
-                  undefined, fade.records);
+                  undefined, fade.records, fade.root);
   return true;
 }
 
@@ -162,7 +162,7 @@ private blendFromFade(inst: Instance, m: BakedMotion, f: number): boolean {
 private applyBlend(inst: Instance, mA: BakedMotion, fA: number,
                    mB: BakedMotion, fB: number, w: number,
                    full = (inst.a.motionFlags & MotionFlag.RootMotion) === 0,
-                   overA?: readonly FadeRecord[]):
+                   overA?: readonly FadeRecord[], rootA?: FadeRoot):
     void {
   inst.drawnFrom = null;
   const ra = fA * 3;
@@ -172,16 +172,21 @@ private applyBlend(inst: Instance, mA: BakedMotion, fA: number,
   // translations into one triple at `model+0x6C..0x74` *before*
   // `SkeletonApplyRootMotion` sees it, so a blend is one root, not two.
   const lerp = (a: number, b: number): number => a + (b - a) * w;
+  // A snapshot root the state wrote before it blended -- `model+0x6C..0x74`,
+  // axis by axis -- is where the fade dissolves from. See `Actor.fadeFrom`.
   inst.pivot.position.set(
-    full ? lerp(mA.root[ra], mB.root[rb]) : 0,
-    lerp(mA.root[ra + 1], mB.root[rb + 1]),
-    full ? lerp(mA.root[ra + 2], mB.root[rb + 2]) : 0);
+    full ? lerp(rootA?.x ?? mA.root[ra], mB.root[rb]) : 0,
+    lerp(rootA?.y ?? mA.root[ra + 1], mB.root[rb + 1]),
+    full ? lerp(rootA?.z ?? mA.root[ra + 2], mB.root[rb + 2]) : 0);
 
   const n = inst.type.bone_count;
   const ba = fA * n * 3;
   const bb = fB * n * 3;
+  // Record 0 is the pivot's, and a state may have rewritten it too.
+  const o0 = overA?.find((r) => r.record === 0);
   inst.pivot.quaternion
-    .copy(this.bams(mA.rot[ba], mA.rot[ba + 1], mA.rot[ba + 2]))
+    .copy(o0 ? this.bams(o0.rot[0], o0.rot[1], o0.rot[2])
+             : this.bams(mA.rot[ba], mA.rot[ba + 1], mA.rot[ba + 2]))
     .slerp(this.bams(mB.rot[bb], mB.rot[bb + 1], mB.rot[bb + 2]), w);
 
   for (const [bone, node] of inst.bones) {

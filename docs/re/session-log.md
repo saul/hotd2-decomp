@@ -24956,3 +24956,75 @@ draw clones the same stage nodes (`Object3D.clone` shares materials), so it
 carries the same state by construction. Stage 2's type-33 strip
 (`?stage=2&block=11&step=1&op=20`, cam 57/371) is one sprite with no second
 one behind it to cut.
+
+## 2026-09-29 -- stage 1's bin civilian: the fall's yaw, the climb-off's height, and the captor that mauled for ever
+
+**Report.** The civilian who falls off the bridge before JUDGMENT (stage 1
+block 6 step 1, `0x3C38`, stream 13) landed in the wrong place, and the zombie
+that bursts from the wood after she climbs off the bin (`0x3D34`, char type 7,
+initial state 39, attack state 40) repeated its maul and stuck.
+
+**Found.** Driven in headless Chrome with the bridge captor (`0x3C8C`) shot:
+after `SetPose` her yaw was 0, the fall's root motion took her along -Z (541
+-> 550) instead of +X, and after the climb-off clip she stayed at y -0.1 (the
+bin lid) through the rest of the scene. The captor went 36 -> 40 -> 35 (clip
+967) -> 40 -> 35 -> ... for as long as the stage ran. Three causes, none a
+regression -- the two civilian ones never worked, and the captor one was left
+half-done by d82271fb:
+
+* **Op 0x18 is six dwords, not six floats.** `0x0048BE71..0x0048BEA9` are
+  `MOV`s: three floats into `obj+0x40..0x48`, three BAMS integers into
+  `obj+0x64..0x6C`. Both exporters read all six with `f32`, which is L2's
+  trap on another struct, so all five shipped poses had a denormal yaw. Fixed
+  in `web/src/hod2lib/exetab.ts` and `tools/hod2lib/exetab.py`; the port now
+  writes pitch and roll as well.
+* **`CivilianApplyMotionPose` (`FUN_0048C310`) was unported**, on a note that
+  the root walk "already carries a civilian where its clips say". The stream's
+  `0x160100` block carries `0x20000`: move the actor so bone 1 of the new
+  clip's first frame lands where the climb-down drew it. Ported whole in
+  `class10/pose.ts`: the heading turn (`0x18000`), the hold, the record
+  rewrites (`0x8000` rebases records 1 and 9, `0x10000` record 0), the
+  outgoing block's `0x100000` root hand-off, and the blend -- `sub+0xE`, op
+  0x03's operand, whose only reader this is. Op 0x03 was `SetTurnRate`; it is
+  `SetMotionBlend` now, and state.ts's `[open]` on the field is closed. The
+  record and root writes land in the fade's snapshot, so `Actor.fadeFrom`
+  gained `root` and the renderer's blend honours it and record 0. The
+  listing ends the `0x8000` arm at `MatrixStackPop(1)` (`0x0048C767`) with a
+  return; the bytes run on through record 9 and into the blend (L35).
+* **State 40's subs write the cursor's blob.** `MOV [ESI+0x1398], EDI` with
+  `EDI` the attack blob + 0x10 at `0x0045BD34`/`0x0045BD92`; the port set
+  `scriptPc = 0` and left the blob the burst (state 36) had pointed at, so
+  state 35 sub 1 loaded the target blob's only entry. State 41 had the same
+  omission. Both now `aimCursor`, and the arrival tests read the cursor.
+
+**Also fixed on the way.** Op 0x01's start and `CivilianReapplyWaitCommand`'s
+op 0x01 are play **cursors** (`model+0x08` takes them as they are); the port
+converted them as authored frames and started 21 shipped clips twice as far
+in.
+
+**Wrong turns.** The first run, with nothing shot, showed the civilian
+switching to her on-shot stream (11) at f190 and a captor dying, which read as
+a shot from nowhere; it is the bridge captor's maul killing her on schedule --
+the exe's failure path, route branch 1. The repro has to shoot `0x3C8C` to see
+the rescue path at all. A test helper that waited for the wait word to change
+never ran a frame when the new block's word equalled the old one; it waits on
+the cursor now. `tools/civilians.mjs` fails on origin/main (17 moved, 0
+rescued, 14 mauled against 37/21/10) with identical numbers before and after
+this change -- not this change's, and not investigated.
+
+**Left open.** The class-0x30 script entries and headers pass the exe's start
+**cursor** to the port's `ActorSetMotionBlended`, which takes an authored
+frame and doubles it: the bin captor's burst (967, frame 33) starts at cursor
+66, half-way through, and its flag-34 cue at 63 never fires (the flag's one
+reader, `MouseBranchTriggerUpdate` `0x0043F743`, despawns a mouse). The same
+holds for every non-skeleton caller that passes a nonzero start; filed as its
+own task. Class 0x41 constructor 66 (`FUN_00464500`, 20 or 29 table props,
+placed at block 6 step 1 by `0x6884`) is not exported and not ported.
+
+**Proof.** `port.test.ts`: "the bin captor's walk hands state 35 its attack
+list, once" (two of three fail without the `aimCursor`), and "class 0x10's clip
+change, CivilianApplyMotionPose" (eight of nine fail on main's `script.ts`; the
+ninth, the cut, is the control). `verify_civilian_scripts.py` fails on main's
+decoder (all five poses denormal) and passes now. In the page: after the
+climb-off, y -0.1 -> -15.5; the fall lands at x -689 (was z -550); the captor
+runs 36 -> 40 -> 35 (958, 965) -> AttackRun once.

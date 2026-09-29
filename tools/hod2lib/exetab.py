@@ -495,7 +495,8 @@ class ExeTables:
         Returns ``{"entries": [script index per table slot],
         "scripts": [[command, ...], ...]}``. A command is
         ``{"op": int, "args": [int, ...]}`` plus the resolved operands the
-        port needs: ``point``/``pose`` for the pointers-to-floats, ``sounds``
+        port needs: ``point`` for the pointers-to-floats, ``pose`` for
+        op 0x18's three floats and three BAMS ints, ``sounds``
         for the ``(id, delay)`` list op 0x22 walks, and ``script`` (an index
         into ``scripts``) wherever an operand is another stream.
 
@@ -571,8 +572,13 @@ class ExeTables:
                 if op == 0x16:
                     d["radius"] = struct.unpack("<f",
                                                 struct.pack("<i", args[0]))[0]
+                # Op 0x18 copies six dwords: the position's three floats into
+                # obj+0x40..0x48 and the rotation's three BAMS integers into
+                # obj+0x64..0x6C (0x0048BE71..0x0048BEA9). Not six floats.
                 if op == 0x18 and args[0]:
-                    d["pose"] = [self._f32(args[0] + i * 4) for i in range(6)]
+                    d["pose"] = ([self._f32(args[0] + i * 4) for i in range(3)]
+                                 + [self._i32(args[0] + i * 4)
+                                    for i in range(3, 6)])
                 if op in (0x13, 0x14) and args[0] > 0:
                     d["item"] = self._civ_item(args[0], items)
                 if op == 0x15 and args[0]:

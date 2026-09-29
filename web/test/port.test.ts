@@ -14287,21 +14287,21 @@ console.log("\nclass 0x10, the civilian and the rescue:");
   {
     const { a, events } = civScene([[
       cmd(CivilianOp.Wait, 0),
-      cmd(CivilianOp.SetTurnRate, 77),
+      cmd(CivilianOp.SetMotionBlend, 77),
       cmd(CivilianOp.SetCiviliansGoal, 3),
       cmd(CivilianOp.Wait, 0),
-      cmd(CivilianOp.SetTurnRate, 88),
+      cmd(CivilianOp.SetMotionBlend, 88),
       cmd(CivilianOp.Wait, 0),
       cmd(CivilianOp.End),
     ]]);
     check("the Init runs a whole block and parks on the next wait",
-          a.civ?.cursor === 3 && a.civ?.turnRate === 77
+          a.civ?.cursor === 3 && a.civ?.motionBlend === 77
           && a.civ?.civiliansGoal === 3,
-          `cursor ${a.civ?.cursor} rate ${a.civ?.turnRate}`);
+          `cursor ${a.civ?.cursor} rate ${a.civ?.motionBlend}`);
     for (let i = 0; i < 20; i++) cFrame(a, events);
     check("...and a wait word with no bits and no timer never resumes",
-          a.civ?.turnRate === 77 && a.civ?.cursor === 3,
-          `rate ${a.civ?.turnRate} cursor ${a.civ?.cursor}`);
+          a.civ?.motionBlend === 77 && a.civ?.cursor === 3,
+          `rate ${a.civ?.motionBlend} cursor ${a.civ?.cursor}`);
   }
 
   // Wait bit 0x2000 reads `g_script_flags`, and a flag the script has never
@@ -14311,17 +14311,17 @@ console.log("\nclass 0x10, the civilian and the rescue:");
     const { a, events } = civScene([[
       cmd(CivilianOp.Wait, CivilianWait.ScriptFlag),
       cmd(CivilianOp.Wait, 0),
-      cmd(CivilianOp.SetTurnRate, 77),
+      cmd(CivilianOp.SetMotionBlend, 77),
       cmd(CivilianOp.Wait, 0),
       cmd(CivilianOp.End),
     ]]);
     for (let i = 0; i < 5; i++) cFrame(a, events);
     check("an unset script flag holds the wait rather than passing it",
-          a.civ?.turnRate === 10, `rate ${a.civ?.turnRate}`);
+          a.civ?.motionBlend === 10, `rate ${a.civ?.motionBlend}`);
     G.g_script_flags[0] = 1;
     cFrame(a, events);
     check("...and raising it lets the block run",
-          a.civ?.turnRate === 77, `rate ${a.civ?.turnRate}`);
+          a.civ?.motionBlend === 77, `rate ${a.civ?.motionBlend}`);
   }
 
   // Wait bit 0x1000 is **three** conditions (`0x0048B2F8`): the arm only
@@ -14336,7 +14336,7 @@ console.log("\nclass 0x10, the civilian and the rescue:");
     const { a, events } = civScene([[
       cmd(CivilianOp.Wait, CivilianWait.CameraSettled),
       cmd(CivilianOp.Wait, 0),
-      cmd(CivilianOp.SetTurnRate, 77),
+      cmd(CivilianOp.SetMotionBlend, 77),
       cmd(CivilianOp.Wait, 0),
       cmd(CivilianOp.End),
     ]]);
@@ -14346,17 +14346,17 @@ console.log("\nclass 0x10, the civilian and the rescue:");
     G.g_camera_free = 0;
     for (let i = 0; i < 5; i++) cFrame(a, events);
     check("bit 0x1000 holds while the camera is neither settled nor free",
-          a.civ?.turnRate === 10, `rate ${a.civ?.turnRate}`);
+          a.civ?.motionBlend === 10, `rate ${a.civ?.motionBlend}`);
     G.g_camera_free = 1;
     cFrame(a, events);
     check("...and `g_camera_free` alone releases it",
-          a.civ?.turnRate === 77, `rate ${a.civ?.turnRate}`);
+          a.civ?.motionBlend === 77, `rate ${a.civ?.motionBlend}`);
   }
   {
     const { a, events } = civScene([[
       cmd(CivilianOp.Wait, CivilianWait.CameraSettled),
       cmd(CivilianOp.Wait, 0),
-      cmd(CivilianOp.SetTurnRate, 77),
+      cmd(CivilianOp.SetMotionBlend, 77),
       cmd(CivilianOp.Wait, 0),
       cmd(CivilianOp.End),
     ]]);
@@ -14367,7 +14367,7 @@ console.log("\nclass 0x10, the civilian and the rescue:");
     G.g_camera_free = 1;
     for (let i = 0; i < 5; i++) cFrame(a, events);
     check("...and off the path-camera row the arm releases nothing at all",
-          a.civ?.turnRate === 10, `rate ${a.civ?.turnRate}`);
+          a.civ?.motionBlend === 10, `rate ${a.civ?.motionBlend}`);
   }
 
   // The timer, op 0x09. It does **not** delay its own block: `CivilianStep-
@@ -14381,20 +14381,20 @@ console.log("\nclass 0x10, the civilian and the rescue:");
       cmd(CivilianOp.Wait, 0),
       cmd(CivilianOp.SetTimer, 3),
       cmd(CivilianOp.Wait, 0),
-      cmd(CivilianOp.SetTurnRate, 77),
+      cmd(CivilianOp.SetMotionBlend, 77),
       cmd(CivilianOp.Wait, 0),
       cmd(CivilianOp.End),
     ]]);
     cFrame(a, events);
     check("the timer's own block runs at once and parks with it armed",
-          a.civ?.timer === 3 && a.civ?.cursor === 3 && a.civ?.turnRate === 10,
+          a.civ?.timer === 3 && a.civ?.cursor === 3 && a.civ?.motionBlend === 10,
           `timer ${a.civ?.timer} cursor ${a.civ?.cursor}`);
     for (let i = 0; i < 3; i++) cFrame(a, events);
     check("a timer holds the next block for the frames it names",
-          a.civ?.turnRate === 10, `rate ${a.civ?.turnRate}`);
+          a.civ?.motionBlend === 10, `rate ${a.civ?.motionBlend}`);
     cFrame(a, events);
     check("...and releases it on the frame it reads zero",
-          a.civ?.turnRate === 77, `rate ${a.civ?.turnRate}`);
+          a.civ?.motionBlend === 77, `rate ${a.civ?.motionBlend}`);
   }
 
   // **A captor that leaves is not a captor that died.**
@@ -14478,7 +14478,7 @@ console.log("\nclass 0x10, the civilian and the rescue:");
       [cmd(CivilianOp.Wait, CivilianWait.Free),
        { op: CivilianOp.SetOnShot, args: [1], scripts: [1] },
        cmd(CivilianOp.Wait, 0), cmd(CivilianOp.End)],
-      [cmd(CivilianOp.Wait, 0), cmd(CivilianOp.SetTurnRate, 55),
+      [cmd(CivilianOp.Wait, 0), cmd(CivilianOp.SetMotionBlend, 55),
        cmd(CivilianOp.Wait, 0), cmd(CivilianOp.End)],
     ]);
     EnterPlay();
@@ -14498,7 +14498,7 @@ console.log("\nclass 0x10, the civilian and the rescue:");
           && G.g_player_score[0] === 800,
           `lives ${G.g_player_lives[0]} score ${G.g_player_score[0]}`);
     check("...and switches it to the on-shot script",
-          a.civ?.turnRate === 55 && a.dead, `rate ${a.civ?.turnRate}`);
+          a.civ?.motionBlend === 55 && a.dead, `rate ${a.civ?.motionBlend}`);
   }
   {
     const { a, events } = civScene([
@@ -14580,7 +14580,7 @@ console.log("\nclass 0x10, the civilian and the rescue:");
       cmd(CivilianOp.Wait, CivilianWait.Free),
       cmd(CivilianOp.SetSkipCount, 1),
       cmd(CivilianOp.Wait, CivilianWait.Free),
-      cmd(CivilianOp.SetTurnRate, 66),      // skipped: not a wait condition
+      cmd(CivilianOp.SetMotionBlend, 66),      // skipped: not a wait condition
       cmd(CivilianOp.SetEnemiesGoal, 5),    // re-applied: it is one
       cmd(CivilianOp.Wait, 0),
       cmd(CivilianOp.End),
@@ -14589,7 +14589,7 @@ console.log("\nclass 0x10, the civilian and the rescue:");
     check("a skipped block re-applies its wait conditions...",
           a.civ?.enemiesGoal === 5, `goal ${a.civ?.enemiesGoal}`);
     check("...and does not run its actions",
-          a.civ?.turnRate !== 66, `rate ${a.civ?.turnRate}`);
+          a.civ?.motionBlend !== 66, `rate ${a.civ?.motionBlend}`);
   }
 
   // **Does a dead civilian leave `g_civilians_alive`?** This is the counter
@@ -14683,7 +14683,7 @@ console.log("\nclass 0x10, the civilian and the rescue:");
     const { a, events } = civScene([[
       cmd(CivilianOp.Wait, CivilianWait.InFront),
       cmd(CivilianOp.Wait, 0),
-      cmd(CivilianOp.SetTurnRate, 77),
+      cmd(CivilianOp.SetMotionBlend, 77),
       cmd(CivilianOp.Wait, 0),
     ]]);
     // The target is behind her, so the wait holds...
@@ -14699,13 +14699,13 @@ console.log("\nclass 0x10, the civilian and the rescue:");
     const before = a.civ?.cursor;
     cFrame(a, events);
     check("an in-front wait holds while the target is behind",
-          a.civ?.cursor === before && a.civ?.turnRate !== 77,
+          a.civ?.cursor === before && a.civ?.motionBlend !== 77,
           `cursor ${a.civ?.cursor}`);
     // ...and releases the frame it is in front, with no timer involved.
     a.yaw = 0x8000;                              // half a turn: now in front
     cFrame(a, events);
     check("...and releases the frame it comes round, timer or no timer",
-          a.civ?.turnRate === 77, `turn ${a.civ?.turnRate}`);
+          a.civ?.motionBlend === 77, `turn ${a.civ?.motionBlend}`);
   }
 
   // **The civilian turn cap is a literal, and it is not the script's.**
@@ -14719,7 +14719,7 @@ console.log("\nclass 0x10, the civilian and the rescue:");
     const { a, events } = civScene([[
       cmd(CivilianOp.Wait, CivilianWait.Face),
       cmd(CivilianOp.Wait, 0),
-      cmd(CivilianOp.SetTurnRate, 55),
+      cmd(CivilianOp.SetMotionBlend, 55),
       cmd(CivilianOp.Wait, 0),
     ]]);
     a.pos = vec3(0, 0, 0);
@@ -14731,12 +14731,12 @@ console.log("\nclass 0x10, the civilian and the rescue:");
       a.civ.targetMode = 1;
     }
     let frames = 0;
-    while (frames < 3000 && a.civ?.turnRate !== 55) {
+    while (frames < 3000 && a.civ?.motionBlend !== 55) {
       cFrame(a, events);
       frames += 1;
     }
     check("a civilian turns at the engine's cap, not the script's rate",
-          a.civ?.turnRate === 55 && frames < 200, `${frames} frames`);
+          a.civ?.motionBlend === 55 && frames < 200, `${frames} frames`);
   }
 
 
@@ -14950,6 +14950,158 @@ console.log("\nclass 0x10, the civilian and the rescue:");
     check("...and op 0x27 does write it, scaling the ground she covers with it",
           a.scale === 50 && d.dz < -300,
           `scale ${a.scale} dz ${d.dz.toFixed(3)}`);
+  }
+}
+
+// **A civilian's clip change** -- `CivilianApplyMotionPose` (`FUN_0048C310`),
+// which ops 0x00 and 0x01 call and the port did not. Stage 1's bin civilian
+// (`0x3C38`, block 6) is the scene: she falls onto the bin on clip 619 and
+// climbs down on 611, whose root ends 15.4 units lower, and the block that
+// follows (`0x160100`) carries `0x20000` -- hold bone 1 -- which is what puts
+// her feet on the ground. Without it she walked the rest of the scene at the
+// height of the bin lid. Each arm is driven through the VM, with a host whose
+// bone 1 stands where a draw would have left it.
+console.log("\nclass 0x10's clip change, CivilianApplyMotionPose:");
+{
+  const rng = new Rng(21);
+  const N = TYPE.bone_count;
+  /** A clip whose every frame has this root and these two records. */
+  const clip = (frames: number, root: [number, number, number],
+                rec0: [number, number, number] = [0, 0, 0],
+                rec1: [number, number, number] = [0, 0, 0]) => ({
+    bank: "t", frames, fps: 30,
+    root: Array.from({ length: frames * 3 }, (_, i) => root[i % 3]),
+    rot: Array.from({ length: frames * N * 3 }, (_, i) => {
+      const r = Math.floor(i / 3) % N;
+      return r === 0 ? rec0[i % 3] : r === 1 ? rec1[i % 3] : 0;
+    }),
+  });
+  const POSE_CHARS = {
+    ...CHARS,
+    types: { "1": { ...TYPE, motions: {
+      ...TYPE.motions,
+      // 610 the climb down, whose root ends low; 565 the stand after it.
+      "610": clip(20, [0, -5.18, 0]),
+      "565": clip(20, [0, 11.91, 0]),
+      // 669 a pose whose bone 1 is turned 0x2000; 373 one that is not.
+      "669": clip(20, [0, 11.8, 0], [0, 0, 0], [0, 0x2000, 0]),
+      "373": clip(20, [0, 11.0, 0]),
+    } } },
+  } as unknown as CharactersJson;
+  /** Where the host says bone 1 was drawn. */
+  const DRAWN = vec3(3, -4.78, 5);
+  const HOST = { ...NULL_HOST,
+    boneWorld: (_at: number, bone: number, out: Vec3) => {
+      if (bone !== 1) return false;
+      out.x = DRAWN.x; out.y = DRAWN.y; out.z = DRAWN.z;
+      return true;
+    } };
+  const cmd = (op: CivilianOp, ...args: number[]): CivilianCmdJson =>
+    ({ op, args });
+  /**
+   * The Init plays `first` in a block of its own and waits one timer frame;
+   * the next block, led by `word`, changes to `second`. Returned just after
+   * that change, driven by `CivilianUpdate` with `HOST`.
+   */
+  const change = (first: number, word: number, ...block: CivilianCmdJson[]) => {
+    ResetGameGlobals();
+    EnterPlay();
+    SetGameTables(POSE_CHARS, undefined, undefined, undefined, undefined, {
+      entries: [0], items: [],
+      scripts: [[
+        cmd(CivilianOp.Wait, CivilianWait.RootMotion),
+        cmd(CivilianOp.SetMotion, first, -1),
+        cmd(CivilianOp.SetTimer, 1),
+        cmd(CivilianOp.Wait, word),
+        ...block,
+        cmd(CivilianOp.Wait, 0),
+        cmd(CivilianOp.End),
+      ]],
+      spawns: { "16384": { charType: 1, script: 0, removePath: -1,
+                           removeFrame: 0, removeDelay: 0, children: [] } },
+    });
+    const a = ActorSpawn(0x4000, SpawnClass.Civilian, 1, "civilian",
+                         undefined, rng);
+    a.visible = true;
+    a.pos = vec3(0, 0, 0);
+    a.yaw = 0;
+    const events = new Events();
+    // The Init parks on command 3; the frame the next block runs moves it.
+    for (let i = 0; i < 6 && a.civ?.cursor === 3; i++) {
+      CivilianUpdate(a, { dt: 1 / 60, rng, host: HOST, events });
+    }
+    return a;
+  };
+
+  // `0x20000`: pos += bone 1 drawn - bone 1 under the new clip's first frame.
+  // Type 1 is scale 1.0 and its first root node's offset is zero, so P2 is
+  // the position plus 565's root, `(0, 11.91, 0)`.
+  {
+    const a = change(610, CivilianWait.HoldBone1 | CivilianWait.RootMotion,
+                     cmd(CivilianOp.SetMotion, 565, -1));
+    check("0x20000 moves her so bone 1 stays where the climb-down drew it",
+          a.motion === 565 && Math.abs(a.pos.x - 3) < 1e-4
+          && Math.abs(a.pos.y - (-4.78 - 11.91)) < 1e-4
+          && Math.abs(a.pos.z - 5) < 1e-4,
+          `motion ${a.motion} pos ${a.pos.x},${a.pos.y},${a.pos.z}`);
+    check("...and the fade dissolves from the new clip's root, not the old",
+          a.fadeFrom !== null && a.fadeFrom.root?.y === 11.91
+          && a.fadeFrom.root?.x === 0 && a.fadeFrom.root?.z === 0,
+          JSON.stringify(a.fadeFrom));
+  }
+  // The blend is op 0x03's operand -- `sub+0xE`, `CivilianInit`'s 10 by
+  // default -- and `0x200000` cuts instead.
+  {
+    const a = change(610, CivilianWait.RootMotion,
+                     cmd(CivilianOp.SetMotionBlend, 6),
+                     cmd(CivilianOp.SetMotion, 565, -1));
+    check("a clip change fades over op 0x03's length",
+          a.motion === 565 && a.fadeFrom !== null && a.fadeLen === 7,
+          `motion ${a.motion} fadeLen ${a.fadeLen}`);
+    const b = change(610, CivilianWait.Cut | CivilianWait.RootMotion,
+                     cmd(CivilianOp.SetMotion, 565, -1));
+    check("...and 0x200000 cuts, with no fade at all",
+          b.motion === 565 && b.fadeFrom === null, `fade ${b.fadeLen}`);
+  }
+  // The old block walked on its clip (`0x100000` in the word the VM entered
+  // with), so the snapshot's x and z are the new frame's -- `model+0x6C` and
+  // `+0x74` at `0x0048C809`/`0x0048C816` -- and its y is still the drawn one.
+  {
+    const a = change(610, CivilianWait.RootMotion,
+                     cmd(CivilianOp.SetMotion, 565, -1));
+    check("the outgoing block's root motion hands the fade x and z, not y",
+          a.fadeFrom?.root?.x === 0 && a.fadeFrom?.root?.z === 0
+          && a.fadeFrom?.root?.y === undefined, JSON.stringify(a.fadeFrom));
+  }
+  // `0x8000`: she turns by the heading the drawn pose has and the new clip's
+  // first frame lacks, and records 1 and 9 are rebased by the same so the
+  // body does not swing. 669's bone 1 faces 0x2000; 373's faces nothing.
+  {
+    const a = change(669, CivilianWait.TurnKeepBones | CivilianWait.RootMotion,
+                     cmd(CivilianOp.SetMotion, 373, -1));
+    const r1 = a.fadeFrom?.records?.find((r) => r.record === 1)?.rot;
+    check("0x8000 turns her by the drawn heading the new clip lacks",
+          a.motion === 373 && Math.abs(a.yaw - 0x2000) <= 1, `yaw ${a.yaw}`);
+    check("...and rebases bone 1 so the body keeps facing where it was",
+          r1 !== undefined && r1.every((v) => Math.abs(v) <= 2)
+          && a.fadeFrom?.records?.some((r) => r.record === 9) === true,
+          JSON.stringify(a.fadeFrom?.records));
+  }
+  // Op 0x01's third operand is the start **cursor**: `ActorSetMotionBlended`
+  // writes it into `model+0x08` as it is. The port doubled it.
+  {
+    const a = change(610, CivilianWait.Cut,
+                     { op: CivilianOp.SetMotionFrom, args: [565, 1, 7] });
+    check("op 0x01 starts the clip on the cursor it names",
+          a.motion === 565 && a.playTicks === 7, `ticks ${a.playTicks}`);
+  }
+  // Op 0x18: six dwords copied, the last three into pitch, yaw and roll.
+  {
+    const a = change(610, 0, { op: CivilianOp.SetPose, args: [0],
+                               pose: [-698, -0.116, -541, 0x100, 0xc000, 0x200] });
+    check("op 0x18 writes all three angles as BAMS",
+          a.pitch === 0x100 && a.yaw === 0xc000 && a.roll === 0x200
+          && a.pos.x === -698, `pitch ${a.pitch} yaw ${a.yaw} roll ${a.roll}`);
   }
 }
 
@@ -18820,6 +18972,57 @@ console.log("\nthe crawler's undamaged swing:");
   ZombieScriptEnded(done);
   check("a captor that has finished its attack script goes to AttackRun",
         done.state === ZombieState.AttackRun, `state ${done.state}`);
+}
+
+// **Stage 1's bin captor, `0x3D34`**, block 6 step 1 -- the zombie that
+// bursts out of the wood once the civilian has climbed off the bin. Its
+// civilian orders it into state 36 (the burst, its *target* blob), whose
+// one-entry list ends in `ZombieScriptEnded` and so in its attack state 40,
+// `ZombieStateWalkPastPoint`. That walks past the header's point and hands
+// state 35 **the cursor it wrote**: `0x1398 = blob + 0x10` at `0x0045BD34` /
+// `0x0045BD92`, the attack blob's first entry. The port set the index and not
+// the blob, so state 35 replayed the burst -- the *target* blob's entry --
+// ended that list, went back to state 40, and did it again for ever. Driven
+// through `GameUpdate`, with the clips standing in for 967 (the burst), 958
+// (the walk) and 958/965 (the attack list).
+console.log("\nthe bin captor's walk hands state 35 its attack list, once:");
+{
+  const rng = new Rng(5);
+  const events = scene(0, rng);
+  const z = spawnZombie(0x3d34, 1, "bin captor");
+  z.visible = true;
+  z.hp = 100;
+  z.pos = vec3(0, 0, 0);
+  z.yaw = 0;                                   // facing -Z, toward the point
+  z.attackState = ZombieState.WalkPastPoint;
+  z.script = {
+    target: { state: 36, head: {},
+              entries: [{ motion: 102, frame: 0, loops: 1, mode: 20, flag: 34 }] },
+    attack: { state: 40, head: { point: [0, 0, -6], motion: 12, frame: 0 },
+              entries: [{ motion: 100, frame: 0, loops: 1, mode: -1 },
+                        { motion: 101, frame: 0, loops: 1, mode: 32 }] },
+  };
+  z.state = ZombieState.TargetScriptWithFlag;
+  z.sub = 0;
+  const seen: string[] = [];
+  for (let i = 0; i < 900 && z.state !== ZombieState.AttackRun; i++) {
+    GameUpdate(1 / 60, NULL_HOST, rng, events);
+    const s = `${z.state}:${z.zom.scriptMotion}`;
+    if (seen[seen.length - 1] !== s) seen.push(s);
+  }
+  const path = seen.join(" ");
+  const burst = `${ZombieState.TargetScriptWithFlag}:102`;
+  const walk = `${ZombieState.WalkPastPoint}:12`;
+  check("the walk hands state 35 the attack list's first entry, not the burst",
+        seen.includes(`${ZombieState.TargetMotionScript}:100`)
+        && !seen.includes(`${ZombieState.TargetMotionScript}:102`), path);
+  check("...plays both of its entries in order",
+        path.includes(`${ZombieState.TargetMotionScript}:100 `
+                      + `${ZombieState.TargetMotionScript}:101`), path);
+  check("...and bursts and walks once each before turning on the player",
+        seen.filter((x) => x === burst).length === 1
+        && seen.filter((x) => x === walk).length === 1
+        && z.state === ZombieState.AttackRun, path);
 }
 
 // State 42, the camera-cue hold (`ZombieStateHoldForCameraCue`,

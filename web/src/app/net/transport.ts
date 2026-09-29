@@ -27,6 +27,76 @@ export interface TransportInfo {
   rtt: number;
   /** Bytes queued on `tick` and not yet sent. */
   buffered: number;
+  /** WebRTC's search for a path, where there is one. See {@link describePath}. */
+  path?: IcePath;
+}
+
+/**
+ * What ICE had to work with and how it fared: every address each end offered,
+ * by type, and the candidate pairs tried. A connection that never opens is
+ * almost always explained by these counts, so the page shows them rather
+ * than "connecting" for ever.
+ */
+export interface IcePath {
+  /** When the search began (the offer), on the page's clock; NaN before. */
+  since: number;
+  /** Candidates by type -- host, srflx, prflx, relay -- this end found and the other end sent. */
+  local: Record<string, number>;
+  remote: Record<string, number>;
+  /** Host candidates hidden behind an mDNS `.local` name, each side. */
+  localMdns: number;
+  remoteMdns: number;
+  /** Candidate pairs ICE has formed, and how many of them failed. */
+  pairs: number;
+  failed: number;
+  /** TURN servers the rendezvous handed out, and whether only they may be used. */
+  turn: number;
+  relayOnly: boolean;
+}
+
+/** How long a search runs before the page offers a reason it has not finished. */
+export const PATH_HINT_MS = 8000;
+
+/**
+ * The search, in a line, and -- once it has run long enough to be stuck --
+ * the likeliest reason it has not found a path, in the order the causes
+ * would show. Pure, so the headless UI test can hold it to its words.
+ */
+export function describePath(p: IcePath, ice: string, now: number): { line: string; hint: string | null } {
+  const kinds = (m: Record<string, number>, mdns: number): string => {
+    const parts = Object.entries(m).filter(([, n]) => n > 0)
+      .map(([k, n]) => (k === "host" && mdns ? `${n} host (${mdns} hidden as .local)` : `${n} ${k}`));
+    return parts.length ? parts.join(", ") : "nothing yet";
+  };
+  const secs = Number.isNaN(p.since) ? 0 : Math.max(0, now - p.since) / 1000;
+  const line = `ICE ${ice || "new"} for ${secs.toFixed(0)} s · this end offered ${kinds(p.local, p.localMdns)}`
+    + ` · the other ${kinds(p.remote, p.remoteMdns)}`
+    + ` · ${p.pairs} pair${p.pairs === 1 ? "" : "s"} tried, ${p.failed} failed`;
+  if (Number.isNaN(p.since) || now - p.since < PATH_HINT_MS
+      || ice === "connected" || ice === "completed") {
+    return { line, hint: null };
+  }
+  const count = (m: Record<string, number>) => Object.values(m).reduce((a, b) => a + b, 0);
+  let hint: string;
+  if (count(p.remote) === 0) {
+    hint = "Nothing has arrived from the other end. The rendezvous carries each end's "
+      + "addresses; if none come through, the two pages are not using the same one "
+      + "(compare their ?signal=), or it is not relaying.";
+  } else if (p.relayOnly && !p.local.relay) {
+    hint = "?relay=1 allows only a TURN relay, and the rendezvous handed out no TURN server.";
+  } else if (!p.local.srflx && !p.local.relay) {
+    hint = "This end reached no STUN server, so it knows only its own local address: "
+      + "a firewall is blocking outgoing UDP.";
+  } else {
+    hint = "No path between the two ends works. On one network, browsers hide each "
+      + "device's address behind a .local name, and resolving it needs multicast -- on "
+      + "a Mac, allow the browser in System Settings → Privacy & Security → Local "
+      + "Network. Between networks, a strict NAT, or a router that will not route to "
+      + `its own address, needs a TURN relay${p.turn ? "" : ", and this rendezvous has none"} `
+      + "(web/tools/signal/README.md). Two tabs of one browser pair without WebRTC "
+      + "unless ?rtc=1 is set.";
+  }
+  return { line, hint };
 }
 
 export interface Transport {
@@ -199,5 +269,62 @@ export class SimLink implements Transport {
 
   close(reason?: string): void {
     this.inner.close(reason);
+  }
+}
+
+/**
+ * Several ways to the same peer, tried at once. The first to open is the
+ * link and the rest are closed; until one opens, {@link info} is the first
+ * way's, which is the one worth watching (WebRTC's ICE state).
+ *
+ * Before one has opened, any way closing closes them all. A way that gives
+ * up is saying something the session must hear -- WebRTC closes when player
+ * 2 comes back on a new connection, and the session answers by making a new
+ * one -- and a race left running on the other ways would swallow it.
+ */
+export class FirstOpen implements Transport {
+  onMessage: (ch: Channel, data: Uint8Array) => void = () => {};
+  onOpen: () => void = () => {};
+  onClose: (reason: string) => void = () => {};
+  private winner: Transport | null = null;
+  private closed = false;
+
+  constructor(private readonly ways: readonly Transport[]) {
+    for (const t of ways) {
+      t.onOpen = () => {
+        if (this.winner || this.closed) return;
+        this.winner = t;
+        for (const o of ways) if (o !== t) o.close("another way connected first");
+        this.onOpen();
+      };
+      t.onMessage = (ch, d) => {
+        if (t === this.winner) this.onMessage(ch, d);
+      };
+      t.onClose = (reason) => {
+        if (this.closed) return;
+        if (this.winner && t !== this.winner) return;
+        this.close(reason);
+      };
+    }
+  }
+
+  get info(): TransportInfo {
+    return (this.winner ?? this.ways[0]).info;
+  }
+
+  poll(): Promise<void> {
+    const t = this.winner ?? this.ways[0];
+    return t.poll?.() ?? Promise.resolve();
+  }
+
+  send(ch: Channel, data: Uint8Array): void {
+    this.winner?.send(ch, data);
+  }
+
+  close(reason = "closed"): void {
+    if (this.closed) return;
+    this.closed = true;
+    for (const t of this.ways) t.close(reason);
+    this.onClose(reason);
   }
 }

@@ -146,6 +146,11 @@ export class NetHost extends NetPeer {
       && this.now - this.loadSentAt < LOAD_WAIT_MS;
   }
 
+  /** Whether player 2's page has answered the handshake, and the link still stands. */
+  get connected(): boolean {
+    return this.peerHello !== null && !this.closed;
+  }
+
   /** Whether a replica is connected and taking ticks. */
   get streaming(): boolean {
     return this.phase === "streaming" && !this.closed;

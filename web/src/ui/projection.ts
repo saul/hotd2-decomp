@@ -50,6 +50,10 @@ export interface NetProjection {
     code: string | null;
     link: string | null;
     error: string | null;
+    /** WebRTC's search for a path, in a line, while it is searching. */
+    path: string | null;
+    /** Once the search has run long enough to be stuck: the likeliest reason. */
+    hint: string | null;
   };
   /** The one line over the game, while a session is up. */
   badge: { text: string; level: NetLevel } | null;

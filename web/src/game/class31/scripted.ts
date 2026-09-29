@@ -27,10 +27,9 @@ import type { Rng } from "../../core/rng";
 import { ActorFlag, ThrowerFlag, type ThrowerActor } from "../actor";
 import { ThrowerTryClaimAttackSlot } from "../combat/permits";
 import { IsPlayerAttackable, PlayerTakeDamage } from "../combat/player";
-import { ticksOfAuthoredFrame } from "../../core/play_cursor";
 import { G } from "../globals";
 import type { GameHost } from "../host";
-import { MotionOf } from "../tables";
+import { MotionOf, MotionPlayLength } from "../tables";
 import { vec3 } from "../vec";
 import { GAME_HZ } from "../class30/states";
 import {
@@ -382,8 +381,11 @@ export function ThrowerStateWaitForCue(obj: ThrowerActor, dt: number,
   if (obj.sub === 0) {
     const m = MotionOf(obj, c.motion);
     if (m) {
+      // `rand() % g_motion_play_length[motion]` at `0x0044F53B`..`0x0044F549`,
+      // pushed as `ActorSetMotionBlended`'s start (`0x0044F554`): a play
+      // cursor, not an authored frame to double.
       obj.action = { motion: c.motion,
-                     ticks: ticksOfAuthoredFrame(rng.int(m.frames), m.fps) };
+                     ticks: rng.int(MotionPlayLength(obj, c.motion)) };
       obj.rootActionFrame = -1;
     }
     obj.slideTimer = 0;

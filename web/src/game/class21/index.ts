@@ -125,8 +125,7 @@ export const CLASS21_MOTION_FREED = 0x3cc;
 /**
  * `ActorSetMotionBlended(model, 0x3CC, 0xF, 5)` at `0x00451BC0` --
  * `PUSH 0x5; PUSH 0xf; PUSH 0x3cc` (`6a05 6a0f 68cc030000`). The start is a
- * **play cursor**, 15, which the port's setter takes as an authored frame:
- * `15 / 2`, which it turns back into 15 ticks.
+ * **play cursor**, 15, which is the unit the port's setter takes.
  */
 export const CLASS21_FREED_START_CURSOR = 0xf;
 export const CLASS21_FREED_FADE = 5;
@@ -596,7 +595,7 @@ function RescueTargetRescued(obj: Actor, f: ClassFrame): void {
   obj.roll = r.z;
   t.freedFrames = 0;
   ActorSetMotionBlended(obj, CLASS21_MOTION_FREED,
-                        CLASS21_FREED_START_CURSOR / 2, CLASS21_FREED_FADE);
+                        CLASS21_FREED_START_CURSOR, CLASS21_FREED_FADE);
   // `MOV [EAX*4 + 0x9c88c0], EBX` with no test of `obj+0x3C` first: an actor
   // that found the table full writes the word before it. `[port-only]` guard,
   // since the port's table has no word before it; class 0x21 claims in its

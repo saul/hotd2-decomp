@@ -281,15 +281,13 @@ function ClipDone(obj: Actor, sub: FrogTail): boolean {
  * class, and every call but the leap's recovery starts at cursor 0.
  *
  * The engine's third argument is the **play cursor** (`param_1[2] = param_3`,
- * with `param_3 / 2` as the authored frame); the port's primitive takes the
- * authored frame and rebuilds the cursor from it, so the cursor is halved on
- * the way in. `frog.bin` is authored at 30 Hz, which makes that exact. The
- * write to `part+0x08` is the one a state reads back before the next draw
- * ({@link FrogTail.playCursor}).
+ * with `param_3 / 2` as the authored frame), and the port's primitive takes
+ * it as it stands. The write to `part+0x08` is the one a state reads back
+ * before the next draw ({@link FrogTail.playCursor}).
  */
 function FrogPlay(obj: Actor, m: number, cursor = 0): void {
   if (obj.motion === m) return;
-  ActorSetMotionBlended(obj, m, cursor / 2, FROG_FADE);
+  ActorSetMotionBlended(obj, m, cursor, FROG_FADE);
   const sub = Tail(obj);
   if (sub && obj.motion === m) sub.playCursor = cursor;
 }

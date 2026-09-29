@@ -1,13 +1,7 @@
 /**
  * The player as a site: a Worker that serves `npm run deploy`'s upload out of
- * an R2 bucket, over HTTPS, under a secret path.
- *
- * **Only under `/<SITE_KEY>/`, and 404 for everything else.** The bucket holds
- * the game's data -- the bundle and the sounds are derived from a copyrighted
- * install -- so it is never public: the bucket's own `r2.dev` address stays
- * off, and this Worker answers only the path whose first segment is the key
- * (a Worker secret, never in a file that is committed). The page's URLs are
- * relative (`vite.config.ts`'s `base`), so the whole site lives under it.
+ * an R2 bucket, over HTTPS, at the root -- the bucket is the site, and the
+ * deploy deletes whatever the site no longer has.
  *
  * What the page and its service worker need of a file server, and R2's
  * `get` gives directly:
@@ -42,8 +36,6 @@ export interface R2Bucket {
 }
 export interface Env {
   SITE: R2Bucket;
-  /** The secret path segment everything is served under. */
-  SITE_KEY?: string;
 }
 
 const NOT_FOUND = () => new Response("not found", {
@@ -53,21 +45,12 @@ const NOT_FOUND = () => new Response("not found", {
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
     const url = new URL(req.url);
-    const key = env.SITE_KEY;
-    // Without a key configured nothing is served: a missing secret must not
-    // make the whole bucket the site.
-    if (!key || key.length < 16) return NOT_FOUND();
-    const prefix = `/${key}`;
-    if (url.pathname === prefix) {
-      return Response.redirect(`${url.origin}${prefix}/${url.search}`, 301);
-    }
-    if (!url.pathname.startsWith(`${prefix}/`)) return NOT_FOUND();
     if (req.method !== "GET" && req.method !== "HEAD") {
       return new Response("method not allowed", { status: 405, headers: { allow: "GET, HEAD" } });
     }
     let name: string;
     try {
-      name = decodeURIComponent(url.pathname.slice(prefix.length + 1));
+      name = decodeURIComponent(url.pathname.slice(1));
     } catch {
       return NOT_FOUND();
     }

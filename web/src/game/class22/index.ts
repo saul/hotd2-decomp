@@ -36,10 +36,10 @@ import type { Rng } from "../../core/rng";
 import type { Events } from "../../core/events";
 import type { Actor, JudgmentActor } from "../actor";
 import { BossIntroBannerSpawn } from "../boss_banner";
-import { ActorByAt } from "../globals";
+import { ActorByAt, G } from "../globals";
 import {
   registerClass, type ActorDebug, type ClassFrame, type ClassHandler,
-  type SpawnRecord,
+  type ReplaySpawnRecord, type SpawnRecord,
 } from "../registry";
 import { ActorSpawn } from "../spawn";
 import { SpawnClass } from "../spawn_class";
@@ -261,19 +261,97 @@ export function Class22Update(obj: Actor, f: ClassFrame): void {
   }
 }
 
+/** A spawn record's descriptor tail, off its placement. */
+function Class22RecordDescriptor(rec: SpawnRecord): Class22Descriptor | null {
+  const p = (T.chars?.placements ?? []).find((x) => x.at === rec.at);
+  return p?.class22 ?? null;
+}
+
 /**
  * The flags a record raises, by its variant: 2 and 3 for the stage-1 fight
  * (`0x0049B809`, `0x0049B726` and `0x0049CC95`), 0 for stage 5's
  * (`0x0049CC85`), none for the cameo and the attract loop.
  */
 function Class22RaisesScriptFlag(rec: SpawnRecord): readonly number[] | undefined {
-  const p = (T.chars?.placements ?? []).find((x) => x.at === rec.at);
-  const v = p?.class22?.variant;
+  const v = Class22RecordDescriptor(rec)?.variant;
   if (v === Class22Variant.Stage1) {
     return [CLASS22_BANNER_FLAG, CLASS22_STAGE1_DEAD_FLAG];
   }
   if (v === Class22Variant.Stage5) return [CLASS22_STAGE5_DEAD_FLAG];
   return undefined;
+}
+
+/**
+ * The flag `Class22Death`'s sub 5 raises as the orbit ends, by variant:
+ * `MOV byte [0x009C7203], 1` at `0x0049CC95` for stage 1's fight and
+ * `MOV byte [0x009C7200], 1` at `0x0049CC85` for stage 5's; none for the
+ * others. A function rather than a table because it reads two modules'
+ * exports (L56).
+ */
+function Class22DeadFlag(variant: number): number | undefined {
+  if (variant === Class22Variant.Stage1) return CLASS22_STAGE1_DEAD_FLAG;
+  if (variant === Class22Variant.Stage5) return CLASS22_STAGE5_DEAD_FLAG;
+  return undefined;
+}
+
+/**
+ * `[port-only]` -- a replay's question, `ClassHandler.outlivedByReplay`:
+ * has the replay gone past this flier's way out, so that at the landing
+ * address the engine's object is gone, or is a body out of both counters,
+ * and must not be rebuilt at its `Init`?
+ *
+ * A rebuilt fighting flier is a whole fight: its entrance's first frame
+ * spawns the walker from the nested descriptor (`0x0049B640` and `0x0049CE10`,
+ * sub 0), and the walker counts itself into both enemy counters in its `Init`
+ * (`INC`s at `0x0048FE16` and `0x0048FE1D`). Nothing in either class tests
+ * the address it was rebuilt at, so every gate after it waits on the fight.
+ * A reload at stage 5's `4/1/0` landed with `g_enemies_alive` 1 and held
+ * `4/2/12` shut after every zombie in the room was dead.
+ *
+ * The ways out the replay can see, each read in the exe `[proved]`:
+ *
+ * * **The variant's dead flag** -- 0 for stage 5, 3 for stage 1's fight.
+ *   `Class22Death` (`FUN_0049C910`) raises it in sub 5, at the end of the
+ *   orbit and after sub 0 has given both counters back; the walker left
+ *   `g_enemies_alive` when it began to fall (`0x004901AE`) and
+ *   `g_enemies_present` when it lay down (`0x00490B5C`). The script waits
+ *   on it at stage 5's `1/1/72` and stage 1's `14/1/63` and `16/2/55`, and
+ *   no `set_script_flag` in either stage names it, so in a replay -- which
+ *   runs no class -- the byte comes up only as the replay steps over that
+ *   wait. Past it the
+ *   flier's only exit is `Class22Death`'s own cue test, and the walker's is
+ *   `Class23LieUntilCameraCue`'s (`FUN_00490C50`) on the same cue. So a
+ *   landing between the flag and the cue loses two bodies early -- stage 5
+ *   block 2 up to path `0xCF` frame 140; the rest of stage 1's block 14,
+ *   whose `0x31` stops at 230 and never reaches the 400 of its cue -- which
+ *   is the one window this answers early rather than exactly. Neither body
+ *   counts, is shot at or raises anything in it.
+ * * **The descriptor's cue**, `g_active_cam_path == tail+6 &&
+ *   g_cam_path_frame >= tail+8`: the cameo's only way out, the `ActorKill`
+ *   at the head of `Class22CutsceneRideAndLeave` (`FUN_0049B3F0`), which it
+ *   enters on the chapter card's flag `0xF8` -- raised at stage 1's `0/1/65`,
+ *   before block 0 step 2 plays `0x22` to 470. The fighting variants' cue is
+ *   tested by `Class22Death` alone, after its own flag in every shipped
+ *   script, so the flag answers for them first. A replay jumps frames where
+ *   play steps them, so "at or past" is the frame play would have passed.
+ *
+ * **Not the room gate.** The fighting variants do not count in `Init`, but
+ * the walker their first update makes does, so a `wait_enemies_alive` after
+ * the spawn is held from that frame on and passes only once the flier is in
+ * `Class22Death`. That is already the pair out of both counters -- and still
+ * not a reason to retire it: the page parks on the dead flag's wait for the
+ * whole 300-frame orbit, and only the orbit raises that flag, so a landing
+ * there has to rebuild the fight to be let past at all. The attract loop's
+ * variant 3 plays no stage script and answers nothing here.
+ */
+export function Class22OutlivedByReplay(rec: ReplaySpawnRecord): boolean {
+  const d = Class22RecordDescriptor(rec);
+  if (!d) return false;
+  const dead = Class22DeadFlag(d.variant);
+  if (dead !== undefined) return (G.g_script_flags[dead] ?? 0) === 1;
+  if (d.variant !== Class22Variant.Cameo) return false;
+  return G.g_active_cam_path === d.despawn_path
+    && d.despawn_frame <= G.g_cam_path_frame;
 }
 
 /** The sidebar's line. */
@@ -306,6 +384,7 @@ export const Class22Handler: ClassHandler = {
   // `Class22ChargeShots` reads the per-player part bytes itself.
   ownsShotResult: true,
   raisesScriptFlag: Class22RaisesScriptFlag,
+  outlivedByReplay: Class22OutlivedByReplay,
   // Phase 2's `ActorRegisterCameraPoint(2.0)` (`0x0049C8CE`) while bit
   // `0x100` is down, and the one-frame `RegisterEnemySlot` at `0x0049C347`.
   tracksCamera: (obj) => obj.cls === SpawnClass.Judgment

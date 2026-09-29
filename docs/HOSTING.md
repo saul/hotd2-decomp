@@ -3,8 +3,8 @@
 ## On Cloudflare: `npm run deploy`
 
 The simplest way onto a phone that is not on the LAN: the built page, the
-bundle and the sounds in an R2 bucket, served over HTTPS by a Worker under a
-secret path, `https://hotd2-site.<subdomain>.workers.dev/<SITE_KEY>/`.
+bundle and the sounds in an R2 bucket, served over HTTPS by a Worker at
+`https://hotd2-site.<subdomain>.workers.dev/`.
 
 ```sh
 cd web

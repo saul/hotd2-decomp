@@ -193,10 +193,9 @@ CHECKS: list[Check] = [
           "the mixer rather than the intent",
           NEEDS_BUNDLE, LANE_BROWSER),
     Check("test:r2site", "web", ["npm", "run", "--silent", "test:r2site"],
-          "the deployed site's Worker, against a bucket in a Map: nothing "
-          "served outside the secret path, and under it the 304s, the ranges "
-          "and the stored-compressed bundle with its decoded length that the "
-          "page's service worker and loading bar rely on"),
+          "the deployed site's Worker, against a bucket in a Map: the 304s, "
+          "the ranges and the stored-compressed bundle with its decoded "
+          "length that the page's service worker and loading bar rely on"),
     Check("offline", "web", ["npm", "run", "--silent", "offline-check"],
           "that the service worker never shows a stale copy while the server "
           "answers -- a bundle file changed on disk is the new one on the next "
@@ -243,6 +242,15 @@ CHECKS: list[Check] = [
           "browser and starts a game with five lives, four credits and the "
           "chosen crosshair on the reticle, and that a reload boots what "
           "was saved in place of the free-play default",
+          NEEDS_BUNDLE, LANE_BROWSER),
+    Check("judgment_reload", "web",
+          ["node", "tools/judgment_reload_page.mjs", "--headless"],
+          "that a reload at stage 5's `block=4&step=1&op=0` -- past "
+          "JUDGMENT's return -- lands with no boss in the pool and nothing "
+          "counted, and that block 4's room gate then counts exactly its own "
+          "zombies and opens when they die: the only check that reads the "
+          "enemy counters in a page a seek built, which is the rebuild every "
+          "reload during development goes through (L75)",
           NEEDS_BUNDLE, LANE_BROWSER),
     Check("crosshair", "web",
           ["node", "tools/crosshair_page.mjs", "--headless"],

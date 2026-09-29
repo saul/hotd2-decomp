@@ -1,23 +1,28 @@
 /**
  * The player, deployed: the built page, the bundle and the sounds, uploaded
- * to a Cloudflare R2 bucket that `r2site/worker.ts` serves over HTTPS under a
- * secret path -- a secure context on any phone, so the Home Screen and the
- * service worker's offline copy work there without a certificate installed.
+ * to a Cloudflare R2 bucket that `r2site/worker.ts` serves over HTTPS at the
+ * root of its address -- a secure context on any phone, so the Home Screen
+ * and the service worker's offline copy work there without a certificate
+ * installed.
  *
  *     npm run deploy                 # stage the site, upload what changed
  *     npm run deploy -- --dry-run    # say what would go, send nothing
  *     npm run deploy -- --no-stage   # upload what extract/site/ already holds
- *     npm run deploy -- --worker     # deploy the Worker as well (the first run does)
+ *     npm run deploy -- --worker     # deploy the Worker even if it has not changed
  *
  * `npm run export` runs this after every rebundle into the default bundle
  * directory, when a deploy is set up (`r2site/.deploy.env`); `--no-deploy`
  * there skips it.
  *
- * **A public bucket is said, not refused.** What is uploaded is the game's
- * data, and a bucket whose `r2.dev` address is on, or that has a custom
- * domain, serves every object to anyone with its address, whatever the
- * Worker's secret path. The owner has said that is fine for theirs, so the
- * deploy prints it and goes on. `docs/HOSTING.md`.
+ * **The site is public, and so may the bucket be.** What is uploaded is the
+ * game's data, served by the Worker to anyone with its address; a bucket
+ * whose `r2.dev` address is on, or that has a custom domain, serves it there
+ * too. The owner has said that is fine for theirs, so the deploy says which
+ * addresses and goes on. `docs/HOSTING.md`.
+ *
+ * The Worker is deployed when its source is not the one deployed: the deploy
+ * gives it the hash of `r2site/`'s `worker.ts` and `wrangler.toml` as a plain
+ * variable, `SOURCE`, and reads it back from the Worker's settings.
  *
  * Staging is `tools/site.ts --gzip`, unchanged. Uploading is incremental: an
  * object whose ETag is the staged file's MD5 is left alone, so a rebundle
@@ -55,23 +60,21 @@ function fail(msg: string): never {
 const args = new Set(process.argv.slice(2));
 const dry = args.has("--dry-run");
 if (!existsSync(DEPLOY_ENV)) {
-  fail(`no ${relative(ROOT, DEPLOY_ENV)}. Make one with CLOUDFLARE_ACCOUNT_ID, `
-    + "R2_BUCKET and SITE_KEY -- see r2site/README.md");
+  fail(`no ${relative(ROOT, DEPLOY_ENV)}. Make one with CLOUDFLARE_ACCOUNT_ID `
+    + "and R2_BUCKET -- see r2site/README.md");
 }
 const env = readEnv(DEPLOY_ENV);
 const account = env.CLOUDFLARE_ACCOUNT_ID;
 const bucket = env.R2_BUCKET;
-const siteKey = env.SITE_KEY;
-if (!account || !bucket || !siteKey) {
-  fail(`${relative(ROOT, DEPLOY_ENV)} needs CLOUDFLARE_ACCOUNT_ID, R2_BUCKET and SITE_KEY`);
+if (!account || !bucket) {
+  fail(`${relative(ROOT, DEPLOY_ENV)} needs CLOUDFLARE_ACCOUNT_ID and R2_BUCKET`);
 }
-if (!/^[A-Za-z0-9_-]{16,}$/.test(siteKey)) fail("SITE_KEY must be 16 or more of [A-Za-z0-9_-]");
 // The API token: this file's, the environment's, or the matchmaker's deploy token.
 const token = env.CLOUDFLARE_API_TOKEN || process.env.CLOUDFLARE_API_TOKEN
   || readEnv(join(ROOT, "matchmaker", ".cloudflare.env")).CLOUDFLARE_API_TOKEN;
 if (!token) fail("no Cloudflare API token (CLOUDFLARE_API_TOKEN in .deploy.env or the environment)");
 
-async function api<T>(path: string): Promise<{ success: boolean; result: T }> {
+async function api<T>(path: string): Promise<{ success: boolean; result: T | undefined }> {
   const r = await fetch(`https://api.cloudflare.com/client/v4/accounts/${account}${path}`,
                         { headers: { authorization: `Bearer ${token}` } });
   return r.json() as Promise<{ success: boolean; result: T }>;
@@ -83,12 +86,11 @@ const pub = await api<{ enabled?: boolean; domain?: string }>(`/r2/buckets/${buc
 if (!pub.success) fail(`cannot read bucket ${bucket}'s settings: does it exist, and may the token read R2?`);
 const custom = await api<{ domains?: { domain: string }[] }>(`/r2/buckets/${bucket}/domains/custom`);
 const open = [
-  ...(pub.result.enabled && pub.result.domain ? [pub.result.domain] : []),
+  ...(pub.result?.enabled && pub.result.domain ? [pub.result.domain] : []),
   ...(custom.result?.domains ?? []).map((d) => d.domain),
 ];
 if (open.length) {
-  console.log(`deploy: note -- bucket ${bucket} is public (${open.join(", ")}): every file `
-    + "uploaded, the bundle and the sounds included, is served there to anyone with the address");
+  console.log(`deploy: note -- bucket ${bucket} is also served at ${open.join(", ")}`);
 }
 
 // -- stage ------------------------------------------------------------------------
@@ -170,32 +172,37 @@ if (!dry) {
 
 // -- the Worker ------------------------------------------------------------------------
 
-function wrangler(argv: string[], input?: string): Promise<number> {
+function wrangler(argv: string[]): Promise<number> {
   return new Promise((ok) => {
     const child = spawn("npx", ["--yes", "wrangler@4", ...argv], {
       cwd: SITE_DIR,
       env: { ...process.env, CLOUDFLARE_API_TOKEN: token, CLOUDFLARE_ACCOUNT_ID: account,
              WRANGLER_SEND_METRICS: "false", CI: "1" },
-      stdio: [input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
+      stdio: ["ignore", "pipe", "pipe"],
     });
-    const scrub = (s: string) => s.split(token!).join("<token>").split(siteKey).join("<SITE_KEY>");
+    const scrub = (s: string) => s.split(token!).join("<token>");
     child.stdout?.on("data", (d) => process.stdout.write(scrub(String(d))));
     child.stderr?.on("data", (d) => process.stderr.write(scrub(String(d))));
-    if (input !== undefined) { child.stdin!.write(input); child.stdin!.end(); }
     child.on("exit", (code) => ok(code ?? 1));
   });
 }
 
-const scripts = await api<{ id: string }[]>("/workers/scripts");
-const exists = scripts.result?.some((s) => s.id === WORKER) ?? false;
-if (!dry && (args.has("--worker") || !exists)) {
-  const toml = readFileSync(join(SITE_DIR, "wrangler.toml"), "utf8");
-  if (!toml.includes(`bucket_name = "${bucket}"`)) {
-    fail(`r2site/wrangler.toml binds another bucket than R2_BUCKET (${bucket})`);
+const toml = readFileSync(join(SITE_DIR, "wrangler.toml"), "utf8");
+const source = createHash("sha256").update(readFileSync(join(SITE_DIR, "worker.ts")))
+  .update(toml).digest("hex").slice(0, 16);
+const settings = await api<{ bindings?: { type: string; name: string; text?: string }[] }>(
+  `/workers/scripts/${WORKER}/settings`);
+const deployed = settings.result?.bindings?.find((b) => b.name === "SOURCE")?.text;
+if (args.has("--worker") || deployed !== source) {
+  console.log(`deploy: the Worker ${settings.result ? "has changed" : "is not deployed yet"}`
+    + (dry ? ", and would be deployed" : ""));
+  if (!dry) {
+    if (!toml.includes(`bucket_name = "${bucket}"`)) {
+      fail(`r2site/wrangler.toml binds another bucket than R2_BUCKET (${bucket})`);
+    }
+    if (await wrangler(["deploy", "--var", `SOURCE:${source}`]) !== 0) fail("wrangler deploy failed");
   }
-  if (await wrangler(["deploy"]) !== 0) fail("wrangler deploy failed");
-  if (await wrangler(["secret", "put", "SITE_KEY"], siteKey) !== 0) fail("setting SITE_KEY failed");
 }
 
 const sub = await api<{ subdomain: string }>("/workers/subdomain");
-console.log(`deploy: ${dry ? "would be" : "live"} at https://${WORKER}.${sub.result?.subdomain ?? "<subdomain>"}.workers.dev/${siteKey}/`);
+console.log(`deploy: ${dry ? "would be" : "live"} at https://${WORKER}.${sub.result?.subdomain ?? "<subdomain>"}.workers.dev/`);

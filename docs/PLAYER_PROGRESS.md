@@ -6534,6 +6534,19 @@ sub-actor never registers.
 Not ported: Training's subtype 2 (`trnevtbl.bin` block 9), which no bundle
 carries. Stage 1 blocks 14 and 16 are the same descriptor.
 
+**A reload past the fight does not bring it back** (`PLAYER_HANGS.md` item
+33). A seek's replay used to list the flier from its spawn for the rest of the
+stage and rebuild it wherever it landed. The rebuilt flier made a walker, and
+the walker counted, so a reload anywhere in stage 5 after block 1 held every
+room gate shut on a `1` nothing on the field could give back. The first seen
+was `4/2/12`, with its five zombies dead. `Class22OutlivedByReplay` retires the
+record once the replay has stepped over the flag the flier's death raises
+(0 in stage 5, 3 in stage 1), or, for the cameo, once the replay's camera has
+played its cue. A reload between the flag and the despawn cue therefore loses
+the two bodies a few seconds early. A reload during the 300-frame death orbit
+still rebuilds the fight, because only the orbit raises the flag the script
+waits on there.
+
 ## Strength, the stage-4 boss (class 0x19), is ported whole
 
 Every routine of class 0x19 is in `game/class19/` -- the four entrances, the

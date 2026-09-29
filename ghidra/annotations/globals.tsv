@@ -7,6 +7,11 @@
 #
 # Windows TEB fields and resource labels are excluded: Ghidra creates those itself.
 #
+# **The comment column is this file's.** apply-annotations writes it over the
+# database's whenever the two differ; export-annotations never replaces a
+# non-empty one, and lists the ones the database disagrees with. Edit a
+# comment here, with tools/annotate.py, not over MCP (docs/LESSONS.md L90).
+#
 # **Rows are sorted by address, and every writer must keep them that way.**
 # tools/annotate.py inserts in order; ExportAnnotations.java re-sorts on write.
 # The file used to be append-only and grouped into topical sections, and both

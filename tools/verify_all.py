@@ -385,11 +385,14 @@ CHECKS: list[Check] = [
           ["python3", "tools/verify_ghidra_db.py", "--game-dir", "{game_dir}"],
           "that the Ghidra database every session decompiles from says what "
           "`ghidra/annotations/` says -- every prototype and no-return flag "
-          "in `prototypes.tsv` applied, no flag it does not declare -- and "
-          "that no `CALL` to a function that returns carries the "
-          "`CALL_RETURN` override that prints as a clean `return;`: the only "
-          "check that reads the database rather than the exe, and so the "
-          "only thing that can say the pseudocode is not missing code (L89). "
+          "in `prototypes.tsv` applied, no flag it does not declare, and no "
+          "database name one the file has renamed away from, which the next "
+          "`export-annotations` would put back (L90) -- and that no `CALL` "
+          "to a function that returns carries the `CALL_RETURN` override "
+          "that prints as a clean `return;`: the only check that reads the "
+          "database rather than the exe, and so the only thing that can say "
+          "the pseudocode is not missing code (L89). Names and comments still "
+          "on their way in either direction are counted, not failed. "
           "Asserts nothing without Ghidra or a project",
           NEEDS_GAME),
     game("prop_pose",

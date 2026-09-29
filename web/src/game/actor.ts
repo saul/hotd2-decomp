@@ -151,6 +151,15 @@ export enum ActorFlag {
   /**
    * Set by `ZombieStateBackOff` while the actor retreats and cleared when it
    * finishes. `RankEnemiesByDistance` drops these from the compacted queue.
+   *
+   * On class 0x31 exactly two routines raise it, both of them the retreat:
+   * `ThrowerStateLeapAside` (`OR EDI, 0x20000000` at `0x0044B8BA`) and
+   * `ThrowerStateWithdraw` (`0x0044EC9F`). Its readers there are
+   * `ThrowerStateFallToSurface` (`0x0044BE87`: land into the leap back, not
+   * the hub) and the arc landing's dust column (`0x0044D2A1`). No class-0x31
+   * actor is ranked -- `RegisterForDistanceRank`'s one call is at
+   * `0x0045346D`, in `EnemyZombieUpdate`. `[proved]`; the strikes raise
+   * {@link Committed}.
    */
   BackingOff = 0x20000000,
   /**
@@ -311,9 +320,23 @@ export enum ActorFlag {
    * It said "will not be re-ranked out of it". `RankEnemiesByDistance`
    * reads bit 1 and {@link BackingOff} and not this. `[proved]`
    *
-   * Class 0x31's pounces raise it for the flight -- `ThrowerStateLeapDown` at
-   * `0x0044B6F0`, `ThrowerStateLeapStrike` and `ThrowerStateDelayedPounce` at
-   * `0x0044E8E6` -- and not {@link BackingOff}, which is the next bit up.
+   * Class 0x31's strikes raise it, every one of them, and not
+   * {@link BackingOff}, which is the next bit up: the pounces for the flight
+   * -- `ThrowerStateLeapDown` at `0x0044B6F0`, `ThrowerStateLeapStrike` at
+   * `0x0044E72B`, `ThrowerStateDelayedPounce` at `0x0044E8E6` -- and the two
+   * standing swings for the swing, `ThrowerStateCloseAndStrike` at
+   * `0x0044EB5F` and `ThrowerStateStrikeOnTheSpot` at `0x00450BD2`. Each
+   * clears it on its own way out and `ThrowerOnShot` clears it with
+   * {@link BackingOff} (`AND EAX, 0xcfffffff` at `0x00449A24`). `[proved]`
+   * from a linear sweep of `.text` for every 32-bit `TEST`/`OR`/`AND` whose
+   * immediate touches either bit. Its class-0x31 readers: the arc landing's
+   * dust column in `ThrowerEmitGroundDust` (`0x0044D296`), which it
+   * suppresses, and -- across classes -- `ZombiePushOutOfWorldAndActors` at
+   * `00454944`, which pushes a zombie 1.8x as hard when the actor that
+   * shoved it (`obj+0x138`, written by `ColiTestSphereAgainstActors` at
+   * `0x00405F2B`) carries it. Three of the five raised {@link BackingOff}
+   * here until the sweep: the dust column went up under a strike and the
+   * boost never did.
    */
   Committed = 0x10000000,
   /**

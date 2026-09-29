@@ -233,7 +233,8 @@ import {
 import { ZombieStateApproach } from "../src/game/class30/approach";
 import { ZombieScriptedPickPlayer } from "../src/game/class30/scripted";
 import { ThrowerTryEnterState } from "../src/game/class31/router";
-import { ThrowerStateBlinkInThreeHops, ThrowerStateRideObjectPath }
+import { ThrowerStateBlinkInThreeHops, ThrowerStateLeapStrike,
+         ThrowerStateRideObjectPath }
   from "../src/game/class31/scripted";
 import { EnemyZombieUpdate, ZOMBIE_CAMERA_RISE, ZombieEntryState }
   from "../src/game/class30";
@@ -342,7 +343,7 @@ import { GroundDustCode, ThrowerEmitGroundDust }
   from "../src/game/class31/ground_dust";
 import { ThrowerStateStandAndDecide } from "../src/game/class31/stand";
 import { ThrowerStateCloseAndStrike, ThrowerStateRearm,
-         ThrowerStateRestoreBothHands }
+         ThrowerStateRestoreBothHands, ThrowerStateStrikeOnTheSpot }
   from "../src/game/class31/standing";
 import { ActorClipLength } from "../src/game/class31/arc";
 import {
@@ -12959,6 +12960,157 @@ console.log("\nwhich eye: g_camera_eye, block 0, the drawn block:");
         JSON.stringify(z.target));
   check("...and turns to face g_camera_eye",
         z.yaw === FtolS16(VecToAngles(30, 0, 40).yaw), String(z.yaw));
+}
+// Class 0x31's standing swings and its scripted leap raise `obj+0x34` bit
+// 0x10000000 -- `ActorFlag.Committed` -- and not `BackingOff`, the bit above
+// it: `OR EDX, 0x10000000` (`81ca00000010`) at `0x0044EB5F` in state 24,
+// `OR ECX` (`81c900000010`) at `0x00450BD2` in state 32 and `0x0044E72B` in
+// state 22, cleared by `25ffffffef` at `0x0044EC52` and `0x00450C6D` and
+// `81e1ffffffef` at `0x0044E7F0`. The readers that tell the two apart are the
+// crowd push's 1.8x on the shover's bit (`00454944`) and the arc landing's
+// dust column (`0x0044D296`/`0x0044D2A1`).
+console.log("class 0x31, states 22, 24 and 32 raise 0x10000000, not 0x20000000:");
+{
+  const SET0 = CLASS31.sets[0]!;
+  const TABLES = {
+    ...CHARS31,
+    class31: {
+      ...CLASS31,
+      sets: [{
+        ...SET0,
+        // The mid-pounce ground row, stance 4: state 22 raises
+        // `obj+0x136C` 0x20000 before `ThrowerLoadAttackArcScript` reads it.
+        attacks: { ...SET0.attacks, "4": SET0.attacks["0"] },
+        // One `g_class31_throws` row: motion 9's swing, 287's approach, a
+        // reach of 20 and a hit on frame 48.
+        strikes: {
+          "0": { strike: 9, lunge: 287, distance: 20, hit_frame: 48,
+                 overlay_kind: 6, cancel_mask: 2 },
+        },
+      }],
+    },
+  } as unknown as CharactersJson;
+  const spawn31 = (state: ThrowerState, type = 0x16) => {
+    ResetGameGlobals();
+    SetGameTables(TABLES);
+    G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    G.g_scene_state_major = SCENE_MAJOR_PLAYING;
+    EnterPlay();
+    G.g_camera_yaw_bams = 0;
+    G.g_camera_fixed_eye_y = 0;
+    const a = ActorSpawn(0x9000, SpawnClass.Thrower, type, "t",
+                         { initialState: state, condition: 0 });
+    if (a.cls !== SpawnClass.Thrower) throw new Error("not class 0x31");
+    a.visible = true;
+    a.hp = 100;
+    a.pos = vec3(0, 0, 80);
+    a.state = state;
+    a.sub = 0;
+    return a;
+  };
+  const hex = (f: number) => `0x${(f >>> 0).toString(16)}`;
+  // The crowd push, from the zombie's side: it applies the push a shover
+  // recorded on it last frame (`obj+0x138`, `0x00405F2B`), 1.8x when the
+  // shover's `obj+0x34 & 0x18000000`. Far from everything, five deep.
+  const shovedBy = (at: number): number => {
+    const b = spawnZombie(0x7a01, 1, "b");
+    b.visible = true;
+    b.hp = b.maxHp = 100;
+    b.flags2 |= ZombieFlag2.CollideActors;
+    b.pos = vec3(50, 0, 0);
+    b.pushedBy = at;
+    b.pushDepth = 5;
+    b.pushNormal = vec3(1, 0, 0);
+    ZombiePushOutOfWorldAndActors(b);
+    return b.pos.x - 50;
+  };
+  // A seed whose first draw is under 5, so set 0's picks name attack 0.
+  let seed = 1;
+  while (new Rng(seed).int(10) >= 5) seed++;
+
+  // -- state 24, `ThrowerStateCloseAndStrike` -------------------------------
+  {
+    const z = spawn31(ThrowerState.CloseAndStrike);
+    // The mark five units in front of it, inside the entry's reach of 20, so
+    // the swing starts at once.
+    const host = {
+      ...NULL_HOST,
+      viewPoint: (_x: number, _y: number, _z: number, out: Vec3) => {
+        out.x = 0; out.y = 0; out.z = 75;
+      },
+    };
+    const rng = new Rng(seed);
+    ThrowerStateCloseAndStrike(z, rng, host);
+    check("close-and-strike raises 0x10000000 in sub 0 (`0x0044EB5F`), "
+          + "not BackingOff",
+          (z.flags & ActorFlag.Committed) !== 0
+          && (z.flags & ActorFlag.BackingOff) === 0, hex(z.flags));
+    check("...and a zombie it shoves mid-swing is pushed 1.8x "
+          + "(`00454944`, the shover's bit)",
+          Math.abs(shovedBy(z.at) - 0.9) < 1e-6, String(shovedBy(z.at)));
+    let backingOff = false;
+    for (let i = 0; i < 400 && z.state === ThrowerState.CloseAndStrike; i++) {
+      ActorAdvanceMotion(z, 1 / 60);
+      ThrowerStateCloseAndStrike(z, rng, host);
+      if (z.flags & ActorFlag.BackingOff) backingOff = true;
+    }
+    check("...holds it through the swing and drops it on the way to state "
+          + "25 (`0x0044EC52`), never raising 0x20000000",
+          z.state === ThrowerState.Withdraw
+          && (z.flags & ActorFlag.Committed) === 0 && !backingOff,
+          `state ${z.state} ${hex(z.flags)} backingOff ${backingOff}`);
+    check("...after which the shove is back to a tenth",
+          Math.abs(shovedBy(z.at) - 0.5) < 1e-6, String(shovedBy(z.at)));
+  }
+
+  // -- state 32, `ThrowerStateStrikeOnTheSpot` -------------------------------
+  {
+    const z = spawn31(ThrowerState.StrikeOnTheSpot);
+    z.sub = 2;
+    z.strikeStart = { x: 0, y: 0, z: 80 };
+    const rng = new Rng(seed);
+    ThrowerStateStrikeOnTheSpot(z, 1 / 60, rng, CAM_HOST);
+    check("strike-on-the-spot raises 0x10000000 with its draw "
+          + "(`0x00450BD2`), not BackingOff",
+          z.sub === 3 && (z.flags & ActorFlag.Committed) !== 0
+          && (z.flags & ActorFlag.BackingOff) === 0,
+          `sub ${z.sub} ${hex(z.flags)}`);
+    let backingOff = false;
+    for (let i = 0; i < 400 && z.sub === 3; i++) {
+      ActorAdvanceMotion(z, 1 / 60);
+      ThrowerStateStrikeOnTheSpot(z, 1 / 60, rng, CAM_HOST);
+      if (z.flags & ActorFlag.BackingOff) backingOff = true;
+    }
+    check("...and drops it when the swing ends (`0x00450C6D`)",
+          z.sub === 5 && (z.flags & ActorFlag.Committed) === 0 && !backingOff,
+          `sub ${z.sub} ${hex(z.flags)} backingOff ${backingOff}`);
+  }
+
+  // -- state 22, `ThrowerStateLeapStrike` ------------------------------------
+  {
+    const z = spawn31(ThrowerState.LeapStrike, 0x19);
+    z.leapStrikeFrames = 30;
+    const rng = new Rng(seed);
+    const seq0 = G.g_sprite_effect_seq;
+    ThrowerStateLeapStrike(z, 1 / 60, rng, CAM_HOST);
+    check("the leap strike raises 0x10000000 with the pounce bit "
+          + "(`0x0044E72B`), not BackingOff",
+          (z.flags & ActorFlag.Committed) !== 0
+          && (z.flags & ActorFlag.BackingOff) === 0, hex(z.flags));
+    for (let i = 0; i < 400 && z.state === ThrowerState.LeapStrike; i++) {
+      ActorAdvanceMotion(z, 1 / 60);
+      ThrowerStateLeapStrike(z, 1 / 60, rng, CAM_HOST);
+    }
+    const columns = G.g_sprite_effects.filter(
+      (e) => e.id >= seq0 && e.kind === SpriteEffectKind.DustAlt).length;
+    check("...lands with no dust column -- `ThrowerEmitGroundDust` 0x50 "
+          + "raises one only with 0x10000000 down and 0x20000000 up",
+          z.state === ThrowerState.LeapAside && columns === 0,
+          `state ${z.state} columns ${columns}`);
+    check("...and drops the bit on the way to state 10 (`0x0044E7F0`)",
+          (z.flags & ActorFlag.Committed) === 0
+          && (z.flags & ActorFlag.BackingOff) === 0, hex(z.flags));
+  }
 }
 {
   // The drawn block. `CameraInstallViewAngles` (`MOV [0x009c6f00], 2` at

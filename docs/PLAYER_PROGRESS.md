@@ -5296,6 +5296,19 @@ One divergence is declared: `zskamere` in state 10 is given no arc script,
 because the engine's arm for it skips the copy and hands the arc twelve dwords
 of uninitialised stack. No shipped run has been shown to reach it.
 
+**The other three strikes had the same wrong bit, and now raise `0x10000000`
+too.** `ThrowerStateCloseAndStrike` (state 24, `0x0044EB5F`/`0x0044EC52`),
+`ThrowerStateStrikeOnTheSpot` (state 32, `0x00450BD2`/`0x00450C6D`) and
+`ThrowerStateLeapStrike` (state 22, `0x0044E72B`/`0x0044E7F0`) raised and
+cleared `BackingOff`. A linear sweep of `.text` for every 32-bit
+`TEST`/`OR`/`AND` touching either bit says class 0x31 raises `0x20000000` in
+the two retreats alone (states 10 and 25). What moved: a `zskamere` mid-swing
+now shoves a zombie it bumps 1.8x as hard, because
+`ZombiePushOutOfWorldAndActors` reads the shover's `0x18000000`
+(`00454944`), and the dead-code state 22 no longer puts up the leap back's
+dust column when it lands. No class-0x31 actor is distance-ranked, so
+`RankEnemiesByDistance`'s `0x20000000` test never saw the wrong bit.
+
 ### A zombie's swing holds its first frame, and its run becomes its lunge
 
 `ZombieStateStrike` (`FUN_00455A40`) sets both of its clips on the one track

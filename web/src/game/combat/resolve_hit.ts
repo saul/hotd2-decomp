@@ -724,7 +724,14 @@ export function ResolveHit(obj: Actor, bone: number,
   const slot = step?.[0] ?? 0;
   const code: EffectCode = step?.[1] ?? EffectCode.Last;
   const head = bone === type?.head_bone;
-  const wasDead = obj.dead;
+  // **The dead bit, `obj+0x34 & 0x4000000`** -- `MOV EBX, 0x4000000 / TEST
+  // EBX, ECX` at `0x0040970C`, with ECX just loaded from `[EDI + 0x34]` --
+  // and not `Actor.dead`, the port's own field, which several paths set
+  // without the bit (a thrower's fall, its corpse) or leave down under it
+  // (`ZombieStateDragTarget`'s release, the body creature's). The engine reads
+  // it after the dispatch below; nothing in the dispatch writes it, so this is
+  // the same word.
+  const wasDead = (obj.flags & ActorFlag.Dead) !== 0;
 
   // `damage = table + DamageRankModifier(bone)`, floored at zero.
   let damage = Math.max(0, (step?.[2] ?? 0) + DamageRankModifier(b));
@@ -862,8 +869,22 @@ export function ResolveHit(obj: Actor, bone: number,
     ? ActorReactToHit(obj, bone, result) : undefined;
 
   let death: number | undefined;
-  const killed = !wasDead && obj.hp < 1
-    && result !== HitResultCode.NoEffect;
+  // **Two tests, and the result is not one of them.**
+  //
+  // ```
+  // 0040972a  855f34          TEST dword ptr [EDI + 0x34], EBX   ; dead bit
+  // 0040972d  0f85a4000000    JNZ  0x004097d7                    ; -> no kill
+  // 00409733  6683bf1c010000  CMP  word ptr [EDI + 0x11c], 0x0   ; hit points
+  // 0040973b  0f8f96000000    JG   0x004097d7                    ; -> no kill
+  // ```
+  //
+  // `g_hit_result == 5` is read once in the block, at `0x0040976F`, and it
+  // gates the head coming off and nothing else: the bit, the 0x50 and the
+  // killer's byte are all written whatever the result. The port refused the
+  // kill on a result-5 hit as well -- so an actor at or below zero hit points
+  // whose bit was still down, shot on a bone whose step is the sentinel, was
+  // never killed by it.
+  const killed = !wasDead && obj.hp < 1;
   if (killed) {
     obj.dead = true;
     // The 1-in-4 headshot burst: `ResolveHit` swaps the head to slot 0 --
@@ -887,8 +908,16 @@ export function ResolveHit(obj: Actor, bone: number,
     //   its block at allocation. So it is 0 for the life of every actor and
     //   the test can never take its jump. Not modelled, and not given a field:
     //   a name for it would be a name for where it sits.
+    //
+    // Then `CMP dword ptr [EAX*0x4 + 0x9a58f8], 0x5 / JZ skip` at
+    // `0x0040976F`: a result-5 hit takes no head. This is where that test
+    // lives, and the only place -- it used to be folded into `killed` above,
+    // which it is not part of. The roll is `rand() % 4 == 0`
+    // (`AND EAX, 0x80000003` and the sign fix-up, `0x0040977E`..`0x0040978B`),
+    // drawn only once every gate before it has passed.
     if (G.g_app_state === AppState.InPlay && head
-        && !HEADLESS_EXEMPT.has(obj.charType) && rng.next() < 0.25) {
+        && !HEADLESS_EXEMPT.has(obj.charType)
+        && result !== HitResultCode.NoEffect && rng.int(4) === 0) {
       // **The head is thrown, not just deleted.** `ResolveHit` runs three
       // calls here and this port had only the third: `SpawnBoneHitSprite`,
       // then `SpawnSeveredHead` (`FUN_0040A130`), then the swap to slot 0.

@@ -470,18 +470,21 @@ export function FireShotRequest(req: ShotRequest, host: GameHost, rng: Rng,
   // rather than in each class's own on-shot routine.
   G.g_hit_result = out.result;
   ActorShotFeedback(obj, pick.bone, pick.point, host, rng, events);
+  // `ResolveHit`'s tail, `0x004097B6`..`0x00409819`. **A result-5 hit is not
+  // worth nothing**: the result is tested on the body arm's 10 alone
+  // (`CMP [g_hit_result + p*4], 5 / JZ` ahead of it). The kill's 0x50 is
+  // charged inside the kill block whatever the result, and the head arm's
+  // 0x78 and combo take no test at all. This zeroed all three.
   let points = 0;
   if (out.head) {
     points += SCORE_HEAD + (G.g_head_combo_bonus[player] ?? 0);
     G.g_head_combo_bonus[player] =
       (G.g_head_combo_bonus[player] ?? 0) + SCORE_HEAD_COMBO_STEP;
   } else {
-    points += SCORE_HIT;
+    if (out.result !== HitResultCode.NoEffect) points += SCORE_HIT;
     G.g_head_combo_bonus[player] = 0;
   }
   if (out.killed) points += SCORE_KILL;
-  // `ResolveHit` scores nothing at all for a result-5 hit.
-  if (out.result === HitResultCode.NoEffect) points = 0;
   // Through `ScoreAddForPlayer`, not `G.g_player_score[0] += points`. Every
   // award and penalty in the game goes through that one routine. No `events`
   // argument, because this path never emitted `player.score` and making it do

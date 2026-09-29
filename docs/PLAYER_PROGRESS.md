@@ -133,6 +133,34 @@ frame for 8143 BAMS where her drawn cursor gives 6875. Tests: "class 0x10's
 resume stores the cursor, not the clock" (four assertions, three failing on
 the base) and the civilians harness's fade check.
 
+**He cannot be saved, and the exe does not mean him to be.** The fountain man
+dies 57 frames after he spawns in the page (captor `0x1868` starts in state 35,
+the maul, on `{788, start cursor 7, cue 64}`), and that is the script: step 6
+closes the shutter and disables firing, nothing reopens it before the maul,
+his live stream is `SetMotion 399` for ever with no rescue block, and the
+command that hands the gun back is the fourth of his own killed stream --
+whose `SetCameraCue 39, 60` then times his last clip to the step-8 cutscene
+where evt message 16, "I don't wanna die.", plays. Volleying at his captor from
+the frame it is on screen lands nothing until that command runs. The user
+confirmed it.
+
+**Three class-0x10 readings the fountain man's investigation turned up, and
+the kill test.** Op 0x06, `SetTargetPoint`, writes its pointer to `sub+0x44`
+and the point to `sub+0x30..0x38` and leaves the target mode alone
+(`0x0048BC93`, and `0x0048B84E` in the reapply walk); the port wrote the
+pointer into the mode as well, so all eleven shipped ones -- each in a block
+waiting on the in-front test -- turned their civilian toward the point she is
+meant to walk past. `CivilianStepScript` restores its eight saved words on
+every exit (`0x0048B6DC`), not only when nothing resumed, so a block the loop
+passes leaves no goal, cue or loop count behind. `ResolveHit`'s kill is the
+dead **bit** and the hit points, with result 5 gating only the head burst; the
+port read its own `dead` field and refused a result-5 kill, and
+`FireShotRequest` zeroed every point of a result-5 hit where the exe withholds
+only the body hit's 10. The civilians harness does not move (none of its
+civilians reaches an op 0x06 block or a passed block that sets a restored
+word, and every captor it shoots dies the same way); tests in `port.test.ts`,
+each seen failing on the base.
+
 **And they have a size.** `EnemyZombieInit` writes two radii — `obj+0x124`
 from `g_actor_radius_by_char`, which is the shot sphere, and `obj+0x128` = 3.5,
 which is the **body** sphere every collision uses — and the port wrote neither.

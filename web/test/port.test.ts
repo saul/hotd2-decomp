@@ -309,6 +309,7 @@ import {
 } from "../src/game/carrier";
 import { bamsDelta } from "../src/core/bams";
 import { CivilianAttachSet, CivilianCountMotionLoops, CivilianOp,
+         CivilianReapplyWaitCommand,
          CivilianRunScript, CivilianSphereMode, CivilianTarget,
          CivilianUpdate, CivilianWait, CivilianWriteSphereCentre,
          CIVILIAN_SPHERE_BONE_MODE1, CIVILIAN_SPHERE_BONE_MODE2,
@@ -1551,6 +1552,94 @@ console.log("ResolveHit:");
   check("the killing shot names its player at obj+0x131C",
         (k1.flags & ActorFlag.Dead) !== 0 && k1.killedBy === 1,
         `flags ${k1.flags.toString(16)} killedBy ${k1.killedBy}`);
+
+  // **The kill is two tests: the dead bit and the hit points.**
+  // `0x0040972A TEST [EDI + 0x34], EBX` (EBX = 0x4000000) and
+  // `0x00409733 CMP word ptr [EDI + 0x11c], 0x0 / JG`. The port read its own
+  // `Actor.dead` for the first, and added a third the engine does not have --
+  // `result !== 5` -- which in the engine gates the head burst alone
+  // (`0x0040976F`). Neither input is one a shipped class-0x30 spawn reaches
+  // through `DispatchHit` that I could find: the release paths that raise the
+  // bit alone hold `ShotImmune` too (the drag's `0x10100`, the release state's
+  // `0x3500` from its first frame), and `ActorInitHitPoints` floors hit
+  // points at 1. So these pin the transcription, by hand.
+  {
+    // The bit, not the field: `ZombieStateDragTarget`'s release and the body
+    // creature's raise `0x4000000` and leave `dead` down. A hit on such an
+    // actor at zero hit points kills nothing and its plain result is zeroed.
+    const flagged = spawnZombie(0x1110, 1, "dead bit, dead field down");
+    flagged.visible = true;
+    flagged.hp = 0;
+    flagged.flags |= ActorFlag.Dead;
+    const onFlagged = ResolveHit(flagged, 5, NULL_HOST, rng, 1);
+    check("the dead BIT refuses the kill, whatever `dead` says",
+          !onFlagged.killed && onFlagged.result === HitResultCode.None
+          && flagged.killedBy === -1,
+          `killed ${onFlagged.killed} result ${onFlagged.result} `
+          + `killedBy ${flagged.killedBy}`);
+
+    // A result-5 hit on an actor at zero hit points with the bit down kills:
+    // the bit, the killer's byte -- and no head, which is the one thing the
+    // result gates, so the roll behind it is never drawn.
+    const SENTINEL_HEAD = 0x77;
+    SetGameTables({
+      ...CHARS,
+      types: {
+        ...CHARS.types,
+        [String(SENTINEL_HEAD)]: {
+          ...TYPE, type: SENTINEL_HEAD,
+          bones: TYPE.bones.map((b) => (b.bone === 2 || b.bone === 5
+            ? { ...b, steps: [[2, EffectCode.Last, 3]] } : b)),
+        },
+      },
+    } as unknown as CharactersJson);
+    const five = spawnZombie(0x1120, SENTINEL_HEAD, "result 5 at 0 hp");
+    five.visible = true;
+    five.hp = 0;
+    const roll = new Rng(21);
+    const out5 = ResolveHit(five, 2, NULL_HOST, roll, 1);
+    check("a result-5 hit at zero hit points kills",
+          out5.result === HitResultCode.NoEffect && out5.killed
+          && (five.flags & ActorFlag.Dead) !== 0 && five.killedBy === 1,
+          `result ${out5.result} killed ${out5.killed} `
+          + `flags ${five.flags.toString(16)} killedBy ${five.killedBy}`);
+    check("...and takes no head: the roll is not drawn",
+          !out5.severed && roll.next() === new Rng(21).next(),
+          `severed ${out5.severed}`);
+
+    // **And what a result-5 hit is worth**: `ResolveHit`'s tail tests the
+    // result ahead of the body arm's 10 (`0x00409819`) and nowhere else, so
+    // the head arm's 120 and combo, and the kill's 80, are paid on it. The
+    // port zeroed every point of a result-5 hit.
+    const target = spawnZombie(0x1130, SENTINEL_HEAD, "result 5, scored");
+    target.visible = true;
+    target.hp = 50;
+    const at = (bone: number): GameHost => ({
+      ...NULL_HOST,
+      pickShot: () => ({ kind: "actor", at: target.at, bone,
+                         point: vec3(0, 0, 40) }),
+    });
+    const fire = (bone: number): number => {
+      const before = G.g_player_score[0];
+      FireShotRequest({ player: 0, frame: 0, onScreen: 1, ray: {
+        origin: vec3(0, 0, 0), dir: vec3(0, 0, 1) } }, at(bone), rng);
+      return G.g_player_score[0] - before;
+    };
+    G.g_head_combo_bonus[0] = 0;
+    const head = fire(2);
+    const body = fire(5);
+    const combo = G.g_head_combo_bonus[0];
+    fire(2);                                  // 120, and the combo to 10
+    target.hp = 0;
+    const kill = fire(2);                     // 120 + 10, and the kill's 80
+    check("a result-5 head hit pays 120; a body hit pays nothing and ends "
+          + "the combo", head === 120 && body === 0 && combo === 0,
+          `head ${head} body ${body} combo ${combo}`);
+    check("...and a result-5 kill on the head pays the combo and the 80",
+          kill === 120 + 10 + 80 && (target.flags & ActorFlag.Dead) !== 0,
+          `kill ${kill}`);
+    SetGameTables(CHARS);
+  }
 }
 
 // -- 4a. the three bits `ResolveHit` reads on `obj+0x34` ---------------------
@@ -15050,22 +15139,110 @@ console.log("\nclass 0x10, the civilian and the rescue:");
   }
 
   // Op 0x11's skip count, which is what `CivilianReapplyWaitCommand` is for:
-  // the skipped block's *conditions* are re-applied and its actions are not.
+  // the skipped block's *conditions* are re-applied and its actions are not
+  // -- and they are re-applied **for the step's own loop**, which puts eight
+  // of them back on every way out (`0x0048B6DC`). This used to assert the
+  // skipped goal was still there afterwards, which was the port's restore
+  // running only when nothing had resumed.
+  //
+  // So: the Init block sets goals 2 and 7 and a skip of one. The skipped
+  // block raises the enemy goal to 5; the block after it waits while more
+  // than that many enemies are present, and three are -- so the loop passes
+  // it in the same frame **because of** the skipped 5 (with the 2 it would
+  // hold), walking its civilian goal of 9 on the way. Then the step returns
+  // and both goals read 2 and 7 again, which is what the block the cursor
+  // lands on runs under; neither passed block's action ran.
   {
     const { a, events } = civScene([[
       cmd(CivilianOp.Wait, CivilianWait.Free),
+      cmd(CivilianOp.SetEnemiesGoal, 2),
+      cmd(CivilianOp.SetCiviliansGoal, 7),
       cmd(CivilianOp.SetSkipCount, 1),
-      cmd(CivilianOp.Wait, CivilianWait.Free),
-      cmd(CivilianOp.SetMotionBlend, 66),      // skipped: not a wait condition
-      cmd(CivilianOp.SetEnemiesGoal, 5),    // re-applied: it is one
-      cmd(CivilianOp.Wait, 0),
-      cmd(CivilianOp.End),
+      cmd(CivilianOp.Wait, 0),                  // 4: skipped by op 0x11
+      cmd(CivilianOp.SetMotionBlend, 66),       //    an action: never run
+      cmd(CivilianOp.SetEnemiesGoal, 5),        //    a condition: re-applied
+      cmd(CivilianOp.Wait, CivilianWait.EnemiesPresent),   // 7: passed
+      cmd(CivilianOp.SetCiviliansGoal, 9),
+      cmd(CivilianOp.SetMotionBlend, 44),
+      cmd(CivilianOp.Wait, 0),                  // 10: the block it runs
+      cmd(CivilianOp.End),                      // 11: where that parks
     ]]);
+    G.g_enemies_present = 3;
+    check("the Init block sets its goals and parks on the skipped block",
+          a.civ?.cursor === 4 && a.civ?.enemiesGoal === 2
+          && a.civ?.civiliansGoal === 7,
+          `cursor ${a.civ?.cursor} goals ${a.civ?.enemiesGoal}/`
+          + `${a.civ?.civiliansGoal}`);
     cFrame(a, events);
-    check("a skipped block re-applies its wait conditions...",
-          a.civ?.enemiesGoal === 5, `goal ${a.civ?.enemiesGoal}`);
-    check("...and does not run its actions",
-          a.civ?.motionBlend !== 66, `rate ${a.civ?.motionBlend}`);
+    // Held at 7, the action VM would have run 7's block and parked on 10.
+    check("a skipped block's goal is live inside the step: the next wait "
+          + "passes on it in the same frame", a.civ?.cursor === 11,
+          `cursor ${a.civ?.cursor}`);
+    check("...and the step puts the goals back on its way out",
+          a.civ?.enemiesGoal === 2 && a.civ?.civiliansGoal === 7,
+          `goals ${a.civ?.enemiesGoal}/${a.civ?.civiliansGoal}`);
+    check("...and runs no passed block's actions",
+          a.civ?.motionBlend !== 66 && a.civ?.motionBlend !== 44,
+          `blend ${a.civ?.motionBlend}`);
+  }
+
+  // **Op 0x06 sets the point and not the mode.** `MOV dword ptr [EAX + 0x44]`
+  // at `0x0048BC93`, and `[ECX + 0x44]` at `0x0048B84E` in the reapply walk:
+  // the pointer lands in `sub+0x44`, the three words it names in
+  // `sub+0x30..0x38`, and `sub+0x40` -- the mode the turn runs on -- is not
+  // written. Every shipped op 0x06 sits in a block waiting on `InFront`, the
+  // test that reads `sub+0x30` raw, with the mode at 0: the civilian walks past
+  // the point on her own clip and never turns to it. The port wrote the
+  // pointer into the mode too, so each of them turned toward it.
+  {
+    const P = [0, 0, -100];
+    const ptr = 5683752;                     // stage 1 stream 3's, cmd 10
+    // Mode 0, the shipped shape: nothing may turn her.
+    {
+      const { a, events } = civScene([[
+        cmd(CivilianOp.Wait, 0),
+        { op: CivilianOp.SetTargetPoint, args: [ptr],
+          point: P as [number, number, number] },
+        cmd(CivilianOp.Wait, 0),
+        cmd(CivilianOp.End),
+      ]]);
+      a.yaw = 0x4000;                        // P is 90 degrees off her facing
+      for (let i = 0; i < 20; i++) cFrame(a, events);
+      check("op 0x06 leaves the target mode at 0, so nothing turns her...",
+            a.civ?.targetMode === CivilianTarget.None && a.yaw === 0x4000,
+            `mode ${a.civ?.targetMode} yaw 0x${a.yaw.toString(16)}`);
+      check("...and still sets the point the in-front test reads",
+            a.civ?.target.x === 0 && a.civ?.target.z === -100,
+            `target ${JSON.stringify(a.civ?.target)}`);
+    }
+    // A mode already set -- the camera, -1 -- stands through op 0x06 in both
+    // VMs: the action VM running the block, and the reapply walk the step
+    // runs over it first.
+    {
+      const { a, events } = civScene([[
+        cmd(CivilianOp.Wait, CivilianWait.Free),
+        { op: CivilianOp.SetTarget, args: [CivilianTarget.Camera, 0],
+          radius: 5 },
+        cmd(CivilianOp.Wait, CivilianWait.InFront),
+        { op: CivilianOp.SetTargetPoint, args: [ptr],
+          point: P as [number, number, number] },
+        cmd(CivilianOp.Wait, 0),
+        cmd(CivilianOp.End),
+      ]]);
+      check("a mode set before op 0x06 is the camera's",
+            a.civ?.targetMode === CivilianTarget.Camera,
+            `mode ${a.civ?.targetMode}`);
+      const at = CivilianReapplyWaitCommand(a, a.civ?.script ?? 0, 2);
+      check("the reapply walk's op 0x06 leaves it standing",
+            at === 4 && a.civ?.targetMode === CivilianTarget.Camera
+            && a.civ?.target.z === -100,
+            `at ${at} mode ${a.civ?.targetMode} `
+            + `target ${JSON.stringify(a.civ?.target)}`);
+      cFrame(a, events);
+      check("...and so does the action VM's, once the block runs",
+            a.civ?.cursor === 4 && a.civ?.targetMode === CivilianTarget.Camera,
+            `cursor ${a.civ?.cursor} mode ${a.civ?.targetMode}`);
+    }
   }
 
   // **Does a dead civilian leave `g_civilians_alive`?** This is the counter

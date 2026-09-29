@@ -342,7 +342,7 @@ import { bannerCardSlots } from "../src/game/boss_banner_records";
 import { DrawScreenSpriteLayered, SCREEN_SPRITE_QUEUE_CELLS,
   ScreenSpriteQueueFlush, ScreenSpriteQueueReset }
   from "../src/game/screen_sprite";
-import { FALL_GRAVITY, SND_BOUNCE, ThrowerBeginKnockbackArc,
+import { FALL_GRAVITY, KNOCKDOWN_BODY, SND_BOUNCE, ThrowerBeginKnockbackArc,
          ThrowerStateCorpseBlink, ThrowerStateCorpseSink,
          ThrowerStateFallAndLand }
   from "../src/game/class31/death";
@@ -13457,6 +13457,12 @@ console.log("class 0x31, the stumble and the death chain:");
   const z = thrower(ThrowerState.StandAndDecide);
   z.pos = vec3(0, 0, 45);
   z.hp = 100;
+  // A loop on track 0, at its start. A stumble below bone 9 plays on track 1
+  // and lasts until **track 0's** cursor reaches its play length less one
+  // (`ThrowerStateHitReaction`, `0x0044A3EA`), so a fixture whose loop has
+  // no clip ends the stumble on the frame it starts.
+  z.motion = 295;
+  z.playTicks = 0;
 
   // `ResolveHit` hands class 0x31 a *pending hit* instead of the shared
   // stagger and the shared directional death: the class picks its own.
@@ -13515,6 +13521,162 @@ console.log("class 0x31, being knocked down is survivable:");
   }
   check("and it gets back up", recovered && !z.dead, `state ${z.state}`);
   check("with its hit points intact", z.hp > 0, `hp ${z.hp}`);
+}
+
+/**
+ * **How far a shot `zsass` goes** -- reported against stage 2's block 5 step 6
+ * (Original Mode), whose two `zsass` "get pushed back much too far by being
+ * shot": held under fire they walked backwards off the walkway.
+ *
+ * Some of that push is the engine's own, and the numbers here are the
+ * engine's. A knockdown is `ThrowerStateFallAndLand` (`FUN_0044A450`):
+ *
+ * * the arc `ThrowerBeginKnockbackArc` (`FUN_0044D120`) builds throws the
+ *   body `t = 15.0 / |obj+0x70| * 10.0` units along the camera's own depth
+ *   (`[0x004C4398]` = 15.0f, `[0x004C43A4]` = 10.0f) -- 150/45 here;
+ * * sub 3 then plays `0x11B`, which in `szom.bin` is a back handspring whose
+ *   root runs 21.43 units along its own +z. Root motion is on for every
+ *   class-0x31 actor, so the body goes with it -- but only as far as sub 4
+ *   lets the clip run: `g_motion_play_length[0x11B] - 2` = 27 on the cursor,
+ *   and the draw that follows the hand-back takes it to 28, authored frame
+ *   14 -- **20.3593** of the root, not the clip's last frame.
+ *
+ * And the end of the fall hands a `zsass` back with **thirty frames** of shot
+ * immunity (`MOV [ESI+0x133C], 0x1e` / `OR AH, 0x1` at `0x0044A7EB`), which
+ * the port forgot, so the next round knocked it straight down again.
+ *
+ * The actor faces a quarter turn round (L48): the handspring's travel is
+ * then world +x and the arc's world +z, so each is measured on its own axis.
+ */
+console.log("class 0x31, how far a knocked-down zsass goes:");
+{
+  // `szom.bin` motion 0x11B's root track, as the bundle bakes it, and
+  // `g_motion_play_length[0x11B]` = 29.
+  const HANDSPRING = [
+    0, 7.4452, 0, 0, 7.3737, 0.3161, 0, 7.3608, 0.6777, 0.0241, 7.3915, 0.241,
+    -0.1094, 9.287, 0.9994, -0.3247, 12.0678, 3.1227, 0.0261, 11.6264, 5.2612,
+    0.0563, 10.4954, 7.4827, 0.0266, 9.2097, 9.6385, 0, 8.3039, 11.5801,
+    -0.002, 7.8577, 13.1024, -0.0015, 7.6589, 14.3476, -0.0002, 7.8042,
+    15.6877, 0, 8.1077, 17.6252, 0, 7.5922, 20.3593, 0, 7.4452, 21.4343,
+  ];
+  // Authored frame 14's z less frame 0's: where sub 4's exit leaves it.
+  const HOP = HANDSPRING[14 * 3 + 2] - HANDSPRING[2];
+  const ZSASS_FLIP: CharacterType = {
+    ...TYPE31_ZSASS,
+    motions: {
+      ...TYPE31_ZSASS.motions,
+      "283": { bank: "szom.bin", frames: 16, fps: 30, root: HANDSPRING,
+               rot: [], play: 29 },
+      // Behaviour set 0's airborne clip, 26 frames, play length 50.
+      "934": motion(26, 0, 50),
+      // The stumble set 0 plays for bone 4, given a root that runs back a
+      // unit a frame -- which is what a flinch played on the wrong track
+      // would carry the body by.
+      "935": motion(18, -1, 34),
+    },
+  };
+  const SET = CLASS31.sets[0];
+  const chars = {
+    ...CHARS31,
+    types: { ...CHARS31.types, "22": ZSASS_FLIP },
+    // The router's picks all 7, so nothing after the hand-back moves it.
+    class31: { ...CLASS31, sets: [{ ...SET, state_picks: {
+      "1": new Array(80).fill(7), "2": new Array(80).fill(7) } }] },
+  } as unknown as CharactersJson;
+  const spawn = (state: number) => {
+    ResetGameGlobals();
+    SetGameTables(chars);
+    G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    G.g_scene_state_major = SCENE_MAJOR_PLAYING;
+    EnterPlay();
+    G.g_camera_yaw_bams = 0;
+    const a = ActorSpawn(0x9100, SpawnClass.Thrower, 0x16, "zsass", {
+      initialState: state, condition: 0,
+    });
+    if (a.cls !== SpawnClass.Thrower) throw new Error("not class 0x31");
+    a.visible = true;
+    a.hp = a.maxHp = 130;
+    a.pos = vec3(0, 0, 45);
+    a.yaw = 0x4000;
+    return a;
+  };
+
+  // Knocked down out of any state but the hub -- here the wait for a permit,
+  // entered by hand after the spawn, whose own entry state is the hub.
+  const rng = new Rng(51);
+  const events = new Events();
+  const z = spawn(ThrowerState.StandAndDecide);
+  z.state = ThrowerState.WaitForPermit;
+  z.sub = 0;
+  const x0 = z.pos.x;
+  const z0 = z.pos.z;
+  ResolveHit(z, 1, CAM_HOST, rng);
+  GameUpdate(1 / 60, CAM_HOST, rng, events);
+  check("a body shot outside the hub knocks a zsass down",
+        z.state === ThrowerState.FallAndLand
+        && (z.flags & KNOCKDOWN_BODY) !== 0,
+        `state ${z.state}, flags ${z.flags.toString(16)}`);
+  let n = 0;
+  while (z.state === ThrowerState.FallAndLand && n++ < 400) {
+    GameUpdate(1 / 60, CAM_HOST, rng, events);
+  }
+  // The frame it hands back: thirty frames of immunity, the knocked-down
+  // bit gone.
+  const cooldownAtExit = z.cooldown;
+  const immuneAtExit = (z.flags & ActorFlag.ShotImmune) !== 0;
+  const bodyBitAtExit = (z.flags & KNOCKDOWN_BODY) !== 0;
+  // One more frame: the draw after the hand-back is the one that takes the
+  // clip to authored frame 14.
+  GameUpdate(1 / 60, CAM_HOST, rng, events);
+  const dx = z.pos.x - x0;
+  const dz = z.pos.z - z0;
+  check("the knockback arc throws it 150/45 units along the camera's depth",
+        Math.abs(dz - 150 / 45) < 1e-3, `dz ${dz.toFixed(4)}`);
+  check("...and the handspring carries it 0x11B's root to authored frame 14",
+        Math.abs(dx - HOP) < 1e-3,
+        `dx ${dx.toFixed(4)}, want ${HOP.toFixed(4)} (the clip's last frame `
+        + `is ${HANDSPRING[15 * 3 + 2]})`);
+  check("it hands back to the hub shot-immune, the cooldown at thirty",
+        z.state === ThrowerState.StandAndDecide && immuneAtExit
+        && cooldownAtExit === 0x1e && !bodyBitAtExit,
+        `state ${z.state}, immune ${immuneAtExit}, cooldown ${cooldownAtExit}, `
+        + `body bit ${bodyBitAtExit}`);
+  // Twenty-nine more updates -- thirty since the hand-back -- and the round
+  // that lands is still refused; the thirtieth takes the bit down.
+  for (let i = 0; i < 28; i++) GameUpdate(1 / 60, CAM_HOST, rng, events);
+  const stillImmune = (z.flags & ActorFlag.ShotImmune) !== 0;
+  GameUpdate(1 / 60, CAM_HOST, rng, events);
+  check("...for thirty frames and no more",
+        stillImmune && (z.flags & ActorFlag.ShotImmune) === 0
+        && z.cooldown === 0, `after 29: ${stillImmune}, after 30: `
+        + `${(z.flags & ActorFlag.ShotImmune) !== 0}, cooldown ${z.cooldown}`);
+
+  // The stumble: a hub shot below bone 9 plays on track 1, which carries no
+  // root, and lasts until **track 0's** loop reaches its play length less one.
+  // The loop here is set 0's idle, 0x127 = 295, 31 frames and a play length
+  // of 60, standing at cursor 50: nine frames from 59.
+  const s = spawn(ThrowerState.StandAndDecide);
+  s.sub = 1;
+  s.motion = 295;
+  s.playTicks = 50;
+  const sx0 = s.pos.x;
+  const sz0 = s.pos.z;
+  ResolveHit(s, 4, CAM_HOST, rng);
+  let frames = 0;
+  let drift = 0;
+  let onOneShot = false;
+  do {
+    GameUpdate(1 / 60, CAM_HOST, rng, events);
+    frames += 1;
+    drift = Math.max(drift, Math.hypot(s.pos.x - sx0, s.pos.z - sz0));
+    if (s.state === ThrowerState.HitReaction && s.action) onOneShot = true;
+  } while (s.state === ThrowerState.HitReaction && frames < 120);
+  check("a hub shot on bone 4 stumbles on track 1 and does not move the body",
+        !onOneShot && drift < 1e-9 && s.react?.motion === 0x3a7,
+        `one-shot ${onOneShot}, drift ${drift.toFixed(4)}, `
+        + `react ${s.react?.motion}`);
+  check("...and is over when the loop underneath reaches its end: 9 frames, "
+        + "not the stumble clip's 34", frames === 9, `${frames} frames`);
 }
 
 console.log("class 0x31, the scripted entrances:");

@@ -26,9 +26,9 @@
  *
  * **It drives the shared arc engine.** `ActorArcBeginToAtSpeed`
  * (`FUN_0044DB50`) fills the arc record at `obj+0x13C0`/`+0x13CC`/`+0x1330`/
- * `+0x1334`, and sub 1 rides it with {@link ActorArcVelocityY}, which is
- * `ActorArcVelocity`'s (`FUN_0044DE80`) case 0 with the axis selector taken
- * out. What it does *not* use is `ActorArcStep` (`FUN_0044D860`) or the
+ * `+0x1334`, and sub 1 rides it with `ActorArcVelocityY` (`FUN_0044DDE0`),
+ * which is `ActorArcVelocity`'s (`FUN_0044DE80`) case 0 with the axis
+ * selector taken out. What it does *not* use is `ActorArcStep` (`FUN_0044D860`) or the
  * three-stage motion script: `ChooseDeathMotion` picks one clip and it plays
  * through the whole flight.
  *
@@ -39,10 +39,11 @@
  */
 import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
+import { ActorFlag, ZombieFlag2, type ZombieActor } from "../actor";
 import {
-  ActorFlag, ZombieFlag2, type Actor, type ZombieActor,
-} from "../actor";
-import { ActorArcBeginToAtSpeed, ARC_GRAVITY_HALF } from "../class31/arc";
+  ActorArcBeginToAtSpeed, ActorArcVelocityY, ARC_GRAVITY_HALF,
+  ClearCurrentActorVelocityAndAccel,
+} from "../class31/arc";
 import { QueryGroundHeightAt } from "../coli";
 import { G } from "../globals";
 import type { GameHost } from "../host";
@@ -130,46 +131,6 @@ const FALL_FRAME_CAP = 0x78;
 const _view = vec3();
 const _dest = vec3();
 
-/**
- * `ClearCurrentActorVelocityAndAccel` — `FUN_0044E120`. Acceleration first
- * (`obj+0x58/5C/60`), then velocity (`obj+0x4C/50/54`).
- *
- * Its natural home is beside the other whole-actor helpers rather than in one
- * class's folder; `class30/death.ts` and `class31/death.ts` both inline it
- * today, and collapsing all three onto this one is a tidy-up of its own.
- */
-export function ClearCurrentActorVelocityAndAccel(obj: Actor): void {
-  obj.accX = obj.accY = obj.accZ = 0;
-  obj.vel.x = obj.vel.y = obj.vel.z = 0;
-}
-
-/**
- * `ActorArcVelocityY` — `FUN_0044DDE0`. One frame of the shared arc, as a
- * velocity, with the parabola on **y**.
- *
- * It is `ActorArcVelocity` (`FUN_0044DE80`) case 0 with the axis selector
- * removed — the same closed form, the same `obj+0x1330` advance, the same
- * `false` once `obj+0x1330` reaches `obj+0x1334`. Its only two callers are
- * `ThrowerStateFallAndLand` (0x0044A561) and this state (0x0045534C).
- *
- * The velocity is computed for the frame *after* the advance — `iVar1 = t + 1`
- * at 0x0044DDF6 — while the test that ends the arc uses the frame before it.
- * Nothing integrates here: `EnemyZombieUpdate` adds `vel` to `pos` after the
- * state runs, which is where the flight actually happens.
- */
-export function ActorArcVelocityY(obj: Actor, step: number): boolean {
-  const t = obj.arcFrames;
-  obj.arcFrames = t + step;
-  const total = obj.arcTotal;
-  if (t >= total) return false;
-  const n = t + step;
-  const dy = obj.arcTo.y - obj.arcFrom.y;
-  obj.vel.x = (obj.arcTo.x - obj.arcFrom.x) / total;
-  obj.vel.y = n * -ARC_GRAVITY_HALF
-            + (total * total * ARC_GRAVITY_HALF + dy + dy) / (total * 2);
-  obj.vel.z = (obj.arcTo.z - obj.arcFrom.z) / total;
-  return true;
-}
 
 /**
  * `ZombieStateDeathKnockbackArc` — `FUN_004550E0`, class 0x30 state 9.

@@ -86,10 +86,35 @@ export function ActorArcBeginTo(obj: Actor, dest: Vec3, step: number): void {
  * `minFrames`** — 2.0 units a frame ordinarily, 3.0 in the fast case —
  * clamped up to `minFrames`, so a short hop still takes a quarter of a second
  * and a long one is not instant. The divisor 30.0 is `0x0055CCD4`.
+ *
+ * **`minFrames` is 10 or 15, and the routine chooses it itself:**
+ *
+ * ```
+ * 0044dbaa  TEST EAX, 0x2000000    a900000002   ; EAX = obj+0x136C
+ * 0044dbc9  JZ   0044dbda                       ; clear -> 15
+ * 0044dbce  MOV  EDI, 0xa                       ; set   -> 10 ...
+ * 0044dbd3  TEST EAX, 0x44000000   a900000044   ; ... EAX = obj+0x34
+ * 0044dbd8  JZ   0044dbdf                       ;     unless dead or reacting
+ * 0044dbda  MOV  EDI, 0xf                       ;     -> 15
+ * ```
+ *
+ * `[proved]`. `ThrowerShotFeedback` (`FUN_00449B20`) raises
+ * {@link ThrowerFlag.LowSphere} as half of `OR EDX, 0x6000000` on the head
+ * shot that knocks a thrower down, so a live knocked-down thrower takes the
+ * **10**-frame branch -- 3 units of travel a frame rather than 2. Class 0x30's
+ * `ZombieFlag2.LowSphere` is the same bit of the same word, so the one test
+ * serves both classes' callers. The test used to be a `fast` argument that no
+ * caller passed, with the fall's knockback carrying its own copy of the
+ * routine to get the 10 (`L11`: the test belongs to this function).
+ *
+ * The divisor is a `FILD`/`FDIVR` pair the decompiler drops entirely --
+ * `FILD [ESP+0xc]` (`db44240c`) then `FDIVR [0x0055ccd4]` (`d83dd4cc5500`)
+ * at 0x0044DBE3.
  */
-export function ActorArcBeginToAtSpeed(obj: Actor, dest: Vec3,
-                                       fast = false): void {
-  const min = fast ? ARC_MIN_FRAMES_FAST : ARC_MIN_FRAMES;
+export function ActorArcBeginToAtSpeed(obj: Actor, dest: Vec3): void {
+  const min = (obj.flags2 & ThrowerFlag.LowSphere)
+              && !(obj.flags & (ActorFlag.Dead | ActorFlag.Reacting))
+    ? ARC_MIN_FRAMES_FAST : ARC_MIN_FRAMES;
   const n = Math.trunc(dist2d(obj.pos, dest) / (ARC_SPEED_UNITS / min));
   ActorArcBegin(obj, dest, Math.max(min, n));
 }
@@ -323,20 +348,55 @@ export function ActorArcInterpolate(obj: Actor, step: number): boolean {
 }
 
 /**
- * `ActorArcVelocity` — `FUN_0044DE80`. The same arc as a velocity, for the
- * states that integrate rather than interpolate.
+ * `ActorArcVelocityY` — `FUN_0044DDE0`. One frame of the shared arc, as a
+ * velocity, with the parabola on **y**: the same arc as the interpolation
+ * above, for the states that integrate rather than interpolate.
  *
- * `vel.y = -g2*n + (T*T*g2 + 2*dy) / (2*T)` is the derivative of the y term
- * above, which is why the two agree.
+ * `vel.y = -g2*n + (T*T*g2 + 2*dy) / (2*T)` is the derivative of that
+ * routine's y term, which is why the two agree. It is `ActorArcVelocity`'s
+ * (`FUN_0044DE80`) case 0 with the axis selector taken out -- the same closed
+ * form, the same `obj+0x1330` advance, the same `false` once `obj+0x1330` has
+ * reached `obj+0x1334`. Its only two callers are `ThrowerStateFallAndLand`
+ * (0x0044A561) and `ZombieStateDeathKnockbackArc` (0x0045534C); both classes
+ * share the arc record, so it lives here beside the rest of it.
+ *
+ * The velocity is computed for the frame *after* the advance -- `iVar1 = t + 1`
+ * at 0x0044DDF6 -- while the test that ends the arc uses the frame before it.
+ * Nothing integrates here: the class's update adds `vel` to `pos` after the
+ * state runs, which is where the flight actually happens.
+ *
+ * The class-0x31 fall used to call a one-axis copy of `FUN_0044DE80` instead,
+ * which read the velocity at `t` rather than `t + 1` and left the advance to
+ * its caller: every knockback rode an arc one frame of gravity higher than the
+ * engine's, and the copy had no caller once the fall was put right.
  */
-export function ActorArcVelocity(obj: Actor): void {
-  const T = obj.arcTotal;
-  const n = obj.arcFrames;
+export function ActorArcVelocityY(obj: Actor, step: number): boolean {
+  const t = obj.arcFrames;
+  obj.arcFrames = t + step;
+  const total = obj.arcTotal;
+  if (t >= total) return false;
+  const n = t + step;
   const dy = obj.arcTo.y - obj.arcFrom.y;
-  obj.vel.x = (obj.arcTo.x - obj.arcFrom.x) / T;
-  obj.vel.z = (obj.arcTo.z - obj.arcFrom.z) / T;
-  obj.vel.y = -ARC_GRAVITY_HALF * n
-            + (T * T * ARC_GRAVITY_HALF + dy + dy) / (T * 2);
+  obj.vel.x = (obj.arcTo.x - obj.arcFrom.x) / total;
+  obj.vel.y = n * -ARC_GRAVITY_HALF
+            + (total * total * ARC_GRAVITY_HALF + dy + dy) / (total * 2);
+  obj.vel.z = (obj.arcTo.z - obj.arcFrom.z) / total;
+  return true;
+}
+
+/**
+ * `ClearCurrentActorVelocityAndAccel` — `FUN_0044E120`. Acceleration first
+ * (`obj+0x58/5C/60`), then velocity (`obj+0x4C/50/54`).
+ *
+ * Eighteen call sites across classes 0x30 and 0x31, and it sits in the image
+ * between the arc routines above and the class-0x31 states, so it lives with
+ * the arc record here. The thrower's fall and stumble used to clear the
+ * velocity and `obj+0x5C` by hand, which left `obj+0x58` and `obj+0x60`
+ * standing: harmless only while nothing else wrote them.
+ */
+export function ClearCurrentActorVelocityAndAccel(obj: Actor): void {
+  obj.accX = obj.accY = obj.accZ = 0;
+  obj.vel.x = obj.vel.y = obj.vel.z = 0;
 }
 
 /** `ActorArcStep`'s five phases, at `obj+0x1360`. */

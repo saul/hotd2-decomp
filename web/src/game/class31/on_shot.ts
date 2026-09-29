@@ -70,7 +70,13 @@ export function ThrowerOnShot(obj: ThrowerActor): void {
   obj.flags2 &= ~(ThrowerFlag.Pouncing | ThrowerFlag.BandLatched | 0x200);
   // `25ffffffcf` at `0x00449A24`: both bits of the attack pair.
   obj.flags &= ~(ActorFlag.BackingOff | ActorFlag.Committed);
-  if (obj.attackPermit >= 0) ThrowerReleaseAttackPermit(obj);
+  // `CALL 0x0044cfb0` at `0x00449A33`, with no test in front of it: the
+  // routine gives back a permit if there is one **and** takes down the
+  // off-screen claim's `g_attack_committed` latch if its bit is up, and the
+  // second half does not wait on the first. The port asked "is a permit
+  // held?" here first, which left the latch raised for a thrower shot with
+  // none (`L11`).
+  ThrowerReleaseAttackPermit(obj);
 
   if (obj.dead) {
     obj.flags2 |= ThrowerFlag.DeathLatched;

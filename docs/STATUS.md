@@ -18,7 +18,7 @@ than a measurement. What each directory is for is in
 
 | Directory | Lines | Files | Layer |
 |---|---:|---:|---|
-| `game/` | 110248 | 361 | engine |
+| `game/` | 110447 | 361 | engine |
 | `hod2lib/` | 19994 | 35 | engine |
 | `render/` | 15804 | 60 | render |
 | `app/` | 12685 | 44 | app |
@@ -28,7 +28,7 @@ than a measurement. What each directory is for is in
 | `bundle/` | 2921 | 11 | engine |
 | `audio/` | 1053 | 3 | render |
 | `hud/` | 526 | 1 | ui |
-| **total** | **175034** | **580** | |
+| **total** | **175233** | **580** | |
 
 The largest files, which is where the pressure to split next is:
 
@@ -42,9 +42,9 @@ The largest files, which is where the pressure to split next is:
 
 | | |
 |---|---|
-| Gameplay coverage | **233 of 299** annotated functions in the gameplay address ranges have a port (77%) |
+| Gameplay coverage | **232 of 299** annotated functions in the gameplay address ranges have a port (77%) |
 | Ported outside those ranges | 591 (opcodes, and the classes whose handlers sit elsewhere) |
-| Citations checked | 824 ported functions match `functions.tsv` under the same name |
+| Citations checked | 823 ported functions match `functions.tsv` under the same name |
 | Spawn classes | **32 of 42** read classes have a module, covering 1549 of 1619 placements |
 | Declared `[diverges]` | **131** — where the port knowingly departs from the exe, each with its reason on the spot |
 | `[open]` markers | **122** — questions the port and the exporter are honest about not having answered |

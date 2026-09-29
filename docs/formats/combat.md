@@ -2576,8 +2576,8 @@ makes its fall and its knock-back physical.
 | # | Routine | What it is |
 |---|---|---|
 | 0 | `0x0041EBB0` | the engine's shared no-op |
-| 1 | `ThrowerStateHitReaction` | the stumble, from `g_class31_hit_reactions` |
-| 2 | `ThrowerStateFallAndLand` | knocked off its feet: an arc **at the camera**, then a bounce |
+| 1 | `ThrowerStateHitReaction` | the stumble, from `g_class31_hit_reactions` -- on track 1 below bone 9 |
+| 2 | `ThrowerStateFallAndLand` | knocked off its feet: an arc **away from the camera**, a bounce, then clip `0x11B` |
 | 3 | `ThrowerStateDeathClip` | character 0x16's own death clip |
 | 4, 5 | `ThrowerStateCorpseSink` / `ThrowerStateCorpseBlink` | two seconds of corpse, sinking or flickering |
 | 6 | `ThrowerLeave` | release everything and despawn — **never entered as a state** |
@@ -3245,8 +3245,10 @@ else                                state 2,  the knockdown
 ```
 
 Two consequences worth naming. **A knockdown is survivable** — state 2 lies
-still for `(rand()%10+1)*3` frames, plays a get-up and returns to the hub with
-its hit points intact — so being knocked over is not the same as dying. And
+still for `(rand()%10+1)*3` frames (`zsass` instead waits its airborne clip
+out), plays clip `0x11B` and returns to the hub with its hit points intact —
+so being knocked over is not the same as dying; how far that clip carries the
+body is below. And
 `obj+0x1368` is the **bone index** here, where class 0x30 keeps a bitfield of
 special-death arms in the same word: one offset, two meanings, and conflating
 them is a stumble that plays the wrong clip.
@@ -3257,6 +3259,64 @@ is load-bearing: a result-1 hit on **bone 2** that swaps the head model to
 the only thing in the class that routes states 1 and 2 into **state 17**. So a
 thrower plays its get-up exactly when you have taken its head off and it has
 survived it.
+
+### How far a knockdown carries a thrower
+
+Reported against stage 2 block 5 step 6 in Original Mode: the two `zsass`
+"get pushed back much too far by being shot", far enough under steady fire to
+leave the walkway. **Most of that push is the engine's own**, and it is two
+movements, both `[proved]`:
+
+* **The arc.** `ThrowerBeginKnockbackArc` (`FUN_0044D120`) takes the view-space
+  tracked point `obj+0x70`, computes `t = 15.0 / |obj+0x70| * 10.0`
+  (`[0x004C4398]` = 15.0f, `[0x004C43A4]` = 10.0f; half again, `[0x004C4CB8]`
+  = 1.5f, if already dead), moves the point `t` further along the camera's own
+  `-z` and hands it to `ActorArcBeginToAtSpeed` (`FUN_0044DB50`), which picks
+  its own minimum of 10 or 15 frames. `ThrowerStateFallAndLand`
+  (`FUN_0044A450`) flies it with `ActorArcVelocityY` (`FUN_0044DDE0`) and
+  `EnemyThrowerUpdate`'s `vel += acc; pos += vel`. At the 45 units block 5
+  stands them at, that is 3.3 units.
+* **The handspring.** Once the body is down, sub 3 plays motion `0x11B`
+  (`PUSH 0x11b` at `0x0044A788`) for every type but 0x17. In `szom.bin` it is
+  a back handspring: bone 0 turns a full revolution about x over sixteen
+  authored frames while the root runs **21.43 units along the clip's own
+  +z** -- backwards. Root motion is on for every class-0x31 actor
+  (`SkeletonApplyRootMotion`, `FUN_00410C50`, gated on `model+0x64` bit 1,
+  which `ActorBuildSkinnedModel` sets and `EnemyThrowerInit` only adds bit 4
+  to), so the body goes with the clip. Sub 4 lets go at
+  `g_motion_play_length[0x11B] - 2` = 27 on the cursor, and the draw of that
+  same frame takes it to 28 -- authored frame 14, **20.36 units**.
+
+So a knockdown there costs a `zsass` about 23.7 units. It is the class's
+style rather than an accident of one clip: behaviour set 1's own landing clip
+(`g_class31_motion_sets[1][4]`, motion 4 in `ans.bin`) is the same shape and
+runs 19.0 back. What stops it being repeated at once is the
+hand-back: a `zsass` leaves sub 4 with **thirty frames of shot immunity**
+(`MOV [ESI+0x133C], 0x1e` and `OR AH, 0x1` at `0x0044A7EB`, counted down by
+`EnemyThrowerUpdate`), in state 7, and every type then goes through
+`ThrowerPickNextState` (`CALL 0x0044adb0` at `0x0044A8D6`).
+
+And a shot in the hub is usually not a knockdown at all. `ThrowerOnShot` sends
+state 7 to `ThrowerStateHitReaction` (`FUN_0044A360`), which below bone 9 plays
+the stumble with `MotionCrossFadeTo(obj+0x194, 1, clip, 0, 1, 0x14)` at
+`0x0044A3C9` -- **track 1**, over the loop, with no root of its own -- and
+leaves when **track 0's** cursor reaches its play length less one
+(`0x0044A3EA`..`0x0044A401`). Bone 9 and up is `ActorSetMotion` on track 0
+instead. A second shot inside that window is a knockdown, because state 1 is
+not state 7, so the window's length is what decides how often a trigger held
+down turns into a handspring.
+
+The port had all of that a little wrong, in the direction of more push: it
+played the stumble on its one-shot channel, which carried the body with the
+stumble clip's root (up to 2.7 units back) and held state 1 for the whole
+clip; it read every cursor test in the fall against the clip's baked length
+rather than the play length, so the handspring ran to its last frame (21.43);
+it left the thirty frames of immunity and the router out; and it rode the
+arc on a one-axis copy of `ActorArcVelocity` (`FUN_0044DE80`) rather than
+`ActorArcVelocityY`. Measured in the page at the reported address, one
+knockdown out of a throw went from 24.1 units to 23.0, and a zsass held under
+a pull every twelve frames at chest height for fifteen seconds went from 288
+units out to 168 (eleven knockdowns to seven); at head height, 235 to 201.
 
 ### The two motion banks, and why every table has two rows
 

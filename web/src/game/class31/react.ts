@@ -15,21 +15,31 @@ import { ActorFlag, ThrowerFlag, type ThrowerActor } from "../actor";
 import { ThrowerReleaseSlotOnDeath } from "../combat/counts";
 import { G } from "../globals";
 import type { GameHost } from "../host";
-import { MotionOf, T } from "../tables";
+import { MotionOf, MotionPlayLength, T } from "../tables";
+import { ActorSetMotion } from "../class30/motion_cue";
 import { GAME_HZ } from "../class30/states";
-import { ActorClipFrame, ActorClipLength } from "./arc";
+import {
+  ActorClipFrame, ActorClipLength, ActorPlayCursor, ActorPlayMotion,
+  ClearCurrentActorVelocityAndAccel,
+} from "./arc";
 import { ThrowerPickNextState } from "./router";
 import { ThrowerState } from "./states";
 import { Class31SetOf, ThrowerStanceOf } from "./tables";
-import { ThrowerEnterCorpseState, FALL_GRAVITY, SURFACE_KILL } from "./death";
+import {
+  ThrowerEnterCorpseState, FALL_GRAVITY, KNOCKDOWN_BODY, SURFACE_KILL,
+} from "./death";
 import { vec3 } from "../vec";
 import { ThrowerBeginKnockbackArc } from "./death";
 import { TraceActorSurfaceContactPoint } from "./surface";
 
-/** `g_bone_reaction_group` has sixteen entries, so the bone clamps here. */
+/**
+ * `g_bone_reaction_group` has sixteen entries, so the bone clamps here --
+ * `CMP EAX, 0xf; JLE` and a store of 15 back into `obj+0x1368` itself.
+ */
 const REACT_BONE_MAX = 15;
 /** Bones below this cross-fade over 0x14 frames; 9 and up hard-cut. */
 const REACT_HARD_SET_BONE = 9;
+/** `MotionCrossFadeTo`'s (`FUN_00411B70`) last argument, `PUSH 0x14`. */
 const REACT_FADE = 0x14;
 /** `ThrowerStateGetUp`'s clip — a `szom.bin` one, for every character type. */
 const GET_UP_CLIP = 0x127;
@@ -58,27 +68,55 @@ function playOnce(obj: ThrowerActor, motion: number): void {
  * `g_class31_hit_reactions[set]`. Bones 9 and up — the pelvis and the legs —
  * **hard-cut** rather than blend, so a leg shot reads as a buckle where an arm
  * shot reads as a flinch.
+ *
+ * **The two arms put the clip on different tracks**, and that decides both
+ * how the body moves and how long the state lasts:
+ *
+ * * bones below 9 -- `MotionCrossFadeTo(obj+0x194, 1, clip, 0, 1, 0x14)` at
+ *   `0x0044A3C9`, the stumble on **track 1**, over the loop. Track 1 carries
+ *   no root (`SkeletonPoseRootFrame` takes track 0's), so the flinch moves
+ *   nothing, and the loop underneath keeps its own clock and its own root.
+ *   The port's track 1 is `Actor.react`, as it is for class
+ *   0x30's `ActorPlayHitReaction` (`FUN_004544C0`), which makes the same call.
+ * * bones 9 and up -- `ActorSetMotion(obj+0x194, clip)` at `0x0044A3DB`, a
+ *   hard cut on **track 0**: the clip replaces the loop, root and all.
+ *
+ * The way out reads track 0 whichever arm ran: `g_motion_play_length
+ * [obj+0x1B4] - 1 <= obj+0x19C` at `0x0044A3EA`..`0x0044A401`, the clip
+ * `obj+0x1B4` names and the cursor at `obj+0x19C`. After a leg shot that is
+ * the reaction's own end. After any other shot it is **the loop's**, which
+ * reaches its last frame somewhere in the next play length -- so a flinch is
+ * over whenever the loop comes round, not after the reaction clip's
+ * thirty-odd frames.
+ *
+ * The port played every stumble on its one-shot channel as well, which gave
+ * the flinch its clip's root travel (0x3A3's runs 2.2 units back and returns)
+ * and held the state -- in which the next shot is a knockdown, state 1 not
+ * being state 7 -- for the whole clip.
  */
 export function ThrowerStateHitReaction(obj: ThrowerActor, rng: Rng,
                                         host: GameHost): void {
-  const bone = Math.min(REACT_BONE_MAX, Math.max(0, obj.thr.reactBone));
+  if (obj.thr.reactBone > REACT_BONE_MAX) obj.thr.reactBone = REACT_BONE_MAX;
+  const bone = obj.thr.reactBone;
   const group = T.chars?.reaction_groups?.[bone] ?? 0;
   const motion = Class31SetOf(obj)?.reactions?.[group];
 
   if (obj.sub === 0) {
-    obj.vel.x = obj.vel.y = obj.vel.z = 0;
-    obj.accY = 0;
+    ClearCurrentActorVelocityAndAccel(obj);
     if (motion !== undefined && MotionOf(obj, motion)) {
-      obj.react = { motion, ticks: 0, blend: bone < REACT_HARD_SET_BONE
-                                          ? REACT_FADE : 0,
-                    hard: bone >= REACT_HARD_SET_BONE };
-      playOnce(obj, motion);
+      if (bone < REACT_HARD_SET_BONE) {
+        obj.react = { motion, ticks: 0, blend: REACT_FADE, hard: false };
+      } else {
+        ActorSetMotion(obj, motion);
+      }
     }
     obj.sub = 1;
+  } else if (obj.sub !== 1) {
+    return;
   }
 
-  const len = ActorClipLength(obj, obj.action?.motion ?? 0);
-  if (obj.action && ActorClipFrame(obj) < len - 1) return;
+  if (ActorPlayCursor(obj)
+      < MotionPlayLength(obj, ActorPlayMotion(obj)) - 1) return;
 
   const knocked = obj.flags2 & ThrowerFlag.KnockedDown;
   obj.flags &= ~ActorFlag.Reacting;
@@ -183,7 +221,9 @@ export function ThrowerStateKnockedTumbling(obj: ThrowerActor, host: GameHost,
   if (obj.sub === 0) {
     const reentry = (obj.flags2 & ThrowerFlag.ReactReentry) !== 0;
     obj.flags2 |= 0x180000;
-    obj.flags &= ~ActorFlag.PoseFrozen;
+    // `& 0xffffbfff | 0x200000` on `obj+0x34`, as the fall's sub 0 has it:
+    // the body is being knocked down until the exit below takes it away.
+    obj.flags = (obj.flags & ~ActorFlag.PoseFrozen) | KNOCKDOWN_BODY;
     const clip = TUMBLE_BY_STANCE[stance] ?? TUMBLE_BY_STANCE[0];
     if (!reentry) {
       obj.vel.x = obj.vel.y = obj.vel.z = 0;
@@ -275,7 +315,7 @@ export function ThrowerStateKnockedTumbling(obj: ThrowerActor, host: GameHost,
   const len = ActorClipLength(obj, obj.action?.motion ?? 0);
   if (obj.action && ActorClipFrame(obj) < len - 2) return;
   obj.flags2 &= ~(ThrowerFlag.ReactReentry | ThrowerFlag.BandLatched);
-  obj.flags = (obj.flags & ~(ActorFlag.Reacting | 0x200000))
+  obj.flags = (obj.flags & ~(ActorFlag.Reacting | KNOCKDOWN_BODY))
             | ActorFlag.ShotImmune;
   obj.cooldown = TUMBLE_COOLDOWN;
   obj.state = ThrowerState.StandAndDecide;

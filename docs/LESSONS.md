@@ -1286,3 +1286,24 @@ the user sent `?stage=1&block=1&step=3&op=9`. **Ask for the address, or
 take the page's own URL, before choosing a class**, then read
 `G.g_object_list` there for what is actually on screen (L83's list-every-spawn
 pointed at a report).
+
+**L90 -- A report that the port plays wrong is a claim about the exe too, and
+the exe's own number comes before the fix.** Stage 2 block 5's two `zsass`
+were reported "pushed back much too far by being shot -- I can basically push
+them off the stage". Read in full, most of that push is the engine's:
+`ThrowerStateFallAndLand` throws the body `150 / d` units along the camera's
+depth and then plays `0x11B`, a back handspring whose root runs 21.4 units
+backwards with root motion on -- about 24 units a knockdown, faithfully. What
+the port had wrong was around it, and every fault pushed the same way: the
+stumble on its one-shot channel instead of on track 1 (so it carried the
+stumble clip's root, and held the state a second shot turns into a knockdown
+for the whole clip instead of until track 0's loop came round), the baked clip
+length where the engine reads `g_motion_play_length`, and no thirty frames of
+immunity and no router at the hand-back. Under a held trigger that was 288
+units of drift in fifteen seconds where the faithful port gives 168 -- still a
+long way, because the game does it. A clamp on the push would have closed the
+report and made a game that is not this one. **Work out what the exe does with
+the reported input first, measure before and after at the reported address,
+and say which part of the complaint is the engine's own.** And a port channel
+standing in for a motion track is a claim about which track: `obj.action` is
+not track 1, and a state's cursor test reads track 0 whatever else is playing.

@@ -24,44 +24,23 @@ import { ActorFlag, ThrowerFlag, type ThrowerActor } from "../actor";
 import { G, HIT_SLOT_NONE } from "../globals";
 import { CameraSlotVacate } from "../camera/slots";
 import { SpawnGroundRingEffect } from "../effects/ring_effect";
+import { SpawnSpriteEffect } from "../effects/sprite";
 import type { GameHost } from "../host";
 import { vec3 } from "../vec";
 import { QueryGroundHeightAt } from "../coli";
 import { ActorDespawn } from "../despawn";
-import { MotionOf, T } from "../tables";
-import { GAME_HZ } from "../class30/states";
-import { ActorArcVelocity, ActorClipFrame, ActorClipLength } from "./arc";
+import { MotionOf, MotionPlayLength, T } from "../tables";
+import { ActorSetOneShotBlended } from "../class30/motion_cue";
+import { GAME_HZ, MotionFade } from "../class30/states";
+import {
+  ActorArcBeginToAtSpeed, ActorArcVelocityY, ActorClipFrame, ActorClipLength,
+  ActorPlayCursor, ActorPlayMotion, ClearCurrentActorVelocityAndAccel,
+} from "./arc";
 import { GroundDustCode, ThrowerEmitGroundDust } from "./ground_dust";
+import { ThrowerPickNextState } from "./router";
 import { ThrowerState, ThrowerMotion } from "./states";
 import { ThrowerMotionOf, ThrowerStanceOf } from "./tables";
 
-
-/**
- * `ActorArcBeginToAtSpeed`'s `minFrames` — **10 or 15, not always 15.**
- *
- * ```
- * 0044dbaa  TEST EAX, 0x2000000    a900000002   ; EAX = obj+0x136C
- * 0044dbc9  JZ   0044dbda                       ; clear -> 15
- * 0044dbce  MOV  EDI, 0xa                       ; set   -> 10 ...
- * 0044dbd3  TEST EAX, 0x44000000   a900000044   ; ... EAX = obj+0x34
- * 0044dbd8  JZ   0044dbdf                       ;     unless dead or reacting
- * 0044dbda  MOV  EDI, 0xf                       ;     -> 15
- * ```
- *
- * `[proved]`. `ThrowerShotFeedback` (`FUN_00449B20`) raises
- * {@link ThrowerFlag.LowSphere} as half of `OR EDX, 0x6000000` on the head
- * shot that knocks a thrower down, so a live knocked-down thrower takes the
- * **10**-frame branch — and 10 frames is 3 units of travel each rather than 2.
- * The port hardcoded 15 and `dist2d / 2`, which is exactly the `N = 15` arm.
- */
-function ArcMinFrames(obj: ThrowerActor): number {
-  if (!(obj.flags2 & ThrowerFlag.LowSphere)) return 15;
-  return (obj.flags & (ActorFlag.Dead | ActorFlag.Reacting)) ? 15 : 10;
-}
-
-/** `[0x0055CCD4]` = `0000f041` = 30.0f: the world units an arc covers in
- *  `ArcMinFrames` frames. */
-const ARC_UNITS_PER_MIN = 30.0;
 
 const _view = vec3();
 const _dest = vec3();
@@ -85,8 +64,47 @@ const FALL_PROBE_RISE = 4.5;
 const DROP_PROBE_RISE = 1.0;
 /** The surface that kills whatever lands on it. `[likely]` deep water. */
 export const SURFACE_KILL = 0x5a;
-/** The get-up clip, for every character but 0x17. */
+/**
+ * `PUSH 0x11b` at `0x0044A788`: the clip sub 3 hands every character but 0x17
+ * to, through `SetCurrentActorMotionBlended` (`FUN_0044D230`) at fade 5.
+ *
+ * Called the get-up because sub 4 is the way back to the hub, and for 0x18
+ * and 0x19, which bounce and lie still first, it is one. For `zsass` it is a
+ * **back handspring**: in `szom.bin` bone 0 turns a whole revolution about x
+ * across its sixteen authored frames while the root runs 21.4 units along the
+ * clip's own +z -- backwards, away from where the actor faces. That travel is
+ * root motion like any other clip's (`SkeletonApplyRootMotion`, gate on for
+ * every class-0x31 actor), so a knocked-down `zsass` really does end up about
+ * twenty units further off than the knockback arc left it. What bounds it is
+ * where sub 4 lets the clip go: `g_motion_play_length[0x11B] - 2` = 27 on the
+ * cursor, and the draw of that same frame takes it to 28 -- authored frame
+ * 14, 20.36 of the root, not the clip's last frame's 21.43.
+ */
 const GET_UP_CLIP = 0x11b;
+/**
+ * `MOV dword ptr [ESI + 0x133c], 0x1e` at `0x0044A7EB`, with `OR AH, 0x1` on
+ * `obj+0x34`: a `zsass` back on its feet ricochets shots for thirty frames,
+ * which `EnemyThrowerUpdate` counts down before it takes the bit away.
+ */
+const ZSASS_GETUP_COOLDOWN = 0x1e;
+/**
+ * `obj+0x34` bit `0x200000` on a class-0x31 actor: **a body being knocked
+ * down.** Sub 0 raises it -- `OR EDX, 0x200000` at `0x0044A49C`, and the
+ * tumble's sub 0 the same -- and each takes it down with the rest of the
+ * reaction on the way back to the hub (`AND EBP, 0xbfdffeff` at `0x0044A7C5`).
+ * Its reader is `ThrowerPushOutOfWorld` (`FUN_00449D40`), on the object the
+ * crowd test found: a thrower clinging to a wall or a ceiling that such a body
+ * runs into is knocked off it. Class 0x33's burning car raises the same bit of
+ * its own word for its own reasons (`ActorFlag.FireLoop`, `L3`).
+ */
+export const KNOCKDOWN_BODY = 0x200000;
+/**
+ * `PUSH -0x1; PUSH 0x1; PUSH 0x61` at `0x0044A877`: the sprite a body that
+ * landed on the killing surface leaves, in `g_scene_index` 3 block 4 only.
+ */
+const KILL_SURFACE_SPRITE = 0x61;
+const KILL_SURFACE_SPRITE_SCENE = 3;
+const KILL_SURFACE_SPRITE_BLOCK = 4;
 /** The corpse lies here for two seconds, sinking this far a frame. */
 const CORPSE_FRAMES = 0x78;
 const CORPSE_SINK = 0.04;
@@ -154,67 +172,147 @@ function playOnce(obj: ThrowerActor, motion: number): void {
  */
 export function ThrowerBeginKnockbackArc(obj: ThrowerActor,
                                         host: GameHost): void {
-  // The standing arc first: no knockback at all, over the minimum duration.
   // [diverges] The engine always has a camera; a host that cannot answer is
-  // the port's own case, and leaving `arcTotal` at zero would collapse the
-  // whole fall into one frame rather than merely skip the throw.
-  obj.arcFrom = { x: obj.pos.x, y: obj.pos.y, z: obj.pos.z };
-  obj.arcTo = { x: obj.pos.x, y: obj.pos.y, z: obj.pos.z };
-  obj.arcFrames = 0;
-  const minFrames = ArcMinFrames(obj);
-  obj.arcTotal = minFrames;
-  if (!host.viewSpaceOf(obj.at, _view)) return;
-  const len = Math.hypot(_view.x, _view.y, _view.z);
-  if (len < 1e-4) return;
+  // the port's own case, and so is a tracked point sitting exactly on the eye,
+  // which the engine divides by. Either way the port flies the standing arc --
+  // no knockback at all, over `ActorArcBeginToAtSpeed`'s minimum duration --
+  // because leaving `arcTotal` at zero would collapse the whole fall into one
+  // frame rather than merely skip the throw.
+  const len = host.viewSpaceOf(obj.at, _view)
+    ? Math.hypot(_view.x, _view.y, _view.z) : 0;
+  if (len < 1e-4) {
+    ActorArcBeginToAtSpeed(obj, obj.pos);
+    return;
+  }
   let t = (15.0 / len) * 10.0;
   if (t < 0) t = 0;
   if (obj.flags & ActorFlag.Dead) t *= 1.5;
   // `p = (obj+0x70, obj+0x74, obj+0x78 - t)`, then back through the
   // view-to-world matrix. `-z` is in front, so this is away from the viewer.
   host.viewPoint(_view.x, _view.y, _view.z - t, _dest);
-  obj.arcTo = {
-    x: _dest.x,
-    // A wall-clinging `zslman` keeps its own height: `local_14` is overwritten
-    // with `obj+0x44` after the transform.
-    y: obj.charType === CHAR_ZSLMAN && (obj.flags2 & 0xc0) ? obj.pos.y
-       : _dest.y,
-    z: _dest.z,
-  };
-  // `ActorArcBeginToAtSpeed`'s own duration rule, which is what `FUN_0044DB50`
-  // gives it: `dist2d / (30.0 / minFrames)`, floored at `minFrames`. The
-  // divisor is a `FILD`/`FDIVR` pair the decompiler drops entirely —
-  // `FILD [ESP+0xc]` (`db44240c`) then `FDIVR [0x0055ccd4]` (`d83dd4cc5500`)
-  // at 0x0044DBE3, where `[0x0055CCD4]` = `0000f041` = 30.0f.
-  obj.arcTotal = Math.max(minFrames, Math.trunc(Math.hypot(
-    obj.arcTo.x - obj.arcFrom.x, obj.arcTo.z - obj.arcFrom.z)
-    / (ARC_UNITS_PER_MIN / minFrames)));
+  // A wall-clinging `zslman` keeps its own height: `local_14` is overwritten
+  // with `obj+0x44` after the transform.
+  if (obj.charType === CHAR_ZSLMAN && (obj.flags2 & 0xc0)) _dest.y = obj.pos.y;
+  // `PUSH` the six floats and `CALL 0x0044db50` at `0x0044D216` -- the arc's
+  // duration, and whether it is flown at ten frames or fifteen, are that
+  // routine's to decide, and it is called rather than copied here.
+  ActorArcBeginToAtSpeed(obj, _dest);
+}
+
+/**
+ * `vel += acc; pos += vel` -- `EnemyThrowerUpdate`'s tail, `0x00449954` ..
+ * `0x00449987`, which the engine runs after every state on every frame.
+ *
+ * `[port-only]` as a function: the port runs that step inside the class-0x31
+ * states that move by velocity rather than in `EnemyThrowerUpdate`, as it has
+ * since the class was ported. The fall runs it once on each of its paths that
+ * leaves a velocity or an acceleration standing, **after** the state's own
+ * tests, which is the engine's order: sub 2's ground test reads `pos.y +
+ * vel.y` with the velocity the last frame left, and only then does gravity
+ * go in. On every other path both are zero -- sub 0 clears them, the landing
+ * clears them -- and the step would move nothing.
+ */
+function ThrowerFallIntegrate(obj: ThrowerActor, frames: number): void {
+  obj.vel.x += obj.accX * frames;
+  obj.vel.y += obj.accY * frames;
+  obj.vel.z += obj.accZ * frames;
+  obj.pos.x += obj.vel.x * frames;
+  obj.pos.y += obj.vel.y * frames;
+  obj.pos.z += obj.vel.z * frames;
+}
+
+/**
+ * Raise {@link ActorFlag.PoseFrozen} once the clip passes the character's
+ * threshold -- the switch on `obj+0x1F4` at `0x0044A538` and again at
+ * `0x0044A5CD`. A type outside 0x16..0x19 falls out of the jump table and
+ * freezes nothing.
+ *
+ * `[port-only]` as a function: two inline copies of one pattern, with a
+ * different table each.
+ */
+function ThrowerFreezePastFrame(obj: ThrowerActor,
+                                table: Record<number, number>): void {
+  const frame = table[obj.charType];
+  if (frame !== undefined && ActorPlayCursor(obj) >= frame) {
+    obj.flags |= ActorFlag.PoseFrozen;
+  }
+}
+
+/**
+ * `g_motion_play_length[obj+0x1B4]` for the clip on the track -- what every
+ * cursor test in this routine is measured against, and **not** the clip's
+ * baked length: the play length is `2n - 2` or `2n - 3` ticks where the
+ * baked clip runs `2n`, so reading the baked length held each clip two or
+ * three frames past where the engine lets go of it.
+ *
+ * `[port-only]` as a function: one `MOVSX` off `0x004E07D0` at each site.
+ */
+function ThrowerTrackPlayLength(obj: ThrowerActor): number {
+  return MotionPlayLength(obj, ActorPlayMotion(obj));
 }
 
 /**
  * `ThrowerStateFallAndLand` — `FUN_0044A450`, class 0x31 state 2.
  *
  * The knockdown *and* the death fall — which state it turns into depends on
- * whether the actor was still alive when it landed. Being knocked down is
- * survivable: it lies there for a random three to thirty frames, plays a
- * get-up clip and goes back to deciding.
+ * whether the actor was still alive when it landed. Five subs, and 0 falls
+ * into 1, 1 into 2, 2 into 3 and 3 into 4 on the frame each finishes, as the
+ * engine's switch does:
+ *
+ * * **0** raises the reaction's bits, starts the airborne clip (a fade of 5
+ *   the first time, a hard cut on a re-entry for every type but 0x16), and
+ *   throws the body with `ThrowerBeginKnockbackArc` -- at most twice a fall.
+ * * **1** rides the arc with `ActorArcVelocityY` (`FUN_0044DDE0`), freezing
+ *   the pose past the type's frame.
+ * * **2** falls under `obj+0x5C` gravity and bounces until the vertical speed
+ *   is under 0.15 or 0x78 frames have passed; `zsass` never bounces. On the
+ *   settle the body goes shot-immune.
+ * * **3** waits: `zsass` for the airborne clip to reach its play length less
+ *   one, the rest for `(rand() % 10 + 1) * 3` frames. Then clip `0x11B`.
+ * * **4** waits for that clip's play length less two, and hands back: a
+ *   `zsass` with thirty frames of shot immunity, a decapitated thrower to
+ *   state 17, and everyone else to `ThrowerPickNextState`.
+ *
+ * A body that is dead, or landed on surface `0x5A`, leaves sub 3 the other
+ * way once its clip has run to its play length (`obj+0x1F1`, the draw's
+ * "reached the end" byte): `zsass` to its death clip, the rest to a corpse.
+ *
+ * **How far a `zsass` goes.** The arc throws it `150 / d` units along the
+ * camera's own depth, `d` its distance: about 3.3 at the 45 units stage 2's
+ * block 5 stands them at. Clip `0x11B`'s back handspring then carries it the
+ * root's travel to authored frame 14, 20.36 units, so a knockdown there
+ * costs about 23.7 -- the engine's own figure, and most of what was
+ * reported. The port used to read every cursor test against the baked clip's
+ * length and so ran the handspring to its last frame; it forgot the thirty
+ * frames of immunity at the end, so the next shot could knock it down again
+ * at once; and it went straight to state 7 without the router. Together with
+ * the stumble on the wrong track (`ThrowerStateHitReaction`, `0x0044A360`),
+ * that made a held trigger walk the pair backwards off the walkway faster
+ * than the game does.
  */
 export function ThrowerStateFallAndLand(obj: ThrowerActor, host: GameHost,
                                         dt: number, rng: Rng,
                                         events?: Events): void {
   const frames = dt * GAME_HZ;
+  // `MOV EDI, [ECX + 0x14]` at `0x0044A46E`, before the switch: the set's
+  // airborne clip, which subs 0 and 1 both start.
+  const clip = ThrowerMotionOf(obj, ThrowerMotion.Airborne);
 
   if (obj.sub === 0) {
     const reentry = (obj.flags2 & ThrowerFlag.ReactReentry) !== 0;
     obj.flags2 = (obj.flags2 & ~(ThrowerFlag.Surface | ThrowerFlag.OffGround))
                | 0x180000;
-    obj.flags &= ~ActorFlag.PoseFrozen;
-    const clip = ThrowerMotionOf(obj, ThrowerMotion.Airborne);
+    obj.flags = (obj.flags & ~ActorFlag.PoseFrozen) | KNOCKDOWN_BODY;
     if (!reentry) {
-      obj.vel.x = obj.vel.y = obj.vel.z = 0;
-      obj.accY = 0;
-      if (clip !== undefined) playOnce(obj, clip);
+      ClearCurrentActorVelocityAndAccel(obj);
+      // `ActorSetMotionBlended(obj+0x194, clip, 0, 5)` at `0x0044A4C3`.
+      if (clip !== undefined) {
+        ActorSetOneShotBlended(obj, clip, 0, MotionFade.Quick);
+      }
       obj.thr.knockCount = 0;
     } else {
+      // `ActorSetMotion` at `0x0044A4E9`: a hard cut, and none at all for
+      // `zsass`, whose clip plays on through the second hit.
       if (obj.charType !== CHAR_ZSASS && clip !== undefined) playOnce(obj, clip);
       obj.thr.knockCount += 1;
     }
@@ -224,50 +322,46 @@ export function ThrowerStateFallAndLand(obj: ThrowerActor, host: GameHost,
     } else {
       obj.flags |= ActorFlag.NoHitReaction;
     }
-    // The last line of the engine's own case 0, and the one the port did not
-    // have: a thrower leaves `g_enemies_alive` on the frame it is knocked off
-    // its feet, not when the body stops bouncing three seconds later. The
-    // whole fall used to run before the room-clear gate could see it.
+    // The last line of the engine's own case 0: a thrower leaves
+    // `g_enemies_alive` on the frame it is knocked off its feet, not when the
+    // body stops bouncing three seconds later.
     ThrowerReleaseSlotOnDeath(obj);
     obj.sub = 1;
   }
 
   if (obj.sub === 1) {
-    if (ActorClipFrame(obj) >= (FREEZE_AIR[obj.charType] ?? 44)) {
-      obj.flags |= ActorFlag.PoseFrozen;
-    }
-    if (obj.arcFrames < obj.arcTotal) {
-      ActorArcVelocity(obj);
-      obj.arcFrames += frames;
-      obj.pos.x += obj.vel.x * frames;
-      obj.pos.y += obj.vel.y * frames;
-      obj.pos.z += obj.vel.z * frames;
+    ThrowerFreezePastFrame(obj, FREEZE_AIR);
+    if (ActorArcVelocityY(obj, frames)) {
+      ThrowerFallIntegrate(obj, frames);
       return;
     }
     if (obj.charType === CHAR_ZSASS) {
-      obj.vel.x = obj.vel.y = obj.vel.z = 0;
+      ClearCurrentActorVelocityAndAccel(obj);
+    } else if (obj.charType > CHAR_ZSASS && obj.charType < 0x1a
+               && clip !== undefined) {
+      // `ActorSetMotionBlended(obj+0x194, clip, 0, 5)` at `0x0044A58E`: the
+      // other three types start the airborne clip over for the drop.
+      ActorSetOneShotBlended(obj, clip, 0, MotionFade.Quick);
     }
+    // `MOV dword ptr [ESI + 0x5c], 0xbd5f0123` at `0x0044A5A0`.
     obj.accY = FALL_GRAVITY;
+    obj.sub = 2;
     obj.flags &= ~ActorFlag.PoseFrozen;
     obj.thr.sinceLanding = 0;
-    obj.sub = 2;
   }
 
   if (obj.sub === 2) {
-    if (ActorClipFrame(obj) >= (FREEZE_FALL[obj.charType] ?? 44)) {
-      obj.flags |= ActorFlag.PoseFrozen;
-    }
+    ThrowerFreezePastFrame(obj, FREEZE_FALL);
     obj.thr.sinceLanding += frames;
-    obj.vel.y += obj.accY * frames;
     // `QueryGroundHeightAt` falls back to the script's own ground plane when
     // the trace misses, which is the engine's own answer.
     const ground = QueryGroundHeightAt(obj.pos.x, obj.pos.y + FALL_PROBE_RISE,
                                        obj.pos.z);
+    // `FLD [ESI+0x44]; FADD [ESI+0x50]; FCOMP` at `0x0044A623`: last frame's
+    // velocity, before this frame's gravity goes in.
     if (obj.pos.y + obj.vel.y > ground
         && obj.thr.sinceLanding < FALL_FRAME_CAP) {
-      obj.pos.x += obj.vel.x * frames;
-      obj.pos.y += obj.vel.y * frames;
-      obj.pos.z += obj.vel.z * frames;
+      ThrowerFallIntegrate(obj, frames);
       return;
     }
     obj.pos.y = ground;
@@ -284,10 +378,10 @@ export function ThrowerStateFallAndLand(obj: ThrowerActor, host: GameHost,
         && obj.thr.sinceLanding < FALL_FRAME_CAP
         && obj.charType !== CHAR_ZSASS) {
       obj.flags &= ~ActorFlag.PoseFrozen;
-      return;                                    // bounce again
+      ThrowerFallIntegrate(obj, frames);         // bounce again
+      return;
     }
-    obj.vel.x = obj.vel.y = obj.vel.z = 0;
-    obj.accY = 0;
+    ClearCurrentActorVelocityAndAccel(obj);
     // `AND AH, 0x9f` (`80e49f`) then `OR AH, 0x1` (`80cc01`) on `obj+0x34`,
     // and in between `AND EBP, 0xffffbfff` (`81e5ffbfffff`) on `obj+0x136C`
     // at 0x0044A6E6 — the body has settled, so the next landing may puff
@@ -300,27 +394,65 @@ export function ThrowerStateFallAndLand(obj: ThrowerActor, host: GameHost,
   }
 
   if (obj.sub === 3) {
-    const alive = !obj.dead && obj.thr.landSurface !== SURFACE_KILL;
-    if (!alive) return ThrowerDie(obj);
+    // `TEST EAX, 0x4000000` on `obj+0x34` at `0x0044A71E`, then the surface:
+    // the flag the killing hit raised, not the port's own `dead`.
+    if ((obj.flags & ActorFlag.Dead) || obj.thr.landSurface === SURFACE_KILL) {
+      // `obj+0x1F1` -- the byte `SkeletonAdvancePlayCursor` (`FUN_004111A0`)
+      // sets once the cursor has reached the play length. Until then the
+      // body lies on the clip it fell in.
+      if (ActorPlayCursor(obj) < ThrowerTrackPlayLength(obj)) return;
+      if (obj.thr.landSurface === SURFACE_KILL) {
+        obj.flags |= ActorFlag.Dead;
+        ThrowerReleaseSlotOnDeath(obj);
+        if (G.g_scene_index === KILL_SURFACE_SPRITE_SCENE
+            && G.g_evt_block_index === KILL_SURFACE_SPRITE_BLOCK) {
+          SpawnSpriteEffect(vec3(obj.pos.x, obj.pos.y, obj.pos.z), 0, 0,
+                            KILL_SURFACE_SPRITE, 1, -1, host, events);
+        }
+      }
+      if (obj.charType !== CHAR_ZSASS) {
+        ThrowerEnterCorpseState(obj);
+        return;
+      }
+      obj.sub = 0;
+      obj.state = ThrowerState.Death;
+      return;
+    }
     if (obj.charType === CHAR_ZSASS) {
-      if (obj.action) return;
+      if (ActorPlayCursor(obj) < ThrowerTrackPlayLength(obj) - 1) return;
     } else {
       obj.slideTimer -= frames;
       if (obj.slideTimer > 0) return;
     }
-    if (obj.charType !== CHAR_ZSKAMERE) playOnce(obj, GET_UP_CLIP);
+    // `SetCurrentActorMotionBlended(obj+0x194, 0x11b, 0, 5)` at `0x0044A78E`.
+    if (obj.charType !== CHAR_ZSKAMERE) {
+      ActorSetOneShotBlended(obj, GET_UP_CLIP, 0, MotionFade.Quick);
+    }
     obj.sub = 4;
   }
 
-  // Sub 4: the get-up plays out, and the knocked-down latch decides whether it
-  // owes you a stagger first.
-  const len = ActorClipLength(obj, obj.action?.motion ?? 0);
-  if (obj.action && ActorClipFrame(obj) < len - 2) return;
+  if (obj.sub !== 4) return;
+  // Sub 4: the clip plays out to its play length less two, and the
+  // knocked-down latch decides whether it owes you a get-up first.
+  if (ActorPlayCursor(obj) < ThrowerTrackPlayLength(obj) - 2) return;
   const wasKnocked = obj.flags2 & ThrowerFlag.KnockedDown;
-  obj.flags &= ~(ActorFlag.ShotImmune | ActorFlag.Reacting);
-  obj.flags2 &= ~(ThrowerFlag.BandLatched | ThrowerFlag.ReactReentry);
-  obj.sub = 0;
-  obj.state = wasKnocked ? ThrowerState.GetUp : ThrowerState.StandAndDecide;
+  // `AND EBP, 0xbfdffeff` and `AND EDI, 0xffbfdfff` at `0x0044A7C5`.
+  obj.flags &= ~(ActorFlag.Reacting | KNOCKDOWN_BODY | ActorFlag.ShotImmune);
+  obj.flags2 &= ~(ThrowerFlag.ReactReentry | ThrowerFlag.BandLatched);
+  if (obj.charType === CHAR_ZSASS) {
+    obj.cooldown = ZSASS_GETUP_COOLDOWN;
+    obj.flags |= ActorFlag.ShotImmune;
+    obj.state = ThrowerState.StandAndDecide;
+    obj.sub = 0;
+  }
+  if (wasKnocked) {
+    obj.state = ThrowerState.GetUp;
+    obj.sub = 0;
+    return;
+  }
+  // `CALL 0x0044adb0` at `0x0044A8D6`, with the state still 2 for every type
+  // but `zsass` -- the router always moves it on.
+  ThrowerPickNextState(obj, rng, host);
 }
 
 /**

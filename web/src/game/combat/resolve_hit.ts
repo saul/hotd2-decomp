@@ -655,10 +655,11 @@ const HEADLESS_EXEMPT = new Set([3, 0x12, 0x18]);
  * The head, as `ResolveHit` asks it: `00409760 83fd02 CMP EBP, 0x2` for the
  * pop and `004097D7 83fd02 CMP EBP, 0x2` for the tail's payout, `EBP` loaded
  * from `g_shot_bone[p]` at `0x0040943A`. An immediate, so it lives here --
- * this used to read the bundle's `head_bone`, which the exporter writes as
- * the same `2` for every character type.
+ * this used to read the bundle's `head_bone`, which the exporter wrote as
+ * the same `2` for every character type; the field is gone from the bundle.
+ * Exported for the harnesses that aim a headshot.
  */
-const HEAD_BONE = 2;
+export const HEAD_BONE = 2;
 
 // `ScoreAddForPlayer` amounts, all immediates in this routine's tail.
 /** `004097DC 6a78 PUSH 0x78` -- a hit on bone 2. */

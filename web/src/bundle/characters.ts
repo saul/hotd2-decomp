@@ -101,8 +101,6 @@ export interface CharacterType {
    * kept so the index still lines up with `g_character_part_bones`.
    */
   parts?: (CharacterPartJson | null)[];
-  /** Bone the score model treats as the head — 2 on every humanoid. */
-  head_bone: number;
   /**
    * `{body_condition: [motion per reaction group]}` — the stumble the actor
    * plays when a shot hurts it but does not kill it. See

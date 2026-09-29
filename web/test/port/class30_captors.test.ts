@@ -1953,7 +1953,7 @@ console.log("\nclass 0x30's twelve entrance states — do the waits end?");
           left > 0x14 && left <= 0x14 + 3, `left after ${left} frames`);
     check("...into state 10, which `g_class30_states` says is "
           + "`ZombieReleaseAndDespawn` (`FUN_00455490`) and not the "
-          + "`ActorAbortAttackAndLeave` this used to name",
+          + "routine at `0x0045D9F0` this used to name",
           z.state === ZombieState.Leave || z.despawned,
           `state ${z.state}${z.despawned ? " despawned" : ""}`);
   }

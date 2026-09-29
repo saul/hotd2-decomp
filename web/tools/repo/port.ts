@@ -26,7 +26,7 @@
  *     and a hand-rolled `dt * 60` in `game/` or `render/`;
  *  7. the exporter bakes every class-0x31 clip the port names as a literal,
  *     and -- with a bundle -- class 0x33's tail blocks and the crawler's
- *     unreachable hit frame are in it;
+ *     leap (its entry, lunge and arc clips) are in it;
  *  8. and the same citation rule holds in `docs/`: a name beside an address
  *     there agrees with `functions.tsv`.
  *
@@ -929,35 +929,38 @@ export function checkClass33Selectors(t: PortTree, out: Findings): void {
 }
 
 /**
- * The crawlers' undamaged attack, as the exe holds it at `0x00566E70`:
- * character types 0x07, 0x0B and 0x0C share the row. `hod2lib/combat.ts`'s
- * `attackHitLands` is the long form and `web/tools/checks/combat.ts` checks
- * the numbers against the exe; here they are only the join key into the
- * bundle.
+ * The crawler's undamaged attack, as the exe holds it at `0x00566E70`: body
+ * condition 4's entry 2, `{997, 1051, 26.0f, 40, 9, 1}`. Character type 0xC is
+ * the only one the shipped data gives condition 4
+ * (`web/tools/checks/split_unreachable.ts` holds that), so it is the only one
+ * this asks about.
  */
-const CRAWLER_TYPES = [0x07, 0x0B, 0x0C];
+const CRAWLER_TYPE = 0x0C;
 const CRAWLER_CONDITION = 4;
 const CRAWLER_INDEX = 2;
-const CRAWLER_CLIP = 997;
-const CRAWLER_HIT_FRAME = 40;
+const CRAWLER_LUNGE = 1051;
+/** `g_class30_leap_strike_arc_script` (`0x00593180`) as the bundle names it. */
+const CRAWLER_ARC_SCRIPT = "leap_strike";
 
 /**
- * The attack that is meant to miss has to be **in** the bundle to miss.
+ * What a crawler attacks with has to be **in** the bundle.
  *
- * `ZombieStateStrike` (`FUN_00455A40`) fires its hit on
- * `obj+0x19C == entry+0x08` exactly and leaves the state at
- * `g_motion_play_length[obj+0x1B4] - 1`, so the shipped condition-4 entry of
- * clip 997 at hit frame 40 -- against a play length of 20 -- can never land:
- * the engine's undamaged crawler swings and misses every time. `game/`
- * indexes the table blind, as the engine does, so what can go wrong is the
- * bundle: the entry dropped, or kept with clip 997 not baked, which is a
- * play length of 0 and a strike that ends on its first frame. Both are asked
- * of every exported stage that places one of these types.
+ * `ZombieStateHoldAtRange` sends body condition 4 to `ZombieStateLeapStrike`
+ * (`FUN_0045E330`) and never to `ZombieStateStrike` (`0x0045585E`), so a
+ * `znkager` reads its drawn entry for the lunge (`+0x02`), the distance it
+ * closes to (`+0x04`) and, through `ActorStrikeConnect` on landing, the
+ * overlay kind and cancel mask -- and **not** the strike clip or the hit
+ * frame, which is why the entry's hit frame of 40 on a 20-frame clip is not a
+ * whiff. It then flies `g_class30_leap_strike_arc_script` (`L92`). What can go
+ * wrong is the bundle -- the entry dropped, the lunge not baked, or the arc
+ * script or its clips missing, any of which leaves the leap with nothing to
+ * play. Asked of every exported stage that places a type-0xC class-0x30
+ * actor; with no bundle this is a note.
  */
-export function checkCrawlerWhiff(t: PortTree, out: Findings): void {
+export function checkCrawlerLeap(t: PortTree, out: Findings): void {
   const stages = bundleStages(t);
   if (!stages.length) {
-    out.note("the crawler's unreachable hit frame is unchecked (no bundle to look in)");
+    out.note("the crawler's leap is unchecked (no bundle to look in)");
     return;
   }
   let seen = 0;
@@ -965,48 +968,45 @@ export function checkCrawlerWhiff(t: PortTree, out: Findings): void {
     const chars = readJson(path).characters || {};
     const placed = new Set((chars.placements || [])
       .filter((p: Json) => p.class === 0x30).map((p: Json) => p.char_type));
-    for (const [key, ty] of Object.entries<Json>(chars.types || {})) {
-      const ct = Number.parseInt(key, 10);
-      if (!CRAWLER_TYPES.includes(ct) || !placed.has(ct)) continue;
-      const where = `${basename(dirname(path))}/${basename(path)} type ${hexw(ct, 2)}`;
-      const row = (ty.attacks || {})[String(CRAWLER_CONDITION)] || {};
-      const entry = row[String(CRAWLER_INDEX)];
-      if (entry === undefined || entry === null) {
-        out.fail(`${where}: body condition ${CRAWLER_CONDITION} carries no `
-          + `attack ${CRAWLER_INDEX}, so an undamaged crawler draws an index `
-          + `the bundle cannot satisfy -- the engine's own swing is missing and `
-          + `whatever the port does instead is not it`);
-        continue;
-      }
-      seen++;
-      if (entry.strike !== CRAWLER_CLIP || entry.hit_frame !== CRAWLER_HIT_FRAME) {
-        out.fail(`${where}: attack ${CRAWLER_INDEX} is clip ${show(entry.strike)} `
-          + `at hit frame ${show(entry.hit_frame)}, not ${CRAWLER_CLIP} at `
-          + `${CRAWLER_HIT_FRAME}`);
-        continue;
-      }
-      const clip = (ty.motions || {})[String(CRAWLER_CLIP)];
-      if (!truthy(clip)) {
-        out.fail(`${where}: attack ${CRAWLER_INDEX} names clip ${CRAWLER_CLIP} `
-          + `and the bundle does not bake it, so the swing has no length and `
-          + `ends on its first frame`);
-        continue;
-      }
-      const play = clip.play || 0;
-      if (play <= 0 || entry.hit_frame < play) {
-        out.fail(`${where}: clip ${CRAWLER_CLIP} has play length ${play}, which `
-          + `puts hit frame ${entry.hit_frame} back inside the clip -- the `
-          + `swing would connect`);
-      }
+    const ty = (chars.types || {})[String(CRAWLER_TYPE)];
+    if (!placed.has(CRAWLER_TYPE) || ty === undefined || ty === null) continue;
+    const where = `${basename(dirname(path))}/${basename(path)}`;
+    const motions = ty.motions || {};
+    const row = (ty.attacks || {})[String(CRAWLER_CONDITION)] || {};
+    const entry = row[String(CRAWLER_INDEX)];
+    if (entry === undefined || entry === null) {
+      out.fail(`${where}: body condition ${CRAWLER_CONDITION} carries no attack `
+        + `${CRAWLER_INDEX}, so an undamaged crawler's leap has no lunge, `
+        + `no distance and no hit`);
+      continue;
     }
+    if (entry.lunge !== CRAWLER_LUNGE || !(String(CRAWLER_LUNGE) in motions)) {
+      out.fail(`${where}: attack ${CRAWLER_INDEX}'s lunge is ${show(entry.lunge)}, `
+        + `baked ${String(entry.lunge) in motions ? "True" : "False"} -- the crawler `
+        + `would close on no clip`);
+      continue;
+    }
+    const script = ((chars.combat || {}).arc_scripts || {})[CRAWLER_ARC_SCRIPT];
+    if (!Array.isArray(script) || script.length !== 3) {
+      out.fail(`${where}: no three-stage ${CRAWLER_ARC_SCRIPT} arc script, so the `
+        + `leap flies with no clip`);
+      continue;
+    }
+    const missing = script.map((st: Json) => st.motion)
+      .filter((m: unknown) => !(String(m) in motions));
+    if (missing.length) {
+      out.fail(`${where}: the leap's clips [${missing.join(", ")}] are not baked `
+        + `for character type 0xC`);
+      continue;
+    }
+    seen++;
   }
   if (!seen) {
-    out.fail("no exported stage places a crawler with its condition-4 attack, "
-      + "so nothing was checked");
+    out.fail("no exported stage places a crawler, so nothing was checked");
     return;
   }
-  out.note(`the crawler's unreachable hit frame checks out in ${seen} `
-    + `exported (stage, character type) pairs`);
+  out.note(`the crawler's leap -- its entry, lunge and arc clips -- checks out `
+    + `in ${seen} exported stages`);
 }
 
 /**
@@ -1060,7 +1060,7 @@ export function runPort(t: PortTree, out: Findings): Ported {
   checkFrameMath(t, out);
   checkClass31LiteralClips(t, out);
   checkClass33Selectors(t, out);
-  checkCrawlerWhiff(t, out);
+  checkCrawlerLeap(t, out);
   checkDocsCitations(t, named, out);
   return ported;
 }

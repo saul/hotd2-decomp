@@ -16,6 +16,8 @@ import { ThrowerReleaseSlotOnDeath } from "../combat/counts";
 import { G } from "../globals";
 import type { GameHost } from "../host";
 import { MotionOf, T } from "../tables";
+import { MotionCrossFadeTo } from "../motion";
+import { ActorSetMotion } from "../class30/motion_cue";
 import { GAME_HZ } from "../class30/states";
 import { ActorClipFrame, ActorClipLength } from "./arc";
 import { ThrowerPickNextState } from "./router";
@@ -28,9 +30,12 @@ import { TraceActorSurfaceContactPoint } from "./surface";
 
 /** `g_bone_reaction_group` has sixteen entries, so the bone clamps here. */
 const REACT_BONE_MAX = 15;
-/** Bones below this cross-fade over 0x14 frames; 9 and up hard-cut. */
+/** Bones below this play on the overlay; 9 and up cut the base track. */
 const REACT_HARD_SET_BONE = 9;
+/** `MotionCrossFadeTo`'s fade back out, fade in and bone: `0x14`, 1, 1. */
 const REACT_FADE = 0x14;
+const REACT_FADE_IN = 1;
+const REACT_OVERLAY_BONE = 1;
 /** `ThrowerStateGetUp`'s clip — a `szom.bin` one, for every character type. */
 const GET_UP_CLIP = 0x127;
 /** The knock and get-up clips state 33 picks by stance. */
@@ -69,9 +74,15 @@ export function ThrowerStateHitReaction(obj: ThrowerActor, rng: Rng,
     obj.vel.x = obj.vel.y = obj.vel.z = 0;
     obj.accY = 0;
     if (motion !== undefined && MotionOf(obj, motion)) {
-      obj.react = { motion, ticks: 0, blend: bone < REACT_HARD_SET_BONE
-                                          ? REACT_FADE : 0,
-                    hard: bone >= REACT_HARD_SET_BONE };
+      // `0x0044A3C9 CALL MotionCrossFadeTo(obj+0x194, 1, clip, 0, 1, 0x14)`
+      // for a bone below 9 -- the clip on bone 1's subtree, faded back out
+      // over 0x14 -- and `ActorSetMotion(obj+0x194, clip)` for the rest.
+      if (bone < REACT_HARD_SET_BONE) {
+        MotionCrossFadeTo(obj, REACT_OVERLAY_BONE, motion, 0, REACT_FADE_IN,
+                          REACT_FADE);
+      } else {
+        ActorSetMotion(obj, motion);
+      }
       playOnce(obj, motion);
     }
     obj.sub = 1;

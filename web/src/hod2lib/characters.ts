@@ -28,7 +28,9 @@
  * module that owns a name.
  */
 
-import { arcScript, CLASS30_ARC_SCRIPTS } from "./arcscript";
+import {
+  arcScript, CLASS30_ARC_SCRIPTS, CLASS30_ENTRANCE_ARC_SCRIPTS,
+} from "./arcscript";
 import { civilianItemSlots, civilianMotionIds, civilianOrderedStates,
          TARGET_SCRIPT_SHAPE, targetScript,
          targetScriptMotions } from "./actorscript";
@@ -2046,12 +2048,19 @@ export async function resolveForStage(
       if (tail[1] === 30) {
         // The crouch and the three arc-script stages, both by type.
         entryClips.push(0x10c, 0x39f);
-        for (const a30 of Object.values(CLASS30_ARC_SCRIPTS)) {
-          for (const st of arcScript(tables, a30) ?? []) {
+        for (const k of CLASS30_ENTRANCE_ARC_SCRIPTS) {
+          for (const st of arcScript(tables, CLASS30_ARC_SCRIPTS[k]) ?? []) {
             entryClips.push(st.motion);
           }
         }
       }
+    }
+    // Body condition 4 attacks through `ZombieStateLeapStrike`
+    // (`FUN_0045E330`), not `ZombieStateStrike`: its arc script's windup,
+    // flight and landing clips. Every `znkager` is condition 4.
+    if (cls === 0x30 && tail[0] === 4) {
+      const leap = CLASS30_ARC_SCRIPTS.leap_strike;
+      for (const st of arcScript(tables, leap) ?? []) entryClips.push(st.motion);
     }
     // The two clips the `znjoe` release state names -- keyed by character
     // type, because that state is. See {@link BODY_CREATURE_HOST_CLIPS}.

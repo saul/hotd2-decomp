@@ -852,7 +852,7 @@ console.log("\nActorBodyConditionFromHands:");
   }
 }
 
-// -- 33c. the crawler's attack is meant to miss ------------------------------
+// -- 33c. the crawler's attack is a leap, and it lands ------------------------
 
 console.log("\nthe crawler's undamaged swing:");
 {
@@ -873,16 +873,20 @@ console.log("\nthe crawler's undamaged swing:");
    * Entry 2's hit frame is 40 against `g_motion_play_length[997]` = 20, and
    * `ZombieStateStrike` fires the hit on `obj+0x19C == entry+0x08` *exactly*
    * (`00455bdf`) while leaving the state at `play_length - 1` (`00455c0b`), so
-   * the equality is never reached: the engine's undamaged crawler swings and
-   * misses, every time. The frame counts and play lengths below are the real
-   * bake — 997 is 11 authored frames with a play length of 20, 1018 is 19 with
-   * 35, 1051 is 17 with 31.
+   * in **that** state the equality is never reached. The frame counts and play
+   * lengths below are the real bake — 997 is 11 authored frames with a play
+   * length of 20, 1018 is 19 with 35, 1051 is 17 with 31.
    *
-   * This is divergence 2, closed. The exporter used to drop entry 2 as an
-   * impossible row and `ZombiePickAttack` used to substitute another entry
-   * when the draw named one the bundle had no row for, which between them
-   * handed the crawler entry 3 — a swing that connects. Measured against the
-   * real stage-2 bundle: 29 hits landed in a minute before, 0 after.
+   * This section used to conclude from that that "the engine's undamaged
+   * crawler swings and misses, every time", and asserted no damage in a
+   * minute. **A crawler never runs `ZombieStateStrike`.**
+   * `ZombieStateHoldAtRange` sends body condition 4 to state 0x34
+   * (`0x0045585E`), `ZombieStateLeapStrike` (`FUN_0045E330`), which lands the
+   * entry through `ActorStrikeConnect` when its arc touches down and reads no
+   * hit frame at all -- so both entries connect: entry 2's cancel mask is the
+   * head, and a crawler that has lost its head draws entry 3, whose mask 8 can
+   * never cancel. The draw and the exported entry are unchanged; what this now
+   * asserts is the state that reads them. `L53`.
    */
   const CRAWL = {
     "2": { strike: 997, lunge: 1051, distance: 26, hit_frame: 40,
@@ -900,10 +904,21 @@ console.log("\nthe crawler's undamaged swing:");
     motion_row: { ...TYPE.motion_row, "4": [10, 10, 12, 12, 14] },
     reactions: { ...TYPE.reactions, "4": TYPE.reactions["0"] },
     motions: { ...TYPE.motions, "997": motion(11, 0.2, 20),
-               "1018": motion(19, 0.2, 35), "1051": motion(17, 0.6, 31) },
+               "1018": motion(19, 0.2, 35), "1051": motion(17, 0.6, 31),
+               // `g_class30_leap_strike_arc_script`'s two clips.
+               "1052": motion(40), "1053": motion(20) },
   } as unknown as CharacterType;
   const CHARS_CRAWLER = {
     ...CHARS, types: { "1": TYPE, "12": TYPE_CRAWLER },
+    combat: {
+      arc_scripts: {
+        leap_strike: [
+          { motion: 0x41c, start: 0, fade: 5, until: 10 },
+          { motion: 0x41c, start: 11, fade: 5, until: 38 },
+          { motion: 0x41d, start: 0, fade: 3, until: 0 },
+        ],
+      },
+    },
   } as unknown as CharactersJson;
 
   const crawler = (zones: number) => {
@@ -970,32 +985,41 @@ console.log("\nthe crawler's undamaged swing:");
     let damaged = 0;
     events.on("player.damaged", () => { damaged += 1; });
     let strikes = 0;
+    let leaps = 0;
     let was = false;
     const drawn = new Set<number>();
     for (let i = 0; i < 3600; i++) {
       GameUpdate(1 / 60, NULL_HOST, rng, events);
-      const now = z.state === ZombieState.Strike;
-      if (now && !was) strikes += 1;
+      if (z.state === ZombieState.Strike) strikes += 1;
+      const now = z.state === ZombieState.LeapStrike;
+      if (now && !was) leaps += 1;
       if (now && z.attack >= 0) drawn.add(z.attack);
       was = now;
     }
-    return { strikes, damaged, drawn: [...drawn].sort() };
+    return { strikes, leaps, damaged, drawn: [...drawn].sort() };
   };
 
   {
     const m = minute(0);
-    check("it gets its swing in", m.strikes > 10, `${m.strikes} strikes`);
+    // The fixture's player has two lives and a continue-less game, so the
+    // minute ends with the player down rather than with the crawler tired:
+    // three leaps, three hits, as measured when this was written.
+    check("it attacks by leaping, again and again until the player is down",
+          m.leaps >= 2 && G.g_player_lives[0] === 0,
+          `${m.leaps} leaps, lives ${G.g_player_lives[0]}`);
+    check("...and never once through ZombieStateStrike", m.strikes === 0,
+          `${m.strikes} frames in the strike`);
     check("...on entry 2", m.drawn.length === 1 && m.drawn[0] === 2,
           `drew {${m.drawn.join(",")}}`);
-    // The point of the whole change.
-    check("...and lands no damage at all, because clip 997 never reaches "
-          + "frame 40", m.damaged === 0, `${m.damaged} hits landed`);
+    // The point of the correction.
+    check("...and every leap connects: it has no hit frame to miss",
+          m.damaged === m.leaps, `${m.damaged} hits from ${m.leaps} leaps`);
   }
   {
-    // The other arm, so that "no damage" is a property of the entry and not
-    // of the fixture: shoot the head off and the same crawler connects.
+    // The other arm: shoot the head off and the same crawler draws entry 3,
+    // whose cancel mask of 8 is outside the zone bits, and still connects.
     const m = minute(DamageZone.Head);
-    check("a crawler with its head shot off draws entry 3 and does connect",
+    check("a crawler with its head shot off draws entry 3 and connects too",
           m.damaged > 0 && m.drawn.length === 1 && m.drawn[0] === 3,
           `${m.damaged} hits on {${m.drawn.join(",")}}`);
   }

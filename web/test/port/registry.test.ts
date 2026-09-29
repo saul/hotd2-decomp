@@ -985,7 +985,7 @@ console.log("\nwhere the camera follows an actor:");
  * `ZombieStateStrike` raises it when it captures `strikeStart`
  * (`00455b98 a900000400` / `00455ba5 0d00000400`) and **on the melee path
  * nothing ever clears it again**: the one `AND` in the program that does is in
- * `FUN_0045DA60` (`0045db39 25fffffbff`), which an ordinary zombie never
+ * `ZombieSplitUpdateSelf` (`0045db39 25fffffbff`), which an ordinary zombie never
  * reaches. The port modelled it as a boolean, cleared it in three places, and
  * left it out of the two tests in `ZombieStateHoldAtRange` that read it -- one
  * misreading with four separate symptoms, which is what these assert.

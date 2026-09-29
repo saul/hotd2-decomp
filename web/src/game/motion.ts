@@ -10,13 +10,14 @@
  * `ActorSetMotion` and the motion job own these in the engine, and the frame
  * counter is a field of the object, at `obj+0x19C`.
  */
-import { ActorFlag, type Actor } from "./actor";
+import { ActorFlag, type Actor, type OverlayTrack } from "./actor";
 import { ActorStartFade } from "./class30/motion_cue";
 import { MotionFade } from "./class30/states";
 import { authoredFrameHeld, ticksOfAuthoredFrame }
   from "../core/play_cursor";
 import { ApplyRootMotion, rootDelta } from "./root_motion";
-import { MotionAuthoredFrame, MotionOf, SecondsToTicks } from "./tables";
+import { MotionAuthoredFrame, MotionOf, MotionPlayFrame, MotionPlayLength,
+         SecondsToTicks } from "./tables";
 
 /** One actor's clocks, `dt` seconds of game time. */
 export function ActorAdvanceMotion(obj: Actor, dt: number): void {
@@ -183,15 +184,178 @@ export function ActorAdvanceMotion(obj: Actor, dt: number): void {
     }
   }
 
-  // The stumble runs on its own track; the loop underneath keeps going, which
-  // is what makes the cross-fade back land in the right place.
-  if (obj.react) {
-    obj.react.ticks += SecondsToTicks(dt);
-    const rm = MotionOf(obj, obj.react.motion);
-    if (!rm || obj.react.ticks >= ticksOfAuthoredFrame(rm.frames, rm.fps)) {
-      obj.react = null;
+  // Track 1, the stumble, on its own clock -- the base track above keeps
+  // running under it, which is what its hand-back waits for.
+  SkeletonAdvanceOverlayCursor(obj, ticks);
+}
+
+/**
+ * `[port-only]` -- what `MotionLoadPoseSlot` (`FUN_00411C20`) mode 0xC
+ * snapshots into a fade's slot A: the pose last drawn on the bones the track
+ * is taking over. The engine copies each bone record's `+0x7C` angles; the
+ * port names the clip and cursor they were drawn from, as
+ * {@link Actor.fadeFrom} does for the base track, and the poser re-samples
+ * it. The overlay's own clip while one runs, else the one-shot the port keeps
+ * on its own channel, else the base clip.
+ */
+function OverlaySnapshot(obj: Actor): { motion: number; ticks: number } {
+  const t = obj.react;
+  if (t) return { motion: t.motion, ticks: t.ticks };
+  if (obj.action) return { motion: obj.action.motion, ticks: obj.action.ticks };
+  return { motion: obj.motion, ticks: obj.playTicks };
+}
+
+/**
+ * `MotionCrossFadeTo` — `FUN_00411B70`. Start `motion` on track 1, over the
+ * subtree of `bone`.
+ *
+ * ```
+ * track+0x0C = start; track+0x1C = start / 2; track+0x2C = counter1 - 1
+ * track+0x31 = fade_in + 1; track+0x33 = fade_out + 1; track+0x24 = motion
+ * track+0x38 = (track+0x38 & 0xC7) | 1
+ * MotionStartOnTrack(model, bone, motion, 1)    ; the subtree, and slot A
+ * ```
+ *
+ * **The last argument is the fade out, not the fade in.** Both callers pass
+ * `(obj+0x194, 1, clip, 0, 1, n)`: the clip is in after two frames, plays to
+ * its end, and `SkeletonAdvanceOverlayCursor` then spends `n + 2` frames
+ * fading back through {@link MotionFadeOverlayToBase}. The port had `n` as a
+ * fade in and nothing on the way out.
+ */
+export function MotionCrossFadeTo(obj: Actor, bone: number, motion: number,
+                                  start: number, fadeIn: number,
+                                  fadeOut: number): void {
+  obj.react = {
+    motion, ticks: start, bone,
+    fadeFrom: OverlaySnapshot(obj), fade: fadeIn, fadeLen: fadeIn + 1,
+    fadeOut: fadeOut + 1, back: false, hold: false,
+  };
+}
+
+/**
+ * `MotionCrossFadeAlt` — `FUN_00411B20`. {@link MotionCrossFadeTo} without the
+ * fade out, and with `track+0x38 = (& 0xDF) | 9`: bit 3 up, so the clip never
+ * ends on its own, and bit 0x10 left as it was. `track+0x33` is not written.
+ *
+ * Its two callers, `ActorPlayHitReaction`'s `obj+0x136C` bit-0x100 arm and
+ * `ZombieTickAltHitReaction`, sit behind a bit nothing in the shipped game
+ * raises -- see `ZombieFlag2.HitReactionAlt`.
+ */
+export function MotionCrossFadeAlt(obj: Actor, bone: number, motion: number,
+                                   start: number, fadeIn: number): void {
+  const was = obj.react;
+  obj.react = {
+    motion, ticks: start, bone,
+    fadeFrom: OverlaySnapshot(obj), fade: fadeIn, fadeLen: fadeIn + 1,
+    fadeOut: was?.fadeOut ?? 0, back: was?.back ?? false, hold: true,
+  };
+}
+
+/**
+ * `MotionFadeOverlayToBase` — `FUN_00411BD0`. Track 1's way home: it takes the
+ * **base** track's clip at cursor 0 and fades onto it from the pose it last
+ * drew.
+ *
+ * ```
+ * track+0x0C = 0; track+0x1C = 0; track+0x33 = 0
+ * track+0x24 = track+0x20                       ; the base clip's id
+ * track+0x2C = counter1 - 1; track+0x31 = len + 1
+ * track+0x38 = (track+0x38 & 0xD7) | 0x11       ; fading, and handing back
+ * MotionStartOnTrack(model, bone, track+0x20, 1)
+ * ```
+ *
+ * `SkeletonAdvanceOverlayCursor` calls it with `track+0x33`, which is
+ * `MotionCrossFadeTo`'s fade out + 1.
+ */
+export function MotionFadeOverlayToBase(obj: Actor, bone: number,
+                                        len: number): void {
+  obj.react = {
+    motion: obj.motion, ticks: 0, bone,
+    fadeFrom: OverlaySnapshot(obj), fade: len, fadeLen: len + 1,
+    fadeOut: 0, back: true, hold: false,
+  };
+}
+
+/**
+ * `SkeletonAdvanceOverlayCursor` — `FUN_004112E0`. Track 1's clock, and what
+ * ends it: `SkeletonDrawWalk` runs it on every draw beside the base track's
+ * `SkeletonAdvancePlayCursor` (`FUN_004111A0`).
+ *
+ * ```
+ * if (model+0x36 != 1) return
+ * if (!(flags & 0x10)) {                         ; not handing back
+ *   if (flags & 1) {                             ; fading in
+ *     k = counter1 - track+0x2C
+ *     if (k == track+0x31 + 1) { counter1 = cursor1 + 1; flags &= ~1 }
+ *     else if (k > track+0x31 + 1 || k < 0) { flags &= ~1; hand back }
+ *   }
+ * } else {
+ *   if (counter1 - track+0x2C >= track+0x31 + 1) flags &= ~1
+ *   if (!(flags & 1) && cursor0 == cursor1) { flags &= ~0x10; hand back }
+ * }
+ * if (model+0x36 != 1) return
+ * if (!(flags & 1)) {
+ *   if (!(flags & 0x10)) cursor1 = counter1 % (play_length + 1)
+ *   ...load the pose at cursor1...
+ * }
+ * if (cursor1 >= play_length && !(flags & 8)) {
+ *   if (track+0x33 > 0) MotionFadeOverlayToBase(model, 1, track+0x33)
+ *   else if (!(flags & 0x10)) hand back
+ * }
+ * hand back:  model+0x36 = 0; SkeletonAssignSubtreeTrack(0, 0)
+ * ```
+ *
+ * The port steps the counter here, where the engine's `ZombieAdvanceMotion`
+ * steps both tracks' counters after the draw, so it is the base track's
+ * {@link ActorAdvanceMotion} pattern: the counter is held while a fade holds
+ * the cursor, and moves on by what is left of the frame once the fade is
+ * spent. The fade-in's out-of-range arm needs the counter to jump, which a
+ * counter stepped a frame at a time does not do, in the engine or here.
+ *
+ * Handing back while fading home waits for the base cursor to come round to
+ * 0, the frame this track holds -- so the upper body stands on the base
+ * clip's first frame until the loop underneath reaches it.
+ */
+export function SkeletonAdvanceOverlayCursor(obj: Actor, ticks: number): void {
+  const t = obj.react;
+  if (!t) return;
+  let run = ticks;
+  if (t.fadeFrom) {
+    t.fade -= ticks;
+    if (t.fade < 0) {
+      run = -t.fade;
+      t.fadeFrom = null;
+      t.fade = 0;
+    } else {
+      run = 0;
     }
   }
+  if (t.back) {
+    // Bit 0x10: the cursor is not recomputed -- it stays on 0 -- and the
+    // track hands back on the draw the base cursor equals it.
+    if (!t.fadeFrom && MotionPlayFrame(obj) === t.ticks) obj.react = null;
+    return;
+  }
+  t.ticks += run;
+  if (t.hold || OverlayCursor(obj, t) < MotionPlayLength(obj, t.motion)) return;
+  if (t.fadeOut > 0) {
+    MotionFadeOverlayToBase(obj, t.bone, t.fadeOut);
+    return;
+  }
+  obj.react = null;
+}
+
+/**
+ * `[port-only]` -- `track+0x0C`, track 1's cursor, which the engine stores
+ * (`counter1 % (play_length + 1)`, held at 0 while the track fades home) and
+ * the port derives from {@link OverlayTrack.ticks}, as
+ * `MotionPlayFrame` does for the base track. `ZombieClearHitReactionWhenDone`
+ * reads it as `obj+0x1A0`.
+ */
+export function OverlayCursor(obj: Actor, t: OverlayTrack): number {
+  if (t.back) return t.ticks;
+  const len = MotionPlayLength(obj, t.motion);
+  return len > 0 ? t.ticks % (len + 1) : t.ticks;
 }
 
 /**

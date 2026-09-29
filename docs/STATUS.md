@@ -19,42 +19,42 @@ is in `tools/verify_all.py`, beside the command that runs it.
 
 | Directory | Lines | Files | Layer |
 |---|---:|---:|---|
-| `game/` | 104581 | 339 | engine |
-| `hod2lib/` | 19312 | 35 | engine |
+| `game/` | 106466 | 346 | engine |
+| `hod2lib/` | 19395 | 35 | engine |
 | `render/` | 15087 | 54 | render |
-| `app/` | 12047 | 41 | app |
+| `app/` | 12048 | 41 | app |
 | `script/` | 4471 | 25 | engine |
 | `ui/` | 3620 | 26 | ui |
-| `core/` | 3027 | 13 | engine |
-| `bundle/` | 2740 | 11 | engine |
+| `core/` | 3036 | 13 | engine |
+| `bundle/` | 2788 | 11 | engine |
 | `audio/` | 973 | 2 | render |
 | `hud/` | 491 | 1 | ui |
-| **total** | **166349** | **547** | |
+| **total** | **168375** | **554** | |
 
 The largest files, which is where the pressure to split next is:
 
-* `app/main.ts` — 2963
-* `game/globals.ts` — 2860
+* `game/globals.ts` — 3108
+* `app/main.ts` — 2964
 * `game/actor.ts` — 2694
-* `hod2lib/bundle.ts` — 2322
-* `hod2lib/exetab.ts` — 2276
+* `hod2lib/exetab.ts` — 2347
+* `hod2lib/bundle.ts` — 2334
 
 ## The port
 
 | | |
 |---|---|
-| Gameplay coverage | **231 of 299** annotated functions in the gameplay address ranges have a port (77%) |
-| Ported outside those ranges | 533 (opcodes, and the classes whose handlers sit elsewhere) |
-| Citations checked | 764 ported functions match `functions.tsv` under the same name |
+| Gameplay coverage | **233 of 299** annotated functions in the gameplay address ranges have a port (77%) |
+| Ported outside those ranges | 564 (opcodes, and the classes whose handlers sit elsewhere) |
+| Citations checked | 797 ported functions match `functions.tsv` under the same name |
 | Spawn classes | **30 of 42** read classes have a module, covering 1541 of 1619 placements |
 | Declared `[diverges]` | **132** — where the port knowingly departs from the exe, each with its reason on the spot |
-| `[open]` markers | **121** — questions the port and the exporter are honest about not having answered |
+| `[open]` markers | **122** — questions the port and the exporter are honest about not having answered |
 
 Both markers are counted in **every** `.ts`/`.tsx` file under `web/src/`, one per occurrence, and only in comments — a word in code or in a string is not a marker (`verify_port.marker_lines`). Each departure and each question is written once, where it is made; everything that refers to it names it in words ([`PLAYER_ARCHITECTURE.md`](PLAYER_ARCHITECTURE.md), "One departure, one tag"). By layer, from the same table as the directories above:
 
 | Layer | Directories | `[diverges]` | `[open]` |
 |---|---|---:|---:|
-| engine | `core/`, `bundle/`, `script/`, `game/`, `hod2lib/` | 118 | 118 |
+| engine | `core/`, `bundle/`, `script/`, `game/`, `hod2lib/` | 118 | 119 |
 | render | `render/`, `audio/` | 13 | 3 |
 | ui | `hud/`, `ui/` | 0 | 0 |
 | app | `app/` | 1 | 0 |
@@ -67,7 +67,7 @@ The two declared seams between the UI and the player: **`PlayerCommands` has 53 
 |---|---|
 | Named functions | 1425 in `ghidra/annotations/functions.tsv` |
 | Named globals | 722 in `ghidra/annotations/globals.tsv` |
-| Verifier scripts | 45 under `tools/`, run together by `verify_all.py` |
+| Verifier scripts | 46 under `tools/`, run together by `verify_all.py` |
 
 Phase and format status is a judgement about what counts as solved,
 and lives in [`PROGRESS.md`](PROGRESS.md).
@@ -153,6 +153,7 @@ nothing exits 3 and is never counted as green.
 | `verify_effects` | that each of the 29 effect trees walks to exactly the node count `g_effect_bone_counts` declares, and that every motion the effect system plays divides by the stride that count implies -- the only check that reads a motion at the effect stride rather than a character's | game-dir |
 | `verify_horde` | that every number the class-0x40 horde is steered by -- its entry splines, spline rates, shot delays, wander grid, second skin and the emerge prop's corners -- is the EXE's, and that the seven descriptors split five hordes to two props on the byte PlaceHorde switches on | game-dir |
 | `verify_continue` | that the continue screen the port draws -- the run's CONTINUE? and digit, the two-player small ones, the small GAME OVER and the credit line -- is at the EXE's positions, scales and sprite ids, read as instruction bytes and `.rdata` rows; that only one credit-line drawer can run, because the credit costs are stored once, as 1; and that all eight wait opcodes read the gameplay gate that holds the script while nobody is in play. Nothing else looks at a picture that, when wrong, is simply not there | game-dir |
+| `verify_options` | that the profile reading is right on the user's own save -- the four disguised files deciphered with the key taken out of `ProfileCipher`'s instructions, and the block's byte sum and version checked -- that Blood Color is dead in this build (one store of its gate, no reader of its byte), and that the options screen's factory tables, sprite ids, positions and glyph table are the EXE's, with the bundle's `options` block when there is one | game-dir |
 | `verify_water` | that class 0x41 type 1, the canal water task, starts from the table the EXE indexes -- ten flat water tiles -- and that every slot, flag, camera cue and multiplier the port's copy of it tests is the immediate at the instruction that holds it; its fifteen spawns sit at the origin, so a wrong reading draws nothing and looks like nothing | game-dir |
 | `verify_draw_order` | that the player's two passes and translucent order are the EXE's: the blend and depth tables `render/draw_order.ts` copies, the alpha-test and blend-enable pushes, and the VIEW matrix and comparator bytes that make the sort nearest-first rather than the painter's order this repo's docs had -- plus that no mesh in `pol/` turns its depth write off, which is why translucent meshes occlude | game-dir |
 | `verify_texture_alpha` | that a texture's alpha reaches the bundle as the bank stores it, because the EXE's D3D path keeps it: the upload's format table and the A1R5G5B5 test, stage 0's alpha args, and a disassembly of the D3D module finding TSP bit 19 read only as half of the pass selector -- plus the corpus premise that makes a glTF alphaMode from the pass right, and, on a current bundle, no `_opaque` image and the IgnoreTexAlpha ARGB images byte-equal to the bank's alpha | game-dir |
@@ -164,7 +165,7 @@ nothing exits 3 and is never counted as green.
 | `verify_geometry` | that every scenery part in a stage bundle holds every triangle its `pol/` models declare -- the only check that compares an export against the files it was made from rather than against another export | game-dir |
 | `baseline` | that the installed assets still hash to `manifest.csv` | game-dir |
 
-22 of them need the installed game and 21 need an exported
+23 of them need the installed game and 21 need an exported
 bundle. **That is a known hole, not a design:** a machine with
 neither cannot run the checks that compare two histories, and a
 bundle-free fixture is the open work that closes it.

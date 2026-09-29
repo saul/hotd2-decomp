@@ -25482,3 +25482,36 @@ were re-read here.
 records, which end exactly there (L6 in reverse: the index source's base is
 not the table's). And the first draft of the check expected every glyph to be
 16x32; `W` is 32x32.
+
+## 2026-09-29 -- the options screen, ported (logic)
+
+`game/options/` is the screen, one TS function per exe function under its
+name; `game/profile.ts` the resets, load, save and apply; `options_data.ts`
+the `.data` the factory reset copies and the sprite ids pushed as
+immediates; the bundle's new `options` block the `.rdata` it reads (rows,
+labels, glyphs, crosshairs, both sound tests' lists) -- `ExeTables.optionsTables`
+in both exporters.
+
+What the reading overturned, rewritten rather than adapted: `OPTION_LIVES`
+and `START_LIVES_BY_OPTION` in `player_shell.ts` (the life setting is
+`G.g_option_lives`, and `PlayerBlockBoot` no longer writes `g_start_lives` --
+its one writer is `ProfileApplyToRun`, and like the options it outlives a
+reset); `INPUT_BINDINGS` in `player_gun.ts` (`G.g_player_input_bindings`,
+written by the factory reset); `OPTION_CREDITS_FACTORY` (`OPTIONS_FACTORY`,
+held to the image by `verify_options.py`); `HudDrawCrosshair`'s "by binding
+set" (it is by the Sight Graphic, and the port records the sprite now); and
+`g_input_mode` 5 -> 6. The free-play `[diverges]` moved from the field's
+literal to `ProfileBoot`, the one place the port chooses it; the count is
+unchanged.
+
+**Failing first.** Two mutations, each caught: `PlayerBlockBoot` writing
+three lives again fails "the player enters play with five lives"; the
+Continue row ignoring its unlock bits fails "left from 1 wraps to 9, not to
+free play" -- and did **not** fail "right from free play: 1", which moves the
+same way either way. That is why the wrap is tested from both sides.
+
+**Not ported, and why**: the two sub-screens' bodies. Sight Speed tunes a
+keyboard crosshair (`PadMoveCrosshair`) and Gun Calibration a gun's raw
+position; the page's players are mouse guns in mode 6, the cursor steps over
+both rows, and each sub-screen's own first test sends it back -- which the
+port has. Their bodies need an aim record the page does not feed.

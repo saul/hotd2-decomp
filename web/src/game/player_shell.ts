@@ -141,20 +141,6 @@ export const g_player_enter_play_modes: readonly {
   { flags: 0x3d, state: PlayerState.Out, invuln: 90, hook: 2 },      // 5
 ];
 
-/**
- * `0x004D0EDC`, s16[5]: the lives each setting of the options' life count
- * gives. `FUN_0040AB50` loads `g_start_lives` from it.
- */
-export const START_LIVES_BY_OPTION: readonly number[] = [1, 2, 3, 4, 5];
-
-/**
- * `0x009C9F21`, the options' life setting, at its factory value: the reset
- * `FUN_00401130` writes 2, which is **three** lives. The port has no options
- * screen and no saved options, so the factory value is the one it can claim.
- * (The bundle's `start_lives` said 2; nothing in the image read it.)
- */
-export const OPTION_LIVES = 2;
-
 /** `PlayerStateArmContinue`'s start value for the continue countdown. */
 const CONTINUE_TIMER_START = 0x9fff;
 /** ...and what one frame takes off it: ten digits in about 910 frames. */
@@ -716,6 +702,7 @@ export function PlayerTaskRun(player: number, f: PlayerFrame): void {
 export function PlayerTasksRun(f: PlayerFrame): void {
   G.g_screen_sprite_draws = [];
   G.g_crosshair_drawn = [0, 0];
+  G.g_crosshair_sprite = [-1, -1];
   const offscreen = [false, false];
   for (let p = 0; p < 2; p++) {
     const r = FirstDueShotRequest(p);
@@ -798,10 +785,9 @@ export function SelectAttackablePlayer(): void {
 // -- entering a stage --------------------------------------------------------
 
 /**
- * `[port-only]` -- the boot slice of the player block, from three routines:
+ * `[port-only]` -- the boot slice of the player block, from two routines:
  * `FUN_0040A920` zeroes the data segment and writes 9 to both players
- * (`0x0040AA3D`); `CreditsBootReset` (`FUN_004066D0`) sets the credit costs;
- * `FUN_0040AB50` loads the start lives from the options.
+ * (`0x0040AA3D`); `CreditsBootReset` (`FUN_004066D0`) sets the credit costs.
  */
 export function PlayerBlockBoot(): void {
   G.g_damage_rank_pending = 0;
@@ -865,7 +851,10 @@ export function PlayerBlockBoot(): void {
   G.g_credit_prompt_player = 0;
   G.g_score_cheat = 0;
   G.g_crosshair_drawn = [0, 0];
-  G.g_start_lives = START_LIVES_BY_OPTION[OPTION_LIVES];
+  G.g_crosshair_sprite = [-1, -1];
+  // `g_start_lives` is not here: its one writer is `ProfileApplyToRun`
+  // (`FUN_0040AB50`), from the options' life setting, and like the options
+  // it outlives every reset -- the page's boot and the options' EXIT set it.
 }
 
 /**

@@ -127,7 +127,7 @@ import { ActorByAt, AppState, G, ResetGameGlobals } from "../game/globals";
 import {
   PadBit, PlayerBlockCapture, PlayerTasksDrawWithoutAFrame,
 } from "../game/player_shell";
-import { SetBoss4Tables, SetGameOverTables, SetGameTables }
+import { SetBoss4Tables, SetGameOverTables, SetGameTables, SetOptionsTables }
   from "../game/tables";
 import { PressKind, type Press } from "../core/net/protocol";
 import { NetSession, type NetRole } from "./net/session";
@@ -1092,6 +1092,7 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     SetGameTables(script.characters, script.breakables, script.set_pieces,
                   script.humanoids, script.coli, script.civilians);
     SetGameOverTables(script.game_over);
+    SetOptionsTables(script.options);
     SetBoss4Tables(script.boss4, script.carrier_door_yaw);
   }
 

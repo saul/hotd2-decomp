@@ -68,6 +68,9 @@ import { AdvanceToNextScene, PlayerBlockBoot, PlayerBlockRestore,
   type PlayerBlock }
   from "./player_shell";
 import { HudShutterTaskCreate, type ShutterBar } from "./hud_shutter";
+import { GUN_CALIBRATION_FACTORY, INPUT_BINDINGS_DEFAULT, OPTION_9F28_FACTORY,
+  OPTIONS_FACTORY, SIGHT_SPEED_FACTORY, START_LIVES_BY_OPTION }
+  from "./options_data";
 
 /**
  * `g_app_state` (`0x009C8E98`) — the game's top-level screen, and something
@@ -111,6 +114,14 @@ export enum AppState {
    * alone for it, as for 6. `[proved]`
    */
   GameOver = 7,
+  /**
+   * The options screen. `AppStateDispatch` (`FUN_004608A0`) runs
+   * `OptionsRunPhase` (`FUN_004869E0`) in it, the title menu's OPTION row is
+   * what asks for it (`TitleMenuUpdateAndSelect`, cursor 5,
+   * `RequestAppState(0x0C)`), and its EXIT asks for {@link Title} again.
+   * `CommitAppState` puts both players out on the way in. `[proved]`
+   */
+  Options = 0x0c,
   /**
    * Boot. Stamped once, by `FUN_0040E4A0`, whose only caller is the startup
    * routine `FUN_0049E4A0` — the one that reads `Hod2.ini` — and which resets
@@ -423,10 +434,19 @@ export const G = {
   /**
    * `g_input_mode_p1` — 0x00588E24 and `g_input_mode_p2` — 0x007DC698, as
    * `GetPlayerInputModes` (`FUN_0041E260`) returns them. The low half is the
-   * PC input mode (5 is the mouse); bit 31 is the gun flag the auto-reload
-   * tests. Mode 5 without the flag is what the port's pointer is.
+   * PC input mode; bit 31 is the gun flag the auto-reload tests.
+   *
+   * **6, the mouse and the keyboard**, is what the page is. Modes 5 and 6
+   * both make the mouse a gun, and 6 then ORs the keyboard's pad into its
+   * word -- `InputMapDevicesToMaple` (`FUN_0041E530`), whose case 6 does the
+   * OR and falls into case 5 `[proved]` -- which is where the page's START
+   * (Enter) and its directions (the arrows, `KeyboardReadAsPad`'s player 0)
+   * come from; mode 5 alone has only the mouse's three buttons. It decides
+   * two things in the options list: a mode-6 player may change their Sight
+   * Graphic, and Gun Calibration is offered only outside mode 6. It was 5
+   * here until the options screen, whose arrows made the difference matter.
    */
-  g_input_mode: [5, 5] as number[],
+  g_input_mode: [6, 6] as number[],
   /**
    * `g_original_fire_mode` — 0x009A2247 + player*0x14: how the Original Mode
    * weapon fires (1 bursts, 2 reloads only when empty). 0 in Arcade and in
@@ -675,11 +695,13 @@ export const G = {
    */
   g_player_no_damage: [0, 0],
   /**
-   * `g_start_lives` — 0x009A34C4. `FUN_0040AB50` loads it from
-   * {@link START_LIVES_BY_OPTION} at the options' lives setting, and
-   * `PlayerEnterPlay` gives it to every player whose row resets lives.
+   * `g_start_lives` — 0x009A34C4. `ProfileApplyToRun` (`FUN_0040AB50`)
+   * loads it from `g_start_lives_by_option` at the options' life setting --
+   * at boot and at the options' EXIT -- and `PlayerEnterPlay` gives it to
+   * every player whose row resets lives. Three here: the boot's apply of a
+   * factory profile.
    */
-  g_start_lives: 0,
+  g_start_lives: START_LIVES_BY_OPTION[OPTIONS_FACTORY.lives],
   /**
    * `g_credits` — 0x009C8E60, stride 8: the credits (continues) left, one
    * shared count unless `g_credits_per_player` is set. `SetBothPlayerCounters`
@@ -699,14 +721,215 @@ export const G = {
    * `g_option_credits` — 0x009C9F25, a signed byte: the options' credit
    * setting. An Arcade start seeds the count with it plus one, or free play
    * when it is -1 (`ModeStartCounterValue`, `MOV AL,[0x009c9f25]; CMP AL,0xff`
-   * at `0x00496B86`). The factory reset `FUN_00401130` writes
-   * `OPTION_CREDITS_FACTORY`, 5.
+   * at `0x00496B86`). The factory reset `OptionsFactoryReset`
+   * (`FUN_00401130`) writes `OPTIONS_FACTORY.credits`, 5.
    *
-   * [diverges] Starts at -1, free play, by the user's choice: the port has no
-   * options screen or saved options yet, and free play is a value that screen
-   * offers, so the port starts as if it had been picked there.
+   * The options screen's Continue row edits it (`OptionsRowContinue`): 1..9,
+   * and free play only once all three of {@link g_option_unlocks}' low bits
+   * are up.
+   *
+   * -1 here, free play: the boot's value, which is the user's choice and
+   * {@link ProfileBoot}'s declared departure -- a profile with nothing saved
+   * gets it, and a saved one brings its own.
    */
   g_option_credits: -1,
+  /**
+   * `g_option_difficulty` — 0x009C9F20, s8 0..4: the options' Difficulty,
+   * "Very Easy" to "Very Hard" (`OptionsRowDifficulty`). `ProfileApplyToRun`
+   * (`FUN_0040AB50`) copies it, sign-extended, into `g_difficulty`. The
+   * factory reset writes 2, "Normal" (`g_options_factory`, `0x004C42A0`).
+   */
+  g_option_difficulty: OPTIONS_FACTORY.difficulty as number,
+  /**
+   * `g_option_lives` — 0x009C9F21, s8 0..4: the options' Life, shown as
+   * "1".."5" (`OptionsRowLife`). `ProfileApplyToRun` loads `g_start_lives`
+   * from `g_start_lives_by_option` at it. Factory 2: three lives.
+   */
+  g_option_lives: OPTIONS_FACTORY.lives as number,
+  /**
+   * `g_option_blood_color` — 0x009C9F22, s8: 0 "  Red", 1 "Green".
+   * **Nothing reads it but the options screen's own row** (every addressing
+   * form, `[proved]`; see `docs/re/options-screen.md`), the row is never
+   * shown (`g_options_blood_row_shown` has one store and it stores 0), and
+   * the boot writes 1 over whatever was loaded (`MOV [0x009c9f22], 1` at
+   * `0x0040A99B`). So it is 1 and stays 1.
+   */
+  g_option_blood_color: 1,
+  /**
+   * `g_option_unused_9F28` — 0x009C9F28. The factory reset writes
+   * `g_option_9F28_factory` (0) and the options screen copies it into
+   * `g_options_edit_9F28`, which nothing reads. No row edits it and no other
+   * instruction reads it; what it was for is `[open]`.
+   */
+  g_option_unused_9F28: OPTION_9F28_FACTORY as number,
+  /**
+   * `g_option_unlocks` — 0x009C9F5E. Three bits the modes' final results set:
+   * `1` a stage-6 boss (class 0x2D) killed in Original Mode, `2` every one
+   * of the ten Training grades at least 1, `4` every one of the ten Boss Mode
+   * grades at least 1. **The options' Continue row offers "Free Play" only
+   * with all three** (`AND AL, 7; CMP AL, 7` at `0x004874A7`). The profile
+   * reset (`FUN_00401060`) zeroes it. `[proved]`
+   *
+   * The port runs none of the three writers -- no bundle is a Training or
+   * Boss Mode stage, and the class-0x2D kill arm is Original Mode's -- so it
+   * stays 0 unless a saved profile brings bits in.
+   */
+  g_option_unlocks: 0,
+  /**
+   * `+0x00` of each player's record at `g_player_input_bindings`
+   * (`0x009C9F60` + player*0x7C), s8 0..3: the options' **Sight Graphic**
+   * (`OptionsRowSightGraphic`). `HudDrawCrosshair` draws
+   * `g_crosshair_sprites[setting + player*4]` (`MOVSX EDX, byte ptr [EDX]` at
+   * `0x00416AC8`). Factory 0 (`0x004C42A3`).
+   */
+  g_player_sight_graphic: [OPTIONS_FACTORY.sightGraphic,
+                           OPTIONS_FACTORY.sightGraphic] as number[],
+  /**
+   * `g_player_sight_speed` — 0x009C9F64 + player*0x7C, f32 0..1: the
+   * options' **Sight Speed**, which `PadMoveCrosshair` (`FUN_0040CFE0`) adds
+   * 0.2 to and scales the d-pad's nudge by. Factory 0.5 (`0x004C42A4`).
+   */
+  g_player_sight_speed: [SIGHT_SPEED_FACTORY,
+                         SIGHT_SPEED_FACTORY] as number[],
+  /**
+   * `+0x08` of the same record: four binding sets of five pad masks per
+   * player -- trigger, reload, fast crosshair, recentre, and a fifth -- by
+   * `PlayerInputBindingSet`. Only the factory reset writes them, copying
+   * `g_input_bindings_default` (`0x004C42A8`).
+   */
+  g_player_input_bindings: INPUT_BINDINGS_DEFAULT.map(
+    (sets) => sets.map((set) => [...set])) as number[][][],
+  /**
+   * `+0x58` of the same record: eight dwords of gun calibration, which only
+   * the gun calibration sub-screen and the factory reset write and
+   * `FUN_0040CB10` copies into the aim record. Factory
+   * `g_gun_calibration_factory` (`0x004C4348`).
+   */
+  g_player_gun_calibration: [[...GUN_CALIBRATION_FACTORY],
+                             [...GUN_CALIBRATION_FACTORY]] as number[][],
+  /**
+   * `g_profile_original_items` — 0x009C9F3D, 33 bytes: the saved copy of
+   * `g_original_items_taken`, which `ProfileApplyToRun` copies in and the
+   * Original Mode game over copies out before it saves. Zeroed by the
+   * profile reset.
+   */
+  g_profile_original_items: new Array(33).fill(0) as number[],
+  /**
+   * `g_profile_version` — 0x009CA05F. `ProfileLoad` (`FUN_004A0B60`) takes a
+   * saved profile only at 7, and writes 7 over a reset one.
+   */
+  g_profile_version: 7,
+
+  // -- the options screen (app state 0x0C) -----------------------------------
+  /**
+   * `g_options_cursor` — 0x009C8E20, s8 0..10: the highlighted row of the
+   * options list (`OptionsMoveCursorTask`). The Blood Color row is always
+   * skipped, and so are Sight Speed and Gun Calibration when no player can
+   * use them. The sub-screens put it on EXIT when they bail out.
+   */
+  g_options_cursor: 0,
+  /**
+   * The options screen's working copies, taken by `OptionsRunPhase`'s arm
+   * and edited by the rows, which write each value back into the profile
+   * as it changes: `g_options_edit_blood_color` (0x009C8E21),
+   * `g_options_edit_difficulty` (0x009C8E22), `g_options_edit_lives`
+   * (0x009C8E23), `g_options_edit_credits` (0x009C8E24, 0 for free play),
+   * `g_options_edit_sight_graphic` (0x009C8E25 + player).
+   */
+  g_options_edit_blood_color: 0,
+  g_options_edit_difficulty: 0,
+  g_options_edit_lives: 0,
+  g_options_edit_credits: 0,
+  g_options_edit_sight_graphic: [0, 0] as number[],
+  /**
+   * `g_options_edit_sight_speed` — 0x009C8E28 + player*4. Only the Default
+   * row writes it, and nothing reads it.
+   */
+  g_options_edit_sight_speed: [0, 0] as number[],
+  /** `g_options_se_test` — 0x009C8E32, s16 0..0x2EE: the SE test's number. */
+  g_options_se_test: 0,
+  /** `g_options_music_test` — 0x009C8E34, s8 0..0x12: the music test's. */
+  g_options_music_test: 0,
+  /**
+   * `g_options_edit_9F28` — 0x009C8E35. The arm and the Default row copy
+   * {@link g_option_unused_9F28} into it; nothing reads it.
+   */
+  g_options_edit_9F28: 0,
+  /**
+   * `g_options_hold_repeat` — 0x009C8E36, s16 -30..30: how long left or
+   * right has been held (`OptionsHoldRepeatTick`). At either end the two
+   * sound-test rows step once a frame.
+   */
+  g_options_hold_repeat: 0,
+  /**
+   * `g_options_input_seen` — 0x007DD01C + player*4: each player's
+   * `g_player_input_is_gun` as the list last saw it. A change sends the
+   * cursor to EXIT (`OptionsFrameList`).
+   */
+  g_options_input_seen: [0, 0] as number[],
+  /**
+   * `g_options_row_shift` — 0x007DD028, s16: added to the row of every
+   * entry below Blood Color. The arm writes -1 and nothing else writes it,
+   * so the hidden row's gap is always closed.
+   */
+  g_options_row_shift: -1,
+  /**
+   * `g_options_blood_row_shown` — 0x007DD030. The Blood Color row is drawn
+   * and reachable only while this is set, and its one store is the arm's 0
+   * (`0x00486B14`). `[proved]`
+   */
+  g_options_blood_row_shown: 0,
+  /**
+   * `g_options_frame` — 0x009CA0F0, the options screen's frame routine, as
+   * its address: `OptionsRunPhase`'s phase 1 is `JMP [0x009CA0F0]`. See
+   * `OptionsFrame`.
+   */
+  g_options_frame: 0,
+  /**
+   * `g_options_task_list` — 0x007DD024, the list `TaskListBuild` made of
+   * `OptionsTaskListCreate`'s two tasks, which `OptionsFrameList` walks: as
+   * the tasks' addresses, in allocation order.
+   */
+  g_options_task_list: [] as number[],
+  /**
+   * `g_sight_speed_kind_seen` — 0x007DD038 + player*4: each player's
+   * `g_player_pad_kind` as the Sight Speed sub-screen's arm took it.
+   */
+  g_sight_speed_kind_seen: [-1, -1] as number[],
+  /**
+   * `g_sight_speed_open` — 0x007DD040 + player*0x10: whether the sub-screen
+   * opened an edit slot for the player (their crosshair, speed and slider).
+   */
+  g_sight_speed_open: [0, 0] as number[],
+  /**
+   * `g_sight_speed_released` — 0x007DD060 + player*4: raised once the
+   * player's A is seen up, so the press that entered the screen does not
+   * also slow the crosshair.
+   */
+  g_sight_speed_released: [0, 0] as number[],
+  /**
+   * `g_calibration_player` — 0x009A2C78: the player Gun Calibration is
+   * calibrating.
+   */
+  g_calibration_player: 0,
+  /**
+   * `g_screen_idle_frames` — 0x007C1EB0. `ScreenIdleDim` counts it up while
+   * nothing is held, and past 18000 dims the screen; any held button,
+   * `ScreenIdleReset` and the screens' arms zero it.
+   */
+  g_screen_idle_frames: 0,
+  /**
+   * `[port-only]` -- the alpha `ScreenIdleDim` drew asset slot `0x93E` at
+   * this frame (`AssetDrawSlotWithAlpha`), 0 when it drew nothing. The draw
+   * itself is the renderer's.
+   */
+  g_screen_idle_dim: 0,
+  /**
+   * `g_render_light_colour_r` — 0x007E7998, and `g`, `b` beside it: the
+   * light colour `SetRenderLightColour` (`FUN_004AA0A0`) last set. The port
+   * keeps it for the 2D quads that are lit (`SCREEN_SPRITE_LIT`).
+   */
+  g_render_light_colour: [1, 1, 1] as number[],
   /** `g_credits_per_player` — 0x009C8E74. 0: one shared count. */
   g_credits_per_player: 0,
   /**
@@ -739,6 +962,18 @@ export const G = {
    * the word stays 0 and the debug state stands still.
    */
   g_pad_held: 0,
+  /**
+   * `0x009A37A8` and `0x009A37A0` -- a second pressed/held pair beside
+   * `g_pad_state` and `g_pad_held`, which `PadLatchFrame` (`FUN_0040D680`)
+   * latches from `0x009A37B4` the same way. The options list reads their low
+   * byte as four directions a player: `1` up, `2` down, `4` left, `8` right,
+   * player 1's the same shifted four (`OptionsPadPressed`,
+   * `OptionsHoldRepeatTick`). `[port-only]` in that nothing feeds them: the
+   * page's directions are its keyboard's, which the exe ORs into the pad
+   * word itself (`KeyboardReadAsPad`), so both stay 0.
+   */
+  g_pad_aux_state: 0,
+  g_pad_aux_held: 0,
   /**
    * `g_trigger_down` — 0x009C8FD4 + player*0x28, the trigger bit in the aim
    * record `PollPlayerAimInput` (`FUN_0040CBB0`) fills. The continue
@@ -1054,8 +1289,13 @@ export const G = {
   g_original_weapon_kind: [0, 0] as number[],
 
   // -- difficulty --------------------------------------------------------
-  /** `g_difficulty` — 0x009C8E94. Scales spawn HP only. */
-  g_difficulty: 2,
+  /**
+   * `g_difficulty` — 0x009C8E94. Scales spawn HP, and picks the rank a game
+   * starts at (`ResetDamageRank`). `ProfileApplyToRun` (`FUN_0040AB50`)
+   * copies the options' difficulty into it at boot and at the options' EXIT;
+   * the factory setting's here.
+   */
+  g_difficulty: OPTIONS_FACTORY.difficulty as number,
   /**
    * `g_damage_rank_pending` — 0x009A3794. `PlayerTakeDamage` subtracts 2;
    * `UpdateDamageRank` adds it into the rank next frame and clears it.
@@ -1919,6 +2159,14 @@ export const G = {
    * walk.
    */
   g_crosshair_drawn: [0, 0] as number[],
+  /**
+   * `[port-only]` -- the sprite `HudDrawCrosshair` drew each player's
+   * crosshair with this frame: `g_crosshair_sprites[sight graphic +
+   * player*4]` (`0x00579F58`, the bundle's `options.crosshair_sprites`), -1
+   * when it drew none or the table is not in the bundle. Beside
+   * `g_crosshair_drawn`, for the same page to draw.
+   */
+  g_crosshair_sprite: [-1, -1] as number[],
   /**
    * `g_evt_gameplay_live` — 0x007DCCA4. Recomputed at the top of
    * `EvtInterpreterLoop` (`FUN_0045ECC0`) and read by every wait opcode,

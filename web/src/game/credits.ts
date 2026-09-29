@@ -28,14 +28,6 @@ export function ModeStartCounterValue(mode: number): number {
 }
 
 /**
- * What the factory reset `FUN_00401130` writes to `g_option_credits`
- * (`0x009C9F25`): 5, so an Arcade game starts with six credits -- the start
- * and five continues. The port starts at free play instead; see
- * `g_option_credits`.
- */
-export const OPTION_CREDITS_FACTORY = 5;
-
-/**
  * `SetBothPlayerCounters` — `FUN_00406F60`. -1 is free play
  * (`FUN_00407000`), anything else a count (`FUN_00407030(0)` first clears
  * free play); then both counts take the value and `CreditTiersUpdate` runs.

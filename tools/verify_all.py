@@ -405,6 +405,16 @@ CHECKS: list[Check] = [
           "that holds the script while nobody is in play. Nothing else looks "
           "at a picture that, when wrong, is simply not there",
           NEEDS_GAME),
+    Check("verify_options", ".",
+          ["python3", "tools/verify_options.py", "--game-dir", "{game_dir}"],
+          "that the profile reading is right on the user's own save -- the "
+          "four disguised files deciphered with the key taken out of "
+          "`ProfileCipher`'s instructions, and the block's byte sum and "
+          "version checked -- that Blood Color is dead in this build (one "
+          "store of its gate, no reader of its byte), and that the options "
+          "screen's factory tables, sprite ids, positions and glyph table are "
+          "the EXE's, with the bundle's `options` block when there is one",
+          NEEDS_GAME),
     Check("verify_water", ".",
           ["python3", "tools/verify_water.py", "--game-dir", "{game_dir}"],
           "that class 0x41 type 1, the canal water task, starts from the table "

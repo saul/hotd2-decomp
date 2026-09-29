@@ -3335,9 +3335,28 @@ now, not a constant, and it starts at **-1**: free play, which
 `ModeStartCounterValue` (`CMP AL,0xff` at `0x00496B8B`) turns into
 `SetBothPlayerCounters(-1)`. Every start and continue succeeds and the credit
 line reads free play. The factory reset writes 5 (six credits);
-`OPTION_CREDITS_FACTORY` keeps that number, and the tests that count credits
-set it. Declared `[diverges]` on the field until the options screen and
-saved options exist to hold the choice.
+`OPTIONS_FACTORY.credits` keeps that number, and the tests that count credits
+set it. The declared `[diverges]` is `ProfileBoot`'s now: a profile with
+nothing saved boots in free play, a saved one brings its own setting.
+
+**The options screen is ported** (2026-09-29, `game/options/`,
+`game/profile.ts`; read in `docs/re/options-screen.md`). App state `0x0C`,
+`OptionsRunPhase`: the list of eleven rows, each value written into the
+profile as it changes; the cursor that steps over what cannot be used; the
+two sound tests; Default, which is the factory reset `FUN_00401130`; EXIT,
+which saves, applies (`ProfileApplyToRun`: `g_start_lives`, `g_difficulty`,
+the saved Original items) and hands back to the title. The settings are `G`
+fields at their addresses now -- `g_option_difficulty`, `g_option_lives`,
+`g_option_credits`, each player's sight graphic, sight speed, bindings and
+calibration -- where `OPTION_LIVES` and `INPUT_BINDINGS` were constants, and
+every reader reads them. The page's input mode is **6** (the mouse with the
+keyboard's pad ORed in), which is what makes Sight Graphic editable and takes
+Gun Calibration off the list; the two sub-screens are unreachable with the
+page's mouse guns, so the port has their gates and not their bodies.
+Blood Color is dead in the exe and stays so. Free play, once changed on the
+Continue row, does not come back without three unlock bits no bundle can set
+-- the exe's rule. `port.test.ts` drives it all with pad bits: lives 4 is
+five lives in the next game, credits 3 is four credits.
 
 **The continue screen is drawn, and the script waits under it** (2026-09-28,
 `NEW-BUGS-2`). It used to be state with nothing on screen: the countdown ran

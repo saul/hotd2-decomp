@@ -91,36 +91,6 @@ export enum InputBindingSet {
   PadKind2 = 3,
 }
 
-/** Two of the five masks of a binding set: `+0x00` and `+0x04`. */
-export interface InputBinding {
-  /** `+0x00`: `PollPlayerAimInput`'s trigger for a non-gun device. */
-  trigger: number;
-  /** `+0x04`: `PlayerFireAndReloadUpdate`'s reload for a non-gun device. */
-  reload: number;
-}
-
-/**
- * `g_input_bindings_default` — `0x004C42A8`, `u32[2][4][5]`, copied into
- * `g_player_input_bindings` (`0x009C9F60 + 8`) by the factory reset
- * `FUN_00401130`. The port has no options screen, so these are the bindings.
- * Player 1's masks are player 0's shifted up 16, as `PadReadMapleDevices`
- * (`FUN_0040D6C0`) lays the two pads out in `g_pad_state`.
- */
-export const INPUT_BINDINGS: readonly (readonly InputBinding[])[] = [
-  [
-    { trigger: 0x4, reload: 0 },
-    { trigger: 0x4, reload: 0x4002 },
-    { trigger: 0x4, reload: 0x2 },
-    { trigger: 0x4, reload: 0x2 },
-  ],
-  [
-    { trigger: 0x40000, reload: 0 },
-    { trigger: 0x40000, reload: 0x40020000 },
-    { trigger: 0x40000, reload: 0x20000 },
-    { trigger: 0x40000, reload: 0x20000 },
-  ],
-];
-
 /**
  * `g_original_fire_params` — `0x00579ED8`, eight bytes per
  * `g_original_fire_mode`. `OriginalWeaponLoadFireParams` copies bytes 0..3
@@ -175,10 +145,18 @@ export function PlayerInputBindingSet(player: number): InputBindingSet {
   return InputBindingSet.PadKind2;
 }
 
-/** The reload mask of `player`'s binding set; 0 with no device. */
+/** A binding set's `+0x04`, the reload mask. */
+export const BINDING_RELOAD = 1;
+
+/**
+ * The reload mask of `player`'s binding set, from
+ * `g_player_input_bindings` (`+0x08` of the player's options record, which
+ * only the factory reset writes); 0 with no device.
+ */
 function ReloadMask(player: number): number {
   const set = PlayerInputBindingSet(player);
-  return set === InputBindingSet.None ? 0 : INPUT_BINDINGS[player]?.[set]?.reload ?? 0;
+  return set === InputBindingSet.None
+    ? 0 : G.g_player_input_bindings[player]?.[set]?.[BINDING_RELOAD] ?? 0;
 }
 
 /**

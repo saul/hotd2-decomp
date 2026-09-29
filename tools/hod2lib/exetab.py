@@ -1348,6 +1348,49 @@ class ExeTables:
                                for rank in range(16)],
         }
 
+    def options_tables(self) -> dict:
+        """The options screen's ``.rdata``, for ``script.json``'s ``options``
+        block. The TypeScript half's ``optionsTables`` says what each field is
+        and which routine reads it; this is the same read.
+        """
+        def s8(va: int) -> int:
+            r = self._v2r(va)
+            return struct.unpack_from("<b", self.data, r)[0] if r is not None else 0
+
+        def s16(va: int) -> int:
+            r = self._v2r(va)
+            return struct.unpack_from("<h", self.data, r)[0] if r is not None else 0
+
+        def u32(va: int) -> int:
+            v = self._u32(va)
+            return v if v is not None else 0
+
+        def s32(va: int) -> int:
+            r = self._v2r(va)
+            return struct.unpack_from("<i", self.data, r)[0] if r is not None else -1
+
+        def row(i: int) -> dict:
+            p = u32(0x005696E0 + i * 8)
+            return {"col": s8(p), "row": s8(p + 1),
+                    "label": self._cstr(u32(p + 4)) or ""}
+
+        return {
+            "rows": [row(i) for i in range(11)],
+            "difficulty_labels": [self._cstr(0x00569758 + i * 10) or ""
+                                  for i in range(5)],
+            "digits": [self._cstr(0x00569738 + i * 2) or "" for i in range(10)],
+            "blood_labels": [self._cstr(0x0056974C + i * 6) or ""
+                             for i in range(2)],
+            "free_play": self._cstr(0x005971F8) or "",
+            "number": self._cstr(0x00597204) or "",
+            "glyphs": [s16(0x0056AF10 + i * 2) for i in range(96)],
+            "crosshair_sprites": [s16(0x00579F58 + i * 2) for i in range(8)],
+            "se_test": [u32(0x00569798 + i * 8) for i in range(0x2EF)],
+            "se_test_packs": [s32(0x0056979C + i * 8) for i in range(0x2EF)],
+            "music_test": [u32(0x005970C4 + i * 4) for i in range(0x13)],
+            "sight_speed_sprites": [s16(0x0056AFE0 + i * 2) for i in range(4)],
+        }
+
     def carrier_door_yaw(self) -> list[int]:
         """``g_carrier2_door_yaw`` (0x005926D0), s16[59] -- the swing
         `CarrierPropRoutine2` (FUN_004408A0) steps its two doors through."""

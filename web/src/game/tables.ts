@@ -14,7 +14,8 @@ import { authoredFrameOfTicks, ticksOfSeconds } from "../core/play_cursor";
 import type { Actor } from "./actor";
 import type { SetPieceParams } from "./class24";
 import type { CiviliansJson } from "../bundle/scene";
-import type { Boss4TablesJson, GameOverJson } from "../bundle/stage";
+import type { Boss4TablesJson, GameOverJson, OptionsJson }
+  from "../bundle/stage";
 import type { HumanoidProgram } from "./class25";
 import { G } from "./globals";
 import { TURN_CURVE_DEFAULT, TURN_RATE_UNTRACKED } from "./camera/constants";
@@ -63,6 +64,13 @@ export const T = {
    */
   gameOver: null as GameOverJson | null,
   /**
+   * The options screen's `.rdata`: its rows and labels, the glyph table its
+   * text is drawn from, the crosshair sprites and the two sound tests' lists.
+   * One block for the whole game. Null in a bundle written before it, which
+   * draws the screen with no text and plays no test.
+   */
+  options: null as OptionsJson | null,
+  /**
    * Class 0x19's `.rdata` -- the stage-4 boss's seven tables. One block for
    * the whole game, read by `game/class19/`. Null in a bundle written before
    * format 13, and the boss then has no arena to fight in.
@@ -97,6 +105,11 @@ export function SetBoss4Tables(json: Boss4TablesJson | undefined,
                                doorYaw: number[] | undefined): void {
   T.boss4 = json ?? null;
   T.carrierDoorYaw = doorYaw ?? [];
+}
+
+/** `[port-only]` -- the options block, from the same `script.json`. */
+export function SetOptionsTables(json: OptionsJson | undefined): void {
+  T.options = json ?? null;
 }
 
 /** `[port-only]` -- the game-over block, from the same `script.json`. */

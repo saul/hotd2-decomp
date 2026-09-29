@@ -130,8 +130,8 @@ export function class20Tail(rec: Spawn): Record<string, unknown> {
  * themselves -- but they are here for the same reason: no character type,
  * and the port still needs the placement to build them.
  */
-export const SLOT_DRAWN_CLASSES = new Set([0x13, 0x16, 0x17, 0x26, 0x33, 0x40,
-                                           0x43, 0x51, 0x52]);
+export const SLOT_DRAWN_CLASSES = new Set([0x12, 0x13, 0x16, 0x17, 0x26, 0x33,
+                                           0x40, 0x43, 0x51, 0x52]);
 
 /**
  * Class 0x17's descriptor tail, as `WaterWaveSourceAdd` (`FUN_004422D0`) and
@@ -377,6 +377,48 @@ export function zombieBoneMeshColi(
   if (word === null || word === 0xffffffff || !sets) return null;
   const hit = colilib.pointerToOffset(word, sets[0], sets[1]);
   return hit ? `${hit[0]}:${hit[1]}` : null;
+}
+
+/**
+ * Class 0x12's descriptor tail — every field `ScriptedPropInit12`
+ * (`FUN_0043F9D0`) reads out of `obj+0x130C`, at the width it reads it:
+ *
+ * ```
+ * +0x00 s16  the slot drawn until the flag      -> (float) sub+0x14
+ * +0x02 s16  the delay, once the flag is up     -> sub+0x04
+ * +0x04 u32  a relocated coli pointer, or -1    -> obj+0x14C (the shot mesh)
+ * +0x08 s16  an index into g_prop_behaviours    -> sub+0x00
+ * +0x0A s16  the camera path that despawns it   -> sub+0x06
+ * +0x0C s16  ...and the frame on it             -> sub+0x08
+ * +0x0E s16  the strip's first slot             -> sub+0x0A
+ * +0x10 s16  ...and its last                    -> sub+0x0C
+ * +0x12 s16  the script flag that starts it, -1 -> sub+0x0E
+ * +0x14 f32  the cursor's step a frame          -> sub+0x18
+ * +0x18 f32  a uniform scale                    -> sub+0x10
+ * ```
+ *
+ * `[proved]`, `0x0043F9EC`..`0x0043FA49`. The pointer resolves to the
+ * `coli.blobs` key the way {@link class26Tail}'s does.
+ */
+export function class12Tail(
+    rec: Spawn,
+    sets: [colilib.ColiFile, colilib.ColiFile] | null): Record<string, unknown> {
+  const word = rec.param(0x04, "u32");
+  const hit = word !== null && word !== 0xffffffff && sets
+    ? colilib.pointerToOffset(word, sets[0], sets[1]) : null;
+  return {
+    slot: rec.param(0x00, "i16") ?? 0,
+    delay: rec.param(0x02, "i16") ?? 0,
+    coli: hit ? `${hit[0]}:${hit[1]}` : null,
+    behaviour: rec.param(0x08, "i16") ?? 0,
+    cam_path: rec.param(0x0a, "i16") ?? -1,
+    cam_frame: rec.param(0x0c, "i16") ?? -1,
+    first: rec.param(0x0e, "i16") ?? 0,
+    last: rec.param(0x10, "i16") ?? 0,
+    flag: rec.param(0x12, "i16") ?? -1,
+    step: rec.param(0x14, "f32") ?? 0,
+    scale: rec.param(0x18, "f32") ?? 1,
+  };
 }
 
 export function class13Tail(rec: Spawn): Record<string, unknown> {
@@ -872,6 +914,11 @@ export function slotDrawnSpawn(cls: number, rec: Spawn): boolean {
   // `Class26Subtype2Update` (`FUN_0048EAD0`), stage 3's boat -- and the rest
   // are drawn by `render/rigs.ts` off the rig table with no actor behind them.
   if (cls === 0x26) return rec.hp === CLASS26_BOAT;
+  // Class 0x12 calls the behaviour its descriptor names every frame until its
+  // strip starts, and the port runs entry 0 alone (`NoOpStub`), which every
+  // shipped descriptor names. One that named another would arrive drawing
+  // the right slot and doing nothing else.
+  if (cls === 0x12) return rec.param(0x08, "i16") === 0;
   if (cls === 0x33) {
     return rec.hp === CLASS33_CARRIER || rec.hp === CLASS33_PUSHABLE;
   }
@@ -1539,6 +1586,7 @@ export async function resolveForStage(
       }
     }
     const class13 = cls === 0x13 ? class13Tail(rec) : null;
+    const class12 = cls === 0x12 ? class12Tail(rec, coliSets) : null;
     const class18 = cls === 0x18 ? class18Tail(rec) : null;
     const class26 = cls === 0x26 ? class26Tail(rec, coliSets) : null;
     const class19 = cls === 0x19 ? class19Tail(rec, coliSets) : null;
@@ -1654,6 +1702,7 @@ export async function resolveForStage(
     p.leap_strike_frames = leapStrikeFrames;
     p.ring_set = res.charType === 0 ? RING_SET_FOR_CHAR0 : 0;
     p.class13 = class13;
+    p.class12 = class12;
     p.class18 = class18;
     p.class26 = class26;
     p.class19 = class19;

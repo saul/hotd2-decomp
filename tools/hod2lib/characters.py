@@ -217,6 +217,7 @@ __all__ = [
     "Character",
     "class20_tail",
     "SLOT_DRAWN_CLASSES",
+    "class12_tail",
     "CLASS33_CARRIER",
     "CLASS33_PUSHABLE",
     "class33_push_tail",
@@ -614,6 +615,43 @@ def class19_tail(rec, sets=None) -> dict:
         "despawn_path": rec.param(0x40, "i16") or 0,
         "despawn_frame": rec.param(0x42, "i16") or 0,
     }
+def class12_tail(rec, sets=None) -> dict:
+    """Class 0x12's descriptor tail, as `ScriptedPropInit12` (`FUN_0043F9D0`)
+    reads it into its 0x1C-byte block. The TypeScript half's ``class12Tail``
+    has the offset table; this is the same read, field for field and width
+    for width.
+
+    ``coli`` is ``tail+0x04`` -- the shot mesh the Init puts in ``obj+0x14C``
+    -- resolved through `coli.pointer_to_offset` to the ``coli.blobs`` key, or
+    None for -1 and when ``sets`` is not given.
+    """
+    from . import coli as colilib
+    word = rec.param(0x04, "u32")
+    hit = None
+    if word is not None and word != 0xFFFFFFFF and sets:
+        hit = colilib.pointer_to_offset(word, sets[0], sets[1])
+
+    def i16(at: int, default: int) -> int:
+        v = rec.param(at, "i16")
+        return default if v is None else v
+
+    step = rec.param(0x14, "f32")
+    scale = rec.param(0x18, "f32")
+    return {
+        "slot": i16(0x00, 0),
+        "delay": i16(0x02, 0),
+        "coli": f"{hit[0]}:{hit[1]}" if hit else None,
+        "behaviour": i16(0x08, 0),
+        "cam_path": i16(0x0A, -1),
+        "cam_frame": i16(0x0C, -1),
+        "first": i16(0x0E, 0),
+        "last": i16(0x10, 0),
+        "flag": i16(0x12, -1),
+        "step": 0.0 if step is None else step,
+        "scale": 1.0 if scale is None else scale,
+    }
+
+
 #: The character types whose arm of `EnemyZombieInitByCharType`
 #: (`FUN_00452FD0`) reads the tail's ``+0x10`` -- 2 and 3 share one arm, 0xE
 #: has its own.

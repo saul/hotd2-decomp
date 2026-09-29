@@ -18,7 +18,7 @@
  */
 import { ByteReader, ByteWriter } from "./bytes";
 
-export const PROTOCOL = 3;
+export const PROTOCOL = 4;
 
 export type Channel = "ctrl" | "tick";
 
@@ -42,9 +42,9 @@ export enum Msg {
   Session = 14,
   /** replica -> host: send me a keyframe. */
   Resync = 15,
-  /** replica -> host: my section hashes at a tick my state hash disagreed on. */
+  /** replica -> host: my state is not yours; send me a keyframe. */
   Desync = 16,
-  /** host -> replica: which sections differed. */
+  /** replica -> host: what differed, found by comparing the keyframe that answered. */
   DesyncReport = 17,
   /** either way: I am leaving. */
   Bye = 18,
@@ -120,15 +120,17 @@ export interface ResyncMsg {
 
 export interface DesyncMsg {
   epoch: number;
+  /** The tick it was found at. */
   tick: number;
-  /** `[section, hash]`, every section of the replica's state at `tick`. */
-  sections: [string, number][];
+  /** How it was found: a hash that differed, an op that would not apply, an audit. */
+  reason: string;
 }
 
 export interface DesyncReportMsg {
   epoch: number;
+  /** The keyframe's tick, which the replica's own state was compared at. */
   tick: number;
-  /** Sections whose hash differed, as readable paths; empty if none could be compared. */
+  /** The values that differed, as `path: host's vs replica's`; empty if none. */
   differ: string[];
   note: string;
 }
@@ -165,11 +167,8 @@ export interface TickHead {
   base: number;
   /** The highest press id the host has applied. */
   pressAck: number;
-  /**
-   * The host's state hash at `tick`, on the ticks that carry one (every
-   * `HASH_EVERY`th, and keyframes', and the held clock's); null on the rest.
-   */
-  hash: number | null;
+  /** The host's state hash at `tick`. Every tick carries it, and every tick is checked. */
+  hash: number;
   /** `performance.now()` on the host when sent, for the jitter estimate. */
   sentAt: number;
 }
@@ -181,8 +180,7 @@ export function writeTickHead(w: ByteWriter, h: TickHead): void {
   w.uvar(h.tick);
   w.uvar(h.base + 1);
   w.uvar(h.pressAck + 1);
-  w.u8(h.hash === null ? 0 : 1);
-  if (h.hash !== null) w.u32(h.hash);
+  w.u32(h.hash);
   w.f64(h.sentAt);
 }
 
@@ -194,7 +192,7 @@ export function readTickHead(r: ByteReader): TickHead {
     tick: r.uvar(),
     base: r.uvar() - 1,
     pressAck: r.uvar() - 1,
-    hash: r.u8() ? r.u32() : null,
+    hash: r.u32(),
     sentAt: r.f64(),
   };
 }

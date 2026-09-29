@@ -105,7 +105,11 @@ function CivilianWaitStillHolds(obj: Actor, word: number): boolean {
   if ((word & CivilianWait.MotionFrame)
       // `*(int *)(model + 8)` is `obj+0x19C`, the **play** cursor, not the
       // authored frame index — the same clock every other cue is counted in.
-      && MotionPlayFrame(obj) === sub.motionCompare) return false;
+      // After a resume it is what the reapply walk just stored there, which
+      // this loop reads before any draw recomputes it (`Actor.cursorStore`).
+      && (obj.cursorStore ?? MotionPlayFrame(obj)) === sub.motionCompare) {
+    return false;
+  }
   if ((word & CivilianWait.Hook) && sub.hookBusy !== 0) return false;
   if (word & CivilianWait.Free) return false;
   // **Three conditions, not one**, and the port had only the middle one.

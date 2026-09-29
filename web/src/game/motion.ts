@@ -20,6 +20,11 @@ import { MotionAuthoredFrame, MotionOf, SecondsToTicks } from "./tables";
 
 /** One actor's clocks, `dt` seconds of game time. */
 export function ActorAdvanceMotion(obj: Actor, dt: number): void {
+  // The sample: `SkeletonAdvancePlayCursor` (`FUN_004111A0`) recomputes
+  // `model+0x08` from the counter on every draw, frozen or not -- the freeze
+  // gates the counter, not the draw -- so a store to the cursor alone lives
+  // until here and no further. See `Actor.cursorStore`.
+  obj.cursorStore = null;
   // A frozen set-piece holds its pose exactly. In the engine the clock lives
   // *inside* the class's own draw routine — `SetPiecePropDrawAndTick` writes
   // `if (obj+0x1324 == 0) obj+0x194++` — so a frozen object simply never
@@ -186,5 +191,42 @@ export function ActorAdvanceMotion(obj: Actor, dt: number): void {
     if (!rm || obj.react.ticks >= ticksOfAuthoredFrame(rm.frames, rm.fps)) {
       obj.react = null;
     }
+  }
+}
+
+/**
+ * A store to the play cursor alone: `model+0x08 = cursor`, with the counter
+ * at `model+0x00` left as it is.
+ *
+ * `[port-only]` as a function -- the engine's stores are single `MOV`s, and
+ * `CivilianReapplyWaitCommand`'s two (`FUN_0048B760`: `MOV dword ptr
+ * [ECX + 0x8], 0x0` at `0x0048B794` for op 0x00, `MOV dword ptr [ECX + 0x8],
+ * EDX` at `0x0048B7BA` for op 0x01) are its callers. It exists because the
+ * port keeps one clock where the engine keeps those two words, and what the
+ * store reaches depends on `SkeletonAdvancePlayCursor` (`FUN_004111A0`):
+ *
+ *  * **the fade bit up** (`track+0x37 & 1`, which the port holds as
+ *    `Actor.fadeFrom`): the sampler leaves the cursor alone, and the fade's
+ *    end resumes the counter from it (`*model = model[2] + 1`). The port's
+ *    held {@link Actor.playTicks} *is* that cursor, so the store goes there.
+ *  * **the bit down**: the next draw recomputes the cursor from the counter
+ *    and the store is gone. Until then its only reader is
+ *    `CivilianStepScript`'s own `0x200` test (`CMP [model+0x8], sub+0x16`),
+ *    so it waits in {@link Actor.cursorStore}; the clip plays on where it was.
+ *
+ * The port wrote {@link Actor.playTicks} in both cases, which restarted every
+ * civilian's clip on the frame a block resumed -- one frame early, before
+ * `CivilianRunScript` changed it -- so `CivilianApplyMotionPose`
+ * (`FUN_0048C310`) turned her by the heading of the outgoing clip's first
+ * frame rather than the one she was drawn in, and the fade dissolved from that
+ * first frame too. Stage 1's fountain man (`0x1828`, stream 0) turned 145
+ * degrees at once and swung back through the fade.
+ */
+export function ActorStorePlayCursor(obj: Actor, cursor: number): void {
+  if (obj.fadeFrom) {
+    obj.playTicks = cursor;
+    obj.cursorStore = null;
+  } else {
+    obj.cursorStore = cursor;
   }
 }

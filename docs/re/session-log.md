@@ -25424,6 +25424,166 @@ they set `OPTION_CREDITS_FACTORY` now, which is why the setting had to be a
 field and not a constant. New checks: the port starts in free play, and
 twenty continues all succeed and take nothing.
 
+## Stage 1's first civilian spun: the reapply walk stores the cursor, not the clock
+
+Reported: "the first civilian that says 'I don't wanna die' in stage 1 seems
+to spin in place when they say it", a regression.
+
+**Which civilian.** Not settled by ear -- nothing here can hear a WAV -- so
+every stage-1 civilian was measured instead. The fountain man `0x1828`
+(block 1 step 7, stream 1: `0x8300000`, 399 for ever; on-shot stream 0) is
+the one that turned: after 378 plays once and holds, the `0x8200` block
+changes to 377, and in the page (`?stage=1&block=1&step=7&op=0&drive=1&seed=1`,
+captors shot) `yaw` went 20480 -> 46825 in one frame and bone 1's drawn
+heading jumped 28120 BAMS, then swung back through the ten-frame fade. The
+pre-merge tree (1603f7f5, `git archive`d, same bundle) holds his heading at
+22018 across the same change. The session log's older note calls 399 "the I
+don't wanna die"; voice 5 (`COM\56_1_Y_W`) is queued by `0x18A8` (block 1
+step 9) and by the bin girl `0x3C38`, and neither of those turned `yaw` at
+all -- but both popped at fade starts from the same cause, so the fix is the
+same whichever the reporter meant. `[likely]` it is `0x1828`.
+
+**Cause.** `CivilianStepScript` (`FUN_0048B1E0`) resumes a block by running
+`CivilianReapplyWaitCommand` (`FUN_0048B760`) over it -- `0x0048B6C3` -- before
+`CivilianUpdate` hands the frame to `CivilianRunScript` (`0x0048AAB3`). The
+walk's op 0x00 is `MOV ECX, [0x007DD09C]; MOV dword ptr [ECX + 0x8], 0x0`
+(`0x0048B78E`/`0x0048B794`) and op 0x01's `MOV dword ptr [ECX + 0x8], EDX`
+(`0x0048B7BA`): `model+0x08`, the **cursor**. `SkeletonAdvancePlayCursor`
+(`FUN_004111A0`) recomputes it from the counter at `model+0x00` on every draw
+unless the fade bit holds it, and `CivilianApplyMotionPose` (`FUN_0048C310`)
+reads the draw records `model+0x7C`/`+0x10C` for the drawn heading and
+`ActorSetMotionBlended` snapshots them -- neither reads `model+0x08`. The one
+reader of the store is the step loop's own `0x200` test
+(`*(int *)(g_cur_actor_model + 8) != sub+0x16`); the loop arm reads the cursor
+after the draw (`0x0048AA30`), and nothing in `CivilianUpdate` after the step
+reads the model's `+0x08`. `[proved]`, and the walk's callers by an `E8` byte
+scan: `0x0048B699` and `0x0048B6C3`, both the step's.
+
+The port's walk wrote `obj.playTicks = 0` -- its one clock, the counter -- so
+the outgoing clip was on frame 0 when the pose routine read "the drawn pose"
+through `MotionPlayFrame`. While the clip change was a cut (before 16ba4b4e)
+that cost nothing visible but restarting a re-stated clip; 16ba4b4e's
+`CivilianApplyMotionPose` turns by the drawn heading under `0x18000` and fades
+from the drawn pose, and both came from frame 0: 378's first frame faces
+145 degrees from its last. Regressing change: `class10/pose.ts`'s
+`const drawn = MotionFrameOf(obj, obj.motion, MotionPlayFrame(obj) >> 1)` and
+the blend's `ActorStartFade(obj, obj.motion, obj.playTicks, ...)`, reading a
+clock the walk had reset one call earlier (the reset itself predates it).
+
+**Fix.** `ActorStorePlayCursor` (`game/motion.ts`): while a fade holds the
+cursor the port's held clock *is* the cursor, so the store goes there; else it
+waits in `Actor.cursorStore`, which the `0x200` test reads first and
+`ActorAdvanceMotion` (the next sample) and `ActorSetMotionBlended`
+(`track[2] = start`) clear. It is L79's shape once more -- one port field for
+two engine words, and a writer of the one the port did not have.
+
+**Numbers.** Fountain man, in the page: mean |dyaw| 51.4 -> 0.0 BAMS a frame
+over 513 frames; the step at the 377 change 28120 -> 0. `0x18A8`: largest
+one-frame drawn step 6072 (the fade into 588 starting from 587's first frame)
+-> 2357 (the clip's own). Bin girl, block 6: the climb-off's fade start popped
+13935 BAMS -> 0; her `0x148100` turn into 373 read 669's first frame, 8143,
+where the drawn cursor gives 6875. Headless over all 53 civilians (the
+civilians harness's run, 30 s): 22 of 32 checked clip changes faded from
+their clip's first frame -> 0, which the harness now fails on.
+
+**Wrong turns.** The first probe measured `obj.yaw` at 5-frame steps from
+`step=8`, where the captor mauls the man before path 39 ever reaches the
+cue that moves his dying script on -- so it saw a constant yaw and moved on.
+Then 0x18A8 and the bin girl were chased as the likely speakers, and their
+`yaw` never spun either. What found it was reading bone 1's drawn heading off
+the renderer for every civilian at once, with the captors shot so the stage
+moves. A drawn-heading metric is ill-conditioned when a body lies flat -- the
+man's 377 shows a 12498 one-frame "step" at cursor 188 on both trees, which
+is the clip -- so the verdict rests on `yaw` and on the pre-merge tree.
+
+**Left open.** Two divergences seen on the way, in the same two routines, not
+changed here: op 0x06 `SetTargetPoint` writes `sub+0x44` and the point but not
+`sub+0x40` (`puVar9[0x11] = param_2[1]` in `CivilianRunScript`, and the walk
+the same), while the port sets `targetMode` -- and `CivilianUpdate`'s turn
+step is gated on `+0x40` (`CMP [ECX+0x40], EBX` at `0x0048A970`), so the port
+turns a civilian toward an op-6 point the exe does not; and
+`CivilianStepScript`'s restore of the eight saved sub fields sits after its
+loop in the decompile, on every exit that reaches `0x0048B6D6`, where the port
+restores only when nothing resumed. And the port's "drawn" cursor is still a
+tick ahead of the engine's draw (L62), for every class.
+
+## 2026-09-29 -- class 0x12: the boards the bin captor bursts through
+
+**Report.** "The zombie at end of stage 2 in the civilian scripted sequence
+should burst out of a wooden wall. The wood doesn't seem to exist in the
+port." Corrected by the user mid-task: the scene is stage 1's -- block 6 step
+1, the civilian off the bridge onto the bin (`0x3C38`) and the captor that
+bursts out of the wood after she climbs down (`0x3D24`, state 39 -> 36, clip
+967 from cursor 33, flag 34 on cursor 63).
+
+**Found.** The step's spawn list holds `0x3D88`, opcode 0x0C, **class 0x12**
+-- a class the port had no `SpawnClass` member, handler or placement for.
+`g_class_handler_pairs` (`0x00593358`) pairs it with `0x0043F9D0`; Ghidra had
+no function there or at the update it installs, `0x0043FA60`. Both created
+and named: `ScriptedPropInit12`, `ScriptedPropUpdate12` (`functions.tsv`).
+The descriptor: start slot `0x11FD` = `door_1.bin[41]`, delay 1, a shot mesh
+(`coli1.bin:5144`), behaviour 0, despawn on camera path 47 frame 130, strip
+`0x11FE..0x1233`, **flag 34**, step 1.0, scale 1.0, flags word `0x10`.
+`door_1.bin[41]` is modelled in world space across the doorway (`x -675..-661,
+y -16..7, z -551..-545`), between the captor at `(-660, -15.5, -565)` and the
+bin; `[42..95]` are the same geometry pulled apart, the last over 90 units.
+So the wood is a flag-driven slot strip, and flag 34 -- which 101e4929 made
+the captor raise -- is what starts it. `[proved]` from the disassembly of
+both routines (the pseudocode drops both `__ftol` operands, `L1`). Two more
+class-0x12 records ship, `sanbasi.bin[12..90]` at half a slot a frame: stage
+2 block 37 (flag 95) and stage 5 block 3 (flag 11).
+
+**Ported.** `game/class12/`, `SpawnSlotActor`'s arm, the draw in
+`render/slotmodels.ts`, the exporter (`class12Tail`, `class12_tail`,
+`SLOT_DRAWN_CLASSES`, the strip slots in `slots_actor`), and
+`tools/verify_flag_strips.py`, which holds the exporter's tail reads to the
+Init's eleven instructions quoted out of the EXE, every shipped spawn's
+placement to the evt, and every strip slot to its bundle. Fails on the old
+bundle (six stages without placements) and on `cam_frame` moved to `+0x0E`.
+
+**Not ported, and said so where it bites.** `ShotTestMesh` for an actor: the
+door files itself with `0x10` until its strip starts, so in the engine a shot
+at the boards stops on them; the port's pick passes a mesh entry by
+(`combat/shot_test.ts`, whose note used to say no registering class raised
+the bit).
+
+**Wrong turns -- most of the session.** The first brief said stage 2, and the
+search went through every civilian scene from block 14 on: 16/5 (the
+`hito_gal` out of the double doors with the axe man -- the doors are hinges,
+drawn), 16/11 (the boat), 16/14 (the jetty doorway), 17/1-2 (the `znkage` in
+the wallpapered room), 21/5 (the clock tower). Two hypotheses died on the
+data: that clip 1027 (`zom.bin` 77) or 784 (`ono.bin` 10) was a burst -- both
+are walk heads in five other captors' scripts. The brief's suspect,
+constructor 66 (`FUN_00464500`), is **not** the wood: its two tables place
+`komono_kanban.bin` and `komono_uemiti.bin` models whose update
+(`FUN_0046FE00`) swings them when shot and on the screen shake in scene 0 --
+signs, `[likely]` from the file name -- 340 to 800 units from the bin, placed
+at stage 1 blocks 6, 14 and 16 and stage 2 blocks 0 and 3. Unported, not
+chased. The earlier entry's "flag 34's one reader, `MouseBranchTriggerUpdate`,
+despawns a mouse" is true of subtype 4 alone, which is stage 4 block 10's
+mouse; stage 1's mice are subtype 0 and never read it (corrected in
+`PLAYER_PROGRESS.md`). `L83`.
+
+**Found on the way, not fixed.** Stage 2 block 17 step 1's `0xBE60` is class
+0x41 **constructor 50** (`FUN_00463BA0`, table 2 at `0x00594CA0`): four
+`PropDrawOnlyType12` objects, `komono_suimonie.bin[5]`, `[6]` and `[7]` twice
+-- the last two at `x -602.5, z -1532.5/-1548.5`, 32.7 units tall, under the
+four class-0x13 `komono_st1.bin[3]` records at the same x that PLAYER_PROGRESS
+calls "four wooden models on the far wall". Unported, so in the port those
+four hang in the air. Constructor 50 is six descriptors, one per table:
+stage 1 blocks 3/8 (table 5) and 4 (table 3), stage 2 blocks 7, 8, 17 and
+25 (tables 4, 1, 2, 0). **Stage 1's table 3 is in this very scene**: placed
+at block 4 step 3 with a four-step lifetime, it is still alive at block 6
+step 1 on the direct route from block 4 (four step changes), and its five `komono_st1b.bin` models ([0], [5], [6], [1], [2]) sit
+at `x -688..-696, y -2..-4, z -536..-543` -- on the bin she lands on. Missing
+from the port too; not the wall, and not chased here.
+
+**Proof.** `test:port` "class 0x12, the door the bin captor bursts out of"
+(six fail with the registration and the spawn arm removed); `test:render`
+"class 0x12's strip" (three fail without the draw arm); the page, before and
+after, at `?stage=1&block=6&step=1&op=0&drive=1&seed=1` with `0x3C7C` shot at
+frame 60: an open doorway before, boards after, bursting on the frame flag 34
+rises.
 ## 2026-09-29 -- the options screen, read
 
 The user asked for the game's options screen, properly ported. This entry is

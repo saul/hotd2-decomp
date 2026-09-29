@@ -473,6 +473,22 @@ export interface CharacterPlacement {
     scale: number; behaviour: number; selector: number;
   } | null;
   /**
+   * Class 0x12's tail — a slot strip a script flag starts, every field
+   * `ScriptedPropInit12` (`FUN_0043F9D0`) reads out of it.
+   *
+   * `slot` is drawn until `flag` (-1 for none) is up; `delay` frames later
+   * the cursor jumps to `first` and moves `step` a frame, and the prop
+   * despawns once it is past `last`. `cam_path`/`cam_frame` despawn it too,
+   * `scale` is applied only when it is not 1.0, `behaviour` indexes
+   * `g_prop_behaviours`, and `coli` is the `coli.blobs` key of the shot mesh
+   * `tail+0x04` points at (`obj+0x14C`), `null` for -1. See `game/class12/`.
+   */
+  class12?: {
+    slot: number; delay: number; coli: string | null; behaviour: number;
+    cam_path: number; cam_frame: number; first: number; last: number;
+    flag: number; step: number; scale: number;
+  } | null;
+  /**
    * Class 0x18's three — the class-0x30 state a rider leaves the carrier from,
    * and the camera path and frame that let it. See `game/class18/`.
    */

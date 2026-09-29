@@ -167,6 +167,12 @@ function DrawSlotFor(a: Actor): number | null {
       // `Translate; RotX; RotZ; RotY` and an optional uniform scale --
       // `ScriptedPropUpdate13` (`FUN_0043FE90`).
       return a.prop13.slot || null;
+    case SpawnClass.FlagStripProp:
+      // `AssetDrawSlot(__ftol(sub+0x14))` at `0x0043FB54`..`0x0043FB5D` --
+      // the cursor `ScriptedPropUpdate12` (`FUN_0043FA60`) steps, truncated
+      // here because the truncation is the draw's. A half-slot step draws
+      // each slot twice.
+      return Math.trunc(a.prop12.cursor) || null;
     case SpawnClass.ScriptedScenery:
       // `obj+0x13F0`, which `ScriptedPushableUpdate33` (`FUN_00433B70`) seeds
       // from its descriptor tail and never changes. Selector 1's draw is a
@@ -218,6 +224,10 @@ function DrawScaleFor(a: Actor): number {
       // `tail+0x0C` is not 1.0 -- the engine skips the call outright
       // otherwise. Stage 2's block 16 prop is the one that is not: 2.5.
       return a.prop13.scale || 1;
+    case SpawnClass.FlagStripProp:
+      // The same test on `sub+0x10` at `0x0043FB2F` (`FCOMP 1.0`), and the
+      // same call at `0x0043FB43`. All three shipped descriptors carry 1.0.
+      return a.prop12.scale || 1;
     case SpawnClass.WaterEnemy:
       // `MatrixScale(0.3, 0.3, 0.3)` at `0x00439AC9`, and again at
       // `0x00439CF8` in `FishSwimAwayTick` (`FUN_00439C20`). A fish drawn at
@@ -441,7 +451,12 @@ export class SlotModelLayer implements System<RenderContext> {
         live.node.position.set(a.pos.x, a.pos.y, a.pos.z);
         live.node.rotation.set(a.pitch * BAMS_TO_RAD, a.yaw * BAMS_TO_RAD,
                                a.roll * BAMS_TO_RAD, "ZYX");
-      } else if (a.cls === SpawnClass.ScriptedProp) {
+      } else if (a.cls === SpawnClass.ScriptedProp
+                 || a.cls === SpawnClass.FlagStripProp) {
+        // `ScriptedPropUpdate12` (`FUN_0043FA60`) composes the same product
+        // at `0x0043FB05`..`0x0043FB20`: Translate, then RotX(+0x64),
+        // RotZ(+0x6C), RotY(+0x68).
+        //
         // `ScriptedPropUpdate13` (`FUN_0043FE90`) is
         // `MatrixTranslate(obj+0x40)` then `RotX(obj+0x64)`, `RotZ(obj+0x6C)`,
         // `RotY(obj+0x68)` at `0x0043FEE3`..`0x0043FEF9` — the product is

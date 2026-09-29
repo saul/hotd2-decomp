@@ -155,8 +155,18 @@ translation either moves the object or moves the pose, never both.
 
 `CivilianReapplyWaitCommand` (`FUN_0048B760`) deliberately does **not** write
 either `model+0x20` or `model+0x64`, so a skipped block leaves the gate where
-the last real clip change put it. Its op 0x01 writes `model+0x08` -- the start
-**cursor** -- as the operand has it, as the real change does.
+the last real clip change put it. Its ops 0x00 and 0x01 write `model+0x08` --
+the **cursor**, 0 or op 0x01's start as the operand has it (`0x0048B794`,
+`0x0048B7BA`) -- and not the counter at `model+0x00`. `[proved]` The next
+draw's `SkeletonAdvancePlayCursor` (`FUN_004111A0`) recomputes the cursor from
+the counter unless a fade holds it, so the store reaches the step loop's own
+`0x200` test (`CMP [model+0x8], sub+0x16`) and nothing after: a block that
+re-states the playing clip does not restart it, and a block that changes clip
+hands `CivilianApplyMotionPose` the pose the outgoing clip was **drawn** in,
+because that routine reads the draw records. The port has one clock for both
+words; `ActorStorePlayCursor` in `game/motion.ts` is how the store lands.
+Writing the clock instead is what made stage 1's fountain man (`0x1828`) turn
+145 degrees on his change to 377 -- see *The clip change* below.
 
 ### The clip change — `CivilianApplyMotionPose`
 
@@ -219,8 +229,9 @@ Two consequences worth knowing, both the engine's:
   it passes as well the loop advances again and the block it walked past never
   runs its actions. `CivilianReapplyWaitCommand` (`FUN_0048B760`) is what makes
   that safe: a second, smaller VM that re-applies only the opcodes a wait
-  condition reads — the clip and its loop count, the target, the timer, the
-  three count goals, the camera cue, the frame hook and the flag index.
+  condition reads — the clip's loop count and play cursor (never the clip),
+  the target, the timer, the three count goals, the camera cue, the frame hook
+  and the flag index.
 * **`SetTimer` (op 0x09) does not delay its own block.** The step loop clears
   the timer on every resume, so the value that survives is the one the reapply
   walk reads out of the block *ahead*. A timer of `n` costs `n + 1` frames,

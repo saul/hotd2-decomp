@@ -579,6 +579,8 @@ import {
 } from "../src/game/class44";
 import { SpawnPropContainers, SpawnSlotActor, SpawnSlotActors }
   from "../src/game/director";
+import type { ScriptedProp12Tail } from "../src/game/class12/state";
+import { ScriptedProp12DrawSlots } from "../src/game/class12/state";
 import {
   SetPieceState, SetPiecePropUpdate,
   DROP_GRAVITY, SLIDE_FRAMES, SLIDE_VX, SLIDE_VZ,
@@ -15588,6 +15590,141 @@ console.log("\nclass 0x10's clip change, CivilianApplyMotionPose:");
   }
 }
 
+// **A resume stores the cursor, not the clock.** `CivilianStepScript` runs
+// `CivilianReapplyWaitCommand` (`FUN_0048B760`) over the block at the cursor
+// before `CivilianRunScript` runs it, and the walk's op 0x00 is `MOV dword ptr
+// [ECX + 0x8], 0x0` (`0x0048B794`): `model+0x08`, the cursor the next draw
+// recomputes from the counter at `model+0x00` -- which it leaves alone. The
+// port wrote its one clock, so the outgoing clip was back on its first frame
+// when `CivilianApplyMotionPose` (`FUN_0048C310`) read the drawn pose, which
+// it takes from the draw records and never from `model+0x08`. Stage 1's
+// fountain man (`0x1828`, stream 0: clip 378 once and held, then `0x8200` and
+// 377) turned +26345 BAMS in one frame and swung back through the fade.
+//
+// Driven in the director's order -- the clock, then the update -- over clips
+// whose frames differ (L48): 702's bone 1 faces 0x2000 on its last frame and
+// nothing on its first, 703 faces 0x2000 throughout, 704 turns 0x100 a frame.
+console.log("\nclass 0x10's resume stores the cursor, not the clock:");
+{
+  const rng = new Rng(23);
+  const N = TYPE.bone_count;
+  const FRAMES = 20;
+  /** `mot/` authors at 30; the cursor runs to `2 * frames - 2`. */
+  const PLAY = FRAMES * 2 - 2;
+  /** A clip standing still whose bone 1 is turned `yaw(f)` on frame `f`. */
+  const turning = (yaw: (f: number) => number) => ({
+    bank: "t", frames: FRAMES, fps: 30,
+    root: Array.from({ length: FRAMES * 3 }, (_, i) => (i % 3 === 1 ? 11 : 0)),
+    rot: Array.from({ length: FRAMES * N * 3 }, (_, i) =>
+      (Math.floor(i / 3) % N === 1 && i % 3 === 1
+        ? yaw(Math.floor(i / (N * 3))) : 0)),
+  });
+  const RESUME_CHARS = {
+    ...CHARS,
+    types: { "1": { ...TYPE, motions: {
+      ...TYPE.motions,
+      "702": turning((f) => (f === FRAMES - 1 ? 0x2000 : 0)),
+      "703": turning(() => 0x2000),
+      "704": turning((f) => f * 0x100),
+    } } },
+  } as unknown as CharactersJson;
+  const cmd = (op: CivilianOp, ...args: number[]): CivilianCmdJson =>
+    ({ op, args });
+  /**
+   * Spawn a civilian on `script` at yaw 0x1234 and run it until `until` says
+   * stop -- ticking the clip before each update, as `GameUpdate` does.
+   * Returns the actor and the play cursor the frame before the last.
+   */
+  const run = (script: CivilianCmdJson[],
+               until: (a: ReturnType<typeof ActorSpawn>) => boolean) => {
+    ResetGameGlobals();
+    EnterPlay();
+    SetGameTables(RESUME_CHARS, undefined, undefined, undefined, undefined, {
+      entries: [0], items: [], scripts: [script],
+      spawns: { "16384": { charType: 1, script: 0, removePath: -1,
+                           removeFrame: 0, removeDelay: 0, children: [] } },
+    });
+    const a = ActorSpawn(0x4000, SpawnClass.Civilian, 1, "civilian",
+                         undefined, rng);
+    a.visible = true;
+    a.pos = vec3(0, 0, 0);
+    a.yaw = 0x1234;
+    const events = new Events();
+    let before = a.playTicks;
+    for (let i = 0; i < 400 && !until(a); i++) {
+      before = a.playTicks;
+      ActorAdvanceMotion(a, 1 / 60);
+      CivilianUpdate(a, { dt: 1 / 60, rng, host: NULL_HOST, events });
+    }
+    return { a, before };
+  };
+
+  // 702 plays once and holds its last frame (the loop arm stops stepping the
+  // counter at the play length); a timer later the `0x8000` block changes to
+  // 703. The drawn heading is 702's last frame's, 0x2000, and 703's first
+  // frame has the same, so `yaw += 0x2000 - 0x2000`: no turn at all.
+  {
+    const { a } = run([
+      cmd(CivilianOp.Wait, CivilianWait.RootMotion),
+      cmd(CivilianOp.SetMotion, 702, 1),
+      cmd(CivilianOp.SetTimer, 80),
+      cmd(CivilianOp.Wait, CivilianWait.TurnKeepBones | CivilianWait.RootMotion),
+      cmd(CivilianOp.SetMotion, 703, -1),
+      cmd(CivilianOp.Wait, 0),
+      cmd(CivilianOp.End),
+    ], (x) => x.motion === 703);
+    check("a 0x8000 change turns by the pose she was drawn in, not the "
+          + "outgoing clip's first frame",
+          a.motion === 703 && a.yaw === 0x1234,
+          `motion ${a.motion} yaw ${a.yaw.toString(16)} (0x1234 - 0x2000 is `
+          + "the first frame's)");
+    // `MotionLoadPoseSlot` mode 0xC snapshots the draw records, and they
+    // are 702's held last frame -- the cursor at the play length.
+    check("...and the fade dissolves from the held frame, not from frame 0",
+          a.fadeFrom?.motion === 702 && a.fadeFrom?.ticks === PLAY,
+          JSON.stringify(a.fadeFrom));
+  }
+  // A block that re-states the clip already playing changes nothing in
+  // `CivilianRunScript` (`if (model+0x20 != clip)`), and the reapply's store
+  // is gone at the next draw: the counter runs on, one tick a frame.
+  {
+    const { a, before } = run([
+      cmd(CivilianOp.Wait, CivilianWait.RootMotion),
+      cmd(CivilianOp.SetMotion, 704, -1),
+      cmd(CivilianOp.SetTimer, 20),
+      cmd(CivilianOp.Wait, CivilianWait.RootMotion),
+      cmd(CivilianOp.SetMotion, 704, -1),
+      cmd(CivilianOp.Wait, 0),
+      cmd(CivilianOp.End),
+    ], (x) => (x.civ?.cursor ?? 3) > 3);
+    check("a resume that re-states the playing clip does not restart it",
+          a.motion === 704 && before > 0 && a.playTicks === before + 1,
+          `ticks ${before} -> ${a.playTicks}`);
+  }
+  // The store's one reader: the step loop tests the block it has just walked
+  // before any draw -- `CMP [model+0x8], sub+0x16` for bit 0x200. The walk
+  // stored 0 and op 0x04 asked for 0, so the block is already satisfied and
+  // the loop walks past it; its flag is never raised and the next block's is.
+  {
+    const { a } = run([
+      cmd(CivilianOp.Wait, CivilianWait.RootMotion),
+      cmd(CivilianOp.SetMotion, 704, -1),
+      cmd(CivilianOp.SetTimer, 20),
+      cmd(CivilianOp.Wait, CivilianWait.MotionFrame | CivilianWait.RootMotion),
+      cmd(CivilianOp.SetMotion, 704, -1),
+      cmd(CivilianOp.SetMotionFrame, 0),
+      cmd(CivilianOp.SetScriptFlag, 7),
+      cmd(CivilianOp.Wait, 0),
+      cmd(CivilianOp.SetScriptFlag, 8),
+      cmd(CivilianOp.End),
+    ], () => G.g_script_flags[7] === 1 || G.g_script_flags[8] === 1);
+    check("the 0x200 test reads the cursor the walk just stored",
+          a.motion === 704 && (G.g_script_flags[7] ?? 0) === 0
+          && G.g_script_flags[8] === 1,
+          `flags 7:${G.g_script_flags[7]} 8:${G.g_script_flags[8]}`);
+  }
+}
+
 console.log("\nclass 0x30's captor family — the zombies work on the civilian:");
 {
   const rng = new Rng(11);
@@ -20645,6 +20782,7 @@ console.log("\n`g_class_handlers`, filled by the classes themselves:");
     [SpawnClass.OneHitTarget, "0x20 one-hit target"],
     [SpawnClass.RankScaledEnemy, "0x21 rescue target"],
     [SpawnClass.ScriptedProp, "0x13 script-driven prop / the boat"],
+    [SpawnClass.FlagStripProp, "0x12 slot strip on a flag / the bin's door"],
     [SpawnClass.CarriedZombie, "0x18 the zombie that rides it"],
     [SpawnClass.Vehicle, "0x26 subtype 2, the boat the player rides"],
     [SpawnClass.PathRidingProp, "0x28 stage 1's two burning cars"],
@@ -36888,6 +37026,158 @@ console.log("\nclass 0x28 -- held on its route until cp 0x2F, thrown once, "
   }
 }
 
+// -- class 0x12: the wood the bin captor bursts out of ------------------------
+//
+// Stage 1 block 6 step 1 places evt `0x3D88`, class 0x12, at camera frame 640
+// -- the descriptor as `st1evtbl.bin` carries it, read field by field the way
+// `ScriptedPropInit12` (`FUN_0043F9D0`) reads it: `door_1.bin[41]` (`0x11FD`),
+// delay 1, the shot mesh `coli1.bin:5144`, behaviour 0, gone on camera path
+// 47 frame 130, the strip `0x11FE..0x1233`, flag 34, a slot a frame, scale 1,
+// flags word `0x10`. `ScriptedPropUpdate12` (`FUN_0043FA60`) holds `0x11FD`
+// until flag 34 -- which `ZombieStateTargetScriptWithFlag` raises on the burst
+// clip's cursor 63 -- then jumps to `0x11FE`, leaves the shot test (`0x8000`)
+// and steps a slot a frame, despawning, undrawn, the frame the cursor is
+// strictly past `0x1233`. The port had no class 0x12 at all: the spawn built
+// nothing, and the captor walked out of an empty doorway.
+console.log("\nclass 0x12, the door the bin captor bursts out of:");
+{
+  const rng = new Rng(12);
+  const events = scene(0, rng);
+  const DOOR = 0x3d88;
+  const door12 = {
+    slot: 0x11fd, delay: 1, coli: "coli1.bin:5144", behaviour: 0,
+    cam_path: 47, cam_frame: 130, first: 0x11fe, last: 0x1233, flag: 34,
+    step: 1, scale: 1,
+  };
+  // Stage 2's end (`0x15644`): the other shape, half a slot a frame, and its
+  // first slot is the one it starts on.
+  const JETTY = 0x15644;
+  const jetty12 = {
+    slot: 0x16e1, delay: 1, coli: null, behaviour: 0, cam_path: 106,
+    cam_frame: 0, first: 0x16e1, last: 0x172f, flag: 95, step: 0.5, scale: 1,
+  };
+  // Not shipped: a negative delay, which `TEST AX, AX; JL` never starts.
+  const NEVER = 0x7112;
+  SetGameTables({
+    ...CHARS,
+    placements: [
+      { at: DOOR, class: 0x12, char_type: -1, motion: null, hp: 0, yaw: 0,
+        init_flags: 0x10, class12: door12 },
+      { at: JETTY, class: 0x12, char_type: -1, motion: null, hp: 0, yaw: 0,
+        init_flags: 0x8000, class12: jetty12 },
+      { at: NEVER, class: 0x12, char_type: -1, motion: null, hp: 0, yaw: 0,
+        init_flags: 0x10, class12: { ...door12, delay: -1 } },
+    ],
+  } as unknown as CharactersJson);
+  G.g_active_cam_path = 42;
+  G.g_cam_path_frame = 640;
+  SpawnSlotActors([
+    { at: DOOR, class: SpawnClass.FlagStripProp, pos: [0, 0, 0] },
+    { at: NEVER, class: SpawnClass.FlagStripProp, pos: [0, 0, 0] },
+  ], rng);
+  const door = G.g_object_list.find((o) => o.at === DOOR);
+  const t = () => (door as { prop12: ScriptedProp12Tail }).prop12;
+  check("stage 1's class-0x12 spawn builds an object",
+        door?.cls === SpawnClass.FlagStripProp,
+        door ? `0x${door.cls.toString(16)}` : "nothing built");
+  if (door) {
+    check("ScriptedPropInit12 seeds the cursor on door_1.bin[41] and the rest "
+          + "of its block off the tail",
+          t().cursor === 0x11fd && t().first === 0x11fe && t().last === 0x1233
+          && t().flag === 34 && t().delay === 1 && t().step === 1
+          && t().camPath === 47 && t().camFrame === 130,
+          JSON.stringify(t()));
+    // `ActorInitFlags` (`FUN_00408970`) is `obj+0x34 = flags | 1`.
+    check("...obj+0x14C is the shot mesh, obj+0x3C is -1, and the record's "
+          + "flags word 0x10 stands (with ActorInitFlags' 1)",
+          door.coliBlob === "coli1.bin:5144" && door.motion === -1
+          && door.flags === (ActorFlag.ShotTestMesh | 1),
+          `${door.coliBlob} ${door.motion} 0x${door.flags.toString(16)}`);
+    const frame = () => GameUpdate(1 / 60, NULL_HOST, rng, events);
+    for (let i = 0; i < 30; i++) frame();
+    check("with flag 34 down the door holds 0x11FD and files itself for the "
+          + "shot test every frame, as a mesh",
+          !door.despawned && t().cursor === 0x11fd && t().delay === 1
+          && G.g_shot_test_list.some((e) => e.at === DOOR && e.flags === 0x11),
+          `${t().cursor.toString(16)} ${t().delay} `
+          + JSON.stringify(G.g_shot_test_list.filter((e) => e.at === DOOR)));
+    // `wait_frames`-free: the flag is the input, set the way `set_script_flag`
+    // and the captor's cue both set it.
+    G.g_script_flags[34] = 1;
+    frame();
+    check("the frame flag 34 is up the delay runs out: the cursor jumps to "
+          + "0x11FE, obj+0x1F4 takes it, and 0x8000 takes the door out of the "
+          + "shot test",
+          t().cursor === 0x11fe && t().delay === 0 && t().slot1F4 === 0x11fe
+          && (door.flags & ActorFlag.NoShotTest) !== 0
+          && !G.g_shot_test_list.some((e) => e.at === DOOR),
+          `${t().cursor.toString(16)} ${t().delay} 0x${door.flags.toString(16)}`);
+    const shown = [t().cursor];
+    while (!door.despawned && shown.length < 200) {
+      frame();
+      if (!door.despawned) shown.push(t().cursor);
+    }
+    check("...then a slot a frame through 0x1233, all 54 of door_1.bin[42..95]",
+          shown.length === 0x1233 - 0x11fe + 1
+          && shown.every((c, i) => c === 0x11fe + i),
+          `${shown.length} frames, last 0x${shown.at(-1)?.toString(16)}`);
+    check("...and the frame the cursor is past 0x1233 it despawns", 
+          door.despawned === true && t().cursor === 0x1234,
+          `${door.despawned} 0x${t().cursor.toString(16)}`);
+    const never = G.g_object_list.find((o) => o.at === NEVER) as
+      { prop12: ScriptedProp12Tail; despawned: boolean } | undefined;
+    check("a negative delay never starts, flag or no flag",
+          !!never && !never.despawned && never.prop12.cursor === 0x11fd
+          && never.prop12.delay === -1,
+          JSON.stringify(never?.prop12 ?? null));
+  }
+  // The camera cue, and it is an equality: path 47 frame 130 exactly.
+  {
+    ResetGameGlobals();
+    const a = ActorSpawn(DOOR, SpawnClass.FlagStripProp, -1, "door",
+                         { class12: door12, flags: 0x10 }, rng);
+    const fr: ClassFrame = { dt: 1 / 60, rng, host: NULL_HOST };
+    const mod = await import("../src/game/class12");
+    G.g_active_cam_path = 47;
+    G.g_cam_path_frame = 129;
+    mod.ScriptedPropUpdate12(a, fr);
+    const heldAt129 = !a.despawned;
+    G.g_cam_path_frame = 130;
+    mod.ScriptedPropUpdate12(a, fr);
+    check("camera path 47 frame 130 despawns it, 129 does not",
+          heldAt129 && a.despawned, `${heldAt129} ${a.despawned}`);
+  }
+  // Stage 2's jetty strip: half a slot a frame, the draw truncating it, and
+  // the equality arm -- a cursor that lands exactly on the last slot draws it.
+  {
+    ResetGameGlobals();
+    const a = ActorSpawn(JETTY, SpawnClass.FlagStripProp, -1, "jetty",
+                         { class12: jetty12, flags: 0x8000 }, rng);
+    const tj = (a as { prop12: ScriptedProp12Tail }).prop12;
+    const fr: ClassFrame = { dt: 1 / 60, rng, host: NULL_HOST };
+    const mod = await import("../src/game/class12");
+    G.g_script_flags[95] = 1;
+    mod.ScriptedPropUpdate12(a, fr);
+    mod.ScriptedPropUpdate12(a, fr);
+    mod.ScriptedPropUpdate12(a, fr);
+    check("stage 2's strip steps half a slot a frame from 0x16E1",
+          tj.cursor === 0x16e1 + 1.0 && Math.trunc(tj.cursor) === 0x16e2,
+          String(tj.cursor - 0x16e1));
+    tj.cursor = 0x172f - 0.5;
+    mod.ScriptedPropUpdate12(a, fr);
+    const onLast = !a.despawned && tj.cursor === 0x172f;
+    mod.ScriptedPropUpdate12(a, fr);
+    check("...a cursor exactly on the last slot is drawn, half past it is gone",
+          onLast && a.despawned, `${onLast} ${a.despawned}`);
+  }
+  check("the exporter's slot list for the door is 0x11FD and 0x11FE..0x1233",
+        JSON.stringify(ScriptedProp12DrawSlots(door12))
+          === JSON.stringify([0x11fd, ...Array.from(
+            { length: 0x1233 - 0x11fe + 1 }, (_, i) => 0x11fe + i)]),
+        String(ScriptedProp12DrawSlots(door12).length));
+  SetGameTables(CHARS);
+  ResetGameGlobals();
+}
 
 // -- the options screen (app state 0x0C) ---------------------------------------
 

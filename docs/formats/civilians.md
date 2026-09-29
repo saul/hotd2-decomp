@@ -271,8 +271,8 @@ Two consequences worth knowing, both the engine's:
 | `0x10` | `SetHook` | native routine — see below |
 | `0x11` | `SetSkipCount` | wait commands to skip on the next resume |
 | `0x12` | `SetRemoveDelay` | frames |
-| `0x13` | `AddHeldItem` | item record, value |
-| `0x14` | `AddPickedItem` | value |
+| `0x13` | `AddHeldItem` | item record, the wait-word bits its routine gives on (`0x800000` in every stream) |
+| `0x14` | `AddPickedItem` | the same bits; the record is op 0x15's pick |
 | `0x15` | `PickHeldItem` | weighted table |
 | `0x16` | `SetRadiusRamp` | target radius, frames |
 | `0x17` | `SetSphereCentreMode` | **[proved]** the low byte of `cmd[1]` to `sub+0x80` (`0x0048BE5B`), which picks the collision-sphere centre `CivilianUpdate` writes to `obj+0x12C` -- see *The collision sphere* below. It was `SetCameraPointMode`; the camera's point is `obj+0x100` and this never reaches it |
@@ -520,24 +520,36 @@ whole model at a fixed offset. Unported; `0x4C` reaches no bundle.
 
 ### Held items
 
-Ops 0x13, 0x14 and 0x15 put a model in a civilian's hand, and
-`CivilianDrawHeldItems` (`FUN_0048CD10`) draws it. The record is 0x7C bytes —
-the routine copies all 31 dwords onto its stack and reads them back, so the
-layout is the copy's:
+Ops 0x13, 0x14 and 0x15 put an item in a civilian's hand, and
+`CivilianDrawHeldItems` (`FUN_0048CD10`) — which `CivilianUpdate` calls at
+`0x0048AF89`, after the sphere switch — draws it **and gives it**. The array
+at `sub+0x70` (length `sub+0x6E`) holds 8-byte `{record, operand}` pairs; ops
+0x13 and 0x14 append the op's two operands (op 0x14's record is what op 0x15
+last picked, `sub+0x74`). The record is 0x7C bytes — the routine copies all 31
+dwords onto its stack and reads them back, so the layout is the copy's:
 
 ```
 rec+0x00  u32       bone the item hangs off (5, a hand, on every record read)
 rec+0x04  u32       asset slot drawn there
-rec+0x08  s32       kind; 3-10 and 0x0E-0x12 draw a second, fixed slot
+rec+0x08  s32       kind: an Original Mode item id, or -1; 3-10 and 0x0E-0x12
+                    draw a second, fixed slot
 rec+0x0C  s32       rotate X, BAMS
 rec+0x10  s32       rotate Y
 rec+0x14  s32       rotate Z
-rec+0x18  fn        per-frame callback, run after the draw. [open]
+rec+0x18  fn        the routine the draw calls after the item [proved]
 rec+0x1C  f32[6][4] per attach set: translate x/y/z, then a uniform scale
 ```
 
-The rotations are applied **X, then Z, then Y**, and the translate follows
-them. The attach set is `sub+0x82`, which `CivilianInit` picks from the
+**The pose.** Per item, `MatrixStackSetTopFromArray(model + 0xA0 +
+bone*0x90)`, then `RotX(rec+0xC) RotZ(rec+0x14) RotY(rec+0x10) T(set.xyz)`
+and `Scale(set.w)` unless it is 1.0, then `AssetDrawSlot(rec+4)`. Every call
+post-multiplies, so the translate is along the **turned** axes: the item's
+origin is at `Rx Rz Ry t` in the bone's frame, not at `t`. `[proved]` from the
+listing; the pseudocode drops every FPU argument (L1). Kinds 3–6 draw their
+second slot in the same matrix; kinds 7–10 (lift 6.5) and 0x0E, 0x0F, 0x10,
+0x12 (lift 2.0) draw it facing the camera — `T(0, h, 0)`, keep the
+translation, `MatrixLoadIdentity`, `T(p) Scale(set.w * model+0x116C) T(0,
+-h, 0)`. The attach set is `sub+0x82`, which `CivilianInit` picks from the
 character type:
 
 | Attach set | Character types |
@@ -549,15 +561,59 @@ character type:
 | 4 | `0x24`, `0x25`, `0x31`-`0x33` |
 | 5 | everything else |
 
-So one record serves every skin that can hold it, with a different offset and
-scale in a child's hand than in an old man's. Fourteen records exist; their
-models are in `etc_1.bin` and `common.bin`, and the kinds' second slots are
-effect billboards (`0x10A3` is a soft flame quad).
+**The give.** After drawing an item the routine calls `rec+0x18(obj)`. Two
+routines appear in the fourteen records `[proved]`:
+
+* `CivilianHeldItemGrantLife` (`FUN_0048DCC0`) — record `0x0056B190` alone
+  (`g_civilian_item_record_life`: slot `0x10C3`, kind -1, `X 0x4000 Z
+  0xC000`, `t = (0, 1, 1)` in every set). Five spawns hold it: stage 1
+  `0x3C38`, stage 2 `0x51AC`, `0x9FE8` and `0x12714`, stage 4 `0x10FC`.
+* `CivilianHeldItemGrantOriginalItem` (`FUN_0048DD60`) — the other thirteen,
+  whose kind is an Original Mode item id.
+
+Both open the same way: when `entry.operand & wait word` is non-zero they
+clear those bits from the word, raise `0x400000`, and name the player in
+`sub+0x6C` — `g_active_player` when `g_players_in_play == 1`, else `rand() %
+2` only if `sub+0x6C` is still -1 (so, in two-player, the killer of the last
+captor, which `CivilianPruneDeadChildren` copied there). Every shipped op
+0x13/0x14 passes operand `0x800000`, and in all eleven streams that append
+an item the very next wait word is `0x940100` — so the item is held for the
+rest of the block that appends it (the clip playing on to the op 4 frame
+that block sets — frames 10 to 45 of clip `0x238` for stage 1's `0x3C38`) and given on
+the first frame of the next. Then:
+
+* **the life**: `GrantExtraLife(p)` — +1 unless `g_player_lives[p]` has
+  reached the cap (`g_max_lives`, `0x009A2440`, 5, outside Original Mode;
+  `g_original_life_cap[p]`, `0x009A2245 + p*0x14`, 5, in it), in which case
+  `ScoreAddForPlayer(p, 300)`. On a life, `SpawnLifeGrantedMarker(p)`
+  (`FUN_0048DF10`): slot `0x1256 + p` drawn in camera space at `z = -1`, 120 px
+  below centre, 32 px a unit, centred when `g_max_attackers` is 1 and ±160 px
+  otherwise, for 120 frames, the last five faded (`LifeGrantedMarkerUpdate`,
+  `FUN_0048DFE0`). **No sound** anywhere on this path.
+* **an Original Mode item**, in any mode: `g_original_items_taken[kind]++`
+  below 0x63, both slots unloaded, `SpawnOriginalItemBanner` with the sprite
+  `g_original_item_bank_sprite` (`0x0056B0F4`, `{s16 texbank, s16 sprite}`
+  per id) holds for the kind, and a `DelayedTexbankFreeUpdate` task
+  (`FUN_0048DEE0`) that frees the kind's texbank 150 frames later.
+
+The draw answers `0x400000` by clearing it, zeroing that entry's record and
+decrementing `sub+0x6E`; after the loop it reallocates the array to the
+survivors in order (`0x0048CFAB`..`0x0048D01E`, past the `MatrixStackPop`
+where Ghidra's pseudocode stops — L35). The loop count is taken once, and
+`sub+0x70` itself is the cursor the callback reads its own entry through.
+**One word gives one item**: the first routine that sees `0x800000` clears
+it, so a second held item waits for another word — no shipped stream holds
+two.
 
 Op 0x15 picks between records with a weighted `rand()`: a `{weight, record}`
-list terminated by weight `-1`, `rand() % total`, walked down subtracting.
-`CivilianAddPickedItem` (op 0x14) then appends whatever it chose. The draw is
-the same for both.
+list terminated by weight `-1`, `rand() % total`, walked down subtracting, and
+preloads the record's slots and the kind's texbank.
+
+Four of the thirteen Original Mode items (stage 2 `0x8510`, `0x1158C`,
+`0x12098`, stage 4 `0x23F8`) are only reached through the second arm of an op
+0x1F, which `CivilianRunScript` takes when `DAT_009A2226` equals the switch's
+`DX` (`0x0048BF79`). `[open]`; the port takes the first arm, and those four
+leave without their item.
 
 ### Being shot
 

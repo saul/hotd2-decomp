@@ -112,6 +112,9 @@ export function ProfileFactoryReset(): void {
   OptionsFactoryReset();
 }
 
+/** `g_max_lives`' one value -- the immediate `ProfileApplyToRun` stores. */
+export const PROFILE_MAX_LIVES = 5;
+
 /**
  * `ProfileApplyToRun` — `FUN_0040AB50`: the profile into the globals a run
  * reads. `g_start_lives = g_start_lives_by_option[life]`; `g_difficulty =
@@ -130,6 +133,9 @@ export function ProfileApplyToRun(): void {
   G.g_start_lives = START_LIVES_BY_OPTION[G.g_option_lives] ?? 0;
   G.g_difficulty = G.g_option_difficulty;
   G.g_original_items_taken = [...G.g_profile_original_items];
+  // `MOV dword ptr [0x009a2440], 0x5` at `0x0040ABC3`: `g_max_lives`, the
+  // only write in the image.
+  G.g_max_lives = PROFILE_MAX_LIVES;
   // `FUN_0040CB10`: `MOV word ptr [EAX + 0x9c8fd4], DX` per player.
   G.g_trigger_down = [0, 0];
 }

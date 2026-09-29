@@ -314,7 +314,7 @@ import { CivilianAttachSet, CivilianCountMotionLoops, CivilianOp,
          CivilianUpdate, CivilianWait, CivilianWriteSphereCentre,
          CIVILIAN_SPHERE_BONE_MODE1, CIVILIAN_SPHERE_BONE_MODE2,
          CIVILIAN_SPHERE_BONE_MODE3_A, CIVILIAN_SPHERE_BONE_MODE3_B,
-         PoseHookGrowAndPushOutOfWorld }
+         LifeGrantedMarkersTick, PoseHookGrowAndPushOutOfWorld }
   from "../src/game/class10";
 import { CivilianLeaveField } from "../src/game/class10/update";
 import type { CivilianCmdJson, CivilianItemJson } from "../src/bundle/scene";
@@ -15357,11 +15357,13 @@ console.log("\nclass 0x10, the civilian and the rescue:");
       { bone: 5, slot: 0x1000, kind: -1, rot: [0, 0, 0],
         sets: Array.from({ length: 6 },
                          (_, i) => [i, 0, 0, 1] as [number, number, number,
-                                                    number]) },
+                                                    number]),
+        callback: 0, banner: null },
       { bone: 5, slot: 0x1001, kind: -1, rot: [0, 0, 0],
         sets: Array.from({ length: 6 },
                          (_, i) => [i, 0, 0, 1] as [number, number, number,
-                                                    number]) },
+                                                    number]),
+        callback: 0, banner: null },
     ];
     const { a, events } = civScene([[
       cmd(CivilianOp.Wait, CivilianWait.Free),
@@ -15375,7 +15377,7 @@ console.log("\nclass 0x10, the civilian and the rescue:");
           a.civ?.items.length === 2 && a.civ?.pickedItem !== -1,
           `items ${JSON.stringify(a.civ?.items)}`);
     check("...and the second append is the record op 0x13 names",
-          a.civ?.items[1] === 0, `${a.civ?.items[1]}`);
+          a.civ?.items[1]?.record === 0, JSON.stringify(a.civ?.items[1]));
     // The weights are 1 and 3, so the second record is three times as likely.
     // Asserting a *distribution* rather than a value is what catches a walk
     // that always takes the head -- which is the easy way to get this wrong.
@@ -15393,6 +15395,182 @@ console.log("\nclass 0x10, the civilian and the rescue:");
     check("the weighted pick is weighted, not always the head",
           second > 20 && second < 40, `${second}/40 took the 3:1 entry`);
     void events;
+  }
+
+  // **The item is given, and taken away.** Bug: "rescued civilians ... still
+  // carry it after you should receive its effect ... +1 life doesn't apply".
+  //
+  // `CivilianDrawHeldItems` (`FUN_0048CD10`) calls each record's `rec+0x18`
+  // after drawing it. Record `0x0056B190`'s is `CivilianHeldItemGrantLife`
+  // (`FUN_0048DCC0`): when the entry's operand -- `0x800000` in every shipped
+  // op 0x13 -- turns up in the wait word, it clears it, raises `0x400000`,
+  // names the player and calls `GrantExtraLife`; the draw then drops the
+  // entry. The streams below are shaped like the shipped ones: the append,
+  // a wait, then the give (stage 1 civilian `0x3C38`'s stream 13, commands
+  // 55-57). The shipped word is `0x940100`; its `0x100` holds the step on the
+  // block only while a clip has loops left, and these fixtures play none, so
+  // the step would walk straight past a block carrying it -- they load
+  // `0x940000`, the same word without that one condition.
+  {
+    const sets = (x: number, y: number, z: number, w: number) =>
+      Array.from({ length: 6 },
+                 () => [x, y, z, w] as [number, number, number, number]);
+    // Record `0x0056B190` as the exporter writes it, and record `0x0056B390`
+    // (kind 4, one of stage 2 civilian `0x8510`'s three picks).
+    const LIFE: CivilianItemJson = {
+      bone: 5, slot: 0x10c3, kind: -1, rot: [0x4000, 0, 0xc000],
+      sets: sets(0, 1, 1, 1), callback: 0x0048dcc0, banner: null,
+    };
+    const ORIGINAL: CivilianItemJson = {
+      bone: 5, slot: 0x10a8, kind: 4, rot: [0xb83a, 0x7a8a, 0xb51f],
+      sets: sets(0.5, -0.6, 1.1, 0.8), callback: 0x0048dd60, banner: 0x5c1,
+    };
+    const GIVE_WORD = CivilianWait.GiveItem | CivilianWait.RootMotion
+      | CivilianWait.CameraTrack;
+    const give = (): CivilianCmdJson[] => [
+      cmd(CivilianOp.Wait, 0),
+      { op: CivilianOp.AddHeldItem, args: [0x0056b190, 0x800000], item: 0 },
+      cmd(CivilianOp.SetTimer, 5),
+      cmd(CivilianOp.Wait, GIVE_WORD),
+      cmd(CivilianOp.Wait, 0),
+      cmd(CivilianOp.End),
+    ];
+    const markers = () => G.g_life_granted_markers ?? [];
+    const PX = Math.fround(G_PROJECTION_DISTANCE_PX);
+
+    // One player in play: the life goes to whoever is in play.
+    {
+      const { a, events } = civScene([give()], [], [LIFE, ORIGINAL]);
+      const p = G.g_active_player;
+      const lives0 = G.g_player_lives[p];
+      cFrame(a, events);
+      check("a civilian holds the item op 0x13 gave her until the wait word "
+            + "says to hand it over",
+            a.civ?.items.length === 1 && G.g_player_lives[p] === lives0,
+            `items ${JSON.stringify(a.civ?.items)} lives ${G.g_player_lives[p]}`);
+      let at = -1;
+      let drawnThen = "";
+      for (let i = 0; i < 20 && at < 0; i++) {
+        cFrame(a, events);
+        if ((a.civ?.items.length ?? 1) === 0) {
+          at = i;
+          drawnThen = JSON.stringify(a.civ?.heldDrawn);
+        }
+      }
+      check("the wait word's 0x800000 gives it: one more life, to the player "
+            + "in play",
+            at >= 0 && G.g_player_lives[p] === lives0 + 1,
+            `given at ${at}, lives ${lives0} -> ${G.g_player_lives[p]} `
+            + `(player ${p})`);
+      check("...and she no longer carries it -- the entry is dropped and "
+            + "neither bit is left in the word",
+            a.civ?.items.length === 0
+            && (a.civ.wait & (0x800000 | 0x400000)) === 0,
+            `items ${JSON.stringify(a.civ?.items)} `
+            + `wait 0x${a.civ?.wait.toString(16)}`);
+      check("...having been drawn on the frame she gave it, as the engine "
+            + "draws before it calls the record's routine",
+            drawnThen === "[0]", `drawn ${drawnThen}`);
+      cFrame(a, events);
+      check("...and not on the next",
+            JSON.stringify(a.civ?.heldDrawn) === "[]",
+            JSON.stringify(a.civ?.heldDrawn));
+      const m = markers()[0];
+      check("the paid life raises SpawnLifeGrantedMarker's marker: player "
+            + "0's slot, centred with one attacker, 120 px low, 32 px a unit",
+            markers().length === 1 && m.slot === 0x1256 + p && m.x === 0
+            && m.z === -1 && m.y === Math.fround(-120 / PX)
+            && m.scale === Math.fround(32 / PX) && m.frames === 120,
+            JSON.stringify(markers()));
+      // `LifeGrantedMarkerUpdate` (`FUN_0048DFE0`): draw, then count down;
+      // `AssetDrawSlotWithAlpha` at `frames / 6` once `frames < 6.0`, and
+      // `ActorKill` after the draw at 1 -- 120 frames drawn in all.
+      const drawn: (number | null)[] = [];
+      for (let i = 0; i < 125 && markers().length; i++) {
+        LifeGrantedMarkersTick();
+        if (markers().length) drawn.push(markers()[0].drawnAlpha);
+      }
+      check("...drawn for 120 frames, the last five faded by sixths, then gone",
+            drawn.length === 120 && drawn.slice(0, 115).every((x) => x === null)
+            && drawn.slice(115).join() === [5, 4, 3, 2, 1]
+              .map((k) => Math.fround(k * Math.fround(1 / 6))).join()
+            && markers().length === 0,
+            `${drawn.length} frames, tail ${drawn.slice(113).join()}`);
+    }
+
+    // Two players: the captor's killer, `obj+0x131C` through the prune.
+    // Player **1** fires, so a life for player 0 cannot pass.
+    {
+      const { a, kids, events } = civScene([[
+        cmd(CivilianOp.Wait, CivilianWait.Free),
+        { op: CivilianOp.AddHeldItem, args: [0x0056b190, 0x800000], item: 0 },
+        cmd(CivilianOp.SetChildrenGoal, 0),
+        cmd(CivilianOp.Wait, CivilianWait.ChildrenAlive),
+        cmd(CivilianOp.Wait, GIVE_WORD),
+        cmd(CivilianOp.Wait, 0),
+        cmd(CivilianOp.End),
+      ]], [0x4100], [LIFE]);
+      JoinPlayerTwo();
+      const lives = [...G.g_player_lives];
+      for (let i = 0; i < 4; i++) cFrame(a, events);
+      check("two players: the item waits for the captor",
+            a.civ?.items.length === 1, JSON.stringify(a.civ?.items));
+      kids[0].hp = 1;
+      ResolveHit(kids[0], 1, NULL_HOST, rng, 1);
+      for (let i = 0; i < 3; i++) cFrame(a, events);
+      check("...and the life goes to the player who shot it, and to nobody "
+            + "else",
+            G.g_player_lives[1] === lives[1] + 1
+            && G.g_player_lives[0] === lives[0] && a.civ?.items.length === 0,
+            `lives ${lives.join("/")} -> ${G.g_player_lives.join("/")}, `
+            + `sub+0x6C ${a.civ?.rescuePlayer}`);
+      const m = markers()[0];
+      check("...whose marker is player 1's slot, 160 px to the right",
+            markers().length === 1 && m.slot === 0x1257
+            && m.x === Math.fround(160 / PX),
+            JSON.stringify(markers()));
+    }
+
+    // At the cap: 300 points instead, no marker -- and the item still goes.
+    {
+      const { a, events } = civScene([give()], [], [LIFE]);
+      const p = G.g_active_player;
+      G.g_player_lives[p] = G.g_max_lives ?? 5;
+      const score0 = G.g_player_score[p];
+      for (let i = 0; i < 20; i++) cFrame(a, events);
+      check("at g_max_lives the item pays 300 and no life, raises no marker, "
+            + "and is still handed over",
+            G.g_player_lives[p] === 5 && G.g_player_score[p] === score0 + 300
+            && markers().length === 0 && a.civ?.items.length === 0,
+            `lives ${G.g_player_lives[p]} score ${G.g_player_score[p]} `
+            + `markers ${markers().length} items ${a.civ?.items.length}`);
+    }
+
+    // The other thirteen records: `CivilianHeldItemGrantOriginalItem`
+    // (`FUN_0048DD60`) counts the kind into `g_original_items_taken` and
+    // raises its banner -- in any mode.
+    {
+      const { a, events } = civScene([[
+        cmd(CivilianOp.Wait, 0),
+        { op: CivilianOp.PickHeldItem, args: [1], itemTable: [[1, 1]] },
+        { op: CivilianOp.AddPickedItem, args: [0x800000] },
+        cmd(CivilianOp.SetTimer, 5),
+        cmd(CivilianOp.Wait, GIVE_WORD),
+        cmd(CivilianOp.Wait, 0),
+        cmd(CivilianOp.End),
+      ]], [], [LIFE, ORIGINAL]);
+      const taken = G.g_original_items_taken[4] ?? 0;
+      const lives0 = [...G.g_player_lives];
+      for (let i = 0; i < 20; i++) cFrame(a, events);
+      const b = G.g_original_item_banners.at(-1);
+      check("an Original Mode item is counted, bannered and taken away, and "
+            + "pays no life",
+            G.g_original_items_taken[4] === taken + 1 && b?.sprite === 0x5c1
+            && a.civ?.items.length === 0
+            && G.g_player_lives.join() === lives0.join(),
+            `taken ${taken} -> ${G.g_original_items_taken[4]}, banner `
+            + `${b?.sprite} items ${a.civ?.items.length}`);
+    }
   }
 
   // `sub+0x82`: one record, six attach sets, chosen by the character type.

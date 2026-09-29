@@ -558,6 +558,19 @@ export interface CivilianItemJson {
   rot: [number, number, number];
   /** Per attach set: translate x, y, z, then a uniform scale. */
   sets: [number, number, number, number][];
+  /**
+   * `rec+0x18` — the routine the draw calls after each item, as its address:
+   * `CivilianHeldItemGrantLife` (`0x0048DCC0`) for record `0x0056B190`,
+   * `CivilianHeldItemGrantOriginalItem` (`0x0048DD60`) for the other
+   * thirteen. `game/class10/items.ts` switches on it.
+   */
+  callback: number;
+  /**
+   * The `SpawnOriginalItemBanner` sprite `g_original_item_bank_sprite`
+   * (`0x0056B0F4`) holds for this record's kind, or `null` for a kind outside
+   * its 33 rows.
+   */
+  banner: number | null;
 }
 
 /** One class-0x10 spawn's descriptor tail — see `game/class10`. */

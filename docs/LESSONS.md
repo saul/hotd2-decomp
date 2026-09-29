@@ -1258,3 +1258,26 @@ game draws is missing, list every spawn record in that step by class id and
 ask of each whether the pool holds an object for it** -- `G.g_object_list`
 against the step's spawn ops -- before reading any class's sub-types; a
 class id with no handler is the one gap no sub-type audit can see.
+
+**L84 -- A three.js node's `position` is applied outside its rotation; a
+`MatrixTranslate` after the turns on the engine's stack is inside them.**
+`CivilianDrawHeldItems` pushes `RotX RotZ RotY T(set) Scale`, and every call
+post-multiplies, so the item's origin is `Rx Rz Ry t` in the bone's frame. The
+renderer wrote `position = t` and an Euler in the right order, which three.js
+composes as `T R S` -- the orientation was right and the point was not, and a
+hand prop "nearly right" hid it for as long as it was drawn: the extra life
+sat 2.2 units from where the exe puts it. **When a draw has a translate after
+a turn, build the local matrix with `game/matrix.ts`'s routines in call order
+and hand the node the matrix**, rather than decomposing it into three.js's
+fields by eye; and test the node's frame in its parent's, at a non-zero
+offset under a non-trivial turn, against numbers worked from the record.
+
+**L85 -- A class-0x10 wait word is loaded only by the block the step parks
+on.** `CivilianStepScript`'s loop walks past every block whose conditions
+already fail to hold, re-applying only their condition ops, and
+`CivilianRunScript` loads the word of the block it lands on. A fixture that
+copies a shipped word whose conditions pass at once -- `0x940100`'s `0x100`
+with no clip playing -- never has its word loaded, and a test of anything the
+word triggers (the held item's give) sees nothing happen. **Give a hand-written
+fixture's block a condition that holds, or drop the one that cannot**, and
+check the word arrived (`sub.wait`) before asserting what it does.

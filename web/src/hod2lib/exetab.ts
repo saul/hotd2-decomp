@@ -158,6 +158,14 @@ export interface CivItem {
   extra: number | null;
   rot: number[];
   sets: number[][];
+  /** `rec+0x18`, the routine `CivilianDrawHeldItems` calls after the draw. */
+  callback: number;
+  /**
+   * The kind's row of `g_original_item_bank_sprite`, its `+2` half -- the
+   * sprite `CivilianHeldItemGrantOriginalItem` hands `SpawnOriginalItemBanner`.
+   * `null` for a kind outside the table's 33 rows, as record 0's -1 is.
+   */
+  banner: number | null;
 }
 
 /** One vertex group of a {@link CharacterPart}: a bone and its vertices. */
@@ -586,6 +594,16 @@ export class ExeTables {
 
   static readonly CIVILIAN_ITEM_BYTES = 0x7c;
 
+  /**
+   * `g_original_item_bank_sprite` -- `{s16 texbank, s16 banner sprite}` per
+   * Original Mode item id, which a held-item record's kind is:
+   * `MOVSX EAX, word ptr [EDX*4 + 0x56b0f6]` into `SpawnOriginalItemBanner`
+   * at `0x0048DE6A`. No bound in the exe; the 33 rows end at `0x0056B178`,
+   * where `SpawnLifeGrantedMarker`'s `-32.0` begins (L6).
+   */
+  static readonly ORIGINAL_ITEM_BANK_SPRITE = 0x0056b0f4;
+  static readonly ORIGINAL_ITEM_BANK_SPRITE_ROWS = 33;
+
   /** `CivilianDrawHeldItems`' second-asset switch, by the record's kind. */
   static readonly CIVILIAN_ITEM_EXTRA: Record<number, number> = {
     3: 0x10a5, 4: 0x10a7, 5: 0x10a9, 6: 0x10a3,
@@ -741,11 +759,16 @@ export class ExeTables {
     for (let k = 0; k < 6; k++) {
       sets.push([0, 1, 2, 3].map((j) => asFloatBits(w[7 + k * 4 + j])));
     }
+    const kind = w[2]!;
+    const sprite = kind >= 0 && kind < ExeTables.ORIGINAL_ITEM_BANK_SPRITE_ROWS
+      ? this.ru16(ExeTables.ORIGINAL_ITEM_BANK_SPRITE + kind * 4 + 2) : null;
     seen.set(va, this.civItems.length);
     this.civItems.push({
-      bone: w[0]!, slot: w[1]! & 0xffff, kind: w[2]!,
-      extra: ExeTables.CIVILIAN_ITEM_EXTRA[w[2]!] ?? null,
+      bone: w[0]!, slot: w[1]! & 0xffff, kind,
+      extra: ExeTables.CIVILIAN_ITEM_EXTRA[kind] ?? null,
       rot: [w[3]!, w[4]!, w[5]!], sets,
+      callback: w[6]! >>> 0,
+      banner: sprite === null ? null : (sprite << 16) >> 16,
     });
     return seen.get(va)!;
   }

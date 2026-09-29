@@ -1312,3 +1312,16 @@ costing a phone thirty times what it costs a Mac -- was nearly argued away.
 **Ask what the device is before explaining its numbers away**, and treat
 `ua`, `from` and `view` in a report as clues rather than identification: a
 `dpr` of 2 at 2048×1536 is an iPad as much as it is a Retina Mac.
+
+**L88 -- A report names what the player saw, and the class is found from
+the address.** "Civilians that start in a dead pose can be shot" sent a
+session into class 0x10 -- its stream table, its shot gate, the root height
+of every spawn's first clip -- because that is the class the port calls
+civilians. The body the user meant was class 0x24, a set-piece; in this game
+people are drawn by at least classes 0x10, 0x20, 0x24 and 0x25, and only the
+first is "civilian" in the code. The reading on the way was not wasted (it
+found a real gap in class 0x10 too), but it answered the wrong report until
+the user sent `?stage=1&block=1&step=3&op=9`. **Ask for the address, or
+take the page's own URL, before choosing a class**, then read
+`G.g_object_list` there for what is actually on screen (L83's list-every-spawn
+pointed at a report).

@@ -232,9 +232,9 @@ Then, in Original Mode with weapon kind 3, sprite effect `0x53` at the hit.
 `BuildShotRay`'s angle quantisation) and `ColiSortHitCandidatesByDistance`, for
 the classes that set `ClassHandler.registersForShotTest`. Such a class calls
 `RegisterForShotTest`, or `ActorRegisterCameraPoint` (`camera/track.ts`, which
-now carries the tail call), from its own update at the exe's site. The
-director stops calling the camera point for it, and `render/`'s pick passes it
-by. **Every class that calls `ActorRegisterCameraPoint` is filed**, flag or
+now carries the tail call), from its own update at the exe's site, and
+`render/`'s pick passes it by. (The director files no class itself; it records
+the posed bone point, `SkeletonRecordCameraPoint`, and nothing more.) **Every class that calls `ActorRegisterCameraPoint` is filed**, flag or
 no flag, as `0x00409BED` files it, because the list's second reader is the
 crowd push (see section 10); the pick is what migrates, and
 `ShotTestPickedHere` is where it passes over the entries of a class
@@ -244,6 +244,18 @@ run where `ProcessPlayerShots` ends, straight after the player tasks.
 `0x80` on a type with bones, and `CatInit` clears it. The port holds
 `obj+0x70..0x78` in world space (`Actor.shotCentre`) and takes the depth
 through the camera its frame reads.
+
+**A class that never registers sets the flag too.** Class 0x24, the
+set-pieces, calls none of `RegisterForShotTest`, `ActorRegisterCameraPoint` or
+`RegisterForCameraTracking` anywhere -- not in `SetPiecePropInit`
+(`FUN_00482CE0`), its six states, `SetPiecePropDrawAndTick` (`FUN_004834F0`)
+or its per-bone hook `SetPiecePropDrawBonePart` (`FUN_004835D0`), whose tail
+past the `MatrixStackPop` was read from the bytes (`L35`) `[proved]`. So no
+shot in the game touches a set-piece: 28 of the class's 29 spawns are people,
+among them the bodies lying on the floor, and a bullet passes through them.
+The render pick offered them like any actor, and `ResolveHit` then gave the
+body a death clip -- stage 1's man under the library desk fell over again.
+The flag, with no registration site, is what keeps them out.
 
 **The mesh arm.** `ShotTestBoneTree` takes `ShotTestBoneMesh` (`FUN_004048A0`)
 for a record whose `+0x74` has bit `0x10` and whose `+0x88` names a blob; the

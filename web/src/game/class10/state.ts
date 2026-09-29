@@ -13,6 +13,17 @@
  */
 import { CivilianSphereMode } from "./ops";
 
+/** One 8-byte entry of the held-item array at `sub+0x70`. */
+export interface CivilianHeldItem {
+  /** +0x00 the record, as an index into `T.civilians.items`. */
+  record: number;
+  /**
+   * +0x04 the op's second operand: the wait-word bits the record's routine
+   * waits for. `0x800000` in every shipped op 0x13 and 0x14.
+   */
+  operand: number;
+}
+
 export interface CivilianState {
   /** +0x00 the wait word op 0x2C loads, `& 0xFBFFFFFF`. See `CivilianWait`. */
   wait: number;
@@ -113,10 +124,19 @@ export interface CivilianState {
   /** +0x6C who gets the +400, or `-1` for both. From the child that died. */
   rescuePlayer: number;
   /**
-   * +0x70 the held-item array, and +0x6E its length. Indices into
-   * `T.civilians.items`; ops 0x13 and 0x14 append and the draw walks them.
+   * +0x70 the held-item array, and +0x6E its length: 8-byte `{record,
+   * operand}` pairs. Ops 0x13 and 0x14 append, and `CivilianDrawHeldItems`
+   * walks them, calls each record's routine and drops the ones it gave.
    */
-  items: number[];
+  items: CivilianHeldItem[];
+  /**
+   * `[port-only]` The records `CivilianDrawHeldItems` drew this frame, in
+   * order -- the array as its walk found it, before any callback took one.
+   * The renderer draws these. It is the draw's own input and not a second
+   * copy of `items`: the engine draws an item and *then* calls the routine
+   * that gives it, so the frame she hands it over still shows it in her hand.
+   */
+  heldDrawn: number[];
   /** +0x74 what op 0x15 last picked, for op 0x14 to append. */
   pickedItem: number;
   /**
@@ -170,7 +190,7 @@ export function makeCivilianState(): CivilianState {
     target: { x: 0, y: 0, z: 0 }, radius: 0, targetMode: 0,
     cursor: 0, onShot: 0, onShotAlt: 0, resume: 0, sounds: [],
     hook: 0, children: [], carrier: 0, rescuePlayer: -1,
-    items: [], pickedItem: -1, attachSet: 5,
+    items: [], heldDrawn: [], pickedItem: -1, attachSet: 5,
     scaleTarget: 1, scaleStep: 0, sphereCentreMode: CivilianSphereMode.Bone1,
     deathVoice: 0xff,
     soundId: 0, soundDelay: 0, cameraBone: 2,

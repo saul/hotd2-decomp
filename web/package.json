@@ -51,6 +51,7 @@
     "handback": "node tools/run_test.mjs tools/handback.mjs",
     "civ_speech": "node tools/run_test.mjs tools/civ_speech.mjs",
     "civilians": "node tools/run_test.mjs tools/civilians.mjs",
+    "civ_gives": "node tools/run_test.mjs tools/civ_gives.mjs",
     "loops": "node tools/loops.mjs",
     "bgm-loop": "node tools/bgm_loop.mjs",
     "offline-check": "node tools/offline_check.mjs",

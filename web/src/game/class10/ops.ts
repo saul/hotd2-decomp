@@ -92,11 +92,16 @@ export enum CivilianOp {
   SetSkipCount = 0x11,
   /** Frames until the actor leaves, once its removal cue has been met. */
   SetRemoveDelay = 0x12,
-  /** Put a model in the actor's hand. Drawing only. */
+  /**
+   * Put an item in the actor's hand: a record, and the wait-word bits its
+   * routine gives it on. **Not drawing only** -- the record's routine is the
+   * extra life or the Original Mode item, paid on the frame those bits turn
+   * up in the wait word. See `class10/items.ts`.
+   */
   AddHeldItem = 0x13,
-  /** Put the last *picked* model in the actor's hand. Drawing only. */
+  /** The same with the last *picked* record. */
   AddPickedItem = 0x14,
-  /** Pick a model from a weighted table and preload it. Drawing only. */
+  /** Pick a record from a weighted table and preload it. */
   PickHeldItem = 0x15,
   /** Ramp `obj+0x128` to a new radius over N frames. */
   SetRadiusRamp = 0x16,
@@ -341,6 +346,21 @@ export enum CivilianWait {
   Cut = 0x00200000,
   /** Not counted in `g_civilians_alive`, and worth no score. */
   Uncounted = 0x08000000,
+  /**
+   * **Hand the item over.** Not a wait condition: the bit every shipped op
+   * 0x13 and 0x14 names as its entry's operand, which the record's routine
+   * tests against this word from `CivilianDrawHeldItems` each frame
+   * (`TEST EAX, EDX` at `0x0048DCCE` / `0x0048DD6E`). Eleven wait commands
+   * carry it, all `0x940100`: one in each of the eleven streams that append an
+   * item, after the append. `[proved]`
+   */
+  GiveItem = 0x00800000,
+  /**
+   * Raised by a held item's routine on the frame it gives, and answered by
+   * `CivilianDrawHeldItems` (`TEST EAX, 0x400000` at `0x0048CF59`), which
+   * clears it and drops that entry. No shipped wait word carries it. `[proved]`
+   */
+  ItemTaken = 0x00400000,
   /** Leave `g_civilians_alive` now rather than on removal. */
   LeaveCountNow = 0x00080000,
   /** May be removed when off camera. */

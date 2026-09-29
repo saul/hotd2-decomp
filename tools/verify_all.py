@@ -294,6 +294,15 @@ CHECKS: list[Check] = [
           "the one whose rescue and maul counts move when a captor class, the "
           "motion clock or the prune changes under it",
           NEEDS_BUNDLE),
+    Check("civ_gives", "web", ["npm", "run", "--silent", "civ_gives"],
+          "that every civilian whose shipped stream puts an item in her hand "
+          "hands it over -- the life to the player in play with its marker, "
+          "an Original Mode item into `g_original_items_taken` with its "
+          "banner -- and stops holding it, playing each from the evt step "
+          "that spawns her with the stage's own camera; the only check that "
+          "reaches a give, which `civilians` cannot with its camera parked "
+          "five thousand units away",
+          NEEDS_BUNDLE),
     Check("props43", "web", ["npm", "run", "--silent", "props43"],
           "where in a real script a class-0x41 prop is actually placed, and "
           "that it takes a frame of `GameUpdate` to appear -- the only check "

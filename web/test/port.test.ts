@@ -314,7 +314,7 @@ import { CivilianAttachSet, CivilianCountMotionLoops, CivilianOp,
          CivilianUpdate, CivilianWait, CivilianWriteSphereCentre,
          CIVILIAN_SPHERE_BONE_MODE1, CIVILIAN_SPHERE_BONE_MODE2,
          CIVILIAN_SPHERE_BONE_MODE3_A, CIVILIAN_SPHERE_BONE_MODE3_B,
-         PoseHookGrowAndPushOutOfWorld }
+         LifeGrantedMarkersTick, PoseHookGrowAndPushOutOfWorld }
   from "../src/game/class10";
 import { CivilianLeaveField } from "../src/game/class10/update";
 import type { CivilianCmdJson, CivilianItemJson } from "../src/bundle/scene";
@@ -1551,7 +1551,7 @@ console.log("ResolveHit:");
   check("...and the hit its death chain reads is left on the actor",
         z.pendingHit !== null, `${JSON.stringify(z.pendingHit)}`);
   const again = ResolveHit(z, 1, NULL_HOST, rng);
-  check("a hit on a corpse scores nothing", !again.killed
+  check("a hit on a corpse reports nothing and kills nothing", !again.killed
         && again.result === 0);
 
   // **The killer's byte.** The kill arm ends `obj+0x34 |= 0x4000000;
@@ -1653,6 +1653,91 @@ console.log("ResolveHit:");
     check("...and a result-5 kill on the head pays the combo and the 80",
           kill === 120 + 10 + 80 && (target.flags & ActorFlag.Dead) !== 0,
           `kill ${kill}`);
+    SetGameTables(CHARS);
+  }
+
+  // **The payout is `ResolveHit`'s own tail, and so is the hit count.**
+  // `004097D7 CMP EBP, 0x2` -- `EBP` loaded from `g_shot_bone[p]` at
+  // `0x0040943A` -- pays bone 2 `0x78` and the combo, steps the combo by 10
+  // and counts the hit, on any result; `00409819` pays any other bone 10 and
+  // counts it unless `g_hit_result` is 5, and zeroes the combo either way. The
+  // kill's `0x50` is paid inside the kill block (`004097B9`). The port paid
+  // all of it from `FireShotRequest`, in one call, never touched
+  // `g_player_hit_count` (`0x009A5C86`, the accuracy grade's numerator), and
+  // took the head from the bundle's `head_bone`.
+  //
+  // So `ResolveHit` is called bare here, for player 1 so that neither the
+  // default argument nor slot 0 can pass for the payee, and the fixture names
+  // **bone 1** as its head: the exe never reads that field, so bone 2 is the
+  // head and bone 1 is a body hit whatever it says. Every expected number is
+  // one of the tail's immediates.
+  {
+    const MISLABELLED = 0x79;
+    SetGameTables({
+      ...CHARS,
+      types: {
+        ...CHARS.types,
+        [String(MISLABELLED)]: {
+          ...TYPE, type: MISLABELLED, head_bone: 1,
+          // The forearm's one step is the sentinel, for a result-5 body hit.
+          bones: TYPE.bones.map((b) => (b.bone === 5
+            ? { ...b, steps: [[2, EffectCode.Last, 3]] } : b)),
+        },
+      },
+    } as unknown as CharactersJson);
+    const t = spawnZombie(0x1140, MISLABELLED, "the tail");
+    t.visible = true;
+    t.hp = 100;
+    G.g_head_combo_bonus[1] = 0;
+    const count0 = G.g_player_hit_count[1];
+    const other = [G.g_player_score[0], G.g_player_hit_count[0]];
+    const hit = (bone: number): { paid: number; combo: number;
+                                  counted: number; points: number } => {
+      const s0 = G.g_player_score[1], c0 = G.g_player_hit_count[1];
+      const out = ResolveHit(t, bone, NULL_HOST, rng, 1);
+      return { paid: G.g_player_score[1] - s0, combo: G.g_head_combo_bonus[1],
+               counted: G.g_player_hit_count[1] - c0, points: out.points };
+    };
+    const h1 = hit(2), h2 = hit(2), b1 = hit(1), h3 = hit(2), b5 = hit(5);
+    check("bone 2 is the head, whatever `head_bone` says: 120, then 130",
+          h1.paid === 0x78 && h1.combo === 10 && h2.paid === 0x78 + 10
+          && h2.combo === 20,
+          `${JSON.stringify(h1)} ${JSON.stringify(h2)}`);
+    check("...and the bone `head_bone` names is a body hit: 10, combo gone",
+          b1.paid === 10 && b1.combo === 0,
+          JSON.stringify(b1));
+    check("a result-5 body hit pays nothing, counts nothing, and still ends "
+          + "the combo",
+          h3.combo === 10 && b5.paid === 0 && b5.counted === 0
+          && b5.combo === 0,
+          `${JSON.stringify(h3)} ${JSON.stringify(b5)}`);
+    check("every other hit is counted into g_player_hit_count, for the "
+          + "shooter alone",
+          h1.counted === 1 && h2.counted === 1 && b1.counted === 1
+          && h3.counted === 1 && G.g_player_hit_count[1] === count0 + 4
+          && G.g_player_score[0] === other[0]
+          && G.g_player_hit_count[0] === other[1],
+          `count ${count0} -> ${G.g_player_hit_count[1]}, player 0 `
+          + `${G.g_player_score[0]}/${G.g_player_hit_count[0]}`);
+    check("...and what the call reports is what it paid",
+          [h1, h2, b1, h3, b5].every((h) => h.points === h.paid),
+          [h1, h2, b1, h3, b5].map((h) => `${h.points}/${h.paid}`).join(" "));
+
+    // The kill: `0x50` in the kill block, then the body's 10 in the tail.
+    t.hp = 1;
+    const k = hit(1);
+    check("a killing body hit pays 0x50 and 10 from inside ResolveHit",
+          k.paid === 0x50 + 10 && k.counted === 1
+          && (t.flags & ActorFlag.Dead) !== 0,
+          JSON.stringify(k));
+    // The corpse: the dead bit turns result 2 into 0 (`0x0040971F`) and
+    // skips the kill block, and 0 is not 5 -- so the tail pays it all the
+    // same. "Reports nothing" is not "worth nothing".
+    const c = hit(1);
+    check("a body hit on a corpse reports nothing, kills nothing, and is "
+          + "still worth 10",
+          c.paid === 10 && c.counted === 1 && G.g_hit_result === 0,
+          `${JSON.stringify(c)} result ${G.g_hit_result}`);
     SetGameTables(CHARS);
   }
 }
@@ -15246,14 +15331,15 @@ console.log("\nclass 0x10, the civilian and the rescue:");
     // Killed the way a shot kills (L49): `ResolveHit` (`FUN_00409430`) raises
     // the bit `CivilianPruneDeadChildren` tests and writes the shooter into
     // `obj+0x131C`, which the prune copies to `sub+0x6C`. Player **1** fires,
-    // so a payee of 0 or -1 cannot pass. `ResolveHit` pays no kill score here
-    // -- the port charges that in `FireShotRequest` -- so every point on the
-    // board below is the rescue's.
+    // so a payee of 0 or -1 cannot pass. Each killing shot pays its shooter
+    // what `ResolveHit`'s own tail pays -- the kill's 0x50 and a body hit's 10
+    // -- so the rescue's 400 is what is on the board beyond two of those.
+    const KILL_SHOT = 0x50 + 10;
     kids[0].hp = 1;
     ResolveHit(kids[0], 1, NULL_HOST, rng, 1);
     cFrame(a, events);
     check("one captor down is not enough",
-          a.civ?.childCount === 1 && G.g_player_score[1] === 0,
+          a.civ?.childCount === 1 && G.g_player_score[1] === KILL_SHOT,
           `left ${a.civ?.childCount} score ${G.g_player_score.join("/")}`);
     kids[1].hp = 1;
     ResolveHit(kids[1], 1, NULL_HOST, rng, 1);
@@ -15262,7 +15348,8 @@ console.log("\nclass 0x10, the civilian and the rescue:");
     // the engine's "could not name one". A shot always names one.
     check("the last captor down pays 400 to the player who shot it, and to "
           + "nobody else",
-          paid === 1 && payee === 1 && G.g_player_score[1] === 400
+          paid === 1 && payee === 1
+          && G.g_player_score[1] === 2 * KILL_SHOT + 400
           && G.g_player_score[0] === 0,
           `paid ${paid} to ${payee}, scores ${G.g_player_score.join("/")}`);
   }
@@ -15357,11 +15444,13 @@ console.log("\nclass 0x10, the civilian and the rescue:");
       { bone: 5, slot: 0x1000, kind: -1, rot: [0, 0, 0],
         sets: Array.from({ length: 6 },
                          (_, i) => [i, 0, 0, 1] as [number, number, number,
-                                                    number]) },
+                                                    number]),
+        callback: 0, banner: null },
       { bone: 5, slot: 0x1001, kind: -1, rot: [0, 0, 0],
         sets: Array.from({ length: 6 },
                          (_, i) => [i, 0, 0, 1] as [number, number, number,
-                                                    number]) },
+                                                    number]),
+        callback: 0, banner: null },
     ];
     const { a, events } = civScene([[
       cmd(CivilianOp.Wait, CivilianWait.Free),
@@ -15375,7 +15464,7 @@ console.log("\nclass 0x10, the civilian and the rescue:");
           a.civ?.items.length === 2 && a.civ?.pickedItem !== -1,
           `items ${JSON.stringify(a.civ?.items)}`);
     check("...and the second append is the record op 0x13 names",
-          a.civ?.items[1] === 0, `${a.civ?.items[1]}`);
+          a.civ?.items[1]?.record === 0, JSON.stringify(a.civ?.items[1]));
     // The weights are 1 and 3, so the second record is three times as likely.
     // Asserting a *distribution* rather than a value is what catches a walk
     // that always takes the head -- which is the easy way to get this wrong.
@@ -15393,6 +15482,182 @@ console.log("\nclass 0x10, the civilian and the rescue:");
     check("the weighted pick is weighted, not always the head",
           second > 20 && second < 40, `${second}/40 took the 3:1 entry`);
     void events;
+  }
+
+  // **The item is given, and taken away.** Bug: "rescued civilians ... still
+  // carry it after you should receive its effect ... +1 life doesn't apply".
+  //
+  // `CivilianDrawHeldItems` (`FUN_0048CD10`) calls each record's `rec+0x18`
+  // after drawing it. Record `0x0056B190`'s is `CivilianHeldItemGrantLife`
+  // (`FUN_0048DCC0`): when the entry's operand -- `0x800000` in every shipped
+  // op 0x13 -- turns up in the wait word, it clears it, raises `0x400000`,
+  // names the player and calls `GrantExtraLife`; the draw then drops the
+  // entry. The streams below are shaped like the shipped ones: the append,
+  // a wait, then the give (stage 1 civilian `0x3C38`'s stream 13, commands
+  // 55-57). The shipped word is `0x940100`; its `0x100` holds the step on the
+  // block only while a clip has loops left, and these fixtures play none, so
+  // the step would walk straight past a block carrying it -- they load
+  // `0x940000`, the same word without that one condition.
+  {
+    const sets = (x: number, y: number, z: number, w: number) =>
+      Array.from({ length: 6 },
+                 () => [x, y, z, w] as [number, number, number, number]);
+    // Record `0x0056B190` as the exporter writes it, and record `0x0056B390`
+    // (kind 4, one of stage 2 civilian `0x8510`'s three picks).
+    const LIFE: CivilianItemJson = {
+      bone: 5, slot: 0x10c3, kind: -1, rot: [0x4000, 0, 0xc000],
+      sets: sets(0, 1, 1, 1), callback: 0x0048dcc0, banner: null,
+    };
+    const ORIGINAL: CivilianItemJson = {
+      bone: 5, slot: 0x10a8, kind: 4, rot: [0xb83a, 0x7a8a, 0xb51f],
+      sets: sets(0.5, -0.6, 1.1, 0.8), callback: 0x0048dd60, banner: 0x5c1,
+    };
+    const GIVE_WORD = CivilianWait.GiveItem | CivilianWait.RootMotion
+      | CivilianWait.CameraTrack;
+    const give = (): CivilianCmdJson[] => [
+      cmd(CivilianOp.Wait, 0),
+      { op: CivilianOp.AddHeldItem, args: [0x0056b190, 0x800000], item: 0 },
+      cmd(CivilianOp.SetTimer, 5),
+      cmd(CivilianOp.Wait, GIVE_WORD),
+      cmd(CivilianOp.Wait, 0),
+      cmd(CivilianOp.End),
+    ];
+    const markers = () => G.g_life_granted_markers ?? [];
+    const PX = Math.fround(G_PROJECTION_DISTANCE_PX);
+
+    // One player in play: the life goes to whoever is in play.
+    {
+      const { a, events } = civScene([give()], [], [LIFE, ORIGINAL]);
+      const p = G.g_active_player;
+      const lives0 = G.g_player_lives[p];
+      cFrame(a, events);
+      check("a civilian holds the item op 0x13 gave her until the wait word "
+            + "says to hand it over",
+            a.civ?.items.length === 1 && G.g_player_lives[p] === lives0,
+            `items ${JSON.stringify(a.civ?.items)} lives ${G.g_player_lives[p]}`);
+      let at = -1;
+      let drawnThen = "";
+      for (let i = 0; i < 20 && at < 0; i++) {
+        cFrame(a, events);
+        if ((a.civ?.items.length ?? 1) === 0) {
+          at = i;
+          drawnThen = JSON.stringify(a.civ?.heldDrawn);
+        }
+      }
+      check("the wait word's 0x800000 gives it: one more life, to the player "
+            + "in play",
+            at >= 0 && G.g_player_lives[p] === lives0 + 1,
+            `given at ${at}, lives ${lives0} -> ${G.g_player_lives[p]} `
+            + `(player ${p})`);
+      check("...and she no longer carries it -- the entry is dropped and "
+            + "neither bit is left in the word",
+            a.civ?.items.length === 0
+            && (a.civ.wait & (0x800000 | 0x400000)) === 0,
+            `items ${JSON.stringify(a.civ?.items)} `
+            + `wait 0x${a.civ?.wait.toString(16)}`);
+      check("...having been drawn on the frame she gave it, as the engine "
+            + "draws before it calls the record's routine",
+            drawnThen === "[0]", `drawn ${drawnThen}`);
+      cFrame(a, events);
+      check("...and not on the next",
+            JSON.stringify(a.civ?.heldDrawn) === "[]",
+            JSON.stringify(a.civ?.heldDrawn));
+      const m = markers()[0];
+      check("the paid life raises SpawnLifeGrantedMarker's marker: player "
+            + "0's slot, centred with one attacker, 120 px low, 32 px a unit",
+            markers().length === 1 && m.slot === 0x1256 + p && m.x === 0
+            && m.z === -1 && m.y === Math.fround(-120 / PX)
+            && m.scale === Math.fround(32 / PX) && m.frames === 120,
+            JSON.stringify(markers()));
+      // `LifeGrantedMarkerUpdate` (`FUN_0048DFE0`): draw, then count down;
+      // `AssetDrawSlotWithAlpha` at `frames / 6` once `frames < 6.0`, and
+      // `ActorKill` after the draw at 1 -- 120 frames drawn in all.
+      const drawn: (number | null)[] = [];
+      for (let i = 0; i < 125 && markers().length; i++) {
+        LifeGrantedMarkersTick();
+        if (markers().length) drawn.push(markers()[0].drawnAlpha);
+      }
+      check("...drawn for 120 frames, the last five faded by sixths, then gone",
+            drawn.length === 120 && drawn.slice(0, 115).every((x) => x === null)
+            && drawn.slice(115).join() === [5, 4, 3, 2, 1]
+              .map((k) => Math.fround(k * Math.fround(1 / 6))).join()
+            && markers().length === 0,
+            `${drawn.length} frames, tail ${drawn.slice(113).join()}`);
+    }
+
+    // Two players: the captor's killer, `obj+0x131C` through the prune.
+    // Player **1** fires, so a life for player 0 cannot pass.
+    {
+      const { a, kids, events } = civScene([[
+        cmd(CivilianOp.Wait, CivilianWait.Free),
+        { op: CivilianOp.AddHeldItem, args: [0x0056b190, 0x800000], item: 0 },
+        cmd(CivilianOp.SetChildrenGoal, 0),
+        cmd(CivilianOp.Wait, CivilianWait.ChildrenAlive),
+        cmd(CivilianOp.Wait, GIVE_WORD),
+        cmd(CivilianOp.Wait, 0),
+        cmd(CivilianOp.End),
+      ]], [0x4100], [LIFE]);
+      JoinPlayerTwo();
+      const lives = [...G.g_player_lives];
+      for (let i = 0; i < 4; i++) cFrame(a, events);
+      check("two players: the item waits for the captor",
+            a.civ?.items.length === 1, JSON.stringify(a.civ?.items));
+      kids[0].hp = 1;
+      ResolveHit(kids[0], 1, NULL_HOST, rng, 1);
+      for (let i = 0; i < 3; i++) cFrame(a, events);
+      check("...and the life goes to the player who shot it, and to nobody "
+            + "else",
+            G.g_player_lives[1] === lives[1] + 1
+            && G.g_player_lives[0] === lives[0] && a.civ?.items.length === 0,
+            `lives ${lives.join("/")} -> ${G.g_player_lives.join("/")}, `
+            + `sub+0x6C ${a.civ?.rescuePlayer}`);
+      const m = markers()[0];
+      check("...whose marker is player 1's slot, 160 px to the right",
+            markers().length === 1 && m.slot === 0x1257
+            && m.x === Math.fround(160 / PX),
+            JSON.stringify(markers()));
+    }
+
+    // At the cap: 300 points instead, no marker -- and the item still goes.
+    {
+      const { a, events } = civScene([give()], [], [LIFE]);
+      const p = G.g_active_player;
+      G.g_player_lives[p] = G.g_max_lives ?? 5;
+      const score0 = G.g_player_score[p];
+      for (let i = 0; i < 20; i++) cFrame(a, events);
+      check("at g_max_lives the item pays 300 and no life, raises no marker, "
+            + "and is still handed over",
+            G.g_player_lives[p] === 5 && G.g_player_score[p] === score0 + 300
+            && markers().length === 0 && a.civ?.items.length === 0,
+            `lives ${G.g_player_lives[p]} score ${G.g_player_score[p]} `
+            + `markers ${markers().length} items ${a.civ?.items.length}`);
+    }
+
+    // The other thirteen records: `CivilianHeldItemGrantOriginalItem`
+    // (`FUN_0048DD60`) counts the kind into `g_original_items_taken` and
+    // raises its banner -- in any mode.
+    {
+      const { a, events } = civScene([[
+        cmd(CivilianOp.Wait, 0),
+        { op: CivilianOp.PickHeldItem, args: [1], itemTable: [[1, 1]] },
+        { op: CivilianOp.AddPickedItem, args: [0x800000] },
+        cmd(CivilianOp.SetTimer, 5),
+        cmd(CivilianOp.Wait, GIVE_WORD),
+        cmd(CivilianOp.Wait, 0),
+        cmd(CivilianOp.End),
+      ]], [], [LIFE, ORIGINAL]);
+      const taken = G.g_original_items_taken[4] ?? 0;
+      const lives0 = [...G.g_player_lives];
+      for (let i = 0; i < 20; i++) cFrame(a, events);
+      const b = G.g_original_item_banners.at(-1);
+      check("an Original Mode item is counted, bannered and taken away, and "
+            + "pays no life",
+            G.g_original_items_taken[4] === taken + 1 && b?.sprite === 0x5c1
+            && a.civ?.items.length === 0
+            && G.g_player_lives.join() === lives0.join(),
+            `taken ${taken} -> ${G.g_original_items_taken[4]}, banner `
+            + `${b?.sprite} items ${a.civ?.items.length}`);
+    }
   }
 
   // `sub+0x82`: one record, six attach sets, chosen by the character type.
@@ -21386,12 +21651,10 @@ console.log("\nthe shot queue:");
 {
   const rng = new Rng(21);
   const events = scene(3, rng);
-  // Bone 1 -- the torso, the one bone in the fixture with a `Last` effect row
-  // -- stands in for the head, so a "headshot" lands on a real table entry and
-  // the score is the only thing under test.
-  SetGameTables({
-    ...CHARS, types: { "1": { ...TYPE, head_bone: 1 } },
-  } as unknown as CharactersJson);
+  // The headshots are on bone 2, the fixture's head. They used to be on bone 1
+  // with the fixture's `head_bone` pointed at it, which the port read; the exe
+  // asks `CMP EBP, 0x2` of the shot bone, an immediate, so no table can move
+  // the head anywhere else.
   for (const o of G.g_object_list) o.hp = 100;
   const [z0, z1, z2] = G.g_object_list;
 
@@ -21428,7 +21691,7 @@ console.log("\nthe shot queue:");
         heard.map((h) => h.toString(16)).join(" "));
 
   // Two headshots, then a body shot.
-  pick = { kind: "actor", at: z0.at, bone: 1, point: vec3() };
+  pick = { kind: "actor", at: z0.at, bone: 2, point: vec3() };
   QueueShotRequest(0, RAY);
   GameUpdate(1 / 60, host, rng, events);
   check("a headshot pays 120", G.g_player_score[0] === 120,
@@ -21436,7 +21699,7 @@ console.log("\nthe shot queue:");
   check("...and arms `g_head_combo_bonus`, which is the engine's own global",
         G.g_head_combo_bonus[0] === 10, `${G.g_head_combo_bonus[0]}`);
 
-  pick = { kind: "actor", at: z1.at, bone: 1, point: vec3() };
+  pick = { kind: "actor", at: z1.at, bone: 2, point: vec3() };
   QueueShotRequest(0, RAY);
   GameUpdate(1 / 60, host, rng, events);
   check("the second consecutive headshot pays 130",
@@ -31017,12 +31280,18 @@ console.log("\nznjoe's creature:");
   {
     const rng = new Rng(11);
     const { joe, events } = joeScene(rng);
-    const score = G.g_player_score[0];
+    const before = G.g_player_score[0];
     const out = ResolveHit(joe, 1, JOE_HOST, rng, 0);
     check("a torso hit on znjoe plays no stagger and leaves it alive",
           out.react === undefined && out.result === 1 && joe.hp > 0
           && !joe.dead,
           `react ${out.react} result ${out.result} hp ${joe.hp}`);
+    // `ResolveHit`'s tail pays the body hit its 10 there and then; the arm's
+    // 0x50 is on top of that, a frame later.
+    const score = G.g_player_score[0];
+    check("...and `ResolveHit` pays it as a body hit, 10 and no kill",
+          score === before + 10 && !out.killed,
+          `${before} -> ${score} killed ${out.killed}`);
     check("...and the hit carries the player who fired it, per `obj+0x190`",
           joe.pendingHit?.player === 0,
           `${JSON.stringify(joe.pendingHit)}`);

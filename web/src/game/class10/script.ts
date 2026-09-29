@@ -218,7 +218,7 @@ export function CivilianRunScript(obj: Actor, script: number, pc: number,
         CivilianAddHeldItem(sub, c);
         break;
       case CivilianOp.AddPickedItem:
-        CivilianAddPickedItem(sub);
+        CivilianAddPickedItem(sub, c);
         break;
       case CivilianOp.PickHeldItem:
         CivilianPickHeldItem(sub, c, f?.rng ?? rng);

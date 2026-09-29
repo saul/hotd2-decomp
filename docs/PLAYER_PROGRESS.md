@@ -53,6 +53,31 @@ carrier killed holding its prop drops it (`CarriedPropDrop`,
 `CarriedPropFallFree`), and a prop shot to pieces draws its break effect -- the
 drum splits in two -- through the effect tree the class-0x44 props use.
 
+**A rescued civilian hands over what she holds, and it is in her hand.**
+`CivilianDrawHeldItems` (`FUN_0048CD10`) calls each held record's `rec+0x18`
+after drawing it, and that routine is the give: `CivilianHeldItemGrantLife`
+(`FUN_0048DCC0`) for the extra life, `CivilianHeldItemGrantOriginalItem`
+(`FUN_0048DD60`) for the thirteen Original Mode items. It fires on the frame
+the entry's operand (`0x800000`) turns up in the wait word -- the block after
+the append in all eleven streams that hold something -- pays
+(`GrantExtraLife` to the player in play, or the killer of the last captor in
+two-player, with `SpawnLifeGrantedMarker`'s LIFE UP in camera space; or
+`g_original_items_taken` and a banner), and raises `0x400000`, on which the
+draw drops the entry. The port had the three append ops and a renderer that
+hung the model once and never took it off, so nothing was paid and every
+item stayed in the hand. The pose was wrong too: the draw post-multiplies
+`RotX RotZ RotY T Scale`, so the offset is along the turned axes, and the
+renderer used three.js's position-then-rotation -- the life box sat at `(0,
+1, 1)` in the hand's frame where the exe has `(1, -1, 0)`, 2.2 units off at
+stage 1's 0.9. `render/characters/held_items.ts` now builds the matrix with
+`game/matrix.ts`'s routines call for call, and draws the camera-facing second
+slot of kinds 7-10 and 0x0E-0x12. `GrantExtraLife` reads the caps the exe
+does (`g_max_lives`, `g_original_life_cap`) and pays the 300 through
+`ScoreAddForPlayer`. `tools/civ_gives.mjs` (row `civ_gives`) plays every
+giving civilian from her own spawn step: all five life-givers and four of
+the eight Original-item civilians give, in both modes; the other four sit
+behind op 0x1F's second arm, whose selector `DAT_009A2226` is `[open]`.
+
 **A rescued civilian holds the room while she speaks** (bug 18). There is no
 "wait for the dialogue" opcode: `CivilianUpdate` (`FUN_0048A920`) calls
 `ActorRegisterCameraPoint` every frame (`0x0048ADB0`), which tail-calls
@@ -160,6 +185,23 @@ only the body hit's 10. The civilians harness does not move (none of its
 civilians reaches an op 0x06 block or a passed block that sets a restored
 word, and every captor it shoots dies the same way); tests in `port.test.ts`,
 each seen failing on the base.
+
+**...and the rest of `ResolveHit`'s tail is `ResolveHit`'s.** Read again from
+`0x004096F6` to the `RET` at `0x00409865`, the kill test above stands. Two
+things around it did not: the payout lived in `FireShotRequest`, summed into
+one `ScoreAddForPlayer`, and **nothing counted a hit** -- the tail's
+`g_player_hit_count[p]++` on every bone-2 hit and every other hit whose result
+is not 5 (`0x0040980A`, `0x0040983B`) had no port, so the accuracy grade's
+numerator moved only for props and projectiles. And the head was the bundle's
+`head_bone`, where both tests are `CMP EBP, 0x2` on `g_shot_bone[p]`: the same
+2 for every shipped type, from the wrong place. `ResolveHit` now pays the
+kill's 0x50 inside the kill block and then 0x78 and the combo, or 10, in the
+exe's order, counts the hit and reports what it paid; `FireShotRequest` only
+reports. Three tests had been calibrated on the old shape and were rewritten:
+the shot queue's headshots rode bone 1 with the fixture's `head_bone` moved
+onto it, and the rescue and `znjoe` checks assumed a bare `ResolveHit` paid
+nothing. Seven new checks in "ResolveHit:", each failing on the base; a
+mutation that restores only the `head_bone` read fails five of them.
 
 **And they have a size.** `EnemyZombieInit` writes two radii — `obj+0x124`
 from `g_actor_radius_by_char`, which is the shot sphere, and `obj+0x128` = 3.5,

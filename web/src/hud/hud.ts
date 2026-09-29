@@ -245,6 +245,11 @@ export interface ScreenSpriteView {
    * it is 0. 10 is the centre.
    */
   flags: number;
+  /**
+   * `0xRRGGBB` the image is multiplied by -- a lit quad's vertex colour
+   * (`SubmitScreenSpriteQuad`, flags bit `0x2000`) -- or absent for white.
+   */
+  tint?: number;
 }
 
 /** One sprite's image: the texture's size and a URL for it. */
@@ -308,6 +313,8 @@ export class Hud {
   spriteImages: (id: number) => ScreenSpriteImage | null = () => null;
   /** Decoded images by URL, so a frame never waits on a decode twice. */
   private readonly images = new Map<string, HTMLImageElement>();
+  /** {@link tinted}'s canvases, by URL and colour. */
+  private readonly tints = new Map<string, HTMLCanvasElement>();
   /** What the screen last showed, as a string, so an unchanged frame costs nothing. */
   private screenDrawn = "";
 
@@ -369,7 +376,8 @@ export class Hud {
     // Only the ones in the HUD's own plane -- depth 1.0 or nearer.
     const near = sprites.filter((s) => s.depth <= 1);
     for (const s of near) {
-      key += `${s.id},${s.x},${s.y},${s.sx},${s.sy},${s.alpha},${s.flags};`;
+      key += `${s.id},${s.x},${s.y},${s.sx},${s.sy},${s.alpha},${s.flags},`
+        + `${s.tint ?? ""};`;
     }
     if (key === this.screenDrawn) return;
     ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
@@ -390,11 +398,38 @@ export class Hud {
       const ax = a === 0 ? 1 : a & 3;
       const ay = a === 0 ? 1 : (a >> 2) & 3;
       ctx.globalAlpha = Math.max(0, Math.min(1, s.alpha));
-      ctx.drawImage(img, s.x + (1 - ax) * w / 2, s.y + (1 - ay) * h / 2,
+      const src2 = s.tint === undefined || s.tint === 0xffffff
+        ? img : this.tinted(img, src.url, s.tint);
+      ctx.drawImage(src2, s.x + (1 - ax) * w / 2, s.y + (1 - ay) * h / 2,
                     w, h);
     }
     ctx.globalAlpha = 1;
     this.screenDrawn = complete ? key : "";
+  }
+
+  /**
+   * The image multiplied by `tint`, its alpha kept: what a vertex colour does
+   * to a textured quad. Made once per image and colour -- a highlighted row
+   * is a handful of glyphs in red -- on a canvas that never enters the page.
+   */
+  private tinted(img: HTMLImageElement, url: string,
+                 tint: number): HTMLImageElement | HTMLCanvasElement {
+    const key = `${url}#${tint}`;
+    let c = this.tints.get(key);
+    if (c) return c;
+    c = document.createElement("canvas");
+    c.width = img.naturalWidth;
+    c.height = img.naturalHeight;
+    const g = c.getContext("2d");
+    if (!g) return img;
+    g.drawImage(img, 0, 0);
+    g.globalCompositeOperation = "multiply";
+    g.fillStyle = `#${tint.toString(16).padStart(6, "0")}`;
+    g.fillRect(0, 0, c.width, c.height);
+    g.globalCompositeOperation = "destination-in";
+    g.drawImage(img, 0, 0);
+    this.tints.set(key, c);
+    return c;
   }
 
   private image(url: string): HTMLImageElement {

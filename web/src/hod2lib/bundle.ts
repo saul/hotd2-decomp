@@ -60,7 +60,8 @@ import { GAME_OVER_LOGO_SPRITES, ROUTE_FIGURE_SHADOW_SLOT, ROUTE_MARK_SLOTS }
   from "../game/player_body_data";
 // And the options screen's: its titles, EXIT and backgrounds are immediates
 // in its routines; its glyphs, crosshairs and sliders are `.rdata` read below.
-import { OPTIONS_SCREEN_SPRITES } from "../game/options_data";
+import { OPTIONS_SCREEN_SPRITES, SCREEN_IDLE_DIM_SLOT }
+  from "../game/options_data";
 import { f32, i16, i32, u32 } from "./bytes";
 import * as C from "./container";
 import { encodeRgba } from "./png";
@@ -2040,6 +2041,9 @@ export async function buildStage(stage: Stage, sink: BundleSink,
     ...classEffectSlots(spawnRecords.map((r) => r.cls)),
     // ...and Original Mode's weapon-5 round, on the tracer ring.
     ...originalWeaponRoundSlots(stage.original),
+    // ...and the shell screens' idle dimmer, which the options screen draws
+    // over itself after five minutes of nothing held.
+    SCREEN_IDLE_DIM_SLOT,
   ]);
   // Which materials draw blood, so the client can offer the colour the game's
   // own option offers. See `bloodTexturePredicate`.

@@ -120,6 +120,10 @@ export function Viewport(
   // while the game's own reticle is gone.
   const crosshair = useSlice((p) => p?.crosshair);
   const aiming = ready && crosshair === true;
+  // What it looks like is the game's too: the Sight Graphic's sprite, the
+  // image riding the node the pointer moves. The ring stays for a bundle
+  // without the image.
+  const crosshairImage = useSlice((p) => p?.crosshairImage) ?? null;
   // The letterbox is a fraction of the *frame*, not of this element: the
   // engine's bars sit at view-space y = +-0.35 against the frustum's
   // half-height, so they belong to the rendered view. Pillarboxed, that is the
@@ -166,7 +170,10 @@ export function Viewport(
         <canvas className="hud-screen" ref={refs.screen} width={640}
                 height={480} />
       </div>
-      <div className="crosshair" ref={refs.crosshair} hidden={!aiming} />
+      <div className={crosshairImage ? "crosshair sprite" : "crosshair"}
+           ref={refs.crosshair} hidden={!aiming}
+           style={crosshairImage
+             ? { backgroundImage: `url(${crosshairImage})` } : undefined} />
       {/* The other player's, in a two-player session: React places it from
           the projection, because it follows `G` and not this page's pointer. */}
       <PeerCrosshair />

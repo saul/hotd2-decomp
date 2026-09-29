@@ -713,6 +713,14 @@ kbd {
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6), inset 0 0 0 1px rgba(0, 0, 0, 0.6);
 }
 .crosshair[hidden] { display: none; }
+/* The game's own crosshair sprite, 32x32 (`g_crosshair_sprites`): the image
+   is the reticle, so the ring and its dot go. */
+.crosshair.sprite {
+  width: 32px; height: 32px; margin: -16px 0 0 -16px;
+  border: none; border-radius: 0; box-shadow: none;
+  background: center / contain no-repeat;
+}
+.crosshair.sprite::after { display: none; }
 .crosshair::after {
   content: ""; position: absolute; inset: 9px;
   background: rgba(255, 90, 90, 0.9); border-radius: 50%;

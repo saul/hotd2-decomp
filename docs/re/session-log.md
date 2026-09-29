@@ -25675,3 +25675,43 @@ keyboard crosshair (`PadMoveCrosshair`) and Gun Calibration a gun's raw
 position; the page's players are mouse guns in mode 6, the cursor steps over
 both rows, and each sub-screen's own first test sends it back -- which the
 port has. Their bodies need an aim record the page does not feed.
+
+## 2026-09-29 -- the options screen in the page: reached, driven, drawn
+
+**Reaching it.** The page has no title screen -- every load, seek and restart
+is "a game started from the title" -- so the menu (`≡`) has **Options**, which
+does what the title's OPTION row does: `RequestAppState(0x0C)`, committed at
+the end of the next tick like any request. EXIT asks for the title (4), and
+the page is the title by starting the stage again (`stepOneFrame`, port-only,
+beside the other app-state handling there). No layer rule moved:
+`PlayerCommands` grew one member (`openOptions`) and `PlayerView` one
+(`crosshairImage`), both in the open.
+
+**Driving it.** Input mode 6 is the mouse with the keyboard ORed in, so on
+this screen the page's arrows are the pad's directions -- player 1's in
+`KeyboardReadAsPad` -- a click is A (the mouse's left button,
+`MouseReadButtons`), and Enter is START. A press is the next tick's
+`g_pad_state` bit, as START already was; a held arrow is `g_pad_held`'s,
+which nothing fed before and which the sound tests' auto-repeat reads. Off
+this screen the left arrow is still the rewind. The corner button's SKIP is
+hidden over it. The menu item is hidden on a touch screen: a phone has no
+directions, and a player who could open the list could not reach EXIT.
+
+**Drawing it.** Every sprite goes through `G.g_screen_sprite_draws` like the
+continue and game-over screens: the text on the HUD canvas, multiplied by its
+tint when lit (`0x2000`), the background tiles at depth 200 through the deep
+layer. The idle dimmer's model (slot `0x93E`) is exported and drawn by a
+small render layer. The reticle is now the game's own crosshair sprite, the
+one `HudDrawCrosshair` picks by the Sight Graphic -- the ring was the page's
+stand-in, and the option had nothing to change without this.
+
+**Harness**: `web/tools/options_page.mjs`, a `verify_all.py` row (`options`,
+bundle-gated, the browser lane).
+
+**Wrong turns.** The harness's first run read **0** opaque pixels on the HUD
+canvas over a screenshot that plainly had no text either: it had waited and
+called `advance(0)`, which redraws the last tick's pose and runs no
+`world.update`, so the sprite images that had finished decoding were never
+drawn (L69, again). One more frame draws them. The reticle check then waited
+1200 frames for the firing gate and never saw it: stage 1's opening holds
+the gate down for longer than that, and START skips it.

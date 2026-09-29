@@ -117,6 +117,13 @@ export const OPTIONS_BACKGROUND_BASES: readonly number[] = [0x7a, 0xa7d, 0x8e];
 export const OPTIONS_BACKGROUND_TILES = 20;
 
 /**
+ * The idle dimmer's model: `PUSH 0x93E` into `AssetDrawSlotWithAlpha` at
+ * `0x00413D64` (`ScreenIdleDim`) -- `pol/common.bin` entry 129. The exporter
+ * puts it in every stage's effect slots.
+ */
+export const SCREEN_IDLE_DIM_SLOT = 0x93e;
+
+/**
  * Every sprite the options screen can draw by an immediate: the exporter's
  * list, beside the ids it reads out of the screen's own tables.
  */

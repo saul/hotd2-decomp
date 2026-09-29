@@ -35,6 +35,9 @@ export function skipProjection(p: Player): SkipProjection | null {
   // since the region is the thing the script actually declares. So the bar
   // shows for the region and the button carries the gate.
   if (!w?.skippable) return null;
+  // Not over the options screen: the walker stands still under it and the
+  // skip poll is the in-play player's, so START there is the list's alone.
+  if (G.g_app_state === AppState.Options) return null;
   const can = w.canSkip;
   const held = w.wait?.blocksOn;
   return {
@@ -199,10 +202,15 @@ export function crosshairProjection(player = 0): boolean {
  * game-over screen (7) the phase -- its sprites are the HUD layer's, through
  * `G.g_screen_sprite_draws` like every other screen sprite; once it has
  * handed on to the next screen (3, which the port does not have) phase -1,
- * so the buttons stay up.
+ * so the buttons stay up. Null on the options screen (0x0C), which is not a
+ * game over, and on the title it hands back to (4), which the page leaves at
+ * once for a new game.
  */
 export function gameOverProjection(): GameOverProjection | null {
-  if (G.g_app_state === AppState.InPlay) return null;
+  if (G.g_app_state === AppState.InPlay || G.g_app_state === AppState.Options
+      || G.g_app_state === AppState.Title) {
+    return null;
+  }
   const over = G.g_app_state === AppState.GameOver;
   return {
     phase: over ? G.g_nRunPhase : -1,

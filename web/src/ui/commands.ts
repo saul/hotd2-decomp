@@ -85,6 +85,13 @@ export type UiCommand =
    */
   | { kind: "restartStage" }
   | { kind: "restartFromStageOne" }
+  /**
+   * The options screen: what the title menu's OPTION row asks for -- app
+   * state `0x0C` (`TitleMenuUpdateAndSelect`, cursor 5) -- from the game,
+   * since the page has no title to be on. Its EXIT hands back to the title,
+   * which the page is by starting the stage again.
+   */
+  | { kind: "openOptions" }
   | { kind: "takeBranch"; target: number }
   /** Hovering a route's button previews its opening shot. */
   | { kind: "previewBranch"; slot: number; frame: number }

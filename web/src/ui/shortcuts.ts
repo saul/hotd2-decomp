@@ -2,7 +2,7 @@
  * Every key the page answers to, in one table.
  *
  * Three layers listen for keys, and for good reasons: `app/main.ts` owns the
- * game's (Space, Enter, R, the arrow, the digits), `render/freeroam.ts`
+ * game's (Space, Enter, R, the arrows, the digits), `render/freeroam.ts`
  * owns flying (WASDQE and Shift, in free roam only), and `ui/App.tsx` owns the
  * page's (the sidebar, this list, the overlays, mute, fullscreen). What none
  * of them had was one place that said what all of them do -- so the `?`
@@ -55,6 +55,11 @@ const GAME: ShortcutGroup = {
     { codes: ["Enter", "NumpadEnter"], cap: "Enter", by: "app",
       what: "Start — continue, skip a cutscene where the game allows it, "
         + "or a new game when you are out" },
+    { codes: ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"],
+      cap: "← ↑ ↓ →", by: "app",
+      what: "Options screen: move between rows and change a setting (a held "
+        + "← or → runs the sound tests); click or Enter to choose. "
+        + "Elsewhere ← rewinds half a second of game time" },
     { codes: ["KeyM"], cap: "M", by: "ui", what: "Sound on / off" },
     { codes: ["KeyF"], cap: "F", by: "ui", what: "Fullscreen" },
   ],
@@ -66,8 +71,6 @@ const DEBUG: ShortcutGroup = {
     { codes: ["Backquote"], cap: "`", by: "ui", what: "Debug sidebar" },
     { codes: ["Digit1"], cap: "1", by: "app", what: "Play mode" },
     { codes: ["Digit2"], cap: "2", by: "app", what: "Free roam" },
-    { codes: ["ArrowLeft"], cap: "←", by: "app",
-      what: "Rewind half a second of game time" },
     { codes: ["Slash"], cap: "?", by: "ui", what: "This list" },
     { codes: ["Escape"], cap: "Esc", by: "ui",
       what: "Close this list, the menu or the bundle screen" },

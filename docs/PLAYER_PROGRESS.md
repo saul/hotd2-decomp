@@ -3383,6 +3383,17 @@ Continue row, does not come back without three unlock bits no bundle can set
 -- the exe's rule. `port.test.ts` drives it all with pad bits: lives 4 is
 five lives in the next game, credits 3 is four credits.
 
+**In the page** it is the menu's **Options** (`≡`): what the title's OPTION
+row asks for, from the game, since the page has no title. The arrows move and
+change (a held one runs the sound tests), a click is A, Enter is START; EXIT
+hands back to the title, which the page is by starting the stage again, and
+the new game plays by what was set. It is drawn from the exe's own sprites --
+the `scr_back2` stone, "OPTIONS", the `scr_opt_moji05` font, "EXIT" -- with
+the highlighted row lit red through the quad's colour (flags `0x2000`), and
+the reticle in play is the game's crosshair sprite, the one the Sight Graphic
+picks. `web/tools/options_page.mjs` drives it end to end. Not on a touch
+screen: the list needs a pad's directions, and the menu hides the item there.
+
 **The continue screen is drawn, and the script waits under it** (2026-09-28,
 `NEW-BUGS-2`). It used to be state with nothing on screen: the countdown ran
 and the reticle stayed up over a scene that played on, script and all. Now,

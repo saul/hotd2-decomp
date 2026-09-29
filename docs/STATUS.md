@@ -19,24 +19,24 @@ is in `tools/verify_all.py`, beside the command that runs it.
 
 | Directory | Lines | Files | Layer |
 |---|---:|---:|---|
-| `game/` | 106899 | 348 | engine |
-| `hod2lib/` | 19478 | 35 | engine |
-| `render/` | 15102 | 54 | render |
-| `app/` | 12115 | 41 | app |
+| `game/` | 106906 | 348 | engine |
+| `hod2lib/` | 19482 | 35 | engine |
+| `render/` | 15185 | 55 | render |
+| `app/` | 12218 | 41 | app |
 | `script/` | 4471 | 25 | engine |
-| `ui/` | 3620 | 26 | ui |
+| `ui/` | 3657 | 26 | ui |
 | `core/` | 3523 | 13 | engine |
 | `bundle/` | 2805 | 11 | engine |
 | `audio/` | 973 | 2 | render |
-| `hud/` | 491 | 1 | ui |
-| **total** | **169477** | **556** | |
+| `hud/` | 526 | 1 | ui |
+| **total** | **169746** | **557** | |
 
 The largest files, which is where the pressure to split next is:
 
 * `game/globals.ts` — 3108
-* `app/main.ts` — 2965
+* `app/main.ts` — 3054
 * `game/actor.ts` — 2722
-* `hod2lib/bundle.ts` — 2365
+* `hod2lib/bundle.ts` — 2369
 * `hod2lib/exetab.ts` — 2347
 
 ## The port
@@ -48,18 +48,18 @@ The largest files, which is where the pressure to split next is:
 | Citations checked | 799 ported functions match `functions.tsv` under the same name |
 | Spawn classes | **31 of 42** read classes have a module, covering 1544 of 1619 placements |
 | Declared `[diverges]` | **132** — where the port knowingly departs from the exe, each with its reason on the spot |
-| `[open]` markers | **122** — questions the port and the exporter are honest about not having answered |
+| `[open]` markers | **124** — questions the port and the exporter are honest about not having answered |
 
 Both markers are counted in **every** `.ts`/`.tsx` file under `web/src/`, one per occurrence, and only in comments — a word in code or in a string is not a marker (`verify_port.marker_lines`). Each departure and each question is written once, where it is made; everything that refers to it names it in words ([`PLAYER_ARCHITECTURE.md`](PLAYER_ARCHITECTURE.md), "One departure, one tag"). By layer, from the same table as the directories above:
 
 | Layer | Directories | `[diverges]` | `[open]` |
 |---|---|---:|---:|
 | engine | `core/`, `bundle/`, `script/`, `game/`, `hod2lib/` | 118 | 119 |
-| render | `render/`, `audio/` | 13 | 3 |
+| render | `render/`, `audio/` | 13 | 5 |
 | ui | `hud/`, `ui/` | 0 | 0 |
 | app | `app/` | 1 | 0 |
 
-The two declared seams between the UI and the player: **`PlayerCommands` has 53 members against `PlayerView`'s 39** — how much of the player a click can move, against how much of it the page can see. Neither can grow without a line appearing in the open.
+The two declared seams between the UI and the player: **`PlayerCommands` has 54 members against `PlayerView`'s 40** — how much of the player a click can move, against how much of it the page can see. Neither can grow without a line appearing in the open.
 
 ## The decomp
 
@@ -130,6 +130,7 @@ nothing exits 3 and is never counted as green.
 | `bgm_loop` | that the page's music is the engine's stream -- the buffer the script's own track reaches Web Audio as is one period of the file from its first sample to end of file, looped, sample for sample -- and that it is audible | bundle |
 | `keys` | that the page's keys do what the `?` list says when pressed -- test:ui holds the list to the handlers' source, this reads back what a press did -- and that a click on a control over the game hands Space and Enter (START) back to the game rather than leaving them with the button | bundle |
 | `continue` | that the last life lost with credits left puts CONTINUE? and its digit where the exe draws them, holds the script at its wait, and that START -- pressed on the corner button, the one START a phone has -- spends a credit and puts the player back in play | bundle |
+| `options` | that the menu's Options reaches the game's options screen in the real page, that its title and red highlighted row are on the HUD canvas, that the page's arrows and Enter drive the list -- lives and continues changed, the hidden rows stepped over, a held arrow running the sound test -- and that EXIT saves the profile in the browser and starts a game with five lives, four credits and the chosen crosshair on the reticle | bundle |
 | `animals` | that the frog, the owl and the fish are placed from a real bundle and leave their opening state -- none of the three is a skinned enemy the character layer can build, and two have no character type at all | bundle |
 | `horde` | that each of the five class-0x40 hordes is built from a real bundle, walks in, dives and bites, and that shooting every member gives both counters back and lets the walker past the room's wait_enemies_alive -- the members are runtime children with no descriptor, so only the placer's own spawn can bring them into play | bundle |
 | `dives` | that a class-0x43 dive reaches the camera it is aimed at, strikes and comes round again -- the only check that drives a class against the stage's own `cam_play` rather than an eye the harness made up, which is what every other owl check does and why none of them could see a run-in parked five units under the eye | bundle |
@@ -166,7 +167,7 @@ nothing exits 3 and is never counted as green.
 | `verify_geometry` | that every scenery part in a stage bundle holds every triangle its `pol/` models declare -- the only check that compares an export against the files it was made from rather than against another export | game-dir |
 | `baseline` | that the installed assets still hash to `manifest.csv` | game-dir |
 
-24 of them need the installed game and 21 need an exported
+24 of them need the installed game and 22 need an exported
 bundle. **That is a known hole, not a design:** a machine with
 neither cannot run the checks that compare two histories, and a
 bundle-free fixture is the open work that closes it.

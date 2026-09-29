@@ -428,3 +428,12 @@ calibration copied into the aim records `[proved]`.
 * The profile the port keeps is the options, the unlocks, each player's
   record and the saved Original items -- what `G` has. The rankings and the
   grades are not.
+* **Reaching it.** The page has no title screen: the menu's Options asks
+  for `0x0C` from the game, and the title EXIT asks for is the page starting
+  the stage again -- the same "game started from the title" every load is.
+* **Drawing it.** The screen's sprites are recorded in
+  `G.g_screen_sprite_draws`; the HUD canvas draws those at depth 1 and nearer
+  (the text, the title, EXIT), multiplying a lit one by its tint, and the deep
+  layer the background at 200. The idle dimmer's slot `0x93E` is exported and
+  drawn by `render/screen_idle_dim.ts`; how it layers against the 2D quads is
+  `[open]`.

@@ -102,7 +102,7 @@ export interface PlayerCommands {
   readonly breakables: BreakableLayer;
   /** The shot effects, for the muzzle-flash toggle. */
   readonly effects: EffectLayer;
-  /** Red or green blood — the game's own option. */
+  /** Red or green blood: the two banks the game ships (see the layer). */
   readonly bloodColour: BloodColourLayer;
   readonly spawns: SpawnLayer;
   readonly shooting: Shooting;
@@ -135,6 +135,8 @@ export interface PlayerCommands {
   pressStart(): void;
   /** The game-over screen's buttons and the menu's Restart. */
   restartRun(stage: number): void;
+  /** The menu's Options. See the `openOptions` command. */
+  openOptions(): void;
   /** A stage the menu chose, loaded and -- once started -- running. */
   loadAndPlay(): void;
   poseFromSlot(slot: number, frame: number): void;
@@ -237,6 +239,7 @@ export function runCommand(p: PlayerCommands, c: UiCommand): void {
     case "pressStart": p.pressStart(); return;
     case "restartStage": p.restartRun(p.state.stage); return;
     case "restartFromStageOne": p.restartRun(1); return;
+    case "openOptions": p.openOptions(); return;
     case "branchHover":
       p.branchHover = c.over;
       return;

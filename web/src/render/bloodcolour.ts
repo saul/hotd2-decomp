@@ -1,11 +1,17 @@
 /**
- * Red blood or green, which is a **setting the game itself has**.
+ * Red blood or green: the two banks the game ships.
  *
  * `tex/scr_blood_red.bin` and `tex/scr_blood_green.bin` hold the same 39
  * images at the same global texture slots as the ordinary banks that ship
- * them, and the Blood Color option — the string is at `0x005971C4`, beside
- * `"  Red"` and `"Green"` — loads one bank over the other. So this is not an
- * invention: it is the option, offered where the player can reach it.
+ * them. The options screen has a Blood Color row -- the string is at
+ * `0x005971C4`, beside `"  Red"` and `"Green"` -- **but in this build the row
+ * is never shown and its setting is never read**: `g_options_blood_row_shown`
+ * has one store, a 0, and `g_option_blood_color` (`0x009C9F22`) no reader
+ * but the screen's own copy, which the boot overwrites with 1
+ * (`docs/re/options-screen.md`, `tools/verify_options.py`). What loads the
+ * red bank, and when, is `[open]`. So this switch is the page's, between two
+ * sets of art the game carries; it was described as the game's option until
+ * the options screen was read.
  *
  * The exporter marks every material that draws one of those slots with
  * `extras.hod2_blood`, which `GLTFLoader` delivers as `material.userData`.

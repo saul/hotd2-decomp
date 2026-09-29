@@ -212,6 +212,16 @@ CHECKS: list[Check] = [
           "that START -- pressed on the corner button, the one START a phone "
           "has -- spends a credit and puts the player back in play",
           NEEDS_BUNDLE, LANE_BROWSER),
+    Check("options", "web",
+          ["node", "tools/options_page.mjs", "--headless"],
+          "that the menu's Options reaches the game's options screen in the "
+          "real page, that its title and red highlighted row are on the HUD "
+          "canvas, that the page's arrows and Enter drive the list -- lives "
+          "and continues changed, the hidden rows stepped over, a held arrow "
+          "running the sound test -- and that EXIT saves the profile in the "
+          "browser and starts a game with five lives, four credits and the "
+          "chosen crosshair on the reticle",
+          NEEDS_BUNDLE, LANE_BROWSER),
     Check("animals", "web", ["npm", "run", "--silent", "animals"],
           "that the frog, the owl and the fish are placed from a real bundle "
           "and leave their opening state -- none of the three is a skinned "

@@ -3,7 +3,8 @@
  *
  * `≡` in the top-left corner, and a press on it holds the game and opens
  * everything the page offers that is not debugging: which stage, where it
- * opens, Original Mode, a restart, the bundle screen, and the debug sidebar.
+ * opens, Original Mode, a restart, the game's options screen, the bundle
+ * screen, and the debug sidebar.
  * It replaced a top bar and a bottom bar of controls that had grown one
  * debugging need at a time, until the game was the smallest thing on the page.
  *
@@ -187,6 +188,18 @@ export function CrumbMenu({ debugOpen, onToggleDebug, onShowKeys, onClose }:
           <button
                   onClick={act(() => dispatch({ kind: "restartStage" }))}>
             <span className="mi">↺</span> Restart stage
+          </button>
+        )}
+        {/* The title menu's OPTION row: the game's own options screen, run
+            by the port in app state 0x0C. Arrows move and change, Enter or a
+            click chooses, EXIT comes back to the stage from its start. The
+            list is driven by a pad's directions, which a phone does not
+            have, so the stylesheet hides it there as it hides the keys. */}
+        {stage !== undefined && (
+          <button className="options-open only-fine"
+                  title="The game's options: difficulty, lives, continues, the sight, the sound tests"
+                  onClick={act(() => dispatch({ kind: "openOptions" }))}>
+            <span className="mi">⚙</span> Options
           </button>
         )}
         {/* Reachable before anything has loaded, which is when it is most

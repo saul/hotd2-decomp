@@ -138,7 +138,7 @@ function typingIn(target: EventTarget | null): boolean {
  * reading the field, so the switch re-renders this element and not the page.
  */
 function Overlay({ children }: { children: ReactNode }) {
-  const boxed = useSlice((p) => p?.pillarbox) === true;
+  const boxed = useSlice((p) => p?.boxed) === true;
   // **A press over the game hands the keys back to the game.** Chrome leaves
   // the focus on a button the mouse clicked, and a focused button takes Space
   // and Enter for itself -- `app/`'s handler rightly defers to it -- so a

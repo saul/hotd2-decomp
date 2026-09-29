@@ -3281,6 +3281,149 @@ console.log("\nthe pelvis veto: bone 9's own draw, and not its legs");
 }
 
 /**
+ * The result card's figures: a clone of the type's hidden template, **with
+ * its skins bound to the clone's own bones**.
+ *
+ * A figure has no row of its own; `cloneTemplate` copies the type's template
+ * row for each one `ResultCardInstall` (`FUN_00434EF0`) allocates. The waist
+ * is a vertex-blended part -- `SkeletonDrawWalk` (`FUN_004110D0`) draws it
+ * through `DrawCharacterPart`, and the exporter writes it as a glTF skin --
+ * and `Object3D.clone` copies a `SkinnedMesh`'s skeleton by reference. So
+ * every figure's waist was deformed by the hidden template's bones, not its
+ * own, and the card's civilians stood with a hole from chest to belt.
+ */
+console.log("\nthe result card's figures: the waist rides the figure's bones");
+{
+  const { CharacterLayer } = await import("../src/render/characters");
+  const { G, ResetGameGlobals } = await import("../src/game/globals");
+  const { SetGameTables } = await import("../src/game/tables");
+  const { makeActor } = await import("../src/game/actor");
+  const { SpawnClass } = await import("../src/game/spawn_class");
+  const { ResultFigureAt, ResultFigureTemplateAt, ResultCardRoutine } =
+    await import("../src/game/class61/state");
+  const { Bone, BufferAttribute, BufferGeometry, Matrix4, MeshBasicMaterial,
+          Object3D, Skeleton, SkinnedMesh, Vector3 } = await import("three");
+
+  const CT = 0x26;
+  const TEMPLATE_AT = ResultFigureTemplateAt(CT);
+  const FIGURE_AT = ResultFigureAt(0, CT);
+  const CHARS = {
+    types: { [String(CT)]: {
+      type: CT, name: "t38", file: "t.bin", bone_count: 2, actor_radius: 10,
+      bones: [
+        { bone: 0, part: "bone00_1110", slot: 0x1110, offset: [0, 0, 0],
+          parent: null, damage_rank: [], hit_radius: 2, steps: [] },
+        { bone: 1, part: "bone01_1111", slot: 0x1111, offset: [0, 5, 0],
+          parent: 0, damage_rank: [], hit_radius: 2, steps: [] },
+      ],
+      reactions: {}, attacks: {},
+      motions: { "380": { bank: "b", frames: 1, fps: 30, root: [0, 0, 0],
+                          rot: [0, 0, 0, 0, 0, 0, 0, 0, 0], play: 0 } },
+    } },
+    placements: [{
+      at: TEMPLATE_AT, class: 0x61, char_type: CT, motion: 380, hp: 0, yaw: 0,
+      body_condition: 0, initial_state: 0, attack_state: 0, ring_set: 0,
+      synthetic: true,
+    }],
+    approach: { rings: [{ inner: 25, mid: 38, outer: 51 }],
+                steps: { base: 2, mid_add: 3, outer_add: 4 },
+                ring_set_for_char0: 1 },
+    difficulty: { hp_delta: [0, 0, 0, 0, 0], hp_min: 1, hp_max: 300,
+                  initial_rank: [0, 0, 2, 0, 0], default: 2 },
+  };
+
+  // The template, as the exporter lays a character out: two bone nodes, a
+  // joint proxy under each, and the waist -- a skin over both joints, a
+  // child of the rig root with no transform of its own.
+  const root = new Object3D();
+  const rig = new Object3D();
+  rig.name = `chr_t38_spawn${TEMPLATE_AT.toString(16)}`;
+  rig.userData = { hod2_kind: "rig", hod2_rig: "chr_t38",
+                   hod2_spawn_at: TEMPLATE_AT };
+  const b0 = new Object3D();
+  b0.name = `${rig.name}_bone00_1110`;
+  const b1 = new Object3D();
+  b1.name = `${rig.name}_bone01_1111`;
+  b1.position.set(0, 5, 0);
+  b0.add(b1);
+  const j0 = new Bone();
+  const j1 = new Bone();
+  b0.add(j0);
+  b1.add(j1);
+  const g = new BufferGeometry();
+  g.setAttribute("position", new BufferAttribute(
+    new Float32Array([0, 0, 0, 0, 0, 0]), 3));
+  g.setAttribute("skinIndex", new BufferAttribute(
+    new Uint16Array([0, 0, 0, 0, 1, 0, 0, 0]), 4));
+  g.setAttribute("skinWeight", new BufferAttribute(
+    new Float32Array([1, 0, 0, 0, 1, 0, 0, 0]), 4));
+  const waist = new SkinnedMesh(g, new MeshBasicMaterial());
+  waist.name = `${rig.name}_part0_0eb6`;
+  rig.add(b0);
+  rig.add(waist);
+  waist.bind(new Skeleton([j0, j1], [new Matrix4(), new Matrix4()]),
+             new Matrix4());
+  root.add(rig);
+
+  ResetGameGlobals();
+  SetGameTables(CHARS as never);
+  const chars = new CharacterLayer();
+  const stage = new Scope("stage");
+  chars.build(root, stage, CHARS as never);
+
+  // The figure, as `ResultCardAllocFigure` leaves it in the pool.
+  const a = makeActor(FIGURE_AT, SpawnClass.ResultCard, CT, "result figure 0");
+  if (a.cls === SpawnClass.ResultCard) {
+    a.card.routine = ResultCardRoutine.FigureUpdate;
+  }
+  a.motion = 380;
+  G.g_object_list.push(a);
+  chars.syncSpawns([], []);
+
+  const clone = root.children.find((o) => o !== rig
+                                   && o.name.startsWith(rig.name));
+  const skins: InstanceType<typeof SkinnedMesh>[] = [];
+  clone?.traverse((o) => {
+    if ((o as { isSkinnedMesh?: boolean }).isSkinnedMesh) {
+      skins.push(o as InstanceType<typeof SkinnedMesh>);
+    }
+  });
+  const under = (o: InstanceType<typeof Object3D>,
+                 top: InstanceType<typeof Object3D>) => {
+    for (let p: InstanceType<typeof Object3D> | null = o; p; p = p.parent) {
+      if (p === top) return true;
+    }
+    return false;
+  };
+  check("the figure gets a clone of its type's template, waist and all",
+        clone !== undefined && skins.length === 1,
+        `${clone?.name} skins ${skins.length}`);
+  check("...whose waist is bound to the clone's own joints, not the template's",
+        skins.length === 1 && clone !== undefined
+        && skins[0].skeleton.bones.every((b) => under(b, clone)),
+        skins[0]?.skeleton.bones.map((b) => under(b, rig) ? "template" : "?")
+          .join(","));
+
+  // The symptom: the figure stands somewhere the template does not, and its
+  // waist has to be there with it.
+  if (clone && skins.length === 1) {
+    clone.position.set(-235, 4, 80);
+    clone.rotation.set(0, 1.3, 0);
+    root.updateMatrixWorld(true);
+    const v = skins[0].applyBoneTransform(1, new Vector3(0, 0, 0));
+    skins[0].localToWorld(v);
+    const joint = skins[0].skeleton.bones[1].getWorldPosition(new Vector3());
+    const bone1 = clone.getObjectByName(b1.name);
+    const want = bone1?.getWorldPosition(new Vector3()) ?? new Vector3(NaN);
+    check("...so a waist vertex stands on the figure's bone, where it stands",
+          v.distanceTo(joint) < 1e-4 && v.distanceTo(want) < 1e-4
+          && want.distanceTo(new Vector3(0, 5, 0)) > 100,
+          `${v.toArray()} vs ${want.toArray()}`);
+  }
+  stage.dispose();
+}
+
+/**
  * The draw gates: the skeleton's, and each vertex-blended part's.
  *
  * `SkeletonEmitNode` (`FUN_004114C0`) draws no node while `model+0x64` bit 0
@@ -3873,6 +4016,83 @@ console.log("\nthe shot: a class-0x24 set-piece is not in the shot test");
         + "its class could keep it out",
         a.visible && !a.dead && (a.boneRadius["1"] ?? 0) > 0,
         `visible ${a.visible} dead ${a.dead} radius ${a.boneRadius["1"]}`);
+  check("a shot straight through its bone sphere does not find it",
+        chars.pickShot(towards) === null, JSON.stringify(chars.pickShot(towards)));
+
+  stage.dispose();
+  G.g_object_list.length = 0;
+}
+
+/**
+ * **Nor is a scripted humanoid.** Class 0x25 calls `RegisterForShotTest`
+ * (`FUN_00405160`) nowhere either -- not through `ActorRegisterCameraPoint`
+ * (`FUN_00409B70`), not through anything its routines reach -- so the engine's
+ * shot test never sees one. 133 of its 137 spawns carry bit `0x8000` in their
+ * record, which the pick already honours; this is one of the four that do
+ * not, stage 2's jetty zombie `0xAA40` (character type 15, `znebi2`), which
+ * the render pick found through the corner of a building and `ResolveHit`
+ * killed for ninety points.
+ */
+console.log("\nthe shot: a class-0x25 humanoid is not in the shot test");
+{
+  const { CharacterLayer } = await import("../src/render/characters");
+  const { G, ResetGameGlobals } = await import("../src/game/globals");
+  const { SetGameTables } = await import("../src/game/tables");
+  const { ActorSpawn } = await import("../src/game/spawn");
+  const { SpawnClass } = await import("../src/game/spawn_class");
+  const { Scope } = await import("../src/core/scope");
+  const { Object3D } = await import("three");
+  await import("../src/game/classes");
+
+  const ZOMBIE_TYPE = {
+    type: 15, name: "znebi2", file: "znebi2.bin", bone_count: 2,
+    actor_radius: 10,
+    bones: [{ bone: 1, part: "bone01_1c07", slot: 0x1c07, offset: [0, 0, 0],
+              parent: null, steps: [[0, 0, 10]], hit_slot: 0x1c07,
+              hit_radius: 2.3, hit_centre: [0, 0, 0] }],
+    reactions: {}, attacks: {},
+    motions: { "1024": { bank: "h", frames: 1, fps: 30,
+                         root: [0, 0, 0], rot: [0, 0, 0] } },
+  };
+  const AT = 43584;
+  const PLACE = { at: AT, class: 0x25, char_type: 15, motion: 1024, hp: 0,
+                  yaw: 0 };
+  const CHARS = { types: { "15": ZOMBIE_TYPE }, placements: [PLACE] };
+
+  const root = new Object3D();
+  const rig = new Object3D();
+  rig.name = "chr_znebi2_spawn000";
+  rig.userData = { hod2_kind: "rig", hod2_rig: "chr_znebi2",
+                   hod2_spawn_at: AT };
+  const bone = new Object3D();
+  bone.name = "chr_znebi2_spawn000_bone01_1c07";
+  rig.add(bone);
+  root.add(rig);
+
+  ResetGameGlobals();
+  // Its program as the bundle carries it, cut to the hold it is in while the
+  // gun is live: held until camera path 79 reaches frame 100.
+  SetGameTables(CHARS as never, undefined, undefined, { [String(AT)]: {
+    charType: 15, removePath: 100, removeFrame: 65, flags2: 1, motion: 1024,
+    phase: 0, cmds: [{ op: 1, mode: -1, a: 0, b: 0 },
+                     { op: 0, mode: 1, a: 79, b: 100 }],
+  } } as never);
+  const chars = new CharacterLayer();
+  const stage = new Scope("stage");
+  chars.build(root, stage, CHARS as never);
+  const a = ActorSpawn(AT, SpawnClass.ScriptedHumanoid, 15, "znebi2",
+                       { visible: true });
+  a.pos.x = 0; a.pos.y = 0; a.pos.z = -30;
+  chars.syncSpawns([{ at: AT }], [a]);
+  chars.update({} as never);
+  const towards = { origin: { x: 0, y: 0, z: 0 },
+                    dir: { x: 0, y: 0, z: -1 } };
+  check("the zombie is drawn and alive, its record leaves bit 0x8000 clear "
+        + "and its bone sphere is armed, so only its class could keep it out",
+        a.visible && !a.dead && (a.flags & 0x8000) === 0
+        && (a.boneRadius["1"] ?? 0) > 0,
+        `visible ${a.visible} dead ${a.dead} flags 0x${a.flags.toString(16)} `
+        + `radius ${a.boneRadius["1"]}`);
   check("a shot straight through its bone sphere does not find it",
         chars.pickShot(towards) === null, JSON.stringify(chars.pickShot(towards)));
 

@@ -9,9 +9,23 @@
  *     HOTD2_APPLY=1 ./ghidra/run.sh apply-annotations
  *
  * Idempotent by construction: a symbol is only renamed when its current name
- * is still a Ghidra default (FUN_/SUB_/LAB_/DAT_/UNK_). A name a human chose
+ * is still one Ghidra generated (FUN_/DAT_/PTR_/s_/switchdataD_/..., the list
+ * ExportAnnotations refuses to export -- see isDefaultName). A name a human chose
  * in the GUI is never clobbered, so this can be re-run at any time, and it can
- * be run before or after ApplyKnownTables without ordering trouble.
+ * be run before or after ApplyKnownTables without ordering trouble. A curated
+ * name that differs from the row is reported as `renamed`, and left:
+ * export-annotations is what settles it, and it takes the database's.
+ *
+ * **Comments are the file's.** A row's comment is written whenever it differs
+ * from the database's -- not only when the symbol is first named, which is
+ * what this used to do, so a comment improved with tools/annotate.py never
+ * reached the database, and export-annotations, which then let the database
+ * win, put the stale copy back over the curated one (19 rows at once; L90). An
+ * empty file comment never clears the database's (export-annotations brings
+ * that one into the file), and a row whose name disagrees keeps the database's
+ * comment too, because the two are not describing the same reading until
+ * someone settles the name. Every comment replaced is logged, old text and
+ * all, in $HOTD2_OUT/apply_annotations.txt.
  *
  * Functions that do not exist yet are created, because most of the interesting
  * ones are only reachable through a dispatch table Ghidra did not recognise.
@@ -54,6 +68,7 @@ import ghidra.program.model.data.DataType;
 import ghidra.program.model.data.FunctionDefinitionDataType;
 import ghidra.program.model.data.ParameterDefinition;
 import ghidra.program.model.lang.Register;
+import ghidra.program.model.listing.CommentType;
 import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.Listing;
 import ghidra.program.model.listing.Parameter;
@@ -69,8 +84,9 @@ import ghidra.program.model.symbol.SymbolTable;
 public class ApplyAnnotations extends GhidraScript {
 
     private boolean apply;
-    private int fnNamed, fnCreated, fnSkipped, fnFailed;
-    private int gNamed, gSkipped, gFailed;
+    private int fnNamed, fnCreated, fnSame, fnRenamed, fnComments, fnFailed;
+    private int gNamed, gSame, gRenamed, gComments, gFailed;
+    private int nameNotes, commentNotes;
     private int pApplied, pSame, pKept, pMissing, pFailed, pFlags;
     private final StringBuilder log = new StringBuilder();
     /** Per-row detail, printed after the summaries so `run.sh`'s head keeps them. */
@@ -89,13 +105,18 @@ public class ApplyAnnotations extends GhidraScript {
         applyGlobals(new File(dir, "globals.tsv"));
         applyPrototypes(new File(dir, "prototypes.tsv"));
 
+        // One line per table, in a fixed shape: verify_ghidra_db.py parses them.
+        // named/created/comments are what apply would write; renamed is a
+        // curated name the row disagrees with, which apply never touches.
         String summary = String.format(
-                "[hotd2] apply=%b  functions: named=%d created=%d skipped=%d failed=%d"
-                + "  globals: named=%d skipped=%d failed=%d",
-                apply, fnNamed, fnCreated, fnSkipped, fnFailed,
-                gNamed, gSkipped, gFailed);
+                "[hotd2] functions: apply=%b named=%d created=%d same=%d renamed=%d"
+                + " comments=%d failed=%d",
+                apply, fnNamed, fnCreated, fnSame, fnRenamed, fnComments, fnFailed);
+        String gsummary = String.format(
+                "[hotd2] globals: apply=%b named=%d same=%d renamed=%d comments=%d failed=%d",
+                apply, gNamed, gSame, gRenamed, gComments, gFailed);
         println(summary);
-        // Its own line, in a fixed shape: verify_ghidra_db.py parses it.
+        println(gsummary);
         println(String.format(
                 "[hotd2] prototypes: apply=%b changed=%d same=%d kept=%d missing=%d"
                 + " failed=%d flags=%d",
@@ -106,6 +127,7 @@ public class ApplyAnnotations extends GhidraScript {
         if (out != null) {
             try (PrintWriter w = new PrintWriter(new File(out, "apply_annotations.txt"))) {
                 w.println(summary);
+                w.println(gsummary);
                 w.print(log);
             }
         }
@@ -152,18 +174,37 @@ public class ApplyAnnotations extends GhidraScript {
                     fnCreated++;
                 }
                 if (fn == null) continue;
-                if (!isDefaultName(fn.getName())) { fnSkipped++; continue; }
-                if (!apply) { fnNamed++; continue; }
-                try {
-                    fn.setName(c[1], SourceType.USER_DEFINED);
-                    if (c.length > 2 && !c[2].isEmpty()) fn.setComment(c[2]);
+                // The row's own name first: `s_mot_path_format` is curated
+                // and also starts like one of Ghidra's string labels.
+                if (fn.getName().equals(c[1])) {
+                    fnSame++;
+                } else if (isDefaultName(fn.getName())) {
+                    if (apply) {
+                        try {
+                            fn.setName(c[1], SourceType.USER_DEFINED);
+                            log.append("fn  ").append(c[0]).append(' ').append(c[1]).append('\n');
+                        } catch (Exception ex) {
+                            log.append("FAILED name ").append(c[0]).append(": ")
+                               .append(ex.getMessage()).append('\n');
+                            fnFailed++;
+                            continue;
+                        }
+                    }
                     fnNamed++;
-                    log.append("fn  ").append(c[0]).append(' ').append(c[1]).append('\n');
-                } catch (Exception ex) {
-                    log.append("FAILED name ").append(c[0]).append(": ")
-                       .append(ex.getMessage()).append('\n');
-                    fnFailed++;
+                } else {
+                    fnRenamed++;
+                    nameNote("function", c[0], fn.getName(), c[1]);
+                    continue;                  // and its comment with it
                 }
+                String want = c.length > 2 ? c[2] : "";
+                String have = flat(fn.getComment());
+                if (want.isEmpty() || want.equals(have)) continue;
+                fnComments++;
+                commentNote("function", c[0], c[1], have, want);
+                if (!apply) continue;
+                fn.setComment(want);
+                log.append("comment ").append(c[0]).append(' ').append(c[1])
+                   .append(" was: ").append(have).append('\n');
             }
         }
     }
@@ -171,6 +212,7 @@ public class ApplyAnnotations extends GhidraScript {
     private void applyGlobals(File f) throws Exception {
         if (!f.isFile()) { println("[hotd2] missing " + f); return; }
         SymbolTable st = currentProgram.getSymbolTable();
+        Listing lst = currentProgram.getListing();
         try (BufferedReader r = new BufferedReader(new FileReader(f))) {
             String line;
             while ((line = r.readLine()) != null) {
@@ -178,22 +220,69 @@ public class ApplyAnnotations extends GhidraScript {
                 if (c == null) continue;
                 Address a = toAddr(Long.parseLong(c[0], 16));
                 Symbol s = st.getPrimarySymbol(a);
-                if (s != null && !isDefaultName(s.getName())) { gSkipped++; continue; }
-                if (!apply) { gNamed++; continue; }
-                try {
-                    createLabel(a, c[1], true, SourceType.USER_DEFINED);
-                    if (c.length > 2 && !c[2].isEmpty()) {
-                        setEOLComment(a, c[2]);
+                if (s != null && s.getName().equals(c[1])) {
+                    gSame++;
+                } else if (s == null || isDefaultName(s.getName())) {
+                    // Also when the row's name is there but not primary, as
+                    // `g_class26_states` sat behind `switchdataD_0048e32c`:
+                    // createLabel makes it the one the listing shows.
+                    if (apply) {
+                        try {
+                            createLabel(a, c[1], true, SourceType.USER_DEFINED);
+                            log.append("gbl ").append(c[0]).append(' ').append(c[1]).append('\n');
+                        } catch (Exception ex) {
+                            log.append("FAILED label ").append(c[0]).append(": ")
+                               .append(ex.getMessage()).append('\n');
+                            gFailed++;
+                            continue;
+                        }
                     }
                     gNamed++;
-                    log.append("gbl ").append(c[0]).append(' ').append(c[1]).append('\n');
-                } catch (Exception ex) {
-                    log.append("FAILED label ").append(c[0]).append(": ")
-                       .append(ex.getMessage()).append('\n');
-                    gFailed++;
+                } else if (hasSymbol(st, a, c[1])) {
+                    // One of two curated labels on the address; the file's
+                    // choice of alias is kept by ExportAnnotations too.
+                    gSame++;
+                } else {
+                    gRenamed++;
+                    nameNote("global", c[0], s.getName(), c[1]);
+                    continue;
                 }
+                String want = c.length > 2 ? c[2] : "";
+                String have = flat(lst.getComment(CommentType.EOL, a));
+                if (want.isEmpty() || want.equals(have)) continue;
+                gComments++;
+                commentNote("global", c[0], c[1], have, want);
+                if (!apply) continue;
+                setEOLComment(a, want);
+                log.append("comment ").append(c[0]).append(' ').append(c[1])
+                   .append(" was: ").append(have).append('\n');
             }
         }
+    }
+
+    private static boolean hasSymbol(SymbolTable st, Address a, String name) {
+        for (Symbol s : st.getSymbols(a)) if (s.getName().equals(name)) return true;
+        return false;
+    }
+
+    /** A comment as the TSV holds it: one line, no tabs, trimmed. */
+    static String flat(String s) {
+        return s == null ? ""
+            : s.replace('\r', ' ').replace('\n', ' ').replace('\t', ' ').trim();
+    }
+
+    private void nameNote(String what, String addr, String have, String want) {
+        if (nameNotes++ >= 40) return;
+        notes.add("[hotd2] name " + addr + " " + what + ": the database has `" + have
+            + "`, the file `" + want + "` -- not applied; export-annotations takes the"
+            + " database's, so settle which is right before exporting");
+    }
+
+    private void commentNote(String what, String addr, String name, String have, String want) {
+        if (commentNotes++ >= 40) return;
+        notes.add("[hotd2] comment " + addr + " " + what + " " + name + ": the database's "
+            + (have.isEmpty() ? "is empty" : "is " + have.length() + " chars")
+            + ", the file's " + want.length() + (apply ? " -- written" : ""));
     }
 
     private static final Pattern CALLING_CONVENTION =
@@ -364,11 +453,30 @@ public class ApplyAnnotations extends GhidraScript {
         }
     }
 
-    /** A name Ghidra generated, i.e. one this script is allowed to replace. */
+    /**
+     * A name Ghidra generated, i.e. one this script is allowed to replace.
+     *
+     * The same prefixes ExportAnnotations.isAuto refuses to export, matched
+     * the same way (case-insensitively). This list used to stop at FUN_/DAT_
+     * and friends, so a global whose address carried an analyser label --
+     * `PTR_DAT_005696e0`, `s_Very_Easy_00569758` -- was counted as "named by
+     * someone" and never got its curated name: five rows of globals.tsv, on
+     * every rebuild. Keep the two lists together.
+     */
+    private static final String[] AUTO_PREFIX = {
+        "FUN_", "SUB_", "LAB_", "DAT_", "UNK_", "EXT_", "_DAT_", "__DAT_",
+        "Catch@", "Unwind@", "switchd", "switchdata", "cased", "casedata",
+        "jumptable", "PTR_", "s_", "u_", "ADDR_",
+        "thunk_", "Rsrc_", "AddressOfEntryPoint", "entry",
+        "RTTI_", "vftable", "vbtable",
+    };
+    private static final String[] AUTO_EXACT = { "default", "vftable", "switch", "case" };
+
     private static boolean isDefaultName(String n) {
-        return n.startsWith("FUN_") || n.startsWith("SUB_") || n.startsWith("LAB_")
-            || n.startsWith("DAT_") || n.startsWith("UNK_") || n.startsWith("EXT_")
-            || n.startsWith("_DAT_") || n.startsWith("__DAT_");
+        String l = n.toLowerCase();
+        for (String p : AUTO_PREFIX) if (l.startsWith(p.toLowerCase())) return true;
+        for (String e : AUTO_EXACT) if (l.equals(e)) return true;
+        return false;
     }
 
     /** Trim comments and blanks; require at least address and name. */

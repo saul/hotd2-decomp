@@ -49,6 +49,8 @@ export interface PlayerView {
   readonly paused: boolean;
   /** See {@link UiProjection.started}. */
   readonly started: boolean;
+  /** See {@link UiProjection.homeScreenHint}. */
+  readonly homeScreenHint: boolean;
   readonly lightMode: string;
   readonly fogMode: string;
   readonly filterMode: string;
@@ -119,6 +121,7 @@ export function buildProjection(v: PlayerView,
     bundleStale: v.bundleStale,
     paused: v.paused,
     started: v.started,
+    homeScreenHint: v.homeScreenHint,
     // `HudDrawCrosshair`'s decision, off `G`. Off before the first player
     // turn, which is also what the engine's BSS says.
     crosshair: crosshairProjection(v.localPlayer),

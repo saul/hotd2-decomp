@@ -22,19 +22,19 @@ is in `tools/verify_all.py`, beside the command that runs it.
 | `game/` | 107707 | 350 | engine |
 | `hod2lib/` | 19571 | 35 | engine |
 | `render/` | 15195 | 55 | render |
-| `app/` | 12391 | 43 | app |
+| `app/` | 12445 | 43 | app |
 | `script/` | 4471 | 25 | engine |
-| `ui/` | 3694 | 27 | ui |
+| `ui/` | 3719 | 27 | ui |
 | `core/` | 3523 | 13 | engine |
 | `bundle/` | 2862 | 11 | engine |
 | `audio/` | 973 | 2 | render |
 | `hud/` | 526 | 1 | ui |
-| **total** | **170913** | **562** | |
+| **total** | **170992** | **562** | |
 
 The largest files, which is where the pressure to split next is:
 
 * `game/globals.ts` — 3108
-* `app/main.ts` — 3073
+* `app/main.ts` — 3075
 * `game/actor.ts` — 2724
 * `hod2lib/bundle.ts` — 2458
 * `hod2lib/exetab.ts` — 2347
@@ -59,7 +59,7 @@ Both markers are counted in **every** `.ts`/`.tsx` file under `web/src/`, one pe
 | ui | `hud/`, `ui/` | 0 | 0 |
 | app | `app/` | 1 | 0 |
 
-The two declared seams between the UI and the player: **`PlayerCommands` has 54 members against `PlayerView`'s 40** — how much of the player a click can move, against how much of it the page can see. Neither can grow without a line appearing in the open.
+The two declared seams between the UI and the player: **`PlayerCommands` has 54 members against `PlayerView`'s 41** — how much of the player a click can move, against how much of it the page can see. Neither can grow without a line appearing in the open.
 
 ## The decomp
 

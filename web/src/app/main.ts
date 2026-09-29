@@ -103,7 +103,7 @@ import type { Snapshot } from "../core/snapshot";
 import { TICK } from "./loop";
 import { DRIVEN_TICK, Pacer, STOPPED_TICK, type PacerHost } from "./pacer";
 import { SnapshotRing } from "./ring";
-import { TiltReload, touchFirst, unlockDevice } from "./device";
+import { TiltReload, homeScreenHint, touchFirst, unlockDevice } from "./device";
 import {
   CharacterBindSystem, GameSystem, GunLightBuildSystem,
   ScriptSystem, drawSystem,
@@ -452,6 +452,8 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
    * `UiProjection.started`: it is the gesture, and it is taken once.
    */
   started = false;
+  /** See {@link UiProjection.homeScreenHint}. Whether the page was opened from the Home Screen does not change while it is open. */
+  readonly homeScreenHint = homeScreenHint();
   /**
    * Whether the viewer has ever said sound on or sound off, as far as this
    * browser remembers.

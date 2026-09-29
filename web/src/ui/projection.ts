@@ -440,6 +440,12 @@ export interface UiProjection {
    */
   started: boolean;
   /**
+   * An iPhone or an iPad, in the browser: the start screen says how to have
+   * the game full screen, which on those is the Home Screen's and never the
+   * browser's (`app/device.ts`, `appleTouch`).
+   */
+  homeScreenHint: boolean;
+  /**
    * The game drew player 1's crosshair this frame.
    *
    * `HudDrawCrosshair` (0x004169C0) decides it, in `game/`, and it is called

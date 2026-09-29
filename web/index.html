@@ -9,9 +9,22 @@
     <meta name="viewport"
           content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
     <meta name="theme-color" content="#000000" />
+    <!-- The full screen on an iPhone or an iPad is the Home Screen's: added
+         there, the page opens with no browser around it. It never asks for
+         the browser's own fullscreen on those (`app/device.ts`,
+         `appleTouch`), and the start screen says how. The manifest is the
+         same for Android, whose Chrome offers to install it.
+
+         The icons are David's face, out of the install's own `Hod2.exe`: game
+         data, so they are made by the dev server and by `tools/site.ts` and
+         never kept in the repository (`tools/lib/app_icon.ts`). -->
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="HOTD2" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" href="./icons/favicon.png" type="image/png" />
+    <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
     <title>HOTD2 stage player</title>
     <link rel="stylesheet" href="/src/style.css" />
   </head>

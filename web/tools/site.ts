@@ -15,6 +15,9 @@
  * The layout is the one the page already asks for, relative to itself:
  *
  *     index.html, assets/      `vite build`, with `base: "./"`
+ *     manifest.webmanifest     the same, from `public/`
+ *     icons/                   the favicon and Home Screen icons, David's face
+ *                              out of the install's exe (`lib/app_icon.ts`)
  *     bundle/                  the export, as `serverSource` fetches it
  *     bgm/ se/ voice/          the install's `sound/`, **lowercased**
  *
@@ -50,6 +53,7 @@ import { gzipSync } from "node:zlib";
 import type { Manifest } from "../src/bundle/manifest";
 import { manifestRefusal, stageBuilderStale } from "../src/bundle/load";
 import { BUNDLE_ROOT, repoRoot } from "./lib/bundle_root";
+import { APP_ICONS, appIcon } from "./lib/app_icon";
 
 const USAGE = `usage: npm run site -- [options]
 
@@ -233,6 +237,17 @@ function stageBundle(a: Args, restage: boolean): void {
     + (pruned ? `, ${pruned} removed` : "") + (a.gzip ? ", gzipped" : ""));
 }
 
+/** The page's icons, made from the install's exe, or a reticle without one. */
+function stageIcons(a: Args, m: Manifest): void {
+  const dst = join(a.out, "icons");
+  mkdirSync(dst, { recursive: true });
+  const gameDir = a.gameDir || m.game_dir || null;
+  const from = gameDir && existsSync(join(gameDir, "Hod2.exe"))
+    ? `from ${join(gameDir, "Hod2.exe")}` : "a reticle: no Hod2.exe to take them from";
+  for (const name of Object.keys(APP_ICONS)) writeFileSync(join(dst, name), appIcon(name, gameDir)!);
+  console.log(`  icons: ${Object.keys(APP_ICONS).length}, ${from}`);
+}
+
 /** `sound/SE` -> `se`, and the same for every segment below it. */
 function stageSounds(a: Args, m: Manifest): void {
   const gameDir = a.gameDir || m.game_dir;
@@ -292,6 +307,10 @@ function sync(a: Args, gzip: boolean): void {
                    "--content-type", "audio/wav"]),
     ["s3", "sync", join(a.out, "assets"), `${dst}/assets`, "--delete",
      "--cache-control", "public, max-age=31536000, immutable"],
+    ["s3", "sync", join(a.out, "icons"), `${dst}/icons`, "--delete",
+     "--cache-control", "no-cache", "--content-type", "image/png"],
+    ["s3", "cp", join(a.out, "manifest.webmanifest"), `${dst}/manifest.webmanifest`,
+     "--cache-control", "no-cache", "--content-type", "application/manifest+json"],
     ["s3", "cp", join(a.out, "index.html"), `${dst}/index.html`,
      "--cache-control", "no-cache", "--content-type", "text/html; charset=utf-8"],
   ];
@@ -314,6 +333,7 @@ const restage = before !== null && before.gzip !== a.gzip;
 
 console.log(`site: staging into ${a.out}`);
 buildPage(a.out);
+stageIcons(a, m);
 stageBundle(a, restage);
 if (a.sound) {
   stageSounds(a, m);

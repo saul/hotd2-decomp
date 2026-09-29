@@ -3,6 +3,7 @@ import { execSync } from "node:child_process";
 import { configFromEnv } from "../matchmaker/rooms";
 import { handle as handleMatchmaker, nodeMatchmaker } from "../matchmaker/node";
 import { startTurn } from "../matchmaker/turn";
+import { APP_ICONS, appIcon } from "./tools/lib/app_icon";
 import { randomBytes } from "node:crypto";
 import {
   appendFileSync,
@@ -58,6 +59,19 @@ function soundRoot(kind: "bgm" | "SE" | "voice"): string | null {
   } catch { /* no bundle, or no readable install */ }
   return null;
 }
+
+/** The install the bundle was exported from, as its manifest names it. */
+function installDir(): string | null {
+  try {
+    const m = JSON.parse(readFileSync(join(BUNDLE_DIR, "manifest.json"), "utf8"));
+    return typeof m.game_dir === "string" ? m.game_dir : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Icons made, by name and install: reading the exe for every request is waste. */
+const iconCache = new Map<string, Buffer>();
 
 /**
  * The tables spell `.WAV` and carry backslashed subdirectories
@@ -162,6 +176,22 @@ function serveBundle() {
           return createReadStream(file).pipe(res);
         }
 
+        // The favicon and the Home Screen icons: David's face, out of the
+        // install the manifest names -- game data, so made here and never
+        // kept in the repository (`tools/lib/app_icon.ts`), and a reticle
+        // where there is no install.
+        const icon = /^\/icons\/([a-z0-9-]+\.png)$/.exec(url);
+        if (icon && icon[1] in APP_ICONS) {
+          const dir = installDir();
+          const key = `${icon[1]}|${dir}`;
+          let png = iconCache.get(key);
+          if (!png) iconCache.set(key, (png = appIcon(icon[1], dir)!));
+          res.setHeader("Content-Type", "image/png");
+          res.setHeader("Content-Length", String(png.length));
+          res.setHeader("Cache-Control", "no-cache");
+          return res.end(png);
+        }
+
         if (!url.startsWith("/bundle/")) return next();
         // normalize() collapses any ../ before it can escape the directory.
         const rel = normalize(decodeURIComponent(url.slice("/bundle/".length)));
@@ -171,10 +201,12 @@ function serveBundle() {
         }
         const file = join(BUNDLE_DIR, rel);
         let size: number;
+        let mtime: Date;
         try {
           const st = statSync(file);
           if (!st.isFile()) throw new Error("not a file");
           size = st.size;
+          mtime = st.mtime;
         } catch {
           res.statusCode = 404;
           return res.end(
@@ -184,9 +216,22 @@ function serveBundle() {
             '\nOr open the player and build one from your install there.\n',
           );
         }
+        // `no-cache` is "ask before using it", and asking needs something to
+        // ask with. Without a validator every load was a full download --
+        // fifty to ninety megabytes a stage to a phone that had it already.
+        // A re-export rewrites the file, which changes both.
+        const etag = `W/"${size}-${Math.floor(mtime.getTime())}"`;
+        res.setHeader("ETag", etag);
+        res.setHeader("Last-Modified", mtime.toUTCString());
+        res.setHeader("Cache-Control", "no-cache");
+        const since = Date.parse(String(req.headers["if-modified-since"] ?? ""));
+        if (req.headers["if-none-match"] === etag
+            || (!req.headers["if-none-match"] && since >= Math.floor(mtime.getTime() / 1000) * 1000)) {
+          res.statusCode = 304;
+          return res.end();
+        }
         res.setHeader("Content-Type", MIME[extname(file)] ?? "application/octet-stream");
         res.setHeader("Content-Length", String(size));
-        res.setHeader("Cache-Control", "no-cache");
         createReadStream(file).pipe(res);
       });
     },

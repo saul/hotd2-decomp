@@ -40,20 +40,27 @@
  * The draw is `render/slotmodels.ts`': `Translate(obj+0x40); RotX(+0x64);
  * RotZ(+0x6C); RotY(+0x68)`, the scale only when it is not 1.0, and
  * `AssetDrawSlot(__ftol(sub+0x14))` — class 0x13's matrix and a cursor for a
- * slot. `MatrixStore(obj+0x150)` follows it; that matrix and `obj+0x14C` are
- * what `ShotTestMesh` (`FUN_00404A00`) tests, because the record's flags word
- * is `0x10` — {@link ActorFlag.ShotTestMesh} — and the port has no mesh shot
- * test for an actor: `ProcessPlayerShotsTestList` in `combat/shot_test.ts`
- * passes a mesh entry by, and says so. So the panel is in the list and
- * cannot be hit. `0x40` is not in the word, so neither collision pass in
- * `coli.ts` takes the blob either, in the engine or here.
+ * slot. `MatrixStore(obj+0x150)` follows it, and that matrix is the update's
+ * to keep, not the renderer's: with `obj+0x14C` it is what `ShotTestMesh`
+ * (`FUN_00404A00`) tests, because the record's flags word is `0x10` —
+ * {@link ActorFlag.ShotTestMesh}. So **a shot at the boarded doorway stops on
+ * the boards** (`coli1.bin:5144`, one quad, surface 56) and not on the captor
+ * or the civilian behind them, until the frame the strip starts and `0x8000`
+ * takes the door out of the list. `0x40` is not in the word, so neither
+ * collision pass in `coli.ts` takes the blob, in the engine or here: the
+ * boards stop a bullet and nothing else.
  */
 import { ActorFlag, type Actor } from "../actor";
 import { PropBehaviour } from "../class13";
 import { NoOpStub } from "../class45";
+import { ColiStoreObjectMatrix } from "../coli";
 import { RegisterForShotTest } from "../combat/shot_test";
 import { ActorDespawn } from "../despawn";
 import { G } from "../globals";
+import {
+  MatrixLoadIdentity, MatrixRotateX, MatrixRotateY, MatrixRotateZ,
+  MatrixScale, MatrixTranslate, type Mat,
+} from "../matrix";
 import {
   registerClass, type ActorDebug, type ClassFrame, type ClassHandler,
 } from "../registry";
@@ -106,6 +113,9 @@ export function ScriptedPropInit12(obj: Actor): void {
   obj.motion = -1;
 }
 
+/** The stack top the update builds `obj+0x150` on. */
+const _top: Mat = new Array<number>(16).fill(0);
+
 /**
  * `ScriptedPropUpdate12` — `FUN_0043FA60`.
  *
@@ -142,8 +152,13 @@ export function ScriptedPropInit12(obj: Actor): void {
  * descriptor, whose steps are 1.0 and 0.5 and whose cursors are whole or
  * half slots, all exact in a float.
  *
- * The draw that follows the behaviour is `render/slotmodels.ts`'; the
- * registration after it is here.
+ * The draw that follows the behaviour is `render/slotmodels.ts`'; the matrix
+ * it stores and the registration after it are here. The matrix is built on
+ * the identity where the engine's is built on the view -- see
+ * `RegisterForShotTest` in `combat/shot_test.ts` for why that is the matrix
+ * `ShotTestMesh` reads -- and only the two routines behind `obj+0x34` bit
+ * `0x10` read it. Every shipped descriptor has scale 1.0, so the scale arm
+ * never runs, and the trace's inverse (a transpose, in `coli.ts`) is exact.
  */
 export function ScriptedPropUpdate12(obj: Actor, f: ClassFrame): void {
   const sub = Tail(obj);
@@ -175,8 +190,20 @@ export function ScriptedPropUpdate12(obj: Actor, f: ClassFrame): void {
   // descriptor installs entry 0, `NoOpStub`, and the exporter carries none
   // that does not (`hod2lib/characters.ts`), so this is the bare `RET`.
   PROP12_BEHAVIOURS[sub.behaviour]?.(obj);
+  // `0x0043FAF2`..`0x0043FB70`: Push; Translate(obj+0x40); RotX(obj+0x64);
+  // RotZ(obj+0x6C); RotY(obj+0x68); the scale when `sub+0x10 != 1.0`
+  // (`FCOMP [0x004C4380]; TEST AH, 0x40`); AssetDrawSlot; MatrixStore
+  // (obj+0x150); Pop.
+  MatrixLoadIdentity(_top);
+  MatrixTranslate(_top, obj.pos.x, obj.pos.y, obj.pos.z);
+  MatrixRotateX(_top, obj.pitch);
+  MatrixRotateZ(_top, obj.roll);
+  MatrixRotateY(_top, obj.yaw);
+  if (sub.scale !== 1.0) MatrixScale(_top, sub.scale, sub.scale, sub.scale);
+  ColiStoreObjectMatrix(obj, _top);
   RegisterForShotTest(obj, f.host);
 }
+
 
 /**
  * The `g_prop_behaviours` entries a class-0x12 object can have installed —
@@ -206,10 +233,11 @@ function ScriptedProp12Debug(obj: Actor): ActorDebug {
 export const ScriptedProp12Handler: ClassHandler = {
   init: ScriptedPropInit12,
   update: ScriptedPropUpdate12,
-  // It calls `RegisterForShotTest` itself, at `0x0043FB76`; see the module
-  // note for why nothing then picks it.
+  // It calls `RegisterForShotTest` itself, at `0x0043FB76`, and the pick is
+  // `combat/shot_test.ts`' mesh arm.
   registersForShotTest: true,
-  // Nothing in the update reads the hit bit.
+  // Nothing in the update reads the hit bit: a shot on the boards is
+  // `MarkActorShot`'s mark and world impact, and nothing else.
   ownsShotResult: true,
   debug: ScriptedProp12Debug,
 };

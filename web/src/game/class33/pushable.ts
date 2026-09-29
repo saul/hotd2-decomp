@@ -36,9 +36,9 @@
  *
  * * **The mesh shot test.** `tail+0x04` other than `-1` ORs `obj+0x34` bits
  *   `0x40` and `0x10` and puts a mesh id on `obj+0x14C`; bit `0x10` is what
- *   sends the shot to `ShotTestMesh` rather than `ShotTestSphere`, and the
- *   port has neither — see `game/class41/shot_test.ts`. Both shipped spawns
- *   carry `-1`, so neither reaches that arm.
+ *   sends the shot to `ShotTestMesh` rather than `ShotTestSphere`
+ *   (`combat/shot_test.ts`), and this class does not register. Both shipped
+ *   spawns carry `-1`, and `0x8000` besides, so neither reaches that arm.
  * * **`ActorClaimHitSlot` (`FUN_00409270`)**, which every arm of the dispatch
  *   ends with. `g_hit_slots` is not ported at all; `game/globals.ts` records
  *   the whole 14-slot table as absent.

@@ -80,11 +80,14 @@
  * the port's `shutter` — `script/state/shutter.ts` is the HUD letterbox,
  * `g_bHudShutterState`, and has nothing to do with any door.
  *
- * `[port-only]` **No shot test.** `PropBuildRisingDoor` sets `obj+0x34 |= 0x51`
- * and bit `0x10` sends `RegisterForShotTest` (`FUN_00405160`) to `ShotTestMesh`
- * rather than to the sphere, which is the path `class41/shot_test.ts` says the
- * port has not got. The routine itself never reads a hit bit, so nothing
- * happens to this object when it is shot either way.
+ * **No shot test, in the engine either.** `PropBuildRisingDoor` sets
+ * `obj+0x34 |= 0x51` and a blob on `obj+0x14C`, which would send the door to
+ * `ShotTestMesh` and into both collision passes -- but only through
+ * `RegisterForShotTest` (`FUN_00405160`), and this routine never calls it:
+ * of the 95 rel32 calls to it in the image none lies in `0x004753F0`..
+ * `0x004755A6`, nor any to `ActorRegisterCameraPoint` or
+ * `ActorRegisterOriginInViewSpace`, and nothing holds its address as a
+ * pointer. So the door stops no bullet and nothing walks on it. `[proved]`
  */
 import type { BreakablePlacement } from "../../bundle";
 import { G } from "../globals";

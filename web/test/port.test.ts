@@ -309,6 +309,7 @@ import {
 } from "../src/game/carrier";
 import { bamsDelta } from "../src/core/bams";
 import { CivilianAttachSet, CivilianCountMotionLoops, CivilianOp,
+         CivilianReapplyWaitCommand,
          CivilianRunScript, CivilianSphereMode, CivilianTarget,
          CivilianUpdate, CivilianWait, CivilianWriteSphereCentre,
          CIVILIAN_SPHERE_BONE_MODE1, CIVILIAN_SPHERE_BONE_MODE2,
@@ -1551,6 +1552,94 @@ console.log("ResolveHit:");
   check("the killing shot names its player at obj+0x131C",
         (k1.flags & ActorFlag.Dead) !== 0 && k1.killedBy === 1,
         `flags ${k1.flags.toString(16)} killedBy ${k1.killedBy}`);
+
+  // **The kill is two tests: the dead bit and the hit points.**
+  // `0x0040972A TEST [EDI + 0x34], EBX` (EBX = 0x4000000) and
+  // `0x00409733 CMP word ptr [EDI + 0x11c], 0x0 / JG`. The port read its own
+  // `Actor.dead` for the first, and added a third the engine does not have --
+  // `result !== 5` -- which in the engine gates the head burst alone
+  // (`0x0040976F`). Neither input is one a shipped class-0x30 spawn reaches
+  // through `DispatchHit` that I could find: the release paths that raise the
+  // bit alone hold `ShotImmune` too (the drag's `0x10100`, the release state's
+  // `0x3500` from its first frame), and `ActorInitHitPoints` floors hit
+  // points at 1. So these pin the transcription, by hand.
+  {
+    // The bit, not the field: `ZombieStateDragTarget`'s release and the body
+    // creature's raise `0x4000000` and leave `dead` down. A hit on such an
+    // actor at zero hit points kills nothing and its plain result is zeroed.
+    const flagged = spawnZombie(0x1110, 1, "dead bit, dead field down");
+    flagged.visible = true;
+    flagged.hp = 0;
+    flagged.flags |= ActorFlag.Dead;
+    const onFlagged = ResolveHit(flagged, 5, NULL_HOST, rng, 1);
+    check("the dead BIT refuses the kill, whatever `dead` says",
+          !onFlagged.killed && onFlagged.result === HitResultCode.None
+          && flagged.killedBy === -1,
+          `killed ${onFlagged.killed} result ${onFlagged.result} `
+          + `killedBy ${flagged.killedBy}`);
+
+    // A result-5 hit on an actor at zero hit points with the bit down kills:
+    // the bit, the killer's byte -- and no head, which is the one thing the
+    // result gates, so the roll behind it is never drawn.
+    const SENTINEL_HEAD = 0x77;
+    SetGameTables({
+      ...CHARS,
+      types: {
+        ...CHARS.types,
+        [String(SENTINEL_HEAD)]: {
+          ...TYPE, type: SENTINEL_HEAD,
+          bones: TYPE.bones.map((b) => (b.bone === 2 || b.bone === 5
+            ? { ...b, steps: [[2, EffectCode.Last, 3]] } : b)),
+        },
+      },
+    } as unknown as CharactersJson);
+    const five = spawnZombie(0x1120, SENTINEL_HEAD, "result 5 at 0 hp");
+    five.visible = true;
+    five.hp = 0;
+    const roll = new Rng(21);
+    const out5 = ResolveHit(five, 2, NULL_HOST, roll, 1);
+    check("a result-5 hit at zero hit points kills",
+          out5.result === HitResultCode.NoEffect && out5.killed
+          && (five.flags & ActorFlag.Dead) !== 0 && five.killedBy === 1,
+          `result ${out5.result} killed ${out5.killed} `
+          + `flags ${five.flags.toString(16)} killedBy ${five.killedBy}`);
+    check("...and takes no head: the roll is not drawn",
+          !out5.severed && roll.next() === new Rng(21).next(),
+          `severed ${out5.severed}`);
+
+    // **And what a result-5 hit is worth**: `ResolveHit`'s tail tests the
+    // result ahead of the body arm's 10 (`0x00409819`) and nowhere else, so
+    // the head arm's 120 and combo, and the kill's 80, are paid on it. The
+    // port zeroed every point of a result-5 hit.
+    const target = spawnZombie(0x1130, SENTINEL_HEAD, "result 5, scored");
+    target.visible = true;
+    target.hp = 50;
+    const at = (bone: number): GameHost => ({
+      ...NULL_HOST,
+      pickShot: () => ({ kind: "actor", at: target.at, bone,
+                         point: vec3(0, 0, 40) }),
+    });
+    const fire = (bone: number): number => {
+      const before = G.g_player_score[0];
+      FireShotRequest({ player: 0, frame: 0, onScreen: 1, ray: {
+        origin: vec3(0, 0, 0), dir: vec3(0, 0, 1) } }, at(bone), rng);
+      return G.g_player_score[0] - before;
+    };
+    G.g_head_combo_bonus[0] = 0;
+    const head = fire(2);
+    const body = fire(5);
+    const combo = G.g_head_combo_bonus[0];
+    fire(2);                                  // 120, and the combo to 10
+    target.hp = 0;
+    const kill = fire(2);                     // 120 + 10, and the kill's 80
+    check("a result-5 head hit pays 120; a body hit pays nothing and ends "
+          + "the combo", head === 120 && body === 0 && combo === 0,
+          `head ${head} body ${body} combo ${combo}`);
+    check("...and a result-5 kill on the head pays the combo and the 80",
+          kill === 120 + 10 + 80 && (target.flags & ActorFlag.Dead) !== 0,
+          `kill ${kill}`);
+    SetGameTables(CHARS);
+  }
 }
 
 // -- 4a. the three bits `ResolveHit` reads on `obj+0x34` ---------------------
@@ -15050,22 +15139,110 @@ console.log("\nclass 0x10, the civilian and the rescue:");
   }
 
   // Op 0x11's skip count, which is what `CivilianReapplyWaitCommand` is for:
-  // the skipped block's *conditions* are re-applied and its actions are not.
+  // the skipped block's *conditions* are re-applied and its actions are not
+  // -- and they are re-applied **for the step's own loop**, which puts eight
+  // of them back on every way out (`0x0048B6DC`). This used to assert the
+  // skipped goal was still there afterwards, which was the port's restore
+  // running only when nothing had resumed.
+  //
+  // So: the Init block sets goals 2 and 7 and a skip of one. The skipped
+  // block raises the enemy goal to 5; the block after it waits while more
+  // than that many enemies are present, and three are -- so the loop passes
+  // it in the same frame **because of** the skipped 5 (with the 2 it would
+  // hold), walking its civilian goal of 9 on the way. Then the step returns
+  // and both goals read 2 and 7 again, which is what the block the cursor
+  // lands on runs under; neither passed block's action ran.
   {
     const { a, events } = civScene([[
       cmd(CivilianOp.Wait, CivilianWait.Free),
+      cmd(CivilianOp.SetEnemiesGoal, 2),
+      cmd(CivilianOp.SetCiviliansGoal, 7),
       cmd(CivilianOp.SetSkipCount, 1),
-      cmd(CivilianOp.Wait, CivilianWait.Free),
-      cmd(CivilianOp.SetMotionBlend, 66),      // skipped: not a wait condition
-      cmd(CivilianOp.SetEnemiesGoal, 5),    // re-applied: it is one
-      cmd(CivilianOp.Wait, 0),
-      cmd(CivilianOp.End),
+      cmd(CivilianOp.Wait, 0),                  // 4: skipped by op 0x11
+      cmd(CivilianOp.SetMotionBlend, 66),       //    an action: never run
+      cmd(CivilianOp.SetEnemiesGoal, 5),        //    a condition: re-applied
+      cmd(CivilianOp.Wait, CivilianWait.EnemiesPresent),   // 7: passed
+      cmd(CivilianOp.SetCiviliansGoal, 9),
+      cmd(CivilianOp.SetMotionBlend, 44),
+      cmd(CivilianOp.Wait, 0),                  // 10: the block it runs
+      cmd(CivilianOp.End),                      // 11: where that parks
     ]]);
+    G.g_enemies_present = 3;
+    check("the Init block sets its goals and parks on the skipped block",
+          a.civ?.cursor === 4 && a.civ?.enemiesGoal === 2
+          && a.civ?.civiliansGoal === 7,
+          `cursor ${a.civ?.cursor} goals ${a.civ?.enemiesGoal}/`
+          + `${a.civ?.civiliansGoal}`);
     cFrame(a, events);
-    check("a skipped block re-applies its wait conditions...",
-          a.civ?.enemiesGoal === 5, `goal ${a.civ?.enemiesGoal}`);
-    check("...and does not run its actions",
-          a.civ?.motionBlend !== 66, `rate ${a.civ?.motionBlend}`);
+    // Held at 7, the action VM would have run 7's block and parked on 10.
+    check("a skipped block's goal is live inside the step: the next wait "
+          + "passes on it in the same frame", a.civ?.cursor === 11,
+          `cursor ${a.civ?.cursor}`);
+    check("...and the step puts the goals back on its way out",
+          a.civ?.enemiesGoal === 2 && a.civ?.civiliansGoal === 7,
+          `goals ${a.civ?.enemiesGoal}/${a.civ?.civiliansGoal}`);
+    check("...and runs no passed block's actions",
+          a.civ?.motionBlend !== 66 && a.civ?.motionBlend !== 44,
+          `blend ${a.civ?.motionBlend}`);
+  }
+
+  // **Op 0x06 sets the point and not the mode.** `MOV dword ptr [EAX + 0x44]`
+  // at `0x0048BC93`, and `[ECX + 0x44]` at `0x0048B84E` in the reapply walk:
+  // the pointer lands in `sub+0x44`, the three words it names in
+  // `sub+0x30..0x38`, and `sub+0x40` -- the mode the turn runs on -- is not
+  // written. Every shipped op 0x06 sits in a block waiting on `InFront`, the
+  // test that reads `sub+0x30` raw, with the mode at 0: the civilian walks past
+  // the point on her own clip and never turns to it. The port wrote the
+  // pointer into the mode too, so each of them turned toward it.
+  {
+    const P = [0, 0, -100];
+    const ptr = 5683752;                     // stage 1 stream 3's, cmd 10
+    // Mode 0, the shipped shape: nothing may turn her.
+    {
+      const { a, events } = civScene([[
+        cmd(CivilianOp.Wait, 0),
+        { op: CivilianOp.SetTargetPoint, args: [ptr],
+          point: P as [number, number, number] },
+        cmd(CivilianOp.Wait, 0),
+        cmd(CivilianOp.End),
+      ]]);
+      a.yaw = 0x4000;                        // P is 90 degrees off her facing
+      for (let i = 0; i < 20; i++) cFrame(a, events);
+      check("op 0x06 leaves the target mode at 0, so nothing turns her...",
+            a.civ?.targetMode === CivilianTarget.None && a.yaw === 0x4000,
+            `mode ${a.civ?.targetMode} yaw 0x${a.yaw.toString(16)}`);
+      check("...and still sets the point the in-front test reads",
+            a.civ?.target.x === 0 && a.civ?.target.z === -100,
+            `target ${JSON.stringify(a.civ?.target)}`);
+    }
+    // A mode already set -- the camera, -1 -- stands through op 0x06 in both
+    // VMs: the action VM running the block, and the reapply walk the step
+    // runs over it first.
+    {
+      const { a, events } = civScene([[
+        cmd(CivilianOp.Wait, CivilianWait.Free),
+        { op: CivilianOp.SetTarget, args: [CivilianTarget.Camera, 0],
+          radius: 5 },
+        cmd(CivilianOp.Wait, CivilianWait.InFront),
+        { op: CivilianOp.SetTargetPoint, args: [ptr],
+          point: P as [number, number, number] },
+        cmd(CivilianOp.Wait, 0),
+        cmd(CivilianOp.End),
+      ]]);
+      check("a mode set before op 0x06 is the camera's",
+            a.civ?.targetMode === CivilianTarget.Camera,
+            `mode ${a.civ?.targetMode}`);
+      const at = CivilianReapplyWaitCommand(a, a.civ?.script ?? 0, 2);
+      check("the reapply walk's op 0x06 leaves it standing",
+            at === 4 && a.civ?.targetMode === CivilianTarget.Camera
+            && a.civ?.target.z === -100,
+            `at ${at} mode ${a.civ?.targetMode} `
+            + `target ${JSON.stringify(a.civ?.target)}`);
+      cFrame(a, events);
+      check("...and so does the action VM's, once the block runs",
+            a.civ?.cursor === 4 && a.civ?.targetMode === CivilianTarget.Camera,
+            `cursor ${a.civ?.cursor} mode ${a.civ?.targetMode}`);
+    }
   }
 
   // **Does a dead civilian leave `g_civilians_alive`?** This is the counter
@@ -37164,6 +37341,182 @@ console.log("\nclass 0x12, the door the bin captor bursts out of:");
           === JSON.stringify([0x11fd, ...Array.from(
             { length: 0x1233 - 0x11fe + 1 }, (_, i) => 0x11fe + i)]),
         String(ScriptedProp12DrawSlots(door12).length));
+  SetGameTables(CHARS);
+  ResetGameGlobals();
+}
+
+// -- ShotTestMesh: the boards stop the shot -----------------------------------
+//
+// `ProcessPlayerShots` (`FUN_00404570`) sends a registered object whose live
+// `obj+0x34` has bit `0x10` to `ShotTestMesh` (`FUN_00404A00`): the shot
+// segment through the inverse of `obj+0x150` against `obj+0x14C`, and on a
+// hit a candidate keyed on the hit point's depth, sorted with every sphere.
+// Stage 1's boarded doorway (`0x3D88`, class 0x12) is the one object the port
+// runs through it; the boards are `coli1.bin:5144`, one quad, surface 56,
+// modelled in world space, and here they are the bundle's own numbers. The
+// captor stands behind them (`0x3D24`, at about (-660, -15.5, -565)): here a
+// zombie whose head sphere, radius 3, is 2 units off the shot. The port passed a mesh
+// entry by, so the shot went through the boards into whoever stood behind.
+console.log("\nShotTestMesh: the boards stop the shot:");
+{
+  const DOOR = 0x3d88;
+  const MESH = "coli1.bin:5144";
+  const BOARDS = {
+    min: [-675.2266845703125, -15.876447677612305, -549.6888427734375],
+    max: [-661.37451171875, 15.41226577758789, -544.15625], n: 1,
+    plane: [-0.37091198563575745, 0, 0.9286680221557617, 260.02850341796875],
+    verts: [-675.2266845703125, 15.41226577758789, -549.6888427734375,
+            -675.2266845703125, -15.876447677612305, -549.6888427734375,
+            -661.37451171875, -15.876447677612305, -544.15625,
+            -661.37451171875, 15.41226577758789, -544.15625],
+    axis: [2], surface: [56],
+  };
+  const door12 = {
+    slot: 0x11fd, delay: 1, coli: MESH, behaviour: 0, cam_path: 47,
+    cam_frame: 130, first: 0x11fe, last: 0x1233, flag: 34, step: 1, scale: 1,
+  };
+  const rng = new Rng(34);
+  const events = scene(0, rng);
+  SetGameTables({
+    ...CHARS,
+    placements: [{ at: DOOR, class: 0x12, char_type: -1, motion: null, hp: 0,
+                   yaw: 0, init_flags: 0x10, class12: door12 }],
+  } as unknown as CharactersJson);
+  T.coli = { files: ["coli0.bin", "coli1.bin"],
+             blobs: { [MESH]: BOARDS } } as never;
+  SpawnSlotActors([{ at: DOOR, class: SpawnClass.FlagStripProp,
+                     pos: [0, 0, 0] }], rng);
+  const door = G.g_object_list.find((o) => o.at === DOOR)!;
+  // The captor: head (bone 2) a sphere of 3 at `HEAD`, the broad phase round
+  // the same point, nothing else with a sphere.
+  const HEAD = vec3(-674, 0, -565);
+  const z = spawnZombie(0x3d24, 1, "captor");
+  z.visible = true;
+  z.hp = 50;
+  z.pos = vec3(HEAD.x, HEAD.y, HEAD.z);
+  // The eye in front of the boards, looking down -z: `-z` is in front.
+  const EYE = vec3(-672, 0, -500);
+  const host: GameHost = {
+    ...NULL_HOST,
+    pickShot: () => null,
+    boneWorld: (_at, _bone, out) => {
+      out.x = HEAD.x; out.y = HEAD.y; out.z = HEAD.z;
+      return true;
+    },
+    boneSphere: (at, bone, out) => {
+      if (at !== z.at || bone !== 2) return null;
+      out.x = HEAD.x; out.y = HEAD.y; out.z = HEAD.z;
+      return 3;
+    },
+    viewSpaceOfPoint: (p, out) => {
+      out.x = p.x - EYE.x; out.y = p.y - EYE.y; out.z = p.z - EYE.z;
+      return true;
+    },
+  };
+  // One frame: both file themselves, the door as a mesh.
+  GameUpdate(1 / 60, host, rng, events);
+  const THROUGH = { origin: EYE, dir: vec3(0, 0, -1) };
+  const PAST = { origin: vec3(-676, 0, -500), dir: vec3(0, 0, -1) };
+  // Where the line x = -672, y = 0 meets the boards' plane.
+  const [pnx, , pnz, pd] = BOARDS.plane;
+  const ON_BOARDS = -(pnx * EYE.x + pd) / pnz;
+  const through = ProcessPlayerShotsTestList(THROUGH, host);
+  check("both are in the list: the door as a mesh (its word 0x11), the "
+        + "captor as a sphere",
+        G.g_shot_test_list.some((e) => e.at === DOOR && e.flags === 0x11)
+        && G.g_shot_test_list.some((e) => e.at === z.at),
+        JSON.stringify(G.g_shot_test_list.map((e) => [e.at, e.flags])));
+  check("a shot through the boarded doorway stops on the boards: the door, "
+        + "whole, surface 56, on the plane -- not the captor behind",
+        through?.at === DOOR && through.whole && through.bone === 0
+        && through.mesh?.surface === 56
+        && Math.abs(through.point.z - ON_BOARDS) < 1e-3
+        && Math.abs(through.point.x - EYE.x) < 1e-3,
+        JSON.stringify(through));
+  check("...keyed on its depth, __ftol(-z * 10), nearer than the head",
+        through?.key === Math.trunc(-(ON_BOARDS - EYE.z) * 10)
+        && through.key < Math.trunc(-(HEAD.z - EYE.z) * 10),
+        String(through?.key));
+  check("...and the normal is the quad's, the door being unturned",
+        !!through?.mesh
+        && Math.abs(through.mesh.normal.x - pnx) < 1e-6
+        && Math.abs(through.mesh.normal.z - pnz) < 1e-6,
+        JSON.stringify(through?.mesh?.normal));
+  const past = ProcessPlayerShotsTestList(PAST, host);
+  check("a shot past the boards' edge still takes the captor's head",
+        past?.at === z.at && past.bone === 2 && !past.mesh,
+        JSON.stringify(past));
+
+  // The whole pull, from the queue: `MarkActorShot` (`FUN_00404DB0`) marks
+  // the door whole and throws the impact of surface 56 at the quad; the
+  // captor is untouched.
+  const resolved: { kind: string; at?: number }[] = [];
+  events.on("shot.resolved", (r) => resolved.push(r));
+  QueueShotRequest(0, THROUGH);
+  GameUpdate(1 / 60, host, rng, events);
+  const rec = G.g_shot_hit_records[0];
+  check("the pull marks the door (shooter bit, bit 3, byte 1) and nothing "
+        + "else, and the impact is surface 56 on the boards",
+        resolved.length === 1 && resolved[0].kind === "marked"
+        && resolved[0].at === DOOR
+        && (door.flags & (ActorFlag.Hit | ActorFlag.HitByPlayer0))
+          === (ActorFlag.Hit | ActorFlag.HitByPlayer0)
+        && door.shotBones[0] === 1 && z.hp === 50
+        && rec?.surface === 56 && Math.abs(rec.z - ON_BOARDS) < 1e-3,
+        `${JSON.stringify(resolved)} 0x${door.flags.toString(16)} `
+        + `${z.hp} ${JSON.stringify(rec)}`);
+
+  // Flag 34: the strip starts, `0x8000` takes the door out, and the next
+  // frame's list has only the captor.
+  G.g_script_flags[34] = 1;
+  GameUpdate(1 / 60, host, rng, events);
+  const after = ProcessPlayerShotsTestList(THROUGH, host);
+  check("once the boards burst the same shot goes through to the captor",
+        (door.flags & ActorFlag.NoShotTest) !== 0
+        && after?.at === z.at && after.bone === 2,
+        JSON.stringify(after));
+
+  // A quarter turn, where a matrix built in the wrong order or read in the
+  // wrong layout cannot pass (L48): the same boards, yawed 0x4000 and moved
+  // so their middle lands near the origin. `ScriptedPropUpdate12` stores
+  // `T · Rx · Rz · Ry` as `obj+0x150`; `ShotTestMesh` turns the normal by
+  // `Rz · Ry · Rx` of the same angles -- for a yaw alone, the same turn.
+  ResetGameGlobals();
+  SetGameTables(CHARS);
+  T.coli = { files: ["coli0.bin", "coli1.bin"],
+             blobs: { [MESH]: BOARDS } } as never;
+  const T0 = vec3(546.9, 0, -668.3);
+  const a = ActorSpawn(0x7d88, SpawnClass.FlagStripProp, -1, "turned",
+                       { class12: door12, flags: 0x10 }, rng);
+  a.pos = vec3(T0.x, T0.y, T0.z);
+  a.yaw = 0x4000;
+  const mod = await import("../src/game/class12");
+  mod.ScriptedPropUpdate12(a, { dt: 1 / 60, rng, host: NULL_HOST });
+  // `MatrixRotateY` of a quarter turn takes local +x to -z and +z to +x.
+  const turn = (v: Vec3) => vec3(v.z, v.y, -v.x);
+  const nW = turn(vec3(pnx, 0, pnz));
+  const dW = pd - (nW.x * T0.x + nW.y * T0.y + nW.z * T0.z);
+  // An eye 60 out along +x, looking down -x.
+  const EYE2 = vec3(60, 0, 0);
+  const host2: GameHost = {
+    ...NULL_HOST,
+    viewSpaceOfPoint: (p, out) => {
+      out.x = p.z - EYE2.z; out.y = p.y - EYE2.y; out.z = p.x - EYE2.x;
+      return true;
+    },
+  };
+  const turned = ProcessPlayerShotsTestList(
+    { origin: EYE2, dir: vec3(-1, 0, 0) }, host2);
+  const onPlane = turned
+    ? nW.x * turned.point.x + nW.y * turned.point.y + nW.z * turned.point.z
+      + dW : NaN;
+  check("a door turned a quarter is hit on its turned plane, with the normal "
+        + "turned with it",
+        turned?.at === a.at && Math.abs(onPlane) < 1e-3
+        && !!turned.mesh && Math.abs(turned.mesh.normal.x - nW.x) < 1e-4
+        && Math.abs(turned.mesh.normal.z - nW.z) < 1e-4,
+        `${JSON.stringify(turned)} plane ${onPlane}`);
+  T.coli = null;
   SetGameTables(CHARS);
   ResetGameGlobals();
 }

@@ -232,6 +232,17 @@ Two consequences worth knowing, both the engine's:
   condition reads — the clip's loop count and play cursor (never the clip),
   the target, the timer, the three count goals, the camera cue, the frame hook
   and the flag index.
+* **…and eight of those are put back before the step returns.** The loop
+  count, the three goals, the camera cue's path and frame, the frame compare
+  and the flag index (`sub+0x0C`, `+0x20`, `+0x22`, `+0x24`, `+0x10`, `+0x12`,
+  `+0x16`, `+0x1A`) are saved on entry and restored at `0x0048B6DC`, which
+  every exit reaches -- the arms Ghidra shows returning after a
+  `MatrixStackPop` run on past it (L35). So the walks' writes serve the loop's
+  own tests and nothing after: a block the loop passed, or one op `0x11`
+  skipped, leaves none of the eight behind, and `CivilianRunScript` sets what
+  the cursor's block sets. The target, mode, radius, timer and hook are not
+  restored. `[proved]` The port restored only on the exit where nothing had
+  resumed -- the one exit with nothing to undo -- until 2026-09-29.
 * **`SetTimer` (op 0x09) does not delay its own block.** The step loop clears
   the timer on every resume, so the value that survives is the one the reapply
   walk reads out of the block *ahead*. A timer of `n` costs `n + 1` frames,
@@ -247,7 +258,7 @@ Two consequences worth knowing, both the engine's:
 | `0x03` | `SetMotionBlend` | the fade of the next clip change, `sub+0xE`; the Init's default is 10. Its one reader is `CivilianApplyMotionPose`. It was `SetTurnRate`, which nothing read supported |
 | `0x04` | `SetMotionFrame` | the frame wait bit `0x200` looks for |
 | `0x05` | `SetTarget` | point pointer or mode, arrival radius |
-| `0x06` | `SetTargetPoint` | point pointer, always dereferenced |
+| `0x06` | `SetTargetPoint` | point pointer, kept at `sub+0x44`; the point goes to `sub+0x30..0x38` and **the mode at `sub+0x40` is not written** (`0x0048BC93`, `0x0048B84E`), so it turns nobody. All eleven shipped sit in a block waiting on `0x40`, the in-front test that reads `sub+0x30` raw. `[proved]` |
 | `0x07` | `SetTargetHeading` | BAMS; the point is 100 units along it |
 | `0x08` | `SetYaw` | |
 | `0x09` | `SetTimer` | frames |

@@ -5,10 +5,12 @@
  * opcodes `0x00..0x2C` and stops before anything above `0x2B`, parking the
  * cursor on the next `Wait`. `CivilianReapplyWaitCommand` (`FUN_0048B760`) is
  * a second, smaller VM over the same stream, and it exists because
- * `CivilianStepScript` may **skip** a block: a skipped block's loop count,
- * play cursor, target, timer and cues still have to be in place for the wait
- * that follows it to mean anything, and its sounds, dialogue and score must
- * not run, because those are not conditions. It never writes the clip itself.
+ * `CivilianStepScript` may **skip** a block, or pass several in one frame: a
+ * block's loop count, play cursor, target, timer and cues have to be in place
+ * for that loop to test the wait that follows it, and its sounds, dialogue and
+ * score must not run, because those are not conditions. It never writes the
+ * clip itself, and eight of the words it writes the step puts back before it
+ * returns -- see `CivilianStepScript`.
  */
 import { ActorFlag, MotionFlag, type Actor } from "../actor";
 import type { Rng } from "../../core/rng";
@@ -79,8 +81,12 @@ export function CivilianRunScript(obj: Actor, script: number, pc: number,
           sub.target = { x: c.point[0], y: c.point[1], z: c.point[2] };
         }
         break;
+      // **The point and not the mode.** `MOV dword ptr [EAX + 0x44], EDX` at
+      // `0x0048BC93` -- the pointer goes to `sub+0x44`, not to `sub+0x40` --
+      // and the three words it names are copied into `sub+0x30..0x38`. The
+      // target mode is left as it stands, so this does not turn anyone: see
+      // {@link CivilianOp.SetTargetPoint}.
       case CivilianOp.SetTargetPoint:
-        sub.targetMode = a[0];
         if (c.point) {
           sub.target = { x: c.point[0], y: c.point[1], z: c.point[2] };
         }
@@ -359,8 +365,11 @@ function CivilianSetMotion(obj: Actor, motion: number, start: number,
  * Walks forward from one wait command to the next, applying **only** the
  * opcodes whose state a wait condition reads. That is the whole reason it
  * exists as a second, smaller VM: `CivilianStepScript` may skip a block, and a
- * skipped block's loop count, cursor, target and cue still have to be in place
- * for the wait that follows it to mean anything. Its actions — the sounds, the
+ * skipped block's loop count, cursor, target and cue have to be in place for
+ * the step's own test of the wait that follows it. They are in place for that
+ * test and no longer: the step restores the loop count, the three goals, the
+ * cue, the frame compare and the flag index on its way out, whatever it did.
+ * Its actions — the sounds, the
  * dialogue, the score — are not run, because they are not conditions; and of
  * ops 0x00 and 0x01 it runs only the loop count and the **cursor** store,
  * never the clip change (`model+0x20`) or the pose call that goes with it.
@@ -407,8 +416,9 @@ export function CivilianReapplyWaitCommand(obj: Actor, script: number,
           sub.target = { x: c.point[0], y: c.point[1], z: c.point[2] };
         }
         break;
+      // `MOV dword ptr [ECX + 0x44], EDX` at `0x0048B84E`: the same arm as
+      // the action VM's, and it leaves `sub+0x40` alone the same way.
       case CivilianOp.SetTargetPoint:
-        sub.targetMode = a[0];
         if (c.point) {
           sub.target = { x: c.point[0], y: c.point[1], z: c.point[2] };
         }

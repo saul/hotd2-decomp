@@ -108,10 +108,6 @@ class Character:
             "bones": self.bones,
             "extras": [f"0x{s:04X}" for s in self.extras],
             "gore": {str(k): v for k, v in self.gore.items()},
-            # Bone 2 is the head on every 15-bone humanoid, and the head is
-            # what the score model keys on; carried rather than assumed by
-            # the client.
-            "head_bone": 2,
             "torso_stages": self.torso_stages,
             "actor_radius": self.actor_radius,
             "reactions": {str(k): v for k, v in self.reactions.items()},

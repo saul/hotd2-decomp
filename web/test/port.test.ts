@@ -161,8 +161,9 @@ import { SpawnSpriteEffect, SpriteEffectKind }
 import { FireShotRequest, MarkActorShot, MergeShotPicks, QueueOffscreenPull,
   QueueShotRequest, g_gunshot_sound_ids }
   from "../src/game/combat/shot";
-import { AttackListOf, MotionOf, MotionPlayFrame, MotionPlayLength,
-         SetBoss4Tables, SetGameTables, T } from "../src/game/tables";
+import { AttackListOf, CharacterTypeOf, MotionOf, MotionPlayFrame,
+         MotionPlayLength, SetBoss4Tables, SetGameTables, T }
+  from "../src/game/tables";
 import {
   ColiPublishDynamicList, ColiTestSphereAgainstActors,
   ColiTestSphereAgainstFullSet, ColiTraceSegmentAllSets,
@@ -671,10 +672,11 @@ const TYPE: CharacterType = {
     { bone: 1, part: "torso", slot: 1, offset: [0, 0, 0], parent: null,
       damage_rank: [], hit_radius: 3, hit_slot: 1,
       steps: [[0x21, EffectCode.Last, 3]] },
-    // `head_bone: 2` below named a bone this table did not have, so anything
-    // that reads the head's *own* record -- the model the severed head flies
-    // with, for one -- had nothing to find. No steps: a head hit here is a
-    // plain hit, which is what the headshot-burst assertions want.
+    // Bone 2 is the head -- `ResolveHit` compares the shot bone with an
+    // immediate 2 -- and this table used not to have it, so anything that
+    // reads the head's *own* record -- the model the severed head flies with,
+    // for one -- had nothing to find. No steps: a head hit here is a plain
+    // hit, which is what the headshot-burst assertions want.
     // No `steps`, so a head hit here is a plain hit that swaps nothing --
     // which is the case the severed head has to work in, since `boneSlot` only
     // has an entry once something has been swapped. The damage comes from
@@ -696,8 +698,8 @@ const TYPE: CharacterType = {
   // Two rows, because the engine picks one with `obj+0x130C` — the shipped
   // characters carry a second set at body condition 3 (motions 257-263) and
   // the port used to read row 0 for every actor.
-  head_bone: 2, reactions: { "0": [960, 961, 974, 979, 981, 982, 977],
-                             "3": [257, 258, 259, 260, 261, 262, 263] },
+  reactions: { "0": [960, 961, 974, 979, 981, 982, 977],
+               "3": [257, 258, 259, 260, 261, 262, 263] },
   attacks: {
     "0": {
       // `distance` is deliberately just *outside* the inner ring, as the real
@@ -1668,21 +1670,28 @@ console.log("ResolveHit:");
   // took the head from the bundle's `head_bone`.
   //
   // So `ResolveHit` is called bare here, for player 1 so that neither the
-  // default argument nor slot 0 can pass for the payee, and the fixture names
-  // **bone 1** as its head: the exe never reads that field, so bone 2 is the
-  // head and bone 1 is a body hit whatever it says. Every expected number is
-  // one of the tail's immediates.
+  // default argument nor slot 0 can pass for the payee, and the fixture's
+  // table **calls bone 1 the head**: bone 1's record is the part `head` and
+  // bone 2's the part `torso`. `head_bone` is gone from the bundle, so a
+  // part name is the only thing left in a type that could say where the head
+  // is; the exe reads no table for it, so bone 2 is the head and bone 1 is a
+  // body hit whatever the table says. Every expected number is one of the
+  // tail's immediates.
   {
     const MISLABELLED = 0x79;
+    const PART = new Map([[1, "head"], [2, "torso"]]);
     SetGameTables({
       ...CHARS,
       types: {
         ...CHARS.types,
         [String(MISLABELLED)]: {
-          ...TYPE, type: MISLABELLED, head_bone: 1,
-          // The forearm's one step is the sentinel, for a result-5 body hit.
-          bones: TYPE.bones.map((b) => (b.bone === 5
-            ? { ...b, steps: [[2, EffectCode.Last, 3]] } : b)),
+          ...TYPE, type: MISLABELLED,
+          // The labels swapped; the forearm's one step is the sentinel, for a
+          // result-5 body hit.
+          bones: TYPE.bones.map((b) => ({
+            ...b, part: PART.get(b.bone) ?? b.part,
+            ...(b.bone === 5 ? { steps: [[2, EffectCode.Last, 3]] } : {}),
+          })),
         },
       },
     } as unknown as CharactersJson);
@@ -1700,11 +1709,15 @@ console.log("ResolveHit:");
                counted: G.g_player_hit_count[1] - c0, points: out.points };
     };
     const h1 = hit(2), h2 = hit(2), b1 = hit(1), h3 = hit(2), b5 = hit(5);
-    check("bone 2 is the head, whatever `head_bone` says: 120, then 130",
+    const labelled = CharacterTypeOf(t)?.bones.find((b) => b.part === "head");
+    check("the fixture's table calls bone 1 the head",
+          labelled?.bone === 1, JSON.stringify(labelled));
+    check("bone 2 is the head, whatever the table calls it: 120, then 130",
           h1.paid === 0x78 && h1.combo === 10 && h2.paid === 0x78 + 10
           && h2.combo === 20,
           `${JSON.stringify(h1)} ${JSON.stringify(h2)}`);
-    check("...and the bone `head_bone` names is a body hit: 10, combo gone",
+    check("...and the bone the table calls the head is a body hit: 10, "
+          + "combo gone",
           b1.paid === 10 && b1.combo === 0,
           JSON.stringify(b1));
     check("a result-5 body hit pays nothing, counts nothing, and still ends "

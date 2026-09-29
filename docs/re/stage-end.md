@@ -155,13 +155,13 @@ Sub 1 steps to 2 once the dwell is at or below `0x78`. Sub 2 runs **once**:
 ```
 for p in 0, 1:                           ; both, in play or not
     g_player_lives[p] += b
-    if g_GameMode == 1:  if lives >= g_original_max_lives[p]: lives = cap   ; signed
+    if g_GameMode == 1:  if lives >= g_original_life_cap[p]: lives = cap   ; signed
     else:                if (u32)lives >= g_max_lives:        lives = cap   ; unsigned
 sub = 3
 ```
 
 `g_max_lives` (`0x009A2440`) is 5, written by `ProfileApplyToRun`;
-`g_original_max_lives` (`0x009A2245 + p*0x14`) is 5, written by
+`g_original_life_cap` (`0x009A2245 + p*0x14`) is 5, written by
 `ResetOriginalModeLoadout` and by two Original items. Counting frames from
 the card's first update as 1, the dwell at the test is `421 - k`, so sub 2 is
 frame **302**. There is no sound and no other trace of the award than the
@@ -211,7 +211,7 @@ value, `[proved]`. Entries 10 on read `A`..`P`, then one glyph, then
 `Q`..`Z` `[likely]`: under that reading the four strings are `RESCUED X`,
 `LIFE BONUS X`, `P SCORE` and `ACCURACY`, and `0x1679`, the glyph
 `ResultCardDrawAccuracy` puts after the number, is `%`. The render in
-section 7 is what settles it.
+section 7 settles it.
 
 ### `ResultCardDrawScore` (`FUN_004362E0`), `ResultCardDrawAccuracy` (`FUN_00436620`)
 
@@ -316,19 +316,35 @@ for p in 0, 1:
 opcode's operand into `g_accuracy_stats_suppressed` (`0x009A5C48`), and
 while it is non-zero `PlayerFireAndReloadUpdate` does not count shots
 (`0x00414A15`) -- so a boss fight's shots do not count against the grade.
-`MarkSceneOver` and `ResetSceneOnEnter` put it back to 0.
+`MarkSceneOver` and the checkpoint opcode (`ResetSceneCombatState`, `FUN_0045EEC0`) put it back to 0.
 
 `PlayerFireAndReloadUpdate` (`FUN_00414940`), at a trigger pull that fires:
 `g_nPlayerFired[p] = 1` (`0x009A5C78`, a flag) and, unless suppressed,
 `g_player_shot_count[p] += 1` (`0x009A5C84`, the count). They are two words.
 
-## 7. What is still open
+## 7. The port, and what the render showed
 
-* The motions' content: `0x17C`/`0x17D`/`0x17F` (the rescued figures),
-  `0x18B..0x18D` (the no-rescue figures), `0x180` (figure 0's bonus). The
-  code names numbers; the pictures are the port's renders (see
-  `docs/re/session-log.md`, 2026-09-29, the result card).
-* The glyph identities past the digits are `[likely]` (section 3).
+Ported: `game/class61/` (the card, its figures, the two number draws, the
+`.rdata` read by address), `game/class62/`, `game/rescue.ts` (both writers'
+three stores), `game/combat/accuracy.ts` (opcodes `0x2B`, `0x2F`), the shot
+count and its guard in `combat/shot.ts`, `ResolveHit`'s two hit counts, and
+`g_view_slot_draws` for the glyphs. The bundle's `result_card` block and the
+figure templates are `docs/formats/bundle.md`'s.
+
+Rendered in the page (`web/tools/result_card.mjs`), stage 1 with five
+rescues: the frame's window shows the flight through region `0x0B`; the
+figures stand in the alley and on the steps, **waving** on `0x17C`, `0x17D`
+and `0x17F` `[likely]`, from the render; figure 0 (type `0x31`, `hito_mario.bin`) holds up
+the white box marked with a red cross and LIFE -- `common.bin[199]` -- on
+`0x180`; and with no rescue the scene's own list **lies dead** on its three
+single-frame poses `0x18B..0x18D` `[likely]`, from the render. The glyphs read
+`RESCUED X n`, `LIFE BONUS X n`, `1P SCORE` and `ACCURACY` -- the font reading
+of section 3, confirmed by the picture.
+
+## 8. What is still open
+
+* What the motions depict is `[likely]` only, from the render (section 7):
+  the code names numbers.
 * Which callers read `g_accuracy_stats_suppressed` at `0x0046513C` and
   `0x0048FBB1`, and why a prop's hit counts in Training while it is up, is
   `[open]` -- nothing on the result card depends on it.

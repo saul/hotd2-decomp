@@ -26154,3 +26154,43 @@ but `0x009A5C78` is a flag (`= 1` at the pull) and the count is
 `g_player_shot_count` (`0x009A5C84`), guarded by `g_accuracy_stats_suppressed`
 (`0x009A5C48`, evt opcode `0x2F`). Opcodes `0x2B` and `0x2F` were unported, so
 the accuracy bonus the card's score includes was never paid.
+
+## 2026-09-29 -- the result card ported: figures, the life bonus, the score and accuracy
+
+The end of stages 1..4 is ported whole (`docs/re/stage-end.md` section 7):
+class 0x61's figures and life bonus and its draw, class 0x62's kill, the
+rescue record both rescue writers keep, opcodes `0x2B`/`0x2F`, the shot count
+at the pull, and `ResolveHit`'s hit counts. The bundle carries the card's
+`.rdata` as one span, its tiles and glyphs, and one hidden template row per
+figure type; `render/` clones a template per figure, draws the glyphs in
+camera space and the tiles as deep sprites. `web/tools/result_card.mjs` plays
+stage 1 (five rescues, and none), stage 2 (seven) and stage 4 (three) through
+their own result steps; `tools/verify_result_card.py` holds the immediates and
+the span to the EXE. The picture confirmed the font reading (`RESCUED X`,
+`LIFE BONUS X`, `1P SCORE`, `75% ACCURACY`), the waving clips, the life box
+figure 0 holds up, and the no-rescue figures lying dead.
+
+**Wrong turns.** (1) A figure row per (place, type) in the glTF was the first
+plan; the rig writer writes each placement's meshes out again, so stage 2 would
+have carried ~130 civilians' geometry. One template per type, cloned by the
+character layer (geometry shared, as the horde's mirror clones), instead.
+(2) I read the four scene lists as one 0x14 stride from `0x0055DD80`; scene 3's
+list follows scene 2's terminator by four bytes, and `verify_result_card.py`'s
+first run said so. The exporter now reads each list from its own pointer.
+(3) The freeze test (`model+0x08 == 0x80`) first read the counter, a frame
+ahead of the cursor the last draw sampled (L62); the figure keeps the drawn
+cursor on its tail and the test reads that -- the harness shows cursor 0x81,
+the clip's last, held. (4) `g_original_max_lives` and a `g_max_lives` of my
+own collided with main's `g_original_life_cap`/`g_max_lives` from the held-item
+work, landed while I worked; main's names and `GrantExtraLife` were taken and
+mine dropped. (5) `G.g_nPlayerFired` had been the port's shot count; it is the
+per-player "fired this frame" flag `ProcessPlayerShots` clears, and the count
+is `g_player_shot_count`, guarded by `g_accuracy_stats_suppressed` -- every test
+that counted shots through the flag reads the count now.
+
+**Left open.** What the clips depict is `[likely]`, from the render. A figure
+beyond its scene's list stands where the bytes after it say, on the clip they
+name, as the EXE's would; the exporter bakes record `i`'s clip for all ten
+indices, past the terminator included, so that such a figure is posed at all.
+Whether any shipped scene offers more rescues than its list has places is
+`[open]`; I did not count.

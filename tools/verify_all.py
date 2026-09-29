@@ -218,6 +218,16 @@ CHECKS: list[Check] = [
           "that START -- pressed on the corner button, the one START a phone "
           "has -- spends a credit and puts the player back in play",
           NEEDS_BUNDLE, LANE_BROWSER),
+    Check("result_card", "web",
+          ["node", "tools/result_card.mjs", "--headless"],
+          "that the end of stages 1, 2 and 4 plays in the real page from "
+          "their own result steps: one figure per rescue, of the rescued "
+          "type, at the scene's places; the scene's own list, dead, with "
+          "none; the count climbing from frame 31; the life bonus on frame "
+          "302, capped; figure 0 holding the life up from camera frame 260 "
+          "and freezing on cursor 0x81; the score and the accuracy drawn; "
+          "the flag on frame 420 and the scene over after it",
+          NEEDS_BUNDLE, LANE_BROWSER),
     Check("options", "web",
           ["node", "tools/options_page.mjs", "--headless"],
           "that the menu's Options reaches the game's options screen in the "

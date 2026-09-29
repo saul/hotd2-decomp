@@ -10,7 +10,9 @@
  *
  * `spawns.md` had it as "not damageable, awards nothing, plays no sound at
  * all" — `[proved]` negatively across all 496 `PlaySoundId` call sites. That
- * still holds: nothing below scores, damages or makes a noise.
+ * still holds: nothing below scores, damages or makes a noise. It is not even
+ * shot at: nothing in the class files it for the shot test, so a bullet
+ * passes through a set-piece -- see the handler at the foot of the file.
  *
  * ## The handler is an Init
  *
@@ -380,6 +382,23 @@ export function SetPieceAtLastFrame(obj: SetPiecePropActor): boolean {
 export const SetPiecePropHandler: ClassHandler = {
   init: SetPiecePropInit,
   update: SetPiecePropUpdate,
+  // **Registers where the engine's routines do, which is nowhere**, so the
+  // pick finds it through `G.g_shot_test_list` alone and never finds it.
+  // No call to `RegisterForShotTest` (`FUN_00405160`), to
+  // `ActorRegisterCameraPoint` (`FUN_00409B70`), which ends in one, or to
+  // `RegisterForCameraTracking` (`FUN_00408EC0`) is anywhere in the class:
+  // not in `SetPiecePropInit` (`0x00482CE0`, which leaves the hit slot at -1),
+  // the six states at `0x00482EC8`'s table, `SetPiecePropDrawAndTick`
+  // (`0x004834F0`) or the per-bone hook `SetPiecePropDrawBonePart`
+  // (`FUN_004835D0`) -- including its tail past the `MatrixStackPop`,
+  // `0x004836C6`..`0x0048385D`, read from the
+  // bytes (L35). `[proved]` So no bullet in the game ever touches a
+  // set-piece. Offered to the render pick like any actor, the port's did,
+  // and `ResolveHit` gave the body a death clip: stage 1's man under the
+  // library desk fell over again, as could every body and bystander here.
+  registersForShotTest: true,
+  // ...and the debug clear takes nothing a shot could not.
+  invulnerable: () => true,
 };
 
 /**

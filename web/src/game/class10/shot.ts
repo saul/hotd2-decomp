@@ -52,15 +52,27 @@ export function CivilianPlayDeathVoice(obj: Actor, events?: Events): void {
 /**
  * The shot and the rescue branch of `CivilianUpdate` (`FUN_0048A920`).
  *
- * [port-only] Inline in the engine, with no address of its own. `sub.onShot`
- * is the gate: a civilian with no on-shot script has its hit bits cleared
- * every frame and cannot be hurt at all, which is how the ones behind glass
- * work — and it is what `ClassHandler.invulnerable` answers with.
+ * [port-only] Inline in the engine, with no address of its own. The gate is
+ * two tests, over both arms:
+ *
+ * ```
+ * 0048AAC0  CMP [EAX + 0x4C], EBX ; JZ 0x0048AD0F     ; no on-shot script
+ * 0048AAC9  MOV ECX, [0x009C6F08] ; CMP ECX, 2 ; JNZ 0x0048AD0F
+ * 0048AD12  AND AL, 0xF1                              ; the hit bits go
+ * ```
+ *
+ * A civilian with no on-shot script has its hit bits cleared every frame and
+ * cannot be hurt at all, which is how the ones behind glass work -- and it is
+ * what `ClassHandler.invulnerable` answers with. **Nor can any civilian while
+ * `g_scene_state_major_entered` is not 2**, the path camera: a hit is cleared
+ * and the killed bit waits for the state to come back. Stage 3's captives
+ * lying in the canal arm their on-shot script only under state 1, so in the
+ * exe no shot ever plays the death it names.
  */
 export function CivilianCheckShot(obj: Actor, f: ClassFrame): void {
   const sub = obj.civ;
   if (!sub) return;
-  if (sub.onShotScript < 0) {
+  if (sub.onShotScript < 0 || G.g_scene_state_major_entered !== 2) {
     obj.flags &= ~0xe;
     obj.pendingHit = null;
     return;

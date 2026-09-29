@@ -3809,6 +3809,78 @@ console.log("\nthe shot: a character with no bone sphere is one sphere");
 }
 
 /**
+ * **A set-piece is never a candidate.** Class 0x24 calls `RegisterForShotTest`
+ * (`FUN_00405160`) nowhere, so the engine's shot test has nothing to find;
+ * the render pick used to offer it like any other actor, and a body lying
+ * on the floor -- stage 1's man under the library desk -- died again when
+ * shot. Same pick, same kind of bone sphere a zombie is hit through, and the
+ * class is the only thing that differs.
+ */
+console.log("\nthe shot: a class-0x24 set-piece is not in the shot test");
+{
+  const { CharacterLayer } = await import("../src/render/characters");
+  const { G, ResetGameGlobals } = await import("../src/game/globals");
+  const { SetGameTables } = await import("../src/game/tables");
+  const { ActorSpawn } = await import("../src/game/spawn");
+  const { SpawnClass } = await import("../src/game/spawn_class");
+  const { Scope } = await import("../src/core/scope");
+  const { Object3D } = await import("three");
+  await import("../src/game/classes");
+
+  // A person's type as the exporter emits one: a bone with a hit sphere, its
+  // row's slot the node's (`ActorBuildSkinnedModel` arms it only then).
+  const BODY_TYPE = {
+    type: 0x33, name: "hito_marioaa", file: "hito_marioaa.bin", bone_count: 2,
+    actor_radius: 10,
+    bones: [{ bone: 1, part: "bone01_0100", slot: 0x100, offset: [0, 0, 0],
+              parent: null, steps: [[0, 0, 10]], hit_slot: 0x100,
+              hit_radius: 3, hit_centre: [0, 0, 0] }],
+    reactions: {}, attacks: {},
+    motions: { "395": { bank: "h", frames: 1, fps: 30,
+                        root: [0, 0, 0], rot: [0, 0, 0] } },
+  };
+  const AT = 0x1548;
+  const PLACE = { at: AT, class: 0x24, char_type: 0x33, motion: 395, hp: 0,
+                  yaw: 0 };
+  const CHARS = { types: { "51": BODY_TYPE }, placements: [PLACE] };
+
+  const root = new Object3D();
+  const rig = new Object3D();
+  rig.name = "chr_hito_marioaa_spawn000";
+  rig.userData = { hod2_kind: "rig", hod2_rig: "chr_hito_marioaa",
+                   hod2_spawn_at: AT };
+  const bone = new Object3D();
+  bone.name = "chr_hito_marioaa_spawn000_bone01_0100";
+  rig.add(bone);
+  root.add(rig);
+
+  ResetGameGlobals();
+  SetGameTables(CHARS as never, undefined, { [String(AT)]: {
+    selector: 0, removePath: 99, removeFrame: 0, motion: 395, hold: 0,
+    cuePath: -1, cueFrame: 0, cue2Path: -1, cue2Frame: 0, phase: 0,
+  } } as never);
+  const chars = new CharacterLayer();
+  const stage = new Scope("stage");
+  chars.build(root, stage, CHARS as never);
+  const a = ActorSpawn(AT, SpawnClass.SetPieceProp, 0x33, "hito_marioaa",
+                       { visible: true });
+  a.pos.x = 0; a.pos.y = 0; a.pos.z = -30;
+  chars.syncSpawns([{ at: AT }], [a]);
+  chars.update({} as never);
+  const towards = { origin: { x: 0, y: 0, z: 0 },
+                    dir: { x: 0, y: 0, z: -1 } };
+  check("the body is drawn and alive, and its bone sphere is armed, so only "
+        + "its class could keep it out",
+        a.visible && !a.dead && (a.boneRadius["1"] ?? 0) > 0,
+        `visible ${a.visible} dead ${a.dead} radius ${a.boneRadius["1"]}`);
+  check("a shot straight through its bone sphere does not find it",
+        chars.pickShot(towards) === null, JSON.stringify(chars.pickShot(towards)));
+
+  stage.dispose();
+  G.g_object_list.length = 0;
+}
+
+/**
  * The bat's wings: a **synthetic** placement, adopted rather than spawned.
  *
  * `SpawnBatWings` (`FUN_0042E060`) makes the wing actor inside its body's

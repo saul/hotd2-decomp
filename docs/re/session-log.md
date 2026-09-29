@@ -26567,3 +26567,60 @@ reaches end block 7 on every seed.
   no route reaches. It also treated an `end` route's target as a block of the
   same stage. Both are now excluded, and the unreachable one is printed as
   not checked.
+
+## 2026-09-29 -- a set-piece body is shot and dies again: class 0x24 never registers
+
+Reported as "civilians that start in a dead pose can be shot, and they
+re-animate their death". I took "civilian" literally and read class 0x10
+first, and that is most of what went wrong. Its shot branch in
+`CivilianUpdate` (`0x0048AAB9`..`0x0048AD17`, read whole past the
+`MatrixStackPop` Ghidra ends the hit arm at) turned out to be gated on
+`sub+0x4C != 0 && g_scene_state_major_entered == 2`. The port has no
+scene-state test, and stage 3's lying captives (streams 62/68/72, clip 686)
+hold an on-shot script only while the scene state is 1. That is a real
+difference, and it is fixed below. Rooting through the stream table for "dead" clips, the
+root heights of each spawn's first frame, and class 0x20, class 0x25 and
+`DeadClass` (0x2A) found nothing that matched.
+
+The user then gave the address, `?stage=1&block=1&step=3&op=9&frame=61`, and
+the body there is `0x1548`: **class 0x24**, `hito_marioaa`, clip 395, placed
+at `1/2/19`. Nothing in the class files it for the shot test `[proved]`:
+- no xref from its range to `RegisterForShotTest` (77 callers),
+  `ActorRegisterCameraPoint` (16) or `RegisterForCameraTracking`;
+- none in `SetPiecePropInit`, the six states (table `0x00482EC8`),
+  `SetPiecePropDrawAndTick`, or the per-bone hook, named here
+  `SetPiecePropDrawBonePart` (`0x004835D0`);
+- `find_code_gaps` over the range leaves only alignment padding and that
+  hook's tail past its pop, `0x004836C6`..`0x0048385D`, disassembled as a dry
+  run: slot draws and nothing else.
+
+The port's render pick takes every visible, living, unmigrated actor, and a
+hit went `DispatchHit` -> `ResolveHit`: hp 0 -> -10, `dead`, death clip 985 or
+986 on the body. The fix is the flag with no registration site; the debug
+Kill had the same effect and now skips the class.
+
+**Wrong turns.** The class-0x10 detour above. And two checks that could not
+fail as first written:
+- The render test's fixture bone had a hit radius but no `hit_slot`, so
+  `ActorBuildSkinnedModel` never armed its sphere and the pick missed with or
+  without the fix. It now asserts the radius is armed.
+- The page check's first grid fired during the cutscene, with the firing gate
+  shut, and passed with the fix backed out. It now replays the full driven
+  sweep, asserts the pulls were live (the room's zombie dies to them), and was
+  watched failing at `1/4/9` f293.
+
+**The class-0x10 half, done after all.** It is the same symptom family (a
+body lying on the ground at spawn, shot, dies again), and it is in the code
+being changed, so it went in: `CivilianCheckShot` now clears the hit bits
+unless `g_scene_state_major_entered` is 2, over both arms, as `0x0048AAC9`
+does. `test/port.test.ts` "class 0x10's shot counts only on the path camera"
+(4 red first). The `civScene` fixture and `tools/civilians.mjs` had left the
+scene state at the reset's 0, a cutscene, which nothing in the player ever
+plays through. Five old assertions and the harness's calibrated counts went
+red on the fix. Given the path camera, which the walker supplies in the page,
+all five pass and the harness is back to exactly its pinned 37 advanced,
+19 rescued and 12 mauled.
+
+Still filed, not done: whether class 0x25, the scripted humanoids, is the same
+shape as class 0x24. No xref from its range registers either, but its tails
+past each pop have not been read.

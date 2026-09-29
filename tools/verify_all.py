@@ -252,6 +252,15 @@ CHECKS: list[Check] = [
           "enemy counters in a page a seek built, which is the rebuild every "
           "reload during development goes through (L75)",
           NEEDS_BUNDLE, LANE_BROWSER),
+    Check("setpiece_shot", "web",
+          ["node", "tools/setpiece_shot_page.mjs", "--headless"],
+          "that a body lying on the floor -- stage 1's class-0x24 set-piece "
+          "under the library desk -- survives a driven sweep of live pulls "
+          "that kills the room's zombie around it: the only check that fires "
+          "real pointer events at an actor the engine never files for the "
+          "shot test, which the render pick used to offer and `ResolveHit` "
+          "then killed",
+          NEEDS_BUNDLE, LANE_BROWSER),
     Check("crosshair", "web",
           ["node", "tools/crosshair_page.mjs", "--headless"],
           "that real pointer events reach HudDrawCrosshair as the exe's "

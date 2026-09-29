@@ -2612,6 +2612,41 @@ investigation ruled out.
   mode 7. Sixteen routines write the first and none of them has been read.
   `[open]`
 
+## And one about a body on the floor (2026-09-29)
+
+- `[fixed]` **A civilian that starts in a dead pose can be shot, and replays
+  its death.** Reported at `?stage=1&block=1&step=3&op=9&frame=61`: the man
+  lying under the library desk with rats on him. He is not a civilian in the
+  class sense -- he is `0x1548`, **class 0x24**, a set-piece of character type
+  51 (`hito_marioaa`) holding clip 395. Nothing class 0x24 runs files it for
+  the shot test: no call to `RegisterForShotTest`, `ActorRegisterCameraPoint`
+  or `RegisterForCameraTracking` in `SetPiecePropInit`, its six states,
+  `SetPiecePropDrawAndTick` or its per-bone hook, whose tail past a
+  `MatrixStackPop` was read from the bytes (L35). So in the exe no bullet ever
+  touches a set-piece. The port's render pick offers every visible, living
+  actor that does not register the engine's way, and a hit went through
+  `DispatchHit` into `ResolveHit`, which took the body to -10 and gave it a
+  death clip. The class now sets `ClassHandler.registersForShotTest` and
+  registers nowhere, so the pick passes it by, and the debug Kill leaves it
+  standing too (`invulnerable`). 28 of the class's 29 spawns are people, in
+  stages 1, 2 and 4.
+
+  Proof, each watched failing first: `test/port.test.ts` "class 0x24 is never
+  shot" (8 red), `test/render.test.ts` "a class-0x24 set-piece is not in the
+  shot test" (the pick found the body at 30 units), and
+  `tools/setpiece_shot_page.mjs` at the reported address, whose driven sweep
+  killed the room's zombie and then, before the fix, hit the body at `1/4/9`
+  f293 (death clip 986); after it, 345 pulls leave the body untouched.
+
+  The same symptom had a second way in, through the civilians of class 0x10.
+  `CivilianUpdate` takes a hit, and the killed bit, only while
+  `g_scene_state_major_entered` is 2, the path camera (`0x0048AAC9`); the port
+  tested the on-shot script alone. Stage 3's captives lying in the canal
+  (streams 62, 68 and 72) arm a death as their on-shot script only while the
+  scene state is 1, so in the exe no shot ever plays it. `CivilianCheckShot`
+  has the second test now (`test/port.test.ts` "class 0x10's shot counts only
+  on the path camera", 4 red first).
+
 ## Divergences awaiting a call
 
 Four, and each is a refactor rather than a line edit — which is why they are

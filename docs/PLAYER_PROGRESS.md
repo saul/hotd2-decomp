@@ -945,6 +945,17 @@ so 21 set-pieces in stage 2 inflated the count `wait_enemies_alive` blocks on,
 and made the camera swing to look at the world origin, which rendered a black
 screen. Both now ask `ActorIsEnemy`.
 
+**A set-piece cannot be shot** (2026-09-29, `BUGS.md`). Nothing in the class
+files it for the shot test, so a bullet passes straight through it; the
+render pick had offered every set-piece like any actor, and a hit killed the
+body and played a death clip on it -- stage 1's man lying under the library
+desk fell over again. The class sets `registersForShotTest` and registers
+nowhere, which keeps it out of the pick, and the debug Kill leaves it alone.
+A class-0x10 civilian, likewise, is hurt only while the scene state is the
+path camera: `CivilianCheckShot` now makes the second test `CivilianUpdate`
+makes, so a captor lying on the ground under a cutscene's scene state cannot
+be shot into her death script either.
+
 **Class 0x41 type 32 — the lift — is ported** (`game/class41/lift.ts`). It is
 the one class-0x41 prop that moves: while the script holds flag 0x37 up the car
 floor rides at `g_camera_block_eye.y - 15`, and stage 2's block 18 sends it up

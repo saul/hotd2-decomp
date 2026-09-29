@@ -310,7 +310,8 @@ import {
   CarrierTransformPoint, MatrixGetAngles, MatrixToEulerBams, RotXZY, RotYXZ,
 } from "../src/game/carrier";
 import { bamsDelta } from "../src/core/bams";
-import { CivilianAttachSet, CivilianCountMotionLoops, CivilianOp,
+import { CivilianAttachSet, CivilianCheckShot, CivilianCountMotionLoops,
+         CivilianOp,
          CivilianReapplyWaitCommand,
          CivilianRunScript, CivilianSphereMode, CivilianTarget,
          CivilianUpdate, CivilianWait, CivilianWriteSphereCentre,
@@ -7932,6 +7933,49 @@ console.log("\nclass 0x24, the script-flag removal variant:");
   check("but the script flag does", a.dead);
 }
 
+/**
+ * **No shot can touch a set-piece.** Nothing class 0x24 runs calls
+ * `RegisterForShotTest` (`FUN_00405160`), directly or through
+ * `ActorRegisterCameraPoint` (`FUN_00409B70`): not `SetPiecePropInit`
+ * (`FUN_00482CE0`), not one of the six states it installs, not
+ * `SetPiecePropDrawAndTick` (`FUN_004834F0`), not the per-bone hook at
+ * `obj+0x12EC`. So a set-piece is never on the list `ProcessPlayerShots`
+ * walks, and a bullet passes through it. The port offered it to the render
+ * pick like any other actor, and `ResolveHit` then gave the body a death
+ * clip: stage 1's man lying under the library desk (`0x1548`, `hito_marioaa`,
+ * at `?stage=1&block=1&step=3&op=9`) fell over again when shot, and so did
+ * every other body and bystander of the class's 28 people.
+ */
+console.log("\nclass 0x24 is never shot:");
+{
+  const rng = new Rng(2);
+  const h = g_class_handlers[SpawnClass.SetPieceProp];
+  check("it is picked the engine's way, through the registration list alone",
+        h?.registersForShotTest === true, `${h?.registersForShotTest}`);
+  // Every selector, every frame: the list never holds it.
+  let listed = 0;
+  for (const selector of [0, 1, 2, 3, 4, 5]) {
+    const { a, events } = setPieceScene({ selector }, rng);
+    check(`selector ${selector}: ShotTestPickedHere`, ShotTestPickedHere(a));
+    for (let i = 0; i < 90; i++) {
+      frame(a, events, rng);
+      if (G.g_shot_test_list.some((e) => e.at === a.at)) listed += 1;
+    }
+  }
+  check("...and no frame of any of its six states registers it", listed === 0,
+        `${listed} frames listed`);
+  // The debug clear takes only what a shot could.
+  {
+    const { a } = setPieceScene({}, rng);
+    const hp = a.hp;
+    ActorKillAll(rng);
+    check("the Kill button leaves a set-piece standing, with no death clip",
+          !a.dead && a.death === null && a.hp === hp
+          && (a.flags & ActorFlag.Dead) === 0,
+          `dead ${a.dead} death ${JSON.stringify(a.death)} hp ${a.hp}`);
+  }
+}
+
 console.log("\nclass 0x41, the props are in the save state:");
 {
   const rng = new Rng(21);
@@ -15417,6 +15461,10 @@ console.log("\nclass 0x10, the civilian and the rescue:");
                     items: CivilianItemJson[] = [], seed?: number) => {
     ResetGameGlobals();
     EnterPlay();
+    // The path camera: `CivilianUpdate` takes a hit only under it
+    // (`0x0048AAC9`), and in the player the walker says so every frame.
+    G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    G.g_scene_state_major = SCENE_MAJOR_PLAYING;
     SetGameTables(CHARS, undefined, undefined, undefined, undefined, {
       entries: [0],
       scripts: cmds,
@@ -18558,6 +18606,64 @@ console.log("\nclass 0x10's play cursor: a corpse rests, it does not replay:");
     runClip(c, 200);
     check("...and rests after the second", c.civ!.loops === 0
           && MotionPlayFrame(c) === 37, String(MotionPlayFrame(c)));
+  }
+}
+
+/**
+ * **A civilian is hurt only on the path camera.** `CivilianUpdate`
+ * (`FUN_0048A920`) clears her hit bits (`AND AL, 0xF1` at `0x0048AD12`) unless
+ * `sub+0x4C` names an on-shot script **and** `g_scene_state_major_entered`
+ * is 2 (`MOV ECX, [0x009C6F08]; CMP ECX, EDI; JNZ` at `0x0048AAC9`) -- one test
+ * over both arms, the shot and the killed. The port tested the script alone.
+ * Stage 3's captives lying in the canal (streams 62, 68 and 72, clip 686)
+ * arm their on-shot script -- clip 676, a death -- only while the scene state
+ * is 1, and lose it before it is 2, so in the exe no shot ever plays it; in
+ * the port one could, and the body lying there died again.
+ */
+console.log("\nclass 0x10's shot counts only on the path camera:");
+{
+  const f = { dt: 1 / 60, rng: new Rng(3), host: NULL_HOST,
+              events: new Events() };
+  const lying = (major: number) => {
+    ResetGameGlobals();
+    EnterPlay();
+    SetGameTables(CHARS);
+    G.g_scene_state_major_entered = major;
+    G.g_scene_state_major = major;
+    // Stream 0 lies still; stream 1 is the death the shot would switch to.
+    T.civilians = { entries: [0], items: [], spawns: {}, scripts: [
+      [{ op: CivilianOp.Wait, args: [0] }, { op: CivilianOp.End, args: [] }],
+      [{ op: CivilianOp.Wait, args: [0] }, { op: CivilianOp.End, args: [] }],
+    ] } as never;
+    const c = ActorSpawn(0x7500, SpawnClass.Civilian, 1, "lying", undefined,
+                         new Rng(1));
+    c.visible = true;
+    c.civ!.onShot = 0x1234;
+    c.civ!.onShotScript = 1;
+    return c;
+  };
+  for (const major of [1, 3]) {
+    const c = lying(major);
+    c.flags |= ActorFlag.Hit | 2;
+    CivilianCheckShot(c, f);
+    check(`scene state ${major}: a hit is cleared and does nothing`,
+          (c.flags & 0xe) === 0 && !c.dead && c.civ!.onShotScript === 1,
+          `flags ${(c.flags >>> 0).toString(16)} dead ${c.dead} `
+          + `onShot ${c.civ!.onShotScript}`);
+    const k = lying(major);
+    k.flags |= ActorFlag.Dead;
+    CivilianCheckShot(k, f);
+    check(`scene state ${major}: ...and so is the killed bit, which waits`,
+          (k.flags & ActorFlag.Dead) !== 0 && k.civ!.onShotScript === 1,
+          `onShot ${k.civ!.onShotScript}`);
+  }
+  {
+    const c = lying(SCENE_MAJOR_PLAYING);
+    c.flags |= ActorFlag.Hit | 2;
+    CivilianCheckShot(c, f);
+    check("scene state 2: the same hit runs her on-shot script",
+          c.dead && c.civ!.onShotScript === -1 && c.civ!.script === 1,
+          `dead ${c.dead} onShot ${c.civ!.onShotScript} script ${c.civ!.script}`);
   }
 }
 

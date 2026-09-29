@@ -83,6 +83,12 @@ for (let stage = 1; stage <= 6; stage++) {
   SetGameTables(script.characters, undefined, undefined, undefined,
                 script.coli, civ);
   G.g_coli_full_set = Object.keys(script.coli?.blobs ?? {});
+  // The path camera, which the walker says in the player and nothing here
+  // does. `CivilianUpdate` (`FUN_0048A920`) takes neither a shot nor the
+  // killed bit off any other scene state (`0x0048AAC9`), so left at the
+  // reset's 0 -- a cutscene -- no captor here could kill a civilian.
+  G.g_scene_state_major_entered = 2;
+  G.g_scene_state_major = 2;
 
   const rng = new Rng(7);
   const places = new Map(

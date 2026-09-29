@@ -1569,6 +1569,12 @@ export interface ActorBase {
    * `obj+0x1360` — which of `ActorArcStep`'s five phases the arc is in. The
    * same word the path rider keeps its offset in; only one class uses it at a
    * time, which is why they are two names for one offset here.
+   *
+   * On a thrower its readers are `ActorArcStep`'s dispatch,
+   * `ThrowerStrikeConnect`'s melee arm and `ThrowerStateLeapToPoint`, all
+   * against the phase. `ThrowerStateCloseAndStrike` writes
+   * `g_players_in_play` into it (`0x0044EA93`) and none of them reads that:
+   * see the routine.
    */
   arcPhase: number;
   /**

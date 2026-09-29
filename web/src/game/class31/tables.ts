@@ -13,7 +13,9 @@
  *
  * The port stores that byte in `Actor.condition`, which is the same offset.
  */
-import type { ArcStage, Class31Attack, Class31Set } from "../../bundle/characters";
+import type {
+  ArcStage, AttackJson, Class31Attack, Class31Set,
+} from "../../bundle/characters";
 import { ThrowerFlag, ThrowerStance, type Actor, type ThrowerActor }
   from "../actor";
 import { T } from "../tables";
@@ -61,11 +63,40 @@ export function ThrowerAttackOf(a: Actor, stance: number, index: number):
  * between the two hands, one arm gone forces the other, both gone gives the
  * head-butt slot.
  */
-export function ThrowerPickAttack(a: Actor, roll: number): number {
-  const picks = Class31SetOf(a)?.attack_picks ?? [];
+export function ThrowerPickAttack(a: Actor, roll: number,
+                                  set: Class31Set | null = Class31SetOf(a)):
+    number {
+  const picks = set?.attack_picks ?? [];
   if (!picks.length) return 0;
   return picks[(roll % 10) + (a.zones & 7) * 10] ?? 0;
 }
+
+/**
+ * `g_class31_throws[obj+0x130C] + (s8)obj+0x131A * 0x10` (`0x00592A00`) --
+ * the row `ThrowerStateCloseAndStrike`, `ThrowerStateStrikeOnTheSpot` and
+ * `ThrowerStrikeConnect`'s throw-table arm read, `{s16 strike; s16 lunge;
+ * f32 distance; s16 hit frame; s16 overlay; u16 cancel mask}`.
+ *
+ * `[port-only]` The engine reads the row whatever it holds; the bundle omits
+ * an entry whose strike clip is not positive (`hod2lib/class31.ts`), and this
+ * hands back the zero row in its place. That is the row the engine reads for
+ * every index a state can draw: the picks give sets 0, 1 and 3 the indices 0,
+ * 1 and 3 and set 2 the indices 4, 5 and 6 (state 24's `zskamere` draws set
+ * 0's, 0, 1 and 3), and the only one of those the bundle omits is row A's
+ * entry 3, which is sixteen zero bytes at `0x00564848`. `[proved]` from the
+ * image. The one omitted row that is **not** zero -- row A's entry 5, a zero
+ * strike clip over `{0x11F, 15.0, 48, 6, 4}` at `0x00564868` -- is not drawn
+ * by any set's picks.
+ */
+export function ThrowerThrowEntryOf(a: Actor, index: number): AttackJson {
+  return Class31SetOf(a)?.strikes?.[String(index)] ?? ZERO_THROW_ENTRY;
+}
+
+/** Sixteen zero bytes, read as a `g_class31_throws` row. */
+const ZERO_THROW_ENTRY: AttackJson = Object.freeze({
+  strike: 0, lunge: 0, distance: 0, hit_frame: 0, overlay_kind: 0,
+  cancel_mask: 0,
+});
 
 /**
  * `g_class31_action_picks[set][band]` — the actor's whole repertoire, as

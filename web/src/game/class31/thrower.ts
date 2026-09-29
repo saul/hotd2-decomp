@@ -599,7 +599,7 @@ function ThrowerRunState(obj: ThrowerActor, dt: number, rng: Rng,
     case ThrowerState.StandAndDecide:
       return ThrowerStateStandAndDecide(obj, dt, rng, host, events);
     case ThrowerState.WaitForPermit:
-      return ThrowerStateWaitForPermit(obj, rng, host);
+      return ThrowerStateWaitForPermit(obj, rng, host, events);
     // Three ids, one handler: the router names 12 and 13, the wait names 9.
     case ThrowerState.Pounce:
     case ThrowerState.PounceNear:

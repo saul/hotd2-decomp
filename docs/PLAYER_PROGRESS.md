@@ -5309,6 +5309,40 @@ now shoves a zombie it bumps 1.8x as hard, because
 dust column when it lands. No class-0x31 actor is distance-ranked, so
 `RankEnemiesByDistance`'s `0x20000000` test never saw the wrong bit.
 
+**`zskamere`'s standing swing is the listing, top to bottom.**
+`ThrowerStateCloseAndStrike` (`FUN_0044EA50`) was re-read against the port.
+Four departures went. The hit test is `obj+0x19C == entry+8` on every frame
+behind no latch (`0x0044EC15`), in the play cursor's own unit. The swing cries
+out with `ActorPlayHitVoice(obj, 3)` (`0x0044EC02`). Sub 0 writes
+`g_players_in_play` into `obj+0x1360` (`0x0044EA93`). And a row the bundle
+omits is the zero row the engine reads, not a port-only exit to state 25.
+`obj+0x1360` is the thrower's arc phase, and nothing reads the value state 24
+writes. Its connect takes the throw-table arm, and every `ActorArcStep` caller
+zeroes the phase before its first step. Both clips now go through
+`ActorSetMotionBlended(.., 0, 5)`, where the port cut to them. The swing's
+cursor holds on 0 for the fade, and the clip ends on `g_motion_play_length`
+rather than its authored length.
+
+The same reading fixed the state on either side of it. `ThrowerStateWaitForPermit`
+(`FUN_0044B3E0`) plays `0x2416A9` on every claim that leads to state 9 or
+0x18 (`0x0044B526`, `0x0044B5A5`), which the port never played. A waiting
+`zskamere` stands in its set's first idle with no draw (`0x0044B458`).
+`ThrowerStateStrikeOnTheSpot` (`FUN_00450B20`) had the missing cry too
+(`0x00450C30`). It also released the permit only when one was held, where
+`FUN_0044CFB0` drops the off-screen latch either way. It now ends each clip on
+`g_motion_play_length` and idles on the one track. `ThrowerStateLeapStrike`
+connects while `IsPlayerAttackable` allows (`0x0044E7C1`), not while
+`obj+0x121 >= 0`, which its own sub 0 guarantees. `ThrowerStateDelayedPounce`
+already matched.
+
+What moved, measured by `web/tools/close_strike.mjs` at stage 4 block 1 on
+seed 1: the first `zskamere` claims at frame 69 and now plays `0x2416A9`, and
+its swing starts at frame 70 with the cry `0x1617A9`. It takes a life at
+frame 110, cursor 35, 40 frames into the swing. Before, the hit came at frame
+105, 35 frames in, because the swing did not hold its first frame. State 25
+follows on cursor 48, `g_motion_play_length(441) - 1`, where the port waited
+for 51.
+
 ### A zombie's swing holds its first frame, and its run becomes its lunge
 
 `ZombieStateStrike` (`FUN_00455A40`) sets both of its clips on the one track

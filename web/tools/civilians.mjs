@@ -1,7 +1,7 @@
 /**
  * Drive every class-0x10 civilian in the shipped stages, headless.
  *
- * `test/port.test.ts` guards the VM against streams written by hand; this
+ * `test/port/` guards the VM against streams written by hand; this
  * guards it against the 136 the game ships. What it can catch that the unit
  * tests cannot:
  *

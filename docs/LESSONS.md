@@ -256,7 +256,7 @@ which takes its argument in ST0, printed 271 times as `__ftol()` and
 session learned to disassemble past the end; nobody asked why the end was
 there. `ghidra/scripts/RepairFlowDamage.java` and
 `ghidra/annotations/prototypes.tsv` fix both at the source, `rebuild` replays
-them, and `tools/verify_ghidra_db.py` fails when the database drifts from
+them, and the `ghidra_db` check fails when the database drifts from
 them. **When the pseudocode is wrong the same way twice, the callee is what
 is wrong: give it a prototype or a flag, prove it, commit it as a row, and
 every caller inherits it.** Choose rows, do not bulk-commit the decompiler's
@@ -409,7 +409,7 @@ port would have shown it.
 **L41 — A marker something counts is not a word you may also use in prose.**
 Consolidating `ActorPlayHitVoice` into one copy closed a real open question in
 `combat/feedback.ts` — the bursting head had been silent because the voice
-tables were on the other side of the layer line — and `STATUS.md`'s
+tables were on the other side of the layer line — and the status report's
 `[open]` markers went **158 to 159**. Two narrative sentences saying *"that
 used to be an `[open]`"* and *"it had been an `[open]`"* each put the literal
 token back, and the counter counts tokens. So the number moved the wrong way
@@ -807,7 +807,7 @@ they are saved. **Check for the assertion, not for the absence of an error.**
 
 **L14 — A check that asserted nothing is not a check that passed.** The
 bundle-gated suites exit **3** for exactly this reason, and
-`tools/verify_all.py` counts skips separately from passes. Four regression
+`npm run verify` counts skips separately from passes. Four regression
 tests were described in the record as passing while asserting nothing on any
 machine without game assets.
 
@@ -822,8 +822,9 @@ control.
 **L16 — A number written in prose is a second source for a fact a checker
 already computes, and it will rot.** Hand-maintained counts in
 `PLAYER_ARCHITECTURE.md` and `PLAN.md` drifted by 5,716 lines, 17 divergences
-and 412 named functions before anyone noticed. Countable facts live in
-[`STATUS.md`](STATUS.md), which is generated; nothing else quotes them.
+and 412 named functions before anyone noticed. Countable facts are printed
+by `npm run status`, which measures them from the tree; nothing else quotes
+them.
 
 **L28 -- A worktree agent has to check where a repo tool wrote.** Two
 `annotate.py` calls were made with a `cd` to the shared checkout in front of
@@ -1310,7 +1311,7 @@ the page would have written at that point and run it. And the rebuild has two
 lists to keep true -- `registry.ts`'s `ENEMY_CLASSES`, the classes the game
 counts, and the walker's `ENEMY_GATE_CLASSES`, the ones a replay retires at a
 room gate -- which had drifted apart by two classes (`L24`'s shape: "I fixed
-it" was true of one copy); `test/port.test.ts` now drives every member of the
+it" was true of one copy); `web/test/port/` drives every member of the
 first through a gate and fails on any the second forgets.
 
 **L78 -- A hash of what was handed over says nothing about what was made of

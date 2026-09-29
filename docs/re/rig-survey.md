@@ -50,7 +50,7 @@ evaluator extrapolates backwards along the opening segment, and at frame 0
 `rot_y` reaches 762,158 BAMS. A `Route` now carries `holdFrame` for the
 literal case.
 
-**[measured]** Sweeping all 51 `CamEvalObjectPath6` call sites for a float
+**[measured]** Sweeping all 52 `CamEvalObjectPath6` call sites for a float
 literal in the time argument finds nine, and only `St1VehicleUpdate`'s two are
 in a transcribed rig. `obj_432840` has the same *shape* of rule -- its pose is
 "sampled ONCE at the table's freeze frame and held" until `obj+0x1320` flips --

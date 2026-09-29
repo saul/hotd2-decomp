@@ -370,7 +370,9 @@ export async function loadStageInto(p: Player): Promise<void> {
     const built = new Date(p.manifest.built);
     const age = (Date.now() - built.getTime()) / 1000;
     status.noteTitle = `Bundle built ${p.manifest.built} by `
-      + `${p.manifest.tool} ${p.manifest.tool_version}`;
+      + `${p.manifest.tool}, format ${p.manifest.format}`
+      + (p.manifest.builder ? `, builder ${p.manifest.builder.hash.slice(0, 12)}`
+        : "");
     status.note = ` · bundle ${
       age < 3600 ? `${Math.max(0, Math.round(age / 60))} min old`
         : built.toLocaleString()}`;

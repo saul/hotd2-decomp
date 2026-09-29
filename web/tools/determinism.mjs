@@ -32,7 +32,9 @@
  *
  * Exit status is 0 only if every run traced identically.
  */
-import { openPlayer, pull, waitForLoad } from "./lib/player.mjs";
+import { openPlayer, pull, waitForLoad, requireBundle } from "./lib/player.mjs";
+
+requireBundle("determinism");
 
 const args = process.argv.slice(2);
 const opt = (n, d = null) => {

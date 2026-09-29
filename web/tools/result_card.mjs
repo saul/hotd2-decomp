@@ -6,7 +6,7 @@
  * Opens a stage's result step (`block/step 2`, op 0) under `?drive=1`, puts
  * the rescue record in place -- `g_civilians_rescued_by_scene[scene]` and
  * `g_rescued_char_types`, exactly the three stores `RecordRescue`
- * (`game/rescue.ts`) makes at each rescue, which `web/test/port.test.ts`
+ * (`game/rescue.ts`) makes at each rescue, which `web/test/port/`
  * drives through the civilian VM and class 0x21 themselves -- and a score and
  * shot counts for the card to show, then plays the step's 420 frames: the
  * script's own `spawn_simple` builds class 0x62 and the card, its own

@@ -227,7 +227,7 @@ export interface GameHost {
    * **Under `Harness.pump` the lag is not one frame, it is all of them.**
    * Nothing draws, so the skeleton holds whatever pose the last real render
    * left, and every pick in a pumped run resolves against that. A harness that
-   * pumps and shoots is measuring the wrong thing; `port.test.ts` stubs
+   * pumps and shoots is measuring the wrong thing; `test/port/` stubs
    * `pickShot` rather than pretending otherwise.
    *
    * Closing it means posing in the engine — the skeleton's forward kinematics

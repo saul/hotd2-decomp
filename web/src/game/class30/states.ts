@@ -197,8 +197,8 @@ export enum ZombieState {
   // -- the captor family: states that work on `obj+0x1394` ----------------
   //
   // Every one of these walks at, mauls or waits on the object the actor was
-  // *built for* rather than at the camera. 59 spawns across the game use one,
-  // and 47 of those are the class-0x10 civilians' own captors.
+  // *built for* rather than at the camera. 70 spawns across the game use one,
+  // and 55 of those are the class-0x10 civilians' own captors.
   /** `ZombieStateWalkToTarget` (`FUN_0045A890`). Walk at the target, then grab. */
   WalkToTarget = 34,
   /** `ZombieStateTargetMotionScript` (`FUN_0045AAA0`). The maul. */

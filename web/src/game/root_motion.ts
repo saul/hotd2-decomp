@@ -37,7 +37,7 @@
  * `CivilianWait.RootMotion` in `game/class10/ops.ts`. "Set once at build and
  * never touched" was true of the two classes that had been read and false of
  * the third: the port carried every civilian wherever her clip's root went —
- * in the 297 of 596 shipped blocks whose wait word does not ask for it just as
+ * in the 307 of 596 shipped blocks whose wait word does not ask for it just as
  * much as in the 289 that do. `[proved]`
  *
  * **The gate has a second arm, and it is a pose.** One `if` in
@@ -261,7 +261,7 @@ export function ApplyRootMotion(obj: Actor, dx: number, dz: number,
   // on every skeletal actor, so classes 0x30 and 0x31 are unaffected by the
   // test; **class 0x10's script turns it on and off per block** — see
   // `CivilianWait.RootMotion`. Without this the port carried every civilian
-  // wherever her clip's root went, in the 297 of 596 shipped blocks whose wait
+  // wherever her clip's root went, in the 307 of 596 shipped blocks whose wait
   // word does not ask for it just as much as in the 289 that do.
   if ((obj.motionFlags & MotionFlag.RootMotion) === 0) return;
   // [port-only] A zero delta transforms to the position itself, bit for bit

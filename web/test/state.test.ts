@@ -2,7 +2,7 @@
  * The snapshot oracle.
  *
  * Every other harness here proves that **playing forward** did not change:
- * `port.test.ts` drives the state machines against hand-written tables,
+ * `test/port/` drives the state machines against hand-written tables,
  * `seek.test.ts` compares a replayed address against a played one, and
  * `scope.test.ts` counts what a rebuild left behind. None of them asks the
  * question the save state actually makes: *does a snapshot determine the next

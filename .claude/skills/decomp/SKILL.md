@@ -76,7 +76,7 @@ and every caller inherits it.
 Then check them:
 
 ```sh
-python3 tools/verify_all.py --only game:annotations --game-dir ~/"THE HOUSE OF THE DEAD 2"
+cd web && npm run verify -- --only game:annotations --game-dir ~/"THE HOUSE OF THE DEAD 2"
 ```
 
 If you renamed anything in the live database over MCP, export it:
@@ -86,7 +86,7 @@ If you renamed anything in the live database over MCP, export it:
 ```
 
 A fresh checkout must rebuild to the same database:
-`./ghidra/run.sh rebuild`. `tools/verify_ghidra_db.py` holds the live
+`./ghidra/run.sh rebuild`. The `ghidra_db` check (`web/tools/repo/ghidra_db.ts`) holds the live
 database to the annotations; if it fails, it names the command that fixes it.
 
 ### 4. Verify
@@ -95,7 +95,7 @@ Pick the check that could actually fail:
 
 * **Whole corpus.** Add a check under `web/tools/checks/`, reading the game
   through `web/src/hod2lib/` with the frame in `web/tools/lib/exe_check.ts`,
-  and give it a row in `tools/verify_all.py`. Aim for a structural invariant —
+  and give it a row in `web/tools/verify_all.ts`. Aim for a structural invariant —
   "1058 of 1058 motion blocks divide exactly by a stride the formula can
   produce" is a real test; "the header looks like a count" is not.
 * **Render it.** For anything geometric, look at it in the player: export the
@@ -107,7 +107,7 @@ Pick the check that could actually fail:
   Then **read the PNG back** (`web/shots/<name>.png`) and say what you see. A
   cat that renders as a cat proves the skeleton, stride, bone indexing and
   rotation order at once. **Log the path** — the user looks at these.
-* Run the full suite before committing: `python3 tools/verify_all.py --game-dir ...`
+* Run the full suite before committing: `cd web && npm run verify -- --game-dir ...`
   — the canonical list, and it counts skips separately from passes.
 
 ### 5. Document
@@ -203,14 +203,14 @@ rewrite history to take it back out.
 
 Leave their uncommitted changes exactly as you found them. Do not "tidy" or
 reformat a shared file. `ghidra/annotations/*.tsv` is **sorted by address** and
-`tools/annotate.py` inserts in order — so adding a row is a one-line diff in
+`npm run annotate` inserts in order — so adding a row is a one-line diff in
 the middle of the file, not a change to its last line, and two agents adding
 unrelated rows no longer collide. Do not reorder it by anything else.
 
 ## Done means
 
 - [ ] Every function you understood is named in `ghidra/annotations/`
-- [ ] The `game:annotations` check passes and the rest of `verify_all.py` still does
+- [ ] The `game:annotations` check passes and the rest of `npm run verify` still does
 - [ ] A check exists that would fail if the reading were wrong
 - [ ] Renders logged with paths, if anything geometric changed
 - [ ] `docs/formats/` or `docs/re/` updated with what was read

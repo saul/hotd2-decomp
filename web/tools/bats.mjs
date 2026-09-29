@@ -7,7 +7,7 @@
  * The report is "the bats don't damage the player when they hit the
  * screen". The strike's only gate is `g_player_state == 5` for either player
  * (`BatDiveUpdate` 0x0042E88A, `BatSwarmUpdate` 0x0042F1B5), and the page left
- * it at 0 -- while `port.test.ts` and `horde.mjs` set 5 by hand and passed.
+ * it at 0 -- while `test/port/` and `horde.mjs` set 5 by hand and passed.
  * So this harness **does not touch the player at all**: the state is whatever
  * `ResetGameGlobals` and the first frame's player task make it, which is what
  * the page runs on.

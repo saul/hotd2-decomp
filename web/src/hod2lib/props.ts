@@ -359,7 +359,7 @@ export async function rigEntries(stage: Stage, hinges: Hinge[],
     };
     const parts: PartModels[] = [[part, [[model, bank as Bank | null, stem]]]];
     out.push({
-      rig, routes: [], anchors: {}, biases: {}, world: false, placements: [],
+      rig, routes: [], world: false, placements: [],
       blocked: "",
       // A fixed pose is the rig writer's own idiom for "the routine hardcodes
       // where this goes", which is exactly the case here.

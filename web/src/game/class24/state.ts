@@ -20,7 +20,7 @@
  * have their own arms — and `obj+0x1330` may never move, because the arc
  * record belongs to no single class.
  *
- * That is the same fact the two non-directive lines in `port.test.ts`'s
+ * That is the same fact the two non-directive lines in `test/port/`'s
  * `unionRejectsCrossClassReads` record, seen from the other end.
  *
  * ## Not an allocated block

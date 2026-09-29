@@ -161,7 +161,7 @@ export function PropUpdateType77(p: BreakableProp, rng: Rng,
   // does resolve against this sphere; what that shot does -- stop there, or
   // go on to what is behind -- is all that depends on it, because the shot
   // arm is latched by then and the prop itself reacts to nothing. Pinned by
-  // `port.test.ts`, "at the point the last draw computed".
+  // `test/port/`, "at the point the last draw computed".
   PropRegisterForShotTest(p, p.shotX, p.shotY, p.shotZ);
 
   if (shot) {

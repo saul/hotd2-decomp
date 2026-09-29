@@ -97,8 +97,6 @@ but the arm's copy** -- every direct, indexed and based operand covering
 `0x009C9F22` was searched, and the pointer dwords of every section -- while
 `FUN_0040A920` writes 1 over it at every boot, after the load (`0x0040A99B`)
 `[proved]`. So in this build it is 1 ("Green") and changes nothing.
-`render/bloodcolour.ts`, `texbank.md` and `combat.md` used to say the
-option "loads one bank over the other"; it does not, and they say so now.
 What loads `scr_blood_red.bin`, if anything, is `[open]`.
 
 ### The cursor
@@ -121,7 +119,11 @@ if cursor moved and the old row was 6 or 7:
 ```
 
 `gun` is `g_player_input_is_gun`, `mode` the PC input mode
-(`GetPlayerInputModes`). Up and down are both tested in one frame.
+(`GetPlayerInputModes`). Mode 6 is the mouse as a gun with the keyboard ORed
+into its pad word -- `InputMapDevicesToMaple`'s case 6 ORs and falls into
+case 5, and `MouseReadButtons` makes the left button `0x4`, A -- and `0xD` is
+player 1's MC PC light gun (`InputModesFromDeviceConfig`) `[proved]`. Up and
+down are both tested in one frame.
 
 ### The input
 
@@ -212,7 +214,7 @@ step once a frame while it sits at either end `[proved]`.
 colour is `alpha << 24 | r << 16 | g << 8 | b` from `g_render_light_colour_r`
 .. `b` (`0x007E7998`, what `SetRenderLightColour` writes), each times 255;
 clear, it is white `[proved]`. That is how the highlighted row and EXIT come
-out red. No sprite the port drew before this screen sets the bit.
+out red.
 
 `OptionsDrawText` (`0x00487CA0`) `[proved]`:
 
@@ -233,8 +235,8 @@ SetRenderLightColour(1, 1, 1)
 ```
 
 Bit 0 of the flags, which every caller sets, is tested nowhere. The rotation
-word passed is 1 for glyphs and 0 elsewhere; the port does not carry it
-`[open]` what `+0x28` does to a quad.
+word passed is 1 for glyphs and 0 elsewhere; what `+0x28` does to a quad is
+`[open]`.
 
 `g_options_glyphs` is `[char*2 + 0x0056AED0]`, but the table is only the 96
 entries from `0x0056AF10` (characters `0x20`..`0x7F`): below that the address
@@ -402,62 +404,3 @@ calibration copied into the aim records `[proved]`.
 `Class2DState5`'s kill arm in Original Mode (the stage-6 boss, class `0x2D`);
 `2` from `FUN_00498ED0` once all ten Training grades are at least 1; `4` from
 `BossModeRecordGrade` once all ten Boss Mode grades are `[proved]`.
-
-## In the port
-
-* **The page's players are mouse guns in PC input mode 6** -- the mouse with
-  the keyboard ORed into its pad word (`InputMapDevicesToMaple`, whose case 6
-  ORs and falls into case 5 `[proved]`). The page's Enter is START and, on
-  this screen, its arrows are the directions -- player 1's keys in
-  `KeyboardReadAsPad` -- and a click is A (the mouse's left button,
-  `MouseReadButtons`). `g_input_mode` was 5 until this screen; 6 is what
-  lets a player change their Sight Graphic and what takes Gun Calibration off
-  the list.
-* **A finger is the light gun, mode `0xD`** (`InputModesFromDeviceConfig`
-  gives player 1's MC PC gun that mode `[proved]`), and the page's pointer is
-  whichever device was used last (`app/device.ts`). So a player whose last
-  press was a touch cannot change their Sight Graphic (drawn at half alpha)
-  and is offered Gun Calibration, as a light-gun player is in the exe.
-* **Sight Speed is not reachable, and Gun Calibration only by a touch.** Sight
-  Speed needs a player on a standard controller, which the port has none of:
-  the cursor steps over the row and the sub-screen's first test sends it
-  back. Gun Calibration needs a gun outside mode 6: a mouse player's cursor
-  steps over it and `OptionsCalibrationEntry` refuses, and a touch player --
-  the light gun, `0xD` -- would be offered it. **The port never offers it**
-  (2026-09-29, the user's choice; `GUN_CALIBRATION_OFFERED` in
-  `game/options/list.ts`, `[diverges]`): the row is hidden and stepped over
-  for every device, because the screen behind it is not ported and the
-  page's guns are aimed by the browser, with nothing to calibrate. The port
-  has the gates (`OptionsSightSpeedFrame`'s, `OptionsCalibrationEntry`'s) and
-  not the screens behind them, which need an aim-record model -- a keyboard
-  crosshair, a raw gun position -- that the port's pointer does not have.
-  Porting `OptionsCalibrationArm` and the nine-state screen behind it is
-  `[open]` work.
-* **Free play is the boot's, by the user's choice** (`ProfileBoot`'s
-  `[diverges]`): a profile with nothing saved starts at -1. Default still
-  writes 5. **And the Continue row always offers free play** (2026-09-29,
-  the user's choice; `FREE_PLAY_ALWAYS_OFFERED` in `game/options/list.ts`,
-  `[diverges]`): the exe's row only goes back to free play with the three
-  unlock bits, none of which the port can set (no Training or Boss Mode
-  stage exists in any bundle), so a player who stepped off it could never
-  return. `g_option_unlocks` is still written and saved as the exe does.
-* The profile the port keeps is the options, the unlocks, each player's
-  record and the saved Original items -- what `G` has. The rankings and the
-  grades are not.
-* **Reaching it.** The page has no title screen: the menu's Options asks
-  for `0x0C` from the game, and the title EXIT asks for is the page starting
-  the stage again -- the same "game started from the title" every load is.
-* **Drawing it.** The screen's sprites are recorded in
-  `G.g_screen_sprite_draws`; the HUD canvas draws those at depth 1 and nearer
-  (the text, the title, EXIT), multiplying a lit one by its tint, and the deep
-  layer the background at 200. The idle dimmer's slot `0x93E` is exported and
-  drawn by `render/screen_idle_dim.ts`; how it layers against the 2D quads is
-  `[open]`.
-* **Keeping it.** `app/profile_store.ts` is the file half of `ProfileSave`
-  and `ProfileLoad`: the port's `ProfileBlock` as JSON under one
-  `localStorage` key, read once as the player is built (`ProfileBoot`) and
-  written on `profile.save` -- the options' EXIT and the Original Mode game
-  over, the two savers the port has. The exe's byte sum and version are its
-  test that the four files read back whole; here a store that will not parse
-  is a profile with nothing saved. Storage blocked, the page plays as with
-  nothing saved and an EXIT does not persist.

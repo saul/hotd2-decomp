@@ -2279,7 +2279,7 @@ console.log("\nthe damage overlay: a plain AssetDrawSlot, drawn by the texture's
   const ctx = { camera } as unknown as Parameters<typeof layer.update>[0];
 
   // The record as the port's spawn and first update leave it -- the state
-  // half is `port.test.ts`'s, driven through `GameUpdate`.
+  // half is `test/port/`'s, driven through `GameUpdate`.
   G.g_player_task[0] = PlayerTask.InPlay;
   const o = G.g_damage_overlays[0]!;
   Object.assign(o, { active: 1, frames: DAMAGE_OVERLAY_FRAMES - 1, x: 0,

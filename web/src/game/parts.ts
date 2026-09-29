@@ -78,7 +78,7 @@ export function SkeletonNodeDrawSuppressed(obj: Actor, bone: number,
  *
  * [port-only] The engine has no such field: it asks the predicate per node
  * inside the draw walk, and the port has no draw walk in `game/`. The answer
- * still has to be the port's — `verify_layers.py`'s `render-drives-the-port`
+ * still has to be the port's — `web/tools/repo/layers.ts`'s `render-drives-the-port`
  * is the rule, and it is the right one here, because the input is actor state
  * that a gore swap can change. So it is computed once a frame and read as
  * state, the same shape `Actor.removed` has.

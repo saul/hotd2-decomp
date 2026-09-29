@@ -227,9 +227,10 @@ export function MotionOf(a: Actor, id: number): BakedMotion | null {
  * "last frame", `ZombieStateMotionCue21`'s exit.
  *
  * Counting in authored frames instead silently loses every cue past halfway.
- * That is what left the civilians alive under their captors: stage 1's four
- * maul cues are 24, 30, 62 and 64 against clips of 41, 26, 43 and 46 frames,
- * so only the 24 ever fired.
+ * That is what left the civilians alive under their captors: stage 1's maul
+ * cues are 24, 30, 62 and 64 in the lists states 34 and 35 step, against clips
+ * of 41, 26, 43 and 46 frames, and 63 and 32 in the state-36 and state-40
+ * lists, against 43 and 26, so only the 24 ever fired.
  *
  * This is the cursor as the draw samples it from the counter. A store to the
  * cursor alone since the last sample (`Actor.cursorStore`) is not in it: the

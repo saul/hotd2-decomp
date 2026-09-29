@@ -104,7 +104,7 @@ export enum HitResultCode {
    * 25 instructions that name `g_hit_result` by address are `ResolveHit`'s
    * 0/1/2/3/5, `ThrowerShotFeedback`'s 5 and reads, and the address of the
    * second player's slot appears nowhere. `[proved]`, and
-   * `tools/verify_split_unreachable.py` counts them. A member rather than a
+   * `web/tools/checks/split_unreachable.ts` counts them. A member rather than a
    * gap because the engine switches on it; see `class30/split.ts`.
    */
   Split = 4,

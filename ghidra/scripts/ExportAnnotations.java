@@ -21,7 +21,7 @@
  *     headers in the body ("# --- combat: shots, damage, ..."); every one of
  *     them was destroyed on export.
  *  3. **It dropped what the database did not have.** A row added with
- *     tools/annotate.py and not yet applied simply vanished -- and globals
+ *     npm run annotate and not yet applied simply vanished -- and globals
  *     were written as `address, name` with no third column at all, so a
  *     single export deleted the comment on 195 of the 282 global rows.
  *
@@ -33,7 +33,7 @@
  *
  * The file wins on **comments**. This used to let the database win whenever
  * it had one, and ApplyAnnotations wrote a comment only when it first named a
- * function, so a comment improved with tools/annotate.py never reached the
+ * function, so a comment improved with npm run annotate never reached the
  * database and the next export put the database's stale copy back: 19 rows in
  * one run, RegisterForShotTest's 1,415 characters replaced by the 455 it had
  * a month earlier. A database comment now reaches the file only for a row
@@ -43,7 +43,7 @@
  * all of them in $HOTD2_OUT/export_comment_conflicts.tsv -- because the
  * database's can be the newer prose (set over MCP and never exported), and
  * the next apply-annotations writes the file's over it. Carry what is worth
- * keeping into the file with tools/annotate.py.
+ * keeping into the file with npm run annotate.
  *
  * What is deliberately NOT exported, because a fresh import recreates it:
  *   - anything still carrying a Ghidra default name (FUN_/DAT_/LAB_/...)
@@ -197,7 +197,7 @@ public class ExportAnnotations extends GhidraScript {
                     Entry e = db.get(addr);
                     if (e == null) {
                         // In the file, not in the database: a row added with
-                        // tools/annotate.py and not yet applied, or a symbol
+                        // npm run annotate and not yet applied, or a symbol
                         // deleted in the GUI. Either way the committed file is
                         // the source of truth and this is not the script that
                         // gets to drop it.
@@ -289,7 +289,7 @@ public class ExportAnnotations extends GhidraScript {
      *
      * These used to be appended at the tail, which is where every merge
      * conflict in `ghidra/annotations/` has come from: two branches adding
-     * unrelated rows to the same last line. `tools/annotate.py` inserts in
+     * unrelated rows to the same last line. `npm run annotate` inserts in
      * order from the other end, and this keeps the invariant whole -- the
      * header block and its blank line stay put, every data row after it is
      * sorted by address.
@@ -483,7 +483,7 @@ public class ExportAnnotations extends GhidraScript {
      * "drops TEB". It does not: Ghidra's synthetic TEB block *is* initialized,
      * so 86 Windows thread-block fields — `TlsSlots`, `LockCount`,
      * `TxnScopeContext`, at addresses like `0xffdfffd4` — were exported as
-     * though they were program globals. `verify_annotations.py` rejects every
+     * though they were program globals. `web/tools/checks/annotations.ts` rejects every
      * one of them with "is in no section", which is the check this should have
      * been making all along: the same one, asked here.
      */

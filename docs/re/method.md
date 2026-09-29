@@ -85,11 +85,11 @@ after a fresh import.
 ## Rule 3: prove it against the whole corpus
 
 Every format claim in `docs/formats/` is backed by an exhaustive check, not a
-sample:
+sample (`web/tools/checks/corpus.ts` asserts each of these):
 
 - `lz` — 793/793 files decompress to exactly the declared size
 - `texbank` — 303/303 banks resolve with mean coverage 1.000
-- `cam` — 100.0000 % byte coverage on all 24 files
+- `cam` — 100.0000 % byte coverage on all 23 files
 - `evt` — 17,150 instructions decode with zero errors, no stub opcodes reached
 - asset slots — 326/326 EXE entry counts equal the container model count
 
@@ -97,7 +97,7 @@ Pick a metric that *collapses* when the interpretation is wrong. Byte coverage
 is ideal: a wrong stride desynchronises a linear walk immediately. "It did not
 crash" is not a metric.
 
-The checks `tools/verify_all.py` runs are the runnable form of this. Add to
+The checks `web/tools/verify_all.ts` runs are the runnable form of this. Add to
 them: a check against the installed game goes under `web/tools/checks/`, reads
 through `web/src/hod2lib/`, and gets a row in `verify_all.py`.
 

@@ -240,7 +240,7 @@ export function ProfileLoad(saved: ProfileBlock | null): number {
  * `g_option_credits` -1, by the user's choice; the exe's reset leaves it at
  * 5, six credits. Only this boot does it: `OptionsFactoryReset` -- the
  * options' Default row -- still writes 5, and a saved profile brings its own
- * setting, free play or not. `web/test/port.test.ts` pins both.
+ * setting, free play or not. `web/test/port/` pins both.
  */
 export function ProfileBoot(saved: ProfileBlock | null): void {
   if (ProfileLoad(saved) === 0) G.g_option_credits = -1;

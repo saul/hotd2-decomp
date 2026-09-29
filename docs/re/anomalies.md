@@ -78,9 +78,6 @@ The other 78 show a positive, quantized delta. Deltas are frequently multiples o
 1024 / 2048, which is consistent with whole unreferenced textures sitting in the
 bank rather than with alignment padding.
 
-`inventory.csv` carries the per-file numbers in `tex_referenced_bytes`,
-`tex_file_bytes` and `tex_delta_bytes`.
-
 The problem this creates: if texture *n* is unreferenced and its size is unknown,
 every texture after it in the bank has an unknown offset. Phase 4 resolves this by
 pooling descriptors across all `pol/` files and then solving the remainder as a

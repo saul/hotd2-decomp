@@ -184,7 +184,11 @@ coli.sceneFiles(1)  // ["coli0.bin", "coli2.bin"] -- what scene 1 loads
 
 `Stage.colisets()` loads a scene's pair, and `web/src/hod2lib/script.ts`
 resolves an opcode `0x10`/`0x11` operand through `coli.pointerToOffset` into
-the instruction's `detail`, which `detailText` renders as:
+the instruction's `detail`: `set` (`full` or `ray_only`) and `meshes`, one per
+pointer, each its file, offset, quad count and surface ids — or only the raw
+`address` when the pointer resolves to no file. One instruction to a line,
+with the script offset and the opcode in front and `clear` for an empty list,
+that reads:
 
 ```
 001438  10 set_collision_set_full  full: coli2.bin+0xb148(6q surf 52,53)
@@ -287,8 +291,9 @@ makes `0x11` read as scenery that stops a bullet but not a body.
 `ThrowerFindWallBeside`, `ThrowerFindCeilingAbove` and
 `TraceActorSurfaceContactPoint` are the class-0x31 probes built on top of them
 — the wall search that decides whether a `zstin` may climb, and the per-frame
-snap that holds it on the wall it climbed. Against the real data, **24 of the
-game's 49 class-0x31 spawns have a wall within reach and 14 have a ceiling**.
+snap that holds it on the wall it climbed. Against the real data, through the
+port's probes, **23 of the game's 51 class-0x31 spawns have a wall within reach
+and 11 have a ceiling** (`web/tools/checks/thrower_walls.ts` holds it).
 
 ### Surface `0x35` is the commonest one in the game
 

@@ -18,7 +18,7 @@
  *
  * **Comments are the file's.** A row's comment is written whenever it differs
  * from the database's -- not only when the symbol is first named, which is
- * what this used to do, so a comment improved with tools/annotate.py never
+ * what this used to do, so a comment improved with npm run annotate never
  * reached the database, and export-annotations, which then let the database
  * win, put the stale copy back over the curated one (19 rows at once; L90). An
  * empty file comment never clears the database's (export-annotations brings
@@ -42,7 +42,7 @@
  * file.
  *
  * Without HOTD2_APPLY this is a report of what would change, and
- * tools/verify_ghidra_db.py asserts that report is empty: a database that
+ * web/tools/repo/ghidra_db.ts asserts that report is empty: a database that
  * says what the committed files say.
  *
  * @category HOTD2
@@ -105,7 +105,7 @@ public class ApplyAnnotations extends GhidraScript {
         applyGlobals(new File(dir, "globals.tsv"));
         applyPrototypes(new File(dir, "prototypes.tsv"));
 
-        // One line per table, in a fixed shape: verify_ghidra_db.py parses them.
+        // One line per table, in a fixed shape: web/tools/repo/ghidra_db.ts parses them.
         // named/created/comments are what apply would write; renamed is a
         // curated name the row disagrees with, which apply never touches.
         String summary = String.format(

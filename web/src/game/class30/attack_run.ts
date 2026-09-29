@@ -116,7 +116,7 @@ export function ZombieStateAttackRun(obj: ZombieActor, dt: number,
     // named with its callees in `class30/split.ts`. Nothing the shipped game
     // runs can reach this arm: `SplitArmed`'s one class-0x30 writer is
     // `ZombieStateCollapseToCondition4` (`FUN_0045E660`), and no instruction
-    // or data enters that state. `tools/verify_split_unreachable.py` holds it.
+    // or data enters that state. `web/tools/checks/split_unreachable.ts` holds it.
   }
 
   const band = TestApproachRing(obj);

@@ -36,7 +36,7 @@
          make a panel silently disappear. -->
     <div id="app"></div>
     <!-- The export screen's mount point, and the reason it is here rather
-         than created on demand: `no-dom-insertion` in `tools/verify_layers.py`
+         than created on demand: `no-dom-insertion` in `web/tools/repo/layers.ts`
          is an error rule at zero, and it is right -- an element appended by a
          layer has two owners and paints in whatever order the two happened to
          mount in. So the page declares the element and React owns what is

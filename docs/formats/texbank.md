@@ -2,9 +2,13 @@
 
 **Status: solved.** Implemented in
 [`web/src/hod2lib/texbank.ts`](../../web/src/hod2lib/texbank.ts) and
-[`web/src/hod2lib/exetab.ts`](../../web/src/hod2lib/exetab.ts). All 303 banks
-with a descriptor table resolve **exactly**: every texture lands inside the file
-and the last one ends precisely at the file size.
+[`web/src/hod2lib/exetab.ts`](../../web/src/hod2lib/exetab.ts). 420 banks have a
+descriptor table. The 303 of them that pair with a `pol/` file all resolve
+**exactly**: every texture lands inside the file and the last one ends precisely
+at the file size (`web/tools/checks/corpus.ts` holds this). Of the other 117,
+all `scr_` screen banks, 50 resolve exactly under `bankFromExe` too; the 67 that
+do not all hold PAL4 textures -- in 66 the last texture ends past the file, and
+in `scr_training_game` an earlier one does.
 
 ## The key fact: metadata lives in the executable
 
@@ -188,8 +192,9 @@ about which option to reproduce rather than a fact about the format.
 
 - **Windows BMP.** 47 `tex/` files start `42 4D`; `tex/segalogor_00.bin` is
   256×256 24-bit. PC-port boot logos. Detect by magic and pass through.
-- **Empty.** 23 files are a 4-byte zero header — a valid compressed file whose
-  uncompressed size is 0.
+- **Empty.** 23 files hold no data: twelve are a 4-byte zero header — a valid
+  compressed file whose uncompressed size is 0 — and eleven are zero bytes
+  long. `web/tools/checks/corpus.ts` holds the count.
 - **23 `pol/` assets have no descriptor table** in the exe and fall back to the
   computed-size path.
 

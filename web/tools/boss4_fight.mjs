@@ -34,7 +34,7 @@
  * refused), and after the death the script's `wait_enemies_present 0` (op 70)
  * waits on them. So the outro camera -- path 182 or 190, whose frame 0 is the
  * pair in the boss's tail that despawns him -- is not reached here; the
- * despawn is `web/test/port.test.ts`'s to assert.
+ * despawn is `web/test/port/`'s to assert.
  */
 
 import { readFileSync } from "node:fs";

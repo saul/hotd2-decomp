@@ -1,6 +1,6 @@
 ---
 name: gameplay-port
-description: Workflow for porting The House of the Dead 2's gameplay out of the EXE into the browser player's web/src/game/ as a faithful transcription — the exe is the spec and the current port is a draft, rewritten wherever a reading contradicts it. Read with the decomp skill first, one exe function to one TS function under its Ghidra name, state where the engine keeps it, no port-only gameplay logic, every change leaves fewer divergences, then verify with tools/verify_port.py and npm run test:port. Use for any task that adds or changes enemy behaviour, damage, scoring, spawn classes, the camera director, or player state in the player.
+description: Workflow for porting The House of the Dead 2's gameplay out of the EXE into the browser player's web/src/game/ as a faithful transcription — the exe is the spec and the current port is a draft, rewritten wherever a reading contradicts it. Read with the decomp skill first, one exe function to one TS function under its Ghidra name, state where the engine keeps it, no port-only gameplay logic, every change leaves fewer divergences, then verify with web/tools/repo/port.ts and npm run test:port. Use for any task that adds or changes enemy behaviour, damage, scoring, spawn classes, the camera director, or player state in the player.
 ---
 
 # Gameplay port
@@ -37,7 +37,7 @@ is declared carries its reason on the spot, names the inputs that would make it
 matter and shows each reaches the port (L57), and has an assertion pinning
 what the code actually does (L26).
 
-**Every change leaves `verify_port.py`'s `divergences:` and `uncited exports:`
+**Every change leaves `web/tools/repo/port.ts`'s `divergences:` and `uncited exports:`
 no higher, and lower where it can.** A divergence you can resolve in code you
 are already in is part of the task.
 
@@ -138,7 +138,7 @@ the refactor that would satisfy it, and ask whether to do that refactor first
 /** `g_attack_permits` — `0x009A2BA0`, one per player. */                // a global
 ```
 
-Always both names: the name is for people, the address for `verify_port.py`,
+Always both names: the name is for people, the address for `web/tools/repo/port.ts`,
 which checks both against the TSVs and fails a dash citation with no function
 of that name in the file. **Inside the file that ports a routine, refer to it
 by bare address** — the parenthesised form there removes it from coverage
@@ -147,22 +147,22 @@ by bare address** — the parenthesised form there removes it from coverage
 ## The loop
 
 0. **Orient.** `git log --oneline -10`, `git status --porcelain`, `ListAgents`.
-   Run `python3 tools/verify_all.py` for a green baseline and note
-   `verify_port.py`'s `divergences:` and `uncited exports:`.
+   Run `cd web && npm run verify` for a green baseline and note
+   `web/tools/repo/port.ts`'s `divergences:` and `uncited exports:`.
 1. **Read** the whole routine and every call it makes, starting from its
    dispatch table (`g_class_handlers` `0x009A2280`, `g_class30_states`
-   `0x00592AE8`). Name everything with `tools/annotate.py` first.
+   `0x00592AE8`). Name everything with `npm run annotate` first.
 2. **Reconcile.** Read the port's existing version and what surrounds it. List
    every difference from what you just read, and everything built on a belief
    the reading overturns (rule 4). That list is the scope of the change.
 3. **Transcribe**, and rewrite what step 2 found.
-4. **Test** in `web/test/port.test.ts`, and watch the assertion fail without
+4. **Test** in `web/test/port/` (the area file for the code), and watch the assertion fail without
    the change. It asserts the exe, not the old port: driven from
    `ResetGameGlobals` rather than a gate set by hand (L49), at a non-identity
    input (L48), on a signal only this code can produce (L47), against numbers
    derived from the exe rather than measured from the output (L65). If it is
    visible, look at it in the page (L19, L25).
-5. **Verify.** `python3 tools/verify_all.py`; a skip is not a pass (L14). The
+5. **Verify.** `npm run verify`; a skip is not a pass (L14). The
    two counts from step 0 are no higher.
 6. **Document**: the routine's doc comment; `docs/formats/*.md` and
    `docs/re/*.md` for what the reading found; `docs/PLAYER.md` if the tree or
@@ -178,8 +178,8 @@ Encouraged, and **global or a bug**, in one commit. Sweep with
 in place (sorted by address; a rename does not move it); the database over MCP,
 reading the `from` in each result (L52), then `./ghidra/run.sh
 export-annotations` and its diff (L13); `game/**` and every comment in either
-citation form; docs and tools. `verify_port.py` and the `game:annotations` check
-(`verify_all.py --game-dir`) check the TS and the TSV; only the sweep checks
+citation form; docs and tools. `web/tools/repo/port.ts` and the `game:annotations` check
+(`npm run verify -- --game-dir`) check the TS and the TSV; only the sweep checks
 the docs.
 
 ## Done means
@@ -191,5 +191,5 @@ the docs.
       and carries its reason, its inputs and an assertion
 - [ ] `divergences:` and `uncited exports:` no higher than at the start
 - [ ] A new assertion, seen failing without the change
-- [ ] `verify_all.py` green, skips named
+- [ ] `npm run verify` green, skips named
 - [ ] Wrong turns in the commit message; only your own hunks staged

@@ -208,7 +208,7 @@ export const GENERIC_RADIUS: Partial<Record<number, number>> = {
  *   and then kills itself. Ten shipped spawns of scenery in total, missing
  *   for exactly the reason the van's body was.
  *
- * `tools/verify_prop_slots.py` holds whatever this set says, and
+ * `web/tools/checks/prop_slots.ts` holds whatever this set says, and
  * `web/tools/checks/prop_pose.ts` **derives the set itself** out of the EXE and
  * the shipped scripts, and fails either copy of it — the port's here and the
  * exporter's in `hod2lib/bundle.ts`. Fourteen of the fifty routines pass

@@ -198,7 +198,7 @@ function DrawSlotFor(a: Actor): number | null {
       //
       // Off `a.hum`, not off the bundle: `ScriptedHumanoidInit` caches the
       // descriptor word on the actor precisely so this is a field read.
-      // `tools/verify_layers.py`'s `render-drives-the-port` is what says a
+      // `web/tools/repo/layers.ts`'s `render-drives-the-port` is what says a
       // render layer may not call into `game/` for an answer, and it is right
       // -- reaching for `HumanoidProgramOf` here is one refactor away from
       // reaching for a decision.

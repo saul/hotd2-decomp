@@ -2,7 +2,7 @@
  * The two UI rules that need an AST, and that fail quietly.
  *
  * Most of what the UI layer promises is already held by something stronger.
- * The layer boundaries are `tools/verify_layers.py`'s job. "The projection is
+ * The layer boundaries are `web/tools/repo/layers.ts`'s job. "The projection is
  * plain data" is a runtime property and `test:state` and `test:projection`
  * prove it better than any static check could. The command union is
  * exhaustive because it is a closed union in an exhaustive switch — the
@@ -36,7 +36,7 @@
  *
  * **Why not ESLint.** There is no lint config in this repo, it would be about
  * eight dependencies and a config file, and it would cost something concrete:
- * ESLint has no equivalent of `verify_layers.py`'s ratchet baselines, and the
+ * ESLint has no equivalent of `web/tools/repo/layers.ts`'s ratchet baselines, and the
  * ratchet is the mechanism that let steps 8 to 12 land at all. Error and warn
  * are not "this count may fall but never rise". So: the same two-severity
  * shape as every other `verify_*`, over the `typescript` already in

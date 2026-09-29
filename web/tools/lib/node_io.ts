@@ -6,7 +6,7 @@
  * the player. `src/hod2lib/` is pure and takes its bytes from an interface;
  * this is one implementation of that interface and the browser's is the other.
  * Putting it in `src/` would put `node:fs` inside the engine layer, which is
- * the boundary `tools/verify_layers.py` exists to hold.
+ * the boundary `web/tools/repo/layers.ts` exists to hold.
  */
 import { deflate } from "node:zlib";
 import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";

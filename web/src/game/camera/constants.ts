@@ -7,7 +7,7 @@
  * citation, not in the bundle: they were in `manifest`-adjacent JSON, which
  * meant the number lived in `hod2lib/approach.ts` with the function that
  * proves it while the TypeScript using it had a bare `?? 14` and
- * `verify_port.py` could not see either half.
+ * `web/tools/repo/port.ts` could not see either half.
  *
  * The one thing here that is *not* in this file is the turn-rate curves
  * themselves: `PTR_DAT_00576C04` is four 64-byte arrays in `.rdata`, so those

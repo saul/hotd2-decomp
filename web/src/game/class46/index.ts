@@ -609,7 +609,7 @@ export function SpawnBatWings(obj: Actor, sub: BatTail, rng?: Rng): void {
  * which neither an evt offset nor {@link BatChildAt} ever sets.
  *
  * `hod2lib/characters.ts` writes the same address on the wing's synthetic
- * row (`CLASS46_WING_AT_BIT`), and `verify_port.py` cannot see that the two
+ * row (`CLASS46_WING_AT_BIT`), and `web/tools/repo/port.ts` cannot see that the two
  * agree -- so each names the other, and `render.test.ts` adopts one through
  * the other.
  */

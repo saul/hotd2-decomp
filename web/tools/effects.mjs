@@ -1,7 +1,7 @@
 /**
  * Are the shot effects actually reaching the screen?
  *
- * `test/port.test.ts` asserts the pools and `test/render.test.ts` asserts the
+ * `test/port/` asserts the pools and `test/render.test.ts` asserts the
  * nodes, and both were green while the page showed nothing — because neither
  * can see the one thing that has to be true for a viewer: that the bundle
  * carries the `slots_effect` models and the layer found them. This loads the

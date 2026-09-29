@@ -715,7 +715,7 @@ export function ThrowerStateCorpseBlink(obj: ThrowerActor, dt: number,
  * lived privately in `class31/scripted.ts` doing only the permit release —
  * so a thrower that finished its grab-and-throw never left either count, and
  * `wait_enemies_alive` after one could not open. One exe function, one TS
- * function; `verify_port.py` now checks it by address.
+ * function; `web/tools/repo/port.ts` now checks it by address.
  */
 export function ThrowerLeave(obj: ThrowerActor): void {
   // `ThrowerLeave` and `ThrowerReleaseSlotOnDeath` are the engine's two callers

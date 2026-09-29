@@ -11,7 +11,7 @@
  * deleted.
  *
  * So the boundary is now structural: `gen_schema_hash.py` names the declaration files
- * it hashes, and `verify_exporters.py` fails if one of them grows runtime
+ * it hashes, and `web/tools/repo/exporters.ts` fails if one of them grows runtime
  * code. Declarations describe what a bundle contains; this file decides what
  * to do about it, and only the former can be disagreed with by a bundle.
  */
@@ -143,7 +143,7 @@ export function manifestRefusal(m: Manifest | null | undefined): string | null {
   //
   // The cost of refusing is one re-export, and only when a declaration
   // actually changed: the digest covers the declarations, not the file, so
-  // editing a doc comment here costs nothing. See `tools/gen_schema_hash.py`.
+  // editing a doc comment here costs nothing. See `web/tools/gen/schema_hash.ts`.
   if (m.schema?.hash !== SCHEMA_HASH) {
     const drift = schemaDrift(m.schema?.files);
     return `this bundle was exported against a different web/src/bundle/ `
@@ -181,11 +181,11 @@ export function stageFormatRefusal(what: string,
  * refusing would make every unrelated fix in `hod2lib/` cost a forty-minute
  * re-export before anything could be opened at all.
  *
- * The case this exists for: `nl1.dropCollapsedUvTriangles` was deleting 3-5%
- * of every stage's geometry, and switching it off moved no declaration and no
- * `BUNDLE_FORMAT`. A stage already in the browser's cache therefore went on
- * winning over the rebuilt one -- with holes in it -- however many times the
- * tree was exported, and nothing on the page said why.
+ * The case this exists for: an exporter fix that changes what a stage holds
+ * -- keeping the 3-5% of triangles a UV-area filter drops, say -- moves no
+ * declaration and no `BUNDLE_FORMAT`. Without this, a stage already in the
+ * browser's cache goes on winning over the rebuilt one -- holes and all --
+ * however many times the tree is exported, and nothing on the page says why.
  */
 export function stageBuilderStale(builder: string | undefined): boolean {
   return builder !== BUILDER_HASH;

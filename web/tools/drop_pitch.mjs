@@ -44,7 +44,9 @@
  * Exits 1 on a failed assertion. Needs a bundle and playwright, like
  * `cam_jump.mjs`, so it is not in `verify_all.py`.
  */
-import { openPlayer, waitForLoad } from "./lib/player.mjs";
+import { openPlayer, waitForLoad, requireBundle } from "./lib/player.mjs";
+
+requireBundle("drop_pitch");
 
 const args = process.argv.slice(2);
 const flag = (n) => args.includes(`--${n}`);

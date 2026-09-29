@@ -245,6 +245,12 @@ switch variant (JA past 3 -> return):
 Increments **no** enemy counter; the flier joins the counters only when its
 entrance ends.
 
+`obj+0x1FC` is `char+0x68`, the object rotation order `SkeletonApplyRootMotion`
+(`FUN_00410C50`) switches on through the table at `0x00411038`: 0
+`Rx Ry Rz`, 1 `Rx Rz Ry`, 2 `Ry Rx Rz`, 3 `Ry Rz Rx`, 4 `Rz Rx Ry`, else
+`Rz Ry Rx`, after `T(obj+0x40)`. The flier and its sub-actor (5) draw
+`T · Rz · Ry · Rx`; the walker (1, `Class23Init`) `T · Rx · Rz · Ry`.
+
 ### `Class22CutsceneHoldUntilChapterCard` — `FUN_0049B280`, `g_class22_states[0]`
 
 Stage 1 block 0 only. `sub` = the sub-actor. Jump table `0x0049B3DC`.
@@ -510,10 +516,11 @@ pop
 CamBlockSetAnglesFromLookAt(&g_camera_block_eye, &g_camera_block_target, 0)   ; 0x0049CDBC
 ```
 
-`g_camera_driver_held` (`0x009CA094`, named by the banner's port);
-`CameraDriverSelectMode` (`0x004026AB`) forces `g_camera_mode` 6
-(`PoseHookNone`, the camera stops) while it is 1, which is what lets this
-routine write the camera block by hand.
+`g_camera_driver_held` (`0x009CA094`): `CameraDriverSelectMode`
+(`0x004026AB`) forces `g_camera_mode` 6 (`PoseHookNone`, the camera stops)
+while it is 1, which is what lets this routine write the camera block by hand.
+`BossIntroBannerUpdate` and `Class14StateScriptedBreak` raise the same global
+for the same purpose.
 
 `g_class22_landing_bounce` (`0x00570E88`) is `float[0x00570C78 + frame*4]` at
 frames `0x84..0x8C`: 7.4 6.6 4.55 4.0 3.1 2.8 2.4 1.8 1.3. The counter is
@@ -525,8 +532,8 @@ after 103 frames. The fall from y 40 is `a·n(n+1)(n+2)/6` with
 stage 5** (ground -70.9, `0x0097889C` in block 1), so both land on index
 `0x84` = exactly 7.4 — arithmetic on shipped data, not a claim about the
 routine. A landing before `0x84` would index `g_class22_path_keys` and
-`g_class22_path_speed` as floats; the port should transcribe the base
-arithmetic over the bytes `0x00570C78..0x00570EAB`, not a nine-entry table.
+`g_class22_path_speed` as floats: the read is base arithmetic over the bytes
+`0x00570C78..0x00570EAB`, not a nine-entry table.
 
 The stage-1 tail cue (path 0x31, frame 400) is never reached: `g_cam_path_length[0x31]` is 230
 and the block plays 0x31 over frames 0..0xE6, so the corpse stays in the pool
@@ -534,7 +541,7 @@ until the stage ends. Stage 5's (0xCF, 140) is.
 
 ### `Class22DrawAndPoseSubActor` — `FUN_0049D770`
 
-Called by every state; **not** an advance (the old name said so).
+Called by every state; it draws and poses, and is **not** an advance.
 
 ```
 LightsUseSecondarySet()                                   ; 0x0041DC70
@@ -578,10 +585,12 @@ if rec[0] == 0x2BB:                                   ; node 1's slot
       RotZ(trunc(9102 * a[0x578] / 26396)); RotX(trunc(21845 * a[0x570] / 32768)); AssetDrawSlot(0x2B4); pop
 ```
 
-`a[0x3C0]/a[0x3C8]` are node 3's record words `+0x04/+0x0C`, `a[0x570]/a[0x578]`
-node 6's (`[likely]` rotations the sampler wrote). The divide is the magic
-`0x9EE633C1` with `SAR 14`, i.e. by 26396; the other is `x*21845 >> 15` with
-round-to-zero. Render-only.
+The arm keys on node 1's **slot** (`0x2BB`, the flier's bone 1), not on the
+node. `a[0x3C0]/a[0x3C8]` are node 3's draw-record words `+0x04/+0x0C`,
+`a[0x570]/a[0x578]` node 6's -- the rotations `FUN_00411700` writes there as
+it rotates the node (the arm is `0x0049DA01`..`0x0049DB36`). The divide is the
+magic `0x9EE633C1` with `SAR 14`, i.e. by 26396; the other is `x*21845 >> 15`
+with round-to-zero. Render-only.
 
 ### Helpers
 
@@ -770,7 +779,7 @@ reference is `0x0048FAFF`); `FUN_0049B050` is referenced only from data at
 | `0x0057041C` | `g_class23_knockback_by_rank` | 0.6 0.5 0.5 0.4 0.4 0.4 0.3 0.3 0.3 0.3 0.3 0.2 0.2 0.1 0 0 |
 | `0x0057045C` | `g_class23_training_x_by_lesson` | 258.1 243.1 228.1 213.1 198.1 |
 
-Scalars inside `.text`/`.rdata` the port keeps as named constants: 70.0
+Scalars inside `.text`/`.rdata`: 70.0
 `0x00570488`, 170.0 `0x00570F1C`, 250.0 `0x00570F20`, 591.0 `0x00570F24`, 410.0
 `0x00570F28`, 310.0 `0x00570F2C`, 1.1 `0x00570F30`, 1.3611e-4 `0x00570F38`
 (double), 7.4 `0x00570F40`, -1180 `0x00570F44`, -1238 `0x00570F48`, 60.0
@@ -840,9 +849,9 @@ the compiler folded the index): `[0x2F]` 830 at `0x00576DF4`, `[0x30]` 300 at
 * `BossIntroBannerSpawn` (`0x00437A70`) is called **only for variant 1**, from
   `Class22Init` at `0x0049B204`, with `g_class22_intro_banner` (`0x00570EC8`):
   flag **2**, cam path **0x30**, end frame **300**, and `0x181D` at `+0x06`
-  (the field class 0x19's port calls `message`; here it is asset slot
-  `boss1z.bin[33]`). The banner waits for `g_script_flags[2]`, which the flier
-  raises at camera frame 830. Variant 2 (stage 5) shows no banner.
+  (asset slot `boss1z.bin[33]`). The banner waits for `g_script_flags[2]`,
+  which the flier raises at camera frame 830. Variant 2 (stage 5) shows no
+  banner.
 
 ## 10. The gates
 
@@ -850,7 +859,7 @@ the compiler folded the index): `[0x2F]` 830 at `0x00576DF4`, `[0x30]` 300 at
 |---|---|---|
 | st1 0 | `wait_script_flag 0xF8` `0x000304` | the chapter card (class 0x60), not this class. Variant 0 *reads* 0xF8 to leave state 0 |
 | st1 14 | `wait_enemies_alive 0` `0x005A50` | companion `+1` at spawn (`0x0048FE1D`) holds it before the flier joins; flier `+1` at `0x0049B6BB`; closes to 0 at the companion's collapse (`0x004901AE`) and the flier's death (`0x0049C98E`), plus whatever else the block spawned |
-| st1 14 | `wait_script_flag 3` `0x005A70` | **`0x0049CC95`** in `Class22Death` sub 5, 300 orbit frames after the camera freed. The other literal writer of flag 3, `0x00445976` (`FUN_00445050`), belongs to another class `[open]` whether it runs here |
+| st1 14 | `wait_script_flag 3` `0x005A70` | **`0x0049CC95`** in `Class22Death` sub 5, 300 orbit frames after the camera freed. The other literal writer of flag 3, `0x00445976` (`FUN_00445050`), is `g_prop_behaviours[9]` (its only reference is the pointer at `0x005926CC`, `0x005926A8 + 9*4`), a behaviour of the prop classes 0x12/0x13/0x15; stage 1's only such spawn is class 0x12 in block 6, so flag 3 here is `Class22Death`'s alone |
 | st1 16 | `wait_enemies_alive 0` `0x006B30`, `wait_script_flag 3` `0x006B50` | the same (block 16 is the continue restart: the camera is put straight to path 0x2F frame 0x33E, so the ride-in hands over on its first frame) |
 | st5 1 | `wait_enemies_alive 0` `0x00146C` | companion `0x0048FE1D`/`0x004901AE`; flier `0x0049D10B`/`0x0049C98E` |
 | st5 1 | `wait_script_flag 0` `0x001484` | **`0x0049CC85`** in `Class22Death` sub 5 |
@@ -877,18 +886,16 @@ tests it: there is no `+0x1390` operand in `0x0049B640`, `0x0049CE10`,
 | st5 `0x14AC` (return) | `0xCF` / 140 | block 2 step 2 plays `0xCF` 50..244 |
 
 So the stage-1 pair lies in the pool until the stage ends, and stage 5's goes in
-block 2. A seek's replay retires the flier's record on the dead flag or, for the
-cameo, the cue (`Class22OutlivedByReplay`). The walker is never a script record:
-it is made by the flier's entrance.
+block 2. The walker is never a script record: it is made by the flier's
+entrance.
 
-## 11. What the bundle exporter must carry
+## 11. The files the two classes draw from
 
-* **Nested descriptors.** For a class-0x22 placement with variant 1 or 2,
-  `tail+0x10` → the class-0x23 descriptor (header + tail) as a linked
-  placement the class can spawn; class 0x10's children in `characters.ts` are
-  the precedent. `spawnres` needs a class-0x23 rule (literal 0x44).
+* **Nested descriptors.** For variant 1 or 2, `tail+0x10` points at the
+  class-0x23 descriptor (header + tail) the flier spawns itself (§1, §4).
 * **Character types** 0x44, 0x45, 0x46 — all three resolve through
-  `g_character_skeletons` into slots `0x28F..0x2C8` (16/16/7 nodes), which the
+  `g_character_skeletons` into slots `0x28F..0x2C8` (bone counts 16/16/7 with
+  the root, so 15/15/6 nodes; `web/tools/checks/skeletons.ts` holds both), which the
   exe lists first under `char_adv04.bin`. **The game draws them from
   `boss1q.bin`, `boss1z.bin` and `boss1z_wing.bin`.** `[proved]` A whole-file
   load (opcode `0x52`) makes a file resident slot by slot: `FUN_00418E40`
@@ -901,92 +908,26 @@ it is made by the flier's entrance.
   and the same texture images in both files, numbered from each file's own
   bank; the walker's are not — slot `0x29D`'s meshes 4 and 6 are different
   geometry in `boss1q.bin`, and its texture 1 (64×128) is not
-  `char_adv04.bin`'s texture 79 (64×64). The exporter builds all three from
-  the stage's own loads (`characters.ts`, `judgmentBuild`).
+  `char_adv04.bin`'s texture 79 (64×64).
 * **Motions**, all in `mot/boss1.bin` (bank 4): flier 0x408..0x416; companion
   0x383..0x391, 0x393, 0x394 (0x387, 0x392 unused by these classes); sub-actor
-  0x0F, 0x10, 0x12, 0x13, 0x14; with `g_motion_play_length` for each.
+  0x0F, 0x10, 0x12, 0x13, 0x14.
 * **Per-instance model overrides:** the flier's node 2 cycles slots
   0x2A7..0x2B3 (`0x2A5 + 2..14`); node 1 draws extra slots 0x2B4/0x2B5; the
   companion's node 2 has slot 0 and extent 0 (not drawn, not shootable).
   Effects: `boss1q.bin[94]` (0x17C8), `common.bin` 25..39 (0x94..0xA2).
 * **Object paths** from `op_st1`: 0x100..0x103 (stage 1 cutscene/ride-in),
   0x104..0x13F (phase 1), 0x140..0x144 (phase 2), 0x147 (ring curve); from
-  `op_st5`: 0x17F. **Stage 5 needs `op_st1.bin`**: the engine's per-scene cam
+  `op_st5`: 0x17F. **Stage 5 loads `op_st1.bin`**: the engine's per-scene cam
   list (`FUN_004040A0`, `PTR 0x004C4990[g_scene_index]`) loads files
-  `{10, 20, 16}` = `cp_st5`, `op_st5`, **`op_st1`** for scene 4. The
-  exporter's `loadCamPaths` (`web/src/hod2lib/stage.ts`) loads the same list
-  through `ExeTables.sceneCamFiles`, plus `cp_gmovr`. Original Mode also
-  loads file 0x16 (`op_org`) per entry.
-* **Tables:** every row of §6 (they are `.rdata`).
-* **Sounds and lines:** the ids in §4–5; lines 0x1B, 0x1C, 0x1D.
+  `{10, 20, 16}` = `cp_st5`, `op_st5`, **`op_st1`** for scene 4. Original Mode
+  also loads file 0x16 (`op_org`) per entry.
 
-## 12. What the port will need
-
-Written before the port, and kept as the reading's statement of need. The
-port meets each point with the node-1 seat and extras in `render/`, the camera
-block under `g_camera_driver_held`, the per-player shot bytes and the draw-site
-clocks.
-
-* **`GameHost`:** `objectPath` (`CamEvalObjectPath6`) for every path above;
-  node 1's **world matrix** of the flier (position *and* ZYX Euler) to seat the
-  sub-actor — `boneWorld` returns a position only; node 1's world point for
-  `obj+0x100` (both classes: shot centre and camera point); the view-space
-  sphere of a hit part (`Class23TakeShots`' spark point) — render-only, can be
-  dropped; `CamEvalPath7` for the ring — render-only.
-* **Camera:** `Class22Death` drives `g_camera_block_eye/target` itself under
-  `g_camera_driver_held = 1` (camera mode 6) and calls `CamBlockSetAnglesFromLookAt`.
-  `game/camera/mode.ts` records that override as not modelled. The faithful
-  port needs mode 6 in the camera driver and the block eye/target as the
-  camera's source of truth during the orbit; this is shared with class 0x14's
-  scripted break and the banner (`BossIntroBannerUpdate` writes the same
-  global).
-* **Shot results:** both classes own their shot result (`ownsShotResult`):
-  part code per player at `obj+0x190+p`, bits 1/2/3 of `obj+0x34`. The port's
-  one-`pendingHit` model drops the both-players arms (`g_active_player == 2`
-  damage 25, the kill coin flip).
-* **Clocks:** `obj+0x194` advanced by the state after the draw; root motion
-  (companion walk) happens in the draw, so the port's `ActorAdvanceMotion`
-  equivalent must run where `Class23Draw` / `Class22DrawAndPoseSubActor` are
-  called, including the frames a state returns *without* drawing (none drawn,
-  none advanced).
-* **Layers:** the sub-actor has no gameplay role (frozen bit, no shot, no
-  counters) but its clip choice depends on game state; keeping `+0x1350/+0x1354`
-  in the actor and posing it in `render/` needs a render-side hook for "seat
-  on the parent's node 1", which `render/` may compute itself from the parent's
-  skeleton — no layer rule is broken by that. `Class22DrawBonePart` is
-  render-only.
-
-## 13. Open questions
-
-Settled in the port's phase:
-
-* ~~Which pol file supplies the drawn models~~ — the stage's own loads
-  (§11). `[proved]`
-* ~~`[0x009CA094]` has no name~~ — `g_camera_driver_held`, named with the
-  banner.
-* ~~`FUN_00445050` also writes `g_script_flags[3]`~~ — it is
-  `g_prop_behaviours[9]` (its only reference is the pointer at `0x005926CC`,
-  `0x005926A8 + 9*4`), a behaviour of the prop classes 0x12/0x13/0x15. Stage
-  1's only such spawn is class 0x12 in block 6; none is in blocks 14 or 16.
-  Flag 3 there is `Class22Death`'s alone. `[proved]`
-* ~~`char+0x68`~~ — the object rotation order `SkeletonApplyRootMotion`
-  (`FUN_00410C50`) switches on through the table at `0x00411038`: 0
-  `Rx Ry Rz`, 1 `Rx Rz Ry`, 2 `Ry Rx Rz`, 3 `Ry Rz Rx`, 4 `Rz Rx Ry`, else
-  `Rz Ry Rx`, after `T(obj+0x40)`. The flier and its sub-actor (5) draw
-  `T · Rz · Ry · Rx`; the walker (1) `T · Rx · Rz · Ry`. `[proved]`
-* ~~`Class22DrawBonePart`'s node-1 arm~~ — it keys on the node's **slot**
-  (`0x2BB`, the flier's bone 1), not the node, and draws `0x2B5` under
-  `T(-0.778, 1.49, 0) RotZ(trunc(9102·rz₃/26396)) RotX(trunc(21845·rx₃/32768))`
-  and `0x2B4` under the mirror with node 6's angles, `rx`/`rz` being the draw
-  record's `+0x04`/`+0x0C` (`FUN_00411700` writes them as it rotates the
-  node). `[proved]` from `0x0049DA01`..`0x0049DB36`.
-
-Still open:
+## 12. Open questions
 
 1. `obj+0x13C0` on class 0x23 (x − 50) has no reader found in the class.
 2. `Class22Phase2TakeShots` with bit 3 up and no part code would pay player −1.
-3. The Training subtype-2 routines were read from the decompilation only, and
-   are not ported: no bundle carries `trnevtbl.bin`.
+3. The Training subtype-2 routines were read from the decompilation only, not
+   re-verified against the bytes.
 4. The sub-actor's `obj+0x34` bit `0x80000`: nothing reads it for an actor
    that is never updated, and no reader elsewhere has been found.

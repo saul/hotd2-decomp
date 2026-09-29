@@ -247,7 +247,7 @@ export interface BodyCreature {
    * The asset slot to draw this frame — `obj+0x1330 % 0x28 + 0x1D31`.
    *
    * `[port-only]` as a **field**, not as a rule: the engine computes it inside
-   * `AssetDrawSlot`'s own argument, in the draw. `verify_layers.py`'s
+   * `AssetDrawSlot`'s own argument, in the draw. `web/tools/repo/layers.ts`'s
    * `render-drives-the-port` is why it is state here — the renderer may not
    * call an engine function to decide what to draw — and it is the same shape
    * {@link SeveredHead.slot} and `Actor.suppressedBones` have.

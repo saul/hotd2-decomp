@@ -23,7 +23,7 @@
  *
  * The two are not reconcilable without changing what one of the two programs
  * is faithful to, so they are two constants with a reason each -- and, as
- * `one-bams-constant` in `tools/verify_layers.py` requires, each lives in the
+ * `one-bams-constant` in `web/tools/repo/layers.ts` requires, each lives in the
  * one file called `bams.ts` and every other module imports it.
  */
 export const BAMS_TO_RAD = (Math.PI * 2) / 65536.0;

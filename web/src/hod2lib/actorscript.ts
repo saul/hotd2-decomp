@@ -13,7 +13,7 @@ import type { CivCommand, CivItem } from "./exetab";
 
 /**
  * The class-0x30 states that work on `obj+0x1394` -- the object the actor was
- * built for, which for the 47 class-0x10 captors is the civilian.
+ * built for, which for the civilians' 57 class-0x30 captors is the civilian.
  *
  * Each takes a script through `ZombieScriptForState`: the descriptor tail's
  * `+0x08` when the actor is in the tail's attack state, `+0x04` otherwise.
@@ -63,8 +63,8 @@ export interface RawSource {
  * One captor script blob, decoded for the state that enters it.
  *
  * The check that the shapes are right is that **every** blob terminates: all
- * 86 the six stages reach end on an entry whose motion is below 1, within 64
- * entries. A wrong header length walks into the middle of a float and the
+ * 117 the six stages' 76 captor spawns reach end on an entry whose motion is
+ * below 1, within 64 entries. A wrong header length walks into the middle of a float and the
  * list runs away immediately.
  */
 export function targetScript(prog: RawSource, off: number | null | undefined,

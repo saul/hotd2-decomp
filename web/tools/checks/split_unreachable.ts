@@ -38,10 +38,8 @@
  * It also re-reads `g_class30_states` (`0x00592AE8`) at 0x31..0x36, so the
  * state numbers above are the table's and not the port's (`L38`).
  *
- * Ported from the branch's `tools/verify_split_unreachable.py`, which read the
- * game through the Python library and capstone; the sweep here is
- * `lib_x86.ts`'s, and the descriptors are the exporter's own
- * (`hod2lib/evt.ts`), civilian captors included.
+ * The instruction sweep is `lib_x86.ts`'s, and the descriptors are the
+ * exporter's own (`hod2lib/evt.ts`), civilian captors included.
  */
 import { Checker, gameDirOrSkip, hex, openGame } from "../lib/exe_check";
 import { ExeTables } from "../../src/hod2lib/exetab";

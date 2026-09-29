@@ -10,7 +10,7 @@ SHA-256 and size for all 2,048 files of one HOTD2 (PC) installation. Check an
 install against it with
 
 ```sh
-python3 tools/baseline.py --game-dir ~/"THE HOUSE OF THE DEAD 2" --verify
+cd web && npm run baseline -- --game-dir ~/"THE HOUSE OF THE DEAD 2" --verify
 ```
 
 and regenerate it by dropping `--verify`. **Regenerating is a claim, so it

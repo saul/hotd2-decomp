@@ -244,8 +244,10 @@ play: `CivilianUpdate` spends one only on the single frame where
 
 Reading a cue against the authored frame count instead loses every cue past
 halfway, silently. That is what left the civilians alive under their captors:
-stage 1's four maul cues are 24, 30, 62 and 64 against clips of 41, 26, 43 and
-46 frames, so only the 24 ever fired.
+stage 1's maul cues are 24, 30, 62 and 64 in the lists states 34 and 35 step,
+against clips of 41, 26, 43 and 46 frames, and 63 and 32 in the state-36 and
+state-40 lists, against 43 and 26, so only the 24 ever fired.
+`web/tools/checks/script_corpus.ts` holds the first four and the 24.
 
 ### And a clip nothing names is a clip nothing carries
 
@@ -271,7 +273,7 @@ character type in any of the twelve bundles, so nothing in the port could
 leave state 12 anywhere in the game and every actor that entered it held
 `g_enemies_present` for ever.
 
-Two checks stand where the reading used to: `tools/verify_death_clips.py` for
+Two checks hold it: `web/tools/checks/death_clips.ts` for
 what `ChooseDeathMotion` names, and `web/tools/entrances.mjs` for whether the
 twelve entrance states end. The first reads a real bundle, deliberately: a
 check that asks anything else would go green on a fix that reached no byte the
@@ -279,8 +281,8 @@ player loads (`L24`).
 
 ## Banks
 
-47 named banks hold 967 motion ids; a walk of the bank files covers 49 (two
-hold props whose bone counts are not in the character table).
+49 named banks hold 1,058 motion ids, and a walk of the bank files covers all
+49; `web/tools/checks/corpus.ts` holds both counts.
 
 `g_asset_bank_names` is **shared with the camera-path filenames**, so an entry
 is a motion bank only when it also has an id list in `g_motion_bank_ids`. That

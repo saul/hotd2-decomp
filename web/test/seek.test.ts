@@ -151,7 +151,7 @@ type Inner = { executeOne(quiet: boolean): boolean };
 /**
  * `saveState` round-trips.
  *
- * Nothing covered this. `test/port.test.ts` checks the **game**'s slice --
+ * Nothing covered this. `test/port/` checks the **game**'s slice --
  * `G` and the actor pool -- and the walker's own is the other half of a
  * snapshot: the program counter, the flags, the channel tweens, the scene
  * state, the queued-event count. A field added to `saveState` and forgotten in

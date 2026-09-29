@@ -2690,7 +2690,7 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     // What the script stopped placing leaves the world here rather than in
     // the layer that noticed: `render/` may notice that a spawn is placeable,
     // it does not get to decide that an object exists or that a lifetime has
-    // ended. `verify_layers.py` is what keeps that honest, and
+    // ended. `web/tools/repo/layers.ts` is what keeps that honest, and
     // `syncCharacterSpawns` is where the three layers meet.
     // ...with `events`, because one class's `Init` makes a sound: character
     // types 2 and 3 start the looping chainsaw or laser sword.

@@ -41,7 +41,7 @@
  *   descriptor's `+0x20` word reaches `obj+0x136C` sign-extended, and no
  *   class-0x30 descriptor sets its bit 15.
  *
- * `tools/verify_split_unreachable.py` asserts all of that against the EXE and
+ * `web/tools/checks/split_unreachable.ts` asserts all of that against the EXE and
  * the scripts, so the day any of it stops being true the check fails rather
  * than the port quietly lacking a feature the data now uses.
  */

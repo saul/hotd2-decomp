@@ -255,7 +255,7 @@ function ZombieRunState(obj: ZombieActor, dt: number, rng: Rng,
       return ZombieStateFallToGround(obj, dt, rng);
 
     // The captor family. None of these looks at the camera: they work on the
-    // object at `obj+0x1394`, which for 47 of the 59 spawns that reach one is
+    // object at `obj+0x1394`, which for 55 of the 70 spawns that reach one is
     // the class-0x10 civilian that built them. See `class30/target.ts`.
     case ZombieState.WalkToTarget:
       return ZombieStateWalkToTarget(obj);

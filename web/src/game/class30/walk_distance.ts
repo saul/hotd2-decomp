@@ -4,14 +4,14 @@
  * **The scripted entrance, and the commonest one after the attack run.** The
  * actor remembers where it started, plays its run clip, and keeps walking on
  * the yaw its spawn record gave it until the 2D distance from that point
- * reaches the float at descriptor tail `+0x04` — three to thirty units, all
- * fifty of them exact integers. Only then does it set state 1 and start
- * closing on the camera.
+ * reaches the float at descriptor tail `+0x04` — three to forty units, all
+ * 63 of them exact integers (`web/tools/checks/walk_distance.ts` holds it).
+ * Only then does it set state 1 and start closing on the camera.
  *
  * It is the difference between an enemy that arrives along the path the level
  * was built for and one that beelines at you from the moment it appears. The
  * port had no state 15 at all: `ZombieEntryState` folded it into `AttackRun`,
- * so every one of these fifty spawns turned to face the camera on its first
+ * so every one of these 63 spawns turned to face the camera on its first
  * frame and walked the straight line to it — through whatever the level had
  * drawn in between. Stage 2 block 16 step 3's lone zombie and stage 4 block 2
  * step 8's three are all state 15, and all four were reported walking through

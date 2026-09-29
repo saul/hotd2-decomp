@@ -15,7 +15,7 @@ import { vec3 } from "../vec";
 import { AngleWithinTolerance } from "../actor_turn";
 import type { Rng } from "../../core/rng";
 import type { CharacterBone, CharacterType } from "../../bundle";
-import { ActorFlag, DamageZone, type Actor } from "../actor";
+import { ActorFlag, DamageZone, ZombieFlag2, type Actor } from "../actor";
 import { AppState, G } from "../globals";
 import { CameraBlockYaw } from "../camera/view";
 import { SpawnClass } from "../spawn_class";
@@ -54,13 +54,20 @@ const DEATH_ARC = 0x2000;
 
 /**
  * The one character type `ResolveHit`'s sever arm singles out —
- * `004095C2  6683bff40100000c  CMP word ptr [EDI+0x1f4], 0xc`. What is
- * special about type 0x0C here is `[open]`; the test is transcribed because
- * the engine makes it.
+ * `004095C2  6683bff40100000c  CMP word ptr [EDI+0x1f4], 0xc` — which is
+ * `znkager`, stage 2's crawler.
+ *
+ * The gate is closed below bone 9 unless `obj+0x136C` bit 0x80 is up, and
+ * `EnemyZombieInitByCharType` (`FUN_00452FD0`) raises that bit on **every**
+ * class-0x30 `znkager` at birth. So in the shipped game it is always open for
+ * them. Nothing set the bit in the port until the type-0xC arm was ported,
+ * which left every `znkager`'s bones 9 to 15 unseverable. Why the engine
+ * gates at all is `[open]`; the test is transcribed because the engine makes
+ * it.
  */
 const SEVER_GATED_CHAR = 0xc;
-/** ...unless `obj+0x136C` bit 7 is up, which lets it sever anyway. */
-const SEVER_GATED_OVERRIDE = 0x80;
+/** ...unless {@link ZombieFlag2.SeverAnyBone} is up, which lets it sever anyway. */
+const SEVER_GATED_OVERRIDE = ZombieFlag2.SeverAnyBone;
 /** ...and bones below this one sever whatever the type. */
 const SEVER_GATED_FIRST_BONE = 9;
 
@@ -77,6 +84,17 @@ export enum HitResultCode {
   Plain = 2,
   /** Severed: the bone kept its stump and everything below it came off. */
   Severed = 3,
+  /**
+   * **Tested and never written.** `ActorReactToHit` (`FUN_004543F0`) sends
+   * result 4 on bone 1 or 9 to `ZombieSplitInTwo` (`FUN_0045D9F0`) and
+   * swallows it on any other bone. Nothing in the image stores 4 here: the
+   * 25 instructions that name `g_hit_result` by address are `ResolveHit`'s
+   * 0/1/2/3/5, `ThrowerShotFeedback`'s 5 and reads, and the address of the
+   * second player's slot appears nowhere. `[proved]`, and
+   * `tools/verify_split_unreachable.py` counts them. A member rather than a
+   * gap because the engine switches on it; see `class30/split.ts`.
+   */
+  Split = 4,
   /** The sentinel. No damage, no score, and a ricochet rather than blood. */
   NoEffect = 5,
 }
@@ -124,7 +142,10 @@ export function DamageRankModifier(b: CharacterBone | undefined): number {
 }
 
 /**
- * Bone indices whose parent is *bone*.
+ * Bone indices whose parent is *bone*. The engine walks a node's own child
+ * array (`+0x16` count, `+0x18` pointers); the bundle flattens the tree, so
+ * this recovers the children from it. Shared by the sever and by
+ * `class30/split.ts`'s hide, which walk the same tree.
  *
  * `CharacterBone.parent` is an **index into `bones`**, not a bone number — the
  * exporter flattens the EXE's node tree parents-first and records where the
@@ -134,7 +155,8 @@ export function DamageRankModifier(b: CharacterBone | undefined): number {
  */
 const kidCache = new WeakMap<CharacterType, Map<number, number[]>>();
 
-function childBones(type: CharacterType, bone: number): number[] {
+/** `[port-only]` -- see above; exported for `class30/split.ts`. */
+export function childBones(type: CharacterType, bone: number): number[] {
   let kids = kidCache.get(type);
   if (!kids) {
     kids = new Map();
@@ -419,11 +441,24 @@ export function ActorReactToHit(obj: Actor, bone: number,
   // plays no reaction at all. The arm itself runs later in the same frame —
   // see {@link ActorWouldReleaseBodyCreature}.
   if (ActorWouldReleaseBodyCreature(obj, bone, ct, result)) return undefined;
-  const reacts = result === HitResultCode.Damaged
-    || result === HitResultCode.Severed
-    || ((result === HitResultCode.Plain || result === HitResultCode.NoEffect)
-        && (ct === 3 || ct === 0x12));
-  return reacts ? ActorPlayHitReaction(obj, bone, result) : undefined;
+  // The engine's own three-way shape, `00454428 MOV EAX, [g_hit_result + p*4]`
+  // and on: 1 and 3 react, 4 is the split, and **everything else** -- 2, 5 and
+  // 0 alike -- reacts only for character types 0x12 and 3. It used to test 2
+  // and 5 by name, which dropped the 0 that `ResolveHit` leaves while
+  // `obj+0x34` bit 0x800 is up (the attract demo).
+  if (result === HitResultCode.Damaged || result === HitResultCode.Severed) {
+    return ActorPlayHitReaction(obj, bone, result);
+  }
+  if (result === HitResultCode.Split) {
+    // `CMP [g_shot_bone + p*4], 1` / `CMP ..., 9`, then
+    // `CALL ZombieSplitInTwo` -- and on any other bone a bare `RET`. [diverges]
+    // The split is not ported, because nothing in the image writes this
+    // result: see `class30/split.ts`. What the port keeps is the arm's other
+    // half, which is that result 4 never staggers.
+    return undefined;
+  }
+  return ct === 3 || ct === 0x12
+    ? ActorPlayHitReaction(obj, bone, result) : undefined;
 }
 
 /**

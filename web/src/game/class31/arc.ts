@@ -263,10 +263,9 @@ export function ActorArcBeginToWaypoint(
   obj: ThrowerActor, dest: Vec3, script: typeof ARC_SCRIPT_DRAW_ATTACK,
   step: number, rng: Rng): void;
 export function ActorArcBeginToWaypoint(
-  obj: ThrowerActor, dest: Vec3, script: ArcStage[] | null,
-  step: number): void;
+  obj: Actor, dest: Vec3, script: ArcStage[] | null, step: number): void;
 export function ActorArcBeginToWaypoint(
-  obj: ThrowerActor, dest: Vec3,
+  obj: Actor, dest: Vec3,
   script: ArcStage[] | null | typeof ARC_SCRIPT_DRAW_ATTACK,
   step: number, rng?: Rng): void {
   if (obj.charType === CHAR_ZSTIN) ActorArcBeginToAtSpeed(obj, dest);
@@ -278,9 +277,12 @@ export function ActorArcBeginToWaypoint(
   }
   // `CALL rand; SAR EAX, 4; CDQ; IDIV 10` -- `Rng.int` is the port's `% n`,
   // and the shift before it changes which value comes up, not how many draws.
-  obj.attack = ThrowerPickAttack(obj, (rng as Rng).int(10));
-  if (obj.charType === CHAR_ZSLMAN) obj.attack = ZSLMAN_ATTACK;
-  ThrowerLoadAttackArcScript(obj);
+  // Only a thrower passes the sentinel -- the overloads say so -- which is
+  // why the draw can read class 0x31's tables.
+  const thr = obj as ThrowerActor;
+  thr.attack = ThrowerPickAttack(thr, (rng as Rng).int(10));
+  if (thr.charType === CHAR_ZSLMAN) thr.attack = ZSLMAN_ATTACK;
+  ThrowerLoadAttackArcScript(thr);
   obj.arcPhase = ArcPhase.Windup;
 }
 

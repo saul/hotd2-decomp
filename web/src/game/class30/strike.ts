@@ -49,7 +49,8 @@ import { ZombieStrikeFrameSplash, ZombieStrikeStartSplash } from "./splash";
  * the draw to `obj+0x131A` and forms the entry pointer as `base + index * 0x10`
  * with no validity test of any kind. There used to be a substitute here — if
  * the bundle carried no row for the drawn index the port reached for another
- * one — and it made the crawlers *more dangerous than the game*. `znkager`
+ * one — and it was removed on the belief that it made the crawlers more
+ * dangerous than the game, which the second paragraph below corrects. `znkager`
  * (character type 12, body condition 4 on every one of its 20 spawns) has a
  * cond-4 pick row of ten 2s followed by ten 3s, so an undamaged one always
  * draws attack **2**, which is
@@ -62,12 +63,18 @@ import { ZombieStrikeFrameSplash, ZombieStrikeStartSplash } from "./splash";
  * a hit frame of 40 against `g_motion_play_length[997]` = `0x0014` = **20** at
  * `0x004E0F9A`. `ZombieStateStrike` fires the hit on `obj+0x19C == entry+0x08`
  * exactly and leaves at `play_length - 1`, so clip 997 can never reach frame
- * 40: **in the engine an undamaged crawler swings and misses, every time.**
- * The exporter dropped the entry as unreachable, the substitute then handed
- * the actor attack 3 — a different clip, at hit frame 3, that connects — and
- * the crawlers hurt the player where the engine's do not. The bundle carries
- * the entry now (`hod2lib`'s `attackHitLands` says why) and the draw is blind
- * again, so the swing whiffs on its own. `[proved]`
+ * 40 **in this state**. `[proved]`
+ *
+ * That paragraph used to end "in the engine an undamaged crawler swings and
+ * misses, every time", and **the conclusion was wrong** though every step to
+ * it was right: a crawler never runs this state. `ZombieStateHoldAtRange`
+ * sends body condition 4 to state 0x34 instead (`0x0045585E`), and
+ * `ZombieStateLeapStrike` (`FUN_0045E330`) lands the same entry through
+ * `ActorStrikeConnect` on touching down, with no hit frame in it at all -- so
+ * an undamaged crawler's leap **connects**, its cancel mask being 1 (the
+ * head). See `class30/leap_strike.ts` and `L57`. The draw here is still blind
+ * and the entry is still exported, and both still matter: they are what that
+ * state reads too.
  *
  * What is left for a pick the bundle has no row for is the ten **zeroed**
  * entries the shipped tables carry — `{0, 0, 0.0f, 0, 0, 0}`, which the

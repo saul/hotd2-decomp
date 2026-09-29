@@ -72,7 +72,7 @@ operand search and `get_xrefs_to` had both missed as a *write*).
 
 **L38 — A dispatch table entry is settled by reading the table, and a name in
 a doc comment is not a reading.** `ZombieState.Leave = 10` carried
-`ActorAbortAttackAndLeave` (`FUN_0045D9F0`) as its citation in `states.ts` and
+`ActorAbortAttackAndLeave` (`FUN_0045D9F0`, since renamed `ZombieSplitInTwo`) as its citation in `states.ts` and
 in `leave.ts`. `g_class30_states[10]` is `0x00455490`,
 `ZombieReleaseAndDespawn` — a **despawn**, not a rejoin. `FUN_0045D9F0` is not
 in the table at all: it takes no argument and assigns no state, and
@@ -276,7 +276,9 @@ range they could not close. Give the state its own floor.
 
 **L9 — A permit held by an actor that cannot attack blocks everyone.** 161 of
 stage 2's class-0x30 spawns have `attack_state <= 0`. Check before claiming,
-and release on every path out; `ActorAbortAttackAndLeave` exists for that.
+and release on every path out. (This used to end "`ActorAbortAttackAndLeave`
+exists for that"; that routine is `ZombieSplitInTwo`, which cuts an actor in
+two, and nothing the shipped game runs calls it -- `L38`, `L90`.)
 
 **L10 — `Math.random()` silently breaks the save state.** Two loads of one
 snapshot diverge on the first swing, and nothing fails until someone notices
@@ -735,6 +737,37 @@ something the replay rebuilt, and `G.g_object_list` names it. And when a
 note says a class's gate "says nothing" about it, follow each thing the class
 spawns into its own `Init` before believing it (L83's list-every-spawn, one
 level down).
+
+**L90 -- A proof about a routine is not a proof about the actor until the edge
+into it has been checked against the data.** The crawlers were closed as "in
+the engine an undamaged crawler swings and misses, every time", from a reading
+of `ZombieStateStrike` that was right in every step: their condition-4 attack
+has hit frame 40, clip 997 plays for 20, the test is an exact equality, so the
+strike can never fire. A minute-long assertion of zero damage was written to
+hold it. **No crawler runs that state.** `ZombieStateHoldAtRange` hands a
+successful claim to one of two states, and the choice is one `CMP` on the body
+condition at `0x0045585E`: condition 4 goes to state 0x34,
+`ZombieStateLeapStrike`, which lands the same entry through
+`ActorStrikeConnect` on touching down and reads no hit frame at all. Every
+`znkager` is condition 4.
+
+The comment that should have stopped it was sitting at the branch: "body
+condition 4 goes to state 0x34 instead; that state is unread, and no stage-2
+spawn carries condition 4 into this state." The first half was true and the
+second was a claim about the data nobody had counted -- all twenty `znkager`
+carry it, from their descriptors. It is `L34`'s shape from the caller's side:
+that lesson collapsed a branch because its outcome looked predetermined, this
+one ignored a branch because its data looked absent. The same week, the
+routine at `0x0045D9F0` was described in two files as one that "assigns no
+state", from its three call instructions; its second callee writes state
+0x32. Reading the calls of a routine is not reading the routine.
+
+So: before a proof about a state becomes a claim about an actor, **find every
+write of that actor's state number, and count the spawns that take each arm of
+the branch that chooses it.** Search the image for the state's literal store
+-- the bytes `10 13 00 00 xx 00` of `MOV word [reg + 0x1310], xx` -- and read
+the `CMP` in front of each one; `web/tools/checks/split_unreachable.ts` does it
+for 0x32, 0x34 and 0x35. A one-line census of the field the branch tests would have turned "no stage-2 spawn" into "twenty".
 
 ---
 

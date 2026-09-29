@@ -906,7 +906,7 @@ decides:
 |---|---|
 | 1 damaged and swapped | **yes** |
 | 3 severed | **yes** |
-| 4 | `FUN_0045D9F0` instead, for bones 1 and 9 |
+| 4 | `ZombieSplitInTwo` (`FUN_0045D9F0`) instead, for bones 1 and 9 -- **and nothing in the image writes 4**, so the arm is dead; see `tools/verify_split_unreachable.py` |
 | 2 damaged only | only character types 3 and 0x12 |
 | 5 no effect | only character types 3 and 0x12 |
 

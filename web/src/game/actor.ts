@@ -145,10 +145,16 @@ export enum ActorFlag {
    * `ActorStrikeConnect` (`FUN_00456490`) and `ThrowerStrikeConnect`
    * (`FUN_0044CE60`): with it up the strike lands **without** the hit latch
    * (`PlayerTakeDamage(player, 0, motion)`, so no damage overlay) and the
-   * striker leaves at once -- `ZombieReleaseAndDespawn` or `ThrowerLeave`. It
-   * is raised by `FUN_0045E010` and `FUN_0045E660`, neither of them read, so
-   * what makes an actor strike-and-leave is `[open]` and nothing in the port
-   * sets it.
+   * striker leaves at once -- `ZombieReleaseAndDespawn` or `ThrowerLeave`.
+   *
+   * This used to say the bit is raised by the routines at `0x0045E010` and
+   * `0x0045E660`. They are `ZombieStateSplitLaunch` and
+   * `ZombieStateCollapseToCondition4` now that they have been read, and their
+   * `OR EAX, 0x2000000` (`0045e2e1`, `0045e732`) goes into **`obj+0x136C`**
+   * -- {@link ZombieFlag2.LowSphere} -- not into this word: a search on the
+   * literal found the constant and not the field (`L32`, `L3`). No class-0x30
+   * routine raises this bit, so what makes an actor strike-and-leave is
+   * `[open]` and nothing in the port sets it.
    */
   StrikeAndLeave = 0x2000000,
   /**
@@ -905,17 +911,44 @@ export enum ZombieFlag2 {
    * pushed, so a wedged one tries the other way.
    */
   BackOffTurnFlip = 0x400000,
-  /** Bit `0x2000000` — the bounding sphere sits a half unit up, not one. */
+  /**
+   * Bit `0x2000000` — the bounding sphere sits a half unit up, not one.
+   *
+   * That is the reader the name came from. Its three writers say what it is
+   * *for*: this actor is **half a body**. `ZombieInitHalved` (`FUN_0045DA10`)
+   * raises it on every `znkager` born at body condition 4, and the two states
+   * the split machinery ends in, `ZombieStateSplitLaunch` (`FUN_0045E010`) and
+   * `ZombieStateCollapseToCondition4` (`FUN_0045E660`), raise it on the way
+   * back into the run. `ZombieSplitUpdateSelf` (`FUN_0045DA60`) and
+   * `ZombieSplitCopyToHalf` (`FUN_0045DBC0`) test it to tell a first split
+   * from a second. `[proved]`
+   */
   LowSphere = 0x2000000,
   /**
-   * Bit `0x1000000` — with {@link LowSphere}, what arms
-   * `ZombieStateAttackRun`'s one-in-64 roll into `ActorAbortAttackAndLeave`
-   * (`FUN_0045D9F0`); the roll clears it when it fires (`00455540 25fffffffe`).
-   * Its one writer found so far is `g_class30_states[53]` at `0045e6a2`
-   * (`OR EAX, 0x1000000`), a state the port does not have. What the bit means
-   * beyond that is `[open]`.
+   * Bit `0x1000000` — with {@link LowSphere}, what arms a split:
+   * `ZombieStateAttackRun`'s one-in-64 roll and `ZombieStateLeapStrike`'s
+   * quarter-arc test both clear it and call `ZombieSplitInTwo`
+   * (`FUN_0045D9F0`) (`00455540 25fffffffe`, `0045e4db 25fffffffe`).
+   *
+   * **Nothing the shipped game runs ever raises it.** Its one class-0x30
+   * writer is `ZombieStateCollapseToCondition4` at `0045e6a2`
+   * (`OR EAX, 0x1000000`), and no instruction stores that state's number and
+   * no descriptor, entry tail, captor script or civilian order names it;
+   * `tools/verify_split_unreachable.py` holds that. It used to be called
+   * `AbortRollArmed`, after the routine's old name. `[proved]`
    */
-  AbortRollArmed = 0x1000000,
+  SplitArmed = 0x1000000,
+  /**
+   * Bit `0x80` — lets `ResolveHit` (`FUN_00409430`) sever bones 9 and up on
+   * character type 0xC, whose sever arm is otherwise closed below bone 9
+   * (`004095C2 CMP word ptr [EDI+0x1F4], 0xC`, then `TEST byte [..+0x136C],
+   * 0x80`). `EnemyZombieInitByCharType` (`FUN_00452FD0`) raises it on
+   * **every** `znkager`, and `ZombieInitHalved` raises it again as part of its
+   * `0x6000080`; nothing else in class 0x30 writes it. So for a class-0x30
+   * actor the gate is always open, and what it is for is `[open]` — the one
+   * `znkager` that could reach `ResolveHit` without it is none. `[proved]`
+   */
+  SeverAnyBone = 0x80,
   /**
    * Bit `0x100000` — the actor is being **carried**: riding
    * `g_carrier_object` in `ZombieStateRideCarrier`, or in flight in
@@ -969,9 +1002,9 @@ export enum ZombieFlag2 {
    * (`OR EAX, 0x40000`), `00455bb0 89866c130000`. `[proved]`
    *
    * **Nothing on the melee path ever clears it.** The one `AND` in the program
-   * that does is in `FUN_0045DA60` (`0045db39 25fffffbff`), reached only
-   * through `FUN_0045D9F0` and gated on two bits an ordinary zombie does not
-   * carry; `EnemyZombieInit` clears it only because it *assigns* the whole
+   * that does is in `ZombieSplitUpdateSelf` (`FUN_0045DA60`)
+   * (`0045db39 25fffffbff`), reached only through `ZombieSplitInTwo`
+   * (`FUN_0045D9F0`), which nothing in the shipped game calls; `EnemyZombieInit` clears it only because it *assigns* the whole
    * word (`00452eaf`, from `00452e9a`'s `(s16)obj+0x1316 | 0x60000000`). So
    * after its first swing an actor keeps this bit for the rest of its life,
    * and its two other readers in `ZombieStateHoldAtRange` — the too-close

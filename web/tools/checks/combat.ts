@@ -92,13 +92,15 @@
  *     waits on `obj+0x19C` reaching each stage's threshold, and that cursor
  *     wraps at `g_motion_play_length + 1`: a start or threshold past the play
  *     length of the clip its stage plays is an actor parked in its leap for
- *     ever. All 41 scripts classes 0x30 and 0x31 can install -- the named
- *     ones, every attack entry's, the two entrance scripts -- keep every stage
- *     inside it. Seven stage changes switch clips: five scripts end on a
- *     different clip from the two stages before -- set 3's attack 3 in all
- *     five stances -- and `ThrowerStatePathFollow`'s style-2 script
- *     (`0x00565E88`) flies on 300 between two stages of 301, so the bound is
- *     taken per stage, not per script. `zslman`'s four leap-aside scripts are
+ *     ever. All 42 scripts classes 0x30 and 0x31 can install -- the named
+ *     ones, every attack entry's, the two entrance scripts and
+ *     `ZombieStateLeapStrike`'s (`FUN_0045E330`) -- keep every stage inside
+ *     it. Eight stage changes switch clips: six scripts end on a different
+ *     clip from the two stages before -- set 3's attack 3 in all five stances,
+ *     and the crawler's leap, which lands on 0x41D after two stages of 0x41C
+ *     -- and `ThrowerStatePathFollow`'s style-2 script (`0x00565E88`) flies on
+ *     300 between two stages of 301, so the bound is taken per stage, not per
+ *     script. `zslman`'s four leap-aside scripts are
  *     held to the four `MOV ESI, imm32` `ThrowerStateLeapAside` picks them
  *     with ({@link LEAP_ASIDE_ZSLMAN_MOV}), `0x60` apart, and the exported
  *     four to the twelve dwords at each (L65).
@@ -905,15 +907,15 @@ async function main(): Promise<void> {
       }
     });
   }
-  c.ok(arcs.length === 41,
-       `check 16: the 41 arc scripts classes 0x30 and 0x31 can install are `
+  c.ok(arcs.length === 42,
+       `check 16: the 42 arc scripts classes 0x30 and 0x31 can install are `
        + `read (${arcs.length})`);
   c.ok(!past.length,
        `check 16: every arc-script stage's start and threshold is inside its `
        + `own clip's play length`
        + (past.length ? ` -- ${past.slice(0, 6).join("; ")}` : ""));
-  c.ok(switches === 7,
-       `check 16: seven arc-script stage changes switch clips (${switches})`);
+  c.ok(switches === 8,
+       `check 16: eight arc-script stage changes switch clips (${switches})`);
   const named: number[] = [];
   LEAP_ASIDE_ZSLMAN_MOV.forEach((ins, row) => {
     const o = exe.v2r(ins)!;

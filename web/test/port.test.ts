@@ -369,8 +369,12 @@ import { ActorPlayCursor } from "../src/game/class31/arc";
 import { ThrowerPickLandingPoint } from "../src/game/class31/leap_down";
 import { SND_LEAP_LANDED } from "../src/game/class31/leap";
 import { dist2d, vec3, type Vec3 } from "../src/game/vec";
-import { ActorPlayHitReaction, EffectCode, HitResultCode, ResolveHit }
-  from "../src/game/combat/resolve_hit";
+import { ActorPlayHitReaction, ActorReactToHit, EffectCode, HitResultCode,
+  ResolveHit } from "../src/game/combat/resolve_hit";
+import {
+  LeapStrikeSub, LeapTargetMode, ZombieLeapStrikeTarget,
+} from "../src/game/class30/leap_strike";
+import { HALVED_STUMP_SLOT } from "../src/game/class30/halved";
 import { ActorSetMotionBlended } from "../src/game/class30/motion_cue";
 import type { BreakablesJson, ScriptJson } from "../src/bundle";
 import { Walker, type BranchChoice } from "../src/script/walker";
@@ -18999,7 +19003,7 @@ console.log("\nclass 0x30's twelve entrance states — do the waits end?");
           left > 0x14 && left <= 0x14 + 3, `left after ${left} frames`);
     check("...into state 10, which `g_class30_states` says is "
           + "`ZombieReleaseAndDespawn` (`FUN_00455490`) and not the "
-          + "`ActorAbortAttackAndLeave` this used to name",
+          + "routine at `0x0045D9F0` this used to name",
           z.state === ZombieState.Leave || z.despawned,
           `state ${z.state}${z.despawned ? " despawned" : ""}`);
   }
@@ -20656,7 +20660,7 @@ console.log("\nActorBodyConditionFromHands:");
   }
 }
 
-// -- 33c. the crawler's attack is meant to miss ------------------------------
+// -- 33c. the crawler's attack is a leap, and it lands ------------------------
 
 console.log("\nthe crawler's undamaged swing:");
 {
@@ -20677,16 +20681,20 @@ console.log("\nthe crawler's undamaged swing:");
    * Entry 2's hit frame is 40 against `g_motion_play_length[997]` = 20, and
    * `ZombieStateStrike` fires the hit on `obj+0x19C == entry+0x08` *exactly*
    * (`00455bdf`) while leaving the state at `play_length - 1` (`00455c0b`), so
-   * the equality is never reached: the engine's undamaged crawler swings and
-   * misses, every time. The frame counts and play lengths below are the real
-   * bake — 997 is 11 authored frames with a play length of 20, 1018 is 19 with
-   * 35, 1051 is 17 with 31.
+   * in **that** state the equality is never reached. The frame counts and play
+   * lengths below are the real bake — 997 is 11 authored frames with a play
+   * length of 20, 1018 is 19 with 35, 1051 is 17 with 31.
    *
-   * This is divergence 2, closed. The exporter used to drop entry 2 as an
-   * impossible row and `ZombiePickAttack` used to substitute another entry
-   * when the draw named one the bundle had no row for, which between them
-   * handed the crawler entry 3 — a swing that connects. Measured against the
-   * real stage-2 bundle: 29 hits landed in a minute before, 0 after.
+   * This section used to conclude from that that "the engine's undamaged
+   * crawler swings and misses, every time", and asserted no damage in a
+   * minute. **A crawler never runs `ZombieStateStrike`.**
+   * `ZombieStateHoldAtRange` sends body condition 4 to state 0x34
+   * (`0x0045585E`), `ZombieStateLeapStrike` (`FUN_0045E330`), which lands the
+   * entry through `ActorStrikeConnect` when its arc touches down and reads no
+   * hit frame at all -- so both entries connect: entry 2's cancel mask is the
+   * head, and a crawler that has lost its head draws entry 3, whose mask 8 can
+   * never cancel. The draw and the exported entry are unchanged; what this now
+   * asserts is the state that reads them. `L53`.
    */
   const CRAWL = {
     "2": { strike: 997, lunge: 1051, distance: 26, hit_frame: 40,
@@ -20704,10 +20712,21 @@ console.log("\nthe crawler's undamaged swing:");
     motion_row: { ...TYPE.motion_row, "4": [10, 10, 12, 12, 14] },
     reactions: { ...TYPE.reactions, "4": TYPE.reactions["0"] },
     motions: { ...TYPE.motions, "997": motion(11, 0.2, 20),
-               "1018": motion(19, 0.2, 35), "1051": motion(17, 0.6, 31) },
+               "1018": motion(19, 0.2, 35), "1051": motion(17, 0.6, 31),
+               // `g_class30_leap_strike_arc_script`'s two clips.
+               "1052": motion(40), "1053": motion(20) },
   } as unknown as CharacterType;
   const CHARS_CRAWLER = {
     ...CHARS, types: { "1": TYPE, "12": TYPE_CRAWLER },
+    combat: {
+      arc_scripts: {
+        leap_strike: [
+          { motion: 0x41c, start: 0, fade: 5, until: 10 },
+          { motion: 0x41c, start: 11, fade: 5, until: 38 },
+          { motion: 0x41d, start: 0, fade: 3, until: 0 },
+        ],
+      },
+    },
   } as unknown as CharactersJson;
 
   const crawler = (zones: number) => {
@@ -20774,32 +20793,41 @@ console.log("\nthe crawler's undamaged swing:");
     let damaged = 0;
     events.on("player.damaged", () => { damaged += 1; });
     let strikes = 0;
+    let leaps = 0;
     let was = false;
     const drawn = new Set<number>();
     for (let i = 0; i < 3600; i++) {
       GameUpdate(1 / 60, NULL_HOST, rng, events);
-      const now = z.state === ZombieState.Strike;
-      if (now && !was) strikes += 1;
+      if (z.state === ZombieState.Strike) strikes += 1;
+      const now = z.state === ZombieState.LeapStrike;
+      if (now && !was) leaps += 1;
       if (now && z.attack >= 0) drawn.add(z.attack);
       was = now;
     }
-    return { strikes, damaged, drawn: [...drawn].sort() };
+    return { strikes, leaps, damaged, drawn: [...drawn].sort() };
   };
 
   {
     const m = minute(0);
-    check("it gets its swing in", m.strikes > 10, `${m.strikes} strikes`);
+    // The fixture's player has two lives and a continue-less game, so the
+    // minute ends with the player down rather than with the crawler tired:
+    // three leaps, three hits, as measured when this was written.
+    check("it attacks by leaping, again and again until the player is down",
+          m.leaps >= 2 && G.g_player_lives[0] === 0,
+          `${m.leaps} leaps, lives ${G.g_player_lives[0]}`);
+    check("...and never once through ZombieStateStrike", m.strikes === 0,
+          `${m.strikes} frames in the strike`);
     check("...on entry 2", m.drawn.length === 1 && m.drawn[0] === 2,
           `drew {${m.drawn.join(",")}}`);
-    // The point of the whole change.
-    check("...and lands no damage at all, because clip 997 never reaches "
-          + "frame 40", m.damaged === 0, `${m.damaged} hits landed`);
+    // The point of the correction.
+    check("...and every leap connects: it has no hit frame to miss",
+          m.damaged === m.leaps, `${m.damaged} hits from ${m.leaps} leaps`);
   }
   {
-    // The other arm, so that "no damage" is a property of the entry and not
-    // of the fixture: shoot the head off and the same crawler connects.
+    // The other arm: shoot the head off and the same crawler draws entry 3,
+    // whose cancel mask of 8 is outside the zone bits, and still connects.
     const m = minute(DamageZone.Head);
-    check("a crawler with its head shot off draws entry 3 and does connect",
+    check("a crawler with its head shot off draws entry 3 and connects too",
           m.damaged > 0 && m.drawn.length === 1 && m.drawn[0] === 3,
           `${m.damaged} hits on {${m.drawn.join(",")}}`);
   }
@@ -22672,7 +22700,7 @@ console.log("\nwhere the camera follows an actor:");
  * `ZombieStateStrike` raises it when it captures `strikeStart`
  * (`00455b98 a900000400` / `00455ba5 0d00000400`) and **on the melee path
  * nothing ever clears it again**: the one `AND` in the program that does is in
- * `FUN_0045DA60` (`0045db39 25fffffbff`), which an ordinary zombie never
+ * `ZombieSplitUpdateSelf` (`0045db39 25fffffbff`), which an ordinary zombie never
  * reaches. The port modelled it as a boolean, cleared it in three places, and
  * left it out of the two tests in `ZombieStateHoldAtRange` that read it -- one
  * misreading with four separate symptoms, which is what these assert.
@@ -39812,6 +39840,210 @@ console.log("\nthe crosshair and the device -- the mouse has one, the light gun 
         `modes ${G.g_input_mode}`);
   ResetGameGlobals();
   SetOptionsTables(undefined);
+}
+
+/**
+ * Stage 2's crawler, `znkager` -- character type 0xC, body condition 4 on all
+ * twenty of its spawns -- and the two routines that condition selects.
+ *
+ * `EnemyZombieInitByCharType` (`FUN_00452FD0`) raises `obj+0x136C` bit 0x80 on
+ * every `znkager` and, at condition 4, calls `ZombieInitHalved`
+ * (`FUN_0045DA10`): the bone-9 root hidden, a stump on bone 9, a smaller body
+ * sphere, bits `0x6000080`. Then `ZombieStateHoldAtRange` sends a condition-4
+ * claim to state 0x34 (`0x0045585E`), `ZombieStateLeapStrike` (`FUN_0045E330`),
+ * which lands the hit through `ActorStrikeConnect` on touching down.
+ *
+ * The port had none of it. Every assertion below fails on the tree before this
+ * section was written: the flags and the hidden bones were never set, bone 10
+ * could not be severed, and the crawler ran `ZombieStateStrike` -- where its
+ * attack, hit frame 40 on a clip whose play length is 20, can never land. The
+ * fixture pins that play length for exactly that reason: a crawler that is
+ * still in the strike deals **no** damage here, and one that leaps does.
+ */
+console.log("\nthe crawler: born halved, and it leaps rather than strikes:");
+{
+  // The EXE's type-0xC skeleton: two roots, bone 1 with the head (2) and two
+  // arm chains (3-5, 6-8), and bone 9 with two leg chains (10-12, 13-15).
+  // `parent` is an index into the list, as the exporter writes it.
+  const kb = (bone: number, parent: number | null,
+              steps: number[][] = []) =>
+    ({ bone, part: `b${bone}`, slot: 0x1d80 + bone, offset: [0, 0, 0],
+       parent, damage_rank: [], hit_radius: 2, steps });
+  const bones = [
+    kb(1, null), kb(2, 0), kb(3, 0), kb(4, 2), kb(5, 3),
+    kb(6, 0), kb(7, 5), kb(8, 6),
+    kb(9, null), kb(10, 8, [[0x1da9, EffectCode.Sever, 3]]), kb(11, 9),
+    kb(12, 10), kb(13, 8), kb(14, 12), kb(15, 13),
+  ];
+  const STRIKE = 997;
+  const LUNGE = 1051;
+  const WINDUP = 0x41c;
+  const LANDING = 0x41d;
+  const KAGER = {
+    ...TYPE, type: 0xc, name: "znkager", bones,
+    // `00566e70`: `{997, 1051, 26.0f, 40, 9, 1}`, the entry every undamaged
+    // crawler draws -- its cond-4 pick row is ten 2s per zone combo.
+    attacks: {
+      ...TYPE.attacks,
+      "4": { "2": { strike: STRIKE, lunge: LUNGE, distance: 26, hit_frame: 40,
+                    overlay_kind: 9, cancel_mask: 1 } },
+    },
+    attack_picks: { ...TYPE.attack_picks, "4": new Array(80).fill(2) },
+    motion_row: { ...TYPE.motion_row, "4": [10, 10, 12, 12, 14] },
+    motions: {
+      ...TYPE.motions,
+      // `g_motion_play_length[997]` is 0x14, 20, and `ZombieStateStrike`
+      // fires on `obj+0x19C == 40` exactly.
+      [STRIKE]: motion(11, 0, 20), [LUNGE]: motion(20, 0.6),
+      [WINDUP]: motion(40), [LANDING]: motion(20),
+    },
+  } as unknown as CharacterType;
+  const CHARS12 = {
+    ...CHARS,
+    types: { "1": TYPE, "3": { ...TYPE, type: 3 }, "12": KAGER },
+    // `g_class30_leap_strike_arc_script`, `0x00593180`, as exported.
+    combat: {
+      arc_scripts: {
+        leap_strike: [
+          { motion: WINDUP, start: 0, fade: 5, until: 10 },
+          { motion: WINDUP, start: 11, fade: 5, until: 38 },
+          { motion: LANDING, start: 0, fade: 3, until: 0 },
+        ],
+      },
+    },
+  } as unknown as CharactersJson;
+  const setup = () => {
+    ResetGameGlobals();
+    SetGameTables(CHARS12);
+    G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    G.g_scene_state_major = SCENE_MAJOR_PLAYING;
+    EnterPlay();
+    G.g_nFiringGate = 1;
+  };
+  const kager = (at: number, condition: number): ZombieActor => {
+    const z = spawnZombie(at, 0xc, "znkager",
+                          { condition, initialState: ZombieState.AttackRun,
+                            attackState: -1 }, new Rng(3));
+    z.visible = true;
+    z.hp = z.maxHp = 100;
+    z.pos = vec3(0, 0, 45);
+    z.motion = 12;
+    return z;
+  };
+  const range = (a: number, b: number) =>
+    Array.from({ length: b - a + 1 }, (_, i) => a + i);
+
+  // -- ZombieInitHalved ----------------------------------------------------
+  setup();
+  {
+    const z = kager(0x7c00, 4);
+    check("a znkager born at body condition 4 carries 0x6000080 in obj+0x136C",
+          (z.flags2 & 0x6000080) === 0x6000080, `0x${z.flags2.toString(16)}`);
+    check("...a body sphere of 0.8 of EnemyZombieInit's 3.5",
+          Math.abs(z.bodyRadius - 3.5 * 0.8) < 1e-9, String(z.bodyRadius));
+    check("...draws nothing from bone 10 to 15, and all of bones 1 to 9",
+          range(10, 15).every((b) => z.removed.includes(b))
+          && !range(1, 9).some((b) => z.removed.includes(b)),
+          JSON.stringify(z.removed));
+    check("...and draws the stump 0x1DA3 on bone 9",
+          z.boneSlot["9"] === HALVED_STUMP_SLOT, JSON.stringify(z.boneSlot));
+  }
+  {
+    const z = kager(0x7c01, 0);
+    check("one born at any other condition keeps its legs and still gets 0x80",
+          z.removed.length === 0
+          && (z.flags2 & ZombieFlag2.SeverAnyBone) !== 0
+          && (z.flags2 & ZombieFlag2.LowSphere) === 0,
+          `0x${z.flags2.toString(16)} ${JSON.stringify(z.removed)}`);
+    const out = ResolveHit(z, 10, NULL_HOST, new Rng(1));
+    check("...which is what opens ResolveHit's type-0xC gate below bone 9",
+          out.result === HitResultCode.Severed
+          && z.removed.includes(11) && z.removed.includes(12),
+          `result ${out.result} removed ${JSON.stringify(z.removed)}`);
+  }
+
+  // -- ZombieLeapStrikeTarget ----------------------------------------------
+  {
+    setup();
+    const calls: number[][] = [];
+    const host = {
+      ...NULL_HOST,
+      viewPoint: (x: number, y: number, zz: number, out: Vec3) => {
+        calls.push([x, y, zz]);
+        out.x = 7; out.y = 8; out.z = 9;
+      },
+    };
+    const z = kager(0x7c02, 4);
+    z.attackPermit = 1;
+    const was = G.g_max_attackers;
+    G.g_max_attackers = 2;
+    const p = vec3();
+    ZombieLeapStrikeTarget(z, p, LeapTargetMode.CameraSpace, host);
+    z.condition = 0;
+    ZombieLeapStrikeTarget(z, p, LeapTargetMode.CameraSpace, host);
+    G.g_max_attackers = was;
+    check("a crawler aims 3 under and 12.5 ahead of the camera, 2 to the "
+          + "permit's side negated; anyone else 12 and 12, not negated",
+          JSON.stringify(calls) === "[[2,-3,-12.5],[-2,-12,-12]]"
+          && p.x === 7 && p.y === 8 && p.z === 9, JSON.stringify(calls));
+  }
+
+  // -- the hub, the leap, the hit ------------------------------------------
+  {
+    setup();
+    const z = kager(0x7c03, 4);
+    const rng = new Rng(9);
+    const events = new Events();
+    const sounds: number[] = [];
+    events.on("sound.play", (d) => sounds.push(d.id));
+    const lives = G.g_player_lives[0];
+    let struck = false;
+    let leapt = false;
+    const subs = new Set<number>();
+    let backedOff = false;
+    let livesAtLanding = -1;
+    for (let i = 0; i < 2400 && !backedOff; i++) {
+      GameUpdate(1 / 60, NULL_HOST, rng, events);
+      if (z.state === ZombieState.Strike) struck = true;
+      if (z.state === ZombieState.LeapStrike) {
+        leapt = true;
+        subs.add(z.sub);
+        if (z.sub >= LeapStrikeSub.Recoil && livesAtLanding < 0) {
+          livesAtLanding = G.g_player_lives[0];
+        }
+      }
+      if (leapt && z.state === ZombieState.BackOff) backedOff = true;
+    }
+    check("the hub sends a condition-4 claim to state 0x34, the leap", leapt,
+          `state ${ZombieState[z.state] ?? z.state}`);
+    check("...and never to ZombieStateStrike", !struck);
+    check("...which is flown through its arc rather than skipped",
+          subs.has(LeapStrikeSub.Flight), JSON.stringify([...subs]));
+    check("...and lands the hit the strike could not: a life gone on touchdown",
+          G.g_player_lives[0] === lives - 1 && livesAtLanding === lives - 1,
+          `lives ${lives} -> ${G.g_player_lives[0]} (at landing ${livesAtLanding})`);
+    check("...then bounces, with ENE_WALK6_22 on the bounce, into the retreat",
+          backedOff && sounds.includes(0x2916a9),
+          `backed off ${backedOff}, sounds ${sounds.join(",")}`);
+    check("...back on the ground snap", (z.flags & ActorFlag.Airborne) === 0,
+          `0x${z.flags.toString(16)}`);
+  }
+
+  // -- ActorReactToHit's three arms ----------------------------------------
+  {
+    setup();
+    const z1 = spawnZombie(0x7c04, 1, "type 1");
+    const z3 = spawnZombie(0x7c05, 3, "type 3");
+    check("result 4 never staggers -- the split arm, whose split is not ported",
+          ActorReactToHit(z1, 1, HitResultCode.Split) === undefined
+          && ActorReactToHit(z1, 4, HitResultCode.Split) === undefined);
+    check("...result 1 always does", z1.react === null
+          && ActorReactToHit(z1, 4, HitResultCode.Damaged) !== undefined);
+    check("...and result 0 does for type 3, as 2 and 5 do: everything that is "
+          + "not 1, 3 or 4 is one arm",
+          ActorReactToHit(z3, 4, HitResultCode.None) !== undefined
+          && ActorReactToHit(z1, 4, HitResultCode.None) === undefined);
+  }
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

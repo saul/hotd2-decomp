@@ -69,6 +69,11 @@ export class StageScene {
    */
   private waterOwned: ReadonlySet<number> = new Set();
   private waterDrawn: ReadonlySet<number> = new Set();
+  /**
+   * Slots a ported routine draws at a matrix of its own, by the layer that
+   * poses it -- see {@link claimSlots}.
+   */
+  private readonly claimed = new Map<string, ReadonlySet<number>>();
 
   /**
    * The stage, parsed from its glTF's bytes -- which the loader has already
@@ -86,7 +91,16 @@ export class StageScene {
     // copies it, and the copies must carry the engine's draw state and the
     // primitive marks the translucent sort groups by. See `draw_order.ts`.
     prepareDrawCommands(gltf.scene, gltf.parser.associations);
-    return new StageScene(gltf.scene, script);
+    return StageScene.fromScene(gltf.scene, script);
+  }
+
+  /**
+   * A stage from a tree that is already parsed and prepared: the half of
+   * {@link load} after the glTF, which is also how `test/render.test.ts`
+   * builds one out of a few nodes.
+   */
+  static fromScene(scene: Object3D, script: ScriptJson): StageScene {
+    return new StageScene(scene, script);
   }
 
   private constructor(scene: Object3D, script: ScriptJson) {
@@ -195,6 +209,37 @@ export class StageScene {
     this.refresh();
   }
 
+  /**
+   * Take *slots* out of the "loaded, so drawn" rule in {@link refresh}: a
+   * layer that runs the routine which really draws a slot claims it, under
+   * its own name, so the stage does not draw a second copy.
+   *
+   * That rule has no routine behind it (`L54`): opcode `0x50` makes a slot
+   * resident and draws nothing, and the stage's copy of an unregioned model
+   * sits at the model's own origin -- the world's `(0, 0, 0)`. For a door
+   * that is a door standing in the wrong place. Stage 5's tunnel held
+   * `0x189A`, the roller shutter `RisingDoorUpdate` (`FUN_004753F0`) draws in
+   * a garage three hundred units away, and `0x1899`, the gate `HingeUpdate`
+   * (`FUN_00473CF0`) swings open at the tunnel's mouth; and block 1's
+   * `0x1892`, which `RiseToHeightUpdate` (`FUN_004757F0`) draws behind
+   * JUDGMENT, was drawn nowhere else at all. No instruction in the image
+   * names any of the three -- they reach `AssetDrawSlot` only through the
+   * descriptor tail those routines copy into `obj+0x28C`.
+   *
+   * A claim is replaced whole on a second call from the same owner, and
+   * lives as long as this stage.
+   */
+  claimSlots(owner: string, slots: Iterable<number>): void {
+    this.claimed.set(owner, new Set(slots));
+    this.refresh();
+  }
+
+  /** Whether some layer has claimed *slot* -- see {@link claimSlots}. */
+  isClaimed(slot: number): boolean {
+    for (const s of this.claimed.values()) if (s.has(slot)) return true;
+    return false;
+  }
+
   /** `asset_load_slot` (`0x50`) / `asset_unload_slot` (`0x51`). */
   loadSlot(slot: number): void {
     this.loadedSlots.add(slot);
@@ -220,9 +265,11 @@ export class StageScene {
       m.node.visible = true;
     }
     // Props the script streamed in with 0x50 are not region members; they stay
-    // drawn until 0x51 takes them away.
+    // drawn until 0x51 takes them away -- unless a layer runs the routine that
+    // really draws them, and has claimed the slot (see `claimSlots`).
     for (const m of this.unregioned) {
       if (m.slot === null || this.waterOwned.has(m.slot)) continue;
+      if (this.isClaimed(m.slot)) continue;
       if (this.loadedSlots.has(m.slot)) m.node.visible = true;
     }
     for (const slot of this.waterDrawn) {

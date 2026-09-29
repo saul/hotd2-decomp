@@ -44,6 +44,7 @@ import {
   BreakableState, PropFamily, type BreakableProp, type PropDrawCall,
 } from "../game/class41/prop_state";
 import { T } from "../game/tables";
+import type { BreakablePlacement } from "../bundle";
 import { KIND_SHADOW } from "../game/class41/kinded";
 import {
   GENERIC_DRAW_SLOT, GENERIC_POSE_ORDER, PoseOrder,
@@ -233,6 +234,24 @@ interface Live {
   partSlots?: number[];
   /** `PropUpdateType48FlickerLight`'s thirty pieces, built on the break. */
   debris?: Object3D[];
+}
+
+/**
+ * The slots the pool's two class-0x44 doors draw from their own descriptors:
+ * `RisingDoorUpdate` (`FUN_004753F0`, selector 11) and `RiseToHeightUpdate`
+ * (`FUN_004757F0`, selector 13), each exactly one `AssetDrawSlot(obj+0x28C)`
+ * under its own translate. This layer draws both, so the slots are claimed
+ * from `StageScene`'s "loaded, so drawn" rule, which had drawn stage 3's and
+ * stage 5's shutters a second time at the world's origin and stage 5's gate
+ * nowhere else. See `StageScene.claimSlots`.
+ */
+export function DescriptorDoorSlots(
+    placements: readonly BreakablePlacement[] | null | undefined): number[] {
+  return (placements ?? [])
+    .filter((pl) => pl.container === "rising_door"
+                 || pl.container === "rise_to_height")
+    .map((pl) => pl.slot ?? 0)
+    .filter((slot) => slot !== 0);
 }
 
 export class BreakableLayer implements System<RenderContext> {

@@ -1363,3 +1363,21 @@ the user sent `?stage=1&block=1&step=3&op=9`. **Ask for the address, or
 take the page's own URL, before choosing a class**, then read
 `G.g_object_list` there for what is actually on screen (L83's list-every-spawn
 pointed at a report).
+
+**L93 -- A thing drawn in the wrong place may be a second copy, and the first
+question is which layer draws it.** "A huge door in the complete wrong
+position" at the start of stage 5 read as a transform bug, and the step's
+three door-like objects were each checked in turn: the hinge's remove flag
+raised, the roller shutter's remove flag raised, the rigs, props and
+breakables layers switched off one at a time in a driven page. The door stayed
+through all five. It was `StageScene`'s: the shutter's model, slot `0x189A`,
+which the port drew correctly in its garage three hundred units away *and*
+again at the world's origin, because the script had loaded it with opcode
+`0x50` and the stage draws every unregioned loaded slot where the model's own
+coordinates put it -- `L54`'s stand-in, still in the tree. The same rule had
+been the only thing drawing the gate behind JUDGMENT (slot `0x1892`), whose
+builder was unported, fourteen hundred units from the fight. **Before reading
+any routine's matrix, find the layer: switch each one off in a driven frame
+and see which takes the object with it**; a model with no layer left is a
+drawer the port does not have, and a model two layers draw is a stand-in that
+outlived the port it stood in for.

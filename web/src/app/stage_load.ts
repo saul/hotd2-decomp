@@ -25,6 +25,8 @@ import { StageScene } from "../render/stagescene";
 import { CamPaths } from "../game/camera/curve";
 import { SetCameraPaths } from "../game/tables";
 import { RailLayer } from "../render/overlays";
+import { HingeDrawSlots } from "../render/props";
+import { DescriptorDoorSlots } from "../render/breakables";
 import { attachTo, ownResources } from "../render/scope3d";
 import { Walker } from "../script/walker";
 import { G } from "../game/globals";
@@ -213,6 +215,12 @@ export async function loadStageInto(p: Player): Promise<void> {
   // adopted here; the nodes follow `G.g_breakable_props`.
   p.breakables.adopt(p.scene3d.root);
   p.chars.breakables = p.breakables;
+  // Both of those layers draw models the script also streams in with opcode
+  // 0x50, at the matrices their routines make. The stage would otherwise
+  // draw its own copy of each at the model's origin (L54); they claim them.
+  p.scene3d.claimSlots("props", HingeDrawSlots(bundle.script.props));
+  p.scene3d.claimSlots("breakables",
+                       DescriptorDoorSlots(bundle.script.breakables?.placements));
   // ...and the same two lines for the actors whose model is an asset slot.
   // `chars` owns the ray; this layer owns the spheres `ShotTestSphere`
   // measures against.

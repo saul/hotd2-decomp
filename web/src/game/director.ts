@@ -619,6 +619,7 @@ export function SpawnPropContainers(spawns: readonly ScriptSpawn[]): void {
       story_switch: Class44Selector.StoryModeSwitch,
       script_flag_effect: Class44Selector.ScriptFlagEffect,
       rising_door: Class44Selector.RisingDoor,
+      rise_to_height: Class44Selector.RiseToHeight,
     };
     const sel = CLASS44_SELECTOR[pl.container];
     if (s.class === SpawnClassValue.PropPlacer && sel !== undefined) {
@@ -629,7 +630,9 @@ export function SpawnPropContainers(spawns: readonly ScriptSpawn[]): void {
                                ? `effect ${pl.effect}`
                                : pl.container === "rising_door"
                                  ? `rising door, flag ${pl.open_flag}`
-                                 : `container kind ${pl.kind}`,
+                                 : pl.container === "rise_to_height"
+                                   ? `rise to height, flag ${pl.open_flag}`
+                                   : `container kind ${pl.kind}`,
                            { hp: sel });
       a.pos = vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0, s.pos?.[2] ?? 0);
       a.yaw = pl.yaw ?? 0;

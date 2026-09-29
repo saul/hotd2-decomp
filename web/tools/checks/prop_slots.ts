@@ -17,7 +17,9 @@
  * **What is asserted, and what is not.** Only the slots the port will *really*
  * ask for:
  *
- * * every `rising_door` placement's `slot`, and every model a `flicker_light`
+ * * every `rising_door` and `rise_to_height` placement's `slot` (class 0x44
+ *   selectors 11 and 13, each of which draws its descriptor's slot and nothing
+ *   else), and every model a `flicker_light`
  *   (class 0x41 type 48) carries;
  * * every `generic` placement whose type is in `GENERIC_DESCRIPTOR_SLOT`, for
  *   which the descriptor's `+0x11C` is the asset slot rather than a lifetime;
@@ -477,10 +479,11 @@ for (const entry of JSON.parse(readFileSync(manifest, "utf8")).stages) {
       // PropUpdateType48FlickerLight draws, carried on the placement.
       for (const slot of pl.slots || []) want.push([slot, "a model PropUpdateType48FlickerLight draws"]);
     }
-    if (kind === "rising_door") {
+    if (kind === "rising_door" || kind === "rise_to_height") {
       const slot = pl.slot || 0;
       if (slot) {
-        want.push([slot, "the model RisingDoorUpdate draws"]);
+        const routine = kind === "rising_door" ? "RisingDoorUpdate" : "RiseToHeightUpdate";
+        want.push([slot, `the model ${routine} draws`]);
         doors++;
       }
     } else if (kind === "generic") {
@@ -544,7 +547,7 @@ if (!stages) {
   console.log("SKIP  prop_slots: the manifest names no stages");
   c.finish();
 }
-c.note(`${stages} bundles: ${checked} prop draw slots checked (${doors} rising doors, `
+c.note(`${stages} bundles: ${checked} prop draw slots checked (${doors} class-0x44 doors, `
        + `${bodies} descriptor-slot props, ${frames} extra strip frames, `
        + `${items} Original Mode collectibles)`);
 c.finish();

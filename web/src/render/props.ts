@@ -133,6 +133,20 @@ function onScreen(o: Object3D): boolean {
   return true;
 }
 
+/**
+ * The slots `HingeUpdate` (`FUN_00473CF0`) draws on this stage: each hinge's
+ * `obj+0x28C`, from its descriptor tail. This layer poses every one of them,
+ * so they are claimed from `StageScene`'s "loaded, so drawn" rule -- which
+ * otherwise drew a second copy of each at the model's origin whenever the
+ * script had streamed the slot in (stage 5's gate `0x1899` stood a second
+ * time, unswung, at the mouth of the tunnel it opens, and five more hinge
+ * models in stages 2, 4 and 6 the same way).
+ * See `StageScene.claimSlots`.
+ */
+export function HingeDrawSlots(json: PropsJson | null | undefined): number[] {
+  return json ? json.hinges.map((h) => h.slot) : [];
+}
+
 /** Half-length of the origin cross, in world units. */
 const ORIGIN_ARM = 2.5;
 /** The box drawn for a prop that has no measurable bounds. */

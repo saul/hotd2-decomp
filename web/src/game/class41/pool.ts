@@ -18,6 +18,7 @@ import { FallingContainerFragmentUpdate }
 import type { GameHost } from "../host";
 import { PropShattersTick, type ShatterCamera } from "./shatter";
 import { RisingDoorUpdate } from "../class44/rising_door";
+import { RiseToHeightUpdate } from "../class44/rise_to_height";
 import { ScriptFlagEffectUpdate } from "../class44/script_flag_effect";
 import {
   ChainSegmentUpdate, StoryModeSwitchUpdate,
@@ -94,6 +95,9 @@ export function BreakablePropPoolUpdate(rng: Rng, events?: Events,
       // `obj+0x34` and no `RegisterForShotTest` in it. Its remove flag is its
       // whole lifetime.
       case PropFamily.RisingDoor: RisingDoorUpdate(p); break;
+      // Nor around selector 13's: its remove flag and a camera cue are its
+      // lifetime, and its shot-test call is its own, behind `obj+0x14C`.
+      case PropFamily.RiseToHeight: RiseToHeightUpdate(p); break;
       // Neither of these calls `PropExpireByStepLifetime` — 53 inlines its
       // own variant of it and 54 has no lifetime at all — so neither can ride
       // the generic arm, which runs that prologue before it dispatches.

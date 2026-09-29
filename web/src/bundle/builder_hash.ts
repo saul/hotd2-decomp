@@ -23,7 +23,7 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
   "approach.ts": "f2458fca4f4f943e775d2f73237eef7bf925b37dc38ba653bc89f80d3e800443",
   "arcscript.ts": "7c64fa78e89264425a0032c0918c846f8972905d848251d517112cd307722b35",
   "bams.ts": "f03b1290866a63ab2ae764d49bd15c57bd53c6b1a03794f7a0357e8dd842eb8f",
-  "bundle.ts": "b4f34edb41a52c80eb5ce0a0846db112a32733a3c526ea0182e4e5c295576c3f",
+  "bundle.ts": "bb43499fb536dbeebfa00541adca22e947c92fcaa4baf3a28c338ca996582d92",
   "bytes.ts": "59b2f363e98da56e88ada59458239032e40cad3a27342659e213d849c0967168",
   "cam.ts": "fe50200cb57c6578681a121766e7a5f4ed2425d91996169f83a82e8375dd63c3",
   "campaths.ts": "fbe28df3265d37b60a006e937a926eca8546609aa29cc5d80e7f1fc9afd639be",
@@ -74,4 +74,4 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
 };
 
 /** One digest over {@link BUILDER_FILES}, in filename order. */
-export const BUILDER_HASH = "7f0799702c5ee0826f6478095fb108e33b4165f95ede2ea39f4aed5f66169588";
+export const BUILDER_HASH = "031a4b9128469df74d05d434677eebed18d72744b713123b220327732bc5d2c3";

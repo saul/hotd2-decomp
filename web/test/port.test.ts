@@ -607,6 +607,8 @@ import {
   PropBuildRisingDoor, RisingDoorUpdate, RisingDoorRise, RisingDoorRattles,
   RISING_DOOR_CEILING, RISING_DOOR_CEILING_OTHER, RISING_DOOR_RATTLE_SLOT,
   RISING_DOOR_STEP_OTHER,
+  Class44Selector, PropBuildRiseToHeight, RiseToHeightUpdate,
+  RISE_TO_HEIGHT_KILL_FRAME, RISE_TO_HEIGHT_KILL_PATH,
 } from "../src/game/class44";
 import { SpawnPropContainers, SpawnSlotActor, SpawnSlotActors }
   from "../src/game/director";
@@ -10758,9 +10760,124 @@ console.log("\nclass 0x44 selector 11, the door that slides up:");
         door.y === held && held > RISING_DOOR_CEILING, String(held));
 
   // Flag 11 is the last op of that step, and it is `ActorKill` and not a hide.
+  const flagsBefore = door.flags;
   G.g_script_flags[11] = 1;
   RisingDoorUpdate(door);
   check("the remove flag kills it outright", door.dead);
+  // `CALL 0x004A7040` at 0x00475417 -- `ActorKill`, which writes nothing to
+  // the object. `ActorDespawn` would have raised `0x80018000` and dropped the
+  // live bit, which is the exit the port took.
+  check("...through ActorKill, which leaves the flag word as it was",
+        door.flags === flagsBefore && door.flags === 0x51,
+        `0x${(door.flags >>> 0).toString(16)}`);
+}
+
+console.log("\nclass 0x44 selector 13, stage 5's gate behind JUDGMENT:");
+{
+  // Driven the way the level drives it: a placement in the bundle, the
+  // walker's spawn list, `SpawnPropContainers`, and `GameUpdate`. Before
+  // selector 13 was ported the placement did not exist, the spawn built
+  // nothing, and the model was drawn only by the stage's own "loaded, so
+  // drawn" rule -- at the world's origin, fourteen hundred units from here.
+  const rng = new Rng(65);
+  const events = propScene(rng, GameMode.Arcade);
+  // Stage 5's descriptor exactly: evt 0x16F4, slot 0x1892 = st5.bin[1], tail
+  // +0x14 = 48, rise flag 4, remove flag 23, no blob (block 1 step 1 op 26).
+  const GATE: BreakablePlacement = {
+    at: 0x16f4, container: "rise_to_height", slot: 0x1892, coli: -1,
+    rise: 48, open_flag: 4, remove_flag: 23, lifetime_evt_steps: 0,
+    pos: [583, -70.9, -1340.2], yaw: 0,
+  };
+  SetGameTables(CHARS, { ...BREAKABLES,
+                         placements: [...(BREAKABLES.placements ?? []), GATE] });
+  SpawnPropContainers([{ at: 0x16f4, class: SpawnClass.PropPlacer }]);
+  const placer = G.g_object_list.find((o) => o.at === 0x16f4);
+  check("the placer is class 0x44 and dispatches on +0x11C = 13",
+        placer?.cls === SpawnClass.PropPlacer
+        && placer.hp === Class44Selector.RiseToHeight && placer.hp === 13,
+        `${placer?.cls} ${placer?.hp}`);
+  GameUpdate(1 / 60, NULL_HOST, rng, events);
+  const gate = G.g_breakable_props.find((q) => q.at === 0x16f4);
+  check("one frame builds the object and the placer dies",
+        !!gate && gate.family === PropFamily.RiseToHeight && !!placer?.dead);
+  if (!gate) throw new Error("no gate");
+  // `FILD [tail+0x14]; FADD [desc+0x44]; FSTP [obj+0x2C0]`: 48 + (f32)-70.9.
+  const y0 = Math.fround(-70.9);
+  check("the ceiling is the descriptor's y plus the tail's whole-number "
+        + "height, in f32",
+        gate.y === y0 && gate.shake === Math.fround(48 + y0)
+        && gate.slot === 0x1892 && gate.storyItem === 4
+        && gate.removeFlag === 23 && gate.flags === 0x51,
+        `${gate.y} ${gate.shake}`);
+
+  for (let i = 0; i < 120; i++) RiseToHeightUpdate(gate);
+  check("with no flag it holds its place and is drawn there, once: "
+        + "Translate(583, -70.9, -1340.2) RotY(0) AssetDrawSlot(0x1892)",
+        gate.y === y0 && !gate.dead && gate.draws?.length === 1
+        && gate.draws[0].slot === 0x1892
+        && gate.draws[0].m[12] === Math.fround(583)
+        && gate.draws[0].m[13] === y0
+        && gate.draws[0].m[14] === Math.fround(-1340.2),
+        JSON.stringify(gate.draws?.[0]?.m.slice(12, 15)));
+  check("...and, with no blob, it files nothing for the shot test",
+        !gate.shotRegistered && gate.hitRadius === 0);
+
+  // Flag 4: a unit a frame, tested before the step and strictly below.
+  G.g_script_flags[4] = 1;
+  const ys: number[] = [];
+  for (let i = 0; i < 60; i++) { RiseToHeightUpdate(gate); ys.push(gate.y); }
+  const moved = ys.filter((y, i) => y !== (i ? ys[i - 1] : y0)).length;
+  check("the flag raises it 1.0 a frame, and it stops on the 48th frame, "
+        + "at the ceiling and not a unit past it",
+        ys[0] === Math.fround(y0 + 1) && moved === 48
+        && ys[47] === gate.shake && ys[59] === gate.shake,
+        `${moved} frames, ${ys[47]} / ${gate.shake}`);
+  check("...drawn where it stands", gate.draws?.[0]?.m[13] === gate.shake);
+
+  // The camera cue: path 0xDD, frame 0x35C, and nothing else.
+  G.g_active_cam_path = RISE_TO_HEIGHT_KILL_PATH;
+  G.g_cam_path_frame = RISE_TO_HEIGHT_KILL_FRAME - 1;
+  RiseToHeightUpdate(gate);
+  check("path 0xDD a frame short of 0x35C leaves it", !gate.dead);
+  G.g_cam_path_frame = RISE_TO_HEIGHT_KILL_FRAME;
+  const flagsBefore = gate.flags;
+  RiseToHeightUpdate(gate);
+  check("path 0xDD frame 0x35C kills it, through ActorKill",
+        gate.dead && gate.flags === flagsBefore);
+}
+
+console.log("\nclass 0x44 selector 13, the remove flag and the blob word:");
+{
+  const rng = new Rng(66);
+  propScene(rng, GameMode.Arcade);
+  const make = (coli: number) => PropBuildRiseToHeight({
+    at: 0x18c8, container: "rise_to_height", slot: 0x18c1, coli, rise: 32,
+    open_flag: 6, remove_flag: 25, lifetime_evt_steps: 0,
+    pos: [256.6, 2498.7, -9760.5], yaw: 0x4000 });
+  const bare = make(-1);
+  const blob = make(0x0cebf000);
+  G.g_breakable_props.push(bare, blob);
+  RiseToHeightUpdate(bare);
+  RiseToHeightUpdate(blob);
+  // A quarter turn, where the rotation shows (L48): RotY(0x4000) after the
+  // translate leaves the translate where it is and turns the model's X.
+  const m = bare.draws?.[0]?.m ?? [];
+  check("the yaw is obj+0x1D0, turned after the translate",
+        Math.abs(m[0]) < 1e-6 && Math.abs(Math.abs(m[2]) - 1) < 1e-6
+        && m[12] === Math.fround(256.6), JSON.stringify(m));
+  check("with a blob it registers for the shot test every frame; without, "
+        + "never", blob.shotRegistered && !bare.shotRegistered);
+  G.g_script_flags[25] = 1;
+  RiseToHeightUpdate(bare);
+  RiseToHeightUpdate(blob);
+  check("the remove flag takes the one without a blob by ActorKill -- the "
+        + "flag word untouched --",
+        bare.dead && bare.flags === 0x51,
+        `0x${(bare.flags >>> 0).toString(16)}`);
+  check("...and the one with a blob by ActorDespawn, which marks it",
+        blob.dead && ((blob.flags & 0x80018000) >>> 0) === 0x80018000
+        && (blob.flags & 1) === 0,
+        `0x${(blob.flags >>> 0).toString(16)}`);
 }
 
 console.log("\nclass 0x44 selector 11, stage 5's door takes the other arm:");

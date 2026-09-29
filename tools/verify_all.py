@@ -415,6 +415,14 @@ CHECKS: list[Check] = [
          "loads it, decoded out of the EXE; that every class-0x12 spawn on the "
          "disc is placed with exactly those fields; and, with a bundle, that "
          "every slot its strip can draw is in it"),
+    game("rise_to_height",
+         "that class 0x44 selector 13 -- stage 5's gate behind JUDGMENT and "
+         "twelve objects in stage 6 -- is `g_class44_subtypes[13]`, that the "
+         "exporter reads its tail at the offsets and widths "
+         "`PropBuildRiseToHeight` loads it and the port's three constants "
+         "are the update's own, that no shipped spawn carries the collision "
+         "blob the port's prop pool cannot shoot, and, with a bundle, that "
+         "every spawn is placed with exactly that tail and its model travels"),
     game("branches",
          "that every value a branch trigger can write into "
          "`g_script_branch_var` names a route slot its own block actually "

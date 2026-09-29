@@ -28,7 +28,9 @@ did not carry it, and the client's clone answered null.
 **What is asserted, and what is not.** Only the slots the port will *really*
 ask for:
 
-* every `rising_door` placement's `slot`;
+* every `rising_door` and `rise_to_height` placement's `slot` (class 0x44
+  selectors 11 and 13, each of which draws its descriptor's slot and nothing
+  else);
 * every `generic` placement whose type is in `GENERIC_DESCRIPTOR_SLOT`, for
   which the descriptor's `+0x11C` is the asset slot rather than a lifetime;
 * every literal in `GENERIC_STATIC_SLOTS`, which is what those routines draw
@@ -427,10 +429,12 @@ def main() -> int:
                 # PropUpdateType48FlickerLight draws, carried on the placement.
                 for slot in pl.get("slots") or []:
                     want.append((slot, "a model PropUpdateType48FlickerLight draws"))
-            if kind == "rising_door":
+            if kind in ("rising_door", "rise_to_height"):
                 slot = pl.get("slot") or 0
                 if slot:
-                    want.append((slot, "the model RisingDoorUpdate draws"))
+                    routine = ("RisingDoorUpdate" if kind == "rising_door"
+                               else "RiseToHeightUpdate")
+                    want.append((slot, f"the model {routine} draws"))
                     doors += 1
             elif kind == "generic":
                 ty = pl.get("type")
@@ -486,7 +490,7 @@ def main() -> int:
         return 3
 
     print(f"{stages} bundles: {checked} prop draw slots checked "
-          f"({doors} rising doors, {bodies} descriptor-slot props, "
+          f"({doors} class-0x44 doors, {bodies} descriptor-slot props, "
           f"{frames} extra strip frames, {items} Original Mode collectibles)")
     if bad:
         for line in bad[:40]:

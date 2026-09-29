@@ -5241,6 +5241,61 @@ console.log("\nShader programs are kept:\n");
         !release(programs[2]), JSON.stringify(programs[2]));
 }
 
+console.log("\nthe stage's loaded models: a door is drawn by its routine, once");
+
+{
+  // Stage 5 block 0 streams in `st5.bin[8]` and `[9]` with opcode 0x50, and
+  // block 1 `st5.bin[1]`: three unregioned models, slots 0x1899, 0x189A and
+  // 0x1892. `StageScene` drew every such slot where the model's own origin
+  // puts it -- the world's origin -- because the script had loaded it; and
+  // the loaded one is drawn by `HingeUpdate`, `RisingDoorUpdate` and
+  // `RiseToHeightUpdate` at their descriptors' points. So the gate stood in
+  // the tunnel it opens onto, the shutter across the path beside it, and the
+  // gate behind JUDGMENT was nowhere near JUDGMENT.
+  const { StageScene } = await import("../src/render/stagescene");
+  const { HingeDrawSlots } = await import("../src/render/props");
+  const { DescriptorDoorSlots } = await import("../src/render/breakables");
+  const model = (slot: number) => {
+    const m = new Group();
+    m.userData = { hod2_regions: [], hod2_slot: slot, hod2_draw_mode: 0 };
+    m.add(new Mesh(new PlaneGeometry(1, 1), new MeshBasicMaterial()));
+    return m;
+  };
+  const tree = new Group();
+  const gate = model(0x1899), shutter = model(0x189a), far = model(0x1892);
+  // A loaded model nothing here draws: the rule still stands for it.
+  const other = model(0x18a3);
+  tree.add(gate, shutter, far, other);
+  const scene = StageScene.fromScene(tree, { regions: [] } as never);
+  for (const s of [0x1899, 0x189a, 0x1892, 0x18a3]) scene.loadSlot(s);
+  check("loaded and in no region, every one of them is drawn at its origin",
+        gate.visible && shutter.visible && far.visible && other.visible);
+
+  scene.claimSlots("props", HingeDrawSlots({
+    hinges: [{ name: "prop_0be4_0", kind: "hinge", at: 0x0be4, selector: 1,
+               slot: 0x1899, side: -1, curve: 1, base_yaw: 54613,
+               open_flag: 1, remove_flag: 6 }],
+    statics: [], curves: {}, note: "" }));
+  scene.claimSlots("breakables", DescriptorDoorSlots([
+    { at: 0x0c2c, container: "rising_door", slot: 0x189a, open_flag: 2,
+      remove_flag: 7, lifetime_evt_steps: 0 },
+    { at: 0x16f4, container: "rise_to_height", slot: 0x1892, rise: 48,
+      coli: -1, open_flag: 4, remove_flag: 23, lifetime_evt_steps: 0 },
+    // Not a door: a generic prop's slot is not claimed by this rule.
+    { at: 0x0c74, container: "generic", type: 51, slot: 0x18a3,
+      lifetime_evt_steps: 0x18a3 },
+  ]));
+  check("a hinge's slot and both class-0x44 doors' are not drawn a second "
+        + "time by the stage",
+        !gate.visible && !shutter.visible && !far.visible,
+        `${gate.visible} ${shutter.visible} ${far.visible}`);
+  check("...while a loaded model no layer claims is left to the rule",
+        other.visible);
+  scene.enterRegion(0);
+  check("...and a region change does not bring them back",
+        !gate.visible && !shutter.visible && !far.visible && other.visible);
+}
+
 // Class 0x42's draws, composed by three.js, against the same calls made on
 // the engine's own stack (`game/matrix.ts`, which post-multiplies as
 // `MatrixTranslate`/`MatrixRotate*` do) -- at turns where no axis lines up

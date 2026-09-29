@@ -1,10 +1,10 @@
 # `tex/` texture bank
 
 **Status: solved.** Implemented in
-[`tools/hod2lib/texbank.py`](../../tools/hod2lib/texbank.py) and
-[`tools/hod2lib/exetab.py`](../../tools/hod2lib/exetab.py). All 303 banks with a
-descriptor table resolve **exactly**: every texture lands inside the file and
-the last one ends precisely at the file size.
+[`web/src/hod2lib/texbank.ts`](../../web/src/hod2lib/texbank.ts) and
+[`web/src/hod2lib/exetab.ts`](../../web/src/hod2lib/exetab.ts). All 303 banks
+with a descriptor table resolve **exactly**: every texture lands inside the file
+and the last one ends precisely at the file size.
 
 ## The key fact: metadata lives in the executable
 
@@ -151,7 +151,8 @@ looked at before it was named `[proved]`:
 | `0x900` | 512x32 | PRESS START BUTTON (attract) | `CreditBlinkTick` |
 
 The credit count's digits are the HUD's `0x59 + d`, 16x32, at the credit
-line's 0.85. `tools/verify_continue.py` checks each id resolves at that size.
+line's 0.85. `web/tools/checks/continue_screen.ts` checks each id resolves at
+that size.
 
 ## Two banks that overwrite a third: the blood colour
 

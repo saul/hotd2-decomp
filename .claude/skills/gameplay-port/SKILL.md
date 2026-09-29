@@ -8,7 +8,7 @@ description: Workflow for porting The House of the Dead 2's gameplay out of the 
 `web/src/game/` **is the exe, transcribed.** Not a game that plays like
 HOTD2: the same routines, the same state in the same places, the same
 branches, readable line for line beside Ghidra. The why is
-`docs/PLAYER_ARCHITECTURE.md` § *The gameplay code is a port*. The traps are
+`docs/PLAYER.md` § *The gameplay port*. The traps are
 [`docs/LESSONS.md`](../../../docs/LESSONS.md), cited here by id and not
 restated — read it before the first edit.
 
@@ -107,8 +107,9 @@ old shape. Remove the divergence and open-question notes the reading settles.
   bits) with the exe's own values; named `const`s for scalars. Plain `enum` —
   `const enum` breaks `isolatedModules` — and `Record`s keyed on it.
 * **Tables from `.rdata` travel in the bundle; immediates from `.text` stay in
-  `game/`.** A format change lands in `web/src/hod2lib/` and `tools/hod2lib/`
-  in the same commit.
+  `game/`.** A format change lands in `web/src/hod2lib/` and its spec in
+  `docs/formats/` in the same commit, with the bundle hashes regenerated
+  (L33).
 * **A class gets behaviour by registering** in `g_class_handlers`
   (`game/registry.ts`), never by an `if` elsewhere.
 * **Nothing at module load reads another module's export**; derive it inside
@@ -124,8 +125,8 @@ is derived and never saved.
 
 When a faithful transcription needs something its layer forbids, **never
 weaken the rule or the checker.** Finish what is not blocked, name the rule and
-the step of `PLAYER_ARCHITECTURE.md`'s *Order of work* that clears it, and ask
-whether to do that refactor first (CLAUDE.md).
+the refactor that would satisfy it, and ask whether to do that refactor first
+(CLAUDE.md).
 
 ## Citing
 
@@ -143,10 +144,9 @@ by bare address** — the parenthesised form there removes it from coverage
 
 ## The loop
 
-0. **Orient.** `git log --oneline -10`, `git status --porcelain`, `ListAgents`;
-   *Order of work* in `PLAYER_ARCHITECTURE.md` (`◐` is half-done). Run
-   `python3 tools/verify_all.py` for a green baseline and note `verify_port.py`'s
-   `divergences:` and `uncited exports:`.
+0. **Orient.** `git log --oneline -10`, `git status --porcelain`, `ListAgents`.
+   Run `python3 tools/verify_all.py` for a green baseline and note
+   `verify_port.py`'s `divergences:` and `uncited exports:`.
 1. **Read** the whole routine and every call it makes, starting from its
    dispatch table (`g_class_handlers` `0x009A2280`, `g_class30_states`
    `0x00592AE8`). Name everything with `tools/annotate.py` first.
@@ -162,10 +162,10 @@ by bare address** — the parenthesised form there removes it from coverage
    visible, look at it in the page (L19, L25).
 5. **Verify.** `python3 tools/verify_all.py`; a skip is not a pass (L14). The
    two counts from step 0 are no higher.
-6. **Document**: `PLAYER_PROGRESS.md`, `docs/formats/*.md`,
-   `PLAYER_ARCHITECTURE.md` if the tree or order of work moved, and
-   `docs/re/session-log.md` **including what you got wrong**. A new trap goes
-   in `LESSONS.md` and nowhere else.
+6. **Document**: the routine's doc comment; `docs/formats/*.md` and
+   `docs/re/*.md` for what the reading found; `docs/PLAYER.md` if the tree or
+   a rule moved; and the commit message, **including what you got wrong**. A
+   new trap goes in `LESSONS.md` and nowhere else.
 7. **Commit** only your own hunks, per CLAUDE.md. (`web/src/game/` is
    re-included by `!web/src/game/` in `.gitignore`; leave that rule alone.)
 
@@ -176,9 +176,9 @@ Encouraged, and **global or a bug**, in one commit. Sweep with
 in place (sorted by address; a rename does not move it); the database over MCP,
 reading the `from` in each result (L52), then `./ghidra/run.sh
 export-annotations` and its diff (L13); `game/**` and every comment in either
-citation form; docs and tools. Never rewrite `docs/re/session-log.md` — append
-the rename. `verify_port.py` and `verify_annotations.py --game-dir` check the
-TS and the TSV; only the sweep checks the docs.
+citation form; docs and tools. `verify_port.py` and the `game:annotations` check
+(`verify_all.py --game-dir`) check the TS and the TSV; only the sweep checks
+the docs.
 
 ## Done means
 
@@ -190,4 +190,4 @@ TS and the TSV; only the sweep checks the docs.
 - [ ] `divergences:` and `uncited exports:` no higher than at the start
 - [ ] A new assertion, seen failing without the change
 - [ ] `verify_all.py` green, skips named
-- [ ] Wrong turns in the session log; only your own hunks staged
+- [ ] Wrong turns in the commit message; only your own hunks staged

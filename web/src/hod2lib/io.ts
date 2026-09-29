@@ -2,15 +2,14 @@
  * The seam. Everything in this package is a pure function of bytes; this file
  * is where the bytes come from and where they go.
  *
- * `tools/hod2lib/` opens files. It can, because it only ever runs on a machine
- * with the install on it. This package runs in a browser too, where "open a
- * file" is a directory handle the user granted, and in node, where it is
- * `node:fs` — so no module below this one is allowed to know which.
+ * This package runs in a browser, where "open a file" is a directory handle
+ * the user granted, and in node, where it is `node:fs` — so no module below
+ * this one is allowed to know which.
  *
  * The implementations live outside the package on purpose: `web/tools/lib/`
  * for the CLI, `web/src/app/install/` for the page. Nothing here imports them.
  *
- * See docs/TS_PORT.md.
+ * See docs/PLAYER.md, "The bundle".
  */
 
 /**
@@ -44,11 +43,9 @@ export interface BundleSink {
 /**
  * zlib deflate, at the level PNG asks for.
  *
- * Node has `zlib.deflateSync`, which is the same zlib Python calls and emits
- * the same bytes. The browser has `CompressionStream("deflate")`, which is
- * also zlib but chooses its own level. Both decode to the same pixels, which
- * is the guarantee `docs/TS_PORT.md` makes and the one the parity check
- * asserts.
+ * Node has `zlib.deflateSync`. The browser has `CompressionStream("deflate")`,
+ * which is also zlib but chooses its own level. The bytes may differ between
+ * the two hosts; both decode to the same pixels.
  */
 export type Deflate = (data: Uint8Array, level: number) => Promise<Uint8Array>;
 
@@ -88,6 +85,8 @@ export async function resolveCase(
     try {
       names = await list(here);
     } catch {
+      // not-a-loss: a directory that cannot be listed has no such entry, and
+      // null is this function's answer for "no such path".
       return null;
     }
     for (const n of names) {

@@ -101,8 +101,7 @@ export function ThrowerRetireFromAliveCount(obj: Actor): void {
  * of the arm sit inside it: `0044d079 0d00000100` writes `NoCameraTrack` and
  * `0044d08e c604c5c05e9a0000` clears the slot, and the `JZ` at `0044d077`
  * jumps past both. The port used to guard the slot clear alone and raise the
- * flag unconditionally, which is half of **D1** in
- * `docs/REVIEW-2026-09-03.md`; the bit is now modelled as
+ * flag unconditionally; the bit is now modelled as
  * {@link ActorFlag.KeepCameraWhenLast}.
  */
 export function ThrowerReleaseSlotOnDeath(obj: Actor): void {

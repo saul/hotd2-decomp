@@ -1341,7 +1341,7 @@ console.log("\nrigs: class 0x28's sprite cels draw in their own meshes' state --
 
 console.log("\nrigs: the stage-2 car is drawn from the port's task, not from load");
 {
-  // New bug (NEW-BUGS-2): the car stood in Goldman's office through stage 2
+  // The car stood in Goldman's office through stage 2
   // block 0 step 1. `obj_452320` is `St2CarDraw` (`FUN_00452320`); its object
   // is the task `St2CarSpawn` (`FUN_00452120`) allocates, and the one caller
   // is `RescueTargetInit` (`FUN_00451720`) -- class 0x21's spawn, a step
@@ -1418,7 +1418,7 @@ console.log("\nrigs: the stage-2 car is drawn from the port's task, not from loa
 
 console.log("\nrigs: the car draws the parts St2CarDraw names, posed as it posed them");
 {
-  // New bug (NEW-BUGS-2): the car's rig showed its first asset row for good
+  // The car's rig showed its first asset row for good
   // -- the exporter shipped nothing else -- with the spun parts still and the
   // parked part never turning. `St2CarDraw` (`FUN_00452320`) picks a row of
   // `g_st2car_asset_variants` per frame, turns one push by `obj+0x1334` and
@@ -2487,7 +2487,7 @@ console.log("\nthe blood colour switch moves the map, not the shader:");
 }
 
 /**
- * "Civilians' hair doesn't render" — `docs/BUGS.md`.
+ * "Civilians' hair doesn't render".
  *
  * A civilian's head model is a shell open at the back: `hito_gal`'s bone 2 is
  * 149 vertices spanning `z 0.18..1.38`, with four vertex normals in the whole

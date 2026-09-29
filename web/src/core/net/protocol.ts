@@ -3,7 +3,7 @@
  * channels they travel on, and the binary layouts of the three messages that
  * go every frame.
  *
- * `docs/NETPLAY.md` has the reasoning. The short form:
+ * `docs/PLAYER.md`, "Netplay", has the reasoning. The short form:
  *
  * * **`ctrl`** is reliable and ordered: the handshake, the load barrier,
  *   keyframes, the session state, desync reports. JSON, apart from keyframe

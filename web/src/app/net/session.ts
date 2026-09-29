@@ -6,7 +6,7 @@
  * view of the game, and a wake -- and calls it at the frame's fixed points.
  * Everything below it (`host.ts`, `replica.ts`, the transports, the codec)
  * knows nothing of the player; everything above it (`ui/`) reads its
- * projection and sends commands. See `docs/NETPLAY.md`.
+ * projection and sends commands. See `docs/PLAYER.md`, "Netplay".
  *
  * "Host a two-player game" makes a room at the matchmaker (`matchmaker.ts`)
  * and shows its code and a link; player 2 opens the link (`#join=CODE`) or

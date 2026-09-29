@@ -1,7 +1,6 @@
 /**
- * Hand-coded object rigs, recovered from their draw routines.
- * The port of `tools/hod2lib/rigs.py` -- its code half; the table itself is
- * `rigs_data.ts`, generated from the same source.
+ * Hand-coded object rigs, recovered from their draw routines. This is the code;
+ * the table is `rigs_data.ts`.
  *
  * A `cam/` `op_` path moves *something*, but that something is rarely one
  * model. The objects that follow object paths are rigs assembled in code: a
@@ -237,8 +236,8 @@ export interface Rig {
   spawnClass?: number | null;
   /**
    * `obj+0x11C` of the spawns of {@link spawnClass} whose class handler
-   * installs this routine -- the one answer to "which spawn owns this rig";
-   * see `spawn_subtype` in `tools/hod2lib/rigs.py`. Every such rig carries
+   * installs this routine -- the one answer to "which spawn owns this rig".
+   * Every such rig carries
    * the matching spawns' addresses as {@link RigInstance.spawnAts}, and the
    * player draws it only once one has run. A rig with no route and no fixed
    * pose is also placed once per matching spawn, tagged `hod2_spawn_at`, and
@@ -354,9 +353,8 @@ export class AssetCache {
     try {
       got = await loadAsset(this.stage.source, this.stage.tables, stem);
     } catch (exc) {
-      // `where` is the caller's, spelled as Python's frame inspection would
-      // have derived it: four call sites share this cache and each keeps its
-      // own location in the degraded record.
+      // `where` is the caller's: four call sites share this cache and each
+      // keeps its own location in the degraded record.
       degraded.note(where, `${what} ${stem}`, lost, exc);
       got = [[], null];
     }

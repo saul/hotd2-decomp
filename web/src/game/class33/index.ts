@@ -36,7 +36,7 @@
  * ```
  *
  * Two looped sounds, each with its `_OFF` half, and the second starts where
- * the first stops. That also settles `rigs.py`'s `[likely] fire or smoke` on
+ * the first stops. That also settles `rigs_data.ts`'s `[likely] fire or smoke` on
  * the 0x1AAB..0x1AD2 loop the object swaps to: it is fire.
  *
  * ## The two bits, and why this class had to exist for the port to finish
@@ -76,7 +76,7 @@
  * * Everything from `0x00433463` to `0x0043382F`, which is drawing: the two
  *   22-slot sprite loops at `obj+0x1354`/`+0x1358`, the 45-degree spin at
  *   `obj+0x135C`, and the five sub-models slot `0x1B0E` carries. It is in
- *   `tools/hod2lib/rigs.py` as `obj_4331d0` and the renderer already places
+ *   `hod2lib/rigs_data.ts` as `obj_4331d0` and the renderer already places
  *   it. **The decompiler shows none of it** — its pseudocode ends at
  *   `0x0043345E` with a `return` the code does not have, which is `L37`.
  */

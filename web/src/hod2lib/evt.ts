@@ -1,5 +1,5 @@
 /**
- * `evt/` event tables. The port of `tools/hod2lib/evt.py`.
+ * `evt/` event tables.
  *
  * The files are raw memory images captured from the NAOMI/Dreamcast build.
  * They still contain absolute SH-4 RAM pointers, which the PC port patches at
@@ -155,7 +155,7 @@ export const OPCODES: Record<number, Op> = {
   0x2c: ["set_skippable_region", "fix", 2],
   0x2d: ["play_dialogue", "fix", 2],
   // `if (skip) PlaySoundId(0x80000002)`: the voice channel's stop, not a
-  // resume of the music. See tools/hod2lib/evt.py.
+  // resume of the music. See docs/formats/evt.md.
   0x2e: ["stop_voice_if_skipped", "fix", 1],
   0x2f: ["suppress_accuracy_stats", "fix", 2],
   0x30: ["queue_event", "queue", 0],      // FUN_0045F7F0
@@ -524,7 +524,7 @@ function hex8(v: number): string {
   return (v >>> 0).toString(16).toUpperCase().padStart(8, "0");
 }
 
-/** `"%06X  %02X %-24s %s"`, the reference implementation's `repr`. */
+/** One instruction as a line: `"%06X  %02X %-24s %s"`. */
 export function formatInstr(ins: Instr): string {
   const args = ins.words.map(hex8).join(" ");
   return `${ins.offset.toString(16).toUpperCase().padStart(6, "0")}  `

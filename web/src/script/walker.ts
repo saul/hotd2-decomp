@@ -2105,7 +2105,7 @@ export class Walker {
       //
       // Only for a real hole. A route slot of -1 is not one: the engine would
       // index its block table at -1, which no shipped script does -- every
-      // branch write names a live slot, which is what `verify_branches.py`
+      // branch write names a live slot, which is what `web/tools/checks/branches.ts`
       // asserts -- so the port stops rather than inventing an answer.
       this.nextEntryBlock = index > 0
         ? this.script.routes[index - 1]?.next[0] ?? null
@@ -2134,8 +2134,7 @@ export class Walker {
     // calls `FUN_00408D60`, which writes three approach constants. **It
     // touches no object.** An actor built by `SpawnFromDescriptor`
     // (`FUN_00408A20`) leaves through its own state machine and through
-    // nothing else — see `docs/PLAYER_HANGS.md` item 2, which wrote that down
-    // and then left this line in place. `[proved]`
+    // nothing else. `[proved]`
     //
     // Clearing them retired every live actor on the frame a block changed,
     // because `syncCharacterSpawns` hands `app/` everything the walker has

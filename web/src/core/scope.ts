@@ -31,7 +31,7 @@
  *   slice through `clonePlain`, and a graph of disposal closures cannot
  *   survive that.
  *
- * See `docs/PLAYER_ARCHITECTURE.md`, "Scopes: every lifetime has an owner".
+ * See `docs/PLAYER.md`, "Scopes: every lifetime has an owner".
  */
 
 /** Anything a scope can own outright. */

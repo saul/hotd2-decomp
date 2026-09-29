@@ -4,8 +4,8 @@ An object that follows an `op_` path is almost never one model. Its draw
 routine walks the matrix stack, pushing a transform and calling
 `AssetDrawSlot` per part. **There is no rig data in the asset files** — the
 hierarchy exists only as instructions, so every rig has to be transcribed by
-hand. See `tools/hod2lib/rigs.py` for the transcriptions and the proof that
-this is not a parser problem.
+hand. `RIGS` in `web/src/hod2lib/rigs_data.ts` holds the transcriptions, and
+`web/src/hod2lib/rigs.ts` the proof that this is not a parser problem.
 
 `CamEvalObjectPath6` (`0x004042D0`) has 31 callers. They split by whether they
 also call `AssetDrawSlot`:
@@ -47,9 +47,8 @@ sampled together, and nothing in the file says they should be.
 Treating `0xFF` as a route the car rides is what made the browser player fly
 the car through the camera while spinning it eleven and a half times -- the
 evaluator extrapolates backwards along the opening segment, and at frame 0
-`rot_y` reaches 762,158 BAMS. A `Route` now carries `hold_frame` for the
-literal case, and `verify_objects.py` fails if any swept route is evaluated
-before its own keys begin.
+`rot_y` reaches 762,158 BAMS. A `Route` now carries `holdFrame` for the
+literal case.
 
 **[measured]** Sweeping all 51 `CamEvalObjectPath6` call sites for a float
 literal in the time argument finds nine, and only `St1VehicleUpdate`'s two are
@@ -86,9 +85,8 @@ used as routes resolve to `op_` files, and each gate sits in the same stage
 file as the route it selects.
 
 That gives the per-stage gate the exporter uses: **a stage owns a rig iff it
-owns the camera path that selects it.** `tools/verify_objects.py` enforces
-both halves plus the same-stage-file rule, because a cross-stage gate could
-never fire.
+owns the camera path that selects it.** The same-stage-file rule holds
+because a cross-stage gate could never fire.
 
 ## Shared idioms
 
@@ -240,8 +238,7 @@ unless the source column says otherwise.
   gated on cam `0x2F` (cp_st1 15), but two of its four routes are `op_st2`.
   The gate controls when the object starts *moving*; the route is chosen per
   instance by `obj+0x11C`. Recording `0x2F` as a route gate produced a cp_st1
-  gate on op_st2 routes — a gate that could never fire — which is exactly what
-  the same-stage-file check in `verify_objects.py` caught.
+  gate on op_st2 routes — a gate that could never fire.
 * **A cel loop is one part per cel.** A `RigPart`'s `slots` are drawn
   together, so a routine that names one slot of a strip each frame has every
   cel exported as a part of its own -- `FUN_00432840`'s fire and smoke,
@@ -265,7 +262,7 @@ unless the source column says otherwise.
 ## Ghidra hazards hit while doing this
 
 * The decompiler **silently drops FPU arguments** to the matrix calls. Every
-  constant in `rigs.py` was re-read from raw bytes with `disassemble_bytes`,
+  constant in `rigs_data.ts` was re-read from raw bytes with `disassemble_bytes`,
   and the raw hex is kept in each part's `note`.
 * `CamEvalObjectPath6` writes `{float x,y,z; int rx,ry,rz}` — elements 3–5 are
   `__ftol` results, BAMS integers in float-typed slots. Ghidra shows all six as
@@ -282,7 +279,7 @@ at `obj+0x11C` (the descriptor's `+0x22`) and stores the subtype's routine at
 3 → `FUN_0048F050` (`obj_48f050`), 4 → `FUN_0048F190` (after one call to
 `FUN_00475A50`), 5 → `FUN_0048F560`, 6/7 → `FUN_0048F930`. So each of those
 rigs **exists from the frame its spawn opcode runs**, and not before.
-`tools/hod2lib/rigs.py` records this as `spawn_class=0x26, spawn_subtype=n`
+`RIGS` records this as `spawnClass: 0x26, spawnSubtype: n`
 — one field, the only answer to "which spawn owns this rig". The bundle
 resolves it to `rigs[].spawn_ats`, the script addresses of the matching
 spawns, and `render/rigs.ts` draws every such rig only once the walker has run

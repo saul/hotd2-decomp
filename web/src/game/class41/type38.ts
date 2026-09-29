@@ -34,7 +34,7 @@ import { PropRegisterForShotTest } from "./shot_test";
  * `g_prop_table38` — `0x00593E70`, nine rows of
  * `{f32 x, y, z; f32 rx, ry, rz}` with the angles in **degrees**.
  *
- * Checked against the image by `tools/verify_prop_tables.py`.
+ * Checked against the image by `web/tools/checks/prop_tables.ts`.
  */
 export const PROP_TABLE38: ReadonlyArray<readonly number[]> = [
   [15.283, 6.735, 9.353, -104.851, 0, 90],

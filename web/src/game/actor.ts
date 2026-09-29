@@ -371,7 +371,7 @@ export enum ActorFlag {
    * or a memory word, would be invisible to this sweep too (`L32`).
    *
    * The docstring this replaced said the state was "the only reader and
-   * writer". See `PLAYER_HANGS.md` items 22 and 24 for what that cost:
+   * writer". What that cost:
    * `class30/stand_throw.ts` **raised** this bit in sub 0, where the engine's
    * own arm only tests it and writes `obj+0x136C` bits `1` and `0x100000`
    * (`0x004590E6`..`0x00459109`), and that is what put two character-type-19
@@ -2167,7 +2167,7 @@ export interface ActorBase {
    * twice. Sixteen call sites test this cursor with `===` — correctly, because
    * `>=` double-fires across the `% (len + 1)` wrap — so an authored cue of 7,
    * 15, 31 or 507 could never fire and the actor simply parked. That is the
-   * shape of most of `docs/PLAYER_HANGS.md`.
+   * shape of most of the player's hangs.
    *
    * The engine's field is an integer incremented once per frame, and the
    * architecture doc's "whole ticks, never a fraction" rule was true of

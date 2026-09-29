@@ -45,7 +45,7 @@ export interface CameraPose extends CamPose {
  * That is what the measurement this note used to carry was saying: with the
  * drop applied to the draw, 173 of 201 paths would look up at their own aim
  * point. The raw curve eye is the camera -- which is also what the glTF
- * cameras `hod2lib.gltf` exports use -- and the fifteen units are the height
+ * cameras `hod2lib/gltf.ts` exports use -- and the fifteen units are the height
  * of the player's body below it.
  */
 
@@ -64,7 +64,7 @@ const _rollQ = new Quaternion();
  * The rotation a three.js camera needs to sit at `eye` looking at `target`.
  *
  * three.js cameras look down -Z with +Y up, which is also glTF's convention,
- * so this is the same construction `hod2lib.gltf._look_at_quat` uses for the
+ * so this is the same construction `lookAtQuat` in `hod2lib/gltf.ts` uses for the
  * exported cameras -- deliberately, so the browser and a Blender render of
  * the same glTF are comparable.
  */

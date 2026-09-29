@@ -233,7 +233,7 @@ export function PlaceWaterSurface(obj: Actor): WaterSurface | null {
  *
  * [diverges] `resident` is the slot table's `+0xD` bit 0x80, which the port
  * does not keep: opcodes 0x52..0x58 are whole-file asset traffic it treats as
- * already done (`docs/PLAYER_PROGRESS.md`'s opcode table). So the walk runs
+ * already done. So the walk runs
  * whether or not the tile is loaded. Every shipped placement follows the load
  * of its tile except block 16 step 10's, whose `komono_boss2.bin` arrives at
  * step 13, and the only effect is three steps of ripple phase on a tile that

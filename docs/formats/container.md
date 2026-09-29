@@ -1,7 +1,7 @@
 # `pol/` and `tex/` container
 
 **Status:** solved. Parser in
-[`tools/hod2lib/container.py`](../../tools/hod2lib/container.py); verified
+[`web/src/hod2lib/container.ts`](../../web/src/hod2lib/container.ts); verified
 across every asset in the game.
 
 ## Layout

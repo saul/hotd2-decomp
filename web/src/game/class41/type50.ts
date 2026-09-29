@@ -60,7 +60,7 @@ import { makeBreakableProp, PropFamily, type BreakableProp }
  * A row is 28 bytes, `{u16 slot; u16 pad; f32 x, y, z; s32 rx, ry, rz}`, the
  * angles already in BAMS. Carried here as `[slot, x, y, z, rx, ry, rz]`.
  *
- * Checked word for word against the image by `tools/verify_prop_tables.py`.
+ * Checked word for word against the image by `web/tools/checks/prop_tables.ts`.
  */
 export const PROP_TABLE50: ReadonlyArray<ReadonlyArray<readonly number[]>> = [
   // table 0, 0x00594AA0

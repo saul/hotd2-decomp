@@ -9,7 +9,7 @@
  * the overlay — is the renderer's own work and has no counterpart in the exe.
  *
  * It is also the shape the routine would have to be in to move into `game/`,
- * where the layering says it belongs; see `docs/PLAYER_PROGRESS.md`.
+ * where the layering says it belongs.
  */
 
 /** `obj+0x1DC` decides which way a hinge swings, and *only* by its sign. */

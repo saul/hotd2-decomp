@@ -1,11 +1,11 @@
 /**
  * **Do the civilians move?** In a real browser, on the real bundle, with eyes.
  *
- * `docs/BUGS.md` carries a report that says "civilians seem to be missing
+ * There is a report that says "civilians seem to be missing
  * their root motion", and the answer to a report about something you can see
  * is a picture and a number that came from the same run — L19 and L25. This
  * deep-links to the block that spawns them, drives whole game frames through
- * `?drive=1` rather than the wall clock (L12, and `PLAYER_HANGS` item 8),
+ * `?drive=1` rather than the wall clock (L12),
  * samples every class-0x10 row's `at (x,z) · root on|off · scale n` line, and
  * writes a screenshot at each end of the sample.
  *

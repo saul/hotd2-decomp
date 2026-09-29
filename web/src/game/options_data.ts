@@ -12,7 +12,7 @@
  * sources) and the sprite ids it **pushes** as immediates; the `.rdata` the
  * screen reads as it draws -- its rows, labels, glyphs and sound-test lists --
  * travels in the bundle (`ExeTables.optionsTables`, `T.options`).
- * `tools/verify_options.py` holds every number here to the image.
+ * `web/tools/checks/options.ts` holds every number here to the image.
  */
 
 /**

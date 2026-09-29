@@ -12,8 +12,6 @@
  * status sits on the same object as the `run` that justifies it. Ask
  * `opStatus` from `./walker`. What is left here is the type and
  * the human labels, which are presentation and belong with neither.
- *
- * `docs/PLAYER_PROGRESS.md` carries the same table for humans.
  */
 
 export type OpStatus =

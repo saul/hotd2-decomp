@@ -2,7 +2,7 @@
  * The light channels, the directional light and the two gates over them.
  *
  * Registered into `Walker.OPS` by `./index.ts`; the `status` field is what
- * `verify_player_ops.py` checks against docs/PLAYER_PROGRESS.md.
+ * the script panel shows.
  */
 import type { OpImpl } from "../walker";
 import { Walker } from "../walker";
@@ -40,7 +40,7 @@ export const OPS: Record<number, OpImpl> = {
     },
     0x15: {                                     // enable_entity_spotlights
       // Decoded as a raw operand: 0x15's handler only writes a global, so
-      // `script.py` leaves it in `raw` rather than naming a field.
+      // `hod2lib/script.ts` leaves it in `raw` rather than naming a field.
       status: "done",
       run: (w, op) => {
         w.gunLights = (op.raw?.length

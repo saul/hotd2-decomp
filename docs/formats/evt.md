@@ -5,8 +5,7 @@ routing graph and the bytecode are all recovered; 16,991 instructions across all
 13 files decode with zero errors. What remains is *semantics* — most opcodes are
 identified only by which global they touch.
 
-Implemented in [`tools/hod2lib/evt.py`](../../tools/hod2lib/evt.py); checked by
-`tools/verify_phase6.py`.
+Implemented in [`web/src/hod2lib/evt.ts`](../../web/src/hod2lib/evt.ts).
 
 The files are raw Dreamcast RAM images. They are not serialised: they contain
 absolute SH-4 pointers, and the PC port patches them at load.
@@ -215,7 +214,7 @@ between blocks, and the mechanism behind the game's branching paths. Read by
 
 Stage 2 has 42 route nodes with 15 branch points — comfortably the most
 branch-heavy stage, which matches the game. Exposed as
-`ExeTables.scene_routes(scene)`.
+`ExeTables.sceneRoutes(scene)`.
 
 ### How a branch is decided
 
@@ -280,12 +279,12 @@ Every one is an Original Mode road, and every one has an original-mode trigger
 standing in it. The other nineteen all have a live slot 1, which is the
 value arcade's writers say.
 
-`tools/verify_branches.py` is the check, in two halves: for every branch block
-that spawns a trigger, and for every prop write that lands in a branch block,
-the value must name a **live** slot of that block's own record. Fourteen
-blocks and thirty-one prop writes, all clean. It fails if the class 0x52
-subtype table is flipped, the cat's block gate is dropped, or
-`PropUpdateType25`'s 1 becomes a 2.
+`web/tools/checks/branches.ts` is the check, in two halves: for every branch
+block that spawns a trigger, and for every prop write that lands in a branch
+block, the value must name a **live** slot of that block's own record. Fourteen
+blocks and thirty-one prop writes, all clean. It fails if the class 0x52 subtype
+table is flipped, the cat's block gate is dropped, or `PropUpdateType25`'s 1
+becomes a 2.
 
 The **civilian** is the mechanism that matters. Eleven of the 136 command
 streams run op `0x19`, all eleven pass 1, and every one of them puts it after
@@ -354,12 +353,12 @@ at. Following slot 2, which is Original Mode's road, adds nothing: **Arcade and
 Original reach the same nine endings**, so both entries of stage 3 and of stage
 4 are open to both modes.
 
-`tools/verify_scene_exits.py` is the check. It walks the route graph from each
-scene's entry blocks, and asserts that a hole follows every reachable terminal
-record, that none of them sits at block 0 (which would send the `-6` read off
-the front of the table), and that every `next[0]` names a block the next
-scene's evt file actually supplies. Read `next[1]` instead and stage 2 hands
-stage 3 a `-1`.
+`web/tools/checks/scene_exits.ts` is the check. It walks the route graph from
+each scene's entry blocks, and asserts that a hole follows every reachable
+terminal record, that none of them sits at block 0 (which would send the `-6`
+read off the front of the table), and that every `next[0]` names a block the
+next scene's evt file actually supplies. Read `next[1]` instead and stage 2
+hands stage 3 a `-1`.
 
 The browser player carries both halves in its bundle — `entries` and `exits` on
 `<stage>.script.json`, format 5 — offers the entry as a picker on the two
@@ -584,9 +583,9 @@ runs no script and draws the bars shut. Every stage's block 0 step 1 then
 writes a 5 of its own before its first wait, and opens the bars later (stage
 6's block 0 step 2 with a 6, the others with a 1).
 
-`hod2lib.script` attaches these readings to the instruction as `means` and
-`firing_gate`, so the player shows "5 — close, and disable firing" rather than
-"5".
+`web/src/hod2lib/script.ts` attaches these readings to the instruction as
+`means` and `firing_gate`, so the player shows "5 — close, and disable firing"
+rather than "5".
 
 ### `1D` — the rain, read out
 
@@ -898,7 +897,7 @@ then `op_*`:
 **[proved by measurement]** All **751 / 751** selector-`0x40` instructions in
 stages 1–6 name a path inside their own stage's range. A wrong operand order
 would scatter those indices across the whole 418-path space, so this is a
-metric that collapses. `tools/verify_evt_cam.py`.
+metric that collapses.
 
 ## The scene state machine — SOLVED
 
@@ -1011,8 +1010,8 @@ Header is 0x24 bytes, identical for opcodes `0x09`, `0x0B`, `0x0C`, `0x0D`
 
 ### `+0x20` — the class flag word, and the reading that was wrong
 
-This document and `tools/hod2lib/evt.py` both used to call `+0x20` "always 0" /
-"unused in every shipped file". **Both were false whole-corpus.**
+`+0x20` is not "always 0" and not "unused in every shipped file": **both
+readings are false whole-corpus.**
 
 `SpawnFromDescriptor` (`FUN_00408A20`) copies it to `obj+0x1316` —
 `MOV AX, word ptr [EDI + 0x20]` (`668b4720`) then
@@ -1072,9 +1071,9 @@ pointer to some other record. There are two allocators:
 | `0x0C` | `FUN_00408BC0` | alloc **0x1314**; `obj+0x130C = descriptor + 0x24` — a *different object field*, so a class-0x0C object has no `obj+0x1390` at all |
 
 So a class handler that reads `obj+0x1390 + k` is reading this file at
-`descriptor + 0x24 + k`. `hod2lib.evt.Spawn.param(k, kind)` does exactly that,
-taking the same `k` the handler uses so the two can be compared without
-arithmetic.
+`descriptor + 0x24 + k`. `Spawn.param(k, kind)` in `web/src/hod2lib/evt.ts`
+does exactly that, taking the same `k` the handler uses so the two can be
+compared without arithmetic.
 
 Two worked examples, both `[proved]` in the code and then confirmed against the
 data:
@@ -1162,7 +1161,7 @@ The u16 at `+0x22` reaches **both** `obj+0x11C` and `obj+0x11E`, and several
 classes use `obj+0x11C` as a **sub-type selector** rather than a health count:
 class `0x28` indexes a four-entry route table with it, class `0x33` picks one
 of eleven handlers, class `0x26` one of eight states. The field is still spelled
-`hp` in `hod2lib.evt.Spawn`; treat that as a historical name, not a claim. A
+`hp` in `evt.ts`'s `Spawn`; treat that as a historical name, not a claim. A
 `+0x11C` current / `+0x11E` maximum pair would also fit the duplication, and
 which classes read it which way is being resolved handler by handler.
 
@@ -1175,7 +1174,7 @@ data: 65 (347 descriptors), 48 (283), 37 (169), 68 (132).
 
 - Position is float and in level space. Sampled against the bounding box of
   each stage's own geometry set, **1546 of 1546** spawns across all six stages
-  fall inside their own stage — `tools/verify_objects.py`. That is the
+  fall inside their own stage. That is the
   strongest available check that the offsets are right. (An earlier revision
   reported 1216/1216 over five stages.)
 - **35 distinct class ids are used and every one is defined** in the handler

@@ -45,8 +45,7 @@
  * `ActorArcVelocity`, with no script: the same parabola, but the four step-3
  * legs over stage 2's rooftops took three times as long as the engine's --
  * 25, 49, 46 and 37 frames against 10, 18, 17 and 14 -- in whatever pose the
- * actor had been standing in, with no windup or landing between legs. That is
- * the "moves quite slowly" of `docs/NEW-BUGS-2.md`.
+ * actor had been standing in, with no windup or landing between legs.
  */
 import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";

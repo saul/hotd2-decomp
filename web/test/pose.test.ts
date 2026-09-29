@@ -14,7 +14,7 @@
  * frame at the bottom and not at the top, ran off the end of a 41-frame clip,
  * and posed `m.root[undefined]`. `g_camera_lookat_target` went NaN and stage 2
  * block 3 could not be cleared by a player, because the camera was pointing at
- * nothing. `docs/PLAYER_HANGS.md` item 1.
+ * nothing.
  *
  * This drives every path through the poser well past the end of every clip and
  * asserts the arithmetic stays finite. It uses three.js, which is why it is

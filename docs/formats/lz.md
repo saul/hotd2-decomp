@@ -1,8 +1,8 @@
 # Compression codec
 
 **Status: SOLVED.** Located at `0x0040ACD0` in `Hod2.exe`, reimplemented in
-[`tools/hod2lib/lz.py`](../../tools/hod2lib/lz.py), and verified against every
-compressed asset in the game.
+[`web/src/hod2lib/lz.ts`](../../web/src/hod2lib/lz.ts), and verified against
+every compressed asset in the game.
 
 ## Verification
 
@@ -13,12 +13,7 @@ compressed asset in the game.
 18,027 models parsed from the decompressed containers
 ```
 
-Every file produces **exactly** the byte count its header declares. Reproduce
-with:
-
-```sh
-python3 tools/verify_lz.py --game-dir "/path/to/THE HOUSE OF THE DEAD 2"
-```
+Every file produces **exactly** the byte count its header declares.
 
 ## Container form
 
@@ -113,16 +108,16 @@ Do **not** classify files by `dword0 > filesize`. Raw texture banks routinely
 begin with pixel data whose first dword exceeds the file size —
 `tex/etc_boy_kao.bin` starts `0xA32992E8` and is entirely uncompressed.
 
-Classify by trial instead, as [`container.py`](../../tools/hod2lib/container.py)
-does: check for a valid container first, then attempt decompression, and only
-fall back to "opaque blob" if both fail. Using the naive heuristic produced 24
-false positives.
+Classify by trial instead, as
+[`container.ts`](../../web/src/hod2lib/container.ts) does: check for a valid
+container first, then attempt decompression, and only fall back to "opaque blob"
+if both fail. Using the naive heuristic produced 24 false positives.
 
 ## Reference implementation
 
-[`tools/hod2lib/lz.py`](../../tools/hod2lib/lz.py). It is the only one: a C
-port was planned and has been dropped, because the Python already reads as the
-specification and a second implementation is a second thing to keep true.
+[`web/src/hod2lib/lz.ts`](../../web/src/hod2lib/lz.ts). It is the only one:
+it reads as the specification, and a second implementation is a second thing
+to keep true.
 
 ## Remaining questions
 

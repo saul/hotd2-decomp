@@ -1,5 +1,5 @@
 /**
- * glTF 2.0 writer for HOTD2 levels. The port of `tools/hod2lib/gltf.py`.
+ * glTF 2.0 writer for HOTD2 levels.
  *
  * Emits a `.glb`, or a `.gltf` + `.bin` + PNG set. The raw PowerVR2
  * render-state words are preserved verbatim in each material's `extras.pvr2`
@@ -449,17 +449,16 @@ function drawOrderExtras(mesh: Mesh, chainIndex: number, model = 0): Doc {
 function orderedPrims(prims: Doc[]): Doc[] {
   const key = (p: Doc) =>
     (p.extras as Doc).hod2_pass !== "opaque" ? 1 : 0;
-  // `Array.prototype.sort` is stable in every engine this runs on, which is
-  // what `sorted(key=...)` relies on here.
+  // `Array.prototype.sort` is stable in every engine this runs on, which the
+  // chain order relies on here.
   return prims.slice().sort((a, b) => key(a) - key(b));
 }
 
 /**
- * `"%g"`, which is how Python spells a bias tag.
+ * A bias tag, formatted as `"%g"`.
  *
  * Six significant digits, trailing zeros stripped, and an exponent only
- * outside `[1e-4, 1e6)`. Written out because a tag has to be stable across the
- * two implementations, and `toString` is not `%g`.
+ * outside `[1e-4, 1e6)`. Written out because `toString` is not `%g`.
  */
 function formatG(v: number): string {
   if (v === 0) return "0";
@@ -914,7 +913,7 @@ export async function exportLevel(
     // drawn with the first matching mesh's material -- nearly all of them
     // with another mesh's baked lighting and base alpha, among them the
     // stage-2 car's door shells, which took the black of the body's inner
-    // copies. `tools/verify_texture_alpha.py` holds every primitive of a
+    // copies. `web/tools/checks/texture_alpha.ts` holds every primitive of a
     // bundle to its own mesh's colour and culling.
     const key = [part, mesh.textureId, mesh.tsp, mesh.textureControl,
                  mesh.parameterControl, mesh.ispTsp, mesh.shading,
@@ -964,7 +963,7 @@ export async function exportLevel(
     // are both off there, and a glTF viewer ignores alpha under `OPAQUE`.
     // Over every mesh in `pol/` the list type agrees with the pass except the
     // untextured list-2 meshes of `zndina` (4) and `zslman` (1), which the
-    // port draws opaque; `tools/verify_texture_alpha.py` holds that.
+    // port draws opaque; `web/tools/checks/texture_alpha.ts` holds that.
     // The player does not read this: `render/draw_order.ts` rebuilds the
     // state from the words in `extras.pvr2`.
     mat.alphaMode = mesh.opaquePass ? "OPAQUE" : "BLEND";

@@ -2,7 +2,7 @@
  * The spawn opcodes: what the script puts in the level.
  *
  * Registered into `Walker.OPS` by `./index.ts`; the `status` field is what
- * `verify_player_ops.py` checks against docs/PLAYER_PROGRESS.md.
+ * the script panel shows.
  */
 import type { OpImpl } from "../walker";
 import type { OpJson } from "../../bundle";
@@ -73,7 +73,7 @@ export function EvtOpSpawnSimple0A(w: Walker, op: OpJson): string | undefined {
  * `g_evt_spawn_gated_handlers` — `0x00577650` — is indexed by the opcode, and
  * holds the same four handlers twice, so 0x03 and 0x07 both forward to
  * `EvtOpSpawnObj0B` (`FUN_00408AA0`) and 0x04 and 0x08 to `EvtOpSpawnObjC0C`
- * (`FUN_00408C40`). The descriptors are the ordinary ones; `hod2lib.evt`
+ * (`FUN_00408C40`). The descriptors are the ordinary ones; `hod2lib/evt.ts`
  * resolves them for these opcodes too.
  *
  * The gate is `g_max_attackers` — `0x009C8E84` — the count of players

@@ -17,7 +17,7 @@
  * 176..215, the host character's own model bank — and the two sounds it plays
  * are `COMMON\MEET01_22.WAV` and `COMMON\MEET02_22.WAV`, which name nothing.
  * The sound table does hold a `WORM_TUBU`, which is the corroboration
- * `docs/BUGS.md` recorded for calling it a worm, and **nothing in this chain
+ * there is for calling it a worm, and **nothing in this chain
  * plays it**. So it keeps the engine-shaped name it was read under: a creature
  * that comes out of a body. `L20`.
  *

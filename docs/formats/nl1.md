@@ -88,7 +88,7 @@ at that position and advance by `0x50 + mesh_data_size`.
 ## Register bitfields
 
 These are PowerVR2 hardware register words carried verbatim. They are the
-authoritative source for material state; see [`../PLAN.md`](../PLAN.md) Phase 5.
+authoritative source for material state.
 
 ### `parameter_control` (PCW)
 
@@ -333,7 +333,7 @@ Nothing else is consulted. Not `parameter_control`, not the shading mode, not
 any 16-bit-UV flag. **There are only two record sizes in an NL1 model: 32 bytes
 and 8 bytes, selected by bit 0 of the record's first dword.**
 
-`tools/verify_walk.py` replays exactly this over the whole corpus:
+Replaying exactly this over the whole corpus:
 
 ```
 models walked : 9112
@@ -389,13 +389,13 @@ Three independent lines of evidence:
    back as a denormal and clamps to zero).
 
 So the bit reads naturally as "this polygon carries reduced/absent texture
-coordinates", set on meshes that sample no texture. `_read_vertex()` reading two
+coordinates", set on meshes that sample no texture. `readVertex()` reading two
 `f32` from those meshes yields `(0, 0)`, which is exactly right, and exactly
 what the game submits.
 
 > ⚠️ **Consequence: do not run a UV-area filter over an untextured mesh.**
 > All its UVs are zero, so every triangle has zero UV area and
-> `drop_collapsed_uv_triangles()` deleted the whole mesh. On stage 2 that was
+> `dropCollapsedUvTriangles()` deleted the whole mesh. On stage 2 that was
 > 811 triangles and 43 entire materials — flat-black shadow panels, dark window
 > recesses and wall inserts — silently removed from the export. Fixed: the
 > filter now returns early for `texture_id < 0`.
@@ -421,7 +421,7 @@ be in a previous mesh.
 
 **[measured]** In this game that never changes anything: across all 225,744
 bit-7 strips, the strip's own bits 0–1 and bit 6 are **always identical** to the
-inherited ones. So reading them per strip, as `nl1.py` does, is safe here. It
+inherited ones. So reading them per strip, as `nl1.ts` does, is safe here. It
 would not be safe on other NaomiLib content.
 
 **Bit 5 — super index.** Only a bit-5 strip may contain back-references; a
@@ -486,10 +486,11 @@ dwords at a time with the UVs verbatim at dwords 6–7. Nothing in the walk, and
 nothing in D3D7, rejects a polygon for being collinear in texture space.
 `[proved]`
 
-`drop_collapsed_uv_triangles()` is still there, behind `--drop-collapsed-uv`,
-for an export headed somewhere other than the player. It is **off by default**
-and no stage bundle asks for it. It also **skips untextured meshes**, whose UVs
-are all legitimately zero — see the 16-bit UV section.
+`dropCollapsedUvTriangles()` (`web/src/hod2lib/nl1.ts`) is still there, behind
+`ExportOptions.dropCollapsedUv`, for an export headed somewhere other than the
+player. It is **off by default** and no stage bundle asks for it. It also
+**skips untextured meshes**, whose UVs are all legitimately zero — see the
+16-bit UV section.
 
 It used to be on by default, and it cost every bundle 3–5% of its triangles:
 1,577 of stage 1's 35,637, median 3 square units and up to 3,849. Two of those
@@ -497,13 +498,10 @@ are paving in the piazza, and from the rooftops north of the square the shipped
 bundle had a pair of triangular holes straight through the world. The reasoning
 had been that a face carrying no displayable texture information could only be
 improved by deleting it. A streaked roof is the game; a hole is not.
-`tools/verify_geometry.py` is the check that would have caught it, and it is
-the only one that compares an export against the files it was made from.
 
 > A collapsed UV triangle and a *clamped* texture axis look identical on screen
-> — both smear one row or column of texels across a face. Session 13 spent a
-> long time treating the second as the first. If a face reads as a 1-D smear,
-> check its sampler before you look at its UVs.
+> — both smear one row or column of texels across a face. If a face reads as
+> a 1-D smear, check its sampler before you look at its UVs.
 
 ## Skeleton
 

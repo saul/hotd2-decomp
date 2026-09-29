@@ -14,7 +14,7 @@ The port is `web/src/game/options/` (the screen), `game/profile.ts` (the
 resets, the load, the save, the apply), `game/options_data.ts` (the `.data`
 the resets copy and the sprite ids the screen pushes), `game/screen_idle.ts`
 and the bundle's `options` block (the `.rdata` the screen reads).
-`tools/verify_options.py` holds the reading to the image.
+`web/tools/checks/options.ts` holds the reading to the image.
 
 ## How it is reached, and left
 
@@ -364,7 +364,7 @@ Hod2.ini `[proved]`.
 with a 176-byte key built on the stack; its own inverse. `ProfileChecksum`
 (`0x004A06C0`) is 0 minus the byte sum `[proved]`. **The install's own four
 files decipher to a block whose sum matches and whose version is 7** --
-`tools/verify_options.py` does it every run. The files are disguised as game
+`web/tools/checks/options.ts` does it every run. The files are disguised as game
 data and `ProfileWriteFiles` stamps each with `pol/st_adver07.bin`'s file
 times.
 

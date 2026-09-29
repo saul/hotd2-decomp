@@ -206,7 +206,7 @@ export interface SceneLightState {
   /** Global ambient, from channel 10. */
   ambient: number;
   /**
-   * Direction the light comes from. The script stores BAMS; `hod2lib.script`
+   * Direction the light comes from. The script stores BAMS; `hod2lib/script.ts`
    * converts to degrees on the way out, so that is what travels.
    */
   pitchDeg: number;

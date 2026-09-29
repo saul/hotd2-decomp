@@ -9,7 +9,7 @@
  * different blocks and two of stage 3's do, so **stage 3 opens at block 0 or
  * block 7 and stage 4 at block 0 or block 4**; every other stage has one.
  *
- * `tools/verify_scene_exits.py` asserts that against the exe's tables and
+ * `web/tools/checks/scene_exits.ts` asserts that against the exe's tables and
  * `test/seek.test.ts` drives the walker to each ending. Neither can see the
  * page. This checks the two things only the page has:
  *

@@ -1,6 +1,5 @@
 /**
  * The rings an enemy advances through, and the camera that watches it.
- * The port of `tools/hod2lib/approach.py`.
  *
  * One subject, not two: `TestApproachRing` and `ZombieStateApproach` measure
  * the actor's distance **to the camera** and read the same three radii, and

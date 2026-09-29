@@ -908,7 +908,7 @@ function DragTargetCopyPose(obj: ZombieActor, t: Actor | null): void {
  * {@link ActorFlag.ShotImmune} while it does, so `DispatchHit`
  * (`FUN_004092F0`) never reaches `ResolveHit` and nothing can shoot it out of
  * the count either. **This port had no tail at all**: it had the sub-4 arm and
- * nothing that could ever assign sub 4. That is `PLAYER_HANGS` item 23 —
+ * nothing that could ever assign sub 4. That is the hang on
  * stage 4's entry-4 route, block 9's `wait_enemies_alive 0` held for ever by
  * one `znkage` at `0x35B4`.
  *

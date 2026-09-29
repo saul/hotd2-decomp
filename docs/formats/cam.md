@@ -2,8 +2,7 @@
 
 **Status:** solved. All 24 files parse at **100.0000 % byte coverage** — every
 byte is claimed by exactly one of {offset table, curve, path descriptor}.
-Implemented in [`tools/hod2lib/cam.py`](../../tools/hod2lib/cam.py); checked by
-`tools/verify_phase6.py`.
+Implemented in [`web/src/hod2lib/cam.ts`](../../web/src/hod2lib/cam.ts).
 
 A `cam/` file is a pool of independent **scalar cubic-Hermite animation
 curves**, plus one small descriptor per path naming the curve that drives each
@@ -446,8 +445,8 @@ the runs tile 0–417 with no gaps or overlaps (`cp_demo` 0–17, `cp_st2` 55–
 equals the number of paths the file parser finds, and every slot in the
 forward list maps back to the same file through the `s8` reverse table.
 
-In `hod2lib`: `ExeTables.cam_files()`, `.cam_path_slots()`,
-`.cam_slots_for(name)`, `.slot_cam_file(slot)`.
+In `web/src/hod2lib/exetab.ts`: `ExeTables.camFiles()`, `.camPathSlots()`,
+`.camSlotsFor(name)`, `.slotCamFile(slot)`.
 
 Loader: `0x00403EC0` opens the file, allocates `size + 0x20`, aligns the buffer
 up to 32 and stores the base at `0x0059C9EC`; `0x00403FB0` performs the
@@ -461,19 +460,21 @@ There is no anomaly in this format. Every one of the 23 shipped files parses to
 entry dword aligned and pointing at a real descriptor, and every one of the
 44,800 keyframes holding four finite words.
 
-`hod2lib.cam` used to carry a substantial repair apparatus for this file set —
-six "corrupt" offset-table entries in `op_st1.bin` and ~90 keyframe words
-"smashed to `0xFF`" across four files. **None of that was in the shipped data.**
-It was bit-rot in one local extract of the game, and it is gone once the files
-are re-copied from the disc. `CamFile.parse` now *rejects* a file holding a word
-outside the sane range rather than reconstructing it, so a damaged copy fails
-loudly instead of being silently invented over.
+Six "corrupt" offset-table entries in `op_st1.bin` and ~90 keyframe words
+"smashed to `0xFF`" across four files are **not in the shipped data**. They
+are bit-rot in one local extract of the game, and they are gone once the files
+are re-copied from the disc. `CamFile.parse` (`web/src/hod2lib/cam.ts`)
+*rejects* a file holding a word outside the sane range rather than
+reconstructing it, so a damaged copy fails loudly instead of being silently
+invented over.
 See [`../re/anomalies.md`](../re/anomalies.md).
 
 ## Export
 
-Implemented in `hod2lib.gltf._emit_paths`, reached from
-`tools/export_level.py --stage N`.
+Implemented in `emitPaths` (`web/src/hod2lib/gltf.ts`), which `exportLevel`
+runs when it is handed cam files. The player bundle hands it none: it carries
+the curves themselves in `<stage>.cam.json`, and the player evaluates and draws
+them ([`docs/PLAYER.md`, *The bundle*](../PLAYER.md#the-bundle)).
 
 glTF has no look-at, so the exporter composes a rotation per sample: the
 camera's local −Z is set to `normalize(target − eye)`, +Y up, and roll applied
@@ -495,20 +496,15 @@ than guessing.
 Verified by rendering through an exported camera: `cp_st2_50_cam` at frame 90
 produces a recognisable stage-2 Venice plaza shot, which exercises the keyframe
 layout, the Hermite evaluation, the look-at construction and the coordinate
-space in one go. `tools/blender_camview.py` automates this.
+space in one go. The player poses the same shot from a deep link
+(`?stage=2&slot=105&frame=90&freeze=1`), and `web/tools/shot.mjs` captures it
+headless.
 
 ## Open questions
 
 1. What is the eighth `cp_` descriptor index for? It is always a valid curve.
-   **Field of view is the obvious candidate** — it is the one per-path scalar a
-   camera needs that no other channel supplies. Unverified, so the exporter
-   uses a neutral 60° and flags it.
-2. ~~Which `evt/` opcode selects a path slot?~~ **SOLVED** — see *Selection*
-   below.
-3. Are the six corrupt `op_st1` entries dead data, or does the game read
-   garbage for those slots? Their slot ids (304, 306, 309, 320, 322, 324) are
-   ordinary members of the file's contiguous run and nothing in the EXE marks
-   them special.
+   It is not a field of view: the projection is a compile-time constant (see
+   *Field of view* below). `[open]`
 
 ## What starts a path — SOLVED
 
@@ -538,7 +534,7 @@ Stage ranges: `cp_st1` 32–54, `cp_st2` 55–120, `cp_st3` 121–162,
 `cp_st4` 163–202, `cp_st5` 203–216, `cp_st6` 217–232.
 
 **[proved by measurement]** 751/751 camera-play actions in stages 1–6 name a
-path from their own stage. `tools/verify_evt_cam.py`.
+path from their own stage.
 
 ## Field of view — SOLVED
 
@@ -586,8 +582,8 @@ vectors, and **`Rx` reaches the vertex first**. As a quaternion that is
 `PlacePlayerEntityFromViewPose` builds the view pose with the same chain, which
 is an independent sighting of the convention.
 
-**[measured]** `hod2lib.gltf._bams_euler_to_quat` reproduces an explicitly
-built `Rz·Ry·Rx` matrix to 4.4e-16 across a grid of angles.
+**[measured]** `bamsEulerToQuat` (`web/src/hod2lib/gltf.ts`) reproduces an
+explicitly built `Rz·Ry·Rx` matrix to 4.4e-16 across a grid of angles.
 
 The channels really are BAMS, not radians: over all `op_` files they span
 −71,867 … +80,202, i.e. more than a full 65,536-unit turn.
@@ -630,10 +626,11 @@ camera.
 
 ### Reproducing a rig
 
-`hod2lib/rigs.py` transcribes a draw routine as data, and the exporter
-instantiates it as a node hierarchy under the animated path node — so the
-object rides its route. `RIGS` holds one so far, `st1_vehicle` from
-`FUN_0048E600`, with eleven parts.
+`RIGS` in `web/src/hod2lib/rigs_data.ts` transcribes a draw routine as data,
+and the exporter instantiates it as a node hierarchy under the animated path
+node — so the object rides its route. `RIGS` holds every routine transcribed
+so far (`docs/re/rig-survey.md` covers all the path followers); `st1_vehicle`,
+from `FUN_0048E600`, is the worked example above.
 
 Two things make the transcription mechanical rather than interpretive:
 
@@ -652,11 +649,10 @@ complete car with a legible number plate — `extract/compare/session18/`. That
 is the check that the transform chain is right: a wrong rotation order or a
 mis-composed translation scatters the parts.
 
-> ⚠️ Render it with **EEVEE**. `03_workbench_WRONG.png` is the same rig under
-> Workbench: the rear reads as a stretched smear because several body materials
-> set `flip_uv = 2` → `wrapS = MIRROR`, and Workbench does not evaluate the
-> importer's wrap-emulation nodes. The export is correct; the renderer was not.
-> `tools/blender_nodeview.py` defaults to EEVEE for this reason.
+> ⚠️ Several body materials set `flip_uv = 2` → `wrapS = MIRROR`. A viewer
+> that fakes wrap modes — Blender's Workbench does not evaluate the importer's
+> wrap-emulation nodes — draws the rear as a stretched smear. The export is
+> correct; such a renderer is not.
 
 ### There is no rig data to parse — [proved]
 
@@ -671,7 +667,8 @@ What *is* data is the play length: `0x00576D38` holds one dword per global path
 slot saying how many frames the game runs that path for, and the draw routines
 clamp with it. **[measured]** 417 of 418 slots are non-zero and 323 equal the
 parsed curve duration to within 2 frames — the other 95 stop short of the last
-key or hold past it. `ExeTables.cam_path_length`, exported as `play_frames`.
+key or hold past it. `ExeTables.camPathLength`, which the bundle carries as
+each rig route's `length` in `<stage>.script.json`.
 
 Two part names were corrected by measuring rather than assuming:
 
@@ -705,12 +702,12 @@ Two part names were corrected by measuring rather than assuming:
 
 ## Export
 
-`export_level.py` emits every `op_` path twice: a green rail polyline, and an
+`emitPaths` emits every `op_` path twice: a green rail polyline, and an
 **animated node** `<file>_<nn>_obj` carrying translation and rotation. Parent a
 model under that node to watch it run its route.
 
-`<stage>_objects.json` carries the spawns and the routes together — see
-[`evt.md`](evt.md). `tools/verify_objects.py` checks both.
+The bundle carries the spawns in `<stage>.script.json` and the routes in
+`<stage>.cam.json`'s `object_paths` — see [`evt.md`](evt.md).
 
 ### Which route an object takes, and in which stage
 
@@ -725,8 +722,7 @@ every id used as a gate resolves to a `cp_` file, every id used as a route
 resolves to an `op_` file, and a gate always sits in the same stage file as the
 route it selects. So the gate doubles as the per-stage binding — **a stage owns
 a rig iff it owns the camera path that selects it** — which is how
-`export_level.py` decides where a rig belongs. `verify_objects.py` enforces all
-three halves of that claim.
+`resolveForStage` (`web/src/hod2lib/rigs.ts`) decides where a rig belongs.
 
 Some routines also **bias the pose**: `Translate(p.x, p.y + 2.0, p.z)` before
 `RotZ; RotY; RotX`. That is `T(p+b) · R`, and a child node with translation `b`

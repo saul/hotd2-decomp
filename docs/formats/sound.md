@@ -3,7 +3,7 @@
 **Status:** the id space, the BGM tables, the **looping-SE pairs**, the
 **music stream and its loop**, and the three control words are solved. SE and
 voice use the same dispatcher and their name tables are read by
-`ExeTables.se_names()` / `.voice_names()`. Each stage's own music is started by
+`ExeTables.seNames()` / `.voiceNames()`. Each stage's own music is started by
 its script -- see [what starts a stage's own music](#what-starts-a-stages-own-music).
 
 Audio ships as plain `.wav` under `sound/` — `bgm/` (38 files, 270 MB),
@@ -11,7 +11,7 @@ Audio ships as plain `.wav` under `sound/` — `bgm/` (38 files, 270 MB),
 driver was replaced wholesale for the PC port (see the `0x5D`/`0x5E` stubs in
 [`evt.md`](evt.md)).
 
-Implemented in `ExeTables.bgm_names()` / `.bgm_file()`; consumed by the browser
+Implemented in `ExeTables.bgmNames()` / `.bgmFile()`; consumed by the browser
 player, which streams tracks straight out of the install.
 
 ---
@@ -95,7 +95,7 @@ can want it. See `g_weapon_loop_holders` (`0x009C8A74`) for the worked example.
 `0xFFFFFFFF` terminator, and the two bases are `0xB4` = 45 dwords apart, so 44
 entries plus the terminator exactly fill the gap. That is the *shape* of
 [L6](../LESSONS.md), so the reading is checked rather than asserted:
-`tools/verify_looping_se.py` proves the pairing four ways —
+`web/tools/checks/looping_se.ts` proves the pairing four ways —
 
 * both walks give the same 44 and fill the gap between the bases exactly;
 * all 88 ids resolve through `g_se_name_list`;
@@ -118,9 +118,9 @@ asserts they do.
 and the rest are the game's ambiences — `UFO_44`, `RAIN3ST_44`, `QUAKE_22`,
 `CAR_FIRE`, `BOAT_SLOW`, `HELI1_44`, `EREVATOR_16`, `WIND2_44`.
 
-Exposed as `ExeTables.looping_se()` in both halves of the library and carried
-into the bundle as `sound.looping`; `web/src/audio/bgm.ts` is the transcription
-of the branch above.
+Exposed as `ExeTables.loopingSe()` and carried into the bundle as
+`sound.looping`; `web/src/audio/bgm.ts` is the transcription of the branch
+above.
 
 **A looping SE is not streamed**, unlike the music: `SoundPlayOnFreeChannel`
 opens every channel but `0xF` with `SoundChannelOpenWav(ch, name, 0, 0)`, a
@@ -251,14 +251,14 @@ follow from where it is made:
 The initial fill is made before the loop bit is set, so a *looping* file
 shorter than the ring would play once, then silence to the end of the ring,
 and only then wrap. No shipped looping track is that short -- the shortest is
-`ST6_BOS1_AR`, 8.3 rings -- and `tools/verify_bgm_stream.py` asserts it.
+`ST6_BOS1_AR`, 8.3 rings -- and `web/tools/checks/bgm_stream.ts` asserts it.
 
 **[measured]** Before this was read, the player looped each track on an
 `<audio loop>` element: the same points, since the element also returns to
 the first sample, but it stopped at the end of the `data` chunk and it put
 **8.4 ms of digital silence** at the seam of `ST1.WAV` (Chrome, headless). The
 player now builds one period of the stream -- one pass, or two where a pass is
-half a frame over -- and loops it in Web Audio; `tools/bgm_loop.mjs` renders
+half a frame over -- and loops it in Web Audio; `web/tools/bgm_loop.mjs` renders
 the wrap and finds every sample the stream's own.
 
 ### The three one-shots
@@ -277,9 +277,9 @@ stops the buffer a half-ring later. Every other name in either table loops.
 
 ### Per track
 
-`python3 tools/verify_bgm_stream.py --game-dir ...` prints this from the files
-and the exe's own walk. Start is the file offset of the first sample; the loop
-is always `[start, EOF)`.
+`node tools/run_ts.mjs tools/checks/bgm_stream.ts --game-dir ...` (from `web/`)
+prints this from the files and the exe's own walk. Start is the file offset of
+the first sample; the loop is always `[start, EOF)`.
 
 | Track | Mode | Start | Data | Tail | Pass | Passes per period |
 |---|---|---|---|---|---|---|

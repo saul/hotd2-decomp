@@ -1,5 +1,5 @@
 /**
- * The Python-to-TypeScript bundle contract, and whether it can actually fire.
+ * The exporter-to-loader bundle contract, and whether it can actually fire.
  *
  * Item 25 gave the loader two refusals — a `format` that must match and a
  * schema digest that must match — and they were right and unreachable. Every

@@ -11,7 +11,7 @@
  * `HoldAtRange` still owning the permit; the `finish_sequence` the script
  * queues next (`EvtActionFinishSequence21`, `FUN_00403710`) is what frees it.
  * The port had no copy of that, so the zombie stood at the ring with the only
- * permit for the rest of the stage -- the NEW-BUGS-2 report.
+ * permit for the rest of the stage.
  *
  * Nothing is shot, so the maul happens. The driver watches `0xA030` for its
  * first `Strike` after the civilian dies, and with `--shoot` then volleys at

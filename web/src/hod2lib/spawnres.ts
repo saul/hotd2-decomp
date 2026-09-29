@@ -1,6 +1,5 @@
 /**
  * Resolve a spawn descriptor to what it actually is, and to geometry.
- * The port of `tools/hod2lib/spawnres.py`.
  *
  * A spawn descriptor names a **class**; the class handler turns that into a
  * **character type** or an asset slot; the character type names a **skeleton**
@@ -184,11 +183,9 @@ export function resolveSpawn(tables: ExeTables, spawn: Spawn): ResolvedSpawn {
 /**
  * Identify every spawn descriptor the stage's event script reaches.
  *
- * The reference implementation builds the `Program` itself and swallows a
- * failure with a `degraded.note`; here the caller has usually built one
- * already -- `bundle` builds exactly one and hands it round -- so it is passed
- * in, and a null one is the same "no resolved spawns" answer without the
- * exception to catch.
+ * The caller has usually built the `Program` already -- `bundle` builds
+ * exactly one and hands it round -- so its spawn records are passed in, and
+ * null is the "no resolved spawns" answer.
  */
 export function resolveStageSpawns(tables: ExeTables,
                                    spawnRecords: Spawn[] | null):

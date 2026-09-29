@@ -8,7 +8,7 @@
  * is never shown and its setting is never read**: `g_options_blood_row_shown`
  * has one store, a 0, and `g_option_blood_color` (`0x009C9F22`) no reader
  * but the screen's own copy, which the boot overwrites with 1
- * (`docs/re/options-screen.md`, `tools/verify_options.py`). What loads the
+ * (`docs/re/options-screen.md`, `web/tools/checks/options.ts`). What loads the
  * red bank, and when, is `[open]`. So this switch is the page's, between two
  * sets of art the game carries; it was described as the game's option until
  * the options screen was read.

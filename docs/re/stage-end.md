@@ -25,8 +25,8 @@ such steps, two per stage where the stage has two endings:
 | 3 | 2 | 11/2, 13/2 | `0x19` | `0xA1` | block 0 / block 4 |
 | 4 | 3 | 23/2, 25/2 | `0x26` | `0xC3` | block 0 |
 
-Stages 5 and 6 have none. Each step is, in order (`dump_stage_script.py
---full`):
+Stages 5 and 6 have none. Each step is, in order (op names as
+`web/src/hod2lib/evt.ts` decodes them):
 
 ```
 set_hud_shutter_state 6

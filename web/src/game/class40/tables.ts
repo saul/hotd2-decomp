@@ -4,7 +4,7 @@
  * Small enough that the bundle plumbing to deliver them would be larger than
  * they are — the same call `BAT_SPLINE_POINTS` makes — and kept next to the
  * routines that walk them so a reader can check both at once.
- * `tools/verify_horde.py` asserts every number here against `Hod2.exe`.
+ * `web/tools/checks/horde.ts` asserts every number here against `Hod2.exe`.
  */
 
 /**

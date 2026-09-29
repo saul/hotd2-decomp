@@ -22,7 +22,7 @@ import { dirname, extname, join, normalize, resolve } from "node:path";
  *
  * For a hosted copy, `tools/site.ts` (`npm run site`) stages the build, the
  * bundle and the sounds side by side -- the app fetches `bundle/manifest.json`
- * relative to the page either way. See `docs/HOSTING.md`.
+ * relative to the page either way. See `docs/PLAYER.md`, "Hosting".
  *
  * `HOTD2_BUNDLE` points all of this at an export somewhere else. It is the
  * same variable `tools/lib/bundle_root.ts` reads, on purpose: the dev server
@@ -354,7 +354,7 @@ export default defineConfig({
   // know, and `tailscale serve` hands it the tailnet's name for this machine
   // -- `<machine>.<tailnet>.ts.net`, with a certificate a phone already
   // trusts, which is the other way to give one a secure context and so the
-  // service worker (`docs/HOSTING.md`). Addresses and `localhost` it takes
+  // service worker (`docs/PLAYER.md`, "Hosting"). Addresses and `localhost` it takes
   // anyway.
   server: { port: 5173, open: false, https: httpsOptions(), allowedHosts: [".ts.net"] },
   build: { target: "es2022", chunkSizeWarningLimit: 2000 },

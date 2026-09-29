@@ -363,8 +363,7 @@ export async function storageEstimate():
  * `CompressionStream("deflate")` emits a zlib stream, which is what PNG's
  * IDAT holds. It is the same library node's `zlib` is, but the level and
  * strategy are the engine's choice, so a PNG written here need not be byte
- * identical to one written by the CLI. The pixels are, which is the guarantee
- * docs/TS_PORT.md makes.
+ * identical to one written by the CLI. The pixels are.
  */
 export const browserDeflate: Deflate = async (data) => {
   const cs = new CompressionStream("deflate");

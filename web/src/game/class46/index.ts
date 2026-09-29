@@ -301,7 +301,7 @@ export const BAT_SPLASH_SCENE = 2;
  * for the same reason `OWL_APPROACH_CURVES` is: twelve rows of three integers
  * is smaller than the bundle plumbing that would deliver them, and putting the
  * numbers next to the routine that walks them is what lets a reader check both
- * at once. `tools/verify_bats.py` asserts them against the EXE.
+ * at once. `web/tools/checks/bats.ts` asserts them against the EXE.
  */
 export const BAT_SPLINE_POINTS: readonly (readonly (readonly [number, number,
   number])[])[] = [
@@ -461,7 +461,7 @@ function BatApplyWobble(obj: Actor, sub: BatTail): void {
  * `PlayerTakeDamage(obj+0x121, 1, 9)` -- a non-zero second argument, so the
  * hit latch and hit motion 9 are written. That gate is why the page's bats
  * never hurt: `g_player_state` used to be seeded 0, and nothing but a test
- * ever wrote 5 (NEW-BUGS 19; see `g_player_state` in `globals.ts`).
+ * ever wrote 5 (see `g_player_state` in `globals.ts`).
  */
 function BatStrikeAndLeave(obj: Actor, sub: BatTail, f: ClassFrame): void {
   if (G.g_player_state[0] === PlayerState.InPlay
@@ -1310,7 +1310,7 @@ export function BatBodyNodeMatrix(body: Actor): Mat {
  * five s16 each and every row identical.
  *
  * The tables are here rather than in the bundle for the same reason
- * {@link BAT_SPLINE_POINTS} is, and `tools/verify_bats.py` asserts both
+ * {@link BAT_SPLINE_POINTS} is, and `web/tools/checks/bats.ts` asserts both
  * against the EXE.
  */
 export const BAT_BODY_MOTIONS: readonly number[] = [0x407, 0x407, 0x407,

@@ -108,7 +108,7 @@ export function ActorSpawn(at: number, cls: SpawnClass, charType: number,
  *   another model than the node does -- `zsass`'s bones 5 and 8 name the
  *   armed hands `EnemyThrowerInit` gives it (`0x1FA2`, `0x1F9E`) where the
  *   skeleton names the bare ones. Every row with a radius that the test
- *   refuses is `GATED` in `tools/verify_combat.py`, which derives the list
+ *   refuses is `GATED` in `web/tools/checks/combat.ts`, which derives the list
  *   from the exe and fails when it moves. So a `zsass` is born with
  *   both weapon hands unshootable, `EnemyThrowerInit` arms them without
  *   touching the radius, and only `ThrowerStateRearm` gives them a sphere,

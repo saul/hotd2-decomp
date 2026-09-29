@@ -11,7 +11,7 @@
  * and the failure is loud rather than a wrong digest.
  */
 
-/** Lowercase hex, the way `hashlib.sha256(...).hexdigest()` spells it. */
+/** The digest as lowercase hex. */
 export async function sha256Hex(data: Uint8Array): Promise<string> {
   const buf = data.byteOffset === 0 && data.byteLength === data.buffer.byteLength
     ? data.buffer

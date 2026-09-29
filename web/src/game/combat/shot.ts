@@ -21,7 +21,7 @@
  * per frame gives a session that can be replayed. What is *not* here yet is
  * the other half of that — a `pickShot` a headless run can answer, which needs
  * the skeleton's forward kinematics in `game/`. See
- * docs/PLAYER_ARCHITECTURE.md, "Input intent".
+ * docs/PLAYER.md, "Input intent".
  *
  * ## What a bullet does
  *

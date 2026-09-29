@@ -55,7 +55,7 @@
  * thin claw marks are mostly edge), with a 4-bit soft edge between. So a hit
  * puts a solid mark on the screen with feathered edges, not a translucent
  * one; `tools/hurt_alpha.mjs` measures the same off the page's pixels, and
- * `tools/verify_texture_alpha.py` holds the words, the colour and the
+ * `web/tools/checks/texture_alpha.ts` holds the words, the colour and the
  * textures to it.
  *
  * ## Under which camera

@@ -1,5 +1,5 @@
 /**
- * `coli/` collision meshes. The port of `tools/hod2lib/coli.py`.
+ * `coli/` collision meshes.
  *
  * The format is stated outright by the hit test, `ColiSegmentVsMesh`
  * (`0x004AAA40`), so none of it is inferred from the bytes:
@@ -188,11 +188,10 @@ export async function load(source: AssetSource, path: string,
     try {
       parsed = parseBlob(b, off);
     } catch (exc) {
-      // Stopping is right; `consumed` and `coverage` record where. But only
-      // `verify_coli.py` ever looked at them, and it runs over the game
-      // directory rather than over an export -- so on the *export* path a file
-      // that stopped a third of the way through went into the bundle a third
-      // complete, with nothing said. The wall the player walks through is the
+      // Stopping is right; `consumed` and `coverage` record where. Nothing on
+      // the export path reads those, so without this note a file that stopped
+      // a third of the way through would go into the bundle a third complete,
+      // with nothing said. The wall the player walks through is the
       // same shape either way.
       degraded.note("hod2lib.coli.load",
                     `${f.name} past 0x${off.toString(16)}`,

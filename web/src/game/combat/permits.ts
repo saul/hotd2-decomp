@@ -373,8 +373,8 @@ export function AttackClaimRefusal(): string | null {
  * `NoCameraTrack` raise travels together with the `g_enemy_slots` clear and
  * both are guarded by {@link ActorFlag.KeepCameraWhenLast}. This used to raise
  * the bit here, unconditionally, which defeated that guard on every release
- * path in both ported enemy classes; it is **D1** of
- * `docs/REVIEW-2026-09-03.md`, and the decision was to match the engine.
+ * path in both ported enemy classes,
+ * and the decision was to match the engine.
  *
  * Releasing an off-screen permit is the **only** thing that lifts
  * `g_attack_committed`, so forgetting *that* here would stall every enemy in

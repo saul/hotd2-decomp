@@ -1,6 +1,5 @@
 /**
  * Three-stage arc motion scripts: the twelve dwords an actor leaps on.
- * The port of `tools/hod2lib/arcscript.py`.
  *
  * `InstallArcMotionScript` (`FUN_0044DA60`) copies twelve dwords into the
  * actor's slot and `ActorArcStep` plays them as a windup, a flight and a
@@ -19,7 +18,7 @@ import type { ExeTables } from "./exetab";
  * stage 1 once the clip frame reaches stage 0's threshold, stage 2 once it
  * reaches stage 1's, and reports the arc over once it reaches stage 2's. Some
  * installable scripts switch clips from one stage to the next, so a stage's
- * clip is its own (`verify_combat.py` check 16 counts them).
+ * clip is its own (`web/tools/checks/combat.ts` check 16 counts them).
  */
 export const ARC_SCRIPT_STAGES = 3;
 
@@ -87,7 +86,8 @@ export const CLASS31_ARC_SCRIPT_BYTES = ARC_SCRIPT_STAGES * 4 * 4;
  * row 3 (`0x0044BAB8`). Between each pair lies one of `zslman`'s pounce
  * scripts -- the ones `g_class31_melee_attacks` set 3 names for attack 3 --
  * and reading at a script's own width gave rows 1 to 3 a pounce and its
- * neighbour's leap. `verify_combat.py` check 16 reads the four immediates.
+ * neighbour's leap. `web/tools/checks/combat.ts` check 16 reads the four
+ * immediates.
  */
 export const CLASS31_ASIDE_ZSLMAN_STRIDE = 0x60;
 

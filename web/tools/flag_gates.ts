@@ -47,7 +47,7 @@
  * the script at all — it is the dragged civilian's own `CivilianRunScript` op
  * `0x1C`, reached through the class-0x10 spawn's `children` list, so the check
  * is that every state-43 placement has such a parent and that the parent's
- * reachable streams raise the flag. See `docs/PLAYER_HANGS.md` item 23.
+ * reachable streams raise the flag.
  *
  * `[port-only]`. The engine needs none of this; every writer of
  * `g_script_flags` is code it is running.
@@ -215,7 +215,7 @@ function actorHeldGates(script: ScriptJson, entry: number): ActorHeldGate[] {
  * advances — so a captor whose stage cannot raise flag 29 stands in
  * `g_enemies_alive` for the rest of the stage, shot-immune, and every
  * `wait_enemies_alive` behind it is a room a player cannot clear. That is
- * `PLAYER_HANGS` item 23.
+ * stage 4's entry-4 route, block 9.
  *
  * Its writer is not in the script: flag 29 comes off the **dragged
  * civilian's own** `CivilianRunScript` op `0x1C`, so the two records have to

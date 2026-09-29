@@ -1,14 +1,12 @@
 /**
- * Writes the static bundle the browser player loads.
- * Ported from `tools/hod2lib/bundle.py`, which was removed once the two
- * agreed byte for byte; see docs/TS_PORT.md.
+ * Writes the static bundle the browser player loads. See docs/PLAYER.md,
+ * "The bundle".
  *
  * The player does **not** parse `pol/`, `tex/`, `cam/`, `evt/` or `Hod2.exe`
  * while it is playing: it loads glTF, evaluates Hermite curves and walks the
- * resolved event script. What changed with this port is *where* the parsing
- * can happen -- the same code now runs in a CLI or in a worker in the page, so
- * a bundle can be built without leaving the browser. It is still built once
- * and then consumed.
+ * resolved event script. The parsing runs in a CLI or in a worker in the
+ * page, so a bundle can be built without leaving the browser; either way it
+ * is built once and then consumed.
  *
  * Layout:
  *
@@ -99,7 +97,7 @@ import type { CamPaths } from "./campaths";
  * client refuses a bundle it does not know how to read rather than rendering
  * something subtly wrong.
  *
- * **It stayed at 1 across 23 commits to the reference implementation** -- the
+ * **It stayed at 1 across 23 commits** -- the
  * ones that added `coli`, `civilians`, `humanoids` and `set_pieces`, and the
  * one that renumbered `game_mode`. A version check whose constant nobody bumps
  * is documentation, not a check.
@@ -111,14 +109,10 @@ import type { CamPaths } from "./campaths";
 export const BUNDLE_FORMAT = 15;
 
 /**
- * `hod2lib.__version__`, which lands in the manifest as `tool_version`.
+ * The library's version, which lands in the manifest as `tool_version`.
  *
  * It is informational -- the number a reader validates against is
- * {@link BUNDLE_FORMAT} -- and it names the *library*, not the implementation:
- * `tools/hod2lib/` is still where each format is specified in code, and its
- * `__version__` has to read the same. `tools/verify_exporters.py` checks that.
- *
- * 0.8.0 is the release that removed the Python bundle writer.
+ * {@link BUNDLE_FORMAT}.
  */
 export const TOOL_VERSION = "0.8.0";
 
@@ -2042,10 +2036,9 @@ export async function buildStage(stage: Stage, sink: BundleSink,
   const tables = stage.tables;
   const cache = new AssetCache(stage);
 
-  // The reference implementation constructs a fresh `Program` five times over
-  // -- once for the rain, once for the props, the rigs, the characters and the
-  // breakables. They are identical by construction and each costs a full evt
-  // walk, so this builds one and hands it round.
+  // The rain, the props, the rigs, the characters and the breakables each
+  // need a `Program`. They are identical by construction and each costs a
+  // full evt walk, so this builds one and hands it round.
   const prog = await Program.create(stage);
   const evt = prog.evt;
   const spawnRecords = evt ? evtlib.spawns(evt) : [];
@@ -2184,10 +2177,10 @@ export async function buildStage(stage: Stage, sink: BundleSink,
   // otherwise a stale stage inside a fresh bundle, which is the one
   // arrangement a single top-level version can never see.
   camJson.format = BUNDLE_FORMAT;
-  // `allowNan: false` on purpose: Python writes bare `NaN` and `Infinity`,
-  // which are not JSON and which every browser rejects with a parse error
-  // naming a byte offset rather than a field. A bundle that cannot be parsed
-  // is worse than an export that fails, so this throws here instead.
+  // `allowNan: false` on purpose: `dumps` otherwise writes bare `NaN` and
+  // `Infinity`, which are not JSON and which every browser rejects with a
+  // parse error naming a byte offset rather than a field. A bundle that cannot
+  // be parsed is worse than an export that fails, so this throws here instead.
   await sink.write(`${outDir}/${name}.cam.json`, dumpsStrict(camJson));
 
   say(`  ${name}: event script`);
@@ -2319,11 +2312,11 @@ export async function buildStage(stage: Stage, sink: BundleSink,
  * Carries the schema digest as well as the version, so the client can tell
  * "this bundle predates a field you read" from "this bundle is fine".
  *
- * **The digest is imported, not recomputed.** The reference implementation
- * hashes `web/src/bundle/*.ts` off disk; this exporter is compiled against
- * those same declarations, so `schema_hash.ts` -- generated from them and
- * committed -- is the digest by construction. A bundle built in the browser
- * therefore agrees with the client that built it, with nothing to keep in step.
+ * **The digest is imported, not recomputed.** This exporter is compiled
+ * against the declarations in `web/src/bundle/`, so `schema_hash.ts` --
+ * generated from them and committed -- is the digest by construction. A
+ * bundle built in the browser therefore agrees with the client that built
+ * it, with nothing to keep in step.
  */
 export async function writeManifest(
     sink: BundleSink, stages: Record<string, unknown>[],

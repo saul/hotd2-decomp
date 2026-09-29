@@ -38,21 +38,20 @@ Explorer-made duplicate that sat beside it and had not rotted; the manifest
 recorded both, and the duplicate is gone now, which is why a manifest from
 before this date reports it missing.
 
-**`Hod2.exe` differs from the disc by one byte** — `JZ` → `JNZ` at
-`0x004A6857`, a deliberate no-CD patch — and that is the copy every address in
-`ghidra/annotations` and every table in `hod2lib/exetab.py` was read from. The
-manifest records the patched executable on purpose. `ExeTables` refuses any
-other, because ~70 hard virtual addresses read out of a different build produce
-plausible garbage rather than an error.
+**`Hod2.exe` differs from the disc by one byte** — `JZ` → `JNZ` at `0x004A6857`,
+a deliberate no-CD patch — and that is the copy every address in
+`ghidra/annotations` and every table in `web/src/hod2lib/exetab.ts` was read
+from. The manifest records the patched executable on purpose. `ExeTables`
+refuses any other, because ~70 hard virtual addresses read out of a different
+build produce plausible garbage rather than an error.
 
 `pol/tv2.bin` also differs from the disc by 14 bytes and is **[open]** — it has
 not been established whether that is rot or a real difference, and nothing the
 project reads depends on it yet.
 
-The full comparison — method, all seven differences, and the ~400 lines of
-parser it invalidated — is in
-[`session-log.md`](session-log.md), "compare the installed game tree against
-the retail disc". The short version is the sentence that cost the most:
+The damage the comparison found in `cam/`, and the repair code it
+invalidated, is [`anomalies.md`](anomalies.md) §7. The short version is the
+sentence that cost the most:
 *"both retail copies checked are byte-identical, so this is how the game
 ships"*. Two copies of the same **installed** tree are not two retail copies,
 and nothing had ever been compared against the disc.

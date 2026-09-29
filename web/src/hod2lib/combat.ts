@@ -1,6 +1,5 @@
 /**
  * What a shot does: damage, reactions, attacks, gore and death.
- * The port of `tools/hod2lib/combat.py`.
  *
  * The tables `ResolveHit`, `ActorPlayHitReaction`, `ZombieStateStrike`,
  * `ThrowerStateThrow`, `ActorShotFeedback` and `FUN_00456220` read, with the
@@ -597,7 +596,7 @@ export function hitReactions(tables: ExeTables,
  * types 0x07, 0x0B and 0x0C, body condition 4, index 2, all of them
  * `{997, 1051, 26.0f, 40, 9, 1}` against `g_motion_play_length[997] == 20` --
  * and they are the crawlers' undamaged attack, which is meant to miss.
- * `tools/verify_combat.py` asserts that set rather than the bound, so a
+ * `web/tools/checks/combat.ts` asserts that set rather than the bound, so a
  * genuine misread still fails a check.
  */
 export function attackHitLands(hitFrame: number,
@@ -801,8 +800,8 @@ export function combatTables(tables: ExeTables): Record<string, unknown> {
     // `0x00453F6E CMP EAX,0x2` on `g_shot_bone` (through `EBP`, loaded at
     // `0x00453EEE`), and `ThrowerOnShot` (`FUN_004499A0`) agrees at
     // `0x00449A76`. The two kinds share one voice pair, so the impact is the
-    // only audible difference; `tools/verify_combat.py` check 15 asserts both
-    // and reads the two operands out of the image.
+    // only audible difference; `web/tools/checks/combat.ts` check 15 asserts
+    // both and reads the two operands out of the image.
     impact: named(v.slice(0, 5)),
     head_impact: named([0x0116a9, 0x0516a9]),
     voice: {

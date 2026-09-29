@@ -1,6 +1,5 @@
 /**
  * What a *stage* is: the single abstraction every exporter resolves against.
- * The port of `tools/hod2lib/stage.py`.
  *
  * A stage is not a directory and not a filename glob. It is a **scene id** --
  * the event system's own index -- and everything else follows from tables
@@ -13,10 +12,9 @@
  *                                   plus every slot opcode 0x50 loads
  *           ---> cam/ files         cp_st<N>, op_st<N>
  *
- * **Everything that touches a file is async here and synchronous in Python.**
- * That is the one structural difference in this package, and it is the seam:
- * a browser cannot block on a read. The laziness is the same -- constructing a
- * `Stage` reads nothing -- and each accessor caches its promise, so two callers
+ * **Everything that touches a file is async**, because a browser cannot block
+ * on a read. Constructing a `Stage` reads nothing, and each accessor caches
+ * its promise, so two callers
  * asking for the geometry at once decode it once.
  *
  * Reference: docs/formats/pipeline.md.
@@ -80,9 +78,8 @@ export const SCENE_TO_STAGE: Record<number, number> =
 /**
  * Parsed `Hod2.exe` tables per source, cached.
  *
- * The reference implementation caches on the game directory string because
- * that is its identity; here the {@link AssetSource} *is* the identity, and it
- * may be a directory handle with no path at all.
+ * The {@link AssetSource} *is* the identity, not a directory path: it may be
+ * a directory handle with no path at all.
  */
 const TABLES = new WeakMap<AssetSource, Promise<ExeTables | null>>();
 
@@ -207,12 +204,11 @@ export interface Geometry {
 /**
  * The key `modelRegions` and the slot inverse use for a `(name, n)` pair.
  *
- * The reference implementation keys those two maps on a Python tuple, which
- * JavaScript has no equivalent of, so the pair is spelled as one string with a
- * separator no part name can contain. Every reader of either map goes through
- * this function: `gltf` looked the same key up with a space in it once, and
- * the result was every model node in the bundle losing its region list -- a
- * bundle that loads, draws, and shows the whole stage at once.
+ * JavaScript has no value-keyed tuple, so the pair is spelled as one string
+ * with a separator no part name can contain. Every reader of either map goes
+ * through this function: `gltf` looked the same key up with a space in it
+ * once, and the result was every model node in the bundle losing its region
+ * list -- a bundle that loads, draws, and shows the whole stage at once.
  */
 export function pairKey(a: string, b: number): string {
   return `${a}\u0000${b}`;

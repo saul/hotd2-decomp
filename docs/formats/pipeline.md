@@ -36,7 +36,7 @@ model count the container parser finds — 326/326, zero mismatches. Indices
 ≥ 328 are a second copy of the name list with a count of 0: the `pol_`-prefixed
 duplicates, which are therefore *disabled table entries*, not spare data.
 
-Exposed as `ExeTables.pol_files()` and `ExeTables.asset_slots()`.
+Exposed as `ExeTables.polFiles()` and `ExeTables.assetSlots()`.
 
 > **Trap.** pol file indices are assigned in alphabetical order, so *any* run of
 > consecutive integers decodes through that table into a plausible-looking
@@ -122,7 +122,8 @@ props, effects, character models and HUD texture banks — paged in and out
 around the blocks that need them, e.g. `znsam2.bin` loaded and freed 29/13
 times across the stage.
 
-`tools/dump_stage_script.py --assets` prints this per stage.
+The bundle's `<stage>.script.json` carries every asset instruction with the
+`file` it resolves to.
 
 ---
 
@@ -182,9 +183,9 @@ region  8 : st2_04[2], st2_07[1], st2_10[2], st2_11[0], st2_07[7]
 ```
 
 Only one region is ever resident and drawn, so segments that interpenetrate in
-a whole-stage export are never on screen together. `export_level.py` writes a
-`<stage>_regions.json` sidecar and tags every model node with
-`extras.hod2_regions` so the sets can be told apart.
+a whole-stage export are never on screen together. The bundle carries the
+region table as `regions` in `<stage>.script.json` and tags every model node
+with `extras.hod2_regions` so the sets can be told apart.
 
 ### `draw_mode` — how a region entry is submitted
 
@@ -263,8 +264,9 @@ list it appends slot `0x16` to every entry **only when `g_GameMode == 1`**. And
 the `pol/` directory carries a whole `_org` family (`car_org`, `eff_org*`)
 alongside the four `st_org*` files.
 
-Export it with `export_level.py --original`; output lands in
-`extract/stage<N>_original/` and the sidecar records `"game_mode": 1`.
+The bundle builds it beside Arcade Mode by default, and `--original` builds
+only it ([`docs/PLAYER.md`](../PLAYER.md#from-the-command-line)). It lands in
+`stage<N>_original/`, and its manifest entry records `"game_mode": 1`.
 
 ### The projection matrix and the field of view — SOLVED
 
@@ -409,7 +411,7 @@ selector is the TSP bits, **not** the list type — see
 #### What the exporter does with this
 
 glTF has no render-order concept at all, so the order cannot be expressed
-directly. `hod2lib.gltf` therefore:
+directly. `web/src/hod2lib/gltf.ts` therefore:
 
 * emits each mesh's primitives **opaque first, then translucent**, each group
   in chain order — a stable sort, so the engine's within-pass order survives;
@@ -429,8 +431,8 @@ object, and this game's models genuinely contain two coincident translucent
 copies of the same shell (the stage-2 car's body is prim 0, texture 2, base
 colour white, and prim 6, texture 33, base colour black, centroids 0.03 apart
 and radii 20.32 vs 20.16). Those resolve arbitrarily and one paints over the
-other as a large flat wrong-coloured face. The `blender_*.py` viewers switch
-blended materials to **hashed/dithered** transparency, which resolves per
+other as a large flat wrong-coloured face. A viewer can switch blended
+materials to **hashed/dithered** transparency, which resolves per
 fragment and avoids the artefact — not the engine's order, but not a lie about
 the geometry either.
 
@@ -440,10 +442,8 @@ inside it (radius 20.16 against 20.32, `char_adv04` model 0 meshes 0 and 7),
 so it fails the depth test everywhere the outer shell drew — which is
 everywhere except the texels whose alpha is 0, where the alpha test threw the
 outer shell away. So the black shows only through the clear parts of the
-glass: it is the car's interior. The web player drew it on top of the
-bodywork for as long as translucent materials had no depth write and sorted
-per primitive (`docs/NEW-BUGS-2.md`: "this car that has translucent windows.
-it's not rendering properly at all").
+glass: it is the car's interior. A renderer that gives translucent materials
+no depth write and sorts per primitive draws it on top of the bodywork.
 
 > ⚠️ The tempting "fix" is to force those black base colours to white. It is
 > wrong. `InitD3DDeviceAndTextureStages` sets `COLOROP = MODULATE`,
@@ -497,8 +497,8 @@ Stage 3's long-standing 77 % was the glob missing `st3.bin`. Stage 6 draws
 `st5_01`, `st5_01b`, `st5_02`, `st5_02b` — it genuinely reuses stage 5
 geometry, which no `st6_*` glob can find.
 
-`ExeTables.scene_regions()`, `.scene_geometry_slots()`,
-`.scene_geometry_files()`.
+`ExeTables.sceneRegions()`, `.sceneGeometrySlots()`,
+`.sceneGeometryFiles()`.
 
 ## Camera, script and geometry during play
 

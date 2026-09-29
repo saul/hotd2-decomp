@@ -17,7 +17,7 @@
  * the same dispatcher, so it is **not** restricted to SE: it is how every
  * stage script starts its own track, at block 0 step 2 (stage 5 alone uses
  * `bgm_entry_play` for it). All three name tables are read out of the EXE by
- * `hod2lib.exetab`, so this file routes ids and never guesses a filename.
+ * `hod2lib/exetab.ts`, so this file routes ids and never guesses a filename.
  *
  * **Music** is one streamed channel with the engine's own loop -- see
  * `stream.ts` for what that plays, byte for byte -- decoded here and handed to

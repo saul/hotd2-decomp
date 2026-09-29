@@ -46,7 +46,7 @@ export { makePathRidingPropTail, type PathRidingPropTail } from "./state";
 
 /**
  * `g_class28_route_table` -- `0x00589AE0`, `{s16 op_ slot, s16 freeze frame}`,
- * indexed by `obj+0x11C`. Read out of the image; `tools/verify_prop_tables.py`
+ * indexed by `obj+0x11C`. Read out of the image; `web/tools/checks/prop_tables.ts`
  * compares it word for word.
  */
 export const CLASS28_ROUTES: ReadonlyArray<readonly [number, number]> = [

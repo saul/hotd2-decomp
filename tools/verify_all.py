@@ -1,12 +1,8 @@
 #!/usr/bin/env python3
 """Run every check this repo has, and say which ones actually ran.
 
-**This file is the canonical list of checks.** It used to be a shell block
-copied into `CLAUDE.md`, `.claude/skills/decomp/SKILL.md`,
-`.claude/skills/gameplay-port/SKILL.md` and twice into
-`.claude/skills/hang-investigation/SKILL.md` -- five copies, four of them
-stale, three of them missing suites that had existed for weeks. A list that
-lives in one place and is executable cannot drift from itself.
+**This file is the canonical list of checks.** A list that lives in one place
+and is executable cannot drift from itself, so it is copied nowhere.
 
 `tools/status.py` imports `CHECKS` from here to render the same table into
 `docs/STATUS.md`, so the documentation of what is checked is one authored
@@ -18,11 +14,9 @@ Exit codes, and why a skip is not a pass:
 * **1** -- something failed.
 * **2** -- `--strict` and something was skipped.
 
-A check exits **3** when it asserted nothing. That is the convention the
-bundle-gated suites use, and the reason it exists is that four regression
-tests silently asserted nothing on any machine without game assets while the
-record described them as passing. Here a skip is counted, named and printed
-under its own heading; it never disappears into a green line.
+A check exits **3** when it asserted nothing -- no bundle, or no game
+directory. Here a skip is counted, named and printed under its own heading;
+it never disappears into a green line (L14).
 
     python3 tools/verify_all.py                       # what runs without assets
     python3 tools/verify_all.py --game-dir ~/"THE HOUSE OF THE DEAD 2"
@@ -31,8 +25,8 @@ under its own heading; it never disappears into a green line.
 
 The checks run in parallel, one per core, except the ones that drive a
 browser, which take turns in a lane of their own beside the rest (see
-`LANE_BROWSER`); `-j 1` is the old serial run. The whole list against the
-game is about a minute and a half, nearly all of it that lane.
+`LANE_BROWSER`); `-j 1` runs them one at a time in table order. The run
+prints its own wall time.
 """
 from __future__ import annotations
 
@@ -83,6 +77,15 @@ class Check:
 LANE_BROWSER = "browser"
 
 
+def game(name: str, sees: str) -> Check:
+    """A check against the installed game: `web/tools/checks/<name>.ts`,
+    reading the game through `web/src/hod2lib/`."""
+    return Check(f"game:{name}", "web",
+                 ["node", "tools/run_ts.mjs", f"tools/checks/{name}.ts",
+                  "--game-dir", "{game_dir}"],
+                 sees, NEEDS_GAME)
+
+
 #: Ordered cheapest-first, so a broken tree fails in seconds rather than
 #: minutes. `tsc` comes before every suite that would fail confusingly
 #: without it.
@@ -94,8 +97,6 @@ CHECKS: list[Check] = [
     Check("verify_port", ".", ["python3", "tools/verify_port.py"],
           "that every exe citation in the port matches `functions.tsv`, "
           "under the same name"),
-    Check("verify_player_ops", ".", ["python3", "tools/verify_player_ops.py"],
-          "that the opcode table and the implementations agree"),
     Check("verify_player_dom", ".", ["python3", "tools/verify_player_dom.py"],
           "that the stylesheet and the markup agree, in both directions"),
     Check("verify_exporters", ".", ["python3", "tools/verify_exporters.py"],
@@ -358,220 +359,126 @@ CHECKS: list[Check] = [
           "state 7 as stopping on its range's end rather than one past it and "
           "twenty of the sites it checks become gates nothing can open",
           NEEDS_BUNDLE),
-    Check("verify_prop_pose", ".",
-          ["python3", "tools/verify_prop_pose.py", "--game-dir", "{game_dir}"],
-          "that every class-0x41 generic prop is posed in the order its own "
-          "update routine poses it -- read out of the EXE per type, matched to "
-          "the field each `MatrixRotate*` is handed. `render/breakables.ts` "
-          "composed one order for all fifty, and it was type 51's alone: "
-          "twenty shipped spawns came out somewhere else, four of them by more "
-          "than a degree and the worst by 19.65",
-          NEEDS_GAME),
-    Check("verify_prop_tables", ".",
-          ["python3", "tools/verify_prop_tables.py", "--game-dir", "{game_dir}"],
-          "that the tables class 0x41 types 38, 39, 40, 44, 50 and 66 build their "
-          "objects from -- positions, angles, hull corners, slots, counts, "
-          "scales -- are the EXE's own words, and class 0x28's route, "
-          "length and pose tables with them: the port carries them as "
-          "literals, and a mistyped row would put a church chair somewhere "
-          "the engine does not, with nothing else to notice",
-          NEEDS_GAME),
-    Check("verify_flag_strips", ".",
-          ["python3", "tools/verify_flag_strips.py", "--game-dir", "{game_dir}"],
-          "that the exporter reads class 0x12's descriptor tail at the "
-          "offsets and widths `ScriptedPropInit12` reads it, quoted out of "
-          "the EXE, that every class-0x12 spawn on the disc is placed with "
-          "exactly those fields, and that every slot its strip can draw is in "
-          "its bundle -- the check for stage 1's door, the wood the bin "
-          "captor bursts out of, which the port built nothing for until the "
-          "class had a module",
-          NEEDS_GAME),
-    Check("verify_annotations", ".",
-          ["python3", "tools/verify_annotations.py", "--game-dir", "{game_dir}"],
-          "that every annotated address is a real function in the EXE",
-          NEEDS_GAME),
-    Check("verify_branches", ".",
-          ["python3", "tools/verify_branches.py", "--game-dir", "{game_dir}"],
-          "that every value a branch trigger can write into "
-          "`g_script_branch_var` names a route slot its own block actually "
-          "fills -- the one check that ties the gameplay half of branching to "
-          "the route tables",
-          NEEDS_GAME),
-    Check("verify_scene_exits", ".",
-          ["python3", "tools/verify_scene_exits.py", "--game-dir",
-           "{game_dir}"],
-          "that a terminal route record's `next[0]` is a live block of the "
-          "*next* scene, and that a hole follows every one of them -- the only "
-          "check that reads the handover from one stage to the next, and so "
-          "the only thing that can say stage 3 and stage 4 have two entry "
-          "points each",
-          NEEDS_GAME),
-    Check("verify_looping_se", ".",
-          ["python3", "tools/verify_looping_se.py", "--game-dir",
-           "{game_dir}"],
-          "that `PlaySoundId`'s two loop tables really do pair index for "
-          "index -- every entry is `X.wav` against `X_OFF.wav` and no `_OFF` "
-          "file ships, which is the only thing that says a stop id is a "
-          "control word rather than a sound, and so the only thing that makes "
-          "the chainsaw a loop rather than a one-shot",
-          NEEDS_GAME),
-    Check("verify_bgm_stream", ".",
-          ["python3", "tools/verify_bgm_stream.py", "--game-dir",
-           "{game_dir}"],
-          "that the music has no loop points to find -- the exe's own bytes "
-          "stream channel 0xF and seek it back to the first sample at end of "
-          "file, the port's one-shot ids are the exe's three, and every "
-          "looping track in both tables is long enough for that model to be "
-          "exact",
-          NEEDS_GAME),
-    Check("verify_root_pose", ".",
-          ["python3", "tools/verify_root_pose.py", "--game-dir",
-           "{game_dir}"],
-          "that a clip's root translation still either moves the object or "
-          "offsets the pose -- the two arms of one `model+0x64` bit, quoted "
-          "as bytes because Ghidra shows neither of them whole -- and the "
-          "only place the set of actors the second arm can move is "
-          "enumerated: every motion block in the game measured for an "
-          "absolute horizontal root, paired with the class-0x10 wait word "
-          "that governs it -- and the size both arms are drawn at: "
-          "`ActorBuildSkinnedModel`'s per-type switch decoded from its jump "
-          "table against the port's `ActorModelScale`, and the characters "
-          "that pose those clips found in the six stages' spawns",
-          NEEDS_GAME),
-    Check("verify_combat", ".",
-          ["python3", "tools/verify_combat.py", "--game-dir", "{game_dir}"],
-          "that the shot and damage tables hold together across every "
-          "character type -- and the only place the *exact* set of attacks "
-          "the engine can never land is asserted, which is what stops the "
-          "crawlers' condition-4 swing being filtered out again as an "
-          "impossible row",
-          NEEDS_GAME),
-    Check("verify_effects", ".",
-          ["python3", "tools/verify_effects.py", "--game-dir", "{game_dir}"],
-          "that each of the 29 effect trees walks to exactly the node count "
-          "`g_effect_bone_counts` declares, and that every motion the effect "
-          "system plays divides by the stride that count implies -- the only "
-          "check that reads a motion at the effect stride rather than a "
-          "character's",
-          NEEDS_GAME),
-    Check("verify_horde", ".",
-          ["python3", "tools/verify_horde.py", "--game-dir", "{game_dir}"],
-          "that every number the class-0x40 horde is steered by -- its entry "
-          "splines, spline rates, shot delays, wander grid, second skin and "
-          "the emerge prop's corners -- is the EXE's, and that the seven "
-          "descriptors split five hordes to two props on the byte PlaceHorde "
-          "switches on",
-          NEEDS_GAME),
-    Check("verify_continue", ".",
-          ["python3", "tools/verify_continue.py", "--game-dir", "{game_dir}"],
-          "that the continue screen the port draws -- the run's CONTINUE? "
-          "and digit, the two-player small ones, the small GAME OVER and the "
-          "credit line -- is at the EXE's positions, scales and sprite ids, "
-          "read as instruction bytes and `.rdata` rows; that only one "
-          "credit-line drawer can run, because the credit costs are stored "
-          "once, as 1; and that all eight wait opcodes read the gameplay gate "
-          "that holds the script while nobody is in play. Nothing else looks "
-          "at a picture that, when wrong, is simply not there",
-          NEEDS_GAME),
-    Check("verify_options", ".",
-          ["python3", "tools/verify_options.py", "--game-dir", "{game_dir}"],
-          "that the profile reading is right on the user's own save -- the "
-          "four disguised files deciphered with the key taken out of "
-          "`ProfileCipher`'s instructions, and the block's byte sum and "
-          "version checked -- that Blood Color is dead in this build (one "
-          "store of its gate, no reader of its byte), and that the options "
-          "screen's factory tables, sprite ids, positions and glyph table are "
-          "the EXE's, with the bundle's `options` block when there is one",
-          NEEDS_GAME),
-    Check("verify_result_card", ".",
-          ["python3", "tools/verify_result_card.py", "--game-dir", "{game_dir}"],
-          "that every constant the result card's port transcribes -- the "
-          "dwell, the bonus's dwell, the count's, the camera frame figure 0 "
-          "turns on, the cursor it freezes on, the slot it holds up -- is the "
-          "immediate at its instruction; that the `.rdata` span the card reads "
-          "with no bound is the EXE's bytes; that every rescuable civilian's "
-          "type has an attachment list the unbounded lookup can find; and, "
-          "with a bundle, that each stage placing the card carries a figure "
-          "template for every type its list names or it can rescue, with "
-          "every clip the card can put that type on baked",
-          NEEDS_GAME),
-    Check("verify_water", ".",
-          ["python3", "tools/verify_water.py", "--game-dir", "{game_dir}"],
-          "that class 0x41 type 1, the canal water task, starts from the table "
-          "the EXE indexes -- ten flat water tiles -- and that every slot, "
-          "flag, camera cue and multiplier the port's copy of it tests is the "
-          "immediate at the instruction that holds it; its fifteen spawns sit "
-          "at the origin, so a wrong reading draws nothing and looks like "
-          "nothing",
-          NEEDS_GAME),
-    Check("verify_draw_order", ".",
-          ["python3", "tools/verify_draw_order.py", "--game-dir",
-           "{game_dir}"],
-          "that the player's two passes and translucent order are the EXE's: "
-          "the blend and depth tables `render/draw_order.ts` copies, the "
-          "alpha-test and blend-enable pushes, and the VIEW matrix and "
-          "comparator bytes that make the sort nearest-first rather than the "
-          "painter's order this repo's docs had -- plus that no mesh in `pol/` "
-          "turns its depth write off, which is why translucent meshes occlude",
-          NEEDS_GAME),
-    Check("verify_texture_alpha", ".",
-          ["python3", "tools/verify_texture_alpha.py", "--game-dir",
-           "{game_dir}"],
-          "that a texture's alpha reaches the bundle as the bank stores it, "
-          "because the EXE's D3D path keeps it: the upload's format table and "
-          "the A1R5G5B5 test, stage 0's alpha args, and a disassembly of the "
-          "D3D module finding TSP bit 19 read only as half of the pass "
-          "selector -- plus the corpus premise that makes a glTF alphaMode "
-          "from the pass right, and, on a current bundle, no `_opaque` image "
-          "and the IgnoreTexAlpha ARGB images byte-equal to the bank's alpha",
-          NEEDS_GAME),
-    Check("verify_bats", ".",
-          ["python3", "tools/verify_bats.py", "--game-dir", "{game_dir}"],
-          "that the class-0x46 bat's flight paths still line up with the "
-          "descriptors that select them -- the only check on a class whose "
-          "spawns are all at the world origin and take their whole position "
-          "from an EXE table, so nothing about a wrong reading of them looks "
-          "wrong in the data",
-          NEEDS_GAME),
-    Check("verify_attachments", ".",
-          ["python3", "tools/verify_attachments.py",
-           "--game-dir", "{game_dir}"],
-          "that every face and accessory a spawn's attachment list names has "
-          "a model in the stage's glTF -- the check that would have caught "
-          "the civilians having no hair, because a civilian's own head model "
-          "is a shell open at the back and every count was right without it",
-          NEEDS_GAME),
-    Check("verify_bone_cels", ".",
-          ["python3", "tools/verify_bone_cels.py", "--game-dir",
-           "{game_dir}"],
-          "that every cel run `ZombieDrawBonePart` (`FUN_004534A0`) draws is "
-          "still the arithmetic in the EXE and is still in the bundle -- no "
-          "table in the image names those models, so this is the only thing "
-          "standing between a hand-written run and `char_adv02` losing its "
-          "midriff again",
-          NEEDS_GAME),
-    Check("verify_skeletons", ".",
-          ["python3", "tools/verify_skeletons.py", "--game-dir",
-           "{game_dir}"],
-          "that every character skeleton is walked whole -- one node per bone "
-          "of the EXE's own motion-frame count -- which no rig, bake or render "
-          "check notices when a walk comes up short: the stage-3 boss's heads "
-          "lost thirteen nodes, their jaws and their weak bones to a depth cap",
-          NEEDS_GAME),
-    Check("verify_parts", ".",
-          ["python3", "tools/verify_parts.py", "--game-dir", "{game_dir}"],
-          "that every vertex-blended part in a bundle is skinned the way the "
-          "exe deforms it -- one bone per vertex, weight 1, the exe's source "
-          "geometry and no inverse binds -- which is the only check that can "
-          "see the waist riding the hips instead of stretching to the chest",
-          NEEDS_GAME),
-    Check("verify_geometry", ".",
-          ["python3", "tools/verify_geometry.py", "--game-dir", "{game_dir}"],
-          "that every scenery part in a stage bundle holds every triangle its "
-          "`pol/` models declare -- the only check that compares an export "
-          "against the files it was made from rather than against another "
-          "export",
-          NEEDS_GAME),
+    game("annotations",
+         "that every row of `ghidra/annotations/*.tsv` is an address in a real "
+         "section of the EXE -- functions in `.text` -- with no address or "
+         "name listed twice and none in both files"),
+    game("prop_pose",
+         "that every class-0x41 generic prop is posed in the order its own "
+         "update routine poses it -- read out of the EXE per type and matched "
+         "to the field each `MatrixRotate*` is handed -- that both copies of "
+         "the generic slot tables are what the routines and the shipped "
+         "`+0x11C` words say, and that `render/breakables.ts` composes a pose "
+         "in one place, from the table"),
+    game("prop_tables",
+         "that the tables class 0x41 types 38, 39, 40, 44, 50 and 66 build "
+         "their objects from -- positions, angles, hull corners, slots, "
+         "counts, scales -- and class 0x28's route, length and pose tables "
+         "are the EXE's own words, compared as 32-bit patterns against the "
+         "values the port evaluates; a mistyped row puts a church chair where "
+         "the engine does not, with nothing else to notice"),
+    game("flag_strips",
+         "that `class12Tail`, the exporter's read of class 0x12's descriptor "
+         "tail, takes each field at the offset and width `ScriptedPropInit12` "
+         "loads it, decoded out of the EXE; that every class-0x12 spawn on the "
+         "disc is placed with exactly those fields; and, with a bundle, that "
+         "every slot its strip can draw is in it"),
+    game("branches",
+         "that every value a branch trigger can write into "
+         "`g_script_branch_var` names a route slot its own block actually "
+         "fills -- the one check that ties the gameplay half of branching to "
+         "the route tables"),
+    game("scene_exits",
+         "that a terminal route record's `next[0]` is a live block of the "
+         "*next* scene, and that a hole follows every one of them -- the only "
+         "check that reads the handover from one stage to the next, and so "
+         "the only thing that can say stage 3 and stage 4 have two entry "
+         "points each"),
+    game("looping_se",
+         "that `PlaySoundId`'s two loop tables pair index for index -- every "
+         "entry is `X.wav` against `X_OFF.wav` and no `_OFF` file ships, "
+         "which is what says a stop id is a control word rather than a sound "
+         "-- and that class 0x30's play and stop ids are the operands of the "
+         "EXE's own PUSHes"),
+    game("bgm_stream",
+         "that the music has no loop points to find -- the EXE's own bytes "
+         "stream channel 0xF and seek it back to the first sample at end of "
+         "file, the port's one-shot ids and ring length are the EXE's, and "
+         "every looping track opens under the port's header walk and is long "
+         "enough for its stream model to be exact"),
+    game("root_pose",
+         "that a clip's root translation either moves the object or offsets "
+         "the pose -- the two arms of one `model+0x64` bit, quoted as bytes -- "
+         "which actors the posing arm can move, measured over every motion "
+         "block and paired with the class-0x10 wait word that governs it, and "
+         "that `ActorModelScale` is `ActorBuildSkinnedModel`'s per-type switch, "
+         "decoded from its jump table"),
+    game("combat",
+         "that the exporter's shot and damage readings hold together across "
+         "every character type and match the EXE's bytes -- and the only place "
+         "the *exact* set of attacks the engine can never land is asserted, "
+         "which stops the crawlers' condition-4 swing being filtered out as "
+         "an impossible row (L65, L71, L73)"),
+    game("horde",
+         "that every number the class-0x40 horde is steered by -- its entry "
+         "splines, spline rates, shot delays, wander grid, second skin and "
+         "the emerge prop's corners -- is the EXE's, and that the seven "
+         "descriptors split five hordes to two props on the byte PlaceHorde "
+         "switches on"),
+    game("continue_screen",
+         "that the continue screen the port draws -- the run's CONTINUE? and "
+         "digit, the two-player small ones, the small GAME OVER and the credit "
+         "line -- is at the EXE's positions, scales and sprite ids, read as "
+         "instruction bytes and `.rdata` rows; that only one credit-line "
+         "drawer can run; and that all eight wait opcodes read the gameplay "
+         "gate that holds the script while nobody is in play"),
+    game("options",
+         "that the profile reading is right on the user's own save -- the "
+         "four disguised files deciphered with the key taken out of "
+         "`ProfileCipher`'s instructions, and the block's byte sum and version "
+         "checked -- that Blood Color is dead in this build, and that the "
+         "options screen's factory tables, sprite ids, positions and glyph "
+         "table are the EXE's, with the bundle's `options` block when there is "
+         "one"),
+    game("result_card",
+         "that every constant the result card's port transcribes is the "
+         "immediate at its instruction; that the `.rdata` span the card reads "
+         "with no bound is the EXE's bytes; that every rescuable civilian's "
+         "type has an attachment list the unbounded lookup can find; and, "
+         "with a bundle, that each stage placing the card carries a figure "
+         "template and every clip for every type it can show"),
+    game("water",
+         "that class 0x41 type 1, the canal water task, starts from the table "
+         "the EXE indexes -- ten flat water tiles -- and that every slot, flag, "
+         "camera cue and multiplier the port's copy of it tests is the "
+         "immediate at the instruction that holds it; its spawns sit at the "
+         "origin, so a wrong reading draws nothing and looks like nothing"),
+    game("draw_order",
+         "that the player's two passes and translucent order are the EXE's: "
+         "the blend and depth tables `render/draw_order.ts` copies, the "
+         "alpha-test and blend-enable pushes, and the VIEW matrix and "
+         "comparator bytes that make the sort nearest-first -- plus that no "
+         "mesh in `pol/` turns its depth write off, which is why translucent "
+         "meshes occlude"),
+    game("texture_alpha",
+         "that a texture's alpha reaches the bundle as the bank stores it, "
+         "because the EXE's D3D path keeps it: the upload's format table and "
+         "the A1R5G5B5 test, stage 0's alpha args, and TSP bit 19 read only as "
+         "half of the pass selector -- plus the corpus premise that makes a "
+         "glTF alphaMode from the pass right and, on a current bundle, no "
+         "`_opaque` image and the IgnoreTexAlpha images byte-equal to the "
+         "bank's alpha"),
+    game("bats",
+         "that the class-0x46 bat's flight paths line up with the descriptors "
+         "that select them, and that the port's spline table, motion pair and "
+         "swarm counts are the EXE's bytes -- the only check on a class whose "
+         "spawns are all at the world origin and take their whole position "
+         "from an EXE table"),
+    game("bone_cels",
+         "that every cel run `ZombieDrawBonePart` (`FUN_004534A0`) draws is "
+         "the arithmetic in the EXE and is in the bundle -- no table in the "
+         "image names those models, so this is the only thing standing "
+         "between a hand-written run and a character losing a part"),
     Check("baseline", ".",
           ["python3", "tools/baseline.py", "--game-dir", "{game_dir}",
            "--verify"],
@@ -613,16 +520,13 @@ def run_all(checks: list[Check], game_dir: str | None, timeout: int,
             jobs: int, quick: bool = False) -> list[tuple[Check, str, str, float]]:
     """Run `checks`, the pool in parallel and each lane in order beside it.
 
-    **Parallel because the list outgrew serial.** Fifty-odd checks one after
-    another were three and a half minutes with nothing dominating -- a long
-    tail of five-to-thirty-second suites, each waiting on the last. Every
-    check is its own process with its own temporary files and its own
+    Every check is its own process with its own temporary files and its own
     port, so the only ones that cannot share the machine are the ones that
     share a browser, and those keep their lane.
 
     A line is printed as each check finishes, so the order on screen is the
     order they finished in; the summary and every failure's output below it
-    stay in table order. `jobs` of 1 is the old serial run, lanes included.
+    stay in table order. `jobs` of 1 runs everything in table order.
     """
     w = max(len(c.name) for c in checks)
     lock = threading.Lock()

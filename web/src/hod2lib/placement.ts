@@ -1,6 +1,5 @@
 /**
  * One spawn, decoded: where it stands and what its descriptor tail says.
- * The port of `tools/hod2lib/placement.py`.
  *
  * A spawn descriptor is 0x18 bytes of tail whose meaning belongs to the
  * **state the spawn starts in**, not to the class -- every one of the tables

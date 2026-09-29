@@ -1,6 +1,5 @@
 /**
  * Scripted scenery: doors, shutters, windows and the vans they hang off.
- * The port of `tools/hod2lib/props.py`.
  *
  * The zombies that lunge at you out of the back of a van in stage 2 are not
  * standing in the open waiting for the camera. They are inside a van, and the
@@ -400,8 +399,7 @@ export const EFFECT_COUNT = 29;
  * A bound on the walk, so a corrupt pointer cannot run away.
  *
  * It is not a guess at the data: effect 8 has **144 children under its root**
- * and 145 nodes, and a cap of 0x40 silently returned 65 of them --
- * `verify_effects.py`'s node-count check is exactly what caught that.
+ * and 145 nodes, and a cap of 0x40 silently returned 65 of them.
  */
 export const EFFECT_NODE_CAP = 4096;
 

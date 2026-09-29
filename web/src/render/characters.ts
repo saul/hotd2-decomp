@@ -3,7 +3,7 @@
  *
  * The exporter has already done the hard half. A skeleton is a tree of named
  * parts, each with a bone offset and an asset slot, which is exactly a rig —
- * so `hod2lib.characters` puts one through the ordinary rig writer at every
+ * so `hod2lib/characters.ts` puts one through the ordinary rig writer at every
  * spawn descriptor of its class, and the glTF arrives with a full node
  * hierarchy per character, positioned and yawed. What is left for the client
  * is the part that cannot be baked: the pose.
@@ -88,7 +88,7 @@ const boneSuffix = (part: string) => `_${part}`;
  * object they draw.
  *
  * Every field that survives a frame lives on the `Actor` — see
- * docs/PLAYER_ARCHITECTURE.md, "Saving and restoring the whole game state".
+ * docs/PLAYER.md, "Saving and restoring the whole game state".
  * What is left here is three.js, which a snapshot never contains and which
  * `resync` rebuilds from the actor after a load.
  */

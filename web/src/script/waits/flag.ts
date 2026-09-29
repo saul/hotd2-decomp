@@ -32,7 +32,7 @@
  * stream 64 command 17 when she is rescued; stream 63 command 12 when she is
  * shot or mauled), and with the wait passing on sight the script left the
  * rescue behind and step 4's boat shot sailed straight past her and her
- * captor. See `docs/BUGS.md`, "the civilian/enemy are jumped over".
+ * captor.
  *
  * `g_evt_gameplay_live` (`0x007DCCA4`) is the engine's "may the script
  * advance" -- a player in state 5 with lives left -- and it is what holds the
@@ -117,7 +117,7 @@ let cache: {
  *
  * Class 0x32 is not small: it is an enemy with thirteen states, and
  * declaring its flag without the actor would turn a stage that completes into
- * one that hangs (`docs/PLAYER_HANGS.md` item 20). Every other shipped gate
+ * one that hangs. Every other shipped gate
  * -- the two cards', classes 0x14, 0x19 and 0x22's, class 0x41's type 75, the
  * civilians' op 0x1C and the captors' state 36 -- has a writer the port runs,
  * and is honoured.
@@ -130,7 +130,7 @@ let cache: {
  *
  * The five reports that opened this line of work asked for "one spawn opcode
  * and two cue props"; the sweep that was written to check it says otherwise,
- * and that estimate is recorded as wrong in `docs/re/session-log.md`. The two
+ * and that estimate is wrong. The two
  * cue props — `FUN_00433F40` (class 0x33) and `FUN_00473CF0` (`HingeUpdate`) —
  * turn out to open **no gate in any shipped script**: every flag they write
  * comes off a descriptor, and no `wait_script_flag` in the game names one.

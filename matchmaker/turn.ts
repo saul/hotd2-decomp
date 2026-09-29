@@ -24,7 +24,7 @@
  *
  * Not here: TCP and TLS transports, IPv6 relays, `EVEN-PORT` and
  * reservations, bandwidth quotas. For a relay on the open internet serving
- * strangers, use coturn or a hosted TURN service (`README.md`); this is for a
+ * strangers, use coturn or a hosted TURN service (`docs/PLAYER.md`); this is for a
  * development machine, a LAN, or a small server for people you know.
  */
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";

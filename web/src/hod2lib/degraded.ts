@@ -1,20 +1,17 @@
 /**
  * What the exporter could not read, and carried on without.
  *
- * A port of `tools/hod2lib/degraded.py`, and the reasoning there is the whole
- * story: thirty-odd places in this package answer a failure with an empty
- * result, every one of them deliberate, and what was wrong is that they were
- * silent. A site that swallows says so, `buildStage` drains the records into
- * the stage's manifest entry, and the export exits non-zero if the list is not
+ * Thirty-odd places in this package answer a failure with an empty result,
+ * every one of them deliberate, and the danger is that they are silent. A
+ * site that swallows says so, `buildStage` drains the records into the
+ * stage's manifest entry, and the export exits non-zero if the list is not
  * empty.
  *
- * **One divergence, and it is in the `where` field.** Python takes it from the
- * caller's frame, `sys._getframe(1)`, so a moved function cannot leave a stale
- * location behind. JavaScript has no equivalent that survives bundling:
- * esbuild renames functions and the browser build has no file names at all. So
- * the call site passes it, spelled exactly as Python would have derived it
- * (`hod2lib.nl1.parse`), and `tools/compare_bundles.py` compares the strings.
- * A hand-written location can go stale, which is the cost; a location that
+ * **The call site passes the `where` field.** JavaScript has no way to name
+ * the caller that survives bundling: esbuild renames functions and the
+ * browser build has no file names at all. So each site spells its own
+ * location, `hod2lib.<module>.<function>` (`hod2lib.nl1.parse`). A
+ * hand-written location can go stale, which is the cost; a location that
  * reads `t.a` after minification is worse.
  */
 
@@ -29,7 +26,7 @@ export interface Degradation {
   error: string;
 }
 
-/** The em dash is the reference implementation's; the strings are compared. */
+/** One record as the warning line the exporter prints. */
 export function line(r: Degradation): string {
   return `${r.where}: could not read ${r.what} (${r.error}) — ${r.lost}`;
 }
@@ -50,12 +47,11 @@ export function setWarningSink(fn: (text: string) => void): void {
 }
 
 /**
- * `TypeName: message`, the way Python renders an exception in a record.
+ * `TypeName: message`, the form a record's `error` takes.
  *
  * An `Error` subclass keeps its constructor name through esbuild because the
  * classes in this package are declared rather than generated; anything thrown
- * that is not an `Error` is reported as its own text, which is what Python's
- * `str(exc)` does for a value with no message of its own.
+ * that is not an `Error` is reported as its own text.
  */
 export function describe(exc: unknown): string {
   if (exc instanceof Error) return `${exc.name}: ${exc.message}`;

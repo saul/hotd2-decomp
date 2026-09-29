@@ -1,24 +1,61 @@
 /**
- * The transcribed object rigs. **Generated file.**
+ * The transcribed object rigs: the table `rigs.ts` draws from.
  *
- * Written by `tools/gen_rig_data.py` from `tools/hod2lib/rigs.py`, which is
- * where these came from and where the evidence for each one is. A rig is a
- * draw routine read by hand -- there is no rig data in the asset files at all,
- * only 168 `AssetDrawSlot` call sites with their transforms as `PUSH imm32` in
- * the instruction stream -- so every number here was disassembled once, and
- * re-typing them would be doing that work again with nothing to catch a slip.
+ * A rig is a draw routine read by hand -- there is no rig data in the asset
+ * files at all, only `AssetDrawSlot` call sites with their transforms as
+ * `PUSH imm32` in the instruction stream -- so every number here was
+ * disassembled once, and the evidence travels with it: `note`, `animated` and
+ * `condition` are fields, and the comment above each rig carries what was
+ * read to establish it.
  *
- * The evidence travels: `note`, `animated` and `condition` are fields, not
- * comments, so they are in this file too. What is only in `rigs.py` is the
- * prose between declarations.
- *
- * `tools/verify_exporters.py` fails when this file is stale. Re-run the
- * generator after editing `rigs.py` and commit the two together.
+ * Twelve of the 31 `CamEvalObjectPath6` callers are here; the other 19
+ * evaluate a path but never call `AssetDrawSlot`, so they position an object
+ * that some other routine draws. `docs/re/rig-survey.md` covers all 31.
  */
 
 import type { Rig } from "./rigs";
 
 export const RIGS: readonly Rig[] = [
+  /**
+   * The stage-1 opening vehicle. `FUN_0048E600` picks its route from the
+   * camera path -- cp_st1 0/1/2 (0x20/0x21/0x22) select op_st1 0/1/2
+   * (0xFD/0xFE/0xFF) -- so the object runs in lockstep with the shot.
+   * obj+0x1334, the stage-1 occupants' yaw: op_st1 2's `rot_y` less 0x4000,
+   * evaluated at the routine's own clamped time, and only on cp_st1 2. Before
+   * that shot the field is still zero, which is why the occupants face forward
+   * for the whole drive and only turn once the car has stopped.
+   *
+   * `condition` "only while obj+0x1320 (moving) is set": Drawn only while the
+   * object is moving. FUN_0048E600 sets obj+0x1320 when the camera is on
+   * cp_st1 0 or 1, and clears it on cp_st1 2 and once cp_st1 1 has run past
+   * frame 0x15D.
+   *
+   * - route 0xFE, camera paths 0x22: cp_st1 2 does NOT ride a path.
+   *   `FUN_0048E600` evaluates op 0xFE at the literal 0x43AF0000 = 350.0 --
+   *   the end of the path the car has just finished -- and clears obj+0x1320,
+   *   so the car is parked and its wheels and dust trails stop being drawn. It
+   *   reads op 0xFF only for `local_8` (rot_y), which becomes obj+0x1334, the
+   *   occupants' yaw; op 0xFF's position channels are never read by this
+   *   routine at all.
+   * - part `part_898`: two MatrixTranslate calls in a row compose:
+   *   (-4.6755,0,0.239)+(0,9,6)
+   * - part `part_8cc`: RotX(-0x1C00) . RotZ(sin-driven) . RotX(+0x1C00): a
+   *   rotation about an axis tilted -39.375 deg from Z, and IDENTITY when the
+   *   sin term is 0. Baking only the first RotX would leave the part half-
+   *   rotated.
+   * - part `side_left`: 11.3 tall, 11.7 deep, seated either side at y 9.4 --
+   *   they read as the two occupants, but that is inference from the shape and
+   *   place.
+   * - part `spinner_front`: 20.8 wide -- the full track -- and spun about X at
+   *   0x2000 a frame, which is 45 deg/frame or 7.5 turns a second at 60 Hz.
+   *   Reads as a wheel pair rather than an axle, but the routine does not say.
+   * - part `trail_fl`: AssetDrawSlot(DAT_009A32A0 % 0xC + 0x8CE) -- a 12-frame
+   *   cycle on a global counter, frame 0 emitted; the right pair is the left
+   *   model mirrored with MatrixScale(-1, 1, 1). Measured, each is 11.7 long
+   *   along the travel axis, 2.9 wide and 2.6 tall, sitting at ground level
+   *   just outside the body -- and it is drawn only while moving. That is a
+   *   ground effect, not a wheel: the wheels are modelled into the body.
+   */
   {
     name: "st1_vehicle",
     routine: "FUN_0048E600",
@@ -153,6 +190,17 @@ export const RIGS: readonly Rig[] = [
     ],
     note: "Draws car_pl.bin parts and char_adv00.bin occupants. Route selected by the active camera path: cp_st1 0/1 ride op_st1 0/1 in lockstep, and cp_st1 2 parks the car at the end of op_st1 1.",
   },
+  /**
+   * `Class26Subtype2Update` (`FUN_0048EAD0`), subtype 2 of the class-0x26
+   * family `Class26InstallSubtypeUpdate` (`FUN_0048E290`) dispatches. Almost
+   * the whole routine is camera-path dispatch; it draws one slot.
+   *
+   * - `spawn_class`: No routes. The routine's camera-path switch -- slots
+   *   0x156..0x15D and 0x199 by cp 0x7C..0x87 and 0xF6..0xF8, the 2.0 bias at
+   *   0x004E30F0, the face-camera latch obj+0x1350 -- is transcribed once, in
+   *   the browser port's `Class26Subtype2Update` (web/src/game/class26/), and
+   *   the root is placed from that actor, so it is not repeated here.
+   */
   {
     name: "obj_48ead0",
     routine: "FUN_0048EAD0",
@@ -168,6 +216,9 @@ export const RIGS: readonly Rig[] = [
     ],
     note: "Class 0x26 subtype 2. Posed by the port's actor (game/class26/): the path switch, the 2.0 bias and the face-camera latch are Class26Subtype2Update's, and this root is placed at the spawn and then from that actor every frame.",
   },
+  /**
+   * `FUN_0048F050`. One slot at the object root.
+   */
   {
     name: "obj_48f050",
     routine: "FUN_0048F050",
@@ -198,6 +249,18 @@ export const RIGS: readonly Rig[] = [
     ],
     note: "Jump table at 0x0048F17C, index cam_path - 0xAE. On any other camera path there is no path eval at all and the object draws with the pose it already holds. Push/pop depth 1.",
   },
+  /**
+   * `FUN_0048F190`. Push/pop depth 2: the outer push holds the object root and
+   * is held open, so the sub-parts are children of it rather than siblings
+   * that each re-apply the root. Same part offsets as ST1_VEHICLE with
+   * different asset slots -- FUN_0048E600 is a sibling state of the same
+   * object.
+   *
+   * - part `part_8cd`: Rx(-a).Rz(90).Rx(a) == Rz(90).Ry(a).Rx(a) exactly for a
+   *   = 0x1C00, verified to 1e-16 against the engine's rotation sign
+   *   convention. The sibling FUN_0048E600 has the same sandwich with a sin-
+   *   driven middle term, where it collapses to identity at rest instead.
+   */
   {
     name: "obj_48f190",
     routine: "FUN_0048F190",
@@ -284,6 +347,16 @@ export const RIGS: readonly Rig[] = [
     ],
     note: "Jump table at 0x0048F53C, index cam_path - 0xCC; 0xD0 and 0xD2 do no path eval. ROOT YAW OVERRIDE: while obj+0x1350 is set the root Y becomes camera yaw + 0x8000, i.e. the rig faces the camera. Latch frames: cp 0xCE set@100 clear@200; 0xCF set@70,630 clear@230,970; 0xD1 set@80,470 clear@320,1215.",
   },
+  /**
+   * `FUN_0048F560`. Three fixed groups plus a two-digit numeric readout drawn
+   * twice, on opposite faces. Ghidra mis-renders the digit dispatch as an
+   * indirect call and leaves 0x48F796..0x48F80F undisassembled; the tables
+   * were recovered by hand from 0x0048F918.
+   *
+   * - part `part_digit_hi_a`: Four banks of exactly 10 consecutive slots,
+   *   indexed n/10 and n%10. Frame 0 of each bank is emitted; the running
+   *   value is a runtime rule.
+   */
   {
     name: "obj_48f560",
     routine: "FUN_0048F560",
@@ -354,6 +427,19 @@ export const RIGS: readonly Rig[] = [
     ],
     note: "Byte-index table 0x0048F904 into targets at 0x0048F8F0. Push/pop depth 2, 7/7 balanced. KNOWN BUG, [proved]: on any camera path outside {0xDA,0xDB,0xDC,0xEC} the four digit slot indices are read from [ESP+0x2C], the routine's own obj argument slot reused as scratch and never written on that path, giving 0xAD4 + (int16)obj_ptr. [likely] unreachable, since the routine is only installed as the handler during those paths.",
   },
+  /**
+   * `FUN_00484FF0`, the draw tail of a script-driven object (its bytecode VM
+   * is FUN_004842A0). The object's own body is a skeletal model drawn by
+   * FUN_00411090 *before* this switch; these are extra props drawn alongside
+   * it. [proved] world space: nothing pushes an object root before the call
+   * and the case 1/2/4 translations are absolute magnitudes matching the path
+   * coords.
+   *
+   * - part `part_1a37_v3_path`: Variant 3 draws the same slot from the runtime
+   *   path pose, plus a mirrored flipbook pair under an anchor at pose.xz with
+   *   y forced to -25.0 and the pose's heading only. No literal slot, so not
+   *   placed.
+   */
   {
     name: "obj_484ff0_props",
     routine: "FUN_00484FF0",
@@ -407,6 +493,10 @@ export const RIGS: readonly Rig[] = [
     ],
     note: "variant = *(int16*)(obj+0x1390 + 6), which is descriptor +0x2A -- the parameter tail opcodes 0x0B/0x0C/0x0D attach. Variants 1 and 2 occur in stage 2, 3 and 4 in stage 3. The variant-4 descriptor sits at (-635.1, 43.0, -955.9), which is where the routine hardcodes part_10df_v4 -- independent corroboration of both readings. The variant-3 parts take their path slot from obj+0x135C at runtime and are still not placeable. Nothing is drawn while g_screen_furniture_flags (DAT_009A5900) & 0x20 is set, and [proved] that bit is the chapter card's: ChapterCardInstall (FUN_004342E0) ORs it in at 0x0043436D, or at 0x004342FA / 0x00434328 in its Boss Mode and app-state-0x0B arms, and clears it at 0x004348C9 as it raises g_script_flags[0xF8]; BossModeChapterCardUpdate (0x00434CE7) and FUN_00434DA0 (0x00434ED6) clear it for the other two. So the body and every part here are hidden for the card's 180 frames unless it is skipped. The early-out lands on the tick at 0x0048523A, not the return: the motion frame keeps advancing behind the card.",
   },
+  /**
+   * `FUN_00470B70`, actor state 412 (dispatch table 0x00593170, entry
+   * 0x005937E0). One part, one literal slot, standard Z,Y,X rotation order.
+   */
   {
     name: "obj_470b70",
     routine: "FUN_00470B70",
@@ -426,6 +516,11 @@ export const RIGS: readonly Rig[] = [
     ],
     note: "Push/pop depth 1. After the pop it transforms (pose.x, pose.y + 8.0, pose.z) by the parent matrix into obj+0x70..0x78 -- a world anchor, not a draw. Returns early to FUN_00409CC0 when DAT_009C8E98 == 5, and ActorKills when the object is out of its scene segment.",
   },
+  /**
+   * `FUN_00470080`, actor state 406. Transcribed for the record only: its one
+   * drawn slot is obj+0x28C, a per-instance runtime field, so there is no
+   * geometry to place.
+   */
   {
     name: "obj_470080",
     routine: "FUN_00470080",
@@ -451,6 +546,25 @@ export const RIGS: readonly Rig[] = [
     ],
     note: "Path slot comes from the word table at 0x00595778 indexed by (int16)obj+0x290, whose ~20 writers are spread across the binary, so which route an instance takes is per-instance. Two SEQUENTIAL push/pop pairs, not nested: the first draws nothing, it only builds a scratch rotation to transform one vector. The path's rotation output is read but never used -- only pose.xyz is stored. Rotation order here is Y, Z, X, NOT the usual Z, Y, X.",
   },
+  /**
+   * `FUN_00416B00`, `PlayerShotEffectsThink`. Not a static rig: a loop i =
+   * 0..5 over three parallel 0x30-byte record arrays, record = ARRAY + 0x30*(i
+   * + 6*player). Every translation and rotation is runtime data and all but
+   * one slot id is computed, so only the record layout and the rules are
+   * transcribed.
+   *
+   * **Not placed.** Its one literal slot, 0x109D (`etc_1.bin` entry 41), is
+   * the tracer arm for Original Mode weapon kind 5, and the exe draws it only
+   * from a live `g_shot_tracer_ring` record of that kind: `CMP EAX, 0x5` on
+   * `+0x2C` at 0x00416CBE, then `Translate(record) .
+   * Translate(CamEvalObjectPath6(0x194, age % 24)) . MatrixClearRotation .
+   * RotZ RotY RotX` and `PUSH 0x109D` at 0x00416DA1 [proved, from the
+   * listing]. A `Route(0x194)` here would become an ungated root drawn from
+   * stage load at the path's own pose, (0.5, 0, 0): a green mound in front of
+   * Goldman's desk in every Original Mode stage-2 cutscene. The ring is
+   * `web/src/game/effects/shot_effects.ts`'s and its draw is
+   * `web/src/render/effects.ts`'s, so nothing here is a root to place.
+   */
   {
     name: "obj_416b00",
     routine: "FUN_00416B00",
@@ -495,6 +609,24 @@ export const RIGS: readonly Rig[] = [
     ],
     note: "[likely] the per-shot gunfire effect set -- spawned from the player's crosshair at unit view depth by FUN_00416F70, per player, a ring of 6 with short frame-counted lifetimes, drawn in layer 0xC. Record layout [proved]: +0x00 s16 active, +0x02 s16 variant (= player index), +0x04/08/0C f32 pos, +0x10/14/18 i32 rot, +0x1C/20/24 f32 velocity, +0x28 i32 age, +0x2C i32 kind. Slot tables at 0x00579F78 and 0x00579F7C hold 373/383 and 2934/2948. Nothing here is placeable: see the parts.",
   },
+  /**
+   * `FUN_00432840`, spawn class 0x28 (table entry 0x005933F8 -> FUN_00432610).
+   * The route is chosen per instance by obj+0x11C through the 4-entry table at
+   * 0x00589AE0, NOT by the camera path -- cp_st1 15 (0x2F) gates when the
+   * object starts *moving*, which is a different thing. Conflating the two
+   * would claim a cp_st1 gate on op_st2 routes, a gate that could never fire.
+   *
+   * - part `part_135f`: Both sprite parts bias the path position before the
+   *   billboard yaw, so neither offset can be expressed as a child of the
+   *   rotated root.
+   * - part `part_%04x`: The loop's other fourteen cels, one part each -- the
+   *   draw names one slot a frame (0x0043292C: MOV EAX,[g_frame_counter]; XOR
+   *   EDX,EDX; MOV ECX,0xF; DIV ECX; ADD EDX,0x135F), and a part with several
+   *   slots draws them all at once. The player shows the one the counter
+   *   names; see PathRidingPropDraw in web/src/render/rigs.ts.
+   * - part `part_%04x`: ...and the smoke loop's other seven (0x004329A7: MOV
+   *   EDX, [g_frame_counter]; AND EDX,7; ADD EDX,0xB67).
+   */
   {
     name: "obj_432840",
     routine: "FUN_00432840",
@@ -710,6 +842,15 @@ export const RIGS: readonly Rig[] = [
     ],
     note: "Max matrix depth 1, 3 balanced push/pop pairs, all parts siblings. No SetDrawLayerNibble, so everything is on the default layer. Each sprite loop is exported one part per cel, 15 fire and 8 smoke, of which the draw names one a frame from g_frame_counter. Until obj+0x1320 flips the pose is the route sampled ONCE at the table's freeze frame and held; it flips on the first frame where g_active_cam_path == 0x2F and g_frame >= that freeze frame, and the pose then tracks the live frame. Killed once cam_path_length[route] <= g_frame. In g_mode(0x009C8E98) == 10 the route is replaced by a literal pose from 0x0055DD18 and the object is killed once the camera reaches path 8; only sub-types 0 and 1 have plausible records there, so those poses are recorded in the note rather than emitted. [open] what mode 10 denotes.",
   },
+  /**
+   * `SUB_004331D0`, spawn class 0x33, selected when obj+0x11C == 1 inside the
+   * class handler FUN_00432FF0. The largest rig found: 9 draw sites. Not
+   * placed -- see `placement_blocked`.
+   *
+   * - `variant_param`: The five sub-parts below are drawn only when the main
+   *   asset is 0x1B0E, and the main asset is itself a tail field -- obj+0x13F0
+   *   = p+0x00. So the selector for this rig is the asset id.
+   */
   {
     name: "obj_4331d0",
     routine: "SUB_004331D0",
@@ -798,6 +939,47 @@ export const RIGS: readonly Rig[] = [
     ],
     note: "Max matrix depth 1, 8 balanced push/pop pairs, no nesting -- every part is a sibling. Two of the pushed blocks draw nothing; one caches the object's camera-space position. No SetDrawLayerNibble anywhere. The parts split into two MUTUALLY EXCLUSIVE sets by the main asset id at obj+0x13F0: 0x1B0E gets part_0899/part_08cb_a/part_08cb_b/part_1b0a/part_1b0d and never the sprite loops; anything else gets the sprite loops and never those five. Every configuration draws part_main_13f0, and part_1aab once detonated.",
   },
+  /**
+   * `FUN_00452320`, the stage-2 opening vehicle. **[proved] a car**: its poser
+   * `FUN_00452930` plays sound 0x719A9, whose SE record at 0x005868B4 names
+   * ``STAGE2_SE\CAR_SRIP_22.wav`` -- a tyre skid. The neighbouring record
+   * 0x619A9 is ``STAGE2_SE\CAR_CRASH1.wav``; both are in the stage-2 preload
+   * list at 0x00569C98, but no code site plays the crash, so if one sounds it
+   * is fired by the event script.
+   *
+   * This rig is why the 9-vs-22 split in `docs/re/rig-survey.md` is a filter
+   * and not a definition: the posers evaluate the path and never call
+   * AssetDrawSlot themselves, while the rig lives here. They do draw --
+   * `St2CarRouteUpdate` (FUN_004521B0) and `St2CarHeldUpdate` (FUN_004522A0)
+   * each end by calling this routine, at 0x0045228C and 0x00452308; this said
+   * "never draw" until 2026-09-28.
+   *
+   * **Both asset rows are parts.** Every part draws
+   * `g_st2car_asset_variants[obj+0x13F0][column]` (0x00565F2C, int[2][4]): row
+   * 0 = 0x2D 0x2F 0x34 0x31, row 1 = 0x2E 0x30 0x35 0x32, read from the image.
+   * The eight slots are `pol/char_adv04.bin` entries 2..10 through the pol
+   * slot list, so each row is its own part here, and `web/src/render/rigs.ts`
+   * shows the part whose slot `St2CarDraw` names this frame -- the port's
+   * `web/src/game/class21/car.ts` computes the row, the two gated rotations
+   * and the roll-limited frame, all of it read from 0x00452320..0x0045253F.
+   *
+   * - part `part_002d`: Row 0 of g_st2car_asset_variants: what St2CarDraw
+   *   draws until shot 0x39 runs out.
+   * - part `part_002f`: A genuine nested push: this one is inside part_002d's,
+   *   not a sibling. Every translation here is the float32 its PUSH imm32
+   *   carries, as the shortest decimal that round-trips (0x00452377,
+   *   0x00452497, 0x004524E8). They were 2..40 ulps off in five of six
+   *   components until 2026-09-28.
+   * - part `part_0034`: Both of these are children of a second, non-drawing
+   *   root that re-applies the body orientation with the roll passed through a
+   *   limiter. That root is identical to the object root whenever the body has
+   *   no roll, so they are exported as children of the rig root, and the
+   *   player moves them onto the limited frame the port computes each frame
+   *   (web/src/game/class21/car.ts, St2CarDraw).
+   * - part `part_002e`: Row 1: the same four pushes, the same transforms and
+   *   the same gated rotations, on the slots St2CarDraw names once
+   *   St2CarRouteUpdate has written obj+0x13F0 = 1 (0x00452239).
+   */
   {
     name: "obj_452320",
     routine: "FUN_00452320",

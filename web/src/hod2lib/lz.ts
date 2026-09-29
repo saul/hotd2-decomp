@@ -1,8 +1,8 @@
 /**
  * HOTD2 LZSS decompressor.
  *
- * A port of `tools/hod2lib/lz.py`, which is a clean-room reimplementation of
- * the routine at 0x0040ACD0 in Hod2.exe. See docs/formats/lz.md.
+ * A clean-room reimplementation of the routine at 0x0040ACD0 in Hod2.exe.
+ * See docs/formats/lz.md.
  *
  * Container form on disk:
  *
@@ -12,10 +12,9 @@
  * The routine itself takes the bitstream only; {@link decompressFile} handles
  * the u32 header and verifies the result length against it.
  *
- * The output buffer is preallocated from that header where there is one. The
- * reference implementation appends to a `bytearray`, which amortises fine in
- * Python; here it is the difference between decompressing 80 MB of `pol/` and
- * decompressing it four times over, because every doubling copies.
+ * The output buffer is preallocated from that header where there is one. That
+ * is the difference between decompressing 80 MB of `pol/` and decompressing
+ * it four times over, because every doubling of a growing buffer copies.
  *
  * **That header is not trusted input.** `container.classify` decompresses on
  * spec to find out whether a blob is compressed at all, so this routine is

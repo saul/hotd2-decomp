@@ -1,6 +1,5 @@
 /**
- * Class 0x14's tables -- the stage-2 boss. The port of
- * `tools/hod2lib/class14.py`.
+ * Class 0x14's tables -- the stage-2 boss.
  *
  * Every one of these is `.rdata` that `Class14Update` (`FUN_00476150`) and the
  * routines under it index directly, so they travel in the bundle

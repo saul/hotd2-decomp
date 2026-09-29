@@ -146,7 +146,7 @@ const FAMILY_POSE_ORDER: Partial<Record<PropFamily, PoseOrder>> = {
  * the engine has: fifty class-0x41 routines each with their own sequence of
  * `MatrixRotate*` calls. A generic type with no row, or one whose source the
  * read could not attribute ({@link PoseOrder.Unread}), falls back to the
- * family default rather than guessing — see `tools/verify_prop_pose.py`, which
+ * family default rather than guessing — see `web/tools/checks/prop_pose.ts`, which
  * is what says the rows are right.
  */
 function PoseOrderFor(p: BreakableProp): string {
@@ -422,7 +422,7 @@ export class BreakableLayer implements System<RenderContext> {
         // `GENERIC_POSE_ORDER` -- twenty-two of them compose `Rz.Ry.Rx` and
         // `PropDrawOnlyType51` is the only descriptor-slot type that composes
         // `Ry.Rz.Rx`, which is the one this renderer used for all fifty until
-        // `tools/verify_prop_pose.py` was written.
+        // the prop-pose check was written.
         //
         // **The order only matters when yaw and roll are both non-zero.** `Rx`
         // is last in every one of these compositions, so all an order can

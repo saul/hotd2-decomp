@@ -67,7 +67,7 @@ export function ActorAdvanceMotion(obj: Actor, dt: number): void {
     // root is zero -- the pose offset is `root[f]` where the accumulated
     // deltas would be `root[f] - root[0]`, both inside the actor's own
     // rotation -- and that is 992 of the game's 1058 motion blocks, measured
-    // by `tools/verify_root_pose.py`. Which is why it is invisible, not why it
+    // by `web/tools/checks/root_pose.ts`. Which is why it is invisible, not why it
     // is right. Being faithful means running root motion through a death here,
     // for the classes with no death machine, and that is a change of its own.
     // [diverges]

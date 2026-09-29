@@ -1,16 +1,13 @@
 /**
- * Minimal PNG writer, the port of `tools/hod2lib/png.py`.
+ * Minimal PNG writer.
  *
- * Python has `zlib` in the standard library and this package cannot: node's
- * deflate and a browser's are different objects with different defaults, so
- * the compressor arrives as a {@link Deflate} and everything here is async.
- * That is the only structural change from the reference implementation.
+ * Node's deflate and a browser's are different objects with different
+ * defaults, so the compressor arrives as a {@link Deflate} and everything here
+ * is async.
  *
- * Node's `zlib.deflateSync(buf, {level: 6})` is the same zlib Python calls and
- * produces the same bytes, so a CLI export is byte-identical. A browser's
- * `CompressionStream("deflate")` picks its own level and may not be; the
- * pixels are identical either way, which is the guarantee docs/TS_PORT.md
- * makes and the property `tools/compare_bundles.py` asserts.
+ * Node's `zlib.deflateSync(buf, {level: 6})` gives the same bytes every run.
+ * A browser's `CompressionStream("deflate")` picks its own level and may not
+ * match it; the pixels are identical either way.
  */
 
 import { Writer, utf8 } from "./bytes";
@@ -57,9 +54,8 @@ function chunk(w: Writer, tag: string, data: Uint8Array): void {
 /**
  * Encode RGBA8888 pixel data (`length === width * height * 4`) as a PNG.
  *
- * Filter type 0 on every row, like the reference implementation: the textures
- * are small, the result is embedded in a GLB that nothing re-compresses, and
- * an adaptive filter would be a second thing to keep byte-identical.
+ * Filter type 0 on every row: the textures are small and the result is
+ * embedded in a GLB that nothing re-compresses.
  */
 export async function encodeRgba(width: number, height: number,
                                  pixels: Uint8Array,

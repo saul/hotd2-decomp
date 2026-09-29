@@ -5,7 +5,7 @@
  * put inside a routine — not an entry in a table the exporter can read. Under
  * the rule in `docs/formats/bundle.md` those belong in `game/` with their
  * citation, not in the bundle: they were in `manifest`-adjacent JSON, which
- * meant the number lived in `hod2lib/approach.py` with the function that
+ * meant the number lived in `hod2lib/approach.ts` with the function that
  * proves it while the TypeScript using it had a bare `?? 14` and
  * `verify_port.py` could not see either half.
  *

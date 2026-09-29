@@ -1,5 +1,5 @@
 /**
- * Slot-keyed `cam/` path resolution. The port of `tools/hod2lib/campaths.py`.
+ * Slot-keyed `cam/` path resolution.
  *
  * A `cam/` file numbers its paths from zero, but nothing in the game ever
  * refers to a path that way. Every consumer -- the event script's
@@ -68,11 +68,10 @@ export class CamPaths {
    * What the parse could not make sense of, per file.
    *
    * `CamFile.warnings` -- a descriptor running past the end of the file, a
-   * channel index that is not a curve start -- existed and was read by
-   * `verify_phase6.py` alone, which runs over the *game directory*. Nothing on
-   * the export path looked at it, so a stage whose `cam/` file had a bad
-   * descriptor exported a bundle quietly missing those paths, and the camera
-   * simply did not move where it should have.
+   * channel index that is not a curve start -- travel into the stage's
+   * `cam.json`, where the exporter prints them. Without them a stage whose
+   * `cam/` file had a bad descriptor would export a bundle quietly missing
+   * those paths, and the camera would simply not move where it should.
    */
   warnings: string[] = [];
 

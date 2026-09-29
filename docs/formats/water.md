@@ -190,5 +190,4 @@ Draws the region geometry with the same region rule as the game, and runs the
 type-1 task (`game/class41/water.ts`, drawn by `render/water_surfaces.ts`):
 the ripple, the bilinear switch, the pairs and swaps. The wave field is ported
 too (`game/class16/`, `game/class17/`) for the stage-2 boss that samples it;
-the floating-prop rows are not. See `docs/PLAYER_PROGRESS.md`, *The canal is
-drawn by a task*.
+the floating-prop rows are not.

@@ -12,11 +12,11 @@ them all gives **136 streams and 1,967 commands**, and 17,684 of the region's
 18,728 bytes are command; the rest is the operand data those commands point
 at.
 
-`tools/verify_civilian_scripts.py` is the check. A command is a dword and its
+The walk is a measurement, not only a reading. A command is a dword and its
 length is per-opcode, so one wrong length desynchronises the stream and the
-next opcode is a pointer or a float — out of range at once. It also asserts
-that every stream ends in exactly one `0x2D`, that no byte is claimed by two
-different commands, and that the region is mostly command.
+next opcode is a pointer or a float — out of range at once. Walked, every
+stream ends in exactly one `0x2D`, no byte is claimed by two different
+commands, and the region is mostly command.
 
 ## The command stream
 
@@ -782,7 +782,7 @@ rebuilds any actor holding either counter leaves her sobbing in front of dead
 captors. Two did: stage 2's class-0x21 rescue target, whose ways out all come
 before any gate (`RescueTargetOutlivedByReplay` in `game/class21/index.ts`),
 and stage 3's class-0x18 boat riders, which the walker's gate list had left
-out. See `docs/PLAYER_HANGS.md` item 31.
+out.
 
 ## The rescue, and what the class is
 
@@ -916,7 +916,7 @@ blob while the actor is in the tail's attack state (`tail+0x03`), and the
 *entered* it and continues as a list of `s16[4]` `{motion, frame, loops, mode}`
 entries; the cursor at `obj+0x1398` is shared, which is how the walk hands the
 maul a half-walked list. All 86 blobs the six stages reach decode and
-terminate — `tools/verify_captor_scripts.py`.
+terminate.
 
 | Entering state | Header |
 |---|---|

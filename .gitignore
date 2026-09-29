@@ -21,10 +21,9 @@ game/
 *.gltf
 *.glb
 
-# Explicit allowances (generated metadata and docs, no asset content)
+# Explicit allowances (generated metadata, no asset content)
 !manifest.csv
 !inventory.csv
-!extract/README.md
 
 # Web player
 # The client's source is committed; nothing it consumes or produces is.
@@ -37,12 +36,6 @@ web/dist/
 web/.vite/
 web/test-results/
 web/playwright-report/
-# Local-only visual diff output. tests/README.md sets the policy: assertions
-# are against hashes and derived metrics, never against embedded asset
-# content -- and a screenshot of a stage IS derived game art.
-web/test/visual/**/*-actual.png
-web/test/visual/**/*-diff.png
-web/test/visual/screenshots/
 
 # Ghidra
 # Project databases and analysis output are local; the scripts that produce
@@ -64,8 +57,9 @@ venv/
 .vscode/
 .idea/
 
-# Local-only screenshots of the running player. A shot of a stage is derived
-# game art; see tests/README.md on why no asset ever lands in this repo.
+# Local-only screenshots of the running player. A screenshot of a stage is
+# derived game art, and no game asset or anything derived from one is ever
+# committed: checks assert against hashes and derived numbers instead.
 web/shots/
 
 # Agent worktrees. `.claude/worktrees/<id>/` is a full checkout each, made by
@@ -74,7 +68,7 @@ web/shots/
 
 # The matchmaker's secrets: the Cloudflare TURN key and its API token, as
 # `wrangler dev` reads them, and the API token `wrangler` deploys with
-# (`matchmaker/README.md`). Never committed.
+# (docs/PLAYER.md, "The matchmaker"). Never committed.
 .dev.vars
 .dev.vars.*
 .cloudflare.env

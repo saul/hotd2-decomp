@@ -1,11 +1,11 @@
 /**
  * Binary angles, and the rotation matrices they build.
  *
- * The port of `tools/hod2lib/bams.py`. The engine keeps every orientation as a
- * BAMS -- a 16-bit angle where 0x10000 is a full turn -- and `FUN_00410590`
- * feeds a spawn's three of them to `RotX; RotY; RotZ` in that order. Anything
- * that has to hand a composed orientation to glTF, which wants one rotation
- * and not three, comes through here.
+ * The engine keeps every orientation as a BAMS -- a 16-bit angle where
+ * 0x10000 is a full turn -- and `FUN_00410590` feeds a spawn's three of them
+ * to `RotX; RotY; RotZ` in that order. Anything that has to hand a composed
+ * orientation to glTF, which wants one rotation and not three, comes through
+ * here.
  *
  * `web/src/core/bams.ts` is the *player's* binary angles and is a different
  * file on purpose: that one is the engine's arithmetic at runtime, this one is
@@ -18,8 +18,8 @@
  * `core/bams.ts` has one too and it is a different number: that one is
  * `Math.fround(2*pi/65536)`, because the exe stores the constant as a float32
  * and the player's job is to be the engine. This one is the double, because
- * the exporter's job is to write the same bytes as `tools/hod2lib/`, which
- * computes `math.tau / 65536.0`. They differ by about one part in 10^8.
+ * the exporter's job is to compose an exact rotation for glTF, not to repeat
+ * the engine's rounding. They differ by about one part in 10^8.
  *
  * The two are not reconcilable without changing what one of the two programs
  * is faithful to, so they are two constants with a reason each -- and, as
@@ -47,13 +47,13 @@ export function rotMatrix(bams: readonly number[]): Mat3 {
 }
 
 /**
- * Python's `round`, which is banker's rounding, and JavaScript's is not.
+ * Round half to even (banker's rounding), which `Math.round` is not.
  *
- * `Math.round(0.5)` is 1 and `Math.round(-0.5)` is -0; `round(0.5)` in Python
- * is 0 and `round(-0.5)` is 0. A BAMS is a sixteen-thousandth of a turn and a
- * half-unit disagreement is invisible on screen -- and it is still a byte in
- * the bundle that would not match, on exactly the ties a rotation of a
- * multiple of 90 degrees produces, which is most of the scenery.
+ * `Math.round(0.5)` is 1 and `Math.round(-0.5)` is -0; this gives 0 for both.
+ * A BAMS is 1/65536 of a turn and a half-unit disagreement is
+ * invisible on screen -- and it is still a different byte in the bundle, on
+ * exactly the ties a rotation of a multiple of 90 degrees produces, which is
+ * most of the scenery.
  */
 export function roundHalfEven(v: number): number {
   const f = Math.floor(v);

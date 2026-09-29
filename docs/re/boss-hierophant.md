@@ -61,7 +61,8 @@ Singletons, re-seated at the top of Init and Update:
 
 ## 1. The five spawns and their gates
 
-Descriptors decoded with `tools/dump_stage_script.py --json` `[proved]`:
+Descriptors decoded by `web/src/hod2lib/evt.ts`, as the bundle's
+`<stage>.script.json` carries them `[proved]`:
 
 | stage/block | step/op | pos | yaw | hp | `tail+0x01` (state) | entrance |
 |---|---|---|---|---|---|---|
@@ -227,7 +228,7 @@ for p in order (both entries, loop to 0x009C8910):          ; 0x004762E0..0x0047
 ```
 
 **Only bone 1 can damage the boss**, and never while `0x100` is up. boss2's
-per-bone pick spheres (`combat.hit_sphere(0x47, b)` `[proved]`): bone 1
+per-bone pick spheres (`combat.hitSphere(tables, 0x47, b)` `[proved]`): bone 1
 centre (0, 2.25, 0) r 5.55; bone 2 (0, 0.2, 2.4) r 2.4; bones 3..15 limbs.
 
 ### 5.2 `Class14ApplyBoneDamage(obj, bone, player)` — `0x004763E0`
@@ -476,7 +477,7 @@ row's close rate lives only until the same frame's clamp.
 (25:0x1400, 26:0x1500 … 36:0x1F00, 37..39: 0x2000).
 
 The asset slots resolve to `boss2.bin` entries 2..36 (A) and 37..76 (B)
-`[proved]` via `ExeTables.asset_slots()`. What they look like is `[open]` —
+`[proved]` via `ExeTables.assetSlots()`. What they look like is `[open]` —
 render them before naming them.
 
 Writers of `B.hold` elsewhere, all `[proved]`: Hunt tail (§8.6), Lunge/Leap sub 2,
@@ -752,7 +753,7 @@ sub 3: landing as §8.8 sub 3 but sets sub = 4 directly; +0x94 = 7 always
 sub 4/5: as §8.8, exit to state 6 with +0x9C = 0 and obj+0x34 &= ~0x10000000
 all subs: integrate unless state+0x00 & 4
 ```
-Message groups `[proved]` (`ExeTables.screen_messages`): **0x55 = "Right."**
+Message groups `[proved]` (`ExeTables.screenMessages`): **0x55 = "Right."**
 (`ST2\117_J.WAV`/`117_GA.WAV`), **0x56 = "Left."** (`ST2\118_J.WAV`/`118_GA.WAV`) —
 the partner calls the side: `+0x9C == 0` is `x - 60`, "Left.".
 

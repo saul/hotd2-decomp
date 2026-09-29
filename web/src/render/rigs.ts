@@ -3,7 +3,7 @@
  *
  * An object that follows an object path is rarely one model. Its draw routine
  * walks the matrix stack, pushing a transform and calling `AssetDrawSlot` per
- * part; there is **no rig data in the assets at all**, so `hod2lib.rigs`
+ * part; there is **no rig data in the assets at all**, so `hod2lib/rigs.ts`
  * transcribes the routine and the exporter instantiates it as a node
  * hierarchy. See `docs/formats/rigs.md`.
  *
@@ -271,7 +271,7 @@ const ACTOR_POSED_ROUTINES: Readonly<Record<string, SpawnClass>> = {
  *
  * -- an unsigned `DIV`, hence the `>>> 0`. Not `g_scene_tick_counter`, which
  * `PropDrawOnlyType53` (`FUN_0046EBD0`) reads for the same two loops. Every
- * cel is a `rig_part` of its own (`obj_432840` in `hod2lib/rigs.py`), which is
+ * cel is a `rig_part` of its own (`obj_432840` in `hod2lib/rigs_data.ts`), which is
  * how the stage-2 car's rig carries both of its rows.
  *
  * Then `+5.0` (`0x0055D2B4`) and `+8.0` (`0x004C43A0`) on the object's `y`

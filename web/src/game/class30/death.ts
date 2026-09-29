@@ -420,8 +420,7 @@ function ZombieCorpseLeave(obj: ZombieActor): void {
  * `DAT_0059306C` (0x41A), `DAT_00593074` (0x404) and `DAT_0059307C` (0x3F7),
  * each a pair picked with `rand() % 17 >> 4` — the same once-in-seventeen
  * idiom `ThrowerCorpsePoseFrame` uses against class 0x31's own table at
- * `0x00592AC0`. **None of the class-0x30 table is exported**, and
- * `tools/hod2lib/` is outside this change's file list.
+ * `0x00592AC0`. **None of the class-0x30 table is exported** yet.
  *
  * What it costs is only *which* frame of the death clip the body holds:
  * `ZombieEnterCorpseState` raises {@link ActorFlag.PoseFrozen}, so the corpse

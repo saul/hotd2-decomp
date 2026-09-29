@@ -1,5 +1,5 @@
 /**
- * NaomiLib NL1 model parser. The port of `tools/hod2lib/nl1.py`.
+ * NaomiLib NL1 model parser.
  *
  * See docs/formats/nl1.md for the format specification.
  *
@@ -78,8 +78,8 @@ export function envMapped(s: Strip): boolean {
 /**
  * One mesh of a model, with its PowerVR2 render state decoded.
  *
- * A class rather than a record because the reference implementation's `Mesh`
- * is twenty-odd `@property` accessors over four dwords, every one of them read
+ * A class rather than a record because it is twenty-odd accessors over four
+ * dwords, every one of them read
  * by the glTF writer, and copying the bit arithmetic to each call site is how
  * two of them come to disagree.
  */

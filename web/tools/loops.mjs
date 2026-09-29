@@ -4,7 +4,7 @@
  *     node tools/loops.mjs
  *
  * Every other check in this tree can be green while the ambience is missing.
- * `verify_looping_se.py` proves the two EXE tables pair up; `seek.test.ts`
+ * `web/tools/checks/looping_se.ts` proves the two EXE tables pair up; `seek.test.ts`
  * proves the **walker** remembers what should be sounding. Neither gets near
  * an `<audio>` element, and the bug this was written for lived exactly there:
  * playing stage 1 from the top gave rain, and opening the same stage at a deep

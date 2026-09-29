@@ -10,7 +10,7 @@
  * `0x20D4`, `0x20FC` and `0x2124`. All three are placed at the origin with no
  * angles and `+0x11C == 0`, and their `desc+0x24` bytes — the placer's
  * `+0x1F4`, the bundle's `field_1f4` — are **0, 1 and 2**: one of each index
- * this type has. `[proved]` by `tools/hod2lib/evt.py` over every scene's evt
+ * this type has. `[proved]` by `hod2lib/evt.ts` over every scene's evt
  * file. Op 15 runs after `wait_script_flag 0xF1` in that program. Which
  * lesson block 5 is, is `[open]`.
  *

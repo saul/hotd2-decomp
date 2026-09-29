@@ -334,7 +334,7 @@ for (const stage of STAGES) {
  * literally where the next stage starts.
  *
  * Driving it here rather than reading the tables is the point: the tables are
- * what `tools/verify_scene_exits.py` checks, and this checks that **the walker
+ * what `web/tools/checks/scene_exits.ts` checks, and this checks that **the walker
  * actually gets there** -- that a stage played from each of its own entry
  * blocks reaches a terminal record at all, and that both sides of the seam
  * agree about which block comes next.
@@ -343,7 +343,7 @@ for (const stage of STAGES) {
  * is `g_script_branch_var` as the run left it -- 0 with no gameplay. So this
  * drives one route per entry, not every route; the exhaustive statement about
  * routes is the exporter's `exits`, asserted against the exe by
- * `verify_scene_exits.py`.
+ * `web/tools/checks/scene_exits.ts`.
  */
 console.log("\na finished stage names where the next one opens:");
 {

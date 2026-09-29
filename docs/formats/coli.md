@@ -151,7 +151,7 @@ read so far distinguishes them.
 
 ## Validation
 
-`tools/verify_coli.py`. Each check collapses if the interpretation is wrong:
+Each measurement collapses if the interpretation is wrong:
 
 | Check | Result |
 |---|---|
@@ -171,19 +171,20 @@ error — the p99 is 5e-03 and the vertices still sit inside their AABB.
 
 ## Tooling
 
-`hod2lib/coli.py` implements the format; `tools/verify_coli.py` only checks it.
+[`web/src/hod2lib/coli.ts`](../../web/src/hod2lib/coli.ts) implements the
+format:
 
-```python
-from hod2lib import coli
-f = coli.load("coli/coli2.bin")
-f.coverage          # 1.0 -- the blob walk tiled the file
-f.blobs[0].quads    # [Quad(normal=..., plane_d=..., axis=..., verts=..., surface=...)]
-coli.scene_files(1) # ('coli0.bin', 'coli2.bin') -- what scene 1 loads
+```ts
+import * as coli from "./coli";
+const f = await coli.load(source, "coli/coli2.bin", "coli2.bin");
+f.coverage          // 1.0 -- the blob walk tiled the file
+f.quads[0]          // {offset, normal, planeD, axis, verts, surface}
+coli.sceneFiles(1)  // ["coli0.bin", "coli2.bin"] -- what scene 1 loads
 ```
 
-`Stage.colisets()` loads a scene's pair, and `hod2lib/script.py` resolves an
-opcode `0x10`/`0x11` operand through `coli.pointer_to_offset`, so the script
-dump reads:
+`Stage.colisets()` loads a scene's pair, and `web/src/hod2lib/script.ts`
+resolves an opcode `0x10`/`0x11` operand through `coli.pointerToOffset` into
+the instruction's `detail`, which `detailText` renders as:
 
 ```
 001438  10 set_collision_set_full  full: coli2.bin+0xb148(6q surf 52,53)
@@ -193,11 +194,11 @@ dump reads:
 **[measured]** Across stages 1–6 there are 113 collision-set instructions: 41
 clear the set and 72 carry 86 pointers, all 86 of which resolve.
 
-`export_level.py` writes `<stage>_coli.json`: both files the scene loads, every
-quad's plane, vertices and surface id, plus an `activated` list of the blobs the
-event script actually switches on. **[measured]** the collision bounding box for
-stage 2 lies inside the exported geometry's bounding box, so the two coordinate
-spaces really are the same — `--no-coli` skips it.
+The bundle carries it as the `coli` block of `<stage>.script.json`
+(`Program.coliJson`): both files the scene loads, and every blob's quads —
+plane, vertices, axis and surface id. **[measured]** the collision bounding box
+for stage 2 lies inside the exported geometry's bounding box, so the two
+coordinate spaces really are the same.
 
 ## Open questions
 
@@ -217,10 +218,10 @@ spaces really are the same — `--no-coli` skips it.
    write `obj+0x14C` and their pointers have not been resolved.
 3. Two quads have an `axis` tag that is not the largest normal component, and a
    handful have a zero-length normal. Authoring slack, or a deliberate marker?
-4. Export: the sidecar carries the geometry, but nothing yet builds a debug
-   mesh from it. Overlaying it on the exported stage in Blender would be the
-   visual confirmation, and would show whether the surface palette lines up
-   with visible materials.
+4. Export: the bundle carries the geometry, and the player draws the
+   selected blobs over the stage (`web/src/render/coli_debug.ts`), coloured by
+   set. Colouring by surface id would show whether the surface palette lines
+   up with visible materials.
 
 ## What the player does with it
 
@@ -259,10 +260,10 @@ surface[n]
 The whole of stage 2's collision is **785 quads across 57 blobs**, about 250 KB
 of JSON, so there is no spatial index and none is warranted.
 
-`verify_coli.py` re-derives every blob through the exporter and compares it
-field by field with the parsed file — 166 blobs, 0 differing. That check exists
-because a transposed vertex triple or an off-by-one stride reads as plausible
-geometry and silently moves walls.
+Every blob re-derived through the exporter matches the parsed file field by
+field — 166 blobs, 0 differing. That comparison matters because a transposed
+vertex triple or an off-by-one stride reads as plausible geometry and silently
+moves walls.
 
 ### The two sets are the whole of the selection
 
@@ -287,8 +288,7 @@ makes `0x11` read as scenery that stops a bullet but not a body.
 `TraceActorSurfaceContactPoint` are the class-0x31 probes built on top of them
 — the wall search that decides whether a `zstin` may climb, and the per-frame
 snap that holds it on the wall it climbed. Against the real data, **24 of the
-game's 49 class-0x31 spawns have a wall within reach and 14 have a ceiling**;
-`tools/verify_thrower_walls.py` measures it.
+game's 49 class-0x31 spawns have a wall within reach and 14 have a ceiling**.
 
 ### Surface `0x35` is the commonest one in the game
 

@@ -28,7 +28,7 @@
  *
  * `[proved]` from `FUN_004636A0` and `FUN_0046C570`, every float and every
  * table re-read out of the image (L1, L6); the tables are checked against the
- * image by `tools/verify_prop_tables.py`.
+ * image by `web/tools/checks/prop_tables.ts`.
  */
 import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";

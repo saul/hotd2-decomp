@@ -105,7 +105,7 @@
  * to 56 are all 0.9, and they are the people, whichever class runs them --
  * 0x10, 0x24, 0x25 or 0x45 in the shipped placements. The three `people.bin`
  * clips 596, 598 and 600, which pose their root rather than walk it, sit
- * 2.593 units off it and not 2.882 (`tools/verify_root_pose.py`). The port
+ * 2.593 units off it and not 2.882 (`web/tools/checks/root_pose.ts`). The port
  * drew every one of them at 1.0 -- every skinned actor but the bat, which
  * was drawn at its own size as a special case of what is the general rule.
  *
@@ -171,7 +171,7 @@ const MODEL_SCALE_PEOPLE = Math.fround(0.9);
  * (`0x00410478`), `0x3f333333` (`0x00410484`) and `0x3f666666`
  * (`0x0041046C`). Those are floats, and so is this: `fround`, so that the 0.9
  * the renderer draws with and the root motion steps by is the engine's
- * 0.89999998, not a double the engine never had. `tools/verify_root_pose.py`
+ * 0.89999998, not a double the engine never had. `web/tools/checks/root_pose.ts`
  * holds the bytes.
  *
  * | types | scale | who |

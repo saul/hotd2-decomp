@@ -1,18 +1,19 @@
 ---
 name: hang-investigation
-description: Workflow for finding out why the browser player stops — a walker parked on a wait that never comes true, a room a player could not clear, or a stage that plays differently every run. Reproduce it, capture it, distil it into a headless harness, read the routine in the exe with /decomp before writing a line of TypeScript, fix it with /gameplay-port, and prove the fix by watching the check fail without it. Use for anything in docs/PLAYER_HANGS.md and for any report that the player "gets stuck", "never continues", or "only sometimes finishes".
+description: Workflow for finding out why the browser player stops — a walker parked on a wait that never comes true, a room a player could not clear, or a stage that plays differently every run. Reproduce it, capture it, distil it into a headless harness, read the routine in the exe with /decomp before writing a line of TypeScript, fix it with /gameplay-port, and prove the fix by watching the check fail without it. Use for any report that the player "gets stuck", "never continues", or "only sometimes finishes", and for any stop `web/tools/playthrough.mjs` reports.
 ---
 
 # Hang investigation
 
-The work list is `docs/PLAYER_HANGS.md`. This is the operating procedure for
-taking one item off it. `/decomp` is how you read the binary and `/gameplay-port`
-is how you write the TypeScript; this skill is what goes **between** them — how
-to turn "it stops here" into a named routine, and how to know the fix is real.
+A hang arrives as a user's report (usually a deep link) or as a stop
+`web/tools/playthrough.mjs` reports. This is the operating procedure for
+closing one. `/decomp` is how you read the binary and `/gameplay-port` is how
+you write the TypeScript; this skill is what goes **between** them — how to
+turn "it stops here" into a named routine, and how to know the fix is real.
 
 **One hang at a time, start to finish.** Two half-investigations produce a
 commit whose two halves each explain the other's symptom, and nothing is
-proved. Finish an item — read, fix, check, record — before opening the next.
+proved. Finish one — read, fix, check, record — before opening the next.
 
 ## What a hang actually is
 
@@ -24,16 +25,16 @@ different reading:
 | fault | where it lives | example |
 |---|---|---|
 | **the rule** reads the wrong condition | `web/src/script/waits/` | a wait word's mask tested against the wrong bits |
-| **the count** is wrong | whoever maintains it in `game/` | item 2 — an actor left the world still counted |
+| **the count** is wrong | whoever maintains it in `game/` | an actor left the world still counted |
 | **the actor** cannot finish | the state routine in `game/` | an entrance whose cue never arrives |
-| **the room is unclearable** | `render/`, the camera | item 1 — the camera faces a wall, so the enemies cannot be shot |
+| **the room is unclearable** | `render/`, the camera | the camera faces a wall, so the enemies cannot be shot |
 
 The fourth is not a walker bug at all and presents identically to the first
 three. Separate it early — it is the difference between reading
 `script/waits/` for an afternoon and reading `CamStartPathPlayback`.
 
 There is a fifth shape that is not a stop: **the same stage does not play the
-same way twice** (item 8). Treat non-determinism as its own investigation, and
+same way twice.** Treat non-determinism as its own investigation, and
 do it *before* any intermittent hang, because until a hang reproduces you
 cannot tell a fix from a coin landing your way.
 
@@ -42,7 +43,7 @@ cannot tell a fix from a coin landing your way.
 1. **Reproduce before you read, read before you write.** A hang you have seen
    once is a report. A hang you can produce on demand is a bug. Do not open
    Ghidra on a symptom you cannot summon back.
-2. **The exe decides.** Every `[open]` in `docs/PLAYER_HANGS.md` means the
+2. **The exe decides.** An `[open]` beside the code you suspect means the
    routine has not been read. Read it in full, name it in
    `ghidra/annotations/`, *then* write TypeScript — `/decomp` in full, not a
    glance at a decompilation someone pasted in a doc.
@@ -73,9 +74,9 @@ git log --oneline -10
 git status --porcelain          # what is dirty that is NOT yours?
 ```
 
-Read the item in `docs/PLAYER_HANGS.md` and its evidence, `docs/PLAYER_PROGRESS.md`
-for what the player is supposed to do, and `docs/re/session-log.md` for whether
-this was tried before. Run `ListAgents` if a peer session may be live.
+Read the report and its link, the code the link lands in, and
+`git log -S<symbol>` for whether this was tried before. Run `ListAgents` if a
+peer session may be live.
 
 Get the baseline green before changing anything, so a failure later is yours:
 
@@ -95,19 +96,18 @@ node tools/playthrough.mjs --stage N --headless
 ```
 
 Run it **five times** and write down the outcome of each. This is not
-ceremony: stage 1 gave four different outcomes over five runs, and a
-one-in-five hang investigated as though it were reliable will "fix" itself.
+ceremony: a one-in-five hang investigated as though it were reliable will
+"fix" itself.
 
-Record the hit rate in the item. `5/5` and `1/5` are different bugs and want
-different next steps — a `1/5` sends you to the determinism question first.
+Record the hit rate. `5/5` and `1/5` are different bugs and want different
+next steps — a `1/5` sends you to the determinism question first.
 
 For a hang the playthrough reaches slowly, pin it with a URL instead. The
 player is addressable by `stage`, `block`, `step`, `op`, `mode`, `slot`,
 `frame`, `seed`, `freeze`, `all`, `original`:
 
 ```sh
-node tools/shot.mjs --url '?stage=2&block=3&step=1&op=0' --out hang \
-  --click 'label[title^="Click to shoot"] input' --press Space --settle 8000
+node tools/shot.mjs --url '?stage=2&mode=play&block=3&step=1&op=0' --out hang
 ```
 
 **But a URL is a seek, and a seek is its own rebuild path with its own bugs.**
@@ -117,8 +117,8 @@ subject. Say which of the two you are investigating.
 
 ### 2. Capture it, before it goes away
 
-Two items in the list say "was not captured in detail" and are stalled on
-exactly that. When the hang is on screen, take everything:
+A hang that was not captured in detail stalls on exactly that. When it is on
+screen, take everything:
 
 * the harness's own hang report — instruction, wait word, the actors holding
   it and their debug rows;
@@ -129,10 +129,10 @@ exactly that. When the hang is on screen, take everything:
   nothing into a number — a zombie in `HoldAtRange` prints **why** a permit was
   refused, a captor prints its script cursor, a civilian on a reach/face wait
   prints target, distance against radius, heading error and turn rate;
-* the transport bar — camera path, slot, frame against length, and whether it
-  says `(static pose)`.
+* the camera readout — path, slot, frame against length, and whether it says
+  `(static pose)`.
 
-Paste it into the item in `docs/PLAYER_HANGS.md` as you go, not at the end.
+Write it down as you go, not at the end; it goes in the commit message.
 
 ### 3. Triage: which of the four faults
 
@@ -173,10 +173,12 @@ thing rather than one address — that is what makes it worth keeping, and the
 whole-corpus form ("133 of 133 entrance spawns leave their entrance state") is
 a check that can fail rather than a spot check that cannot.
 
-Run harnesses through the esbuild wrapper, never bare:
+Run harnesses through the esbuild wrapper, never with node's bare
+`--experimental-strip-types`, which fails on the first `enum` it meets in a
+way that looks like a real failure:
 
 ```sh
-node --experimental-strip-types --no-warnings tools/run_test.mjs tools/<name>.mjs
+node tools/run_test.mjs tools/<name>.mjs
 ```
 
 ### 5. Read the binary — `/decomp`, in full
@@ -188,14 +190,14 @@ every claim `[proved]` / `[likely]` / `[open]`.
 
 Two questions decide the shape of the fix:
 
-* **absent or wrong?** Item 3 is a removal path the port simply does not have;
-  item 4 is a comparison the port has backwards. Absent means transcribe a
-  routine; wrong means find why the port's version differs, because somebody
-  wrote it deliberately once.
+* **absent or wrong?** A removal path the port simply does not have is one
+  shape; a comparison the port has backwards is the other. Absent means
+  transcribe a routine; wrong means find why the port's version differs,
+  because somebody wrote it deliberately once.
 * **is this one function reached from several places?** *A shared label is one
-  function.* Three bugs in the list came from the same shape — a piece of the
-  engine reached from several callers, written out once per caller, and the
-  copies not identical. Check `get_xrefs_to` before transcribing.
+  function.* A piece of the engine reached from several callers, written out
+  once per caller with the copies not identical, is a recurring cause. Check
+  `get_xrefs_to` before transcribing.
 
 Everything you understood gets named in `ghidra/annotations/functions.tsv` and
 `globals.tsv` via `python3 tools/annotate.py` — **in the same commit as the
@@ -214,7 +216,7 @@ Two hang-specific ones:
 * **Every counter and every latch an actor can hold needs a hand in `retire`.**
   The port has a lifetime the engine does not have — "the script stopped
   listing you". In the exe an object leaves through its own state machine and
-  its bookkeeping leaves with it. Item 2 is this, and it will recur.
+  its bookkeeping leaves with it. This recurs.
 * **Do not move a test across a function boundary** to make a gate come down.
   That is how the elevated throwers stopped throwing.
 
@@ -242,14 +244,14 @@ git worktree add --detach /tmp/standalone HEAD && cd /tmp/standalone/web \
 
 ### 8. Record it
 
-* `docs/PLAYER_HANGS.md` — **mark the item fixed with the mechanism, do not
-  delete it.** Item 2's four lines of "recorded because the shape will recur"
-  are worth more than the fix. Add anything new you found on the way as a new
-  `[open]` item rather than carrying it in your head.
-* `docs/PLAYER_PROGRESS.md` — what the player now does.
-* `docs/formats/*.md` — anything newly read out of the binary.
-* `docs/re/session-log.md` — **including what you got wrong.** A recorded wrong
-  turn stops the next session repeating it.
+* **The commit message** — the mechanism, the hit rate before and after, the
+  check you watched fail, and **what you got wrong on the way**. A recorded
+  wrong turn stops the next session repeating it.
+* **The code** — the fixed routine's doc comment says what it transcribes; a
+  new question you found and did not answer is an `[open]` where it is asked.
+* `docs/formats/*.md` and `docs/re/*.md` — anything newly read out of the
+  binary.
+* `docs/LESSONS.md` — a new trap, and only there.
 
 ## Things that are not fixes
 
@@ -269,15 +271,15 @@ committed, and reaching for one is the signal to stop and ask the user.
 * **Decrementing a counter where the symptom is**, rather than where the engine
   decrements it.
 * **Loosening a comparison** — `===` to `>=`, a mask to a truthiness test —
-  without reading the engine's own. Item 4 is `>=` where the engine has `==`
-  and is currently harmless; that is a *known divergence with a note*, not a
+  without reading the engine's own. A `>=` where the engine has `==` that
+  happens to be harmless is a *known divergence with a note*, not a
   precedent.
 * **Special-casing a block, step or op number.** The engine has no such test.
 
 ## Traps this list has already paid for
 
-**[`docs/LESSONS.md`](../../../docs/LESSONS.md) is the list**, and it is one
-file because it used to be four. The ones that bite hardest here:
+**[`docs/LESSONS.md`](../../../docs/LESSONS.md) is the list.** The ones that
+bite hardest here:
 
 * **L17** — a negative result from one agent is not a fact.
 * **L12** — two clocks, and they are not the same clock. Establish which one
@@ -302,7 +304,6 @@ A new trap found here goes in `LESSONS.md`, not in this file.
 - [ ] A check exists that fails without the fix, and you watched it fail
 - [ ] The corpus harness passes over the shipped data, not one address
 - [ ] Full suite green, and the commit builds standalone in a fresh worktree
-- [ ] `PLAYER_HANGS.md` item marked fixed **with the mechanism**, new findings
-      filed as new `[open]` items
-- [ ] Wrong turns in the session log, not quietly dropped
+- [ ] The mechanism and the wrong turns are in the commit message; new
+      questions are `[open]` in the code where they are asked
 - [ ] **Only your own hunks staged** — explicit paths, no `git add -A`

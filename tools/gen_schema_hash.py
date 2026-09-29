@@ -3,25 +3,15 @@
 
 **The digest that ties a bundle to the TypeScript that reads it.**
 
-`web/src/bundle/*.ts` is forty-odd interfaces mirroring the dicts the exporter
-emits. Nothing checked that the two agreed: `getJson<T>` is a bare cast, so a
-field renamed on one side and not the other produced `undefined` at the read
-site and a stage that rendered *almost* right. `BUNDLE_FORMAT` was supposed to
-catch it and never moved, because bumping it is a thing a person has to
-remember.
+`web/src/bundle/*.ts` holds the interfaces that mirror what the exporter
+emits, and `getJson<T>` is a bare cast: a field renamed on one side and not the
+other would produce `undefined` at the read site and a stage that renders
+*almost* right. So the digest is generated into :data:`GENERATED` and
+committed; the exporter imports it and stamps it into `manifest.json`, and the
+client compares the two and refuses a bundle that does not match. Nobody has
+to remember to bump anything.
 
-So the digest is generated into :data:`GENERATED` and committed; the exporter
-imports it and stamps it into `manifest.json`, and the client compares the two
-and refuses a bundle that does not match. Nobody has to remember anything.
-
-**This used to be `tools/hod2lib/schema.py`, and it moved when the Python
-exporter went.** It was a library module because `export_player.py` called it
-on every run; the TypeScript exporter is *compiled against* the declarations,
-so it needs no such call -- but something still has to write the file the
-compile reads, and that something is a repository tool, not a parser. It sits
-beside `gen_rig_data.py`, which has the same shape and the same contract:
-generate, `--check`, and a `verify_exporters.py` row that fails when the
-committed copy is stale.
+`tools/verify_exporters.py` fails when the committed copy is stale.
 
 **What is hashed is the declarations, not the file.** Comments and whitespace
 are stripped first (:func:`declarations`). A digest that changed when someone

@@ -5,7 +5,7 @@
  * without a careful eye:
  *
  * * **`asset` has to put back what the glTF sampler said.** The exporter emits
- *   the game's own per-mesh filter — `gltf.py`'s `get_sampler`, off the TSP
+ *   the game's own per-mesh filter — `gltf.ts`'s `getSampler`, off the TSP
  *   `filter_mode` bit — so `asset` is the faithful mode and the only one that
  *   is not a constant. Once another mode has overwritten `minFilter` the
  *   sampler's value is gone unless it was recorded first.

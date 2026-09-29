@@ -21,7 +21,7 @@ two of these survived for as long as they did:
   renderer had nothing to clone. Four vans, and every one of them a pair of
   doors in mid-air.
 
-Same shape as `verify_attachments.py`, which was written for the identical
+It is the shape of the identical
 failure on characters -- a table in the exe names an asset slot, the hidden rig
 did not carry it, and the client's clone answered null.
 
@@ -50,7 +50,7 @@ set and is not is invisible to it -- mutate `GENERIC_DESCRIPTOR_SLOT` back to
 The set is **seven** types by the routines -- 5, 12, 31, 33, 51, 53 and 54 --
 and all seven are in it now, so the ten spawns this check was agreeing to miss
 are covered. The blind spot itself has not closed: this is still a check on the
-exporter's table rather than on the routines, and `tools/verify_prop_pose.py`
+exporter's table rather than on the routines, and `web/tools/checks/prop_pose.ts`
 is the one that reads the fifty routines out of the EXE.
 
 **Two of the seven draw a strip, not a slot.** `PropDrawOnlyType31`
@@ -317,13 +317,41 @@ def fragment_slots(sub_kind: int) -> list[tuple[int, str]]:
     return out
 
 
+def ts_literal(path: Path, name: str):
+    """`export const NAME ... = <literal>;` as a Python value.
+
+    Only numbers, `-`, hex, `Math.fround(x)` (whose value is `x`), brackets,
+    braces with numeric keys, and commas are expected; anything else fails.
+    """
+    text = path.read_text(encoding="utf-8")
+    m = re.search(r"export const " + name + r"\b[^=]*=\s*", text)
+    if not m:
+        raise SystemExit(f"{path}: {name} not found")
+    i = m.end()
+    depth = 0
+    j = i
+    while j < len(text):
+        c = text[j]
+        if c in "[{(":
+            depth += 1
+        elif c in "]})":
+            depth -= 1
+        elif c == ";" and depth == 0:
+            break
+        j += 1
+    body = text[i:j]
+    body = re.sub(r"//[^\n]*", "", body)
+    body = re.sub(r"Math\.fround\(([^()]*)\)", r"\1", body)
+    if not re.fullmatch(r"[\s\d.\-+xXa-fA-F,\[\]{}:e]*", body):
+        raise SystemExit(f"{path}: {name} is not a plain numeric literal")
+    return eval(body, {"__builtins__": {}})  # noqa: S307 -- checked above
+
+
 def row_table_slots(kind: str, index: int) -> list[tuple[int, str]]:
     """The slots constructor 50's or 66's objects draw, out of the port's own
     literal rows in `game/class41/type50.ts` / `type66.ts` -- the first word
     of every row of the table the placement's `+0x1F4` picks, the way
     `PlaceTable50Props` and `PlaceTable66Props` pick it."""
-    sys.path.insert(0, str(ROOT / "tools"))
-    from verify_prop_tables import ts_literal  # noqa: E402
     game = ROOT / "web" / "src" / "game" / "class41"
     if kind == "table50":
         tables = ts_literal(game / "type50.ts", "PROP_TABLE50")

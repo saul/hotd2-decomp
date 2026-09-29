@@ -2,7 +2,7 @@
  * Fetching a bundle, and refusing one this client cannot read.
  *
  * **Split out of `stage.ts` because the schema digest hashes this directory,
- * and code is not a declaration.** `schema.py` globbed `web/src/bundle/*.ts`,
+ * and code is not a declaration.** The hash covered `web/src/bundle/*.ts`,
  * so every one of the refusal strings below was part of the hash that decides
  * whether an exported bundle is still valid — and rewording one of them
  * invalidated every bundle on disk and demanded a full re-export for a change
@@ -10,7 +10,7 @@
  * nothing to keep, and a check that expensive to satisfy is a check that gets
  * deleted.
  *
- * So the boundary is now structural: `schema.py` names the declaration files
+ * So the boundary is now structural: `gen_schema_hash.py` names the declaration files
  * it hashes, and `verify_exporters.py` fails if one of them grows runtime
  * code. Declarations describe what a bundle contains; this file decides what
  * to do about it, and only the former can be disagreed with by a bundle.

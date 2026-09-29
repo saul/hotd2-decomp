@@ -1,5 +1,5 @@
 /**
- * HOTD2 pol/ and tex/ container. The port of `tools/hod2lib/container.py`.
+ * HOTD2 pol/ and tex/ container.
  *
  * See docs/formats/container.md.
  *

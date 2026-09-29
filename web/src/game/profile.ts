@@ -10,7 +10,7 @@
  * `tex/scr_tod_itm_itamidome2.bin`, `pol/komono_0.bin`, `pol/tv2.bin`, each
  * stamped with `pol/st_adver07.bin`'s file time -- and deciphers it again.
  * `ProfileLoad` (`FUN_004A0B60`) reads, deciphers and takes the block only
- * when the sum matches and the version byte is 7. `tools/verify_options.py`
+ * when the sum matches and the version byte is 7. `web/tools/checks/options.ts`
  * deciphers the install's own four files and checks the sum. `[proved]`
  *
  * The port keeps the parts of the block `G` has: the options -- difficulty,

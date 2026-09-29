@@ -539,7 +539,7 @@ export function ActorArcStep(obj: Actor, step: number, dt: number,
     // at twice its authored frame count, past `g_motion_play_length + 1` where
     // the engine's cursor wraps, so a threshold the clip never reaches -- or a
     // stage the bundle has no clip for -- cannot park the actor here. No
-    // shipped script names one (`verify_combat.py` check 16), so on real data
+    // shipped script names one (`web/tools/checks/combat.ts` check 16), so on real data
     // this is the engine's own test.
     if (obj.action !== null && ActorClipFrame(obj) < script[2].until) {
       return true;

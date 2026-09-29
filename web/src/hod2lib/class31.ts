@@ -1,5 +1,5 @@
 /**
- * Class 0x31's four behaviour sets. The port of `tools/hod2lib/class31.py`.
+ * Class 0x31's four behaviour sets.
  *
  * Everything here is indexed by `obj+0x130C`, which `EnemyThrowerInit` takes
  * straight from the descriptor tail's byte +1 -- **not** by the body condition

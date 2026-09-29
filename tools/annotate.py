@@ -3,7 +3,7 @@
 
 Appending blind has now put a duplicate address in `functions.tsv` twice in one
 session -- `ThrownWeaponFlyToTarget` and `RankEnemiesByDistance` -- because the
-address was already named and I did not look. `verify_annotations.py` catches
+address was already named and I did not look. `web/tools/checks/annotations.ts` catches
 it afterwards; this stops it happening.
 
 Rules, which are the ones the decomp skill states:
@@ -40,7 +40,7 @@ def main() -> int:
 
     # One row is one line, and one line is three tab-separated fields. A
     # comment pasted in with newlines in it silently splits into rows whose
-    # first field is prose, which breaks `verify_annotations.py`, the exporter
+    # first field is prose, which breaks `web/tools/checks/annotations.ts`, the exporter
     # and the address-ordered insert below all at once -- and it looks fine in
     # the tool's own output, because the write succeeded. Refuse it here
     # rather than let it reach the file both workstreams share.

@@ -1,6 +1,5 @@
 /**
  * `cam/` camera and object paths -- cubic Hermite spline curves.
- * The port of `tools/hod2lib/cam.py`.
  *
  * A `cam/` file is a pool of independent scalar animation curves plus a small
  * descriptor per path that names the curves for each channel.
@@ -84,11 +83,10 @@ export interface Key {
 }
 
 /**
- * `bisect_left` over the key times.
+ * The index of the first key whose time is not below *t*, by binary search.
  *
- * Spelled out rather than reached for, because Python's is over a list the
- * reference implementation rebuilds on every evaluate and this one indexes the
- * keys in place. A camera rail is sampled a few thousand times per export.
+ * It indexes the keys in place rather than building a list of their times,
+ * because a camera rail is sampled a few thousand times per export.
  */
 function bisectLeftTime(keys: readonly Key[], t: number): number {
   let lo = 0;

@@ -406,7 +406,7 @@ function ThrowerRestoreHand(obj: ThrowerActor, host: GameHost,
  * pseudocode shows the four words of each as float **literals**, `0x3fe00000`
  * and the rest: `0x004D0384` is initialised data, and the decompiler folded
  * the load through it into the values it points at. They are the table's
- * rows 4 and 7 bit for bit, and `verify_combat.py` holds that.
+ * rows 4 and 7 bit for bit, and `web/tools/checks/combat.ts` holds that.
  */
 export function ThrowerStateRearm(obj: ThrowerActor, host: GameHost): void {
   if (obj.charType !== CHAR_ZSASS) {

@@ -1,29 +1,20 @@
 #!/usr/bin/env python3
 """Generate `docs/STATUS.md` -- every number this repo states about itself.
 
-The problem this solves, stated plainly: a number written into prose is a
-second source for a fact a checker already computes, and the second source
-rots. `PLAYER_ARCHITECTURE.md` claimed 38,999 lines against a tree with
-44,715, "82 declared `[diverges]`" against 99, and a port coverage figure
-fifteen points from the one `verify_port.py` printed on the same commit.
-`PLAN.md` claimed 202 named functions against 614. None of that was
-carelessness; it is what hand-maintained numbers do.
+A number written into prose is a second source for a fact a checker
+already computes, and the second source rots (L16). So **no prose document in
+this repo quotes a countable fact**: they link here, and this file is
+generated. Everything in it is measured from the tree on every run.
 
-So: **no prose document in this repo quotes a countable fact.** They link
-here, and this file is generated. Everything in it is measured from the tree
-on every run; nothing in it is typed by hand.
-
-What stays in prose, deliberately: anything that is a *judgement* -- what a
-directory is for, why a check is not redundant, what is worth doing next.
-Those belong in `PLAYER_ARCHITECTURE.md`, `verify_all.py` and `PLAN.md`
-respectively, in exactly one place each.
+What stays in prose is anything that is a *judgement*: what a directory is
+for lives in `docs/PLAYER.md`, and why a check is not redundant lives beside
+it in `verify_all.py`.
 
     python3 tools/status.py            # rewrite docs/STATUS.md
     python3 tools/status.py --check    # fail if it is out of date
 
-`--check` is one of the checks in `verify_all.py`, which means a commit that
-changes the tree and not this document fails. That friction is the point and
-it costs one command; the alternative is what the two reviews found.
+`--check` is one of the checks in `verify_all.py`, so a commit that changes
+the tree and not this document fails.
 """
 from __future__ import annotations
 
@@ -42,12 +33,7 @@ ROOT = Path(__file__).resolve().parent.parent
 SRC = ROOT / "web" / "src"
 OUT = ROOT / "docs" / "STATUS.md"
 
-#: Directory -> layer, **taken from the checker** rather than restated.
-#:
-#: This was a copy, and it had already drifted twice: it filed `audio/` under
-#: `ui` where `verify_layers.py` -- the tool that actually enforces the
-#: boundary -- files it under `render`, and it never learned about `hod2lib/`,
-#: so a whole package was missing from the table this file exists to print. A
+#: Directory -> layer, **taken from the checker** rather than restated: a
 #: generated document quoting its own copy of a table is the same fault as a
 #: hand-written one quoting a count.
 LAYER_OF = verify_layers.LAYER_OF
@@ -80,8 +66,7 @@ def interface_members(path: Path, name: str) -> int:
     """How many members an `export interface` declares.
 
     `PlayerCommands` against `PlayerView` is the player's standing measurement
-    of how much of itself a click can reach, and the architecture doc argued
-    from it with numbers that were three and eight out of date.
+    of how much of itself a click can reach.
     """
     src = path.read_text()
     m = re.search(r"export interface %s\b[^{]*\{" % re.escape(name), src)
@@ -106,13 +91,8 @@ def tsv_rows(path: Path) -> int:
 
 
 def count_diverges() -> dict[str, int]:
-    """Every declared departure, by directory of `web/src/`.
-
-    This counted `game_files()` alone while `verify_port` already counted
-    `game/` **plus** `script/`, so the table published one number and the check
-    printed a larger one for the same concept. Both measure the same thing now
-    -- `verify_port.marker_counts`, which is every source file under
-    `web/src/`, in comments only, one per occurrence.
+    """Every declared departure, by directory of `web/src/`: every source
+    file, in comments only, one per occurrence (`verify_port.marker_counts`).
     """
     return verify_port.marker_counts(verify_port.DIVERGES_TAG)
 
@@ -120,11 +100,7 @@ def count_diverges() -> dict[str, int]:
 def count_open() -> dict[str, int]:
     """`[open]` markers: questions the port and the exporter are honest about
     not having answered. Together with the divergences, the two numbers that
-    say how finished the transcription is.
-
-    It counted `game/` alone while the marker was written in `render/`,
-    `hod2lib/`, `app/` and `ui/` too -- and counted raw text, so `ui/`'s one
-    was a React dependency array. Same measurement as `count_diverges` now.
+    say how finished the transcription is. Measured as `count_diverges` is.
     """
     return verify_port.marker_counts(verify_port.OPEN_TAG)
 
@@ -175,9 +151,8 @@ def render() -> str:
     add("")
     add("What is *not* here, on purpose: anything that is a judgement rather")
     add("than a measurement. What each directory is for is in")
-    add("[`PLAYER_ARCHITECTURE.md`](PLAYER_ARCHITECTURE.md); what is worth")
-    add("doing next is in [`PLAN.md`](PLAN.md); what each check uniquely sees")
-    add("is in `tools/verify_all.py`, beside the command that runs it.")
+    add("[`PLAYER.md`](PLAYER.md); what each check uniquely sees is in")
+    add("`tools/verify_all.py`, beside the command that runs it.")
     add("")
 
     add("## The browser player, by directory")
@@ -218,7 +193,7 @@ def render() -> str:
         "code or in a string is not a marker (`verify_port.marker_lines`). "
         "Each departure and each question is written once, where it is "
         "made; everything that refers to it names it in words "
-        "([`PLAYER_ARCHITECTURE.md`](PLAYER_ARCHITECTURE.md), "
+        "([`PLAYER.md`](PLAYER.md#one-departure-one-tag), "
         "\"One departure, one tag\"). By layer, from the same table as the "
         "directories above:")
     add("")
@@ -256,22 +231,16 @@ def render() -> str:
         f"in `ghidra/annotations/functions.tsv` |")
     add(f"| Named globals | {tsv_rows(ROOT / 'ghidra/annotations/globals.tsv')} "
         f"in `ghidra/annotations/globals.tsv` |")
-    verifiers = [p for p in (ROOT / "tools").glob("verify_*.py")
-                 if p.name != "verify_all.py"]
-    add(f"| Verifier scripts | {len(verifiers)} under `tools/`, run together "
-        f"by `verify_all.py` |")
-    add("")
-    add("Phase and format status is a judgement about what counts as solved,")
-    add("and lives in [`PROGRESS.md`](PROGRESS.md).")
+    add(f"| Checks | {len(verify_all.CHECKS)}, run together by "
+        f"`tools/verify_all.py` (listed below) |")
     add("")
 
     add("## Ratchets")
     add("")
     add("A ratchet is a violation the architecture has not reached yet: a count")
-    add("that may fall and may never rise, tied to the step of")
-    add("[`PLAYER_ARCHITECTURE.md`](PLAYER_ARCHITECTURE.md#order-of-work) that")
-    add("clears it. **Raising one is a change to that document, not a line edit")
-    add("in a checker**, and there is deliberately no suppression comment.")
+    add("that may fall and may never rise. **Raising one is a decision for the")
+    add("repository's owner, not a line edit in a checker**, and there is")
+    add("deliberately no suppression comment.")
     add("")
     add("| Ratchet | Where | Now | Baseline |")
     add("|---|---|---:|---:|")
@@ -302,8 +271,7 @@ def render() -> str:
         need = c.needs or "—"
         add(f"| `{c.name}` | {c.sees} | {need} |")
     add("")
-    # Counted, not written down. Both numbers were prose until a check was
-    # added that needed the game and neither moved.
+    # Counted, not written down (L16).
     n_game = sum(1 for c in verify_all.CHECKS
                  if c.needs == verify_all.NEEDS_GAME)
     n_bundle = sum(1 for c in verify_all.CHECKS

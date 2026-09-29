@@ -1,6 +1,5 @@
 /**
  * The little bytecode blobs an actor state steps through.
- * The port of `tools/hod2lib/actorscript.py`.
  *
  * Three shapes, all of them lists of motion entries compiled into Hod2.exe
  * rather than authored in `evt/`: the target scripts `ZombieScriptForState`

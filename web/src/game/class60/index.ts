@@ -188,7 +188,7 @@ function ChapterCardCountDown(obj: Actor): void {
  *
  * `[diverges]` Always the unconditional skip bit, so every chapter card is
  * cut on its first update and raises flag 248 there instead of three seconds
- * later. **The user's decision** (docs/NEW-BUGS.md, bug 13): the port draws
+ * later. **The user's decision**: the port draws
  * no chapter card, so the engine's dwell was a three-second dead pause at the
  * top of every stage, and the port skips title sequences entirely. Taking
  * the engine's own skip arm keeps the rest of the routine — installer, latch,

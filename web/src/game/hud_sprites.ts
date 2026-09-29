@@ -144,7 +144,7 @@ export interface CreditPromptRow {
  * scale, u32 id}` indexed by `CreditPromptMessageIndex`: no credit, not
  * enough, the caption-mode blink (a row whose id is 0 and which no call can
  * reach -- see `CreditPromptMessageIndex`), and enough. `[proved]` read out of
- * the image; `tools/verify_continue.py` reads it again.
+ * the image; `web/tools/checks/continue_screen.ts` reads it again.
  */
 export const CREDIT_PROMPT_MESSAGES: readonly CreditPromptRow[] = [
   { dx: 24, dy: 0, scale: 0.85, id: ContinueSprite.InsertCoins },

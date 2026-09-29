@@ -2,7 +2,7 @@
  * Look at every civilian's head, in a real browser, through the player's own
  * loader.
  *
- * `docs/BUGS.md` carries a report that says "civilians' hair doesn't render",
+ * There is a report that says "civilians' hair doesn't render",
  * and the only way to answer a report about a picture is to look at the
  * picture -- L19 and L25. This prints the four views of one rig part for every
  * class-0x10 character type in a stage, side by side, and the material state

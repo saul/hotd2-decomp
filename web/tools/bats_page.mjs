@@ -1,5 +1,5 @@
 /**
- * NEW-BUGS 19 in the real page: **a bat that reaches the screen costs a life.**
+ * In the real page: **a bat that reaches the screen costs a life.**
  *
  * Opens a block that places bats under `?drive=1`, plays without firing, and
  * reads player 0's lives out of the page's own `G` each frame while bats are

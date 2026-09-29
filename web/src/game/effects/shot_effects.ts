@@ -265,7 +265,7 @@ export function PlayerShotEffectSpawn(player: number, ray: ShotRay,
     // at `0x00416B00`'s tracer arm), so the round is never drawn where it
     // spawned — one unit in front of the eye, where a scale-1 quad fills
     // the frame. Drawing it there once was the full-screen flash on every
-    // shot (NEW-BUGS bug 15). The frame counter is *not* stepped here: the
+    // shot. The frame counter is *not* stepped here: the
     // engine steps it after the draw, and the port's next tick is that step.
     TracerAdvance(t);
   }

@@ -93,7 +93,7 @@ export function describePath(p: IcePath, ice: string, now: number): { line: stri
       + "a Mac, allow the browser in System Settings → Privacy & Security → Local "
       + "Network. Between networks, a strict NAT, or a router that will not route to "
       + `its own address, needs a TURN relay${p.turn ? "" : ", and this rendezvous has none"} `
-      + "(matchmaker/README.md).";
+      + "(docs/PLAYER.md, \"The matchmaker\").";
   }
   return { line, hint };
 }

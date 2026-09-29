@@ -159,7 +159,7 @@ function CivilianWaitStillHolds(obj: Actor, word: number): boolean {
   // true.
   //
   // **Found looking for stage 2's block 9 and not the cause of it** — that was
-  // a camera frame, `docs/PLAYER_HANGS.md` item 30. This changed nothing
+  // a camera frame. This changed nothing
   // measurable in the six stages and is here because the disassembly says so;
   // `test/port.test.ts` is what holds it.
   if ((word & CivilianWait.CameraSettled)

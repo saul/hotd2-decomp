@@ -63,7 +63,7 @@ place for all but 64 of them. The largest are `komono_niwa.bin` 471 at 361.7
 units and `komono_bridge.bin` 472 at 47.9; `zom.bin` 998, the one clip class
 0x21 plays, is a **constant** `(0, 15.692, 11.943)` over all sixteen frames,
 which means its delta is zero on every frame and only the pose arm can place
-it. `tools/verify_root_pose.py` asserts all of this.
+it. `web/tools/checks/root_pose.ts` asserts all of this.
 
 ## Cross-fades: a still, and a held start frame
 
@@ -98,7 +98,7 @@ The start is a **play cursor** at every one of the routine's 367 call sites
 computed cursors, none converted on the way in. A negative start is legal --
 class 0x25's `op 3` passes -1, whose authored frame is 0 (`SAR` truncates
 toward zero) and which, held through the fade, plays the clip from 0.
-`[proved]`; the survey is in `docs/re/session-log.md`, 2026-09-29.
+`[proved]`.
 
 `MotionStartBetweenFrames` (`FUN_00411F20`) is the odd-cursor arm of the same
 start: slot A from authored frame `f`, slot B from `f + 1`.
@@ -189,9 +189,8 @@ motion is only meaningful with the character it was authored for — and
 which **truncates** rather than rounding up, and a frame is `n-1` translations
 of three floats followed by `n-1` rotations of three BAMS shorts — three
 *floats* per bone where a character has none, because an effect's node tree
-carries no bind offsets and its translations come per frame. `mot.py` and
-`mot.ts` both expose it as `effect_frame_stride` / `effectFrameStride`, and
-`tools/verify_effects.py` holds all 13 `(effect, motion)` pairs against it.
+carries no bind offsets and its translations come per frame. `mot.ts` exposes
+it as `effectFrameStride`, and all 13 `(effect, motion)` pairs fit it.
 Reading one of those blocks at the character stride is a third of a frame out
 per frame, and it decodes without complaint.
 
@@ -266,20 +265,18 @@ state 12 is `if (obj+0x19C < 0x3C) return;` against
 `g_motion_play_length[0x3F9]`, which is **85** — and `0x3F9` was baked for no
 character type in any of the twelve bundles, so nothing in the port could
 leave state 12 anywhere in the game and every actor that entered it held
-`g_enemies_present` for ever. `PLAYER_HANGS.md` 22.
+`g_enemies_present` for ever.
 
-Three checks stand where the reading used to: `verify_scripted_clips.py` for
-what a class-0x25 program and a class-0x20 descriptor name,
-`verify_death_clips.py` for what `ChooseDeathMotion` names, and
-`tools/entrances.mjs` for whether the twelve entrance states end. The first
-asks the exporter and the second reads a real bundle, deliberately: the
-TypeScript half is the only writer of a bundle, and asking the Python half
-would go green on a fix that reached no byte the player loads (`L24`).
+Two checks stand where the reading used to: `tools/verify_death_clips.py` for
+what `ChooseDeathMotion` names, and `web/tools/entrances.mjs` for whether the
+twelve entrance states end. The first reads a real bundle, deliberately: a
+check that asks anything else would go green on a fix that reached no byte the
+player loads (`L24`).
 
 ## Banks
 
-47 named banks hold 967 motion ids; `verify_mot.py` walks 49 (two hold props
-whose bone counts are not in the character table).
+47 named banks hold 967 motion ids; a walk of the bank files covers 49 (two
+hold props whose bone counts are not in the character table).
 
 `g_asset_bank_names` is **shared with the camera-path filenames**, so an entry
 is a motion bank only when it also has an id list in `g_motion_bank_ids`. That
@@ -302,7 +299,7 @@ A sample, with the characters they serve:
 
 ## Verification
 
-`tools/verify_root_pose.py` checks what the root translation is *for* — the
+`web/tools/checks/root_pose.ts` checks what the root translation is *for* — the
 two arms of `model+0x64` bit 1, quoted as bytes at their addresses because the
 decompiler shows neither whole, and then the population: every block measured
 for an absolute horizontal root, and every clip the class-0x10 scripts can play
@@ -310,10 +307,10 @@ with the gate clear enumerated against it. It is the only place the set of
 actors a clip root can reposition is written down as a fact rather than a
 guess.
 
-`tools/verify_mot.py` checks every bank. It deliberately does **not** assume a
-bank belongs to a known character: it tests the format's own arithmetic, that
-the block size divided by the declared frame count is a stride the formula
-`(n*6+15) & ~3` can actually produce. A wrong stride would almost never divide
+Every bank passes a test that does **not** assume a bank belongs to a known
+character: it tests the format's own arithmetic, that the block size divided by
+the declared frame count is a stride the formula `(n*6+15) & ~3` can actually
+produce. A wrong stride would almost never divide
 exactly, so this is a real test rather than a restatement.
 
 ```
@@ -325,12 +322,10 @@ clean
 
 ## Tools
 
-* `ExeTables.character_skeleton(type)` — the node tree, parents resolved.
-* `ExeTables.character_bone_count(type)`, `motion_banks()`, `motion_bank_of(id)`.
-* `hod2lib.mot.load_bank()` / `MotionBank.frames(id, bone_count)`.
-* `tools/export_character.py <type> [--motion N --frame F]` — assembles a
-  character and writes it as a posed glTF hierarchy, reusing the rig writer
-  because a skeleton *is* a rig: a tree of named parts each with a translation,
-  a BAMS triple and an asset slot.
-
-`python3 tools/export_character.py 0x1A --motion 762` produces a cat, mid-stride.
+* `ExeTables.characterSkeleton(type)` — the node tree, parents resolved.
+* `ExeTables.characterBoneCount(type)`, `motionBanks()`, `motionBankOf(id)`.
+* `loadBank()` / `MotionBank.frames(id, boneCount)` in `web/src/hod2lib/mot.ts`.
+* `build` and `rigEntry` in `web/src/hod2lib/charbuild.ts` — assemble a
+  character type and hand it to the glTF writer as a rig, because a skeleton
+  *is* a rig: a tree of named parts each with a translation, a BAMS triple and
+  an asset slot.

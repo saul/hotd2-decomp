@@ -4,8 +4,8 @@
  * up by itself.
  *
  * It is proved a car by its sound: the Training poser plays `0x719A9`, whose
- * SE record names `STAGE2_SE\CAR_SRIP_22.wav` (see `OBJ_452320` in
- * `tools/hod2lib/rigs.py`). Its draw routine is {@link St2CarDraw}, at
+ * SE record names `STAGE2_SE\CAR_SRIP_22.wav` (see `obj_452320` in
+ * `hod2lib/rigs_data.ts`). Its draw routine is {@link St2CarDraw}, at
  * `0x00452320`: the exporter transcribes its transforms into the rig
  * `obj_452320`, and everything it decides -- the asset row, the two gated
  * rotations, the roll-limited frame -- is here.
@@ -470,8 +470,8 @@ export function St2CarHeldUpdate(car: St2Car, host: GameHost): boolean {
  * `render/`'s, so this computes everything the routine decides -- which row,
  * which rotation each push takes and the second frame's three angles -- and
  * leaves it on {@link St2Car.draw} for `render/rigs.ts` to place the parts
- * with. The translations are the rig data's (`tools/hod2lib/rigs.py`
- * `OBJ_452320`), transcribed from the same `PUSH imm32`s.
+ * with. The translations are the rig data's (`hod2lib/rigs_data.ts`
+ * `obj_452320`), transcribed from the same `PUSH imm32`s.
  *
  * A skipped rotation is **not** a held one: once `St2CarRouteUpdate` clears
  * `+0x1320` at frame 0x50 of shot `0x3A`, the spun parts are drawn at `RotX`

@@ -301,7 +301,7 @@ export async function loadStageInto(p: Player): Promise<void> {
   //
   // **Both decoders, on one channel.** The script's have travelled in the
   // stage JSON from the beginning; the camera's existed and were read only by
-  // `verify_phase6.py`, which runs over the game directory rather than over an
+  // a check over the game directory rather than over an
   // export — so a stage whose `cam/` file had a bad descriptor exported with
   // those paths quietly missing, and the camera not moving where it should
   // looked like a gameplay bug. `?? []` because a bundle written before format

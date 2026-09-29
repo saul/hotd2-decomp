@@ -14,8 +14,8 @@
  * It used to poll every 250 ms and start shooting after N *milliseconds* of no
  * address movement, which meant the shots landed on a different game frame in
  * every run — and the port takes its time straight off the wall clock, so the
- * same stage on the same seed played four different ways over five runs
- * (`docs/PLAYER_HANGS.md` item 8). A tool that cannot compare one playthrough
+ * same stage on the same seed played four different ways over five runs.
+ * A tool that cannot compare one playthrough
  * with the previous one is not worth much.
  *
  * So it runs the page under `?drive=1` — the seam in `web/src/app/harness.ts`
@@ -231,8 +231,7 @@
  * always had. `--boss` is all three.
  *
  * * **`--play-end`** plays an end block through instead of stopping on
- *   entering it (`docs/PLAYER_HANGS.md`, the first item 17: "stops on
- *   entering an end block"). Stage 1's block 14, stage 4's 23/25/27/29 and
+ *   entering it. Stage 1's block 14, stage 4's 23/25/27/29 and
  *   stage 5's boss blocks are end blocks, so without this every boss fight
  *   whose room is the last one is never executed. With it the run succeeds
  *   only when the walker **leaves** the end block -- the script ran off its
@@ -261,8 +260,7 @@
  * with the walker's address. It is how a boss run shows the fight rather
  * than only its outcome.
  *
- * Flag gates are shot at by default, as the second item 17 of
- * `PLAYER_HANGS.md` records; none of these flags changes that.
+ * Flag gates are shot at by default; none of these flags changes that.
  *
  *   node tools/playthrough.mjs --stage 5 --headless --continue --boss
  */
@@ -621,8 +619,7 @@ const started = Date.now();
 // plays forward, so it exercises the stage's own rebuild path and not the
 // seek's. And it is not cosmetic coverage -- stage 3's block 2 is on neither
 // entry-0 route, so until this existed a seven-step block of shipped script
-// had never been executed by anything, and it held two hangs. See
-// `docs/PLAYER_HANGS.md` items 21 to 23.
+// had never been executed by anything, and it held two hangs.
 const entry = opt("entry", null);
 /** `--route`'s rules, parsed before the browser is launched. See the header. */
 const ROUTE = parseRoute(opt("route", null));

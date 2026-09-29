@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Check the browser player's `game/` tree against the Ghidra annotations.
 
-The porting rules in docs/PLAYER_ARCHITECTURE.md are only worth having if they
+The porting rules in docs/PLAYER.md are only worth having if they
 are enforced, and they are cheaply checkable because both sides are text:
 
   1. every `FUN_` address named in a `game/` doc comment exists in
@@ -35,11 +35,6 @@ SCRIPT = ROOT / "web" / "src" / "script"
 RENDER = ROOT / "web" / "src" / "render"
 SPAWNS = ROOT / "docs" / "formats" / "spawns.md"
 DOCS = ROOT / "docs"
-#: The session log is a record of what was believed **when**, so it is full of
-#: names that were later changed and that is the point of it. `/decomp` says
-#: in as many words never to rewrite it; a check that demanded it be current
-#: would be asking for exactly that.
-DOCS_SKIP = {"session-log.md"}
 
 # Two citation forms, and the difference matters.
 #
@@ -57,7 +52,7 @@ GLOBAL_DOC = re.compile(
     r"`(g_[A-Za-z0-9_]+)`\s*[-—]+\s*`?0x([0-9A-Fa-f]{6,8})`?")
 DIVERGES = re.compile(r"\[diverges\]")
 #: The two markers `docs/STATUS.md` counts. See :func:`marker_lines` for what
-#: counts as an occurrence, and `docs/PLAYER_ARCHITECTURE.md` for the rule
+#: counts as an occurrence, and `docs/PLAYER.md` for the rule
 #: that keeps each one a single declaration.
 DIVERGES_TAG = "[diverges]"
 OPEN_TAG = "[open]"
@@ -698,9 +693,10 @@ def check_class31_literal_clips() -> None:
     Class 0x31's motion ids mostly arrive through `g_class31_motion_sets` and
     the attack tables, and the exporter collects those from the data. A handful
     of states name a clip **inline** instead, and nothing collects those -- so
-    `hod2lib.class31.CLASS31_LITERAL_MOTIONS` is a hand-kept list, which is
-    exactly the shape that goes stale. The port names the same ids in its own
-    `const`s, and the two halves had drifted twice:
+    `CLASS31_LITERAL_MOTIONS` in `web/src/hod2lib/class31.ts` is a hand-kept
+    list, which is exactly the shape that goes stale. The port names the same
+    ids in its own `const`s, and a clip missing from the list breaks a state
+    silently:
 
     * `REARM_CLIP` (5), `ThrowerStateRearm` (`FUN_0044F7A0`). Without the clip
       the state ran with no motion, so its **midpoint** -- where the hands are
@@ -716,11 +712,18 @@ def check_class31_literal_clips() -> None:
     error anywhere -- `MotionOf` simply returns nothing and the state falls
     through.
     """
-    sys.path.insert(0, str(ROOT / "tools"))
-    try:
-        from hod2lib.class31 import CLASS31_LITERAL_MOTIONS as baked
-    except ImportError as exc:                       # pragma: no cover
-        failures.append(f"cannot read CLASS31_LITERAL_MOTIONS: {exc}")
+    src = (ROOT / "web" / "src" / "hod2lib" / "class31.ts").read_text()
+    m = re.search(r"export const CLASS31_LITERAL_MOTIONS = new Set\(\[(.*?)\]\)",
+                  src, re.S)
+    if not m:
+        failures.append("web/src/hod2lib/class31.ts declares no "
+                        "CLASS31_LITERAL_MOTIONS set")
+        return
+    body = re.sub(r"//[^\n]*", "", m.group(1))
+    baked = {int(v, 0) for v in re.findall(r"\b(0x[0-9a-fA-F]+|\d+)\b", body)}
+    if not baked:
+        failures.append("CLASS31_LITERAL_MOTIONS in web/src/hod2lib/class31.ts "
+                        "is empty or could not be read")
         return
     lit = re.compile(r"^const\s+([A-Z][A-Z0-9_]*(?:CLIP|MOTION))\s*"
                      r"(?::\s*number\s*)?=\s*(0x[0-9a-fA-F]+|\d+)\s*;", re.M)
@@ -934,8 +937,8 @@ def check_class33_selectors() -> None:
 
 #: The crawlers' undamaged attack, as the EXE holds it at `0x00566E70`:
 #: ``(character types, body condition, index, strike clip, hit frame)``.
-#: Types 0x07, 0x0B and 0x0C share the row; `hod2lib.combat.attack_hit_lands`
-#: is the long form and `tools/verify_combat.py` checks the numbers against
+#: Types 0x07, 0x0B and 0x0C share the row; `hod2lib/combat.ts`'s `attackHitLands`
+#: is the long form and `web/tools/checks/combat.ts` checks the numbers against
 #: the EXE. Here they are only the join key into the bundle.
 CRAWLER_TYPES = (0x07, 0x0B, 0x0C)
 CRAWLER_CONDITION = 4
@@ -1043,8 +1046,6 @@ def check_docs_citations(named: dict[str, str]) -> None:
     seen: dict[str, tuple[str, str]] = {}
     cited: set[str] = set()
     for path in sorted(DOCS.rglob("*.md")):
-        if path.name in DOCS_SKIP:
-            continue
         text = path.read_text(encoding="utf-8", errors="replace")
         rel = path.relative_to(ROOT)
         for m in ANY_FUN.finditer(text):

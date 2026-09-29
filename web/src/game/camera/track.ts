@@ -47,8 +47,7 @@ import { RegisterForShotTest } from "../combat/shot_test";
  * `SelectCameraLookAtTarget` aims at — never `obj+0x40`. The bone is **1** for
  * an ordinary humanoid (character types 0..0x14); 2 and 9 are selected by
  * flags this port does not model, and so is the `-3.5` the same routine takes
- * off the height for a close-ranked enemy. `[open]` -- see
- * `docs/PLAYER_PROGRESS.md`'s camera section.
+ * off the height for a close-ranked enemy. `[open]`
  */
 const CAMERA_TRACK_BONE = 1;
 

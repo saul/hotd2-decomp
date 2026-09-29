@@ -22,8 +22,7 @@
  * It used to do both. `Player.gameTick` handed the port
  * `frames: wall * speed * 60` straight off the rAF delta, so every timer and
  * motion clock integrated a browser-dependent amount, and the same stage on
- * the same seed played four different ways over five runs —
- * `docs/PLAYER_HANGS.md` item 8.
+ * the same seed played four different ways over five runs.
  *
  * ## A tick is not a frame
  *

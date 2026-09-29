@@ -7,10 +7,9 @@ time. This file is about the *contract* between the two halves: what is in the
 bundle, what deliberately is not, and the three checks that fire when they
 drift.
 
-The exporter was a port of `tools/hod2lib/`, which wrote this same directory
-until the two agreed byte for byte on all twelve stage bundles; see
-`docs/TS_PORT.md`. Anything below that says "the exporter" means the
-TypeScript one.
+Anything below that says "the exporter" means `web/src/hod2lib/`. How to run
+it, from the command line or inside the page, is in
+[`docs/PLAYER.md`, *The bundle*](../PLAYER.md#the-bundle).
 
 ```
 extract/player/
@@ -33,7 +32,7 @@ spawns from them; `render/game_over_scene.ts` claims their hierarchies from the
 character layer.
 
 Since format 12 `script.json` carries a `game_over` block -- the game-over
-screen's `.rdata`, read by `ExeTables.gameOverTables` in both halves: the
+screen's `.rdata`, read by `ExeTables.gameOverTables`: the
 bodies' types, start and fall clips, fall frames and stands; the route map's
 tile bases, waypoint table and default route -- and `screen_sprites` (the old
 `hud_sprites`) holds the logo's and the route tiles' images beside the HUD's.
@@ -43,7 +42,7 @@ which the exporter imports.
 
 `script.json` also carries a
 `result_card` block -- the result card's `.rdata`, read by
-`ExeTables.resultCardTables` in both halves: `bytes`, the span
+`ExeTables.resultCardTables`: `bytes`, the span
 `0x0055DD80..0x0055E074` as hex (the figure records, the six list pointers,
 the per-type attachment lists, the four glyph strings and the life bonus, as
 one span because the card reads a scene's records with no bound), `lists`
@@ -55,7 +54,7 @@ can stand, at `0x06000000 | type` (`ResultFigureTemplateAt`), with the
 figures' clips (`0x17C`, `0x17D`, `0x17F`, `0x180`, `0x18B..0x18D`, and
 whatever a list's overflow records name) and `common.bin[199]` on the type's
 template. The renderer clones a template for each figure the card allocates;
-`tools/verify_result_card.py` holds the block to the EXE.
+`web/tools/checks/result_card.ts` holds the block to the EXE.
 
 `screen_sprites` also carries the continue screen's sprites -- CONTINUE?, the
 64x128 countdown digits, the credit line's words and the small GAME OVER --
@@ -65,7 +64,7 @@ and a bundle built before it reads fine and draws no continue screen until it
 is re-exported, which the builder hash says.
 
 `script.json` carries an `options` block -- the options screen's `.rdata`, read
-by `ExeTables.optionsTables` in both halves (`OptionsJson`): the eleven rows
+by `ExeTables.optionsTables` (`OptionsJson`): the eleven rows
 through `g_options_rows`' pointers, the difficulty, digit and blood labels,
 "Free Play" and "No.", the 96-entry glyph table from `0x0056AF10`, the
 crosshair sprites, the two sound tests' lists and Sight Speed's four sprites
@@ -73,7 +72,7 @@ crosshair sprites, the two sound tests' lists and Sight Speed's four sprites
 immediates in `OPTIONS_SCREEN_SPRITES` (`web/src/game/options_data.ts`) and
 the ids those tables name. An optional field, so the schema digest moved and
 no format bump: a bundle built before it is refused by the digest and rebuilt,
-which is one click. `tools/verify_options.py` holds the block to the image.
+which is one click. `web/tools/checks/options.ts` holds the block to the image.
 
 ## Three versions, and only one of them moves on its own
 
@@ -83,8 +82,8 @@ whose `format` is not its own. Bump it when the *layout* changes — a file adde
 to a stage directory, a block renamed.
 
 It is bumped by hand, and that is its weakness rather than a detail. It sat at
-**1 across 23 commits** to `bundle.py`, including the ones that added `coli`,
-`civilians`, `humanoids` and `set_pieces` and the one that renumbered
+**1 across 23 commits** to the bundle writer, including the ones that added
+`coli`, `civilians`, `humanoids` and `set_pieces` and the one that renumbered
 `game_mode`. The check existed the whole time and could never fire. Treat it as
 documentation with teeth, not as the thing that will catch you.
 
@@ -183,7 +182,7 @@ is what `hod2lib` is for, and there is no other way for the client to get it:
 * every baked motion, every skeleton, every attack and throw table row
 
 A number the compiler **put inside a routine** does not. It belongs in
-`web/src/game/`, as a named constant carrying the citation the Python had:
+`web/src/game/`, as a named constant carrying its Ghidra citation:
 
 ```ts
 /** Frames of invulnerability after a hit — `0x5A`. */
@@ -191,7 +190,7 @@ const PLAYER_INVULN_FRAMES = 90;
 ```
 
 The failure this closes is specific. `90` used to be exported as
-`characters.player.invuln_frames`, so the constant lived in `hod2lib/combat.py`
+`characters.player.invuln_frames`, so the constant lived in the exporter
 beside the Ghidra citation that proves it, while `PlayerTakeDamage`
 (`FUN_00415300`) in `game/combat/player.ts` read it as `d?.invuln_frames ?? 90`
 — a bare literal, uncited, in the file whose whole job is to be the
@@ -209,8 +208,8 @@ out of the glTF.
 
 **A motion id alone does not make the exception, and this is where that was
 nearly got wrong.** `ThrowerStateThrow`'s character-0x18 arm picks its throw
-clip by hand and stance, and D3 of `docs/REVIEW-2026-09-03.md` proposed
-exporting the table it indexes — the 32 bytes at `0x0044FD1C` — as an `.rdata`
+clip by hand and stance, and a review proposed exporting the table it
+indexes — the 32 bytes at `0x0044FD1C` — as an `.rdata`
 row set. It is not one. `.rdata` starts at `0x004C4000`; that table is inside
 the function's own body, has one xref, and is a compiler-emitted dense switch
 whose nine jump targets are all addresses in that function and whose clip ids
@@ -218,7 +217,7 @@ are `MOV` immediates in its arms. Two things settle it:
 
 * **the test is whether the exporter had to write the thing being joined to,
   not whether the value looks like an id.** All eight of those clips are
-  already baked for character type 0x18 — `tools/hod2lib/class31.py`'s
+  already baked for character type 0x18 — `web/src/hod2lib/class31.ts`'s
   `CLASS31_LITERAL_MOTIONS` lists them, under the heading that says class
   0x31's states name them as literals rather than through a table. The ids
   join to geometry that is in the bundle for reasons that have nothing to do

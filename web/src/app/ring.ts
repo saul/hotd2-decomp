@@ -2,8 +2,8 @@
  * The history a `rewind` walks back through.
  *
  * `world.save()` already returns a plain value that fully determines the next
- * frame — that is the property `docs/PLAYER_ARCHITECTURE.md` calls "snapshot
- * as proof", and it is what the whole `game/` boundary is paid for. Until this
+ * frame — that is the property `docs/PLAYER.md` calls the proof of the
+ * port, and it is what the whole `game/` boundary is paid for. Until this
  * file there was exactly **one** slot for it, the Save button's, so the only
  * way back to a moment was to have known in advance that it mattered. The
  * awkward bug is the one that does not announce itself: *it only happens after

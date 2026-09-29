@@ -8,7 +8,7 @@
  * `SoundStreamThread` (`FUN_004A4640`) reads past **end of file** it seeks
  * back to the first sample and reads on: one pass is `[first sample, EOF)`,
  * the `LIST` chunk after the data included, and a pass of `2 mod 4` bytes puts
- * the next one half a frame late. `tools/verify_bgm_stream.py` reads that out
+ * the next one half a frame late. `web/tools/checks/bgm_stream.ts` reads that out
  * of the exe and `test:audio` holds `audio/stream.ts` to it; neither gets near
  * a page. This does:
  *
@@ -107,7 +107,7 @@ const check = (name, ok, detail = "") => {
 function expected(bytes, loop) {
   // `SoundChannelOpenWav`'s walk, the short way: every shipped track is
   // RIFF/WAVE/fmt(16)/data, so the first sample is at 44. The check that
-  // this is so for every track is `verify_bgm_stream.py`'s.
+  // this is so for every track is `web/tools/checks/bgm_stream.ts`'s.
   const start = 44;
   const dataSize = new DataView(bytes.buffer, bytes.byteOffset).getUint32(40, true);
   const P = bytes.length - start;
@@ -235,7 +235,7 @@ async function scenario(url, label, body) {
   }
   // `_OFF` is the one exemption, as in `tools/audio.mjs`: a looping SE's stop
   // id plays its own name, and none of the 36 `_OFF` files ship -- a 404 by
-  // design (`verify_looping_se.py`). Anything else the page complains of is
+  // design (`web/tools/checks/looping_se.ts`). Anything else the page complains of is
   // counted.
   const faults = state.faultLines.filter((l) => !/_OFF\.wav/i.test(l));
   check(`${label}: the page raised no errors`, faults.length === 0,

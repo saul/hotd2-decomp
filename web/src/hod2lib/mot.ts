@@ -1,5 +1,5 @@
 /**
- * `mot/` -- skeletal animation. The port of `tools/hod2lib/mot.py`.
+ * `mot/` -- skeletal animation.
  *
  * Read out of the loader, not out of the files. The chain is:
  *
@@ -114,10 +114,10 @@ export class MotionBank {
 
   /** The byte after the last one this motion's block owns. */
   private blockEnd(base: number): number {
-    // `min(o for o in offsets if o > base)`, and the file length when there is
-    // no later block. Deliberately not clamped to the file length: an offset
-    // past the end is a damaged bank, and the reference implementation lets
-    // the slice come up short rather than inventing a bound.
+    // The smallest offset above `base`, and the file length when there is no
+    // later block. Deliberately not clamped to the file length: an offset
+    // past the end is a damaged bank, and the slice comes up short rather
+    // than inventing a bound.
     let end: number | null = null;
     for (const o of this.offsets.values()) {
       if (o > base && (end === null || o < end)) end = o;
@@ -129,8 +129,8 @@ export class MotionBank {
    * The bone count this block was authored for, from its own size.
    *
    * A block declares its frame count in its first four bytes and occupies
-   * everything up to the next block, and `verify_mot.py` shows that
-   * `frames * stride` accounts for that span exactly on all 1058 blocks. So
+   * everything up to the next block, and `frames * stride` accounts for
+   * that span exactly on all 1058 blocks. So
    * the stride is `span / frames`, and the bone count follows by inverting
    * {@link frameStride}.
    *

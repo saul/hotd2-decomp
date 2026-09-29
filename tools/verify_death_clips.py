@@ -23,15 +23,11 @@ for ever:
   `ZombieEnterCorpseState` never runs, `ReleaseEnemyPresentCount`
   (`FUN_00456580`) never runs, and `g_enemies_present` never falls. Stage 3's
   block 2 hung on a `wait_scripted_actors` behind a dead civilian who was
-  herself parked on `CivilianWait.EnemiesPresent`. `PLAYER_HANGS.md` 22.
+  herself parked on `CivilianWait.EnemiesPresent`.
 
-**It reads the bundle, not the exporter.** `verify_scripted_clips.py` asks
-`hod2lib/characters.py` the same shape of question one class over, and that is
-the right half to ask there. Here it is the wrong half: `web/src/hod2lib/` is
-the only thing that writes a bundle, the Python package is the parser half, and
-the two have drifted before (`FROG_CLIPS` is in the TypeScript and not in the
-Python). A check that asked the Python exporter would go green on a fix that
-never reached a byte the player loads, which is `L24`.
+**It reads the bundle, not the exporter.** A check that asked the exporter
+would go green on a fix that never reached a byte the player loads, which is
+`L24`.
 
 **The blind spot, written down rather than left implicit.** The four
 destroyed-part arms -- `obj+0x1368` bits `0x8`, `0x10`, `0x40`, `0x80` giving

@@ -1,5 +1,5 @@
 /**
- * HOTD2 texture banks. The port of `tools/hod2lib/texbank.py`.
+ * HOTD2 texture banks.
  *
  * See docs/formats/texbank.md.
  *
@@ -56,8 +56,7 @@ export function descSize(d: TexDesc): number {
 /**
  * Each decoder writes four bytes into *out* rather than returning a tuple.
  *
- * The reference implementation returns `(r, g, b, a)` and the caller unpacks
- * it. That is one tuple allocation per pixel, and a stage decodes about
+ * A returned tuple is one allocation per pixel, and a stage decodes about
  * seventeen million of them.
  */
 type Decoder = (p: number, out: Uint8Array, o: number) => void;
@@ -94,12 +93,11 @@ const DECODERS: Record<number, Decoder> = {
 /**
  * `spread[v]` is *v* with its bits moved to the even positions.
  *
- * The reference implementation interleaves in a sixteen-iteration loop per
- * pixel. A texture is up to 1024x1024 and a stage has 1,730 of them, so the
- * loop is the decode; a table of 1024 entries is the same arithmetic done
- * once. The largest texture dimension in the game is 1024, and
- * {@link morton} asserts nothing beyond that because a wider one would index
- * past the end of a bank long before it produced a wrong pixel.
+ * A sixteen-iteration interleave per pixel would be the decode: a texture is
+ * up to 1024x1024 and a stage has 1,730 of them. A table of 1024 entries is
+ * the same arithmetic done once. The largest texture dimension in the game is
+ * 1024, and {@link morton} asserts nothing beyond that because a wider one
+ * would index past the end of a bank long before it produced a wrong pixel.
  */
 const SPREAD = (() => {
   const t = new Uint32Array(1024);

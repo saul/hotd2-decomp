@@ -13,7 +13,7 @@
  * `MarkActorShot`, `BreakablePropTakeShot`, `ScoreAddForPlayer` and a private
  * head-combo counter that shadowed `g_head_combo_bonus`. None of that could be
  * reached by `test:port` and none of it was in a snapshot. See
- * `game/combat/shot.ts` and docs/PLAYER_ARCHITECTURE.md, "Input intent".
+ * `game/combat/shot.ts` and docs/PLAYER.md, "Input intent".
  *
  * The hit test itself is `characters.ts`, because that is where the bones are
  * and the spheres ride them — the port asks for it by name across
@@ -173,7 +173,7 @@ export class Shooting implements System {
    * violation wearing a different verb — `no-engine-writes-in-render` only
    * greps for `G.x =`, but the rule is about who decides, not about the
    * spelling. So this layer says *what the viewer did* and the composition
-   * root turns it into input the port owns. See docs/PLAYER_ARCHITECTURE.md,
+   * root turns it into input the port owns. See docs/PLAYER.md,
    * "Input intent".
    */
   onFire: (ray: { origin: Vector3; dir: Vector3 }) => void = () => {};

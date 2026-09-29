@@ -1,7 +1,7 @@
 /**
  * The wall search, run through the **port's own** collision.
  *
- * `tools/verify_thrower_walls.py` asks the same question of the same data with
+ * The reference counts below answer the same question from the same data with
  * an independent Python implementation, straight off the `coli/` files. This
  * asks it through `game/coli.ts` and the exported bundle. If the two disagree,
  * one of them is wrong and the disagreement says which spawn to look at --
@@ -123,7 +123,7 @@ for (let stage = 1; stage <= 6; stage++) {
 console.log(`\n${total} class-0x31 spawns: ${grounded} stand on the collision `
   + `mesh, ${walls} can reach a wall, ${ceilings} have a ceiling`);
 
-/** What `verify_thrower_walls.py` reports, and what this must report. */
+/** What this must report. */
 const EXPECT = { total: 49, grounded: 38, walls: 22, ceilings: 11 };
 const got = { total, grounded, walls, ceilings };
 const bad = Object.keys(EXPECT).filter((k) => EXPECT[k] !== got[k]);
@@ -134,5 +134,5 @@ if (bad.length) {
     + "are explained at the top of this file, and any other move is a bug");
   process.exit(1);
 }
-console.log("\nclean -- and `verify_thrower_walls.py` agrees, modulo the two "
+console.log("\nclean -- and the Python reference agrees, modulo the two "
   + "places it is looser on purpose");

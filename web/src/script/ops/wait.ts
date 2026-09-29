@@ -3,7 +3,7 @@
  * live-enemy gates that combat actually opens.
  *
  * Registered into `Walker.OPS` by `./index.ts`; the `status` field is what
- * `verify_player_ops.py` checks against docs/PLAYER_PROGRESS.md.
+ * the script panel shows.
  */
 import type { OpImpl } from "../walker";
 

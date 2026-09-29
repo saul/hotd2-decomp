@@ -568,7 +568,7 @@ const RELEASE_CREATURE_SCORE = 0x50;
  * is drawn at. `[proved]`
  *
  * Named by angle rather than front/back — see the note in
- * `hod2lib/characters.py`, which explains why those labels depend on two
+ * `hod2lib/combat.ts`, which explains why those labels depend on two
  * conventions at once and why the *data* is the reliable half.
  */
 export function ChooseDeathMotionDirectional(obj: Actor,
@@ -701,7 +701,7 @@ const SCORE_KILL = 80;
  * for it: `dead` was set, the kill voice played, and its own `state 2` sub 4
  * went on to stand it back up, because the get-up arm is reached from the
  * switch and never re-reads `dead`. It then stood, threw and pounced as a
- * corpse, still inside `g_enemies_alive`. See `docs/BUGS.md`.
+ * corpse, still inside `g_enemies_alive`.
  *
  * `null` is the refusal. What the engine does *instead* is still a hit — the
  * shot marked the actor and the class's own feedback routine runs — so the

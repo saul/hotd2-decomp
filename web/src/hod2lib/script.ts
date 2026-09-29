@@ -1,6 +1,5 @@
 /**
  * The event script as a *resolved* program, not a byte stream.
- * The port of `tools/hod2lib/script.py`.
  *
  * `hod2lib/evt` decodes the bytecode: opcodes, operand lengths, block and step
  * structure. It deliberately stops there, because the numbers an instruction

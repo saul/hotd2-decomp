@@ -11,33 +11,32 @@ tree, so a change that moves a number and does not regenerate fails.
 
 What is *not* here, on purpose: anything that is a judgement rather
 than a measurement. What each directory is for is in
-[`PLAYER_ARCHITECTURE.md`](PLAYER_ARCHITECTURE.md); what is worth
-doing next is in [`PLAN.md`](PLAN.md); what each check uniquely sees
-is in `tools/verify_all.py`, beside the command that runs it.
+[`PLAYER.md`](PLAYER.md); what each check uniquely sees is in
+`tools/verify_all.py`, beside the command that runs it.
 
 ## The browser player, by directory
 
 | Directory | Lines | Files | Layer |
 |---|---:|---:|---|
-| `game/` | 110222 | 361 | engine |
-| `hod2lib/` | 19865 | 35 | engine |
+| `game/` | 110218 | 361 | engine |
+| `hod2lib/` | 19994 | 35 | engine |
 | `render/` | 15804 | 60 | render |
-| `app/` | 12687 | 44 | app |
-| `script/` | 4498 | 25 | engine |
+| `app/` | 12685 | 44 | app |
+| `script/` | 4495 | 25 | engine |
 | `ui/` | 3773 | 27 | ui |
 | `core/` | 3535 | 13 | engine |
 | `bundle/` | 2921 | 11 | engine |
 | `audio/` | 1053 | 3 | render |
 | `hud/` | 526 | 1 | ui |
-| **total** | **174884** | **580** | |
+| **total** | **175004** | **580** | |
 
 The largest files, which is where the pressure to split next is:
 
 * `game/globals.ts` — 3251
 * `app/main.ts` — 3202
 * `game/actor.ts` — 2744
-* `hod2lib/bundle.ts` — 2490
-* `hod2lib/exetab.ts` — 2411
+* `hod2lib/bundle.ts` — 2483
+* `hod2lib/exetab.ts` — 2409
 
 ## The port
 
@@ -50,7 +49,7 @@ The largest files, which is where the pressure to split next is:
 | Declared `[diverges]` | **131** — where the port knowingly departs from the exe, each with its reason on the spot |
 | `[open]` markers | **122** — questions the port and the exporter are honest about not having answered |
 
-Both markers are counted in **every** `.ts`/`.tsx` file under `web/src/`, one per occurrence, and only in comments — a word in code or in a string is not a marker (`verify_port.marker_lines`). Each departure and each question is written once, where it is made; everything that refers to it names it in words ([`PLAYER_ARCHITECTURE.md`](PLAYER_ARCHITECTURE.md), "One departure, one tag"). By layer, from the same table as the directories above:
+Both markers are counted in **every** `.ts`/`.tsx` file under `web/src/`, one per occurrence, and only in comments — a word in code or in a string is not a marker (`verify_port.marker_lines`). Each departure and each question is written once, where it is made; everything that refers to it names it in words ([`PLAYER.md`](PLAYER.md#one-departure-one-tag), "One departure, one tag"). By layer, from the same table as the directories above:
 
 | Layer | Directories | `[diverges]` | `[open]` |
 |---|---|---:|---:|
@@ -67,18 +66,14 @@ The two declared seams between the UI and the player: **`PlayerCommands` has 54 
 |---|---|
 | Named functions | 1454 in `ghidra/annotations/functions.tsv` |
 | Named globals | 753 in `ghidra/annotations/globals.tsv` |
-| Verifier scripts | 48 under `tools/`, run together by `verify_all.py` |
-
-Phase and format status is a judgement about what counts as solved,
-and lives in [`PROGRESS.md`](PROGRESS.md).
+| Checks | 68, run together by `tools/verify_all.py` (listed below) |
 
 ## Ratchets
 
 A ratchet is a violation the architecture has not reached yet: a count
-that may fall and may never rise, tied to the step of
-[`PLAYER_ARCHITECTURE.md`](PLAYER_ARCHITECTURE.md#order-of-work) that
-clears it. **Raising one is a change to that document, not a line edit
-in a checker**, and there is deliberately no suppression comment.
+that may fall and may never rise. **Raising one is a decision for the
+repository's owner, not a line edit in a checker**, and there is
+deliberately no suppression comment.
 
 | Ratchet | Where | Now | Baseline |
 |---|---|---:|---:|
@@ -102,7 +97,6 @@ nothing exits 3 and is never counted as green.
 | `tsc` | that the whole tree -- `test/` and `tools/` included -- typechecks | — |
 | `verify_layers` | the layer boundaries, and any ratchet's current count | — |
 | `verify_port` | that every exe citation in the port matches `functions.tsv`, under the same name | — |
-| `verify_player_ops` | that the opcode table and the implementations agree | — |
 | `verify_player_dom` | that the stylesheet and the markup agree, in both directions | — |
 | `verify_exporters` | that no exporter swallows a failure and reports success | — |
 | `status` | that `docs/STATUS.md` still matches the tree it describes | — |
@@ -148,33 +142,28 @@ nothing exits 3 and is never counted as green.
 | `verify_prop_slots` | that every asset slot a placed class-0x41 or class-0x44 prop will pass to `AssetDrawSlot` has a model in its own bundle -- the check that would have caught stage 3's roller shutter and the stage 5 van's body, both of which were placed, updated and invisible because nothing carried their geometry, which from the level looks exactly like a placement that was never exported | bundle |
 | `verify_death_clips` | that every clip `ChooseDeathMotion` can put on a dying class-0x30 actor is baked for that spawn's own character type -- the only check that reads a death clip out of a real bundle, and the one that says whether an actor can leave state 12 at all, since that state's exit is an exact `obj+0x19C >= 0x3C` against a play clock that is 0 for a clip nothing carried | bundle |
 | `verify_cam_waits` | that every `wait_camera_path_frame <n>` asks for a frame the play in force actually publishes -- the only check that holds the three routines that publish a camera frame against the scripts that wait on them, and the one that says the strict `frame > operand` of `EvtOpWaitCameraPathFrame41` is safe to transcribe. Model scene state 7 as stopping on its range's end rather than one past it and twenty of the sites it checks become gates nothing can open | bundle |
-| `verify_prop_pose` | that every class-0x41 generic prop is posed in the order its own update routine poses it -- read out of the EXE per type, matched to the field each `MatrixRotate*` is handed. `render/breakables.ts` composed one order for all fifty, and it was type 51's alone: twenty shipped spawns came out somewhere else, four of them by more than a degree and the worst by 19.65 | game-dir |
-| `verify_prop_tables` | that the tables class 0x41 types 38, 39, 40, 44, 50 and 66 build their objects from -- positions, angles, hull corners, slots, counts, scales -- are the EXE's own words, and class 0x28's route, length and pose tables with them: the port carries them as literals, and a mistyped row would put a church chair somewhere the engine does not, with nothing else to notice | game-dir |
-| `verify_flag_strips` | that the exporter reads class 0x12's descriptor tail at the offsets and widths `ScriptedPropInit12` reads it, quoted out of the EXE, that every class-0x12 spawn on the disc is placed with exactly those fields, and that every slot its strip can draw is in its bundle -- the check for stage 1's door, the wood the bin captor bursts out of, which the port built nothing for until the class had a module | game-dir |
-| `verify_annotations` | that every annotated address is a real function in the EXE | game-dir |
-| `verify_branches` | that every value a branch trigger can write into `g_script_branch_var` names a route slot its own block actually fills -- the one check that ties the gameplay half of branching to the route tables | game-dir |
-| `verify_scene_exits` | that a terminal route record's `next[0]` is a live block of the *next* scene, and that a hole follows every one of them -- the only check that reads the handover from one stage to the next, and so the only thing that can say stage 3 and stage 4 have two entry points each | game-dir |
-| `verify_looping_se` | that `PlaySoundId`'s two loop tables really do pair index for index -- every entry is `X.wav` against `X_OFF.wav` and no `_OFF` file ships, which is the only thing that says a stop id is a control word rather than a sound, and so the only thing that makes the chainsaw a loop rather than a one-shot | game-dir |
-| `verify_bgm_stream` | that the music has no loop points to find -- the exe's own bytes stream channel 0xF and seek it back to the first sample at end of file, the port's one-shot ids are the exe's three, and every looping track in both tables is long enough for that model to be exact | game-dir |
-| `verify_root_pose` | that a clip's root translation still either moves the object or offsets the pose -- the two arms of one `model+0x64` bit, quoted as bytes because Ghidra shows neither of them whole -- and the only place the set of actors the second arm can move is enumerated: every motion block in the game measured for an absolute horizontal root, paired with the class-0x10 wait word that governs it -- and the size both arms are drawn at: `ActorBuildSkinnedModel`'s per-type switch decoded from its jump table against the port's `ActorModelScale`, and the characters that pose those clips found in the six stages' spawns | game-dir |
-| `verify_combat` | that the shot and damage tables hold together across every character type -- and the only place the *exact* set of attacks the engine can never land is asserted, which is what stops the crawlers' condition-4 swing being filtered out again as an impossible row | game-dir |
-| `verify_effects` | that each of the 29 effect trees walks to exactly the node count `g_effect_bone_counts` declares, and that every motion the effect system plays divides by the stride that count implies -- the only check that reads a motion at the effect stride rather than a character's | game-dir |
-| `verify_horde` | that every number the class-0x40 horde is steered by -- its entry splines, spline rates, shot delays, wander grid, second skin and the emerge prop's corners -- is the EXE's, and that the seven descriptors split five hordes to two props on the byte PlaceHorde switches on | game-dir |
-| `verify_continue` | that the continue screen the port draws -- the run's CONTINUE? and digit, the two-player small ones, the small GAME OVER and the credit line -- is at the EXE's positions, scales and sprite ids, read as instruction bytes and `.rdata` rows; that only one credit-line drawer can run, because the credit costs are stored once, as 1; and that all eight wait opcodes read the gameplay gate that holds the script while nobody is in play. Nothing else looks at a picture that, when wrong, is simply not there | game-dir |
-| `verify_options` | that the profile reading is right on the user's own save -- the four disguised files deciphered with the key taken out of `ProfileCipher`'s instructions, and the block's byte sum and version checked -- that Blood Color is dead in this build (one store of its gate, no reader of its byte), and that the options screen's factory tables, sprite ids, positions and glyph table are the EXE's, with the bundle's `options` block when there is one | game-dir |
-| `verify_result_card` | that every constant the result card's port transcribes -- the dwell, the bonus's dwell, the count's, the camera frame figure 0 turns on, the cursor it freezes on, the slot it holds up -- is the immediate at its instruction; that the `.rdata` span the card reads with no bound is the EXE's bytes; that every rescuable civilian's type has an attachment list the unbounded lookup can find; and, with a bundle, that each stage placing the card carries a figure template for every type its list names or it can rescue, with every clip the card can put that type on baked | game-dir |
-| `verify_water` | that class 0x41 type 1, the canal water task, starts from the table the EXE indexes -- ten flat water tiles -- and that every slot, flag, camera cue and multiplier the port's copy of it tests is the immediate at the instruction that holds it; its fifteen spawns sit at the origin, so a wrong reading draws nothing and looks like nothing | game-dir |
-| `verify_draw_order` | that the player's two passes and translucent order are the EXE's: the blend and depth tables `render/draw_order.ts` copies, the alpha-test and blend-enable pushes, and the VIEW matrix and comparator bytes that make the sort nearest-first rather than the painter's order this repo's docs had -- plus that no mesh in `pol/` turns its depth write off, which is why translucent meshes occlude | game-dir |
-| `verify_texture_alpha` | that a texture's alpha reaches the bundle as the bank stores it, because the EXE's D3D path keeps it: the upload's format table and the A1R5G5B5 test, stage 0's alpha args, and a disassembly of the D3D module finding TSP bit 19 read only as half of the pass selector -- plus the corpus premise that makes a glTF alphaMode from the pass right, and, on a current bundle, no `_opaque` image and the IgnoreTexAlpha ARGB images byte-equal to the bank's alpha | game-dir |
-| `verify_bats` | that the class-0x46 bat's flight paths still line up with the descriptors that select them -- the only check on a class whose spawns are all at the world origin and take their whole position from an EXE table, so nothing about a wrong reading of them looks wrong in the data | game-dir |
-| `verify_attachments` | that every face and accessory a spawn's attachment list names has a model in the stage's glTF -- the check that would have caught the civilians having no hair, because a civilian's own head model is a shell open at the back and every count was right without it | game-dir |
-| `verify_bone_cels` | that every cel run `ZombieDrawBonePart` (`FUN_004534A0`) draws is still the arithmetic in the EXE and is still in the bundle -- no table in the image names those models, so this is the only thing standing between a hand-written run and `char_adv02` losing its midriff again | game-dir |
-| `verify_skeletons` | that every character skeleton is walked whole -- one node per bone of the EXE's own motion-frame count -- which no rig, bake or render check notices when a walk comes up short: the stage-3 boss's heads lost thirteen nodes, their jaws and their weak bones to a depth cap | game-dir |
-| `verify_parts` | that every vertex-blended part in a bundle is skinned the way the exe deforms it -- one bone per vertex, weight 1, the exe's source geometry and no inverse binds -- which is the only check that can see the waist riding the hips instead of stretching to the chest | game-dir |
-| `verify_geometry` | that every scenery part in a stage bundle holds every triangle its `pol/` models declare -- the only check that compares an export against the files it was made from rather than against another export | game-dir |
+| `game:annotations` | that every row of `ghidra/annotations/*.tsv` is an address in a real section of the EXE -- functions in `.text` -- with no address or name listed twice and none in both files | game-dir |
+| `game:prop_pose` | that every class-0x41 generic prop is posed in the order its own update routine poses it -- read out of the EXE per type and matched to the field each `MatrixRotate*` is handed -- that both copies of the generic slot tables are what the routines and the shipped `+0x11C` words say, and that `render/breakables.ts` composes a pose in one place, from the table | game-dir |
+| `game:prop_tables` | that the tables class 0x41 types 38, 39, 40, 44, 50 and 66 build their objects from -- positions, angles, hull corners, slots, counts, scales -- and class 0x28's route, length and pose tables are the EXE's own words, compared as 32-bit patterns against the values the port evaluates; a mistyped row puts a church chair where the engine does not, with nothing else to notice | game-dir |
+| `game:flag_strips` | that `class12Tail`, the exporter's read of class 0x12's descriptor tail, takes each field at the offset and width `ScriptedPropInit12` loads it, decoded out of the EXE; that every class-0x12 spawn on the disc is placed with exactly those fields; and, with a bundle, that every slot its strip can draw is in it | game-dir |
+| `game:branches` | that every value a branch trigger can write into `g_script_branch_var` names a route slot its own block actually fills -- the one check that ties the gameplay half of branching to the route tables | game-dir |
+| `game:scene_exits` | that a terminal route record's `next[0]` is a live block of the *next* scene, and that a hole follows every one of them -- the only check that reads the handover from one stage to the next, and so the only thing that can say stage 3 and stage 4 have two entry points each | game-dir |
+| `game:looping_se` | that `PlaySoundId`'s two loop tables pair index for index -- every entry is `X.wav` against `X_OFF.wav` and no `_OFF` file ships, which is what says a stop id is a control word rather than a sound -- and that class 0x30's play and stop ids are the operands of the EXE's own PUSHes | game-dir |
+| `game:bgm_stream` | that the music has no loop points to find -- the EXE's own bytes stream channel 0xF and seek it back to the first sample at end of file, the port's one-shot ids and ring length are the EXE's, and every looping track opens under the port's header walk and is long enough for its stream model to be exact | game-dir |
+| `game:root_pose` | that a clip's root translation either moves the object or offsets the pose -- the two arms of one `model+0x64` bit, quoted as bytes -- which actors the posing arm can move, measured over every motion block and paired with the class-0x10 wait word that governs it, and that `ActorModelScale` is `ActorBuildSkinnedModel`'s per-type switch, decoded from its jump table | game-dir |
+| `game:combat` | that the exporter's shot and damage readings hold together across every character type and match the EXE's bytes -- and the only place the *exact* set of attacks the engine can never land is asserted, which stops the crawlers' condition-4 swing being filtered out as an impossible row (L65, L71, L73) | game-dir |
+| `game:horde` | that every number the class-0x40 horde is steered by -- its entry splines, spline rates, shot delays, wander grid, second skin and the emerge prop's corners -- is the EXE's, and that the seven descriptors split five hordes to two props on the byte PlaceHorde switches on | game-dir |
+| `game:continue_screen` | that the continue screen the port draws -- the run's CONTINUE? and digit, the two-player small ones, the small GAME OVER and the credit line -- is at the EXE's positions, scales and sprite ids, read as instruction bytes and `.rdata` rows; that only one credit-line drawer can run; and that all eight wait opcodes read the gameplay gate that holds the script while nobody is in play | game-dir |
+| `game:options` | that the profile reading is right on the user's own save -- the four disguised files deciphered with the key taken out of `ProfileCipher`'s instructions, and the block's byte sum and version checked -- that Blood Color is dead in this build, and that the options screen's factory tables, sprite ids, positions and glyph table are the EXE's, with the bundle's `options` block when there is one | game-dir |
+| `game:result_card` | that every constant the result card's port transcribes is the immediate at its instruction; that the `.rdata` span the card reads with no bound is the EXE's bytes; that every rescuable civilian's type has an attachment list the unbounded lookup can find; and, with a bundle, that each stage placing the card carries a figure template and every clip for every type it can show | game-dir |
+| `game:water` | that class 0x41 type 1, the canal water task, starts from the table the EXE indexes -- ten flat water tiles -- and that every slot, flag, camera cue and multiplier the port's copy of it tests is the immediate at the instruction that holds it; its spawns sit at the origin, so a wrong reading draws nothing and looks like nothing | game-dir |
+| `game:draw_order` | that the player's two passes and translucent order are the EXE's: the blend and depth tables `render/draw_order.ts` copies, the alpha-test and blend-enable pushes, and the VIEW matrix and comparator bytes that make the sort nearest-first -- plus that no mesh in `pol/` turns its depth write off, which is why translucent meshes occlude | game-dir |
+| `game:texture_alpha` | that a texture's alpha reaches the bundle as the bank stores it, because the EXE's D3D path keeps it: the upload's format table and the A1R5G5B5 test, stage 0's alpha args, and TSP bit 19 read only as half of the pass selector -- plus the corpus premise that makes a glTF alphaMode from the pass right and, on a current bundle, no `_opaque` image and the IgnoreTexAlpha images byte-equal to the bank's alpha | game-dir |
+| `game:bats` | that the class-0x46 bat's flight paths line up with the descriptors that select them, and that the port's spline table, motion pair and swarm counts are the EXE's bytes -- the only check on a class whose spawns are all at the world origin and take their whole position from an EXE table | game-dir |
+| `game:bone_cels` | that every cel run `ZombieDrawBonePart` (`FUN_004534A0`) draws is the arithmetic in the EXE and is in the bundle -- no table in the image names those models, so this is the only thing standing between a hand-written run and a character losing a part | game-dir |
 | `baseline` | that the installed assets still hash to `manifest.csv` | game-dir |
 
-25 of them need the installed game and 27 need an exported
+20 of them need the installed game and 27 need an exported
 bundle. **That is a known hole, not a design:** a machine with
 neither cannot run the checks that compare two histories, and a
 bundle-free fixture is the open work that closes it.

@@ -252,8 +252,8 @@ export function ZombieStateStandAndThrow(obj: ZombieActor,
       // {@link ActorFlag.HoldingWeapon} instead, which the engine only reads
       // here -- the bit comes from the spawn record -- and so sent
       // the two character-type-19 axe men of stage 3 block 2, whose records
-      // do not carry it, into `ZombieStateDeathFallAndBounce` when they died
-      // (`docs/PLAYER_HANGS.md` item 24). Bit `0x100000` is the one the
+      // do not carry it, into `ZombieStateDeathFallAndBounce` when they died.
+      // Bit `0x100000` is the one the
       // carrier states name {@link ZombieFlag2.Carried}; `ZombieOnShot` and
       // `ChooseDeathMotion` read the bit, not the name, so an airborne
       // stand-and-throw spawn that does not start holding dies through

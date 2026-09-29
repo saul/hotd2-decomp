@@ -305,8 +305,7 @@ console.log(`${total} civilians driven, ${moved} advanced, `
  *
  * `mauled` is the other side of it: a civilian killed by her captors inside
  * fifteen seconds is one nobody can rescue. It was **four** until the clip
- * clock counted `g_motion_play_length`; `tools/verify_maul_cues.py` is the
- * corpus check for the cues themselves.
+ * clock counted `g_motion_play_length`.
  *
  * **Twenty-one rescues was three too many.** Before 902de88a the class-0x18
  * captors had no placement, this harness spawned nothing for them, and until

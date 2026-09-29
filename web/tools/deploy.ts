@@ -18,7 +18,7 @@
  * game's data, served by the Worker to anyone with its address; a bucket
  * whose `r2.dev` address is on, or that has a custom domain, serves it there
  * too. The owner has said that is fine for theirs, so the deploy says which
- * addresses and goes on. `docs/HOSTING.md`.
+ * addresses and goes on. `docs/PLAYER.md`, "Hosting".
  *
  * The Worker is deployed when its source is not the one deployed: the deploy
  * gives it the hash of `r2site/`'s `worker.ts` and `wrangler.toml` as a plain
@@ -61,7 +61,7 @@ const args = new Set(process.argv.slice(2));
 const dry = args.has("--dry-run");
 if (!existsSync(DEPLOY_ENV)) {
   fail(`no ${relative(ROOT, DEPLOY_ENV)}. Make one with CLOUDFLARE_ACCOUNT_ID `
-    + "and R2_BUCKET -- see r2site/README.md");
+    + "and R2_BUCKET -- see docs/PLAYER.md, \"Hosting\"");
 }
 const env = readEnv(DEPLOY_ENV);
 const account = env.CLOUDFLARE_ACCOUNT_ID;

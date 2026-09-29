@@ -2,9 +2,9 @@
  * Does the same stage, on the same seed, with the same shots on the same
  * frames, produce the same run?
  *
- * `docs/PLAYER_HANGS.md` item 8 says it did not: stage 1 gave four different
+ * It did not: stage 1 gave four different
  * outcomes over five runs on identical code and an identical route. Until that
- * is gone, no other item on that list can be investigated honestly — you
+ * is gone, no other hang can be investigated honestly — you
  * cannot tell a fix from a coin landing your way. **This is the check that can
  * fail.**
  *

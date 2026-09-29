@@ -1,5 +1,5 @@
 /**
- * Tables compiled into Hod2.exe. The port of `tools/hod2lib/exetab.py`.
+ * Tables compiled into Hod2.exe.
  *
  * The tex/ files carry no metadata at all. Each bank's texture layout lives in
  * a table compiled into the executable's .rdata, and the game looks it up by
@@ -25,9 +25,9 @@
  *
  * A row of all zeros terminates the table.
  *
- * **Everything here is memoised that the reference implementation recomputes.**
- * `asset_slots()` walks four hundred pointer tables and is called from inside
- * three loops; Python pays that cost once per call and this pays it once. The
+ * **The expensive walks here are memoised.** `assetSlots()` walks four
+ * hundred pointer tables and is called from inside three loops, and this
+ * pays that cost once. The
  * tables are read-only data in a file that does not change while an export
  * runs, so the only observable difference is the time.
  */
@@ -244,8 +244,7 @@ export class ExeTables {
    * describe.
    *
    * Async because the build gate is a SHA-256 and `crypto.subtle` is the only
-   * digest both hosts have. The reference implementation's constructor is
-   * synchronous for the same reason Python's is: it has `hashlib`.
+   * digest both hosts have.
    */
   static async create(data: Uint8Array, label: string,
                       allowAnyBuild = false): Promise<ExeTables> {
@@ -296,10 +295,9 @@ export class ExeTables {
   /**
    * Virtual address to file offset, or null.
    *
-   * Public, like the reference implementation's `_v2r`, because five sibling
-   * modules read tables this one does not name -- `arcscript`, `approach`,
-   * `combat`, `class31`, `props`. They are the same package; the underscore
-   * in Python says "not for callers outside it" and so does this comment.
+   * Public because five sibling modules read tables this one does not name --
+   * `arcscript`, `approach`, `combat`, `class31`, `props`. They are the same
+   * package, and this comment says "not for callers outside it".
    */
   v2r(va: number): number | null {
     for (const s of this.sections) {

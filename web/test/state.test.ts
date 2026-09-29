@@ -281,7 +281,7 @@ console.log("\nA driven frame is a whole frame:\n");
   }
   // `g_cam_path_frame` is `__ftol`'d in the exe and steps by exactly one, so
   // an `== cue` is safe there. It is only unsafe here if the port's clock is
-  // ever handed a variable step -- which is `docs/PLAYER_HANGS.md` item 4's
+  // ever handed a variable step -- which is an
   // open question, and this is the half of it that is now settled.
   check("600 whole ticks put `g_frame` on exactly 600, integral throughout",
         integral, `ended on ${G.g_frame}`);
@@ -418,7 +418,7 @@ console.log("\nWhat a save writes is what a load reads:\n");
   // **The version constants could not catch a dropped key, so this does.**
   // `SNAPSHOT_VERSION` and `BUNDLE_FORMAT` both sat at 1 from the day they
   // were introduced, through 28 commits to `globals.ts`, every `saveState`
-  // shape change there has been, and 23 commits to `bundle.py` that added
+  // shape change there has been, and 23 commits to the bundle writer that added
   // `coli`, `civilians`, `humanoids` and `set_pieces`. Both checks existed the
   // whole time and neither could ever fire.
   //

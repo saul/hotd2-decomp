@@ -97,7 +97,7 @@ export class NodeBundleSink implements BundleSink {
  *
  * This is the same zlib Python's `zlib.compress(data, 6)` calls, with the same
  * window and memory level, so a PNG written here is byte-identical to one
- * written by `tools/hod2lib/png.py`. The browser's `CompressionStream` is not
+ * compressed by Python's. The browser's `CompressionStream` is not
  * promised to be.
  */
 export const nodeDeflate: Deflate = (data, level) =>

@@ -1,7 +1,6 @@
 /**
- * What Python's `struct` gives the reference implementation for free.
+ * Fixed-width fields read and written at a byte offset.
  *
- * Every parser under `tools/hod2lib/` is `struct.unpack_from("<3f", b, off)`.
  * The game is x86 and there is no big-endian path in it, so everything here is
  * little-endian with no option to be otherwise — an endianness flag would only
  * ever be a way to get it wrong.
@@ -51,7 +50,7 @@ export function f32(b: Uint8Array, off: number): number {
   return view(b).getFloat32(b.byteOffset + off, true);
 }
 
-/** *n* consecutive u32s. `struct.unpack_from("<%dI" % n, b, off)`. */
+/** *n* consecutive u32s. */
 export function u32s(b: Uint8Array, off: number, n: number): number[] {
   const v = view(b);
   const base = b.byteOffset + off;
@@ -125,9 +124,9 @@ export function cstring(b: Uint8Array, off: number, max = 0x100): string {
 /**
  * A growable little-endian byte writer.
  *
- * `gltf.py`'s `_Buf` appends packed structs into one `bytearray` and hands out
- * offsets; this is the same object. It doubles rather than reallocating per
- * append because a stage's buffer reaches 25 MB one vertex at a time.
+ * It appends packed fields and hands out offsets. It doubles rather than
+ * reallocating per append because a stage's buffer reaches 25 MB one vertex
+ * at a time.
  */
 export class Writer {
   private buf: Uint8Array;

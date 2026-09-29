@@ -21,7 +21,7 @@ data:
 
 | Problem | Guessing from data | Reading the code |
 |---|---|---|
-| Compression codec | 14 candidate sliding-window sites triaged, all wrong (Session 3) | traced the loader's `ReadFile` buffer to its consumer — found in one pass |
+| Compression codec | 14 candidate sliding-window sites triaged, all wrong | traced the loader's `ReadFile` buffer to its consumer — found in one pass |
 | `evt/` relocation | "pointer spans are 4x and 160x the file size, this format may be unrecoverable" | `FUN_00413120` is nine lines and answers it completely |
 | `cam/` container | "u32 offset table, presumably a keyframe struct" — wrong on both counts | `FUN_004041E0` gives the exact channel layout in one read |
 | Stage asset sets | a table decoded into a perfect per-stage segment list — and was not one | still open, but only code will settle it |
@@ -36,14 +36,14 @@ said, you have learned nothing.
    name it, you are guessing. Say so explicitly.
 2. **Aggregate statistics hide tails.** A 5 % artefact does not move a median.
    When aggregate health contradicts a specific report, stop computing
-   aggregates and dump the raw records of the outliers (Session 9/10).
+   aggregates and dump the raw records of the outliers.
 3. **A filter wider than the program's own test manufactures anomalies.** The
    `evt/` "span problem" was entirely an artefact of filtering `0x0Cxxxxxx`
    when the loader tests a window 32x narrower.
 4. **Try both id spaces before believing either.** `pol/` file indices are
    assigned alphabetically, so *any* run of consecutive integers decodes into a
    plausible sequence of related filenames. That produced a convincing, wrong
-   "stage segment table" in Session 11.
+   "stage segment table".
 5. **Do not name a function from its neighbours.** `0x52`/`0x53` were labelled
    `voice_a`/`voice_b` because their handlers sat near sound code. They are
    asset load/free.
@@ -97,7 +97,9 @@ Pick a metric that *collapses* when the interpretation is wrong. Byte coverage
 is ideal: a wrong stride desynchronises a linear walk immediately. "It did not
 crash" is not a metric.
 
-`tools/verify_*.py` are the runnable form of this. Add to them.
+The checks `tools/verify_all.py` runs are the runnable form of this. Add to
+them: a check against the installed game goes under `web/tools/checks/`, reads
+through `web/src/hod2lib/`, and gets a row in `verify_all.py`.
 
 ### Corollary: appearance has no such metric
 
@@ -108,61 +110,37 @@ luminance by 0.0001 (0.3194 → 0.3193) and passed every numeric check in the
 repo.
 
 **So: any change affecting appearance gets a before/after render through a game
-camera, looked at, before it is committed as the default.**
+camera, looked at, before it is committed as the default.** The player is the
+renderer: a deep link poses the camera on any path and frame, and
+`web/tools/shot.mjs` captures it headless.
 
 ```sh
-/Applications/Blender.app/Contents/MacOS/Blender -b -P tools/blender_camview.py \
-    -- extract/stage2/stage2.gltf cp_st2_50_cam 90
+cd web && node tools/shot.mjs --url '?stage=2&slot=59&frame=170&freeze=1' --out before
 ```
 
 ### Corollary 2: the renderer you check with is part of the experiment
 
-Blender's glTF importer cannot put two different wrap modes on an Image
-Texture node, so it sets `extension = EXTEND` and emulates the real modes with
-shader math nodes. **Workbench does not evaluate shader nodes.** Under
-Workbench every material with a clamped or mirrored axis therefore renders
-clamped on *both* axes — one row or column of texels smeared across the face,
-and solid black wherever the UVs run negative.
-
-That is indistinguishable from a UV bug in the exporter, and Session 13 spent
-hours on it. Before concluding anything from a render, know what the renderer
-is faking.
-
-**And it recurred.** Session 18 rendered a reconstructed rig with a hand-rolled
-Workbench script and shipped the image as evidence. The car's rear read as a
-stretched smear — which the user spotted, not the checks. The export was
-correct: several body materials set `flip_uv = 2` → `wrapS = MIRROR`, and
-Workbench was faking it.
-
-Writing the corollary down was not enough, because the trap is in the *next*
-script, not the one that was fixed. So the rule is carried by the tools now:
-`blender_camview.py`, `blender_check.py` and `blender_nodeview.py` all default
-to EEVEE for unlit files and print which engine they used. **Do not hand-roll
-another render script — use one of those.**
+A viewer that fakes a sampler mode, a blend or a light produces a wrong picture
+that is indistinguishable from an exporter bug. Before concluding anything from
+a render, know what the renderer is faking. The player's own switches (the
+Scene panel's light, fog and filtering) are there to turn one thing off at a
+time.
 
 ### Corollary 3: when a face looks wrong, bisect the pipeline, don't stare
 
-Three cheap, decisive tools, in the order they should be used:
-
-1. `tools/blender_probe.py <gltf> <cam> <frame> <sx> <sy> …` — raycast a pixel
-   and print the object, material, image, the face's UVs and its world-units
-   per texel. `--sweep` ranks the whole frame by texel aspect. Reading pixel
-   coordinates off a screenshot by eye is guesswork; this is not.
-2. `export_level.py --uv-check` — replace every texture with a checkerboard.
-   Distinguishes "the UVs are degenerate" from "the texture decoded wrong" in
-   one render.
-3. **Turn one thing off.** Forcing every sampler to `REPEAT` and re-rendering
-   located Session 13's bug in a single step, after a long time spent probing
-   UV values that were correct all along.
+**Turn one thing off.** Forcing every sampler to one mode and re-rendering
+locates a UV bug in a single step, where probing UV values that are correct
+all along does not. Then find which stage of the pipeline — decode, bundle,
+material translation, draw — first differs from the game.
 
 ---
 
-## Rule 4: the session log is the deliverable
+## Rule 4: the wrong turns are part of the result
 
-`session-log.md` is the handoff. Record **dead ends with the same weight as
-results** — a documented wrong turn is worth more than an undocumented right
-one, because it is the thing the next session would otherwise repeat.
+Record **dead ends with the same weight as results** — in the commit message
+that closes the work — because a documented wrong turn is the thing the next
+session would otherwise repeat.
 
-When a previously-documented claim turns out to be wrong, **correct it in place
-and say so in the log.** Several entries in `formats/` were confidently wrong
+When a previously-documented claim turns out to be wrong, **correct it in
+place**, and say so in the commit message. Several entries in `formats/` were confidently wrong
 for multiple sessions.

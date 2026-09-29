@@ -3,7 +3,7 @@
  *
  * `world.save()` returns a plain JSON value that fully determines the next
  * frame; `world.load()` makes the running player identical to the moment it
- * was taken. See docs/PLAYER_ARCHITECTURE.md, "Saving and restoring the whole
+ * was taken. See docs/PLAYER.md, "Saving and restoring the whole
  * game state", for the six rules that make that true.
  */
 

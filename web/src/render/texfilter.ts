@@ -2,8 +2,8 @@
  * Texture filtering, as an **override** of what the game asked for.
  *
  * This is not a setting the player invents. Every mesh in the game carries its
- * own filter in its TSP word, and the exporter already honours it: `gltf.py`'s
- * `get_sampler` emits one glTF sampler per `(wrapS, wrapT, filter)` triple,
+ * own filter in its TSP word, and the exporter already honours it: `gltf.ts`'s
+ * `getSampler` emits one glTF sampler per `(wrapS, wrapT, filter)` triple,
  * with `NEAREST` when the mesh's `filter_mode` is 0 and `LINEAR` otherwise, and
  * the wrap modes off the `clamp_uv` / `flip_uv` bits. So the bundle that comes
  * off the disc already says, per mesh, how it wants to be sampled — and

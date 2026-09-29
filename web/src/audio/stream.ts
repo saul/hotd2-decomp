@@ -72,7 +72,7 @@
  * file **shorter than the ring** plays once, then silence to the end of the
  * ring, and only then wraps. No shipped looping track is that short (the
  * shortest is `ST6_BOS1_AR.WAV`, 25 s against a 3 s ring; `CLR2.WAV`, 4.35 s,
- * is one of the three one-shots), and `tools/verify_bgm_stream.py` asserts it
+ * is one of the three one-shots), and `web/tools/checks/bgm_stream.ts` asserts it
  * of every name in both tables, so the model below is exact for the game as
  * shipped rather than for every file the engine could be handed.
  */

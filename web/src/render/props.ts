@@ -42,7 +42,7 @@
  * stage 1 has four hinges carrying **±512 and ±416**, and multiplying the X
  * angle by one of those throws the door through a hundred turns rather than
  * the two-degree judder the curve holds. That was this layer's bug, not the
- * exporter's — see `docs/PLAYER_PROGRESS.md`.
+ * exporter's.
  *
  * `scale` is `obj+0x2C0`, an `FMUL` that `PropBuildHinge` (`FUN_00472BD0`),
  * `PropBuildVanDoors` and `PropBuildHingeScaled` (`FUN_00472EB0`) all seed

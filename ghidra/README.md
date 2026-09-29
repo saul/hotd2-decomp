@@ -1,8 +1,8 @@
 # Ghidra environment
 
-Phase 1. The project database is **not** committed — it is 17 MB of derived
-data and rebuilds in about two minutes. The scripts that produce it are
-committed, because reproducibility is the point.
+The project database is **not** committed — it is derived data and rebuilds in
+a few minutes. The scripts that produce it are committed, because
+reproducibility is the point.
 
 ## Prerequisites
 
@@ -34,12 +34,16 @@ HOTD2_APPLY=1 ./ghidra/run.sh apply-annotations
 ## Annotations are the source of truth
 
 The database is derived data and is not committed. **`annotations/*.tsv` is
-what is committed**, and it is the project's record of every symbol recovered:
+what is committed**, and it is the project's record of every symbol recovered
+(the counts are in `docs/STATUS.md`):
 
-| File | Rows | Contents |
-|---|---|---|
-| `annotations/functions.tsv` | ~200 | `address`, `name`, optional comment |
-| `annotations/globals.tsv` | ~130 | `address`, `name`, optional comment |
+| File | Contents |
+|---|---|
+| `annotations/functions.tsv` | `address`, `name`, optional comment — sorted by address |
+| `annotations/globals.tsv` | `address`, `name`, optional comment — sorted by address |
+
+Add or rename a row with `python3 tools/annotate.py`, which upserts and keeps
+the address order.
 
 `ApplyAnnotations` only renames a symbol whose current name is still a Ghidra
 default, so it is idempotent, it never clobbers a name chosen in the GUI, and
@@ -47,9 +51,14 @@ it can run before or after `ApplyKnownTables` without ordering trouble. It
 *creates* functions that do not exist yet, because most of the interesting ones
 are only reachable through a dispatch table auto-analysis did not recognise.
 
-`tools/verify_annotations.py` checks every row against the EXE's own PE section
-table — that each address resolves, that functions land in `.text`, that
-nothing is listed twice. Run it before committing an annotation change.
+The `game:annotations` check (`web/tools/checks/annotations.ts`) holds every
+row against the EXE's own PE section table — that each address resolves, that
+functions land in `.text`, that nothing is listed twice. Run it before
+committing an annotation change:
+
+```sh
+python3 tools/verify_all.py --only game:annotations --game-dir ~/"THE HOUSE OF THE DEAD 2"
+```
 
 ### After exploring over MCP, export
 
@@ -62,10 +71,14 @@ So when a session has renamed anything:
 git diff ghidra/annotations          # review, then commit
 ```
 
-`ExportAnnotations` deliberately skips anything a fresh import would recreate —
-default names, `Catch@`/`Unwind@`, PE resources, Windows TEB fields, and the
-CRT/D3DX names the function ID analyser finds — so the committed file stays a
-record of *this project's* findings rather than a snapshot of Ghidra's.
+`ExportAnnotations` **merges** into the TSVs: it keeps body comments and any
+row the database has no symbol for, and refuses a generated name over a curated
+one. It skips anything a fresh import would recreate — default names,
+`Catch@`/`Unwind@`, PE resources, Windows TEB fields, and the CRT/D3DX names
+the function ID analyser finds — so the committed file stays a record of
+*this project's* findings. Its filter is a prefix list, so read the diff: a
+Ghidra release that renames an auto-label prefix lets those labels through.
+The export fails while a Ghidra GUI holds the project lock.
 
 ## Layout
 
@@ -87,15 +100,7 @@ environment variable, and print a line prefixed `[hotd2]` so `run.sh` surfaces i
 
 ## Ghidra MCP
 
-An MCP bridge runs at `http://127.0.0.1:8089` for interactive exploration and is
-registered in `~/.config/opencode/opencode.jsonc`. It requires an opencode
-restart to take effect, and only `/mcp/health` is reachable over plain HTTP.
-
-Use MCP to *explore*. Capture anything that is a *result* as a committed script
-here or as documentation in `docs/re/` — MCP calls leave no reproducible trail,
-and this project spans many sessions.
-
-## Current baseline
-
-See `docs/re/session-log.md` for the analysis state, known gaps and the ordered
-list of next actions.
+Interactive exploration goes through a Ghidra MCP bridge against the live
+database. Use it to *explore*; capture anything that is a *result* in
+`annotations/` (then `export-annotations`), as a committed script here, or as
+documentation in `docs/re/` — MCP calls leave no reproducible trail.

@@ -180,7 +180,7 @@ reference is inside the class range, per `get_xrefs_to`, except the
 
 All object and camera path slots exist in stage 3's `op_st3`/`cp_st3` with
 start frames equal to the tables' (`op_st3` slot 354 starts at −245)
-`[proved]` (`hod2lib.stage.Stage(stage=3).campaths()`).
+`[proved]` (`Stage.campaths()` for stage 3, `web/src/hod2lib/stage.ts`).
 
 ### The class's two RNGs
 
@@ -1105,7 +1105,7 @@ The chain runs from the tail (bone 0 at `pts[+0x762C]`, the actor's
 position) **forward** along the path, three points per bone: the head (bone 24)
 leads the body by about 72 path points `[proved]` from the arithmetic.
 
-### The skeletons — and a decoder that truncates them
+### The skeletons
 
 Walked from `g_character_skeletons` (`0x004E0430`) with no depth limit
 `[proved]`:
@@ -1114,7 +1114,7 @@ Walked from `g_character_skeletons` (`0x004E0430`) with no depth limit
   (offsets `(3, 0, 0)`, slot 914; node 17 slot 913), node 17 — **the weak
   bone** — has two children, 18 (slot 911) and 19 (slot 912), **both at
   offset `(3.662, −0.189, 0)`**: the jaws. 20 bones
-  (`character_bone_count` 20).
+  (`characterBoneCount` 20).
 * `boss3l.bin` (`0x48`): chain 1..24 (offsets `(4, 0, 0)`), node 24 the weak
   bone with jaws 25 (slot 898) and 26 (slot 899) at `(4.881, −0.252, 0)`.
   27 bones.
@@ -1125,13 +1125,11 @@ skeletons is past the end of a childless node and is never used, because the
 jaw it would serve takes the first jaw's node and **both jaws have the same
 offset** `[proved]`.
 
-**Both `hod2lib` halves stop the skeleton walk at depth 12**
-(`tools/hod2lib/exetab.py` `character_skeleton`, `depth > 12`;
-`web/src/hod2lib/exetab.ts:1112`), so they return **13 of boss3's 19 nodes
-and 13 of boss3l's 26** — no weak bone and no jaws `[proved]` (run above).
-`b6boss3.bin` (`0x50`) is truncated the same way. A bundle built today would
-give these heads nothing to shoot. Raising the bound (the `seen` set already
-guards cycles) is a format change and lands in both halves together.
+**These trees are deep** — the weak bone and both jaws sit below depth 12 —
+and the decoder walks them whole: `characterSkeleton`
+(`web/src/hod2lib/exetab.ts`) has no depth cap, and its `seen` set bounds the
+walk by its input (`L22`), so it returns all 19 of boss3's nodes, all 26 of
+boss3l's, and `b6boss3.bin` (`0x50`) whole.
 
 ### `Boss3DrawBoneParts` — `0x004219E0` (render, with one clock in it)
 
@@ -1291,11 +1289,10 @@ Through the globals and through each other's actors, never through a parent
 
 ## What the exporter must carry
 
-1. **A character-type rule for class 0x45** (`CHAR_TYPE_RULES` in
-   `web/src/hod2lib/spawnres.ts`, and its twin in
-   `tools/hod2lib/spawnres.py`). None of the existing rule kinds fits, because
-   the type depends on the subtype byte and, for subtype 2, on the index word
-   `[proved]`:
+1. **A character-type rule for class 0x45** — `CHAR_TYPE_RULES` in
+   `web/src/hod2lib/spawnres.ts` gives it its own (`class45Type`), because no
+   single-field rule kind fits: the type depends on the subtype byte and, for
+   subtype 2, on the index word `[proved]`:
 
    | `desc+0x25` | type |
    |---|---|
@@ -1322,9 +1319,9 @@ Through the globals and through each other's actors, never through a parent
    67–72, 73 `0x49`); bystanders `0x21D`, `0x21E`, `0x21F`, `0x23D`, `0x24F`,
    `0x264`. `g_motion_play_length` of each is load-bearing (the heads' and
    body's timings read the cursor and clip end).
-   **And the skeletons themselves must be whole**: both `hod2lib` halves cut
-   the node walk at depth 12, which drops the weak bone and both jaws of
-   `boss3.bin` and `boss3l.bin` (see [the skeletons](#the-skeletons--and-a-decoder-that-truncates-them)).
+   **And the skeletons themselves must be whole**: the weak bone and both
+   jaws of `boss3.bin` and `boss3l.bin` sit deep in the tree (see
+   [the skeletons](#the-skeletons)).
 3. **The two index words and the subtype** on each placement (`desc+0x22`,
    `desc+0x25`), and `desc+0x24` for the bystanders.
 4. Object paths `op_st3` 354–370 and camera paths `cp_st3` 137–144, 150–158:

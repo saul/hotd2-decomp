@@ -95,7 +95,7 @@ for the boot logos.
 23 `tex/` files are effectively empty — `tex/bg_adv10.bin` is 4 bytes of zero,
 i.e. a valid compressed file whose uncompressed size is 0.
 
-## 4. `evt/` pointer ranges — RESOLVED (Session 11)
+## 4. `evt/` pointer ranges — RESOLVED
 
 **Not an anomaly.** The apparent problem was an artefact of too wide a filter.
 
@@ -133,7 +133,7 @@ Analysed in full in [`provenance.md`](provenance.md); relevant to Phase 2.
 Most raw `pol/` offset tables start `800, 800, ...`. `etc_1.bin` starts
 `800, 800, 1000, 1000, ...` — a much smaller first span. Either it holds many
 small models, or the table has a different meaning here. Low priority; noted so
-the `container.py` parser is tested against it.
+the `container.ts` parser is tested against it.
 
 ## 7. `cam/op_st1.bin` corrupt offset-table entries — RESOLVED, not shipped
 
@@ -157,7 +157,7 @@ The six "corrupt" entries were single bytes overwritten with `0xEE`:
 That the low byte alone changed, always to the same value, is the signature of
 media damage — and it is why the "deltas are not constant, so this is not a
 uniform off-by-N" reasoning went nowhere: there was no exporter bug to find.
-`hod2lib.cam`'s offset-repair pass has been removed.
+The cam parser (`web/src/hod2lib/cam.ts`) has no offset-repair pass.
 
 ## 8. `trnevtbl.bin` references cam path slot 418
 
@@ -214,6 +214,5 @@ invented to explain corruption.
   word outside the sane range instead of restoring it.
 
 Fixed by restoring the four files from `hotd2.iso` and deleting the repair code
-from `hod2lib.cam`, `hod2lib.campaths`, `tools/verify_phase6.py`,
-`web/src/bundle/cameras.ts`, `web/src/render/campath.ts`,
+from the cam parser, `web/src/bundle/cameras.ts`, `web/src/render/campath.ts`,
 `web/src/render/overlays.ts` and `web/src/app/main.ts`.

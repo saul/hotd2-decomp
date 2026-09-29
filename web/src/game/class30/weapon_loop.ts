@@ -63,9 +63,9 @@ export enum WeaponLoopType {
 const CHAIN_SAW_LOOP = 0x4d17a9;
 /** `PUSH 0x1f25a9` at `0x0045314a` — entry 34 of the same table. */
 const LASER_SWORD_LOOP = 0x1f25a9;
-/** `DAT_004e17a9` at `0x00456620` — entry 4 of `g_looping_se_stop_ids`. */
+/** `PUSH 0x4e17a9` at `0x00456624` — entry 4 of `g_looping_se_stop_ids`. */
 const CHAIN_SAW_STOP = 0x4e17a9;
-/** `0x2025a9` at `0x00456627` — entry 34 of the same table. */
+/** `PUSH 0x2025a9` at `0x0045662b` — entry 34 of the same table. */
 const LASER_SWORD_STOP = 0x2025a9;
 
 /**

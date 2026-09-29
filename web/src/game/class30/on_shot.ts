@@ -96,8 +96,8 @@ const STATE_UNREAD_0x34 = 0x34;
  * was not: every actor this half of the routine chose state 9 for was sent to
  * {@link ZombieState.Death} instead, on the argument that the two states share
  * a terminus, so the 44 shipped spawns carrying body condition 5 or 6 died
- * where they stood rather than where they were thrown. That was **D2** in
- * `docs/REVIEW-2026-09-03.md`, and `class30/knockback.ts` now transcribes
+ * where they stood rather than where they were thrown.
+ * `class30/knockback.ts` now transcribes
  * `FUN_004550E0` — the camera-space landing point, the arc, the water case and
  * the bounce — so the write below is the engine's own.
  */

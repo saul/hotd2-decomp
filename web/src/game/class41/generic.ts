@@ -68,7 +68,7 @@
  *
  * **The renderer used to pose every one of these `Ry·Rz·Rx`**, which is
  * `PropDrawOnlyType51`'s order and not the family's. It then read
- * {@link GENERIC_POSE_ORDER}, which `tools/verify_prop_pose.py` derives from
+ * {@link GENERIC_POSE_ORDER}, which `web/tools/checks/prop_pose.ts` derives from
  * the EXE per type; a routine that records its draws composes its own
  * matrices and never reaches that table, and every generic routine records
  * its draws now. The table stays as the check's reading of the EXE.
@@ -114,7 +114,7 @@ import { GENERIC_PLACE_ARMS } from "./generic_routines";
  * read left to right as the engine calls them, which for a pre-multiplying
  * matrix stack composes as `Rz·Ry·Rx`.
  *
- * `tools/verify_prop_pose.py` reads these values straight out of the EXE and
+ * `web/tools/checks/prop_pose.ts` reads these values straight out of the EXE and
  * fails on any that disagrees, which is what stops the table becoming the
  * second source `L16` is about.
  */
@@ -138,7 +138,7 @@ export enum PoseOrder {
    */
   NoRotation = "",
   /**
-   * The routine rotates from something `tools/verify_prop_pose.py`'s scan
+   * The routine rotates from something `web/tools/checks/prop_pose.ts`'s scan
    * cannot attribute to a descriptor word, so the table claims no order.
    * **75** poses from the object path it rides (`PropUpdateType75`,
    * `FUN_004710C0`). **41** is `RotY(yaw); RotZ((s16)obj+0x200);
@@ -209,7 +209,7 @@ export const GENERIC_RADIUS: Partial<Record<number, number>> = {
  *   for exactly the reason the van's body was.
  *
  * `tools/verify_prop_slots.py` holds whatever this set says, and
- * `tools/verify_prop_pose.py` **derives the set itself** out of the EXE and
+ * `web/tools/checks/prop_pose.ts` **derives the set itself** out of the EXE and
  * the shipped scripts, and fails either copy of it — the port's here and the
  * exporter's in `hod2lib/bundle.ts`. Fourteen of the fifty routines pass
  * `obj+0x28C` to their first draw, and four clauses cut that down to seven:
@@ -242,7 +242,7 @@ export const GENERIC_RADIUS: Partial<Record<number, number>> = {
  * does draw `obj+0x28C`, but its arm calls `PickOriginalModeItem`, which
  * overwrites the field with the item record's model before the routine ever
  * runs; the check had looked for a literal store and not for a call. Clause 2
- * now counts the call, for 70, 71 and 72 alike, and `tools/verify_prop_pose.py`
+ * now counts the call, for 70, 71 and 72 alike, and `web/tools/checks/prop_pose.ts`
  * with it. See `class41/original_item.ts`.
  */
 export const GENERIC_DESCRIPTOR_SLOT: ReadonlySet<number> =
@@ -292,7 +292,7 @@ export const GENERIC_SLOT_STRIP: ReadonlySet<number> = new Set([31, 33]);
  * place, four of them by more than a degree and the worst by 19.65° — all four
  * `PropDrawOnlyType12`, in stage 4's blocks 4, 7, 12 and 13.
  *
- * `tools/verify_prop_pose.py` derives this table from the EXE and fails on any
+ * `web/tools/checks/prop_pose.ts` derives this table from the EXE and fails on any
  * row that disagrees, so it is a mirror and not a second source. Its two
  * measurements are worth keeping in view:
  *

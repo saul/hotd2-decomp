@@ -3,8 +3,8 @@
 How PowerVR2 render state maps to a portable material, and specifically how
 transparency works.
 
-Implemented in [`tools/hod2lib/gltf.py`](../../tools/hod2lib/gltf.py). Bitfield
-definitions live in [`nl1.md`](nl1.md).
+Implemented in [`web/src/hod2lib/gltf.ts`](../../web/src/hod2lib/gltf.ts).
+Bitfield definitions live in [`nl1.md`](nl1.md).
 
 ## Alpha is not stored in the texture alone
 
@@ -51,7 +51,7 @@ Notes:
 - Every textured list-2 mesh with `IgnoreTexAlpha` also sets `UseAlpha`, so it
   is in the translucent pass on the PC, and its texture's alpha blends. (This
   table's counts include the `pol_` copies of files; see
-  `tools/verify_texture_alpha.py` for the de-duplicated corpus.)
+  `web/tools/checks/texture_alpha.ts` for the de-duplicated corpus.)
 - **Additive blending is real but confined to effects.** All 2,704 additive
   meshes live in `eff_*` and boss assets — `eff_boss3`, `eff_org9`, `eff_boss5`
   and similar. Stage geometry contains none.
@@ -110,8 +110,7 @@ from the TSP pass bits alone, which the forced mask keeps. So a faded draw at
 **writes depth**; only its translucent-pass meshes are dropped by the alpha
 test. `[proved]` The characters that fade -- `znele`, the twin, the blinking
 throwers -- are drawn at 0 for whole stretches, and what they cover of any
-translucent geometry the sort draws after them is left undrawn. See
-`docs/PLAYER_PROGRESS.md`, "Character fades".
+translucent geometry the sort draws after them is left undrawn.
 
 Measured over the corpus: 112 translucent-pass meshes set `IgnoreTexAlpha` on
 an ARGB texture, and **101** of those textures have alpha below 255 — the
@@ -121,34 +120,34 @@ invisible either way. The stripped copies drew the blades' glow as solid
 cards. 3,147 opaque-pass meshes sit on textures with transparent texels; the
 opaque pass shows them as before, and only a faded draw would change them.
 
-**The exporter** writes one image per bank texture with the bank's alpha;
-the material's `alphaMode` is the pass, so a viewer ignores the alpha of an
+**The exporter** writes one image per bank texture with the bank's alpha; the
+material's `alphaMode` is the pass, so a viewer ignores the alpha of an
 opaque-pass material as the game does. **The player** reproduces pass 0's
 indifference with three.js's `OPAQUE` define (compiled for a material that is
 not `transparent` and has `NormalBlending`, which `draw_order.ts` gives every
 opaque-pass material), and a fade flips the pass. Two things leaned on the
 stripped images and changed with them: `setAssetDrawAlpha` draws an
-`AssetDrawSlotWithAlpha` at 1.0 in the forced state rather than plainly, and
-the blood-colour transpose reads pixels back through WebGL instead of a 2D
-canvas, which is premultiplied and turned the colour under 904 opaque-pass
-gore texels at alpha 0 black. `tools/verify_texture_alpha.py` holds the bytes,
-the scan, the corpus counts, and a current bundle's images against the bank.
+`AssetDrawSlotWithAlpha` at 1.0 in the forced state rather than plainly, and the
+blood-colour transpose reads pixels back through WebGL instead of a 2D canvas,
+which is premultiplied and turned the colour under 904 opaque-pass gore texels
+at alpha 0 black. `web/tools/checks/texture_alpha.ts` holds the bytes, the scan,
+the corpus counts, and a current bundle's images against the bank.
 
 ## One material per mesh — [proved]
 
 `WalkMeshChainAndDraw` calls `SetMaterial` for **every mesh** from its own
 header: diffuse `(+0x30, +0x34, +0x38, +0x2C)`, ambient that times `+0x28`
 (`ModelSetMeshAmbientScale`, `0x00419380`, writes it), and a specular colour
-`+0x40..+0x48` at power `1 << +0x24` when `+0x24 >= 1`. The exporter's
-material cache was keyed on the part, the texture and the four words, **not
-the base colour or the culling**, so a mesh with the same texture and state
-as an earlier one got the earlier one's colour: about a fifth of the game's
-meshes, nearly all of them with another mesh's baked lighting or base alpha.
-The stage-2 car's driver's door (`char_adv04` model 4, white) drew black —
-the colour of the body's inner copies in model 2, same texture 33 and TSP.
-The key carries the clamped colour and `doubleSided` now, and
-`verify_texture_alpha.py` holds every model primitive of a bundle to its own
-mesh's colour and culling, found by the header sphere it carries.
+`+0x40..+0x48` at power `1 << +0x24` when `+0x24 >= 1`. The exporter's material
+cache was keyed on the part, the texture and the four words, **not the base
+colour or the culling**, so a mesh with the same texture and state as an earlier
+one got the earlier one's colour: about a fifth of the game's meshes, nearly all
+of them with another mesh's baked lighting or base alpha. The stage-2 car's
+driver's door (`char_adv04` model 4, white) drew black — the colour of the
+body's inner copies in model 2, same texture 33 and TSP. The key carries the
+clamped colour and `doubleSided` now, and `web/tools/checks/texture_alpha.ts`
+holds every model primitive of a bundle to its own mesh's colour and culling,
+found by the header sphere it carries.
 
 ## Pixel formats and their alpha
 
@@ -274,8 +273,8 @@ through table `0x00598B20`:
 | 2 | `D3DCULL_CCW` |
 | 3 | `D3DCULL_CW` |
 
-This confirms the winding fix made empirically in Session 6 — the reversal
-belongs on culling 3, not 2 — from the binary rather than from screenshots.
+This settles from the binary, rather than from screenshots, that the winding
+reversal belongs on culling 3, not 2.
 
 ### Shade mode is per *strip*, not per mesh — correction
 
@@ -336,8 +335,8 @@ stage 1 (`COLOROP`/`ALPHAOP` = `D3DTOP_DISABLE`) and nothing re-enables it.
 So there is no second texture stage for a reflection map to live in either.
 
 **For the exporter this is a decision, not a gap:** the faithful reproduction
-of this port ignores both flags. `nl1.Strip.env_mapped` is kept so the flag
-survives into `extras`, but nothing acts on it.
+of this port ignores both flags. `envMapped` in `web/src/hod2lib/nl1.ts` reads
+the flag, but nothing acts on it.
 
 ### The addressing table, read from the binary
 
@@ -571,7 +570,7 @@ Two corrections to what used to be written here and in the annotations:
   pass is drawn in decides which translucent surfaces survive, and it is not a
   painter's order.
 
-`tools/verify_draw_order.py` asserts all of it from the bytes and the corpus.
+`web/tools/checks/draw_order.ts` asserts all of it from the bytes and the corpus.
 
 ### The translucent order — [proved]
 
@@ -675,21 +674,11 @@ Two setups, selected by bit `0x04000000` of the draw command — see
 
 ## Debugging exported materials
 
-Two tools exist for tracing a visual problem back to source data:
+`exportLevel` (`web/src/hod2lib/gltf.ts`) takes a `uvCheck` option that
+replaces every texture with a UV checkerboard, red increasing along u and blue
+along v. No `npm run export` flag sets it.
 
-```sh
-# whole level with every texture replaced by a UV checkerboard
-python3 tools/export_level.py --game-dir "..." --stage 2 --uv-check
-
-# everything known about one Blender material
-python3 tools/inspect_material.py --game-dir "..." --material st2_07_tex12_lambert
-```
-
-`tools/blender_whatsthis.py` pastes into Blender's Scripting tab and reports the
-selected face's UV bounds, world-space area and per-axis texel density, writing
-to `~/hod2_whatsthis.txt`.
-
-**Interpreting `--uv-check`:** if a face is still wrong with a checkerboard on
+**Interpreting a UV check:** if a face is still wrong with a checkerboard on
 it, the texture pipeline is not at fault — look at UVs, geometry or material
 state instead. That single distinction eliminates most of the search space.
 
@@ -747,6 +736,4 @@ the addressing modes their own `tsp_instruction` demands**.
 > nodes. Workbench does not evaluate shader nodes — it reads `extension`
 > directly — so under Workbench *every* material with a non-`REPEAT` axis
 > renders clamped on **both** axes, producing exactly the streaks and
-> solid-black faces the real bug produced. `blender_camview.py` now defaults to
-> EEVEE for unlit exports for this reason. Use `--engine workbench` only for
-> geometry checks.
+> solid-black faces the real bug produced.

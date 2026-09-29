@@ -4,7 +4,7 @@
  * Plain `{x, y, z}` and free functions, because `game/` may not import three
  * and — the sharper reason — a snapshot is `structuredClone` of the state, so
  * anything with a prototype or a method in it would not survive the round
- * trip. See docs/PLAYER_ARCHITECTURE.md, rule 2 of the save state.
+ * trip. See docs/PLAYER.md, rule 2 of the save state.
  */
 
 export interface Vec3 { x: number; y: number; z: number }

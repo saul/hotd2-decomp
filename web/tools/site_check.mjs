@@ -109,9 +109,8 @@ try {
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
   const bad = [];
   const got = { bgm: 0, se: 0, bundle: 0 };
-  // `docs/HOSTING.md` keeps the site private with a secret path, which holds
-  // only while the page asks nothing of any other origin: a request elsewhere
-  // would carry the path out in its `Referer`.
+  // The page asks nothing of any other origin: everything it needs is on the
+  // site, so a site copied anywhere works whole.
   const origin = `http://127.0.0.1:${port}/`;
   const foreign = [];
   page.on("request", (r) => {

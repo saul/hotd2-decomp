@@ -8,7 +8,7 @@
  * per room code is the one place both reach. Every request is a short
  * request -- no stream stays open -- so an object is up only while it answers.
  *
- * Deploying, and the TURN key: `README.md`.
+ * Deploying, and the TURN key: `docs/PLAYER.md`, "The matchmaker".
  */
 import {
   Matchmaker, SDP_MAX, SignalError, configFromEnv, drawCode, route, type Room,

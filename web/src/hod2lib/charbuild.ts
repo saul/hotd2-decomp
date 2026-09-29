@@ -1,6 +1,5 @@
 /**
  * Assembling one character type, and the glTF rig it draws through.
- * The port of `tools/hod2lib/charbuild.py`.
  *
  * {@link Character} is a character *type* -- its skeleton, its per-bone combat
  * rows and the motions baked for it -- not an instance; `placement.Placement`

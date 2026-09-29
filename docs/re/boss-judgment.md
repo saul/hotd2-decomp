@@ -28,15 +28,15 @@ not return (`L35`): `Class22DrawAndPoseSubActor`, `Class22FightPhase1`,
 
 ## 1. Where it spawns, and how the tail reaches `obj+0x1390`
 
-`dump_stage_script.py` prints evt opcode **`0x0B` as `spawn_obj`** and opcode
-`0x09` as `spawn_placed`. The evt dispatch table at `0x005931D8` (96 dwords,
-read from memory) has entry 9 = `0x004088A0` (`EvtOpSpawnPlaced09`, no tail
-pointer) and entry `0xB` = `0x00408AA0` (`EvtOpSpawnObj0B`), which calls
-`SpawnFromDescriptor` (`FUN_00408A20`) at `0x00408ABB` — and that is what
-writes `obj+0x1390 = descriptor + 0x24`. So there is no contradiction with
-`spawns.md`: every class-0x22 spawn is opcode `0x0B`. The nested class-0x23
-descriptor is spawned by `SpawnFromDescriptor` directly (`0x0049B6FA`,
-`0x0049CE42`), so it gets `obj+0x1390` too.
+The evt decoder (`web/src/hod2lib/evt.ts`) names evt opcode **`0x0B`
+`spawn_obj`** and opcode `0x09` `spawn_placed`. The evt dispatch table at
+`0x005931D8` (96 dwords, read from memory) has entry 9 = `0x004088A0`
+(`EvtOpSpawnPlaced09`, no tail pointer) and entry `0xB` = `0x00408AA0`
+(`EvtOpSpawnObj0B`), which calls `SpawnFromDescriptor` (`FUN_00408A20`) at
+`0x00408ABB` — and that is what writes `obj+0x1390 = descriptor + 0x24`. So
+there is no contradiction with `spawns.md`: every class-0x22 spawn is opcode
+`0x0B`. The nested class-0x23 descriptor is spawned by `SpawnFromDescriptor`
+directly (`0x0049B6FA`, `0x0049CE42`), so it gets `obj+0x1390` too.
 
 | stage | block | instr | descriptor | class | variant / subtype | hp (`+0x22`) |
 |---|---|---|---|---|---|---|
@@ -876,11 +876,10 @@ tests it: there is no `+0x1390` operand in `0x0049B640`, `0x0049CE10`,
 | st1 `0x6174` (fight) | `0x31` / 400 | never: block 14 plays `0x31` to 230, then `0x32`, `0x33` |
 | st5 `0x14AC` (return) | `0xCF` / 140 | block 2 step 2 plays `0xCF` 50..244 |
 
-So the stage-1 pair lies in the pool until the stage ends, and stage 5's
-goes in block 2. A seek's replay retires the flier's record on the dead flag
-or, for the cameo, the cue (`Class22OutlivedByReplay`,
-`PLAYER_HANGS.md` item 33). The walker is never a script record: it is made
-by the flier's entrance.
+So the stage-1 pair lies in the pool until the stage ends, and stage 5's goes in
+block 2. A seek's replay retires the flier's record on the dead flag or, for the
+cameo, the cue (`Class22OutlivedByReplay`). The walker is never a script record:
+it is made by the flier's entrance.
 
 ## 11. What the bundle exporter must carry
 
@@ -915,18 +914,19 @@ by the flier's entrance.
   0x104..0x13F (phase 1), 0x140..0x144 (phase 2), 0x147 (ring curve); from
   `op_st5`: 0x17F. **Stage 5 needs `op_st1.bin`**: the engine's per-scene cam
   list (`FUN_004040A0`, `PTR 0x004C4990[g_scene_index]`) loads files
-  `{10, 20, 16}` = `cp_st5`, `op_st5`, **`op_st1`** for scene 4. The web
-  loader (`hod2lib/stage.ts loadCamPaths`) loads `cp_st5`, `op_st5`,
-  `cp_gmovr` only. Original Mode also loads file 0x16 (`op_org`) per entry.
+  `{10, 20, 16}` = `cp_st5`, `op_st5`, **`op_st1`** for scene 4. The
+  exporter's `loadCamPaths` (`web/src/hod2lib/stage.ts`) loads the same list
+  through `ExeTables.sceneCamFiles`, plus `cp_gmovr`. Original Mode also
+  loads file 0x16 (`op_org`) per entry.
 * **Tables:** every row of §6 (they are `.rdata`).
 * **Sounds and lines:** the ids in §4–5; lines 0x1B, 0x1C, 0x1D.
 
 ## 12. What the port will need
 
-Written before the port, and kept as the reading's statement of need. How
-each point was met -- the node-1 seat and extras in `render/`, the camera
-block under `g_camera_driver_held`, the per-player shot bytes, the draw-site
-clocks -- is in [`PLAYER_PROGRESS.md`](../PLAYER_PROGRESS.md), "JUDGMENT".
+Written before the port, and kept as the reading's statement of need. The
+port meets each point with the node-1 seat and extras in `render/`, the camera
+block under `g_camera_driver_held`, the per-player shot bytes and the draw-site
+clocks.
 
 * **`GameHost`:** `objectPath` (`CamEvalObjectPath6`) for every path above;
   node 1's **world matrix** of the flier (position *and* ZYX Euler) to seat the

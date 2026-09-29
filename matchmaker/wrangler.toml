@@ -1,5 +1,5 @@
 # The netplay matchmaker as a Cloudflare Worker: worker.ts beside this file,
-# one Durable Object per room. README.md is the whole procedure:
+# one Durable Object per room. docs/PLAYER.md ("The matchmaker") has the procedure:
 #
 #     cd matchmaker
 #     npx wrangler login

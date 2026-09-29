@@ -1,6 +1,5 @@
 /**
  * Which motion a spawn starts in, and the baked frames of it.
- * The port of `tools/hod2lib/charmotion.py`.
  *
  * `obj+0x1B4` is the motion id and a class handler is the only thing that
  * writes it, so a class earns a rule here the same way it earns a
@@ -414,8 +413,8 @@ const HUMANOID_IF_MODES = new Set([0, 1, 2]);
  * command inside a skipped arm would be read by the engine as two 8-byte ones,
  * and the second half of its point would have to miss `-2` for the scan to
  * survive. That is the engine's own arithmetic and it is transcribed rather
- * than corrected -- `tools/verify_scripted_clips.py` checks that every target
- * it lands on is a real command boundary in the shipped scripts.
+ * than corrected; every target it lands on in the shipped scripts is a real
+ * command boundary.
  *
  * Returns null only if the scan runs off the end of the file, which no shipped
  * program does.
@@ -595,11 +594,11 @@ export interface BakedMotion {
 /**
  * Parsed `mot/` banks, per source.
  *
- * The reference implementation re-reads the file on every {@link bake}, which
- * on a local disk is a few hundred redundant reads and costs seconds. Here a
- * read is a `FileSystemFileHandle` away and a bank is up to a megabyte, so the
- * same shape would be minutes. A bank is immutable once parsed and the file
- * cannot change under a running export, so the cache is invisible.
+ * Re-reading the file on every {@link bake} would be a few hundred redundant
+ * reads, and in the page a read is a `FileSystemFileHandle` away and a bank
+ * is up to a megabyte, so that would take minutes. A bank is immutable once
+ * parsed and the file cannot change under a running export, so the cache is
+ * invisible.
  */
 const BANK_CACHE = new WeakMap<AssetSource,
                                Map<string, Awaited<ReturnType<typeof loadBank>>>>();

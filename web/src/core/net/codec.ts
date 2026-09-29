@@ -2,7 +2,7 @@
  * The state codec: what the host sends so a replica holds exactly the host's
  * state, and how the replica puts it back.
  *
- * `docs/NETPLAY.md` is the design; this is the mechanism. Three properties are
+ * `docs/PLAYER.md`, "Netplay", is the design; this is the mechanism. Three properties are
  * load-bearing, and each is what the fuzz test in `web/test/net_codec.test.ts`
  * asserts:
  *

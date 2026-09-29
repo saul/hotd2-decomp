@@ -818,7 +818,7 @@ const TYPE: CharacterType = {
     // sub 1 is `if (obj+0x19C < 0x3C) return;`, a literal 60 measured against
     // that play clock. A fixture that left `play` to be derived from the frame
     // count would pass on a bundle that got it wrong, and the whole of
-    // `PLAYER_HANGS.md` 22 is an actor that never reached 60.
+    // stage 3 block 2's hang is an actor that never reached 60.
     "1017": motion(44, 0, 85), "1016": motion(36, 0, 69),
     // 987 (0x3DB) is the clip `ChooseDeathMotion` gives body conditions 5 and
     // 6 — the two that die through state 9 rather than state 6.
@@ -6386,7 +6386,7 @@ console.log("\nclass 0x41 type 43, stage 3's seven shootable props:");
 
 console.log("\nclass 0x41's pose orders come from the routines:");
 {
-  // The table the renderer reads. `tools/verify_prop_pose.py` is what says
+  // The table the renderer reads. `web/tools/checks/prop_pose.ts` is what says
   // the values match the EXE; this is what says the port's own three types
   // are in it and that the set the fix was about did not drift.
   check("type 51 is the only descriptor-slot type that composes Ry.Rz.Rx",
@@ -6406,7 +6406,7 @@ console.log("\nclass 0x41's pose orders come from the routines:");
   // Fourteen routines pass `obj+0x28C` to their first draw and only seven of
   // them are descriptor-slot types. These four are the ones that look like
   // they belong and do not, so a well-meaning addition trips here as well as
-  // in `tools/verify_prop_pose.py`:
+  // in `web/tools/checks/prop_pose.ts`:
   //
   // * 43 -- its arm computes the field (`0x19E8` or `0xFFFF`) rather than
   //   leaving the prologue's, and it ages `obj+0x11C` as a lifetime. All seven
@@ -7427,8 +7427,8 @@ console.log("\nclass 0x25, an unbaked clip parks the VM (B13's mechanism):");
   // The bug as reported was two stage-2 humanoids frozen on one frame. The
   // cause was not in this file at all: their `op 2` set motion 180 and the
   // **exporter** had never baked it, because nothing added an `op 2` operand
-  // to the bake list. `tools/verify_scripted_clips.py` is the corpus check for
-  // that; this is the port half, which records what an unbaked clip does so
+  // to the bake list.
+  // This is the port half, which records what an unbaked clip does so
   // the symptom is recognisable the next time one appears.
   const rng = new Rng(4);
   const cmds = [
@@ -8711,7 +8711,7 @@ console.log("\nthe stage-2 car: class 0x21 makes it, and nothing does before:");
 
 console.log("\nSt2CarDraw: the row, the two gated rotations, the roll-limited frame:");
 {
-  // New bug (NEW-BUGS-2, left open by the car's port): the crashed set, the
+  // Left open by the car's port: the crashed set, the
   // spin and the parked part's turn were never drawn -- the task only said
   // "drew". `St2CarDraw` (`FUN_00452320`) decides all three, and the port
   // leaves what it decided on `car.draw`.
@@ -12478,7 +12478,7 @@ console.log("class 0x31, the climb:");
 //   00449769  OR    EAX, 0x180000                  0d00001800
 //   0044977a  MOV   dword ptr [ESI + 0x136c], EAX  89866c130000
 //
-// `tools/hod2lib/evt.py` called that word "unused in every shipped file". It
+// That word has been called "unused in every shipped file". It
 // is not: 23 of 51 class-0x31 and 76 of 345 class-0x30 descriptors set it, and
 // the five stage-6 `zslman` that blink in on a wall or the ceiling get their
 // whole stance from it and nowhere else. Dropping it gave all five stance 0 —
@@ -14869,7 +14869,7 @@ console.log("class 0x31, the grab ends in the engine's one leave routine:");
 /**
  * `ThrowerStateThrow` and the two compares that divert character type 0x18.
  *
- * D3 of `docs/REVIEW-2026-09-03.md`. The write-up called it a 23-frame late
+ * It looked like a 23-frame late
  * release; it was that **and** the wrong clip, because `FUN_0044FAF0` tests
  * the character type twice — at 0x0044FB7A for the clip and again at
  * 0x0044FC83 for the release frame — and the port had been reading the
@@ -17201,7 +17201,7 @@ console.log("\nclass 0x30's captor family — the zombies work on the civilian:"
   // civilian for ever. Stage 1 block 9's 0x4B74 and 0x4BD0 are the two that
   // did it; their real header is `arrive 12.0, motion 1026`.
   //
-  // The producer is checked by `tools/verify_captor_scripts.py`; this is the
+  // The producer is the exporter's; this is the
   // consumer, and it is the assertion that says a null script is not survivable
   // rather than merely unusual.
   {
@@ -17371,7 +17371,7 @@ console.log("\nclass 0x30's captor family — the zombies work on the civilian:"
           (civ.flags & ActorFlag.Dead) !== 0, `flags 0x${civ.flags.toString(16)}`);
   }
 
-  // **State 43's tail, which is its only exit** — `PLAYER_HANGS` item 23.
+  // **State 43's tail, which is its only exit**.
   //
   // `ZombieStateDragTarget` (`FUN_0045C080`) raises `0x10100` on itself when
   // it kills, so from that frame `DispatchHit` skips `ResolveHit` and nothing
@@ -18229,7 +18229,7 @@ console.log("\nthe clip clock the scripts count in:");
   // showing 5 twice. Sixteen call sites compare it with `===`, correctly,
   // because `>=` double-fires across the `% (len + 1)` wrap. A cue authored at
   // 7, 15, 31 or 507 could therefore never fire, and the actor parked for
-  // ever. Most of `docs/PLAYER_HANGS.md` is that sentence.
+  // ever. That is the shape of most of the player's hangs.
   //
   // So this drives the real advance, one tick at a time, from every phase a
   // clip can start on -- because which value gets lost moves with the phase.
@@ -20138,8 +20138,7 @@ console.log("\nclass 0x30 state 33: the stationary thrower:");
   // bare and hands the permit over. The assertion is on the world: a record in
   // `g_thrown_weapons` carrying the kit's projectile slot, closing on the eye
   // frame after frame, and a hand whose recorded draw slot is now the bare
-  // one. What that slot *draws* is the exporter's half — see the
-  // throwing-hand rows in `tools/verify_attachments.py`.
+  // one. What that slot *draws* is the exporter's half.
   {
     const z = thrower();
     const host = {
@@ -20209,7 +20208,7 @@ console.log("\nclass 0x30 state 33: the stationary thrower:");
   // `0x004590E3`..`0x00459109`: holding already, neither write; otherwise
   // `|= 1`, and `|= 0x100000` too while `obj+0x34` has 0x20000. The port
   // raised the held-weapon bit here instead, and that is what sent stage 3's
-  // two type-19 axe men into state 12 when they died (PLAYER_HANGS 22, 24).
+  // two type-19 axe men into state 12 when they died.
   {
     const z = thrower();
     ZombieStateStandAndThrow(z, new Rng(1), NULL_HOST);
@@ -21170,7 +21169,7 @@ console.log("\nthe script states' drift tails:");
         `state ${held.state} flags 0x${(held.flags >>> 0).toString(16)}`);
 }
 
-// **The captor that mauls the civilian and then never attacks** -- NEW-BUGS-2,
+// **The captor that mauls the civilian and then never attacks** --
 // stage 2 block 16, `0xA030`. Driven through `GameUpdate`, so the delegate is
 // the real `ZombieStateHoldAtRange` and the claim the real `TryClaimAttackSlot`.
 //
@@ -24262,7 +24261,7 @@ console.log("class 0x30, dying with a weapon still in hand:");
  * **What state 12 costs when its clip is not in the bundle**, pinned as a test
  * rather than left as a sentence.
  *
- * `PLAYER_HANGS.md` 22 and the shape of it: sub 1 is
+ * The shape of it: sub 1 is
  * `if (obj+0x19C < 0x3C) return;`, an exact literal against the play clock of
  * clip `0x3F9`, and `MotionPlayFrame` answers **0** for a clip the character
  * type has not got. No character type in any of the twelve shipped bundles had
@@ -26186,7 +26185,7 @@ console.log("\nthe shot effects:");
   check("the tracer flies twenty units a frame",
         Math.abs(Math.hypot(tracer.vel.x, tracer.vel.y, tracer.vel.z) - 20)
           < 1e-4, `${tracer.vel.z}`);
-  // NEW-BUGS bug 15, the full-screen flash on every shot. The muzzle is one
+  // The full-screen flash on every shot. The muzzle is one
   // unit in front of the eye, and the tracer's quad drawn there at scale 1
   // fills the frame. `PlayerShotEffectsThink` (`FUN_00416B00`) moves a
   // tracer **before** it draws it, so the engine never draws one there: the
@@ -26648,8 +26647,7 @@ console.log("\nthe firing gate:");
  * hostage raises flag 30 from her own stream (rescued, command 17; shot or
  * mauled, command 12 of the on-shot stream), the wait passed on the frame it
  * was reached, and step 4's boat shot sailed past her and her captor while
- * the maul was still running. `docs/BUGS.md`, "the civilian/enemy are jumped
- * over".
+ * the maul was still running.
  *
  * Asserted here on the world rather than on a layer's opinion of itself: a
  * real class-0x10 actor in `G.g_object_list` with a real captor, driven by
@@ -26965,7 +26963,7 @@ console.log("\n`spawn_simple` builds the cards, and the cards open the gate:");
 
   // The chapter card: `MOV word ptr [ESI+0x11c], 0xb4` at `0x004345AB`, then
   // the skip test at `0x00434802`. The engine would hold 180 frames; by the
-  // user's decision (NEW-BUGS bug 13) the port takes the pad's unconditional
+  // user's decision the port takes the pad's unconditional
   // skip arm on every card, so the flag is up after **one** update — not a
   // three-second dead pause at the top of every stage.
   {
@@ -27020,7 +27018,7 @@ console.log("\n`spawn_simple` builds the cards, and the cards open the gate:");
 
   // The chapter card's bit: `OR AL, 0x20` at `0x0043436B` first thing in
   // sub 0, and `AND AL, 0xDF` at `0x004348C7` straight after flag 248 goes
-  // up at `0x004348C1`. The skip (NEW-BUGS bug 13) runs both in the one
+  // up at `0x004348C1`. The skip runs both in the one
   // update, which is the exe's own skip path -- so the bit is up for exactly
   // the stretch of that call between sub 0's head and the flag, and down
   // again before any other routine runs.
@@ -27204,7 +27202,7 @@ console.log("\n`spawn_simple` builds the cards, and the cards open the gate:");
  * The `.rdata` is the exe's own: `RESULT_CARD_RDATA` is what
  * `hod2lib/exetab.ts`'s `resultCardTables()` reads out of `Hod2.exe`,
  * copied once so the suite runs with no game directory, and
- * `tools/verify_result_card.py` holds the bundle's copy to the exe. Every
+ * `web/tools/checks/result_card.ts` holds the bundle's copy to the exe. Every
  * expected number below is the exe's -- a record's position, a table's cell
  * -- and never the port's own output read back (L65).
  */
@@ -28147,7 +28145,7 @@ console.log("\nclass 0x19: the stage-4 boss, Strength, and both of its flags:");
  *
  * The fixture is `boss2.bin` as the bundle carries it -- the real skeleton,
  * the real clip lengths -- with every clip's angles and root at zero, and
- * class 0x14's `.rdata` read out of `Hod2.exe` by `tools/hod2lib/class14.py`.
+ * class 0x14's `.rdata` read out of `Hod2.exe` by `web/src/hod2lib/class14.ts`.
  */
 console.log("\nclass 0x14, the stage-2 boss:");
 {
@@ -31762,7 +31760,7 @@ console.log("\nclass 0x33 selector 5: the effect a camera frame sets off:");
   }
 
   {
-    // NEW-BUGS 19: **the same flight, with nothing set by hand.** The strike's
+    // **The same flight, with nothing set by hand.** The strike's
     // only gate is `g_player_state == 5` for either player (`0x0042E88A`,
     // `0x0042F1B5`), and the page never set it -- the test above did, so it
     // passed while every bat in the page arrived and did nothing. The reset is

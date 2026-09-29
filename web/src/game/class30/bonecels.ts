@@ -85,7 +85,7 @@
  * That table read `0x08 char_adv01.bin | 0x1C97, 0x1CA9` for one revision, and
  * it was **L6**: the scan that built it walked `HIT_EFFECT` rows for bones
  * 1..39 on characters that have sixteen, so it read `znjoe`'s rows off the end
- * of `char_adv01`'s table and attributed them. `tools/verify_bone_cels.py` is
+ * of `char_adv01`'s table and attributed them. `web/tools/checks/bone_cels.ts` is
  * what found it — the bundle it was demanding eighteen `znjoe` cels from was
  * `char_adv01`'s — and the bound is the character's own bone count now.
  * `char_adv01` reaches no arm at all, and `znjikken1` reaches only the

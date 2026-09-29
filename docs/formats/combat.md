@@ -424,7 +424,8 @@ The two halves of this rule are easy to separate and expensive to separate:
 `ThrowerOnShot` (`FUN_004499A0`) and `ZombieOnShot` (`FUN_00453EB0`) test the
 same bit and refuse to pick a *reaction*, so a port that gates the reaction and
 not the damage kills actors in the one window where nothing is listening for a
-kill. See `docs/BUGS.md`, the `zsass` at stage 2 `0x8094`.
+kill: the stage-2 `zsass` at evt `0x8094` plays its death voice under such a
+port and keeps coming.
 
 ### The bone records those indices address
 
@@ -553,8 +554,8 @@ does not treat `code` as a slot — it **branches** on it:
 The values are unambiguous in the data. Across all 86 character types with a
 skeleton the effect tables carry **442 slot references, the lowest of which is
 `0xB91`**, and the only values below that are 0, 1 and 2 — a gap of nearly
-three thousand with nothing in it. `tools/verify_combat.py` asserts exactly
-that, and it would fail if `[i + 1]` were an ordinary slot.
+three thousand with nothing in it. `web/tools/checks/combat.ts` asserts
+exactly that, and it would fail if `[i + 1]` were an ordinary slot.
 
 Two more details `ResolveHit` folds in:
 
@@ -977,7 +978,8 @@ Three independent things say these are stumbles rather than something else
 mistaken for them, and none of them is "the numbers look right":
 
 * **Length.** Every reaction is 29–43 frames; every death is 74–161. The two
-  sets do not overlap, and `verify_combat.py` asserts they never will.
+  sets do not overlap, and `web/tools/checks/combat.ts` asserts they never
+  will.
 * **Violence.** Summing the unwrapped per-bone rotation across each clip, the
   reactions travel 326–377° against the walk's 137° over twice as many frames.
   A flinch is a lurch and a recovery; a walk is not.
@@ -1035,7 +1037,7 @@ routine returns 0 on both of its paths (`XOR EAX,EAX` at `0x004099D7` and
 second. A row for the slot in type 7's table (or 0x0B's, for type 0x0D)
 therefore overwrites the actor's own. In the shipped data every slot both
 searches find has the same row in both tables, so the difference cannot be
-seen; `tools/verify_combat.py` check 17 holds that, and that every tail a
+seen; `web/tools/checks/combat.ts` check 17 holds that, and that every tail a
 search can reach ends in its `-1`.
 
 The bundle carries the tails as `characters.part_spheres`, by character type,
@@ -1078,7 +1080,7 @@ hands are the one case a player meets: rows 4 and 7 name the armed hands
 `EnemyThrowerInit` puts in (`0x1FA2`, `0x1F9E` at `0x00449877`/`0x00449881`),
 the skeleton names the bare ones, so a `zsass` holding its weapons cannot be
 shot in either hand until it has thrown one and `ThrowerStateRearm` has given
-it a sphere. `GATED` in `tools/verify_combat.py` has every refused row.
+it a sphere. `GATED` in `web/tools/checks/combat.ts` has every refused row.
 
 ## 8b. What a bone actually draws — `ZombieDrawBonePart`
 
@@ -1137,8 +1139,7 @@ The two fade arms are the whole of what moves a class-0x30 actor's alpha;
 stepping `1/60`, type 0x12 at 0 stepping `1/30`, both with a hundred-draw wait
 and `obj+0x1368` bit `0x20` up -- and type 0x12's arm allocates the type-9
 twin, which `ZombieTwinFollowHost` (`FUN_00453290`) keeps on the host's pose.
-Ported in `game/class30/draw.ts`, `init_char.ts` and `twin.ts`; see
-`docs/PLAYER_PROGRESS.md`, "Character fades".
+Ported in `game/class30/draw.ts`, `init_char.ts` and `twin.ts`.
 
 Two arms are not draws at all and wrap this one: `ZombieDrawBoneSlotOnly`
 (`0x00453B30`) is the plain one-slot hook `ZombieAdvanceMotion` installs in
@@ -1192,7 +1193,7 @@ materials, moving vertices — a flipbook, not a set of variants. And stages
 `0x1B72`, `0x1B73` and `0x1B74`, the three the switch does *not* name, are
 exactly the three whose own geometry already reaches `y -2.02`.
 
-`tools/verify_bone_cels.py` holds all of it: the byte pattern for every
+`web/tools/checks/bone_cels.ts` holds all of it: the byte pattern for every
 `(base, count)`, the pelvis split measured from `pol/`, and the presence of
 every cel in every bundle that carries a trigger character.
 
@@ -1221,9 +1222,9 @@ material picks both the sound and the sprite:
 
 The filenames are the proof: `SND`, `MET`, `OTH`, `WAT`, `WOD` sitting under
 materials 1, 2, 3, 5 and 6 is what establishes that those codes are sand,
-metal, other, water and wood. `coli.py` already observed the surface palette
-`(0, 2, 3, 0x32, 0x34, 0x35, 0x38, 0x3C, 0x3D, 0x5A, 0x63)` in the collision
-files independently, and it lands inside this table.
+metal, other, water and wood. The collision files independently carry the
+surface palette `(0, 2, 3, 0x32, 0x34, 0x35, 0x38, 0x3C, 0x3D, 0x5A, 0x63)`,
+and it lands inside this table.
 
 `SpawnWorldImpact` (`FUN_00405260`) calls `SpawnSpriteEffect`
 (`FUN_00407340`), a wrapper that marshals the point, the facing and the
@@ -1241,7 +1242,7 @@ The routine allocates the effect actor and plays its sound, so it is not a
 slot-range lookup; and impact is one of its fourteen kinds, not what it is
 for: `0x53` is rain and `0x5A` spawns two more effects beside itself. Worse,
 `SpawnImpactSprite` would have collided with the wrapper's own name one
-address up. See `docs/re/session-log.md`.
+address up.
 
 ### Firing — `g_gunshot_sound_ids`
 
@@ -1334,7 +1335,7 @@ The loop loads two pointers at its head and holds them to its end:
 the same: `LEA EBP` of the same address at `0x004499D4`, `MOV EAX, [EBP]` at
 `0x00449A70`, `CMP EAX, 0x2` at `0x00449A76`. Neither tests whether the actor
 died of *this* shot — only that it is dead and its death not yet latched.
-`tools/verify_combat.py` check 15 reads those operands out of the image.
+`web/tools/checks/combat.ts` check 15 reads those operands out of the image.
 
 This page said `bone == 2 ? 2 : 1` when the routine was first read, which was
 right. A later session read `[EBP]` at `0x00453F6E` as `g_hit_result` — the
@@ -2082,66 +2083,24 @@ calls `ZombieThrowHandWeapon` a second time for character type 1 after a
 
 ## 11. What the player implements
 
-Exact: the hit spheres, hit points through `ActorInitHitPoints`, the per-bone
-damage escalation with the `DamageRankModifier` applied, the control codes,
-**the sever and its cascade**, the final-stage latch, the withheld torso stage,
-the headshot burst, the nearest-first resolution, the score including the
-result-5 rule, **the stumble** — the right clip per body region, cross-faded
-over the walk on a second track, faded for the upper body and hard-set for the
-legs, and skipped entirely for the hits that do not interrupt — the directional
-death, the gore swap, and every sound in §9.
+Everything this document reads is transcribed in `web/src/game/` — the hit
+spheres, hit points, damage escalation, the control codes, the sever and its
+cascade, the stumble, the directional death, the gore swap, the score, the
+sounds of §9, the advance rings, the attack permit, the strike and the
+tracking camera. Where the port departs from a reading, or a reading is still
+open, it says so beside the code with `[diverges]` or `[open]`, and
+[`../STATUS.md`](../STATUS.md) counts them.
 
-The live-enemy waits (evt `0x43` / `0x44`) are **real**: the script holds
-until the enemies are dead, which is the game's own condition. It used to
-depend on a Shoot toggle, which defaulted to off — and off, the counts read
-null, the gates were paced by a stopwatch, and the player walked through every
-fight in the game. `g_enemies_present` is approximated by the alive count,
-because the player never despawns a corpse.
+Two readings the port rests on that are easy to get wrong:
 
-Not implemented, and why:
-
-* the **collision-mesh** refinement of the bone pick — the sphere pass alone
-  gives the same answer except at grazing angles;
-* the **miss material**. `FUN_00405260` takes it from the collision triangle,
-  and the collision meshes are not in the bundle. The visible geometry gives
-  the impact point and material 3 — the game's own "other" — gives the sound.
-  `[open]`, and the fix is to carry `coli.py`'s per-triangle `surface` into the
-  bundle;
-* the **impact artwork**. The sprite's position, timing, frame count and scale
-  law are transcribed, but the frames are asset slots `0x3A..0x52` and `0x091A..` which the bundle does not carry, so a radial splat stands in.
-  `[open]`;
-* the **special deaths** — `ChooseDeathMotion`'s `obj+0x1368` arms. What sets
-  those bits is `[open]`; see §6;
-* **civilians, bosses and the ammo/reload cycle**;
-* the **body condition** `obj+0x130C`, held at 0. `ActorUpdateBodyCondition`
-  derives it partly from `obj+0x4DC` / `obj+0x68C`, which are `[open]`. It only
-  changes the stumble at condition 3, and conditions 0, 1, 2 and 4 share a row;
-* the **alternate reactions** at `+0x10` of each `g_class30_motion_rows`
-  row, reached only when `obj+0x136C & 0x100`, which is `[open]`. The table
-  itself is the general motion row -- sixteen readers, fourteen of them
-  states picking a walk, run, idle or back-away clip;
-* the **fade back out** of a reaction. `MotionCrossFadeTo` states the fade *in*;
-  the player fades out over the same length, which is `[likely]`, not proved;
-
-The gameplay loop **is** implemented end to end: the advance rings, the
-per-band step counts, the attack permit, the attack run, the hold at range, the
-**strike** with its per-attack lunge distance and exact hit frame, the cancel
-mask and the destroyed-zone attack pick, **player lives and invulnerability**,
-actors turning to face the camera, and the tracking camera with its slot table,
-nearest-first ordering and turn-rate curve. One thing in it is not transcribed
-and is marked as such in `enemies.ts`:
-
-* **how an enemy closes the distance** is `[open]`, and genuinely so. Three
-  candidates are ruled out: the zombie's own code never writes a velocity
-  (no `fstp [reg+0x4c]` anywhere in `0x455000..0x459000`); it is not root
-  motion (the clips the approach actually uses — 270, 975, 1000 — each net
-  between +0.00 and +0.04 over a full cycle, while the death clips net −8.7
-  and −15.7, so root motion is real but carries falling bodies); and it is not
-  a step count, per the queue-rank reading above. The player uses an
-  **invented** closing speed, flagged as such in `enemies.ts`, because the
-  game's own states plainly do close — `ZombieStateAttackRun` runs until
-  `TestApproachRing` returns 1, and the strike lunges until inside the attack's
-  distance.
+* **The live-enemy waits (evt `0x43` / `0x44`) are real**: the script holds
+  until the enemies are dead, which is the game's own condition.
+* **An enemy closes the distance through its clips.** No class-0x30 state
+  writes a velocity; `SkeletonApplyRootMotion` (`FUN_00410C50`) moves the
+  object by the frame-to-frame root delta, gated by `model+0x64` bit 1, which
+  `ActorBuildSkinnedModel` sets for every skeletal actor. The approach plays
+  an in-place walk while it waits its turn, and the attack run closes fast.
+  `web/src/game/root_motion.ts` has the measurements.
 
 ### The strike — `ZombieStateHoldAtRange` and `ZombieStateStrike`
 
@@ -2213,9 +2172,10 @@ Nothing is aborted and nothing is retried: the strike simply never fires, the
 clip plays out and the actor retreats. `[proved]`
 
 The exporter therefore keeps such an entry rather than rejecting it —
-`hod2lib.combat.attack_hit_lands` carries the reading, and `verify_combat.py`
-asserts that exact set of three instead of imposing the bound, because a row
-misread out of the *next* character's attacks looks the same from the outside.
+`attackHitLands` in `web/src/hod2lib/combat.ts` carries the reading, and
+`web/tools/checks/combat.ts` asserts that exact set of three instead of
+imposing the bound, because a row misread out of the *next* character's
+attacks looks the same from the outside.
 The bound was right for as long as the reader scanned a fixed number of
 entries; it has been indexed by the pick table for longer than that.
 
@@ -2382,10 +2342,10 @@ mesh each with the same state:
 
 So what reaches the screen is the texel's alpha: a solid mark with feathered
 edges, not a translucent one, and the same on all 59 frames. The port draws
-exactly that -- `tools/hurt_alpha.mjs` measures it off the page's pixels
+exactly that -- `web/tools/hurt_alpha.mjs` measures it off the page's pixels
 (stage 2's kind 4: 66.5% of the covered pixels at alpha exactly 1.0 against
 texture 28's 65.4% of covered texels at 255; stage 1's kind 0: 74.2% against
-texture 33's 75.9%), and `tools/verify_texture_alpha.py` holds the call, the
+texture 33's 75.9%), and `web/tools/checks/texture_alpha.ts` holds the call, the
 words, the base alpha, the textures and the bundle's images to it.
 
 `[likely]` **Its colour is lit.** `AssetDrawSlot` draws under
@@ -2549,7 +2509,7 @@ both x and z — it only bobs, ±0.22 — while the deaths net **−8.7** and
 approach velocity is still `[open]`. No `fstp [reg+0x4c]` exists anywhere in
 `0x455000..0x459000`, so it is not written in the zombie's own code.
 
-`tools/verify_combat.py` is the check: it re-derives the step tables from raw
+`web/tools/checks/combat.ts` is the check: it re-derives the step tables from raw
 bytes, asserts the control-code/slot gap across all 86 character types,
 asserts every slot resolves through the asset slot table, asserts every sever
 step has a subtree to remove, walks all 2810 spawn/difficulty hit-point pairs
@@ -2932,9 +2892,9 @@ dest = local(∓4.5, 0, 0) from the hit point
 units short of the face**. `ThrowerFindCeilingAbove` (`FUN_0044C0B0`) is the
 same question straight up, over a thousand units.
 
-`tools/verify_thrower_walls.py` runs those two queries against the game's own
-`coli/` sets at every class-0x31 spawn in the game: **24 of the 49 can reach a
-wall and 14 have something overhead**, 9 and 4 of them in stage 2. The climb is
+Run against the game's own `coli/` sets at every class-0x31 spawn in the game,
+those two queries say **24 of the 49 can reach a wall and 14 have something
+overhead**, 9 and 4 of them in stage 2. The climb is
 level design, not unreachable data.
 
 ### The pounce — `ThrowerStateLeapDown`, `FUN_0044B670`
@@ -3067,8 +3027,8 @@ sub 2  if (++obj+0x1338 < 0x5A && |obj - eye|xz < 50.0) return
 `zslman`'s four sit **`0x60` apart**, each after the pounce script set 3
 names for attack 3 in that stance; the exporter read them at `0x30` until
 this was read, which gave rows 1 and 3 a pounce and row 2 row 1's leap.
-`verify_combat.py` check 16 holds the export to the four `MOV ESI, imm32` the
-state picks them with.
+`web/tools/checks/combat.ts` check 16 holds the export to the four
+`MOV ESI, imm32` the state picks them with.
 
 So the ordinary thrower lands five units to one side of the camera and fifty
 in front, **in the camera's yaw-only frame**, and stands there for ninety
@@ -3173,7 +3133,7 @@ aside in stances 1 and 3 (504 then 506, 494 then 496) and set 3's attack 3 in
 all five stances end on a different clip, and `ThrowerStatePathFollow`'s
 style-2 script flies on 300 between two stages of 301 — and every start and
 threshold of every one lies inside the play length of its own stage's clip,
-which `tools/verify_combat.py` check 16 asserts and counts.
+which `web/tools/checks/combat.ts` check 16 asserts and counts.
 
 `ThrowerStatePathFollow` (`FUN_0044EE00`) picks its leg's script from the
 waypoint's style word, the `s16` at `+0x02`, and the bundle carries all four
@@ -3228,9 +3188,6 @@ FitArcScriptByStartFrame   (0x19, zstin)
   > 0:  both fades += k; the rest onto s1.fade; NO clamp
   <= 0: both starts += k, each clamped at its own until; the rest onto s1.start
 ```
-
-The port had one function for both, with the second's slack and `k`, until
-the rooftop route of NEW-BUGS-2 was read.
 
 > ⚠️ **Every one of those thresholds is in engine frames, at 60 Hz.** `mot/` is
 > authored at 30 Hz, so the baked clip's own index is half of it: clip 303
@@ -3334,7 +3291,7 @@ cleared in 420, 435 and 285 frames.
 
 This is the designed behaviour and not a bug in either the engine or the port,
 but it is a **trap for any harness that measures a room in shots**: firing
-twenty rounds into one frame lands exactly one of them. `tools/playthrough.mjs`
+twenty rounds into one frame lands exactly one of them. `web/tools/playthrough.mjs`
 therefore gives up on frames in which nothing took damage rather than on frames
 elapsed — see its header.
 

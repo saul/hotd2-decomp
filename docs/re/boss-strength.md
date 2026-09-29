@@ -12,17 +12,17 @@ evidence stated; `[open]` undetermined.
 
 ## 0. What this boss is, and where it appears
 
-**Identity.** Character type `0x4A` = `boss4.bin`, fifteen skeleton nodes
-(bones 1..15) `[proved]` (`g_character_skeletons`, `ExeTables.character_skeleton(0x4A)`).
-The code never names the boss. What it does name: `COMMON2\CHAIN_SAW_22.wav` and
-`CHAIN_SAW_22_OFF.wav` (`Boss4ChainsawOn`/`Off`), `STAGE4_SE\BOSS4_HASHIRI1.wav`,
-`BOSS4_YARARE3/4.wav`, `BOSS4_TAORE_A.wav`, `BOS_WALK1_44.wav` and
-`AXE_44K.wav` `[proved]` (sound records). "A chainsaw-wielding giant" is
-consistent with the sounds; "Strength" is the user's name and the code has no
-opinion on it.
+**Identity.** Character type `0x4A` = `boss4.bin`, fifteen skeleton nodes (bones
+1..15) `[proved]` (`g_character_skeletons`,
+`ExeTables.characterSkeleton(0x4A)`). The code never names the boss. What it
+does name: `COMMON2\CHAIN_SAW_22.wav` and `CHAIN_SAW_22_OFF.wav`
+(`Boss4ChainsawOn`/`Off`), `STAGE4_SE\BOSS4_HASHIRI1.wav`,
+`BOSS4_YARARE3/4.wav`, `BOSS4_TAORE_A.wav`, `BOS_WALK1_44.wav` and `AXE_44K.wav`
+`[proved]` (sound records). "A chainsaw-wielding giant" is consistent with the
+sounds; "Strength" is the user's name and the code has no opinion on it.
 
 **Where it spawns** `[proved]`, from every spawn descriptor reachable in all
-twelve evt files (`hod2lib.evt.spawns` over scenes 0..11):
+twelve evt files (`spawns` in `web/src/hod2lib/evt.ts`, over scenes 0..11):
 
 | stage 4 block | tail `+0x01` (entrance) | how it is reached | camera path of the fight | despawn pair `tail+0x40/+0x42` |
 |---|---|---|---|---|
@@ -173,8 +173,8 @@ obj[0] = Boss4Update
 `0CED4DB0 FFFFFFFF 0CED0C60 0CED8FB0 0CED4400 0CED1C40 0CED8330 FFFFFFFF
 FFFFFFFF 0CED2C20 0CECF000 FFFFFFFF 0CED3810 0CECFE30 FFFFFFFF`. The evt
 loader relocates every dword in `0x0CE80000..0x0CEFFFFF` by `-0x0C53E600`
-(`hod2lib/coli.py`, `resolve_pointer`), which lands **all ten** on blob starts
-of `coli4.bin` (loaded at `BUF_SCENE` `0x00990A00`):
+(`web/src/hod2lib/coli.ts`, `resolvePointer`), which lands **all ten** on blob
+starts of `coli4.bin` (loaded at `BUF_SCENE` `0x00990A00`):
 
 | bone | blob offset | quads | surfaces |
 |---|---|---|---|
@@ -1123,7 +1123,7 @@ Phase 2 (branch `boss/strength`) ported every routine in §4..§8 into
 `web/src/game/class19/` and the pieces around it. What each item of the old
 "needs" list became:
 
-* **The bundle** (format 13, both `hod2lib` halves): the seven `.rdata` tables
+* **The bundle** (format 13): the seven `.rdata` tables
   travel in `script.json` as `boss4` (`exetab.ts` `boss4Tables()`), with
   `carrier_door_yaw` (`0x005926D0`); the placements carry `class19` (the
   entrance, the fifteen per-bone mesh words as `coli.blobs` keys, the despawn

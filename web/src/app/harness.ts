@@ -11,7 +11,7 @@
  * The player once had two clocks that disagreed about what a frame is, and a
  * playthrough that fired its shots after N *milliseconds* fired them on a
  * different game frame every run: the same stage on the same seed played four
- * different ways over five runs, `docs/PLAYER_HANGS.md` item 8. Both halves
+ * different ways over five runs. Both halves
  * are fixed. The simulation is a fixed 60 Hz tick that is never skipped
  * (`app/loop.ts`), and this is the other half — **what the accumulator is fed
  * from.** `app/pacer.ts` chooses between the two and owns this object; nothing

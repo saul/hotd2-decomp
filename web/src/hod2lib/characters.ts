@@ -1,6 +1,5 @@
 /**
  * Assemble a spawned character: skeleton, placement and motion.
- * The port of `tools/hod2lib/characters.py`.
  *
  * `hod2lib/spawnres` answers *what* a spawn is -- its class, its character
  * type, the `pol/` file its parts live in. This module answers the two
@@ -25,11 +24,8 @@
  * posed from another character's animation is worse than a character not posed
  * at all, because it looks like a decoding bug rather than a missing feature.
  *
- * **The re-exports are gone.** `characters.py` re-exports every name of the
- * nine modules below it, so that splitting it was a refactor and not a flag
- * day across `tools/verify_*.py`. Nothing in TypeScript ever imported the old
- * shape, so this module exports only what it owns; import from the module that
- * owns a name.
+ * **No re-exports.** This module exports only what it owns; import from the
+ * module that owns a name.
  */
 
 import { arcScript, CLASS30_ARC_SCRIPTS } from "./arcscript";
@@ -750,7 +746,7 @@ const CLASS40_MEMBERS = 10;
  * formations 1 and 2 wear through `obj+0x1350`. Row 0 is the skeleton's own
  * slots and needs nothing; these are `mol.bin`'s odd parts, which no skeleton
  * node names, so they ride the gore template to be cloned by slot.
- * `tools/verify_horde.py` asserts them against the EXE.
+ * `web/tools/checks/horde.ts` asserts them against the EXE.
  */
 const CLASS40_SKIN_SLOTS = [4979, 4981, 4983, 4985, 4987, 4989, 4975, 4993,
                             4991];

@@ -1,23 +1,22 @@
 #!/usr/bin/env python3
 """Enforce the browser player's layer boundaries.
 
-`docs/PLAYER_ARCHITECTURE.md` names three layers and the direction they may
-depend in. This is the check that makes that real, because a boundary nobody
-measures is a preference.
+`docs/PLAYER.md` names the layers and the direction they may depend in.
+This is the check that makes that real, because a boundary nobody measures is
+a preference.
 
-    engine   core/ bundle/ script/ game/   no three.js, no DOM, deterministic
-    render   render/                       three.js. reads engine state
-    ui       hud/                          reads a projection, emits commands
-    app      app/                          the composition root; sees everything
+    engine   core/ bundle/ script/ game/ hod2lib/   no three.js, no DOM, deterministic
+    render   render/ audio/                         reads engine state, owns nothing
+    ui       hud/ ui/                               reads a projection, emits commands
+    app      app/                                   the composition root; sees everything
 
 Two severities, and the difference matters:
 
 * **error** -- must be zero. A new one fails the build.
 * **ratchet** -- a violation the architecture has not reached yet. The current
-  count is recorded here against the step of the order of work that clears it.
-  The build fails if the count **grows**. It never rises, and it is never
+  count is recorded here, and the build fails if it **grows**. It is never
   quietly re-based to make a commit pass: lowering a baseline is the point,
-  raising one is a decision that belongs in the architecture doc, not here.
+  raising one is the repository owner's decision, not a line edit here.
 
 That is the whole mechanism. There is no suppression comment and no per-file
 opt-out, on purpose -- the escape hatch is to fix the layering or to change the
@@ -35,8 +34,8 @@ SRC = ROOT / "web" / "src"
 
 LAYER_OF = {
     "core": "engine", "bundle": "engine", "script": "engine", "game": "engine",
-    # `hod2lib/` is the asset library -- the TypeScript port of
-    # `tools/hod2lib/`, so that a bundle can be built in the browser. It is an
+    # `hod2lib/` is the asset library -- the game-format parsers and the
+    # bundle writer, so that a bundle can be built in the browser. It is an
     # engine directory because it needs exactly the engine's constraints and
     # for the same reason: no three.js, no DOM, no clock, no `Math.random()`.
     # A parser that reads the wall clock cannot be replayed, and one that

@@ -1,7 +1,7 @@
 /**
  * The parts of the TypeScript exporter a game directory cannot check.
  *
-While the Python writer existed, `tools/verify_parity.py` was the real proof:
+ * While the Python writer existed, a parity check was the real proof:
  * it exported a stage with each implementation and compared the bytes. Three
  * pieces of the port were load-bearing, were *not* exercised by comparing two
  * bundles, and had nothing testing them at all -- and now that the comparison
@@ -58,7 +58,7 @@ console.log("\npyjson: what `json.dumps` actually writes");
  *
  * Recording expected strings by hand would be recording *my reading* of
  * `json.dumps`, which is the thing under test. This runs the real one -- the
- * same interpreter `tools/hod2lib/` runs on -- and compares.
+ * same interpreter `tools/verify_all.py` runs on -- and compares.
  */
 function python(expr: string): string {
   return execFileSync("python3", ["-c", `import json;print(${expr}, end="")`],
@@ -66,7 +66,7 @@ function python(expr: string): string {
 }
 
 {
-  // The default separators, which `bundle.py` relies on and `JSON.stringify`
+  // The default separators, which `hod2lib/bundle.ts` relies on and `JSON.stringify`
   // does not have: `", "` and `": "`, with the spaces.
   const v = { a: 1, b: [1, 2], c: { d: "x" } };
   const py = python('json.dumps({"a":1,"b":[1,2],"c":{"d":"x"}})');
@@ -100,7 +100,7 @@ function python(expr: string): string {
   check("an empty container is not indented",
         dumpsIndented({}) === "{}" && dumpsIndented([]) === "[]");
 
-  // `allow_nan=False`, which `bundle.py` passes so a camera curve that decoded
+  // `allow_nan=False`, which `hod2lib/bundle.ts` uses so a camera curve that decoded
   // to garbage fails the export rather than writing a file no parser will read.
   let threw = false;
   try {

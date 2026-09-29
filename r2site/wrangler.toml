@@ -1,5 +1,5 @@
 # The player as a site: worker.ts beside this file serves an R2 bucket that
-# `npm run deploy` (web/tools/deploy.ts) fills. README.md is the procedure;
+# `npm run deploy` (web/tools/deploy.ts) fills. docs/PLAYER.md ("Hosting") has the procedure;
 # `npm run deploy` runs `wrangler deploy` here itself whenever this file or
 # worker.ts has changed.
 #

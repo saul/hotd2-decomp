@@ -1,7 +1,6 @@
 /**
  * Build the static bundle the browser stage player loads. The TypeScript
- * exporter's command line, ported from the `tools/export_player.py` that
- * used to be the only way to build a bundle.
+ * exporter's command line.
  *
  *     npm run export -- --game-dir "..." --all       # both modes
  *     npm run export -- --game-dir "..." --stage 2   # both modes
@@ -142,6 +141,7 @@ async function treeBytes(dir: string): Promise<number> {
     try {
       names = await readdir(d);
     } catch {
+      // not-a-loss: this only sizes the summary line; the bundle is written.
       return;
     }
     for (const n of names) {

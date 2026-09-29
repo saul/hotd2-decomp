@@ -1,16 +1,16 @@
 /**
  * Stage the player as a static site -- the page, a bundle and the sounds, in
- * one directory any static host can serve -- and optionally upload it to S3.
+ * one directory any static host can serve. `npm run deploy` (`deploy.ts`)
+ * runs this and uploads the result to R2; `--sync` uploads it to S3 instead.
  *
  *     npm run site                                  # stage into extract/site/
  *     npm run site -- --gzip --check                # ...compressed, then play it
- *     npm run site -- --gzip --sync s3://bucket/<secret>
+ *     npm run site -- --gzip --sync s3://bucket/prefix
  *
  * **What is staged is the game's data.** The bundle and the sounds are derived
  * from a copyrighted install, so the default output is under `extract/`,
- * which `.gitignore` already keeps out of the repository, and the place it is
- * uploaded to must be private. `docs/HOSTING.md` says how, and why a private
- * bucket behind CloudFront is the shape that works on a phone.
+ * which `.gitignore` keeps out of the repository. Where it is published, and to
+ * whom, is the owner's decision (`docs/PLAYER.md`, "Hosting").
  *
  * The layout is the one the page already asks for, relative to itself:
  *
@@ -35,9 +35,8 @@
  * takes to 69% (70 MB to 48). Not the music, which it takes only to 95%, and
  * not the sound effects: the looping ones play through `<audio>` elements,
  * which read byte ranges, and a range of a compressed file is not a range of
- * the sound. A stage's GLB is 73 MB and 30 MB gzipped,
- * and CloudFront will not compress anything over 10 MB itself. Off by
- * default, because a plain host (`tailscale serve`, `python -m http.server`)
+ * the sound. A stage's GLB is 73 MB and 30 MB gzipped, and a CDN will
+ * not compress a file that size itself. Off by default, because a plain host (`tailscale serve`, `python -m http.server`)
  * would hand the page the compressed bytes as they are.
  *
  * Staging is incremental: a file whose source is not newer than its staged

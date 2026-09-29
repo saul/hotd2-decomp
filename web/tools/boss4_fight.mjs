@@ -6,8 +6,8 @@
  *
  * `tools/playthrough.mjs` cannot answer it: it stops on the first poll inside
  * an **end** block, and stage 4's boss blocks -- 23, 25, 27, 29 -- are its end
- * blocks, so the fight's two gates have never run under it
- * (`docs/PLAYER_HANGS.md` item 17). This plays the real script from the top of
+ * blocks, so the fight's two gates have never run under it.
+ * This plays the real script from the top of
  * each routed boss block, the way `tools/dives.mjs` plays a flock: the walker,
  * the camera seat, the character and slot spawns in the script's order (the
  * transport before the boss, so `Boss4Init` latches it), and `GameUpdate`

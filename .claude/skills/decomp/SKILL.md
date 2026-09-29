@@ -6,7 +6,7 @@ description: Workflow for reverse-engineering The House of the Dead 2 in this re
 # Decomp workflow
 
 The reasoning behind these rules is in `docs/re/method.md`. This is the
-operating procedure. Read `docs/PLAN.md` for what is currently worth doing.
+operating procedure.
 
 ## The five non-negotiables
 
@@ -21,8 +21,8 @@ operating procedure. Read `docs/PLAN.md` for what is currently worth doing.
 3. **Verify, and prefer verification that can fail.** Whole-corpus checks and
    rendered images, not spot checks and not plausibility.
 4. **Persist it.** Annotations to `ghidra/annotations/`, findings to
-   `docs/`, the story to the session log. MCP renames leave no trail; an
-   un-exported session is a lost session.
+   `docs/formats/` and `docs/re/`, the story to the commit message. MCP
+   renames leave no trail; an un-exported session is a lost session.
 5. **Commit only your own hunks.** Other workstreams run in this repo
    concurrently. `git add -A` is banned — see *Committing* below.
 
@@ -31,11 +31,10 @@ operating procedure. Read `docs/PLAN.md` for what is currently worth doing.
 ### 1. Orient
 
 ```
-docs/PLAN.md            what is worth doing, and why
-docs/PROGRESS.md        what is done
-docs/re/session-log.md  what was tried, including what failed
 docs/formats/*.md       the formats already solved
 docs/re/addresses.md    the named tables
+docs/re/*.md            the subsystems and bosses already read
+git log -S<symbol>      what was tried, including what failed
 ```
 
 Check `git log --oneline -10` and `ListAgents` — a peer session may be editing
@@ -70,7 +69,7 @@ ghidra/annotations/globals.tsv      address <TAB> name <TAB> comment
 Then check them:
 
 ```sh
-python3 tools/verify_annotations.py --game-dir ~/"THE HOUSE OF THE DEAD 2"
+python3 tools/verify_all.py --only game:annotations --game-dir ~/"THE HOUSE OF THE DEAD 2"
 ```
 
 If you renamed anything in the live database over MCP, export it:
@@ -86,21 +85,20 @@ A fresh checkout must rebuild to the same database:
 
 Pick the check that could actually fail:
 
-* **Whole corpus.** Add a `tools/verify_*.py`. Aim for a structural invariant —
+* **Whole corpus.** Add a check under `web/tools/checks/`, reading the game
+  through `web/src/hod2lib/` with the frame in `web/tools/lib/exe_check.ts`,
+  and give it a row in `tools/verify_all.py`. Aim for a structural invariant —
   "1058 of 1058 motion blocks divide exactly by a stride the formula can
   produce" is a real test; "the header looks like a count" is not.
-* **Render it.** For anything geometric, export and look:
+* **Render it.** For anything geometric, look at it in the player: export the
+  stage (`cd web && npm run export -- --game-dir ... --stage N`), open the deep
+  link that shows it, or capture it headless:
   ```sh
-  python3 tools/export_level.py --game-dir ~/"THE HOUSE OF THE DEAD 2" --stage N --unlit
-  python3 tools/export_character.py 0x1A --motion 762
-  /Applications/Blender.app/Contents/MacOS/Blender -b -P tools/blender_nodeview.py -- \
-      <gltf> <node-prefix> extract/compare/<session>/<name>.png
+  cd web && node tools/shot.mjs --url '?stage=2&mode=free&all=1' --out <name>
   ```
-  Then **read the PNG back** and say what you see. A cat that renders as a cat
-  proves the skeleton, stride, bone indexing and rotation order at once.
-  **Log the path** — the user looks at these.
-* **Use EEVEE, never Workbench.** Workbench fakes wrap modes and lighting and
-  has produced false conclusions here twice.
+  Then **read the PNG back** (`web/shots/<name>.png`) and say what you see. A
+  cat that renders as a cat proves the skeleton, stride, bone indexing and
+  rotation order at once. **Log the path** — the user looks at these.
 * Run the full suite before committing: `python3 tools/verify_all.py --game-dir ...`
   — the canonical list, and it counts skips separately from passes.
 
@@ -109,12 +107,9 @@ Pick the check that could actually fail:
 Every session updates, in the same commit or the next:
 
 * `docs/formats/<fmt>.md` — the format, with the function that proves each field
-* `docs/PROGRESS.md` — tick what is done, add what is newly known
-* `docs/PLAN.md` — if the shape of the remaining work changed
-* `docs/re/session-log.md` — **including what you got wrong.** The log is a
-  deliverable, not a diary; a recorded wrong turn stops the next session
-  repeating it.
-* `docs/PLAYER_PLAN.md` — if it affects what the browser player can render
+* `docs/re/*.md` — a subsystem, a boss, a table: what was read and where
+* the commit message — **including what you got wrong.** A recorded wrong turn
+  stops the next session repeating it.
 
 If the finding is going **into** the player's gameplay port —
 `web/src/game/` — follow `/gameplay-port` for that half. It is downstream of
@@ -140,7 +135,7 @@ Both of these are the difference between naming a thing and guessing at it:
 
 * **Character skeletons → pol filenames.** `g_character_skeletons`
   (`0x004E0430`) per character type; its nodes name asset slots; slots resolve
-  through `ExeTables.asset_slots()` to a filename — `cat.bin`,
+  through `ExeTables.assetSlots()` to a filename — `cat.bin`,
   `hito_manbest.bin`, `zabat.bin`.
 * **Sound records** at `g_se_name_list` (`0x005845F8`), 324 `{id, filename}`
   entries. `PlaySoundId` ids resolve to paths like
@@ -148,10 +143,8 @@ Both of these are the difference between naming a thing and guessing at it:
 
 ## Traps that have already cost this project
 
-**[`docs/LESSONS.md`](../../../docs/LESSONS.md) is the list**, and it is one
-file because it used to be four — the polymorphic-field trap was in all of
-them and only one still remembered `obj+0x1390`. The ones that bite hardest
-when reading the binary:
+**[`docs/LESSONS.md`](../../../docs/LESSONS.md) is the list.** The ones that
+bite hardest when reading the binary:
 
 * **L1** — the decompiler silently drops FPU arguments to the matrix calls.
 * **L2** — `CamEvalObjectPath6` returns `{float x,y,z; int rx,ry,rz}`; Ghidra
@@ -183,7 +176,7 @@ git status --porcelain     # what is dirty that is NOT yours?
 Then stage **explicit paths**, never a wildcard:
 
 ```sh
-git add tools/hod2lib/mot.py docs/formats/mot.md
+git add web/src/hod2lib/mot.ts docs/formats/mot.md
 git diff --cached --stat   # confirm before committing
 ```
 
@@ -191,14 +184,14 @@ git diff --cached --stat   # confirm before committing
 to your own hunks:
 
 ```sh
-git diff -- path/to/shared.py > /tmp/mine.patch
+git diff -- path/to/shared.ts > <scratchpad>/mine.patch
 # keep only the hunks that are yours, then:
-git apply --cached /tmp/mine.patch
+git apply --cached <scratchpad>/mine.patch
 git diff --cached --stat
 ```
 
-If you have already committed someone else's work, undo it rather than leaving
-it: `git reset --soft HEAD~1` then `git restore --staged <their paths>`.
+If you have already committed someone else's work, say so and ask; never
+rewrite history to take it back out.
 
 Leave their uncommitted changes exactly as you found them. Do not "tidy" or
 reformat a shared file. `ghidra/annotations/*.tsv` is **sorted by address** and
@@ -209,9 +202,9 @@ unrelated rows no longer collide. Do not reorder it by anything else.
 ## Done means
 
 - [ ] Every function you understood is named in `ghidra/annotations/`
-- [ ] `verify_annotations.py` passes and the other verifiers still pass
+- [ ] The `game:annotations` check passes and the rest of `verify_all.py` still does
 - [ ] A check exists that would fail if the reading were wrong
 - [ ] Renders logged with paths, if anything geometric changed
-- [ ] `PROGRESS.md`, the session log, and `PLAN.md` if the plan moved
-- [ ] Wrong turns written down, not quietly dropped
+- [ ] `docs/formats/` or `docs/re/` updated with what was read
+- [ ] Wrong turns in the commit message, not quietly dropped
 - [ ] **Only your own hunks staged** — `git status` checked first, explicit paths, no `git add -A`

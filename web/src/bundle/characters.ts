@@ -266,7 +266,7 @@ export interface CharacterPlacement {
    */
   pitch?: number;
   roll?: number;
-  /** Class-0x30 descriptor tail: see `Placement` in hod2lib/characters.py. */
+  /** Class-0x30 descriptor tail: see `Placement` in hod2lib/placement.ts. */
   body_condition: number;
   initial_state: number;
   /** State to enter once the approach finishes. 0 means it never attacks. */
@@ -285,7 +285,7 @@ export interface CharacterPlacement {
   } | null;
   /**
    * The two captor scripts, decoded — see `target_script` in
-   * hod2lib/characters.py. `target_script` is the descriptor tail's `+0x04`
+   * hod2lib/placement.ts. `target_script` is the descriptor tail's `+0x04`
    * blob read for the initial state, `attack_script` the `+0x08` blob read for
    * the attack state, which is the selection `ZombieScriptForState`
    * (`FUN_0045CA10`) makes.
@@ -386,7 +386,7 @@ export interface CharacterPlacement {
   };
   /**
    * The tail one of the twelve class-0x30 entrance states reads — see
-   * `ENTRY_TAIL_STATES` in `hod2lib/characters.py`, which gates each shape on
+   * `ENTRY_TAIL_STATES` in `hod2lib/placement.ts`, which gates each shape on
    * the spawn's own `initial_state`. Between them these are 133 of the game's
    * 356 class-0x30 spawns.
    *
@@ -972,7 +972,7 @@ export interface DifficultyJson {
  * `ActorArcStep` (`FUN_0044D860`) walks them.
  *
  * A script is nearly always one clip cut into windup, flight and landing;
- * some switch clips between stages (`verify_combat.py` check 16 counts
+ * some switch clips between stages (`web/tools/checks/combat.ts` check 16 counts
  * them), so each stage names its own.
  */
 export interface ArcStage {

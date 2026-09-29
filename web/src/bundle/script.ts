@@ -78,7 +78,7 @@ export interface SimpleSpawnJson {
 
 /**
  * One decoded instruction. The fields beyond the first five vary by opcode --
- * they are whatever `hod2lib.script` could resolve. An opcode whose meaning is
+ * they are whatever `hod2lib/script.ts` could resolve. An opcode whose meaning is
  * still only "the global it writes" carries `raw` and nothing else, and the
  * event feed shows those operands verbatim rather than inventing a label.
  */

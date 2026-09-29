@@ -18,7 +18,7 @@
  * GAME OVER  0x43E     45 / 365     170   0.6 x 0.7   direct
  * ```
  *
- * `[proved]` from the pushes; `tools/verify_continue.py` reads them again.
+ * `[proved]` from the pushes; `web/tools/checks/continue_screen.ts` reads them again.
  */
 import { AppState, G } from "./globals";
 import { ContinueSprite, HudSprite } from "./hud_sprites";

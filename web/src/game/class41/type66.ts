@@ -37,7 +37,7 @@ import { PropRegisterForShotTest } from "./shot_test";
  * `{s16 slot; s16 pad; f32 x, y, z; s32 yaw; f32 sx, sy, sz}`. Carried as
  * `[slot, x, y, z, yaw, sx, sy, sz]`.
  *
- * Checked word for word against the image by `tools/verify_prop_tables.py`.
+ * Checked word for word against the image by `web/tools/checks/prop_tables.ts`.
  */
 export const PROP_TABLE66_A: ReadonlyArray<readonly number[]> = [
   [0x17d4, -1113.2, 45.4084, -541.172, 0x61c, 0.5016, 0.5016, 0.5016],  // komono_kanban.bin[11]

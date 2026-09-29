@@ -1929,8 +1929,8 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
    */
   private replicaStep(): boolean {
     if (this.perfMeter.enabled) this.perfMeter.tick();
-    // Between connections -- reconnecting after a drop -- there is nothing to
-    // apply, and still nothing this page may simulate: it draws what it has.
+    // Before the stream starts, or after it ends, there is nothing to apply,
+    // and still nothing this page may simulate: it draws what it has.
     const applied = this.net.replica?.step(performance.now()) ?? false;
     this.cam.scripted = true;
     this.world.update(this.ctx, applied ? DRIVEN_TICK : STOPPED_TICK);

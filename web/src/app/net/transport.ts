@@ -81,7 +81,7 @@ export function describePath(p: IcePath, ice: string, now: number): { line: stri
   if (count(p.remote) === 0) {
     hint = "Nothing has arrived from the other end. The rendezvous carries each end's "
       + "addresses; if none come through, the two pages are not using the same one "
-      + "(compare their ?signal=), or it is not relaying.";
+      + "(compare their ?matchmaker=), or it is not answering.";
   } else if (p.relayOnly && !p.local.relay) {
     hint = "?relay=1 allows only a TURN relay, and the rendezvous handed out no TURN server.";
   } else if (!p.local.srflx && !p.local.relay) {
@@ -93,7 +93,7 @@ export function describePath(p: IcePath, ice: string, now: number): { line: stri
       + "a Mac, allow the browser in System Settings → Privacy & Security → Local "
       + "Network. Between networks, a strict NAT, or a router that will not route to "
       + `its own address, needs a TURN relay${p.turn ? "" : ", and this rendezvous has none"} `
-      + "(web/tools/signal/README.md).";
+      + "(matchmaker/README.md).";
   }
   return { line, hint };
 }

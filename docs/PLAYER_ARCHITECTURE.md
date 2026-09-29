@@ -503,8 +503,7 @@ that is a direct call is one a replica never hears.
 dormant every system that writes state -- `GameSystem`'s update, the rain,
 the gun lights' build (`World.setDormant`, which `update` and `resync` both
 respect) -- and the player skips the script phase and sends its gun to the
-host. The role decides this, never the presence of a peer object, which is
-absent while a dropped link reconnects.
+host. The role decides this, never the presence of a peer object.
 
 **3. A keyframe is adopted, not copied.** `World.load(snap, ctx, { adopt: true })`
 hands each system its slice uncloned, so the decoded objects become `G`'s and
@@ -844,9 +843,10 @@ web/src/
     device.ts     the phone as a gun: the flick that reloads, and the one press
                   that asks for fullscreen, landscape and the motion sensors
     stage_load.ts, walker_host.ts, urlstate.ts, viewprefs.ts
-    net/          two players over WebRTC: session.ts (roles, lobby,
-                  rejoin), host.ts and replica.ts (the two ends), rtc.ts,
-                  signal.ts (the rendezvous),
+    net/          two players over WebRTC: session.ts (roles, lobby),
+                  host.ts and replica.ts (the two ends), rtc.ts,
+                  matchmaker.ts (the matchmaker's client; the server is
+                  matchmaker/ at the repository's root),
                   player_hooks.ts (the player as netplay sees it), stats.ts.
                   See docs/NETPLAY.md
   core/         the framework. No three.js, no DOM.

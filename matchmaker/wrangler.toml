@@ -1,0 +1,38 @@
+# The netplay matchmaker as a Cloudflare Worker: worker.ts beside this file,
+# one Durable Object per room. README.md is the whole procedure:
+#
+#     cd matchmaker
+#     npx wrangler login
+#     npx wrangler deploy
+#     npx wrangler secret put HOTD2_CF_TURN_KEY_ID
+#     npx wrangler secret put HOTD2_CF_TURN_TOKEN
+#
+# The page then points at https://hotd2-matchmaker.<your-subdomain>.workers.dev/net/matchmaker
+
+name = "hotd2-matchmaker"
+main = "worker.ts"
+compatibility_date = "2025-09-01"
+
+# To serve it from a domain of your own instead of workers.dev (the zone has
+# to be on Cloudflare):
+# routes = [{ pattern = "matchmaker.example.com", custom_domain = true }]
+
+[[durable_objects.bindings]]
+name = "ROOMS"
+class_name = "MatchRoom"
+
+# SQLite-backed, which the Workers Free plan requires of a new class.
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["MatchRoom"]
+
+[vars]
+# Seconds a TURN credential lives: longer than any session.
+HOTD2_TURN_TTL = "21600"
+# Comma-separated; leave it out for the defaults (Cloudflare's, Google's).
+# HOTD2_STUN = "stun:stun.cloudflare.com:3478,stun:stun.l.google.com:19302"
+
+# Secrets, never in this file -- `npx wrangler secret put <NAME>`:
+#
+#   HOTD2_CF_TURN_KEY_ID, HOTD2_CF_TURN_TOKEN   Cloudflare's TURN service
+#   HOTD2_TURN_SECRET (+ HOTD2_TURN_URLS var)    a coturn server of your own, instead

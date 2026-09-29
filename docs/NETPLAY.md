@@ -78,24 +78,34 @@ public one, needs a router that routes to itself. With neither, the first two
 tabs anyone tried sat on "Finding a way through both networks" for good. What
 always gets through is a relay, so:
 
-**The dev server runs a TURN relay** (`web/tools/signal/turn.ts`) beside its
-rendezvous, on a free UDP port, and the rooms hand it out with credentials.
+**The dev server runs a TURN relay** (`matchmaker/turn.ts`) beside its
+matchmaker, on a free UDP port, and the rooms hand it out with credentials.
 Where a direct path works, ICE takes it and the overlay's route says
 `srflx→srflx` or `host→host`; where none does, it says `relay→relay … via
 TURN`. `HOTD2_DEV_TURN=0` turns it off.
 
-**The rendezvous.** The dev server has one at `/net/signal`, so two tabs, or a
-laptop and a phone on the LAN, need no cloud. For a hosted copy, run one: see
-[`web/tools/signal/README.md`](../web/tools/signal/README.md) for the
-Cloudflare Worker, the standalone Node server (`npm run signal`), and TURN.
-The page finds it through `?signal=<url>`, a build's `VITE_HOTD2_SIGNAL`, or
-`net/signal` beside the page, in that order.
+**The matchmaker** (`matchmaker/` at the repository's root) is how the two
+browsers find each other. The host makes a room and gets a code and TURN
+credentials; player 2 joins with the code and gets credentials too. Then the
+host posts its **offer** and player 2 its **answer**, each carrying every
+address its browser gathered (its LAN address, its public address as STUN saw
+it, its relay address), and the two connect. That is all the matchmaker does:
+one message each way, no stream, and nothing after the connection is made. The
+dev server has one at `/net/matchmaker`, so two tabs, or a laptop and a phone
+on the LAN, need no cloud. For a hosted copy, deploy the Cloudflare Worker in
+the same directory: [`matchmaker/README.md`](../matchmaker/README.md). The page
+finds it through `?matchmaker=<url>`, a build's `VITE_HOTD2_MATCHMAKER`, or
+`net/matchmaker` beside the page, in that order.
+
+**A session that drops is over.** There is no reconnecting: the card says why,
+each page goes back to playing alone, and hosting again makes a new room.
 
 **Development and testing:**
 
 | in the address | does |
 |---|---|
 | `?net=host` | make a room as the page opens |
+| `&matchmaker=URL` | use that matchmaker, e.g. a deployed Worker, from a local page |
 | `#join=CODE` | join that room (what the link is) |
 | `&netsim=lat:80,jit:20,loss:5` | make this end's outgoing link that bad: ms, ms, percent |
 | `&relay=1` | force WebRTC through TURN (`iceTransportPolicy: "relay"`) |
@@ -118,7 +128,7 @@ offered by type (`host`, with how many are hidden as `.local`; `srflx`, the
 public address STUN reported; `relay`), and the candidate pairs tried and
 failed. After 8 s without a connection it adds the likeliest reason, in order:
 nothing arrived from the other end (the two pages are not on the same
-rendezvous); `?relay=1` with no TURN server; no STUN answer (outgoing UDP
+matchmaker); `?relay=1` with no TURN server; no STUN answer (outgoing UDP
 blocked); or no pair works (mDNS names that do not resolve, and a NAT or
 router that needs a TURN relay). Both ends show it (`describePath` in
 `app/net/transport.ts`).
@@ -173,15 +183,16 @@ core/net/protocol.ts     message types, the two channels, the binary layouts
 app/net/peer.ts          what both ends share: handshake, pings, link report, stats
 app/net/host.ts          NetHost: acks pick the base, keyframes, player 2's gun, the aim check
 app/net/replica.ts       NetReplica: jitter buffer, apply, verify, desync report, the gun
-app/net/session.ts       roles, the lobby, rebuild and rejoin, the page's hooks
+app/net/session.ts       roles, the lobby, the page's hooks
 app/net/player_hooks.ts  the player as netplay sees it: live root, install, afterApply
 app/net/transport.ts     the transport seam, MemoryLink (tests), SimLink (?netsim)
-app/net/rtc.ts           WebRTC: two negotiated channels, ICE restart, candidate stats
-app/net/signal.ts        the rendezvous client (HTTP + server-sent events)
+app/net/rtc.ts           WebRTC: two negotiated channels, one offer and one answer, candidate stats
+app/net/matchmaker.ts    the matchmaker's client: create or join, post and wait for the SDP
 app/net/stats.ts         rates, loss by sequence, round trips, jitter, NetStats
 app/projection/net.ts    the badge, the overlay, the sidebar rows, judged
 ui/panels/Net.tsx        the badge, the overlay, the lobby card, the menu section, P2's crosshair
-tools/signal/            rooms.ts (the rendezvous), node.ts, serve.ts, worker.ts, README.md
+matchmaker/              (the repository's root) rooms.ts, node.ts, serve.ts, worker.ts,
+                         turn.ts (the dev relay), wrangler.toml, README.md
 ```
 
 `verify_layers.py` needed no new baseline. `core/net` is pure; `app/net` is the
@@ -333,16 +344,16 @@ harness it reads 0.0000°.
   is that a delta over `n` ticks carries every path touched in them: measured,
   about 1.2 KB against the previous tick and 1.7–2.5 KB against a base 3–9
   ticks back.
-* **The rendezvous speaks HTTP and server-sent events, not WebSockets.** No
-  WebSocket library is installed and none was added, and the dev server, a
-  plain Node server and a Worker can all serve SSE with nothing added. It
-  passes any proxy.
-* **Sessions survive drops** (the plan's N7). The host keeps its room and goes
-  back to waiting, with player 2's gun put down (`g_aim_on_screen[1] = 0`).
-  Player 2 rejoins by itself, with backoff, using the token it had; the
-  rendezvous numbers each join, so the host can tell player 2 coming back
-  from its own stream reconnecting. A closing tab leaves its room but keeps
-  its token, so a reload rejoins even if the leave never landed.
+* **The matchmaker is a mailbox, not a relay of signals.** No candidates
+  are trickled: each side waits for its browser to gather every address (up
+  to 5 s) and sends them all in one SDP, so the matchmaker holds two messages
+  and is asked for them with plain requests, repeated once a second. An
+  earlier version streamed every candidate over server-sent events and
+  supported rejoining; it was several times the size, for a second of
+  connect time.
+* **Sessions do not survive drops** (the plan's N7 is not built). A drop ends
+  the session on both pages. Rejoining would need a new offer and answer
+  through the matchmaker, a round of its own.
 * **Rules the plan implied, made explicit.** An event subscriber is an output
   (the dialogue handler no longer writes the caption on a replica), and a
   replica's world holds dormant every system that writes state. See
@@ -374,24 +385,18 @@ third of each tick's changes are counters stepping by exactly one.
 
 ## NAT traversal
 
-ICE with the servers the rendezvous hands out: STUN always (Cloudflare's and
-Google's by default), and TURN when the rendezvous has a secret. TURN
+ICE with the servers the matchmaker hands out: STUN always (Cloudflare's and
+Google's by default), and TURN when it has one -- the dev server's own relay,
+Cloudflare's TURN service, or coturn. TURN
 credentials are minted per peer and short-lived (the coturn
 `use-auth-secret` scheme: `<expiry>:<room>` and
 `base64(HMAC-SHA1(secret, username))`), so the secret never reaches a page.
 TURN is not optional for this player. It is built for phones, and a phone on
 cellular sits behind carrier-grade NAT, where hole-punching often fails;
 TURN over TLS on 443 also covers networks that block UDP. And, as it turned
-out, two tabs on one machine can need it too (*Using it*). When ICE drops
-(`disconnected` for 2.5 s, or `failed`), the host restarts it through the
-rendezvous (the replica asks it to), up to four times in a row; a restart
-that reconnects gives the budget back. Both ends usually see a drop together,
-so a replica's request that lands while the host's own restart is in flight,
-or within 2.5 s of it, is ignored: a second offer over the first would leave
-each end holding the other's wrong credentials. Signalling goes out in order
-and is handled in order, and a candidate for an ICE generation whose offer or
-answer has not been applied yet (its username fragment says which) is held
-for it. The overlay's route row says whether a session is direct or relayed.
+out, two tabs on one machine can need it too (*Using it*). When ICE fails the
+link is closed, and the session with it. The overlay's route row says whether
+a session is direct or relayed.
 
 ## Verification
 
@@ -399,9 +404,9 @@ for it. The overlay's route row says whether a session is direct or relayed.
 |---|---|
 | `test:net-codec` | fuzzed trees, lossy, reordered and duplicated delivery, acks up to 60 ticks late: every applied tick deep-equal and hash-equal to the host's; pool identity kept and a respawn a new object, asserted over every window, the only survivor's respawn included; a rebuilt list free; a `Map` refused by name. No bundle, about 20 s |
 | `test:net` | a real stage, host and replica sessions on a `MemoryLink` at clean, lossy and bad settings: every tick hash-verified, a whole-tree comparison every 30th, player 2's tab hidden for five seconds with the host's deltas staying narrow, a seek's epoch followed, every press of the final epoch taken once and none twice, player 2 scoring, the aim check exact for a true shot and catching a false one. Sabotaged once: a changed value and a removed actor caught and named, a lost desync report recovered by the replica's own retry. Needs a bundle |
-| `test:signal` | the rendezvous over real HTTP in its Node binding and its Worker: codes, TURN credentials, 404/409/403, queues, reconnects, rejoins, the sweep. It found three bugs, now fixed |
+| `test:matchmaker` | the matchmaker over real HTTP in its Node binding and in-process in its Worker (a fake Durable Object namespace): codes, TURN credentials minted from the secret, the offer and the answer each behind its own token, 404/409/403/400, the host's delete, a room's hour, a Worker's second draw on a live code, and Cloudflare's credential answer in both shapes with port 53 dropped. No bundle |
 | `test:turn` | the relay over real UDP on loopback, driven by a client written from the RFC: the 401 challenge, the minted credentials accepted and a wrong or expired one refused, response integrity and fingerprint, nothing crossing before both ends have a permission, Send and Data indications, ChannelData both ways, a Refresh freeing the relay. No bundle, about a second |
-| `net_pair` | the page, in a Chrome as users have it (mDNS on): a room whose link is opened in a second tab, over WebRTC, with the host's game held until player 2 is in; again with player 2's link at 60±30 ms and 10% loss; and again through the relay alone (`?relay=1`), whose route must say `relay`. Each plays stage 1 with player 2 joining and shooting through its own camera, and the replica's systems re-hashed against the host's. The first also takes a pause (player 2 on the host's exact frame), a reload of player 2 (rejoined, matching) and a stage change (player 2 follows, matching). No console error anywhere |
+| `net_pair` | the page, in a Chrome as users have it (mDNS on): a room whose link is opened in a second tab, over WebRTC, with the host's game held until player 2 is in; again with player 2's link at 60±30 ms and 10% loss; and again through the relay alone (`?relay=1`), whose route must say `relay`. Each plays stage 1 with player 2 joining and shooting through its own camera, and the replica's systems re-hashed against the host's. The first also takes a pause (player 2 on the host's exact frame) and a stage change (player 2 follows, matching), and ends with player 2 closing the tab, which the host's card must report. No console error anywhere |
 
 All five are rows in `tools/verify_all.py`.
 
@@ -423,35 +428,24 @@ All five are rows in `tools/verify_all.py`.
 What is built runs on one machine or one network with nothing else. For two
 people on two networks:
 
-1. **The page, hosted**, over https: `npm run site` stages the build
-   (`VITE_HOTD2_SIGNAL` pointing at the rendezvous below). No game data goes
-   with it: each player's page decodes its own bundle from their own copy of
-   the game, and both must be the same build, which the handshake enforces.
-2. **The rendezvous, hosted**: the Cloudflare Worker (`npx wrangler deploy`
-   in `web/tools/signal`), on the Workers Free plan, or `npm run signal`
-   behind TLS on any server.
-3. **A TURN relay reachable from the internet, with TCP and TLS on 443.**
-   Needed by a phone on carrier-grade NAT, strict NATs, networks that block
-   UDP, and -- as this machine shows -- sometimes by two devices on one
-   network. Either:
-   * **Cloudflare's TURN service**: make a TURN key in the dashboard and give
-     the Worker `HOTD2_CF_TURN_KEY_ID` and `HOTD2_CF_TURN_TOKEN` as secrets;
-     it mints credentials per player. Nothing to run. Billed by traffic
-     relayed, about 400–600 MB per hour of play.
-   * **coturn** on a server with a public address, sharing
-     `HOTD2_TURN_SECRET` with the rendezvous (`web/tools/signal/README.md`
-     has the configuration).
-   * The relay here (`npm run signal -- --turn --turn-ip <public address>`)
-     on a small server works for UDP but has no TCP or TLS, so it does not
-     reach networks that block UDP. It is for people you know, not the open
-     internet.
+1. **The matchmaker, deployed**: the Cloudflare Worker in `matchmaker/`, on
+   the Workers Free plan. `matchmaker/README.md` is the whole procedure.
+2. **Cloudflare's TURN service**, for the players with no direct path (a
+   phone on carrier-grade NAT, strict NATs, networks that block UDP, and
+   sometimes two devices on one network): a TURN key, given to the Worker as
+   two secrets. It relays over UDP, TCP and TLS on 443, and is billed by the
+   traffic it relays, about 400–600 MB per hour of relayed play.
+3. **The page, hosted**, over https, built with `VITE_HOTD2_MATCHMAKER`
+   pointing at the Worker (`docs/HOSTING.md`). No game data goes through the
+   matchmaker or the relay; each page loads its own bundle, and both must be
+   the same build, which the handshake enforces.
 4. **The test that has not been run**: a phone on cellular against a desktop
-   on Wi-Fi, through the deployed Worker and relay.
+   on Wi-Fi, through the deployed Worker and Cloudflare's relay.
 
 ## Known limits
 
-* **The host reloading ends the session.** A reload makes a new room with a
-  new code; player 2 has to join again.
+* **No reconnecting.** A dropped link, or either page reloading, ends the
+  session; hosting again makes a new room with a new code.
 * **Two players.** A third page could replicate (the host would need a
   `NetHost` per peer), but the game has two guns.
 * **No cosmetic prediction on player 2.** Player 2's reticle follows the

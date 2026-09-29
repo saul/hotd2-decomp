@@ -1,15 +1,15 @@
 /**
- * The netplay rendezvous on its own, for a machine that is not running the
+ * The netplay matchmaker on its own, for a machine that is not running the
  * dev server: a small VPS, a Raspberry Pi, a laptop on a LAN party.
  *
- *     npm run signal -- --port 8787
+ *     cd web && npm run matchmaker -- --port 8787
  *
- * Then open the player with `?signal=https://that-host/net/signal`, or build
- * it with `VITE_HOTD2_SIGNAL` set to the same. TURN, if there is one, comes
+ * Then open the player with `?matchmaker=https://that-host/net/matchmaker`,
+ * or build it with `VITE_HOTD2_MATCHMAKER` set to the same. TURN, if there is one, comes
  * from the environment -- `HOTD2_TURN_URLS`, `HOTD2_TURN_SECRET`,
  * `HOTD2_TURN_TTL`, or Cloudflare's `HOTD2_CF_TURN_KEY_ID` and
  * `HOTD2_CF_TURN_TOKEN` -- as `rooms.ts` reads it. Put it behind TLS: a page
- * served over https may not call an http rendezvous.
+ * served over https may not call an http matchmaker.
  *
  * `--turn` runs the relay in `turn.ts` beside it, on UDP 3478 (`--turn-port`),
  * advertising relays at `--turn-ip` -- the address peers reach this machine
@@ -19,7 +19,7 @@
 import { createServer } from "node:http";
 import { randomBytes } from "node:crypto";
 import { configFromEnv } from "./rooms";
-import { handle, nodeRooms } from "./node";
+import { handle, nodeMatchmaker } from "./node";
 import { startTurn } from "./turn";
 
 const args = process.argv.slice(2);
@@ -28,7 +28,7 @@ const flag = (name: string, fallback: string): string => {
   return i >= 0 && args[i + 1] ? args[i + 1] : fallback;
 };
 const port = Number(flag("port", "8787"));
-const base = flag("base", "/net/signal");
+const base = flag("base", "/net/matchmaker");
 const cfg = configFromEnv(process.env);
 if (args.includes("--turn")) {
   const secret = cfg.turn?.secret ?? randomBytes(16).toString("hex");
@@ -41,16 +41,15 @@ if (args.includes("--turn")) {
                ttlSeconds: cfg.turn?.ttlSeconds ?? 6 * 3600 };
   console.log(`TURN relay on udp/${turn.port}, relays at ${turn.relayIp}`);
 }
-const rooms = nodeRooms(cfg);
-setInterval(() => rooms.sweep(), 15_000).unref();
+const mm = nodeMatchmaker(cfg);
 
 createServer((req, res) => {
-  if (!handle(rooms, base, req, res)) {
+  if (!handle(mm, base, req, res)) {
     res.statusCode = 404;
     res.end("not found");
   }
 }).listen(port, () => {
-  console.log(`netplay rendezvous on :${port}${base} -- `
+  console.log(`netplay matchmaker on :${port}${base} -- `
     + `${cfg.turn ? `TURN ${cfg.turn.urls.join(", ")}`
       : cfg.cloudflareTurn ? "Cloudflare TURN" : "no TURN configured (STUN only)"}`);
 });

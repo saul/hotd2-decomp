@@ -126,11 +126,12 @@ CHECKS: list[Check] = [
           "exactly -- deep-equal and hash-equal on every tick it applies -- "
           "over fuzzed trees with lost, reordered and late-acked packets; the "
           "only check of the delta's window property and of pool identity"),
-    Check("test:signal", "web", ["npm", "run", "--silent", "test:signal"],
-          "that the netplay rendezvous keeps its protocol over real HTTP in "
-          "all three of its servers -- the dev server's, the standalone one "
-          "and the Cloudflare Worker's -- refusals, queues, reconnects, "
-          "rejoins and the TURN credentials included"),
+    Check("test:matchmaker", "web", ["npm", "run", "--silent", "test:matchmaker"],
+          "that the netplay matchmaker keeps its protocol -- a room code, TURN "
+          "credentials, the host's offer and player 2's answer, each behind its "
+          "own token -- over real HTTP in the Node server and in-process in the "
+          "Cloudflare Worker, and reads Cloudflare's TURN credentials in both "
+          "of their shapes"),
     Check("test:turn", "web", ["npm", "run", "--silent", "test:turn"],
           "that the TURN relay the dev server runs keeps RFC 8656 over real "
           "UDP: the credential challenge, the minted credentials accepted and "
@@ -179,8 +180,9 @@ CHECKS: list[Check] = [
           "the dev server's rendezvous -- directly, on a bad link, and "
           "through its TURN relay alone -- every tick the replica applies "
           "hash-equal to the host's, player 2 joining and scoring, its aim "
-          "checked against the host's camera, and a pause, a reload and a "
-          "stage change survived -- the only check of the replica's install "
+          "checked against the host's camera, a pause and a stage change "
+          "survived, and player 2 leaving ending it -- the only check of the "
+          "replica's install "
           "into G and of the render layers following a state they did not "
           "make",
           NEEDS_BUNDLE, LANE_BROWSER),

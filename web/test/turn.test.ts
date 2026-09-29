@@ -1,5 +1,5 @@
 /**
- * The TURN relay (`tools/signal/turn.ts`), driven over real UDP on loopback
+ * The TURN relay (`matchmaker/turn.ts`), driven over real UDP on loopback
  * by a client written from the RFC rather than from the server.
  *
  * It asserts what a browser depends on:
@@ -27,7 +27,7 @@ import { createSocket, type Socket } from "node:dgram";
 import {
   Attr, Cls, Method, StunWriter, attr, crc32, integrityOk, longTermKey, parseStun,
   readXorAddress, restPassword, startTurn, xorAddress, type StunMessage,
-} from "../tools/signal/turn";
+} from "../../matchmaker/turn";
 
 let passes = 0;
 let failures = 0;

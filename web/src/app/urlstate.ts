@@ -134,4 +134,4 @@ export function writeState(s: PlayerState, replace = true): void {
 }
 
 /** The netplay settings the address carries across every rewrite. See `writeState`. */
-const NET_PARAMS = ["signal", "relay", "netsim"] as const;
+const NET_PARAMS = ["matchmaker", "relay", "netsim"] as const;

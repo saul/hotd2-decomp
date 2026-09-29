@@ -1,8 +1,8 @@
 import { defineConfig } from "vite";
 import { execSync } from "node:child_process";
-import { configFromEnv } from "./tools/signal/rooms";
-import { handle as handleSignal, nodeRooms } from "./tools/signal/node";
-import { startTurn } from "./tools/signal/turn";
+import { configFromEnv } from "../matchmaker/rooms";
+import { handle as handleMatchmaker, nodeMatchmaker } from "../matchmaker/node";
+import { startTurn } from "../matchmaker/turn";
 import { randomBytes } from "node:crypto";
 import {
   appendFileSync,
@@ -194,17 +194,18 @@ function serveBundle() {
 }
 
 /**
- * The netplay rendezvous, on the dev server: two tabs, or a laptop and a
- * phone on the LAN, find each other at `/net/signal` with no cloud involved.
- * The same rooms as `npm run signal` and the Cloudflare Worker -- see
- * `tools/signal/rooms.ts`. TURN comes from the environment, as there.
+ * The netplay matchmaker, on the dev server: two tabs, or a laptop and a
+ * phone on the LAN, find each other at `/net/matchmaker` with no cloud
+ * involved. The same rooms as `npm run matchmaker` and the Cloudflare Worker
+ * -- see `matchmaker/rooms.ts` at the repository's root. TURN comes from the
+ * environment, as there, or from the relay started below.
  */
-function serveSignal() {
+function serveMatchmaker() {
   return {
-    name: "hod2-signal",
+    name: "hod2-matchmaker",
     configureServer(server: import("vite").ViteDevServer) {
       const cfg = configFromEnv(process.env);
-      const rooms = nodeRooms(cfg);
+      const mm = nodeMatchmaker(cfg);
       // A TURN relay of its own, unless one is configured or it is turned
       // off (`HOTD2_DEV_TURN=0`): on a machine where two tabs, or a laptop and
       // a phone, find no direct path -- mDNS that does not resolve, a router
@@ -225,11 +226,8 @@ function serveSignal() {
             server.config.logger.warn(`  netplay: no TURN relay: ${e.message}`);
           });
       }
-      const sweep = setInterval(() => rooms.sweep(), 15_000);
-      sweep.unref();
-      server.httpServer?.on("close", () => clearInterval(sweep));
       server.middlewares.use((req, res, next) => {
-        if (!handleSignal(rooms, "/net/signal", req, res)) next();
+        if (!handleMatchmaker(mm, "/net/matchmaker", req, res)) next();
       });
     },
   };
@@ -254,7 +252,7 @@ function buildId(): string {
 }
 
 export default defineConfig({
-  plugins: [serveBundle(), serveSignal()],
+  plugins: [serveBundle(), serveMatchmaker()],
   define: { __HOTD2_BUILD__: JSON.stringify(buildId()) },
   // Relative, so a build works wherever it is put -- a bucket's root, a
   // prefix in one, a CloudFront path. Every URL the page makes for itself

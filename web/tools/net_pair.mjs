@@ -8,7 +8,7 @@
  * addresses stay hidden behind mDNS names, which is what every real Chrome
  * does, and on the machine this was written on they do not resolve and the
  * router does not route to itself -- so the sessions below connect through
- * the dev server's TURN relay (`tools/signal/turn.ts`), and the route they
+ * the dev server's TURN relay (`matchmaker/turn.ts`), and the route they
  * report says so. An earlier version launched Chrome with the hiding off, and
  * passed for days while two real tabs could not connect at all (L80).
  *
@@ -270,13 +270,24 @@ async function session(label, { both = "", replicaQuery = "", seconds, robust = 
   if (relayOnly) {
     check(`...through the relay alone (${rf.route})`, /relay/.test(rf.route ?? ""), rf.route);
   }
-  if (robust) await robustness(host, replica);
+  if (robust) {
+    await robustness(host, replica);
+    // Player 2 leaves: the session is over, and the host's card says so.
+    await replica.close();
+    let card = "";
+    for (let i = 0; i < 40 && !/ended/i.test(card); i++) {
+      await host.waitForTimeout(250);
+      card = await host.$eval("#net-lobby", (e) => e.textContent).catch(() => "");
+    }
+    check(`player 2 closing the tab ends the host's session, and says so ("${card.trim()}")`,
+          /ended/i.test(card), card);
+  }
   await context.close();
 }
 
 /**
- * What a session has to survive: the host pausing, player 2 reloading their
- * tab mid-game, and the host moving to another stage.
+ * What a session has to survive: the host pausing, and the host moving to
+ * another stage.
  */
 async function robustness(host, replica) {
   // The host pauses: player 2 is held, and says why.
@@ -304,25 +315,6 @@ async function robustness(host, replica) {
   check(`...and the held host's own ticks still verify (${ticks0} -> ${f1["ticks verified"]})`,
         num(f1["ticks verified"]) > ticks0 && f1["hash mismatches"] === "0", JSON.stringify(f1));
   await host.keyboard.press("Space");
-
-  // Player 2 reloads the tab: the same game comes back, and matches.
-  await replica.reload({ waitUntil: "domcontentloaded" });
-  const stuck = await loaded(replica);
-  if (stuck) {
-    check("a reloaded player 2 loads the page", false, stuck);
-    return;
-  }
-  let f = {};
-  for (let i = 0; i < 60; i++) {
-    f = await figures(replica);
-    if (num(f["ticks verified"]) > 120) break;
-    await replica.waitForTimeout(500);
-  }
-  check(`a reloaded player 2 rejoins the same room and verifies ticks (${f["ticks verified"]})`,
-        num(f["ticks verified"]) > 120 && f["hash mismatches"] === "0", JSON.stringify(f));
-  const hf = await figures(host);
-  check(`...with the host back to streaming (${hf.phase})`, /streaming/.test(hf.phase ?? ""),
-        hf.phase);
 
   // The host changes stage: player 2 loads it too, and it still matches.
   await host.click("#crumbs .crumb-trail");

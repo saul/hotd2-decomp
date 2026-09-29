@@ -164,4 +164,13 @@ export interface Instance {
    * take are read off the pose each frame. See `render/characters/judgment.ts`.
    */
   judgmentWings?: Object3D[];
+  /**
+   * A result card figure's `common.bin[199]` on bone 5, which
+   * `ResultCardFigureDrawNode` (`FUN_004357F0`) draws while the figure's
+   * `holdsLife` is up; null once looked for and not in the bundle. Render
+   * bookkeeping. See `render/characters/result_figure.ts`.
+   */
+  resultLife?: Object3D | null;
+  /** The figure's scaled nodes' meshes carry their push and pop. */
+  resultScaleHooked?: boolean;
 }

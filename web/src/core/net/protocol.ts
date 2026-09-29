@@ -18,7 +18,7 @@
  */
 import { ByteReader, ByteWriter } from "./bytes";
 
-export const PROTOCOL = 4;
+export const PROTOCOL = 5;
 
 export type Channel = "ctrl" | "tick";
 
@@ -226,7 +226,16 @@ export interface InputPacket {
   ack: number;
   /** The tick on screen now. */
   view: number;
-  aim: { x: number; y: number; on: boolean };
+  /**
+   * Where player 2 is aiming, and **the device they are aiming with**: `mode`
+   * is their PC input mode (`g_input_mode`), 6 for the mouse and `0xD` for a
+   * finger, the light gun. The exe's own network game sends the same thing,
+   * the byte at `+0x14` of every packet (`NetBuildInputPacket`,
+   * `FUN_004A02F0`), and the other end puts it in the peer's slot
+   * (`NetApplyPeerInput`, `FUN_0049EE10`) -- so the host's `HudDrawCrosshair`
+   * decides player 2's crosshair from player 2's own device.
+   */
+  aim: { x: number; y: number; on: boolean; mode: number };
   presses: Press[];
 }
 
@@ -239,6 +248,7 @@ export function writeInput(w: ByteWriter, p: InputPacket): void {
   w.f64(p.aim.x);
   w.f64(p.aim.y);
   w.u8(p.aim.on ? 1 : 0);
+  w.u8(p.aim.mode);
   w.uvar(p.presses.length);
   for (const q of p.presses) {
     w.uvar(q.id);
@@ -260,7 +270,7 @@ export function readInput(r: ByteReader): InputPacket {
   const seq = r.uvar();
   const ack = r.uvar() - 1;
   const view = r.uvar() - 1;
-  const aim = { x: r.f64(), y: r.f64(), on: r.u8() === 1 };
+  const aim = { x: r.f64(), y: r.f64(), on: r.u8() === 1, mode: r.u8() };
   const n = r.uvar();
   if (n > 256) throw new Error(`${n} presses in one packet`);
   const presses: Press[] = [];

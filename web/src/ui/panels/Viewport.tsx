@@ -66,7 +66,7 @@
 import type { ReactNode, RefObject } from "react";
 import { useSlice } from "../useSlice";
 import type { LoadingProjection } from "../projection";
-import { PeerCrosshair } from "./Net";
+import { PeerCrosshair, crosshairSpriteStyle } from "./Net";
 import { LoadBar } from "./LoadBar";
 
 /**
@@ -122,9 +122,14 @@ export function Viewport(
   const crosshair = useSlice((p) => p?.crosshair);
   const aiming = ready && crosshair === true;
   // What it looks like is the game's too: the Sight Graphic's sprite, the
-  // image riding the node the pointer moves. The ring stays for a bundle
-  // without the image.
-  const crosshairImage = useSlice((p) => p?.crosshairImage) ?? null;
+  // image riding the node the pointer moves, at the size the exe's quad has
+  // on this frame. The ring stays for a bundle without the image.
+  //
+  // And whether it is there at all is the game's for the device as well: a
+  // finger is the light gun, which `HudDrawCrosshair` gives no crosshair, so
+  // a touch takes it away and the mouse brings it back -- through `crosshair`
+  // above, with nothing here asking what the pointer is.
+  const sprite = useSlice((p) => p?.crosshairSprite) ?? null;
   // The letterbox is a fraction of the *frame*, not of this element: the
   // engine's bars sit at view-space y = +-0.35 against the frustum's
   // half-height, so they belong to the rendered view. Pillarboxed, that is the
@@ -171,10 +176,9 @@ export function Viewport(
         <canvas className="hud-screen" ref={refs.screen} width={640}
                 height={480} />
       </div>
-      <div className={crosshairImage ? "crosshair sprite" : "crosshair"}
+      <div className={sprite ? "crosshair sprite" : "crosshair"}
            ref={refs.crosshair} hidden={!aiming}
-           style={crosshairImage
-             ? { backgroundImage: `url(${crosshairImage})` } : undefined} />
+           style={sprite ? crosshairSpriteStyle(sprite) : undefined} />
       {/* The other player's, in a two-player session: React places it from
           the projection, because it follows `G` and not this page's pointer. */}
       <PeerCrosshair />

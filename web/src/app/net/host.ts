@@ -57,8 +57,11 @@ export interface TakenPress extends Press {
 
 /** Player 2's gun, as the host feeds it into the port. */
 export interface RemoteInput {
-  /** Where player 2 is aiming, or null before the first packet. */
-  aim: { x: number; y: number; on: boolean } | null;
+  /**
+   * Where player 2 is aiming and the device they aim with (their PC input
+   * mode, see `InputPacket.aim`), or null before the first packet.
+   */
+  aim: { x: number; y: number; on: boolean; mode: number } | null;
   /** Presses that arrived since the last call, oldest first. */
   presses: TakenPress[];
 }

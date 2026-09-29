@@ -7,10 +7,10 @@
  * `app/projection/net.ts`'s; these lay it out. What they add is only what
  * never leaves the page: copying a code or a report to the clipboard.
  */
-import { useRef, useState } from "react";
+import { useRef, useState, type CSSProperties } from "react";
 import { useDispatch } from "../store_context";
 import { useSlice } from "../useSlice";
-import type { NetProjection } from "../projection";
+import type { CrosshairSprite, NetProjection } from "../projection";
 
 type CopyField = HTMLInputElement | HTMLTextAreaElement;
 
@@ -264,15 +264,38 @@ export function NetMenuSection({ onClose }: { onClose: () => void }) {
 }
 
 /**
- * The other player's crosshair, where the game says they are aiming: blue
- * for player 2, red for player 1, as the cabinet's two guns were.
+ * A crosshair sprite on its node: the image, the size the exe's quad has on
+ * this frame, and centred on the point -- the record's anchor is (2, 2). The
+ * node's `left` and `top` are the point, whoever writes them.
+ */
+export function crosshairSpriteStyle(s: CrosshairSprite): CSSProperties {
+  return {
+    backgroundImage: `url(${s.url})`,
+    width: `${s.w}px`, height: `${s.h}px`,
+    marginLeft: `${-s.w / 2}px`, marginTop: `${-s.h / 2}px`,
+  };
+}
+
+/**
+ * The other player's crosshair, where the game says they are aiming, drawn
+ * with the sprite the game drew it with -- that player's Sight Graphic, and
+ * player 2's are the blue set -- and there exactly when the game drew it, so
+ * a player on a finger has none. The ring, red for player 1 and blue for
+ * player 2 as the cabinet's two guns were, is for a bundle without the
+ * sprites.
  */
 export function PeerCrosshair() {
   const peer = useSlice((p) => p?.netPeer ?? null);
   if (!peer) return null;
+  const at = { left: `${peer.x}px`, top: `${peer.y}px` };
+  if (peer.sprite) {
+    return (
+      <div className={`crosshair peer sprite p${peer.player}`}
+           style={{ ...at, ...crosshairSpriteStyle(peer.sprite) }} />
+    );
+  }
   return (
-    <div className={`crosshair peer p${peer.player}`}
-         style={{ left: `${peer.x}px`, top: `${peer.y}px` }}>
+    <div className={`crosshair peer p${peer.player}`} style={at}>
       <span>P{peer.player}</span>
     </div>
   );

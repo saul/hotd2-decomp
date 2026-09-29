@@ -3402,10 +3402,11 @@ the saved Original items) and hands back to the title. The settings are `G`
 fields at their addresses now -- `g_option_difficulty`, `g_option_lives`,
 `g_option_credits`, each player's sight graphic, sight speed, bindings and
 calibration -- where `OPTION_LIVES` and `INPUT_BINDINGS` were constants, and
-every reader reads them. The page's input mode is **6** (the mouse with the
-keyboard's pad ORed in), which is what makes Sight Graphic editable and takes
-Gun Calibration off the list; the two sub-screens are unreachable with the
-page's mouse guns, so the port has their gates and not their bodies.
+every reader reads them. The page's mouse is input mode **6** (the mouse with
+the keyboard's pad ORed in), which is what makes Sight Graphic editable and
+takes Gun Calibration off the list; the two sub-screens are unreachable with
+the page's mouse guns, so the port has their gates and not their bodies (a
+finger is the light gun, `0xD`, and reaches Gun Calibration's gate -- below).
 Blood Color is dead in the exe and stays so. Free play, once changed on the
 Continue row, does not come back without three unlock bits no bundle can set
 -- the exe's rule. `port.test.ts` drives it all with pad bits: lives 4 is
@@ -3421,6 +3422,33 @@ the highlighted row lit red through the quad's colour (flags `0x2000`), and
 the reticle in play is the game's crosshair sprite, the one the Sight Graphic
 picks. `web/tools/options_page.mjs` drives it end to end. Not on a touch
 screen: the list needs a pad's directions, and the menu hides the item there.
+
+**The crosshair is the device's, and a finger is the light gun** (2026-09-29).
+`HudDrawCrosshair` (`FUN_004169C0`) draws for the mouse -- input modes 5 and
+6 -- and for a non-gun aiming on the screen, and so **never for a gun that is
+not the mouse**: the PC build's MC PC light gun, mode `0xD` on player 1's port
+and `0xE` on player 2's (`InputModesFromDeviceConfig`, `FUN_0041E440`)
+`[proved]`. The page's pointer is whichever device was used last
+(`app/device.ts`): a mouse move or click is mode 6, a touch is `0xD`, and a
+page with no fine pointer (a phone) starts on `0xD`; `stepOneFrame` writes
+both players' modes through `SetPlayerInputModes` (`FUN_0041E240`,
+`game/input_mode.ts`) at the head of every tick. So a tap takes the reticle
+away and a mouse move brings it back, by the exe's own rule and with no
+switch in the page. The reticle is the game's sprite for the player's Sight
+Graphic, at the sprite's own size in the 640x480 screen scaled to the frame
+and centred on the pointer -- the crosshair's record has sx and sy 1.0 and
+anchor (2, 2) (`g_crosshair_sprite_record`, set by `FUN_0040A920`) -- for the
+page's own reticle and for the other player's in a two-player session; the
+CSS ring is only for a bundle without the sprites. **Two players:** player
+2's device rides their input packet (protocol 5), as byte `+0x14` of the exe's
+own network packet does (`NetBuildInputPacket`, `NetApplyPeerInput`), so the
+host decides player 2's crosshair from player 2's device and each page shows
+the other's reticle exactly when the game drew it. One consequence reaches
+the options screen: a player whose last press was a touch is a light gun
+there too, so Gun Calibration is offered and taken -- and its screen is not
+ported, so it stays blank until the mouse moves (`game/options/index.ts`).
+`test:port`, `test:ui`, `test:net` and `web/tools/crosshair_page.mjs` (the
+`crosshair` row; `--net` for two tabs) hold it.
 
 **The profile is kept** in the browser (`app/profile_store.ts`), where the
 exe writes four disguised files: saved at EXIT and at the Original Mode game

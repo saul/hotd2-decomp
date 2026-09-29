@@ -25952,3 +25952,76 @@ lacks. Headless, before (constructors unregistered) and after:
 five models and her landing among them), `?stage=2&block=17&step=1&op=0` f650
 (four models in mid-air, then in the cabinet), `?stage=2&block=3&step=1&op=0`
 f112 (no sign, then the hanging sign over the van).
+
+## 2026-09-29 -- the crosshair is the device's: a finger is the light gun
+
+**The rule, read again.** `HudDrawCrosshair` (`FUN_004169C0`) draws when app
+state 6, a life, the firing gate, and *either* the player is not a gun and
+aims on the screen, *or* `GetPlayerInputModes` says 5 or 6 for them (`TEST
+EAX, EAX` on the task's `+0x34` picks player 2's word for any player but 0)
+`[proved]`. So a gun outside 5 and 6 never has one. `InputModesFromDeviceConfig`
+(`FUN_0041E440`) says which gun that is: a configured device of type `0x104`
+is the MC PC light gun, mode `0xD` on player 1's port and `0xE` on player 2's,
+assigned outright; `InputMapDevicesToMaple` makes it maple flag `0x80`, a
+gun, like the mouse `[proved]`. Named: `SetPlayerInputModes` (`FUN_0041E240`),
+`InputInit` (`FUN_0041E2D0`), `InputModesFromDeviceConfig`.
+
+**The exe sends the peer's device.** Chasing the writers of `g_input_mode_p1`
+found the NETWORK row's game: `NetBuildInputPacket` (`FUN_004A02F0`) puts this
+machine's saved mode in byte `+0x14` of its 0x2C-byte packet, the exchange
+copies the peer's into `g_net_peer_packet` (`0x007DE4B8`), and
+`NetApplyPeerInput` (`FUN_0049EE10`) calls `SetPlayerInputModes(local, peer)`
+(or the other way round by `g_net_local_player`) every network frame;
+`NetworkScreenSetup` saves both modes and `NetSessionClose` restores them
+`[proved]`. So each machine's crosshair rule reads the peer's own device --
+which is exactly the shape the port's netplay wanted, and why the replica's
+packet now carries a mode byte (protocol 5).
+
+**The port.** `game/input_mode.ts` (`InputMode`, `SetPlayerInputModes`,
+`GetPlayerInputModes`); `HudDrawCrosshair` reads the modes through the getter.
+`app/device.ts` maps `pointerType` to a device (mouse 6, touch `0xD`, pen
+nothing) and picks the first one by `(any-pointer: fine)`; `render/shooting.ts`
+reports the pointer type on every press and move; `stepOneFrame` writes both
+modes at every tick's head (the replica's from its packets). The reticles --
+this page's and the peer's -- draw `g_crosshair_sprite` at the sprite's size
+times the record's sx/sy (1.0, `FUN_0040A920`'s stores into
+`g_crosshair_sprite_record`) scaled by frame height / 480, centred (flags 10,
+anchor (2, 2)); the peer's is shown exactly when `g_crosshair_drawn` says, the
+`g_aim_on_screen` test beside it gone. The `(pointer: coarse)` rule that hid
+the reticle in CSS is gone: the game's rule does it.
+
+**Wrong turns.** (1) I added `g_input_mode` to `PLAYER_BLOCK_FIELDS`,
+believing a stage step resets `G`; the mutation run passed without it --
+`ResetGameGlobals` never touches the field -- and it came out again. (2) I
+wrote the crosshair record's sx/sy writers up as "the only writers"
+`[proved]` from the xref list; `HudDrawCrosshair` itself stores into the
+block through `ESI + 0xE4..0xF0`, so a pointer-relative writer would not show
+(L32), and it is `[likely]` now. (3) `test:net`'s first device count was off by
+one or two frames a run: frames where the gate or player 2's state moved
+inside the step, before or after the draw. It counts frames in play on both
+sides of the step now. (4) The harness's first two-tab read of the replica
+raced the host by a round trip. (5) Found on the way, pre-existing: after a
+dropped session the host's `applyRemoteInput` re-applied the last packet every
+tick, undoing `peerGone`'s aim-off; it skips a closed host now, and a gone
+player 2 is a light gun (`0xE`) off the screen, so the game draws them no
+crosshair.
+
+**Left open.** A touch player on the options screen is a light gun there too,
+so Gun Calibration is offered and `OptionsCalibrationEntry` takes them; the
+arm and the nine-state screen are not ported, so the screen is blank until
+the mouse moves (mode 6, refused, back to EXIT). Porting the calibration
+screen is the fix; nothing in this change guards it.
+
+**Proof.** `test:port` "the crosshair and the device": the three light-gun
+checks fail when `HudDrawCrosshair` reads player 1's mode for both players,
+and again when it counts `0xD`/`0xE` as the mouse. `test:ui` "The crosshairs
+are the game's sprites": the size and peer-sprite checks fail against the
+old ring-only peer and the unsized sprite. `test:net`: player 2's device,
+switched every two seconds on the replica, reaches the host, which draws
+them a crosshair on every stable in-play mouse frame and none on a finger's.
+`web/tools/crosshair_page.mjs` (row `crosshair`): mouse -> the bundle's
+sprite image at 64 px on a 960-high frame, centred on the pointer, Sight
+Graphic 2 -> `0xAAB`; tap -> mode `0xD`, hidden, system pointer back; mouse ->
+back; a phone context -> `0xD` from the first frame and no reticle through
+play and three taps. `--net`: two tabs, each drawing the other's reticle with
+that player's sprite, a tap on either taking it off both.

@@ -191,6 +191,13 @@ export class Shooting implements System {
    * from), so this layer reports it and `app/` writes it.
    */
   onAim: (ndcX: number, ndcY: number) => void = () => {};
+  /**
+   * What made the last press or move: `PointerEvent.pointerType`, `"mouse"`,
+   * `"touch"` or `"pen"`, before the press itself is reported. Which device
+   * that is to the game -- the mouse or the light gun, and so whether it has
+   * a crosshair -- is the port's, and `app/` writes it (`app/device.ts`).
+   */
+  onPointerKind: (pointerType: string) => void = () => {};
 
   private combat: CombatJson | null = null;
   /**
@@ -220,6 +227,9 @@ export class Shooting implements System {
     // and on a phone, a finger held still, which is a shot.
     viewport.addEventListener("contextmenu", (e) => e.preventDefault());
     viewport.addEventListener("pointerdown", (e) => {
+      // The device first: a tap is the light gun's pull, and the game should
+      // hear it as one on the tick that takes the shot.
+      this.onPointerKind(e.pointerType);
       if (e.button === 2) {
         e.preventDefault();
         this.onOffscreenPull();
@@ -265,6 +275,7 @@ export class Shooting implements System {
       this.fire(f);
     });
     viewport.addEventListener("pointermove", (e) => {
+      this.onPointerKind(e.pointerType);
       this.follow(this.pointerAt(e));
     });
     // A finger lifting, or taken by the browser, is no longer down.

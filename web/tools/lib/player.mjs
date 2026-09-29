@@ -94,7 +94,8 @@ export async function serve(port) {
  */
 export async function openPlayer({ url = "", size = "1600x1000",
                                    headless = false, quiet = false,
-                                   init = null, debug = true } = {}) {
+                                   init = null, debug = true,
+                                   context = {} } = {}) {
   const [width, height] = size.split("x").map(Number);
   const port = await freePort();
   if (!quiet) console.log(`vite on :${port}`);
@@ -115,7 +116,9 @@ export async function openPlayer({ url = "", size = "1600x1000",
     console.log(`  ${line}`);
   };
 
-  const page = await browser.newPage({ viewport: { width, height } });
+  // `context` is the rest of Playwright's context options -- `hasTouch` and
+  // `isMobile` for a driver that taps (`crosshair_page.mjs`).
+  const page = await browser.newPage({ viewport: { width, height }, ...context });
   page.on("console", (m) => {
     if (m.type() !== "error") return;
     // **The one excused URL, named.** Chrome asks for `/favicon.ico` by

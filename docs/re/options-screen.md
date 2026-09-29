@@ -413,13 +413,25 @@ calibration copied into the aim records `[proved]`.
   `MouseReadButtons`). `g_input_mode` was 5 until this screen; 6 is what
   lets a player change their Sight Graphic and what takes Gun Calibration off
   the list.
-* **Neither sub-screen is reachable.** Sight Speed needs a player on a
-  standard controller and Gun Calibration a gun outside mode 6; the port has
-  neither, the cursor steps over both rows, and each sub-screen's first test
-  sends it back. The port has those tests (`OptionsSightSpeedFrame`'s,
-  `OptionsCalibrationEntry`'s) and not the screens behind them, which need an
-  aim-record model -- a keyboard crosshair, a raw gun position -- that the
-  port's pointer does not have.
+* **A finger is the light gun, mode `0xD`** (`InputModesFromDeviceConfig`
+  gives player 1's MC PC gun that mode `[proved]`), and the page's pointer is
+  whichever device was used last (`app/device.ts`). So a player whose last
+  press was a touch cannot change their Sight Graphic (drawn at half alpha)
+  and is offered Gun Calibration, as a light-gun player is in the exe.
+* **Sight Speed is not reachable, and Gun Calibration only by a touch.** Sight
+  Speed needs a player on a standard controller, which the port has none of:
+  the cursor steps over the row and the sub-screen's first test sends it
+  back. Gun Calibration needs a gun outside mode 6: a mouse player's cursor
+  steps over it and `OptionsCalibrationEntry` refuses, but a touch player's
+  does not and the entry takes them. The port has those tests
+  (`OptionsSightSpeedFrame`'s, `OptionsCalibrationEntry`'s) and not the
+  screens behind them, which need an aim-record model -- a keyboard
+  crosshair, a raw gun position -- that the port's pointer does not have; so
+  a touch player who chooses Gun Calibration gets a blank screen (the entry
+  frame, asked again every frame) until their mouse moves -- mode 6, refused,
+  back to the list on EXIT -- or the page's menu leaves. A phone cannot reach
+  row 8: it has no arrows. Porting `OptionsCalibrationArm` and the nine-state
+  screen behind it is `[open]` work.
 * **Free play is the boot's, by the user's choice** (`ProfileBoot`'s
   `[diverges]`): a profile with nothing saved starts at -1. Default still
   writes 5, and the Continue row -- faithfully -- will not go back to free

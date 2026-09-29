@@ -223,6 +223,15 @@ CHECKS: list[Check] = [
           "chosen crosshair on the reticle, and that a reload boots what "
           "was saved in place of the free-play default",
           NEEDS_BUNDLE, LANE_BROWSER),
+    Check("crosshair", "web",
+          ["node", "tools/crosshair_page.mjs", "--headless"],
+          "that real pointer events reach HudDrawCrosshair as the exe's "
+          "devices -- a mouse move is input mode 6 and the reticle is the "
+          "Sight Graphic's sprite out of the bundle, sized to the frame and "
+          "centred on the pointer; a touch is the light gun, 0xD, and the "
+          "game draws no crosshair until the mouse moves again; and a phone, "
+          "with no fine pointer, never shows one",
+          NEEDS_BUNDLE, LANE_BROWSER),
     Check("animals", "web", ["npm", "run", "--silent", "animals"],
           "that the frog, the owl and the fish are placed from a real bundle "
           "and leave their opening state -- none of the three is a skinned "

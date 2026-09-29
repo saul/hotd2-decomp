@@ -108,7 +108,7 @@ export function makeNetHooks(p: Player): NetPlayerHooks {
     roleChanged: (role: NetRole) => p.netRoleChanged(role),
     // Player 2's gun, pointed off the screen: the cabinet's gun put down.
     // Their player plays on as the game plays any player nobody is aiming.
-    peerGone: () => { G.g_aim_on_screen[1] = 0; },
+    peerGone: () => p.netPeerGone(),
     wake: () => p.wake(),
   };
 }

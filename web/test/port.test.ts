@@ -608,6 +608,8 @@ import { OptionsFactoryReset, ProfileBoot, ProfileCapture, ProfileLoad,
 import { OptionsSprite } from "../src/game/options_data";
 import { RequestAppState } from "../src/game/app_state";
 import { SetOptionsTables } from "../src/game/tables";
+import { GetPlayerInputModes, InputMode, SetPlayerInputModes }
+  from "../src/game/input_mode";
 import { RouteFigureTick } from "../src/game/route_map";
 import { CamPath, CamPaths } from "../src/game/camera/curve";
 import { SetCameraPaths } from "../src/game/tables";
@@ -38068,6 +38070,94 @@ console.log("the options screen, driven with pad bits:");
         && G.g_option_lives === 2 && G.g_option_credits === 5);
   ProfileBoot(null);
   G.g_app_state = AppState.InPlay;
+  ResetGameGlobals();
+  SetOptionsTables(undefined);
+}
+
+console.log("\nthe crosshair and the device -- the mouse has one, the light gun none:");
+{
+  // `HudDrawCrosshair` (`FUN_004169C0`) draws for a player whose device is
+  // not a gun and aims on the screen, or who is in input mode 5 or 6 (the
+  // mouse). The light gun -- `0xD` on player 1's port, `0xE` on player 2's
+  // (`InputModesFromDeviceConfig`, `FUN_0041E440`) -- is a gun like the mouse
+  // and in neither mode, so it never has one; the page's finger is that gun
+  // and `app/` writes it through `SetPlayerInputModes` (`FUN_0041E240`).
+  // Driven from the reset with both players in by their START (L49); sight
+  // graphics 2 and 3, so neither sprite is a table's first entry (L48).
+  const rng = new Rng(11);
+  const ev = new Events();
+  SetOptionsTables({
+    crosshair_sprites: [2728, 2730, 2731, 2732, 2729, 2733, 2734, 2735],
+  } as never);
+  scene(0, rng);
+  JoinPlayerTwo();
+  openShutter();
+  G.g_player_sight_graphic = [2, 3];
+  SetPlayerAimFromPointer(0, -100, 40);
+  SetPlayerAimFromPointer(1, 100, -40);
+  const drawn = () => `drawn ${G.g_crosshair_drawn} sprites `
+    + `${G.g_crosshair_sprite.map((s) => s.toString(16))} modes `
+    + `${G.g_input_mode.map((m) => m.toString(16))}`;
+  check("both players in play, both guns, both aiming on the screen",
+        G.g_player_state[0] === PlayerState.InPlay
+        && G.g_player_state[1] === PlayerState.InPlay
+        && G.g_player_input_is_gun[0] === 1 && G.g_player_input_is_gun[1] === 1
+        && G.g_aim_on_screen[0] === 1 && G.g_aim_on_screen[1] === 1,
+        `states ${G.g_player_state} gun ${G.g_player_input_is_gun}`);
+  SetPlayerInputModes(InputMode.MouseKeyboard, InputMode.MouseKeyboard);
+  run(1, rng, ev);
+  check("two mice (mode 6): both crosshairs, each player's Sight Graphic -- "
+        + "player 1's 2 at 0xAAB, player 2's 3 from the blue set at +4, 0xAAF",
+        G.g_crosshair_drawn[0] === 1 && G.g_crosshair_drawn[1] === 1
+        && G.g_crosshair_sprite[0] === 0xaab && G.g_crosshair_sprite[1] === 0xaaf,
+        drawn());
+  SetPlayerInputModes(InputMode.LightGun1, InputMode.MouseKeyboard);
+  run(1, rng, ev);
+  check("player 1 on the light gun (0xD): no crosshair for them, aim on the "
+        + "screen or not -- player 2's mouse keeps theirs",
+        G.g_crosshair_drawn[0] === 0 && G.g_crosshair_drawn[1] === 1
+        && G.g_aim_on_screen[0] === 1, drawn());
+  SetPlayerInputModes(InputMode.MouseKeyboard, InputMode.LightGun2);
+  run(1, rng, ev);
+  check("...and the other way about: player 2's light gun (0xE) has none, "
+        + "player 1's mouse is back", G.g_crosshair_drawn[0] === 1
+        && G.g_crosshair_drawn[1] === 0 && G.g_crosshair_sprite[0] === 0xaab,
+        drawn());
+  // The light gun a peer's page sends is its own player 1's, `0xD`, and the
+  // exe's network game writes that byte into the peer's slot as it comes
+  // (`NetApplyPeerInput`): player 2 in `0xD` is a gun outside 5 and 6 too.
+  SetPlayerInputModes(InputMode.MouseKeyboard, InputMode.LightGun1);
+  run(1, rng, ev);
+  check("player 2 in 0xD -- a peer's own light gun, as its packet says it -- "
+        + "has none either", G.g_crosshair_drawn[1] === 0, drawn());
+  check("GetPlayerInputModes hands back both, as SetPlayerInputModes wrote them",
+        GetPlayerInputModes()[0] === 6 && GetPlayerInputModes()[1] === 0xd);
+  SetPlayerInputModes(InputMode.Mouse, InputMode.Mouse);
+  run(1, rng, ev);
+  check("mode 5, the mouse alone, draws as 6 does",
+        G.g_crosshair_drawn[0] === 1 && G.g_crosshair_drawn[1] === 1, drawn());
+  // The other arm: a standard controller (the keyboard, mode 3) is not a
+  // gun, and has a crosshair exactly while its aim is on the screen.
+  // `PlayerBindMapleDevices` is not ported, so its 0 is written here.
+  G.g_player_input_is_gun[0] = 0;
+  SetPlayerInputModes(InputMode.Keyboard, InputMode.Mouse);
+  run(1, rng, ev);
+  const padOn = G.g_crosshair_drawn[0];
+  G.g_aim_on_screen[0] = 0;
+  run(1, rng, ev);
+  check("a keyboard (not a gun, mode 3) has one while it aims on the screen "
+        + "and none once it does not", padOn === 1
+        && G.g_crosshair_drawn[0] === 0, `on ${padOn} then ${drawn()}`);
+  G.g_player_input_is_gun[0] = 1;
+  G.g_aim_on_screen[0] = 1;
+  // No scene load writes the modes: `InputInit` at boot and the network
+  // game are their only writers, and the port's reset leaves them be.
+  SetPlayerInputModes(InputMode.LightGun1, InputMode.MouseKeyboard);
+  const carry = PlayerBlockCapture();
+  ResetGameGlobals(carry);
+  check("a stage step keeps the device: player 1 still the light gun (0xD)",
+        G.g_input_mode[0] === 0xd && G.g_input_mode[1] === 6,
+        `modes ${G.g_input_mode}`);
   ResetGameGlobals();
   SetOptionsTables(undefined);
 }

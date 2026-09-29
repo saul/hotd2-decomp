@@ -744,10 +744,12 @@ kbd {
 .err { color: var(--spawn); }
 
 /* ---- the crosshair ----
-   It follows the pointer while the firing gate is open. Drawn here rather than
-   as a cursor so it is visible in a screenshot. A finger needs none: it is
-   where the shot goes, and a ring left behind wherever it last touched would
-   be a crosshair pointing at nothing. */
+   It follows the pointer while the game draws it (`HudDrawCrosshair`). Drawn
+   here rather than as a cursor so it is visible in a screenshot. A finger
+   gets none, and that is the game's decision, not this sheet's: a finger is
+   the light gun, which the exe never gives a crosshair -- it is where the
+   shot goes, and a reticle left wherever it last touched would be pointing
+   at nothing (`app/device.ts`). */
 #viewport.shooting { cursor: none; }
 .crosshair {
   position: absolute; z-index: 2; pointer-events: none;
@@ -757,8 +759,10 @@ kbd {
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6), inset 0 0 0 1px rgba(0, 0, 0, 0.6);
 }
 .crosshair[hidden] { display: none; }
-/* The game's own crosshair sprite, 32x32 (`g_crosshair_sprites`): the image
-   is the reticle, so the ring and its dot go. */
+/* The game's own crosshair sprite (`g_crosshair_sprites`): the image is the
+   reticle, so the ring and its dot go. Its size and the margins that centre
+   it are written on the node -- the sprite's own size in the 640x480
+   screen, scaled to the frame -- and 32x32 here is only until they are. */
 .crosshair.sprite {
   width: 32px; height: 32px; margin: -16px 0 0 -16px;
   border: none; border-radius: 0; box-shadow: none;
@@ -769,16 +773,17 @@ kbd {
   content: ""; position: absolute; inset: 9px;
   background: rgba(255, 90, 90, 0.9); border-radius: 50%;
 }
-@media (pointer: coarse) { .crosshair:not(.peer) { display: none; } }
 /* Two players: the cabinet's guns were red for player 1 and blue for player
-   2, and so are the crosshairs -- this page's own, and the other player's,
-   which the game draws where that player aims and which follows `G`, not a
-   pointer, so it shows on a touch screen too. */
+   2, and so are the game's crosshair sprites -- player 2's set is the blue
+   one -- this page's own, and the other player's, which the game draws where
+   that player aims and which follows `G`, not a pointer, so a touch screen
+   shows it too. The rings below are for a bundle without the sprites. */
 #viewport.p2 .crosshair:not(.peer),
 .crosshair.peer.p2 { border-color: rgba(90, 160, 255, 0.95); }
 #viewport.p2 .crosshair:not(.peer)::after,
 .crosshair.peer.p2::after { background: rgba(90, 160, 255, 0.95); }
-.crosshair.peer { opacity: 0.85; }
+/* The sprite is drawn at the record's alpha, 1.0, as the game draws it. */
+.crosshair.peer:not(.sprite) { opacity: 0.85; }
 .crosshair.peer span {
   position: absolute; left: 22px; top: -3px;
   font: 700 10px/1 var(--mono); color: #fff;

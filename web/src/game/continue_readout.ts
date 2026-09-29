@@ -22,6 +22,7 @@
  */
 import { AppState, G } from "./globals";
 import { ContinueSprite, HudSprite } from "./hud_sprites";
+import { GetPlayerInputModes, InputMode } from "./input_mode";
 import { DrawScreenSprite, DrawScreenSpriteLayered } from "./screen_sprite";
 import { T } from "./tables";
 
@@ -138,15 +139,35 @@ export function HudDrawScoreCheat(player: number): void {
   HudDrawScoreDigits(p, SCORE_CHEAT_X[p], SCORE_CHEAT_Y);
 }
 
-/** `GetPlayerInputModes`' answers that make `HudDrawCrosshair` draw at once. */
-const CROSSHAIR_MOUSE_MODES: readonly number[] = [5, 6];
+/**
+ * The crosshair's record past what `HudDrawCrosshair` writes each frame --
+ * `g_crosshair_sprite_record`, `0x009A5D44 + player*0x130` -- as
+ * `FUN_0040A920` sets it (`0x0040AA33`..`0x0040AA7E`, `EAX = 0x009A5D8C +
+ * player*0x130`): sx and sy 1.0 (`MOV [EAX-0x38], EDX` and `MOV [EAX-0x34],
+ * EDX`, `EDX = 0x3F800000`), so the sprite is drawn at its own size in the
+ * 640x480 screen; and flags 10 (`MOV dword ptr [EAX-0x14], 0xA`), anchor
+ * (2, 2), so it is centred on the point. `[proved]` for those stores. That
+ * nothing else writes the three is `[likely]`: they are the only references
+ * by address, and `HudDrawCrosshair`'s own stores (through `ESI + 0xE4` ..
+ * `0xF0`) end at `+0x0C`.
+ */
+export const CROSSHAIR_SX = 1;
+export const CROSSHAIR_SY = 1;
+export const CROSSHAIR_FLAGS = 10;
 
 /**
  * `HudDrawCrosshair` — `FUN_004169C0`, the decision half. The engine draws
- * the crosshair sprite when all of: app state 6; a gun whose aim is on the
- * screen, or input mode 5 or 6 (the mouse); a life; and the firing gate up.
- * It is called only from `PlayerUpdateInPlay`, so a player on the continue or
- * out of the game has none.
+ * the crosshair sprite when all of: app state 6; **a player whose device is
+ * not a gun, aiming on the screen, or input mode 5 or 6 (the mouse)**; a
+ * life; and the firing gate up. It is called only from `PlayerUpdateInPlay`,
+ * so a player on the continue or out of the game has none.
+ *
+ * So a gun that is not the mouse never has one: the light gun (modes `0xD`
+ * and `0xE`, `InputModesFromDeviceConfig`) is `g_player_input_is_gun` 1 like
+ * the mouse, and fails both arms. The cabinet's gun needs no reticle -- it
+ * is pointed at the screen -- and the page's finger is that gun
+ * (`app/device.ts`), so a touch takes the crosshair away and the mouse,
+ * mode 6 again, brings it back. `[proved]`
  *
  * `[port-only]` in what it draws: the reticle is the page's, following the
  * pointer between ticks, so the decision is recorded in
@@ -154,11 +175,15 @@ const CROSSHAIR_MOUSE_MODES: readonly number[] = [5, 6];
  * to it. The sprite is `g_crosshair_sprites[setting + player*4]`
  * (`0x00579F58`), the setting being the options' Sight Graphic
  * (`g_player_sight_graphic`, `MOVSX EDX, byte ptr [EDX]` at `0x00416AC8`),
- * and it is recorded beside the decision for the page to draw.
+ * and it is recorded beside the decision for the page to draw, at
+ * {@link CROSSHAIR_SX} by {@link CROSSHAIR_SY} of its own size and centred.
  */
 export function HudDrawCrosshair(player: number): void {
-  const mode = G.g_input_mode[player] ?? 0;
-  const mouse = CROSSHAIR_MOUSE_MODES.includes(mode);
+  // `GetPlayerInputModes(&p1, &p2)`, and the task's player picks one:
+  // `TEST EAX, EAX` on `+0x34`, so any player but 0 reads player 2's.
+  const [p1, p2] = GetPlayerInputModes();
+  const mode = player !== 0 ? p2 : p1;
+  const mouse = mode === InputMode.MouseKeyboard || mode === InputMode.Mouse;
   if (G.g_app_state === AppState.InPlay
       && ((G.g_player_input_is_gun[player] !== 1
            && G.g_aim_on_screen[player] !== 0) || mouse)

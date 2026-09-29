@@ -15,8 +15,8 @@ import type { Walker } from "../../script/walker";
 import type { ToggleName } from "../../ui/commands";
 import type { UiSlice } from "../../ui/store";
 import type {
-  BranchProjection, ContinueProjection, JoinProjection, FeedRow, LoadingProjection,
-  NetProjection, PerfProjection, FpsProjection,
+  BranchProjection, ContinueProjection, CrosshairSprite, JoinProjection, FeedRow,
+  LoadingProjection, NetPeerProjection, NetProjection, PerfProjection, FpsProjection,
   SkipProjection, SoundProjection, StatusProjection, StripRow, TransportProjection,
   TreeProjection, UiProjection,
 } from "../../ui/projection";
@@ -88,12 +88,12 @@ export interface PlayerView {
   readonly transport: TransportProjection;
   /** Which player this page's gun is: 0 alone or hosting, 1 as player 2. */
   readonly localPlayer: number;
-  /** See {@link UiProjection.crosshairImage}. */
-  readonly crosshairImage: string | null;
+  /** See {@link UiProjection.crosshairSprite}. */
+  readonly crosshairSprite: CrosshairSprite | null;
   /** See {@link UiProjection.net}. */
   readonly netView: NetProjection | null;
   /** See {@link UiProjection.netPeer}. */
-  readonly netPeer: { x: number; y: number; player: 1 | 2 } | null;
+  readonly netPeer: NetPeerProjection | null;
 }
 
 /**
@@ -125,7 +125,7 @@ export function buildProjection(v: PlayerView,
     // `HudDrawCrosshair`'s decision, off `G`. Off before the first player
     // turn, which is also what the engine's BSS says.
     crosshair: crosshairProjection(v.localPlayer),
-    crosshairImage: v.crosshairImage,
+    crosshairSprite: v.crosshairSprite,
     toggles: v.toggles,
     transport: v.transport,
     sound: v.sound,

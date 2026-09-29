@@ -87,6 +87,7 @@ function projection(): UiProjection {
     bundleStale: false,
     paused: true,
     started: false,
+    homeScreenHint: false,
     // The game drew the crosshair: the fixture renders the chrome as it is in
     // play, and `Viewport` hangs the reticle off this.
     crosshair: true,
@@ -1137,6 +1138,36 @@ console.log("\nThe loading bar:\n");
   const ready = renderIn(projection(), createElement(RotateHint));
   check("...and says it is ready once it has",
         ready.includes("Ready when you are") && !ready.includes("progressbar"), ready);
+}
+
+// Fullscreen on Apple's devices is the Home Screen's, never the browser's:
+// WebKit's anti-phishing check in element fullscreen reads rapid taps as
+// typing and stops the page with a modal (`app/device.ts`, `appleTouch`).
+console.log("\nThe Home Screen, not fullscreen, on an iPhone or an iPad:\n");
+{
+  const { appleTouch } = await import("../src/app/device");
+  const was = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+  const as = (userAgent: string, maxTouchPoints: number): boolean => {
+    Object.defineProperty(globalThis, "navigator",
+                          { value: { userAgent, maxTouchPoints }, configurable: true });
+    return appleTouch();
+  };
+  const IPAD = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 "
+    + "(KHTML, like Gecko) Version/27.0 Safari/605.1.15";
+  const IPHONE = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 "
+    + "(KHTML, like Gecko) Version/27.0 Mobile/15E148 Safari/604.1";
+  const ANDROID = "Mozilla/5.0 (Linux; Android 15) AppleWebKit/537.36 (KHTML, like Gecko) "
+    + "Chrome/140.0 Mobile Safari/537.36";
+  const found = { ipad: as(IPAD, 5), iphone: as(IPHONE, 5), mac: as(IPAD, 0),
+                  android: as(ANDROID, 5) };
+  if (was) Object.defineProperty(globalThis, "navigator", was);
+  check("an iPad saying it is a Mac, and an iPhone, are Apple touch; a Mac and Android are not",
+        found.ipad && found.iphone && !found.mac && !found.android, JSON.stringify(found));
+  const hint = renderIn({ ...projection(), homeScreenHint: true }, createElement(PauseScreen));
+  check("the start screen tells an iPhone or an iPad how to have it full screen",
+        hint.includes("Add to Home Screen"), hint);
+  check("...and nothing else",
+        !renderIn(projection(), createElement(PauseScreen)).includes("Home Screen"));
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

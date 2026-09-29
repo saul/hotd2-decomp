@@ -3,6 +3,7 @@ import { execSync } from "node:child_process";
 import { configFromEnv } from "../matchmaker/rooms";
 import { handle as handleMatchmaker, nodeMatchmaker } from "../matchmaker/node";
 import { startTurn } from "../matchmaker/turn";
+import { APP_ICONS, appIcon } from "./tools/lib/app_icon";
 import { randomBytes } from "node:crypto";
 import {
   appendFileSync,
@@ -58,6 +59,19 @@ function soundRoot(kind: "bgm" | "SE" | "voice"): string | null {
   } catch { /* no bundle, or no readable install */ }
   return null;
 }
+
+/** The install the bundle was exported from, as its manifest names it. */
+function installDir(): string | null {
+  try {
+    const m = JSON.parse(readFileSync(join(BUNDLE_DIR, "manifest.json"), "utf8"));
+    return typeof m.game_dir === "string" ? m.game_dir : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Icons made, by name and install: reading the exe for every request is waste. */
+const iconCache = new Map<string, Buffer>();
 
 /**
  * The tables spell `.WAV` and carry backslashed subdirectories
@@ -160,6 +174,22 @@ function serveBundle() {
           }
           res.setHeader("Content-Length", String(size));
           return createReadStream(file).pipe(res);
+        }
+
+        // The favicon and the Home Screen icons: David's face, out of the
+        // install the manifest names -- game data, so made here and never
+        // kept in the repository (`tools/lib/app_icon.ts`), and a reticle
+        // where there is no install.
+        const icon = /^\/icons\/([a-z0-9-]+\.png)$/.exec(url);
+        if (icon && icon[1] in APP_ICONS) {
+          const dir = installDir();
+          const key = `${icon[1]}|${dir}`;
+          let png = iconCache.get(key);
+          if (!png) iconCache.set(key, (png = appIcon(icon[1], dir)!));
+          res.setHeader("Content-Type", "image/png");
+          res.setHeader("Content-Length", String(png.length));
+          res.setHeader("Cache-Control", "no-cache");
+          return res.end(png);
         }
 
         if (!url.startsWith("/bundle/")) return next();

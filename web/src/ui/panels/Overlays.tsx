@@ -36,6 +36,7 @@ export function PauseScreen() {
   const started = useSlice((p) => p?.started);
   const stage = useSlice((p) => p?.stage);
   const original = useSlice((p) => p?.original);
+  const homeScreen = useSlice((p) => p?.homeScreenHint);
   if (!paused) return null;
   const go = () => dispatch({ kind: started ? "play" : "start" });
   return (
@@ -60,8 +61,26 @@ export function PauseScreen() {
         <span className="hint only-coarse">
           tap to shoot · flick the phone, or tap with a second finger, to reload
         </span>
+        {homeScreen && !started && (
+          <span className="hint home-screen-hint">
+            For full screen: Share <ShareGlyph />, then Add to Home Screen
+          </span>
+        )}
       </div>
     </div>
+  );
+}
+
+/** Safari's Share icon, drawn small enough to sit in a line of text. */
+function ShareGlyph() {
+  return (
+    <svg viewBox="0 0 16 16" width="13" height="13" aria-label="the Share button"
+         style={{ verticalAlign: "-2px" }}>
+      <path d="M8 1.5v9M5 4.5l3-3 3 3" fill="none" stroke="currentColor"
+            strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M5.5 7H4a1 1 0 0 0-1 1v5.5a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V8a1 1 0 0 0-1-1h-1.5"
+            fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+    </svg>
   );
 }
 

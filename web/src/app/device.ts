@@ -33,6 +33,11 @@
  * honours `screen.orientation.lock` once the page is fullscreen, which is the
  * order {@link unlockDevice} asks in. Both report `rotationRate` in degrees a
  * second, and both deliver touches as pointer events.
+ *
+ * **An iPad is never asked for fullscreen** -- see {@link appleTouch}. The
+ * full screen on Apple's devices is the Home Screen's: added there, the page
+ * opens as an app with no browser around it (`manifest.webmanifest`, and the
+ * `apple-mobile-web-app-*` tags in `index.html`), on an iPhone as on an iPad.
  */
 
 /**
@@ -125,6 +130,45 @@ export function touchFirst(): boolean {
     && window.matchMedia("(pointer: coarse)").matches;
 }
 
+/**
+ * An iPhone or an iPad -- every browser on them is WebKit -- where the page
+ * must not ask for element fullscreen.
+ *
+ * **In element fullscreen, WebKit on iOS scores every tap as possible typing
+ * on a fake keyboard**, and past a threshold it puts up "It looks like you are
+ * typing while in full screen" -- a modal that stops the page dead until it
+ * is answered. `[proved]` from WebKit's source: `WKFullScreenViewController`'s
+ * `_touchDetected` feeds each ended touch to `FullscreenTouchSecheuristic`,
+ * whose score climbs with touches that come fast and land apart, and calls
+ * `_showPhishingAlert` past `requiredScore()`. Shooting at zombies is taps
+ * that come fast and land apart; an iPad tripped it within a minute of play.
+ * The page cannot switch it off, so it does not go fullscreen there.
+ *
+ * An iPad's Safari says it is a Mac, and a Mac has no touch points.
+ */
+export function appleTouch(): boolean {
+  if (typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent;
+  return /iPhone|iPad|iPod/.test(ua)
+    || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+}
+
+/** Opened from the Home Screen: already the whole screen, with no browser round it. */
+export function standalone(): boolean {
+  if (typeof window === "undefined") return false;
+  return (navigator as { standalone?: boolean }).standalone === true
+    || (typeof window.matchMedia === "function"
+        && window.matchMedia("(display-mode: standalone), (display-mode: fullscreen)").matches);
+}
+
+/**
+ * Whether to tell the player about the Home Screen: on an iPhone or an iPad,
+ * in the browser rather than already added.
+ */
+export function homeScreenHint(): boolean {
+  return appleTouch() && !standalone();
+}
+
 interface MotionPermission {
   requestPermission?: () => Promise<"granted" | "denied">;
 }
@@ -163,6 +207,9 @@ export function unlockDevice(tilt: TiltReload): void {
   } else {
     tilt.listen();
   }
+  // Not on an iPhone or an iPad: see `appleTouch`. Nor from the Home Screen,
+  // which is the whole screen already.
+  if (appleTouch() || standalone()) return;
   const root = document.documentElement;
   if (!document.fullscreenElement && typeof root.requestFullscreen === "function") {
     root.requestFullscreen({ navigationUI: "hide" })
@@ -179,14 +226,16 @@ export function unlockDevice(tilt: TiltReload): void {
  * The same request the start screen makes on a phone, made on any device and
  * undone by a second press -- Escape undoes it too, which the browser does
  * itself. A key press is a gesture, so it is allowed. On a touch screen the
- * landscape lock follows, as it does from the start screen. iOS has no element
- * fullscreen on a phone, so there the call is missing and this does nothing.
+ * landscape lock follows, as it does from the start screen. Not on an iPad
+ * with a keyboard either -- see {@link appleTouch} -- and an iPhone has no
+ * element fullscreen to ask for.
  */
 export function toggleFullscreen(): void {
   if (document.fullscreenElement) {
     document.exitFullscreen().catch(() => { /* already out */ });
     return;
   }
+  if (appleTouch()) return;
   const root = document.documentElement;
   if (typeof root.requestFullscreen !== "function") return;
   root.requestFullscreen({ navigationUI: "hide" })

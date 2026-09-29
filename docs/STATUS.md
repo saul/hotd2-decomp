@@ -22,18 +22,18 @@ is in `tools/verify_all.py`, beside the command that runs it.
 | `game/` | 105014 | 341 | engine |
 | `hod2lib/` | 19395 | 35 | engine |
 | `render/` | 15112 | 54 | render |
-| `app/` | 12220 | 42 | app |
+| `app/` | 12274 | 42 | app |
 | `script/` | 4471 | 25 | engine |
-| `ui/` | 3657 | 27 | ui |
+| `ui/` | 3682 | 27 | ui |
 | `core/` | 3514 | 13 | engine |
 | `bundle/` | 2804 | 11 | engine |
 | `audio/` | 973 | 2 | render |
 | `hud/` | 491 | 1 | ui |
-| **total** | **167651** | **551** | |
+| **total** | **167730** | **551** | |
 
 The largest files, which is where the pressure to split next is:
 
-* `app/main.ts` — 2973
+* `app/main.ts` — 2975
 * `game/globals.ts` — 2860
 * `game/actor.ts` — 2722
 * `hod2lib/bundle.ts` — 2353
@@ -59,7 +59,7 @@ Both markers are counted in **every** `.ts`/`.tsx` file under `web/src/`, one pe
 | ui | `hud/`, `ui/` | 0 | 0 |
 | app | `app/` | 1 | 0 |
 
-The two declared seams between the UI and the player: **`PlayerCommands` has 53 members against `PlayerView`'s 39** — how much of the player a click can move, against how much of it the page can see. Neither can grow without a line appearing in the open.
+The two declared seams between the UI and the player: **`PlayerCommands` has 53 members against `PlayerView`'s 40** — how much of the player a click can move, against how much of it the page can see. Neither can grow without a line appearing in the open.
 
 ## The decomp
 

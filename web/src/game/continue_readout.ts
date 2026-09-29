@@ -23,6 +23,7 @@
 import { AppState, G } from "./globals";
 import { ContinueSprite, HudSprite } from "./hud_sprites";
 import { DrawScreenSprite, DrawScreenSpriteLayered } from "./screen_sprite";
+import { T } from "./tables";
 
 /** `g_continue_prompt_x` — `0x00579F68`, f32 per player. */
 export const CONTINUE_PROMPT_X: readonly number[] = [48, 368];
@@ -149,8 +150,11 @@ const CROSSHAIR_MOUSE_MODES: readonly number[] = [5, 6];
  *
  * `[port-only]` in what it draws: the reticle is the page's, following the
  * pointer between ticks, so the decision is recorded in
- * `G.g_crosshair_drawn` and the sprite (`0x00579F58` by binding set) and
- * its position (`FUN_0041E280`, the mouse) are left to it.
+ * `G.g_crosshair_drawn` and its position (`FUN_0041E280`, the mouse) is left
+ * to it. The sprite is `g_crosshair_sprites[setting + player*4]`
+ * (`0x00579F58`), the setting being the options' Sight Graphic
+ * (`g_player_sight_graphic`, `MOVSX EDX, byte ptr [EDX]` at `0x00416AC8`),
+ * and it is recorded beside the decision for the page to draw.
  */
 export function HudDrawCrosshair(player: number): void {
   const mode = G.g_input_mode[player] ?? 0;
@@ -160,5 +164,7 @@ export function HudDrawCrosshair(player: number): void {
            && G.g_aim_on_screen[player] !== 0) || mouse)
       && G.g_player_lives[player] > 0 && G.g_nFiringGate !== 0) {
     G.g_crosshair_drawn[player] = 1;
+    G.g_crosshair_sprite[player] = T.options?.crosshair_sprites?.[
+      G.g_player_sight_graphic[player] + player * 4] ?? -1;
   }
 }

@@ -15,10 +15,13 @@
  *
  * The 79 constructors are a grab-bag: the retail stages reach 74 of them, and
  * exactly one — type 0, `PlaceBreakableGroup` — is the container mechanism the
- * class is named for. The rest are single-prop builders that were not read
- * here; each keeps its slot in the table and does nothing, because an
- * unimplemented type that silently ran the *wrong* constructor is the same
- * bug that had the cat running the zombie's state machine.
+ * class is named for. Fifty are `PlaceGenericProp`, five are `NoOpStub`, and
+ * of the other twenty-four the ones below are ported; the thirteen that are
+ * not, with the spawns that place each, are listed in `docs/formats/spawns.md`
+ * (*Class 0x41's constructors: which are ported*). An unported type keeps its
+ * slot in the table and does nothing, because an unimplemented type that
+ * silently ran the *wrong* constructor is the same bug that had the cat
+ * running the zombie's state machine.
  */
 import type { Actor } from "../actor";
 import { G } from "../globals";
@@ -35,6 +38,8 @@ import { PlaceFragmentProps } from "./type40";
 import { PlaceTable38Props } from "./type38";
 import { PlaceTable39Stacks } from "./type39";
 import { PlaceTable44Props } from "./type44";
+import { PlaceTable50Props } from "./type50";
+import { PlaceTable66Props } from "./type66";
 import { PROP75_SCRIPT_FLAG, PROP75_TYPE } from "./flag_prop";
 import { FLICKER_LIGHT_TYPE, PlaceFlickerLightProp48 } from "./type48";
 import { PlaceWaterSurface } from "./water";
@@ -90,6 +95,17 @@ export enum PropContainerType {
   Table39Stacks = 39,
   /** `PlaceTable44Props` (`FUN_004639F0`) — seven chairs from a table. */
   Table44Props = 44,
+  /**
+   * `PlaceTable50Props` (`FUN_00463BA0`) — one of six tables of scenery, the
+   * placer's `+0x1F4` picking which. Stage 1's bin-scene crate and stage 2
+   * block 17's furniture among them.
+   */
+  Table50Props = 50,
+  /**
+   * `PlaceTable66Props` (`FUN_00464500`) — twenty or twenty-nine
+   * `komono_kanban.bin` and `komono_uemiti.bin` models from one of two tables.
+   */
+  Table66Props = 66,
 }
 
 /** What one class-0x41 constructor does. `undefined` where none is ported. */
@@ -143,6 +159,16 @@ export const g_class41_constructors:
   },
   [PropContainerType.Table44Props]: (obj) => {
     G.g_breakable_props.push(...PlaceTable44Props(obj.at, obj.hp));
+  },
+  // These two read `+0x1F4` as well: the table to build from. `+0x11C` is the
+  // step lifetime every object copies, as for the three above.
+  [PropContainerType.Table50Props]: (obj) => {
+    G.g_breakable_props.push(
+      ...PlaceTable50Props(obj.at, obj.charType, obj.hp));
+  },
+  [PropContainerType.Table66Props]: (obj) => {
+    G.g_breakable_props.push(
+      ...PlaceTable66Props(obj.at, obj.charType, obj.hp));
   },
   // The canal water. `+0x1F4` is a table index and `+0x11C` a lifetime in
   // step changes; the position is never read.
@@ -302,6 +328,8 @@ export * from "./type40";
 export * from "./water";
 export * from "./water_slots";
 export * from "./type44";
+export * from "./type50";
+export * from "./type66";
 export * from "./prop_state";
 export * from "./prop";
 export * from "./items";

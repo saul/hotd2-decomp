@@ -25745,3 +25745,210 @@ boards' middle, read after `advance(2)`: before, door unmarked, impact surface
 `0x11 -> 0x1B`, byte 1, impact surface 56 at (-668.3, -0.2, -546.9), no actor
 touched. (The captor carries `0x8000` in its order wait, so at that frame no
 actor stood behind the boards to be hit.)
+
+## 2026-09-29 -- the options screen, read
+
+The user asked for the game's options screen, properly ported. This entry is
+the reading; `docs/re/options-screen.md` is the result.
+
+App state `0x0C` is `OptionsRunPhase` (`0x004869E0`), three phases, the second
+a jump through a frame pointer at `0x009CA0F0` -- the list, or one of two
+sub-screens. The list is eleven rows out of `g_options_rows` (`0x005696E0`),
+each a label and a handler: Difficulty, Life, Continue, Blood Color, Sight
+Graphic, Sight Speed, the two sound tests, Gun Calibration, Default, EXIT.
+Every value is written into the profile as it changes; EXIT saves and applies.
+
+**Almost none of it is in a decompile.** Every row handler plays `0xA9` on a
+change, `PlaySoundId` is no-return to Ghidra (L72), and so every row's
+decompile ends at its first right-press -- the wrap, the store and the whole
+left arm are only in the listing. `capstone` over the image, with the
+annotation names folded in, was faster and more complete than the MCP
+disassembly for a screen of thirty routines; the scratch scripts are the
+session's, not the repo's.
+
+What the reading settled:
+
+* **Blood Color is dead in this build.** Its row's gate `0x007DD030` has one
+  store, the arm's 0, and `0x009C9F22` has no reader but the arm's copy; the
+  boot writes 1 over it after the load. `render/bloodcolour.ts` says the
+  option "loads one bank over the other" -- that is not this exe's.
+* **Free play is locked.** The Continue row offers it only when the three low
+  bits of `0x009C9F5E` are up -- the stage-6 boss killed in Original Mode, all
+  ten Training grades, all ten Boss Mode grades. Without them the row wraps
+  1..9, and a step away from free play cannot come back.
+* **Sight Graphic is the crosshair**: `HudDrawCrosshair` reads `+0x00` of the
+  options record (`MOVSX EDX, byte ptr [EDX]`, `0x00416AC8`) to index
+  `g_crosshair_sprites`. The port's comment said "by binding set".
+* **The profile save is real and checkable**: four `0x3DB`-byte files
+  disguised as `pol/` and `tex/` data, XORed with a 176-byte key that
+  `ProfileCipher` builds on its stack, summed. The install's own four files
+  decipher to a block whose sum and version (7) match -- difficulty 4, life
+  4, continues 9, somebody's settings.
+* **Bit `0x2000` of a sprite's flags lights it** with the render light
+  colour (`SubmitScreenSpriteQuad`, `0x004ACE27`); the highlighted row is red
+  that way, and no sprite the port drew before used the bit.
+* **Mode 6 is the page.** The two sub-screens are for a player on a keyboard
+  crosshair (Sight Speed) and a calibrated gun outside mode 6 (Gun
+  Calibration). Mode 6 is the mouse with the keyboard ORed into its pad word
+  -- `InputMapDevicesToMaple`'s case 6 does the OR and falls into case 5 --
+  which is what a page with an Enter START and arrow directions is.
+
+Two sub-agents read, in parallel: the calibration sub-screen whole, and the
+profile's callers, the unlock bits and the helpers. Their readings are in
+the document with addresses; the calibration's jump table and frame head
+were re-read here.
+
+**Wrong turns.** The glyph table looked like 128 entries from `0x0056AED0` --
+`[char*2 + 0x56AED0]` -- and dumping it gave a clean alphabet. It is 96 from
+`0x0056AF10`: below that the address is the SE test table's last eight
+records, which end exactly there (L6 in reverse: the index source's base is
+not the table's). And the first draft of the check expected every glyph to be
+16x32; `W` is 32x32.
+
+## 2026-09-29 -- the options screen, ported (logic)
+
+`game/options/` is the screen, one TS function per exe function under its
+name; `game/profile.ts` the resets, load, save and apply; `options_data.ts`
+the `.data` the factory reset copies and the sprite ids pushed as
+immediates; the bundle's new `options` block the `.rdata` it reads (rows,
+labels, glyphs, crosshairs, both sound tests' lists) -- `ExeTables.optionsTables`
+in both exporters.
+
+What the reading overturned, rewritten rather than adapted: `OPTION_LIVES`
+and `START_LIVES_BY_OPTION` in `player_shell.ts` (the life setting is
+`G.g_option_lives`, and `PlayerBlockBoot` no longer writes `g_start_lives` --
+its one writer is `ProfileApplyToRun`, and like the options it outlives a
+reset); `INPUT_BINDINGS` in `player_gun.ts` (`G.g_player_input_bindings`,
+written by the factory reset); `OPTION_CREDITS_FACTORY` (`OPTIONS_FACTORY`,
+held to the image by `verify_options.py`); `HudDrawCrosshair`'s "by binding
+set" (it is by the Sight Graphic, and the port records the sprite now); and
+`g_input_mode` 5 -> 6. The free-play `[diverges]` moved from the field's
+literal to `ProfileBoot`, the one place the port chooses it; the count is
+unchanged.
+
+**Failing first.** Two mutations, each caught: `PlayerBlockBoot` writing
+three lives again fails "the player enters play with five lives"; the
+Continue row ignoring its unlock bits fails "left from 1 wraps to 9, not to
+free play" -- and did **not** fail "right from free play: 1", which moves the
+same way either way. That is why the wrap is tested from both sides.
+
+**Not ported, and why**: the two sub-screens' bodies. Sight Speed tunes a
+keyboard crosshair (`PadMoveCrosshair`) and Gun Calibration a gun's raw
+position; the page's players are mouse guns in mode 6, the cursor steps over
+both rows, and each sub-screen's own first test sends it back -- which the
+port has. Their bodies need an aim record the page does not feed.
+
+## 2026-09-29 -- the options screen in the page: reached, driven, drawn
+
+**Reaching it.** The page has no title screen -- every load, seek and restart
+is "a game started from the title" -- so the menu (`≡`) has **Options**, which
+does what the title's OPTION row does: `RequestAppState(0x0C)`, committed at
+the end of the next tick like any request. EXIT asks for the title (4), and
+the page is the title by starting the stage again (`stepOneFrame`, port-only,
+beside the other app-state handling there). No layer rule moved:
+`PlayerCommands` grew one member (`openOptions`) and `PlayerView` one
+(`crosshairImage`), both in the open.
+
+**Driving it.** Input mode 6 is the mouse with the keyboard ORed in, so on
+this screen the page's arrows are the pad's directions -- player 1's in
+`KeyboardReadAsPad` -- a click is A (the mouse's left button,
+`MouseReadButtons`), and Enter is START. A press is the next tick's
+`g_pad_state` bit, as START already was; a held arrow is `g_pad_held`'s,
+which nothing fed before and which the sound tests' auto-repeat reads. Off
+this screen the left arrow is still the rewind. The corner button's SKIP is
+hidden over it. The menu item is hidden on a touch screen: a phone has no
+directions, and a player who could open the list could not reach EXIT.
+
+**Drawing it.** Every sprite goes through `G.g_screen_sprite_draws` like the
+continue and game-over screens: the text on the HUD canvas, multiplied by its
+tint when lit (`0x2000`), the background tiles at depth 200 through the deep
+layer. The idle dimmer's model (slot `0x93E`) is exported and drawn by a
+small render layer. The reticle is now the game's own crosshair sprite, the
+one `HudDrawCrosshair` picks by the Sight Graphic -- the ring was the page's
+stand-in, and the option had nothing to change without this.
+
+**Harness**: `web/tools/options_page.mjs`, a `verify_all.py` row (`options`,
+bundle-gated, the browser lane).
+
+**Wrong turns.** The harness's first run read **0** opaque pixels on the HUD
+canvas over a screenshot that plainly had no text either: it had waited and
+called `advance(0)`, which redraws the last tick's pose and runs no
+`world.update`, so the sprite images that had finished decoding were never
+drawn (L69, again). One more frame draws them. The reticle check then waited
+1200 frames for the firing gate and never saw it: stage 1's opening holds
+the gate down for longer than that, and START skips it.
+
+## 2026-09-29 -- the options screen: the profile kept
+
+**Keeping it.** `app/profile_store.ts` is `ProfileSave`'s and `ProfileLoad`'s
+file half: one `localStorage` key, read once at construction into
+`ProfileBoot`, written on `profile.save`. Nothing saved is the exe's failure
+arm plus the user's free play. The harness now reloads after EXIT and reads the
+boot's profile back: three continues and five lives, not free play. A reload
+under `?drive=1` never takes the loading overlay down by itself -- the drive
+owes it a frame -- so the check waits for the player's construction, which is
+where the boot runs, not for the overlay.
+
+## 2026-09-29 -- class 0x41 constructors 50 and 66: the bin-scene crate, stage 2's furniture, the signs
+
+The last entry found both and chased neither. Both are ported now, with every
+shipped use.
+
+**The reading** (`[proved]`, disassembly throughout). `g_class41_constructors`
+(`0x00593580`) read entry by entry: 50 is `FUN_00463BA0`, 66 `FUN_00464500`;
+`g_class41_updates` (`0x005936BC`) has `NoOpStub` at 50 and `FUN_0046FE00` at
+66. Named `PlaceTable50Props`, `PlaceTable66Props`, `PropUpdateType66`, and
+the eleven tables they read (`g_prop_table50_0`..`_5`, `_scale_z`, `_ptrs`,
+`_counts`, `g_prop_table66_a`/`_b`). Constructor 50 hands `ActorAlloc`
+`PropDrawOnlyType12` itself: six tables through a pointer array and an s8
+count array, `+0x290` the table, `+0x2A0` the row, table 5 alone Z-scaled from
+a float per row. Its scale array holds six floats and table 5 reads five; the
+image also has a sixth 28-byte row after table 5 that its count of 5 never
+reaches (`L6`, both left out). Constructor 66 picks one of two 32-byte-row
+tables on `(s16)+0x1F4 > 0`, with the counts as `MOV` immediates;
+`PropUpdateType66` inlines a lifetime that ends in `ActorKill`, and only slots
+`0x10DC`/`0x10DD`/`0x10DE` swing, shoot and score. Ghidra's decompile stops at
+its `PlaySoundId` (`L72`) and drops the swing rate the hit writes after it.
+
+**Every shipped use**, surveyed with `hod2lib.script` over scenes 0-11:
+constructor 50 tables 5 (stage 1 blocks 3 and 8), 3 (stage 1 block 4, and
+training block 1), 4, 1, 2, 0 (stage 2 blocks 7, 8, 17, 25); constructor 66
+table a at stage 1 blocks 6, 14, 16 and stage 2 block 0, table b at stage 2
+block 3. All eight descriptors in the bundled stages are placements now.
+
+**The survey the brief asked for** is in `docs/formats/spawns.md`, *Class
+0x41's constructors: which are ported*: 50 entries are `PlaceGenericProp`
+(every type has its routine), 5 `NoOpStub`, 11 ported, and **13 unported**,
+each placed by a script -- 3, 16, 17, 26, 29, 37, 42, 47, 52, 55, 61, 65, 68 --
+with what each allocates and where. Constructor 52 (`FUN_00463D20`, stage 1
+block 14 beside `0x6884`, and stage 5 block 0) is two more
+`PropDrawOnlyType12` objects and the cheapest next port.
+
+**The port.** `game/class41/type50.ts` and `type66.ts`, two new families
+(`Type66`, and `DrawOnlyType12` -- not `Generic` with kind 12, because for
+these `+0x290` is the table and the generic arm dispatches on that word), the
+director mapping (`+0x1F4` the table, `+0x11C` the lifetime) and the exporter's
+`table50`/`table66` placements with the chosen table's slots read out of the
+image. The bundle changed: hashes regenerated before the export (`L33`).
+
+**Wrong turns.** The first shake test set `g_screen_shake_frames` to 0x18 and
+expected no swing; `UpdateScreenShake` takes a frame off before the pool runs,
+so the pool read 0x17 and swung. The test now raises a latched player hit,
+which restarts the countdown at 0x30 the engine's way, and asserts the kicks
+land exactly when the pool reads 0x2F and 0x17. Its scene-1 control first
+picked a sign the scene-0 shake had already kicked. `props13_look.mjs`'s
+default frame 420 shows block 17's sofa and table, not the cabinet the four
+models stand in; that is the hold at camera 81 frame 425, driven frame 460
+on. One look run timed out on the loading overlay under a peer's Chrome and
+passed alone.
+
+**Proof.** `test:port` "class 0x41 constructors 50 and 66": 25 of 26 fail
+with the two constructor entries and the director arms removed; the pivot,
+`ActorKill` and family checks each fail on their own mutation.
+`verify_prop_tables` (1279 words) fails on one slot or one float changed in
+either file; `verify_prop_slots` fails when a row names a slot the bundle
+lacks. Headless, before (constructors unregistered) and after:
+`?stage=1&block=6&step=1&op=0` f70 and f280 (the crate empty, then set with
+five models and her landing among them), `?stage=2&block=17&step=1&op=0` f650
+(four models in mid-air, then in the cabinet), `?stage=2&block=3&step=1&op=0`
+f112 (no sign, then the hanging sign over the van).

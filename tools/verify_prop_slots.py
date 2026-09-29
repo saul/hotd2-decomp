@@ -317,6 +317,24 @@ def fragment_slots(sub_kind: int) -> list[tuple[int, str]]:
     return out
 
 
+def row_table_slots(kind: str, index: int) -> list[tuple[int, str]]:
+    """The slots constructor 50's or 66's objects draw, out of the port's own
+    literal rows in `game/class41/type50.ts` / `type66.ts` -- the first word
+    of every row of the table the placement's `+0x1F4` picks, the way
+    `PlaceTable50Props` and `PlaceTable66Props` pick it."""
+    sys.path.insert(0, str(ROOT / "tools"))
+    from verify_prop_tables import ts_literal  # noqa: E402
+    game = ROOT / "web" / "src" / "game" / "class41"
+    if kind == "table50":
+        tables = ts_literal(game / "type50.ts", "PROP_TABLE50")
+        rows = tables[index] if 0 <= index < len(tables) else []
+    else:
+        rows = ts_literal(game / "type66.ts",
+                          "PROP_TABLE66_B" if index > 0 else "PROP_TABLE66_A")
+    return [(row[0] & 0xFFFF, f"{kind} table {index} row {i}'s model")
+            for i, row in enumerate(rows)]
+
+
 def table_slots(kind: str) -> list[tuple[int, str]]:
     """The literals the three table constructors' routines draw."""
     names = {
@@ -419,6 +437,8 @@ def main() -> int:
                 want += fragment_slots(pl.get("sub_kind") or 0)
             elif kind in TABLE_TS:
                 want += table_slots(kind)
+            elif kind in ("table50", "table66"):
+                want += row_table_slots(kind, pl.get("field_1f4") or 0)
             if kind in ("group", "falling"):
                 want += story_item_slots(breakables, pl)
             for slot, why in want:

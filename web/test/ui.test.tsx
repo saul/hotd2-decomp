@@ -91,6 +91,7 @@ function projection(): UiProjection {
     // The game drew the crosshair: the fixture renders the chrome as it is in
     // play, and `Viewport` hangs the reticle off this.
     crosshair: true,
+    crosshairImage: null,
     toggles: TOGGLE_DEFAULTS,
     transport: { playing: false, mode: "play",
                  camLabel: "cp_st2[0] slot 57  frame 10 / 100" },

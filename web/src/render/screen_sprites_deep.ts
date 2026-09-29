@@ -93,6 +93,8 @@ export class ScreenSpritesDeep implements System<RenderContext> {
         q.material.needsUpdate = true;
       }
       q.material.opacity = Math.max(0, Math.min(1, s.alpha));
+      // A lit quad's vertex colour (`SCREEN_SPRITE_LIT`), white otherwise.
+      q.material.color.setHex(s.tint ?? 0xffffff);
       // The depth test is the sprite's own: `DrawSpriteQuadCommand`
       // (`FUN_004A7AB0`) puts `flags >> 8 & 7` (0 meaning 4) into the PVR2
       // ISP word's compare mode, and `TranslatePvr2StateToD3D` sends

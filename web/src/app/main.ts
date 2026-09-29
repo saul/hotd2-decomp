@@ -60,6 +60,7 @@ import { RigLayer } from "../render/rigs";
 import { CharacterLayer } from "../render/characters";
 import { GameOverScene } from "../render/game_over_scene";
 import { ScreenSpritesDeep } from "../render/screen_sprites_deep";
+import { ScreenIdleDimLayer } from "../render/screen_idle_dim";
 import { PropLayer } from "../render/props";
 import { Shooting } from "../render/shooting";
 import { ColiDebugLayer } from "../render/coli_debug";
@@ -129,7 +130,11 @@ import { ActorByAt, AppState, G, ResetGameGlobals } from "../game/globals";
 import {
   PadBit, PlayerBlockCapture, PlayerTasksDrawWithoutAFrame,
 } from "../game/player_shell";
-import { SetBoss4Tables, SetGameOverTables, SetGameTables }
+import { RequestAppState } from "../game/app_state";
+import { ProfileBoot } from "../game/profile";
+import { readProfile, writeProfile } from "./profile_store";
+import { OptionsPad } from "../game/options/list";
+import { SetBoss4Tables, SetGameOverTables, SetGameTables, SetOptionsTables }
   from "../game/tables";
 import { PressKind, type Press } from "../core/net/protocol";
 import { NetSession, type NetRole } from "./net/session";
@@ -294,6 +299,7 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
   readonly gameOverScene = new GameOverScene(this.scene);
   /** Screen sprites deeper than the HUD's plane, drawn in the 3D. */
   readonly deepSprites = new ScreenSpritesDeep();
+  readonly screenIdleDim = new ScreenIdleDimLayer();
   readonly props = new PropLayer();
   readonly breakables = new BreakableLayer();
   /** A stacked prop's fifteen pieces, off the breakables' templates. */
@@ -739,6 +745,11 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     this.world.add("render", this.gameOverScene);
     this.scene.add(this.deepSprites.group);
     this.world.add("render", this.deepSprites);
+    // The idle dimmer, in view space over the frame -- after the stage is
+    // hidden, like the deep sprites, and from the effect layer's templates.
+    this.screenIdleDim.cloneSlot = (slot) => this.effects.cloneSlot(slot);
+    this.scene.add(this.screenIdleDim.group);
+    this.world.add("render", this.screenIdleDim);
     // The screen-space layer, and the last thing the tick does: it draws the
     // caption straight off the walker and the shutter bars and screen sprites
     // the engine recorded in `G`, and holds no state of its own for a
@@ -804,6 +815,16 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     // that a netplay replica, which hears the host's events and nothing else,
     // hears them. The note is what the walker's feed row says.
     this.events.on("sound.play", (d) => { this.lastSoundNote = this.bgm.play(d.id); });
+    // `SoundStopAll` (`FUN_0041D350`) from a screen's arm -- the options'.
+    this.events.on("sound.stopAll", () => this.bgm.stopAll());
+    // The profile: read once, before any game starts -- `ProfileLoad` and the
+    // two lines of the boot's reset that touch it (`ProfileBoot`) -- and kept
+    // whenever the game saves it: the options' EXIT, the Original Mode game
+    // over. A second player's page plays the host's options and keeps none.
+    ProfileBoot(readProfile());
+    this.events.on("profile.save", (d) => {
+      if (!this.asReplica) writeProfile(d.profile);
+    });
 
     // -- class 0x10, the civilians ---------------------------------------
     // Op 0x1D is `EvtOpPlayDialogue2D`, the same call evt op 0x2D makes, so a
@@ -929,6 +950,17 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
   }
   get joinOffer(): JoinProjection | null {
     return joinProjection(this.localPlayer);
+  }
+  /**
+   * The image of the crosshair sprite `HudDrawCrosshair` picked for this
+   * page's player -- `g_crosshair_sprites[sight graphic + player*4]` -- as
+   * the bundle carries it, or null when it drew none or the bundle predates
+   * the sprite.
+   */
+  get crosshairImage(): string | null {
+    const id = G.g_crosshair_sprite[this.localPlayer] ?? -1;
+    if (id < 0) return null;
+    return this.hudLayer.spriteImages(id)?.url ?? null;
   }
   get perf(): PerfProjection | null {
     return this.perfMeter.enabled ? this.perfMeter.snapshot : null;
@@ -1096,6 +1128,7 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     SetGameTables(script.characters, script.breakables, script.set_pieces,
                   script.humanoids, script.coli, script.civilians);
     SetGameOverTables(script.game_over);
+    SetOptionsTables(script.options);
     SetBoss4Tables(script.boss4, script.carrier_door_yaw);
   }
 
@@ -1323,6 +1356,22 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
             .includes(e.code)) {
         return;
       }
+      // **The options screen's directions**: the arrows, player 1's d-pad in
+      // `KeyboardReadAsPad` (`FUN_0041F1A0`), which input mode 6 ORs into the
+      // pad word. A press is the next tick's `g_pad_state` bit, as START is,
+      // and held it is `g_pad_held`'s. Only on that screen: elsewhere the
+      // left arrow is the rewind below, and nothing in play reads a gun's
+      // d-pad.
+      const dir = e.code === "ArrowUp" ? OptionsPad.Up
+        : e.code === "ArrowDown" ? OptionsPad.Down
+          : e.code === "ArrowLeft" ? OptionsPad.Left
+            : e.code === "ArrowRight" ? OptionsPad.Right : 0;
+      if (dir !== 0 && G.g_app_state === AppState.Options && !this.asReplica) {
+        e.preventDefault();
+        if (!e.repeat) this.padLatch |= dir;
+        this.padHeld |= dir;
+        return;
+      }
       if (e.code === "Space") { e.preventDefault(); this.togglePlay(); }
       // Half a second of game time back, through the snapshot ring. It has no
       // button: it is a debugging reach for "watch that again", and it went
@@ -1351,6 +1400,15 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
       // that pull -- not onto a pad bit, because the gun's binding set in
       // `g_input_bindings_default` has no reload bit to press.
       else if (e.code === "KeyR") this.offscreenPull();
+    });
+
+    // A direction let go: `g_pad_held` loses its bit.
+    window.addEventListener("keyup", (e) => {
+      const dir = e.code === "ArrowUp" ? OptionsPad.Up
+        : e.code === "ArrowDown" ? OptionsPad.Down
+          : e.code === "ArrowLeft" ? OptionsPad.Left
+            : e.code === "ArrowRight" ? OptionsPad.Right : 0;
+      this.padHeld &= ~dir;
     });
 
     window.addEventListener("popstate", () => {
@@ -1625,6 +1683,11 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
         // shot: no scene runs.
         if (G.g_app_state === AppState.GameOver) {
           this.padLatch |= 0x2 * shift;
+        } else if (G.g_app_state === AppState.Options) {
+          // ...and on the options screen it is A: the mouse's left button is
+          // `0x4` of its pad word (`MouseReadButtons`, `FUN_0041F370`), which
+          // input mode 6 hands to the options list as it is.
+          this.padLatch |= OptionsPad.A * shift;
         } else if (ray && this.gameRunning && !this.frozen) {
           QueueShotRequest(player, ray);
         }
@@ -2596,10 +2659,25 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     if (!this.gameStopped) {
       G.g_pad_state = this.padLatch;
       this.padLatch = 0;
+      // The directions held on the options screen; nothing else is fed.
+      if (G.g_app_state !== AppState.Options) this.padHeld = 0;
+      G.g_pad_held = this.padHeld;
     }
     this.world.update(this.ctx,
                       this.gameStopped ? STOPPED_TICK : DRIVEN_TICK);
     if (!this.gameStopped) G.g_pad_state = 0;
+    // `[port-only]` -- the title. The page has none: every load, seek and
+    // restart is "a game started from the title" (`PlayerStartGameFromTitle`),
+    // so a screen that hands back to it -- the options' EXIT, through
+    // `RequestAppState(4)` -- is a new game at the stage it left.
+    if (G.g_app_state === AppState.Title) {
+      if (!this.titleRestart) {
+        this.titleRestart = true;
+        this.restartRun(this.state.stage);
+      }
+    } else {
+      this.titleRestart = false;
+    }
     // The game-over screen (`game/game_over.ts`) runs in the port; the
     // script does not -- only app state 6 runs the evt interpreter. Said once
     // in the feed, as the moment the run ended.
@@ -2638,6 +2716,13 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
   private advancing = false;
   /** START presses waiting for the next tick; see `stepOneFrame`. */
   private padLatch = 0;
+  /**
+   * `[port-only]` -- the pad bits held down, for `g_pad_held`: the arrows, on
+   * the options screen, whose sound tests step once a frame while one is held.
+   */
+  private padHeld = 0;
+  /** A restart from the title is under way; see `stepOneFrame`. */
+  private titleRestart = false;
   /** The feed has been told this run is over. Cleared by a restart. */
   private gameOverNoted = false;
 
@@ -2651,6 +2736,21 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
    * It plays once loaded whether or not the start screen has been passed:
    * every way here is a press, and a press is what the start screen waits for.
    */
+  /**
+   * `[port-only]` -- the menu's Options: `RequestAppState(0x0C)`, what the
+   * title menu's OPTION row asks for (`TitleMenuUpdateAndSelect`, cursor 5).
+   * The page has no title to be on, so it is asked from the game, and
+   * `CommitAppState` takes it at the end of the next tick -- both players out,
+   * run phase 0 -- as it would from anywhere. The game runs so the screen
+   * does; a second player's page has no options of its own.
+   */
+  openOptions(): void {
+    if (this.asReplica) return;
+    if (this.state.mode !== "play") this.setMode("play");
+    RequestAppState(AppState.Options);
+    this.startGame();
+  }
+
   restartRun(stage: number): void {
     if (stage !== this.state.stage) this.state.entry = undefined;
     this.state.stage = stage;

@@ -7,6 +7,8 @@
  * lives only in a pending event would not survive a save.
  */
 
+import type { ProfileBlock } from "../game/profile";
+
 /** Every event in the player, with its payload. */
 export interface EventMap {
   /** `PlayerTakeDamage` ran: one life gone, and why. */
@@ -30,6 +32,13 @@ export interface EventMap {
   "feed.note": { name: string; cat: string; note: string };
   /** A sound id the port asked for; the host owns the audio element. */
   "sound.play": { id: number };
+  /** `SoundStopAll` ran: every channel stopped. */
+  "sound.stopAll": Record<string, never>;
+  /**
+   * `ProfileSave` ran: the profile the port keeps, to be written where the
+   * browser keeps things. The state is `G`'s; this only says "now".
+   */
+  "profile.save": { profile: ProfileBlock };
   /** `ScoreAddForPlayer` ran. Negative `points` is a penalty. */
   "player.score": { player: number; points: number; score: number };
   /**

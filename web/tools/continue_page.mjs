@@ -142,7 +142,8 @@ try {
   await page.evaluate(async () => {
     const { G } = await import("/src/game/globals.ts");
     const c = await import("/src/game/credits.ts");
-    G.g_option_credits = c.OPTION_CREDITS_FACTORY;
+    const { OPTIONS_FACTORY } = await import("/src/game/options_data.ts");
+    G.g_option_credits = OPTIONS_FACTORY.credits;
     c.SetBothPlayerCounters(c.ModeStartCounterValue(G.g_GameMode));
   });
   await page.evaluate(() => document.activeElement?.blur?.());

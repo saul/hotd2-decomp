@@ -3388,9 +3388,44 @@ now, not a constant, and it starts at **-1**: free play, which
 `ModeStartCounterValue` (`CMP AL,0xff` at `0x00496B8B`) turns into
 `SetBothPlayerCounters(-1)`. Every start and continue succeeds and the credit
 line reads free play. The factory reset writes 5 (six credits);
-`OPTION_CREDITS_FACTORY` keeps that number, and the tests that count credits
-set it. Declared `[diverges]` on the field until the options screen and
-saved options exist to hold the choice.
+`OPTIONS_FACTORY.credits` keeps that number, and the tests that count credits
+set it. The declared `[diverges]` is `ProfileBoot`'s now: a profile with
+nothing saved boots in free play, a saved one brings its own setting.
+
+**The options screen is ported** (2026-09-29, `game/options/`,
+`game/profile.ts`; read in `docs/re/options-screen.md`). App state `0x0C`,
+`OptionsRunPhase`: the list of eleven rows, each value written into the
+profile as it changes; the cursor that steps over what cannot be used; the
+two sound tests; Default, which is the factory reset `FUN_00401130`; EXIT,
+which saves, applies (`ProfileApplyToRun`: `g_start_lives`, `g_difficulty`,
+the saved Original items) and hands back to the title. The settings are `G`
+fields at their addresses now -- `g_option_difficulty`, `g_option_lives`,
+`g_option_credits`, each player's sight graphic, sight speed, bindings and
+calibration -- where `OPTION_LIVES` and `INPUT_BINDINGS` were constants, and
+every reader reads them. The page's input mode is **6** (the mouse with the
+keyboard's pad ORed in), which is what makes Sight Graphic editable and takes
+Gun Calibration off the list; the two sub-screens are unreachable with the
+page's mouse guns, so the port has their gates and not their bodies.
+Blood Color is dead in the exe and stays so. Free play, once changed on the
+Continue row, does not come back without three unlock bits no bundle can set
+-- the exe's rule. `port.test.ts` drives it all with pad bits: lives 4 is
+five lives in the next game, credits 3 is four credits.
+
+**In the page** it is the menu's **Options** (`≡`): what the title's OPTION
+row asks for, from the game, since the page has no title. The arrows move and
+change (a held one runs the sound tests), a click is A, Enter is START; EXIT
+hands back to the title, which the page is by starting the stage again, and
+the new game plays by what was set. It is drawn from the exe's own sprites --
+the `scr_back2` stone, "OPTIONS", the `scr_opt_moji05` font, "EXIT" -- with
+the highlighted row lit red through the quad's colour (flags `0x2000`), and
+the reticle in play is the game's crosshair sprite, the one the Sight Graphic
+picks. `web/tools/options_page.mjs` drives it end to end. Not on a touch
+screen: the list needs a pad's directions, and the menu hides the item there.
+
+**The profile is kept** in the browser (`app/profile_store.ts`), where the
+exe writes four disguised files: saved at EXIT and at the Original Mode game
+over, read once when the page starts. A saved setting overrides the
+free-play default; a browser with nothing saved gets free play.
 
 **The continue screen is drawn, and the script waits under it** (2026-09-28,
 `NEW-BUGS-2`). It used to be state with nothing on screen: the countdown ran
@@ -4914,6 +4949,8 @@ the wall-climbers, and the arm read `yaw` by name. `SpawnFromDescriptorSmall`
 (`FUN_00408BC0`) copies all three words, behaviour 0 is a bare `RET`, and
 `ScriptedPropUpdate13` draws `T·Rx·Rz·Ry·S`, which `render/slotmodels.ts`
 already did; so the four wooden models on the far wall of the block-17 room
+(which stand on the two `komono_suimonie.bin[7]` rows class 0x41 constructor 50
+places under them -- built only since 2026-09-29, see *Scenery out of tables*)
 stood upright where the game tips them `+22.5°`, `+56°`, `-22.5°` and `-28°`
 about x, and `etc_1.bin[63]` -- the moon, `[likely]` by its texture -- stood
 on edge to the ground where the game turns its face `56°` down toward it. Every spawn site now takes the three angles
@@ -5080,6 +5117,36 @@ point the shot was aimed (the generic spark no longer fires for 38/39/40/44,
 none of whose routines calls it); and `EffectPoseNode`'s matrix arm,
 `MatrixInterpolateSwingTwist` (`FUN_00412750`), which effect 0x13 reaches on
 12 node-frames of its break (`class44/swing_twist.ts`).
+
+### Scenery out of tables: the bin-scene crate, stage 2's furniture, the signs
+
+Three reports, one gap: class 0x41 constructors 50 and 66 had no entry in
+`g_class41_constructors`, so both placers died having built nothing.
+
+**Constructor 50** (`PlaceTable50Props`, `FUN_00463BA0`) builds one of six
+tables of scenery, each object running `PropDrawOnlyType12` -- the routine
+generic type 12 runs, handed to `ActorAlloc` directly. Table 3, placed at
+stage 1 block 4 step 3 with a four-step lifetime, is the five
+`komono_st1b.bin` models on the crate the civilian of the bin scene (block 6
+step 1) falls onto: the crate was empty, and now she lands among them. Table 2,
+stage 2 block 17 step 1, is `komono_suimonie.bin[5]`, `[6]` and `[7]` twice;
+the four class-0x13 models that hung in the air stand on the two `[7]`s. The
+other four tables (stage 1 blocks 3/8; stage 2 blocks 7, 8, 25) come with it.
+
+**Constructor 66** (`PlaceTable66Props`, `FUN_00464500`) builds twenty or
+twenty-nine `komono_kanban.bin`/`komono_uemiti.bin` models (signs, `[likely]`)
+running `PropUpdateType66` (`FUN_0046FE00`): three of the slots swing when
+shot -- a ricochet, no points -- and swing again on frames `0x2F` and `0x17` of
+a stage-1 screen shake. Stage 1 blocks 6, 14 and 16 and stage 2 block 0 place
+table a, 340 units and more down the street; stage 2 block 3 places table b,
+the hanging "White Furniture" sign over the van among it.
+
+Both in `game/class41/type50.ts` and `type66.ts`; the exporter places them as
+`table50`/`table66` and carries the chosen table's slots (a fresh bundle is
+needed). `verify_prop_tables` holds all eight tables to the EXE, reading
+constructor 66's counts out of its `MOV`s, and `verify_prop_slots` holds each
+bundle to the port's rows. The thirteen constructors still unported, with the
+spawns that place each, are listed in `docs/formats/spawns.md`.
 
 ### Light block 1 is the characters' light
 

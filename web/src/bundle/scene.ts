@@ -212,6 +212,12 @@ export interface BreakablePlacement {
    * the placement carries only the step lifetime, and for `table44` the
    * effect and motion its two breakable rows draw. See `game/class41/`.
    *
+   * `table50` and `table66` are constructors 50 and 66 (`PlaceTable50Props`,
+   * `PlaceTable66Props`), which build their objects from tables in the image
+   * too: `field_1f4` says which table and `lifetime_evt_steps` is the step
+   * lifetime every object copies. See `game/class41/type50.ts` and
+   * `type66.ts`.
+   *
    * `water_surface` is constructor 1, `PlaceWaterSurface` (`FUN_00462F70`):
    * not a prop but the task that draws a canal water tile and ripples it.
    * `slot` is the tile, already looked up in `g_water_surface_slots`
@@ -221,7 +227,7 @@ export interface BreakablePlacement {
   container: "group" | "kinded" | "falling" | "generic"
     | "chain" | "fragment" | "story_switch" | "script_flag_effect"
     | "rising_door" | "flicker_light" | "table38" | "table39" | "table44"
-    | "water_surface";
+    | "table50" | "table66" | "water_surface";
   /** How many evt blocks it lives for. */
   lifetime_evt_steps: number;
   /** `group` only — the row of `g_breakable_group_ptrs` to build. */
@@ -258,6 +264,9 @@ export interface BreakablePlacement {
    * an item set for 34, 70 and 71, as a sub-kind for 40 and as a radius
    * multiplier for 59. Carried whole, because which of those it is depends on
    * the type and that decision belongs in `game/class41/generic.ts`.
+   *
+   * `table50` and `table66` carry it too: it is the table the constructor
+   * builds from.
    */
   field_1f4?: number;
   slot?: number;

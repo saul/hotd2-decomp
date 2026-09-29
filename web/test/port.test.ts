@@ -319,10 +319,11 @@ import { CivilianAttachSet, CivilianCountMotionLoops, CivilianOp,
 import { CivilianLeaveField } from "../src/game/class10/update";
 import type { CivilianCmdJson, CivilianItemJson } from "../src/bundle/scene";
 import { GameMode } from "../src/game/game_mode";
-import { CreditTrySpend, CreditsAvailable, ModeStartCounterValue,
-  OPTION_CREDITS_FACTORY } from "../src/game/credits";
+import { CreditTrySpend, CreditsAvailable, ModeStartCounterValue }
+  from "../src/game/credits";
+import { OPTIONS_FACTORY } from "../src/game/options_data";
 import {
-  ARCADE_MAGAZINE, INPUT_BINDINGS, InputBindingSet, PlayerInputBindingSet,
+  ARCADE_MAGAZINE, BINDING_RELOAD, InputBindingSet, PlayerInputBindingSet,
   RELOAD_SOUND,
 } from "../src/game/player_gun";
 import {
@@ -563,6 +564,10 @@ import {
   PROP_TABLE38, TYPE38_SLOT, TYPE38_SLOT_HIT, Type38State,
 } from "../src/game/class41/type38";
 import { Type39StackHeight } from "../src/game/class41/type39";
+import { PROP_TABLE50, PROP_TABLE50_SCALE_Z } from "../src/game/class41/type50";
+import {
+  PROP_TABLE66_A, PROP_TABLE66_B, SFX_TYPE66_HIT,
+} from "../src/game/class41/type66";
 import {
   TYPE44_WHOLE_SLOT, TYPE44_EFFECT,
 } from "../src/game/class41/type44";
@@ -595,6 +600,14 @@ import { HumanoidRoutine } from "../src/game/class25/state";
 
 import { GameOverCameraFlyTick } from "../src/game/game_over";
 import { SetGameOverTables } from "../src/game/tables";
+import { OptionsCalibrationEntry } from "../src/game/options";
+import { OptionsRow } from "../src/game/options/list";
+import { OptionsFrame } from "../src/game/options/state";
+import { OptionsFactoryReset, ProfileBoot, ProfileCapture, ProfileLoad,
+         type ProfileBlock } from "../src/game/profile";
+import { OptionsSprite } from "../src/game/options_data";
+import { RequestAppState } from "../src/game/app_state";
+import { SetOptionsTables } from "../src/game/tables";
 import { RouteFigureTick } from "../src/game/route_map";
 import { CamPath, CamPaths } from "../src/game/camera/curve";
 import { SetCameraPaths } from "../src/game/tables";
@@ -9714,6 +9727,256 @@ console.log("\nclass 0x41 types 38, 39, 40 and 44 -- stage 1's church (new bugs 
         String(G.g_breakable_props.length));
 }
 
+console.log("\nclass 0x41 constructors 50 and 66 -- the table scenery (stage 1's bin crate, stage 2 block 17, the signs):");
+{
+  // Driven the way the level drives them: a placement in the bundle, the
+  // walker's spawn list, `SpawnPropContainers`, and a frame of `GameUpdate`.
+  // Before these were ported, `g_class41_constructors[50]` and `[66]` had no
+  // entry and both placers died having built nothing.
+  const rng = new Rng(50);
+  const events = propScene(rng, GameMode.Arcade);
+  const sounds: number[] = [];
+  events.on("sound.play", (e) => sounds.push(e.id));
+  // The descriptors stand at the origin: neither constructor reads it.
+  const ORIGIN: [number, number, number] = [0, 0, 0];
+  const placements = [
+    ...(BREAKABLES.placements ?? []),
+    // Stage 1 block 4 step 3: `+0x1F4` 3, `+0x11C` 4 (evt 0x3B14).
+    { at: 0x3b14, container: "table50" as const, field_1f4: 3,
+      lifetime_evt_steps: 4, pos: ORIGIN },
+    // Stage 1 blocks 3 and 8: table 5, lifetime 11 (evt 0x2D9C).
+    { at: 0x2d9c, container: "table50" as const, field_1f4: 5,
+      lifetime_evt_steps: 11, pos: ORIGIN },
+    // Stage 2 block 17 step 1: table 2, lifetime 5 (evt 0xBE60).
+    { at: 0xbe60, container: "table50" as const, field_1f4: 2,
+      lifetime_evt_steps: 5, pos: ORIGIN },
+    // Stage 1 blocks 6, 14, 16: table a, lifetime 4 (evt 0x6884).
+    { at: 0x6884, container: "table66" as const, field_1f4: 0,
+      lifetime_evt_steps: 4, pos: ORIGIN },
+    // Stage 2 block 3: table b, lifetime 8 (evt 0x2554).
+    { at: 0x2554, container: "table66" as const, field_1f4: 1,
+      lifetime_evt_steps: 8, pos: ORIGIN },
+  ];
+  SetGameTables(CHARS, { ...BREAKABLES, placements });
+  SpawnPropContainers([0x3b14, 0x2d9c, 0xbe60, 0x6884, 0x2554].map(
+    (at) => ({ at, class: SpawnClass.PropContainerPlacer })));
+  const placers = G.g_object_list.filter(
+    (o) => o.cls === SpawnClass.PropContainerPlacer);
+  check("each placer carries its table in +0x1F4 and its lifetime in +0x11C",
+        placers.length === 5
+        && placers.map((o) => `${o.condition}/${o.charType}/${o.hp}`).join()
+          === "50/3/4,50/5/11,50/2/5,66/0/4,66/1/8",
+        placers.map((o) => `${o.condition}/${o.charType}/${o.hp}`).join());
+  GameUpdate(1 / 60, NULL_HOST, rng, events);
+  const at = (a: number) => G.g_breakable_props.filter((q) => q.at === a);
+  const crate = at(0x3b14);
+  check("constructor 50 table 3 builds five komono_st1b models on the crate: "
+        + "slots 0xD40, 0xD45, 0xD46, 0xD41, 0xD42",
+        crate.map((q) => q.slot.toString(16)).join() === "d40,d45,d46,d41,d42",
+        crate.map((q) => q.slot.toString(16)).join());
+  check("...each running PropDrawOnlyType12, at the row's point and BAMS",
+        crate.length === 5
+        && crate.every((q) => q.family === PropFamily.DrawOnlyType12)
+        && crate[0].x === Math.fround(-693.816)
+        && crate[0].y === Math.fround(-3.525)
+        && crate[0].z === Math.fround(-536.116)
+        && crate[0].pitch === -0xca1 && crate[0].yaw === 0x4885
+        && crate[0].roll === 0x684,
+        `${crate[0]?.x} ${crate[0]?.y} ${crate[0]?.z} ${crate[0]?.pitch}`);
+  check("...+0x290 the table, +0x2A0 the row, the step lifetime copied",
+        crate.length === 5 && crate.every((q, i) => q.kind === 3
+                                          && q.storyItem === i
+                                          && q.lifetime === 4));
+  check("...unit scale, no sphere and no +0x34",
+        crate.length === 5
+        && crate.every((q) => q.restX === 1 && q.restY === 1 && q.restZ === 1
+                       && q.hitRadius === 0 && q.flags === 0
+                       && !q.shotRegistered));
+  check("...and each draws its slot, placed where its row says",
+        crate.length === 5
+        && crate.every((q) => q.draws?.length === 1
+                       && q.draws[0].slot === q.slot
+                       && Math.abs(q.draws[0].m[12] - q.x) < 1e-4
+                       && Math.abs(q.draws[0].m[13] - q.y) < 1e-4
+                       && Math.abs(q.draws[0].m[14] - q.z) < 1e-4),
+        JSON.stringify(crate[0]?.draws?.[0]?.m));
+  const rails = at(0x2d9c);
+  check("table 5 is five komono_st1b.bin[15], each z-scaled by "
+        + "g_prop_table50_scale_z: 0.6, 1, 0.5, 0.715, 0.715",
+        rails.length === 5 && rails.every((q) => q.slot === 0x17d6)
+        && rails.map((q) => q.restZ).join()
+          === [0.6, 1, 0.5, 0.715, 0.715].map(Math.fround).join()
+        && rails.every((q) => q.restX === 1 && q.restY === 1),
+        rails.map((q) => q.restZ).join());
+  const room = at(0xbe60);
+  check("table 2, stage 2 block 17: komono_suimonie [5], [6] and [7] twice",
+        room.map((q) => q.slot.toString(16)).join() === "1980,1982,1983,1983"
+        && room[2].x === -602.5 && room[2].y === 38.5
+        && room[2].z === -1532.5 && room[3].z === -1548.5
+        && room[2].yaw === 0x8000 && room[3].yaw === 0x8000,
+        room.map((q) => `${q.slot.toString(16)}@${q.x},${q.y},${q.z}`)
+          .join(" "));
+  check("PROP_TABLE50 has g_prop_table50_counts' 7, 11, 4, 5, 6, 5 rows",
+        PROP_TABLE50.map((t) => t.length).join() === "7,11,4,5,6,5"
+        && PROP_TABLE50_SCALE_Z.length === 5);
+
+  const signs = at(0x6884);
+  const signsB = at(0x2554);
+  check("constructor 66 builds 20 of table a and 29 of table b",
+        signs.length === 20 && signsB.length === 29
+        && signs.every((q) => q.family === PropFamily.Type66)
+        && signs.map((q) => q.slot).join()
+          === PROP_TABLE66_A.map((r) => r[0]).join()
+        && signsB.map((q) => q.slot).join()
+          === PROP_TABLE66_B.map((r) => r[0]).join(),
+        `${signs.length} ${signsB.length}`);
+  const sign = (i: number) => signs[i] ?? makeBreakableProp(-1, 0, 0);
+  const signB = (i: number) => signsB[i] ?? makeBreakableProp(-1, 0, 0);
+  check("...+0x124 4.0 and +0x2C0 -3.5, but 6.5 and -5.0 for slot 0x10DC",
+        sign(3).slot === 0x10dd && sign(3).hitRadius === 4
+        && sign(3).shake === -3.5
+        && sign(1).slot === 0x10dc && sign(1).hitRadius === 6.5
+        && sign(1).shake === -5,
+        `${sign(1).hitRadius} ${sign(1).shake}`);
+  check("...slot 0x10B1 laid back -0x4000, the rest only turned in yaw",
+        signB(27).slot === 0x10b1 && signB(27).pitch === -0x4000
+        && signB(27).yaw === -0x4d22
+        && signs.every((q) => q.pitch === 0 && q.roll === 0),
+        `${signB(27).pitch}`);
+  check("...the row's scale and a live +0x34",
+        sign(4).restX === Math.fround(0.7606) && sign(4).restY === 1
+        && sign(4).restZ === Math.fround(0.5404)
+        && signs.every((q) => q.flags === (0x80000001 | 0)
+                       || q.flags === 0x80000001));
+  check("only 0x10DC, 0x10DD and 0x10DE register, at y + the +0x2C0 drop",
+        signs.filter((q) => q.shotRegistered).map((q) => q.slot.toString(16))
+          .join() === "10dc,10dd,10dd,10dc,10dc,10dd"
+        && sign(1).shotY === Math.fround(sign(1).y - 5)
+        && sign(3).shotY === Math.fround(sign(3).y - 3.5),
+        signs.filter((q) => q.shotRegistered).map((q) => q.slot.toString(16))
+          .join());
+
+  // The hit: bit 3 cleared, the ricochet, no points, and a swing rate of
+  // rand() % 0x201 + 0x600, sprung once on the same frame.
+  const s = sign(3);
+  const score0 = G.g_player_score[0];
+  const hits0 = G.g_player_hit_count[0] ?? 0;
+  BreakablePropTakeShot(s, 0);
+  sounds.length = 0;
+  GameUpdate(1 / 60, NULL_HOST, rng, events);
+  const s0 = [...Array(0x201).keys()].map((r) => r + 0x600)
+    .find((v) => v - Math.trunc(v / 24) === s.spin);
+  check("a shot 0x10DD swings: rate rand()%0x201 + 0x600, less a 24th",
+        s0 !== undefined && s.pitch === s.spin
+        && (s.flags & BreakableFlag.Hit) === 0,
+        `spin ${s.spin} pitch ${s.pitch}`);
+  check("...plays 0x1116A9, counts the hit and pays nothing",
+        sounds.includes(SFX_TYPE66_HIT) && G.g_player_score[0] === score0
+        && G.g_player_hit_count[0] === hits0 + 1,
+        `${sounds} ${G.g_player_score[0]}`);
+  let neg = false;
+  for (let f = 0; f < 240; f++) {
+    GameUpdate(1 / 60, NULL_HOST, rng, events);
+    if (s.pitch < 0) neg = true;
+  }
+  check("...and swings back through zero: rate -= (pitch + rate) / 24",
+        neg, `${s.pitch}`);
+
+  // The pivot: 0x10DE swings about a point 1.5 above its origin, so a pitch
+  // moves the drawn origin on a circle of radius 1.5.
+  const piv = signB(19);
+  piv.spin = 0x800;
+  GameUpdate(1 / 60, NULL_HOST, rng, events);
+  const m = piv.draws?.[0]?.m ?? [];
+  const moved = Math.hypot(m[12] - piv.x, m[13] - piv.y, m[14] - piv.z);
+  const chord = 2 * 1.5 * Math.abs(Math.sin(piv.pitch / 65536 * Math.PI));
+  check("slot 0x10DE is drawn about (0, 1.5, 0): its origin moves 2 * 1.5 * "
+        + "sin(pitch / 2)",
+        piv.slot === 0x10de && piv.pitch !== 0
+        && Math.abs(moved - chord) < 1e-3,
+        `moved ${moved} chord ${chord}`);
+  const mp = s.draws?.[0]?.m ?? [];
+  check("...where 0x10DD is drawn at its own origin however it swings",
+        s.pitch !== 0 && Math.abs(mp[12] - s.x) < 1e-4
+        && Math.abs(mp[13] - s.y) < 1e-4 && Math.abs(mp[14] - s.z) < 1e-4);
+
+  // The shake: scene 0, and the pool reading g_screen_shake_frames at 0x2F or
+  // 0x17. A latched player hit is what restarts the countdown at 0x30, and
+  // `UpdateScreenShake` takes a frame off before the pool runs.
+  const still = sign(12);
+  const board = sign(0);
+  check("an unshot 0x10DC hangs still", still.slot === 0x10dc
+        && still.pitch === 0 && still.spin === 0);
+  G.g_scene_index = 0;
+  G.g_player_was_hit[0] = 1;
+  GameUpdate(1 / 60, NULL_HOST, rng, events);
+  const kick = (frames: number, rate: number) =>
+    [...Array(0x201).keys()].some((r) => {
+      const v = r + frames * 32;
+      return Math.abs(rate) === v - Math.trunc(v / 24);
+    });
+  check("a hit's shake swings it the frame the countdown reads 0x2F: "
+        + "±(rand()%0x201 + 0x2F * 32), less a 24th",
+        G.g_screen_shake_frames === 0x2f && kick(0x2f, still.spin)
+        && still.pitch === still.spin && board.pitch === 0,
+        `${G.g_screen_shake_frames} ${still.spin} ${board.pitch}`);
+  // From 0x2E down the rate only springs, until the countdown reads 0x17.
+  const kicked: number[] = [];
+  while (G.g_screen_shake_frames > 1) {
+    const rate = still.spin;
+    const sprung = (rate - Math.trunc((still.pitch + rate) / 24)) | 0;
+    GameUpdate(1 / 60, NULL_HOST, rng, events);
+    if (still.spin !== sprung) kicked.push(G.g_screen_shake_frames);
+  }
+  check("...and kicks it again at 0x17 and at no other frame",
+        kicked.join() === "23" && board.pitch === 0, kicked.join());
+  G.g_scene_index = 1;
+  G.g_player_was_hit[0] = 1;
+  const quiet = sign(19);
+  const quietRate = quiet.spin;
+  const quietSprung =
+    (quietRate - Math.trunc((quiet.pitch + quietRate) / 24)) | 0;
+  GameUpdate(1 / 60, NULL_HOST, rng, events);
+  check("...in scene 0 only: scene 1's 0x2F only springs it",
+        quiet.slot === 0x10dd && G.g_screen_shake_frames === 0x2f
+        && quiet.spin === quietSprung,
+        `${quiet.spin} ${quietSprung}`);
+  G.g_screen_shake_frames = 0;
+  G.g_scene_index = 0;
+
+  // The lifetimes: table 3 and the signs both live four step changes; the
+  // crate's objects despawn, the signs are killed (`ActorKill` writes no
+  // flag word, `ActorDespawn` clears the live bit).
+  const crate0 = crate[0] ?? makeBreakableProp(-1, 0, 0);
+  const sign0 = sign(0);
+  for (let step = 2; step <= 6; step++) {
+    G.g_evt_step_index = step;
+    GameUpdate(1 / 60, NULL_HOST, rng, events);
+  }
+  check("after five step changes table 3's objects and table a's are gone",
+        crate.length === 5 && signs.length === 20
+        && at(0x3b14).length === 0 && at(0x6884).length === 0
+        && at(0x2d9c).length === 5 && at(0x2554).length === 29,
+        `${at(0x3b14).length} ${at(0x6884).length} ${at(0x2554).length}`);
+  check("...the crate's by ActorDespawn, the signs' by ActorKill",
+        crate0.dead && sign0.dead
+        && (crate0.flags & BreakableFlag.Live) === 0
+        && (crate0.flags & 0x18000) === 0x18000
+        && (sign0.flags & BreakableFlag.Live) !== 0);
+
+  // Scene 1's sweep, `g_script_flags[0x77]`: PropDrawOnlyType12 runs the
+  // shared prologue and goes; PropUpdateType66 inlines its lifetime without it.
+  G.g_scene_index = 1;
+  G.g_script_flags[0x77] = 1;
+  GameUpdate(1 / 60, NULL_HOST, rng, events);
+  check("scene 1's sweep takes the table-50 objects and leaves the signs",
+        rails.length === 5 && signsB.length === 29
+        && at(0x2d9c).length === 0 && at(0xbe60).length === 0
+        && at(0x2554).length === 29,
+        `${at(0x2d9c).length} ${at(0xbe60).length} ${at(0x2554).length}`);
+  G.g_script_flags[0x77] = 0;
+}
+
 console.log("\nMatrixInterpolateSwingTwist, effect interpolation mode 2:");
 {
   const near = (a: number, b: number, eps = 1) => Math.abs(a - b) <= eps;
@@ -17760,7 +18023,7 @@ console.log("\nthe player shell: in, hit, out, continue, over:");
   const rng = new Rng(3);
   const f = { host: NULL_HOST, rng };
   G.g_GameMode = GameMode.Arcade;
-  G.g_option_credits = OPTION_CREDITS_FACTORY;  // counts, not free play
+  G.g_option_credits = OPTIONS_FACTORY.credits;  // counts, not free play
   ResetGameGlobals();
   SetGameTables(CHARS);
   check("the reset's start press spends one credit of six and puts the "
@@ -18185,7 +18448,7 @@ console.log("\nthe continue screen, as the exe draws it:");
   const rng = new Rng(5);
   const ev = new Events();
   G.g_GameMode = GameMode.Arcade;
-  G.g_option_credits = OPTION_CREDITS_FACTORY;  // counts, not free play
+  G.g_option_credits = OPTIONS_FACTORY.credits;  // counts, not free play
   scene(0, rng);
   const at = (id: number) => G.g_screen_sprite_draws.filter((d) => d.id === id);
   const listed = () => JSON.stringify(G.g_screen_sprite_draws.map((d) =>
@@ -33516,7 +33779,8 @@ console.log("\nthe gun: the magazine, the reload, and the HUD readouts:");
         `${G.g_player_ammo[0]} ${G.g_player_magazine_empty[0]}`);
   check("the mouse is a gun: its binding set is the gun's, which has no "
         + "reload bit", PlayerInputBindingSet(0) === InputBindingSet.Gun
-        && INPUT_BINDINGS[0][InputBindingSet.Gun].reload === 0);
+        && G.g_player_input_bindings[0][InputBindingSet.Gun][BINDING_RELOAD]
+           === 0);
   check("six bullets are drawn from x = 24, 24 px apart, at y = 364",
         bullets().length === 6
         && bullets().every((b, i) => b.x === 24 + 24 * i && b.y === 364
@@ -33684,7 +33948,8 @@ console.log("\nthe gun: the magazine, the reload, and the HUD readouts:");
         sprites(HudSprite.PressReloadButton).length === 1
         || G.g_player_reload_prompt_timer[0] % 60 > 45,
         JSON.stringify(G.g_screen_sprite_draws.map((s) => s.id.toString(16))));
-  G.g_pad_state = INPUT_BINDINGS[0][InputBindingSet.Controller].reload & 0x2;
+  G.g_pad_state = G.g_player_input_bindings[0][InputBindingSet.Controller][
+    BINDING_RELOAD] & 0x2;
   step();
   G.g_pad_state = 0;
   check("...and pad B -- Right Ctrl -- does", G.g_player_ammo[0] === 6,
@@ -37519,6 +37784,292 @@ console.log("\nShotTestMesh: the boards stop the shot:");
   T.coli = null;
   SetGameTables(CHARS);
   ResetGameGlobals();
+}
+
+// -- the options screen (app state 0x0C) ---------------------------------------
+
+console.log("the options screen, driven with pad bits:");
+{
+  // `OptionsRunPhase` (`FUN_004869E0`) and its list, from the page's boot:
+  // `ProfileBoot` with nothing saved, then the menu's request for app state
+  // 0x0C, which is what the title's OPTION row makes.
+  const rng = new Rng(5);
+  const heard: number[] = [];
+  const saved: ProfileBlock[] = [];
+  const ev = new Events();
+  ev.on("sound.play", (d) => heard.push(d.id));
+  ev.on("profile.save", (d) => saved.push(d.profile));
+  // The screen's `.rdata`, as `ExeTables.optionsTables` reads it: the rows
+  // and labels are the image's; the glyph table is one sprite per character
+  // (`0x1000 + code`) so a drawn string can be read back; the SE test's
+  // first two entries.
+  const rows = [
+    [2, 3, "Difficulty"], [2, 4, "Life"], [2, 5, "Continue"],
+    [2, 6, "Blood Color"], [2, 7, "Sight Graphic"], [2, 8, "Sight Speed"],
+    [2, 9, "Sound Test Special Effects"], [2, 10, "Sound Test Music"],
+    [2, 11, "Gun Calibration"], [2, 12, "Default"], [15, 18, "EXIT"],
+  ].map(([col, row, label]) => ({ col: col as number, row: row as number,
+                                   label: label as string }));
+  SetOptionsTables({
+    rows,
+    difficulty_labels: ["Very Easy", "     Easy", "   Normal", "     Hard",
+                        "Very Hard"],
+    digits: "0123456789".split(""), blood_labels: ["  Red", "Green"],
+    free_play: "Free Play", number: "No.",
+    glyphs: Array.from({ length: 96 }, (_u, i) => (i === 0 ? 0 : 0x1020 + i)),
+    crosshair_sprites: [2728, 2730, 2731, 2732, 2729, 2733, 2734, 2735],
+    se_test: [0x80000000, 0x15a9], se_test_packs: [-1, -1],
+    music_test: [0x80000000, 0x1000001a],
+    sight_speed_sprites: [0xa91, 0xa92, 0xa93, 0xa94],
+  });
+  /** The glyphs drawn on one line, left to right, as text. */
+  const glyphText = (line: number) => G.g_screen_sprite_draws
+    .filter((s) => s.id > 0x1020 && s.id < 0x1080
+      && s.y >= line * 24 && s.y < line * 24 + 8)
+    .sort((a, b) => a.x - b.x)
+    .map((s) => String.fromCharCode(s.id - 0x1000)).join("");
+  const frame = (pad = 0, held = 0) => {
+    G.g_pad_state = pad;
+    G.g_pad_held = held;
+    GameUpdate(1 / 60, NULL_HOST, rng, ev);
+    G.g_pad_state = 0;
+    G.g_pad_held = 0;
+  };
+  G.g_GameMode = GameMode.Arcade;
+  G.g_option_credits = 5;
+  ProfileBoot(null);
+  check("a profile with nothing saved boots in free play -- the port's "
+        + "declared departure -- at three lives and Normal, blood 1",
+        G.g_option_credits === -1 && G.g_option_lives === 2
+        && G.g_start_lives === 3 && G.g_difficulty === 2
+        && G.g_option_blood_color === 1 && G.g_profile_version === 7,
+        `credits ${G.g_option_credits} lives ${G.g_start_lives}`);
+  ResetGameGlobals();
+  SetGameTables(CHARS);
+  check("the page's players are mouse guns in input mode 6: the mouse with "
+        + "the keyboard ORed in (`InputMapDevicesToMaple` case 6)",
+        G.g_input_mode[0] === 6 && G.g_player_input_is_gun[0] === 1
+        && G.g_player_pad_kind[0] === -1);
+  RequestAppState(AppState.Options);
+  frame();
+  check("a request for 0x0C is committed at the frame's end, both players "
+        + "out, run phase 0",
+        G.g_app_state === AppState.Options && G.g_nRunPhase === 0
+        && G.g_player_state[0] === PlayerState.Out,
+        `app ${G.g_app_state} phase ${G.g_nRunPhase}`);
+  heard.length = 0;
+  const stopped: number[] = [];
+  const offStop = ev.on("sound.stopAll", () => stopped.push(1));
+  frame();
+  offStop();
+  check("phase 0 arms the list: every sound stopped, cursor on Difficulty, "
+        + "the working copies taken -- credits 0 for free play -- Blood "
+        + "Color hidden, the rows below it one line up, the stage released",
+        stopped.length === 1
+        && G.g_nRunPhase === 1 && G.g_options_frame === OptionsFrame.List
+        && G.g_options_cursor === OptionsRow.Difficulty
+        && G.g_options_edit_credits === 0 && G.g_options_edit_lives === 2
+        && G.g_options_blood_row_shown === 0 && G.g_options_row_shift === -1
+        && G.g_stage_unloaded === 1,
+        `phase ${G.g_nRunPhase} cursor ${G.g_options_cursor}`);
+  frame();
+  const title = G.g_screen_sprite_draws.find(
+    (s) => s.id === OptionsSprite.Options);
+  const exit = G.g_screen_sprite_draws.find((s) => s.id === OptionsSprite.Exit);
+  const tiles = G.g_screen_sprite_draws.filter(
+    (s) => s.id >= 0x7a && s.id < 0x8e);
+  check("the list draws: \"OPTIONS\" 0xB31 at (344, 16) anchor 6, EXIT 0x803 "
+        + "lit white and centred at (320, 18*24 - 4), twenty background "
+        + "tiles at depth 200",
+        title?.x === 344 && title?.y === 16 && title?.flags === 6
+        && exit?.x === 320 && exit?.y === 428 && exit?.flags === 0x200a
+        && exit?.tint === 0xffffff
+        && tiles.length === 20 && tiles.every((t) => t.depth === 200)
+        && tiles[19].x === 512 && tiles[19].y === 384,
+        JSON.stringify({ title, exit, n: tiles.length }));
+  const firstGlyph = G.g_screen_sprite_draws.find(
+    (s) => s.id === 0x1044 && s.y === 3 * 24);
+  check("...the highlighted row's label red and nearer: \"Difficulty\" on "
+        + "line 3, tint 0xFF0000, depth 0.9, and \"Normal\" beside it, white",
+        glyphText(3).startsWith("Difficulty")
+        && firstGlyph?.tint === 0xff0000 && firstGlyph?.depth === 0.9
+        && glyphText(3).endsWith("Normal"),
+        `${glyphText(3)} ${JSON.stringify(firstGlyph)}`);
+  check("...\"Sight Graphic\" on line 6, not 7: the hidden row's gap closed",
+        glyphText(6).startsWith("SightGraphic") && glyphText(7) === "SightSpeed",
+        `6 "${glyphText(6)}" 7 "${glyphText(7)}"`);
+  heard.length = 0;
+  frame(0x20);
+  check("down: Life, and 0xA9", G.g_options_cursor === OptionsRow.Life
+        && heard.includes(0xa9), `${G.g_options_cursor} ${heard}`);
+  frame(0x80);
+  frame(0x80);
+  check("right twice: the life setting 2 -> 4, written at once",
+        G.g_option_lives === 4 && G.g_options_edit_lives === 4,
+        `${G.g_option_lives}`);
+  frame(0x80);
+  check("...and once more wraps to 0 -- \"1\" life", G.g_option_lives === 0);
+  frame(0x40);
+  check("...left wraps back to 4", G.g_option_lives === 4);
+  frame(0x200000);
+  check("player 2's down moves the same cursor: Continue",
+        G.g_options_cursor === OptionsRow.Continue);
+  check("...shown as \"Free Play\"", glyphText(5).endsWith("FreePlay"),
+        glyphText(5));
+  frame(0x80);
+  check("right from free play without the three unlock bits: 1, not 0 -- "
+        + "free play is not on offer",
+        G.g_option_credits === 1 && G.g_options_edit_credits === 1,
+        `${G.g_option_credits}`);
+  frame(0x40);
+  check("...and left from 1 wraps to 9, not to free play",
+        G.g_option_credits === 9);
+  frame(0x80);
+  check("...right from 9 wraps to 1", G.g_option_credits === 1);
+  frame(0x80);
+  frame(0x80);
+  check("...two more: 3", G.g_option_credits === 3);
+  frame(0x20);
+  check("down from Continue steps over the hidden Blood Color: Sight Graphic",
+        G.g_options_cursor === OptionsRow.SightGraphic);
+  frame(0x80);
+  check("mode 6 may change its sight graphic: player 1's right, 0 -> 1, "
+        + "written back", G.g_player_sight_graphic[0] === 1
+        && G.g_player_sight_graphic[1] === 0,
+        `${G.g_player_sight_graphic}`);
+  frame(0x20);
+  check("down steps over Sight Speed -- no player on a controller -- to the "
+        + "SE test", G.g_options_cursor === OptionsRow.SoundTestSe);
+  frame(0x80);
+  heard.length = 0;
+  frame(0x4);
+  check("the SE test: right to 1, A stops voice and SE and plays 0x15A9",
+        G.g_options_se_test === 1
+        && JSON.stringify(heard) === JSON.stringify(
+          [0x80000002, 0x80000001, 0x15a9]),
+        heard.map((h) => h.toString(16)).join(","));
+  for (let i = 0; i < 31; i++) frame(0, 0x80);
+  check("...a right held 30 frames steps once a frame after",
+        G.g_options_se_test === 3 && G.g_options_hold_repeat === 30,
+        `${G.g_options_se_test} ${G.g_options_hold_repeat}`);
+  heard.length = 0;
+  frame(0x20);
+  check("leaving a sound-test row stops music, voice and SE and plays 0xA9 "
+        + "again", G.g_options_cursor === OptionsRow.SoundTestMusic
+        && JSON.stringify(heard) === JSON.stringify(
+          [0xa9, 0x80000000, 0x80000002, 0x80000001, 0xa9]),
+        heard.map((h) => h.toString(16)).join(","));
+  frame(0x20);
+  check("down steps over Gun Calibration -- mode 6 is not offered it -- to "
+        + "Default", G.g_options_cursor === OptionsRow.Default);
+  frame(0x20);
+  frame(0x20);
+  check("...then EXIT, then round to Difficulty",
+        G.g_options_cursor === OptionsRow.Difficulty);
+  frame(0x10);
+  check("up from the top: EXIT", G.g_options_cursor === OptionsRow.Exit);
+  frame(0x10);
+  frame(0x10);
+  check("up from EXIT: Default, then the music test (Gun Calibration "
+        + "stepped over)", G.g_options_cursor === OptionsRow.SoundTestMusic);
+  for (let i = 0; i < 5; i++) frame(0x10);
+  check("up through the rows to Difficulty",
+        G.g_options_cursor === OptionsRow.Difficulty,
+        `${G.g_options_cursor}`);
+  frame(0x40);
+  check("left from Normal: Easy", G.g_option_difficulty === 1);
+  frame(0x10);
+  heard.length = 0;
+  frame(0x8);
+  check("EXIT on START: 0x121A9, the profile saved with what was set, and "
+        + "applied -- five lives, Easy",
+        heard.includes(0x121a9) && saved.length === 1
+        && saved[0].lives === 4 && saved[0].credits === 3
+        && saved[0].difficulty === 1 && saved[0].sightGraphic[0] === 1
+        && G.g_start_lives === 5 && G.g_difficulty === 1
+        && G.g_nRunPhase === 2,
+        JSON.stringify(saved[0]));
+  frame();
+  check("phase 2: credits cleared and the title asked for, committed at "
+        + "the frame's end", G.g_app_state === AppState.Title
+        && G.g_credits[0] === 0, `app ${G.g_app_state}`);
+  // The title's START, as the page takes it: a game from the title.
+  ResetGameGlobals();
+  SetGameTables(CHARS);
+  check("a game started from the title seeds Arcade with the credit "
+        + "setting plus one -- four -- and the start spends one",
+        ModeStartCounterValue(GameMode.Arcade) === 4
+        && G.g_free_play === 0 && G.g_credits[0] === 3,
+        `credits ${G.g_credits} free ${G.g_free_play}`);
+  run(2, rng, ev);
+  check("...and the player enters play with five lives",
+        G.g_player_state[0] === PlayerState.InPlay
+        && G.g_player_lives[0] === 5, `lives ${G.g_player_lives[0]}`);
+  check("...at Easy", G.g_difficulty === 1);
+
+  // Default: the factory settings, and 5 -- not free play.
+  RequestAppState(AppState.Options);
+  frame();
+  frame();
+  frame(0x10);
+  frame(0x10);
+  check("back in: up twice from Difficulty is Default",
+        G.g_options_cursor === OptionsRow.Default, `${G.g_options_cursor}`);
+  frame(0x4);
+  check("A on Default: the factory settings -- two, two, five credits, "
+        + "sight graphic 0 -- and the working copies taken again",
+        G.g_option_lives === 2 && G.g_option_difficulty === 2
+        && G.g_option_credits === 5 && G.g_options_edit_credits === 5
+        && G.g_player_sight_graphic[0] === 0,
+        `${G.g_option_lives} ${G.g_option_credits}`);
+  G.g_option_credits = 3;
+  OptionsFactoryReset();
+  check("OptionsFactoryReset writes 5 whatever the boot's free play",
+        G.g_option_credits === 5);
+
+  // The three unlock bits put free play back on the Continue row.
+  G.g_option_unlocks = 7;
+  G.g_options_cursor = OptionsRow.Continue;
+  G.g_options_edit_credits = 9;
+  frame(0x80);
+  check("with the unlocks, right from 9 is free play: -1",
+        G.g_option_credits === -1 && G.g_options_edit_credits === 0);
+  G.g_option_unlocks = 0;
+
+  // The two sub-screens' gates.
+  G.g_options_frame = OptionsFrame.Calibration;
+  G.g_options_cursor = OptionsRow.GunCalibration;
+  frame();
+  check("Gun Calibration refuses a mode-6 gun: back to the list, cursor on "
+        + "EXIT", G.g_options_frame === OptionsFrame.List
+        && G.g_options_cursor === OptionsRow.Exit);
+  G.g_input_mode = [5, 5];
+  G.g_options_frame = OptionsFrame.Calibration;
+  OptionsCalibrationEntry();
+  check("...and takes a mode-5 gun: player 1", G.g_calibration_player === 0
+        && G.g_options_frame === OptionsFrame.Calibration);
+  G.g_input_mode = [6, 6];
+  G.g_options_frame = OptionsFrame.SightSpeedArm;
+  frame();
+  frame();
+  check("Sight Speed with no player on a controller goes straight back: "
+        + "list, cursor on EXIT", G.g_options_frame === OptionsFrame.List
+        && G.g_options_cursor === OptionsRow.Exit);
+
+  // The profile: a saved block overrides the boot's free play.
+  const block = ProfileCapture();
+  ProfileBoot({ ...block, credits: 5, lives: 4 });
+  check("a saved profile overrides the free-play default: credits 5, five "
+        + "lives", G.g_option_credits === 5 && G.g_start_lives === 5);
+  ProfileBoot({ ...block, credits: -1 });
+  check("...and a saved free play stays free play", G.g_option_credits === -1);
+  check("a profile of another version is not taken: a reset",
+        ProfileLoad({ ...block, version: 6, lives: 4 }) === 0
+        && G.g_option_lives === 2 && G.g_option_credits === 5);
+  ProfileBoot(null);
+  G.g_app_state = AppState.InPlay;
+  ResetGameGlobals();
+  SetOptionsTables(undefined);
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

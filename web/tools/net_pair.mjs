@@ -50,7 +50,7 @@ const vite = await serve(port);
 // Host candidates as plain addresses: two pages of one browser on one machine
 // find each other that way whether or not mDNS resolves, or STUN is reachable.
 // **No real user's browser does this** -- the flag hid, for a whole round of
-// testing, that two tabs over WebRTC do not connect on this machine (L79) --
+// testing, that two tabs over WebRTC do not connect on this machine (L80) --
 // so the last section launches Chrome again without it.
 let browser = await chromium.launch({
   channel: "chrome", headless: true,

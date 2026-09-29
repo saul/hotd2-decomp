@@ -151,6 +151,15 @@ export enum ActorFlag {
   /**
    * Set by `ZombieStateBackOff` while the actor retreats and cleared when it
    * finishes. `RankEnemiesByDistance` drops these from the compacted queue.
+   *
+   * On class 0x31 exactly two routines raise it, both of them the retreat:
+   * `ThrowerStateLeapAside` (`OR EDI, 0x20000000` at `0x0044B8BA`) and
+   * `ThrowerStateWithdraw` (`0x0044EC9F`). Its readers there are
+   * `ThrowerStateFallToSurface` (`0x0044BE87`: land into the leap back, not
+   * the hub) and the arc landing's dust column (`0x0044D2A1`). No class-0x31
+   * actor is ranked -- `RegisterForDistanceRank`'s one call is at
+   * `0x0045346D`, in `EnemyZombieUpdate`. `[proved]`; the strikes raise
+   * {@link Committed}.
    */
   BackingOff = 0x20000000,
   /**
@@ -311,9 +320,23 @@ export enum ActorFlag {
    * It said "will not be re-ranked out of it". `RankEnemiesByDistance`
    * reads bit 1 and {@link BackingOff} and not this. `[proved]`
    *
-   * Class 0x31's pounces raise it for the flight -- `ThrowerStateLeapDown` at
-   * `0x0044B6F0`, `ThrowerStateLeapStrike` and `ThrowerStateDelayedPounce` at
-   * `0x0044E8E6` -- and not {@link BackingOff}, which is the next bit up.
+   * Class 0x31's strikes raise it, every one of them, and not
+   * {@link BackingOff}, which is the next bit up: the pounces for the flight
+   * -- `ThrowerStateLeapDown` at `0x0044B6F0`, `ThrowerStateLeapStrike` at
+   * `0x0044E72B`, `ThrowerStateDelayedPounce` at `0x0044E8E6` -- and the two
+   * standing swings for the swing, `ThrowerStateCloseAndStrike` at
+   * `0x0044EB5F` and `ThrowerStateStrikeOnTheSpot` at `0x00450BD2`. Each
+   * clears it on its own way out and `ThrowerOnShot` clears it with
+   * {@link BackingOff} (`AND EAX, 0xcfffffff` at `0x00449A24`). `[proved]`
+   * from a linear sweep of `.text` for every 32-bit `TEST`/`OR`/`AND` whose
+   * immediate touches either bit. Its class-0x31 readers: the arc landing's
+   * dust column in `ThrowerEmitGroundDust` (`0x0044D296`), which it
+   * suppresses, and -- across classes -- `ZombiePushOutOfWorldAndActors` at
+   * `00454944`, which pushes a zombie 1.8x as hard when the actor that
+   * shoved it (`obj+0x138`, written by `ColiTestSphereAgainstActors` at
+   * `0x00405F2B`) carries it. Three of the five raised {@link BackingOff}
+   * here until the sweep: the dust column went up under a strike and the
+   * boost never did.
    */
   Committed = 0x10000000,
   /**
@@ -1105,6 +1128,16 @@ export enum ThrowerStance {
 export interface FadeRecord {
   record: number;
   rot: [number, number, number];
+}
+
+/**
+ * A fade snapshot's root translation where a routine wrote it before the
+ * blend, axis by axis. See {@link ActorBase.fadeFrom}.
+ */
+export interface FadeRoot {
+  x?: number;
+  y?: number;
+  z?: number;
 }
 
 /**
@@ -2137,8 +2170,18 @@ export interface ActorBase {
    * the fade dissolves from those. The frog's two turning states do the same
    * to record 1 after every pass of a turn clip (`FrogStateHopWithinScreenWedge`
    * (`FUN_0043AA10`), `FrogStateLeapAtPlayer` (`FUN_0043B270`)).
+   * `CivilianApplyMotionPose` (`FUN_0048C310`) rewrites records 1 and 9 the
+   * same way, or record 0 -- the root's own rotation.
+   *
+   * `root` is the same for the root translation, `model+0x6C..0x74`, which
+   * `MotionLoadPoseSlot` mode 0xC copies into slot A beside the angles: an
+   * axis present here is the one the fade dissolves from, an absent one is
+   * the clip's. `CivilianApplyMotionPose` is its writer -- all three when it
+   * has just moved the actor to hold bone 1, x and z when the outgoing block
+   * walked on its clip.
    */
-  fadeFrom: { motion: number; ticks: number; records?: FadeRecord[] } | null;
+  fadeFrom: { motion: number; ticks: number; records?: FadeRecord[];
+              root?: FadeRoot } | null;
   /**
    * Frames of the cross-fade left. It starts at the fade length and the
    * fade is over when it goes **below zero**, so the incoming clip is held on

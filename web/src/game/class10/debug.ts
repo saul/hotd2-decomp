@@ -111,7 +111,7 @@ export function CivilianDebug(obj: Actor): ActorDebug {
              ?? sub.targetMode : `(${t.x.toFixed(0)},${t.z.toFixed(0)})`}`
       + ` · d=${Math.hypot(obj.pos.x - t.x, obj.pos.z - t.z).toFixed(0)}`
       + `/${sub.radius} · heading err ${HeadingError(obj, t)}`
-      + ` · turn ${sub.turnRate}`);
+      + ` · blend ${sub.motionBlend}`);
   }
   if (on.length) detail.push(`on ${on.join(" · ")}`);
   if (parked) {

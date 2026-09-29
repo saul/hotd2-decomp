@@ -19,25 +19,25 @@ is in `tools/verify_all.py`, beside the command that runs it.
 
 | Directory | Lines | Files | Layer |
 |---|---:|---:|---|
-| `game/` | 103925 | 338 | engine |
-| `hod2lib/` | 19305 | 35 | engine |
-| `render/` | 15082 | 54 | render |
-| `app/` | 11993 | 41 | app |
+| `game/` | 104323 | 339 | engine |
+| `hod2lib/` | 19312 | 35 | engine |
+| `render/` | 15087 | 54 | render |
+| `app/` | 12277 | 41 | app |
 | `script/` | 4471 | 25 | engine |
-| `ui/` | 3478 | 25 | ui |
+| `ui/` | 3490 | 25 | ui |
 | `core/` | 2977 | 13 | engine |
-| `bundle/` | 2735 | 11 | engine |
+| `bundle/` | 2738 | 11 | engine |
 | `audio/` | 973 | 2 | render |
 | `hud/` | 491 | 1 | ui |
-| **total** | **165430** | **545** | |
+| **total** | **166139** | **546** | |
 
 The largest files, which is where the pressure to split next is:
 
-* `app/main.ts` — 2896
+* `app/main.ts` — 2898
 * `game/globals.ts` — 2848
-* `game/actor.ts` — 2644
+* `game/actor.ts` — 2687
 * `hod2lib/bundle.ts` — 2322
-* `hod2lib/exetab.ts` — 2269
+* `hod2lib/exetab.ts` — 2276
 
 ## The port
 
@@ -48,13 +48,13 @@ The largest files, which is where the pressure to split next is:
 | Citations checked | 764 ported functions match `functions.tsv` under the same name |
 | Spawn classes | **30 of 42** read classes have a module, covering 1541 of 1619 placements |
 | Declared `[diverges]` | **131** — where the port knowingly departs from the exe, each with its reason on the spot |
-| `[open]` markers | **124** — questions the port and the exporter are honest about not having answered |
+| `[open]` markers | **123** — questions the port and the exporter are honest about not having answered |
 
 Both markers are counted in **every** `.ts`/`.tsx` file under `web/src/`, one per occurrence, and only in comments — a word in code or in a string is not a marker (`verify_port.marker_lines`). Each departure and each question is written once, where it is made; everything that refers to it names it in words ([`PLAYER_ARCHITECTURE.md`](PLAYER_ARCHITECTURE.md), "One departure, one tag"). By layer, from the same table as the directories above:
 
 | Layer | Directories | `[diverges]` | `[open]` |
 |---|---|---:|---:|
-| engine | `core/`, `bundle/`, `script/`, `game/`, `hod2lib/` | 117 | 121 |
+| engine | `core/`, `bundle/`, `script/`, `game/`, `hod2lib/` | 117 | 120 |
 | render | `render/`, `audio/` | 13 | 3 |
 | ui | `hud/`, `ui/` | 0 | 0 |
 | app | `app/` | 1 | 0 |

@@ -24956,3 +24956,150 @@ draw clones the same stage nodes (`Object3D.clone` shares materials), so it
 carries the same state by construction. Stage 2's type-33 strip
 (`?stage=2&block=11&step=1&op=20`, cam 57/371) is one sprite with no second
 one behind it to cut.
+
+## 2026-09-29 -- stage 1's bin civilian: the fall's yaw, the climb-off's height, and the captor that mauled for ever
+
+**Report.** The civilian who falls off the bridge before JUDGMENT (stage 1
+block 6 step 1, `0x3C38`, stream 13) landed in the wrong place, and the zombie
+that bursts from the wood after she climbs off the bin (`0x3D34`, char type 7,
+initial state 39, attack state 40) repeated its maul and stuck.
+
+**Found.** Driven in headless Chrome with the bridge captor (`0x3C8C`) shot:
+after `SetPose` her yaw was 0, the fall's root motion took her along -Z (541
+-> 550) instead of +X, and after the climb-off clip she stayed at y -0.1 (the
+bin lid) through the rest of the scene. The captor went 36 -> 40 -> 35 (clip
+967) -> 40 -> 35 -> ... for as long as the stage ran. Three causes, none a
+regression -- the two civilian ones never worked, and the captor one was left
+half-done by d82271fb:
+
+* **Op 0x18 is six dwords, not six floats.** `0x0048BE71..0x0048BEA9` are
+  `MOV`s: three floats into `obj+0x40..0x48`, three BAMS integers into
+  `obj+0x64..0x6C`. Both exporters read all six with `f32`, which is L2's
+  trap on another struct, so all five shipped poses had a denormal yaw. Fixed
+  in `web/src/hod2lib/exetab.ts` and `tools/hod2lib/exetab.py`; the port now
+  writes pitch and roll as well.
+* **`CivilianApplyMotionPose` (`FUN_0048C310`) was unported**, on a note that
+  the root walk "already carries a civilian where its clips say". The stream's
+  `0x160100` block carries `0x20000`: move the actor so bone 1 of the new
+  clip's first frame lands where the climb-down drew it. Ported whole in
+  `class10/pose.ts`: the heading turn (`0x18000`), the hold, the record
+  rewrites (`0x8000` rebases records 1 and 9, `0x10000` record 0), the
+  outgoing block's `0x100000` root hand-off, and the blend -- `sub+0xE`, op
+  0x03's operand, whose only reader this is. Op 0x03 was `SetTurnRate`; it is
+  `SetMotionBlend` now, and state.ts's `[open]` on the field is closed. The
+  record and root writes land in the fade's snapshot, so `Actor.fadeFrom`
+  gained `root` and the renderer's blend honours it and record 0. The
+  listing ends the `0x8000` arm at `MatrixStackPop(1)` (`0x0048C767`) with a
+  return; the bytes run on through record 9 and into the blend (L35).
+* **State 40's subs write the cursor's blob.** `MOV [ESI+0x1398], EDI` with
+  `EDI` the attack blob + 0x10 at `0x0045BD34`/`0x0045BD92`; the port set
+  `scriptPc = 0` and left the blob the burst (state 36) had pointed at, so
+  state 35 sub 1 loaded the target blob's only entry. State 41 had the same
+  omission. Both now `aimCursor`, and the arrival tests read the cursor.
+
+**Also fixed on the way.** Op 0x01's start and `CivilianReapplyWaitCommand`'s
+op 0x01 are play **cursors** (`model+0x08` takes them as they are); the port
+converted them as authored frames and started 21 shipped clips twice as far
+in.
+
+**Wrong turns.** The first run, with nothing shot, showed the civilian
+switching to her on-shot stream (11) at f190 and a captor dying, which read as
+a shot from nowhere; it is the bridge captor's maul killing her on schedule --
+the exe's failure path, route branch 1. The repro has to shoot `0x3C8C` to see
+the rescue path at all. A test helper that waited for the wait word to change
+never ran a frame when the new block's word equalled the old one; it waits on
+the cursor now. `tools/civilians.mjs` fails on origin/main (17 moved, 0
+rescued, 14 mauled against 37/21/10) with identical numbers before and after
+this change -- not this change's, and not investigated.
+
+**Left open.** The class-0x30 script entries and headers pass the exe's start
+**cursor** to the port's `ActorSetMotionBlended`, which takes an authored
+frame and doubles it: the bin captor's burst (967, frame 33) starts at cursor
+66, half-way through, and its flag-34 cue at 63 never fires (the flag's one
+reader, `MouseBranchTriggerUpdate` `0x0043F743`, despawns a mouse). The same
+holds for every non-skeleton caller that passes a nonzero start; filed as its
+own task. Class 0x41 constructor 66 (`FUN_00464500`, 20 or 29 table props,
+placed at block 6 step 1 by `0x6884`) is not exported and not ported.
+
+**Proof.** `port.test.ts`: "the bin captor's walk hands state 35 its attack
+list, once" (two of three fail without the `aimCursor`), and "class 0x10's clip
+change, CivilianApplyMotionPose" (eight of nine fail on main's `script.ts`; the
+ninth, the cut, is the control). `verify_civilian_scripts.py` fails on main's
+decoder (all five poses denormal) and passes now. In the page: after the
+climb-off, y -0.1 -> -15.5; the fall lands at x -689 (was z -550); the captor
+runs 36 -> 40 -> 35 (958, 965) -> AttackRun once.
+
+## 2026-09-29 -- class 0x31's strikes raise 0x10000000, not BackingOff
+
+The eye audit left one line open: `ThrowerStateCloseAndStrike` raised and
+cleared `ActorFlag.BackingOff` (`0x20000000`) where the exe uses
+`0x10000000`. It is right, and it was not alone.
+
+**The bytes.** `ThrowerStateCloseAndStrike` (`FUN_0044EA50`), whose `ESI` is
+the actor throughout: sub 0 loads `8b5634` `MOV EDX, [ESI+0x34]` at
+`0x0044EB59`, `81ca00000010` `OR EDX, 0x10000000` at `0x0044EB5F`, stores
+`895634` at `0x0044EB77`; the exit loads `8b4634` at `0x0044EC46`,
+`25ffffffef` `AND EAX, 0xefffffff` at `0x0044EC52`, stores `894634` at
+`0x0044EC60` with state `0x19`. The word is `obj+0x34` -- the port's
+`obj.flags` -- not `obj+0x136C` and not a class-0x31 tail word. `[proved]`
+
+**The sweep.** Ghidra's `search_instructions` for the two immediates, then a
+capstone linear sweep of `.text` for every 32-bit `TEST`/`OR`/`XOR`/`AND`
+whose immediate touches either bit, because a substring search misses masks
+like `0x10002000`, `0x18000000` and `0xcfffffff`. On class 0x31, `obj+0x34`:
+
+* `0x10000000` up: `ThrowerStateLeapDown` `0x0044B6F0`,
+  `ThrowerStateLeapStrike` `0x0044E72B`, `ThrowerStateDelayedPounce`
+  `0x0044E8E6`, `ThrowerStateCloseAndStrike` `0x0044EB5F`,
+  `ThrowerStateStrikeOnTheSpot` `0x00450BD2`; each clears it on its way out
+  (`0x0044B841`, `0x0044E7F0`, `0x0044EA1D`, `0x0044EC52`, `0x00450C6D`).
+* `0x20000000` up: `ThrowerStateLeapAside` `0x0044B8BA` and
+  `ThrowerStateWithdraw` `0x0044EC9F` only; cleared at `0x0044BB43` and
+  `0x0044EDDF` (`0xdfffdfff`, with `0x2000`).
+* Both cleared by `ThrowerOnShot` (`25ffffffcf` at `0x00449A24`).
+* Read: `ThrowerEmitGroundDust`'s arc-landing column wants `0x10000000` down
+  and `0x20000000` up (`0x0044D296`, `0x0044D2A1`); `ThrowerStateFallToSurface`
+  lands into state 10 on `0x20000000` (`0x0044BE87`). `ThrowerStateLeapToPoint`'s
+  `0x10000000` (`0x0044E577`) is on `obj+0x136C`, `TrackBone2`, not this word.
+
+Across classes: `RankEnemiesByDistance` tests `0x20000000` (`0x00409149`), but
+a byte scan for `E8` calls finds `RegisterForDistanceRank`'s only caller at
+`0x0045346D` (`EnemyZombieUpdate`), so no thrower is ever ranked.
+`ZombiePushOutOfWorldAndActors` tests `0x18000000` on the actor that shoved
+it (`f7c100000018` at `00454944`), and that actor is whoever
+`ColiTestSphereAgainstActors` ran for -- `found+0x138 = g_cur_actor`
+(`899638010000` at `0x00405F2B`) -- which includes a thrower. The other
+`0x10000000` readers (`SubModelPoseBoneHalfRate`'s type-0x1D arm at
+`0x0040EF0C`, class 0x22's companion test at `0x0049BDA1`, class 0x30's
+routines) never see a class-0x31 actor.
+
+**What the port had.** Three of the five strikes -- states 24, 32 and 22 --
+raised and cleared `BackingOff`; state 9's own copy of the mistake was fixed
+earlier (NEW-BUGS-2). With the wrong bit, a striking thrower never boosted the
+zombie push, and state 22's landing put up the leap back's dust column.
+`ThrowerOnShot` spelled the second bit as a literal. All four now say
+`ActorFlag.Committed`; `actor.ts` documents both enum members' class-0x31
+writers and readers.
+
+**Proof.** Nine checks in `port.test.ts` ("states 22, 24 and 32 raise
+0x10000000"). They drive each state through its swing, or its arc and
+landing, and measure the consequence: a zombie shoved by the thrower
+mid-swing moves 0.9 (1.8 x 0.1 x 5), and 0.5 once the swing is over; state 22
+lands with no column. With the three source files reverted, seven of the nine
+fail (flags `0x20000081`, shove 0.5, one column).
+
+**Wrong turns.** The first state-22 check passed for the wrong reason. The
+fixture had no stance-4 attack row, and state 22 raises `obj+0x136C` 0x20000
+before `ThrowerLoadAttackArcScript` reads the stance, so the arc script was
+null. The leap then ended on its first frame, before the flag could be
+observed or any landing happen. The fixture now has a row 4, and the
+failing-first run shows the column.
+
+**Left open.** `ThrowerStateCloseAndStrike`'s port still differs from the
+listing in ways this commit does not touch. It fires the connect on
+`frame >= hit_frame` behind a `struck` latch, where the exe compares
+`obj+0x19C == (s16)entry+8` every frame (`0x0044EC15`). It omits sub 0's
+`obj+0x1360 = g_players_in_play` (`0x0044EA93`) and the strike arm's attack
+cry, `ActorPlayHitVoice(obj, 3)` (`CALL 0x0040a6f0` at `0x0044EC02`). And a
+port-only `!e` guard sends a missing strike entry to state 25 with
+`Committed` still up.

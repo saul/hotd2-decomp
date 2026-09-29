@@ -1183,7 +1183,23 @@ host's is signed whenever `Rng.next` last ran. The same bits draw the same
 numbers, so nothing played wrong -- this time. **Check state where it is used,
 not where it was delivered.**
 
-**L79 -- A flag that makes the test environment work can be the bug the user
+**L79 -- A fix that splits one engine word into two port fields has to find
+every writer of the word, not every reader.** `obj+0x1398`, the captor
+script's cursor, is a **pointer**, and d82271fb fixed a hang by carrying the
+blob it points into beside the index -- `aimCursor(obj, blob, pc)` -- and by
+making every *reader* use it. It changed the writers it was reading beside,
+and left two it was not: states 40 and 41 each store `blob + 0x10` in their
+subs 0/1, and the port went on writing the index alone. So stage 1's bin
+captor walked past its point and handed state 35 a cursor that still named
+the burst it had just finished, replayed it, and bounced between the two for
+the rest of the stage. Nothing failed: the readers were right and the tests
+were about the readers. **When a port's representation stops being the
+engine's one word, sweep the image for every store to that offset** (`search
+_instructions` with the operand, and the byte pattern -- L32) and make each
+store write every field. It is L63's cousin: there a port encoding leaked
+into a reader's constant; here it silently kept a writer's old meaning.
+
+**L80 -- A flag that makes the test environment work can be the bug the user
 hits.** Netplay's browser harness launched Chrome with
 `--disable-features=WebRtcHideLocalIpsWithMdns`, so two tabs would find each
 other by plain address "whether or not mDNS resolves", and its WebRTC run

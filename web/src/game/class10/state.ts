@@ -34,15 +34,16 @@ export interface CivilianState {
   /** +0x0C how many more times the clip may loop. Negative loops for ever. */
   loops: number;
   /**
-   * +0x0E, written by op 3 and by `CivilianInit`'s own 10.
-   *
-   * [open] **Nothing in the civilian's turn reads it.**
-   * `CivilianStepTurnToTarget` (`FUN_0048C850`) passes the literal `0x100` to
-   * `ActorTurnTowardPoint`, and this port passed this field instead — which
-   * made every civilian turn twenty-five times too slowly. What does read it
-   * is unread; it is kept because op 3 writes it and the sidebar shows it.
+   * +0x0E, written by op 3 and by `CivilianInit`'s own 10: **the fade** of the
+   * next clip change. `CivilianApplyMotionPose` (`FUN_0048C310`) is its one
+   * reader, and passes it to `ActorSetMotionBlended` -- see
+   * {@link CivilianOp.SetMotionBlend}. It was `turnRate`, and nothing in the
+   * turn reads it: `CivilianStepTurnToTarget` (`FUN_0048C850`) passes the
+   * literal `0x100` to `ActorTurnTowardPoint`, and this port once passed this
+   * field instead, which made every civilian turn twenty-five times too
+   * slowly. `[proved]`
    */
-  turnRate: number;
+  motionBlend: number;
   /** +0x10 / +0x12 op 0x0D — the camera cue wait bit 0x80 tests. */
   cuePath: number;
   cueFrame: number;
@@ -162,7 +163,7 @@ export interface CivilianState {
 export function makeCivilianState(): CivilianState {
   return {
     wait: 0, subFlags: 0, frameLimit: 0, loops: 0,
-    turnRate: 10, cuePath: 0, cueFrame: 0, timer: -1, motionCompare: 0,
+    motionBlend: 10, cuePath: 0, cueFrame: 0, timer: -1, motionCompare: 0,
     hookBusy: 0, flagIndex: 0, skipCount: 0, childCount: 0, childrenGoal: 0,
     enemiesGoal: 0, civiliansGoal: 0, removePath: 0, removeFrame: 0,
     removeDelay: 0, childOrder: 0, childOrderFrames: 0, pouncer: 0,

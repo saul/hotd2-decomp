@@ -132,7 +132,11 @@ export function ThrowerStateLeapStrike(obj: ThrowerActor, dt: number, rng: Rng,
       obj.attackPermit = G.g_active_player === 1 ? 1
         : G.g_active_player === 2 ? rng.int(2) : 0;
     }
-    obj.flags |= ActorFlag.BackingOff;
+    // `81c900000010` at `0x0044E72B` on `obj+0x34` (`8b4e34` / `894e34`),
+    // beside `obj+0x136C |= 0x20000`: bit `0x10000000`. It raised
+    // `BackingOff`, which made the arc's landing (`ThrowerEmitGroundDust`
+    // code 0x50) raise the leap-back's dust column under a strike.
+    obj.flags |= ActorFlag.Committed;
     obj.flags2 |= ThrowerFlag.Pouncing;
     obj.attack = ThrowerPickAttack(obj, rng.int(10));
     ThrowerLoadAttackArcScript(obj);
@@ -143,7 +147,8 @@ export function ThrowerStateLeapStrike(obj: ThrowerActor, dt: number, rng: Rng,
   }
   if (obj.attackPermit >= 0) ThrowerStrikeConnect(obj, events);
   if (ActorArcStep(obj, 1, dt, host, events)) return;
-  obj.flags &= ~ActorFlag.BackingOff;
+  // `81e1ffffffef` at `0x0044E7F0`, `25fffffdff` on `obj+0x136C` beside it.
+  obj.flags &= ~ActorFlag.Committed;
   obj.flags2 &= ~ThrowerFlag.Pouncing;
   obj.state = ThrowerState.LeapAside;
   obj.sub = 0;

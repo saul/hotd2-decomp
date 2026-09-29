@@ -519,7 +519,10 @@ export interface CivilianCmdJson {
   point?: [number, number, number] | null;
   /** Op 5's approach radius, op 0x16's target scale — the operand as a float. */
   radius?: number;
-  /** Op 0x18's six floats: position then rotation. */
+  /**
+   * Op 0x18's six dwords: the position's three floats, then the rotation's
+   * three BAMS integers (pitch, yaw, roll -- `obj+0x64..0x6C`).
+   */
   pose?: number[];
   /** Op 0x22's `(sound id, delay)` list, terminated by id `0xFFFFFFFF`. */
   sounds?: [number, number][];

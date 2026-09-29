@@ -484,6 +484,69 @@ export const TABLE_SLOTS: Record<string, number[]> = {
 };
 
 /**
+ * Class 0x41 constructor 50, `PlaceTable50Props` (`FUN_00463BA0`): the
+ * placer's `+0x1F4` picks one of six tables through `g_prop_table50_ptrs`
+ * (`0x00594F08`), `g_prop_table50_counts` (`0x00594F20`, an s8 each) says how
+ * many 28-byte rows it has, and the u16 at the head of each row is the slot
+ * its `PropDrawOnlyType12` object draws.
+ */
+export const TABLE50_TYPE = 50;
+export const PROP_TABLE50_PTRS = 0x00594f08;
+export const PROP_TABLE50_COUNTS = 0x00594f20;
+export const PROP_TABLE50_ROW = 0x1c;
+/** Six pointers and six counts: `(s16)placer+0x1F4` outside them reads junk. */
+export const PROP_TABLE50_TABLES = 6;
+
+/**
+ * Class 0x41 constructor 66, `PlaceTable66Props` (`FUN_00464500`): twenty
+ * rows of `g_prop_table66_a` (`0x00595158`), or twenty-nine of
+ * `g_prop_table66_b` (`0x005953D8`) when the placer's `+0x1F4` is above zero
+ * -- both counts `MOV` immediates in the constructor. The s16 at the head of
+ * each 32-byte row is the slot its `PropUpdateType66` object draws.
+ */
+export const TABLE66_TYPE = 66;
+export const PROP_TABLE66_A = 0x00595158;
+export const PROP_TABLE66_A_ROWS = 0x14;
+export const PROP_TABLE66_B = 0x005953d8;
+export const PROP_TABLE66_B_ROWS = 0x1d;
+export const PROP_TABLE66_ROW = 0x20;
+
+/**
+ * The slots one constructor-50 or constructor-66 placement's objects draw,
+ * read out of the image the way the constructor reads its rows, or null for a
+ * table index the constructor has no table for.
+ */
+export function propTableSlots(tables: ExeTables, ctor: number,
+                               index: number): number[] | null {
+  let base: number;
+  let rows: number;
+  let stride: number;
+  if (ctor === TABLE50_TYPE) {
+    if (index < 0 || index >= PROP_TABLE50_TABLES) return null;
+    const ptr = tables.ru32(PROP_TABLE50_PTRS + index * 4);
+    const word = tables.ru16(PROP_TABLE50_COUNTS + index);
+    if (ptr === null || word === null) return null;
+    base = ptr;
+    rows = ((word & 0xff) << 24) >> 24;
+    stride = PROP_TABLE50_ROW;
+  } else if (ctor === TABLE66_TYPE) {
+    // `if (0 < (s16)placer+0x1F4)` -- a negative index takes table a.
+    base = index > 0 ? PROP_TABLE66_B : PROP_TABLE66_A;
+    rows = index > 0 ? PROP_TABLE66_B_ROWS : PROP_TABLE66_A_ROWS;
+    stride = PROP_TABLE66_ROW;
+  } else {
+    return null;
+  }
+  const out: number[] = [];
+  for (let i = 0; i < rows; i++) {
+    const slot = tables.ru16(base + i * stride);
+    if (slot === null) return null;
+    if (!out.includes(slot)) out.push(slot);
+  }
+  return out;
+}
+
+/**
  * The slots one type-40 sub-kind can draw, from `PlaceFragmentProps`
  * (`FUN_004636A0`) and `PropUpdateType40` (`FUN_0046C570`): its starting slot
  * (`g_fragment_slots`, or the literals of arms 0 and 1), the next one — a hit
@@ -606,6 +669,25 @@ export function containerPlacements(tables: ExeTables, evt: evtlib.EvtFile,
           lifetime_evt_steps: rec.hp,
           ...(ctor === 44 ? { effect: TABLE44_EFFECT, motion: TABLE44_MOTION }
                           : {}),
+          pos: [...rec.pos], yaw: rec.orient[1],
+        });
+      } else if (ctor === TABLE50_TYPE || ctor === TABLE66_TYPE) {
+        // `PlaceTable50Props` and `PlaceTable66Props`: every object comes out
+        // of a table in the image and the descriptor names only which one --
+        // `+0x1F4`, the s8 at `desc+0x24` -- and the step lifetime, `+0x11C`,
+        // each object copies. The position and angles are never read.
+        const index = s8(rec.offset + 0x24);
+        if (propTableSlots(tables, ctor, index) === null) {
+          degraded.note("hod2lib.bundle.container_placements",
+                        `table constructor ${ctor} at 0x${rec.offset.toString(16)}`,
+                        "the objects are not placed and nothing draws them",
+                        `index ${index} names no table`);
+          continue;
+        }
+        out.push({
+          at: rec.offset, container: `table${ctor}`,
+          field_1f4: index,
+          lifetime_evt_steps: rec.hp,
           pos: [...rec.pos], yaw: rec.orient[1],
         });
       } else if (ctor === 1) {
@@ -1692,10 +1774,17 @@ export async function breakableSlotEntry(
   // pieces it bursts into. Without them the objects are placed and the
   // renderer has nothing to clone, which is how stage 1's church came to have
   // bare pews.
+  // Constructors 50 and 66 draw whatever their table's rows name, so what
+  // travels is every slot of the table this placement picked.
   for (const pl of placements) {
     const slots = pl.container === "fragment"
       ? fragmentSlots(stage.tables, (pl.sub_kind as number) ?? 0)
-      : TABLE_SLOTS[pl.container as string] ?? [];
+      : pl.container === "table50" || pl.container === "table66"
+        ? propTableSlots(stage.tables,
+                         pl.container === "table50" ? TABLE50_TYPE
+                                                    : TABLE66_TYPE,
+                         (pl.field_1f4 as number) ?? 0) ?? []
+        : TABLE_SLOTS[pl.container as string] ?? [];
     for (const slot of slots) if (!want.includes(slot)) want.push(slot);
   }
   for (const pl of placements) {

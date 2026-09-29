@@ -156,6 +156,23 @@ export enum PropFamily {
    */
   DrawOnlyType33 = 20,
   /**
+   * `PropUpdateType66` (`FUN_0046FE00`) — the twenty or twenty-nine objects
+   * `PlaceTable66Props` builds out of `g_prop_table66_a`/`_b`, three of whose
+   * slots swing when shot. Stage 1 blocks 6, 14 and 16; stage 2 blocks 0 and
+   * 3. See `class41/type66.ts`.
+   */
+  Type66 = 21,
+  /**
+   * `PropDrawOnlyType12` (`FUN_00467E50`) as `PlaceTable50Props` hands it to
+   * `ActorAlloc` — directly, since `g_class41_updates[50]` is `NoOpStub`.
+   *
+   * The routine {@link Generic} runs for type 12, and its own family for the
+   * reason `kind` is `+0x290`: for these objects that word is the **table
+   * index** the constructor wrote, and the generic arm would read it as the
+   * type to dispatch on. See `class41/type50.ts`.
+   */
+  DrawOnlyType12 = 22,
+  /**
    * `OriginalItemDropUpdate` (`FUN_00466BE0`) — the Original Mode item
    * `SpawnOriginalItemDrop` (`FUN_00466B40`) releases, which
    * `PropUpdateType7`'s first hit does. See `class41/type07.ts`.

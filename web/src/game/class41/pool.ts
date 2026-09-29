@@ -45,6 +45,8 @@ import { PropUpdateType38 } from "./type38";
 import { PropUpdateType39 } from "./type39";
 import { PropUpdateType40 } from "./type40";
 import { PropUpdateType44 } from "./type44";
+import { PropUpdateType66 } from "./type66";
+import { PropDrawOnlyType12 } from "./type12";
 
 /**
  * Every live container, once a frame.
@@ -125,6 +127,13 @@ export function BreakablePropPoolUpdate(rng: Rng, events?: Events,
       // Its own constructor, its own lifetime, its own light. See
       // `class41/type48.ts`.
       case PropFamily.Type48: PropUpdateType48FlickerLight(p, rng, events); break;
+      // `PlaceTable66Props`' objects: their own lifetime, ending in
+      // `ActorKill`, and their own hit arm and sphere. See `class41/type66.ts`.
+      case PropFamily.Type66: PropUpdateType66(p, rng, events); break;
+      // `PlaceTable50Props` hands `ActorAlloc` this routine itself, so the
+      // routine runs and nothing of the generic arm's lookup does. See
+      // `class41/type50.ts`.
+      case PropFamily.DrawOnlyType12: PropDrawOnlyType12(p, rng, events); break;
       default: BreakablePropUpdate(p, rng, events, cam); break;
     }
   }

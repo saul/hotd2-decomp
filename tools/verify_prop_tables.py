@@ -15,6 +15,11 @@ What only this check can see: a table row mistyped, dropped or re-ordered in
 the port -- which would put a church chair a few units from where the engine
 draws it and nothing else would notice.
 
+Constructors 50 and 66 (`type50.ts`, `type66.ts`) are the same shape: six
+tables of scenery behind `g_prop_table50_ptrs` and its row counts, and the two
+sign tables `PlaceTable66Props` picks between, whose counts are `MOV`
+immediates in the constructor and are read out of the code here.
+
 Class 0x28's three tables ride along (`web/src/game/class28/index.ts`): the
 route table, the path lengths it is killed on and the `g_app_state` 10 poses
 -- a freeze frame one off would throw stage 1's burning cars a frame early.
@@ -173,6 +178,63 @@ def main() -> int:
                 same_f32(f"{name}[{i}]", lit[i], raw)
             else:
                 same_int(f"{name}[{i}]", lit[i], struct.unpack("<i", raw)[0])
+
+    # Constructor 50 (`type50.ts`): g_prop_table50_ptrs picks the table,
+    # g_prop_table50_counts says how many 28-byte rows
+    # {u16 slot; pad; f32 x,y,z; s32 rx,ry,rz}, and g_prop_table50_scale_z is
+    # read for table 5 alone, one float per row.
+    p50 = GAME / "type50.ts"
+    t50 = ts_literal(p50, "PROP_TABLE50")
+    ptrs50 = struct.unpack("<6I", rd(0x00594F08, 24))
+    counts50 = struct.unpack("<6b", rd(0x00594F20, 6))
+    same_int("PROP_TABLE50 has one entry per g_prop_table50_ptrs row",
+             len(t50), len(ptrs50))
+    for ti, ptr in enumerate(ptrs50):
+        rows = t50[ti] if ti < len(t50) else []
+        same_int(f"PROP_TABLE50[{ti}] row count", len(rows), counts50[ti])
+        for i, row in enumerate(rows):
+            raw = rd(ptr + i * 28, 28)
+            same_int(f"PROP_TABLE50[{ti}][{i}] slot", row[0],
+                     struct.unpack_from("<H", raw)[0])
+            for k in range(3):
+                same_f32(f"PROP_TABLE50[{ti}][{i}][{1 + k}]", row[1 + k],
+                         raw[4 + 4 * k:8 + 4 * k])
+            for k in range(3):
+                same_int(f"PROP_TABLE50[{ti}][{i}][{4 + k}]", row[4 + k],
+                         struct.unpack_from("<i", raw, 16 + 4 * k)[0])
+    zs = ts_literal(p50, "PROP_TABLE50_SCALE_Z")
+    same_int("PROP_TABLE50_SCALE_Z has table 5's row count", len(zs),
+             counts50[5])
+    for i, v in enumerate(zs):
+        same_f32(f"PROP_TABLE50_SCALE_Z[{i}]", v, rd(0x00594EF0 + i * 4, 4))
+
+    # Constructor 66 (`type66.ts`): two tables of 32-byte rows
+    # {s16 slot; pad; f32 x,y,z; s32 yaw; f32 sx,sy,sz}, whose counts and
+    # addresses are the `MOV EAX, imm32` / `MOV ECX, imm32` pairs at
+    # 0x00464505 and 0x00464519 -- read out of the code, not assumed.
+    p66 = GAME / "type66.ts"
+    for name, mov in (("PROP_TABLE66_A", 0x00464505),
+                      ("PROP_TABLE66_B", 0x00464519)):
+        code = rd(mov, 10)
+        if code[0] != 0xB8 or code[5] != 0xB9:
+            bad.append(f"{name}: 0x{mov:08X} is not MOV EAX,imm; MOV ECX,imm")
+            continue
+        n, va = struct.unpack_from("<I", code, 1)[0], \
+            struct.unpack_from("<I", code, 6)[0]
+        rows = ts_literal(p66, name)
+        same_int(f"{name} row count (the constructor's MOV EAX)", len(rows), n)
+        for i, row in enumerate(rows):
+            raw = rd(va + i * 32, 32)
+            same_int(f"{name}[{i}] slot", row[0],
+                     struct.unpack_from("<h", raw)[0])
+            for k in range(3):
+                same_f32(f"{name}[{i}][{1 + k}]", row[1 + k],
+                         raw[4 + 4 * k:8 + 4 * k])
+            same_int(f"{name}[{i}][4] yaw", row[4],
+                     struct.unpack_from("<i", raw, 16)[0])
+            for k in range(3):
+                same_f32(f"{name}[{i}][{5 + k}]", row[5 + k],
+                         raw[20 + 4 * k:24 + 4 * k])
 
     # Class 0x28 (`web/src/game/class28/index.ts`): g_class28_route_table
     # {s16 slot, s16 freeze}, g_cam_path_length at each route's slot, and

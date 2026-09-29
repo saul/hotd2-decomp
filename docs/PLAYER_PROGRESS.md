@@ -4949,6 +4949,8 @@ the wall-climbers, and the arm read `yaw` by name. `SpawnFromDescriptorSmall`
 (`FUN_00408BC0`) copies all three words, behaviour 0 is a bare `RET`, and
 `ScriptedPropUpdate13` draws `T·Rx·Rz·Ry·S`, which `render/slotmodels.ts`
 already did; so the four wooden models on the far wall of the block-17 room
+(which stand on the two `komono_suimonie.bin[7]` rows class 0x41 constructor 50
+places under them -- built only since 2026-09-29, see *Scenery out of tables*)
 stood upright where the game tips them `+22.5°`, `+56°`, `-22.5°` and `-28°`
 about x, and `etc_1.bin[63]` -- the moon, `[likely]` by its texture -- stood
 on edge to the ground where the game turns its face `56°` down toward it. Every spawn site now takes the three angles
@@ -5115,6 +5117,36 @@ point the shot was aimed (the generic spark no longer fires for 38/39/40/44,
 none of whose routines calls it); and `EffectPoseNode`'s matrix arm,
 `MatrixInterpolateSwingTwist` (`FUN_00412750`), which effect 0x13 reaches on
 12 node-frames of its break (`class44/swing_twist.ts`).
+
+### Scenery out of tables: the bin-scene crate, stage 2's furniture, the signs
+
+Three reports, one gap: class 0x41 constructors 50 and 66 had no entry in
+`g_class41_constructors`, so both placers died having built nothing.
+
+**Constructor 50** (`PlaceTable50Props`, `FUN_00463BA0`) builds one of six
+tables of scenery, each object running `PropDrawOnlyType12` -- the routine
+generic type 12 runs, handed to `ActorAlloc` directly. Table 3, placed at
+stage 1 block 4 step 3 with a four-step lifetime, is the five
+`komono_st1b.bin` models on the crate the civilian of the bin scene (block 6
+step 1) falls onto: the crate was empty, and now she lands among them. Table 2,
+stage 2 block 17 step 1, is `komono_suimonie.bin[5]`, `[6]` and `[7]` twice;
+the four class-0x13 models that hung in the air stand on the two `[7]`s. The
+other four tables (stage 1 blocks 3/8; stage 2 blocks 7, 8, 25) come with it.
+
+**Constructor 66** (`PlaceTable66Props`, `FUN_00464500`) builds twenty or
+twenty-nine `komono_kanban.bin`/`komono_uemiti.bin` models (signs, `[likely]`)
+running `PropUpdateType66` (`FUN_0046FE00`): three of the slots swing when
+shot -- a ricochet, no points -- and swing again on frames `0x2F` and `0x17` of
+a stage-1 screen shake. Stage 1 blocks 6, 14 and 16 and stage 2 block 0 place
+table a, 340 units and more down the street; stage 2 block 3 places table b,
+the hanging "White Furniture" sign over the van among it.
+
+Both in `game/class41/type50.ts` and `type66.ts`; the exporter places them as
+`table50`/`table66` and carries the chosen table's slots (a fresh bundle is
+needed). `verify_prop_tables` holds all eight tables to the EXE, reading
+constructor 66's counts out of its `MOV`s, and `verify_prop_slots` holds each
+bundle to the port's rows. The thirteen constructors still unported, with the
+spawns that place each, are listed in `docs/formats/spawns.md`.
 
 ### Light block 1 is the characters' light
 

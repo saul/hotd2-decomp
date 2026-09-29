@@ -134,7 +134,7 @@ holding paths like `COM\220_Y_M.WAV`, which is decisive.
 
 | Class | Handler | Spawns | What it is | Confidence |
 |---|---|---|---|---|
-| `0x41` | `PropContainerPlacerUpdate` (`FUN_00461CD0`) | 441 | **Breakable-prop / item-container placer.** A transient stub: dispatches on `obj+0x130C` through `g_class41_constructors`, 79 entries at `0x00593580`, builds child actors, then `ActorKill`s itself. Never drawn, never damaged. Type 0 is the breakable group (8 spawns) and is **ported**; **type 1** (`PlaceWaterSurface`, `FUN_00462F70`, 15 spawns) is not a prop at all but the task that draws and ripples a canal water tile, `WaterSurfaceUpdate` (`FUN_0046E3A0`) -- the tile is `g_water_surface_slots[+0x1F4]` (`0x00593DA4`) and `+0x11C` a step lifetime -- and is **ported**, see `docs/formats/water.md` §2; type 4 (`PlaceKindedProp`, 70 spawns) and **type 43** (`PropUpdateType43`, 7) both read `obj+0x6C` as an object kind; type 32 is the **lift** (`LiftUpdate`) and is ported; type 13 (`PropUpdateType13`, `FUN_00467F50`) is the part that drops out of stage 2's clock tower on script flag `0x6D`, and type 35 (`PropUpdateType35`, `FUN_0046B320`) the double door stage 2's block-5 civilian stands behind, drawn at **literal world coordinates** whatever its placement -- both ported, see PLAYER_PROGRESS *Three stage-2 set pieces*. Types **38, 39 and 44** (`PlaceTable38Props`, `PlaceTable39Stacks`, `PlaceTable44Props`) and **40** (`PlaceFragmentProps` / `PropUpdateType40`, all twenty sub-kinds) build their objects from tables in the image and are ported whole — see *Stage 1's church* below. The 44 types `PlaceGenericProp` serves share one constructor and a jump table — `g_place_generic_prop_arm_index` at `0x00462978` and `g_place_generic_prop_arms` at `0x004628D4`, indexed `type - 6` — so which arm sets what is read and not guessed. The retail stages reach 74 of the 79. See *The generic props' `+0x11C`* below. | `[proved]` |
+| `0x41` | `PropContainerPlacerUpdate` (`FUN_00461CD0`) | 441 | **Breakable-prop / item-container placer.** A transient stub: dispatches on `obj+0x130C` through `g_class41_constructors`, 79 entries at `0x00593580`, builds child actors, then `ActorKill`s itself. Never drawn, never damaged. Type 0 is the breakable group (8 spawns) and is **ported**; **type 1** (`PlaceWaterSurface`, `FUN_00462F70`, 15 spawns) is not a prop at all but the task that draws and ripples a canal water tile, `WaterSurfaceUpdate` (`FUN_0046E3A0`) -- the tile is `g_water_surface_slots[+0x1F4]` (`0x00593DA4`) and `+0x11C` a step lifetime -- and is **ported**, see `docs/formats/water.md` §2; type 4 (`PlaceKindedProp`, 70 spawns) and **type 43** (`PropUpdateType43`, 7) both read `obj+0x6C` as an object kind; type 32 is the **lift** (`LiftUpdate`) and is ported; type 13 (`PropUpdateType13`, `FUN_00467F50`) is the part that drops out of stage 2's clock tower on script flag `0x6D`, and type 35 (`PropUpdateType35`, `FUN_0046B320`) the double door stage 2's block-5 civilian stands behind, drawn at **literal world coordinates** whatever its placement -- both ported, see PLAYER_PROGRESS *Three stage-2 set pieces*. Types **38, 39 and 44** (`PlaceTable38Props`, `PlaceTable39Stacks`, `PlaceTable44Props`) and **40** (`PlaceFragmentProps` / `PropUpdateType40`, all twenty sub-kinds) build their objects from tables in the image and are ported whole — see *Stage 1's church* below — as are **50** (`PlaceTable50Props`, six tables of scenery: stage 1's bin-scene crate, stage 2 block 17's furniture) and **66** (`PlaceTable66Props` / `PropUpdateType66`, the `komono_kanban.bin` signs), see *Class 0x41 constructors 50 and 66*. **Thirteen constructors are unported**, each with the spawns that place it, in *Class 0x41's constructors: which are ported*. The 44 types `PlaceGenericProp` serves share one constructor and a jump table — `g_place_generic_prop_arm_index` at `0x00462978` and `g_place_generic_prop_arms` at `0x004628D4`, indexed `type - 6` — so which arm sets what is read and not guessed. The retail stages reach 74 of the 79. See *The generic props' `+0x11C`* below. | `[proved]` |
 | `0x30` | `FUN_00452DA0` | 288 | **The zombie.** HP, per-body-part damage zones, 80 points on kill / 10 per hit / 120 + combo on a head hit, a 54-state machine at `0x00592AE8`. Increments `g_enemies_alive`. State 2 (`FUN_00455720`) plays `COMMON2\ZOMBIE_041_16.wav`; the type-2 setup plays `CHAIN_SAW_22.wav` and a later state `KNIFE1_44.wav`. State 37, `ZombieStateCarryProp`, carries a **classless prop** (`CarriedPropInit`, `FUN_00442740`) typed by its script's `+0x00` out of `g_carried_prop_types` and throws it through `g_prop_behaviours` 1/3/4/5 -- stage 3's drums and stage 1's barrel; see `game/carried_prop.ts`. | `[proved]`, by the game's own sound record **Eleven of the 54 states never look at the camera**: they work on `obj+0x1394`, the object the actor was built for, and for 47 of the 59 spawns that reach one that is the class-0x10 civilian whose `CivilianInit` built them. See docs/formats/civilians.md. |
 | `0x44` | `PropPlacerDispatch44` (`FUN_00472B10`) | 204 | **Prop placer.** Same shape as 0x41: dispatches on `obj+0x11C` through `g_class44_subtypes`, 18 entries at `0x00595AB8`, builds a child, `ActorKill`s. Selectors 0 (`PropBuildScriptFlagEffect`), 11 (`PropBuildRisingDoor`), 16 (`PlaceFallingContainer`) and 17 (`PlaceStoryModeSwitch`) are read and ported; 1, 2 and 4 are the hinges (`HingeUpdate`, see PLAYER_PROGRESS *Scripted scenery*); 9 (`PropBuildFlagLiftedProp`, `0x00473300` — one asset slot that rises 0.8 a frame to y 10 on one script flag and is killed by another; no collision) is read and unported; 15 is `PropBuildKindedProp`; the rest are unread. | `[proved]` |
 | `0x25` | `ScriptedHumanoidInit` (`FUN_004840D0`) | 142 | **Script-driven humanoid actor.** A bytecode VM (`FUN_004842A0`) drives a skinned character. Not an enemy, not damageable, awards nothing — shots land in its hit slot and nothing consumes them. **It is also how the game draws the player's own body in a cut scene** — see *`op 10` is an `if`* below. | `[proved]` |
@@ -459,6 +459,80 @@ round nothing (new bug 9).
 
 `tools/verify_prop_tables.py` compares every table word the port carries as a
 literal against the image.
+
+### Class 0x41 constructors 50 and 66: scenery and signs out of tables
+
+**[proved]** from `PlaceTable50Props` (`FUN_00463BA0`),
+`PlaceTable66Props` (`FUN_00464500`) and `PropUpdateType66` (`FUN_0046FE00`),
+all read in the disassembly. Both descriptors stand at the origin; `+0x1F4`
+(the s8 at `desc+0x24`) names the table and `+0x11C` is the step lifetime every
+object copies. Unported until 2026-09-29, when stage 1's bin-scene crate was
+empty, stage 2 block 17's four `komono_st1.bin[3]` models hung in the air and
+no sign in either stage was drawn.
+
+| ctor | update | tables | shipped |
+|---|---|---|---|
+| 50 | `PropDrawOnlyType12` (`FUN_00467E50`), handed to `ActorAlloc` directly — `g_class41_updates[50]` is `NoOpStub` | `g_prop_table50_ptrs` (`0x00594F08`) → six tables of 28-byte rows `{u16 slot; pad; f32 x,y,z; s32 rx,ry,rz}`, counts `g_prop_table50_counts` (`0x00594F20`) 7, 11, 4, 5, 6, 5; table 5's Z scale `g_prop_table50_scale_z` (`0x00594EF0`) | table 5 stage 1 blocks 3, 8 (evt `0x2D9C`); **table 3 stage 1 block 4 step 3 (`0x3B14`), lifetime 4 — the five `komono_st1b.bin` models on the bin-scene crate**, alive at block 6 step 1; table 4 stage 2 block 7 (`0x3580`); table 1 block 8 (`0x43DC`); **table 2 block 17 step 1 (`0xBE60`) — `komono_suimonie.bin[5]`, `[6]`, `[7]` twice, the last two under the four class-0x13 models**; table 0 block 25 (`0x116C0`); table 3 again in training block 1 |
+| 66 | `PropUpdateType66` (`FUN_0046FE00`) = `g_class41_updates[66]` | `g_prop_table66_a` (`0x00595158`), 20 rows, or `g_prop_table66_b` (`0x005953D8`), 29, when `+0x1F4 > 0`; 32-byte rows `{s16 slot; pad; f32 x,y,z; s32 yaw; f32 sx,sy,sz}`; counts are `MOV` immediates at `0x00464505`/`0x00464519` | table a stage 1 blocks 6, 14, 16 (`0x6884`) and stage 2 block 0 (`0x0C64`); table b stage 2 block 3 (`0x2554`), lifetime 8 |
+
+* **Constructor 50's objects** are `+0x290` the table, `+0x2A0` the row,
+  unit scale except table 5's Z, no radius and `+0x34` left 0 by
+  `ActorClearGameFields`. They are the routine generic type 12 runs — the
+  shared lifetime prologue with its scene-1 sweep, the camera cue at path
+  `0x2F` frame `0x96`, `T(x, y, z + obj+0x1C8) . Rz . Ry . Rx . S`.
+* **Constructor 66's objects** draw `komono_kanban.bin[0..11]` and
+  `komono_uemiti.bin[0..1]` (signs, `[likely]` from the file name). Radius 4.0
+  with the sphere 3.5 below the origin (`+0x2C0`), 6.5 and 5.0 for slot
+  `0x10DC`; slot `0x10B1` is laid back `-0x4000`; `+0x34 = 0x80000001`. Table
+  b's row 11 stands at x **+740.193**, the only positive x in either table.
+* **`PropUpdateType66`**: an inline step lifetime with no sweep that ends in
+  `ActorKill`, not `ActorDespawn`. Only slots `0x10DC`, `0x10DD` and `0x10DE`
+  do more: a hit clears bit 3, `BreakablePropAwardHit(award 0)`,
+  `SpawnPropHitEffectScaled(1.0)`, `PlaySoundId(0x1116A9)` and a swing rate
+  `+0x1D8 = rand() % 0x201 + 0x600`; in scene 0 with `g_screen_shake_frames`
+  at `0x17` or `0x2F` the rate becomes `±(rand() % 0x201 + frames * 32)`;
+  then `rate -= (pitch + rate) / 24; pitch += rate` and the sphere is
+  registered. `0x10DE` swings about `(0, 1.5, 0)`. Ghidra's decompile stops at
+  the `PlaySoundId` (`L72`); the rate write after it is in the listing only.
+
+Ported in `game/class41/type50.ts` and `type66.ts`; the exporter places them
+as `table50`/`table66` with `field_1f4`, and carries every slot the chosen
+table's rows name. `tools/verify_prop_tables.py` holds all eight tables to the
+image, and `tools/verify_prop_slots.py` holds each bundle to the port's rows.
+
+### Class 0x41's constructors: which are ported
+
+`g_class41_constructors` (`0x00593580`) read entry by entry. **50 of the 79**
+are `PlaceGenericProp` (`FUN_00461CF0`), which is ported with a routine for
+every type it serves (`GENERIC_ROUTINES` and `GENERIC_FAMILY` in
+`game/class41/`). Five — 2, 15, 22, 23 and 46 — are `NoOpStub`
+(`0x0041EBB0`) and no script places them. Of the other twenty-four, eleven are
+ported: 0, 1, 4, 24, 38, 39, 40, 44, 48, 50 and 66.
+
+**Thirteen constructors are unported**, and every one of them is placed by a
+script. What each allocates is `[proved]` from its decompile; nothing past
+that has been read, and nothing here is named.
+
+| ctor | routine | what it allocates | shipped spawns |
+|---|---|---|---|
+| 3 | `FUN_00462DF0` | one `0x88`-byte object running `FUN_004659D0`, nothing written | stage 1 block 0 step 1 (evt `0x076C`); scene 10 block 0 |
+| 16 | `FUN_00462FE0` | six `0x378` objects running `FUN_00468640`, x/z from s16 pairs at `0x00593D20` × 0.1, y −1.9, slot `0xA50`, radius 8.0 | stage 2 block 24 step 1 (`0x10980`) |
+| 17 | `FUN_004630B0` | three `0x378` objects running `FUN_00468D10` about the placer's point (the offsets go through `fsin`, and the pseudocode may be missing an FPU operand, `L1`), radius 2.0, `vy` −0.1 | stage 2 block 21 step 2 (`0xECBC`) |
+| 26 | `FUN_00463230` | one `0x44`-byte object running `FUN_00469C80`, the placer's `+0x11C` as its lifetime | stage 2 block 24 step 1 (`0x109A8`) |
+| 29 | `FUN_00463270` | nine `0x378` objects running `FUN_0046A030` from xyz rows at `0x00593D38` | stage 2 block 21 step 3 (`0xECE4`) |
+| 37 | `FUN_004632F0` | two `0x378` objects running `FUN_0046B5F0` (into `0x007DCDC4`), slot `0x17A9`, radius 6.0, effect 7 on motion `0x1D5`, an item set from `+0x1F4` | stage 2 blocks 4 and 30 (`0x24DC`), 14 (`0x812C`), 25, 26 and 27 (`0x1296C`) |
+| 42 | `0x004639D0` | `[open]` — Ghidra has no function there | stage 2 block 35 step 1 (`0x14968`) |
+| 47 | `FUN_00463AE0` | one `0x48`-byte object running `0x0046DD40` at the placer's point | stage 2 block 35 step 1 (`0x14990`) |
+| 52 | `FUN_00463D20` | two `PropDrawOnlyType12` objects, slots `0x1794` and `0x1795`, at `T(pos) . Ry(yaw)` of `(−9.29, 11.5, 22.68)` and `(9.29, 11.5, 22.68)`, the second turned half round | stage 1 block 14 step 1 (`0x68AC`); stage 5 block 0 step 2 (`0x0DD4`) |
+| 55 | `FUN_00463FE0` | one `0x8500`-byte object running `0x0046EEB0`, 800 particles off s16 xyz rows from `0x00594F2A` × 0.001 | stage 6 block 12 step 1 (`0x4780`) |
+| 61 | `FUN_004641F0` | nine `0x13F4` skinned actors running `FUN_004729E0`, character types from `0x0059504C` | stage 6 block 2 step 1 (`0x2058`) |
+| 65 | `FUN_00464360` | one `0x8500`-byte object running `FUN_0046FCC0`, 300 particles round (580, 2200, −9149) | stage 5 block 7 step 2 (`0x3D5C`) |
+| 68 | `FUN_00463E50` | the golden frog (`GoldenFrogUpdate`), placed from a table by `g_training_lesson` | training block 7 only |
+
+The spawn columns count every script instruction that reaches the descriptor,
+from `hod2lib.script` over scenes 0–11; scenes 6 (training), 9 and 10 are not
+bundled stages. A class the port has no module for is in no list here either
+(`L83`) — this one is the constructors of a class that has one.
 
 ### Class 0x41 type 4: seven of the eleven kinds are effects, not models
 

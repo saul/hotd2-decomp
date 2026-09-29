@@ -1,9 +1,9 @@
 # The player as a site: worker.ts beside this file serves an R2 bucket that
-# `npm run deploy` (web/tools/deploy.ts) fills, under a secret path. README.md
-# is the procedure; `npm run deploy` runs `wrangler deploy` here itself the
-# first time.
+# `npm run deploy` (web/tools/deploy.ts) fills. README.md is the procedure;
+# `npm run deploy` runs `wrangler deploy` here itself whenever this file or
+# worker.ts has changed.
 #
-# The page is then at https://hotd2-site.<your-subdomain>.workers.dev/<SITE_KEY>/
+# The page is then at https://hotd2-site.<your-subdomain>.workers.dev/
 
 name = "hotd2-site"
 main = "worker.ts"
@@ -13,7 +13,3 @@ compatibility_date = "2025-09-01"
 binding = "SITE"
 # Must be the deploy's R2_BUCKET (r2site/.deploy.env); `npm run deploy` checks.
 bucket_name = "hotd2"
-
-# Secrets, never in this file -- `npm run deploy` sets it from .deploy.env:
-#
-#   SITE_KEY   the path segment the site is served under

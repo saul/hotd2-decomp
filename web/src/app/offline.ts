@@ -27,7 +27,27 @@ export function registerServiceWorker(search: string): void {
     return;
   }
   if (navigator.webdriver && asked !== "1") return;
-  sw.register("./sw.js").catch((e: unknown) => {
+  sw.register("./sw.js").then(dropNested, (e: unknown) => {
     console.warn("service worker not registered:", e);
   });
+}
+
+/**
+ * A worker registered further down this address is a copy of the site that
+ * used to live there -- the deployed site was served under a secret path
+ * before it was served at the root -- and it would go on holding that copy's
+ * stages in the cache this one shares. It goes, and they with it.
+ */
+async function dropNested(ours: ServiceWorkerRegistration): Promise<void> {
+  for (const r of await navigator.serviceWorker.getRegistrations()) {
+    if (r.scope === ours.scope || !r.scope.startsWith(ours.scope)) continue;
+    await r.unregister();
+    if (typeof caches === "undefined") continue;
+    for (const name of await caches.keys()) {
+      const cache = await caches.open(name);
+      for (const req of await cache.keys()) {
+        if (req.url.startsWith(r.scope)) await cache.delete(req);
+      }
+    }
+  }
 }

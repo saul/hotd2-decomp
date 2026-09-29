@@ -738,6 +738,22 @@ no such test and pays its 120 and combo whatever the result, and the kill's 80
 is charged inside the kill block, which the result does not gate either.
 `[proved]` The port zeroed all three until 2026-09-29.
 
+**"The head" is bone 2, an immediate.** Both readers -- the tail's
+`004097D7 CMP EBP, 0x2` and the burst's `00409760 CMP EBP, 0x2` -- compare
+`EBP`, which the prologue loads from `g_shot_bone[p]` (`0040943A MOV EBP,
+[EAX*4 + 0x9a2d88]`), with a literal; no table is read. The exporter writes a
+`head_bone` of 2 for every character type, and the port read that until
+2026-09-29 -- the same answer, from the wrong place.
+
+**The whole tail is `ResolveHit`'s**: four `ScoreAddForPlayer` calls (the
+kill's 0x50 in the kill block; then 0x78 and the combo, or 10), the combo and
+`g_player_hit_count`, reached by every hit the damage tables charged -- a
+corpse's included, which reports result 0 and is still worth its 10. The port
+paid it from `FireShotRequest` in one summed call and never counted a hit, so
+the accuracy grade's numerator (`0x009A5C86`) moved only for props and
+projectiles. Since 2026-09-29 `ResolveHit` pays and counts it in the exe's
+order, and `FireShotRequest` reports what it paid.
+
 **The kill** is two tests: `obj+0x34 & 0x4000000` clear (`0x0040972A`) and
 the s16 at `obj+0x11C` not above zero (`0x00409733`). Then the bit, the 80 and
 the killer's byte at `obj+0x131C`. The result gates only the head burst below.
@@ -751,8 +767,9 @@ rolls `rand() % 4` and on a zero runs three routines: `SpawnBoneHitSprite`
 (`FUN_00407200`), `SpawnSeveredHead` (`FUN_0040A130`), and
 `ActorSwapDamagedPart(rec, 0, 2)` — slot **0**, which is `RemoveBoneSubtree`'s
 "gone". One headshot kill in four takes the head off. Gated on app state 6,
-character type not 3/0x12/0x18, `obj+0x3B8 < 2` and `g_hit_result != 5`
-(`0x0040976F`), in that order, and the roll is drawn only past all of them.
+character type not 3/0x12/0x18, the shot bone 2 (`0x00409760`),
+`obj+0x3B8 < 2` and `g_hit_result != 5` (`0x0040976F`), in that order, and the
+roll is drawn only past all of them.
 
 **`FUN_0040A130` is not a blood spray**, which is what this page said until
 2026-09-04 and why the port removed the head and drew nothing in its place. It

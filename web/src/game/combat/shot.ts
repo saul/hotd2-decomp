@@ -45,10 +45,14 @@
  * ## The score, from `FUN_00409430`
  *
  * ```
- * any hit not on the head     +10
+ * any hit not on the head     +10, unless the hit reported result 5
  * a hit on bone 2, the head   +120, then a per-player combo that grows by 10
  * HP reaching zero            +80
  * ```
+ *
+ * All three are paid inside `ResolveHit`, which is also what counts the hit
+ * into `g_player_hit_count` for the accuracy grade; this file only reports
+ * what it paid.
  *
  * The head combo is added *before* it increments, so consecutive headshots pay
  * 120, 130, 140 …, and **any non-head hit resets it to zero**. That reset is
@@ -88,7 +92,6 @@ import type { Vec3 } from "../vec";
 import { g_class_handlers } from "../registry";
 import type { SpawnClass } from "../spawn_class";
 import { DispatchHit, HitResultCode } from "./resolve_hit";
-import { ScoreAddForPlayer } from "./score";
 import { ProcessPlayerShotsTestList, type ShotCandidate } from "./shot_test";
 
 /**
@@ -135,12 +138,6 @@ export interface ShotRequest {
  * therefore not ported.
  */
 export const g_gunshot_sound_ids: readonly number[] = [0x003416a9, 0x003316a9];
-
-/** `ScoreAddForPlayer` constants, from `FUN_00409430`. */
-const SCORE_HIT = 10;
-const SCORE_HEAD = 120;
-const SCORE_HEAD_COMBO_STEP = 10;
-const SCORE_KILL = 80;
 
 /**
  * Put one trigger pull on the queue.
@@ -475,35 +472,9 @@ export function FireShotRequest(req: ShotRequest, host: GameHost, rng: Rng,
   // rather than in each class's own on-shot routine.
   G.g_hit_result = out.result;
   ActorShotFeedback(obj, pick.bone, pick.point, host, rng, events);
-  // `ResolveHit`'s tail, `0x004097B6`..`0x00409819`. **A result-5 hit is not
-  // worth nothing**: the result is tested on the body arm's 10 alone
-  // (`CMP [g_hit_result + p*4], 5 / JZ` ahead of it). The kill's 0x50 is
-  // charged inside the kill block whatever the result, and the head arm's
-  // 0x78 and combo take no test at all. This zeroed all three.
-  //
-  // **And each arm counts the hit** for the accuracy grade:
-  // `INC word [ESI + 0x9a5c86]` at `0x0040980A` after the head's combo, and
-  // at `0x0040983B` after the body's 10 -- inside the same result test, so a
-  // result-5 body hit is no hit. Neither tests `g_accuracy_stats_suppressed`.
-  let points = 0;
-  if (out.head) {
-    points += SCORE_HEAD + (G.g_head_combo_bonus[player] ?? 0);
-    G.g_head_combo_bonus[player] =
-      (G.g_head_combo_bonus[player] ?? 0) + SCORE_HEAD_COMBO_STEP;
-    G.g_player_hit_count[player] += 1;
-  } else {
-    if (out.result !== HitResultCode.NoEffect) {
-      points += SCORE_HIT;
-      G.g_player_hit_count[player] += 1;
-    }
-    G.g_head_combo_bonus[player] = 0;
-  }
-  if (out.killed) points += SCORE_KILL;
-  // Through `ScoreAddForPlayer`, not `G.g_player_score[0] += points`. Every
-  // award and penalty in the game goes through that one routine. No `events`
-  // argument, because this path never emitted `player.score` and making it do
-  // so now would be a behaviour change smuggled in with a refactor.
-  ScoreAddForPlayer(player, points);
+  // The score, the head combo and the hit count are `ResolveHit`'s own tail
+  // (`0x004097D7`), paid inside the call above; `out.points` is what it paid.
+  const points = out.points;
 
   events?.emit("shot.resolved", {
     player, kind: "actor", ray: req.ray, point: pick.point,

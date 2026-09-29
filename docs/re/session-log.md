@@ -26115,6 +26115,55 @@ takes the box at f675, gives it at f710, lives 3 -> 4, LIFE UP on screen, hand
 empty from f711; on the old tree the box floats beside the hand and is still
 held at f795 with lives 3.
 
+## 2026-09-29 -- ResolveHit's tail: the payout, the hit count and bone 2
+
+The brief was the kill test -- `killed` read `Actor.dead` and refused result
+5, where `0x0040972A`/`0x00409733` test the dead bit and the hit points and
+result 5 gates only the head pop (`0x0040976F`). **Main already had it**
+(8354e06e, earlier the same day); the brief described the tree before that
+commit. Read again from `LAB_004096f6` to the `RET` at `0x00409865` with
+`disassemble_bytes` rather than trusting the citation: the `0x800` overwrite,
+the bit's two tests (result 2 -> 0 at `0x0040971F`, then the jump past the kill
+block at `0x0040972D`), the hit-point test, the pop's gates and the kill's
+bit / `0x50` / `obj+0x131C` all match the port as it stood. `wasDead` is read
+at entry where the exe reads the bit after the dispatch; nothing between writes
+`0x4000000`, so it is the same word.
+
+What the reading found instead is the tail after `0x004097D7`:
+
+* **`g_player_hit_count` was never counted by a shot.** The head arm
+  (`0x0040980A`) counts every bone-2 hit, the body arm (`0x0040983B`) every
+  other hit whose `g_hit_result` is not 5. The port's `FireShotRequest` paid
+  the score and moved the combo and never touched the count, so the accuracy
+  grade's numerator (read by evt `0x2B`, `FUN_0045FE40`, not yet ported) moved
+  only for props and projectiles.
+* **The payout was in the wrong function**, summed into one call. It is four
+  `ScoreAddForPlayer` calls inside `ResolveHit`: the kill's `0x50` in the kill
+  block, then `0x78` and the combo, or 10. Moved in; `FireShotRequest` reports
+  `out.points`.
+* **The head was a bundle field.** Both head tests are `CMP EBP, 0x2`, and
+  `EBP` is `g_shot_bone[p]` (`0x0040943A`, L71). The port compared with
+  `type.head_bone`, which the exporter writes as 2 for every type. Now an
+  immediate in `game/`; the bundle field has no reader left.
+
+Readers reconciled: `FireShotRequest` (the only caller, via `DispatchHit`);
+`ActorReleaseBodyCreatureOnHit`, which raises the bit without `dead` and pays
+its own `0x50` (the next shot sees the bit, reports 0 and pays a body hit's
+10, which is the exe); the civilian (`ownsShotResult`, never reaches
+`ResolveHit`); class 0x31 and 0x18 (`updatesWhenDead`, no shared clip).
+
+**Wrong turns.** None in the reading. Three tests were calibrated on the old
+shape and failed on the move, as they should: the shot queue's "headshots"
+rode bone 1 with the fixture's `head_bone` pointed at it, and the rescue and
+`znjoe` checks said in so many words that a bare `ResolveHit` pays nothing.
+Rewritten to the exe's numbers (a kill shot on a body bone is `0x50 + 10`).
+Also a corpse hit: this file and the code both said it "scores nothing"; it
+reports result 0, which is not 5, so it is worth its 10 -- in the old port too,
+through `FireShotRequest`. Only the words were wrong.
+
+Proof: seven new checks in `port.test.ts` "ResolveHit:", all failing on the
+base; restoring only the `head_bone` read fails five of them.
+
 ## 2026-09-29 -- the result card read: figures, the life bonus, the score
 
 Read in full for the end-of-stage port: `ResultCardInstall` (`FUN_00434EF0`),
@@ -26187,6 +26236,10 @@ mine dropped. (5) `G.g_nPlayerFired` had been the port's shot count; it is the
 per-player "fired this frame" flag `ProcessPlayerShots` clears, and the count
 is `g_player_shot_count`, guarded by `g_accuracy_stats_suppressed` -- every test
 that counted shots through the flag reads the count now.
+(6) The two hit counts in `ResolveHit`'s tail I first put in
+`FireShotRequest`'s copy of that tail; main's `ResolveHit` work (e8e0a55f)
+moved the tail into `ResolveHit` and counts them there, and the merge took
+its version.
 
 **Left open.** What the clips depict is `[likely]`, from the render. A figure
 beyond its scene's list stands where the bytes after it say, on the clip they

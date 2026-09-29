@@ -11,6 +11,7 @@ import type { Actor } from "../../game/actor";
 import type { BakedMotion, CharacterType } from "../../bundle";
 import type { CelRunNode } from "./cels";
 import type { HeadTurn } from "./head_aim";
+import type { HeldItemNodes } from "./held_items";
 
 /**
  * What one gore swap did to a bone, and therefore what undoing it must put
@@ -135,14 +136,20 @@ export interface Instance {
    */
   attached?: Map<number, Object3D>;
   /**
-   * Class 0x10's held items, by their index in `civilians.items`.
+   * Class 0x10's held items, by their position in `civ.heldDrawn` -- the
+   * list `CivilianDrawHeldItems` (`FUN_0048CD10`) walked this frame -- so a
+   * civilian holding two of the same record keeps both.
    *
-   * `CivilianDrawHeldItems` (`FUN_0048CD10`) walks the actor's own list every
-   * frame; here the models are attached once and left on the bone, which is
-   * the same picture with far less work. The map is keyed by item index so a
-   * civilian holding two of the same thing keeps both.
+   * The item's matrix in its bone's frame is a constant of the record and
+   * the attach set, so each is built once, from the draw's own calls, and
+   * left on the bone: the same picture as the engine's per-frame draw. See
+   * `render/characters/held_items.ts`.
    */
   held?: Map<number, Object3D>;
+  /** The same items' camera-facing second slots, placed every frame. */
+  heldNodes?: HeldItemNodes[];
+  /** `attachSet:records` the nodes above were built for. */
+  heldKey?: string;
   /**
    * The one clip and authored frame the last pose took every bone from, or
    * `null` when it mixed two (a cross-fade, a reaction). Render bookkeeping,

@@ -21,11 +21,11 @@ export const SCHEMA_FILES: Readonly<Record<string, string>> = {
   "cameras.ts": "e711fd29f97441deae96406d95600d68fc9b5e9ccb1c170b46f23120cd8d67ce",
   "characters.ts": "a58a41c23caec88a8d3aa8e63b79211df35d67f80a01a068f52b6b0733bd9bfd",
   "manifest.ts": "13cbb3d9ee94af298b646865caf01025f773cf71da5941c37b392bf9322bebf8",
-  "scene.ts": "8b654932b294bf76b1cc3519fd5560939ac04b20f6b420094394445f91ae1e47",
+  "scene.ts": "37aa734daacf1357020824ada9b20b1db38663fbe07bb5abdd9e1c63aacb8eb3",
   "script.ts": "05e0793ed5c5771b326f7a1e094f250a25a96bf2805849da33bbf846ab132100",
   "sound.ts": "69f5c5cdf7a96b4ef01e41cbee9805c81e709f15a396ed2456b017389b3cefd8",
   "stage.ts": "a2c349e41b039259b4fd1f4989b0ecfb749ddef05575919e4a42c2ace7b0fcf6",
 };
 
 /** One digest over {@link SCHEMA_FILES}, in filename order. */
-export const SCHEMA_HASH = "b098659e9482e71a8dff963ae3bf482220e0fed2e5a6d0d95bf9dc08a55a2b74";
+export const SCHEMA_HASH = "39286021c511586268feb79cd99ab909acc43e8e0331713478a5fbaeff9b7791";

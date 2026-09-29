@@ -20,6 +20,7 @@ import { CivilianCountMotionLoops } from "./loops";
 import { CivilianSphereMode, CivilianTarget, CivilianWait } from "./ops";
 import { ActorBoundsOnScreen } from "../combat/permits";
 import type { GameHost } from "../host";
+import { CivilianDrawHeldItems } from "./items";
 import { CivilianRunScript } from "./script";
 import { CivilianCheckShot } from "./shot";
 import { CivilianStepScript } from "./step";
@@ -30,7 +31,7 @@ import { CivilianStepTurnToTarget } from "./turn";
  *
  * The order is the engine's: prune, hook, turn, interpolate, draw, advance
  * the clip, step the script, then the shot branch, the sound queue, the
- * camera point, the sphere switch and the removal. The shot branch runs
+ * camera point, the sphere switch, the held items and the removal. The shot branch runs
  * **after** the script step on purpose — a shot taken this frame switches the
  * script the step just resumed.
  */
@@ -95,6 +96,11 @@ export function CivilianUpdate(obj: Actor, f: ClassFrame): void {
   // whether `RegisterForCameraTracking` takes her -- the whole of bug 18.
   ActorRegisterCameraPoint(obj, f.host, CIVILIAN_CAMERA_RISE);
   CivilianWriteSphereCentre(obj, f.host);
+  // `PUSH ESI; CALL 0x0048CD10` at `0x0048AF88`, on the line after the
+  // switch's `MatrixStackPop`: every path through the switch reaches it. The
+  // held items are drawn and, on the frame the wait word says so, given --
+  // see `class10/items.ts`.
+  CivilianDrawHeldItems(obj, f);
   CivilianCheckRemoval(obj, f.host);
   // `LAB_0048B0CE`, the tail every path out of `CivilianUpdate` falls into
   // except the two that despawn.

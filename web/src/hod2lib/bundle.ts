@@ -1306,6 +1306,12 @@ export const EFFECT_SLOTS_BY_CLASS: Record<number, number[]> = {
   // stage with bats and none of those would otherwise have no splash. See
   // `game/class46/splash.ts`.
   0x46: [...CREATURE_SPLASH_SLOTS],
+  // Class 0x10, the civilian: the marker `SpawnLifeGrantedMarker`
+  // (`FUN_0048DF10`) raises when her held item pays a life --
+  // `obj+0x1F4 = 0x1256 + player`, `common.bin` 303 and 304 -- which
+  // `LifeGrantedMarkerUpdate` draws in camera space. See
+  // `game/class10/life_marker.ts`.
+  0x10: [0x1256, 0x1257],
 };
 
 /** {@link EFFECT_SLOTS_BY_CLASS} for the classes a stage spawns. */

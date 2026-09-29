@@ -19,43 +19,43 @@ is in `tools/verify_all.py`, beside the command that runs it.
 
 | Directory | Lines | Files | Layer |
 |---|---:|---:|---|
-| `game/` | 107914 | 351 | engine |
-| `hod2lib/` | 19571 | 35 | engine |
-| `render/` | 15352 | 56 | render |
+| `game/` | 108328 | 352 | engine |
+| `hod2lib/` | 19600 | 35 | engine |
+| `render/` | 15539 | 58 | render |
 | `app/` | 12661 | 44 | app |
 | `script/` | 4471 | 25 | engine |
 | `ui/` | 3773 | 27 | ui |
 | `core/` | 3533 | 13 | engine |
-| `bundle/` | 2862 | 11 | engine |
+| `bundle/` | 2875 | 11 | engine |
 | `audio/` | 1053 | 3 | render |
 | `hud/` | 526 | 1 | ui |
-| **total** | **171716** | **566** | |
+| **total** | **172359** | **569** | |
 
 The largest files, which is where the pressure to split next is:
 
 * `app/main.ts` — 3200
-* `game/globals.ts` — 3117
+* `game/globals.ts` — 3146
 * `game/actor.ts` — 2724
-* `hod2lib/bundle.ts` — 2458
-* `hod2lib/exetab.ts` — 2347
+* `hod2lib/bundle.ts` — 2464
+* `hod2lib/exetab.ts` — 2370
 
 ## The port
 
 | | |
 |---|---|
 | Gameplay coverage | **233 of 299** annotated functions in the gameplay address ranges have a port (77%) |
-| Ported outside those ranges | 575 (opcodes, and the classes whose handlers sit elsewhere) |
-| Citations checked | 808 ported functions match `functions.tsv` under the same name |
+| Ported outside those ranges | 578 (opcodes, and the classes whose handlers sit elsewhere) |
+| Citations checked | 811 ported functions match `functions.tsv` under the same name |
 | Spawn classes | **31 of 42** read classes have a module, covering 1544 of 1619 placements |
-| Declared `[diverges]` | **135** — where the port knowingly departs from the exe, each with its reason on the spot |
-| `[open]` markers | **124** — questions the port and the exporter are honest about not having answered |
+| Declared `[diverges]` | **134** — where the port knowingly departs from the exe, each with its reason on the spot |
+| `[open]` markers | **122** — questions the port and the exporter are honest about not having answered |
 
 Both markers are counted in **every** `.ts`/`.tsx` file under `web/src/`, one per occurrence, and only in comments — a word in code or in a string is not a marker (`verify_port.marker_lines`). Each departure and each question is written once, where it is made; everything that refers to it names it in words ([`PLAYER_ARCHITECTURE.md`](PLAYER_ARCHITECTURE.md), "One departure, one tag"). By layer, from the same table as the directories above:
 
 | Layer | Directories | `[diverges]` | `[open]` |
 |---|---|---:|---:|
-| engine | `core/`, `bundle/`, `script/`, `game/`, `hod2lib/` | 121 | 119 |
-| render | `render/`, `audio/` | 13 | 5 |
+| engine | `core/`, `bundle/`, `script/`, `game/`, `hod2lib/` | 121 | 118 |
+| render | `render/`, `audio/` | 12 | 4 |
 | ui | `hud/`, `ui/` | 0 | 0 |
 | app | `app/` | 1 | 0 |
 
@@ -65,8 +65,8 @@ The two declared seams between the UI and the player: **`PlayerCommands` has 54 
 
 | | |
 |---|---|
-| Named functions | 1439 in `ghidra/annotations/functions.tsv` |
-| Named globals | 738 in `ghidra/annotations/globals.tsv` |
+| Named functions | 1444 in `ghidra/annotations/functions.tsv` |
+| Named globals | 742 in `ghidra/annotations/globals.tsv` |
 | Verifier scripts | 47 under `tools/`, run together by `verify_all.py` |
 
 Phase and format status is a judgement about what counts as solved,
@@ -140,6 +140,7 @@ nothing exits 3 and is never counted as green.
 | `handback` | that a room waits for the camera to turn back onto its rail after the last enemy dies and not merely for the counter -- the only check that measures the *pacing* of a room-clear gate rather than whether it opens at all, and the one that separates the two drivers a `finish_sequence` can install | bundle |
 | `civ_speech` | that a rescued civilian holds a camera slot while her script asks, and that the room-clear gate therefore waits for her lines and her shutter -- the only check that plays a real civilian stream against the stage's own gate, and the reason a non-enemy can be a camera candidate at all | bundle |
 | `civilians` | that every class-0x10 civilian in the six stages runs her shipped stream beside her real captors -- none runs away, every captor the bundle names is placed, the captors (class 0x30 and the carrier's class 0x18) work on her rather than on the camera, and shooting them pays the rescue to the player who shot -- the only check over the whole corpus of streams rather than one room's, so the one whose rescue and maul counts move when a captor class, the motion clock or the prune changes under it | bundle |
+| `civ_gives` | that every civilian whose shipped stream puts an item in her hand hands it over -- the life to the player in play with its marker, an Original Mode item into `g_original_items_taken` with its banner -- and stops holding it, playing each from the evt step that spawns her with the stage's own camera; the only check that reaches a give, which `civilians` cannot with its camera parked five thousand units away | bundle |
 | `props43` | where in a real script a class-0x41 prop is actually placed, and that it takes a frame of `GameUpdate` to appear -- the only check that separates `spawn_placed` putting a *placer* in the pool from the constructor that builds the prop, which is the difference between a room the player has not cleared and a placement the player dropped. It is also the only harness that reports the address the walker reached rather than the one it asked for | bundle |
 | `verify_prop_slots` | that every asset slot a placed class-0x41 or class-0x44 prop will pass to `AssetDrawSlot` has a model in its own bundle -- the check that would have caught stage 3's roller shutter and the stage 5 van's body, both of which were placed, updated and invisible because nothing carried their geometry, which from the level looks exactly like a placement that was never exported | bundle |
 | `verify_death_clips` | that every clip `ChooseDeathMotion` can put on a dying class-0x30 actor is baked for that spawn's own character type -- the only check that reads a death clip out of a real bundle, and the one that says whether an actor can leave state 12 at all, since that state's exit is an exact `obj+0x19C >= 0x3C` against a play clock that is 0 for a clip nothing carried | bundle |
@@ -169,7 +170,7 @@ nothing exits 3 and is never counted as green.
 | `verify_geometry` | that every scenery part in a stage bundle holds every triangle its `pol/` models declare -- the only check that compares an export against the files it was made from rather than against another export | game-dir |
 | `baseline` | that the installed assets still hash to `manifest.csv` | game-dir |
 
-24 of them need the installed game and 24 need an exported
+24 of them need the installed game and 25 need an exported
 bundle. **That is a known hole, not a design:** a machine with
 neither cannot run the checks that compare two histories, and a
 bundle-free fixture is the open work that closes it.

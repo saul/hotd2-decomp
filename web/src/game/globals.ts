@@ -38,6 +38,7 @@ import type { WaterSurface, WaterSurfaceUv } from "./class41/water";
 import type { St2Car } from "./class21/car";
 import type { Actor } from "./actor";
 import type { OriginalItemBanner } from "./class41/item_banner";
+import type { LifeGrantedMarker } from "./class10/life_marker";
 import type { BreakableProp, PropFinalDraw } from "./class41/prop_state";
 import type { PropShatter } from "./class41/shatter";
 import type { ShotRequest } from "./combat/shot";
@@ -710,6 +711,25 @@ export const G = {
    * factory profile.
    */
   g_start_lives: START_LIVES_BY_OPTION[OPTIONS_FACTORY.lives],
+  /**
+   * `g_max_lives` — 0x009A2440, s32: the cap `GrantExtraLife` (`FUN_00415630`)
+   * tests outside Original Mode. Its one writer is `ProfileApplyToRun`
+   * (`FUN_0040AB50`), which stores 5 (`0x0040ABC3`); the other two
+   * references read it. `[proved]` Seeded with that value, as the boot's
+   * apply leaves it.
+   */
+  g_max_lives: 5,
+  /**
+   * `g_original_life_cap` — 0x009A2245 + player*0x14, `+0x05` of the
+   * Original Mode block at `g_original_item_slots`, s8: `GrantExtraLife`'s
+   * cap while `g_GameMode` is 1. The two writers that name the address both
+   * store 5 -- `ResetOriginalModeLoadout` at `0x0048A125` and `FUN_00416240`
+   * at `0x004162A6` -- so it is seeded with that and not written again, the
+   * way {@link g_original_weapon_damage_scale} is. `[likely]` that no other
+   * store reaches it: one through the block's base with no constant address
+   * would not be listed.
+   */
+  g_original_life_cap: [5, 5] as number[],
   /**
    * `g_credits` — 0x009C8E60, stride 8: the credits (continues) left, one
    * shared count unless `g_credits_per_player` is set. `SetBothPlayerCounters`
@@ -2556,6 +2576,13 @@ export const G = {
    */
   g_original_item_banners: [] as OriginalItemBanner[],
   /**
+   * The markers `SpawnLifeGrantedMarker` (`FUN_0048DF10`) allocates when a
+   * civilian's held item pays a life, in allocation order: every one that
+   * drew this frame. [port-only] as a list: each is a 0x1314-byte task in the
+   * engine. See `game/class10/life_marker.ts`.
+   */
+  g_life_granted_markers: [] as LifeGrantedMarker[],
+  /**
    * `g_chain_segments` — 0x007DCD18, `[group * 0x14 + segment]`.
    *
    * The twenty-segment chains `PlaceChainSegments` builds, by prop id rather
@@ -3038,6 +3065,8 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   G.g_original_item_pickup_blocked = 0;
   G.g_original_item_banner_count = 0;
   G.g_original_item_banners = [];
+  // ...and the life markers, which are tasks on the same list.
+  G.g_life_granted_markers = [];
   G.g_chain_segments = [];
   G.g_scene_index = 0;
   G.g_camera_block_eye = vec3();

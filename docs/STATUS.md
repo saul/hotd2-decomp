@@ -18,7 +18,7 @@ than a measurement. What each directory is for is in
 
 | Directory | Lines | Files | Layer |
 |---|---:|---:|---|
-| `game/` | 110248 | 361 | engine |
+| `game/` | 110272 | 361 | engine |
 | `hod2lib/` | 19994 | 35 | engine |
 | `render/` | 15804 | 60 | render |
 | `app/` | 12685 | 44 | app |
@@ -28,7 +28,7 @@ than a measurement. What each directory is for is in
 | `bundle/` | 2921 | 11 | engine |
 | `audio/` | 1053 | 3 | render |
 | `hud/` | 526 | 1 | ui |
-| **total** | **175034** | **580** | |
+| **total** | **175058** | **580** | |
 
 The largest files, which is where the pressure to split next is:
 
@@ -64,9 +64,9 @@ The two declared seams between the UI and the player: **`PlayerCommands` has 54 
 
 | | |
 |---|---|
-| Named functions | 1455 in `ghidra/annotations/functions.tsv` |
+| Named functions | 1457 in `ghidra/annotations/functions.tsv` |
 | Named globals | 753 in `ghidra/annotations/globals.tsv` |
-| Checks | 70, run together by `tools/verify_all.py` (listed below) |
+| Checks | 71, run together by `tools/verify_all.py` (listed below) |
 
 ## Ratchets
 
@@ -130,6 +130,7 @@ nothing exits 3 and is never counted as green.
 | `options` | that the menu's Options reaches the game's options screen in the real page, that its title and red highlighted row are on the HUD canvas, that the page's arrows and Enter drive the list -- lives and continues changed, the hidden rows stepped over, a held arrow running the sound test -- and that EXIT saves the profile in the browser and starts a game with five lives, four credits and the chosen crosshair on the reticle, and that a reload boots what was saved in place of the free-play default | bundle |
 | `judgment_reload` | that a reload at stage 5's `block=4&step=1&op=0` -- past JUDGMENT's return -- lands with no boss in the pool and nothing counted, and that block 4's room gate then counts exactly its own zombies and opens when they die: the only check that reads the enemy counters in a page a seek built, which is the rebuild every reload during development goes through (L75) | bundle |
 | `setpiece_shot` | that a body lying on the floor -- stage 1's class-0x24 set-piece under the library desk -- survives a driven sweep of live pulls that kills the room's zombie around it: the only check that fires real pointer events at an actor the engine never files for the shot test, which the render pick used to offer and `ResolveHit` then killed | bundle |
+| `humanoid_shot` | that stage 2's jetty zombies -- class-0x25 scripted humanoids, the four in the game whose spawn record leaves bit 0x8000 clear -- survive live pulls aimed through the page's own camera at their bodies while the gun is up: the one check that fires real pointer events at the class, which the render pick used to find through a wall and `ResolveHit` then killed for ninety points | bundle |
 | `crosshair` | that real pointer events reach HudDrawCrosshair as the exe's devices -- a mouse move is input mode 6 and the reticle is the Sight Graphic's sprite out of the bundle, sized to the frame and centred on the pointer; a touch is the light gun, 0xD, and the game draws no crosshair until the mouse moves again; and a phone, with no fine pointer, never shows one | bundle |
 | `animals` | that the frog, the owl and the fish are placed from a real bundle and leave their opening state -- none of the three is a skinned enemy the character layer can build, and two have no character type at all | bundle |
 | `horde` | that each of the five class-0x40 hordes is built from a real bundle, walks in, dives and bites, and that shooting every member gives both counters back and lets the walker past the room's wait_enemies_alive -- the members are runtime children with no descriptor, so only the placer's own spawn can bring them into play | bundle |
@@ -165,7 +166,7 @@ nothing exits 3 and is never counted as green.
 | `game:bone_cels` | that every cel run `ZombieDrawBonePart` (`FUN_004534A0`) draws is the arithmetic in the EXE and is in the bundle -- no table in the image names those models, so this is the only thing standing between a hand-written run and a character losing a part | game-dir |
 | `baseline` | that the installed assets still hash to `manifest.csv` | game-dir |
 
-21 of them need the installed game and 28 need an exported
+21 of them need the installed game and 29 need an exported
 bundle. **That is a known hole, not a design:** a machine with
 neither cannot run the checks that compare two histories, and a
 bundle-free fixture is the open work that closes it.

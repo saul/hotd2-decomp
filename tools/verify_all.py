@@ -262,6 +262,15 @@ CHECKS: list[Check] = [
           "shot test, which the render pick used to offer and `ResolveHit` "
           "then killed",
           NEEDS_BUNDLE, LANE_BROWSER),
+    Check("humanoid_shot", "web",
+          ["node", "tools/humanoid_shot_page.mjs", "--headless"],
+          "that stage 2's jetty zombies -- class-0x25 scripted humanoids, the "
+          "four in the game whose spawn record leaves bit 0x8000 clear -- "
+          "survive live pulls aimed through the page's own camera at their "
+          "bodies while the gun is up: the one check that fires real pointer "
+          "events at the class, which the render pick used to find through a "
+          "wall and `ResolveHit` then killed for ninety points",
+          NEEDS_BUNDLE, LANE_BROWSER),
     Check("crosshair", "web",
           ["node", "tools/crosshair_page.mjs", "--headless"],
           "that real pointer events reach HudDrawCrosshair as the exe's "

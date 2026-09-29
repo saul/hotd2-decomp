@@ -7,8 +7,10 @@
  * again, and that routine walks 8-byte commands until one of them blocks.
  * (Both are ported below, so they are named here by address -- `L42`.)
  *
- * It is **not an enemy**: not damageable, awards nothing, and shots land in its
- * hit slot with nothing to consume them. What it is, is the game's cutscene
+ * It is **not an enemy**: not damageable, awards nothing, and not even shot at.
+ * It holds a hit slot, as every skinned actor does, but nothing in the class
+ * files it for the shot test, so a bullet passes through it -- see the handler
+ * at the foot of the file. What it is, is the game's cutscene
  * system — a skinned character told to play a motion, ride an object path,
  * turn to face the camera, swap the model in its hand and make a noise, in
  * whatever order the block says.
@@ -1231,6 +1233,27 @@ export const ScriptedHumanoidHandler: ClassHandler = {
   init: ScriptedHumanoidInit,
   update: ScriptedHumanoidRun,
   debug: ScriptedHumanoidDebug,
+  // **Registers where the engine's routines do, which is nowhere**, so the
+  // pick finds it through `G.g_shot_test_list` alone and never finds it.
+  // `[proved]` from the bytes rather than the xref list: a scan of `.text`
+  // finds 95 `E8`/`E9` calls to `RegisterForShotTest` (`FUN_00405160`), 17
+  // to `ActorRegisterCameraPoint` (`FUN_00409B70`), which ends in one, and
+  // 22 to `RegisterForCameraTracking` (`FUN_00408EC0`), and no absolute
+  // pointer to any of them. None lies in `0x004840D0`..`0x00485F8F`, and a
+  // descent from the class's thirteen routines -- the ported ones, the draw
+  // `0x00484FF0`, its per-bone hook `0x00485260`, the head aim, and
+  // `SpawnTumblingModelAtBone5` (`FUN_00485DE0`) with the object it makes --
+  // through every call, jump table and installed code pointer they reach,
+  // no-return marks ignored, reaches none of those 134 sites. So no bullet in
+  // the game touches a scripted humanoid. The render pick found the four
+  // whose spawn record leaves bit `0x8000` clear -- stage 2's jetty zombies,
+  // blocks 16 and 20 -- and `ResolveHit` killed them through the corner of
+  // a building for ninety points (`tools/humanoid_shot_page.mjs`).
+  registersForShotTest: true,
+  // ...and the debug clear takes nothing a shot could not: the Kill button
+  // used to kill every scripted humanoid in the pool, a cut scene's whole
+  // cast included.
+  invulnerable: () => true,
 };
 
 /**

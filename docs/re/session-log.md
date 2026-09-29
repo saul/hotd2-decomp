@@ -25423,3 +25423,62 @@ start, continue and game over; the continue screen's credit line) failed;
 they set `OPTION_CREDITS_FACTORY` now, which is why the setting had to be a
 field and not a constant. New checks: the port starts in free play, and
 twenty continues all succeed and take nothing.
+
+## 2026-09-29 -- the options screen, read
+
+The user asked for the game's options screen, properly ported. This entry is
+the reading; `docs/re/options-screen.md` is the result.
+
+App state `0x0C` is `OptionsRunPhase` (`0x004869E0`), three phases, the second
+a jump through a frame pointer at `0x009CA0F0` -- the list, or one of two
+sub-screens. The list is eleven rows out of `g_options_rows` (`0x005696E0`),
+each a label and a handler: Difficulty, Life, Continue, Blood Color, Sight
+Graphic, Sight Speed, the two sound tests, Gun Calibration, Default, EXIT.
+Every value is written into the profile as it changes; EXIT saves and applies.
+
+**Almost none of it is in a decompile.** Every row handler plays `0xA9` on a
+change, `PlaySoundId` is no-return to Ghidra (L72), and so every row's
+decompile ends at its first right-press -- the wrap, the store and the whole
+left arm are only in the listing. `capstone` over the image, with the
+annotation names folded in, was faster and more complete than the MCP
+disassembly for a screen of thirty routines; the scratch scripts are the
+session's, not the repo's.
+
+What the reading settled:
+
+* **Blood Color is dead in this build.** Its row's gate `0x007DD030` has one
+  store, the arm's 0, and `0x009C9F22` has no reader but the arm's copy; the
+  boot writes 1 over it after the load. `render/bloodcolour.ts` says the
+  option "loads one bank over the other" -- that is not this exe's.
+* **Free play is locked.** The Continue row offers it only when the three low
+  bits of `0x009C9F5E` are up -- the stage-6 boss killed in Original Mode, all
+  ten Training grades, all ten Boss Mode grades. Without them the row wraps
+  1..9, and a step away from free play cannot come back.
+* **Sight Graphic is the crosshair**: `HudDrawCrosshair` reads `+0x00` of the
+  options record (`MOVSX EDX, byte ptr [EDX]`, `0x00416AC8`) to index
+  `g_crosshair_sprites`. The port's comment said "by binding set".
+* **The profile save is real and checkable**: four `0x3DB`-byte files
+  disguised as `pol/` and `tex/` data, XORed with a 176-byte key that
+  `ProfileCipher` builds on its stack, summed. The install's own four files
+  decipher to a block whose sum and version (7) match -- difficulty 4, life
+  4, continues 9, somebody's settings.
+* **Bit `0x2000` of a sprite's flags lights it** with the render light
+  colour (`SubmitScreenSpriteQuad`, `0x004ACE27`); the highlighted row is red
+  that way, and no sprite the port drew before used the bit.
+* **Mode 6 is the page.** The two sub-screens are for a player on a keyboard
+  crosshair (Sight Speed) and a calibrated gun outside mode 6 (Gun
+  Calibration). Mode 6 is the mouse with the keyboard ORed into its pad word
+  -- `InputMapDevicesToMaple`'s case 6 does the OR and falls into case 5 --
+  which is what a page with an Enter START and arrow directions is.
+
+Two sub-agents read, in parallel: the calibration sub-screen whole, and the
+profile's callers, the unlock bits and the helpers. Their readings are in
+the document with addresses; the calibration's jump table and frame head
+were re-read here.
+
+**Wrong turns.** The glyph table looked like 128 entries from `0x0056AED0` --
+`[char*2 + 0x56AED0]` -- and dumping it gave a clean alphabet. It is 96 from
+`0x0056AF10`: below that the address is the SE test table's last eight
+records, which end exactly there (L6 in reverse: the index source's base is
+not the table's). And the first draft of the check expected every glyph to be
+16x32; `W` is 32x32.

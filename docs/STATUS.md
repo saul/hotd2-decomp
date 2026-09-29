@@ -43,7 +43,7 @@ The largest files, which is where the pressure to split next is:
 
 | | |
 |---|---|
-| Gameplay coverage | **231 of 297** annotated functions in the gameplay address ranges have a port (77%) |
+| Gameplay coverage | **231 of 299** annotated functions in the gameplay address ranges have a port (77%) |
 | Ported outside those ranges | 533 (opcodes, and the classes whose handlers sit elsewhere) |
 | Citations checked | 764 ported functions match `functions.tsv` under the same name |
 | Spawn classes | **30 of 42** read classes have a module, covering 1541 of 1619 placements |
@@ -65,8 +65,8 @@ The two declared seams between the UI and the player: **`PlayerCommands` has 53 
 
 | | |
 |---|---|
-| Named functions | 1378 in `ghidra/annotations/functions.tsv` |
-| Named globals | 677 in `ghidra/annotations/globals.tsv` |
+| Named functions | 1425 in `ghidra/annotations/functions.tsv` |
+| Named globals | 722 in `ghidra/annotations/globals.tsv` |
 | Verifier scripts | 45 under `tools/`, run together by `verify_all.py` |
 
 Phase and format status is a judgement about what counts as solved,

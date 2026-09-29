@@ -43,6 +43,7 @@
  * `PacerHost` hooks below. The split is not by line count: it is that nothing
  * in this file knows what a stage, an actor or a panel is.
  */
+import { FrameStats } from "./framestats";
 import { Loop, TICK } from "./loop";
 import { install as installHarness, type DriveTarget, type Harness }
   from "./harness";
@@ -134,6 +135,9 @@ export class Pacer {
   private urlSyncKey = "";
   private urlSyncAt = 0;
 
+  /** Every drawn frame's interval and work, for the FPS badge. Always kept. */
+  readonly frameStats = new FrameStats();
+
   constructor(private readonly host: PacerHost) {}
 
   /**
@@ -207,6 +211,7 @@ export class Pacer {
    * click rather than to a tick.
    */
   private frame = (now: number): void => {
+    const t0 = performance.now();
     this.rafId = null;
     this.frameNow = now;
     const wall = this.loop.wallDelta(now);
@@ -235,6 +240,7 @@ export class Pacer {
     if (!this.drive && ran === 0) this.host.idleTick(this.loop.idle(wall));
 
     this.host.endFrame();
+    this.frameStats.add(now, performance.now() - t0);
     // Last, so that what the frame did decides whether there is another one.
     this.schedule();
   };

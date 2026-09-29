@@ -366,5 +366,8 @@ export function applyToggle(p: PlayerCommands, name: ToggleName,
     // The network overlay is the projection's to draw; the switch only asks
     // for it, and `wantsFrame` keeps its figures live while it is open.
     case "netStats":     return;
+    // The badge is the projection's to draw, from numbers the pacer keeps
+    // whether or not anyone is looking.
+    case "fps":          return;
   }
 }

@@ -16,7 +16,7 @@ import type { ToggleName } from "../../ui/commands";
 import type { UiSlice } from "../../ui/store";
 import type {
   BranchProjection, ContinueProjection, JoinProjection, FeedRow, LoadingProjection,
-  NetProjection, PerfProjection,
+  NetProjection, PerfProjection, FpsProjection,
   SkipProjection, SoundProjection, StatusProjection, StripRow, TransportProjection,
   TreeProjection, UiProjection,
 } from "../../ui/projection";
@@ -81,6 +81,7 @@ export interface PlayerView {
   readonly continueOffer: ContinueProjection | null;
   readonly joinOffer: JoinProjection | null;
   readonly perf: PerfProjection | null;
+  readonly fps: FpsProjection | null;
   readonly branch: BranchProjection | null;
   readonly transport: TransportProjection;
   /** Which player this page's gun is: 0 alone or hosting, 1 as player 2. */
@@ -144,6 +145,7 @@ export function buildProjection(v: PlayerView,
     continueOffer: v.continueOffer,
     joinOffer: v.joinOffer,
     perf: v.perf,
+    fps: v.fps,
     branch: v.branch,
     gameOver: gameOverProjection(),
     net: v.netView,

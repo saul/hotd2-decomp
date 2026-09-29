@@ -73,7 +73,7 @@ import { TOGGLE_DEFAULTS } from "../ui/panels/Toggles";
 import { feedRow } from "./projection/script";
 import type {
   BranchProjection, ContinueProjection, JoinProjection, FeedRow, LoadingProjection,
-  NetProjection, PerfProjection,
+  NetProjection, PerfProjection, FpsProjection,
   SkipProjection, SoundProjection, StatusProjection, TransportProjection,
   TreeProjection,
 } from "../ui/projection";
@@ -929,6 +929,12 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
   get perf(): PerfProjection | null {
     return this.perfMeter.enabled ? this.perfMeter.snapshot : null;
   }
+  get fps(): FpsProjection | null {
+    if (!this.toggles.fps) return null;
+    const net = this.net.active ? this.net.stats?.costMs ?? null : null;
+    return this.pacer.frameStats.read(performance.now(),
+                                      net === null ? null : Math.round(net * 100) / 100);
+  }
   get branch(): BranchProjection | null { return branchProjection(this); }
   get transport(): TransportProjection { return transportProjection(this); }
 
@@ -1416,6 +1422,10 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     // sends, so the switch shows it and the choice is kept like any other.
     if (this.perfMeter.experiments.perf && !this.toggles.perf) {
       this.runCommand({ kind: "toggle", name: "perf", on: true });
+    }
+    // `?fps=1`, the same way, for a phone with no K key.
+    if (new URLSearchParams(location.search).get("fps") === "1" && !this.toggles.fps) {
+      this.runCommand({ kind: "toggle", name: "fps", on: true });
     }
   }
 
@@ -2350,6 +2360,18 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     this.wake();
   }
 
+  /** The session's figures for {@link reportPerf}, or null alone. */
+  private netReport(): Record<string, unknown> | null {
+    const s = this.net.stats;
+    if (!this.net.active || !s) return null;
+    return {
+      role: this.net.role, phase: s.phase, cost: s.costMs, worst: s.costMax,
+      parts: Object.fromEntries(s.costParts), rtt: s.rtt, route: s.route,
+      delta: s.deltaBytes, depth: s.depth, underruns: s.underruns, skips: s.skips,
+      verified: s.verified, mismatches: s.mismatches,
+    };
+  }
+
   /** How many readouts since the last one was sent. See {@link reportPerf}. */
   private perfSent = 0;
 
@@ -2372,6 +2394,9 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
         .filter(([k, on]) => TOGGLE_DEFAULTS[k as ToggleName] !== on)
         .map(([k, on]) => `${k}=${on ? 1 : 0}`).join(" "),
       light: this.lighting.lightingMode, filter: this.texFilter.filterMode,
+      // A two-player session's own cost: what a tick costs this end, by
+      // phase, and the link it runs over -- on the device that plays it.
+      net: this.netReport(),
     });
     fetch("/__perf", { method: "POST", body, keepalive: true })
       .catch(() => { /* no dev server behind this page: nothing to tell */ });

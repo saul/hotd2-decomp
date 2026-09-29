@@ -27,7 +27,7 @@ import {
   type ReadyMsg, type ResyncMsg, type SessionMsg,
 } from "../../core/net/protocol";
 import { NetPeer, type Identity } from "./peer";
-import { Rate } from "./stats";
+import { CostMeter, Rate } from "./stats";
 import type { Transport } from "./transport";
 
 /** What the host needs of the player. */
@@ -79,6 +79,14 @@ const MAX_UNRELIABLE = 12 * 1024;
 const LOAD_WAIT_MS = 45_000;
 /** While the host's clock is held, a tick this often all the same. See `poll`. */
 const HELD_TICK_MS = 250;
+/**
+ * The state is hashed, and the replica checks it, every this many ticks --
+ * ten times a second -- rather than every tick. The hash is a walk of the
+ * whole state on each end, and it was the largest part of a tick's cost on
+ * both; a desync is still caught within a tenth of a second, and a keyframe
+ * and a held tick always carry one.
+ */
+export const HASH_EVERY = 6;
 /**
  * The widest delta sent, in ticks. Past it a keyframe is cheaper: a replica
  * that has not acknowledged in a second and a half is not applying what it
@@ -134,6 +142,7 @@ export class NetHost extends NetPeer {
   private aimErrorAt = -Infinity;
   /** When the last tick went, for the held clock's own ticks. */
   private lastTickAt = -Infinity;
+  private readonly cost = new CostMeter();
 
   constructor(transport: Transport, me: Identity, private readonly sim: HostSim) {
     super(transport, me, "host");
@@ -210,36 +219,26 @@ export class NetHost extends NetPeer {
 
   /**
    * After a tick: diff, hash, and send. `now` is the page's clock, for the
-   * cost and the keyframe cooldown.
+   * cost and the keyframe cooldown. `held` is the held clock's own tick
+   * (`poll`), which always carries a hash.
    */
-  endTick(now: number): void {
+  endTick(now: number, held = false): void {
     this.now = now;
     if (this.phase !== "streaming" || this.closed) {
       this.pending = [];
       return;
     }
-    const t0 = performance.now();
+    const cost = this.cost;
+    cost.begin();
     this.lastTickAt = now;
     this.tick++;
     const t = this.tick;
     if (!this.tracker) this.tracker = new StateTracker();
     const tracker = this.tracker;
-    tracker.update(this.sim.liveRoot(), t);
-    const scratch = this.sectionScratch;
-    scratch.ids.length = 0;
-    scratch.hashes.length = 0;
-    const hash = this.hasher.hash(tracker.state,
-                                  this.trackSections ? this.sectionSink : undefined);
-    if (this.trackSections) {
-      this.sections.set(t, { ids: Int32Array.from(scratch.ids),
-                             hashes: Uint32Array.from(scratch.hashes) });
-      this.sections.delete(t - SECTION_HISTORY);
-    }
-    if (this.pending.length) this.events.set(t, this.pending);
-    this.pending = [];
-    this.events.delete(t - EVENT_WINDOW - 1);
-    this.views.set(t, this.sim.view().slice());
-    this.views.delete(t - VIEW_HISTORY);
+    const live = this.sim.liveRoot();
+    cost.lap("state");
+    tracker.update(live, t);
+    cost.lap("diff");
 
     // The base is the replica's newest ack -- or the keyframe in flight, which
     // the reliable channel will deliver, so a delta against it waits on the
@@ -248,14 +247,43 @@ export class NetHost extends NetPeer {
     const canDelta = base >= 0 && tracker.covers(base);
     const cooled = now - this.keyframeSentAt >= KEYFRAME_COOLDOWN_MS;
     const tooWide = t - base > MAX_DELTA_SPAN;
-    if ((this.needKeyframe || !canDelta || tooWide) && (cooled || this.keyframeAt < 0)) {
-      this.sendKeyframe(hash);
+    const keyframe = (this.needKeyframe || !canDelta || tooWide)
+      && (cooled || this.keyframeAt < 0);
+    const hash = keyframe || held || t % HASH_EVERY === 0 ? this.hashTick(t) : null;
+    cost.lap("hash");
+    if (this.pending.length) this.events.set(t, this.pending);
+    this.pending = [];
+    this.events.delete(t - EVENT_WINDOW - 1);
+    this.views.set(t, this.sim.view().slice());
+    this.views.delete(t - VIEW_HISTORY);
+    if (keyframe) {
+      this.sendKeyframe(hash!);
     } else if (canDelta) {
       this.sendDelta(base, hash);
     }
-    this.stats.costMs = performance.now() - t0;
+    cost.lap("send");
+    cost.end(this.stats, now);
     this.stats.tick = t;
     this.stats.lag = this.ack < 0 ? 0 : t - this.ack;
+  }
+
+  /** The shadow's hash at `t`, with its sections kept for a desync report. */
+  private hashTick(t: number): number {
+    const scratch = this.sectionScratch;
+    scratch.ids.length = 0;
+    scratch.hashes.length = 0;
+    const hash = this.hasher.hash(this.tracker!.state,
+                                  this.trackSections ? this.sectionSink : undefined);
+    if (this.trackSections) {
+      this.sections.set(t, { ids: Int32Array.from(scratch.ids),
+                             hashes: Uint32Array.from(scratch.hashes) });
+      // Only hashed ticks are kept, so the oldest is found, not computed.
+      for (const k of this.sections.keys()) {
+        if (k > t - SECTION_HISTORY) break;
+        this.sections.delete(k);
+      }
+    }
+    return hash;
   }
 
   private writeEvents(from: number, to: number) {
@@ -274,7 +302,7 @@ export class NetHost extends NetPeer {
     };
   }
 
-  private sendDelta(base: number, hash: number): void {
+  private sendDelta(base: number, hash: number | null): void {
     const w = this.out;
     w.reset();
     writeTickHead(w, {
@@ -282,8 +310,9 @@ export class NetHost extends NetPeer {
       pressAck: this.pressHigh, hash, sentAt: this.now,
     });
     const info = this.tracker!.encodeDelta(base, w, this.writeEvents(base, this.tick));
+    this.cost.lap("encode");
     if (!info) {
-      this.sendKeyframe(hash);
+      this.sendKeyframe(hash ?? this.hashTick(this.tick));
       return;
     }
     const bytes = w.finish();
@@ -445,7 +474,7 @@ export class NetHost extends NetPeer {
     const simHold = this.sim.hold();
     if (this.phase === "streaming" && simHold !== null && simHold !== "loading"
         && (this.needKeyframe || now - this.lastTickAt >= HELD_TICK_MS)) {
-      this.endTick(now);
+      this.endTick(now, true);
     }
     const hold: HoldReason = this.phase === "loading" ? "loading" : simHold;
     const msg: SessionMsg = { epoch: this.epoch, hold, branch: this.sim.branch() };

@@ -179,6 +179,21 @@ export interface ContinueProjection {
 }
 
 /**
+ * The FPS badge: the last second of drawn frames, from `app/framestats.ts`.
+ * Null while the badge is off.
+ */
+export interface FpsProjection {
+  fps: number;
+  /** Time between frames, ms: lowest, mean, highest. */
+  frame: readonly [number, number, number];
+  /** The page's own work per frame, ms: mean and worst. */
+  work: readonly [number, number];
+  /** A netplay tick's cost, ms, mean over the last second; null alone. */
+  net: number | null;
+  level: "ok" | "warn" | "bad";
+}
+
+/**
  * The join offer: this page's player is out -- player 2 through a one-player
  * game, or player 1 once a continue has run out -- and the game is drawing
  * PRESS START BUTTON for them. The corner button becomes **Join** or
@@ -483,6 +498,7 @@ export interface UiProjection {
   joinOffer: JoinProjection | null;
   /** See {@link PerfProjection}. */
   perf: PerfProjection | null;
+  fps: FpsProjection | null;
   branch: BranchProjection | null;
   gameOver: GameOverProjection | null;
   /** Netplay, whenever a session is up or being made; null alone. */

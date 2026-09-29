@@ -32,7 +32,7 @@
 import type { EventMap } from "../src/core/events";
 import { TreeHasher, diffTrees } from "../src/core/net/codec";
 import { Msg, PressKind } from "../src/core/net/protocol";
-import { NetHost, type HostSim } from "../src/app/net/host";
+import { HASH_EVERY, NetHost, type HostSim } from "../src/app/net/host";
 import { NetReplica, type ReplicaSim } from "../src/app/net/replica";
 import { MemoryLink } from "../src/app/net/transport";
 import type { Identity } from "../src/app/net/peer";
@@ -338,7 +338,8 @@ async function run(stage: number, p: Profile, seconds: number,
     .map(([id]) => id);
   const dropped = [...fired].filter(([id, ep]) => ep !== finalEpoch && !taken.has(id)).length;
   check(`${tag}: the replica streamed (${rs.verified} ticks verified by hash)`,
-        rs.verified > frames / 4, `${rs.verified} of ${frames} frames; phase ${rs.phase}`);
+        // One tick in HASH_EVERY carries the host's hash, and only those are checked.
+        rs.verified > frames / (4 * HASH_EVERY), `${rs.verified} of ${frames} frames; phase ${rs.phase}`);
   const logs = (s: typeof rs) => s.log.map((e) => `${e.kind}@${e.tick}: ${e.text}`).join(" | ");
   if (sabotage) {
     // What the overlay exists to show: a replica that is not the host's is

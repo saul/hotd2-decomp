@@ -22,6 +22,16 @@ const ms = (v: number): string => Number.isNaN(v) ? "—" : `${Math.round(v)} ms
 const pct = (v: number): string => `${v.toFixed(v < 10 ? 1 : 0)}%`;
 const kb = (v: number): string => `${v.toFixed(v < 10 ? 1 : 0)} KB/s`;
 
+/**
+ * A tick's cost, mean and worst over the last second, and where it went:
+ * "0.84 ms, worst 2.1 · diff 0.52 · hash 0.11 · send 0.18".
+ */
+function cost(s: NetStats): string {
+  const parts = s.costParts.filter(([, v]) => v >= 0.005)
+    .map(([k, v]) => `${k} ${v.toFixed(2)}`).join(" · ");
+  return `${s.costMs.toFixed(2)} ms, worst ${s.costMax.toFixed(1)}${parts ? ` · ${parts}` : ""}`;
+}
+
 function level(bad: boolean, warn: boolean): NetLevel {
   return bad ? "bad" : warn ? "warn" : "ok";
 }
@@ -88,7 +98,7 @@ function sections(net: NetSession, s: NetStats): { title: string; rows: NetRow[]
       title: "Ticks since the newest one player 2 has said it applied: the base of every delta." },
     { label: "delta, mean", value: `${Math.round(s.deltaBytes)} B`, level: level(s.deltaBytes > 12000, s.deltaBytes > 4000) },
     { label: "keyframes", value: `${s.keyframes} (last ${(s.keyframeBytes / 1024).toFixed(1)} KiB)`, level: "" },
-    { label: "cost per tick", value: `${s.costMs.toFixed(2)} ms`, level: level(s.costMs > 6, s.costMs > 3),
+    { label: "cost per tick", value: cost(s), level: level(s.costMs > 4, s.costMs > 2),
       title: "Diffing the state, hashing it and encoding the packet, on this machine." },
     { label: "presses taken", value: String(s.presses), level: "" },
     { label: "player 2's aim", value: Number.isNaN(s.aimError) ? "—" : `${s.aimError.toFixed(4)}° off`,
@@ -104,7 +114,7 @@ function sections(net: NetSession, s: NetStats): { title: string; rows: NetRow[]
     { label: "underruns · skips", value: `${s.underruns} · ${s.skips}`, level: "",
       title: "A frame with nothing new to show, and ticks jumped over. Both follow lost packets; neither loses state." },
     { label: "keyframes", value: `${s.keyframes} (last ${(s.keyframeBytes / 1024).toFixed(1)} KiB)`, level: "" },
-    { label: "cost per tick", value: `${s.costMs.toFixed(2)} ms`, level: level(s.costMs > 6, s.costMs > 3),
+    { label: "cost per tick", value: cost(s), level: level(s.costMs > 4, s.costMs > 2),
       title: "Applying the host's delta and hashing the result." },
     { label: "presses sent", value: String(s.presses), level: "" },
   ];
@@ -128,6 +138,24 @@ function sections(net: NetSession, s: NetStats): { title: string; rows: NetRow[]
     { title: host ? "Sending" : "Receiving", rows: sync },
     { title: "Is it the same game?", rows: truth },
   ];
+}
+
+/**
+ * "Copy report"'s JSON, remade at most once a second. It is every figure and
+ * the log, and making it -- and handing React a new string for the field it is
+ * copied from -- on every frame the overlay was open cost more than the
+ * netplay it reports on.
+ */
+let reported = { at: -Infinity, text: "" };
+function report(net: NetSession, s: NetStats, now: number): string {
+  if (now - reported.at < 1000) return reported.text;
+  const text = JSON.stringify({
+    at: new Date().toISOString(), role: net.role, lobby: net.lobby,
+    stats: { ...s, log: s.log },
+    ua: typeof navigator !== "undefined" ? navigator.userAgent : "",
+  }, (_k, v) => (typeof v === "number" && !Number.isFinite(v) ? null : v), 2);
+  reported = { at: now, text };
+  return text;
 }
 
 /** What the UI is told about netplay, or null when there is none. */
@@ -162,11 +190,7 @@ export function netProjection(net: NetSession, wantStats: boolean,
         age: `${Math.max(0, (now - e.at) / 1000).toFixed(1)} s`,
         tick: e.tick, kind: e.kind, text: e.text,
       })),
-      report: JSON.stringify({
-        at: new Date().toISOString(), role: net.role, lobby: net.lobby,
-        stats: { ...s, log: s.log },
-        ua: typeof navigator !== "undefined" ? navigator.userAgent : "",
-      }, (_k, v) => (typeof v === "number" && !Number.isFinite(v) ? null : v), 2),
+      report: report(net, s, now),
     },
   };
 }

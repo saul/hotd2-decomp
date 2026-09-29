@@ -131,6 +131,7 @@ function projection(): UiProjection {
     skip: { canSkip: true, sub: "region 3", stacked: false },
     continueOffer: null,
     joinOffer: null,
+    fps: null,
     perf: null,
     branch: { sub: "two routes", options: [], countdown: "5s",
               paused: false },
@@ -1003,6 +1004,39 @@ console.log("\nThe shutter bars, as the HUD layer covers the frame:\n");
         frameOf(true) === "hud-frame boxed", String(frameOf(true)));
   check("...and unboxed, in a frame that is the whole viewport",
         frameOf(false) === "hud-frame", String(frameOf(false)));
+}
+
+// The FPS badge: the pacer's frame times, summarised, and the one line that
+// shows them.
+console.log("\nThe FPS badge:\n");
+{
+  const { FrameStats } = await import("../src/app/framestats");
+  const { FpsBadge } = await import("../src/ui/panels/FpsBadge");
+  const steady = new FrameStats();
+  for (let i = 0; i <= 60; i++) steady.add(1000 + i * (1000 / 60), 3);
+  const a = steady.read(1000 + 60 * (1000 / 60), null);
+  check("sixty even frames: 60 fps, 16.7 ms low, mean and high, work 3",
+        a?.fps === 60 && a.frame.every((v) => v === 16.7) && a.work[0] === 3
+        && a.level === "ok", JSON.stringify(a));
+  const hitch = new FrameStats();
+  let t = 0;
+  for (let i = 0; i <= 60; i++) { t += i === 30 ? 60 : 1000 / 60; hitch.add(t, 4); }
+  const b = hitch.read(t, 1.25);
+  check("...one 60 ms frame among them: the high says so, and the badge is bad",
+        b?.frame[2] === 60 && b.level === "bad" && b.net === 1.25, JSON.stringify(b));
+  const slept = new FrameStats();
+  slept.add(0, 1);
+  slept.add(16, 1);
+  slept.add(5000, 1);
+  slept.add(5016, 1);
+  const c = slept.read(5016, null);
+  check("...and a gap the loop slept through is not a slow frame",
+        c?.frame[2] === 16, JSON.stringify(c));
+  const html = renderIn({ ...projection(), fps: a }, createElement(FpsBadge));
+  check("the badge shows fps and the low/mean/high line",
+        html.includes('id="fps-badge"') && />60</.test(html) && html.includes("16.7/16.7/16.7"), html);
+  check("...and nothing while it is off",
+        !renderIn(projection(), createElement(FpsBadge)).includes("fps-badge"));
 }
 
 // The join offer is read off the player's shell, as the game's own credit

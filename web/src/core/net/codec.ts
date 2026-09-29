@@ -103,6 +103,9 @@ export function labelOf(path: string): string {
  * plain object, with a distinct integer `at` within `±2^31`. Empty is not a
  * pool by content -- an empty array keeps whatever it was.
  */
+/** {@link poolAts}'s scratch: it runs for every array of objects, every tick. */
+const POOL_SEEN = new Set<number>();
+
 export function poolAts(arr: readonly unknown[]): number[] | null {
   const n = arr.length;
   if (n === 0) return null;
@@ -112,7 +115,8 @@ export function poolAts(arr: readonly unknown[]): number[] | null {
     return null;
   }
   const ats = new Array<number>(n);
-  const seen = new Set<number>();
+  const seen = POOL_SEEN;
+  seen.clear();
   for (let i = 0; i < n; i++) {
     if (!(i in arr)) return null;
     const e = arr[i];
@@ -290,6 +294,13 @@ export class StateTracker {
   private shadow: Record<string, unknown> | null = null;
   private readonly pools = new WeakMap<unknown[], PoolInfo>();
   private readonly lookups = new WeakMap<unknown[], Map<number, unknown>>();
+  /**
+   * How many keys each shadow object holds. The walk counts the live object's
+   * keys as it goes; only when the two differ can a key have gone, and only
+   * then is the shadow's every key looked up in the live one -- which was
+   * half of every object's cost, every tick.
+   */
+  private readonly nkeys = new WeakMap<object, number>();
   private serial = 0;
   private tick = -1;
   private readonly segs: Seg[] = [];
@@ -393,13 +404,46 @@ export class StateTracker {
     }
     const out: Record<string, unknown> = {};
     const o = v as Record<string, unknown>;
-    for (const k in o) out[k] = this.copy(o[k]);
+    let n = 0;
+    for (const k in o) {
+      out[k] = this.copy(o[k]);
+      n++;
+    }
+    this.nkeys.set(out, n);
     return out;
   }
 
   private diffObject(live: Record<string, unknown>,
                      shadow: Record<string, unknown>, d: number): void {
     const segs = this.segs;
+    let n = 0, added = 0;
+    for (const k in live) {
+      n++;
+      const lv = live[k];
+      const sv = shadow[k];
+      // The common case, first and cheapest: a primitive that has not moved.
+      // `===` agrees with `Object.is` except on 0 and -0, which it calls equal,
+      // and NaN, which it does not -- the second falls through to the walk,
+      // which says NaN is NaN.
+      // `undefined` may be a key the shadow does not have yet: the long way.
+      if (lv === sv && lv !== undefined && (lv === null || typeof lv !== "object")
+          && (lv !== 0 || 1 / (lv as number) === 1 / (sv as number))) continue;
+      segs[d] = k;
+      if (sv === undefined && !Object.hasOwn(shadow, k)) {
+        shadow[k] = this.copy(lv);
+        added++;
+        this.mark(d + 1, Dirty.Value);
+        continue;
+      }
+      this.diffChild(shadow, k, lv, sv, d + 1);
+    }
+    // Every live key is in the shadow now; the shadow holds more only if some
+    // went from the live object since the last tick.
+    const had = this.nkeys.get(shadow);
+    if (had !== undefined && had + added === n) {
+      if (added) this.nkeys.set(shadow, n);
+      return;
+    }
     for (const k in shadow) {
       if (!Object.hasOwn(live, k)) {
         delete shadow[k];
@@ -407,16 +451,7 @@ export class StateTracker {
         this.mark(d + 1, Dirty.Value);
       }
     }
-    for (const k in live) {
-      segs[d] = k;
-      const lv = live[k];
-      if (!Object.hasOwn(shadow, k)) {
-        shadow[k] = this.copy(lv);
-        this.mark(d + 1, Dirty.Value);
-        continue;
-      }
-      this.diffChild(shadow, k, lv, shadow[k], d + 1);
-    }
+    this.nkeys.set(shadow, n);
   }
 
   /** `segs[cd - 1]` is `key`, and `container[key]` holds `sv`. */
@@ -479,8 +514,14 @@ export class StateTracker {
       if (n < shadow.length) shadow.length = n;
     }
     for (let i = 0; i < n; i++) {
-      const has = i in live;
-      const had = i in shadow;
+      const lv = live[i];
+      const sv = shadow[i];
+      // As in `diffObject`: an element that has not moved costs a comparison.
+      // `undefined` may be a hole on either side, so it takes the long way.
+      if (lv === sv && lv !== undefined && (lv === null || typeof lv !== "object")
+          && (lv !== 0 || 1 / (lv as number) === 1 / (sv as number))) continue;
+      const has = lv !== undefined || i in live;
+      const had = sv !== undefined || i in shadow;
       if (!has && !had) continue;
       segs[d] = i;
       if (!has) {
@@ -493,8 +534,7 @@ export class StateTracker {
         this.mark(d + 1, Dirty.Value);
         continue;
       }
-      this.diffChild(shadow as unknown as Record<number, unknown>, i,
-                     live[i], shadow[i], d + 1);
+      this.diffChild(shadow as unknown as Record<number, unknown>, i, lv, sv, d + 1);
     }
     // Trailing holes: the loop above cannot lengthen the shadow on its own.
     if (shadow.length !== n) shadow.length = n;

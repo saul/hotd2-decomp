@@ -192,11 +192,11 @@ async function session(label, { both = "", replicaQuery = "", seconds, robust = 
   let f = {};
   for (let i = 0; i < 60; i++) {
     f = await figures(replica);
-    if (num(f["ticks verified"]) > 120) break;
+    if (num(f["ticks verified"]) > 20) break;
     await replica.waitForTimeout(500);
   }
   const search = await replica.$eval("#net-lobby", (e) => e.textContent).catch(() => "");
-  check("the replica connects, streams and verifies ticks", num(f["ticks verified"]) > 120,
+  check("the replica connects, streams and verifies ticks", num(f["ticks verified"]) > 20,
         `${JSON.stringify(f)}; lobby: ${search}`);
 
   // Player 2 presses START. The shell goes through pending-start (10) and
@@ -249,7 +249,7 @@ async function session(label, { both = "", replicaQuery = "", seconds, robust = 
   console.log(`        replica: ${JSON.stringify(rf)}`);
   console.log(`        host: ${JSON.stringify(hf)}`);
   check(`no tick the replica applied differed from the host's (${rf["ticks verified"]} verified)`,
-        rf["hash mismatches"] === "0" && num(rf["ticks verified"]) > 300,
+        rf["hash mismatches"] === "0" && num(rf["ticks verified"]) > 50,
         `mismatches ${rf["hash mismatches"]}`);
   check("no delta failed to apply", rf["apply errors"] === "0", rf["apply errors"]);
   // The mirror the deltas land in is what the per-tick hash sees; this is the
@@ -335,12 +335,12 @@ async function robustness(host, replica) {
     for (let i = 0; i < 80; i++) {
       await replica.waitForTimeout(500);
       rf2 = await figures(replica);
-      if (num(rf2["ticks verified"]) > 200 && (await readG(replica, (G) => G.g_scene_index)) === 1) break;
+      if (num(rf2["ticks verified"]) > 35 && (await readG(replica, (G) => G.g_scene_index)) === 1) break;
     }
     const scene = await readG(replica, (G) => G.g_scene_index);
     check(`the host's stage change takes player 2 to stage 2 too (scene index ${scene}), `
           + `still matching (${rf2["hash mismatches"]} mismatches)`,
-          scene === 1 && rf2["hash mismatches"] === "0" && num(rf2["ticks verified"]) > 200,
+          scene === 1 && rf2["hash mismatches"] === "0" && num(rf2["ticks verified"]) > 35,
           JSON.stringify(rf2));
   } else {
     check("the host's menu offered stage 2", false, "no #stage-picker button for stage 2");

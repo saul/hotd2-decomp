@@ -28,7 +28,7 @@ import {
   type TickHead,
 } from "../../core/net/protocol";
 import { NetPeer, type Identity } from "./peer";
-import { Jitter } from "./stats";
+import { CostMeter, Jitter } from "./stats";
 import type { Transport } from "./transport";
 
 /** What the replica needs of the player. */
@@ -80,13 +80,14 @@ const RESYNC_RETRY_MAX_MS = 8000;
  */
 const IDLE_MS = 250;
 /**
- * Every this many applied ticks, the state is hashed again as the page's
- * systems hold it rather than as the deltas left it. The deltas land in a
- * mirrored tree, and every slice but `G` is then handed to its system's
- * `load`. A `load` that drops or changes what it is handed diverges the game
- * while the mirror -- and so the per-tick hash -- stays right.
+ * Every this many verified ticks -- about twice a second, at the host's
+ * `HASH_EVERY` -- the state is hashed again as the page's systems hold it
+ * rather than as the deltas left it. The deltas land in a mirrored tree, and
+ * every slice but `G` is then handed to its system's `load`. A `load` that
+ * drops or changes what it is handed diverges the game while the mirror --
+ * and so the tick's hash -- stays right.
  */
-const DEEP_EVERY = 30;
+const DEEP_EVERY = 5;
 /** Input goes at most this often, apart from presses, which go at once. */
 const INPUT_MS = 15;
 
@@ -123,6 +124,7 @@ export class NetReplica extends NetPeer {
   /** When the player last stepped: its loop is idle long after. */
   private lastStepAt = -Infinity;
   private deepCount = 0;
+  private readonly cost = new CostMeter();
   private deepLoggedAt = -Infinity;
   // -- the gun --
   private aim = { x: 0, y: 0, on: false };
@@ -333,7 +335,7 @@ export class NetReplica extends NetPeer {
     this.stats.phase = "streaming";
     this.stats.keyframes++;
     this.stats.keyframeBytes = bytes.length;
-    this.stats.costMs = performance.now() - t0;
+    this.stats.costMax = Math.max(this.stats.costMax, performance.now() - t0);
     for (const t of [...this.buffer.keys()]) if (t <= tick) this.buffer.delete(t);
     this.sendInput(true);
     this.sim.wake();
@@ -414,7 +416,8 @@ export class NetReplica extends NetPeer {
   }
 
   private apply(b: Buffered): void {
-    const t0 = performance.now();
+    const cost = this.cost;
+    cost.begin();
     const head = b.head;
     this.buffer.delete(head.tick);
     const r = new ByteReader(b.bytes);
@@ -444,14 +447,22 @@ export class NetReplica extends NetPeer {
       this.desync(head.tick, `${kind}: ${(e as Error).message}`);
       return;
     }
+    cost.lap("apply");
     const from = this.at;
     this.at = head.tick;
     this.sim.afterApply(touched);
-    if (this.verify) {
+    cost.lap("load");
+    // Only the ticks that carry the host's hash are checked: every
+    // `HASH_EVERY`th, so a full walk of the state is not every tick's cost.
+    if (this.verify && head.hash !== null) {
       const mine = this.hasher.hash(this.sim.root());
       this.stats.verified++;
-      if (mine !== head.hash) this.mismatch(head, mine);
-      else if (++this.deepCount >= DEEP_EVERY) this.deepVerify(head);
+      cost.lap("hash");
+      if (mine !== head.hash) this.mismatch(head, mine, head.hash);
+      else if (++this.deepCount >= DEEP_EVERY) {
+        this.deepVerify(head, head.hash);
+        cost.lap("deep");
+      }
     }
     // The host's events for every tick this apply moved over, oldest first,
     // and none too old to be worth hearing.
@@ -463,14 +474,15 @@ export class NetReplica extends NetPeer {
     this.lastEventTick = head.tick;
     this.stats.tick = head.tick;
     this.stats.lag = this.newest - head.tick;
-    this.stats.costMs = performance.now() - t0;
+    cost.lap("apply");
+    cost.end(this.stats, this.now);
     this.stats.desynced = this.desynced;
   }
 
-  private mismatch(head: TickHead, mine: number): void {
+  private mismatch(head: TickHead, mine: number, theirs: number): void {
     this.stats.mismatches++;
     if (this.desynced) return; // already reported; a keyframe is on its way
-    this.log("hash", head.tick, `state hash ${hex(mine)}, the host's ${hex(head.hash)}`);
+    this.log("hash", head.tick, `state hash ${hex(mine)}, the host's ${hex(theirs)}`);
     this.desync(head.tick, "state hash differs");
   }
 
@@ -504,12 +516,12 @@ export class NetReplica extends NetPeer {
    * difference is named exactly: the mirror is what the host sent, and the
    * live tree is what the page made of it.
    */
-  private deepVerify(head: TickHead): void {
+  private deepVerify(head: TickHead, theirs: number): void {
     this.deepCount = 0;
     const live = this.sim.liveRoot?.();
     if (!live) return;
     const h = this.hasher.hash(live);
-    if (h === head.hash) return;
+    if (h === theirs) return;
     this.stats.liveMismatches++;
     if (this.now - this.deepLoggedAt < 5000) return;
     this.deepLoggedAt = this.now;

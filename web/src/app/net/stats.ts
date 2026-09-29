@@ -189,8 +189,15 @@ export interface NetStats {
   liveMismatches: number;
   /** Replica: whether its state is known to differ from the host's right now. */
   desynced: boolean;
-  /** Host: the per-tick cost of tracking, in ms. Replica: of applying and hashing. */
+  /**
+   * What a tick costs this end, in ms, over the last second: the mean, the
+   * worst, and the mean by phase -- host: `state` (reading the live state),
+   * `diff` (finding what changed), `hash`, `send` (encoding and sending);
+   * replica: `apply`, `load` (handing slices to the systems), `hash`, `deep`.
+   */
   costMs: number;
+  costMax: number;
+  costParts: [string, number][];
   /** Host: player 2's last shot, checked against the host's own camera: degrees off. */
   aimError: number;
   /** Presses sent (replica) or applied (host), total. */
@@ -205,9 +212,55 @@ export function emptyStats(role: "host" | "replica"): NetStats {
     kbIn: 0, kbOut: 0, pktIn: 0, pktOut: 0, silence: 0, expectTicks: false,
     epoch: 0, tick: 0, lag: 0, depth: 0, target: 0, jitter: 0, underruns: 0,
     skips: 0, deltaBytes: 0, keyframeBytes: 0, keyframes: 0, verified: 0,
-    mismatches: 0, applyErrors: 0, liveMismatches: 0, desynced: false, costMs: 0, aimError: NaN,
+    mismatches: 0, applyErrors: 0, liveMismatches: 0, desynced: false, costMs: 0, costMax: 0, costParts: [], aimError: NaN,
     presses: 0, log: [],
   };
+}
+
+/**
+ * One end's work per tick, timed by phase and published once a second as a
+ * mean, a worst and a mean per phase ({@link NetStats.costMs}). A phase that
+ * did not run in a tick counts as nothing in that tick's mean, so the parts
+ * add up to the whole.
+ */
+export class CostMeter {
+  private readonly sums = new Map<string, number>();
+  private ticks = 0;
+  private total = 0;
+  private worst = 0;
+  private tickCost = 0;
+  private t = 0;
+  private since = -Infinity;
+
+  begin(): void {
+    this.tickCost = 0;
+    this.t = performance.now();
+  }
+
+  /** The time since the last lap (or `begin`) goes to `phase`. */
+  lap(phase: string): void {
+    const now = performance.now();
+    const d = now - this.t;
+    this.t = now;
+    this.tickCost += d;
+    this.sums.set(phase, (this.sums.get(phase) ?? 0) + d);
+  }
+
+  end(stats: NetStats, now: number): void {
+    this.ticks++;
+    this.total += this.tickCost;
+    if (this.tickCost > this.worst) this.worst = this.tickCost;
+    if (now - this.since < 1000) return;
+    this.since = now;
+    const n = this.ticks;
+    stats.costMs = this.total / n;
+    stats.costMax = this.worst;
+    stats.costParts = [...this.sums].map(([k, v]) => [k, v / n]);
+    this.sums.clear();
+    this.ticks = 0;
+    this.total = 0;
+    this.worst = 0;
+  }
 }
 
 /** Keep the log short; the newest last. */

@@ -22,7 +22,11 @@ maple port and in the port too.
 Every tick, the host sends the replica every path of the state that changed
 since the last tick the replica acknowledged, with that path's value now, plus
 the events the port raised in between. The replica applies them into its own
-live `G`, hashes the result, and compares it with the hash the host sent.
+live `G`. Every sixth tick (`HASH_EVERY`, ten times a second), and with every
+keyframe, the host also sends its state's hash, and the replica hashes its own
+and compares. The hash is a walk of the whole state on each end, and hashing
+every tick was the largest single cost of a tick on both; a desync is still
+caught within a tenth of a second.
 
 ```
  replica (player 2)                                  host (player 1, authoritative)
@@ -161,13 +165,23 @@ figure):
   **time since the last packet** (red past 500 ms while the host's clock
   runs), and bandwidth and packets each way.
 * **Sending** (host): epoch and tick, how far behind player 2 is (the base of
-  every delta), mean delta size, keyframes, the per-tick cost of tracking,
+  every delta), mean delta size, keyframes, **what a tick costs** -- the mean
+  over the last second, the worst, and the mean by phase (`state` reading
+  the live state, `diff` finding what changed, `hash`, `encode`, `send`) --
   presses taken, and **player 2's aim**: the last shot's segment against the
   host's own record of the camera at the tick player 2 saw, in degrees. It is
   zero to rounding when replication is right.
 * **Receiving** (replica): epoch and tick, lag, the jitter buffer's depth and
-  target, the arrival jitter, underruns and skips, keyframes, and the per-tick
-  cost of applying and hashing.
+  target, the arrival jitter, underruns and skips, keyframes, and what a tick
+  costs here, by phase (`apply`, `load` handing slices to the systems,
+  `hash`, `deep`).
+
+**The FPS badge** (`fps`, key `K`, or `?fps=1`) sits beside the menu: frames
+per second, the time between frames over the last second (lowest / mean /
+highest), the page's own work per frame, and in a session what a netplay tick
+costs. With the perf meter on (`?perf=1`), a dev build sends its readouts to
+the dev server, `extract/perf.jsonl` -- and in a session, the netplay costs by
+phase with them -- so a phone's numbers can be read without the phone.
 * **Is it the same game?:** whether the replica's state matches the host's
   now, ticks verified, **hash mismatches**, **apply errors**, and **systems
   disagree**; on the host, desync reports. The per-tick hash is of the tree
@@ -392,8 +406,10 @@ every tick, which is why the host diffs against a shadow instead.
 | delta against a base ~3–6 ticks back (median, headless) | 1.7 KB | 1.9–2.0 KB |
 | delta in the page, with player 2 shooting (mean) | 1.8–2.7 KB | — |
 | keyframe | 36–50 KiB | 37–38 KiB |
-| host: diff + hash + sections + encode, per tick | ~1.0 ms median, headless; 1.6–2.1 ms in the page | 1.6–1.9 ms |
-| replica: apply + verify, per tick | 0.5–0.7 ms median | 0.6 ms |
+| host: a tick, headless (median) | 0.56–0.69 ms (was 1.4 before hashing every sixth tick and the walk's fast paths) | 0.9 ms |
+| host: a tick, in headless Chrome | 1.27 ms (was 1.79): diff 0.81, hash 0.12, send 0.28 | |
+| replica: apply + verify, headless (median / p95) | 0.07 / 0.8 ms (was 0.5 median) -- the p95 is the tick in six that is hashed | 0.09 / 0.8 ms |
+| replica: a tick, in headless Chrome | ~0.3 ms (was 1.14) | |
 | bandwidth, host to replica | 107–168 KB/s | |
 
 About 1 Mbit/s, or roughly 400–600 MB per hour of play through a TURN
@@ -421,7 +437,7 @@ a session is direct or relayed.
 | check | what only it sees |
 |---|---|
 | `test:net-codec` | fuzzed trees, lossy, reordered and duplicated delivery, acks up to 60 ticks late: every applied tick deep-equal and hash-equal to the host's; pool identity kept and a respawn a new object, asserted over every window, the only survivor's respawn included; a rebuilt list free; a `Map` refused by name. No bundle, about 20 s |
-| `test:net` | a real stage, host and replica sessions on a `MemoryLink` at clean, lossy and bad settings: every tick hash-verified, a whole-tree comparison every 30th, player 2's tab hidden for five seconds with the host's deltas staying narrow, a seek's epoch followed, every press of the final epoch taken once and none twice, player 2 scoring, the aim check exact for a true shot and catching a false one. Sabotaged once: a changed value and a removed actor caught and named, a lost desync report recovered by the replica's own retry. Needs a bundle |
+| `test:net` | a real stage, host and replica sessions on a `MemoryLink` at clean, lossy and bad settings: every hashed tick verified, a whole-tree comparison every 30th, player 2's tab hidden for five seconds with the host's deltas staying narrow, a seek's epoch followed, every press of the final epoch taken once and none twice, player 2 scoring, the aim check exact for a true shot and catching a false one. Sabotaged once: a changed value and a removed actor caught and named, a lost desync report recovered by the replica's own retry. Needs a bundle |
 | `test:matchmaker` | the matchmaker over real HTTP in its Node binding and in-process in its Worker (a fake Durable Object namespace): codes, TURN credentials minted from the secret, the offer and the answer each behind its own token, 404/409/403/400, the host's delete, a room's hour, a Worker's second draw on a live code, and Cloudflare's credential answer in both shapes with port 53 dropped. No bundle |
 | `test:turn` | the relay over real UDP on loopback, driven by a client written from the RFC: the 401 challenge, the minted credentials accepted and a wrong or expired one refused, response integrity and fingerprint, nothing crossing before both ends have a permission, Send and Data indications, ChannelData both ways, a Refresh freeing the relay. No bundle, about a second |
 | `net_pair` | the page, in a Chrome as users have it (mDNS on): a room whose link is opened in a second tab, over WebRTC, with the host's game held until player 2 is in; again with player 2's link at 60±30 ms and 10% loss; and again through the relay alone (`?relay=1`), whose route must say `relay`. Each plays stage 1 with player 2 joining and shooting through its own camera, and the replica's systems re-hashed against the host's. The first also takes a pause (player 2 on the host's exact frame) and a stage change (player 2 follows, matching), and ends with player 2 closing the tab, which the host's card must report. No console error anywhere |

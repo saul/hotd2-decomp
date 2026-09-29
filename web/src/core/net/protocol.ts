@@ -18,7 +18,7 @@
  */
 import { ByteReader, ByteWriter } from "./bytes";
 
-export const PROTOCOL = 2;
+export const PROTOCOL = 3;
 
 export type Channel = "ctrl" | "tick";
 
@@ -165,8 +165,11 @@ export interface TickHead {
   base: number;
   /** The highest press id the host has applied. */
   pressAck: number;
-  /** The host's state hash at `tick`. */
-  hash: number;
+  /**
+   * The host's state hash at `tick`, on the ticks that carry one (every
+   * `HASH_EVERY`th, and keyframes', and the held clock's); null on the rest.
+   */
+  hash: number | null;
   /** `performance.now()` on the host when sent, for the jitter estimate. */
   sentAt: number;
 }
@@ -178,7 +181,8 @@ export function writeTickHead(w: ByteWriter, h: TickHead): void {
   w.uvar(h.tick);
   w.uvar(h.base + 1);
   w.uvar(h.pressAck + 1);
-  w.u32(h.hash);
+  w.u8(h.hash === null ? 0 : 1);
+  if (h.hash !== null) w.u32(h.hash);
   w.f64(h.sentAt);
 }
 
@@ -190,7 +194,7 @@ export function readTickHead(r: ByteReader): TickHead {
     tick: r.uvar(),
     base: r.uvar() - 1,
     pressAck: r.uvar() - 1,
-    hash: r.u32(),
+    hash: r.u8() ? r.u32() : null,
     sentAt: r.f64(),
   };
 }

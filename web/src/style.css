@@ -351,6 +351,22 @@ kbd {
    The badge sits beside the speaker whenever a session is up; the overlay
    drops under it; the lobby card is the one thing in the middle, because
    while it is up there is nothing yet to play. */
+/* The FPS badge: a pill beside the menu, like the netplay badge opposite. */
+#fps-badge {
+  position: absolute; z-index: 6;
+  top: max(10px, env(safe-area-inset-top));
+  left: calc(max(10px, env(safe-area-inset-left)) + 46px);
+  height: 36px; padding: 0 12px; display: flex; align-items: center;
+  max-width: calc(100vw - 180px); overflow: hidden; white-space: nowrap;
+  background: var(--glass); color: #eef2f6;
+  border: 1px solid var(--glass-line); border-radius: 999px;
+  font: 12px/1 var(--mono); pointer-events: none;
+}
+#fps-badge b { margin-right: 4px; }
+#fps-badge .fps-dim { color: var(--dim); white-space: pre; }
+#fps-badge.fps-warn { border-color: var(--warn); }
+#fps-badge.fps-bad { border-color: var(--spawn); color: #ffd6dd; }
+
 #net-badge {
   position: absolute; z-index: 6;
   top: max(10px, env(safe-area-inset-top));

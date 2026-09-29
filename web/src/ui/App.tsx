@@ -54,6 +54,7 @@ import { PauseScreen, RotateHint, SoundButton } from "./panels/Overlays";
 import { SkipBar } from "./panels/SkipBar";
 import { PerfHud } from "./panels/PerfHud";
 import { NetBadge, NetLobbyCard, NetOverlay } from "./panels/Net";
+import { FpsBadge } from "./panels/FpsBadge";
 import { GameOver } from "./panels/GameOver";
 import { BranchBar } from "./panels/BranchBar";
 import { LoadingOverlay, Viewport } from "./panels/Viewport";
@@ -300,6 +301,7 @@ function Page(
                 <GameOver />
               </>}
               {ready && <PerfHud />}
+              {ready && <FpsBadge />}
               {/* Netplay: the badge whenever a session is up, the card while
                   one is being made, the overlay when asked for. */}
               <NetBadge />

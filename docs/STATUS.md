@@ -21,19 +21,19 @@ is in `tools/verify_all.py`, beside the command that runs it.
 |---|---:|---:|---|
 | `game/` | 105306 | 341 | engine |
 | `hod2lib/` | 19395 | 35 | engine |
-| `render/` | 15112 | 54 | render |
-| `app/` | 12274 | 42 | app |
+| `render/` | 15258 | 55 | render |
+| `app/` | 12300 | 42 | app |
 | `script/` | 4471 | 25 | engine |
 | `ui/` | 3682 | 27 | ui |
 | `core/` | 3514 | 13 | engine |
 | `bundle/` | 2805 | 11 | engine |
-| `audio/` | 973 | 2 | render |
+| `audio/` | 1053 | 3 | render |
 | `hud/` | 491 | 1 | ui |
-| **total** | **168023** | **551** | |
+| **total** | **168275** | **553** | |
 
 The largest files, which is where the pressure to split next is:
 
-* `app/main.ts` — 2975
+* `app/main.ts` — 3000
 * `game/globals.ts` — 2860
 * `game/actor.ts` — 2724
 * `hod2lib/bundle.ts` — 2353

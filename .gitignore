@@ -78,4 +78,6 @@ web/shots/
 .dev.vars
 .dev.vars.*
 .cloudflare.env
+# wrangler's own cache, written beside wrangler.toml by every deploy.
+.wrangler/
 

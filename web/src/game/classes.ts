@@ -45,6 +45,7 @@ import "./class26";
 import "./class28";
 import "./class43";
 import "./class40";
+import "./class42";
 import "./class46";
 import "./class44";
 import "./class45";

@@ -960,7 +960,7 @@ def check_crawler_leap() -> None:
     whiff. It then flies `g_class30_leap_strike_arc_script`.
 
     This used to hold the opposite: that the entry's swing stays unreachable,
-    because the crawler was believed to run `ZombieStateStrike` (`L90`). What
+    because the crawler was believed to run `ZombieStateStrike` (`L92`). What
     can still go wrong is the bundle -- the entry dropped, the lunge not
     baked, or the arc script or its clips missing, any of which leaves the leap
     with nothing to play. Asked of every exported stage that places a type-0xC

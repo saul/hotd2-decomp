@@ -485,6 +485,12 @@ export interface UiProjection {
    */
   pillarbox: boolean;
   /**
+   * Whether the frame **is** boxed this frame: {@link pillarbox}, or the
+   * result card, which holds the 4:3 screen whatever the switch says. What
+   * the layout hangs off; the switch shows the choice. See `Player.boxed`.
+   */
+  boxed: boolean;
+  /**
    * Canvas pixels per CSS pixel, and the steps the Resolution select offers.
    * The screen's own by default. See `Player.pixelRatio`.
    */

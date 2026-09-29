@@ -301,7 +301,7 @@ range they could not close. Give the state its own floor.
 stage 2's class-0x30 spawns have `attack_state <= 0`. Check before claiming,
 and release on every path out. (This used to end "`ActorAbortAttackAndLeave`
 exists for that"; that routine is `ZombieSplitInTwo`, which cuts an actor in
-two, and nothing the shipped game runs calls it -- `L38`, `L90`.)
+two, and nothing the shipped game runs calls it -- `L38`, `L92`.)
 
 **L10 — `Math.random()` silently breaks the save state.** Two loads of one
 snapshot diverge on the first swing, and nothing fails until someone notices
@@ -761,7 +761,7 @@ note says a class's gate "says nothing" about it, follow each thing the class
 spawns into its own `Init` before believing it (L83's list-every-spawn, one
 level down).
 
-**L90 -- A proof about a routine is not a proof about the actor until the edge
+**L92 -- A proof about a routine is not a proof about the actor until the edge
 into it has been checked against the data.** The crawlers were closed as "in
 the engine an undamaged crawler swings and misses, every time", from a reading
 of `ZombieStateStrike` that was right in every step: their condition-4 attack
@@ -1114,6 +1114,25 @@ Pages that must see each other take one `browser.newContext()` and call
 `context.newPage()` twice.
 
 ---
+
+**L90 -- A merge that lets one side win is only as good as the writer that
+keeps that side current.** `ExportAnnotations` let the database win on a
+function's comment whenever it had one, and `ApplyAnnotations` wrote a comment
+only when it first named a function. So a comment improved with
+`tools/annotate.py` never reached the database, and the next export put the
+database's copy back over it: 19 rows in one run, `RegisterForShotTest`'s 1,415
+characters replaced by the 455 it had in August, reported as a clean
+"19 updated". Each rule was reasonable alone; together they made the older
+copy the authority. Comments are now the file's in both scripts, names stay
+the database's, and an export prints every rename it takes and lists every
+comment it disagrees on rather than settling it. The same run showed the other
+direction is no safer to assume: the 20 names and 2 renames the database had
+"never exported" were committed, with comments, on three branches that never
+reached main, and `CameraTrackEnemiesTick`'s longer database comment called a
+byte "written nowhere in the image" that `CameraResetForPathShot` writes at
+`0x0040322D`. **Before trusting a sync rule, ask who writes each side and
+when. The longer copy is not necessarily the newer one, and a name nobody
+exported may be one nobody merged.**
 
 ## Believing what you are looking at
 

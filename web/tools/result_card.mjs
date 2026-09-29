@@ -17,6 +17,10 @@
  *   node tools/result_card.mjs --headless [--loud]
  *
  * Screenshots across the flight go to `web/shots/result-card-*.png`.
+ *
+ * The first case plays in a 16:9 window, where a desktop fills the frame by
+ * default: the card holds the 640x480 screen, so the frame is boxed to 4:3
+ * for as long as it is up and fills again once it is gone (`Player.boxed`).
  */
 import { join } from "node:path";
 import { openPlayer, requireBundle, waitForLoad, SHOTS } from "./lib/player.mjs";
@@ -37,7 +41,7 @@ const check = (ok, what, detail = "") => {
  * `g_result_life_bonus` cell for this many rescues -- both the EXE's.
  */
 const CASES = [
-  { name: "stage1-five", stage: 1, block: 14, step: 2, scene: 0,
+  { name: "stage1-five", stage: 1, block: 14, step: 2, scene: 0, wide: true,
     rescued: [0x31, 0x26, 0x20, 0x27, 0x2e],
     places: [-235, -31.7, -138.4, 81.9, -80],
     clips: [0x17c, 0x17d, 0x17f, 0x17c, 0x17c], bonus: 1,
@@ -73,7 +77,8 @@ async function runCase(c) {
               + `${c.rescued.length} rescued`);
   const { page, close, state } = await openPlayer({
     url: `?stage=${c.stage}&block=${c.block}&step=${c.step}&op=0&drive=1&seed=1`,
-    size: "1280x960", headless: flag("headless"), quiet: !flag("loud"),
+    size: c.wide ? "1600x900" : "1280x960", headless: flag("headless"),
+    quiet: !flag("loud"),
     debug: false,
   });
   try {
@@ -88,6 +93,12 @@ async function runCase(c) {
       return { lives: G.g_player_lives[0], scene: G.g_scene_index };
     }, { scene: c.scene, rescued: c.rescued });
     await page.evaluate(() => document.activeElement?.blur?.());
+    // The frame's shape: the canvas's box, as the page lays it out.
+    const aspect = () => page.evaluate(() => {
+      const r = document.querySelector("canvas").getBoundingClientRect();
+      return Math.round((r.width / r.height) * 1000) / 1000;
+    });
+    const before = await aspect();
     await page.keyboard.press("Space");
 
     // The whole card, one frame at a time, in the page.
@@ -121,6 +132,9 @@ async function runCase(c) {
         };
       });
       trace[f] = row;
+      if (c.wide && [1, CARD_FRAMES - 1, CARD_FRAMES + 10].includes(f)) {
+        row.aspect = await aspect();
+      }
       if (c.shots.includes(f)) {
         await page.waitForTimeout(150);
         await page.evaluate(() => globalThis.__hotd2Drive.advance(0));
@@ -129,6 +143,14 @@ async function runCase(c) {
       }
     }
 
+    if (c.wide) {
+      check(before > 1.7 && trace[1].aspect === 1.333
+            && trace[CARD_FRAMES - 1].aspect === 1.333
+            && trace[CARD_FRAMES + 10].aspect > 1.7,
+            "in a 16:9 window the card is boxed to 4:3, and the frame fills again after",
+            `before ${before} f1 ${trace[1].aspect} f419 ${trace[CARD_FRAMES - 1].aspect}`
+            + ` after ${trace[CARD_FRAMES + 10].aspect}`);
+    }
     const first = trace[1];
     check(first.card && !first.tally && first.tiles === 17,
           "frame 1: the card is up, class 0x62 is gone, the frame's 17 tiles drawn",

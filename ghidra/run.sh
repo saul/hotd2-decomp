@@ -102,6 +102,13 @@ case "${1:-}" in
       fi
       exit $rc
     fi
+    # The other way to not run: a script that does not compile. Ghidra prints
+    # `SCRIPT ERROR ... class could not be found`, skips it, and exits 0.
+    if grep -q "SCRIPT ERROR" "$OUT/script.log"; then
+      echo "error: $NAME failed to load (see the compiler output in $OUT/script.log)" >&2
+      grep -E "\.java:[0-9]+: error" "$OUT/script.log" | head -5 >&2 || true
+      exit 1
+    fi
     ;;
 
   list)

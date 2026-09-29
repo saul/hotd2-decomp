@@ -26,11 +26,24 @@
  *     single export deleted the comment on 195 of the 282 global rows.
  *
  * So: read the file, keep every line in place, update the rows the database
- * has something to say about, append genuinely new ones at the end, and leave
- * everything else exactly as found. The database wins on **names**, because
- * that is the rename this script exists to capture. The file wins on
- * **comments** the database has none of, because a Ghidra label carries no
- * comment and the file is where that prose lives.
+ * has something to say about, insert genuinely new ones in address order, and
+ * leave everything else exactly as found. The database wins on **names**,
+ * because that is the rename this script exists to capture; every rename it
+ * takes is printed, so the diff is not the only place it shows.
+ *
+ * The file wins on **comments**. This used to let the database win whenever
+ * it had one, and ApplyAnnotations wrote a comment only when it first named a
+ * function, so a comment improved with tools/annotate.py never reached the
+ * database and the next export put the database's stale copy back: 19 rows in
+ * one run, RegisterForShotTest's 1,415 characters replaced by the 455 it had
+ * a month earlier. A database comment now reaches the file only for a row
+ * whose file comment is empty (or a row that is new). When both have one and
+ * they differ, the file's is kept and the pair is **listed**, never settled
+ * here -- `conflicts=` on the summary, the first few on their own lines, and
+ * all of them in $HOTD2_OUT/export_comment_conflicts.tsv -- because the
+ * database's can be the newer prose (set over MCP and never exported), and
+ * the next apply-annotations writes the file's over it. Carry what is worth
+ * keeping into the file with tools/annotate.py.
  *
  * What is deliberately NOT exported, because a fresh import recreates it:
  *   - anything still carrying a Ghidra default name (FUN_/DAT_/LAB_/...)
@@ -79,6 +92,9 @@ public class ExportAnnotations extends GhidraScript {
      * `g_class33_selector_targets`, `g_class33_selector_index` and
      * `g_class26_states` all became `switchdataD_...`. A prefix list is a
      * version-drift hazard, so this one is deliberately loose.
+     *
+     * ApplyAnnotations.isDefaultName holds the same list: a name this refuses
+     * to export is a name that one may replace. Change them together.
      */
     private static final String[] AUTO_PREFIX = {
         "FUN_", "SUB_", "LAB_", "DAT_", "UNK_", "EXT_", "_DAT_", "__DAT_",
@@ -102,14 +118,18 @@ public class ExportAnnotations extends GhidraScript {
         "_", "__", "D3DX", "d3dx", "CD3du", "CHelInfo", "operator_",
     };
 
+    /** Every comment the file and the database disagree on, under HOTD2_OUT. */
+    private static final String CONFLICTS = "export_comment_conflicts.tsv";
+
     /** What the database knows about one address. */
     private static final class Entry {
         final String name;
         final String comment;      // "" when the database carries none
         Entry(String name, String comment) {
             this.name = name;
+            // ApplyAnnotations.flat: the two must agree on what "differs" means.
             this.comment = comment == null ? ""
-                : comment.replace('\n', ' ').replace('\t', ' ').trim();
+                : comment.replace('\r', ' ').replace('\n', ' ').replace('\t', ' ').trim();
         }
     }
 
@@ -142,6 +162,8 @@ public class ExportAnnotations extends GhidraScript {
             gbl.put(a.getOffset(), new Entry(n, null));
         }
 
+        String outDir = System.getenv("HOTD2_OUT");
+        if (outDir != null) new File(outDir, CONFLICTS).delete();   // this run's only
         merge(new File(dir, "functions.tsv"), fns, "functions");
         merge(new File(dir, "globals.tsv"), gbl, "globals");
         mergePrototypes(new File(dir, "prototypes.tsv"), prototypesFromDb());
@@ -157,7 +179,9 @@ public class ExportAnnotations extends GhidraScript {
     private void merge(File f, Map<Long, Entry> db, String what) throws Exception {
         List<String> out = new ArrayList<>();
         Map<Long, Boolean> seen = new LinkedHashMap<>();
-        int updated = 0, keptUnknown = 0, keptComment = 0;
+        List<String> renames = new ArrayList<>();
+        List<String[]> conflicts = new ArrayList<>();
+        int updated = 0, keptUnknown = 0, filled = 0;
         int downgraded = 0, aliasKept = 0;
 
         if (f.isFile()) {
@@ -181,9 +205,16 @@ public class ExportAnnotations extends GhidraScript {
                         keptUnknown++;
                         continue;
                     }
-                    String had = c.length > 2 ? c[2] : "";
-                    String comment = e.comment.isEmpty() ? had : e.comment;
-                    if (e.comment.isEmpty() && !had.isEmpty()) keptComment++;
+                    // The file's comment, unless it has none (see the header).
+                    String had = c.length > 2 ? c[2].trim() : "";
+                    String comment = had;
+                    if (had.isEmpty()) {
+                        comment = e.comment;
+                        if (!comment.isEmpty()) filled++;
+                    } else if (!e.comment.isEmpty() && !e.comment.equals(had)) {
+                        conflicts.add(new String[] {
+                            String.format("%08x", addr), c[1], had, e.comment });
+                    }
                     // **A curated name is never replaced by a generated one.**
                     // The collection filters above should mean no generated
                     // name ever reaches here, but they are prefix lists and a
@@ -207,6 +238,9 @@ public class ExportAnnotations extends GhidraScript {
                         name = c[1];
                         aliasKept++;
                     }
+                    if (!name.equals(c[1])) {
+                        renames.add(String.format("%08x %s -> %s", addr, c[1], name));
+                    }
                     String row = row(addr, name, comment);
                     if (!row.equals(line)) updated++;
                     out.add(row);
@@ -222,12 +256,32 @@ public class ExportAnnotations extends GhidraScript {
         }
         int added = fresh.size();
         writeSorted(f, out, fresh);
+        // One line in a fixed shape (verify_ghidra_db.py parses it), then the detail.
         println(String.format(
-            "[hotd2] %s.tsv: %d updated, %d appended, %d kept (not in the "
-            + "database), %d comments kept from the file, %d generated names "
-            + "refused, %d aliases kept",
-            what, updated, added, keptUnknown, keptComment,
-            downgraded, aliasKept));
+            "[hotd2] export %s: updated=%d renamed=%d appended=%d filled=%d conflicts=%d"
+            + " kept=%d refused=%d aliases=%d",
+            what, updated, renames.size(), added, filled, conflicts.size(),
+            keptUnknown, downgraded, aliasKept));
+        for (String n : renames) {
+            println("[hotd2] export " + what + " rename " + n
+                + " (the database's; check it is not the older name)");
+        }
+        for (int i = 0; i < conflicts.size() && i < 10; i++) {
+            String[] k = conflicts.get(i);
+            println(String.format("[hotd2] export %s comment %s %s: kept the file's (%d chars),"
+                + " the database has %d", what, k[0], k[1], k[2].length(), k[3].length()));
+        }
+        String outDir = System.getenv("HOTD2_OUT");
+        if (outDir != null && !conflicts.isEmpty()) {
+            File cf = new File(outDir, CONFLICTS);
+            boolean first = !cf.exists();
+            try (PrintWriter w = new PrintWriter(new java.io.FileWriter(cf, true))) {
+                if (first) w.println("# table\taddress\tname\tfile comment (kept)\tdatabase comment");
+                for (String[] k : conflicts) w.println(what + "\t" + String.join("\t", k));
+            }
+            println("[hotd2] export " + what + ": " + conflicts.size()
+                + " comment conflicts in full in " + cf);
+        }
     }
 
     /**
@@ -388,7 +442,7 @@ public class ExportAnnotations extends GhidraScript {
             fresh.add(String.format("%08x\t%s\t%s", e.getKey(), e.getValue()[0], e.getValue()[1]));
         }
         writeSorted(f, out, fresh);
-        println(String.format("[hotd2] prototypes.tsv: %d updated, %d appended",
+        println(String.format("[hotd2] export prototypes: updated=%d appended=%d",
             updated, fresh.size()));
     }
 

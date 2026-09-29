@@ -11,7 +11,7 @@ that reads cleanly and is missing code (L89).
 It copies the saved project (the GUI's lock stays on the original, so this
 runs with Ghidra open and reads what was last saved), then runs
 `ApplyAnnotations` and `RepairFlowDamage` over the copy **in report mode**, and
-asserts both have nothing to do:
+`ExportAnnotations` into a copy of `ghidra/annotations/`, and asserts:
 
 * no `CALL` to a function that returns carries a `CALL_RETURN` flow override,
   and no such call falls into undisassembled bytes. This is the damage: 1,085
@@ -23,10 +23,28 @@ asserts both have nothing to do:
   and every flag and prototype the file declares is what the database has.
   A prototype someone set by hand that differs from its row is reported
   separately, because the fix is `export-annotations`, not `apply`;
-* the program was imported from the `Hod2.exe` in `--game-dir`.
+* the program was imported from the `Hod2.exe` in `--game-dir`;
+* **no export would put back a name the file has renamed away from**: a
+  function or global whose database name is one this tree's history gave the
+  address before its current row. The database wins on names in an export, so
+  that rename is reverted by the next `export-annotations` -- the loss that
+  reverted 19 curated comments before comments became the file's;
+* every row of `functions.tsv` and `globals.tsv` applies.
+
+Names and comments that differ **without** that are counted and printed, and
+do not fail. Either the files are ahead (a row committed with
+`tools/annotate.py` that `apply-annotations` has not written yet, which needs
+the GUI closed) or the database is (a rename or a comment made over MCP that
+nobody has exported -- a peer's work in progress, or a branch that never
+landed). Neither is wrong, and failing on them would hold every session's
+check red for someone else's work. A database comment that differs from a
+non-empty file comment is listed as a conflict: the next apply replaces it
+with the file's, and the export keeps the file's too, so prose that exists
+only in the database has to be carried over by hand.
 
 What only this check can see: a database that disagrees with the committed
-annotations, and a call the decompiler has been told never comes back.
+annotations, a rename an export would silently undo, and a call the
+decompiler has been told never comes back.
 
 Exit 0 when it asserted all of that, 1 when any of it is wrong, and 3 when it
 could assert nothing -- no Ghidra, no project, or no game.
@@ -34,6 +52,7 @@ could assert nothing -- no Ghidra, no project, or no game.
 from __future__ import annotations
 
 import argparse
+import collections
 import hashlib
 import os
 import re
@@ -57,6 +76,31 @@ def summary(out: str, tag: str) -> dict[str, str] | None:
     if not m:
         return None
     return dict(kv.split("=", 1) for kv in m.group(1).split())
+
+
+RENAME = re.compile(r"\[hotd2\] export (functions|globals) rename ([0-9a-f]{8}) (\S+) -> (\S+)")
+
+
+def former_names(table: str) -> dict[str, set[str]]:
+    """Every name each address has carried in this tree's committed history.
+
+    One `git log -p` over the file: a row's name appears on a `+` or `-` line
+    of every commit that touched it. A name the database has that is in this
+    set, but is not the row's name now, is a rename the file made and the
+    database never followed.
+    """
+    p = subprocess.run(
+        ["git", "-C", str(ROOT), "log", "-p", "-U0", "--no-renames", "--format=",
+         "HEAD", "--", f"ghidra/annotations/{table}.tsv"],
+        capture_output=True, text=True)
+    names: dict[str, set[str]] = collections.defaultdict(set)
+    for line in p.stdout.splitlines():
+        if line[:1] not in "+-" or line.startswith(("+++", "---")):
+            continue
+        c = line[1:].split("\t", 2)
+        if len(c) >= 2 and re.fullmatch(r"[0-9a-fA-F]{8}", c[0]):
+            names[c[0].lower()].add(c[1].strip())
+    return names
 
 
 def main() -> int:
@@ -86,27 +130,37 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="hotd2-ghidra-") as tmp:
         copy = Path(tmp) / "project"
         shutil.copytree(project, copy, ignore=shutil.ignore_patterns("*.lock", "*.lock~"))
-        env = dict(os.environ, HOTD2_REPO=str(ROOT), HOTD2_OUT=tmp)
+        # The scripts read -- and ExportAnnotations writes -- a copy of the
+        # annotations, so what an export would do is measured without doing it.
+        repo = Path(tmp) / "repo"
+        shutil.copytree(ROOT / "ghidra" / "annotations", repo / "ghidra" / "annotations")
+        env = dict(os.environ, HOTD2_REPO=str(repo), HOTD2_OUT=tmp)
         env.pop("HOTD2_APPLY", None)
         p = subprocess.run(
             [str(headless), str(copy), PROJECT_NAME, "-process", PROGRAM,
              "-noanalysis", "-readOnly", "-scriptPath", str(ROOT / "ghidra" / "scripts"),
              "-postScript", "ApplyAnnotations.java",
-             "-postScript", "RepairFlowDamage.java"],
+             "-postScript", "RepairFlowDamage.java",
+             # Last: it rewrites the copy's prototypes.tsv, which RepairFlowDamage reads.
+             "-postScript", "ExportAnnotations.java"],
             env=env, capture_output=True, text=True, timeout=900)
     out = p.stdout + p.stderr
     proto, flow = summary(out, "prototypes"), summary(out, "flow")
-    if p.returncode != 0 or proto is None or flow is None:
-        # A run that printed no summary did not look at the database (L13).
+    fns, gbls = summary(out, "functions"), summary(out, "globals")
+    xfns, xgbls = summary(out, "export functions"), summary(out, "export globals")
+    got = [proto, flow, fns, gbls, xfns, xgbls]
+    if p.returncode != 0 or None in got or "SCRIPT ERROR" in out:
+        # A run that printed no summary did not look at the database (L13),
+        # and a script that failed to compile is skipped with exit 0.
         print(f"FAIL  verify_ghidra_db: the headless run exited {p.returncode} "
-              "without both summaries")
+              f"with {sum(g is not None for g in got)} of {len(got)} summaries")
         for line in out.splitlines()[-25:]:
             print(f"  {line}")
         return 1
 
     detail = [re.sub(r"^.*?\[hotd2\] ", "", l).strip().removesuffix("(GhidraScript)").strip()
               for l in out.splitlines()
-              if re.search(r"\[hotd2\] (prototype |flow )", l)]
+              if re.search(r"\[hotd2\] (prototype |flow |name )", l)]
     md5 = hashlib.md5(exe.read_bytes()).hexdigest()
 
     bad: list[str] = []
@@ -149,8 +203,53 @@ def main() -> int:
          "every row of prototypes.tsv parses",
          f"{proto['failed']} rows of prototypes.tsv do not parse")
 
+    # Names and comments. An export takes the database's name, so the one
+    # disagreement that loses work is a database name the file already left.
+    renames = [(t, a, have, db) for t, a, have, db in RENAME.findall(out)]
+    history = {t: former_names(t) for t in ("functions", "globals")}
+    stale = [(t, a, have, db) for t, a, have, db in renames if db in history[t].get(a, ())]
+    rule(not stale,
+         "no export would put back a name the file renamed away from",
+         f"{len(stale)} database names are ones the file has since renamed, and "
+         "export-annotations would put them back: "
+         + ", ".join(f"0x{a.upper()} `{db}` (the file: `{have}`)" for _, a, have, db in stale[:6])
+         + " -- rename them in the database (rename_function over MCP, or the GUI)")
+    failed = int(fns["failed"]) + int(gbls["failed"])
+    rule(failed == 0,
+         "every row of functions.tsv and globals.tsv applies",
+         f"{failed} rows of functions.tsv/globals.tsv fail to apply -- see "
+         "ghidra/out/apply_annotations.txt after a report run")
+
+    # Counted, never failed: someone's work on its way (see the docstring).
+    notes: list[str] = []
+    ahead_n = int(fns["named"]) + int(fns["created"]) + int(gbls["named"])
+    ahead_c = int(fns["comments"]) + int(gbls["comments"])
+    if ahead_n or ahead_c:
+        notes.append(f"the files are ahead: {ahead_n} names and {ahead_c} comments "
+                     "not in the database yet -- HOTD2_APPLY=1 ./ghidra/run.sh "
+                     "apply-annotations (with the GUI closed) writes them")
+    pending = [(t, a, have, db) for t, a, have, db in renames if (t, a, have, db) not in stale]
+    new_rows = int(xfns["appended"]) + int(xgbls["appended"])
+    filled = int(xfns["filled"])
+    if pending or new_rows or filled:
+        notes.append(f"the database is ahead: {new_rows} names no row has, "
+                     f"{len(pending)} renames and {filled} comments for empty rows "
+                     "-- ./ghidra/run.sh export-annotations brings them over; "
+                     "check a branch has not already committed them")
+        for t, a, have, db in pending[:6]:
+            notes.append(f"  rename 0x{a.upper()} {t}: the file `{have}`, the database `{db}`")
+    conflicts = int(xfns["conflicts"])
+    if conflicts:
+        notes.append(f"{conflicts} comments differ between a file row and the "
+                     "database; both scripts keep the file's, and the database's "
+                     "is replaced on the next apply -- carry anything worth keeping "
+                     "over with tools/annotate.py (export-annotations lists them in "
+                     "ghidra/out/export_comment_conflicts.tsv)")
+
     for line in ok:
         print(f"  ok    {line}")
+    for line in notes:
+        print(f"  note  {line}")
     if bad:
         for line in bad:
             print(f"  FAIL  {line}")

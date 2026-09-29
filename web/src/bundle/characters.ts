@@ -547,6 +547,11 @@ export interface CharacterPlacement {
    */
   class40?: { selector: number } | null;
   /**
+   * Class 0x42's descriptor: `desc+0x25`, the sub-type -- 0 the cog's batch,
+   * 1 the lone drop, 2 the large batch. See `game/class42/state.ts`.
+   */
+  class42?: { subtype: number } | null;
+  /**
    * The placement this one rides, when it is a child rather than a descriptor.
    *
    * Set on the bat's wing rows, which are {@link synthetic}. The client wants
@@ -1112,6 +1117,51 @@ export interface PartSphereRow {
   radius: number;
 }
 
+/**
+ * One of the two motions a split worm's halves follow, `0xBF` and `0xC0`,
+ * as `MotionFrameRecord` (`FUN_00412FB0`) reads it: a two-node effect-layout
+ * motion, one bone, sixty frames.
+ */
+export interface WormHalfTrackJson {
+  motion: number;
+  /** `frames * 3` floats: the frame's `(x, y, z)`. */
+  t: number[];
+  /** `frames * 3` BAMS: the frame's `(rx, ry, rz)`, as the record holds them. */
+  r: number[];
+}
+
+/**
+ * Class 0x42's `.rdata` -- the worm -- and its halves' motions. Every table is
+ * one `PlaceWormBatch` (`FUN_0042F9B0`) or `WormUpdate` (`FUN_0042FCA0`)
+ * indexes, cut at the extent its reader's index reaches; see
+ * `web/src/hod2lib/class42.ts`.
+ */
+export interface Class42Json {
+  /** `g_worm_offsets_6_8` — `s8 {x, z}[8]`, tenths, flat. */
+  offsets_6_8: number[];
+  /** `g_worm_offsets_10_15` — `s8 {x, z}[15]`, tenths, flat. */
+  offsets_10_15: number[];
+  /** `g_worm_drop_delay` — `u8[15]`, frames. */
+  drop_delay: number[];
+  /** `g_worm_yaw_offsets` — `s32[15]`, BAMS. */
+  yaw_offsets: number[];
+  /** `g_worm_orbit_phase` — `s32[15]`, BAMS. */
+  orbit_phase: number[];
+  /** `g_worm_crawl_steps` — `s16[60]`, hundredths. */
+  crawl_steps: number[];
+  /** `g_worm_crawl_scale` — `s16[0x3B][3]`, ten-thousandths, flat. */
+  crawl_scale: number[];
+  /**
+   * `g_worm_leap_path` — `s16 {rise, reach}` for frames `0x20..0x3B`, flat:
+   * frame `n`'s pair is at `(n - 0x20) * 2`.
+   */
+  leap_path: number[];
+  /** `g_worm_leap_scale` — `s16[0x3C][3]`, ten-thousandths, flat. */
+  leap_scale: number[];
+  /** Motions `0xBF` and `0xC0`, in that order: half 0's and half 1's. */
+  halves: WormHalfTrackJson[];
+}
+
 export interface CharactersJson {
   deaths: DeathSet;
   difficulty: DifficultyJson;
@@ -1146,6 +1196,11 @@ export interface CharactersJson {
   class31?: Class31Json;
   /** Class 0x14's own tables — see {@link Class14Json}. */
   class14?: Class14Json | Record<string, never>;
+  /**
+   * Class 0x42's own tables — see {@link Class42Json}. Written only for a
+   * stage that spawns the class, which is stage 2.
+   */
+  class42?: Class42Json;
   /**
    * `g_actor_attachment_records` — `0x004EC4C0`, indexed by the ids in a
    * placement's {@link CharacterPlacement.attachments}.

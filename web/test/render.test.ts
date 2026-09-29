@@ -4024,6 +4024,83 @@ console.log("\nthe shot: a class-0x24 set-piece is not in the shot test");
 }
 
 /**
+ * **Nor is a scripted humanoid.** Class 0x25 calls `RegisterForShotTest`
+ * (`FUN_00405160`) nowhere either -- not through `ActorRegisterCameraPoint`
+ * (`FUN_00409B70`), not through anything its routines reach -- so the engine's
+ * shot test never sees one. 133 of its 137 spawns carry bit `0x8000` in their
+ * record, which the pick already honours; this is one of the four that do
+ * not, stage 2's jetty zombie `0xAA40` (character type 15, `znebi2`), which
+ * the render pick found through the corner of a building and `ResolveHit`
+ * killed for ninety points.
+ */
+console.log("\nthe shot: a class-0x25 humanoid is not in the shot test");
+{
+  const { CharacterLayer } = await import("../src/render/characters");
+  const { G, ResetGameGlobals } = await import("../src/game/globals");
+  const { SetGameTables } = await import("../src/game/tables");
+  const { ActorSpawn } = await import("../src/game/spawn");
+  const { SpawnClass } = await import("../src/game/spawn_class");
+  const { Scope } = await import("../src/core/scope");
+  const { Object3D } = await import("three");
+  await import("../src/game/classes");
+
+  const ZOMBIE_TYPE = {
+    type: 15, name: "znebi2", file: "znebi2.bin", bone_count: 2,
+    actor_radius: 10,
+    bones: [{ bone: 1, part: "bone01_1c07", slot: 0x1c07, offset: [0, 0, 0],
+              parent: null, steps: [[0, 0, 10]], hit_slot: 0x1c07,
+              hit_radius: 2.3, hit_centre: [0, 0, 0] }],
+    reactions: {}, attacks: {},
+    motions: { "1024": { bank: "h", frames: 1, fps: 30,
+                         root: [0, 0, 0], rot: [0, 0, 0] } },
+  };
+  const AT = 43584;
+  const PLACE = { at: AT, class: 0x25, char_type: 15, motion: 1024, hp: 0,
+                  yaw: 0 };
+  const CHARS = { types: { "15": ZOMBIE_TYPE }, placements: [PLACE] };
+
+  const root = new Object3D();
+  const rig = new Object3D();
+  rig.name = "chr_znebi2_spawn000";
+  rig.userData = { hod2_kind: "rig", hod2_rig: "chr_znebi2",
+                   hod2_spawn_at: AT };
+  const bone = new Object3D();
+  bone.name = "chr_znebi2_spawn000_bone01_1c07";
+  rig.add(bone);
+  root.add(rig);
+
+  ResetGameGlobals();
+  // Its program as the bundle carries it, cut to the hold it is in while the
+  // gun is live: held until camera path 79 reaches frame 100.
+  SetGameTables(CHARS as never, undefined, undefined, { [String(AT)]: {
+    charType: 15, removePath: 100, removeFrame: 65, flags2: 1, motion: 1024,
+    phase: 0, cmds: [{ op: 1, mode: -1, a: 0, b: 0 },
+                     { op: 0, mode: 1, a: 79, b: 100 }],
+  } } as never);
+  const chars = new CharacterLayer();
+  const stage = new Scope("stage");
+  chars.build(root, stage, CHARS as never);
+  const a = ActorSpawn(AT, SpawnClass.ScriptedHumanoid, 15, "znebi2",
+                       { visible: true });
+  a.pos.x = 0; a.pos.y = 0; a.pos.z = -30;
+  chars.syncSpawns([{ at: AT }], [a]);
+  chars.update({} as never);
+  const towards = { origin: { x: 0, y: 0, z: 0 },
+                    dir: { x: 0, y: 0, z: -1 } };
+  check("the zombie is drawn and alive, its record leaves bit 0x8000 clear "
+        + "and its bone sphere is armed, so only its class could keep it out",
+        a.visible && !a.dead && (a.flags & 0x8000) === 0
+        && (a.boneRadius["1"] ?? 0) > 0,
+        `visible ${a.visible} dead ${a.dead} flags 0x${a.flags.toString(16)} `
+        + `radius ${a.boneRadius["1"]}`);
+  check("a shot straight through its bone sphere does not find it",
+        chars.pickShot(towards) === null, JSON.stringify(chars.pickShot(towards)));
+
+  stage.dispose();
+  G.g_object_list.length = 0;
+}
+
+/**
  * The bat's wings: a **synthetic** placement, adopted rather than spawned.
  *
  * `SpawnBatWings` (`FUN_0042E060`) makes the wing actor inside its body's

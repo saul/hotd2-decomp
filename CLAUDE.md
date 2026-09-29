@@ -107,10 +107,12 @@ duplicating and inserts in address order, so two branches adding unrelated
 rows touch different parts of the file.
 
 `./ghidra/run.sh export-annotations` **merges** the live database into those
-files: it keeps body comments and any row the database has no symbol for, and
-refuses a generated name over a curated one. Its filter of auto-generated
-names is a prefix list, so a Ghidra release that renames a prefix lets its
-labels through. Read an export's diff rather than trusting it.
+files: it keeps body comments, any row the database has no symbol for and any
+comment the file already has (the database wins on names, the file on
+comments -- `L90`), and refuses a generated name over a curated one. Its
+filter of auto-generated names is a prefix list, so a Ghidra release that
+renames a prefix lets its labels through. Read an export's diff rather than
+trusting it.
 
 ## Things that have cost this project real time
 

@@ -18,7 +18,7 @@ than a measurement. What each directory is for is in
 
 | Directory | Lines | Files | Layer |
 |---|---:|---:|---|
-| `game/` | 111522 | 363 | engine |
+| `game/` | 111547 | 363 | engine |
 | `hod2lib/` | 20145 | 36 | engine |
 | `render/` | 15962 | 61 | render |
 | `app/` | 12713 | 44 | app |
@@ -28,7 +28,7 @@ than a measurement. What each directory is for is in
 | `bundle/` | 2977 | 11 | engine |
 | `audio/` | 1053 | 3 | render |
 | `hud/` | 526 | 1 | ui |
-| **total** | **176707** | **584** | |
+| **total** | **176732** | **584** | |
 
 The largest files, which is where the pressure to split next is:
 
@@ -64,9 +64,9 @@ The two declared seams between the UI and the player: **`PlayerCommands` has 54 
 
 | | |
 |---|---|
-| Named functions | 1463 in `ghidra/annotations/functions.tsv` |
+| Named functions | 1465 in `ghidra/annotations/functions.tsv` |
 | Named globals | 765 in `ghidra/annotations/globals.tsv` |
-| Checks | 71, run together by `tools/verify_all.py` (listed below) |
+| Checks | 72, run together by `tools/verify_all.py` (listed below) |
 
 ## Ratchets
 
@@ -130,6 +130,7 @@ nothing exits 3 and is never counted as green.
 | `options` | that the menu's Options reaches the game's options screen in the real page, that its title and red highlighted row are on the HUD canvas, that the page's arrows and Enter drive the list -- lives and continues changed, the hidden rows stepped over, a held arrow running the sound test -- and that EXIT saves the profile in the browser and starts a game with five lives, four credits and the chosen crosshair on the reticle, and that a reload boots what was saved in place of the free-play default | bundle |
 | `judgment_reload` | that a reload at stage 5's `block=4&step=1&op=0` -- past JUDGMENT's return -- lands with no boss in the pool and nothing counted, and that block 4's room gate then counts exactly its own zombies and opens when they die: the only check that reads the enemy counters in a page a seek built, which is the rebuild every reload during development goes through (L75) | bundle |
 | `setpiece_shot` | that a body lying on the floor -- stage 1's class-0x24 set-piece under the library desk -- survives a driven sweep of live pulls that kills the room's zombie around it: the only check that fires real pointer events at an actor the engine never files for the shot test, which the render pick used to offer and `ResolveHit` then killed | bundle |
+| `humanoid_shot` | that stage 2's jetty zombies -- class-0x25 scripted humanoids, the four in the game whose spawn record leaves bit 0x8000 clear -- survive live pulls aimed through the page's own camera at their bodies while the gun is up: the one check that fires real pointer events at the class, which the render pick used to find through a wall and `ResolveHit` then killed for ninety points | bundle |
 | `crosshair` | that real pointer events reach HudDrawCrosshair as the exe's devices -- a mouse move is input mode 6 and the reticle is the Sight Graphic's sprite out of the bundle, sized to the frame and centred on the pointer; a touch is the light gun, 0xD, and the game draws no crosshair until the mouse moves again; and a phone, with no fine pointer, never shows one | bundle |
 | `animals` | that the frog, the owl and the fish are placed from a real bundle and leave their opening state -- none of the three is a skinned enemy the character layer can build, and two have no character type at all | bundle |
 | `horde` | that each of the five class-0x40 hordes is built from a real bundle, walks in, dives and bites, and that shooting every member gives both counters back and lets the walker past the room's wait_enemies_alive -- the members are runtime children with no descriptor, so only the placer's own spawn can bring them into play | bundle |
@@ -144,7 +145,7 @@ nothing exits 3 and is never counted as green.
 | `verify_death_clips` | that every clip `ChooseDeathMotion` can put on a dying class-0x30 actor is baked for that spawn's own character type -- the only check that reads a death clip out of a real bundle, and the one that says whether an actor can leave state 12 at all, since that state's exit is an exact `obj+0x19C >= 0x3C` against a play clock that is 0 for a clip nothing carried | bundle |
 | `verify_cam_waits` | that every `wait_camera_path_frame <n>` asks for a frame the play in force actually publishes -- the only check that holds the three routines that publish a camera frame against the scripts that wait on them, and the one that says the strict `frame > operand` of `EvtOpWaitCameraPathFrame41` is safe to transcribe. Model scene state 7 as stopping on its range's end rather than one past it and twenty of the sites it checks become gates nothing can open | bundle |
 | `game:annotations` | that every row of `ghidra/annotations/*.tsv` is an address in a real section of the EXE -- functions in `.text` -- with no address or name listed twice and none in both files | game-dir |
-| `verify_ghidra_db` | that the Ghidra database every session decompiles from says what `ghidra/annotations/` says -- every prototype and no-return flag in `prototypes.tsv` applied, no flag it does not declare -- and that no `CALL` to a function that returns carries the `CALL_RETURN` override that prints as a clean `return;`: the only check that reads the database rather than the exe, and so the only thing that can say the pseudocode is not missing code (L89). Asserts nothing without Ghidra or a project | game-dir |
+| `verify_ghidra_db` | that the Ghidra database every session decompiles from says what `ghidra/annotations/` says -- every prototype and no-return flag in `prototypes.tsv` applied, no flag it does not declare, and no database name one the file has renamed away from, which the next `export-annotations` would put back (L90) -- and that no `CALL` to a function that returns carries the `CALL_RETURN` override that prints as a clean `return;`: the only check that reads the database rather than the exe, and so the only thing that can say the pseudocode is not missing code (L89). Names and comments still on their way in either direction are counted, not failed. Asserts nothing without Ghidra or a project | game-dir |
 | `game:prop_pose` | that every class-0x41 generic prop is posed in the order its own update routine poses it -- read out of the EXE per type and matched to the field each `MatrixRotate*` is handed -- that both copies of the generic slot tables are what the routines and the shipped `+0x11C` words say, and that `render/breakables.ts` composes a pose in one place, from the table | game-dir |
 | `game:prop_tables` | that the tables class 0x41 types 38, 39, 40, 44, 50 and 66 build their objects from -- positions, angles, hull corners, slots, counts, scales -- and class 0x28's route, length and pose tables are the EXE's own words, compared as 32-bit patterns against the values the port evaluates; a mistyped row puts a church chair where the engine does not, with nothing else to notice | game-dir |
 | `game:flag_strips` | that `class12Tail`, the exporter's read of class 0x12's descriptor tail, takes each field at the offset and width `ScriptedPropInit12` loads it, decoded out of the EXE; that every class-0x12 spawn on the disc is placed with exactly those fields; and, with a bundle, that every slot its strip can draw is in it | game-dir |
@@ -166,7 +167,7 @@ nothing exits 3 and is never counted as green.
 | `game:bone_cels` | that every cel run `ZombieDrawBonePart` (`FUN_004534A0`) draws is the arithmetic in the EXE and is in the bundle -- no table in the image names those models, so this is the only thing standing between a hand-written run and a character losing a part | game-dir |
 | `baseline` | that the installed assets still hash to `manifest.csv` | game-dir |
 
-22 of them need the installed game and 28 need an exported
+22 of them need the installed game and 29 need an exported
 bundle. **That is a known hole, not a design:** a machine with
 neither cannot run the checks that compare two histories, and a
 bundle-free fixture is the open work that closes it.

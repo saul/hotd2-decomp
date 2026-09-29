@@ -91,12 +91,13 @@ list[n++] = {obj, obj+0x34, obj+0x12C, obj+0x130, obj+0x134}
 The depth test is `FCOMP [0x004C436C]` (`0.0`) / `TEST AH,0x41`, which passes
 on less, equal and unordered. A mesh object (`0x10`) is taken at any depth.
 
-**Who calls it.** `get_xrefs_to 0x00405160` lists 53 callers. A scan of the
-image for `E8`/`E9` rel32 whose target is `0x00405160` finds **95**, and there
-is no absolute pointer to it anywhere, so the 95 are the set. The 42 Ghidra
-misses are in bytes it has not disassembled, most past a `MatrixStackPop` it
-calls no-return (`L35`). The one that matters is `ActorRegisterCameraPoint`
-(`FUN_00409B70`):
+**Who calls it.** A scan of the image for `E8`/`E9` rel32 whose target is
+`0x00405160` finds **95**, and there is no absolute pointer to it anywhere, so
+the 95 are the set. `get_xrefs_to 0x00405160` listed 53 while the database
+carried `MatrixStackPop`'s flow overrides; since the repair (`L89`) it lists
+94, and the one it still misses is `BatSwarmUpdate`'s second call at
+`0x0042F5B3`, in bytes it has not disassembled. The site that hid longest is
+`ActorRegisterCameraPoint` (`FUN_00409B70`):
 
 ```
 00409BA3  obj+0x70..0x78 = g_camera_world_to_view * obj+0x100..0x108
@@ -257,6 +258,31 @@ The render pick offered them like any actor, and `ResolveHit` then gave the
 body a death clip -- stage 1's man under the library desk fell over again.
 The flag, with no registration site, is what keeps them out.
 
+**Class 0x25, the scripted humanoids, is the same** `[proved]`, and the
+evidence is the bytes rather than the xref list. The scan above finds 95
+calls to `RegisterForShotTest`, 17 to `ActorRegisterCameraPoint` and 22 to
+`RegisterForCameraTracking` (`FUN_00408EC0`), and no absolute pointer to any
+of them; none lies in the class's code, `0x004840D0`..`0x00485F8F`. A
+recursive descent from its thirteen routines -- `ScriptedHumanoidInit`, the VM
+`ScriptedHumanoidUpdate`, `ScriptedHumanoidIdle`, the four routines `op 17`
+installs or calls, `ScriptedHumanoidDraw`, `ScriptedHumanoidBoneDrawHook`, the
+head aim and its seed, and `SpawnTumblingModelAtBone5` (`FUN_00485DE0`) with
+the object it makes, `TumblingModelUpdate` (`FUN_00485F00`) -- treating every
+`CALL` as returning, following every jump table and every code pointer the
+reached code installs (the skinned model's hooks, the sprite and blood draw
+tasks), through all 233 routines it reaches, the part drawers
+`g_character_part_drawers` and `AssetRunJob`'s table included, reaches none
+of the 134 sites. The class never writes `obj+0x34`, either. So no shot in
+the game touches a scripted humanoid. 133 of its 137 spawns carry `0x8000` in
+their record, which `RegisterForShotTest` would refuse anyway and the render
+pick already honoured; the other four are stage 2's jetty zombies (evt
+43584 and 43740 in block 16, 55372 and 55536 in block 20), which the render
+pick could find: driven at `16/15/4` while the gun is live, its first pull
+found 43584 through the corner of the building it stands behind, and
+`ResolveHit` killed it for ninety points (`web/tools/humanoid_shot_page.mjs`;
+block 20's pair was not driven). The class sets the flag and registers nowhere, and answers
+`invulnerable`, so the debug clear leaves it too.
+
 **The mesh arm.** `ShotTestBoneTree` takes `ShotTestBoneMesh` (`FUN_004048A0`)
 for a record whose `+0x74` has bit `0x10` and whose `+0x88` names a blob; the
 skeleton build writes `0x21`, and two `Init`s raise the bit: `Boss4Init`, for
@@ -380,10 +406,11 @@ list instead:
   other site it listed, `0x0043FB76`, is `ScriptedPropUpdate12`'s, class
   0x12's door (`game/class12/`, now filed and tested as a mesh). Where
   `0x52` registers is `[open]`.
-* Class `0x25`: `[likely]` none. No site lies in its routines, and every shared
-  routine that registers is accounted for above. The exception is
-  `FUN_004825B0` (`0x00482991`), a task `FUN_00482070` allocates, whose owner
-  is `[open]`. Class `0x42`'s worms register through `WormUpdate`
+* Class `0x25`: **none**, `[proved]` -- see *A class that never registers*
+  above. `FUN_004825B0` (`0x00482991`), a task `FUN_00482070` allocates, was
+  the one site this line could not rule out; nothing class 0x25 runs reaches
+  either routine, so whose task it is stays `[open]` and it is not class
+  0x25's. Class `0x42`'s worms register through `WormUpdate`
   (`FUN_0042FCA0`, `0x00430AF6`) and `WormLoneDropUpdate` (`FUN_00431000`,
   `0x004311EA`), which `PlaceWormBatch` installs, each as one sphere
   (`game/class42/`).

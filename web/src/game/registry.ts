@@ -343,8 +343,9 @@ export interface ClassHandler {
    * shot, which is the engine's rule and the point of the flag.
    *
    * **A class whose routines never register sets it too**, and registers
-   * nowhere: class 0x24, whose set-pieces the exe never files, so no shot
-   * reaches them. Unset, `render/` would offer such an actor to every shot.
+   * nowhere: class 0x24, whose set-pieces the exe never files, and class
+   * 0x25, whose scripted humanoids it never files either, so no shot reaches
+   * them. Unset, `render/` would offer such an actor to every shot.
    *
    * Absent means the class is picked the way it always has been. See
    * `combat/shot_test.ts`.

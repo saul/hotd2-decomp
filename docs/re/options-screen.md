@@ -97,9 +97,9 @@ but the arm's copy** -- every direct, indexed and based operand covering
 `0x009C9F22` was searched, and the pointer dwords of every section -- while
 `FUN_0040A920` writes 1 over it at every boot, after the load (`0x0040A99B`)
 `[proved]`. So in this build it is 1 ("Green") and changes nothing.
-`render/bloodcolour.ts`'s claim that the option "loads one bank over the
-other" is therefore not this exe's: nothing here loads `scr_blood_red.bin`
-by it `[open]` who does.
+`render/bloodcolour.ts`, `texbank.md` and `combat.md` used to say the
+option "loads one bank over the other"; it does not, and they say so now.
+What loads `scr_blood_red.bin`, if anything, is `[open]`.
 
 ### The cursor
 

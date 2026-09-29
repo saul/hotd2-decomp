@@ -1245,10 +1245,11 @@ export const ScriptedHumanoidHandler: ClassHandler = {
   // `SpawnTumblingModelAtBone5` (`FUN_00485DE0`) with the object it makes --
   // through every call, jump table and installed code pointer they reach,
   // no-return marks ignored, reaches none of those 134 sites. So no bullet in
-  // the game touches a scripted humanoid. The render pick found the four
-  // whose spawn record leaves bit `0x8000` clear -- stage 2's jetty zombies,
-  // blocks 16 and 20 -- and `ResolveHit` killed them through the corner of
-  // a building for ninety points (`tools/humanoid_shot_page.mjs`).
+  // the game touches a scripted humanoid. The render pick could find the
+  // four whose spawn record leaves bit `0x8000` clear -- stage 2's jetty
+  // zombies, blocks 16 and 20 -- and did: block 16's first, through the
+  // corner of a building, and `ResolveHit` killed it for ninety points
+  // (`tools/humanoid_shot_page.mjs`).
   registersForShotTest: true,
   // ...and the debug clear takes nothing a shot could not: the Kill button
   // used to kill every scripted humanoid in the pool, a cut scene's whole

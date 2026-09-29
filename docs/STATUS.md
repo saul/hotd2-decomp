@@ -18,7 +18,7 @@ than a measurement. What each directory is for is in
 
 | Directory | Lines | Files | Layer |
 |---|---:|---:|---|
-| `game/` | 110272 | 361 | engine |
+| `game/` | 110273 | 361 | engine |
 | `hod2lib/` | 19994 | 35 | engine |
 | `render/` | 15804 | 60 | render |
 | `app/` | 12685 | 44 | app |
@@ -28,7 +28,7 @@ than a measurement. What each directory is for is in
 | `bundle/` | 2921 | 11 | engine |
 | `audio/` | 1053 | 3 | render |
 | `hud/` | 526 | 1 | ui |
-| **total** | **175058** | **580** | |
+| **total** | **175059** | **580** | |
 
 The largest files, which is where the pressure to split next is:
 

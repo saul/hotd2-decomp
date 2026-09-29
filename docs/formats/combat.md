@@ -276,10 +276,11 @@ of the 134 sites. The class never writes `obj+0x34`, either. So no shot in
 the game touches a scripted humanoid. 133 of its 137 spawns carry `0x8000` in
 their record, which `RegisterForShotTest` would refuse anyway and the render
 pick already honoured; the other four are stage 2's jetty zombies (evt
-43584 and 43740 in block 16, 55372 and 55536 in block 20), and the render
-pick found them -- through the corner of the building they stand behind,
-while the gun is live at `16/15/4` -- and `ResolveHit` killed them for ninety
-points. The class sets the flag and registers nowhere, and answers
+43584 and 43740 in block 16, 55372 and 55536 in block 20), which the render
+pick could find: driven at `16/15/4` while the gun is live, its first pull
+found 43584 through the corner of the building it stands behind, and
+`ResolveHit` killed it for ninety points (`web/tools/humanoid_shot_page.mjs`;
+block 20's pair was not driven). The class sets the flag and registers nowhere, and answers
 `invulnerable`, so the debug clear leaves it too.
 
 **The mesh arm.** `ShotTestBoneTree` takes `ShotTestBoneMesh` (`FUN_004048A0`)

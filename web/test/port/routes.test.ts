@@ -481,6 +481,13 @@ console.log("\na replay does not rebuild a rescue target it has played past:");
       motion: 0, hp: 0, body_condition: 0, initial_state: 0,
       attack_state: 0, ring_set: 0, yaw: 0,
       class46: { subtype: 2, group: 0, member: 0 },
+    }, {
+      // Class 0x42 answers per record too: the lone drop counts nothing, so
+      // the record here is the cog's batch, sub-type 0, whose members
+      // `PlaceWormBatch` counts one by one (`INC` `0x0042FBBF`/`0x0042FBC6`).
+      at: recAt(SpawnClass.Worm), class: SpawnClass.Worm, char_type: -1,
+      motion: 0, hp: 1, body_condition: 0, initial_state: 0,
+      attack_state: 0, ring_set: 0, yaw: 0, class42: { subtype: 0 },
     }] } as unknown as CharactersJson, undefined, undefined, undefined);
     const left: string[] = [];
     for (const cls of ENEMY_CLASSES) {

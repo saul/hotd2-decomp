@@ -427,7 +427,10 @@ in a **debug sidebar** closed until asked for:
 **Everything that is not the game is off by default.** On a desktop the frame
 fills the window at the game's vertical FOV; on a touch screen it is boxed to
 4:3 (`pillarbox`), because a phone held sideways would otherwise show far more
-than the game's 53 degrees across. Every overlay and debug aid starts off.
+than the game's 53 degrees across. **The result card boxes it whatever the
+switch says** (`Player.boxed`): its tiles are the 640x480 screen with a window
+cut in it for the flight, and a wider frame shows the level running on past
+its edges. Every overlay and debug aid starts off.
 
 **A reload is not a new visit.** Vite reloads the page on every edit, so the
 tab keeps the sidebar, its tab and its folds (`ui/persist.ts`), the game's own

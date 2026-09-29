@@ -338,6 +338,16 @@ single-frame poses `0x18B..0x18D` `[likely]`, from the render. The glyphs read
 `RESCUED X n`, `LIFE BONUS X n`, `1P SCORE` and `ACCURACY` -- the font reading
 of section 3, confirmed by the picture.
 
+Two things the picture got wrong until the player was fixed, both the
+renderer's and neither the exe's: the figures had **no waist** -- the
+vertex-blended part `SkeletonDrawWalk` (`FUN_004110D0`) draws through
+`DrawCharacterPart`, which the renderer's per-figure clone of the type's
+template left bound to the template's bones (`render/characters.ts`,
+`cloneTemplate`) -- and in a window wider than 4:3 the level showed past the
+card's left and right edges, since the tiles are the 640x480 screen. The
+player now boxes the frame to 4:3 while bit `0x10` of
+`g_screen_furniture_flags` is up (`Player.boxed`).
+
 ## 8. What is still open
 
 * What the motions depict is `[likely]` only, from the render (section 7):

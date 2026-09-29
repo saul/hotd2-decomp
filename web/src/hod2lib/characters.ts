@@ -134,7 +134,7 @@ export function class20Tail(rec: Spawn): Record<string, unknown> {
  * and the port still needs the placement to build them.
  */
 export const SLOT_DRAWN_CLASSES = new Set([0x12, 0x13, 0x16, 0x17, 0x26, 0x33,
-                                           0x40, 0x43, 0x51, 0x52]);
+                                           0x40, 0x42, 0x43, 0x51, 0x52]);
 
 /**
  * Class 0x17's descriptor tail, as `WaterWaveSourceAdd` (`FUN_004422D0`) and
@@ -443,6 +443,21 @@ export function class43Tail(rec: Spawn): Record<string, unknown> {
     subtype: b ? s8(b[at + 1]) : 0,
     member: Math.max(0, (rec.hp ?? 1) - 1),
   };
+}
+
+/**
+ * Class 0x42's descriptor byte: `desc+0x25`, the sub-type.
+ *
+ * Every one of the three spawns uses `spawn_placed` (0x09), whose allocator
+ * copies `desc+0x25` into `obj+0x130C`, and `PlaceWormBatch` (`FUN_0042F9B0`)
+ * switches on nothing else: 0 the cog's batch, 1 the lone drop, 2 the large
+ * batch. The count, the offsets and every per-member number are in the EXE,
+ * and the position and yaw are the spawn record's. See `game/class42/`.
+ */
+export function class42Tail(rec: Spawn): Record<string, unknown> {
+  const b = rec.evt?.raw;
+  const at = rec.offset + 0x25;
+  return { subtype: b ? ((b[at] ?? 0) << 24) >> 24 : 0 };
 }
 
 /**
@@ -1772,6 +1787,7 @@ export async function resolveForStage(
     const class11 = cls === 0x11 ? class11Tail(rec) : null;
     const class43 = cls === 0x43 ? class43Tail(rec) : null;
     const class46 = cls === 0x46 ? class46Tail(rec) : null;
+    const class42 = cls === 0x42 ? class42Tail(rec) : null;
     const class40 = cls === CLASS40 ? class40Tail(rec) : null;
     const class51 = cls === 0x51 ? class51Tail(rec) : null;
     const class52 = cls === 0x52 ? class52Tail(rec) : null;
@@ -1889,6 +1905,7 @@ export async function resolveForStage(
     p.class11 = class11;
     p.class43 = class43;
     p.class46 = class46;
+    p.class42 = class42;
     p.class40 = class40;
     p.class51 = class51;
     p.class52 = class52;

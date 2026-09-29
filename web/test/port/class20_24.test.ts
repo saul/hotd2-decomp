@@ -30,7 +30,10 @@ import {
   DROP_GRAVITY, SLIDE_FRAMES, SLIDE_VX, SLIDE_VZ,
   type SetPieceParams,
 } from "../../src/game/class24";
-import { check, CHARS, EnterPlay, propScene } from "./harness";
+import {
+  HumanoidCond, HumanoidOp, type HumanoidProgram,
+} from "../../src/game/class25";
+import { check, CHARS, EnterPlay, propScene, jettyScene } from "./harness";
 
 // -- 9b. class 0x20, the one-hit target -------------------------------------
 
@@ -517,6 +520,61 @@ console.log("\nclass 0x24 is never shot:");
     const hp = a.hp;
     ActorKillAll(rng);
     check("the Kill button leaves a set-piece standing, with no death clip",
+          !a.dead && a.death === null && a.hp === hp
+          && (a.flags & ActorFlag.Dead) === 0,
+          `dead ${a.dead} death ${JSON.stringify(a.death)} hp ${a.hp}`);
+  }
+}
+
+console.log("\nclass 0x25 is never shot:");
+{
+  // Nothing class 0x25 runs calls `RegisterForShotTest` (`FUN_00405160`), in
+  // its thirteen routines or anything they reach. The program is stage 2's
+  // jetty zombie, evt 43584 -- one of the four class-0x25 spawns whose record
+  // leaves bit `0x8000` clear, so nothing but the class keeps it out -- from
+  // the reset, through every frame of its hold, its stumble, its fall back and
+  // its splash.
+  const JETTY_PROGRAM: HumanoidProgram["cmds"] = [
+    { op: HumanoidOp.WaitThenHold, mode: HumanoidCond.Always, a: 0, b: 0 },
+    { op: HumanoidOp.WaitThenPlay, mode: HumanoidCond.CameraAt, a: 79, b: 100 },
+    { op: HumanoidOp.WaitUntil, mode: HumanoidCond.CameraAt, a: 79, b: 160 },
+    { op: HumanoidOp.SetBoneModel, mode: 0, a: 2, b: 0 },
+    { op: HumanoidOp.SetMotionBlended, mode: 5, a: 977, b: 0 },
+    { op: HumanoidOp.WaitUntil, mode: HumanoidCond.MotionFrame, a: -1, b: 0 },
+    { op: HumanoidOp.SetMotionBlended, mode: 5, a: 1024, b: 0 },
+    { op: HumanoidOp.WaitUntil, mode: HumanoidCond.Frames, a: 20, b: 0 },
+    { op: HumanoidOp.SetBoneModel, mode: 0, a: 2, b: 1 },
+    { op: HumanoidOp.SetMotionBlended, mode: 5, a: 972, b: 0 },
+    { op: HumanoidOp.Handoff, mode: 0, a: 0, b: 0 },
+    { op: HumanoidOp.End, mode: 0, a: 0, b: 0 },
+  ];
+  const h = g_class_handlers[SpawnClass.ScriptedHumanoid];
+  check("it is picked the engine's way, through the registration list alone",
+        h?.registersForShotTest === true, `${h?.registersForShotTest}`);
+  {
+    const { a, frame } = jettyScene(JETTY_PROGRAM);
+    check("the pick is game/'s, not render/'s: ShotTestPickedHere",
+          ShotTestPickedHere(a) && (a.flags & ActorFlag.NoShotTest) === 0,
+          `flags 0x${a.flags.toString(16)}`);
+    let listed = 0;
+    let frames = 0;
+    for (let f = 1; f <= 600 && !a.dead; f++) {
+      G.g_cam_path_frame = Math.min(f, 179);
+      frame();
+      frames = f;
+      if (G.g_shot_test_list.some((e) => e.at === a.at)) listed += 1;
+    }
+    check("...and no frame of its program, to the splash, registers it",
+          listed === 0 && a.dead, `${listed} of ${frames} frames listed, `
+          + `dead ${a.dead}`);
+  }
+  // The debug clear takes only what a shot could.
+  {
+    const { a, rng } = jettyScene(JETTY_PROGRAM);
+    const hp = a.hp;
+    ActorKillAll(rng);
+    check("the Kill button leaves a scripted humanoid standing, with no death "
+          + "clip",
           !a.dead && a.death === null && a.hp === hp
           && (a.flags & ActorFlag.Dead) === 0,
           `dead ${a.dead} death ${JSON.stringify(a.death)} hp ${a.hp}`);

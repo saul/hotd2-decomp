@@ -25,15 +25,16 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
   "approach.ts": "f2458fca4f4f943e775d2f73237eef7bf925b37dc38ba653bc89f80d3e800443",
   "arcscript.ts": "7caad5bd4d03804b253c16c8beabccf0f3f1787485e6bbe553d8f32e0395719f",
   "bams.ts": "f03b1290866a63ab2ae764d49bd15c57bd53c6b1a03794f7a0357e8dd842eb8f",
-  "bundle.ts": "6f3cf907a0f9497d79726b00298d9df9f3d89d29b01e801476d625797fc9fd3f",
+  "bundle.ts": "6495528022ae0430e42c4a9bf8d68ce12fbdffda174d0fd5174fecb7481387c8",
   "bytes.ts": "59b2f363e98da56e88ada59458239032e40cad3a27342659e213d849c0967168",
   "cam.ts": "fe50200cb57c6578681a121766e7a5f4ed2425d91996169f83a82e8375dd63c3",
   "campaths.ts": "fbe28df3265d37b60a006e937a926eca8546609aa29cc5d80e7f1fc9afd639be",
-  "characters.ts": "32c3328eea892c5af67ce535cdbb41946a4d4310447f86f824d4bcd5bf0f30ba",
+  "characters.ts": "6777c7152be15e8a80a78fa1146e0d89939b396211577c766e378e240b6d6463",
   "charbuild.ts": "416611a1468ce0b1511c55205a153e3fbdcd47d0a514a1af2733c92572e260d9",
   "charmotion.ts": "ff8ee2ae3fe5c9f0c41c6c389b8c864660e99cf79e741d46f7041852a476b825",
   "class14.ts": "e143aab15d3067812e27d18bdd8b35b4b6fc45d6091948c7b8920bf4350a512a",
   "class31.ts": "75b98d9764cd40de62b8f0eef507f48b834b920c8982e6772ad0d12cc2701adf",
+  "class42.ts": "4f1400a663e6dd158b008b7a567fb56d9918901a6c0908e3118fae4c4d0002d6",
   "coli.ts": "02fc9b735e70604a7c4af33ee0598d27ed21f84e1cb1ad7a98ad8433d6eac82a",
   "combat.ts": "8e15b0f7bc0471bd2694cf05d6ad845e46b03dae3abbc162d9355754a2288ab1",
   "container.ts": "11b185957d66a5123097e51aadb5ae66760d11f8c9f69a1c128c58c4045e3e40",
@@ -60,7 +61,7 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
   "lz.ts": "dddff2029ebd1cafc686d25b57da5e5ad8e22fdb2febf4af4988651d627aa80e",
   "mot.ts": "114f3ffa4e967dcdb69ea6919ec21b83d6ff9d1f6754d2a7f9e0fd1d3d1a3952",
   "nl1.ts": "c87a503b1b5b616ade85541b8a222652f93c83c0655da4b3cea6b211e3c321a6",
-  "placement.ts": "d6039914c923c8c05537977136c72aaaeaacc87a96cd93f72ecfed9b569ec5b6",
+  "placement.ts": "da4d4501dc0d0a1d7e67db8e56aed9f600bf983a5ebb4e9dc28242e77cc1d939",
   "png.ts": "326d5417b68475ad54b90e2a91a1f68ca3859d6ba044582928a13459b4afa50b",
   "props.ts": "d35390a2133ba2a01699b20cb3ca086b260eb540724137b3f22118b257adbed6",
   "rigs.ts": "fb13c2083f25a66399a1350bbb03e066c6bd3d69f390915df22416409475421e",
@@ -73,4 +74,4 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
 };
 
 /** One digest over {@link BUILDER_FILES}, in filename order. */
-export const BUILDER_HASH = "51ef5c8fd499614d4eadfaf05e43b34ebde68a333d699ec77424acdc3ddc10e4";
+export const BUILDER_HASH = "7f8587c8bc996cdd6b255a400068f20269c9b76c1544d4a25b863a60b98dc8c0";

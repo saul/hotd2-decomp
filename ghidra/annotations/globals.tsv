@@ -7,6 +7,11 @@
 #
 # Windows TEB fields and resource labels are excluded: Ghidra creates those itself.
 #
+# **The comment column is this file's.** apply-annotations writes it over the
+# database's whenever the two differ; export-annotations never replaces a
+# non-empty one, and lists the ones the database disagrees with. Edit a
+# comment here, with npm run annotate, not over MCP (docs/LESSONS.md L90).
+#
 # **Rows are sorted by address, and every writer must keep them that way.**
 # npm run annotate inserts in order; ExportAnnotations.java re-sorts on write.
 # The file used to be append-only and grouped into topical sections, and both
@@ -76,6 +81,15 @@
 004edaec	g_character_part_drawers	Per character type, a pointer to an array of draw routines, one per entry in that type's g_pCharacterExtraParts list. DrawCharacterPart calls g_character_part_drawers[char_type][i](i).
 0052ea38	g_class17_subpart_records	Eight records for character type 0x17's part 1, stride 0x10: {s32 bone; s32 asset_slot; u32 mesh_info; u32 draw_info}. Read only by BuildCharacterPartSubparts.
 0052ed08	g_pCharacterExtraParts	{u32 count; u32 *descriptors[]} per character type -- the VERTEX-BLENDED parts, which are not in the skeleton because they are not rigid to one bone. BuildCharacterPart makes each one a private copy of the model's vertex buffer and re-transforms up to four groups of its vertices by four different bone matrices every frame (g_character_part_bones), then draws the whole slot in a fifth bone's space. 68 of 76 types have one or two; the cat has none. Part 0 is the waist, which spans the upper body and the pelvis, and without it a humanoid has a hole there. Part 1 is the skirt, over the pelvis and both thighs -- its slot is the PELVIS MODEL ITSELF, and SkeletonNodeDrawSuppressed is what stops bone 9 also drawing it rigidly.
+0055d2e0	g_worm_crawl_steps	s16[60] hundredths: WormUpdate state 3 moves (step[i+1] - step[i]) * 0.01 * 0.6 along its yaw for i = +0x1E8 < 0x3B. [proved]
+0055d358	g_worm_crawl_scale	s16[59][3] ten-thousandths: state 3's scale, (v * 0.0001 - 1) * k + 1, k 0.8 in block 0x15 and 0.3 elsewhere; the index stops at 0x3A. [proved]
+0055d4c0	g_worm_leap_path	s16[28][2] {rise, reach} hundredths: rows 0x20..0x3B of the table WormUpdate state 5 indexes as 0x0055D440 + +0x1E8 * 4, read only while +0x1E8 > 0x1F. [proved]
+0055d530	g_worm_leap_scale	s16[60][3] ten-thousandths: state 5's scale by +0x1E8, and row 0 is what the leaper swells to in state 4. [proved]
+0055d698	g_worm_offsets_6_8	s8[8][2] tenths: sub-type 0's member x/z offsets from the placer. [proved]
+0055d6c0	g_worm_offsets_10_15	s8[15][2] tenths: sub-type 2's. [proved]
+0055d6e8	g_worm_drop_delay	u8[15]: the frames a member sits in WormUpdate state 0 before it falls. [proved]
+0055d6fc	g_worm_yaw_offsets	s32[15] BAMS added to the placer's yaw, per member. [proved]
+0055d74c	g_worm_orbit_phase	s32[15] BAMS: + 0x7800 into +0x1E4, the orbit angle WormUpdate state 0 turns in block 0x15. [proved]
 0055dd18	g_class28_fixed_poses	{f32 x, y, z; i32 rx, ry, rz}, stride 0x18, indexed by obj+0x11C; read only by PathRidingPropUpdate in g_app_state 10. Rows 0 and 1 are op_st1 72's and 73's first keys (-1021.62, -8.04, -497.51 / 0, 0x1CA6, 0; -1021.89, 1.18, -460.22 / -2607, 0x8000, -0x4000); rows 2 and 3 fall into the data after it (L6), and no shipped spawn is 2 or 3. [proved]
 0055dd80	g_result_figure_records	The result card's figure records, 0x14 bytes: +0x00 s16 character type (-1 ends a list), +0x02 s16 motion, +0x04/+0x08/+0x0C f32 position, +0x10 s32 yaw (BAMS). Four lists back to back -- scene 0 at 0x0055DD80 (5), scene 1 at 0x0055DDF8 (7), scene 2 at 0x0055DE98 (4), scenes 3-5 at 0x0055DF00 (3) -- reached only through g_result_figure_lists. The types are each stage's rescuable civilians (stage 1: 0x27 0x2E 0x31 0x26 0x20); the motions are 0x17C, 0x17D, 0x17F. ResultCardInstall reads record i for rescue i with no bound, so a scene with more rescues than records reads the terminator and then whatever follows. [proved]
 0055df50	g_result_figure_lists	Six pointers, one per scene, into g_result_figure_records. Read by ResultCardInstall (0x00434F06) and ResultCardTally (0x0043595A) and nothing else in the image. [proved]
@@ -407,6 +421,9 @@
 007dc800	g_boss3_opening_bystander_yaw	s32: the opening bystander's yaw at init. Written and not read by this class. [proved]
 007dc80c	g_boss3_rank	s8 0..15: the heads' own adaptive rank, seeded from GetDamageRank, +1 per head hit, -3 per bite that lands; indexes g_boss3_attack_delay_by_rank. [proved]
 007dc918	g_bat_members	The live class 0x46 actors, 25 slots per sub-type indexed obj+0x1374 * 0x19 + obj+0x1377. Written every frame by each bat's own update and cleared on despawn. It is not bookkeeping: BatWingUpdate reads it to find the body it is drawn on, and despawns itself the frame the slot goes empty, which is the whole mechanism by which the wings follow the bat and die with it. The four sub-type-0 flights all share slots 0..5, which is safe only because no two of them are ever in play at once.
+007dca48	g_worm_leaper	s8: the worm member whose turn it is to leap (WormUpdate state 4). Drawn at random over the live members at the placement and after a kill, handed to the next live member after a leap or when its own is gone. Every access is in PlaceWormBatch and WormUpdate (byte pattern 48ca7d00). [proved]
+007dca49	g_worm_live_count	s8: members of the worm batch not yet killed or gone. PlaceWormBatch zeroes and counts it, WormUpdate decrements it on a kill and on the state-6 exit (byte pattern 49ca7d00: nothing else). [proved]
+007dca4c	g_worm_members	15 member pointers by index: every WormUpdate call writes itself back, and the kill and the state-6 exit write 0 (byte pattern 4cca7d00: nothing else). [proved]
 007dcbb0	g_water_level	seeded to -24.90; class 0x16/0x17 own the wave field
 007dcbb8	g_frog_bone1_on_entry	Class 0x11's file-scope vec3 (0x007DCBB8/BC/C0): FrogUpdate writes it once per frame, before any state runs (0x0043A282..0x0043A28D), as the translation of g_camera_blocks[g_camera_index] (view to world) times part+0x130 -- bone 1's draw record, which the LAST draw left in view space -- so it is bone 1 where it was last drawn, carried into the world through THIS frame's camera. FrogPushOutOfActorCollision reads x and z only (0x0043A5A9, 0x0043A59F) as the start of the frame's travel; y is written and never read. No other reference, by xref and by byte search. [proved]
 007dcbd0	g_horde_live_count	Members PlaceHorde made, less the ones killed while more than one remained. HordeCorpseSinkUpdate registers the corpse for camera tracking only while this is 1.

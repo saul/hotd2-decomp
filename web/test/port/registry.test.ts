@@ -550,6 +550,7 @@ console.log("\n`g_class_handlers`, filled by the classes themselves:");
     [SpawnClass.PropPlacer, "0x44 prop placer"],
     [SpawnClass.Boss3, "0x45 stage-3 boss"],
     [SpawnClass.HordeSpawner, "0x40 horde"],
+    [SpawnClass.Worm, "0x42 worm"],
     [SpawnClass.Bat, "0x46 bat"],
     [SpawnClass.WaterEnemy, "0x51 fish"],
     [SpawnClass.Mouse, "0x52 mouse / branch trigger"],
@@ -568,12 +569,12 @@ console.log("\n`g_class_handlers`, filled by the classes themselves:");
         && want.every(([c]) => PORTED_CLASSES.includes(c)),
         PORTED_CLASSES.map((c) => `0x${c.toString(16)}`).join(","));
   // The cat is 0x53 and now has one -- its sub-type 2 is a route-branch
-  // trigger -- and 0x40, the horde, has one too. Class 0x42, the falling
-  // breakables, still has none: an unported class must stay absent rather
-  // than fall back to anything, because an `if` is what had the cat running
-  // the zombie's state machine.
+  // trigger -- and 0x40, the horde, and 0x42, the worm, have one too. Class
+  // 0x2D still has none: an unported class must stay absent rather than fall
+  // back to anything, because an `if` is what had the cat running the
+  // zombie's state machine.
   check("a class with no module has no row",
-        g_class_handlers[0x42 as SpawnClass] === undefined);
+        g_class_handlers[SpawnClass.LargeCreature] === undefined);
 
   // Loud, not last-one-wins. A row silently overwritten by a second module is
   // a class whose behaviour depends on evaluation order.

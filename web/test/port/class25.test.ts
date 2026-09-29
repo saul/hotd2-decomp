@@ -23,7 +23,9 @@ import {
   type HumanoidProgram,
 } from "../../src/game/class25";
 import { HumanoidRoutine } from "../../src/game/class25/state";
-import { check, motion, TYPE, CHARS, slotsShown, EnterPlay } from "./harness";
+import {
+  check, CHARS, slotsShown, EnterPlay, JETTY_CHARS, jettyScene,
+} from "./harness";
 
 // -- 9. class 0x25, the scripted humanoid VM -------------------------------
 
@@ -528,42 +530,6 @@ console.log("\nclass 0x25, `op 4` mode 4 waits for the actor to RECEDE (B13):");
   hFrame(closing.a, closing.events, rng);
   check("...and closing on it does not", closing.a.hum.pc === 0,
         `pc ${closing.a.hum.pc}`);
-}
-
-/**
- * Stage 2's jetty, run the way the page runs it: `GameUpdate` steps the clip
- * and then the class, one 60 Hz frame at a time, from `ResetGameGlobals`.
- *
- * `JETTY_TYPE` is the fixture's type 1 with the three clips the zombies play,
- * at their real shape from `zom.bin`: 977 (16 frames, play length 29), 1024
- * (91, 180) and 972 (31, 59) -- the fall back.
- */
-const JETTY_CHARS = {
-  ...CHARS,
-  types: { "1": { ...TYPE, motions: {
-    ...TYPE.motions,
-    "977": motion(16, 0, 29), "1024": motion(91, 0, 180),
-    "972": motion(31, 0, 59), "805": motion(35, 0, 68), "900": motion(10, 0, 18),
-  } } },
-} as unknown as CharactersJson;
-
-function jettyScene(cmds: HumanoidProgram["cmds"], pos = vec3(-1325, -23, -1834),
-                    motion0 = 1024):
-    { a: Actor; rng: Rng; events: Events; frame: () => void } {
-  ResetGameGlobals();
-  EnterPlay();
-  SetGameTables(JETTY_CHARS, undefined, undefined, { "12288": {
-    charType: 1, removePath: 100, removeFrame: 65, flags2: 1,
-    motion: motion0, phase: 0, cmds,
-  } });
-  G.g_active_cam_path = 79;
-  G.g_cam_path_frame = 0;
-  const rng = new Rng(4);
-  const events = new Events();
-  const a = ActorSpawn(0x3000, SpawnClass.ScriptedHumanoid, 1, "jetty",
-                       { pos, visible: true }, rng);
-  return { a, rng, events,
-           frame: () => GameUpdate(1 / 60, NULL_HOST, rng, events) };
 }
 
 console.log("\nclass 0x25, op 17 mode 0: the jetty zombies fall back ONCE, "

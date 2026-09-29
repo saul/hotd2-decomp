@@ -1059,6 +1059,25 @@ Pages that must see each other take one `browser.newContext()` and call
 
 ---
 
+**L90 -- A merge that lets one side win is only as good as the writer that
+keeps that side current.** `ExportAnnotations` let the database win on a
+function's comment whenever it had one, and `ApplyAnnotations` wrote a comment
+only when it first named a function. So a comment improved with
+`tools/annotate.py` never reached the database, and the next export put the
+database's copy back over it: 19 rows in one run, `RegisterForShotTest`'s 1,415
+characters replaced by the 455 it had in August, reported as a clean
+"19 updated". Each rule was reasonable alone; together they made the older
+copy the authority. Comments are now the file's in both scripts, names stay
+the database's, and an export prints every rename it takes and lists every
+comment it disagrees on rather than settling it. The same run showed the other
+direction is no safer to assume: the 20 names and 2 renames the database had
+"never exported" were committed, with comments, on three branches that never
+reached main, and `CameraTrackEnemiesTick`'s longer database comment called a
+byte "written nowhere in the image" that `CameraResetForPathShot` writes at
+`0x0040322D`. **Before trusting a sync rule, ask who writes each side and
+when. The longer copy is not necessarily the newer one, and a name nobody
+exported may be one nobody merged.**
+
 ## Believing what you are looking at
 
 **L17 — A negative result from one agent is not a fact.** Two agents reported

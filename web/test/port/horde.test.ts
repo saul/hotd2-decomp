@@ -11,7 +11,7 @@ import {
 import {
   PropStripEffectsTick, PropStripKind, SpawnPropStripEffect,
 } from "../../src/game/effects/prop_strip";
-import { G, ResetGameGlobals } from "../../src/game/globals";
+import { ActorByAt, G, ResetGameGlobals } from "../../src/game/globals";
 import { NULL_HOST, type GameHost } from "../../src/game/host";
 import {
   HordeFormation, HordeKind, HordeMemberAt, HordeState, HordeUpdate,
@@ -20,6 +20,13 @@ import {
   EmergePropState, type HordeTail,
 } from "../../src/game/class40";
 import { makeSubModel, SubModelFlag } from "../../src/game/class40/submodel";
+import {
+  WormClassUpdate, WormCountsForEnemyGate, WormDeathUpdate,
+  WormLoneDropUpdate, WormMemberAt, WormUpdate, WormBodyDraw, WormFlag,
+  WormRoutine, WormState, WORM_LONE_SLOT, SND_WORM_KILLED_A,
+  SND_WORM_KILLED_B, SND_WORM_LAND_A, SND_WORM_LAND_B, type WormTail,
+} from "../../src/game/class42";
+import type { Class42Json } from "../../src/bundle";
 import {
   BodyCreatureState, BodyCreatureUpdate, MarkBodyCreatureShot,
   SpawnBodyCreature,
@@ -40,9 +47,10 @@ import { CarrierTransformPoint } from "../../src/game/carrier";
 import { GameMode } from "../../src/game/game_mode";
 import { vec3, type Vec3 } from "../../src/game/vec";
 import { EffectCode, ResolveHit } from "../../src/game/combat/resolve_hit";
+import { SpawnSlotActor } from "../../src/game/director";
 import {
   check, motion, CHARS, SCENE_MAJOR_PLAYING, spawnZombie, openShutter, scene,
-  EnterPlay, JoinPlayerTwo, coliQuad,
+  EnterPlay, JoinPlayerTwo, run, coliQuad,
 } from "./harness";
 
 // -- the creature `znjoe` releases ------------------------------------------
@@ -1260,4 +1268,456 @@ console.log("\nclass 0x40, the horde:");
         && CarrierDrawSlots(2).join() === "2386,2387"
         && CarrierDrawSlots(9).join() === "2386,2387"
         && CarrierDrawSlots(3).length === 0);
+}
+
+console.log("\nclass 0x42, the worm:");
+{
+  // The class's `.rdata` as `hod2lib/class42.ts` exports it -- every number
+  // here is the EXE's, and `web/tools/checks/worm.ts` holds the exporter to
+  // the image. The two half tracks are the one thing made up: a straight line
+  // down at two units a frame, x one unit out, so a frame can be read back
+  // off a position and frame 0 is not at the origin (L48).
+  const track = (x: number, y0: number) => ({
+    t: Array.from({ length: 60 }, (_, f) => [x, y0 - 2 * f, 0]).flat(),
+    r: Array.from({ length: 60 }, (_, f) => [f * 16, 0, 0]).flat(),
+  });
+  const WORM: Class42Json = {
+    offsets_6_8: [
+      0, 0, -60, -50, 61, 54, 0, 35, -36, -2, 30, 10, -10, 30,
+      10, -10,
+    ],
+    offsets_10_15: [
+      0, 0, -50, -30, 40, -40, 10, 30, -40, 20, 60, 35, 20, 10,
+      -20, -10, -10, -15, 10, 20, -30, 0, -30, 20, -20, 10, -10, -30,
+      0, -20,
+    ],
+    drop_delay: [
+      70, 90, 95, 105, 115, 125, 130, 135, 140, 145, 150, 155, 160, 165,
+      170,
+    ],
+    yaw_offsets: [
+      65024, 1024, 2560, 0, 2048, 3072, 65280, 0, 64000, 768, 2048, 1536, 384, 128,
+      928,
+    ],
+    orbit_phase: [
+      1024, 4096, 0, 2048, 256, 768, 1536, 512, 0, 0, 0, 0, 0, 0,
+      0,
+    ],
+    crawl_steps: [
+      0, -7, -14, -21, -29, -36, -43, -51, -58, -65, -73, -80, -87, -95,
+      -102, -109, -117, -124, -131, -139, -146, -153, -161, -168, -175, -183, -190, -197,
+      -205, -528, -835, -1128, -1405, -1667, -1915, -2148, -2367, -2572, -2764, -2941, -3106, -3257,
+      -3395, -3520, -3633, -3734, -3822, -3898, -3963, -4016, -4058, -4089, -4107, -4124, -4141, -4159,
+      -4177, -4196, -4215, -4235,
+    ],
+    crawl_scale: [
+      5278, 13510, 13501, 5422, 13253, 13390, 5698, 12970, 13173, 6089, 12667, 12863,
+      6580, 12347, 12473, 7154, 12016, 12015, 7797, 11678, 11503, 8491, 11338, 10950,
+      9221, 10999, 10367, 9970, 10666, 9769, 10690, 10355, 9194, 11344, 10077, 8672,
+      11934, 9830, 8200, 12464, 9613, 7777, 12935, 9424, 7400, 13352, 9260, 7068,
+      13715, 9121, 6777, 14029, 9004, 6526, 14296, 8907, 6313, 14518, 8829, 6135,
+      14699, 8768, 5990, 14841, 8722, 5877, 14946, 8689, 5792, 15018, 8668, 5735,
+      15059, 8657, 5702, 15072, 8654, 5691, 14955, 8712, 5785, 14635, 8871, 6040,
+      14156, 9108, 6421, 13566, 9400, 6892, 12910, 9726, 7415, 12234, 10061, 7954,
+      11584, 10383, 8472, 11005, 10670, 8933, 10544, 10899, 9301, 10161, 11089, 9606,
+      9786, 11275, 9905, 9420, 11457, 10197, 9063, 11633, 10482, 8717, 11805, 10758,
+      8382, 11971, 11025, 8059, 12131, 11282, 7750, 12285, 11529, 7454, 12431, 11765,
+      7173, 12571, 11989, 6907, 12702, 12200, 6658, 12826, 12399, 6426, 12941, 12584,
+      6213, 13047, 12754, 6018, 13144, 12910, 5843, 13230, 13049, 5688, 13307, 13172,
+      5555, 13373, 13278, 5444, 13428, 13367, 5357, 13471, 13437, 5293, 13503, 13487,
+      5254, 13522, 13518, 5241, 13529, 13529, 5260, 13520, 13515,
+    ],
+    leap_path: [
+      169, -193, 337, -387, 502, -584, 663, -784, 817, -986, 961, -1192, 1095, -1402,
+      1215, -1616, 1318, -1833, 1404, -2051, 1474, -2269, 1530, -2484, 1572, -2693, 1604, -2897,
+      1625, -3092, 1638, -3278, 1642, -3454, 1640, -3619, 1630, -3771, 1613, -3910, 1590, -4034,
+      1563, -4142, 1535, -4234, 1509, -4311, 1486, -4370, 1470, -4414, 1459, -4440, 1456, -4449,
+    ],
+    leap_scale: [
+      5278, 13510, 13501, 5350, 13528, 13411, 5552, 13580, 13157, 5868, 13663, 12760,
+      6280, 13772, 12243, 6768, 13905, 11629, 7317, 14058, 10941, 7907, 14227, 10199,
+      8521, 14410, 9428, 9141, 14603, 8650, 9749, 14802, 7886, 10327, 15004, 7160,
+      10858, 15206, 6493, 11323, 15404, 5909, 11704, 15595, 5430, 11985, 15775, 5078,
+      12193, 15948, 4802, 12372, 16115, 4538, 12520, 16273, 4293, 12638, 16417, 4074,
+      12727, 16543, 3886, 12786, 16645, 3735, 12815, 16719, 3628, 12814, 16761, 3570,
+      12784, 16767, 3569, 12724, 16731, 3629, 12635, 16650, 3758, 12516, 16518, 3961,
+      12368, 16331, 4245, 12191, 16085, 4615, 11985, 15775, 5078, 11217, 14600, 6853,
+      9809, 12440, 10110, 8439, 10317, 13282, 7785, 9250, 14801, 7733, 9070, 14935,
+      7710, 8926, 15001, 7714, 8817, 15004, 7744, 8739, 14950, 7797, 8690, 14844,
+      7870, 8668, 14692, 7961, 8671, 14498, 8067, 8694, 14268, 8187, 8737, 14008,
+      8319, 8797, 13722, 8458, 8871, 13416, 8604, 8956, 13095, 8754, 9051, 12765,
+      8906, 9152, 12430, 9056, 9258, 12097, 9204, 9365, 11770, 9346, 9472, 11456,
+      9480, 9575, 11158, 9604, 9673, 10883, 9715, 9763, 10635, 9811, 9841, 10421,
+      9890, 9907, 10245, 9950, 9957, 10112, 9987, 9989, 10029, 10000, 10000, 10000,
+    ],
+    halves: [{ motion: 0xbf, ...track(1, 2) }, { motion: 0xc0, ...track(-1, 3) }],
+  };
+  const worm = (o: Actor) => (o as { worm: WormTail }).worm;
+  const HOST: GameHost = { ...NULL_HOST };
+  const frame = (rng: Rng, events?: Events): ClassFrame =>
+    ({ dt: 1 / 60, rng, host: HOST, events });
+  const GROUND = 3.8;
+  // The three descriptors as they ship: stage 2, `desc+0x25` 1, 0 and 2.
+  const LONE_AT = 0xea04, COG_AT = 0xea2c, LARGE_AT = 0x11ec8;
+  const row = (at: number, subtype: number) => ({
+    at, class: SpawnClass.Worm, char_type: -1, motion: 0, hp: 1,
+    body_condition: 0, initial_state: 0, attack_state: 0, ring_set: 0,
+    yaw: 0, class42: { subtype },
+  });
+  const room = (rng: Rng, block: number, players = 1): Events => {
+    G.g_GameMode = GameMode.Arcade;
+    ResetGameGlobals();
+    SetGameTables({ ...CHARS, class42: WORM, placements: [
+      row(LONE_AT, 1), row(COG_AT, 0), row(LARGE_AT, 2),
+    ] } as unknown as CharactersJson);
+    G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    G.g_scene_state_major = SCENE_MAJOR_PLAYING;
+    EnterPlay();
+    if (players === 2) JoinPlayerTwo();
+    G.g_active_player = 0;
+    G.g_scene_index = 1;
+    G.g_evt_block_index = block;
+    G.g_camera_fixed_eye_y = GROUND;
+    void rng;
+    return new Events();
+  };
+  const place = (at: number, subtype: number, pos: Vec3, yaw: number,
+                 rng: Rng) =>
+    ActorSpawn(at, SpawnClass.Worm, -1, "worm placer",
+               { class42: { subtype }, pos, yaw, visible: true }, rng);
+  const member = (placer: number, i: number) =>
+    ActorByAt(WormMemberAt(placer, i));
+  const listen = (events: Events): number[] => {
+    const out: number[] = [];
+    events.on("sound.play", (e) => out.push(e.id));
+    return out;
+  };
+
+  {
+    // Block 21 step 4's cog batch, sub-type 0, at its descriptor's point and
+    // yaw. One player: six.
+    const rng = new Rng(71);
+    room(rng, 0x15);
+    const p = place(COG_AT, 0, vec3(-924, 74.8, -1336), 40432, rng);
+    const ms = [0, 1, 2, 3, 4, 5, 6].map((i) => member(COG_AT, i));
+    check("the cog's placer builds six worms for one player, and goes",
+          p.despawned && ms.slice(0, 6).every((m) => !!m && !m.despawned)
+          && !ms[6], ms.map((m) => (m ? "+" : "-")).join(""));
+    check("...each in both counters from the moment it is placed",
+          G.g_enemies_alive === 6 && G.g_enemies_present === 6
+          && G.g_worm_live_count === 6
+          && ms.slice(0, 6).every((m, i) => G.g_worm_members[i] === m!.at),
+          `${G.g_enemies_alive}/${G.g_enemies_present}/${G.g_worm_live_count}`);
+    // `g_worm_offsets_6_8` row 1 is (-60, -50), a tenth each; the yaw is the
+    // placer's plus `g_worm_yaw_offsets[1]`, 1024.
+    const m1 = ms[1]!;
+    check("member 1 sits a tenth of its offset from the placer, a quarter "
+          + "turn pitched, turned by its own offset",
+          Math.abs(m1.pos.x - (-924 - 6)) < 1e-4
+          && Math.abs(m1.pos.z - (-1336 - 5)) < 1e-4 && m1.pos.y === 74.8
+          && m1.pitch === 0x4000 && m1.yaw === 40432 + 1024
+          && m1.hitRadius === 2.2,
+          `${m1.pos.x},${m1.pos.z} pitch ${m1.pitch} yaw ${m1.yaw}`);
+    // In block 0x15 it rides the cog: radius idx + 5, about (-924, -1336),
+    // at `g_worm_orbit_phase[1] + 0x7800` -- a turn in which neither sin nor
+    // cos is 0 or 1 -- and the angle steps back 0x80 after it is read.
+    const a = (4096 + 0x7800) * ((2 * Math.PI) / 65536);
+    WormUpdate(m1, frame(rng));
+    check("on the cog, member 1 circles (-924, -1336) at radius six",
+          Math.abs(m1.pos.x - (6 * Math.sin(a) - 924)) < 1e-4
+          && Math.abs(m1.pos.z - (6 * Math.cos(a) - 1336)) < 1e-4
+          && worm(m1).orbit === 4096 + 0x7800 - 0x80,
+          `${m1.pos.x.toFixed(4)},${m1.pos.z.toFixed(4)}`);
+
+    // Member 0's delay is `g_worm_drop_delay[0]`, seventy: the counter passes
+    // it on the seventy-first frame.
+    const m0 = ms[0]!;
+    for (let i = 0; i < 70; i += 1) WormUpdate(m0, frame(rng));
+    check("member 0 holds on for its seventy frames",
+          worm(m0).state === WormState.Perch, WormState[worm(m0).state]);
+    WormUpdate(m0, frame(rng));
+    check("...and lets go on the seventy-first",
+          worm(m0).state === WormState.Fall, WormState[worm(m0).state]);
+    // From y 74.8 at 0.01633 a frame², it is under ground + 3.57 once
+    // 0.01633 n(n+1)/2 > 74.8 - 7.37, n(n+1) > 8258.4: n = 91.
+    const events = new Events();
+    const heard = listen(events);
+    for (let i = 0; i < 90; i += 1) WormUpdate(m0, frame(rng, events));
+    check("...falls for ninety frames without landing",
+          worm(m0).state === WormState.Fall && heard.length === 0,
+          `${WormState[worm(m0).state]} y ${m0.pos.y.toFixed(3)}`);
+    WormUpdate(m0, frame(rng, events));
+    check("...and lands on the ninety-first, 0.8 above the ground, level, "
+          + "with a PDMG_MORR from stage 2's bank",
+          worm(m0).state === WormState.Splat
+          && Math.abs(m0.pos.y - (GROUND + 0.8)) < 1e-6 && m0.pitch === 0
+          && heard.length === 1
+          && (heard[0] === SND_WORM_LAND_A || heard[0] === SND_WORM_LAND_B),
+          `${WormState[worm(m0).state]} y ${m0.pos.y} ${heard.map((x) => x.toString(16))}`);
+    // The splat: `++timer > 0x18`, so the twenty-fifth frame leaves it, with
+    // the crawl's first row 8.
+    for (let i = 0; i < 24; i += 1) WormUpdate(m0, frame(rng));
+    check("the splat holds twenty-four frames, drawing 0x85C + n",
+          worm(m0).state === WormState.Splat && worm(m0).timer === 24
+          && worm(m0).drawnBody === WormBodyDraw.Member,
+          WormState[worm(m0).state]);
+    WormUpdate(m0, frame(rng));
+    check("...and crawls from row 8 on the twenty-fifth",
+          worm(m0).state === WormState.Crawl && worm(m0).frame === 8,
+          `${WormState[worm(m0).state]} ${worm(m0).frame}`);
+    // On the cog the crawl runs twice, rows 8..0x3A and then 0..0x3A: 51 and
+    // 59 frames. Each row moves (step[i+1] - step[i]) * 0.01 * 0.6 * 0.8
+    // along the yaw, so the whole is (step[59] - step[8] + step[59] -
+    // step[0]) * 0.0048 = (-4177 - 4235) * 0.0048 from where it landed.
+    const from = { x: m0.pos.x, z: m0.pos.z };
+    for (let i = 0; i < 109; i += 1) WormUpdate(m0, frame(rng));
+    check("...crawls for 110 frames on the cog",
+          worm(m0).state === WormState.Crawl, WormState[worm(m0).state]);
+    WormUpdate(m0, frame(rng));
+    const go = (-4177 - 4235) * 0.01 * 0.6 * 0.800000011920929;
+    const yaw = m0.yaw * ((2 * Math.PI) / 65536);
+    check("...then waits, having crawled 40.4 units along its own yaw",
+          worm(m0).state === WormState.Wait
+          && Math.abs(m0.pos.x - (from.x + go * Math.sin(yaw))) < 1e-3
+          && Math.abs(m0.pos.z - (from.z + go * Math.cos(yaw))) < 1e-3,
+          `${WormState[worm(m0).state]} moved `
+          + `${(m0.pos.x - from.x).toFixed(3)},${(m0.pos.z - from.z).toFixed(3)}`);
+  }
+
+  {
+    // Two players: eight on the cog, and fifteen in block 26's batch.
+    const rng = new Rng(73);
+    room(rng, 0x15, 2);
+    place(COG_AT, 0, vec3(-924, 74.8, -1336), 40432, rng);
+    check("two players face eight on the cog",
+          !!member(COG_AT, 7) && !member(COG_AT, 8)
+          && G.g_enemies_alive === 8, `${G.g_enemies_alive}`);
+    room(rng, 0x1a, 2);
+    place(LARGE_AT, 2, vec3(-482, 29, -1333), 18730, rng);
+    check("...and fifteen in block 26",
+          !!member(LARGE_AT, 14) && G.g_enemies_alive === 15,
+          `${G.g_enemies_alive}`);
+    room(rng, 0x1a);
+    place(LARGE_AT, 2, vec3(-482, 29, -1333), 18730, rng);
+    check("one player faces ten there",
+          !!member(LARGE_AT, 9) && !member(LARGE_AT, 10)
+          && G.g_enemies_alive === 10, `${G.g_enemies_alive}`);
+  }
+
+  {
+    // **Shot before it lands, it splits.** The kill is in the member's own
+    // update, ahead of its state: blood, both counters, a WORM_TUBU and 80 to
+    // the shooter, and the halves' heights from their motions' first frames.
+    const rng = new Rng(79);
+    const events = room(rng, 0x15);
+    const heard = listen(events);
+    place(COG_AT, 0, vec3(-924, 74.8, -1336), 40432, rng);
+    const m2 = member(COG_AT, 2)!;
+    const score = G.g_player_score[0];
+    m2.flags |= ActorFlag.Hit | ActorFlag.HitByPlayer0;
+    WormUpdate(m2, frame(rng, events));
+    const y = m2.pos.y;
+    check("a worm shot on the cog splits, and its routine is the death's",
+          (m2.flags & WormFlag.Split) !== 0
+          && worm(m2).routine === WormRoutine.Death
+          && worm(m2).state === WormState.Dead, `${m2.flags.toString(16)}`);
+    check("...out of both counters and its slot on the shot, for 80 and a "
+          + "WORM_TUBU",
+          G.g_enemies_alive === 5 && G.g_enemies_present === 5
+          && G.g_worm_live_count === 5 && G.g_worm_members[2] === 0
+          && G.g_player_score[0] - score === 80
+          && heard.some((h) => h === SND_WORM_KILLED_A
+                         || h === SND_WORM_KILLED_B),
+          `${G.g_enemies_alive}/${G.g_enemies_present} `
+          + `+${G.g_player_score[0] - score} ${heard.map((h) => h.toString(16))}`);
+    check("...with its halves where their motions' first frames put them, "
+          + "and the kill frame still drawn whole",
+          worm(m2).halfY[0] === y + 2 && worm(m2).halfY[1] === y + 3
+          && worm(m2).drawnBody === WormBodyDraw.Member,
+          `${worm(m2).halfY}`);
+    check("...and the leaper is a live member",
+          G.g_worm_leaper !== 2 && G.g_worm_members[G.g_worm_leaper] !== 0,
+          `${G.g_worm_leaper}`);
+    WormClassUpdate(m2, frame(rng, events));
+    const h = worm(m2).drawnHalves;
+    check("the death draws both halves on frame 0 and steps them",
+          h.length === 2 && h[0]!.t[1] === 2 && h[1]!.t[1] === 3
+          && h[1]!.t[0] === -1 && worm(m2).halfFrame.join() === "1,1",
+          JSON.stringify(h.map((x) => x.t)));
+    // A half lands once its track's y, two down a frame from 2, puts it
+    // under ground + 1.5 = 5.3: 2 - 2f + y < 5.3.
+    const land = Math.floor((y + 2 - 5.3) / 2) + 1;
+    for (let i = 1; i < land; i += 1) WormDeathUpdate(m2, frame(rng, events));
+    const splashes = () => G.g_object_list.filter(
+      (o) => o.cls === SpawnClass.HordeSpawner
+             && (o as { horde: HordeTail }).horde.kind === HordeKind.Splash
+             && !o.despawned).length;
+    const before = splashes();
+    check("half 0 is still in the air on its frame " + (land - 1),
+          worm(m2).halfLanded[0] === 0, `${worm(m2).halfLanded}`);
+    WormDeathUpdate(m2, frame(rng, events));
+    check("...lands on frame " + land + " at the ground plus 1.5 and "
+          + "splashes, then sinks",
+          worm(m2).halfLanded[0] === 1 && splashes() === before + 1
+          && Math.abs(worm(m2).halfY[0] - (GROUND + 1.5 - 0.025)) < 1e-6,
+          `${worm(m2).halfLanded} ${worm(m2).halfY}`);
+    for (let i = land + 1; i < 61; i += 1) WormDeathUpdate(m2, frame(rng, events));
+    check("the death lasts sixty-one frames...", !m2.despawned);
+    WormDeathUpdate(m2, frame(rng, events));
+    check("...and is gone on the sixty-second", m2.despawned);
+    check("...having moved no counter of its own",
+          G.g_enemies_alive === 5 && G.g_enemies_present === 5,
+          `${G.g_enemies_alive}/${G.g_enemies_present}`);
+  }
+
+  {
+    // **Shot after it lands, it melts**: no split, the horde's splash where
+    // it stands, and the death strip, `0x87A + n`, holding at 0x15. And the
+    // shot is player 2's alone, so player 2 is paid.
+    const rng = new Rng(83);
+    const events = room(rng, 0x1a, 2);
+    place(LARGE_AT, 2, vec3(-482, 29, -1333), 18730, rng);
+    const m = member(LARGE_AT, 3)!;
+    for (let i = 0; i < 400 && worm(m).state !== WormState.Crawl; i += 1) {
+      WormUpdate(m, frame(rng, events));
+    }
+    const score = G.g_player_score[1];
+    m.flags |= ActorFlag.Hit | ActorFlag.HitByPlayer1;
+    WormUpdate(m, frame(rng, events));
+    const splash = G.g_object_list.find(
+      (o) => o.cls === SpawnClass.HordeSpawner
+             && (o as { horde: HordeTail }).horde.kind === HordeKind.Splash);
+    check("a worm shot on the ground does not split, and pays player 2",
+          (m.flags & WormFlag.Split) === 0 && worm(m).state === WormState.Dead
+          && G.g_player_score[1] - score === 80,
+          `${m.flags.toString(16)} +${G.g_player_score[1] - score}`);
+    check("...and leaves the horde's splash a hundredth per index over the "
+          + "ground",
+          !!splash && splash.pos.x === m.pos.x && splash.pos.z === m.pos.z
+          && Math.abs(splash.pos.y - (3 * 0.009999999776482582 + GROUND + 1))
+             < 1e-6, `${splash?.pos.y}`);
+    const strip: number[] = [];
+    for (let i = 0; i < 24; i += 1) {
+      WormDeathUpdate(m, frame(rng, events));
+      strip.push(worm(m).drawnStrip);
+    }
+    check("...then draws the death strip 0..0x15 and holds its last frame",
+          strip[0] === 0 && strip[0x15] === 0x15 && strip[23] === 0x15,
+          strip.join(","));
+  }
+
+  {
+    // **The leap.** Only the member `g_worm_leaper` names swells, for ten
+    // frames, to `g_worm_leap_scale` row 0, and then leaps sixty frames at
+    // the camera block `g_camera_index` names; unshot, it takes a life off
+    // its player and bounces away, and the turn passes to the next member.
+    const rng = new Rng(89);
+    const events = room(rng, 0x1a);
+    G.g_camera_block_eye = vec3(-470, 18, -1290);
+    place(LARGE_AT, 2, vec3(-482, 29, -1333), 18730, rng);
+    const L = G.g_worm_leaper;
+    const m = member(LARGE_AT, L)!;
+    for (let i = 0; i < 400 && worm(m).state !== WormState.Wait; i += 1) {
+      WormUpdate(m, frame(rng, events));
+    }
+    for (let i = 0; i < 9; i += 1) WormUpdate(m, frame(rng, events));
+    check("the leaper swells for nine frames...",
+          worm(m).state === WormState.Wait && worm(m).timer === 9,
+          `${WormState[worm(m).state]} ${worm(m).timer}`);
+    WormUpdate(m, frame(rng, events));
+    const eye = G.g_camera_block_eye;
+    const face = (Math.trunc(Math.atan2(m.pos.x - eye.x, m.pos.z - eye.z)
+                             * 10430.378350470453) << 16) >> 16;
+    const range = Math.hypot(eye.x - m.pos.x, eye.z - m.pos.z);
+    check("...and leaps on the tenth, turned square to the camera block",
+          worm(m).state === WormState.Leap && m.yaw === face
+          && Math.abs(worm(m).range - range) < 1e-9,
+          `${WormState[worm(m).state]} yaw ${m.yaw} vs ${face}`);
+    const from = { ...worm(m).leapFrom };
+    for (let i = 0; i < 0x21; i += 1) WormUpdate(m, frame(rng, events));
+    // Frame 0x20 is the path's first row, `{rise 169, reach -193}`.
+    const a = m.yaw * ((2 * Math.PI) / 65536);
+    check("frame 0x20 puts it the path's first row along its yaw",
+          Math.abs(m.pos.x - (-193 * 0.009999999776482582 * Math.sin(a) * range
+                              * 0.016179848047500653 + from.x)) < 1e-4
+          && Math.abs(m.pos.z - (-193 * 0.009999999776482582 * Math.cos(a)
+                                 * range * 0.016179848047500653 + from.z))
+             < 1e-4, `${m.pos.x},${m.pos.z}`);
+    const lives = G.g_player_lives[0];
+    for (let i = 0x21; i < 0x3b; i += 1) WormUpdate(m, frame(rng, events));
+    check("the leap has not landed by frame 0x3B",
+          worm(m).state === WormState.Leap && G.g_player_lives[0] === lives);
+    WormUpdate(m, frame(rng, events));
+    check("...and takes a life at the sixtieth, and bounces",
+          worm(m).state === WormState.Bounce
+          && G.g_player_lives[0] === lives - 1,
+          `${WormState[worm(m).state]} ${G.g_player_lives[0]}/${lives}`);
+    check("...handing the leap to the next member",
+          G.g_worm_leaper === (L + 1) % 10, `${G.g_worm_leaper} after ${L}`);
+    for (let i = 0; i < 400 && !m.despawned; i += 1) {
+      WormUpdate(m, frame(rng, events));
+    }
+    check("...which is gone under the ground, out of both counters",
+          m.despawned && G.g_enemies_alive === 9 && G.g_enemies_present === 9
+          && G.g_worm_members[L] === 0 && G.g_worm_live_count === 9,
+          `${G.g_enemies_alive}/${G.g_enemies_present}/${G.g_worm_live_count}`);
+  }
+
+  {
+    // Sub-type 1: one worm, counted nowhere, that drops from y 62 at 0.02722
+    // a frame² and goes under y 30: 0.02722 n(n+1)/2 > 32, n = 48.
+    const rng = new Rng(97);
+    room(rng, 0x15);
+    place(LONE_AT, 1, vec3(-912.7, 62, -1318.4), 37552, rng);
+    const lone = ActorByAt(WormMemberAt(LONE_AT, WORM_LONE_SLOT))!;
+    check("the lone drop is one worm in neither counter",
+          !!lone && worm(lone).routine === WormRoutine.LoneDrop
+          && G.g_enemies_alive === 0 && G.g_enemies_present === 0
+          && lone.hitRadius === 3.0 && lone.yaw === 37552,
+          `${G.g_enemies_alive}`);
+    for (let i = 0; i < 47; i += 1) WormLoneDropUpdate(lone, frame(rng));
+    check("...falling for forty-seven frames", !lone.despawned
+          && worm(lone).drawnBody === WormBodyDraw.Lone,
+          `${lone.pos.y}`);
+    WormLoneDropUpdate(lone, frame(rng));
+    check("...and gone on the forty-eighth, below y 30", lone.despawned,
+          `${lone.pos.y}`);
+
+    // Shot, it splits, and goes the frame half 0's track runs out.
+    room(rng, 0x15);
+    place(LONE_AT, 1, vec3(-912.7, 62, -1318.4), 37552, rng);
+    const shot = ActorByAt(WormMemberAt(LONE_AT, WORM_LONE_SLOT))!;
+    shot.flags |= ActorFlag.Hit | ActorFlag.HitByPlayer0;
+    const score = G.g_player_score[0];
+    WormLoneDropUpdate(shot, frame(rng));
+    check("shot, it splits on the same frame, for no score",
+          worm(shot).state === WormState.Dead
+          && worm(shot).drawnHalves.length === 2
+          && G.g_player_score[0] === score, `${worm(shot).drawnHalves.length}`);
+    for (let i = 1; i < 0x3b; i += 1) WormLoneDropUpdate(shot, frame(rng));
+    check("...draws its halves to frame 0x3A", !shot.despawned);
+    WormLoneDropUpdate(shot, frame(rng));
+    check("...and goes on the frame half 0 reaches 0x3B", shot.despawned);
+  }
+
+  {
+    // The replay's question is per record: the lone drop counts nothing.
+    const rng = new Rng(101);
+    room(rng, 0x15);
+    check("a replay retires the two batches at a room gate and not the lone "
+          + "drop",
+          WormCountsForEnemyGate({ at: COG_AT, class: 0x42, hp: 1 })
+          && WormCountsForEnemyGate({ at: LARGE_AT, class: 0x42, hp: 1 })
+          && !WormCountsForEnemyGate({ at: LONE_AT, class: 0x42, hp: 1 }));
+    // ...and the script's spawn reaches `PlaceWormBatch` through the
+    // director, which runs the members from the next frame's task walk.
+    SpawnSlotActor({ at: COG_AT, class: 0x42, pos: [-924, 74.8, -1336] }, rng);
+    const m = member(COG_AT, 1);
+    const before = m ? worm(m).orbit : 0;
+    run(1, rng, new Events());
+    check("the script's spawn builds the batch and the frame runs it",
+          !!m && worm(m).orbit === before - 0x80 && G.g_enemies_alive === 6,
+          `${m ? worm(m).orbit : "none"} vs ${before}`);
+    SetGameTables(CHARS);
+  }
 }

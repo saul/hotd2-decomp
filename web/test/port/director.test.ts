@@ -98,19 +98,20 @@ console.log("an unread class:");
 {
   const rng = new Rng(7);
   const events = scene(0, rng);
-  // Class 0x42 has no module in `g_class_handlers`, so it must not move. This
+  // Class 0x2D has no module in `g_class_handlers`, so it must not move. This
   // used to be the cat, until the cat was read: class 0x53 has a module now,
-  // and its clips are *meant* to carry it -- see "class 0x53, the cat".
-  const idle = ActorSpawn(0x2000, SpawnClass.FallingBreakables, 1, "unread");
+  // and its clips are *meant* to carry it -- see "class 0x53, the cat". Then
+  // it was class 0x42, until the worm was read.
+  const idle = ActorSpawn(0x2000, SpawnClass.LargeCreature, 1, "unread");
   idle.visible = true;
   idle.attackState = 1;
   idle.hp = 10;
   idle.pos = vec3(0, 0, 60);
   const start = { ...idle.pos };
   run(600, rng, events);
-  check("class 0x42 stayed where the script put it",
+  check("class 0x2D stayed where the script put it",
         idle.pos.x === start.x && idle.pos.z === start.z);
-  check("class 0x42 took no permit", idle.attackPermit === -1);
+  check("class 0x2D took no permit", idle.attackPermit === -1);
 }
 
 // -- 3. `attack_state` does not gate the swing ------------------------------

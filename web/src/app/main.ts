@@ -130,7 +130,9 @@ import { EffectLayer } from "../render/effects";
 import { SlotModelLayer } from "../render/slotmodels";
 import { WaterSurfaceLayer } from "../render/water_surfaces";
 import { ResetPropContainers } from "../game/class41";
-import { ActorByAt, AppState, G, ResetGameGlobals } from "../game/globals";
+import {
+  ActorByAt, AppState, G, ResetGameGlobals, ScreenFurniture,
+} from "../game/globals";
 import {
   PadBit, PlayerBlockCapture, PlayerTasksDrawWithoutAFrame,
 } from "../game/player_shell";
@@ -504,6 +506,25 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
    * wrong. A desktop window is nearer 4:3 and fills by default.
    */
   pillarbox = touchFirst();
+  /**
+   * Whether the frame is boxed to 4:3 **now**: the switch, or the result card
+   * holding the screen whatever the switch says.
+   *
+   * `ResultCardInstall` (`FUN_00434EF0`) raises bit `0x10` of
+   * `g_screen_furniture_flags` in its first frame and drops it beside
+   * `g_script_flags[0xFE]` (`ScreenFurniture.ResultCard`), and for all of
+   * that its seventeen `scr_result` tiles are the 640x480 screen itself,
+   * with a window cut in them for the camera's flight. A frame wider than
+   * 4:3 shows the level past the card's left and right edges -- the flight
+   * the window was cut to frame, running on round it. So the card is always
+   * boxed; the switch comes back into force the frame the bit goes down.
+   */
+  get boxed(): boolean {
+    return this.pillarbox
+      || (G.g_screen_furniture_flags & ScreenFurniture.ResultCard) !== 0;
+  }
+  /** {@link boxed} as {@link resize} last applied it. */
+  private boxedApplied = false;
   /**
    * Canvas pixels per CSS pixel -- `WebGLRenderer.setPixelRatio`.
    *
@@ -2472,6 +2493,8 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     // Nothing is seen under the loading screen, and a draw there is shaders
     // compiled in a frame the stage load let through to paint its label.
     if (this.loading) return this.publishUi();
+    // The result card boxes the frame, and the game raises and drops it.
+    if (this.boxed !== this.boxedApplied) this.resize();
     if (this.perfMeter.enabled) return this.endFrameMeasured();
     this.drawOrder.beginFrame();
     this.lighting.beforeRender();
@@ -2569,7 +2592,7 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     const body = JSON.stringify({
       ...r, at: new Date().toISOString(), ua: navigator.userAgent,
       stage: this.state.stage, original: !!this.state.original,
-      boxed: this.pillarbox, ratio: this.pixelRatio,
+      boxed: this.boxed, ratio: this.pixelRatio,
       playing: this.playing, mode: this.state.mode,
       // The switches away from their defaults: "not showing" is as often a
       // setting as a bug.
@@ -3072,13 +3095,15 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
    * the default on a desktop; see {@link pillarbox} for the phone.
    */
   resize(): void {
+    const boxed = this.boxed;
+    this.boxedApplied = boxed;
     const w = this.viewport.clientWidth;
     const h = this.viewport.clientHeight;
     if (w === 0 || h === 0) return;
     if (this.renderer.getPixelRatio() !== this.pixelRatio) {
       this.renderer.setPixelRatio(this.pixelRatio);
     }
-    if (this.pillarbox) {
+    if (boxed) {
       const aspect = 4 / 3;
       const cw = Math.min(w, h * aspect);
       const ch = cw / aspect;

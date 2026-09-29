@@ -179,6 +179,19 @@ export interface ContinueProjection {
 }
 
 /**
+ * The join offer: this page's player is out -- player 2 through a one-player
+ * game, or player 1 once a continue has run out -- and the game is drawing
+ * PRESS START BUTTON for them. The corner button becomes **Join** or
+ * **Start** for it: on a phone it is the only START there is.
+ */
+export interface JoinProjection {
+  label: string;
+  /** START would take: a credit is there. */
+  canJoin: boolean;
+  sub: string;
+}
+
+/**
  * The game-over screen, from `game/game_over.ts`'s state. Null while a stage
  * is being played.
  */
@@ -467,6 +480,7 @@ export interface UiProjection {
   groups: Readonly<Record<DebugGroupName, readonly StripRow[]>>;
   skip: SkipProjection | null;
   continueOffer: ContinueProjection | null;
+  joinOffer: JoinProjection | null;
   /** See {@link PerfProjection}. */
   perf: PerfProjection | null;
   branch: BranchProjection | null;

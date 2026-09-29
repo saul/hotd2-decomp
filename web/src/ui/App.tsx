@@ -144,8 +144,15 @@ function Overlay({ children }: { children: ReactNode }) {
   // click on the speaker made the next Enter a mute instead of START, and one
   // on the menu's trail made it reopen the menu. `detail` is 0 for a click a
   // key made, so a button reached with Tab keeps its focus as it should.
+  //
+  // **Not a text field.** The click that lands on the room-code box would blur
+  // the box it had just focused, and on iOS that is the keyboard coming up and
+  // going straight down again: no way to type a code at all.
   const release = (e: { detail: number }) => {
-    if (e.detail > 0) (document.activeElement as HTMLElement | null)?.blur?.();
+    if (e.detail === 0) return;
+    const a = document.activeElement as HTMLElement | null;
+    if (a?.matches?.("input, textarea, select, [contenteditable]")) return;
+    a?.blur?.();
   };
   return (
     <div id="overlay" className={boxed ? "boxed" : undefined}

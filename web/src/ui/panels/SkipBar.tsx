@@ -28,6 +28,7 @@ export function SkipBar() {
   const dispatch = useDispatch();
   const skip = useSlice((s) => s?.skip);
   const offer = useSlice((s) => s?.continueOffer);
+  const join = useSlice((s) => s?.joinOffer);
   const press = () => dispatch({ kind: "pressStart" });
   if (offer) {
     return (
@@ -35,6 +36,18 @@ export function SkipBar() {
         <button disabled={!offer.canContinue} title={offer.sub}
                 onClick={press}>
           Continue <span className="continue-digit">{offer.digit}</span>
+        </button>
+        <kbd className="skip-key only-fine">Enter</kbd>
+      </div>
+    );
+  }
+  if (join) {
+    // Player 2 out, or player 1 after a continue ran out: the game says PRESS
+    // START BUTTON, and a phone has no Enter.
+    return (
+      <div id="skipbar" className="continue join">
+        <button disabled={!join.canJoin} title={join.sub} onClick={press}>
+          {join.label}
         </button>
         <kbd className="skip-key only-fine">Enter</kbd>
       </div>

@@ -9,7 +9,7 @@
  */
 import type { Player } from "../main";
 import type {
-  BranchProjection, ContinueProjection, GameOverProjection, SkipProjection,
+  BranchProjection, ContinueProjection, JoinProjection, GameOverProjection, SkipProjection,
   SoundProjection, TransportProjection,
 } from "../../ui/projection";
 import { AppState, G, PlayerState, RunPhase } from "../../game/globals";
@@ -72,6 +72,27 @@ export function continueProjection(player = 0): ContinueProjection | null {
     digit: Math.max(0, t >> 12),
     sub: can ? `START: spend a credit and play on (${credits})`
              : "START would not be heard here: no credit, or the screen is not up",
+  };
+}
+
+/**
+ * The join offer, read off the player's shell. The player is out
+ * (`PlayerStateOut`, whose task polls for START) on the play screen with the
+ * screen furniture's bit 2 up -- which is exactly when `PlayerPollStart`
+ * draws the credit line, PRESS START BUTTON -- and `PlayerTryStartPress` takes
+ * the START if there is a credit, as a join (`EnterJoinIn`).
+ */
+export function joinProjection(player = 0): JoinProjection | null {
+  if (G.g_app_state !== AppState.InPlay
+      || G.g_player_state[player] !== PlayerState.Out
+      || (G.g_screen_furniture_flags & 2) === 0) return null;
+  const can = CreditsAvailable() !== 0;
+  const credits = G.g_free_play === 1 ? "free play" : `${G.g_credits[0]} credits`;
+  return {
+    label: player === 1 ? "Join" : "Start",
+    canJoin: can,
+    sub: can ? `START: spend a credit and join as player ${player + 1} (${credits})`
+             : "no credit left to join with",
   };
 }
 

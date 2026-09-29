@@ -59,9 +59,22 @@ game*. A card shows the room code and a *Copy the join link* button. Player 2
 opens the link, or chooses *Join* in the same menu and types the code. Both
 players need the same build of the page and the same bundle for the stage.
 Each brings their own bundle, from the same hosted site or built from their
-own install. **No game data ever crosses the connection.** Player 2 presses
-START (Enter, or the corner button) to join the game with a credit, as at the
-cabinet.
+own install. **No game data ever crosses the connection.**
+
+**Player 2 joins the game on joining the session**, with a credit, as at the
+cabinet: their START is sent for them as soon as the game would take it --
+player 2 out, PRESS START BUTTON up, a credit there -- except during a
+skippable cutscene, where the same START would skip it (the exe reads either
+player's START there), so it waits for the cutscene to end. After that, and
+after a game over, the corner button says **Join** whenever the game is
+drawing PRESS START for player 2 (and **Start** for player 1 once a continue
+has run out): on a phone it is the only START there is. Enter does the same.
+
+**The join link** copies on any page -- `navigator.clipboard` where the page
+is secure, a selected field where it is not (the dev server reached from a
+phone is `http://192.168.x.x`, which is not) -- and says so if it could not;
+the link is shown under the button to press and hold, and a secure page on a
+phone offers the share sheet too.
 
 **The host's game waits for player 2.** From the moment the room is made
 until player 2's page answers, and again after a drop while player 2 finds

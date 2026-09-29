@@ -7,13 +7,48 @@
  * `app/projection/net.ts`'s; these lay it out. What they add is only what
  * never leaves the page: copying a code or a report to the clipboard.
  */
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useDispatch } from "../store_context";
 import { useSlice } from "../useSlice";
 import type { NetProjection } from "../projection";
 
-function copy(text: string): void {
-  void navigator.clipboard?.writeText(text).catch(() => { /* not allowed here */ });
+type CopyField = HTMLInputElement | HTMLTextAreaElement;
+
+/**
+ * Put `field`'s text on the clipboard, and say whether it got there.
+ *
+ * `navigator.clipboard` exists only on a secure page -- https, or localhost --
+ * and the dev server reached from a phone is neither (`http://192.168.x.x`),
+ * so there the button said "Link copied" over an empty clipboard. The old
+ * way still works there: select the text in a field and `execCommand("copy")`,
+ * inside the press (so the clipboard API is not awaited first on such a page),
+ * and on iOS with an explicit selection range. The field is one React renders
+ * -- the join link's own box, or a hidden one beside the button.
+ */
+async function copy(field: CopyField): Promise<boolean> {
+  const text = field.value;
+  if (window.isSecureContext && navigator.clipboard) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch { /* refused: the old way, below, if the press still counts */ }
+  }
+  field.select();
+  field.setSelectionRange(0, text.length);
+  try {
+    return document.execCommand("copy");
+  } catch {
+    return false;
+  }
+}
+
+/** A copy button's state: what it says, and the press that copies a field. */
+function useCopy(): [string | null, (field: CopyField | null) => void] {
+  const [said, setSaid] = useState<string | null>(null);
+  return [said, (field) => {
+    if (!field) return;
+    void copy(field).then((ok) => setSaid(ok ? "copied" : "failed"));
+  }];
 }
 
 /**
@@ -41,7 +76,8 @@ export function NetBadge() {
 export function NetOverlay() {
   const net = useSlice((p) => p?.net ?? null);
   const dispatch = useDispatch();
-  const [copied, setCopied] = useState(false);
+  const [copied, copyNow] = useCopy();
+  const reportField = useRef<HTMLTextAreaElement>(null);
   const stats = net?.stats;
   if (!net || !stats) return null;
   return (
@@ -56,9 +92,11 @@ export function NetOverlay() {
               Resync
             </button>
           )}
-          <button onClick={() => { copy(stats.report); setCopied(true); }}
+          <textarea className="net-copy-field" ref={reportField} value={stats.report}
+                    readOnly tabIndex={-1} aria-hidden="true" />
+          <button onClick={() => copyNow(reportField.current)}
                   title="Every figure and the log, as JSON, for a bug report">
-            {copied ? "Copied" : "Copy report"}
+            {copied === "copied" ? "Copied" : copied === "failed" ? "Could not copy" : "Copy report"}
           </button>
           <button onClick={() => dispatch({ kind: "toggle", name: "netStats", on: false })}
                   aria-label="Close">×</button>
@@ -131,7 +169,9 @@ function lobbyText(net: NetProjection): { title: string; body: string } | null {
 export function NetLobbyCard() {
   const net = useSlice((p) => p?.net ?? null);
   const dispatch = useDispatch();
-  const [copied, setCopied] = useState(false);
+  const [copied, copyNow] = useCopy();
+  const linkField = useRef<HTMLInputElement>(null);
+  const share = typeof navigator !== "undefined" && typeof navigator.share === "function";
   if (!net) return null;
   const t = lobbyText(net);
   if (!t) return null;
@@ -144,10 +184,26 @@ export function NetLobbyCard() {
         <>
           <div className="net-code">{l.code}</div>
           {l.link && (
-            <button className="net-link"
-                    onClick={() => { copy(l.link!); setCopied(true); }}>
-              {copied ? "Link copied" : "Copy the join link"}
-            </button>
+            <>
+              <div className="net-link-row">
+                <button className="net-link" onClick={() => copyNow(linkField.current)}>
+                  {copied === "copied" ? "Link copied"
+                    : copied === "failed" ? "Could not copy" : "Copy the join link"}
+                </button>
+                {/* The share sheet, where there is one (a secure page): on a
+                    phone, the way to send a link is Messages, not a clipboard. */}
+                {share && (
+                  <button className="net-link"
+                          onClick={() => void navigator.share({ url: l.link! }).catch(() => {})}>
+                    Share
+                  </button>
+                )}
+              </div>
+              {/* The link itself: what the button copies from, and a box to
+                  press and hold, or select, when copying is not allowed. */}
+              <input className="net-link-text" ref={linkField} value={l.link} readOnly
+                     aria-label="Join link" onFocus={(e) => e.currentTarget.select()} />
+            </>
           )}
         </>
       )}

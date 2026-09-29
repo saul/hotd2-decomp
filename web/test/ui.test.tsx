@@ -130,6 +130,7 @@ function projection(): UiProjection {
     },
     skip: { canSkip: true, sub: "region 3", stacked: false },
     continueOffer: null,
+    joinOffer: null,
     perf: null,
     branch: { sub: "two routes", options: [], countdown: "5s",
               paused: false },
@@ -400,6 +401,22 @@ console.log("\nThe corner button:\n");
   const neither = renderIn({ ...projection(), skip: null },
                            createElement(SkipBar));
   check("with neither, there is no button", !neither.includes("skipbar"));
+  // Player 2 out, PRESS START BUTTON up: a phone's only way into the game.
+  const joining = renderIn({ ...projection(), skip: null,
+                             joinOffer: { label: "Join", canJoin: true, sub: "a credit" } },
+                           createElement(SkipBar));
+  check("with player 2 out and a credit there, it says Join",
+        joining.includes("skipbar") && />Join</.test(joining)
+        && !/<button[^>]*disabled/.test(joining), joining);
+  const joinOverSkip = renderIn({ ...projection(),
+                                  joinOffer: { label: "Join", canJoin: true, sub: "a credit" } },
+                                createElement(SkipBar));
+  check("...and Join is the label over Skip: getting in is what player 2 is after",
+        joinOverSkip.includes("Join") && !joinOverSkip.includes("Skip"));
+  const noCredit = renderIn({ ...projection(), skip: null,
+                              joinOffer: { label: "Join", canJoin: false, sub: "no credit" } },
+                            createElement(SkipBar));
+  check("...shown but not pressable with no credit", /<button[^>]*disabled/.test(noCredit));
   // Both labels are one press: the command Enter's own handler makes.
   let src = "";
   try {
@@ -986,6 +1003,33 @@ console.log("\nThe shutter bars, as the HUD layer covers the frame:\n");
         frameOf(true) === "hud-frame boxed", String(frameOf(true)));
   check("...and unboxed, in a frame that is the whole viewport",
         frameOf(false) === "hud-frame", String(frameOf(false)));
+}
+
+// The join offer is read off the player's shell, as the game's own credit
+// line is: player out, on the play screen, furniture bit 2 up.
+console.log("\nThe join offer, from the shell:\n");
+{
+  const { joinProjection } = await import("../src/app/projection/chrome");
+  const { G, AppState, PlayerState } = await import("../src/game/globals");
+  const was = { app: G.g_app_state, p: [...G.g_player_state], f: G.g_screen_furniture_flags,
+                free: G.g_free_play, credits: [...G.g_credits] };
+  G.g_app_state = AppState.InPlay;
+  G.g_player_state[1] = PlayerState.Out;
+  G.g_screen_furniture_flags = 2;
+  G.g_free_play = 1;
+  const offer = joinProjection(1);
+  check("player 2 out on the play screen, credit line up: Join, pressable",
+        offer?.label === "Join" && offer.canJoin, JSON.stringify(offer));
+  G.g_player_state[1] = PlayerState.InPlay;
+  check("...and none once player 2 is in", joinProjection(1) === null);
+  G.g_player_state[1] = PlayerState.Out;
+  G.g_screen_furniture_flags = 0;
+  check("...nor while the game is not drawing PRESS START", joinProjection(1) === null);
+  G.g_app_state = was.app;
+  G.g_player_state.splice(0, was.p.length, ...was.p);
+  G.g_screen_furniture_flags = was.f;
+  G.g_free_play = was.free;
+  G.g_credits.splice(0, was.credits.length, ...was.credits);
 }
 
 // Two tabs on a Mac without Local Network access sat on "Finding a way

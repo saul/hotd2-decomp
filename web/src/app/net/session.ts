@@ -135,9 +135,12 @@ export class NetSession {
     this.hooks.wake();
     try {
       const match = await MatchClient.create(matchmakerBase(location.search));
+      // The host's own address, less what only the host means by it -- where
+      // its script is, and `net=host` -- so the matchmaker and the rest of the
+      // session's settings go with it.
       const link = new URL(location.href);
       link.hash = `join=${match.code}`;
-      link.searchParams.delete("net");
+      for (const k of ["net", "block", "step", "op", "slot", "frame"]) link.searchParams.delete(k);
       this.lobby = { phase: "waiting", code: match.code, link: link.href, error: null };
       this.attach("host", match);
     } catch (e) {

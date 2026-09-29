@@ -48,6 +48,7 @@ import { hasThumb, rememberedInstall, runExport,
          writeThumb } from "./install";
 import { hideExportScreen, showExportScreen } from "./install/ExportScreen";
 import { readState, writeState, type PlayerState } from "./urlstate";
+import { PlayerState as GamePlayerState } from "../game/player_state";
 import { seekTo as seekWalkerTo } from "../script/seek";
 import { CameraReseatFromFrame } from "../game/camera/view";
 import { readViewPrefs, writeViewPrefs } from "./viewprefs";
@@ -71,7 +72,7 @@ import type { ToggleName, UiCommand } from "../ui/commands";
 import { TOGGLE_DEFAULTS } from "../ui/panels/Toggles";
 import { feedRow } from "./projection/script";
 import type {
-  BranchProjection, ContinueProjection, FeedRow, LoadingProjection,
+  BranchProjection, ContinueProjection, JoinProjection, FeedRow, LoadingProjection,
   NetProjection, PerfProjection,
   SkipProjection, SoundProjection, StatusProjection, TransportProjection,
   TreeProjection,
@@ -82,7 +83,7 @@ import { buildProjection, type PlayerView } from "./projection/player";
 import { groupRows, hudInputs, hudRows } from "./projection/hud";
 import type { DebugGroupName, StripRow } from "../ui/projection";
 import {
-  branchProjection, continueProjection, skipProjection, soundProjection,
+  branchProjection, continueProjection, joinProjection, skipProjection, soundProjection,
   transportProjection,
 } from "./projection/chrome";
 import { SceneFog } from "../render/fog";
@@ -161,6 +162,10 @@ function readSessionMark(): string | null {
     return null;
   }
 }
+
+/** Player 2's automatic START on joining: how often, and how many times. */
+const AUTO_JOIN_RETRY_MS = 1500;
+const AUTO_JOIN_TRIES = 5;
 
 export class Player implements PlayerView, PlayerCommands, PacerHost {
   private readonly renderer: WebGLRenderer;
@@ -917,6 +922,9 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
   get skip(): SkipProjection | null { return skipProjection(this); }
   get continueOffer(): ContinueProjection | null {
     return continueProjection(this.localPlayer);
+  }
+  get joinOffer(): JoinProjection | null {
+    return joinProjection(this.localPlayer);
   }
   get perf(): PerfProjection | null {
     return this.perfMeter.enabled ? this.perfMeter.snapshot : null;
@@ -1932,10 +1940,41 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     // Before the stream starts, or after it ends, there is nothing to apply,
     // and still nothing this page may simulate: it draws what it has.
     const applied = this.net.replica?.step(performance.now()) ?? false;
+    this.joinAsPlayer2();
     this.cam.scripted = true;
     this.world.update(this.ctx, applied ? DRIVEN_TICK : STOPPED_TICK);
     return true;
   }
+
+  /**
+   * Player 2 joins the game on joining the session: their START, sent for
+   * them, once the game would take it -- player 2 out, PRESS START BUTTON up,
+   * a credit there ({@link joinProjection}). **Not in a skippable cutscene**,
+   * where the same START would skip it (the exe's START is one button:
+   * `PadStartPressed` takes either player's), so it waits for the cutscene to
+   * end. Retried a few times while the game lets nobody in; after that, and
+   * after a game over, the corner button's **Join** is the way in.
+   */
+  private joinAsPlayer2(): void {
+    const a = this.autoJoin;
+    if (!a.armed || !this.net.replica?.running) return;
+    if (G.g_player_state[1] !== GamePlayerState.Out) {
+      // In, or on the way in: a START from here on would be a skip.
+      if (a.tries > 0) a.armed = false;
+      return;
+    }
+    const now = performance.now();
+    if (now - a.at < AUTO_JOIN_RETRY_MS || skipProjection(this)) return;
+    if (!joinProjection(1)?.canJoin) return;
+    if (a.tries >= AUTO_JOIN_TRIES) {
+      a.armed = false;
+      return;
+    }
+    a.at = now;
+    a.tries++;
+    this.pressStart();
+  }
+  private autoJoin = { armed: false, at: -Infinity, tries: 0 };
 
   /**
    * The session's role changed. A replica's world holds dormant every system
@@ -1945,6 +1984,7 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
    * host's run, not one this page can carry on.
    */
   netRoleChanged(role: NetRole): void {
+    this.autoJoin = { armed: role === "replica", at: -Infinity, tries: 0 };
     if (role === "replica") {
       this.world.setDormant([this.game, this.rainSim, this.gunLightBuild]);
       this.playing = false;

@@ -1904,9 +1904,10 @@ export interface ActorBase {
    * `obj+0x131C` — which player's shot killed this actor.
    *
    * `CivilianPruneDeadChildren` reads it off a dead captor to decide who is
-   * paid for the rescue. `[open]` here: the port's shot path carries no player
-   * at all, so nothing writes it and it stays `-1` — which is the engine's own
-   * "could not name one", and pays both players.
+   * paid for the rescue. `ResolveHit`'s kill arm writes the shooter here
+   * (`0x004097D1`); `ActorReactToHit`'s `znjoe` arm, `ZombieRetireAndCredit`
+   * and `ZombieStateAwaitCivilianOrder` are the other writers. `-1` is the
+   * engine's own "could not name one", and pays both players.
    */
   killedBy: number;         // +0x131C
   /**

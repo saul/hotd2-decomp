@@ -9,24 +9,36 @@
  *    which is what a length table off by one dword looks like once it happens
  *    to stay in range;
  *  * a stream that never starts, i.e. a wait word the port can never satisfy;
- *  * a rescue that pays the wrong number of times.
+ *  * a rescue that pays the wrong number of times, or the wrong player;
+ *  * a captor the bundle names and does not place.
  *
- *     node --experimental-strip-types tools/run_test.mjs tools/civilians.mjs
+ *     npm run civilians [-- --verbose]      # --verbose: one line per civilian
+ *
+ * A `verify_all.py` row since 2026-09-29. For the four weeks before that it
+ * was run by hand, and it rotted twice without anyone noticing: 919bcae4 (the
+ * motion clock counting whole frames) let one more maul cue land inside
+ * fifteen seconds and nobody re-pinned, and a41baa08 (the prune testing the
+ * dead bit alone) left its `dead = true` kill invisible, so it reported
+ * `0 rescued` for eleven days while rescues worked in the page.
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { BUNDLE_ROOT } from "./lib/bundle_root.ts";
+import { BUNDLE_ROOT, hasBundle, skipNoBundle } from "./lib/bundle_root.ts";
 import { Rng } from "../src/core/rng.ts";
 import { Events } from "../src/core/events.ts";
+import { ActorFlag } from "../src/game/actor.ts";
+import { DispatchHit } from "../src/game/combat/resolve_hit.ts";
 import { ActorSpawn, GameUpdate } from "../src/game/director.ts";
 import { G, ResetGameGlobals } from "../src/game/globals.ts";
 import { SeatHarnessEye } from "./lib/harness_eye.ts";
 import { NULL_HOST } from "../src/game/host.ts";
-import { SetGameTables } from "../src/game/tables.ts";
-import { SpawnClass } from "../src/game/spawn_class.ts";
+import { CharacterTypeOf, SetGameTables } from "../src/game/tables.ts";
 import { ZombieState } from "../src/game/class30/states.ts";
 import { TARGET_STATES } from "../src/game/class30/target.ts";
+import { SpawnClass } from "../src/game/spawn_class.ts";
 import { vec3 } from "../src/game/vec.ts";
+
+if (!hasBundle()) skipNoBundle("civilians");
 
 const root = BUNDLE_ROOT;
 /**
@@ -47,9 +59,14 @@ function facingError(obj, p) {
   return Math.abs(d);
 }
 const SECONDS = 30;
+/** The frame the harness starts shooting the captors. */
+const HALF = (SECONDS * 60) / 2;
+/** The player every shot here is fired as. */
+const SHOOTER = 0;
+const VERBOSE = process.argv.includes("--verbose");
 let total = 0, moved = 0, rescued = 0, holding = 0, bad = 0;
 let captors = 0, towardCiv = 0, towardEye = 0, mauled = 0;
-let inCaptorState = 0;
+let inCaptorState = 0, unplaced = 0, misPaid = 0;
 const closing = new Map();
 
 for (let stage = 1; stage <= 6; stage++) {
@@ -70,10 +87,25 @@ for (let stage = 1; stage <= 6; stage++) {
   const places = new Map(
     (script.characters?.placements ?? []).map((p) => [p.at, p]));
   const actors = [];
+  // Every captor this stage's civilians spawn, whatever its class. Most are
+  // class 0x30; three are class 0x18, whose update `CarriedZombieUpdate18`
+  // (`FUN_0045CD90`) calls `EnemyZombieUpdate` (`CALL 0x004533f0` at
+  // `0x0045CDDD`), so they run the same captor states and maul the same way.
+  const captorList = [];
   for (const [at, rec] of Object.entries(civ.spawns)) {
     for (const kid of rec.children) {
       const p = places.get(kid.at);
-      if (!p) continue;
+      // **A captor the bundle does not place is a failure, not a skip.** This
+      // line used to `continue`, and when class 0x18 had no character-type
+      // rule its three captors had no placement: nothing was spawned for them,
+      // and the prune of the day dropped a child missing from the pool -- so
+      // three civilians counted as rescued with nobody shot.
+      if (!p) {
+        console.log(`  FAIL civilian 0x${Number(at).toString(16)}: captor `
+                    + `0x${kid.at.toString(16)} has no placement`);
+        unplaced += 1;
+        continue;
+      }
       const k = ActorSpawn(kid.at, p.class, p.char_type, "captor", {
         initialState: p.initial_state ?? 0,
         attackState: p.attack_state ?? 0,
@@ -87,6 +119,7 @@ for (let stage = 1; stage <= 6; stage++) {
       k.visible = true;
       k.hp = k.maxHp = kid.hp || 1;
       k.pos = vec3(kid.pos[0], kid.pos[1], kid.pos[2]);
+      captorList.push(k);
     }
     // The Init draws: op 0x15 picks what the civilian is holding with a
     // weighted `rand()`, and without a generator that whole opcode is skipped.
@@ -98,7 +131,16 @@ for (let stage = 1; stage <= 6; stage++) {
   if (!actors.length) continue;
 
   const events = new Events();
-  events.on("civilian.rescued", () => { rescued += 1; });
+  // `player` is `sub+0x6C`, read off the last captor's `obj+0x131C` by
+  // `CivilianPruneDeadChildren`. Every captor here is killed by `SHOOTER`, so
+  // a rescue naming anyone else -- `-1` pays both players -- is the killer's
+  // byte not written.
+  const saved = new Set();
+  events.on("civilian.rescued", (d) => {
+    rescued += 1;
+    saved.add(d.at);
+    if (d.player !== SHOOTER) misPaid += 1;
+  });
   const start = actors.map((a) => a.civ?.cursor ?? -1);
   let steps = 0;
   const seen = actors.map(() => new Set());
@@ -112,8 +154,8 @@ for (let stage = 1; stage <= 6; stage++) {
     // through to, turns toward the camera. Measuring the *facing* rather than
     // the distance keeps the answer clean whether or not the clip's root
     // motion actually carries the actor anywhere this frame.
-    for (const o of G.g_object_list) {
-      if (o.cls !== SpawnClass.Zombie || o.targetAt < 0) continue;
+    for (const o of captorList) {
+      if (o.despawned || o.targetAt < 0) continue;
       const rec = closing.get(o.at) ?? { captor: false, run: false };
       // The direct statement of the fix: did this captor ever run a state
       // that works on its civilian, or did it go straight to `AttackRun` and
@@ -130,13 +172,28 @@ for (let stage = 1; stage <= 6; stage++) {
       }
       closing.set(o.at, rec);
     }
-    // Half way through, kill every captor. That is the one thing this harness
-    // *can* do that the shipped waits are actually waiting for -- most of the
-    // rest are camera cues and script flags a lone director never raises --
-    // and it is what drives the rescue path over real streams.
-    if (i === (SECONDS * 60) / 2) {
-      for (const o of G.g_object_list) {
-        if (o.cls === SpawnClass.Zombie) { o.dead = true; }
+    // Half way through, shoot every captor dead. That is the one thing this
+    // harness *can* do that the shipped waits are actually waiting for --
+    // most of the rest are camera cues and script flags a lone director never
+    // raises -- and it is what drives the rescue path over real streams.
+    //
+    // **Through `DispatchHit`, never `dead = true`** (L49). The civilian sees
+    // a captor die through `CivilianPruneDeadChildren` (`FUN_0048CA60`),
+    // whose only test is `TEST dword ptr [EAX + 0x34], 0x4000000` at
+    // `0x0048CA75` -- `ActorFlag.Dead`, which `ResolveHit` raises on the
+    // killing shot and a bare `dead` does not. This harness set `dead` alone
+    // until a41baa08 made the prune the engine's, and from then on no captor
+    // ever left a list: `rescued` read 0 and `moved` 17, a stale harness and
+    // not a broken rescue. `DispatchHit` (`FUN_004092F0`) is the shot's own
+    // gate -- a shot-immune captor (`obj+0x34 & 0x100`) takes nothing -- so
+    // one refused this frame is tried again the next, as a player would.
+    if (i >= HALF) {
+      for (const o of captorList) {
+        if (o.despawned || (o.flags & ActorFlag.Dead)) continue;
+        const head = CharacterTypeOf(o)?.head_bone ?? 2;
+        for (let s = 0; s < 60 && !(o.flags & ActorFlag.Dead); s++) {
+          if (!DispatchHit(o, head, NULL_HOST, rng, SHOOTER)) break;
+        }
       }
     }
     SeatHarnessEye(EYE);
@@ -145,6 +202,18 @@ for (let stage = 1; stage <= 6; stage++) {
   }
   for (const a of actors) {
     if (a.flags & 0x4000000) mauled += 1;
+    // `--verbose`: one line per civilian, so a moved count can be bisected
+    // to the civilian that moved it rather than argued about as a total.
+    if (VERBOSE) {
+      const kids = captorList.filter((k) => k.targetAt === a.at
+                                     || civ.spawns[a.at]?.children
+                                       .some((c) => c.at === k.at));
+      console.log(`    0x${a.at.toString(16)}: `
+                  + `${saved.has(a.at) ? "rescued" : (a.flags & 0x4000000)
+                    ? "mauled" : "held"} -- captors `
+                  + kids.map((k) => `0x${k.at.toString(16)}/c${k.cls.toString(16)}`)
+                    .join(" "));
+    }
   }
   let stageMoved = 0;
   for (let i = 0; i < actors.length; i++) {
@@ -178,65 +247,62 @@ console.log(`\n${captors} captors tracked: ${inCaptorState} ran a state that `
             + `more squarely than the camera and ${towardEye} the other way`);
 console.log(`${mauled} civilians were killed by their captors`);
 console.log(`${total} civilians driven, ${moved} advanced, `
-            + `${rescued} rescued, ${holding} holding something, `
-            + `${bad} runaway`);
+            + `${rescued} rescued (${misPaid} paid to anyone but the `
+            + `shooter), ${holding} holding something, ${bad} runaway, `
+            + `${unplaced} captors with no placement`);
 
 /**
- * What a full six-stage bundle gives.
+ * What a full six-stage bundle gives. `--verbose` prints the civilian behind
+ * every count; the ones named here are from that list.
  *
- * The thirteen civilians that do not advance are waiting on camera cues and
- * script flags this harness never raises -- both of stage 6's are -- which is
- * a property of the harness, not of the port.
+ * The civilians that do not advance are waiting on camera cues and script
+ * flags this harness never raises -- both of stage 6's are -- which is a
+ * property of the harness, not of the port.
  *
- * **`inCaptorState` is the one that matters.** 55 of the 57 captors run a
+ * **`inCaptorState` is the one that matters.** All but two captors run a
  * state that works on their civilian; the other two start in state 18, which
  * is a genuine non-captor entrance. Before `class30/target.ts` existed the
  * number was **zero** -- every one of them fell through `ZombieEntryState` to
  * `AttackRun` and went for the camera.
  *
- * The totals were 47 and 47 until the evt spawn opcodes 0x01-0x0A were read:
- * those decode player-count-gated spawns the exporter had been dropping, so
- * six more civilians and ten more captors are in the bundle now. The counts
- * here are the corpus, not a target -- when the exporter learns to read
- * something new they move, and that is the check working.
+ * The counts are the corpus, not a target -- when the exporter learns to read
+ * something new they move, and that is the check working. They moved when the
+ * evt spawn opcodes 0x01-0x0A were read (six more civilians, ten more
+ * captors), and when class 0x18 got a character-type rule (902de88a): its
+ * three captors, stage 2's `0xA174` and stage 3's `0xC00` and `0x71D0`, are
+ * placed now, so `captors` and `inCaptorState` each rose by three.
  *
- * `mauled` is the other side of it: ten civilians are killed by their captors
- * inside fifteen seconds, which is ten that can no longer be rescued. That is
- * why `rescued` is lower here than it was before the family was ported.
+ * `mauled` is the other side of it: a civilian killed by her captors inside
+ * fifteen seconds is one nobody can rescue. It was **four** until the clip
+ * clock counted `g_motion_play_length`; `tools/verify_maul_cues.py` is the
+ * corpus check for the cues themselves.
  *
- * It was **four** until the clip clock was fixed. `obj+0x19C` counts in
- * `g_motion_play_length`, roughly twice the authored frames, and the port was
- * counting authored frames -- so every kill cue past halfway was simply never
- * reached and the maul was an animation with no consequence. 30 of the game's
- * 51 cues are in that range; `tools/verify_maul_cues.py` is the corpus check.
+ * **Twenty-one rescues was three too many.** Before 902de88a the class-0x18
+ * captors had no placement, this harness spawned nothing for them, and until
+ * a41baa08 `CivilianPruneDeadChildren` dropped a child missing from the pool
+ * as though it had died -- so `0xA134`, `0xBC0` and `0x7190` counted as
+ * rescued with nobody shot. Placed and shot now, `0xA134` is rescued by a
+ * real kill of `0xA174`, and `0xBC0` and `0x7190` are mauled before the
+ * halfway mark by their class-0x18 captors, which run `EnemyZombieUpdate`'s
+ * captor states and carry no carrier cue to hold them. Those two are the
+ * whole of 21 -> 19 and 10 -> 12: every other civilian ends as it did on the
+ * pinned build (b885f3fe, the last commit this passed on unchanged).
  *
- * **`moved` and `rescued` fell by three and two when the enemy counters
- * stopped being derived.** A civilian script advances *while* enemies are
- * present -- `CivilianStepScript` needs `goal < g_enemies_present` to be true
- * to step -- and this harness kills every captor at the halfway mark by
- * setting `dead` directly. While the counts were recounted from the pool,
- * `g_enemies_present` was `visible && isEnemy` with **no dead test**, so those
- * corpses stayed counted for ever and the scripts kept stepping. They do not
- * now: the port releases both counts on death.
- *
- * Neither number is the engine's. There, a shot zombie keeps its place in
- * `g_enemies_present` for exactly the length of its death clip --
- * `ZombieReleasePermitAndUntrack` (`FUN_004565A0`) drops the alive count at
- * death and `ZombieEnterCorpseState` (`FUN_00456740`) drops the present count
- * when the clip ends -- and that window is the entire reason the game has two
- * counters. The port has no class-0x30 death state to hang it on, so the
- * window is zero-length here; the old behaviour was a window of *infinity*,
- * which left all 54 `wait_enemies_present` gates unable to open at all.
- * Closing it properly means porting `ZombieStateDeath6` (`FUN_00454D20`).
+ * `misPaid` is `obj+0x131C`. Every rescue here follows a kill by player 0,
+ * so it must name player 0; before `ResolveHit` wrote the byte all nineteen
+ * named -1 and paid both players.
  */
-const EXPECT = { total: 53, moved: 37, rescued: 21, holding: 4,
-                 captors: 57, inCaptorState: 55, mauled: 10 };
+const EXPECT = { total: 53, moved: 37, rescued: 19, holding: 4,
+                 captors: 60, inCaptorState: 58, mauled: 12 };
 const got = { total, moved, rescued, holding, captors, inCaptorState, mauled };
 const missing = Object.keys(EXPECT).filter((k) => EXPECT[k] !== got[k]);
-if (bad || total === 0 || missing.length) {
+if (bad || unplaced || misPaid || total === 0 || missing.length) {
   console.log("\nFAIL");
   for (const k of missing) {
     console.log(`  ${k}: expected ${EXPECT[k]}, got ${got[k]}`);
+  }
+  if (misPaid) {
+    console.log(`  ${misPaid} rescues paid someone other than the shooter`);
   }
   if (total && total !== EXPECT.total) {
     console.log("  (a bundle built for fewer than six stages will not match; "
@@ -244,7 +310,8 @@ if (bad || total === 0 || missing.length) {
   }
   process.exit(1);
 }
-console.log("\nclean -- every shipped stream steps, none runs away, 55 of the "
-            + "57 captors work on their own civilian rather than on the "
-            + "camera, and 10 civilians are mauled before anyone can save "
-            + "them");
+console.log(`\nclean -- every shipped stream steps, none runs away, `
+            + `${inCaptorState} of the ${captors} captors work on their own `
+            + `civilian rather than on the camera, ${mauled} civilians are `
+            + `mauled before anyone can save them, and ${rescued} are rescued `
+            + `by shooting their captors, each paid to the shooter`);

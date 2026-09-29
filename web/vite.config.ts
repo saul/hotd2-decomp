@@ -201,10 +201,12 @@ function serveBundle() {
         }
         const file = join(BUNDLE_DIR, rel);
         let size: number;
+        let mtime: Date;
         try {
           const st = statSync(file);
           if (!st.isFile()) throw new Error("not a file");
           size = st.size;
+          mtime = st.mtime;
         } catch {
           res.statusCode = 404;
           return res.end(
@@ -214,9 +216,22 @@ function serveBundle() {
             '\nOr open the player and build one from your install there.\n',
           );
         }
+        // `no-cache` is "ask before using it", and asking needs something to
+        // ask with. Without a validator every load was a full download --
+        // fifty to ninety megabytes a stage to a phone that had it already.
+        // A re-export rewrites the file, which changes both.
+        const etag = `W/"${size}-${Math.floor(mtime.getTime())}"`;
+        res.setHeader("ETag", etag);
+        res.setHeader("Last-Modified", mtime.toUTCString());
+        res.setHeader("Cache-Control", "no-cache");
+        const since = Date.parse(String(req.headers["if-modified-since"] ?? ""));
+        if (req.headers["if-none-match"] === etag
+            || (!req.headers["if-none-match"] && since >= Math.floor(mtime.getTime() / 1000) * 1000)) {
+          res.statusCode = 304;
+          return res.end();
+        }
         res.setHeader("Content-Type", MIME[extname(file)] ?? "application/octet-stream");
         res.setHeader("Content-Length", String(size));
-        res.setHeader("Cache-Control", "no-cache");
         createReadStream(file).pipe(res);
       });
     },

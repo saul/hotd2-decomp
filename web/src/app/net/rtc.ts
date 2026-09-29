@@ -18,7 +18,7 @@
  */
 import type { Channel } from "../../core/net/protocol";
 import type { SignalClient } from "./signal";
-import type { Transport, TransportInfo } from "./transport";
+import type { IcePath, Transport, TransportInfo } from "./transport";
 
 /** What travels through the rendezvous. */
 type RtcSignal =
@@ -48,8 +48,14 @@ export class RtcTransport implements Transport {
   onMessage: (ch: Channel, data: Uint8Array) => void = () => {};
   onOpen: () => void = () => {};
   onClose: (reason: string) => void = () => {};
+  /** What ICE has to work with, for the lobby's account of a slow connect. */
+  private readonly path: IcePath = {
+    since: NaN, local: {}, remote: {}, localMdns: 0, remoteMdns: 0, pairs: 0, failed: 0,
+    turn: 0, relayOnly: false,
+  };
   readonly info: TransportInfo = {
     kind: "webrtc", state: "connecting", ice: "new", route: "", rtt: NaN, buffered: 0,
+    path: this.path,
   };
   /** Sends dropped because `tick` was backed up. */
   dropped = 0;
@@ -80,6 +86,9 @@ export class RtcTransport implements Transport {
   private peerN: number | null = null;
 
   constructor(private readonly signal: SignalClient, opts: RtcOptions) {
+    this.path.relayOnly = opts.relayOnly;
+    this.path.turn = signal.iceServers.filter((s) =>
+      [s.urls].flat().some((u) => /^turns?:/.test(u))).length;
     this.pc = new RTCPeerConnection({
       iceServers: signal.iceServers,
       iceTransportPolicy: opts.relayOnly ? "relay" : "all",
@@ -102,6 +111,7 @@ export class RtcTransport implements Transport {
       dc.onclose = () => this.close(`${ch} channel closed`);
     }
     this.pc.onicecandidate = (e) => {
+      if (e.candidate) this.tally(e.candidate.candidate, "local");
       void this.say({ kind: "candidate", candidate: e.candidate?.toJSON() ?? null });
     };
     this.pc.oniceconnectionstatechange = () => this.iceChanged();
@@ -158,9 +168,22 @@ export class RtcTransport implements Transport {
     return this.outbox;
   }
 
+  /** One candidate, counted by type, and whether its address is an mDNS name. */
+  private tally(candidate: string, side: "local" | "remote"): void {
+    const f = candidate.split(" ");
+    const type = f[f.indexOf("typ") + 1] ?? "?";
+    const m = this.path[side];
+    m[type] = (m[type] ?? 0) + 1;
+    if (type === "host" && /\.local$/i.test(f[4] ?? "")) {
+      if (side === "local") this.path.localMdns++;
+      else this.path.remoteMdns++;
+    }
+  }
+
   /** The host's offer: at first, and again with fresh ICE on a restart. */
   private async offer(restart: boolean): Promise<void> {
     if (this.closed) return;
+    if (Number.isNaN(this.path.since)) this.path.since = performance.now();
     const offer = await this.pc.createOffer(restart ? { iceRestart: true } : undefined);
     await this.pc.setLocalDescription(offer);
     await this.say({ kind: "offer", sdp: offer.sdp ?? "" });
@@ -171,6 +194,7 @@ export class RtcTransport implements Transport {
     try {
       switch (s.kind) {
         case "offer": {
+          if (Number.isNaN(this.path.since)) this.path.since = performance.now();
           await this.pc.setRemoteDescription({ type: "offer", sdp: s.sdp });
           await this.flushCandidates(s.sdp);
           const answer = await this.pc.createAnswer();
@@ -185,6 +209,7 @@ export class RtcTransport implements Transport {
         case "candidate": {
           const c = s.candidate;
           if (!c) return;
+          if (c.candidate) this.tally(c.candidate, "remote");
           const theirs = c.usernameFragment ?? null;
           if (this.remoteUfrag === null
               || (theirs !== null && this.remoteUfrag && theirs !== this.remoteUfrag)) {
@@ -283,9 +308,16 @@ export class RtcTransport implements Transport {
       return;
     }
     let pairId: string | undefined;
+    let pairs = 0, failed = 0;
     stats.forEach((s) => {
       if (s.type === "transport" && s.selectedCandidatePairId) pairId = s.selectedCandidatePairId;
+      if (s.type === "candidate-pair") {
+        pairs++;
+        if ((s as RTCIceCandidatePairStats).state === "failed") failed++;
+      }
     });
+    this.path.pairs = pairs;
+    this.path.failed = failed;
     let pair: RTCIceCandidatePairStats | undefined;
     stats.forEach((s) => {
       if (s.type !== "candidate-pair") return;

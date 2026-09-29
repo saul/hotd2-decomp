@@ -10,6 +10,7 @@
  */
 import type { NetLevel, NetProjection, NetRow, StripRow } from "../../ui/projection";
 import type { NetSession } from "../net/session";
+import { describePath } from "../net/transport";
 import type { NetStats } from "../net/stats";
 
 /** No packet for this long, while one is expected, is worth a look... */
@@ -134,7 +135,13 @@ export function netProjection(net: NetSession, wantStats: boolean,
                               now: number): NetProjection | null {
   const s = net.stats;
   if (!s && net.lobby.phase === "idle") return null;
-  const lobby = { ...net.lobby };
+  // WebRTC's search, while there is one and the link is not up: what each
+  // end offered, how the pairs fared, and -- once it is stuck -- why.
+  const link = net.link;
+  const searching = link?.path && link.state !== "open" && !Number.isNaN(link.path.since)
+    && net.lobby.phase !== "error" && net.lobby.phase !== "closed";
+  const found = searching ? describePath(link!.path!, link!.ice, now) : null;
+  const lobby = { ...net.lobby, path: found?.line ?? null, hint: found?.hint ?? null };
   const held = net.role === "replica" && net.hostHold ? net.hostHold : null;
   if (!s) {
     return { role: net.role, player: net.role === "replica" ? 2 : 1, lobby,

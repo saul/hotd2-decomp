@@ -2364,8 +2364,10 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     // A replica's clock is the host's: it runs while the host's does.
     if (this.asReplica) return !!this.net.replica?.running && !!this.walker;
     // A host holds its own while player 2 loads the stage, so neither of
-    // them starts it without the other.
-    if (this.net.host?.holding) return false;
+    // them starts it without the other -- and before that, from the moment
+    // it makes a room until player 2 is in, so nothing attacks a player who
+    // is still reading out the code.
+    if (this.net.waitingForPlayer2 || this.net.host?.holding) return false;
     return !this.gameStopped && !!this.walker;
   }
 

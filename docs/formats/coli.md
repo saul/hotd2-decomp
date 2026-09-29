@@ -184,7 +184,11 @@ coli.sceneFiles(1)  // ["coli0.bin", "coli2.bin"] -- what scene 1 loads
 
 `Stage.colisets()` loads a scene's pair, and `web/src/hod2lib/script.ts`
 resolves an opcode `0x10`/`0x11` operand through `coli.pointerToOffset` into
-the instruction's `detail`, which `detailText` renders as:
+the instruction's `detail`: `set` (`full` or `ray_only`) and `meshes`, one per
+pointer, each its file, offset, quad count and surface ids — or only the raw
+`address` when the pointer resolves to no file. One instruction to a line,
+with the script offset and the opcode in front and `clear` for an empty list,
+that reads:
 
 ```
 001438  10 set_collision_set_full  full: coli2.bin+0xb148(6q surf 52,53)

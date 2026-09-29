@@ -548,7 +548,7 @@ specifies everything it reads.
 
 ```
 extract/player/
-  manifest.json                 format, digests, tool version, projection, stages
+  manifest.json                 format, digests, projection, stages
   stage2/
     stage2.glb                  geometry, materials, every texture, rigs, characters
     stage2.cam.json             camera and object paths as Hermite curves, by slot
@@ -591,12 +591,10 @@ npm run export -- --game-dir "/path/to/THE HOUSE OF THE DEAD 2" --all
 `--all` is stages 1–6; `--stage N` (repeatable) builds one and carries every
 other stage already on disk forward in the manifest. Both game modes by
 default; `--arcade` or `--original` builds only that one. `--out DIR` writes
-elsewhere (default `extract/player`, or `HOTD2_BUNDLE`). `--gltf` writes
-`.gltf` + `.bin` + PNGs instead of one `.glb`; `--lit` leaves out
-`KHR_materials_unlit`. An export into the default directory also deploys the
-site when `r2site/.deploy.env` exists (`--no-deploy` skips it). The export
-prints its decoder warnings at the end every time, including when there are
-none.
+elsewhere (default `extract/player`, or `HOTD2_BUNDLE`). An export into the
+default directory also deploys the site when `r2site/.deploy.env` exists
+(`--no-deploy` skips it). The export prints its decoder warnings at the end
+every time, including when there are none.
 
 ### Inside the page
 

@@ -11,9 +11,9 @@
  * Layout:
  *
  *     extract/player/
- *       manifest.json                stages present, tool version, source hashes
+ *       manifest.json                format, digests, stages, source hashes
  *       stage2/
- *         stage2.glb                 geometry, materials, textures (or .gltf set)
+ *         stage2.glb                 geometry, materials, textures
  *         stage2.cam.json            Hermite curves keyed by global path slot
  *         stage2.script.json         the resolved event script and route graph
  *       stage2_original/             game mode 1, same shape
@@ -79,9 +79,9 @@ import * as evtlib from "./evt";
 import type { Spawn } from "./evt";
 import type { ExeTables } from "./exetab";
 import * as gltf from "./gltf";
+import { bundleJson } from "./io";
 import type { AssetSource, BundleSink, Deflate, Progress } from "./io";
 import { loadBank } from "./mot";
-import { dumpsIndented, dumpsStrict } from "./pyjson";
 import * as propslib from "./props";
 import { AssetCache, resolveForStage as resolveRigs } from "./rigs";
 import type { Rig, RigInstance } from "./rigs";
@@ -106,15 +106,7 @@ import type { CamPaths } from "./campaths";
  * fire.** It says "the *layout* moved"; the digest beside it, which nobody has
  * to remember, catches the field-level drift.
  */
-export const BUNDLE_FORMAT = 15;
-
-/**
- * The library's version, which lands in the manifest as `tool_version`.
- *
- * It is informational -- the number a reader validates against is
- * {@link BUNDLE_FORMAT}.
- */
-export const TOOL_VERSION = "0.8.0";
+export const BUNDLE_FORMAT = 16;
 
 /**
  * Every asset slot the three container families can draw. The group props use
@@ -1590,7 +1582,7 @@ export async function actorSlotEntry(
     note: "actor models drawn by asset slot; hidden, cloned per live actor",
   };
   return {
-    rig, routes: [], anchors: {}, biases: {}, world: false, placements: [],
+    rig, routes: [], world: false, placements: [],
     blocked: "",
     fixed: [{ kind: "fixed", translation: [0.0, 0.0, 0.0],
               rotation_bams: [0, 0, 0], cam_paths: [], note: rig.note! }],
@@ -1715,7 +1707,7 @@ export async function effectSlotEntry(
     note: "one model per animation frame; hidden, cloned per live effect",
   };
   return {
-    rig, routes: [], anchors: {}, biases: {}, world: false, placements: [],
+    rig, routes: [], world: false, placements: [],
     blocked: "",
     fixed: [{ kind: "fixed", translation: [0.0, 0.0, 0.0],
               rotation_bams: [0, 0, 0], cam_paths: [], note: rig.note! }],
@@ -1841,7 +1833,7 @@ export async function breakableSlotEntry(
     note: "breakable prop models; hidden, cloned per live prop",
   };
   return {
-    rig, routes: [], anchors: {}, biases: {}, world: false, placements: [],
+    rig, routes: [], world: false, placements: [],
     blocked: "",
     fixed: [{ kind: "fixed", translation: [0.0, 0.0, 0.0],
               rotation_bams: [0, 0, 0], cam_paths: [], note: rig.note! }],
@@ -2006,10 +1998,6 @@ export function civiliansJson(tables: ExeTables, evt: evtlib.EvtFile,
 }
 
 export interface BuildOptions {
-  glb?: boolean;
-  writeTextures?: boolean;
-  unlit?: boolean;
-  camStep?: number;
   progress?: Progress;
 }
 
@@ -2025,7 +2013,6 @@ export async function buildStage(stage: Stage, sink: BundleSink,
                                  deflate: Deflate,
                                  opts: BuildOptions = {}):
     Promise<Record<string, unknown>> {
-  const glb = opts.glb ?? true;
   const say = opts.progress ?? (() => {});
   // The count belongs to this stage, so it starts here rather than at the top
   // of the process. A run builds up to twelve of these and a single running
@@ -2048,11 +2035,8 @@ export async function buildStage(stage: Stage, sink: BundleSink,
   let parts = geo.parts;
   let modelRegions = geo.modelRegions;
 
-  // Rig geometry travels in the glTF, but *unparented*: the bundle exports no
-  // camera nodes, so there is no baked animation to hang a rig under. Passing
-  // `anchors = {slot: null}` makes the writer emit each instance as a scene
-  // node tagged `hod2_path_slot`, which the client then drives from the raw
-  // `op_` curve -- the same trick the camera rails use.
+  // Rig geometry travels in the glTF as one scene node per route, tagged
+  // `hod2_path_slot`, which the client drives from the raw `op_` curve.
   //
   // The rain particle model is drawn by FUN_004136A0, which no region lists
   // and no asset opcode loads. Append it as its own part with an empty region
@@ -2077,11 +2061,6 @@ export async function buildStage(stage: Stage, sink: BundleSink,
   say(`  ${name}: object rigs`);
   const [rigInstances, rigBlocked] = await resolveRigs(
     stage, prog, spawnRecords, null, cache);
-  const rigData: RigInstance[] = rigInstances.map((inst) => {
-    const anchors: Record<string, null> = {};
-    for (const r of inst.routes) anchors[String(r.slot)] = null;
-    return { ...inst, anchors, biases: {} };
-  });
 
   // Spawned characters ride the same writer: a skeleton is a tree of named
   // parts with a translation and an asset slot, which is exactly a rig. They
@@ -2157,14 +2136,10 @@ export async function buildStage(stage: Stage, sink: BundleSink,
   // own option offers. See `bloodTexturePredicate`.
   const isBloodTexture = bloodTexturePredicate(tables);
   const info = await gltf.exportLevel(name, parts, outDir, sink, deflate, {
-    rigs: [...rigData, ...charEntries, ...propEntries,
+    rigs: [...rigInstances, ...charEntries, ...propEntries,
            ...(brk ? [brk] : []), ...(act ? [act] : []),
            ...(eff ? [eff] : [])],
-    writeTextures: opts.writeTextures ?? true,
-    camFiles: [],                  // rails are drawn client-side
-    unlit: opts.unlit ?? true,
     modelRegions,
-    glb,
     isBloodTexture,
   });
 
@@ -2177,11 +2152,10 @@ export async function buildStage(stage: Stage, sink: BundleSink,
   // otherwise a stale stage inside a fresh bundle, which is the one
   // arrangement a single top-level version can never see.
   camJson.format = BUNDLE_FORMAT;
-  // `allowNan: false` on purpose: `dumps` otherwise writes bare `NaN` and
-  // `Infinity`, which are not JSON and which every browser rejects with a
-  // parse error naming a byte offset rather than a field. A bundle that cannot
-  // be parsed is worse than an export that fails, so this throws here instead.
-  await sink.write(`${outDir}/${name}.cam.json`, dumpsStrict(camJson));
+  // `bundleJson` throws on a `NaN` or an `Infinity` rather than writing it as
+  // `null`: a curve that decoded to garbage fails the export here instead of
+  // loading as a curve of nulls.
+  await sink.write(`${outDir}/${name}.cam.json`, bundleJson(camJson));
 
   say(`  ${name}: event script`);
   const scriptJson = prog.toJson();
@@ -2239,7 +2213,7 @@ export async function buildStage(stage: Stage, sink: BundleSink,
                                               stage.scene)),
      // The result card's frame, for a stage that places the card.
      ...(prog && stagePlacesResultCard(prog) ? RESULT_CARD_SPRITES : [])]);
-  await sink.write(`${outDir}/${name}.script.json`, dumpsStrict(scriptJson));
+  await sink.write(`${outDir}/${name}.script.json`, bundleJson(scriptJson));
 
   let nSpawns = 0;
   for (const b of prog.liveBlocks()) {
@@ -2252,11 +2226,8 @@ export async function buildStage(stage: Stage, sink: BundleSink,
   // Drained here, at the end of the stage and before the entry is built, so
   // the list is exactly what this stage lost.
   const lost: Degradation[] = degraded.drain();
-  // Counted *after* `exportLevel`, which is the only thing that mutates a
-  // mesh's triangle list, so this is already what the glTF holds. It used to
-  // have `dropped_collapsed_uv` subtracted from it as well, which counted the
-  // same triangles twice: stage 1 reported 32,485 for a file with 34,062 in
-  // it. Whatever the writer left behind is the number.
+  // The level geometry's triangles, which is what the glTF holds of it:
+  // `exportLevel` writes every triangle of every mesh it is handed.
   const triangles = parts.reduce(
     (n, [, ms]) => n + ms.reduce((k, m) => k + m.triangleCount, 0), 0);
   const sources: Record<string, string> = {};
@@ -2329,7 +2300,6 @@ export async function writeManifest(
     // rather than merely unreadable. See `tools/gen_builder_hash.py`.
     builder: { hash: BUILDER_HASH, files: BUILDER_FILES },
     tool: "hod2lib",
-    tool_version: TOOL_VERSION,
     built,
     game_dir: gameDir,
     fps: 60,
@@ -2338,14 +2308,16 @@ export async function writeManifest(
     projection: {
       yfov_deg: 41.100,
       yfov_bams: gltf.CAM_FOV_BAMS,
-      aspect: 4.0 / 3.0,
+      aspect: gltf.CAM_ASPECT,
       znear: gltf.CAM_ZNEAR,
       zfar: gltf.CAM_ZFAR,
     },
     stages,
   };
   if (notes) doc.notes = notes;
-  await sink.write("manifest.json", dumpsIndented(doc));
+  // Indented, because it is the one file a person opens to see what a bundle
+  // holds; the stage files are compact.
+  await sink.write("manifest.json", bundleJson(doc, 1));
   return "manifest.json";
 }
 

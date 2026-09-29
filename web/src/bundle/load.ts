@@ -181,11 +181,11 @@ export function stageFormatRefusal(what: string,
  * refusing would make every unrelated fix in `hod2lib/` cost a forty-minute
  * re-export before anything could be opened at all.
  *
- * The case this exists for: `nl1.dropCollapsedUvTriangles` was deleting 3-5%
- * of every stage's geometry, and switching it off moved no declaration and no
- * `BUNDLE_FORMAT`. A stage already in the browser's cache therefore went on
- * winning over the rebuilt one -- with holes in it -- however many times the
- * tree was exported, and nothing on the page said why.
+ * The case this exists for: an exporter fix that changes what a stage holds
+ * -- keeping the 3-5% of triangles a UV-area filter drops, say -- moves no
+ * declaration and no `BUNDLE_FORMAT`. Without this, a stage already in the
+ * browser's cache goes on winning over the rebuilt one -- holes and all --
+ * however many times the tree is exported, and nothing on the page says why.
  */
 export function stageBuilderStale(builder: string | undefined): boolean {
   return builder !== BUILDER_HASH;

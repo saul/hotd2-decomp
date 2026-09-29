@@ -169,10 +169,11 @@ def client_source(root: Path | None = None) -> str:
  * mismatch means a bundle cannot be read; an exporter change usually means it
  * can be read and is merely out of date. See {{@link stageBuilderStale}}.
  *
- * The gap this closes: `nl1.dropCollapsedUvTriangles` was deleting 3-5% of
- * every stage, and turning it off moved no declaration and no `BUNDLE_FORMAT`
- * -- so a stage already built into the browser's OPFS cache kept winning over
- * the rebuilt one, with holes in it, however many times the tree was exported.
+ * The gap this closes: an exporter fix that changes what a stage holds --
+ * keeping the 3-5% of triangles a UV-area filter drops, say -- moves no
+ * declaration and no `BUNDLE_FORMAT`, so without this a stage already built
+ * into the browser's OPFS cache goes on winning over the rebuilt one, holes
+ * and all, however many times the tree is exported.
  */
 
 /** The per-file digests, so a stale bundle can name what moved. */

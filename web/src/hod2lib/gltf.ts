@@ -1,10 +1,10 @@
 /**
  * glTF 2.0 writer for HOTD2 levels.
  *
- * Emits a `.glb`, or a `.gltf` + `.bin` + PNG set. The raw PowerVR2
- * render-state words are preserved verbatim in each material's `extras.pvr2`
- * so a target engine can implement exact behaviour rather than relying on the
- * approximate PBR mapping.
+ * Emits one self-contained `.glb`. The raw PowerVR2 render-state words are
+ * preserved verbatim in each material's `extras.pvr2` so a target engine can
+ * implement exact behaviour rather than relying on the approximate PBR
+ * mapping.
  *
  * glTF is right-handed, Y-up, -Z forward, which matches the NaomiLib
  * convention closely enough that positions pass through unchanged. UV V is
@@ -15,13 +15,11 @@
 
 import { BAMS_TO_RAD } from "./bams";
 import { Writer, utf8 } from "./bytes";
-import { CP_CHANNELS, OP_CHANNELS } from "./cam";
-import type { CamFile, Path as CamPath } from "./cam";
+import { bundleJson } from "./io";
 import type { BundleSink, Deflate } from "./io";
 import * as nl1 from "./nl1";
 import type { Mesh, Model } from "./nl1";
 import { encodeRgba } from "./png";
-import { dumpsIndented, dumpsTight } from "./pyjson";
 import type { PartModels, RigInstance, RigPart, RigSkin,
               Vec3 } from "./rigs";
 import { pairKey } from "./stage";
@@ -35,7 +33,6 @@ const UNSIGNED_SHORT = 5123;
 const ARRAY_BUFFER = 34962;
 const ELEMENT_ARRAY_BUFFER = 34963;
 const TRIANGLES = 4;
-const LINE_STRIP = 3;
 
 const NEAREST = 9728;
 const LINEAR = 9729;
@@ -114,20 +111,6 @@ class Buf {
     return this.accessors.length - 1;
   }
 
-  scalarF32(vals: readonly number[]): number {
-    const raw = new Writer(vals.length * 4 + 16);
-    for (const v of vals) raw.f32(v);
-    const view = this.add(raw.view());
-    let lo = vals.length ? vals[0] : 0;
-    let hi = lo;
-    for (const v of vals) { if (v < lo) lo = v; if (v > hi) hi = v; }
-    this.accessors.push({
-      bufferView: view, componentType: FLOAT, count: vals.length,
-      type: "SCALAR", min: [lo], max: [hi],
-    });
-    return this.accessors.length - 1;
-  }
-
   /**
    * `JOINTS_0` — one joint per vertex, the other three slots zero.
    *
@@ -200,98 +183,6 @@ export const CAM_ASPECT = 4.0 / 3.0;
 export const CAM_ZNEAR = 0.8;
 export const CAM_ZFAR = 8000.0;
 
-/** Kept as the old name so nothing silently reverts to the 60-degree guess. */
-export const DEFAULT_YFOV = CAM_YFOV;
-
-// `cam/` roll is stored as an integer and is read through `__ftol`, like every
-// other angle in the game, so it is treated as BAMS. Only cp_st3 uses it at
-// all, peaking at ~876 = 4.8 deg, which is a plausible camera tilt. The
-// constant itself is `bams.ts`'s -- see the note there on why it is not
-// `core/bams.ts`'s.
-
-type V3 = [number, number, number];
-
-function norm(v: V3): V3 {
-  const n = Math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
-  return n > 1e-9 ? [v[0] / n, v[1] / n, v[2] / n] : [0.0, 0.0, -1.0];
-}
-
-function cross(a: V3, b: V3): V3 {
-  return [a[1] * b[2] - a[2] * b[1],
-          a[2] * b[0] - a[0] * b[2],
-          a[0] * b[1] - a[1] * b[0]];
-}
-
-/**
- * Rotation putting a glTF camera at *eye* looking at *target*.
- *
- * glTF cameras look down -Z with +Y up, so the camera's local Z axis is the
- * backward direction. Roll is applied about the view axis.
- */
-function lookAtQuat(eye: V3, target: V3, rollBams = 0.0):
-    [number, number, number, number] {
-  const fwd = norm([target[0] - eye[0], target[1] - eye[1],
-                    target[2] - eye[2]]);
-  const zax: V3 = [-fwd[0], -fwd[1], -fwd[2]];
-  let up: V3 = [0.0, 1.0, 0.0];
-  if (Math.abs(fwd[1]) > 0.9999) up = [0.0, 0.0, 1.0];  // straight up/down
-  let xax = norm(cross(up, zax));
-  let yax = cross(zax, xax);
-
-  if (rollBams) {
-    const a = rollBams * BAMS_TO_RAD;
-    const c = Math.cos(a);
-    const s = Math.sin(a);
-    const xr: V3 = [xax[0] * c + yax[0] * s, xax[1] * c + yax[1] * s,
-                    xax[2] * c + yax[2] * s];
-    const yr: V3 = [yax[0] * c - xax[0] * s, yax[1] * c - xax[1] * s,
-                    yax[2] * c - xax[2] * s];
-    xax = xr;
-    yax = yr;
-  }
-
-  // rotation matrix (columns are the basis vectors) -> quaternion
-  const m00 = xax[0], m01 = yax[0], m02 = zax[0];
-  const m10 = xax[1], m11 = yax[1], m12 = zax[1];
-  const m20 = xax[2], m21 = yax[2], m22 = zax[2];
-  const tr = m00 + m11 + m22;
-  let w: number, x: number, y: number, z: number;
-  if (tr > 0) {
-    const s = Math.sqrt(tr + 1.0) * 2;
-    w = 0.25 * s; x = (m21 - m12) / s; y = (m02 - m20) / s; z = (m10 - m01) / s;
-  } else if (m00 > m11 && m00 > m22) {
-    const s = Math.sqrt(1.0 + m00 - m11 - m22) * 2;
-    w = (m21 - m12) / s; x = 0.25 * s; y = (m01 + m10) / s; z = (m02 + m20) / s;
-  } else if (m11 > m22) {
-    const s = Math.sqrt(1.0 + m11 - m00 - m22) * 2;
-    w = (m02 - m20) / s; x = (m01 + m10) / s; y = 0.25 * s; z = (m12 + m21) / s;
-  } else {
-    const s = Math.sqrt(1.0 + m22 - m00 - m11) * 2;
-    w = (m10 - m01) / s; x = (m02 + m20) / s; y = (m12 + m21) / s; z = 0.25 * s;
-  }
-  const n = Math.sqrt(x * x + y * y + z * z + w * w) || 1.0;
-  return [x / n, y / n, z / n, w / n];
-}
-
-/** Sample a `cam/` path on a fixed frame grid, always including the end. */
-function samplePath(path: CamPath, channels: readonly string[],
-                    step: number): [number, number[]][] {
-  const curves = channels.map((c) => path.channels.get(c));
-  if (curves.some((c) => c === undefined)) return [];
-  const keys = curves[0]!.keys;
-  if (keys.length < 2) {
-    const t0 = keys.length ? keys[0].time : 0.0;
-    return [[t0, curves.map((c) => c!.evaluate(t0))]];
-  }
-  const t0 = keys[0].time;
-  const t1 = keys[keys.length - 1].time;
-  const times: number[] = [];
-  let t = t0;
-  while (t < t1) { times.push(t); t += step; }
-  times.push(t1);
-  return times.map((tt) => [tt, curves.map((c) => c!.evaluate(tt))]);
-}
-
 /**
  * PVR2 clamp/flip -> D3D7 texture address, as `FUN_004A7780` does it.
  *
@@ -310,38 +201,6 @@ function wrapMode(clampBit: boolean, flipBit: boolean): number {
   if (clampBit) return CLAMP_TO_EDGE;
   if (flipBit) return MIRRORED_REPEAT;
   return REPEAT;
-}
-
-/**
- * UV diagnostic texture: a checkerboard with per-axis colour bias.
- *
- * Red increases along u, blue along v, so a stretched or rotated face is
- * obvious at a glance.
- */
-function checker(size = 128, cells = 8): Uint8Array {
-  const px = new Uint8Array(size * size * 4);
-  const step = Math.floor(size / cells);
-  for (let y = 0; y < size; y++) {
-    for (let x = 0; x < size; x++) {
-      const dark = ((Math.floor(x / step) + Math.floor(y / step)) & 1) !== 0;
-      const base = dark ? 60 : 200;
-      const o = (y * size + x) * 4;
-      px[o] = Math.min(255, base + Math.floor(x * 55 / size));
-      px[o + 1] = base;
-      px[o + 2] = Math.min(255, base + Math.floor(y * 55 / size));
-      px[o + 3] = 255;
-    }
-  }
-  // solid border lines each cell, to make shear visible too
-  for (let y = 0; y < size; y++) {
-    for (let x = 0; x < size; x++) {
-      if (x % step === 0 || y % step === 0) {
-        const o = (y * size + x) * 4;
-        px[o] = px[o + 1] = px[o + 2] = 255;
-      }
-    }
-  }
-  return px;
 }
 
 /**
@@ -454,222 +313,6 @@ function orderedPrims(prims: Doc[]): Doc[] {
   return prims.slice().sort((a, b) => key(a) - key(b));
 }
 
-/**
- * A bias tag, formatted as `"%g"`.
- *
- * Six significant digits, trailing zeros stripped, and an exponent only
- * outside `[1e-4, 1e6)`. Written out because `toString` is not `%g`.
- */
-function formatG(v: number): string {
-  if (v === 0) return "0";
-  const exp = Math.floor(Math.log10(Math.abs(v)));
-  if (exp < -4 || exp >= 6) {
-    let s = v.toExponential(5);
-    const [m, e] = s.split("e");
-    const mm = m.includes(".") ? m.replace(/0+$/, "").replace(/\.$/, "") : m;
-    const sign = e[0];
-    const digits = e.slice(1).padStart(2, "0");
-    return `${mm}e${sign}${digits}`;
-  }
-  const s = v.toPrecision(6);
-  return s.includes(".") ? s.replace(/0+$/, "").replace(/\.$/, "") : s;
-}
-
-/** A short, filename-safe tag naming a pose bias. */
-function biasTag(bias: readonly number[]): string {
-  return bias.map((v) => formatG(v).replace(/-/g, "n").replace(/\./g, "p"))
-    .join("_");
-}
-
-/**
- * Add camera/object paths to a glTF document under three parent nodes.
- *
- * Produces, per `cp_` path, a two-polyline mesh -- the eye rail and the
- * look-at rail -- plus an animated perspective camera; and per `op_` path a
- * rail polyline **and an animated node**. `op_` paths carry a BAMS Euler
- * triple rather than a look-at, and the triple's meaning and application order
- * come from the draw chain every path-following object shares.
- *
- * Returns the node indices to add to the scene.
- */
-function emitPaths(camFiles: readonly CamFile[], buf: Buf, nodes: Doc[],
-                   meshes: Doc[], materials: Doc[], cameras: Doc[],
-                   animations: Doc[], fps = 60.0, step = 2.0,
-                   objBiases: Map<string, number[][]> | null = null): number[] {
-  const lineMaterial = (rgba: number[], mname: string): number => {
-    for (let i = 0; i < materials.length; i++) {
-      if (materials[i].name === mname) return i;
-    }
-    materials.push({
-      name: mname,
-      pbrMetallicRoughness: {
-        baseColorFactor: [...rgba], metallicFactor: 0.0, roughnessFactor: 1.0,
-      },
-      emissiveFactor: rgba.slice(0, 3),
-      doubleSided: true,
-    });
-    return materials.length - 1;
-  };
-
-  const polyline = (points: readonly number[][], material: number): Doc => ({
-    attributes: { POSITION: buf.vec3(points) },
-    indices: buf.indices([...points.keys()]),
-    material,
-    mode: LINE_STRIP,
-  });
-
-  const mEye = lineMaterial([0.15, 0.85, 1.0, 1.0], "hod2_cam_rail");
-  const mAim = lineMaterial([1.0, 0.55, 0.1, 1.0], "hod2_cam_aim");
-  const mObj = lineMaterial([0.3, 1.0, 0.35, 1.0], "hod2_object_rail");
-
-  const railNodes: number[] = [];
-  const camNodes: number[] = [];
-  const objNodes: number[] = [];
-
-  for (const cf of camFiles) {
-    const stem = cf.name.endsWith(".bin") ? cf.name.slice(0, -4) : cf.name;
-
-    if (cf.isObjectPath) {
-      for (const path of cf.paths) {
-        const samples = samplePath(path, OP_CHANNELS, step);
-        if (samples.length < 2) continue;
-        const times = samples.map(([t]) => t / fps);
-        const pts = samples.map(([, v]) => [v[0], v[1], v[2]]);
-        const quats = samples.map(([, v]) => bamsEulerToQuat(v[3], v[4], v[5]));
-        const extras: Doc = {
-          hod2_kind: "object_path", hod2_file: stem, hod2_path: path.index,
-          hod2_duration_frames: path.duration,
-        };
-
-        const nm = `${stem}_${String(path.index).padStart(2, "0")}`;
-        meshes.push({ name: nm + "_rail", primitives: [polyline(pts, mObj)] });
-        nodes.push({ mesh: meshes.length - 1, name: nm + "_rail",
-                     extras: { ...extras } });
-        objNodes.push(nodes.length - 1);
-
-        // the moving node: parent a model under this to watch it run
-        nodes.push({
-          name: nm + "_obj",
-          translation: [...pts[0]], rotation: [...quats[0]],
-          extras: { ...extras, hod2_kind: "object" },
-        });
-        const objNode = nodes.length - 1;
-        objNodes.push(objNode);
-
-        const tIn = buf.scalarF32(times);
-        animations.push({
-          name: nm,
-          samplers: [
-            { input: tIn, output: buf.vec3(pts), interpolation: "LINEAR" },
-            { input: tIn, output: buf.vec4(quats), interpolation: "LINEAR" },
-          ],
-          channels: [
-            { sampler: 0, target: { node: objNode, path: "translation" } },
-            { sampler: 1, target: { node: objNode, path: "rotation" } },
-          ],
-        });
-
-        // Some routines bias the path *position* before applying the pose
-        // rotations: `Translate(p.x, p.y + 2.0, p.z); RotZ; RotY; RotX`. That
-        // is T(p+b).R, which a child node with translation b cannot express --
-        // it would give T(p).R.T(b). So each distinct bias gets its own anchor
-        // with shifted samples.
-        for (const bias of objBiases?.get(nm) ?? []) {
-          const bpts = pts.map((p) =>
-            [p[0] + bias[0], p[1] + bias[1], p[2] + bias[2]]);
-          nodes.push({
-            name: `${nm}_obj_b${biasTag(bias)}`,
-            translation: [...bpts[0]], rotation: [...quats[0]],
-            extras: { ...extras, hod2_kind: "object",
-                      hod2_pose_bias: [...bias] },
-          });
-          const bnode = nodes.length - 1;
-          objNodes.push(bnode);
-          animations.push({
-            name: `${nm}_b${biasTag(bias)}`,
-            samplers: [
-              { input: tIn, output: buf.vec3(bpts), interpolation: "LINEAR" },
-              { input: tIn, output: buf.vec4(quats), interpolation: "LINEAR" },
-            ],
-            channels: [
-              { sampler: 0, target: { node: bnode, path: "translation" } },
-              { sampler: 1, target: { node: bnode, path: "rotation" } },
-            ],
-          });
-        }
-      }
-      continue;
-    }
-
-    for (const path of cf.paths) {
-      const samples = samplePath(path, CP_CHANNELS, step);
-      if (samples.length < 2) continue;
-      const eyes = samples.map(([, v]) => [v[0], v[1], v[2]]);
-      const aims = samples.map(([, v]) => [v[3], v[4], v[5]]);
-      const times = samples.map(([t]) => t / fps);
-      const quats = samples.map(([, v], i) =>
-        lookAtQuat(eyes[i] as V3, aims[i] as V3, v[6]));
-
-      const nm = `${stem}_${String(path.index).padStart(2, "0")}`;
-
-      // visible rail: eye polyline + aim polyline in one mesh
-      meshes.push({
-        name: nm + "_rail",
-        primitives: [polyline(eyes, mEye), polyline(aims, mAim)],
-      });
-      nodes.push({
-        mesh: meshes.length - 1, name: nm + "_rail",
-        extras: { hod2_kind: "camera_rail", hod2_file: stem,
-                  hod2_path: path.index,
-                  hod2_duration_frames: path.duration },
-      });
-      railNodes.push(nodes.length - 1);
-
-      // animated camera
-      cameras.push({
-        type: "perspective", name: nm + "_cam",
-        perspective: { yfov: CAM_YFOV, aspectRatio: CAM_ASPECT,
-                       znear: CAM_ZNEAR, zfar: CAM_ZFAR },
-      });
-      nodes.push({
-        camera: cameras.length - 1, name: nm + "_cam",
-        translation: [...eyes[0]], rotation: [...quats[0]],
-        extras: { hod2_kind: "camera", hod2_file: stem, hod2_path: path.index,
-                  hod2_duration_frames: path.duration,
-                  hod2_fov_bams: CAM_FOV_BAMS,
-                  hod2_yfov_deg: CAM_YFOV * 180 / Math.PI },
-      });
-      const camNode = nodes.length - 1;
-      camNodes.push(camNode);
-
-      const tIn = buf.scalarF32(times);
-      animations.push({
-        name: nm,
-        samplers: [
-          { input: tIn, output: buf.vec3(eyes), interpolation: "LINEAR" },
-          { input: tIn, output: buf.vec4(quats), interpolation: "LINEAR" },
-        ],
-        channels: [
-          { sampler: 0, target: { node: camNode, path: "translation" } },
-          { sampler: 1, target: { node: camNode, path: "rotation" } },
-        ],
-      });
-    }
-  }
-
-  const out: number[] = [];
-  for (const [children, label] of [[railNodes, "camera_rails"],
-                                   [camNodes, "cameras"],
-                                   [objNodes, "object_paths"]] as
-       [number[], string][]) {
-    if (children.length) {
-      nodes.push({ name: label, children, extras: { hod2_kind: label } });
-      out.push(nodes.length - 1);
-    }
-  }
-  return out;
-}
-
 const GLB_MAGIC = 0x46546c67;          // 'glTF'
 const GLB_CHUNK_JSON = 0x4e4f534a;     // 'JSON'
 const GLB_CHUNK_BIN = 0x004e4942;      // 'BIN\0'
@@ -681,7 +324,7 @@ const GLB_CHUNK_BIN = 0x004e4942;      // 'BIN\0'
  * with zeros -- both to a 4-byte boundary, as the spec requires.
  */
 function packGlb(doc: Doc, blob: Uint8Array): Uint8Array {
-  const js = utf8(dumpsTight(doc));
+  const js = utf8(bundleJson(doc));
   const jsPad = (-js.length % 4 + 4) % 4;
   const binPad = (-blob.length % 4 + 4) % 4;
   const jsLen = js.length + jsPad;
@@ -709,28 +352,9 @@ export interface ModelRegionInfo {
 }
 
 export interface ExportOptions {
-  collision?: [string, number[][], number[][]][] | null;
   rigs?: RigInstance[] | null;
-  spawns?: Doc[] | null;
-  writeTextures?: boolean;
-  uvCheck?: boolean;
-  /**
-   * Delete triangles that are collinear in UV space -- see
-   * `nl1.dropCollapsedUvTriangles`, which says why the answer is no.
-   *
-   * **Off, and it used to be on.** It was spelled `keepCollapsedUv` and
-   * defaulted to dropping, so every bundle the player has ever loaded was
-   * short 3-5% of its triangles, some of them whole faces. The game draws
-   * them; `WalkMeshChainAndDraw` has no per-triangle test. This is here for an
-   * export aimed at a modelling tool, and it is the caller's to ask for.
-   */
-  dropCollapsedUv?: boolean;
-  camFiles?: CamFile[] | null;
-  camStep?: number;
-  unlit?: boolean;
   modelRegions?: Map<string, ModelRegionInfo> | null;
   foldMirrorUv?: boolean;
-  glb?: boolean;
   /**
    * Is this `(pol stem, texture id)` one of the game's **blood** textures?
    *
@@ -748,30 +372,25 @@ export interface ExportOptions {
 }
 
 export interface ExportInfo {
+  /** The file written, relative to *outDir*: `<name>.glb`. */
   gltf: string;
-  glb: boolean;
-  dropped_collapsed_uv: number;
   folded_mirror_uv: number;
   nodes: number;
   meshes: number;
   materials: number;
   textures: number;
   buffer_bytes: number;
-  cameras: number;
-  animations: number;
-  paths: number;
   rigs: number;
-  spawns: number;
   rig_counts: Record<string, number>;
 }
 
 /**
- * Write one or more parts to `<outDir>/<name>.gltf` plus `.bin` and
- * `textures/`, or, with *glb*, into a single self-contained `<name>.glb`.
+ * Write one or more parts into a single self-contained `<outDir>/<name>.glb`,
+ * textures included.
  *
- * A whole stage is around 1300 separate texture files, and a browser fetching
- * them one at a time is the slowest part of loading a bundle; one file removes
- * the fetch storm entirely.
+ * A whole stage is around 1300 textures, and a browser fetching them one file
+ * at a time is the slowest part of loading a bundle; one file removes the
+ * fetch storm entirely.
  *
  * `parts` is a list of `[partName, models, bank]`. Texture IDs are numbered
  * per bank, so tex 0 of st2_01 is unrelated to tex 0 of st2_02, and everything
@@ -781,10 +400,6 @@ export async function exportLevel(
     name: string, parts: [string, Model[], Bank | null][],
     outDir: string, sink: BundleSink, deflate: Deflate,
     opts: ExportOptions = {}): Promise<ExportInfo> {
-  const glb = opts.glb ?? false;
-  const uvCheck = opts.uvCheck ?? false;
-  const unlit = opts.unlit ?? false;
-  const writeTextures = opts.writeTextures ?? true;
   const modelRegions = opts.modelRegions ?? null;
 
   const buf = new Buf();
@@ -830,33 +445,18 @@ export async function exportLevel(
    */
   const getImage = async (part: string, bank: Bank | null,
                           texId: number): Promise<number | null> => {
-    const key = `${part} ${texId}`;
+    const key = `${part}\u0000${texId}`;
     const hit = imgWritten.get(key);
     if (hit !== undefined) return hit;
     if (bank === null) return null;
     const got = bankDecode(bank, texId);
     if (got === null) return null;
-    let { width: w, height: h, pixels } = got;
-    if (uvCheck) {
-      w = h = 128;
-      pixels = checker();
-    }
-    const sub = `textures/${part}`;
-    const suffix = uvCheck ? "_uvcheck" : "";
-    const fn = `${sub}/tex_${String(texId).padStart(3, "0")}${suffix}.png`;
-    if (glb) {
-      // In a GLB the image is a buffer view, not a file. The name is kept so a
-      // material can still be traced back to its bank slot.
-      const view = buf.add(await encodeRgba(w, h, pixels, deflate));
-      images.push({ bufferView: view, mimeType: "image/png",
-                    name: `${part}/tex_${String(texId).padStart(3, "0")}${suffix}` });
-    } else {
-      if (writeTextures) {
-        await sink.write(`${outDir}/${fn}`,
-                         await encodeRgba(w, h, pixels, deflate));
-      }
-      images.push({ uri: fn });
-    }
+    const { width: w, height: h, pixels } = got;
+    // The image is a buffer view, not a file. The name is kept so a material
+    // can still be traced back to its bank slot.
+    const view = buf.add(await encodeRgba(w, h, pixels, deflate));
+    images.push({ bufferView: view, mimeType: "image/png",
+                  name: `${part}/tex_${String(texId).padStart(3, "0")}` });
     imgWritten.set(key, images.length - 1);
     return images.length - 1;
   };
@@ -938,10 +538,6 @@ export async function exportLevel(
       // This applies to EVERY shading mode. The port's translation sets
       // COLOROP = MODULATE unconditionally and only varies the alpha op, so
       // PowerVR2 "decal" does not replace the colour here.
-      if (uvCheck) {
-        pbr.baseColorFactor = [1.0, 1.0, 1.0,
-                               (pbr.baseColorFactor as number[])[3]];
-      }
     }
 
     const mat: Doc = {
@@ -1007,15 +603,13 @@ export async function exportLevel(
                           "modulate_alpha"][mesh.textureShading],
       },
     };
-    if (unlit) {
-      // HOTD2 does no runtime lighting on level geometry: illumination is
-      // baked into the textures and the per-mesh base colour, and the levels
-      // ship with no light sources at all. KHR_materials_unlit is therefore
-      // the faithful model, not a shortcut -- and it is what stops a Rendered
-      // view from coming out black.
-      const ext = (mat.extensions ??= {}) as Doc;
-      ext.KHR_materials_unlit = {};
-    }
+    // HOTD2 does no runtime lighting on level geometry: illumination is
+    // baked into the textures and the per-mesh base colour, and the levels
+    // ship with no light sources at all. KHR_materials_unlit is therefore the
+    // faithful model, not a shortcut -- and it is what stops a Rendered view
+    // from coming out black. `render/lighting.ts` swaps in a Lambert twin of a
+    // material when the player draws the scene light.
+    mat.extensions = { KHR_materials_unlit: {} };
 
     materials.push(mat);
     matCache.set(key, materials.length - 1);
@@ -1023,7 +617,6 @@ export async function exportLevel(
   };
 
   // ---- geometry ------------------------------------------------------
-  let droppedTris = 0;
   let foldedUvs = 0;
   for (const [partName, models, bank] of parts) {
     for (const model of models) {
@@ -1032,13 +625,6 @@ export async function exportLevel(
         // D3DTADDRESS_MIRROR, and applying it to a target that mirrors
         // correctly destroys texturing.
         if (opts.foldMirrorUv) foldedUvs += nl1.applyMirrorUvFold(mesh);
-      }
-    }
-    if (opts.dropCollapsedUv) {
-      for (const model of models) {
-        for (const mesh of model.meshes) {
-          droppedTris += nl1.dropCollapsedUvTriangles(mesh);
-        }
       }
     }
     const childNodes: number[] = [];
@@ -1108,87 +694,13 @@ export async function exportLevel(
     }
   }
 
-  // ---- collision -----------------------------------------------------
-  for (const [cname, verts, tris] of opts.collision ?? []) {
-    if (!tris.length) continue;
-    const idx: number[] = [];
-    for (const t of tris) idx.push(...t);
-    const prim: Doc = {
-      attributes: { POSITION: buf.vec3(verts) },
-      indices: buf.indices(idx),
-      mode: TRIANGLES,
-    };
-    meshes.push({ name: cname, primitives: [prim] });
-    nodes.push({ mesh: meshes.length - 1, name: cname,
-                 extras: { hod2_kind: "collision" } });
-    sceneNodes.push(nodes.length - 1);
-  }
-
-  // ---- camera and object paths ---------------------------------------
-  const cameras: Doc[] = [];
-  const animations: Doc[] = [];
-  let nPaths = 0;
-  if (opts.camFiles && opts.camFiles.length) {
-    // A rig whose routine biases the path pose needs its own anchor.
-    const biases = new Map<string, number[][]>();
-    for (const entry of opts.rigs ?? []) {
-      for (const [base, b] of Object.entries(entry.biases ?? {})) {
-        let list = biases.get(base);
-        if (!list) { list = []; biases.set(base, list); }
-        const bb = b as number[];
-        if (!list.some((x) => x.join() === bb.join())) list.push(bb);
-      }
-    }
-    sceneNodes.push(...emitPaths(opts.camFiles, buf, nodes, meshes, materials,
-                                 cameras, animations, 60.0,
-                                 opts.camStep ?? 2.0, biases));
-    nPaths = opts.camFiles.reduce((n, c) => n + c.paths.length, 0);
-  }
-
-  // ---- identified spawns ----------------------------------------------
-  //
-  // A node per spawn the event script places, carrying what the thing IS.
-  // These carry no geometry: a consumer should draw a marker.
-  let nSpawns = 0;
-  if (opts.spawns && opts.spawns.length) {
-    const spawnNodes: number[] = [];
-    for (const sp of opts.spawns) {
-      const rot = sp.rot as number[];
-      const node: Doc = {
-        name: `spawn_${(sp.at as number).toString(16).padStart(6, "0")}`
-          + `_${sp.label}`,
-        translation: [...(sp.pos as number[])],
-        rotation: [...bamsEulerToQuat(rot[0], rot[1], rot[2])],
-        extras: {
-          hod2_kind: "spawn",
-          hod2_class: sp.class,
-          hod2_evt_offset: sp.at,
-          hod2_opcode: sp.opcode,
-        },
-      };
-      for (const k of ["char_type", "asset_file", "node_count", "note"]) {
-        const v = sp[k];
-        if (v !== null && v !== undefined && v !== "" && v !== 0) {
-          (node.extras as Doc)["hod2_" + k] = v;
-        }
-      }
-      nodes.push(node);
-      spawnNodes.push(nodes.length - 1);
-      nSpawns += 1;
-    }
-    if (spawnNodes.length) {
-      nodes.push({ name: "spawns", children: spawnNodes,
-                   extras: { hod2_kind: "spawn_root" } });
-      sceneNodes.push(nodes.length - 1);
-    }
-  }
-
   // ---- hand-coded object rigs -----------------------------------------
   //
   // An object that follows an op_ path is not one model: its draw routine
   // walks the matrix stack pushing a transform per part. There is no rig data
   // in the assets, so `hod2lib/rigs` transcribes the routine and this
-  // instantiates it as a node hierarchy under the animated path node.
+  // instantiates it as a node hierarchy, one root per route the client drives
+  // from the raw `op_` curve.
   //
   // Parts are siblings, not a chain -- MatrixStackPush(0) duplicates the top,
   // so each part's transform is relative to the object root.
@@ -1196,26 +708,23 @@ export async function exportLevel(
   const rigCounts: Record<string, number> = {};
   for (const entry of opts.rigs ?? []) {
     const rig = entry.rig;
-    const byName = new Map<string, number>();
-    nodes.forEach((n, i) => { if (n.name !== undefined) byName.set(n.name as string, i); });
-    // A rig reaches the scene four ways: parented to the animated node of a
-    // route it follows, placed at a pose the routine hardcodes, placed at
-    // every spawn descriptor of its class, or -- for a routine that draws
-    // straight off the view matrix with no root push -- left in world space
-    // with the part transforms already absolute.
-    const anchors = (entry.anchors ?? {}) as Record<string, string | null>;
-    const targets: [string, Doc | null, string | null][] =
-      Object.keys(anchors).map(Number).sort((a, b) => a - b).map((slot) =>
-        [String(slot).padStart(3, "0"), null, anchors[String(slot)] ?? null]);
+    // A rig reaches the scene four ways: at the root of a route it follows,
+    // tagged with the path slot the client drives it along; placed at a pose
+    // the routine hardcodes; placed at every spawn descriptor of its class; or
+    // -- for a routine that draws straight off the view matrix with no root
+    // push -- left in world space with the part transforms already absolute.
+    const slots = [...new Set(entry.routes.map((r) => r.slot))]
+      .sort((a, b) => a - b);
+    const targets: [string, Doc | null][] =
+      slots.map((slot) => [String(slot).padStart(3, "0"), null]);
     (entry.placements ?? []).forEach((sp, i) =>
-      targets.push([`spawn${String(i).padStart(3, "0")}`, sp as Doc, null]));
+      targets.push([`spawn${String(i).padStart(3, "0")}`, sp as Doc]));
     (entry.fixed ?? []).forEach((fp, i) =>
       targets.push([`fixed${String(i).padStart(3, "0")}`,
-                    fp as unknown as Doc, null]));
-    if (rig.worldSpace && entry.world) targets.push(["world", null, null]);
+                    fp as unknown as Doc]));
+    if (rig.worldSpace && entry.world) targets.push(["world", null]);
 
-    for (const [tag, spawn, anchor] of targets) {
-      if (anchor !== null && !byName.has(anchor)) continue;
+    for (const [tag, spawn] of targets) {
       const partNodes: number[] = [];
       const nodeByPart = new Map<string, number>();
       /** `[node index, skin]` for every vertex-blended part in this rig. */
@@ -1391,13 +900,7 @@ export async function exportLevel(
           rex.hod2_path_slot = parseInt(tag, 10);
         }
         nodes.push(root);
-        if (anchor !== null) {
-          // parent under the animated object-path node so it rides
-          const host = nodes[byName.get(anchor)!];
-          ((host.children ??= []) as number[]).push(nodes.length - 1);
-        } else {
-          sceneNodes.push(nodes.length - 1);
-        }
+        sceneNodes.push(nodes.length - 1);
         nRigs += 1;
         rigCounts[rig.name] = (rigCounts[rig.name] ?? 0) + 1;
       }
@@ -1405,9 +908,6 @@ export async function exportLevel(
   }
 
   // ---- assemble ------------------------------------------------------
-  const binName = `${name}.bin`;
-  if (!glb) await sink.write(`${outDir}/${binName}`, buf.w.view());
-
   const doc: Doc = {
     asset: {
       version: "2.0",
@@ -1424,8 +924,7 @@ export async function exportLevel(
     accessors: buf.accessors,
     bufferViews: buf.views,
     // A GLB's single buffer is the BIN chunk and carries no URI.
-    buffers: glb ? [{ byteLength: buf.length }]
-                 : [{ uri: binName, byteLength: buf.length }],
+    buffers: [{ byteLength: buf.length }],
   };
   // Omitted when empty: `skins: []` is invalid glTF, and a stage with no
   // vertex-blended character has none.
@@ -1435,34 +934,20 @@ export async function exportLevel(
     doc.textures = textures;
   }
   if (samplers.length) doc.samplers = samplers;
-  if (cameras.length) doc.cameras = cameras;
-  if (animations.length) doc.animations = animations;
-  if (unlit) doc.extensionsUsed = ["KHR_materials_unlit"];
+  doc.extensionsUsed = ["KHR_materials_unlit"];
 
-  let outPath: string;
-  if (glb) {
-    outPath = `${name}.glb`;
-    await sink.write(`${outDir}/${outPath}`, packGlb(doc, buf.w.view()));
-  } else {
-    outPath = `${name}.gltf`;
-    await sink.write(`${outDir}/${outPath}`, dumpsIndented(doc));
-  }
+  const outPath = `${name}.glb`;
+  await sink.write(`${outDir}/${outPath}`, packGlb(doc, buf.w.view()));
 
   return {
     gltf: outPath,
-    glb,
-    dropped_collapsed_uv: droppedTris,
     folded_mirror_uv: foldedUvs,
     nodes: nodes.length,
     meshes: meshes.length,
     materials: materials.length,
     textures: textures.length,
     buffer_bytes: buf.length,
-    cameras: cameras.length,
-    animations: animations.length,
-    paths: nPaths,
     rigs: nRigs,
-    spawns: nSpawns,
     rig_counts: rigCounts,
   };
 }

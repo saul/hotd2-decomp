@@ -112,10 +112,10 @@ CHECKS: list[Check] = [
     Check("test:bundle", "web", ["npm", "run", "--silent", "test:bundle"],
           "that the bundle reader refuses what it should refuse"),
     Check("test:export", "web", ["npm", "run", "--silent", "test:export"],
-          "the three pieces of the TypeScript exporter that comparing two "
-          "bundles cannot check -- `json.dumps`'s separators, the "
-          "case-insensitive path resolve, and an archive something else can "
-          "open"),
+          "the pieces of the TypeScript exporter a game directory cannot "
+          "check -- bundle JSON that round-trips through `JSON.parse` and "
+          "refuses a NaN, the case-insensitive path resolve, and an archive "
+          "something else can open"),
     Check("test:scope", "web", ["npm", "run", "--silent", "test:scope"],
           "that lifetimes are given back"),
     Check("test:projection", "web", ["npm", "run", "--silent", "test:projection"],

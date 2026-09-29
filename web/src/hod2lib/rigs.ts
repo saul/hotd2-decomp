@@ -334,9 +334,6 @@ export interface RigInstance {
    * for a rig nothing links to a spawn. See {@link Rig.spawnSubtype}.
    */
   spawnAts?: number[] | null;
-  /** Only prop rigs carry these; see `props.rigEntries`. */
-  anchors?: Record<string, unknown>;
-  biases?: Record<string, unknown>;
 }
 
 /** A cache of `pol/` assets shared by the rig and prop resolvers. */

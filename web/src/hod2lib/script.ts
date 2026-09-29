@@ -228,66 +228,6 @@ export class Resolver {
     }
     return out;
   }
-
-  /** One line of operand text, as `dump_stage_script.py` prints it. */
-  operandText(ins: evt.Instr): string {
-    const v = ins.raw.length ? ins.raw[0] : 0;
-    if (evt.SLOT_OPCODES.includes(ins.opcode)) {
-      const r = this.slots.get(v);
-      return r ? `slot ${v} = ${r[0]}[${r[1]}]` : `slot ${v} = ?`;
-    }
-    if (ins.opcode === 0x52 || ins.opcode === 0x53) {
-      const r = this.pol.get(v);
-      return r ? `pol ${v} = ${r[0]}` : `pol ${v} = ?`;
-    }
-    if (ins.opcode >= 0x54 && ins.opcode <= 0x57) {
-      return `tex ${v} = ${this.tex.get(v) ?? "?"}`;
-    }
-    return ins.words
-      .map((w) => (w >>> 0).toString(16).toUpperCase().padStart(8, "0"))
-      .join(" ");
-  }
-
-  /** The file an asset opcode touches, or null if it touches none. */
-  assetName(ins: evt.Instr): string | null {
-    const v = ins.raw.length ? ins.raw[0] : 0;
-    if (evt.SLOT_OPCODES.includes(ins.opcode)) {
-      const r = this.slots.get(v);
-      return r ? r[0] : null;
-    }
-    if (ins.opcode === 0x52 || ins.opcode === 0x53) {
-      const r = this.pol.get(v);
-      return r ? r[0] : null;
-    }
-    if (ins.opcode >= 0x54 && ins.opcode <= 0x57) {
-      return this.tex.get(v) ?? null;
-    }
-    return null;
-  }
-}
-
-/**
- * A line rendered from an already-decoded {@link Op}, or null.
- *
- * `operandText` only sees the raw instruction, so it cannot resolve anything
- * that needed more than the EXE tables. Collision-set pointers need the
- * `coli/` files, and those are decoded into `op.detail` when the Program is
- * built.
- */
-export function detailText(op: Op): string | null {
-  if (!COLLISION_SET_OPCODES.includes(op.opcode)) return null;
-  const meshes = (op.detail.meshes as Record<string, unknown>[]) ?? [];
-  const set = (op.detail.set as string) ?? "?";
-  if (!meshes.length) return `${set}: clear`;
-  const parts = meshes.map((m) => {
-    if ("file" in m) {
-      const surfaces = (m.surfaces as number[]) ?? [];
-      return `${m.file}+0x${(m.offset as number).toString(16)}`
-        + `(${m.quads ?? "?"}q surf ${surfaces.join(",")})`;
-    }
-    return `0x${(m.address as number).toString(16).padStart(8, "0")}=UNRESOLVED`;
-  });
-  return `${set}: ${parts.join(" ")}`;
 }
 
 // ---------------------------------------------------------------------------

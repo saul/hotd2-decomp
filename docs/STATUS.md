@@ -19,23 +19,23 @@ than a measurement. What each directory is for is in
 | Directory | Lines | Files | Layer |
 |---|---:|---:|---|
 | `game/` | 110248 | 361 | engine |
-| `hod2lib/` | 19994 | 35 | engine |
-| `render/` | 15804 | 60 | render |
-| `app/` | 12685 | 44 | app |
+| `hod2lib/` | 19192 | 34 | engine |
+| `render/` | 15803 | 60 | render |
+| `app/` | 12684 | 44 | app |
 | `script/` | 4495 | 25 | engine |
 | `ui/` | 3773 | 27 | ui |
 | `core/` | 3535 | 13 | engine |
-| `bundle/` | 2921 | 11 | engine |
+| `bundle/` | 2924 | 11 | engine |
 | `audio/` | 1053 | 3 | render |
 | `hud/` | 526 | 1 | ui |
-| **total** | **175034** | **580** | |
+| **total** | **174233** | **579** | |
 
 The largest files, which is where the pressure to split next is:
 
 * `game/globals.ts` — 3251
 * `app/main.ts` — 3202
 * `game/actor.ts` — 2744
-* `hod2lib/bundle.ts` — 2483
+* `hod2lib/bundle.ts` — 2455
 * `hod2lib/exetab.ts` — 2409
 
 ## The port
@@ -103,7 +103,7 @@ nothing exits 3 and is never counted as green.
 | `test:port` | the state machines, driven headless against hand-written tables | — |
 | `test:audio` | `PlaySoundId`'s dispatch -- the loop flag, the three one-shot tracks, the three control words -- and the byte stream channel 0xF plays, tail and channel swap included, with no browser | — |
 | `test:bundle` | that the bundle reader refuses what it should refuse | — |
-| `test:export` | the three pieces of the TypeScript exporter that comparing two bundles cannot check -- `json.dumps`'s separators, the case-insensitive path resolve, and an archive something else can open | — |
+| `test:export` | the pieces of the TypeScript exporter a game directory cannot check -- bundle JSON that round-trips through `JSON.parse` and refuses a NaN, the case-insensitive path resolve, and an archive something else can open | — |
 | `test:scope` | that lifetimes are given back | — |
 | `test:projection` | that unchanged slices keep their identity across a frame | — |
 | `test:ui` | that the page has the shape the stylesheet expects | — |

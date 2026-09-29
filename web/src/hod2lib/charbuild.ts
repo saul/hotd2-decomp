@@ -477,7 +477,7 @@ export async function rigEntry(stage: Stage, tables: ExeTables,
     parts: parts.map(([p]) => p),
     note: "skeleton from the EXE; posed per frame from mot/",
   };
-  return { rig, routes: [], anchors: {}, biases: {}, fixed: [], world: false,
+  return { rig, routes: [], fixed: [], world: false,
            placements: spawns, blocked: "",
            parts: parts.filter(([, m]) => m.length) };
 }
@@ -584,7 +584,7 @@ export async function goreEntry(stage: Stage, tables: ExeTables,
     note: "damaged parts; hidden, cloned onto a bone when hit",
   };
   return {
-    rig, routes: [], anchors: {}, biases: {}, world: false, placements: [],
+    rig, routes: [], world: false, placements: [],
     blocked: "",
     fixed: [{ kind: "fixed", translation: [0.0, 0.0, 0.0],
               rotation_bams: [0, 0, 0], cam_paths: [], note: rig.note! }],

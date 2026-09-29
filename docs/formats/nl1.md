@@ -393,12 +393,11 @@ coordinates", set on meshes that sample no texture. `readVertex()` reading two
 `f32` from those meshes yields `(0, 0)`, which is exactly right, and exactly
 what the game submits.
 
-> ⚠️ **Consequence: do not run a UV-area filter over an untextured mesh.**
-> All its UVs are zero, so every triangle has zero UV area and
-> `dropCollapsedUvTriangles()` deleted the whole mesh. On stage 2 that was
-> 811 triangles and 43 entire materials — flat-black shadow panels, dark window
-> recesses and wall inserts — silently removed from the export. Fixed: the
-> filter now returns early for `texture_id < 0`.
+> ⚠️ **Consequence: UV area says nothing about an untextured mesh.** All its
+> UVs are zero, so every triangle has zero UV area, and a filter on UV area
+> takes the whole mesh. On stage 2 that is 811 triangles and 43 entire
+> materials — flat-black shadow panels, dark window recesses and wall inserts —
+> none of which samples a texture.
 
 ## Strip control word — measured over all 278,807 strips
 
@@ -478,7 +477,7 @@ recurring shape: a 4-vertex strip whose vertices are two coincident *pairs* —
 a rim polygon a tenth of a world unit wide, giving a flat card a nominal
 thickness. Those are authored, sub-pixel, and harmless either way.
 
-**The game displays them, and the exporter no longer removes them.**
+**The game displays them, and the exporter keeps them.**
 `WalkMeshChainAndDraw` (`FUN_004A7EF0`) submits every strip whole —
 `DrawPrimitive(D3DPT_TRIANGLESTRIP|LIST, FVF 0x112, verts, count, 0)` — and
 makes no per-triangle test on the way there: the records are copied eight
@@ -486,18 +485,14 @@ dwords at a time with the UVs verbatim at dwords 6–7. Nothing in the walk, and
 nothing in D3D7, rejects a polygon for being collinear in texture space.
 `[proved]`
 
-`dropCollapsedUvTriangles()` (`web/src/hod2lib/nl1.ts`) is still there, behind
-`ExportOptions.dropCollapsedUv`, for an export headed somewhere other than the
-player. It is **off by default** and no stage bundle asks for it. It also
-**skips untextured meshes**, whose UVs are all legitimately zero — see the
-16-bit UV section.
-
-It used to be on by default, and it cost every bundle 3–5% of its triangles:
-1,577 of stage 1's 35,637, median 3 square units and up to 3,849. Two of those
-are paving in the piazza, and from the rooftops north of the square the shipped
-bundle had a pair of triangular holes straight through the world. The reasoning
-had been that a face carrying no displayable texture information could only be
-improved by deleting it. A streaked roof is the game; a hole is not.
+A filter on UV area — textured meshes only, since an untextured mesh's UVs
+are all legitimately zero (see the 16-bit UV section) — takes 3–5% of a stage's
+triangles: 1,577 of stage 1's 35,637, median 3 square units and up to 3,849.
+Two of those are paving in the piazza, and without them the view from the
+rooftops north of the square runs through a pair of triangular holes in the
+world. A face carrying no displayable texture information looks as though
+deleting it could only improve it. A streaked roof is the game; a hole is
+not.
 
 > A collapsed UV triangle and a *clamped* texture axis look identical on screen
 > — both smear one row or column of texels across a face. If a face reads as

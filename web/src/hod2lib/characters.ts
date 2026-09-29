@@ -1009,7 +1009,7 @@ export function class51Tail(rec: Spawn): Record<string, unknown> {
 }
 
 /**
- * The one class-0x33 sub-handler the player runs: `obj+0x11C == 1`.
+ * The first class-0x33 sub-handler the player runs: `obj+0x11C == 1`.
  *
  * `ScriptedSceneryDispatch33` (`FUN_00432FF0`) switches that word into eleven
  * different objects, so the tail below is **one** handler's reading of the
@@ -1032,20 +1032,31 @@ export const CLASS33_CARRIER = 1;
 export const CLASS33_PUSHABLE = 4;
 
 /**
+ * The third class-0x33 sub-handler the player runs: `obj+0x11C == 5`.
+ *
+ * `ScriptedEffectAtCameraCue33` (`FUN_00433B00`), off the same switch -- entry
+ * 4 of the jump table at `0x004330C4` is `0x00433051`, which installs it. A
+ * sprite effect of kind 0x44 thrown at the object's own position on the frame
+ * `g_cam_path_frame` or `g_cam_path_frame_2` equals `tail+0x00`, and then a
+ * despawn. One shipped spawn: stage 2's `0x12568`, cue 340.
+ */
+export const CLASS33_EFFECT_CUE = 5;
+
+/**
  * Which spawns of a {@link SLOT_DRAWN_CLASSES} class the bundle carries a
  * placement for.
  *
  * Class 0x52 is one object, so every spawn of it qualifies. Class 0x33 is
- * eleven, and only **two** sub-handlers are decoded below -- selector 1 by
- * {@link class33Tail} and selector 4 by {@link class33PushTail}. Selector 2's
- * props already reach the player through `props`, and the other eight are
- * unread. Emitting one of those would be a placement whose tail block is a
- * different handler's bytes read under one of these two's names, which is `L3`
- * written into the bundle.
+ * eleven, and only **three** sub-handlers are decoded below -- selector 1 by
+ * {@link class33Tail}, selector 4 by {@link class33PushTail} and selector 5 by
+ * {@link class33CueTail}. Selector 2's props already reach the player through
+ * `props`, and the rest are unread. Emitting one of those would be a
+ * placement whose tail block is a different handler's bytes read under one of
+ * these three's names, which is `L3` written into the bundle.
  *
- * **The two blocks are mutually exclusive and the port reads their presence as
- * the selector**, so widening this is only half the change: see the gate on
- * `class33`/`class33_push` in {@link resolveCharacters}.
+ * **The three blocks are mutually exclusive and the port reads their presence
+ * as the selector**, so widening this is only half the change: see the gate on
+ * `class33`/`class33_push`/`class33_cue` in {@link resolveCharacters}.
  */
 export function slotDrawnSpawn(cls: number, rec: Spawn): boolean {
   // Class 0x26 is eight objects behind one id, switched on `obj+0x11C` by
@@ -1059,7 +1070,8 @@ export function slotDrawnSpawn(cls: number, rec: Spawn): boolean {
   // the right slot and doing nothing else.
   if (cls === 0x12) return rec.param(0x08, "i16") === 0;
   if (cls === 0x33) {
-    return rec.hp === CLASS33_CARRIER || rec.hp === CLASS33_PUSHABLE;
+    return rec.hp === CLASS33_CARRIER || rec.hp === CLASS33_PUSHABLE
+      || rec.hp === CLASS33_EFFECT_CUE;
   }
   return true;
 }
@@ -1175,6 +1187,35 @@ export function class33PushTail(rec: Spawn): Record<string, unknown> {
     push_flag: rec.param(0x0c, "u8") ?? 0xff,
     despawn_flag: rec.param(0x0d, "u8") ?? 0xff,
   };
+}
+
+/**
+ * Class 0x33 **selector 5's** tail, as `ScriptedEffectAtCameraCue33`
+ * (`FUN_00433B00`) reads it.
+ *
+ * ```
+ * tail+0x00  i32  the camera frame the effect goes off on
+ * ```
+ *
+ * That is the only word the routine reads: `MOV EAX, [ESI + 0x1390]` / `MOV
+ * EAX, [EAX]` at `0x00433B0E`, compared as an integer with `g_cam_path_frame`
+ * at `0x00433B16` and with `g_cam_path_frame_2` at `0x00433B1A`. The rest of
+ * the routine reads the object -- `obj+0x40..0x48`, the position the effect is
+ * thrown at.
+ *
+ * **One word and no more, because there is no more.** The one shipped spawn,
+ * stage 2's `0x12568`, is followed four bytes after its tail by the next
+ * descriptor (`0x12590`, the selector-1 carrier the same `spawn_obj` makes),
+ * so a wider read here would carry that record's class under this one's name
+ * -- `L6`.
+ *
+ * Its own block and **not** {@link class33Tail}'s or
+ * {@link class33PushTail}'s, for the reason those two are each other's: three
+ * handlers' readings of the same bytes, and `tail+0x00` is a draw slot in the
+ * other two.
+ */
+export function class33CueTail(rec: Spawn): Record<string, unknown> {
+  return { cue: rec.param(0x00, "i32") ?? -1 };
 }
 
 /**
@@ -1750,16 +1791,18 @@ export async function resolveForStage(
     const class23 = cls === CLASS23 ? class23Tail(rec) : null;
     const class45 = cls === 0x45 ? class45Tail(rec) : null;
     // **Gated on the selector, not on the class.** Class 0x33 is eleven
-    // objects behind one id and these two blocks are two of them reading
-    // the same bytes; emitting both for one spawn, or either for a
-    // sub-handler that is neither, is `L3` written into the bundle. The
-    // port reads which key is present as the selector, so exactly one of
-    // them is ever set.
+    // objects behind one id and these three blocks are three of them reading
+    // the same bytes; emitting two for one spawn, or any for a sub-handler
+    // that is none of them, is `L3` written into the bundle. The port reads
+    // which key is present as the selector, so exactly one of them is ever
+    // set.
     const is33 = cls === 0x33;
     const class33 = is33 && rec.hp === CLASS33_CARRIER
       ? class33Tail(rec) : null;
     const class33Push = is33 && rec.hp === CLASS33_PUSHABLE
       ? class33PushTail(rec) : null;
+    const class33Cue = is33 && rec.hp === CLASS33_EFFECT_CUE
+      ? class33CueTail(rec) : null;
     let tscript: TargetScript | null = null;
     let ascript: TargetScript | null = null;
     let cameraCue: Record<string, unknown> | null = null;
@@ -1867,6 +1910,7 @@ export async function resolveForStage(
     p.class45 = class45;
     p.class33 = class33;
     p.class33_push = class33Push;
+    p.class33_cue = class33Cue;
     // `ActorBindPartList` (`FUN_00412440`) -- the faces and accessories this
     // spawn wears. 97 of the game's spawns carry one and every list matches
     // its character's own family, which is what says the tail offsets are

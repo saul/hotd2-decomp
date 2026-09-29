@@ -26507,3 +26507,71 @@ frame (the exe holds, the base released), and an eye at `(10, 0, 60)` turns her
 `+0x100` (the base turned `-0x100`). All three fail on the base. A mutant that
 gives the step the turn's identity fails both reach checks and passes the
 turn.
+
+## 2026-09-29 -- class 0x33 selector 5: the effect a camera frame sets off, and the dispatch's hit slot
+
+`ScriptedEffectAtCameraCue33` (`FUN_00433B00`) was named and not ported: the
+bundle carried no tail block for selector 5, so `SpawnSlotActors` built
+nothing for stage 2's one spawn (evt `0x12568`, cue 340) and no class-0x33
+audit could see it, which is `L83` one level down.
+
+**Read.** The dispatch (`FUN_00432FF0`) disassembled whole rather than taken
+from the brief: byte map `0x004330F8` is `0..10` for selectors 1..11, `11` at
+index `0x62` (selector 99) and `12` elsewhere; the jump table `0x004330C4`'s
+thirteen entries are the twelve arms and the default at `0x004330B9`. Entry 4
+is `0x00433051`: `PUSH EAX` / `MOV [EAX], 0x433b00` / `CALL 0x00409270`. A
+byte search for `003b4300` finds only that store. The update is short and
+`disassemble_bytes` agrees with the pseudocode: an integer compare of
+`tail+0x00` with `[0x009a6110]` and then `[0x009a6458]`, and on a match a
+params block `{obj+0x40, +0x44, +0x48, 0, 0, 0}` (the stack offsets worked
+through the four pushes), `SpawnSpriteEffect(&params, 0x44, 0, -1)` and
+`ActorDespawn`. `SpawnSpriteEffect` (`0x00407340`) puts its second, third and
+fourth arguments at `params[9]` (kind), `params[10]` (face mode) and
+`params[11]` (player) -- the port's `SpawnSpriteEffect(pos, pitch, yaw, kind,
+faceCamera, player)` already had that shape. `SpawnSpriteEffectFromParams`'
+`case 0x44:` is `0xFD4..0x1031` at 1.0, and `g_asset_slots` makes that
+`eff_dokan.bin` 0..93, the whole file.
+
+**What the reading reopened.** `ActorClaimHitSlot` (`0x00409270`), which the
+install calls, is ported now (`game/hit_slots.ts`), and that module had class
+0x33's claim as unread. It is not: all twelve arms and the default call it --
+eighteen xrefs to `0x00409270`, twelve of them in the dispatch. So
+`ScriptedSceneryDispatch33` claims for every selector the port builds, the
+carrier and the chairs included, and the two class-0x33 notes that listed the
+claim as unported (`class33/index.ts`, `class33/pushable.ts`) are gone.
+
+**The tail is one word.** Stage 2's `0x12568` has its tail at `0x1258C` and the
+next descriptor -- the selector-1 carrier `0x12590` the same `spawn_obj` makes
+-- starts four bytes later, so `tail+0x04` is that record's class, 51. `L6`:
+`class33_cue` is `{cue}` and nothing past it, and `verify_port.py` fails a
+block with a second key.
+
+**The effect had nothing to draw.** `EFFECT_SLOT_RANGES` leaves the set-piece
+sprite kinds out on purpose, and nothing carried 0x44 or 0x45 to
+`slots_effect`; the shared bundle had `eff_dokan.bin` only in `slots_actor`,
+which `render/effects.ts` does not clone from. So the stage-2 carrier
+`0x4FD0`'s kind-0x44 effect (effect frame 490) and the stage-5 carrier's
+kind-0x45 one were spawned and never seen. Class 0x33 carries both runs in
+`EFFECT_SLOTS_BY_CLASS` now.
+
+**Seen in the page.** `?stage=2&block=27&step=1&op=0&drive=1`, headless on a
+private bundle: the object is in the pool from op 19, the camera plays `cp_st2`
+path 42, and on frame 340 one kind-0x44 sprite starts at `0xFD4` at
+`(-367.08, -10.67, -1532.01)` and the object despawns; frames 343, 352, 370
+and 400 read `0xFD7`, `0xFE0`, `0xFF2` and `0x1010`, one slot a frame. It draws
+as a tall pale spray rising at the canal's edge.
+
+**Wrong turn.** The first draft of `SpriteEffectKind.Dokan`'s note called the
+effect `[likely]` a blast, from `BOMB1_11.WAV` and from *dokan* meaning a
+bang. The screenshot shows a spray of water. A sound's name and a file's name
+are evidence of what the authors called it, not of what it depicts; the note
+says open now, and names only the file.
+
+Proof: the selector-5 block in `port.test.ts`, through `SpawnSlotActors` and
+`GameUpdate` from `ResetGameGlobals`. With the director gate and
+`class33/index.ts` reversed, the first check fails ("no actor"); with only the
+gate restored, eight of the nine others fail, and the ninth (339 and 341 fire
+nothing) is the one a `>=` mutant fails. Dropping the block-2 compare fails the
+cue-0 check. `verify_port.py`'s class-0x33 check fails a bundle with the block
+dropped, the block widened, or the placement dropped. Divergences 131 and
+uncited exports 81, both unchanged.

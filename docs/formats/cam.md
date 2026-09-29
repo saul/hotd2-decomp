@@ -400,7 +400,7 @@ Two kinds of reader follow from it:
 | reads | where | so |
 |---|---|---|
 | `[g_camera_index * 0x1A4 + 0x9A6110]` | `OwlUpdateAndResolveShot` `0x004460EA`, `WaterSurfaceUpdate` `0x0046E50B`, `PropUpdateType72` `0x0047095A` | under (1, 3) the frame is 0: a sub-type-0 owl cannot be shot, path 0x7E's ripple pause cannot happen, type 72's cue cannot fire |
-| `[0x9a6110] == c \|\| [0x9a6458] == c` | class 0x30 states 18, 19, 23 (`0x004575F1`, `0x004576AE`, `0x00457BEA`), `ZombieStateArcScriptedEntrance` (`0x00458ABD`), `ThrowerStateGrabPlayer` (`0x0044F078`), `ScriptedCarrierUpdate33` (`0x004333DF`), `ScriptedEffectAtCameraCue33` (`0x00433B1A`, class 0x33 selector 5, not ported) | the second arm is "`c` is 0"; no shipped cue is 0 |
+| `[0x9a6110] == c \|\| [0x9a6458] == c` | class 0x30 states 18, 19, 23 (`0x004575F1`, `0x004576AE`, `0x00457BEA`), `ZombieStateArcScriptedEntrance` (`0x00458ABD`), `ThrowerStateGrabPlayer` (`0x0044F078`), `ScriptedCarrierUpdate33` (`0x004333DF`), `ScriptedEffectAtCameraCue33` (`0x00433B1A`, class 0x33 selector 5) | the second arm is "`c` is 0"; no shipped cue is 0 |
 
 The port reads the first kind through `CameraBlockPathFrame(G.g_camera_index)`
 (`game/camera/view.ts`) and the second as written, with `G.g_cam_path_frame_2`.

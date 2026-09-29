@@ -775,19 +775,21 @@ def check_class31_literal_clips() -> None:
 
 
 def check_class33_selectors() -> None:
-    """Class 0x33's two decoded sub-handlers, producer against consumer.
+    """Class 0x33's decoded sub-handlers, producer against consumer.
 
     `ScriptedSceneryDispatch33` (`FUN_00432FF0`) switches ``obj+0x11C`` into
     eleven objects that read the same descriptor bytes eleven ways, and the
-    port has two of them: selector 1 through the ``class33`` block and
-    selector 4 through ``class33_push``. The port **takes which block arrived
-    as the selector** -- `director.ts` spawns on either being present and
-    `ScriptedSceneryUpdate33` picks the routine off ``obj.hp`` -- so two things
-    have to hold in the bundle and nothing else was checking either:
+    port has three of them: selector 1 through the ``class33`` block,
+    selector 4 through ``class33_push`` and selector 5 through
+    ``class33_cue``. The port **takes which block arrived as the selector** --
+    `director.ts` spawns on any being present and `ScriptedSceneryUpdate33`
+    picks the routine off ``obj.hp`` -- so two things have to hold in the
+    bundle and nothing else was checking either:
 
-    1. **exactly one block per placement.** Both would be `L3` written into
+    1. **exactly one block per placement.** Two would be `L3` written into
        the bundle: selector 1's ``tail+0x0C`` is an ``op_`` path slot and
-       selector 4's is a script flag index, so a spawn carrying both would
+       selector 4's is a script flag index, and ``tail+0x00`` is a draw slot
+       in both and selector 5's camera frame, so a spawn carrying two would
        have one handler's names over the other's bytes.
     2. **the draw slot travels.** Selector 4's model is named by the
        *descriptor*, not by the class, so it reaches the glTF only through
@@ -801,11 +803,11 @@ def check_class33_selectors() -> None:
     """
     stages = sorted((ROOT / "extract" / "player").glob("stage*/stage*.script.json"))
     if not stages:
-        notes.append("class 0x33's two tail blocks unchecked (no bundle)")
+        notes.append("class 0x33's three tail blocks unchecked (no bundle)")
         return
     import json
     from struct import unpack_from
-    n_carrier = n_push = 0
+    n_carrier = n_push = n_cue = 0
     for path in stages:
         doc = json.loads(path.read_text())
         places = (doc.get("characters") or {}).get("placements") or []
@@ -813,13 +815,14 @@ def check_class33_selectors() -> None:
         # are in the same file -- so the count comes from the data rather than
         # from a number written here, and narrowing `slot_drawn_spawn` back
         # fails this rather than quietly reporting a smaller total. `hp` is the
-        # selector; 1 and 4 are the two the port runs.
+        # selector; 1, 4 and 5 are the three the port runs.
         want: dict[int, int] = {}
         for blk in doc.get("blocks") or []:
             for step in blk.get("steps") or []:
                 for op in step.get("ops") or []:
                     for sp in op.get("spawns") or []:
-                        if sp.get("class") == 0x33 and sp.get("hp") in (1, 4):
+                        if (sp.get("class") == 0x33
+                                and sp.get("hp") in (1, 4, 5)):
                             want[sp["at"]] = sp["hp"]
         have = {p["at"] for p in places if p.get("class") == 0x33}
         for at, hp in sorted(want.items()):
@@ -830,17 +833,22 @@ def check_class33_selectors() -> None:
                     f"`SpawnSlotActors` can never make it -- widen "
                     f"`slotDrawnSpawn` and `slot_drawn_spawn` together")
         push_slots: set[int] = set()
+        cue_here = False
         for p in places:
             if p.get("class") != 0x33:
                 continue
             carrier, push = p.get("class33"), p.get("class33_push")
+            cue = p.get("class33_cue")
             at, hp = p.get("at", 0), p.get("hp")
-            if carrier and push:
+            blocks = [k for k, v in (("class33", carrier),
+                                     ("class33_push", push),
+                                     ("class33_cue", cue)) if v]
+            if len(blocks) > 1:
                 failures.append(
-                    f"{path.parent.name} spawn {at:#06x}: carries both "
-                    f"`class33` and `class33_push` -- two sub-handlers' "
+                    f"{path.parent.name} spawn {at:#06x}: carries "
+                    f"{' and '.join(f'`{k}`' for k in blocks)} -- sub-handlers' "
                     f"readings of the same bytes, which is `L3` in the bundle")
-            if not carrier and not push:
+            if not blocks:
                 failures.append(
                     f"{path.parent.name} spawn {at:#06x}: selector {hp} has a "
                     f"placement and no tail block, so `SpawnSlotActors` will "
@@ -865,11 +873,29 @@ def check_class33_selectors() -> None:
                     failures.append(
                         f"{path.parent.name} spawn {at:#06x}: selector 4 with "
                         f"no draw slot -- nothing can be cloned for it")
-        if not push_slots:
+            if cue:
+                n_cue += 1
+                cue_here = True
+                if hp != 5:
+                    failures.append(
+                        f"{path.parent.name} spawn {at:#06x}: `class33_cue` "
+                        f"on selector {hp}, but only selector 5 reads that "
+                        f"word")
+                # `ScriptedEffectAtCameraCue33` reads `tail+0x00` and nothing
+                # else, as an integer camera frame. A block that grew a second
+                # key has read past the one-word tail into the next record.
+                if sorted(cue) != ["cue"] or not isinstance(cue.get("cue"), int):
+                    failures.append(
+                        f"{path.parent.name} spawn {at:#06x}: `class33_cue` is "
+                        f"{cue!r}, not the one integer word selector 5 reads")
+        if not push_slots and not cue_here:
             continue
         # ...and the model itself, out of the glb's own node names. The hidden
         # `slots_actor` rig is where `render/slotmodels.ts` finds a template,
         # and a missing part there is an actor that pushes and is not drawn.
+        # Selector 5 draws nothing of its own; what it throws is a kind-0x44
+        # sprite, whose cels `render/effects.ts` clones from `slots_effect` --
+        # so a missing one there is an effect that fires and is not seen.
         glb = path.parent / f"{path.parent.name}.glb"
         if not glb.exists():
             continue
@@ -889,9 +915,21 @@ def check_class33_selectors() -> None:
                     f"{path.parent.name}: selector-4 draw slot {slot:#06x} is "
                     f"in a placement but has no `{want}` part in the glTF -- "
                     f"the object is pushable and invisible")
-    notes.append(f"class 0x33: {n_carrier} selector-1 and {n_push} selector-4 "
-                 f"tails across {len(stages)} bundles, each with exactly one "
-                 f"block and a model to draw")
+        if cue_here:
+            # `SpawnSpriteEffectFromParams`' `case 0x44:`, first and last slot.
+            for slot in range(0xFD4, 0x1031 + 1):
+                want = f"slots_effect_fixed000_slot_{slot:04x}"
+                if want not in names:
+                    failures.append(
+                        f"{path.parent.name}: a selector-5 placement throws "
+                        f"sprite kind 0x44, and its cel {slot:#06x} has no "
+                        f"`{want}` part in the glTF -- the effect fires and "
+                        f"draws nothing")
+                    break
+    notes.append(f"class 0x33: {n_carrier} selector-1, {n_push} selector-4 "
+                 f"and {n_cue} selector-5 tails across {len(stages)} bundles, "
+                 f"each with exactly one block, and a model to draw where it "
+                 f"draws one")
 
 
 #: The crawlers' undamaged attack, as the EXE holds it at `0x00566E70`:

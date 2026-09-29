@@ -221,6 +221,8 @@ __all__ = [
     "CLASS33_CARRIER",
     "CLASS33_PUSHABLE",
     "class33_push_tail",
+    "CLASS33_EFFECT_CUE",
+    "class33_cue_tail",
     "slot_drawn_spawn",
     "class33_tail",
     "class52_tail",
@@ -385,7 +387,7 @@ def class20_tail(rec) -> dict:
 #: survive that anyway. See the note in :func:`resolve_for_stage`.
 SLOT_DRAWN_CLASSES = frozenset({0x33, 0x52})
 
-#: The one class-0x33 sub-handler the player runs: ``obj+0x11C == 1``.
+#: The first class-0x33 sub-handler the player runs: ``obj+0x11C == 1``.
 #:
 #: `ScriptedSceneryDispatch33` (`FUN_00432FF0`) switches that word into eleven
 #: different objects, so :func:`class33_tail` is **one** handler's reading of
@@ -405,24 +407,35 @@ CLASS33_CARRIER = 1
 #: part 0.
 CLASS33_PUSHABLE = 4
 
+#: The third class-0x33 sub-handler the player runs: ``obj+0x11C == 5``.
+#:
+#: `ScriptedEffectAtCameraCue33` (`FUN_00433B00`), off the same switch -- entry
+#: 4 of the jump table at 0x004330C4 is 0x00433051, which installs it. A sprite
+#: effect of kind 0x44 thrown at the object's own position on the frame
+#: ``g_cam_path_frame`` or ``g_cam_path_frame_2`` equals ``tail+0x00``, and
+#: then a despawn. One shipped spawn: stage 2's ``0x12568``, cue 340.
+CLASS33_EFFECT_CUE = 5
+
 
 def slot_drawn_spawn(cls: int, rec) -> bool:
     """Which spawns of a :data:`SLOT_DRAWN_CLASSES` class carry a placement.
 
     Class 0x52 is one object, so every spawn of it qualifies. Class 0x33 is
-    eleven, and only **two** sub-handlers are decoded -- selector 1 by
-    :func:`class33_tail` and selector 4 by :func:`class33_push_tail`.
-    Selector 2's props already reach the player through `props`, and the other
-    eight are unread. Emitting one of those would be a placement whose tail
-    block is a different handler's bytes read under one of these two's names,
-    which is `L3` written into the bundle.
+    eleven, and only **three** sub-handlers are decoded -- selector 1 by
+    :func:`class33_tail`, selector 4 by :func:`class33_push_tail` and selector
+    5 by :func:`class33_cue_tail`. Selector 2's props already reach the player
+    through `props`, and the rest are unread. Emitting one of those would be a
+    placement whose tail block is a different handler's bytes read under one
+    of these three's names, which is `L3` written into the bundle.
 
-    **The two blocks are mutually exclusive and the port reads their presence
-    as the selector**, so widening this is only half the change: see the gate
-    on ``class33``/``class33_push`` in :func:`resolve_for_stage`.
+    **The three blocks are mutually exclusive and the port reads their
+    presence as the selector**, so widening this is only half the change: see
+    the gate on ``class33``/``class33_push``/``class33_cue`` in
+    :func:`resolve_for_stage`.
     """
     if cls == 0x33:
-        return rec.hp in (CLASS33_CARRIER, CLASS33_PUSHABLE)
+        return rec.hp in (CLASS33_CARRIER, CLASS33_PUSHABLE,
+                          CLASS33_EFFECT_CUE)
     return True
 
 
@@ -587,6 +600,35 @@ def class33_push_tail(rec) -> dict:
         "push_flag": u8(0x0C),
         "despawn_flag": u8(0x0D),
     }
+
+
+def class33_cue_tail(rec) -> dict:
+    """Class 0x33 **selector 5's** tail, as `ScriptedEffectAtCameraCue33`
+    (`FUN_00433B00`) reads it.
+
+    ::
+
+        tail+0x00  i32  the camera frame the effect goes off on
+
+    That is the only word the routine reads: ``MOV EAX, [ESI + 0x1390]`` /
+    ``MOV EAX, [EAX]`` at 0x00433B0E, compared as an integer with
+    ``g_cam_path_frame`` at 0x00433B16 and with ``g_cam_path_frame_2`` at
+    0x00433B1A. The rest of the routine reads the object -- ``obj+0x40..0x48``,
+    the position the effect is thrown at.
+
+    **One word and no more, because there is no more.** The one shipped spawn,
+    stage 2's ``0x12568``, is followed four bytes after its tail by the next
+    descriptor (``0x12590``, the selector-1 carrier the same ``spawn_obj``
+    makes), so a wider read here would carry that record's class under this
+    one's name -- `L6`.
+
+    Its own block and **not** :func:`class33_tail`'s or
+    :func:`class33_push_tail`'s, for the reason those two are each other's:
+    three handlers' readings of the same bytes, and ``tail+0x00`` is a draw
+    slot in the other two.
+    """
+    v = rec.param(0x00, "i32")
+    return {"cue": -1 if v is None else v}
 
 
 def class19_tail(rec, sets=None) -> dict:
@@ -1173,16 +1215,18 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
         class23 = class23_tail(rec) if sp["class"] == 0x23 else None
         class45 = class45_tail(rec) if sp["class"] == 0x45 else None
         # **Gated on the selector, not on the class.** Class 0x33 is
-        # eleven objects behind one id and these two blocks are two of
-        # them reading the same bytes; emitting both for one spawn, or
-        # either for a sub-handler that is neither, is `L3` written into
-        # the bundle. The port reads which key is present as the
-        # selector, so exactly one of them is ever set.
+        # eleven objects behind one id and these three blocks are three of
+        # them reading the same bytes; emitting two for one spawn, or any
+        # for a sub-handler that is none of them, is `L3` written into the
+        # bundle. The port reads which key is present as the selector, so
+        # exactly one of them is ever set.
         is33 = sp["class"] == 0x33
         class33 = (class33_tail(rec)
                    if is33 and rec.hp == CLASS33_CARRIER else None)
         class33_push = (class33_push_tail(rec)
                         if is33 and rec.hp == CLASS33_PUSHABLE else None)
+        class33_cue = (class33_cue_tail(rec)
+                       if is33 and rec.hp == CLASS33_EFFECT_CUE else None)
         tscript = ascript = None
         camera_cue = None
         # Class 0x18 too -- `CarriedZombieInit18` is `EnemyZombieInit` plus
@@ -1266,6 +1310,7 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
             class45=class45,
             class33=class33,
             class33_push=class33_push,
+            class33_cue=class33_cue,
             hp=sp.get("hp", 0)))
         if motion is None:
             continue                      # marker only -- see the module note

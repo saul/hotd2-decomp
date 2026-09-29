@@ -4481,6 +4481,60 @@ flags, the 7 and the no-frame draw fails its own assertions when reverted.
 
 ## Scripted scenery: doors, shutters and vans
 
+### Class 0x33 selector 5 — the effect a camera frame sets off
+
+**Ported** (`game/class33/effect_cue.ts`), 2026-09-29. Until then the port
+built nothing for stage 2's one selector-5 spawn, and nothing anywhere said
+so: the bundle carried no tail block for it, `SpawnSlotActors` refused a
+class-0x33 placement with none, and every list of what class 0x33 lacks was
+written by someone reading the selectors they had opened (`L83`'s shape, one
+level down: an unported sub-type inside a class that has a module).
+
+```
+ScriptedEffectAtCameraCue33   FUN_00433B00   the cue, the sprite, the despawn
+```
+
+`[proved]` The dispatch's jump-table entry 4 is `0x00433051`, which stores
+`0x433B00` into `*obj` and calls `ActorClaimHitSlot`; a byte search for
+`003b4300` finds that store and nothing else. The routine reads `tail+0x00`,
+compares it as an integer with `g_cam_path_frame` and then with
+`g_cam_path_frame_2`, and on either match calls `SpawnSpriteEffect` with
+`{obj+0x40, +0x44, +0x48, 0, 0, 0}`, kind `0x44`, face mode 0 and player -1,
+then `ActorDespawn`. It draws nothing and keeps nothing. Kind 0x44 is
+`SpawnSpriteEffectFromParams`' `case 0x44:`, slots `0xFD4..0x1031` at 1.0,
+which is all ninety-four models of `eff_dokan.bin`, and its sound is the
+sprite's own `BOMB1_11.WAV`. Named `SpriteEffectKind.Dokan` for its file;
+what it depicts is an open question.
+
+One spawn, both modes of stage 2: evt `0x12568`, block 27 step 1 op 19,
+at `(-367.08, -10.67, -1532.01)`, cue 340. The same `spawn_obj` makes the
+selector-1 carrier at `0x12590`, and the descriptor's tail is one word -- the
+carrier's record starts four bytes after it -- so the bundle's `class33_cue`
+is `{cue}` and nothing more. The script loads `eff_dokan.bin` at op 5 of the
+same step and frees it at step 2 op 0.
+
+Measured in the running page at `?stage=2&block=27&step=1&op=0` under
+`?drive=1`: the object is in the pool from step 1 op 19, the camera plays
+`cp_st2` path 42, and on its frame 340 one kind-0x44 sprite goes off at the
+object's position -- `0xFD4` stepping to `0x1031` -- and the object is gone.
+On screen it is a tall pale spray rising at the canal's edge. The bundle did
+not carry `eff_dokan.bin` at all before this: `EFFECT_SLOT_RANGES` leaves the
+set-piece kinds out on purpose, so class 0x33 now carries its two
+(`0x44` and the stage-5 carrier's `0x45`, `eff_shop.bin`) through
+`EFFECT_SLOTS_BY_CLASS` -- which also makes the stage-2 carrier `0x4FD0`'s
+own kind-0x44 effect, at its effect frame 490, drawable for the first time.
+(The shared bundle had `eff_dokan.bin` in `slots_actor`, which
+`render/effects.ts` does not clone from.)
+
+**And the dispatch now claims a hit slot, for every selector it builds.**
+`game/hit_slots.ts` had class 0x33's claim as unread; reading the dispatch
+settles it: each of the twelve arms, and the default, ends `PUSH EAX` /
+`CALL 0x00409270`. The carrier and the chairs took no slot before, so on stages
+1, 2 and 5 a skinned actor spawned while one of them lived could take a lower
+`obj+0x3C` -- a cel phase -- than the game gives it. The selectors the port
+still builds nothing for (2, 3, 7, 8 and 9 among the shipped spawns) take no
+slot either, and the same holds while one of them would be alive.
+
 ### Class 0x33 selector 4 — the scenery an actor shoves aside
 
 **Ported** (`game/class33/pushable.ts`), and it is the answer to a bug report
@@ -4558,8 +4612,9 @@ name this function, so the reading available from the decompiler alone is
 impossible.
 
 Not ported: the mesh shot test on the `tail+0x04 != -1` arm (`obj+0x34 |= 0x50`
-and a mesh id on `obj+0x14C`; neither shipped spawn takes it),
-`ActorClaimHitSlot`, and the draw itself, which is `render/slotmodels.ts`' —
+and a mesh id on `obj+0x14C`; neither shipped spawn takes it) and the draw
+itself (`ActorClaimHitSlot` was on this list too, and is claimed in the
+dispatch now -- see selector 5 above), which is `render/slotmodels.ts`' —
 the same arrangement class 0x52's mouse has, and it is `T · Rz · Ry · Rx` there
 rather than the mouse's yaw alone.
 
@@ -5810,7 +5865,7 @@ block's slot. It is now in `G`. Two kinds of reader change:
 The one remaining reader is class 0x33 selector 5,
 `ScriptedEffectAtCameraCue33` (`FUN_00433B00`, named): a camera-cued sprite
 effect, one stage-2 spawn at evt `0x12568`, cue 340, **not ported** -- the
-port builds nothing for it. The table is `docs/formats/cam.md` § *The path
+port builds nothing for it. (Ported the same day: § *Class 0x33 selector 5*.) The table is `docs/formats/cam.md` § *The path
 frame, and block 2's*.
 
 ### Stage 2 block 11: the fire strip ends

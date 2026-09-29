@@ -52,15 +52,19 @@ export const HIT_SLOT_CLAIMED = 0x40;
  * | `0x31` | `EnemyThrowerInit` (`FUN_00449620`) |
  * | `0x53` | `CatInit` (`FUN_00431250`) |
  *
- * `[open]` Three more of the port's classes hold a slot by a route not read
- * here and therefore do not claim one: class 0x33 reaches
- * `ActorClaimHitSlot` directly from `FUN_00432FF0`, and class 0x51's
- * `FishStateFallBack` and class 0x43's routines clear an entry, so something
- * must have given them one. Until those call sites are read the port leaves
- * them at `-1`, which is what the engine leaves an actor that finds the table
- * full — so the *shape* is one the engine reaches, and the consequence is
- * only that a cel phase differs. Guessing a claim site to make the numbers
- * line up is the thing this list exists to avoid.
+ * Class 0x33 is not in the list because it does not claim through the model
+ * build: `ScriptedSceneryDispatch33` (`FUN_00432FF0`) calls
+ * `ActorClaimHitSlot` itself, at the end of every arm of its switch, and the
+ * port's copy of that routine does the same (`class33/index.ts`).
+ *
+ * `[open]` Two more of the port's classes hold a slot by a route not read
+ * here and therefore do not claim one: class 0x51's `FishStateFallBack` and
+ * class 0x43's routines clear an entry, so something must have given them
+ * one. Until those call sites are read the port leaves them at `-1`, which is
+ * what the engine leaves an actor that finds the table full — so the *shape*
+ * is one the engine reaches, and the consequence is only that a cel phase
+ * differs. Guessing a claim site to make the numbers line up is the thing
+ * this list exists to avoid.
  */
 export const HIT_SLOT_CLAIMING_CLASSES: ReadonlySet<SpawnClass> = new Set([
   // Not class 0x14: its actor carries the model block, and `Class14Init`

@@ -429,6 +429,11 @@ class Placement:
     #: and the port takes which key is present as the selector. See
     #: :func:`characters.class33_push_tail`.
     class33_push: dict | None = None
+    #: Class 0x33 **selector 5's** tail -- the one camera frame
+    #: `ScriptedEffectAtCameraCue33` goes off on. Selector 5 only, and never
+    #: set on the same placement as :attr:`class33` or :attr:`class33_push`.
+    #: See :func:`characters.class33_cue_tail`.
+    class33_cue: dict | None = None
     #: The descriptor's ``+0x22``, **before** difficulty scaling.
     #: `ActorInitHitPoints` adds ``difficulty.hp_delta[rank]`` and clamps to
     #: ``[1, 300]``; the client does that, because it is the client that owns
@@ -532,4 +537,6 @@ class Placement:
             d["class33"] = self.class33
         if self.class33_push:
             d["class33_push"] = self.class33_push
+        if self.class33_cue:
+            d["class33_cue"] = self.class33_cue
         return d

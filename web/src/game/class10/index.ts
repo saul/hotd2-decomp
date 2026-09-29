@@ -110,7 +110,7 @@
  *
  * | file          | the engine functions in it                                |
  * | ------------- | --------------------------------------------------------- |
- * | `ops.ts`      | the opcode, wait-bit, target and hook sets both VMs switch on |
+ * | `ops.ts`      | the opcode, wait-bit, target, hook-install and frame-hook sets both VMs switch on |
  * | `init.ts`     | `CivilianInit` `FUN_0048A3E0`                              |
  * | `script.ts`   | `CivilianRunScript` `FUN_0048B9E0`, `CivilianReapplyWaitCommand` `FUN_0048B760` |
  * | `pose.ts`     | `CivilianApplyMotionPose` `FUN_0048C310`                   |
@@ -119,7 +119,7 @@
  * | `step.ts`     | `CivilianStepScript` `FUN_0048B1E0`                        |
  * | `turn.ts`     | `CivilianStepTurnToTarget` `FUN_0048C850`, `ActorTurnTowardPoint` `FUN_0048C990` |
  * | `children.ts` | `CivilianPruneDeadChildren` `FUN_0048CA60`, `CivilianHookRideChildrenStep` `FUN_0048DAB0` |
- * | `hooks.ts`    | `CivilianHookFallStep` `FUN_0048DA20`, `PoseHookGrowAndPushOutOfWorld` `FUN_0048D070` |
+ * | `hooks.ts`    | op 0x10's four installs -- `CivilianHookStartFall` `FUN_0048D9F0`, `CivilianHookRideChildren` `FUN_0048DA90`, `CivilianHookStartMoveY` `FUN_0048DB90`, `CivilianHookStartMoveLocal` `FUN_0048DBD0` -- and three of their steps, `CivilianHookFallStep` `FUN_0048DA20`, `CivilianHookMoveYStep` `FUN_0048DBC0`, `CivilianHookMoveLocalStep` `FUN_0048DC10`; `PoseHookGrowAndPushOutOfWorld` `FUN_0048D070` |
  * | `shot.ts`     | `CivilianPlayDeathVoice` `FUN_0048D140`, and the shot branch of the update |
  * | `loops.ts`    | the update's clip-loop arm                                 |
  * | `update.ts`   | `CivilianUpdate` `FUN_0048A920` and its inline tails        |

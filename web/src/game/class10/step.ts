@@ -73,7 +73,7 @@ export function CivilianStepScript(obj: Actor): boolean {
 
     sub.timer = -1;
     ran = true;
-    sub.hookBusy = 0;
+    sub.hookDone = 0;
     let at = pc;
     if (sub.resumeScript >= 0) {
       sub.script = sub.resumeScript;
@@ -126,7 +126,7 @@ function CivilianWaitStillHolds(obj: Actor, word: number): boolean {
       && (obj.cursorStore ?? MotionPlayFrame(obj)) === sub.motionCompare) {
     return false;
   }
-  if ((word & CivilianWait.Hook) && sub.hookBusy !== 0) return false;
+  if ((word & CivilianWait.Hook) && sub.hookDone !== 0) return false;
   if (word & CivilianWait.Free) return false;
   // **Three conditions, not one**, and the port had only the middle one.
   // `0x0048B2F8`:

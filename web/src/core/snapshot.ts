@@ -25,9 +25,11 @@
  * value -- "not whatever those old snapshots were" -- and 3 is the play
  * cursor becoming a tick count and `g_cam_path_frame_prev` leaving `G`; 4 is
  * the walker's `rng` leaving its slice, a generator nothing ever drew from.
- * Three bumps in a day, after 28 commits of none, is the check working.
+ * Three bumps in a day, after 28 commits of none, is the check working. 5 is
+ * the civilian's `sub+0x5C` holding the frame step's address rather than the
+ * install routine's, and `sub+0x18` renamed `hookDone`.
  */
-export const SNAPSHOT_VERSION = 4;
+export const SNAPSHOT_VERSION = 5;
 
 export interface Snapshot {
   version: number;

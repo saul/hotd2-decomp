@@ -22,6 +22,10 @@
  * 3: the manifest carries a schema digest and every stage carries its own
  * `format`. See `docs/formats/bundle.md`.
  *
+ * 16: every JSON file is `JSON.stringify`'s output -- compact, and
+ * `manifest.json` indented -- and the manifest carries no `tool_version`.
+ * Every other value is format 15's.
+ *
  * 15: `characters.class14` carries the stage-2 boss's `.rdata` -- its cue,
  * damage-cone, weak-point timing, summon and damage tables -- the placements
  * carry `class16`/`class17` for the wave field the boss's summons sample, and
@@ -106,7 +110,7 @@
  * files rather than everything in this directory, so the loader's refusal
  * strings are no longer part of what invalidates a bundle.
  */
-export const SUPPORTED_FORMAT = 15;
+export const SUPPORTED_FORMAT = 16;
 
 /**
  * The exporter's digest of the declarations in this directory.
@@ -154,7 +158,6 @@ export interface Manifest {
   /** See {@link BuilderDigest}. Absent on a bundle built before it existed. */
   builder?: BuilderDigest;
   tool: string;
-  tool_version: string;
   built: string;
   game_dir: string;
   fps: number;

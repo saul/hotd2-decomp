@@ -1,15 +1,11 @@
 /**
  * The parts of the TypeScript exporter a game directory cannot check.
  *
- * While the Python writer existed, a parity check was the real proof:
- * it exported a stage with each implementation and compared the bytes. Three
- * pieces of the port were load-bearing, were *not* exercised by comparing two
- * bundles, and had nothing testing them at all -- and now that the comparison
- * is gone this is what is left:
- *
- * * **`pyjson`** is compared against recorded `json.dumps` output. A bundle
- *   diff cannot catch a separator bug, because both sides would be read back
- *   with `JSON.parse` and agree.
+ * * **`bundleJson`** writes every JSON file in a bundle, and what it writes
+ *   has to come back through `JSON.parse` as what went in -- or not be
+ *   written at all: a `NaN` that `JSON.stringify` would turn into `null`
+ *   fails the export instead. The manifest and a `.glb`'s JSON chunk are
+ *   written here and read back.
  * * **`resolveCase`** is what makes `COMMON\BLOOD01_16.WAV` find
  *   `common/blood01_16.wav`. On a case-insensitive filesystem -- which is what
  *   this repository is developed on -- a broken resolver still works, and the
@@ -32,9 +28,9 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { BUNDLE_FORMAT, writeManifest } from "../src/hod2lib/bundle";
 import { decompress, decompressFile, LZError } from "../src/hod2lib/lz";
-import { resolveCase, segments } from "../src/hod2lib/io";
-import { dumps, dumpsIndented, dumpsStrict, dumpsTight } from "../src/hod2lib/pyjson";
+import { bundleJson, resolveCase, segments } from "../src/hod2lib/io";
 import { crc32 } from "../src/hod2lib/png";
 import { zipBlob } from "../src/app/install/zip";
 import { RIGS } from "../src/hod2lib/rigs_data";
@@ -50,81 +46,83 @@ function check(name: string, ok: boolean, detail = ""): void {
   }
 }
 
-// ---------------------------------------------------------------------------
-console.log("\npyjson: what `json.dumps` actually writes");
+/** A sink that keeps what is written, keyed by path. */
+function memorySink(): { files: Map<string, Uint8Array | string>;
+                         write: (p: string, d: Uint8Array | string) => Promise<void>;
+                         readJson: () => Promise<null>;
+                         exists: () => Promise<boolean> } {
+  const files = new Map<string, Uint8Array | string>();
+  return {
+    files,
+    write: async (path, d) => { files.set(path, d); },
+    readJson: async () => null,
+    exists: async () => false,
+  };
+}
 
-/**
- * The oracle is Python itself.
- *
- * Recording expected strings by hand would be recording *my reading* of
- * `json.dumps`, which is the thing under test. This runs the real one -- the
- * same interpreter `tools/verify_all.py` runs on -- and compares.
- */
-function python(expr: string): string {
-  return execFileSync("python3", ["-c", `import json;print(${expr}, end="")`],
-                      { encoding: "utf8" });
+// ---------------------------------------------------------------------------
+console.log("\nbundleJson: what goes in comes back out of JSON.parse");
+
+{
+  // `JSON.stringify` would write these as `null`; a curve of nulls loads and
+  // fails far from where it was made, so the export fails instead.
+  for (const [what, v] of [["NaN", Number.NaN],
+                           ["Infinity", Number.POSITIVE_INFINITY],
+                           ["-Infinity", Number.NEGATIVE_INFINITY]] as const) {
+    let msg = "";
+    try {
+      bundleJson({ curve: [0, { key: v }] });
+    } catch (e) {
+      msg = (e as Error).message;
+    }
+    check(`${what} is refused, naming the key`, msg.includes('"key"'), msg);
+  }
+  // ...and a Map, which `JSON.stringify` writes as `{}`.
+  let threw = false;
+  try {
+    bundleJson({ m: new Map([[1, 2]]) });
+  } catch {
+    threw = true;
+  }
+  check("a Map is refused rather than written as {}", threw);
+
+  // `undefined` is how an optional block that was not built stays out of the
+  // file.
+  check("an undefined member is dropped, and null is not",
+        bundleJson({ a: undefined, b: null }) === '{"b":null}',
+        bundleJson({ a: undefined, b: null }));
+  check("compact unless indented",
+        bundleJson({ a: [1, 2] }) === '{"a":[1,2]}'
+        && bundleJson({ a: [1, 2] }, 1) === '{\n "a": [\n  1,\n  2\n ]\n}',
+        JSON.stringify(bundleJson({ a: [1, 2] }, 1)));
 }
 
 {
-  // The default separators, which `hod2lib/bundle.ts` relies on and `JSON.stringify`
-  // does not have: `", "` and `": "`, with the spaces.
-  const v = { a: 1, b: [1, 2], c: { d: "x" } };
-  const py = python('json.dumps({"a":1,"b":[1,2],"c":{"d":"x"}})');
-  check("default separators match json.dumps", dumps(v) === py,
-        `${dumps(v)} vs ${py}`);
-
-  // The glTF JSON chunk, which asks for the tight pair.
-  const tight = python('json.dumps({"a":1,"b":[1,2]},separators=(",",":"))');
-  check("the tight pair matches", dumpsTight({ a: 1, b: [1, 2] }) === tight,
-        `${dumpsTight({ a: 1, b: [1, 2] })} vs ${tight}`);
-
-  // `indent=1`, which the manifest and a loose .gltf use. Note that Python
-  // drops the trailing space from the item separator when indenting.
-  const ind = python('json.dumps({"a":1,"b":[1,2],"c":{}},indent=1)');
-  check("indent=1 matches", dumpsIndented({ a: 1, b: [1, 2], c: {} }) === ind,
-        `${JSON.stringify(dumpsIndented({ a: 1, b: [1, 2], c: {} }))} vs `
-        + JSON.stringify(ind));
-
-  // `ensure_ascii`, which is on by default in Python and has no equivalent in
-  // `JSON.stringify`. A `degraded` record can carry an exception message.
-  const nonAscii = python('json.dumps({"k":"caf\\u00e9 \\u2014 ok"})');
-  check("non-ASCII is escaped the way Python escapes it",
-        dumps({ k: "café — ok" }) === nonAscii,
-        `${dumps({ k: "café — ok" })} vs ${nonAscii}`);
-
-  // Control characters and quotes, the other half of the escape table.
-  const esc = python(String.raw`json.dumps({"k":"a\"b\\c\nd\te"})`);
-  check("escapes match", dumps({ k: 'a"b\\c\nd\te' }) === esc,
-        `${dumps({ k: 'a"b\\c\nd\te' })} vs ${esc}`);
-
-  check("an empty container is not indented",
-        dumpsIndented({}) === "{}" && dumpsIndented([]) === "[]");
-
-  // `allow_nan=False`, which `hod2lib/bundle.ts` uses so a camera curve that decoded
-  // to garbage fails the export rather than writing a file no parser will read.
-  let threw = false;
+  // The manifest, written by the exporter's own function and read back. A
+  // `degraded` record carries an exception message, which may be anything.
+  const sink = memorySink();
+  const entry = {
+    name: "stage1", format: BUNDLE_FORMAT, stage: 1, counts: { degraded: 1 },
+    degraded: [{ where: "x", what: "caf\u00e9 \u2014 \"quoted\"\n\ttab", lost: "" }],
+    sources: { "pol/st1_01.bin": "00" },
+  };
+  await writeManifest(sink, [entry], "C:\\Games\\HOTD2", "2026-01-01T00:00:00Z",
+                      { note: "n" });
+  const text = String(sink.files.get("manifest.json"));
+  let back: Record<string, unknown> = {};
   try {
-    dumpsStrict({ x: Number.NaN });
-  } catch {
-    threw = true;
+    back = JSON.parse(text) as Record<string, unknown>;
+  } catch (e) {
+    check("manifest.json parses", false, (e as Error).message);
   }
-  check("NaN is refused, as allow_nan=False", threw);
-  threw = false;
-  try {
-    dumpsStrict({ x: Number.POSITIVE_INFINITY });
-  } catch {
-    threw = true;
-  }
-  check("Infinity is refused too", threw);
-
-  // A negative zero is a real value a float can hold, and `String(-0)` is "0".
-  check("negative zero keeps its sign", dumps(-0) === "-0", dumps(-0));
-
-  // `undefined` is how an optional block that was not built stays out of the
-  // file: Python simply never puts the key in the dict.
-  check("an undefined member is dropped, and null is not",
-        dumps({ a: undefined, b: null }) === '{"b": null}',
-        dumps({ a: undefined, b: null }));
+  check("manifest.json parses, and says its format",
+        back.format === BUNDLE_FORMAT, String(back.format));
+  check("...and its stage entry round-trips unchanged",
+        JSON.stringify((back.stages as unknown[])?.[0]) === JSON.stringify(entry),
+        JSON.stringify((back.stages as unknown[])?.[0]));
+  check("...as does the game directory, backslashes and all",
+        back.game_dir === "C:\\Games\\HOTD2", String(back.game_dir));
+  check("the manifest carries no tool_version", !("tool_version" in back));
 }
 
 // ---------------------------------------------------------------------------
@@ -385,25 +383,40 @@ console.log("\na texture's alpha is the bank's, not the mesh's:");
   // (char_adv04). Same texture and words, its own material.
   model.meshes.push(mesh(0x02000008, 0x94180000, [1, 0, 0, 0]));
 
-  const files = new Map<string, Uint8Array | string>();
-  const sink = {
-    write: async (path: string, d: Uint8Array | string) => {
-      files.set(path, d);
-    },
-    readJson: async () => null,
-    exists: async () => false,
-  };
+  const sink = memorySink();
   const deflate = async (d: Uint8Array, level: number) =>
     new Uint8Array(deflateSync(d, { level }));
-  await exportLevel("t", [["part", [model], bank]], "out", sink, deflate);
+  const info = await exportLevel("t", [["part", [model], bank]], "out", sink,
+                                 deflate);
 
-  const doc = JSON.parse(String(files.get("out/t.gltf"))) as {
-    images: { uri: string }[];
+  // The `.glb`: a 12-byte header, the JSON chunk, the BIN chunk.
+  const glb = sink.files.get(`out/${info.gltf}`);
+  const bytes = glb instanceof Uint8Array ? glb : new Uint8Array();
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const jsonLen = bytes.length >= 20 ? dv.getUint32(12, true) : 0;
+  const binAt = 20 + jsonLen;
+  const bin = binAt + 8 <= bytes.length
+    ? bytes.subarray(binAt + 8, binAt + 8 + dv.getUint32(binAt, true))
+    : new Uint8Array();
+  check("the export is one .glb", info.gltf === "t.glb"
+        && dv.getUint32(0, true) === 0x46546c67 && sink.files.size === 1,
+        `${info.gltf}, ${sink.files.size} file(s)`);
+  const doc = JSON.parse(new TextDecoder().decode(
+    bytes.subarray(20, 20 + jsonLen))) as {
+    images: { name: string; bufferView: number }[];
+    bufferViews: { byteOffset: number; byteLength: number }[];
     materials: { alphaMode: string;
+                 extensions?: Record<string, unknown>;
                  extras: { pvr2: { texture_alpha_used: boolean } } }[];
+    extensionsUsed?: string[];
   };
+  check("its JSON chunk parses", Array.isArray(doc.materials));
+  check("every material is KHR_materials_unlit, and the file says so",
+        doc.materials.every((m) => m.extensions?.KHR_materials_unlit)
+        && doc.extensionsUsed?.includes("KHR_materials_unlit") === true,
+        JSON.stringify(doc.extensionsUsed));
   check("both meshes share one image: there is no alpha-stripped copy",
-        doc.images.length === 1 && !doc.images[0].uri.includes("_opaque"),
+        doc.images.length === 1 && !doc.images[0].name.includes("_opaque"),
         JSON.stringify(doc.images));
 
   /** The RGBA rows of an 8-bit RGBA PNG, filter 0 on every row. */
@@ -426,8 +439,10 @@ console.log("\na texture's alpha is the bank's, not the mesh's:");
     }
     return new Uint8Array(rows);
   };
-  const png = files.get(`out/${doc.images[0]?.uri}`);
-  const got = png instanceof Uint8Array ? pixels(png) : new Uint8Array();
+  const view = doc.bufferViews[doc.images[0]?.bufferView ?? -1];
+  const got = view
+    ? pixels(bin.subarray(view.byteOffset, view.byteOffset + view.byteLength))
+    : new Uint8Array();
   const want = bankDecode(bank, 0)!.pixels;
   const alphas = (px: Uint8Array) => Array.from(px.filter((_, i) => i % 4 === 3));
   check("...and it carries the bank's alpha, byte for byte",

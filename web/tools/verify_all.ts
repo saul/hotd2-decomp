@@ -120,9 +120,10 @@ export const CHECKS: readonly Check[] = [
   check("test:bundle", ["npm", "run", "--silent", "test:bundle"],
         "that the bundle reader refuses what it should refuse"),
   check("test:export", ["npm", "run", "--silent", "test:export"],
-        "the three pieces of the TypeScript exporter that comparing two bundles"
-      + " cannot check -- `json.dumps`'s separators, the case-insensitive path "
-      + "resolve, and an archive something else can open"),
+        "the pieces of the TypeScript exporter a game directory cannot check "
+      + "-- bundle JSON that round-trips through `JSON.parse` and refuses a "
+      + "NaN, the case-insensitive path resolve, and an archive something else "
+      + "can open"),
   check("test:scope", ["npm", "run", "--silent", "test:scope"],
         "that lifetimes are given back"),
   check("test:projection", ["npm", "run", "--silent", "test:projection"],

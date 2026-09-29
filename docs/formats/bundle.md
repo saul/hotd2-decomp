@@ -13,7 +13,7 @@ it, from the command line or inside the page, is in
 
 ```
 extract/player/
-  manifest.json          the index: version, schema digest, stages, sources
+  manifest.json          the index: format, digests, stages, sources
   stage2/
     stage2.glb           geometry, materials, textures
     stage2.cam.json      Hermite curves keyed by global path slot -- the
@@ -22,6 +22,41 @@ extract/player/
     stage2.script.json   the resolved event script, and every table block
   stage2_original/       game mode 1, same shape
 ```
+
+## How the files are written
+
+Every JSON file is `JSON.stringify`'s output, through `bundleJson` in
+`web/src/hod2lib/io.ts`: `<stage>.script.json`, `<stage>.cam.json` and the
+`.glb`'s JSON chunk compact, `manifest.json` indented by one space because it
+is the file a person opens. The text is UTF-8, and a non-ASCII character is
+written as itself. A `NaN` or an `Infinity`, which `JSON.stringify` writes as
+`null`, and a `Map` or a `Set`, which it writes as `{}`, fail the export
+instead, naming the key: a curve of nulls would load and fail far from where
+it was made. An `undefined` member is left out, which is how an optional block
+that was not built stays out of a file. `-0` is written `0`. Nothing reads a
+bundle file as text; every reader is a JSON parser.
+
+The `.glb` is glTF 2.0 binary: the JSON chunk, padded with spaces, and one BIN
+chunk holding every buffer view, each texture a PNG among them. Every material
+is `KHR_materials_unlit`. It holds the stage's geometry, one parent node per
+part, and the rigs -- object rigs, characters, props and the hidden slot rigs
+-- with one root per route, placement or fixed pose; no cameras, rails or
+animations.
+
+`manifest.json`:
+
+| Field | |
+|---|---|
+| `format` | `BUNDLE_FORMAT` |
+| `schema` | `{hash, files}` -- the declaration digest, below |
+| `builder` | `{hash, files}` -- the exporter digest, below |
+| `tool` | `"hod2lib"` |
+| `built` | when, as UTC ISO 8601 |
+| `game_dir` | the install it was built from, as the host names it |
+| `fps` | `60` |
+| `projection` | `yfov_deg`, `yfov_bams`, `aspect`, `znear`, `zfar` -- `SetupSceneProjection`'s constants (`cam.md`, *Field of view*) |
+| `stages` | one entry per stage directory: `name`, `format`, `builder`, `stage`, `scene`, `game_mode`, the `geometry`, `cam` and `script` file names, `counts`, `degraded`, and `sources`, the SHA-256 of every file consumed |
+| `notes` | free text about how it was built; informational |
 
 Since format 11 every stage's `characters.placements` also carries two
 **synthetic** rows with `player_body` set, at `0x20000000 + p`: the players'
@@ -165,11 +200,12 @@ committed copy is stale, and the exporter imports rather than recomputes it.
   browser's cache is nothing but partial exports. It is filled one stage at a
   time and it goes out of date one stage at a time.
 
-The gap it closes is not hypothetical. `nl1.dropCollapsedUvTriangles` was
-deleting 3–5% of every stage's geometry; switching it off changed no
-declaration and no `BUNDLE_FORMAT`, so a stage already in a browser's OPFS
-cache went on winning over the rebuilt one — holes and all — however many times
-the tree was exported, with nothing on the page saying why.
+The gap it closes: an exporter fix that changes what a stage holds -- keeping
+the 3–5% of triangles a UV-area filter drops (`nl1.md`, *Collapsed-UV
+triangles*), say -- moves no declaration and no `BUNDLE_FORMAT`. Without this
+digest a stage already in a browser's OPFS cache goes on winning over the
+rebuilt one, holes and all, however many times the tree is exported, with
+nothing on the page saying why.
 
 ## The rule: `.rdata` travels, `.text` does not
 

@@ -80,8 +80,6 @@ async function run(req: ExportRequest): Promise<void> {
     // twice belongs to the host -- so the timestamp is stamped here.
     const built_at = new Date().toISOString().replace(/\.\d+Z$/, "Z");
     await writeManifest(sink, all, req.install.label, built_at, {
-      unlit: true,
-      geometry: "glb",
       source: "exported in the browser",
       cameras: "raw Hermite curves in <stage>.cam.json; the client evaluates "
         + "and draws the rails itself",
@@ -96,7 +94,6 @@ async function run(req: ExportRequest): Promise<void> {
       post({ kind: "progress",
              line: `stage ${n}${original ? " (Original Mode)" : ""}` });
       const entry = await buildStage(stage, sink, browserDeflate, {
-        glb: true,
         progress: (line) => post({ kind: "progress", line }),
       });
       entries.push(entry);

@@ -473,34 +473,23 @@ See [`../re/anomalies.md`](../re/anomalies.md).
 
 ## Export
 
-Implemented in `emitPaths` (`web/src/hod2lib/gltf.ts`), which `exportLevel`
-runs when it is handed cam files. The player bundle hands it none: it carries
-the curves themselves in `<stage>.cam.json`, and the player evaluates and draws
-them ([`docs/PLAYER.md`, *The bundle*](../PLAYER.md#the-bundle)).
+The bundle carries the curves themselves, keyed by global path slot, in
+`<stage>.cam.json` — `paths` for `cp_`, `object_paths` for `op_` — and the
+player evaluates and draws them
+([`docs/PLAYER.md`, *The bundle*](../PLAYER.md#the-bundle)). A baked glTF
+animation could express neither a pose at any frame nor the sub-range one
+`queue_event` covers, so the glTF holds no cameras and no rails.
 
-glTF has no look-at, so the exporter composes a rotation per sample: the
-camera's local −Z is set to `normalize(target − eye)`, +Y up, and roll applied
-about the view axis. Because that rotation is a non-linear function of two
-curves, it cannot be expressed as a `CUBICSPLINE` over the source tangents —
-so both translation and rotation are **baked** on a fixed frame grid
-(default every 2 frames) and emitted as `LINEAR`. Times are converted to
-seconds (`frame / 60`).
+The player's camera is a look-at: its local −Z is `normalize(target − eye)`,
++Y up (+Z when the view is all but vertical, `|forward.y| > 0.9999`), and
+the roll applied about the view axis — `applyPose` in
+`web/src/render/campath.ts`.
 
-Each path also produces a visible **rail**: an edge-only `LINE_STRIP` mesh with
-two polylines, the eye track and the look-at track. That makes the camera
-layout inspectable without playback.
-
-`op_` paths export as a translation-only rail. Their three integer channels
-reach the same object fields as the `evt/` spawn descriptor's `+0x14`/`+0x1C`,
-whose meaning is **not** settled — so no rotation is emitted for them rather
-than guessing.
-
-Verified by rendering through an exported camera: `cp_st2_50_cam` at frame 90
-produces a recognisable stage-2 Venice plaza shot, which exercises the keyframe
-layout, the Hermite evaluation, the look-at construction and the coordinate
-space in one go. The player poses the same shot from a deep link
-(`?stage=2&slot=105&frame=90&freeze=1`), and `web/tools/shot.mjs` captures it
-headless.
+The player poses `cp_st2` path 50 (global slot 105) at frame 90 from a deep
+link, `?stage=2&slot=105&frame=90&freeze=1`, and `web/tools/shot.mjs` captures
+it headless: a recognisable stage-2 Venice plaza shot, which exercises the
+keyframe layout, the Hermite evaluation, the look-at construction and the
+coordinate space in one go.
 
 ## Open questions
 
@@ -542,7 +531,8 @@ path from their own stage.
 
 41.100° vertical (`0x1D3B` BAMS), 53.115° horizontal, 4:3, near 0.8, far 8000,
 constant for the whole game. Recovered from `SetupSceneProjection`; see
-[`pipeline.md`](pipeline.md). The exporter writes it into every glTF camera.
+[`pipeline.md`](pipeline.md). The bundle's `manifest.json` carries it as
+`projection`.
 
 ## The roll channel is gated
 
@@ -631,8 +621,9 @@ camera.
 ### Reproducing a rig
 
 `RIGS` in `web/src/hod2lib/rigs_data.ts` transcribes a draw routine as data,
-and the exporter instantiates it as a node hierarchy under the animated path
-node — so the object rides its route. `RIGS` holds every routine transcribed
+and the exporter instantiates it as a node hierarchy with one root per route,
+which the player poses from the route's curve every frame — so the object
+rides its route. `RIGS` holds every routine transcribed
 so far (`docs/re/rig-survey.md` covers all the path followers); `st1_vehicle`,
 from `FUN_0048E600`, is the worked example above.
 
@@ -686,7 +677,7 @@ Two part names were corrected by measuring rather than assuming:
 > A path-following object is therefore **not one model**. It is a hand-coded
 > rig: a set of asset slots with relative transforms baked into the draw
 > routine. Exporting one faithfully means reproducing that routine, not
-> attaching a single mesh to the animated node.
+> placing a single mesh on the path.
 
 ### Global path slots
 
@@ -708,12 +699,12 @@ Two part names were corrected by measuring rather than assuming:
 
 ## Export
 
-`emitPaths` emits every `op_` path twice: a green rail polyline, and an
-**animated node** `<file>_<nn>_obj` carrying translation and rotation. Parent a
-model under that node to watch it run its route.
-
-The bundle carries the spawns in `<stage>.script.json` and the routes in
-`<stage>.cam.json`'s `object_paths` — see [`evt.md`](evt.md).
+The bundle carries the routes in `<stage>.cam.json`'s `object_paths` and the
+spawns in `<stage>.script.json` — see [`evt.md`](evt.md). Each rig reaches the
+glTF as a root node per route it follows, tagged `extras.hod2_path_slot`, and
+`<stage>.script.json`'s `rigs` gives each route its `length`, `hold_frame`,
+`stop_frame` and `bias`. `web/src/render/rigs.ts` evaluates the path and poses
+the root every frame.
 
 ### Which route an object takes, and in which stage
 
@@ -732,9 +723,9 @@ a rig iff it owns the camera path that selects it** — which is how
 
 Some routines also **bias the pose**: `Translate(p.x, p.y + 2.0, p.z)` before
 `RotZ; RotY; RotX`. That is `T(p+b) · R`, and a child node with translation `b`
-cannot express it — that would give `T(p) · R · T(b)`. The exporter emits a
-separate anchor with shifted translation samples per distinct bias, named
-`<file>_<nn>_obj_b<tag>`.
+cannot express it — that would give `T(p) · R · T(b)`. The bundle carries `b`
+as the route's `bias`, and the player adds it to the evaluated position before
+it applies the rotation.
 
 The full picture of which routine drives which route is in
 [`../re/rig-survey.md`](../re/rig-survey.md).

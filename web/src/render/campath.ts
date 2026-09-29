@@ -63,10 +63,9 @@ const _rollQ = new Quaternion();
 /**
  * The rotation a three.js camera needs to sit at `eye` looking at `target`.
  *
- * three.js cameras look down -Z with +Y up, which is also glTF's convention,
- * so this is the same construction `lookAtQuat` in `hod2lib/gltf.ts` uses for the
- * exported cameras -- deliberately, so the browser and a Blender render of
- * the same glTF are comparable.
+ * three.js cameras look down -Z with +Y up, which is also glTF's convention:
+ * the camera's -Z is set to `normalize(target - eye)`, +Y up (+Z when the view
+ * is all but vertical), and the roll is applied about the view axis.
  */
 export function applyPose(
   obj: { position: Vector3; quaternion: Quaternion },

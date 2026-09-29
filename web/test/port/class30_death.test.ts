@@ -1241,7 +1241,7 @@ console.log("class 0x30, dying with a weapon still in hand:");
  * civilian who was herself parked on `CivilianWait.EnemiesPresent`.
  *
  * The fix is in the exporter -- `CLASS30_DEATH_CLIPS`, checked over the real
- * bundles by `tools/verify_death_clips.py`, because a hand-written fixture that
+ * bundles by `web/tools/checks/death_clips.ts`, because a hand-written fixture that
  * carries the clip is exactly what cannot see an exporter that does not. This
  * block is the other half: it says out loud that state 12's exit **is** the
  * clip's play clock, so a future attempt to clear the hang by short-circuiting

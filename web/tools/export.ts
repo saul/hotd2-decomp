@@ -35,16 +35,13 @@ interface Args {
   arcade: boolean;
   original: boolean;
   out: string;
-  gltf: boolean;
-  noTextures: boolean;
-  lit: boolean;
   noDeploy: boolean;
 }
 
 function parseArgs(argv: string[]): Args {
   const a: Args = {
     gameDir: "", stages: [], all: false, arcade: false, original: false,
-    out: "", gltf: false, noTextures: false, lit: false, noDeploy: false,
+    out: "", noDeploy: false,
   };
   for (let i = 0; i < argv.length; i++) {
     const k = argv[i];
@@ -55,9 +52,6 @@ function parseArgs(argv: string[]): Args {
       case "--all": a.all = true; break;
       case "--arcade": a.arcade = true; break;
       case "--original": a.original = true; break;
-      case "--gltf": a.gltf = true; break;
-      case "--no-textures": a.noTextures = true; break;
-      case "--lit": a.lit = true; break;
       case "--no-deploy": a.noDeploy = true; break;
       case "-h": case "--help":
         console.log(USAGE);
@@ -78,9 +72,6 @@ const USAGE = `usage: npm run export -- --game-dir DIR (--all | --stage N ...)
   --arcade         Arcade Mode only; the default is both modes
   --original       Original Mode only; the default is both modes
   --out DIR        where the bundle goes (default: extract/player)
-  --gltf           write .gltf + .bin + loose PNGs instead of one .glb
-  --no-textures    skip the PNGs (only meaningful with --gltf)
-  --lit            do not mark materials KHR_materials_unlit
   --no-deploy      do not deploy the site after (it is, into the default
                    directory, when r2site/.deploy.env sets a deploy up)`;
 
@@ -215,9 +206,6 @@ async function main(): Promise<number> {
       }
       console.log(`stage ${n}${original ? " (Original Mode)" : ""}`);
       const entry = await buildStage(st, sink, nodeDeflate, {
-        glb: !args.gltf,
-        writeTextures: !args.noTextures,
-        unlit: !args.lit,
         progress: (line) => console.log(line),
       });
       entries.push(entry);
@@ -277,8 +265,6 @@ async function main(): Promise<number> {
 
   const built_at = new Date().toISOString().replace(/\.\d+Z$/, "Z");
   const path = await writeManifest(sink, entries, game, built_at, {
-    unlit: !args.lit,
-    geometry: args.gltf ? "gltf" : "glb",
     cameras: "raw Hermite curves in <stage>.cam.json; the client evaluates "
       + "and draws the rails itself",
   });

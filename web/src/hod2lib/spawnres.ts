@@ -179,16 +179,3 @@ export function resolveSpawn(tables: ExeTables, spawn: Spawn): ResolvedSpawn {
   return new ResolvedSpawn(spawn, ct, tables.characterAssetFile(ct),
                            skel.length);
 }
-
-/**
- * Identify every spawn descriptor the stage's event script reaches.
- *
- * The caller has usually built the `Program` already -- `bundle` builds
- * exactly one and hands it round -- so its spawn records are passed in, and
- * null is the "no resolved spawns" answer.
- */
-export function resolveStageSpawns(tables: ExeTables,
-                                   spawnRecords: Spawn[] | null):
-    ResolvedSpawn[] {
-  return (spawnRecords ?? []).map((rec) => resolveSpawn(tables, rec));
-}

@@ -674,13 +674,11 @@ Two setups, selected by bit `0x04000000` of the draw command — see
 
 ## Debugging exported materials
 
-`exportLevel` (`web/src/hod2lib/gltf.ts`) takes a `uvCheck` option that
-replaces every texture with a UV checkerboard, red increasing along u and blue
-along v. No `npm run export` flag sets it.
-
-**Interpreting a UV check:** if a face is still wrong with a checkerboard on
-it, the texture pipeline is not at fault — look at UVs, geometry or material
-state instead. That single distinction eliminates most of the search space.
+**A UV checkerboard splits the search.** With every texture replaced by a
+checkerboard — red rising along u, blue along v — a face that is still wrong
+is not the texture pipeline's fault: look at UVs, geometry or material state
+instead. That single distinction eliminates most of the search space. Neither
+the exporter nor the player has a switch for it.
 
 ## glTF mapping
 

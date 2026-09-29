@@ -1415,10 +1415,10 @@ the drawn run is `0x905..0x919`, the tail of the wood strip.
 ## Getting spawns into a renderer
 
 `resolveSpawn` (`web/src/hod2lib/spawnres.ts`) resolves a spawn to its
-character type and asset file. `exportLevel` (`web/src/hod2lib/gltf.ts`) can
-emit one glTF node per spawn under a `spawns` root, carrying class, character
-type, node count and asset filename in `extras`; the player bundle does not ask
-for it, and `web/src/hod2lib/characters.ts` builds the characters it carries.
+character type and asset file, and `web/src/hod2lib/characters.ts` builds the
+characters the bundle carries from that. The glTF holds no node per spawn: the
+spawns travel in `<stage>.script.json`, and the characters as rigs placed at
+them.
 
 **562 of 1225 spawns are identified**, across 52 distinct characters. Only
 classes whose handler has actually been read get a rule; there is deliberately
@@ -1428,12 +1428,12 @@ opcode `0x09` really does copy `desc+0x24` into `obj+0x1F4` — and it "resolved
 `0x41` uses that field as a prop lifetime and a lifetime of 0 is character type
 0. Fewer, correct identifications beat more, wrong ones.
 
-**The nodes carry no geometry, and cannot yet.** Every part model in `cat.bin`
-and `hito_manbest.bin` is authored about its own origin — the per-part
-centroids are all within a unit of zero — so the rest pose is not in the
-models. It lives in the motion data, and `mot/` is the last undecoded format.
-Until then a consumer can place and label a character but not assemble it. The
-single-model prop classes are unaffected and draw exactly.
+**The part models carry no pose.** Every part model in `cat.bin` and
+`hito_manbest.bin` is authored about its own origin — the per-part centroids
+are all within a unit of zero — so where each part sits is the skeleton's, from
+the EXE, and the motion data's (`mot/`), which is how `characters.ts`
+assembles a character. The single-model prop classes draw from the model
+alone.
 
 ## Open questions
 

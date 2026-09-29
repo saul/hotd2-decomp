@@ -41,6 +41,30 @@ export interface BundleSink {
 }
 
 /**
+ * The text of a bundle's JSON file: `JSON.stringify`, compact unless *indent*
+ * is given, refusing the values it would change without a word.
+ *
+ * `JSON.stringify` writes `NaN` and `±Infinity` as `null`, and a `Map` or a
+ * `Set` as `{}`. A camera curve that decoded to garbage would then load as a
+ * curve of nulls, and the page would fail where the value is read, far from
+ * where it was made. This throws instead, naming the key, and the export
+ * fails. `undefined` members are dropped, which is how an optional block that
+ * was not built stays out of the file.
+ */
+export function bundleJson(value: unknown, indent?: number): string {
+  return JSON.stringify(value, (key: string, v: unknown) => {
+    if (typeof v === "number" && !Number.isFinite(v)) {
+      throw new Error(`bundle JSON: "${key}" is ${v}, which JSON cannot hold`);
+    }
+    if (v instanceof Map || v instanceof Set) {
+      throw new Error(`bundle JSON: "${key}" is a ${v.constructor.name}, `
+        + "which JSON.stringify writes as {}");
+    }
+    return v;
+  }, indent);
+}
+
+/**
  * zlib deflate, at the level PNG asks for.
  *
  * Node has `zlib.deflateSync`. The browser has `CompressionStream("deflate")`,

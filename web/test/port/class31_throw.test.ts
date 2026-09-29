@@ -1330,7 +1330,7 @@ console.log("class 0x31, the grab ends in the engine's one leave routine:");
   // `g_enemies_present` one too high for the rest of the stage, and any later
   // `wait_enemies_alive` could never open -- a hang, from a duplicate.
   //
-  // Nothing caught it because `verify_port.py` keyed its ports by *name*, and
+  // Nothing caught it because the port check keyed its ports by *name*, and
   // a set swallows the second of two. It keys by address now.
   //
   // The counts are what this asserts, because the counts are what hangs.

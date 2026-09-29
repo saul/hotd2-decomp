@@ -28,7 +28,7 @@
  * (65535, 65536) -- none -- in colour 0. `[proved]` So no fog and a black
  * background, whatever the stage had.
  */
-import { Color, Group, type Fog, type FogExp2, type Object3D, type Scene }
+import { Color, Group, type Fog, type FogExp2, type Mesh, type Object3D, type Scene }
   from "three";
 import type { System } from "../core/system";
 import type { Scope } from "../core/scope";
@@ -38,6 +38,7 @@ import { G } from "../game/globals";
 import { PLAYER_BODY_AT, ROUTE_FIGURE_SHADOW_SLOT }
   from "../game/player_body_data";
 import type { CharacterLayer } from "./characters";
+import type { SceneLighting } from "./lighting";
 import type { Instance } from "./characters/instance";
 import { Poser } from "./characters/pose";
 import type { RenderContext } from "./context";
@@ -181,6 +182,26 @@ export class GameOverScene implements System<RenderContext> {
       n += 1;
     }
     for (let i = n; i < this.marks.length; i++) this.marks[i].visible = false;
+  }
+
+  /**
+   * The screen's programs, compiled with the load's. It draws its bodies and
+   * the route map's discs with the scene's fog taken away, and fog is in
+   * every program's key, so none of them existed until the first game over:
+   * stage 2's first compiled seven at once, as the screen came up.
+   */
+  warm(compile: (o: Object3D) => void, lighting: SceneLighting): void {
+    const fog = this.scene.fog;
+    this.scene.fog = null;
+    const meshes: Object3D[] = [];
+    const add = (root: Object3D | null | undefined): void => {
+      root?.traverse((o) => { if ((o as Mesh).isMesh) meshes.push(o); });
+    };
+    for (const b of this.bodies) add(b?.root);
+    add(this.effects?.cloneSlot(ROUTE_FIGURE_SHADOW_SLOT));
+    for (const m of meshes) compile(m);
+    lighting.warm(meshes, compile);
+    this.scene.fog = fog;
   }
 
   private disc(i: number): Object3D | null {

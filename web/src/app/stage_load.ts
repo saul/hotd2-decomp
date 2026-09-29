@@ -286,6 +286,7 @@ export async function loadStageInto(p: Player): Promise<void> {
   // `ResetGameOnStart` both call on the way into the next scene -- so the
   // last stage's music, voice and SE do not carry over into this one.
   p.bgm.stopAll();
+  p.bgm.prepare();
   p.bgm.setTable(bundle.script.bgm, entry.game_mode);
   p.bgm.setSoundTables(bundle.script.sound);
   p.treeProj = treeProjection(bundle.script);

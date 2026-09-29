@@ -46,6 +46,7 @@ import { GameMode } from "../game/game_mode";
 import {
   bgmStreamFill, bgmStreamLayout, wavStreamHeader,
 } from "./stream";
+import type { FillIn, FillOut } from "./bgm_fill_worker";
 
 /** `id >> 28`. */
 export const NS_SE = 0;
@@ -463,25 +464,66 @@ export class Bgm {
     const key = `${file}|${loop ? "loop" : "once"}`;
     const hit = this.decoded.find((d) => d.key === key);
     if (hit) return hit.buffer;
-    let bytes: Uint8Array;
+    let bytes: ArrayBuffer;
     try {
       const r = await fetch(soundUrl("bgm", file));
       if (!r.ok) return null;
-      bytes = new Uint8Array(await r.arrayBuffer());
+      bytes = await r.arrayBuffer();
     } catch {
       return null;
     }
-    const header = wavStreamHeader(bytes);
-    const layout = header && bgmStreamLayout(header, bytes.length, loop);
-    if (!header || !layout) return null;
+    const filled = await this.fill(bytes, loop);
+    if (!filled?.channels) return null;
     const { ctx } = this.graph();
-    const buffer = ctx.createBuffer(layout.channels, layout.frames,
-                                    layout.sampleRate);
-    const out: Float32Array[] = [];
-    for (let c = 0; c < layout.channels; c++) out.push(buffer.getChannelData(c));
-    bgmStreamFill(bytes, header, layout, out);
+    const buffer = ctx.createBuffer(filled.channels.length, filled.channels[0].length,
+                                    filled.sampleRate);
+    filled.channels.forEach((a, c) => buffer.copyToChannel(a, c));
     this.decoded = [{ key, buffer }, ...this.decoded].slice(0, 2);
     return buffer;
+  }
+
+  /**
+   * `bgmStreamFill` in the worker (`bgm_fill_worker.ts`), or here where there
+   * is no worker to be had. The bytes are handed over either way.
+   */
+  private fill(bytes: ArrayBuffer, loop: boolean): Promise<FillOut | null> {
+    if (typeof Worker === "undefined") {
+      const b = new Uint8Array(bytes);
+      const header = wavStreamHeader(b);
+      const layout = header && bgmStreamLayout(header, b.length, loop);
+      if (!header || !layout) return Promise.resolve(null);
+      const out: Float32Array<ArrayBuffer>[] = [];
+      for (let c = 0; c < layout.channels; c++) out.push(new Float32Array(layout.frames));
+      bgmStreamFill(b, header, layout, out);
+      return Promise.resolve({ id: 0, sampleRate: layout.sampleRate, channels: out });
+    }
+    this.filler ??= new Worker(new URL("./bgm_fill_worker.ts", import.meta.url),
+                               { type: "module" });
+    const worker = this.filler;
+    const id = ++this.fillSeq;
+    return new Promise((resolve) => {
+      const done = (ev: MessageEvent<FillOut>) => {
+        if (ev.data.id !== id) return;
+        worker.removeEventListener("message", done);
+        resolve(ev.data);
+      };
+      worker.addEventListener("message", done);
+      const req: FillIn = { id, bytes, loop };
+      worker.postMessage(req, [bytes]);
+    });
+  }
+
+  private filler: Worker | null = null;
+  private fillSeq = 0;
+
+  /**
+   * The audio graph made now, under the loading screen, rather than by the
+   * first sound in play: making an `AudioContext` is a long call -- 290 ms
+   * in headless Chrome -- and it used to land in the frame the stage's music
+   * started. It starts suspended, as a page's must, and a press resumes it.
+   */
+  prepare(): void {
+    this.graph();
   }
 
   private graph(): { ctx: AudioContext; gain: GainNode; sfx: GainNode } {

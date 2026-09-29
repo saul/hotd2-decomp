@@ -21,6 +21,7 @@
 import {
   Color,
   type Mesh,
+  type Object3D,
   PCFSoftShadowMap,
   PerspectiveCamera,
   Scene,
@@ -39,6 +40,7 @@ import {
 import { CameraDrawSystem, CameraRig, CameraTakeSystem }
   from "../render/camera";
 import { StageScene } from "../render/stagescene";
+import { ProgramPins } from "../render/program_pins";
 import { RenderCommandOrder } from "../render/draw_order";
 import { SpawnLayer } from "../render/overlays";
 import { FreeRoam, ownsKey } from "../render/freeroam";
@@ -2405,16 +2407,37 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
    * on iOS every one goes through Metal's translator and is many times that,
    * so a room turning into view, the first zombie of a kind or the first shot
    * was a hitch mid-play. `compile` walks every material in the scene, hidden
-   * regions and the effect templates included, under the lights as they
-   * stand. A light turning on later can still ask for a variant; that is the
-   * rare case, not the common one. Called by `loadStageInto` before the
-   * loading screen lifts.
+   * regions included, under the lights as they stand -- and then everything
+   * the glTF held that is no longer in the scene: the templates the layers
+   * took out of it to copy from, the characters and effects among them, which
+   * the scene's walk had silently missed. They are compiled against the
+   * scene's lights, as they will be drawn. A light turning on later can still
+   * ask for a variant; that is the rare case, not the common one. Called by
+   * `loadStageInto` before the loading screen lifts.
+   *
+   * Once compiled, a program stays: see `render/program_pins.ts`.
    */
   warmShaders(): void {
     this.applyStageExperiments();
     updateVisibleMatrixWorld(this.scene);
     this.renderer.compile(this.scene, this.camera);
+    const inScene = (o: Object3D): boolean => {
+      let n: Object3D | null = o;
+      while (n.parent) n = n.parent;
+      return n === this.scene;
+    };
+    const compile = (o: Object3D) => { this.renderer.compile(o, this.camera, this.scene); };
+    const drawables = this.scene3d?.drawables ?? [];
+    for (const o of drawables) if (!inScene(o)) compile(o);
+    // ...and the twins the lighting gives meshes as they come into view, and
+    // the game-over screen, which draws without the fog.
+    this.lighting.warm(drawables, compile);
+    this.gameOverScene.warm(compile, this.lighting);
+    this.programPins.pin(this.renderer);
   }
+
+  /** See `render/program_pins.ts`. */
+  private readonly programPins = new ProgramPins();
 
   /**
    * The perf meter's two A/B switches that act on a loaded stage: `rain=0`
@@ -2445,6 +2468,7 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     this.lighting.beforeRender();
     updateVisibleMatrixWorld(this.scene);
     this.renderer.render(this.scene, this.camera);
+    this.programPins.pin(this.renderer);
     this.keepThumb();
     // The one update path, and it is unconditional on purpose. A projection a
     // frame, published only when it differs -- so the sidebar and the globals
@@ -2471,6 +2495,7 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     m.add("matrices", n - t);
     t = n;
     this.renderer.render(this.scene, this.camera);
+    this.programPins.pin(this.renderer);
     n = performance.now();
     m.add("draw", n - t);
     t = n;

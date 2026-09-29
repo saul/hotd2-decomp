@@ -156,7 +156,7 @@ export class Shooting implements System {
    *
    * `shots` and `hits` are the display's own tally and stay here: `shots`
    * counts clicks the *viewer* made, including one aimed at nothing while the
-   * game was between stages, which is not what `g_nPlayerFired` counts.
+   * game was between stages, which is not what `g_player_shot_count` counts.
    */
   get score(): number { return G.g_player_score[0]; }
   shots = 0;

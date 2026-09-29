@@ -701,6 +701,7 @@ export function PlayerTaskRun(player: number, f: PlayerFrame): void {
  */
 export function PlayerTasksRun(f: PlayerFrame): void {
   G.g_screen_sprite_draws = [];
+  G.g_view_slot_draws = [];
   G.g_crosshair_drawn = [0, 0];
   G.g_crosshair_sprite = [-1, -1];
   const offscreen = [false, false];

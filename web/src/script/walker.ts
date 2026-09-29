@@ -2094,6 +2094,10 @@ export class Walker {
     const blk = this.blockAt(index);
     if (index < 0 || !blk || blk.hole) {
       this.finished = true;
+      // `MarkSceneOver` (`FUN_0045ED90`) zeroes `g_accuracy_stats_suppressed`
+      // (`0x0045EDA1`) as it ends the scene; its run-phase hand-over and its
+      // `SoundStopAll` are the app's stage step (`Player.advanceScene`).
+      G.g_accuracy_stats_suppressed = 0;
       // The scene-over path's *other* half, and the one that outlives the
       // scene: `MarkSceneOver` (`FUN_0045ED90`) hands the run phase over, and
       // then `EvtAdvanceStepOrRoute` reads the block the next stage opens at

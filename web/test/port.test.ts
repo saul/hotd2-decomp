@@ -162,7 +162,8 @@ import { FireShotRequest, MarkActorShot, MergeShotPicks, QueueOffscreenPull,
   QueueShotRequest, g_gunshot_sound_ids }
   from "../src/game/combat/shot";
 import { AttackListOf, MotionOf, MotionPlayFrame, MotionPlayLength,
-         SetBoss4Tables, SetGameTables, T } from "../src/game/tables";
+         SetBoss4Tables, SetGameTables, SetResultCardTables, T }
+  from "../src/game/tables";
 import {
   ColiPublishDynamicList, ColiTestSphereAgainstActors,
   ColiTestSphereAgainstFullSet, ColiTraceSegmentAllSets,
@@ -402,6 +403,12 @@ import {
 } from "../src/game/class60";
 import { RESULT_CARD_FLAG, RESULT_CARD_FRAMES }
   from "../src/game/class61";
+import { ResultCardRoutine } from "../src/game/class61/state";
+import { ResultCardDrawAccuracy, ResultCardDrawScore }
+  from "../src/game/class61/draw";
+import { EvtOpAwardAccuracyBonus2B, EvtOpSuppressAccuracyStats2F }
+  from "../src/game/combat/accuracy";
+import type { ResultCardActor } from "../src/game/actor";
 import { BOSS4_DROP_FLAG, BOSS4_FIGHT_READY_FLAG }
   from "../src/game/class19/entrance";
 import { BOSS4_DEAD_FLAG, BOSS4_DEATH_DWELL }
@@ -409,7 +416,7 @@ import { BOSS4_DEAD_FLAG, BOSS4_DEATH_DWELL }
 import { Boss4ResolveShot } from "../src/game/class19/shot";
 import { Boss4BlockNew, Boss4State } from "../src/game/class19/state";
 import { Boss4PlayCameraCue } from "../src/game/class19/camera";
-import type { Boss4TablesJson } from "../src/bundle/stage";
+import type { Boss4TablesJson, ResultCardJson } from "../src/bundle/stage";
 import {
   BreakableState, BreakableFlag, BreakablePropTakeShot, BreakablePropUpdate,
   BreakableSlot, GrantExtraLife, ItemSet, MEMBERS_PER_GROUP,
@@ -1641,8 +1648,11 @@ console.log("ResolveHit:");
       return G.g_player_score[0] - before;
     };
     G.g_head_combo_bonus[0] = 0;
+    const hits0 = G.g_player_hit_count[0];
     const head = fire(2);
+    const headHits = G.g_player_hit_count[0] - hits0;
     const body = fire(5);
+    const bodyHits = G.g_player_hit_count[0] - hits0 - headHits;
     const combo = G.g_head_combo_bonus[0];
     fire(2);                                  // 120, and the combo to 10
     target.hp = 0;
@@ -1653,6 +1663,16 @@ console.log("ResolveHit:");
     check("...and a result-5 kill on the head pays the combo and the 80",
           kill === 120 + 10 + 80 && (target.flags & ActorFlag.Dead) !== 0,
           `kill ${kill}`);
+    // The same tail counts the accuracy grade's hits: `INC [ESI+0x9a5c86]`
+    // at `0x0040980A` after the head arm, and at `0x0040983B` inside the
+    // body arm's result test -- so the head hits count and the result-5 body
+    // hit does not.
+    check("...and counts a hit on each head hit, none on the result-5 body "
+          + "hit",
+          headHits === 1 && bodyHits === 0
+          && G.g_player_hit_count[0] - hits0 === 3,
+          `head ${headHits} body ${bodyHits} total `
+          + `${G.g_player_hit_count[0] - hits0}`);
     SetGameTables(CHARS);
   }
 }
@@ -2453,6 +2473,8 @@ console.log("\nclass 0x41, the extra life:");
   check("the lone item-set-1 prop releases the extra life",
         released === ItemSet.ExtraLife, String(released));
 
+  // The cap is `g_max_lives`, which the boot's `ProfileApplyToRun` writes.
+  ProfileBoot(null);
   G.g_player_lives[0] = 2;
   check("GrantExtraLife adds a life", GrantExtraLife(0) && G.g_player_lives[0] === 3);
   G.g_player_lives[0] = 5;
@@ -2460,6 +2482,16 @@ console.log("\nclass 0x41, the extra life:");
   check("and pays 300 instead when the player is at the cap",
         !GrantExtraLife(0) && G.g_player_lives[0] === 5
         && G.g_player_score[0] === score + 300);
+  // In Original Mode the cap is the player's own byte, not `g_max_lives`.
+  G.g_GameMode = GameMode.Original;
+  G.g_max_lives = 9;
+  G.g_original_life_cap[0] = 4;
+  G.g_player_lives[0] = 4;
+  check("in Original Mode the cap is g_original_life_cap, not g_max_lives",
+        !GrantExtraLife(0) && G.g_player_lives[0] === 4);
+  G.g_GameMode = GameMode.Arcade;
+  G.g_original_life_cap[0] = 5;
+  ProfileBoot(null);
 }
 
 console.log("\nclass 0x41, the script spawns reach the pool:");
@@ -7947,8 +7979,12 @@ console.log("\nclass 0x21, the rescue target and stage 2's first fork:");
           a.pos.x === before.x && a.pos.z === before.z,
           `${a.pos.x.toFixed(2)},${a.pos.z.toFixed(2)}`);
 
-    // Two hit points, so the first shot does not free it.
+    // Two hit points, so the first shot does not free it. Scene 1 -- stage
+    // 2, where the car is -- with two rescues already in it.
     G.g_player_score = [0, 0];
+    G.g_scene_index = 1;
+    G.g_civilians_rescued_by_scene = [0, 2, 0, 0, 0, 0];
+    G.g_rescued_char_types = new Array<number>(60).fill(0);
     MarkActorShot(a, 0, 4);
     rFrame(a, events, rng);
     check("one shot is not a rescue",
@@ -7967,6 +8003,14 @@ console.log("\nclass 0x21, the rescue target and stage 2's first fork:");
           a.motion === CLASS21_MOTION_FREED
           && a.rescue.state === RescueTargetState.Freed,
           `${a.motion} state ${a.rescue.state}`);
+    // `0x00451AFF`..`0x00451B21`: the same three stores as a civilian's
+    // rescue, with the literal type 0x36 -- not the actor's own, which is 7.
+    check("...and records the rescue as type 0x36, the third in scene 1",
+          G.g_civilians_rescued_by_scene[1] === 3
+          && G.g_rescued_char_types[12] === 0x36 && a.charType !== 0x36,
+          `count ${G.g_civilians_rescued_by_scene[1]} type `
+          + `0x${(G.g_rescued_char_types[12] ?? 0).toString(16)}`);
+    G.g_scene_index = 0;
   }
 
   // Left alone, the camera abandons it -- and that path gives the counters
@@ -15237,6 +15281,13 @@ console.log("\nclass 0x10, the civilian and the rescue:");
     let paid = 0;
     let payee = -2;
     events.on("civilian.rescued", (d) => { paid += 1; payee = d.player; });
+    // A scene other than 0 and a count other than 0 going in, so the rescue
+    // record's index is `scene*10 + n` and not anything that merely starts
+    // at zero (L48).
+    G.g_scene_index = 2;
+    G.g_civilians_rescued_by_scene = [0, 0, 1, 0, 0, 0];
+    G.g_civilians_rescued_total = 4;
+    G.g_rescued_char_types = new Array<number>(60).fill(0);
     check("the civilian starts holding both its captors",
           a.civ?.childCount === 2, `${a.civ?.childCount}`);
     for (let i = 0; i < 5; i++) cFrame(a, events);
@@ -15265,6 +15316,20 @@ console.log("\nclass 0x10, the civilian and the rescue:");
           paid === 1 && payee === 1 && G.g_player_score[1] === 400
           && G.g_player_score[0] === 0,
           `paid ${paid} to ${payee}, scores ${G.g_player_score.join("/")}`);
+    // `CivilianRunScript` op 0x2C's bookkeeping, `0x0048BA93`..`0x0048BAC4`:
+    // the run total, this scene's count, and the civilian's own type at the
+    // count before the increment -- what the result card stands up.
+    check("...and records the rescue: the run's total and the scene's count "
+          + "up one, and the civilian's type at g_rescued_char_types[2*10 + 1]",
+          G.g_civilians_rescued_total === 5
+          && G.g_civilians_rescued_by_scene[2] === 2
+          && G.g_rescued_char_types[21] === a.charType
+          && G.g_rescued_char_types[20] === 0
+          && G.g_civilians_rescued_by_scene[0] === 0,
+          `total ${G.g_civilians_rescued_total} by scene `
+          + `${G.g_civilians_rescued_by_scene.join(",")} type `
+          + `${G.g_rescued_char_types[21]} vs ${a.charType}`);
+    G.g_scene_index = 0;
   }
   // ...and the other arm of `CivilianApplyWaitWord`'s payee test: a captor
   // that died with `obj+0x131C` still at -1 names nobody, and both players
@@ -18249,11 +18314,11 @@ console.log("\nthe player shell: in, hit, out, continue, over:");
         && G.g_players_in_play === 0 && !IsPlayerAttackable(0),
         `state ${G.g_player_state[0]} in ${G.g_players_in_play}`);
   QueueShotRequest(0, { origin: vec3(), dir: vec3(0, 0, 1) });
-  const fired = G.g_nPlayerFired[0];
+  const fired = G.g_player_shot_count[0];
   run(1, rng, new Events());
   check("...a player in the continue has no trigger",
-        G.g_nPlayerFired[0] === fired && G.g_shot_requests.length === 0,
-        `fired ${fired} -> ${G.g_nPlayerFired[0]}`);
+        G.g_player_shot_count[0] === fired && G.g_shot_requests.length === 0,
+        `fired ${fired} -> ${G.g_player_shot_count[0]}`);
   const armed = G.g_nRunPhase;
   run(1, rng, new Events());
   check("...and the run falls into its continue screen: phase 3, then 4",
@@ -21413,6 +21478,7 @@ console.log("\n`g_class_handlers`, filled by the classes themselves:");
     [SpawnClass.SkinnedNpc, "0x53 cat / branch trigger"],
     [SpawnClass.ChapterCard, "0x60 chapter card"],
     [SpawnClass.ResultCard, "0x61 result card"],
+    [SpawnClass.ResultCardTally, "0x62 result card loader"],
   ];
   for (const [cls, name] of want) {
     check(`${name} registered itself`,
@@ -21596,7 +21662,7 @@ console.log("\nthe shot queue:");
   check("the frame drains it", G.g_shot_requests.length === 0);
   check("a miss scores nothing", G.g_player_score[0] === 0
         && seen.at(-1)?.kind === "miss");
-  check("but it is still a shot fired", G.g_nPlayerFired[0] === 1);
+  check("but it is still a shot fired", G.g_player_shot_count[0] === 1);
   // `PlayerFireAndReloadUpdate` (`FUN_00414940`) plays the gunshot at the
   // trigger, not at the hit, so a shot into nothing is as loud as one that
   // lands. It is the FIRST sound of the frame because the engine's order is
@@ -21774,8 +21840,8 @@ console.log("\nthe shot queue, with the clock stopped:");
   check("...and takes no hit points off", z.hp === 100, `hp ${z.hp}`);
   check("...and pays nothing", G.g_player_score[0] === 0,
         `${G.g_player_score[0]}`);
-  check("...and does not count a shot fired", (G.g_nPlayerFired[0] ?? 0) === 0,
-        `${G.g_nPlayerFired[0]}`);
+  check("...and does not count a shot fired", (G.g_player_shot_count[0] ?? 0) === 0,
+        `${G.g_player_shot_count[0]}`);
   check("...and leaves the muzzle flash unlit",
         G.g_shot_flash_ring.every((f) => !f.live));
   check("...and throws no tracer",
@@ -25696,7 +25762,7 @@ console.log("\nthe shot effects:");
  * lets you shoot, and state 5 draws exactly the same bars and writes 0.
  *
  * The port has no ammo, so the counter the engine keeps *inside* the gate and
- * this file can watch is `g_nPlayerFired`. When a magazine arrives it belongs
+ * this file can watch is `g_player_shot_count`. When a magazine arrives it belongs
  * under the same test, above `PlayerShotEffectSpawn`.
  */
 console.log("\nthe firing gate:");
@@ -25749,8 +25815,8 @@ console.log("\nthe firing gate:");
         G.g_shot_requests.length === 0);
   check("a trigger pulled with the gate down resolves nothing",
         resolved.length === 0, resolved.join(","));
-  check("...it is not counted as a shot fired", G.g_nPlayerFired[0] === 0,
-        `${G.g_nPlayerFired[0]}`);
+  check("...it is not counted as a shot fired", G.g_player_shot_count[0] === 0,
+        `${G.g_player_shot_count[0]}`);
   check("...it scores nothing", G.g_player_score[0] === scoreBefore);
   check("...the actor it was aimed at is untouched", z0.hp === 100,
         `${z0.hp}`);
@@ -25776,8 +25842,8 @@ console.log("\nthe firing gate:");
   QueueShotRequest(0, RAY);
   GameUpdate(1 / 60, host, rng, events);
   check("a pull on the frame of the 6 is dead: the players run before the "
-        + "shutter task", resolved.length === 0 && G.g_nPlayerFired[0] === 0,
-        `${resolved.join(",")} fired ${G.g_nPlayerFired[0]}`);
+        + "shutter task", resolved.length === 0 && G.g_player_shot_count[0] === 0,
+        `${resolved.join(",")} fired ${G.g_player_shot_count[0]}`);
   check("...and that frame's shutter task raised the gate and left 2",
         G.g_nFiringGate === 1 && G.g_bHudShutterState === ShutterState.Open,
         `gate ${G.g_nFiringGate} state ${G.g_bHudShutterState}`);
@@ -25790,8 +25856,8 @@ console.log("\nthe firing gate:");
   GameUpdate(1 / 60, host, rng, events);
   check("with the gate up the same shot lands", resolved.at(-1) === "actor",
         resolved.join(","));
-  check("...and now it is a shot fired", G.g_nPlayerFired[0] === 1,
-        `${G.g_nPlayerFired[0]}`);
+  check("...and now it is a shot fired", G.g_player_shot_count[0] === 1,
+        `${G.g_player_shot_count[0]}`);
   check("...and the muzzle is lit",
         G.g_shot_flash_ring.some((f) => f.live)
         && G.g_shot_tracer_ring.some((t) => t.live));
@@ -25814,6 +25880,20 @@ console.log("\nthe firing gate:");
   frame(5);
   frame(1);
   check("state 1 raises it on the way open", G.g_nFiringGate === 1);
+  // `suppress_accuracy_stats 1`: the pull still fires -- the round goes --
+  // but `CMP word ptr [0x009a5c48], 0` at `0x00414A15` keeps it out of the
+  // count, and `ProcessPlayerShots` has put the fired flag back to 0.
+  G.g_accuracy_stats_suppressed = 1;
+  const ammo = G.g_player_ammo[0];
+  const counted = G.g_player_shot_count[0];
+  QueueShotRequest(0, RAY);
+  GameUpdate(1 / 60, host, rng, events);
+  check("...and with the accuracy stats suppressed it fires, uncounted",
+        G.g_player_ammo[0] === ammo - 1
+        && G.g_player_shot_count[0] === counted && G.g_nPlayerFired[0] === 0,
+        `ammo ${ammo} -> ${G.g_player_ammo[0]} count ${counted} -> `
+        + `${G.g_player_shot_count[0]} flag ${G.g_nPlayerFired[0]}`);
+  G.g_accuracy_stats_suppressed = 0;
 
   // -- state 3 drops it only when the close finishes ------------------------
   // Seeded to 0x28 on the frame the state changes, stepped before it is
@@ -25824,12 +25904,12 @@ console.log("\nthe firing gate:");
   check("a state-3 close keeps the gate up while it is still sliding",
         G.g_nFiringGate === 1 && G.g_hud_shutter_counter === SHUTTER_FRAMES - 1,
         `gate ${G.g_nFiringGate} counter ${G.g_hud_shutter_counter}`);
-  const before = G.g_nPlayerFired[0];
+  const before = G.g_player_shot_count[0];
   QueueShotRequest(0, RAY);
   GameUpdate(1 / 60, host, rng, events);
   check("...so a shot in the middle of a close still fires",
-        G.g_nPlayerFired[0] === before + 1,
-        `${before} -> ${G.g_nPlayerFired[0]}`);
+        G.g_player_shot_count[0] === before + 1,
+        `${before} -> ${G.g_player_shot_count[0]}`);
   for (let i = 2; i < SHUTTER_FRAMES; i++) HudDrawShutterState();
   check("...the bars meet on the 40th frame with the gate still up",
         G.g_nFiringGate === 1 && shutter.state === ShutterState.Closing
@@ -25840,11 +25920,11 @@ console.log("\nthe firing gate:");
   check("...and the 41st drops it and leaves 4",
         G.g_nFiringGate === 0 && shutter.state === ShutterState.Closed,
         `gate ${G.g_nFiringGate}, state ${shutter.state}`);
-  const after = G.g_nPlayerFired[0];
+  const after = G.g_player_shot_count[0];
   QueueShotRequest(0, RAY);
   GameUpdate(1 / 60, host, rng, events);
-  check("...and the next pull is dead", G.g_nPlayerFired[0] === after,
-        `${G.g_nPlayerFired[0]}`);
+  check("...and the next pull is dead", G.g_player_shot_count[0] === after,
+        `${G.g_player_shot_count[0]}`);
 
   // -- one word, not two ----------------------------------------------------
   // The gate is in `G` and `Shutter.firingGate` -- which is what `Walker`
@@ -26423,6 +26503,359 @@ console.log("\n`spawn_simple` builds the cards, and the cards open the gate:");
           made.length === 2 && made[0].at !== made[1].at,
           `${made.map((o) => o.at).join(",")}`);
   }
+}
+
+/**
+ * The result card, whole: the figures it stands, the lives it adds, and the
+ * score and accuracy it shows -- `ResultCardInstall` (`FUN_00434EF0`), its
+ * figures (`FUN_004356A0`, `FUN_00435760`, `FUN_004357F0`), its two number
+ * draws and class 0x62. `docs/re/stage-end.md` is the reading.
+ *
+ * The `.rdata` is the exe's own: `RESULT_CARD_RDATA` is what
+ * `hod2lib/exetab.ts`'s `resultCardTables()` reads out of `Hod2.exe`,
+ * copied once so the suite runs with no game directory, and
+ * `tools/verify_result_card.py` holds the bundle's copy to the exe. Every
+ * expected number below is the exe's -- a record's position, a table's cell
+ * -- and never the port's own output read back (L65).
+ */
+console.log("\nclass 0x61: the figures, the life bonus, the score and accuracy:");
+{
+  const RESULT_CARD_RDATA: ResultCardJson = {
+    base: 0x0055dd80,
+    bytes: "27007c0100006bc3000020c0cd0c01c400c000002e007d019a99fdc1cdccfcc09a3902c4" +
+      "00c0000031007f0166660ac3cdccfcc000c0ffc300c0000026007c01cdcca342cdccfcc0" +
+      "00c0ffc300c0000020007c010000a0c2cdccfcc09a3902c400c00000ffff000000000000" +
+      "00000000000000000000000034007c01cd3c88c466666ec100109dc40000000026007d01" +
+      "66c6a0c4666696c03373a7c4edb0000027007f019ab993c466666ec19aa9adc4b0960000" +
+      "20007c01002092c466666ec1cd5c9ec4decd000034007c0166068dc466666ec1cd4c9ec4" +
+      "26df00002e007d01007099c466666ec16626acc436a1000031007f019a4991c466666ec1" +
+      "6696a1c4f9c60000ffff00000000000000000000000000000000000024007c01cdccd8c3" +
+      "000080c1339345c5004000002e007d010080c2c3000080c1005040c5004000002a007f01" +
+      "0080c2c3000080c1001043c50040000032007c010080c2c3000080c100903dc500400000" +
+      "ffff000000000000000000000000000000000000000000002a007f019a9973c29a99c9c1" +
+      "cd2c66c400c0000032007c019a99a2429a99c9c133936bc400c0000024007c019a992141" +
+      "9a99c9c1331364c400c00000ffff00000000000000000000000000000000000080dd5500" +
+      "f8dd550098de550000df550000df550000df550026002700ffff2400ffff00002400ffff" +
+      "000028002700ffff4300ffff0000ffff000000003200ffff00002d00ffff00002d00ffff" +
+      "00003200ffff00003700ffff00003700ffff00003900ffff00003900ffff00003d00ffff" +
+      "00003d00ffff00003d00ffff00004300ffff00004000ffff00004300ffff0000ffff0000" +
+      "0000ffff00000000ffff000000005000ffff00007b166d167c166b167e166d166c160000" +
+      "81160000741671166e166d1600006a16771676167e167c1600008116781600007c166b16" +
+      "77167b166d16000069166b166b167e167b1669166b168216000000000001010100000000" +
+      "000101020000000101010100000000010101010100000000000000000000000000000000",
+    lists: [0x0055dd80, 0x0055ddf8, 0x0055de98, 0x0055df00, 0x0055df00,
+            0x0055df00],
+    accuracy_bonus: [0, 0, 0, 0, 500, 1000, 1500, 2000, 2500, 3000, 4000, 0,
+                     -272, 69, -16, 69, 464, 70, 1248, 70, 1328, 70, 912, 70,
+                     944, 70, 5456, 67, 5728, 67, 3472, 72, 5120, 72, 592, 70,
+                     848, 70, 41, 39, 15, 17, 27, 29, 9, 9, 14, 14, 16, 16, -3,
+                     1025, 8, 0],
+  };
+  // Every civilian type the scene-0 list and these rescues name, each with
+  // the card's clips: 0x17C/0x17D/0x17F the rescued figures', 0x180 figure
+  // 0's -- its play length past 0x80, the cursor it freezes on -- and
+  // 0x18B..0x18D the no-rescue figures'.
+  const CLIPS = {
+    "380": motion(40, 0, 78), "381": motion(40, 0, 78),
+    "383": motion(40, 0, 78), "384": motion(90, 0, 178),
+    "395": motion(30), "396": motion(30), "397": motion(30),
+  };
+  const civ: Record<string, CharacterType> = {};
+  for (const t of [0x20, 0x24, 0x26, 0x27, 0x2a, 0x2e, 0x31, 0x32, 0x34, 0x36]) {
+    civ[String(t)] = { ...TYPE, type: t, name: `civ 0x${t.toString(16)}`,
+                       motions: { ...TYPE.motions, ...CLIPS } };
+  }
+  const RCHARS = { ...CHARS, types: { ...CHARS.types, ...civ } } as
+    unknown as CharactersJson;
+  const events = new Events();
+  const sounds: number[] = [];
+  events.on("sound.play", (d) => sounds.push(d.id));
+  const f: ClassFrame = { dt: 1 / 60, rng: new Rng(11), host: NULL_HOST,
+                          events };
+
+  /** A fresh game, the tables, and this scene's rescues as the VM left them. */
+  const scene = (sc: number, rescued: number[], lives = 2) => {
+    ResetGameGlobals();
+    ProfileBoot(null);
+    EnterPlay();
+    SetGameTables(RCHARS);
+    SetResultCardTables(RESULT_CARD_RDATA);
+    G.g_scene_index = sc;
+    G.g_civilians_rescued_by_scene[sc] = rescued.length;
+    rescued.forEach((t, i) => { G.g_rescued_char_types[sc * 10 + i] = t; });
+    G.g_player_lives = [lives, 0];
+    sounds.length = 0;
+    // As `SpawnSimpleActors` makes it: a negative key, and its first frame
+    // is its update.
+    const card = ActorSpawn(-0x5e88, SpawnClass.ResultCard, -1,
+                            "simple 0x61", { hp: 0 });
+    card.visible = true;
+    return card;
+  };
+  /**
+   * One engine frame of the pool, as `GameUpdate` walks it: in order, and a
+   * task allocated this frame reached this frame. The camera path's frame is
+   * the card's own frame less one -- the `cam_play` the step queues beside it.
+   */
+  let frame = 0;
+  const tick = () => {
+    frame += 1;
+    G.g_cam_path_frame = frame - 1;
+    G.g_screen_sprite_draws = [];
+    G.g_view_slot_draws = [];
+    for (const o of G.g_object_list) {
+      if (!o.visible || o.dead) continue;
+      g_class_handlers[o.cls]?.update(o, f);
+    }
+  };
+  const figures = () => G.g_object_list.filter(
+    (o): o is ResultCardActor => o.cls === SpawnClass.ResultCard
+      && o.card.routine !== ResultCardRoutine.Card);
+  const drawn = (slot: number) =>
+    G.g_view_slot_draws.filter((d) => d.slot === slot);
+  const near = (a: number, b: number) => Math.abs(a - b) < 1e-4;
+
+  // **Stage 1, five rescued.** Scene 0's table row is 0 0 0 0 0 1 1 1, so
+  // five is one life.
+  {
+    frame = 0;
+    const rescued = [0x31, 0x26, 0x20, 0x27, 0x2e];
+    const card = scene(0, rescued);
+    tick();
+    const fig = figures();
+    check("five rescues stand five figures, allocated after the card",
+          fig.length === 5 && G.g_object_list.indexOf(card)
+            < G.g_object_list.indexOf(fig[0]),
+          `${fig.length}`);
+    check("...each the rescued civilian's own type, in the order rescued",
+          fig.map((o) => o.charType).join() === rescued.join()
+          && fig.every((o, i) => o.card.figureIndex === i),
+          fig.map((o) => `0x${o.charType.toString(16)}`).join(","));
+    // `g_result_figure_records` scene 0: x -235, -31.7, -138.4, 81.9, -80;
+    // clips 0x17C, 0x17D, 0x17F, 0x17C, 0x17C; yaw 0xC000.
+    check("...at scene 0's five places, on the places' clips",
+          [-235, -31.7, -138.4, 81.9, -80].every((x, i) => near(fig[i].pos.x,
+                                                               Math.fround(x)))
+          && fig.map((o) => o.motion).join() === "380,381,383,380,380"
+          && fig.every((o) => o.yaw === 0xc000),
+          fig.map((o) => `${o.pos.x.toFixed(1)}:${o.motion}`).join(" "));
+    // Type 0x20 on clip 0x17F is the one figure lowered: -7.9 - 2.4.
+    check("...the type-0x20 figure on 0x17F stood 2.4 lower, the rest not",
+          near(fig[2].pos.y, Math.fround(Math.fround(-7.9) - 2.4))
+          && near(fig[1].pos.y, Math.fround(-7.9)),
+          `${fig[2].pos.y} ${fig[1].pos.y}`);
+    check("...out of the shot test, on their update, with a bonus to show",
+          fig.every((o) => (o.flags & ActorFlag.NoShotTest) !== 0
+                    && o.card.routine === ResultCardRoutine.FigureUpdate
+                    && o.card.lifeBonus === 1),
+          fig.map((o) => `0x${o.flags.toString(16)}`).join(","));
+    // `g_result_figure_attachments`: 0x20 wears 0x26 and 0x27, 0x27 wears
+    // 0x2D.
+    check("...wearing their type's hair from g_result_figure_attachments",
+          fig[2].attachments.join() === "38,39"
+          && fig[3].attachments.join() === "45",
+          `${fig[2].attachments} / ${fig[3].attachments}`);
+    check("the card plays bgm 3 once", sounds.join() === String(0x10000003),
+          sounds.map((s) => s.toString(16)).join());
+    const tiles = G.g_screen_sprite_draws;
+    check("...draws seventeen scr_result tiles at depth 1.1, with the window "
+          + "at (128..512, 128..256) left open",
+          tiles.length === 17 && tiles[0].id === 0xa2a
+          && tiles[16].id === 0xa3a
+          && tiles.every((t) => t.depth === Math.fround(1.1))
+          && !tiles.some((t) => t.y === 128 && t.x >= 128 && t.x <= 384)
+          && tiles.some((t) => t.id === 0xa2f && t.x === 0 && t.y === 128)
+          && tiles.some((t) => t.id === 0xa30 && t.x === 512 && t.y === 128),
+          tiles.map((t) => `${t.id.toString(16)}@${t.x},${t.y}`).join(" "));
+    const r = drawn(0x167b)[0];
+    check("...and 'RESCUED x' from 0x0055DFF8, starting at (-0.25, 0.22)",
+          r !== undefined && near(r.x, -0.25) && near(r.y, 0.22)
+          && r.z === -1 && near(r.scale, 0.07)
+          && G.g_view_slot_draws.filter((d) => near(d.y, 0.22)).length === 9,
+          JSON.stringify(r));
+    check("...but no count before the dwell reaches 0x186",
+          !G.g_view_slot_draws.some((d) => near(d.x, 0.25) && near(d.y, 0.22)));
+
+    // The count: frame k draws `min((k - 31) / 20, 5)`.
+    const countAt: number[] = [];
+    let heldLife = 0;
+    let lifeFrame = -1;
+    let bonusFrame = -1;
+    let livesAt301 = -1;
+    const heldCursors: number[] = [];
+    while (frame < RESULT_CARD_FRAMES) {
+      tick();
+      const c = G.g_view_slot_draws.find((d) => near(d.x, 0.25)
+                                         && near(d.y, 0.22));
+      countAt[frame] = c ? c.slot - 0x165f : -1;
+      if (frame === 301) livesAt301 = G.g_player_lives[0];
+      if (lifeFrame < 0 && G.g_player_lives[0] !== 2) lifeFrame = frame;
+      if (bonusFrame < 0 && drawn(0x1660).some((d) => near(d.x, 0.234))) {
+        bonusFrame = frame;
+      }
+      if (fig[0].card.holdsLife) {
+        heldLife += 1;
+        heldCursors.push(fig[0].card.cursor);
+      }
+    }
+    check("the rescues count up one a third of a second from frame 31, and "
+          + "stop at five",
+          countAt[30] === -1 && countAt[31] === 0 && countAt[50] === 0
+          && countAt[51] === 1 && countAt[131] === 5 && countAt[400] === 5,
+          `30:${countAt[30]} 31:${countAt[31]} 51:${countAt[51]} `
+          + `131:${countAt[131]} 400:${countAt[400]}`);
+    check("the life comes on frame 302 -- sub 2, once -- and not before",
+          livesAt301 === 2 && lifeFrame === 302 && G.g_player_lives[0] === 3,
+          `301:${livesAt301} changed at ${lifeFrame} now ${G.g_player_lives[0]}`);
+    check("...its digit (0x165F + 1) at (0.234, 0.05) from frame 271",
+          bonusFrame === 271, `${bonusFrame}`);
+    check("...and 'LIFE BONUS x' from frame 241",
+          drawn(0x1674).length === 1, `${drawn(0x1674).length}`);
+    // Figure 0 takes clip 0x180 at camera frame 0x104 and holds the life
+    // up for cursor 0x1E..0x57 of it; the others keep their clips.
+    check("figure 0 alone changes to clip 0x180 at camera frame 0x104",
+          fig[0].motion === 0x180 && fig[1].motion === 381,
+          `${fig[0].motion} ${fig[1].motion}`);
+    check("...holds the life up for cursors 0x1E..0x57, 58 frames",
+          heldLife === 0x57 - 0x1e + 1 && heldCursors[0] === 0x1e
+          && heldCursors[heldCursors.length - 1] === 0x57,
+          `${heldLife} frames, ${heldCursors[0]}..${heldCursors.at(-1)}`);
+    check("...and freezes the frame after its cursor reads 0x80",
+          fig[0].frozen === 1 && fig[0].card.cursor === 0x81,
+          `frozen ${fig[0].frozen} cursor ${fig[0].card.cursor}`);
+    check("the card is gone on frame 420 with the flag up; the figures stay",
+          card.dead && G.g_script_flags[RESULT_CARD_FLAG] === 1
+          && figures().every((o) => !o.dead && o.visible),
+          `dead ${card.dead} flag ${G.g_script_flags[RESULT_CARD_FLAG]}`);
+  }
+
+  // **No rescue.** The scene's own list, each on 0x18B + rand() % 3, and
+  // scene 0's row gives nothing for none.
+  {
+    frame = 0;
+    scene(0, []);
+    tick();
+    const fig = figures();
+    check("no rescue stands the scene's own list: 0x27 0x2E 0x31 0x26 0x20",
+          fig.map((o) => o.charType).join() === "39,46,49,38,32",
+          fig.map((o) => `0x${o.charType.toString(16)}`).join(","));
+    check("...each on 0x18B..0x18D, with no bonus to show",
+          fig.every((o) => o.motion >= 0x18b && o.motion <= 0x18d
+                    && o.card.lifeBonus === 0)
+          && new Set(fig.map((o) => o.motion)).size > 1,
+          fig.map((o) => o.motion.toString(16)).join(","));
+    while (frame < RESULT_CARD_FRAMES) tick();
+    check("...and no life", G.g_player_lives[0] === 2,
+          `${G.g_player_lives[0]}`);
+  }
+
+  // **More rescues than places.** Scene 3's list has three records; a
+  // fourth rescue reads the terminator -- the origin, clip 0 -- as the exe
+  // does, not a bound the routine does not have.
+  {
+    frame = 0;
+    scene(3, [0x2a, 0x32, 0x24, 0x2a]);
+    tick();
+    const fig = figures();
+    check("a fourth rescue in scene 3 stands at the list's terminator",
+          fig.length === 4 && fig[3].pos.x === 0 && fig[3].pos.z === 0
+          && fig[3].motion === 0 && fig[3].charType === 0x2a,
+          fig.map((o) => `${o.pos.x}:${o.motion}`).join(" "));
+  }
+
+  // **The caps.** Scene 1, nine rescues: row 1 index 7, two lives -- capped
+  // at g_max_lives outside Original Mode and at the player's own byte in it.
+  {
+    frame = 0;
+    scene(1, new Array(9).fill(0x34), 4);
+    while (frame < 302) tick();
+    check("nine rescues in scene 1 read the row's last cell: +2, capped at "
+          + "g_max_lives 5",
+          G.g_player_lives[0] === 5 && G.g_max_lives === 5,
+          `${G.g_player_lives[0]}`);
+    frame = 0;
+    scene(1, new Array(9).fill(0x34), 2);
+    G.g_GameMode = GameMode.Original;
+    G.g_original_life_cap[0] = 3;
+    while (frame < 302) tick();
+    check("...and in Original Mode at g_original_life_cap, 3",
+          G.g_player_lives[0] === 3, `${G.g_player_lives[0]}`);
+    G.g_GameMode = GameMode.Arcade;
+    G.g_original_life_cap[0] = 5;
+  }
+
+  // **The score and the accuracy**, drawn for an in-play player.
+  {
+    G.g_view_slot_draws = [];
+    G.g_player_score[0] = 12345;
+    ResultCardDrawScore(0, Math.fround(-0.293), Math.fround(-0.17), 0.5);
+    const digits = G.g_view_slot_draws.map((d) => d.slot - 0x165f);
+    check("12345 is five digits, right-aligned: no 100000s column",
+          digits.join() === "1,2,3,4,5"
+          && near(G.g_view_slot_draws[0].x, -0.293 + 0.0288)
+          && near(G.g_view_slot_draws[4].x, -0.293 + 0.144),
+          `${digits} at ${G.g_view_slot_draws.map((d) => d.x.toFixed(4))}`);
+    G.g_view_slot_draws = [];
+    G.g_player_shot_count[1] = 40;
+    G.g_player_hit_count[1] = 30;
+    ResultCardDrawAccuracy(1, Math.fround(-0.243), Math.fround(-0.24),
+                           Math.fround(0.3744));
+    check("30 hits in 40 shots is 75, then 0x1679, at player 1's stride",
+          G.g_view_slot_draws.map((d) => d.slot).join()
+            === [0x165f + 7, 0x165f + 5, 0x1679].join()
+          && near(G.g_view_slot_draws[0].x, 0.3744 - 0.243 + 0.0288),
+          G.g_view_slot_draws.map((d) => d.slot.toString(16)).join());
+    G.g_view_slot_draws = [];
+    G.g_player_shot_count[1] = 0;
+    G.g_player_hit_count[1] = 3;
+    ResultCardDrawAccuracy(1, 0, 0, 0);
+    check("...no shots is written as one, and 300 is drawn as 0",
+          G.g_player_shot_count[1] === 1
+          && G.g_view_slot_draws.map((d) => d.slot).join()
+            === [0x165f, 0x1679].join(),
+          G.g_view_slot_draws.map((d) => d.slot.toString(16)).join());
+  }
+
+  // **The accuracy bonus** `award_accuracy_bonus` pays, and what
+  // `suppress_accuracy_stats` keeps out of it.
+  {
+    scene(0, []);
+    G.g_player_score = [0, 0];
+    G.g_player_shot_count = [40, 0];
+    G.g_player_hit_count = [30, 0];
+    EvtOpAwardAccuracyBonus2B();
+    check("75% pays g_accuracy_bonus_table[7], 2000",
+          G.g_player_score[0] === 2000, `${G.g_player_score[0]}`);
+    G.g_player_shot_count = [19, 0];
+    EvtOpAwardAccuracyBonus2B();
+    check("...and nineteen shots are not enough to be graded",
+          G.g_player_score[0] === 2000, `${G.g_player_score[0]}`);
+    // Hits past the counted shots index past the table: 25 in 20 is 125,
+    // index 12, the word after it -- -272 -- and the floor at 0.
+    G.g_player_score = [100, 0];
+    G.g_player_shot_count = [20, 0];
+    G.g_player_hit_count = [25, 0];
+    EvtOpAwardAccuracyBonus2B();
+    check("...and 125% reads past the eleven entries, as the exe does",
+          G.g_player_score[0] === 0, `${G.g_player_score[0]}`);
+    EvtOpSuppressAccuracyStats2F(1);
+    check("suppress_accuracy_stats writes its operand",
+          G.g_accuracy_stats_suppressed === 1);
+  }
+
+  // **Class 0x62** kills itself on its first frame; before it had a module
+  // it stood in the pool for the rest of the stage.
+  {
+    ResetGameGlobals();
+    const t = ActorSpawn(-0x5e78, SpawnClass.ResultCardTally, -1,
+                         "simple 0x62", { hp: 0 });
+    t.visible = true;
+    g_class_handlers[SpawnClass.ResultCardTally]?.update(t, f);
+    check("class 0x62 is gone after its first frame", t.dead && !t.visible,
+          `dead ${t.dead}`);
+  }
+  SetResultCardTables(undefined);
+  G.g_scene_index = 0;
 }
 
 console.log("\nclass 0x19: the stage-4 boss, Strength, and both of its flags:");
@@ -33977,12 +34410,12 @@ console.log("\nthe gun: the magazine, the reload, and the HUD readouts:");
                         + Math.trunc((f + 4 * i) / 3) % 7),
         `${f} ${lamps().map((l) => l.id - HudSprite.Lamp1P).join(",")}`);
 
-  const fired0 = G.g_nPlayerFired[0];
+  const fired0 = G.g_player_shot_count[0];
   heard.length = 0;
   shoot();
   check("a shot takes one round and fires the gun",
         G.g_player_ammo[0] === 5 && heard.includes(g_gunshot_sound_ids[0])
-        && G.g_nPlayerFired[0] === fired0 + 1 && bullets().length === 5,
+        && G.g_player_shot_count[0] === fired0 + 1 && bullets().length === 5,
         `ammo ${G.g_player_ammo[0]}, heard ${heard.map((h) => h.toString(16))}`);
   for (let i = 0; i < 5; i++) shoot();
   check("the sixth empties it and raises the latch",
@@ -33996,13 +34429,13 @@ console.log("\nthe gun: the magazine, the reload, and the HUD readouts:");
         && sprites(HudSprite.Reload)[0].sx === 1.5,
         JSON.stringify(sprites(HudSprite.Reload)));
 
-  const firedDry = G.g_nPlayerFired[0];
+  const firedDry = G.g_player_shot_count[0];
   const resolvedDry = resolved;
   heard.length = 0;
   shoot();
   check("an empty gun pointed at the screen does nothing: no round, no shot, "
         + "no gunshot", G.g_player_ammo[0] === 0
-        && G.g_nPlayerFired[0] === firedDry && resolved === resolvedDry
+        && G.g_player_shot_count[0] === firedDry && resolved === resolvedDry
         && !heard.includes(g_gunshot_sound_ids[0])
         && !heard.includes(RELOAD_SOUND),
         heard.map((h) => h.toString(16)).join(" "));
@@ -34975,7 +35408,7 @@ console.log("\nthe shot test, for a class that registers the engine's way:");
   // A gun reloads by pulling off the screen, and pulls on one frame land in
   // order: reload, then fire, both on the frame under test, so the
   // registration that frame's pull sees is exactly last frame's.
-  const fired = () => G.g_nPlayerFired[0];
+  const fired = () => G.g_player_shot_count[0];
   const fireAt = (t: Vec3) => {
     boss.shotBones[0] = 0;
     const l = Math.hypot(t.x, t.y, t.z);

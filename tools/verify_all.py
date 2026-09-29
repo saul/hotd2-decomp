@@ -460,6 +460,18 @@ CHECKS: list[Check] = [
           "screen's factory tables, sprite ids, positions and glyph table are "
           "the EXE's, with the bundle's `options` block when there is one",
           NEEDS_GAME),
+    Check("verify_result_card", ".",
+          ["python3", "tools/verify_result_card.py", "--game-dir", "{game_dir}"],
+          "that every constant the result card's port transcribes -- the "
+          "dwell, the bonus's dwell, the count's, the camera frame figure 0 "
+          "turns on, the cursor it freezes on, the slot it holds up -- is the "
+          "immediate at its instruction; that the `.rdata` span the card reads "
+          "with no bound is the EXE's bytes; that every rescuable civilian's "
+          "type has an attachment list the unbounded lookup can find; and, "
+          "with a bundle, that each stage placing the card carries a figure "
+          "template for every type its list names or it can rescue, with "
+          "every clip the card can put that type on baked",
+          NEEDS_GAME),
     Check("verify_water", ".",
           ["python3", "tools/verify_water.py", "--game-dir", "{game_dir}"],
           "that class 0x41 type 1, the canal water task, starts from the table "

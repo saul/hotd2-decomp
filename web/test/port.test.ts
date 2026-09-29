@@ -38043,6 +38043,24 @@ console.log("the options screen, driven with pad bits:");
         G.g_option_credits === -1 && G.g_options_edit_credits === 0);
   G.g_option_unlocks = 0;
 
+  // [diverges] Gun Calibration is never on offer (`GUN_CALIBRATION_OFFERED`
+  // in game/options/list.ts): in the exe a gun outside mode 6 -- a finger's
+  // light gun, 0xD -- is offered it, and the port has no calibration screen.
+  G.g_input_mode = [0xd, 6];
+  G.g_player_input_is_gun = [1, 1];
+  G.g_options_cursor = OptionsRow.SoundTestMusic;
+  frame(0x20);
+  const calibrationDrawn = () => Array.from({ length: 20 }, (_u, l) =>
+    glyphText(l)).some((t) => t.includes("GunCalibration"));
+  check("a light gun (0xD, a finger) is not offered Gun Calibration either: "
+        + "down from the music test is Default, and the row is not drawn",
+        G.g_options_cursor === OptionsRow.Default && !calibrationDrawn(),
+        `${G.g_options_cursor}`);
+  frame(0x10);
+  check("...and up from Default steps over it to the music test",
+        G.g_options_cursor === OptionsRow.SoundTestMusic);
+  G.g_input_mode = [6, 6];
+
   // The two sub-screens' gates.
   G.g_options_frame = OptionsFrame.Calibration;
   G.g_options_cursor = OptionsRow.GunCalibration;

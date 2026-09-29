@@ -144,11 +144,25 @@ export function OptionsHoldRepeatTick(): void {
 }
 
 /**
+ * [diverges] Gun Calibration is never on offer, by the user's choice. In the
+ * exe it is for a gun outside PC input mode 6, and a touch is the port's
+ * light gun (`0xD`), so a player whose last press was a finger would be
+ * offered a screen the port has not got -- `OptionsCalibrationArm` and the
+ * calibration run behind it are unported, and the page's guns are aimed by
+ * the browser, with nothing to calibrate. The row is hidden and stepped
+ * over as the exe does for a mouse; `OptionsCalibrationEntry`'s gate
+ * is still the exe's.
+ */
+const GUN_CALIBRATION_OFFERED = false;
+
+/**
  * Whether Gun Calibration is on offer: a player holding a gun that is not
  * in PC input mode 6. The same two lines open both tasks (`0x00486C38` and
- * `0x00486DC1`). `[port-only]` as a function.
+ * `0x00486DC1`). `[port-only]` as a function. The port never offers it:
+ * see {@link GUN_CALIBRATION_OFFERED}.
  */
 function CalibrationOffered(): boolean {
+  if (!GUN_CALIBRATION_OFFERED) return false;
   return (G.g_player_input_is_gun[0] === 1 && G.g_input_mode[0] !== 6)
     || (G.g_player_input_is_gun[1] === 1 && G.g_input_mode[1] !== 6);
 }

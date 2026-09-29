@@ -422,16 +422,17 @@ calibration copied into the aim records `[proved]`.
   Speed needs a player on a standard controller, which the port has none of:
   the cursor steps over the row and the sub-screen's first test sends it
   back. Gun Calibration needs a gun outside mode 6: a mouse player's cursor
-  steps over it and `OptionsCalibrationEntry` refuses, but a touch player's
-  does not and the entry takes them. The port has those tests
-  (`OptionsSightSpeedFrame`'s, `OptionsCalibrationEntry`'s) and not the
-  screens behind them, which need an aim-record model -- a keyboard
-  crosshair, a raw gun position -- that the port's pointer does not have; so
-  a touch player who chooses Gun Calibration gets a blank screen (the entry
-  frame, asked again every frame) until their mouse moves -- mode 6, refused,
-  back to the list on EXIT -- or the page's menu leaves. A phone cannot reach
-  row 8: it has no arrows. Porting `OptionsCalibrationArm` and the nine-state
-  screen behind it is `[open]` work.
+  steps over it and `OptionsCalibrationEntry` refuses, and a touch player --
+  the light gun, `0xD` -- would be offered it. **The port never offers it**
+  (2026-09-29, the user's choice; `GUN_CALIBRATION_OFFERED` in
+  `game/options/list.ts`, `[diverges]`): the row is hidden and stepped over
+  for every device, because the screen behind it is not ported and the
+  page's guns are aimed by the browser, with nothing to calibrate. The port
+  has the gates (`OptionsSightSpeedFrame`'s, `OptionsCalibrationEntry`'s) and
+  not the screens behind them, which need an aim-record model -- a keyboard
+  crosshair, a raw gun position -- that the port's pointer does not have.
+  Porting `OptionsCalibrationArm` and the nine-state screen behind it is
+  `[open]` work.
 * **Free play is the boot's, by the user's choice** (`ProfileBoot`'s
   `[diverges]`): a profile with nothing saved starts at -1. Default still
   writes 5. **And the Continue row always offers free play** (2026-09-29,

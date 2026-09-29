@@ -22,13 +22,10 @@
  *   (`InputMapDevicesToMaple`, `FUN_0041E530`, whose case 6 falls into case
  *   5) -- and for it the cursor steps over the row and
  *   `OptionsCalibrationEntry` refuses. **A finger is the light gun, mode
- *   `0xD`** (`game/input_mode.ts`), and for a player whose last press was a
- *   touch the row is offered and the entry takes them, as the exe does. The
- *   arm behind it is not ported, so the frame stays on the entry, which
- *   draws nothing and asks again each frame: the screen is blank until that
- *   player's mouse moves (mode 6, refused, back to the list on EXIT) or the
- *   page's menu leaves. A phone cannot get there -- it has no arrows to
- *   reach row 8 with.
+ *   `0xD`** (`game/input_mode.ts`), which the exe would offer the row; the
+ *   port never does (`GUN_CALIBRATION_OFFERED` in `list.ts`, a declared
+ *   `[diverges]`), because the arm and the screen behind the entry are not
+ *   ported. The entry and its gate are the exe's.
  *
  * `docs/re/options-screen.md` has both bodies read in full; they land here
  * with an input model that has a keyboard crosshair or a calibrated gun.

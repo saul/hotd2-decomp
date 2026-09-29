@@ -26036,3 +26036,15 @@ declared `[diverges]`). The unlock bits are still written and saved as the
 exe does -- only this test ignores them. The pad-bit test that walked the
 locked wrap now walks the open one: left from 1 is free play without the
 bits, which fails on the old code.
+
+## 2026-09-29 -- Gun Calibration never offered
+
+The user chose to disable Gun Calibration outright. In the exe the row is on
+offer for a gun outside PC input mode 6 (`0x00486C38`, `0x00486DC1`), and
+since the crosshair work a touch is the light gun (`0xD`), so a finger was
+offered a screen the port has not got -- `OptionsCalibrationArm` and the
+calibration run are unported -- and the entry frame sat blank. The row's
+offer test now returns false first (`GUN_CALIBRATION_OFFERED`, declared
+`[diverges]`); the exe's test stays below it, and `OptionsCalibrationEntry`
+is unchanged. New check: a light-gun player's cursor steps over the row both
+ways and nothing draws it; it fails with the flag true.

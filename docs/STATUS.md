@@ -19,7 +19,7 @@ is in `tools/verify_all.py`, beside the command that runs it.
 
 | Directory | Lines | Files | Layer |
 |---|---:|---:|---|
-| `game/` | 107831 | 351 | engine |
+| `game/` | 107842 | 351 | engine |
 | `hod2lib/` | 19571 | 35 | engine |
 | `render/` | 15352 | 56 | render |
 | `app/` | 12616 | 43 | app |
@@ -29,7 +29,7 @@ is in `tools/verify_all.py`, beside the command that runs it.
 | `bundle/` | 2862 | 11 | engine |
 | `audio/` | 1053 | 3 | render |
 | `hud/` | 526 | 1 | ui |
-| **total** | **171588** | **565** | |
+| **total** | **171599** | **565** | |
 
 The largest files, which is where the pressure to split next is:
 
@@ -47,14 +47,14 @@ The largest files, which is where the pressure to split next is:
 | Ported outside those ranges | 575 (opcodes, and the classes whose handlers sit elsewhere) |
 | Citations checked | 808 ported functions match `functions.tsv` under the same name |
 | Spawn classes | **31 of 42** read classes have a module, covering 1544 of 1619 placements |
-| Declared `[diverges]` | **133** — where the port knowingly departs from the exe, each with its reason on the spot |
+| Declared `[diverges]` | **135** — where the port knowingly departs from the exe, each with its reason on the spot |
 | `[open]` markers | **124** — questions the port and the exporter are honest about not having answered |
 
 Both markers are counted in **every** `.ts`/`.tsx` file under `web/src/`, one per occurrence, and only in comments — a word in code or in a string is not a marker (`verify_port.marker_lines`). Each departure and each question is written once, where it is made; everything that refers to it names it in words ([`PLAYER_ARCHITECTURE.md`](PLAYER_ARCHITECTURE.md), "One departure, one tag"). By layer, from the same table as the directories above:
 
 | Layer | Directories | `[diverges]` | `[open]` |
 |---|---|---:|---:|
-| engine | `core/`, `bundle/`, `script/`, `game/`, `hod2lib/` | 119 | 119 |
+| engine | `core/`, `bundle/`, `script/`, `game/`, `hod2lib/` | 121 | 119 |
 | render | `render/`, `audio/` | 13 | 5 |
 | ui | `hud/`, `ui/` | 0 | 0 |
 | app | `app/` | 1 | 0 |

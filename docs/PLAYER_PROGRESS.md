@@ -3444,10 +3444,12 @@ CSS ring is only for a bundle without the sprites. **Two players:** player
 2's device rides their input packet (protocol 5), as byte `+0x14` of the exe's
 own network packet does (`NetBuildInputPacket`, `NetApplyPeerInput`), so the
 host decides player 2's crosshair from player 2's device and each page shows
-the other's reticle exactly when the game drew it. One consequence reaches
-the options screen: a player whose last press was a touch is a light gun
-there too, so Gun Calibration is offered and taken -- and its screen is not
-ported, so it stays blank until the mouse moves (`game/options/index.ts`).
+the other's reticle exactly when the game drew it. A player whose last press was a
+touch is a light gun on the options screen too, where the exe would offer
+Gun Calibration; **the port never offers it** (a declared `[diverges]`,
+`GUN_CALIBRATION_OFFERED` in `game/options/list.ts`, the user's choice): the
+calibration screen is not ported and the page's guns are aimed by the
+browser, so the row is hidden and stepped over for every device.
 `test:port`, `test:ui`, `test:net` and `web/tools/crosshair_page.mjs` (the
 `crosshair` row; `--net` for two tabs) hold it.
 

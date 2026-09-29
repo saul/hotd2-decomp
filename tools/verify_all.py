@@ -244,6 +244,15 @@ CHECKS: list[Check] = [
           "chosen crosshair on the reticle, and that a reload boots what "
           "was saved in place of the free-play default",
           NEEDS_BUNDLE, LANE_BROWSER),
+    Check("judgment_reload", "web",
+          ["node", "tools/judgment_reload_page.mjs", "--headless"],
+          "that a reload at stage 5's `block=4&step=1&op=0` -- past "
+          "JUDGMENT's return -- lands with no boss in the pool and nothing "
+          "counted, and that block 4's room gate then counts exactly its own "
+          "zombies and opens when they die: the only check that reads the "
+          "enemy counters in a page a seek built, which is the rebuild every "
+          "reload during development goes through (L75)",
+          NEEDS_BUNDLE, LANE_BROWSER),
     Check("crosshair", "web",
           ["node", "tools/crosshair_page.mjs", "--headless"],
           "that real pointer events reach HudDrawCrosshair as the exe's "

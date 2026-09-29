@@ -1296,3 +1296,21 @@ at all. The helper's own comment was the reason nobody diffed them. **Before
 merging inline copies into one function, disassemble both and compare them
 call for call**, arms the pseudocode hides included; where they differ, the
 difference is the helper's argument, named for the instruction.
+
+**L87 -- A class that counts nothing in its `Init` can count through what its
+first update makes, and a count held before the room has anyone in it
+belongs to the seek.** Item 32 recorded that class 0x22 "counts after its
+entrance, not in its `Init`, so a gate stepped over between its spawn and its
+entrance says nothing about it". Of the flier alone that is true. But the
+flier's first update spawns the walker, class 0x23, and the walker counts in
+*its* `Init`, so every gate after the spawn is held from that frame. A reload
+past stage 5's JUDGMENT then rebuilt the pair, and block 4's room stayed shut
+on a `1` with its five zombies dead. The session that reported it spent its
+reading on the room, the Kill button and the class-0x41 props that count.
+The page had said something else from the first frame after the landing: `e1`,
+250 frames before the room spawned anyone. **Before reading why a room will
+not open, read the counters on the landing frame.** A nonzero count there is
+something the replay rebuilt, and `G.g_object_list` names it. And when a
+note says a class's gate "says nothing" about it, follow each thing the class
+spawns into its own `Init` before believing it (L83's list-every-spawn, one
+level down).

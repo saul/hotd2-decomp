@@ -19,7 +19,7 @@ is in `tools/verify_all.py`, beside the command that runs it.
 
 | Directory | Lines | Files | Layer |
 |---|---:|---:|---|
-| `game/` | 109974 | 360 | engine |
+| `game/` | 110053 | 360 | engine |
 | `hod2lib/` | 19802 | 35 | engine |
 | `render/` | 15804 | 60 | render |
 | `app/` | 12667 | 44 | app |
@@ -29,7 +29,7 @@ is in `tools/verify_all.py`, beside the command that runs it.
 | `bundle/` | 2907 | 11 | engine |
 | `audio/` | 1053 | 3 | render |
 | `hud/` | 526 | 1 | ui |
-| **total** | **174539** | **579** | |
+| **total** | **174618** | **579** | |
 
 The largest files, which is where the pressure to split next is:
 
@@ -134,6 +134,7 @@ nothing exits 3 and is never counted as green.
 | `continue` | that the last life lost with credits left puts CONTINUE? and its digit where the exe draws them, holds the script at its wait, and that START -- pressed on the corner button, the one START a phone has -- spends a credit and puts the player back in play | bundle |
 | `result_card` | that the end of stages 1, 2 and 4 plays in the real page from their own result steps: one figure per rescue, of the rescued type, at the scene's places; the scene's own list, dead, with none; the count climbing from frame 31; the life bonus on frame 302, capped; figure 0 holding the life up from camera frame 260 and freezing on cursor 0x81; the score and the accuracy drawn; the flag on frame 420 and the scene over after it | bundle |
 | `options` | that the menu's Options reaches the game's options screen in the real page, that its title and red highlighted row are on the HUD canvas, that the page's arrows and Enter drive the list -- lives and continues changed, the hidden rows stepped over, a held arrow running the sound test -- and that EXIT saves the profile in the browser and starts a game with five lives, four credits and the chosen crosshair on the reticle, and that a reload boots what was saved in place of the free-play default | bundle |
+| `judgment_reload` | that a reload at stage 5's `block=4&step=1&op=0` -- past JUDGMENT's return -- lands with no boss in the pool and nothing counted, and that block 4's room gate then counts exactly its own zombies and opens when they die: the only check that reads the enemy counters in a page a seek built, which is the rebuild every reload during development goes through (L75) | bundle |
 | `crosshair` | that real pointer events reach HudDrawCrosshair as the exe's devices -- a mouse move is input mode 6 and the reticle is the Sight Graphic's sprite out of the bundle, sized to the frame and centred on the pointer; a touch is the light gun, 0xD, and the game draws no crosshair until the mouse moves again; and a phone, with no fine pointer, never shows one | bundle |
 | `animals` | that the frog, the owl and the fish are placed from a real bundle and leave their opening state -- none of the three is a skinned enemy the character layer can build, and two have no character type at all | bundle |
 | `horde` | that each of the five class-0x40 hordes is built from a real bundle, walks in, dives and bites, and that shooting every member gives both counters back and lets the walker past the room's wait_enemies_alive -- the members are runtime children with no descriptor, so only the placer's own spawn can bring them into play | bundle |
@@ -173,7 +174,7 @@ nothing exits 3 and is never counted as green.
 | `verify_geometry` | that every scenery part in a stage bundle holds every triangle its `pol/` models declare -- the only check that compares an export against the files it was made from rather than against another export | game-dir |
 | `baseline` | that the installed assets still hash to `manifest.csv` | game-dir |
 
-25 of them need the installed game and 26 need an exported
+25 of them need the installed game and 27 need an exported
 bundle. **That is a known hole, not a design:** a machine with
 neither cannot run the checks that compare two histories, and a
 bundle-free fixture is the open work that closes it.

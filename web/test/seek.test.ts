@@ -28,7 +28,7 @@ import { seekTo } from "../src/script/seek";
 import { CameraActorTick, CameraUpdateTick } from "../src/game/camera/actor";
 import { EvtActionHandler } from "../src/game/camera/driver";
 import { CamPaths } from "../src/game/camera/curve";
-import { SetCameraPaths } from "../src/game/tables";
+import { SetCameraPaths, SetGameTables } from "../src/game/tables";
 import { PlayerTasksRun } from "../src/game/player_shell";
 import { NULL_HOST } from "../src/game/host";
 import { Rng } from "../src/core/rng";
@@ -1352,6 +1352,135 @@ for (const stage of STAGES) {
     play.gotoSceneState(3, true);
     check("...and leaving scene row 2 in playback retires nobody",
           play.spawns.some((s) => s.at === 4348));
+  }
+}
+
+// -- JUDGMENT is not rebuilt past its own way out ------------------------------
+
+/**
+ * Class 0x22 against every shipped bundle that places it: a seek into the
+ * fight rebuilds it, and a seek past the flag its death raises -- or, for the
+ * cameo, past its camera cue -- does not.
+ *
+ * `?stage=5&original=1&block=4&step=1&op=0` landed with `g_enemies_alive` 1
+ * and nothing on screen: the replay had listed the flier since `1/1/44`, the
+ * landing rebuilt it, its entrance's first frame made the walker, and the
+ * walker counted itself in its `Init` -- so block 4 step 2's room never
+ * opened. The addresses here are read off each script, not written in: the
+ * spawn, the wait on the flier's own flag, and the entry of every block the
+ * stage goes on to.
+ *
+ * `Class22OutlivedByReplay` reads the record's descriptor off the placement,
+ * so this points the tables at the stage first, as `applyGameTables` does
+ * before the page seeks.
+ */
+console.log("\nJUDGMENT is not rebuilt past its own way out:");
+{
+  /** `Class22Death`'s flag, by variant: 3 at `0x0049CC95`, 0 at `0x0049CC85`. */
+  const DEAD_FLAG: Record<number, number> = { 1: 3, 2: 0 };
+  const bundles = STAGES.flatMap((n) => [`stage${n}`, `stage${n}_original`]);
+  let fliers = 0;
+  for (const name of bundles) {
+    const file = join(ROOT, name, `${name}.script.json`);
+    if (!existsSync(file)) continue;
+    const script = JSON.parse(readFileSync(file, "utf8")) as ScriptJson;
+    const variantOf = new Map<number, number>();
+    for (const p of script.characters?.placements ?? []) {
+      if (p.class22) variantOf.set(p.at, p.class22.variant);
+    }
+    const seekFrom = (b: number, s: number, o: number): Walker | null => {
+      freshGame(file);
+      SetGameTables(script.characters, undefined, undefined, undefined,
+                    script.coli);
+      const w = new Walker(script, mkHost());
+      const ok = seekTo(w, b, s, o);
+      SetGameTables(undefined);
+      return ok ? w : null;
+    };
+    const listed = (w: Walker | null, at: number): boolean =>
+      !!w?.spawns.some((x) => x.at === at);
+    for (const blk of script.blocks) {
+      for (const st of blk.steps ?? []) {
+        for (const op of st.ops) {
+          for (const sp of (op as OpJson & { spawns?: { at: number;
+                              class?: number }[] }).spawns ?? []) {
+            if (sp.class !== 0x22) continue;
+            const variant = variantOf.get(sp.at);
+            if (variant === undefined) continue;
+            fliers++;
+            const where = `${name} ${blk.index}/${st.index}/${op.i} 0x`
+              + `${sp.at.toString(16)} variant ${variant}`;
+            const flag = DEAD_FLAG[variant];
+            if (flag !== undefined) {
+              const inside = seekFrom(blk.index, st.index, op.i + 1);
+              if (!inside) {
+                // Stage 1's block 16, the fight's continue restart: no route
+                // leads there, so no reload can land in it.
+                console.log(`  --    ${where}: no route reaches it, so no `
+                            + "seek lands there; not checked");
+                continue;
+              }
+              check(`${where}: a seek into the fight rebuilds it`,
+                    listed(inside, sp.at), "not listed");
+              // The wait on its own flag, later in the same block.
+              let waitAt: [number, number] | null = null;
+              for (const s2 of blk.steps ?? []) {
+                if (s2.index < st.index) continue;
+                for (const o2 of s2.ops) {
+                  if (s2.index === st.index && o2.i <= op.i) continue;
+                  if (o2.name === "wait_script_flag" && o2.arg === flag
+                      && !waitAt) {
+                    waitAt = [s2.index, o2.i];
+                  }
+                }
+              }
+              check(`${where}: its block waits on flag ${flag}`,
+                    waitAt !== null);
+              if (waitAt) {
+                const past = seekFrom(blk.index, waitAt[0], waitAt[1] + 1);
+                check(`${where}: a seek one past \`wait_script_flag `
+                      + `${flag}\` (${blk.index}/${waitAt[0]}/${waitAt[1]}) `
+                      + "does not", past !== null && !listed(past, sp.at),
+                      past ? "still listed" : "unreachable");
+              }
+            }
+            // Every block the stage goes on to, from its first real step. An
+            // `end` route's target is the next stage's, not a block here.
+            const kind = blk.route?.kind;
+            const next = kind === "goto" || kind === "branch"
+              ? (blk.route?.next ?? []).filter((b) => b >= 0) : [];
+            for (const nb of next) {
+              if (!script.blocks.some((b) => b.index === nb)) continue;
+              const w = seekFrom(nb, 1, 0);
+              if (!w) continue;
+              check(`${where}: a seek into block ${nb} does not`,
+                    !listed(w, sp.at), "still listed");
+            }
+          }
+        }
+      }
+    }
+  }
+  // The address the hang was filed with, by name.
+  for (const name of ["stage5", "stage5_original"]) {
+    const file = join(ROOT, name, `${name}.script.json`);
+    if (!existsSync(file)) continue;
+    const script = JSON.parse(readFileSync(file, "utf8")) as ScriptJson;
+    freshGame(file);
+    SetGameTables(script.characters, undefined, undefined, undefined,
+                  script.coli);
+    const w = new Walker(script, mkHost());
+    const ok = seekTo(w, 4, 1, 0);
+    SetGameTables(undefined);
+    check(`${name}: \`block=4&step=1&op=0\` lists no class-0x22 record`,
+          ok && !w.spawns.some((x) => x.class === 0x22),
+          `${w.block}/${w.step}/${w.opIndex}: `
+          + w.spawns.filter((x) => x.class === 0x22)
+            .map((x) => `0x${x.at.toString(16)}`).join(","));
+  }
+  if (ran) {
+    check("some bundle places a JUDGMENT flier, so something was checked",
+          fliers > 0);
   }
 }
 

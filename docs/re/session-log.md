@@ -26507,3 +26507,63 @@ frame (the exe holds, the base released), and an eye at `(10, 0, 60)` turns her
 `+0x100` (the base turned `-0x100`). All three fail on the base. A mutant that
 gives the step the turn's identity fails both reach checks and passes the
 turn.
+
+## 2026-09-29 -- a reload past JUDGMENT's return rebuilt the fight (`PLAYER_HANGS.md` item 33)
+
+The report: stage 5 Original at `block=4&step=1&op=0` parks on `4/2/12`'s
+`wait_enemies_alive`, and after the debug Kill takes everything in the pool
+to `dead`, `g_enemies_alive` stays at 1.
+
+**Entry or deep link first (L75).** From the entry the room opens. The
+Original playthrough needs `--continue`, or it ends GAME OVER at `0/4/20`,
+and `--boss`, or it parks on JUDGMENT's own gate at `1/1/69` (item 17). With
+both it enters block 4 at f9764 and leaves it at f11113. From the deep link
+it hung on every run, so the seek was the subject.
+
+**What found it was the first landed frame, not the room.** `4/1/26` read
+`e1 p1` before block 4 step 2 had spawned anything. The pool held the flier
+`0x14AC` and its walker `0x14E4`, both in their entrance, rebuilt from block
+1's `spawn_obj` at `1/1/44`. The walker counts in `Class23Init`
+(`0x0048FE16`, `0x0048FE1D`, read here), and the flier's first update is what
+makes it (`0x0049CE10` sub 0). Nothing in the replay retired class 0x22.
+
+**Read in the exe**, all already named in `functions.tsv` from the class's
+port: `g_class22_states` at `0x00598000` (ten entries, variant 2's base 6);
+the cue test at the head of `Class22Death` and nowhere in either fighting
+entrance or either phase (operand search on `+0x1390` per function);
+`Class22Death`'s sub 5 flag writes; the walker's two DECs (`0x004901AE`,
+`0x00490B5C`); the cameo's cue only in `Class22CutsceneRideAndLeave`, which
+`CutsceneHold` hands to on flag `0xF8`. From the bundles: stage 5's cue is
+path `0xCF` frame 140, which block 2 step 2 passes, and stage 1's fight cue
+is `0x31` frame 400, which block 14 never reaches (it plays `0x31` to 230).
+
+**Fix:** `Class22OutlivedByReplay` -- the variant's dead flag for the fights,
+the cue for the cameo. Three checks, all watched red with the fix backed out:
+`port.test.ts` 3/9, `seek.test.ts` 10/16 over the shipped records, and the new
+page check `judgment_reload` 4/6. The deep-link playthrough on seeds 1-5 now
+reaches end block 7 on every seed.
+
+**Wrong turns.**
+
+* The brief's frame -- the room, the Kill, the class-0x41 props that count --
+  had me reading `ActorKillAll` first. The Kill is a debug clear that bypasses
+  death chains (filed as found-on-the-way); it was never the holder. Reading
+  the counters on the landing frame, before the step's own spawns, settled it
+  in one line.
+* The first shape I weighed was adding 0x22 to `ENEMY_GATE_CLASSES`, since
+  the walker makes item 32's "a gate says nothing about it" false. It would
+  have made a reload during the death orbit -- where the page parks on
+  `wait_script_flag 0` for 300 frames -- land with no flier and a flag that
+  nothing will ever raise: a permanent hang in place of a replayed fight.
+* The doc comment first carried two sentences restated from older notes:
+  "nothing else in either stage writes either flag" (`death.ts`) and "the
+  scene reset is the only clear" (`walker.ts`). A byte search for
+  `00729c00` returns about seventy references I did not read, and
+  `class41/type18.ts` clears flag `0x5F`, so both went. The comment now says
+  only what the replay needs, which the shipped data shows: no
+  `set_script_flag` names either flag. `walker.ts`'s own sentence is still
+  there and still contradicted by type 18.
+* The seek check's first run failed four times on stage 1's block 16, which
+  no route reaches. It also treated an `end` route's target as a block of the
+  same stage. Both are now excluded, and the unreachable one is printed as
+  not checked.

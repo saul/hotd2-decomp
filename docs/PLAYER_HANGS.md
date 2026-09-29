@@ -2088,12 +2088,119 @@ alone, whose boat-rider changes do not touch this: still hung, same holders.
 Found on the way to item 31, not fixed there:
 
 * **Class 0x22 counts after its entrance, not in its `Init`** (`0x0049B6B4`,
-  `0x0049D104`), so a gate stepped over between its spawn and its entrance
-  says nothing about it and it is deliberately not in `ENEMY_GATE_CLASSES`.
-  Whether any shipped gate falls in that window is unread.
+  `0x0049D104`) -- **read, item 33**: the fighting variants' walker, spawned
+  on the flier's first update, counts in *its* `Init`, so every gate after
+  the spawn is held from that frame; there is no window. The class stays out
+  of `ENEMY_GATE_CLASSES` for a different reason, and answers
+  `outlivedByReplay` from its dead flag instead. What remains is the landing
+  **between** stage 5's `1/1/69` gate and `1/1/72`'s flag (stage 1:
+  `14/1/59` and `14/1/63`) -- the page parks there for the 300-frame death
+  orbit. The replay rebuilds the whole fight at that address, so a reload
+  during the orbit makes the player shoot JUDGMENT down again; retiring it
+  there instead would hang, since only the orbit raises the flag.
 * **The wait panel cannot name a class-0x21 holder**: item 31's hang read
   "Nothing this panel can name is alive" with the target standing at `e1`.
-  `ActorIsEnemy` is the panel's filter and class 0x21 is not in it.
+  `ActorIsEnemy` is the panel's filter and class 0x21 is not in it. Nor are
+  classes 0x22 and 0x23: item 33's hang read the same line with JUDGMENT's
+  walker holding `e1`.
+
+## 33. A reload past JUDGMENT's return rebuilt the fight, and stage 5's `4/2/12` never opened — **fixed**
+
+Observed from the story-mode switch session: `?stage=5&original=1&block=4&
+step=1&op=0&drive=1&seed=1`, Space, 800 driven frames, and the walker parks
+at `4/2/12`, a `wait_enemies_alive 0`, with `e6 p6`. The debug Kill takes
+every actor in the pool to `dead`, and `g_enemies_alive` stays at **1**.
+
+**From the entry block it does not happen; from the page's own URL it always
+does** (L75 again). `playthrough.mjs --stage 5 --original --continue --boss`
+enters block 4 at f9764 and leaves it for block 5 at f11113. (Without `--boss`
+it parks at JUDGMENT's own gate `1/1/69`, which item 17 records; without
+`--continue` it ends GAME OVER at `0/4/20`.) From the deep link,
+`playthrough.mjs --link ... --continue` hung at `4/2/12` on **five of five**
+seeds, with the same holders every time -- the replay draws nothing from the
+generator. Its shot shows the room emptied between the two vans, a burning
+car down the road, and the panel reading `g_enemies_alive 1 ·
+g_enemies_present 1` and "Nothing this panel can name is alive" -- item 32's
+second bullet, for two more classes.
+
+**The count was held before the room had anyone in it.** The first landed
+frame, `4/1/26`, already read `e1 p1`, 250 frames before step 2 spawned its
+five zombies. The pool had `0x14AC boss1z` (class 0x22) and its sub-actor,
+`0x14E4 boss1q` (class 0x23), both in their entrance state 0 sub 1 -- rebuilt
+from block 1, where JUDGMENT returns. So the room was not the question, and
+neither was the Kill: `ActorKillAll` marks a class dead without running the
+chain that gives its count back (found on the way, below).
+
+### The mechanism, `[proved]`
+
+* The replay lists the flier from its `spawn_obj` at `1/1/44` and rebuilds it
+  at the landing. Nothing retired it: class 0x22 is not in
+  `ENEMY_GATE_CLASSES`, had no `outlivedByReplay`, and `retireFlagRaisers` is
+  civilians only.
+* The rebuilt flier's first update is `Class22DescendAndJoinFight`
+  (`0x0049CE10`) sub 0, which spawns the walker from the nested descriptor at
+  `tail+0x10`. The walker's `Class23Init` (`0x0048FD90`) counts itself into
+  both counters (`INC word [0x009C7006]` at `0x0048FE16`, `INC word
+  [0x009C904A]` at `0x0048FE1D`).
+* The walker gives `g_enemies_alive` back only as it starts to fall, when the
+  flier is down to its hit points (`0x004901AE`), and the flier only joins
+  when the camera's frame equals `g_cam_path_length[0xCE]`, which block 4 never
+  plays. So nothing on the field could ever give the `1` back.
+
+In the exe the pair is gone by then. `Class22Death` (`0x0049C910`) gives both
+counters back in sub 0, raises `g_script_flags[0]` (`0x0049CC85`) at the end
+of its 300-frame orbit, and despawns on its descriptor's cue (path `0xCF`,
+frame 140, which block 2 step 2 plays). `Class23LieUntilCameraCue`
+(`0x00490C50`) despawns the walker on the same cue. The two fighting entrances
+(`0x0049B640`, `0x0049CE10`) and both phases (`0x0049B850`, `0x0049C190`)
+never test the cue. All of it is in `functions.tsv` already, from the port of
+the class. What was missing was the replay's question.
+
+### The fix
+
+`Class22OutlivedByReplay` (`game/class22/index.ts`), the class's answer to
+`ClassHandler.outlivedByReplay`:
+
+* **the fighting variants** go when their own dead flag is up -- 0 in stage 5
+  (`wait_script_flag 0` at `1/1/72`), 3 in stage 1 (`14/1/63`). No
+  `set_script_flag` in either stage names them, so in a replay the byte comes
+  up only as the replay steps over that wait. From the flag to the cue the
+  exe has two bodies out of both counters; the replay loses them early,
+  and that is the window this answers early rather than exactly;
+* **the cameo** (variant 0) goes on its cue, path `0x22` frame 400 -- the
+  `ActorKill` at the head of `Class22CutsceneRideAndLeave` (`0x0049B3F0`).
+  A seek into stage 1's block 1 had been rebuilding it too.
+
+Not the room gate: see item 32's first bullet.
+
+Checks, each **watched failing with the fix backed out**:
+`test/port.test.ts` "a replay does not rebuild JUDGMENT past its own way out"
+(3 of 9 red); `test/seek.test.ts` "JUDGMENT is not rebuilt past its own way
+out", every shipped class-0x22 record against its own script's addresses
+(10 of 16 red); and `tools/judgment_reload_page.mjs`, the page at the
+reported address (`verify_all`'s `judgment_reload`, 4 of 6 red: it named
+`0x14ac`, `0x200014ac` and `0x14e4`, and `g_enemies_alive 1` after the Kill).
+After: the landing reads `e0 p0`, the gate counts the room's five zombies,
+and the walker leaves `4/2/12` for `4/2/20` once they are dead. The same deep
+link played by `playthrough.mjs --link ... --continue` reaches the end block 7
+by block 5 on **five of five** seeds, and none stops.
+
+### Found on the way — `[open]`
+
+* **The debug Kill cannot clear JUDGMENT.** `ActorKillAll` takes classes 0x22
+  and 0x23 to `dead` without their death chains, so neither gives its count
+  back, and class 0x23 is an actor no shot can kill outside Training
+  (`Class23TakeShots` charges the flier). Item 18's rule -- what a shot could
+  not touch, the clear must not touch -- has not been applied to either
+  class.
+* **Stage 5 Original's playthrough exits 1 on four 404s**, not on a hang:
+  `se/stage5_se/drive_dead2_22_off.wav`, `se/dc_se/ufo_44_off.wav`,
+  `se/stage5_se/laser_sword_22_off.wav`, `se/stage5_se/car_fire_22_off.wav`.
+  These are stop ids, and the 404s are by design: 36 of the 324 SE names end
+  in `_OFF` and none ship, and `audio/bgm.ts`'s `oneShot` swallows them. But
+  `openPlayer`'s console handler excuses only `/favicon.ico`, so the run
+  counts them as faults, even though `openPlayer`'s own comment expects a
+  muted driver not to request them at all.
 
 ## Rules for whoever picks this up
 

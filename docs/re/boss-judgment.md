@@ -862,6 +862,26 @@ shutter at its own frame 300. Stage 5 plays path 0xCE to 0x1BD (445) and then
 waits 120+280+200+100+140 = **840** frames before `set_hud_shutter_state 1` —
 exactly `Class22DescendAndJoinFight`'s 840.
 
+**Leaving the pool.** Both classes leave only on the descriptor's cue,
+`g_active_cam_path == tail+6 && g_cam_path_frame >= tail+8`. The flier
+tests it at the head of `Class22Death` and, as the cameo, of
+`Class22CutsceneRideAndLeave`. Neither fighting entrance nor either phase
+tests it: there is no `+0x1390` operand in `0x0049B640`, `0x0049CE10`,
+`0x0049B850` or `0x0049C190`. The walker tests it in
+`Class23LieUntilCameraCue`. The shipped cues:
+
+| record | cue | reached |
+|---|---|---|
+| st1 `0x0794` (cameo) | `0x22` / 400 | block 0 step 2 plays `0x22` to 470 |
+| st1 `0x6174` (fight) | `0x31` / 400 | never: block 14 plays `0x31` to 230, then `0x32`, `0x33` |
+| st5 `0x14AC` (return) | `0xCF` / 140 | block 2 step 2 plays `0xCF` 50..244 |
+
+So the stage-1 pair lies in the pool until the stage ends, and stage 5's
+goes in block 2. A seek's replay retires the flier's record on the dead flag
+or, for the cameo, the cue (`Class22OutlivedByReplay`,
+`PLAYER_HANGS.md` item 33). The walker is never a script record: it is made
+by the flier's entrance.
+
 ## 11. What the bundle exporter must carry
 
 * **Nested descriptors.** For a class-0x22 placement with variant 1 or 2,

@@ -8408,6 +8408,155 @@ console.log("\na replay does not rebuild a rescue target it has played past:");
   }
 }
 
+/**
+ * The same shape, class 0x22. Stage 5's `?stage=5&original=1&block=4&step=1`
+ * landed with `g_enemies_alive` 1 and nothing on screen to shoot: the replay
+ * had listed JUDGMENT's flier since block 1 (`1/1/44`) and rebuilt it at the
+ * landing, where its entrance's first frame made the walker
+ * (`Class22DescendAndJoinFight` sub 0, `0x0049CE10`) and the walker counted
+ * itself into both counters in its `Init` (`INC`s at `0x0048FE16` and
+ * `0x0048FE1D`). Block 4 step 2's `wait_enemies_alive 0` then outlived every
+ * zombie in the room.
+ *
+ * The engine is never in that state: by block 2 the flier has died and
+ * raised `g_script_flags[0]` (`0x0049CC85`), which the script waits on at
+ * `1/1/72`, and both bodies have despawned on their descriptor's cue, path
+ * `0xCF` frame 140, which block 2 step 2 plays. `Class22OutlivedByReplay`
+ * names those ways out.
+ */
+console.log("\na replay does not rebuild JUDGMENT past its own way out:");
+{
+  const FLIER_AT = 0x14ac;
+  const WALKER_AT = 0x14e4;
+  const op = (i: number, rest: Record<string, unknown>) =>
+    ({ i, at: 0x100 + i * 8, ...rest });
+  const flierSpawn = (i: number) => op(i, {
+    op: 0x0b, name: "spawn_obj", cat: "spawn",
+    spawns: [{ at: FLIER_AT, class: SpawnClass.Judgment, flags: 0,
+               pos: [0, 0, 0], yaw_deg: 0, orient: [0, 0, 0], hp: 300,
+               desc_flags: 0 }],
+  });
+  const roomGate = (i: number) => op(i, {
+    op: 0x44, name: "wait_enemies_alive", cat: "wait", arg: 0,
+    blocks_on: "enemies alive <= arg",
+  });
+  const waitFlag = (i: number, flag: number) => op(i, {
+    op: 0x45, name: "wait_script_flag", cat: "wait", arg: flag,
+    blocks_on: "script flag arg set",
+  });
+  const shot = (i: number, slot: number, start: number, end: number) => op(i, {
+    op: 0x30, name: "queue_event", cat: "camera", sel: 0x40,
+    action: "cam_play", args: [start, end, slot, 0], start, end, slot,
+    flags: 0, static: false, resume: false,
+    cam: { file: "cp_test", path: 0, duration: end + 1 },
+  });
+  const shotDone = (i: number) => op(i, {
+    op: 0x40, name: "wait_queued_events_done", cat: "wait",
+    blocks_on: "queued events pending == 0",
+  });
+  const frames = (i: number) => op(i, {
+    op: 0x42, name: "wait_frames", cat: "wait", arg: 1,
+    blocks_on: "arg frames elapsed",
+  });
+  const script = (ops: unknown[], slot: number) => ({
+    scene: 5, stage: 5, game_mode: 1, evt_file: "test", entry_block: 0,
+    entry_step: 0, routes: [{ kind: "end", next: [-1, -1, -1] }],
+    regions: [], cam_slots_used: [slot], warnings: [],
+    blocks: [{ index: 0, at: 0, route: { kind: "end", next: [-1, -1, -1] },
+               steps: [{ index: 0, at: 0, ops }] }],
+  }) as unknown as ScriptJson;
+  const walkerHost = {
+    enterRegion: () => undefined, loadSlot: () => undefined,
+    unloadSlot: () => undefined, startCamera: () => undefined,
+    onFeed: () => undefined, onBranch: () => undefined,
+    playSound: () => undefined, aliveEnemies: () => null,
+    presentEnemies: () => null, aliveCivilians: () => null,
+    cameraFree: () => null, scriptFlagRaised: () => null,
+    showMessage: () => null, endDialogue: () => undefined,
+  };
+  // The shipped rows' cues: stage 5 `0xCF`/140, stage 1's fight `0x31`/400
+  // (never reached -- block 14 plays `0x31` to 230), the cameo `0x22`/400.
+  const CUE: Readonly<Record<number, [number, number]>> = {
+    0: [0x22, 400], 1: [0x31, 400], 2: [0xcf, 0x8c],
+  };
+  const walkerFor = (variant: number, ops: unknown[]): Walker => {
+    ResetGameGlobals();
+    EnterPlay();
+    const [path, frame] = CUE[variant];
+    SetCameraPaths(StillPath(path, vec3(0, 10, 0), vec3(0, 10, -100)));
+    SetGameTables({ ...CHARS, placements: [
+      { at: FLIER_AT, class: 0x22, char_type: 0x45, motion: 0x40b, hp: 300,
+        class22: { variant, clip: 0x40b, frame: 0, despawn_path: path,
+                   despawn_frame: frame, hp: 300, hp_stage: 210,
+                   phase1_floor: 90,
+                   companion_at: variant === 0 ? null : WALKER_AT,
+                   sub_actor_at: Class22SubActorAt(FLIER_AT) } },
+    ] } as unknown as CharactersJson, undefined, undefined, undefined);
+    return new Walker(script(ops, path), walkerHost);
+  };
+  const listed = (w: Walker) => w.spawns.some((s) => s.at === FLIER_AT);
+  const at = (w: Walker) => `at ${w.block}/${w.step}/${w.opIndex}, flags `
+    + `0:${G.g_script_flags[0] ?? 0} 3:${G.g_script_flags[3] ?? 0}, path `
+    + `${G.g_active_cam_path} frame ${G.g_cam_path_frame}`;
+
+  // Stage 5 block 1 in miniature: the spawn, the room gate, the flag.
+  {
+    const w = walkerFor(2, [flierSpawn(0), roomGate(1), waitFlag(2, 0),
+                            frames(3)]);
+    seekTo(w, 0, 0, 1);
+    check("a seek into the fight keeps the flier listed", listed(w), at(w));
+    seekTo(w, 0, 0, 2);
+    check("...and so does one parked on `wait_script_flag 0` past the room "
+          + "gate: only the flier's death orbit raises that flag, so a "
+          + "landing there has to rebuild the fight to be let past it",
+          listed(w), at(w));
+    seekTo(w, 0, 0, 3);
+    check("**one past `wait_script_flag 0` retires the stage-5 flier** "
+          + "(`Class22Death` sub 5, `0x0049CC85`) -- and with it the walker "
+          + "its entrance would have made, counted",
+          !listed(w) && (G.g_script_flags[0] ?? 0) === 1, at(w));
+  }
+  // Each fighting variant is retired by its own stage's flag and no other.
+  {
+    const w = walkerFor(1, [flierSpawn(0), waitFlag(1, 0), frames(2),
+                            waitFlag(3, 3), frames(4)]);
+    seekTo(w, 0, 0, 2);
+    check("stage 1's flier is not retired by flag 0...", listed(w), at(w));
+    seekTo(w, 0, 0, 4);
+    check("...but by flag 3 (`0x0049CC95`)", !listed(w), at(w));
+  }
+  // The cue, `g_active_cam_path == tail+6 && g_cam_path_frame >= tail+8`:
+  // the cameo's only way out, tested by `Class22CutsceneRideAndLeave`
+  // (`0x0049B3F0`). Stage 1 block 0 plays `0x22` to 470.
+  {
+    const w = walkerFor(0, [flierSpawn(0), shot(1, 0x22, 360, 399),
+                            shotDone(2), frames(3), shot(4, 0x22, 400, 470),
+                            shotDone(5), frames(6)]);
+    seekTo(w, 0, 0, 3);
+    check("the cameo stays listed while its shot is short of frame 400",
+          listed(w), at(w));
+    seekTo(w, 0, 0, 6);
+    check("...and is retired once the replay's camera has passed it",
+          !listed(w), at(w));
+  }
+  {
+    const w = walkerFor(0, [flierSpawn(0), waitFlag(1, 3), waitFlag(2, 0),
+                            frames(3)]);
+    seekTo(w, 0, 0, 3);
+    check("the cameo raises no flag, and neither fight's flag retires it",
+          listed(w), at(w));
+  }
+  // Replay only: in play the flier leaves through its own states.
+  {
+    const w = walkerFor(2, [flierSpawn(0), frames(1), frames(2)]);
+    for (let i = 0; i < 4; i++) WalkerCameraFrame(w);
+    G.g_script_flags[0] = 1;
+    for (let i = 0; i < 4; i++) WalkerCameraFrame(w);
+    check("played rather than replayed, the marker stands", listed(w), at(w));
+  }
+  SetGameTables(CHARS, undefined, undefined, undefined);
+}
+
 console.log("\nthe stage-2 car: class 0x21 makes it, and nothing does before:");
 {
   /**

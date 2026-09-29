@@ -20,7 +20,7 @@ import { SUPPORTED_FORMAT } from "./manifest";
 import type { Manifest, StageEntry } from "./manifest";
 import { BUILDER_FILES, BUILDER_HASH } from "./builder_hash";
 import { SCHEMA_FILES, SCHEMA_HASH } from "./schema_hash";
-import type { ScriptJson, StageBundle } from "./stage";
+import type { ScriptJson } from "./stage";
 
 
 const ROOT = "bundle";
@@ -38,40 +38,65 @@ const ROOT = "bundle";
  * because a page can perfectly well be served four stages and hold two of its
  * own. Nothing here holds a current source: every call names the one it means.
  *
- * `geometry` is separate from `json` because a GLB is handed to three.js as a
- * URL rather than parsed here, and a cached one has to become a `blob:` URL
- * that is later revoked. {@link releaseGeometry} is that revoke.
+ * Both say how far a read has got, through `onBytes`: a stage is some sixty
+ * megabytes over a phone's Wi-Fi, and the loading screen counts them.
  */
 export interface BundleSource {
-  json<T>(path: string): Promise<T>;
-  geometry(path: string): Promise<string>;
-  release?(url: string): void;
+  json<T>(path: string, onBytes?: OnBytes): Promise<T>;
+  /** A file whole -- the stage glTF, which three.js parses from the bytes. */
+  bytes(path: string, onBytes?: OnBytes): Promise<ArrayBuffer>;
+}
+
+/**
+ * How much of a file has been read, and how big it is -- 0 while that is not
+ * known, as it is not before the response's headers, or ever for a response
+ * the server compressed on the way.
+ */
+export type OnBytes = (loaded: number, total: number) => void;
+
+/** `r`, with its body counted into `onBytes` as it arrives. */
+function counted(r: Response, onBytes?: OnBytes): Response {
+  if (!onBytes || !r.body) return r;
+  // A compressed body's length is the compressed one, and the stream is not.
+  const total = r.headers.get("content-encoding")
+    ? 0 : Number(r.headers.get("content-length")) || 0;
+  onBytes(0, total);
+  const reader = r.body.getReader();
+  let loaded = 0;
+  const body = new ReadableStream<Uint8Array>({
+    async pull(c) {
+      const { done, value } = await reader.read();
+      if (done) {
+        c.close();
+        return;
+      }
+      loaded += value.byteLength;
+      onBytes(loaded, total);
+      c.enqueue(value);
+    },
+    cancel(reason) {
+      return reader.cancel(reason);
+    },
+  });
+  return new Response(body, { headers: r.headers });
+}
+
+async function fetchOk(path: string, onBytes?: OnBytes): Promise<Response> {
+  const url = `${ROOT}/${path}`;
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`${url}: ${r.status} ${r.statusText}`);
+  return counted(r, onBytes);
 }
 
 /** The bundle the page was served, under `/bundle/`. */
 export const serverSource: BundleSource = {
-  async json<T>(path: string): Promise<T> {
-    const url = `${ROOT}/${path}`;
-    const r = await fetch(url);
-    if (!r.ok) throw new Error(`${url}: ${r.status} ${r.statusText}`);
-    return (await r.json()) as T;
+  async json<T>(path: string, onBytes?: OnBytes): Promise<T> {
+    return (await (await fetchOk(path, onBytes)).json()) as T;
   },
-  async geometry(path: string): Promise<string> {
-    return `${ROOT}/${path}`;
+  async bytes(path: string, onBytes?: OnBytes): Promise<ArrayBuffer> {
+    return (await fetchOk(path, onBytes)).arrayBuffer();
   },
 };
-
-/**
- * Give back whatever {@link loadStage} handed out as `geometryUrl`.
- *
- * The source is passed because it has to be the one that handed the URL out:
- * a `blob:` from the cache must be revoked and an `http:` from the server must
- * not, and by the time a stage is torn down the *next* stage may already be
- * loading from the other one.
- */
-export function releaseGeometry(src: BundleSource, url: string): void {
-  src.release?.(url);
-}
 
 /**
  * Which of these declarations the bundle disagrees with, by name.
@@ -182,19 +207,41 @@ function checkStageFormat(what: string, format: number | undefined): void {
   if (no) throw new Error(no);
 }
 
-export async function loadStage(src: BundleSource,
-                                entry: StageEntry): Promise<StageBundle> {
+/** A stage's three files, read: what {@link loadStage} hands back. */
+export interface StageFiles {
+  entry: StageEntry;
+  script: ScriptJson;
+  cam: CamJson;
+  /** The stage glTF, whole, for three.js to parse. */
+  geometry: ArrayBuffer;
+}
+
+/**
+ * Read a stage's files, all three at once: the glTF's download is most of a
+ * load over a network, and it no longer waits for the script's. `onBytes`
+ * hears the three as one -- their total once every response has said its
+ * size.
+ */
+export async function loadStage(src: BundleSource, entry: StageEntry,
+                                onBytes?: OnBytes): Promise<StageFiles> {
   checkStageFormat(entry.name, entry.format);
   const dir = entry.name;
-  const [script, cam] = await Promise.all([
-    src.json<ScriptJson>(`${dir}/${entry.script}`),
-    src.json<CamJson>(`${dir}/${entry.cam}`),
+  const loaded = [0, 0, 0], total = [0, 0, 0];
+  const part = (i: number): OnBytes | undefined => onBytes && ((l, t) => {
+    loaded[i] = l;
+    total[i] = t;
+    onBytes(loaded[0] + loaded[1] + loaded[2],
+            total.every((x) => x > 0) ? total[0] + total[1] + total[2] : 0);
+  });
+  const [script, cam, geometry] = await Promise.all([
+    src.json<ScriptJson>(`${dir}/${entry.script}`, part(0)),
+    src.json<CamJson>(`${dir}/${entry.cam}`, part(1)),
+    src.bytes(`${dir}/${entry.geometry}`, part(2)),
   ]);
   // The manifest entry and the files it names are written together but do not
   // travel together: a stage directory copied in from another bundle keeps its
   // own format while the entry indexing it says whatever this export said.
   checkStageFormat(entry.script, script.format);
   checkStageFormat(entry.cam, cam.format);
-  return { entry, script, cam,
-           geometryUrl: await src.geometry(`${dir}/${entry.geometry}`) };
+  return { entry, script, cam, geometry };
 }

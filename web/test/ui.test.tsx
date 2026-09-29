@@ -1095,5 +1095,49 @@ console.log("\nnetplay: a connect that is not finishing says why");
         why(base, "connected") === "" && why({ ...base, since: NaN }, "new") === "");
 }
 
+// A stage load's progress: the meter's figures, the bar on the loading
+// screen, and the same bar on the "turn your phone" screen, which covers the
+// loading screen while a phone is upright and the stage loads under it.
+console.log("\nThe loading bar:\n");
+{
+  const { LoadMeter } = await import("../src/app/load_meter");
+  const { LoadingOverlay } = await import("../src/ui/panels/Viewport");
+  const { RotateHint } = await import("../src/ui/panels/Overlays");
+  type Shown = NonNullable<UiProjection["loading"]>;
+  const seen: Shown[] = [];
+  const meter = new LoadMeter("Loading stage 1", (s) => seen.push(s));
+  meter.begin("download");
+  meter.bytes(1e6, 0);
+  const unsized = seen[seen.length - 1];
+  meter.bytes(25.6e6, 51.2e6);
+  const half = seen[seen.length - 1];
+  check("the download counts megabytes, and of how many once every file has said",
+        unsized.detail === "Downloading · 1.0 MB" && half.detail === "Downloading · 25.6 of 51.2 MB"
+        && half.progress === 0.25, JSON.stringify([unsized, half]));
+  meter.begin("unpack");
+  const unpack = seen[seen.length - 1];
+  meter.begin("build");
+  meter.begin("shaders");
+  check("...then the parse, the build and the shaders, in order, never backwards",
+        unpack.progress === 0.5 && unpack.detail === "Unpacking the stage"
+        && seen.every((x, i) => i === 0 || (x.progress ?? 0) >= (seen[i - 1].progress ?? 0)),
+        JSON.stringify(seen.map((x) => x.progress)));
+  const html = renderIn({ ...projection(), loading: half }, createElement(LoadingOverlay));
+  check("the loading screen shows the title, a bar at 25% and the figures, and no spinner",
+        html.includes('id="loading-text"') && html.includes("Loading stage 1")
+        && html.includes('aria-valuenow="25"') && html.includes("25.6 of 51.2 MB · 25%")
+        && !html.includes("spinner"), html);
+  const boot = renderIn(null, createElement(LoadingOverlay));
+  check("...and before there is a projection, the spinner and no bar",
+        boot.includes("spinner") && !boot.includes("progressbar"), boot);
+  const upright = renderIn({ ...projection(), loading: half }, createElement(RotateHint));
+  check("the turn-your-phone screen shows the same bar while the stage loads under it",
+        upright.includes("Turn your phone sideways") && upright.includes('aria-valuenow="25"'),
+        upright);
+  const ready = renderIn(projection(), createElement(RotateHint));
+  check("...and says it is ready once it has",
+        ready.includes("Ready when you are") && !ready.includes("progressbar"), ready);
+}
+
 console.log(failures ? `\n${failures} failed` : "\nall passed");
 process.exit(failures ? 1 : 0);

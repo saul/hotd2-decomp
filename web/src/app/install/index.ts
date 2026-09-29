@@ -7,7 +7,7 @@
  * cache has the same tree and the same file names.
  */
 
-import type { BundleSource } from "../../bundle/load";
+import type { BundleSource, OnBytes } from "../../bundle/load";
 import { FileListAssetSource, HandleAssetSource, canPickDirectory, clearCache,
          hasThumb, listCached, onThumbWritten, openCached, readThumb,
          requestPersist,
@@ -26,25 +26,31 @@ export type { InstallRef, WorkerOut };
 /**
  * The cache as a {@link BundleSource}.
  *
- * `blob:` URLs are handed out for the GLB and tracked, because three.js takes
- * a URL and a 58 MB blob that nothing revokes is 58 MB the tab keeps until it
- * closes. `release` is called by the stage loader when it drops a scene.
+ * A file here is read whole and at once, from this device's own storage, so
+ * its progress is its size before and after: there is nothing in between
+ * worth a frame.
  */
 export const cacheSource: BundleSource = {
-  async json<T>(path: string): Promise<T> {
-    const f = await openCached(path);
-    if (!f) throw new Error(`${path} is not in the exported bundle`);
-    return JSON.parse(await f.text()) as T;
+  async json<T>(path: string, onBytes?: OnBytes): Promise<T> {
+    const f = await cached(path, onBytes);
+    const text = await f.text();
+    onBytes?.(f.size, f.size);
+    return JSON.parse(text) as T;
   },
-  async geometry(path: string): Promise<string> {
-    const f = await openCached(path);
-    if (!f) throw new Error(`${path} is not in the exported bundle`);
-    return URL.createObjectURL(f);
-  },
-  release(url: string): void {
-    if (url.startsWith("blob:")) URL.revokeObjectURL(url);
+  async bytes(path: string, onBytes?: OnBytes): Promise<ArrayBuffer> {
+    const f = await cached(path, onBytes);
+    const b = await f.arrayBuffer();
+    onBytes?.(f.size, f.size);
+    return b;
   },
 };
+
+async function cached(path: string, onBytes?: OnBytes): Promise<File> {
+  const f = await openCached(path);
+  if (!f) throw new Error(`${path} is not in the exported bundle`);
+  onBytes?.(0, f.size);
+  return f;
+}
 
 /** Whether the cache holds a manifest, i.e. whether there is anything to play. */
 export async function hasCachedBundle(): Promise<boolean> {

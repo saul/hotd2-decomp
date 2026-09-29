@@ -25408,3 +25408,18 @@ the bin captor at all; it aims at torso and head heights now.
 **Left open.** The port's kill test is `!obj.dead && hp < 1 && result != 5`;
 the exe's is the dead *bit* and `hp < 1`, with result 5 gating only the head
 pop. Not changed here.
+
+## 2026-09-29 -- free play by default
+
+The user asked for infinite credits by default. The exe has the setting:
+`ModeStartCounterValue` (`FUN_00496B70`) reads the options' credit byte
+`0x009C9F25` (`MOV AL,[0x009c9f25]; CMP AL,0xff`, `0x00496B86`) and returns -1,
+free play, when it is `0xFF`; else it plus one. The port had it as a constant
+at the factory value 5 (`FUN_00401130`). It is `G.g_option_credits` now,
+starting at -1 -- a declared `[diverges]` from the factory reset, at the
+user's choice, until the options screen can hold it. First try changed the
+constant, and five tests that walk a game through its credits (the shell's
+start, continue and game over; the continue screen's credit line) failed;
+they set `OPTION_CREDITS_FACTORY` now, which is why the setting had to be a
+field and not a constant. New checks: the port starts in free play, and
+twenty continues all succeed and take nothing.

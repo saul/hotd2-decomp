@@ -73,7 +73,9 @@ web/shots/
 .claude/worktrees/
 
 # The matchmaker's secrets: the Cloudflare TURN key and its API token, as
-# `wrangler dev` reads them (`matchmaker/README.md`). Never committed.
+# `wrangler dev` reads them, and the API token `wrangler` deploys with
+# (`matchmaker/README.md`). Never committed.
 .dev.vars
 .dev.vars.*
+.cloudflare.env
 

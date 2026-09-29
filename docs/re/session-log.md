@@ -25103,3 +25103,105 @@ listing in ways this commit does not touch. It fires the connect on
 cry, `ActorPlayHitVoice(obj, 3)` (`CALL 0x0040a6f0` at `0x0044EC02`). And a
 port-only `!e` guard sends a missing strike entry to state 25 with
 `Committed` still up.
+
+## 2026-09-29 -- state 24 against its listing: the `==`, the cry, `obj+0x1360`, the zero row
+
+The previous entry left four departures in `ThrowerStateCloseAndStrike`
+(`FUN_0044EA50`). Each was read in the bytes and transcribed, and the whole
+routine was then re-read against the port.
+
+**The bytes.** `EDI` is the row, `g_class31_throws[obj+0x130C] +
+(s8)obj+0x131A * 0x10`, computed before a four-arm jump table at `0x0044EC68`
+(`0x0044EA86`, `0x0044EB98`, `0x0044EC11`, `0x0044EC46`, behind `CMP EAX, 0x3
+/ JA`). The arms fall into each other.
+
+1. `MOVSX EAX, word ptr [EDI + 0x8]` / `CMP dword ptr [ESI + 0x19c], EAX` /
+   `JNZ` at `0x0044EC11`..`0x0044EC1B`, every frame of sub 2, then `CALL
+   0x0044ce60`. Both sides are play-cursor units: the connect compares the
+   same `+0x8` against the same `obj+0x19C` again. The port's
+   `ActorPlayCursor` reads the one-shot's `ticks`, which gain one a tick, so
+   the equality is met. The shipped rows name 35, 22 and 40 against
+   `g_motion_play_length` 49, 59 and 79. `[proved]`
+2. `PUSH 0x3 / PUSH ESI / CALL 0x0040a6f0` at `0x0044EBFF`, straight after
+   `ActorSetMotionBlended(obj+0x194, entry+0, 0, 5)` at `0x0044EBFA`.
+3. `MOVSX EDX, word ptr [0x009c8e80]` / `MOV dword ptr [ESI + 0x1360], EDX`
+   at `0x0044EA86`/`0x0044EA93`: `g_players_in_play`, a count. On a thrower
+   `obj+0x1360` is the arc phase. A byte search for the displacement `60 13
+   00 00` over class 0x31's range finds `ThrowerStrikeConnect`'s `CMP ..., 4`
+   (`0x0044CEAC`), `ActorArcBeginToWaypoint`'s two zeroes, `ActorArcStep`'s
+   dispatch and increments, `ThrowerStateLeapToPoint`'s zero and compare,
+   and the zeroes in `ThrowerStateLeapStrike`, `ThrowerStateDelayedPounce`
+   and `ThrowerStateLeapToSurface` (`0x0044C239`). Nothing reads what state
+   24 writes. Its connect takes the throw-table arm, because the only entry
+   (`MOV word ptr [ESI + 0x1310], 0x18` at `0x0044B5BB`, the one such store in
+   the image) comes one instruction after `OR DH, 0x4` on `obj+0x136C`. And
+   every `ActorArcStep` caller zeroes the phase before stepping. The name
+   stays `arcPhase`, and the store is transcribed. `[proved]`
+4. There is no missing-entry test. The engine dereferences the row. Measured
+   across all six stages, every `zskamere` spawn (fifteen, all stage 4) takes
+   set 2. State 24 draws set 0's picks for type 0x17 (`MOV EDX, dword ptr
+   [0x00592a20]` at `0x0044EAF9`), which name 0, 1 and 3, and row B has all
+   three. So no shipped spawn reads an omitted row here. Where the bundle
+   does omit a row a pick can name, the image holds zeros there: row A's
+   entry 3, sixteen zero bytes at `0x00564848`. The port now reads the zero
+   row (`ThrowerThrowEntryOf`), which keeps the actor in sub 1 on a reach of
+   0.0, as the engine would.
+
+**Also found in the re-read.** The port had the two clips wrong. It set the
+approach clip outright where the exe calls `ActorSetMotionBlended(.., 0, 5)`
+(`0x0044EBE0`), and it cut to the swing with no fade hold. It also ended the
+swing on the clip's authored length (`2n`) where the exe uses
+`g_motion_play_length` (`0x0044EC32`). `ThrowerStateWaitForPermit`, the only
+way in, plays `PlaySoundId(0x2416A9)` on every claim that leads to state 9
+or 0x18 (`0x0044B52B`, `0x0044B5B3`). A waiting 0x17 on the ground stands in
+`[set][0]` with no draw (`CMP AX, 0x17` at `0x0044B458`). Neither was
+ported. Ghidra lists the pounce arm's tail as misaligned bytes from
+`0x0044B53E`; `66c786101300000900` at `0x0044B53C` is the state-9 store.
+
+**The siblings.** `ThrowerStateStrikeOnTheSpot` (`FUN_00450B20`, table
+`0x00450CD0`) had the missing cry (`0x00450C30`) but no latch: its connect
+runs every frame, as the exe's does. It gated `ThrowerReleaseAttackPermit`
+on a held permit, where `FUN_0044CFB0` drops the off-screen latch
+regardless. It cleared `0x800`, which no arm writes. Its clips had no fade,
+it ended them on the authored length, and it played the idle as a one-shot.
+`ThrowerStateLeapStrike` has no cry and no latch in the exe. But its connect
+is gated on `IsPlayerAttackable((s8)obj+0x121) == 1` (`0x0044E7C1`), which
+the port had as `obj+0x121 >= 0`, true after its own sub 0 whatever the
+claim said. `ThrowerStateDelayedPounce` matches: no cry, and the connect
+every frame `obj+0x121 != 0xFF` (`0x0044E999`).
+
+**Proof.** Fifteen checks in `port.test.ts` ("state 24, zskamere's standing
+swing"). Fourteen fail with the six source files reverted. The hit lands at
++48 not +53, the exit comes on 79 not 76, there is no cry and no `0x2416A9`,
+`obj+0x1360` stays 4, the rewound cursor lands nothing, the omitted row goes
+to state 25, a waiting 0x17's idles read `296 296 296 296 296 296 295 295`,
+the latch stays up, and state 22 raises `0x800`. `web/tools/close_strike.mjs`
+drives stage 4 block 1 on seed 1. After the change: the claim at frame 69
+plays `0x2416A9`, the swing starts at frame 70 crying `0x1617A9`, the life
+goes at frame 110 on cursor 35, and state 25 comes on cursor 48. Before: no
+sound, the life at frame 105, and state 25 on cursor 51.
+
+**Wrong turns.** `search_instructions` for `0x1360` missed
+`ThrowerStateLeapToSurface`'s zero. It sits past a `PlaySoundId` that Ghidra
+treats as no-return (L72), so the byte search was what found it, as L35
+says. The first state-22 check passed against the old code: the fixture's
+hit frame was 62, and the arc's cursor ends on 48, so the connect never fired
+either way. It now uses 30. The harness first counted no swings, because a
+swing can start on the frame after state 8 hands over, with sub 0 run the
+frame before. It had only looked for sub 1 to 2 inside state 24.
+`JoinPlayerTwo` left one player in play until the fixture set
+`GameMode.Arcade` (a credit to join on). I planned to make the exporter
+emit every row, and dropped that: every omitted row a pick can name is zero
+in the image, so the zero row is exact.
+
+**Left open, read but not changed.** `ThrowerStateRearm` (`FUN_0044F7A0`)
+restores its hands on `obj+0x19C == g_motion_play_length[obj+0x1B4] / 2`
+(`CMP EBX, EAX / JNZ` at `0x0044F7F6`). The port uses `>=` behind `struck`
+and `ActorClipLength`. The exe also raises `obj+0x34 |= 0x2000` on entry
+(`0x0044F7C3`) and drops it on exit (`0x0044F8E9`), which the port does not.
+The port's early exit for types other than 0x16 is its own: the exe tests
+the type only at the swap (`0x0044F7FE`). `ThrowerStateLeapToSurface` does
+not play `0x2416A9` (`0x0044C225`) in the port. And `ZombieStateStrike`'s
+port still connects on `>=` behind `struck`, where its own comment cites the
+exe's `obj+0x19C == entry+0x08`. That last one is `[likely]`: the class-0x30
+bytes were not read here.

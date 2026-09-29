@@ -126,6 +126,9 @@ const RIDE_FRAMES = 0xc4;
 export function ThrowerStateLeapStrike(obj: ThrowerActor, dt: number, rng: Rng,
                                        host: GameHost,
                                        events?: Events): void {
+  // `SUB EAX, EBX / JZ`, `DEC EAX / JZ` at `0x0044E6C9`: two arms, and any
+  // other sub returns.
+  if (obj.sub !== 0 && obj.sub !== 1) return;
   if (obj.sub === 0) {
     if (!ThrowerTryClaimAttackSlot(obj, rng, host)) {
       // `g_active_player`: -1 nobody, 0 or 1 that player only, 2 both.
@@ -145,7 +148,12 @@ export function ThrowerStateLeapStrike(obj: ThrowerActor, dt: number, rng: Rng,
     obj.arcPhase = 0;
     obj.sub = 1;
   }
-  if (obj.attackPermit >= 0) ThrowerStrikeConnect(obj, events);
+  // `MOVSX ECX, byte ptr [ESI + 0x121]` / `CALL 0x00409dc0` / `CMP EAX, 0x1`
+  // at `0x0044E7B9`..`0x0044E7C9`: the connect runs on the frames the player
+  // may be attacked, not on whether a permit is held -- sub 0 has just forced
+  // one onto the actor whether or not the claim gave it. The port tested
+  // `obj+0x121 >= 0`, which after sub 0 is always true.
+  if (IsPlayerAttackable(obj.attackPermit)) ThrowerStrikeConnect(obj, events);
   if (ActorArcStep(obj, 1, dt, host, events)) return;
   // `81e1ffffffef` at `0x0044E7F0`, `25fffffdff` on `obj+0x136C` beside it.
   obj.flags &= ~ActorFlag.Committed;

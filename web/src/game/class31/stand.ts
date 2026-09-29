@@ -181,10 +181,24 @@ const _eyeAtFloor: Vec3 = { x: 0, y: 0, z: 0 };
  *
  * This is the throttle: there is one permit in single player, so however many
  * throwers are on you, only one is ever coming.
+ *
+ * The way out is a four-arm table on the character type (`0x0044B600`,
+ * behind `ADD EAX, -0x16 / CMP EAX, 0x3 / JA` to the `RET` at `0x0044B4FE`):
+ * 0x16, 0x18 and 0x19 take `0x0044B526` -- `PUSH 0x2416a9 / CALL
+ * 0x0041cfd0`, drop `obj+0x136C` bit `0x400`, state 9 -- and 0x17 takes
+ * `0x0044B54D`, the perch test, which goes to state 0x20 in silence or plays
+ * the same sound at `0x0044B5A5` on its way to state 0x18. `[proved]`
+ * Ghidra's listing runs the first arm on into misaligned bytes after its
+ * `AND AH, 0xfb` (`0x0044B53E`); `66c786101300000900` at `0x0044B53C` is
+ * `MOV word ptr [ESI + 0x1310], 0x9`. The port played neither sound.
  */
 export function ThrowerStateWaitForPermit(obj: ThrowerActor,
                                           rng: Rng,
-                                          host: GameHost): void {
+                                          host: GameHost,
+                                          events?: Events): void {
+  // `SUB EAX, 0x0 / JZ`, `DEC EAX / JZ` at `0x0044B3EC`: two arms, and any
+  // other sub returns.
+  if (obj.sub !== 0 && obj.sub !== 1) return;
   if (obj.sub === 0) {
     if (!ThrowerTryClaimAttackSlot(obj, rng, host)) {
       // `if ((obj+0x34 & 0x40000000) != 0) return;` — an actor already in a
@@ -196,8 +210,12 @@ export function ThrowerStateWaitForPermit(obj: ThrowerActor,
       if (obj.charType === CHAR_ZSLMAN) {
         motion = WAIT_BY_STANCE_ZSLMAN[stance] ?? WAIT_DEFAULT;
       } else if (stance === ThrowerStance.Ground) {
-        motion = ThrowerMotionOf(obj, rng.int(2) === 0
-          ? ThrowerMotion.Idle : ThrowerMotion.IdleAlt);
+        // `CMP AX, 0x17 / JZ 0x0044b481` at `0x0044B458`: character type
+        // 0x17 stands in the set's first idle and draws nothing; the others
+        // flip `rand() % 2` between the pair. The port drew for 0x17 too.
+        motion = ThrowerMotionOf(obj, obj.charType === CHAR_ZSKAMERE
+          ? ThrowerMotion.Idle
+          : rng.int(2) === 0 ? ThrowerMotion.Idle : ThrowerMotion.IdleAlt);
       } else {
         motion = WAIT_BY_STANCE[stance] ?? WAIT_DEFAULT;
       }
@@ -218,6 +236,7 @@ export function ThrowerStateWaitForPermit(obj: ThrowerActor,
   // collision halves back on, so an actor that has been through a corpse
   // state (which clears them) collides again when it next commits.
   obj.flags2 |= ThrowerFlag.Collide;
+  if (obj.charType < CHAR_ZSASS || obj.charType > CHAR_ZSTIN) return;
   // Character type 0x17 does not pounce. It splits two ways, and **it raises
   // the throw-table bit on the way out** — which is what makes both of its
   // attacks resolve against `g_class31_throws` rather than the melee row.
@@ -230,15 +249,29 @@ export function ThrowerStateWaitForPermit(obj: ThrowerActor,
     // swings on the spot; otherwise it closes and strikes.
     const surface = QueryGroundSurfaceAt(obj.pos.x, obj.pos.y + 4.5,
                                          obj.pos.z);
-    obj.state = surface === PERCH_SURFACE
-        && G.g_camera_eye.y + PERCH_HEIGHT < obj.pos.y
-      ? ThrowerState.StrikeOnTheSpot : ThrowerState.CloseAndStrike;
+    if (surface === PERCH_SURFACE
+        && G.g_camera_eye.y + PERCH_HEIGHT < obj.pos.y) {
+      obj.state = ThrowerState.StrikeOnTheSpot;
+      return;
+    }
+    events?.emit("sound.play", { id: SND_ATTACK_CLAIMED });
+    obj.state = ThrowerState.CloseAndStrike;
     return;
   }
+  events?.emit("sound.play", { id: SND_ATTACK_CLAIMED });
   obj.flags2 &= ~ThrowerFlag.UseThrowTable;
   obj.state = ThrowerState.Pounce;
 }
 
+/**
+ * `PUSH 0x2416a9` at `0x0044B526` and `0x0044B5A5`: what a claim that goes
+ * to state 9 or 0x18 plays. `ThrowerStateLeapToSurface` names the same id at
+ * `0x0044C225`.
+ */
+const SND_ATTACK_CLAIMED = 0x2416a9;
+/** The way out's table spans the four class-0x31 types, `0x16..0x19`. */
+const CHAR_ZSASS = 0x16;
+const CHAR_ZSTIN = 0x19;
 /** Character type 0x17, the only one that does not pounce. */
 const CHAR_ZSKAMERE = 0x17;
 /** The surface it perches on, and how far above the eye it must be. */

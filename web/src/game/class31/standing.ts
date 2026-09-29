@@ -31,15 +31,24 @@ import { FtolS16 } from "../matrix";
 import { ThrowerReleaseAttackPermit, ThrowerTryClaimAttackSlot }
   from "../combat/permits";
 import type { GameHost } from "../host";
-import { CharacterTypeOf, MotionOf, SecondsToTicks, T } from "../tables";
+import {
+  CharacterTypeOf, MotionOf, MotionPlayLength, SecondsToTicks, T,
+} from "../tables";
 import type { CharacterType } from "../../bundle";
 import { VecToAngles, vec3 } from "../vec";
-import { ActorClipFrame, ActorClipLength } from "./arc";
+import { ActorPlayHitVoice, ActorVoice } from "../combat/voice";
+import {
+  ActorClipFrame, ActorClipLength, ActorPlayCursor, ActorPlayMotion,
+} from "./arc";
 import { ThrowerPickLandingPoint } from "./leap_down";
 import { ThrowerMotion, ThrowerState } from "./states";
 import { ThrowerStrikeConnect } from "./strike";
-import { Class31SetOf, ThrowerMotionOf, ThrowerPickAttack } from "./tables";
-import { SetCurrentActorMotionBlended } from "../class30/motion_cue";
+import {
+  Class31SetOf, ThrowerMotionOf, ThrowerPickAttack, ThrowerThrowEntryOf,
+} from "./tables";
+import {
+  ActorSetMotionBlended, ActorSetOneShotBlended, SetCurrentActorMotionBlended,
+} from "../class30/motion_cue";
 import { MotionFade } from "../class30/states";
 
 const _dest = vec3();
@@ -77,35 +86,95 @@ function playOnce(obj: ThrowerActor, motion: number, from = 0): void {
   obj.rootActionFrame = -1;
 }
 
-/** One entry of `g_class31_throws`, which both standing attacks read. */
-function ThrowerStrikeEntry(obj: ThrowerActor, index: number) {
-  return Class31SetOf(obj)?.strikes?.[String(index)] ?? null;
-}
-
 /**
  * `ThrowerStateCloseAndStrike` — `FUN_0044EA50`, class 0x31 state 24.
  *
- * The standing melee: hold the entry's approach clip until the actor is within
- * the entry's own distance of a target point, then swing and connect on the
- * entry's hit frame.
+ * `zskamere`'s standing swing: hold the entry's approach clip until the actor
+ * is within the entry's own distance of a mark, then swing, cry out, and
+ * connect on the entry's hit frame. `[proved]` from the listing, the whole
+ * routine. The sub is a four-arm jump table (`0x0044EC68`: `0x0044EA86`,
+ * `0x0044EB98`, `0x0044EC11`, `0x0044EC46`) behind `CMP EAX, 0x3 / JA` to the
+ * `RET`, and each arm ends by bumping the sub and running on into the next:
  *
- * Two things about it are counter-intuitive and both are `[proved]`. **It does
- * not move** — no velocity, no arc, no root motion — so the range test's
- * answer is fixed at the moment of entry unless something else carries the
- * actor, which is `[open]`. And the target point is `ThrowerPickLandingPoint`
- * frozen **once**, in sub 0: a place on the screen, captured from that frame's
- * camera and never refreshed.
+ * ```
+ *           e = g_class31_throws[obj+0x130C] + (s8)obj+0x131A * 0x10
+ * sub 0  0044ea93  obj+0x1360 = (s16)g_players_in_play
+ *        0044ea9b  ThrowerPickLandingPoint(obj, obj+0x13E4)
+ *        0044eac8  VecToAngles(obj+0x40 - eye.x, 0, obj+0x48 - eye.z,
+ *                              &pitch, obj+0x68)
+ *        0044eada  obj+0x131A = g_class31_attack_picks[obj+0x1F4 == 0x17
+ *                                 ? 0 : obj+0x130C]
+ *                               [(rand() >> 4) % 10 + (obj+0x1318 & 7) * 10]
+ *        0044eb5f  obj+0x34 |= 0x10000000; obj+0x136C &= 0xFFFFFE1F
+ *        0044eb86  obj+0x13D8..0x13E0 = obj+0x40..0x48; sub 1, and on
+ * sub 1  0044ebba  if (hypot(obj+0x40 - obj+0x13E4, obj+0x48 - obj+0x13EC)
+ *                      > e.distance) {                ; TEST AH, 0x41
+ *                    if (obj+0x1B4 != e.lunge)
+ *                      ActorSetMotionBlended(obj+0x194, e.lunge, 0, 5)
+ *                    return }
+ *        0044ebfa  ActorSetMotionBlended(obj+0x194, e.strike, 0, 5)
+ *        0044ec02  ActorPlayHitVoice(obj, 3); sub 2, and on
+ * sub 2  0044ec15  if (obj+0x19C == e.hit_frame) ThrowerStrikeConnect(obj)
+ *        0044ec3b  if (obj+0x19C < g_motion_play_length[obj+0x1B4] - 1)
+ *                    return
+ *                  sub 3, and on
+ * sub 3  0044ec49  state 0x19, sub 0; obj+0x34 &= ~0x10000000
+ * ```
  *
- * The one genuine subtlety: for character type 0x17 the attack index is drawn
- * from **behaviour set 0's** pick table while still indexing set 2's strike
- * row, which is what gives `zskamere` the always-connect entries 0, 1 and 3
- * here and the limb-gated 4, 5 and 6 in state 32.
+ * It writes no velocity and no position, and the mark is
+ * `ThrowerPickLandingPoint` taken **once**, in sub 0: a place on the screen,
+ * captured from that frame's camera and never refreshed. For character type
+ * 0x17 the attack index is drawn from **behaviour set 0's** picks while still
+ * indexing the actor's own row, which is what gives `zskamere` (set 2 in all
+ * fifteen shipped spawns) the entries 0, 1 and 3 here -- mask 8, which never
+ * cancels -- and the limb-gated 4, 5 and 6 in state 32.
+ *
+ * What the port had wrong, and each was a line the routine does not have or
+ * lacked one it does:
+ *
+ * * **The hit test is `==` every frame, behind no latch**: `MOVSX EAX, word
+ *   ptr [EDI + 0x8]` / `CMP dword ptr [ESI + 0x19c], EAX` / `JNZ` at
+ *   `0x0044EC11`. Both sides are the play cursor's unit -- the entry's frame
+ *   is a `obj+0x19C` value, the same one `ThrowerStrikeConnect` compares
+ *   again -- and the cursor gains one a tick, so the equality is met once per
+ *   swing; the port tested `>=` behind `obj.struck`.
+ * * **The cry**: `PUSH 0x3 / PUSH ESI / CALL 0x0040a6f0` at `0x0044EBFF`, on
+ *   the frame the swing starts. The port swung in silence.
+ * * **`obj+0x1360` takes the player count**, `MOVSX EDX, word ptr
+ *   [0x009c8e80]` / `MOV dword ptr [ESI + 0x1360], EDX` at `0x0044EA86`. On a
+ *   thrower that word is the arc phase, `arcPhase`, and
+ *   its readers are `ActorArcStep`'s dispatch (`0x0044D86C`),
+ *   `ThrowerStrikeConnect`'s melee arm (`CMP [ESI + 0x1360], 0x4` at
+ *   `0x0044CEAC`) and `ThrowerStateLeapToPoint`'s (`0x0044E568`). None of them
+ *   sees this value: state 24 is entered only from `0x0044B5BB`, one
+ *   instruction after `ThrowerStateWaitForPermit` raises `obj+0x136C` bit
+ *   `0x400`, so its connect takes the throw-table arm; and every
+ *   `ActorArcStep` caller zeroes the phase before its first step --
+ *   `ActorArcBeginToWaypoint` (`0x0044D7F0`, `0x0044D84B`),
+ *   `ThrowerStateLeapToSurface` (`0x0044C239`, past a `PlaySoundId` Ghidra
+ *   stops at), `ThrowerStateLeapToPoint` (`0x0044E558`),
+ *   `ThrowerStateLeapStrike` (`0x0044E7B3`, `EBX` zeroed at `0x0044E6B9`) and
+ *   `ThrowerStateDelayedPounce` (`0x0044E973`). A byte search for the
+ *   displacement `60 13 00 00` finds no other access in class 0x31's range.
+ *   The store is kept because the engine makes it.
+ * * **No missing-entry exit.** The engine dereferences the row it names;
+ *   the port sent a row the bundle omits straight to state 25 with
+ *   `0x10000000` still up. See {@link ThrowerThrowEntryOf} for why the zero
+ *   row is the one it reads, and why no shipped spawn reaches one here.
+ * * **Both clips go through `ActorSetMotionBlended`**, fade 5, the lunge on
+ *   the one track's motion and the swing on the one-shot channel that holds
+ *   its start frame for the fade, as `ZombieStateStrike`'s does -- the port
+ *   cut to the swing and set the lunge outright. The end test is
+ *   `g_motion_play_length`, not the clip's authored length.
  */
 export function ThrowerStateCloseAndStrike(obj: ThrowerActor,
                                            rng: Rng,
                                            host: GameHost,
                                            events?: Events): void {
+  // `CMP EAX, 0x3 / JA 0x0044EC63` on the sign-extended sub.
+  if (obj.sub < 0 || obj.sub > 3) return;
   if (obj.sub === 0) {
+    obj.arcPhase = G.g_players_in_play;
     ThrowerPickLandingPoint(obj, host, _dest);
     obj.target = { x: _dest.x, y: _dest.y, z: _dest.z };
     // `VecToAngles(obj+0x40 - g_camera_eye_x, 0, obj+0x48 - g_camera_eye_z,
@@ -116,10 +185,11 @@ export function ThrowerStateCloseAndStrike(obj: ThrowerActor,
     // test below measured to the camera rather than to the mark.
     obj.yaw = FtolS16(VecToAngles(obj.pos.x - G.g_camera_eye.x, 0,
                                   obj.pos.z - G.g_camera_eye.z).yaw);
-    // The 0x17 override: set 0's picks, set 2's entries.
-    obj.attack = obj.charType === CHAR_ZSKAMERE
-      ? ThrowerPickAttackFromSet0(obj, rng.int(10))
-      : ThrowerPickAttack(obj, rng.int(10));
+    // `MOV EDX, dword ptr [0x00592a20]` at `0x0044EAF9` -- set 0's pointer by
+    // address -- against `[EDX*0x4 + 0x592a20]` at `0x0044EB2F` for the rest.
+    obj.attack = ThrowerPickAttack(obj, rng.int(10),
+      obj.charType === CHAR_ZSKAMERE
+        ? T.chars?.class31?.sets?.[0] ?? null : Class31SetOf(obj));
     // `8b5634` / `81ca00000010` / `895634` at `0x0044EB59`..`0x0044EB77`:
     // `obj+0x34 |= 0x10000000` -- mid-attack, as every class-0x31 strike has
     // it. It raised `BackingOff`, the next bit up, which on this class only
@@ -127,48 +197,43 @@ export function ThrowerStateCloseAndStrike(obj: ThrowerActor,
     obj.flags |= ActorFlag.Committed;
     obj.flags2 &= ~(ThrowerFlag.Surface | ThrowerFlag.OffGround);
     obj.strikeStart = { x: obj.pos.x, y: obj.pos.y, z: obj.pos.z };
-    obj.struck = false;
     obj.sub = 1;
   }
 
-  const e = ThrowerStrikeEntry(obj, obj.attack);
-  if (!e) { obj.state = ThrowerState.Withdraw; obj.sub = 0; return; }
-
+  const e = ThrowerThrowEntryOf(obj, obj.attack);
   if (obj.sub === 1) {
+    // `FCOMP [EDI + 0x4]` / `TEST AH, 0x41` / `JNZ` at `0x0044EBBA`: at or
+    // inside the reach -- or unordered -- swings.
     const d = Math.hypot(obj.pos.x - obj.target.x, obj.pos.z - obj.target.z);
     if (d > e.distance) {
-      if (obj.motion !== e.lunge && MotionOf(obj, e.lunge)) {
-        obj.motion = e.lunge;
-        obj.playTicks = 0;
-        obj.rootFrame = -1;
+      // `CMP dword ptr [ESI + 0x1b4], EAX` at `0x0044EBC8`: against whatever
+      // the one track is playing.
+      if (ActorPlayMotion(obj) !== e.lunge) {
+        ActorSetMotionBlended(obj, e.lunge, 0, MotionFade.Quick);
       }
       return;
     }
-    playOnce(obj, e.strike);
+    ActorSetOneShotBlended(obj, e.strike, 0, MotionFade.Quick);
+    ActorPlayHitVoice(obj, ActorVoice.Attack, rng,
+                      (id) => events?.emit("sound.play", { id }));
     obj.sub = 2;
   }
 
   if (obj.sub === 2) {
-    if (!obj.struck && ActorClipFrame(obj) >= e.hit_frame) {
-      obj.struck = true;
+    if (ActorPlayCursor(obj) === e.hit_frame) {
       ThrowerStrikeConnect(obj, events);
     }
-    const len = ActorClipLength(obj, obj.action?.motion ?? e.strike);
-    if (obj.action && ActorClipFrame(obj) < len - 1) return;
+    if (ActorPlayCursor(obj)
+        < MotionPlayLength(obj, ActorPlayMotion(obj)) - 1) {
+      return;
+    }
     obj.sub = 3;
   }
 
   // `25ffffffef` at `0x0044EC52`, stored back to `obj+0x34` at `0x0044EC60`.
-  obj.flags &= ~ActorFlag.Committed;
   obj.state = ThrowerState.Withdraw;
   obj.sub = 0;
-}
-
-/** The 0x17 override: draw from behaviour set 0's pick table. */
-function ThrowerPickAttackFromSet0(obj: ThrowerActor, roll: number): number {
-  const picks = Class31SetOf({ ...obj, condition: 0 })?.attack_picks ?? [];
-  if (!picks.length) return ThrowerPickAttack(obj, roll);
-  return picks[(roll % 10) + (obj.zones & 7) * 10] ?? 0;
+  obj.flags &= ~ActorFlag.Committed;
 }
 
 /**
@@ -177,25 +242,61 @@ function ThrowerPickAttackFromSet0(obj: ThrowerActor, roll: number): number {
  * `zskamere` standing on surface `0x35` above you: it plays one clip, **pins
  * itself to where that clip ended**, and then swings for ever — claim, draw,
  * strike, pause two seconds, repeat. It never writes `obj+0x1310`, so nothing
- * but death takes it out.
+ * but death takes it out. `[proved]` from the listing: a six-arm jump table
+ * (`0x00450CD0`) behind `CMP EAX, 0x5 / JA` to the `RET`, arms falling into
+ * each other as state 24's do:
+ *
+ * ```
+ * sub 0  00450b4c  ActorSetMotionBlended(obj+0x194, 0x1B8, 0, 5); sub 1, on
+ * sub 1  00450b70  if (obj+0x19C < g_motion_play_length[obj+0x1B4] - 1)
+ *                    return
+ *        00450b88  sub 2; obj+0x13D8..0x13E0 = obj+0x40..0x48, and on
+ * sub 2  00450bac  obj+0x40..0x48 = obj+0x13D8..0x13E0
+ *        00450bb8  if (obj+0x121 == 0xFF) ThrowerTryClaimAttackSlot(obj)
+ *        00450bd2  obj+0x34 |= 0x10000000
+ *        00450c0a  obj+0x131A = g_class31_attack_picks[obj+0x130C][...]
+ *        00450c28  ActorSetMotionBlended(obj+0x194,
+ *                    g_class31_throws[obj+0x130C][obj+0x131A].strike, 0, 5)
+ *        00450c30  ActorPlayHitVoice(obj, 3); sub 3, and on
+ * sub 3  00450c41  ThrowerStrikeConnect(obj)
+ *        00450c5e  if (obj+0x19C < g_motion_play_length[obj+0x1B4] - 1)
+ *                    return
+ *                  sub 4, and on
+ * sub 4  00450c6d  obj+0x34 &= ~0x10000000
+ *        00450c75  ThrowerReleaseAttackPermit(obj)
+ *        00450c96  ActorSetMotionBlended(obj+0x194,
+ *                    g_class31_motion_sets[obj+0x130C][1], 0, 5)
+ *        00450ca5  sub 5; obj+0x1330 = 0x78, and on
+ * sub 5  00450cb5  if (--obj+0x1330 > 0) return; sub 2
+ * ```
  *
  * The position is restored from the pin at the top of *every* cycle, not once,
  * which is what keeps a strike's own root motion from walking it off its perch.
+ *
+ * The port had no cry; released the permit only when it held one, where
+ * `FUN_0044CFB0` drops the off-screen latch either way; dropped
+ * `obj+0x136C` bit `0x800`, which no arm here writes; guarded the swing on
+ * the bundle carrying its row; cut to each clip without the fade; and ended
+ * each clip on its authored length rather than `g_motion_play_length`.
  */
 export function ThrowerStateStrikeOnTheSpot(obj: ThrowerActor, dt: number,
                                             rng: Rng,
                                             host: GameHost,
                                             events?: Events): void {
+  // `CMP EAX, 0x5 / JA 0x00450CCB` on the sign-extended sub.
+  if (obj.sub < 0 || obj.sub > 5) return;
   if (obj.sub === 0) {
-    playOnce(obj, PIN_CLIP);
+    ActorSetOneShotBlended(obj, PIN_CLIP, 0, MotionFade.Quick);
     obj.sub = 1;
   }
 
   if (obj.sub === 1) {
-    const len = ActorClipLength(obj, obj.action?.motion ?? PIN_CLIP);
-    if (obj.action && ActorClipFrame(obj) < len - 1) return;
-    obj.strikeStart = { x: obj.pos.x, y: obj.pos.y, z: obj.pos.z };
+    if (ActorPlayCursor(obj)
+        < MotionPlayLength(obj, ActorPlayMotion(obj)) - 1) {
+      return;
+    }
     obj.sub = 2;
+    obj.strikeStart = { x: obj.pos.x, y: obj.pos.y, z: obj.pos.z };
   }
 
   if (obj.sub === 2) {
@@ -208,32 +309,36 @@ export function ThrowerStateStrikeOnTheSpot(obj: ThrowerActor, dt: number,
     // bit `0x10000000`, not `BackingOff`.
     obj.flags |= ActorFlag.Committed;
     obj.attack = ThrowerPickAttack(obj, rng.int(10));
-    const e = ThrowerStrikeEntry(obj, obj.attack);
-    if (e) playOnce(obj, e.strike);
-    obj.struck = false;
+    ActorSetOneShotBlended(obj, ThrowerThrowEntryOf(obj, obj.attack).strike,
+                           0, MotionFade.Quick);
+    // `PUSH 0x3 / PUSH ESI / CALL 0x0040a6f0` at `0x00450C2D`.
+    ActorPlayHitVoice(obj, ActorVoice.Attack, rng,
+                      (id) => events?.emit("sound.play", { id }));
     obj.sub = 3;
   }
 
   if (obj.sub === 3) {
     ThrowerStrikeConnect(obj, events);
-    const len = ActorClipLength(obj, obj.action?.motion ?? 0);
-    if (obj.action && ActorClipFrame(obj) < len - 1) return;
+    if (ActorPlayCursor(obj)
+        < MotionPlayLength(obj, ActorPlayMotion(obj)) - 1) {
+      return;
+    }
     obj.sub = 4;
   }
 
   if (obj.sub === 4) {
     // `25ffffffef` at `0x00450C6D`.
     obj.flags &= ~ActorFlag.Committed;
-    if (obj.attackPermit >= 0) ThrowerReleaseAttackPermit(obj);
-    const idle = ThrowerMotionOf(obj, ThrowerMotion.IdleAlt);
-    if (idle !== undefined) playOnce(obj, idle);
-    obj.slideTimer = PIN_PAUSE_FRAMES;
-    obj.flags2 &= ~ThrowerFlag.Struck;
+    ThrowerReleaseAttackPermit(obj);
+    ActorSetMotionBlended(obj, ThrowerMotionOf(obj, ThrowerMotion.IdleAlt) ?? 0,
+                          0, MotionFade.Quick);
     obj.sub = 5;
+    obj.slideTimer = PIN_PAUSE_FRAMES;
   }
 
   obj.slideTimer -= SecondsToTicks(dt);
-  if (obj.slideTimer < 1) obj.sub = 2;
+  if (obj.slideTimer > 0) return;
+  obj.sub = 2;
 }
 
 /**

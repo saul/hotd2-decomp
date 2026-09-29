@@ -983,9 +983,11 @@ export interface Class31Set {
    * `g_class31_throws` in the raw, by index. `ThrowerStateThrow` reads entries
    * 0 and 1 as the right and left hand; `ThrowerStateCloseAndStrike` reads the
    * same rows as a **melee** attack — a strike clip, an approach clip, the
-   * distance it closes to and the frame the hit lands on. Entries the row
-   * leaves zero are omitted, which is why a set-0 actor with both arms gone
-   * draws index 3 and finds nothing.
+   * distance it closes to and the frame the hit lands on. An entry whose
+   * strike clip is not positive is omitted -- row A's entry 3, all zero, and
+   * its entry 5, a zero clip over non-zero fields -- and the port reads the
+   * zero row in its place (`game/class31/tables.ts`, `ThrowerThrowEntryOf`),
+   * which is what the engine reads for every index a set's picks can name.
    */
   strikes: Record<string, AttackJson>;
   /** `picks[(rand % 10) + (destroyed_zones & 7) * 10]` names the attack. */

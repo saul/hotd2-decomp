@@ -22,6 +22,16 @@
  * with the token it had -- and a reloaded tab rejoins from its link. The
  * game on the host plays on meanwhile, with player 2's gun put down.
  *
+ * **Two tabs of one browser never use WebRTC.** The host listens on a
+ * `BroadcastChannel` for its room beside WebRTC, and a join looks there
+ * first (`local.ts`): on one machine there is nothing to traverse, and it is
+ * the case WebRTC handles worst. `?rtc=1` on both pages turns this off.
+ *
+ * **The host's game waits for player 2.** From the moment it makes a room
+ * until player 2's page answers -- and again after a drop, while player 2
+ * finds their way back -- the host's clock is held
+ * ({@link NetSession.waitingForPlayer2}); Leave plays on alone.
+ *
  * `?netsim=lat:80,jit:20,loss:5` makes this end's outgoing link that much
  * worse; `?relay=1` forces WebRTC through TURN.
  */
@@ -33,7 +43,7 @@ import { NetReplica, type ReplicaSim } from "./replica";
 import { RtcTransport } from "./rtc";
 import { SignalClient, signalBase } from "./signal";
 import { pushLog, type NetStats } from "./stats";
-import { SimLink, parseSim, type Transport } from "./transport";
+import { FirstOpen, SimLink, parseSim, type Transport, type TransportInfo } from "./transport";
 
 export type NetRole = "solo" | "host" | "replica";
 
@@ -68,6 +78,11 @@ export interface LobbyState {
 const POLL_MS = 100;
 /** Player 2's rejoin attempts after a drop, and the wait before each. */
 const REJOIN_DELAYS_MS = [500, 1500, 3000, 6000, 10000];
+
+/** The `BroadcastChannel` room a host's online room is also open on, in its own browser. */
+function sameBrowserRoom(code: string): string {
+  return `room-${code}`;
+}
 
 export class NetSession {
   role: NetRole = "solo";
@@ -165,7 +180,7 @@ export class NetSession {
       link.hash = `join=${signal.code}`;
       link.searchParams.delete("net");
       this.lobby = { phase: "waiting", code: signal.code, link: link.href, error: null };
-      this.attach("host", this.rtc(signal));
+      this.attach("host", this.hostWays(signal));
     } catch (e) {
       this.fail(`could not make a room: ${(e as Error).message}`);
     }
@@ -173,6 +188,13 @@ export class NetSession {
 
   private rtc(signal: SignalClient): RtcTransport {
     return new RtcTransport(signal, { relayOnly: this.params.has("relay") });
+  }
+
+  /** Where player 2 may come from: over WebRTC, or from another tab of this browser. */
+  private hostWays(signal: SignalClient): Transport {
+    if (this.params.has("rtc")) return this.rtc(signal);
+    return new FirstOpen([this.rtc(signal),
+                          new LocalTransport("host", sameBrowserRoom(signal.code))]);
   }
 
   /** Join over the internet, by the host's code. */
@@ -184,16 +206,22 @@ export class NetSession {
       this.lobby = { phase: "joining", code: c, link: null, error: null };
     }
     this.hooks.wake();
+    // The host in another tab of this browser, if it is: no rendezvous, no
+    // WebRTC. Attached straight after the await, before its first message.
+    const near = this.params.has("rtc") ? null : await LocalTransport.find(sameBrowserRoom(c));
+    if (near) {
+      this.signal?.close();
+      this.signal = null;
+      this.showJoined(c);
+      this.lobby = { ...this.lobby, phase: "connecting", code: c };
+      this.attach("replica", near);
+      return;
+    }
     try {
       const signal = await SignalClient.join(signalBase(location.search), c);
       this.signal?.pause();
       this.signal = signal;
-      // The address says which game this tab is in, so a reload comes back
-      // to it (`urlstate.ts` keeps the hash through every rewrite after).
-      if (location.hash !== `#join=${c}`) {
-        history.replaceState(history.state, "",
-                             `${location.pathname}${location.search}#join=${c}`);
-      }
+      this.showJoined(c);
       this.lobby = { ...this.lobby, phase: "connecting", code: c };
       this.attach("replica", this.rtc(signal));
     } catch (e) {
@@ -207,6 +235,17 @@ export class NetSession {
       } else {
         this.rejoinLater(why);
       }
+    }
+  }
+
+  /**
+   * The address says which game this tab is in, so a reload comes back to it
+   * (`urlstate.ts` keeps the hash through every rewrite after).
+   */
+  private showJoined(code: string): void {
+    if (location.hash !== `#join=${code}`) {
+      history.replaceState(history.state, "",
+                           `${location.pathname}${location.search}#join=${code}`);
     }
   }
 
@@ -276,7 +315,7 @@ export class NetSession {
       if (this.kind === "local") {
         this.attach("host", new LocalTransport("host", this.params.get("room") ?? "default"));
       } else if (this.signal) {
-        this.attach("host", this.rtc(this.signal));
+        this.attach("host", this.hostWays(this.signal));
       }
     } else {
       // A host that closed its room is not coming back.
@@ -325,7 +364,31 @@ export class NetSession {
         this.rejoins = 0;
         this.hooks.wake();
       }
+    } else if (!Number.isNaN(this.transport?.info.path?.since ?? NaN)
+               && now - this.searchWakeAt >= 1000) {
+      // WebRTC is searching, and the lobby card counts what it has tried. The
+      // page is held -- a host waiting, a replica with no stream -- so nothing
+      // else would draw it again.
+      this.searchWakeAt = now;
+      this.hooks.wake();
     }
+  }
+
+  private searchWakeAt = -Infinity;
+
+  /**
+   * The host has nobody to play with: its room is made and player 2's page
+   * has not answered yet, or has dropped and not come back. The player holds
+   * its clock meanwhile, as it does while player 2 loads a stage; the lobby
+   * card says so, and Leave plays on alone.
+   */
+  get waitingForPlayer2(): boolean {
+    return this.role === "host" && !this.host?.connected;
+  }
+
+  /** The link as it stands, for the lobby's account of a slow connect. */
+  get link(): TransportInfo | null {
+    return this.transport?.info ?? null;
   }
 
   /** Why the host's clock is held, as the replica hears it. */

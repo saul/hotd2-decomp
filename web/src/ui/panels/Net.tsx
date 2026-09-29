@@ -103,14 +103,20 @@ function lobbyText(net: NetProjection): { title: string; body: string } | null {
   switch (l.phase) {
     case "creating": return { title: "Making a room…", body: "" };
     case "waiting":
-      return net.role === "host"
-        ? { title: "Waiting for player 2", body: l.code === "local"
-            ? "Open this page in another tab with ?net=local-join."
-            : "Send them the link, or have them choose Join and type the code." }
-        : null;
+      if (net.role !== "host") return null;
+      if (l.path) {
+        return { title: "Connecting to player 2…",
+                 body: "Their page is in the room. The game is held until they are in." };
+      }
+      return { title: "Waiting for player 2", body: (l.code === "local"
+        ? "Open this page in another tab with ?net=local-join."
+        : "Send them the link, or have them choose Join and type the code.")
+        + " The game is held until they are in; Cancel plays on alone." };
     case "joining": return { title: `Joining ${l.code ?? ""}…`, body: "" };
     case "connecting":
-      return { title: "Connecting…", body: "Finding a way through both networks." };
+      return l.hint
+        ? { title: "No way through yet", body: "Still trying; this is what it has found." }
+        : { title: "Connecting…", body: "Finding a way through both networks." };
     case "error":
     case "closed":
       return { title: l.phase === "error" ? "Could not connect" : "The session ended",
@@ -147,6 +153,8 @@ export function NetLobbyCard() {
         </>
       )}
       {t.body && <p>{t.body}</p>}
+      {l.path && <p className="net-path">{l.path}</p>}
+      {l.hint && <p className="net-hint">{l.hint}</p>}
       <button className="net-leave" onClick={() => dispatch({ kind: "netLeave" })}>
         {bad ? "Close" : "Cancel"}
       </button>

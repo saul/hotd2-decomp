@@ -1182,3 +1182,16 @@ time it ran: the replica wrote the RNG word back as `state >>> 0`, and the
 host's is signed whenever `Rng.next` last ran. The same bits draw the same
 numbers, so nothing played wrong -- this time. **Check state where it is used,
 not where it was delivered.**
+
+**L79 -- A flag that makes the test environment work can be the bug the user
+hits.** Netplay's browser harness launched Chrome with
+`--disable-features=WebRtcHideLocalIpsWithMdns`, so two tabs would find each
+other by plain address "whether or not mDNS resolves", and its WebRTC run
+passed for days. The first person to try two tabs sat on "Finding a way
+through both networks" for good: every real Chrome hides host addresses
+behind `.local` names, this Mac does not resolve them, and its router does not
+route its own public address back in. The flag was written down, with its
+reason, and the reason was the failure. **When a harness needs a flag the
+user's environment does not have, run the case once without it too** -- here
+`tools/net_pair.mjs` now ends with an mDNS run that must either connect or
+have the page say why.

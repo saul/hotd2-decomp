@@ -1,5 +1,20 @@
 # Putting the player on a phone
 
+## On Cloudflare: `npm run deploy`
+
+The simplest way onto a phone that is not on the LAN: the built page, the
+bundle and the sounds in an R2 bucket, served over HTTPS by a Worker under a
+secret path, `https://hotd2-site.<subdomain>.workers.dev/<SITE_KEY>/`.
+
+```sh
+cd web
+npm run deploy     # and `npm run export` does it after every rebundle
+```
+
+Its settings are `r2site/.deploy.env`, gitignored; `r2site/README.md` is the
+procedure, and says what a bucket with public access means for the game's
+data.
+
 ## From the dev server, over HTTPS, and offline
 
 The quickest way is the dev server itself. Over plain `http://` a phone gets

@@ -353,6 +353,15 @@ When a cross-reference search says a routine nothing could work without is
 never called, disassemble past the end of every function that ought to call it
 before believing the search.
 
+A **callers** list is narrower than the xref list it is built from.
+`get_function_callers` names functions, so a call from code Ghidra left
+outside every body is simply not in it: `PlayerTakeDamageTimed` was recorded
+as having no caller in the image for ten days, while `get_xrefs_to
+0x00415430` listed `CALL` at `0x0048AC45` -- the tail of `CivilianUpdate` --
+with an empty `from_function`, and the port called it with the wrong
+arguments on the strength of the empty list. For a negative, ask for xrefs,
+never callers.
+
 **L36 — A `cd` out of your own worktree is L28 with your own hands on it.**
 L28 is about a *repo tool* writing somewhere else. This is the same failure
 one step earlier: six `python3 - <<'PY'` edit scripts were written with

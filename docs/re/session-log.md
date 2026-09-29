@@ -26114,3 +26114,66 @@ op-0x1F civilians twice. In the page (stage 1 `?block=6&step=1`, 0x3C38): she
 takes the box at f675, gives it at f710, lives 3 -> 4, LIFE UP on screen, hand
 empty from f711; on the old tree the box floats beside the hand and is still
 held at f795 with lives 3.
+
+## 2026-09-29 -- the head combo is not the mark's: every writer of `g_head_combo_bonus`
+
+`FireShotRequest` zeroed the shooter's `g_head_combo_bonus` on every mark of a
+class that owns its shot result, and on every body creature's.
+`MarkActorShot` (`FUN_00404DB0`) writes no such thing, so a pull on class
+0x12's boarded door -- shootable since `ShotTestMesh` -- ended a headshot run
+the exe keeps going.
+
+**The reading.** Rather than read nineteen on-shot routines and hope none
+calls something that writes it, every writer of the global: the xrefs to
+`0x009A5C82` **and** to `0x009A5DB2` (player 1's copy, which classes 0x20 and
+0x21 address absolutely), every instruction operand in
+`0x009A5C00..0x009A5DFF`, and each register base loaded from that range,
+disassembled to its offsets. `[proved]` The writers are `ResolveHit` (reached
+only through `DispatchHit`, from `ThrowerOnShot` and `ZombieOnShot`),
+`OneHitTargetUpdate` (class 0x20), `RescueTargetHeldState` (class 0x21), the
+non-kill shot arm of `CivilianUpdate` (class 0x10, `0x0048AC5B`, in the tail
+Ghidra leaves outside the function), and the resets `PlayerStateEnterJoinIn`,
+`ResetSceneOnEnter` and an undefined routine at `0x00425E90` (`[open]` what
+reaches it; no direct caller). `ProcessPlayerShots` (`EBX = 0x009A5C78`),
+`ScoreAddForPlayer`, `Class14TrackAdaptiveRank`, `Boss4AdjustRank`,
+`FUN_0040A920` and `GameFrameTick` load bases in the block and write nothing
+at the combo's offset. Each of the three class routines is installed only by
+its own class. So of the nineteen `ownsShotResult` classes, 0x10, 0x20 and
+0x21 reset it -- each in its own update, which the port already had, on the
+right arm -- and 0x11-0x14, 0x19, 0x22, 0x23, 0x26, 0x28, 0x40, 0x43, 0x45,
+0x46 and 0x51-0x53 never touch it; nor does `BodyCreatureUpdate`
+(`FUN_0043E880`). Both generic resets are gone from `FireShotRequest`; the
+`globals.tsv` row lists every writer by address.
+
+**Found on the way, in the civilian's arm.** `CALL 0x00415430` at
+`0x0048AC45` is `PlayerTakeDamageTimed(p, 0, 0, 1, -1)` -- `EBX` is zeroed at
+`0x0048A96B` and never reassigned. Its row said "NO CALL TO IT EXISTS IN THE
+IMAGE (searched 2026-09-19)" and the port called it `(p, 1, 0, 0, -1)` with an
+`[open]` saying the civilian's damage call had not been found, while
+`CivilianUpdate`'s own row already said it calls it. The port therefore
+latched a hit (the damage overlay) the exe does not, and refused the life
+inside the invulnerability window, where the exe takes it. Fixed to the exe's
+arguments; the row, `docs/formats/civilians.md`, `damage_overlay.ts`'s
+comment, and the feed label (the event said `"thrown"`, a leftover of the
+weapon once being attributed there) follow.
+
+**Wrong turns.** My first operand sweep used `0x9a5c`, which cannot match the
+absolute form Ghidra prints as `[0x009a5c82]` -- L32, paid for again, a
+fortnight after it was written. The xref list then looked complete until
+`OneHitTargetUpdate`'s disassembly showed player 1's row at `0x009A5DB2`, an
+address with no xref to the global's name at all. And the 2026-09-19 "no
+caller" came from a callers list: `get_function_callers 0x00415430` is empty
+because the call sits outside every function body, while `get_xrefs_to` lists
+it with no `from_function` (added to L35). The body-creature reset was not in
+the brief; it is the same rule in the same function.
+
+**Proof.** `test:port`: a pull on class 0x12's boards keeps a running combo
+for both players, and a pull on a body creature keeps it on the mark and
+through the update that pays 0x50 -- both fail on the old tree. A civilian
+shot inside the invulnerability window costs the life, latches no hit and
+leaves the window -- fails on the old tree (lives 3 -> 3). A shot civilian
+zeroes the shooter's combo alone, in her update (a pin; passes either way).
+`verify_port.py`: divergences 134 and uncited exports 81, as before; two
+`[open]` markers fewer. `verify_all --game-dir` green (crosshair re-run alone
+after a vite "Outdated Optimize Dep" 504; `verify_geometry` through a
+temporary `extract/player` link to a private bundle).

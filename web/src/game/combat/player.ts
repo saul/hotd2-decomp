@@ -189,12 +189,13 @@ function PlayerFloorLivesOffPath(player: number): void {
  * the attract demo, and it does not refuse player -1 before calling
  * `CheckPlayerCanBeHit`, which refuses it anyway.
  *
- * `[open]` **Nothing in the image calls it** -- no `CALL 0x00415430` exists.
- * The port's two callers, the class-0x31 thrown weapon and class 0x10's shot,
- * were attributed to it before that was checked; the weapon's engine routine,
- * `ThrownWeaponFlyToTarget` (`FUN_0044FD40`), calls `PlayerTakeDamage`
- * (`player, 1, 6`), and now does so here too. Class 0x10's engine call has not
- * been found and is left on this routine with its default arguments.
+ * **One call in the image**, `CALL 0x00415430` at `0x0048AC45`: a shot
+ * civilian, `(p, 0, 0, 1, -1)`, from the tail of `CivilianUpdate`
+ * (`FUN_0048A920`) that Ghidra leaves outside the function -- which is why a
+ * search of its callers found none and this said "nothing calls it" until
+ * 2026-09-29; the xref list has it. The class-0x31 thrown weapon was once
+ * attributed here too, and its routine, `ThrownWeaponFlyToTarget`
+ * (`FUN_0044FD40`), calls `PlayerTakeDamage` (`player, 1, 6`) instead.
  */
 export function PlayerTakeDamageTimed(player: number, latch: number,
                                       overlayKind: number, ignoreInvuln = 0,
@@ -215,8 +216,9 @@ export function PlayerTakeDamageTimed(player: number, latch: number,
   }
   if (invulnFrames !== -1) G.g_player_invuln_frames[player] = invulnFrames;
   PlayerFloorLivesOffPath(player);
+  // [port-only] The feed's label: the routine's one caller is a shot civilian.
   events?.emit("player.damaged", {
-    source: "thrown",
+    source: "civilian",
     at: src?.at ?? -1,
     who: src?.name ?? "—",
     attack: -1,

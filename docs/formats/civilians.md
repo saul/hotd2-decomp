@@ -803,6 +803,10 @@ hurt at all. With one, a survivable hit calls `PlayerTakeDamageTimed` — which
 costs a **life** and 100 points of its own — and then charges another 100, so
 the shooter is down 200; a *killing* shot charges 100 to **both** players and
 no life. Either way the civilian switches to its on-shot script and cries out.
+The call is `(p, 0, 0, 1, -1)` at `0x0048AC45` `[proved]`: the life is taken
+**inside the invulnerability window** too, and no hit is latched, so there is
+no damage flash. The survivable arm also zeroes the shooter's
+`g_head_combo_bonus` and counts a hit (`0x0048AC5B`/`0x0048AC62`).
 
 ## The captors, and what they are actually doing
 

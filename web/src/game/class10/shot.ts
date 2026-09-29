@@ -82,11 +82,15 @@ export function CivilianCheckShot(obj: Actor, f: ClassFrame): void {
     // `obj+0x34` bits 1 and 2 name the shooter; neither means "either".
     const two = obj.flags & 6;
     player = two === 2 ? 0 : two === 4 ? 1 : (f.rng.next() < 0.5 ? 0 : 1);
-    // `[open]` The engine call behind this has not been found: `CivilianUpdate`
-    // (`FUN_0048A920`) makes no damage call, and `PlayerTakeDamageTimed` has
-    // no caller in the image. Kept on it, with its default arguments.
-    PlayerTakeDamageTimed(player, 1, 0, 0, -1, f.events, obj);
+    // `PlayerTakeDamageTimed(p, 0, 0, 1, -1)` at `0x0048AC45`, in the tail
+    // Ghidra leaves outside `CivilianUpdate` (`FUN_0048A920`) -- so its
+    // callers list is empty and its xref list is not. No latch, so no
+    // `g_player_was_hit` and no overlay; and a non-zero fourth argument, so
+    // the life is taken inside the invulnerability window too.
+    PlayerTakeDamageTimed(player, 0, 0, 1, -1, f.events, obj);
     ScoreAddForPlayer(player, SHOT_PENALTY, f.events);
+    // `0x0048AC5B`: the shooter's head combo, on this arm only -- one of the
+    // four routines in the image that write it (see `combat/shot.ts`).
     G.g_head_combo_bonus[player] = 0;
     G.g_player_hit_count[player] += 1;
     obj.flags |= ActorFlag.Dead;

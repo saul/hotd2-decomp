@@ -56,6 +56,13 @@
  * in `g_head_combo_bonus`, which `ResetSceneOnEnter` zeroes; a second private
  * copy in `render/shooting.ts` used to shadow it, and only one of the two was
  * ever in a snapshot.
+ *
+ * "Any non-head hit" means any hit a routine that keeps the combo scores, and
+ * there are four: `ResolveHit` here, and the updates of classes 0x10, 0x20
+ * and 0x21, which each write it out again. Nothing else in the image writes
+ * it but the scene and join resets. A shot that is only marked -- a prop, a
+ * thrown weapon, a body creature, any other class that owns its result --
+ * leaves it running.
  */
 import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
@@ -357,7 +364,9 @@ export function FireShotRequest(req: ShotRequest, host: GameHost, rng: Rng,
   if (pick.kind === "creature") {
     // `MarkActorShot` and nothing else: the score, the sound and the blood
     // are `BodyCreatureUpdate`'s, on the next frame, which is where the
-    // engine puts them. See `game/body_creature.ts`.
+    // engine puts them. See `game/body_creature.ts`. No head-combo reset
+    // either -- `BodyCreatureUpdate` (`FUN_0043E880`) pays and counts the hit
+    // and never touches `g_head_combo_bonus`.
     const c = G.g_body_creatures.find((x) => x.id === pick.creatureId);
     if (!c) {
       events?.emit("shot.resolved", { player, kind: "miss", ray: req.ray,
@@ -365,7 +374,6 @@ export function FireShotRequest(req: ShotRequest, host: GameHost, rng: Rng,
       return;
     }
     MarkBodyCreatureShot(c, player);
-    G.g_head_combo_bonus[player] = 0;
     events?.emit("shot.resolved", {
       player, kind: "marked", ray: req.ray, point: pick.point, points: 0,
     });
@@ -411,11 +419,17 @@ export function FireShotRequest(req: ShotRequest, host: GameHost, rng: Rng,
   // delivers it -- marked, and nothing else. `CivilianUpdate` is what a hit on
   // a civilian *means*: a life, two hundred points and the on-shot script.
   // Scoring it here would be a second implementation of that rule.
+  //
+  // **The head combo is the class's too.** `MarkActorShot` does not write
+  // `g_head_combo_bonus`, and of the nineteen owning classes only three
+  // routines do: `CivilianUpdate`, `OneHitTargetUpdate` and
+  // `RescueTargetHeldState` (classes 0x10, 0x20, 0x21), each in its own
+  // update and each ported there. A pull on class 0x12's boarded door, an
+  // owl, a bat or a boss leaves it as it was.
   if (g_class_handlers[obj.cls as SpawnClass]?.ownsShotResult) {
     MarkActorShot(obj, player, pick.bone, pick.whole ?? false,
                   pick.mesh ? { point: pick.point, ...pick.mesh } : undefined,
                   host, events);
-    G.g_head_combo_bonus[player] = 0;
     events?.emit("shot.resolved", {
       player, kind: "marked", ray: req.ray, point: pick.point,
       at: obj.at, bone: pick.bone, who: obj.name, charType: obj.charType,

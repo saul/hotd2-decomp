@@ -324,8 +324,9 @@ export function DamageOverlayClear(player: number): void {
  *
  * Refused outright while this player's overlay is live, sound and all: a
  * second hit inside the 59 frames shows nothing new. (The 90-frame
- * invulnerability window after a hit is longer, so in practice only a
- * `PlayerTakeDamageTimed` with its override could get here while one is up.)
+ * invulnerability window after a hit is longer, so in practice nothing gets
+ * here while one is up: the one call of `PlayerTakeDamageTimed` that passes
+ * the window, a shot civilian's, latches no hit and so asks for no overlay.)
  */
 export function DamageOverlaySpawn(player: number, kind: number,
                                    events?: Events): void {

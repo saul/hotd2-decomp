@@ -738,6 +738,24 @@ no such test and pays its 120 and combo whatever the result, and the kill's 80
 is charged inside the kill block, which the result does not gate either.
 `[proved]` The port zeroed all three until 2026-09-29.
 
+**Who writes the combo.** "Any non-head hit" is any hit a routine that keeps
+the combo scores, and there are four of them `[proved]`: `ResolveHit`, and
+the updates of the three classes that write the whole rule out again --
+`CivilianUpdate` (class 0x10: zero only, the shooter's row, on the arm that is
+not the kill, at `0x0048AC5B`), `OneHitTargetUpdate` (class 0x20) and
+`RescueTargetHeldState` (class 0x21), both of which pay 120 plus the combo on
+the head and zero it on anything else. Apart from those, only the resets write
+it: `PlayerStateEnterJoinIn`, `ResetSceneOnEnter`, and an undefined routine at
+`0x00425E90` with no direct caller (`[open]` what reaches it). Found from
+every instruction operand in `0x009A5C00..0x009A5DFF` -- absolute, base+index,
+and each register base loaded from that range -- because the class routines
+address player 1's copy absolutely at `0x009A5DB2`, which the xref list for
+`0x009A5C82` does not show. So `MarkActorShot` resets nothing: a shot on a
+prop, a thrown weapon, a body creature (`BodyCreatureUpdate` pays 0x50 and
+counts the hit, no more) or any of the other sixteen classes that read their
+own shot bit leaves the combo running. The port zeroed it on every such mark
+until 2026-09-29 -- class 0x12's boarded door included.
+
 **The kill** is two tests: `obj+0x34 & 0x4000000` clear (`0x0040972A`) and
 the s16 at `obj+0x11C` not above zero (`0x00409733`). Then the bit, the 80 and
 the killer's byte at `obj+0x131C`. The result gates only the head burst below.

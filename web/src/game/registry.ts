@@ -234,6 +234,10 @@ export interface ClassHandler {
    * life, two hundred points and the on-shot script, and running the zombie's
    * damage table over one would charge it hit points it does not have and swap
    * gore models it has none of.
+   *
+   * Everything `ResolveHit` would have done is the class's to do or not,
+   * `g_head_combo_bonus` included: classes 0x10, 0x20 and 0x21 zero it on a
+   * non-head hit in their own update, and no other owning class touches it.
    */
   ownsShotResult?: boolean;
   /**

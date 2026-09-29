@@ -15318,8 +15318,17 @@ console.log("\nclass 0x10, the civilian and the rescue:");
     const lives0 = G.g_player_lives[0];
     let shot = 0;
     events.on("civilian.shot", () => { shot += 1; });
+    G.g_head_combo_bonus = [30, 20];
     a.flags |= 8 | 2;                       // hit, and bit 1 names player 0
     cFrame(a, events);
+    // `MOV word ptr [EAX + 0x9a5c82], BX` at `0x0048AC5B`, the shooter's row
+    // only, on the arm that is not the kill. This class's own update is one of
+    // the four places in the image that writes the combo, so it is here and
+    // not in `FireShotRequest`, which only marks her.
+    check("...the shot zeroes the shooter's head combo in her own update, "
+          + "and only the shooter's",
+          G.g_head_combo_bonus[0] === 0 && G.g_head_combo_bonus[1] === 20,
+          String(G.g_head_combo_bonus));
     // 200, not 100: `PlayerTakeDamage` charges its own 100 for the life and
     // `CivilianUpdate` charges another for the civilian. That is what
     // "-100 twice" in docs/formats/spawns.md is.
@@ -15329,6 +15338,30 @@ console.log("\nclass 0x10, the civilian and the rescue:");
           `lives ${G.g_player_lives[0]} score ${G.g_player_score[0]}`);
     check("...and switches it to the on-shot script",
           a.civ?.motionBlend === 55 && a.dead, `rate ${a.civ?.motionBlend}`);
+  }
+  {
+    // The life is `PlayerTakeDamageTimed(p, 0, 0, 1, -1)` (`FUN_00415430`) at
+    // `0x0048AC45`, in the tail Ghidra leaves outside `CivilianUpdate`: a
+    // non-zero fourth argument takes it through the invulnerability window,
+    // and a zero second latches no hit -- no `g_player_was_hit`, no overlay.
+    // The port called it `(p, 1, 0, 0, -1)` believing it had no caller.
+    const { a, events } = civScene([
+      [cmd(CivilianOp.Wait, CivilianWait.Free),
+       { op: CivilianOp.SetOnShot, args: [1], scripts: [1] },
+       cmd(CivilianOp.Wait, 0), cmd(CivilianOp.End)],
+      [cmd(CivilianOp.Wait, 0), cmd(CivilianOp.End)],
+    ]);
+    EnterPlay();
+    const lives0 = G.g_player_lives[0];
+    G.g_player_invuln_frames[0] = 45;
+    a.flags |= 8 | 2;
+    cFrame(a, events);
+    check("a civilian shot inside the invulnerability window still costs the "
+          + "life, latches no hit and leaves the window as it was",
+          G.g_player_lives[0] === lives0 - 1 && G.g_player_was_hit[0] === 0
+          && G.g_player_invuln_frames[0] === 45,
+          `lives ${lives0} -> ${G.g_player_lives[0]} was_hit `
+          + `${G.g_player_was_hit[0]} invuln ${G.g_player_invuln_frames[0]}`);
   }
   {
     const { a, events } = civScene([
@@ -31452,6 +31485,38 @@ console.log("\nznjoe's creature:");
     check("...and leaves on its own", !live);
   }
 
+  // -- 4b. the pull, and the head combo ------------------------------------
+  // `BodyCreatureUpdate` (`FUN_0043E880`) pays 0x50 and counts the hit, and
+  // that is all: it is not one of the writers of `g_head_combo_bonus`
+  // (`ResolveHit`, the updates of classes 0x10, 0x20 and 0x21, and the scene
+  // and join resets), and nor is `MarkActorShot`. `FireShotRequest` zeroed
+  // the shooter's combo on the mark.
+  {
+    const rng = new Rng(18);
+    const { joe, events } = joeScene(rng);
+    const c = SpawnBodyCreature(joe);
+    BodyCreatureUpdate(c, rng, JOE_HOST, events);   // launch
+    const host: GameHost = {
+      ...JOE_HOST,
+      pickShot: () => ({ kind: "creature", creatureId: c.id,
+                         point: vec3(c.pos.x, c.pos.y, c.pos.z) }),
+    };
+    G.g_head_combo_bonus = [30, 0];
+    const hits = G.g_player_hit_count[0];
+    FireShotRequest({ player: 0, frame: 0, onScreen: 1, ray: {
+      origin: vec3(0, 0, 0), dir: vec3(0, 0, 1) } }, host, rng, events);
+    const marked = (c.flags & ActorFlag.Hit) !== 0;
+    const onMark = G.g_head_combo_bonus[0];
+    BodyCreatureUpdate(c, rng, JOE_HOST, events);
+    check("a pull on a body creature leaves the head combo alone, on the mark "
+          + "and on the update that pays it",
+          marked && onMark === 30 && G.g_head_combo_bonus[0] === 30
+          && G.g_player_hit_count[0] === hits + 1
+          && c.state === BodyCreatureState.FallShot,
+          `marked ${marked} combo ${onMark} -> ${G.g_head_combo_bonus[0]} `
+          + `hits ${hits} -> ${G.g_player_hit_count[0]}`);
+  }
+
   // -- 5. the pool ---------------------------------------------------------
   {
     const rng = new Rng(17);
@@ -37897,8 +37962,17 @@ console.log("\nShotTestMesh: the boards stop the shot:");
   // captor is untouched.
   const resolved: { kind: string; at?: number }[] = [];
   events.on("shot.resolved", (r) => resolved.push(r));
+  // A combo mid-run, which the pull must not touch: the only writers of
+  // `g_head_combo_bonus` in the image are `ResolveHit`, the updates of
+  // classes 0x10, 0x20 and 0x21, and the scene and join resets --
+  // `MarkActorShot` is not one, and `ScriptedPropUpdate12` (`FUN_0043FA60`)
+  // reads no hit bit at all. The port zeroed it on every owning-class mark.
+  G.g_head_combo_bonus = [30, 20];
   QueueShotRequest(0, THROUGH);
   GameUpdate(1 / 60, host, rng, events);
+  check("...and the pull on the boards leaves the head combo as it was",
+        G.g_head_combo_bonus[0] === 30 && G.g_head_combo_bonus[1] === 20,
+        String(G.g_head_combo_bonus));
   const rec = G.g_shot_hit_records[0];
   check("the pull marks the door (shooter bit, bit 3, byte 1) and nothing "
         + "else, and the impact is surface 56 on the boards",

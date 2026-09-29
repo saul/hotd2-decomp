@@ -6861,6 +6861,23 @@ stop the shot": five fail with the old skip) and in the page at the same
 address: a pull at the boards' middle marks the door, impact surface 56 at the
 quad's centre, nobody else hit.
 
+**A pull on the boards leaves the head combo alone.** `FireShotRequest`
+zeroed `g_head_combo_bonus` on every mark of a class that owns its shot
+result, and on a body creature's; `MarkActorShot` does no such thing, and of
+the nineteen owning classes only 0x10, 0x20 and 0x21 write the combo, each in
+its own update, where the port already had it. Both generic resets are gone;
+`docs/formats/combat.md` §5 has every writer. Checked by `test:port` (the
+door's pull and a body creature's pull keep a running combo -- both fail on
+the old tree -- and a shot civilian zeroes the shooter's row alone, in her
+update).
+
+Reading the civilian's arm for it turned up her damage call:
+`PlayerTakeDamageTimed(p, 0, 0, 1, -1)` at `0x0048AC45`, which the annotations
+said did not exist. A shot civilian now costs the life inside the
+invulnerability window too, and latches no hit, so no damage flash -- the port
+had it the other way round on both. `docs/formats/civilians.md` has it;
+`test:port` fails on the old tree (lives 3 -> 3).
+
 Checked by `test:port` ("class 0x12, the door the bin captor bursts out of":
 the spawn, the Init, the wait, the flag frame, 54 frames of strip, the despawn,
 the camera cue, a negative delay, stage 2's half step and its equality arm;

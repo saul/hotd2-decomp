@@ -808,7 +808,8 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
         seq: -1, block: this.walker?.block ?? -1, step: -1, opIndex: -1,
         op: { i: -1, at: 0, op: -1, cat: "combat",
               name: d.source === "thrown" ? "hit by thrown weapon"
-                                          : "hit by enemy" },
+                  : d.source === "civilian" ? "shot a civilian"
+                  : "hit by enemy" },
         note: `${d.who}${d.attack >= 0 ? ` attack ${d.attack}` : ""}`
             + ` · −1 life → ${d.lives} · ${d.score} pts`,
       });

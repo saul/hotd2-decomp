@@ -19,7 +19,7 @@ import { DrawScreenSprite, OptionsDrawSprite, SCREEN_SPRITE_LIT,
          SetRenderLightColour } from "../screen_sprite";
 import { OptionsSprite } from "../options_data";
 import { T } from "../tables";
-import { OptionsDrawBackground, OptionsDrawNumber, OptionsDrawText,
+import { OPTIONS_LINE_PX, OptionsDrawBackground, OptionsDrawNumber, OptionsDrawText,
          OptionsTextFlag } from "./text";
 import { ScreenIdleDim } from "../screen_idle";
 import { OptionsFrame, OptionsPhase } from "./state";
@@ -691,6 +691,78 @@ export function OptionsRowExit(events?: Events): void {
   PlaySoundId(OPTIONS_SOUND_EXIT, events);
   ProfileSaveAndApply(events);
   G.g_nRunPhase = OptionsPhase.Leave;
+}
+
+/**
+ * `[port-only]` -- each row the cursor can be on, and the height of its
+ * middle on the 640x480 screen, as {@link OptionsDrawListTask} draws them
+ * this frame: a label's line is 24 pixels from its top, rows below Blood
+ * Color are moved by `g_options_row_shift`, Default takes Gun Calibration's
+ * line when that is not offered, and EXIT's sprite is anchored at
+ * `line*24 - 4`. A row the cursor steps over -- Blood Color hidden, Sight
+ * Speed and Gun Calibration not offered -- is not one a finger can land on.
+ */
+function TapTargets(): [OptionsRow, number][] {
+  const rows = T.options?.rows;
+  if (!rows) return [];
+  const calibration = CalibrationOffered();
+  const out: [OptionsRow, number][] = [];
+  for (let i = 0; i <= OptionsRow.Exit; i++) {
+    if (i === OptionsRow.BloodColor && G.g_options_blood_row_shown === 0) continue;
+    if (i === OptionsRow.SightSpeed && !SightSpeedOffered()) continue;
+    if (i === OptionsRow.GunCalibration && !calibration) continue;
+    if (i === OptionsRow.Exit) {
+      out.push([i, (rows[i]?.row ?? 0) * OPTIONS_LINE_PX - EXIT_DY]);
+      continue;
+    }
+    const lineOf = i === OptionsRow.Default && !calibration ? OptionsRow.GunCalibration : i;
+    const shift = i <= OptionsRow.BloodColor ? 0 : G.g_options_row_shift;
+    out.push([i, ((rows[lineOf]?.row ?? 0) + shift) * OPTIONS_LINE_PX + OPTIONS_LINE_PX / 2]);
+  }
+  return out;
+}
+
+/** How far from a row's middle a tap still counts as on it: a line. */
+const TAP_REACH_PX = OPTIONS_LINE_PX;
+
+/** The rows a second tap presses A on: they have no value to step. */
+const TAP_CONFIRMS: ReadonlySet<OptionsRow> = new Set([
+  OptionsRow.GunCalibration, OptionsRow.Default, OptionsRow.Exit,
+]);
+
+/**
+ * `[port-only]` -- a finger on the list, which the exe never had: the arcade
+ * cabinet's list is driven by the gun's d-pad and the PC's by the arrows, and
+ * a phone or a tablet has neither. `y` is the tap's height on the 640x480
+ * screen.
+ *
+ * A tap on a row the cursor is not on moves it there, as the arrows would --
+ * `0xA9`, and the sound tests stopped when the cursor leaves one -- and
+ * presses nothing. A tap on the highlighted row is the right arrow, which
+ * every value row wraps on; on the three rows with no value (Gun
+ * Calibration, Default, EXIT) it is A, which is what they wait for. Returns
+ * the pad bits the tap stands for, for the next tick; 0 when it only moved
+ * the cursor, or landed on no row.
+ */
+export function OptionsTap(y: number, events?: Events): number {
+  let hit = -1;
+  let near = TAP_REACH_PX;
+  for (const [row, mid] of TapTargets()) {
+    const d = Math.abs(y - mid);
+    if (d < near) { near = d; hit = row; }
+  }
+  if (hit < 0) return 0;
+  const was = G.g_options_cursor;
+  if (hit === was) return TAP_CONFIRMS.has(hit) ? OptionsPad.A : OptionsPad.Right;
+  PlaySoundId(OPTIONS_SOUND_SELECT, events);
+  G.g_options_cursor = hit;
+  if (was >= OptionsRow.SoundTestSe && was <= OptionsRow.SoundTestMusic) {
+    PlaySoundId(SOUND_STOP, events);
+    PlaySoundId(SOUND_STOP_VOICE, events);
+    PlaySoundId(SOUND_STOP_SE, events);
+    PlaySoundId(OPTIONS_SOUND_SELECT, events);
+  }
+  return 0;
 }
 
 /**

@@ -601,7 +601,7 @@ import { HumanoidRoutine } from "../src/game/class25/state";
 import { GameOverCameraFlyTick } from "../src/game/game_over";
 import { SetGameOverTables } from "../src/game/tables";
 import { OptionsCalibrationEntry } from "../src/game/options";
-import { OptionsRow } from "../src/game/options/list";
+import { OptionsPad, OptionsRow, OptionsTap } from "../src/game/options/list";
 import { OptionsFrame } from "../src/game/options/state";
 import { OptionsFactoryReset, ProfileBoot, ProfileCapture, ProfileLoad,
          type ProfileBlock } from "../src/game/profile";
@@ -38079,6 +38079,40 @@ console.log("the options screen, driven with pad bits:");
   frame();
   check("Sight Speed with no player on a controller goes straight back: "
         + "list, cursor on EXIT", G.g_options_frame === OptionsFrame.List
+        && G.g_options_cursor === OptionsRow.Exit);
+
+  // `[port-only]` -- a finger: a tap on a row puts the cursor there, and a
+  // tap on the highlighted row steps it, or chooses on EXIT. Lines as drawn:
+  // Difficulty 3, Sight Graphic 6 (the hidden Blood Color's gap closed), the
+  // SE test 8, Default on Gun Calibration's line 10 (it is not offered),
+  // Sight Speed's 7 empty (no player on a controller), EXIT's sprite at 428.
+  const mid = (line: number) => line * 24 + 12;
+  heard.length = 0;
+  const toDifficulty = OptionsTap(mid(3), ev);
+  check("a tap on Difficulty's line from EXIT: the cursor there, 0xA9, nothing pressed",
+        toDifficulty === 0 && G.g_options_cursor === OptionsRow.Difficulty
+        && heard.includes(0xa9), `${toDifficulty} ${G.g_options_cursor} ${heard}`);
+  const diff0 = G.g_options_edit_difficulty;
+  const again = OptionsTap(mid(3) + 7, ev);
+  frame(again);
+  check("...and a second tap on it is the right arrow: the difficulty steps",
+        again === OptionsPad.Right && G.g_options_edit_difficulty === (diff0 + 1) % 5,
+        `${again} ${diff0} -> ${G.g_options_edit_difficulty}`);
+  check("a tap on Sight Speed's line, which is not offered, moves nothing",
+        OptionsTap(mid(7), ev) === 0 && G.g_options_cursor === OptionsRow.Difficulty);
+  OptionsTap(mid(8), ev);
+  heard.length = 0;
+  OptionsTap(mid(6), ev);
+  check("leaving the SE test for Sight Graphic by a tap stops the sounds, as an "
+        + "arrow does", G.g_options_cursor === OptionsRow.SightGraphic
+        && heard.includes(0x80000000) && heard.includes(0x80000001), `${heard}`);
+  check("Default is on Gun Calibration's line, and a second tap on it is A",
+        OptionsTap(mid(10), ev) === 0 && G.g_options_cursor === OptionsRow.Default
+        && OptionsTap(mid(10), ev) === OptionsPad.A);
+  check("EXIT at its sprite's anchor, and a second tap chooses it",
+        OptionsTap(428, ev) === 0 && G.g_options_cursor === OptionsRow.Exit
+        && OptionsTap(430, ev) === OptionsPad.A);
+  check("a tap on no row does nothing", OptionsTap(5, ev) === 0
         && G.g_options_cursor === OptionsRow.Exit);
 
   // The profile: a saved block overrides the boot's free play.

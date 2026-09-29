@@ -192,11 +192,11 @@ export function CrumbMenu({ debugOpen, onToggleDebug, onShowKeys, onClose }:
         )}
         {/* The title menu's OPTION row: the game's own options screen, run
             by the port in app state 0x0C. Arrows move and change, Enter or a
-            click chooses, EXIT comes back to the stage from its start. The
-            list is driven by a pad's directions, which a phone does not
-            have, so the stylesheet hides it there as it hides the keys. */}
+            click chooses, EXIT comes back to the stage from its start. On a
+            touch screen a tap puts the cursor on a row and a second tap steps
+            it, or chooses EXIT (`OptionsTap`), so it is offered there too. */}
         {stage !== undefined && (
-          <button className="options-open only-fine"
+          <button className="options-open"
                   title="The game's options: difficulty, lives, continues, the sight, the sound tests"
                   onClick={act(() => dispatch({ kind: "openOptions" }))}>
             <span className="mi">⚙</span> Options

@@ -137,7 +137,7 @@ import {
 import { RequestAppState } from "../game/app_state";
 import { ProfileBoot } from "../game/profile";
 import { readProfile, writeProfile } from "./profile_store";
-import { OptionsPad } from "../game/options/list";
+import { OptionsPad, OptionsTap } from "../game/options/list";
 import { SetBoss4Tables, SetGameOverTables, SetGameTables, SetOptionsTables }
   from "../game/tables";
 import { PressKind, type Press } from "../core/net/protocol";
@@ -632,6 +632,7 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     // (`HudDrawCrosshair`). Into `G` at the next tick's head as player 1's;
     // as player 2, out with the next input packet to the host.
     this.shooting.onPointerKind = (type) => {
+      this.lastPointer = type;
       const mode = pointerInputMode(type);
       if (mode === null) return;
       this.inputMode = mode;
@@ -1738,8 +1739,13 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
         } else if (G.g_app_state === AppState.Options) {
           // ...and on the options screen it is A: the mouse's left button is
           // `0x4` of its pad word (`MouseReadButtons`, `FUN_0041F370`), which
-          // input mode 6 hands to the options list as it is.
-          this.padLatch |= OptionsPad.A * shift;
+          // input mode 6 hands to the options list as it is. A finger has no
+          // arrows to go with it, so on this page's own screen a tap is on a
+          // row instead: the cursor to it, or the row stepped (`OptionsTap`).
+          // Its height is the aim's, `+y` up from a frame 480 pixels tall.
+          const tap = player === 0 && !this.asReplica && this.lastPointer !== "mouse";
+          this.padLatch |= (tap ? OptionsTap(240 - this.localAim.y, this.events)
+            : OptionsPad.A) * shift;
         } else if (ray && this.gameRunning && !this.frozen) {
           QueueShotRequest(player, ray);
         }
@@ -2805,6 +2811,8 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
   private advancing = false;
   /** START presses waiting for the next tick; see `stepOneFrame`. */
   private padLatch = 0;
+  /** What made the last press: `PointerEvent.pointerType`. See `gunInput`. */
+  private lastPointer = "mouse";
   /**
    * `[port-only]` -- the pad bits held down, for `g_pad_held`: the arrows, on
    * the options screen, whose sound tests step once a frame while one is held.

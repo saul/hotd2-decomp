@@ -34,6 +34,7 @@ import {
   type LoadMsg, type Press, type PressKind, type ReadyMsg, type SessionMsg,
   type TickHead,
 } from "../../core/net/protocol";
+import { InputMode } from "../../game/input_mode";
 import { NetPeer, type Identity } from "./peer";
 import { CostMeter, Jitter } from "./stats";
 import type { Transport } from "./transport";
@@ -165,7 +166,7 @@ export class NetReplica extends NetPeer {
   private held: { tick: number; stage: number; hash: number; bytes: Uint8Array;
                   until: number } | null = null;
   // -- the gun --
-  private aim = { x: 0, y: 0, on: false };
+  private aim = { x: 0, y: 0, on: false, mode: InputMode.MouseKeyboard as number };
   private readonly unacked: Press[] = [];
   private pressId = 0;
   private inputSeq = 0;
@@ -663,6 +664,15 @@ export class NetReplica extends NetPeer {
     this.aim.x = x;
     this.aim.y = y;
     this.aim.on = on;
+  }
+
+  /**
+   * The device player 2 is aiming with: their PC input mode, which goes out
+   * beside the aim in every input packet -- the byte the exe's own network
+   * game sends at `+0x14` (`NetBuildInputPacket`, `FUN_004A02F0`).
+   */
+  setInputMode(mode: number): void {
+    this.aim.mode = mode;
   }
 
   /**

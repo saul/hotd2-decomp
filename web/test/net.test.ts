@@ -38,7 +38,8 @@ import { NetHost, type HostSim } from "../src/app/net/host";
 import { NetReplica, type ReplicaSim } from "../src/app/net/replica";
 import { MemoryLink } from "../src/app/net/transport";
 import type { Identity } from "../src/app/net/peer";
-import { G } from "../src/game/globals";
+import { AppState, G } from "../src/game/globals";
+import { InputMode, SetPlayerInputModes } from "../src/game/input_mode";
 import { PadBit } from "../src/game/player_shell";
 import { PlayerState } from "../src/game/player_state";
 import { ActorFlag } from "../src/game/actor";
@@ -171,6 +172,10 @@ async function run(stage: number, p: Profile, seconds: number,
   let aimChecked = 0;
   let seeked = false, seekEpochDone = false;
   let sab1 = 0, sab2 = 0, sabEpoch = 0, mismatchesBefore2 = 0;
+  // Player 2's device, switched on the replica between the mouse and a
+  // finger's light gun; the host's in-play frames counted by the mode its
+  // `G` held, with the crosshairs `HudDrawCrosshair` drew for player 2.
+  const devices = { mouse: 0, mouseDrawn: 0, gun: 0, gunDrawn: 0 };
   const frames = seconds * 60;
   let hostTick = 0;
   // Player 2's tab hidden for five seconds: no frames, so no steps and no
@@ -204,6 +209,9 @@ async function run(stage: number, p: Profile, seconds: number,
       if (input.aim) {
         SetPlayerAimFromPointer(1, input.aim.x, input.aim.y);
         if (!input.aim.on) G.g_aim_on_screen[1] = 0;
+        // Player 2's device into their slot, as `stepOneFrame` writes it and
+        // `NetApplyPeerInput` does every network frame.
+        SetPlayerInputModes(G.g_input_mode[0], input.aim.mode);
       }
       for (const q of input.presses) {
         taken.set(q.id, (taken.get(q.id) ?? 0) + 1);
@@ -217,7 +225,24 @@ async function run(stage: number, p: Profile, seconds: number,
       }
       // Player 1 keeps themselves alive on the engine's own continue.
       if (G.g_player_state[0] === PlayerState.Continue && f % 30 === 0) h.press(PadBit.Start0);
+      // Player 2 in play with a life and the firing gate up on both sides of
+      // the frame, so nothing but the device decides their crosshair: a gate
+      // or a state that moves inside the frame may move before or after
+      // `HudDrawCrosshair` runs.
+      const inPlay = () => G.g_player_state[1] === PlayerState.InPlay
+        && G.g_app_state === AppState.InPlay && G.g_player_lives[1] > 0
+        && G.g_nFiringGate !== 0;
+      const wasInPlay = inPlay();
       h.step();
+      if (wasInPlay && inPlay()) {
+        if (G.g_input_mode[1] === InputMode.LightGun1) {
+          devices.gun++;
+          devices.gunDrawn += G.g_crosshair_drawn[1];
+        } else if (G.g_input_mode[1] === InputMode.MouseKeyboard) {
+          devices.mouse++;
+          devices.mouseDrawn += G.g_crosshair_drawn[1];
+        }
+      }
       const t0 = performance.now();
       host.endTick(now);
       if (hidden) hiddenLag = Math.max(hiddenLag, host.stats.lag);
@@ -320,6 +345,9 @@ async function run(stage: number, p: Profile, seconds: number,
         }
       }
     }
+    // Two seconds on the mouse, two on a finger, and so on.
+    replica.setInputMode(Math.floor(f / 120) % 2 === 0
+      ? InputMode.MouseKeyboard : InputMode.LightGun1);
     replica.flushInput(now);
 
     // A seek, halfway: the host jumps its timeline; the replica must follow.
@@ -394,6 +422,12 @@ async function run(stage: number, p: Profile, seconds: number,
         missing.length === 0 && twice.length === 0 && fired.size > 20,
         `missing ${missing.join(",")}; twice ${twice.join(",")}`);
   check(`${tag}: player 2 scored`, G.g_player_score[1] > 0, `score ${G.g_player_score[1]}`);
+  check(`${tag}: player 2's device reached the host in their input packets, and `
+        + `the host's HudDrawCrosshair drew them a crosshair on each of ${devices.mouse} `
+        + `frames on the mouse and none on ${devices.gun} on a finger's light gun`,
+        devices.mouse > 30 && devices.gun > 30
+        && devices.mouseDrawn === devices.mouse && devices.gunDrawn === 0,
+        JSON.stringify(devices));
   check(`${tag}: the host's events reached the replica`, tapped > 0 && dispatched > 0,
         `${tapped} tapped, ${dispatched} dispatched`);
   check(`${tag}: ${aimChecked} shots built through the replica's camera agree `

@@ -354,10 +354,12 @@ carries whatever the other end has not acknowledged yet.
   timed with the page's clock read on receipt, not the last frame's.
 * **Input.** An input packet, sent every frame and at once on a press, has the
   replica's newest applied tick (the host's next base), the tick on screen,
-  the aim in the exe's pixels, and every press not yet acknowledged. The host
-  takes each press once by id. A pull that lands while the host's game is
-  stopped goes nowhere, as player 1's does; START is latched for either. A
-  new epoch drops whatever was waiting.
+  the aim in the exe's pixels, **the device player 2 is aiming with** (their
+  PC input mode, a byte: 6 the mouse, `0xD` a finger's light gun), and every
+  press not yet acknowledged. The host takes each press once by id. A pull
+  that lands while the host's game is stopped goes nowhere, as player 1's
+  does; START is latched for either. A new epoch drops whatever was waiting.
+  The device byte made it protocol 5.
 
 ## Player 2's gun
 
@@ -370,6 +372,22 @@ the player's index. On the host, `applyRemoteInput` feeds player 2's aim and
 presses in at the head of each tick, the same moment a local press made
 between frames is in `G`. At a pull, the aim is set to where it was at the
 press.
+
+**And player 2's device, which decides their crosshair.** The exe's own
+network game (the title's NETWORK row) sends each machine's input mode as
+byte `+0x14` of every packet (`NetBuildInputPacket`, `FUN_004A02F0`), and
+`NetApplyPeerInput` (`FUN_0049EE10`) writes it into the peer's slot every
+network frame with `SetPlayerInputModes` `[proved]`, so each machine's
+`HudDrawCrosshair` decides the peer's crosshair from the peer's own device.
+The port does the same: the replica sends the mode its pointer last was --
+the mouse (6), or a finger, which is the light gun (`0xD`) and has no
+crosshair -- and `stepOneFrame` writes both players' modes at the head of
+each tick. The reticle each page draws for the other player is exactly the
+host's `g_crosshair_drawn` for them, with the sprite `g_crosshair_sprite`
+names: that player's Sight Graphic, player 2's from the blue set. When
+player 2's page goes, their gun is put down -- a light gun (`0xE`) off the
+screen -- and when the session ends, player 2's mode goes back to what it was
+before hosting, as `NetSessionClose` (`FUN_0049F040`) restores both.
 
 **A shot is the segment player 2's own renderer built** (`Raycaster
 .setFromCamera` through its camera, which is placed from the replicated
@@ -479,12 +497,14 @@ a session is direct or relayed.
 | check | what only it sees |
 |---|---|
 | `test:net-codec` | fuzzed trees, lossy, reordered and duplicated delivery, acks up to 60 ticks late: every applied tick deep-equal and hash-equal to the host's; both ends' kept hashes equal to a walk on every tick; the audit silent over every tick a slice at a time, and naming each of six writes made behind its back; pool identity kept and a respawn a new object, asserted over every window, the only survivor's respawn included; a rebuilt list free; a `Map` refused by name. No bundle, about 30 s |
-| `test:net` | a real stage, host and replica sessions on a `MemoryLink` at clean, lossy and bad settings: every tick verified, a whole-tree comparison every 30th, player 2's tab hidden for five seconds with the host's deltas staying narrow, a seek's epoch followed, every press of the final epoch taken once and none twice, player 2 scoring, the aim check exact for a true shot and catching a false one. Sabotaged once: a value changed behind the codec's back found by the audit and named value by value on both ends against the keyframe, a removed actor caught, a lost desync report recovered by the replica's own retry. Needs a bundle |
+| `test:net` | a real stage, host and replica sessions on a `MemoryLink` at clean, lossy and bad settings: every tick verified, a whole-tree comparison every 30th, player 2's tab hidden for five seconds with the host's deltas staying narrow, a seek's epoch followed, every press of the final epoch taken once and none twice, player 2 scoring, the aim check exact for a true shot and catching a false one, player 2's device switched between the mouse and a finger every two seconds and the host drawing them a crosshair on every in-play frame of the first and none of the second. Sabotaged once: a value changed behind the codec's back found by the audit and named value by value on both ends against the keyframe, a removed actor caught, a lost desync report recovered by the replica's own retry. Needs a bundle |
 | `test:matchmaker` | the matchmaker over real HTTP in its Node binding and in-process in its Worker (a fake Durable Object namespace): codes, TURN credentials minted from the secret, the offer and the answer each behind its own token, 404/409/403/400, the host's delete, a room's hour, a Worker's second draw on a live code, and Cloudflare's credential answer in both shapes with port 53 dropped. No bundle |
 | `test:turn` | the relay over real UDP on loopback, driven by a client written from the RFC: the 401 challenge, the minted credentials accepted and a wrong or expired one refused, response integrity and fingerprint, nothing crossing before both ends have a permission, Send and Data indications, ChannelData both ways, a Refresh freeing the relay. No bundle, about a second |
 | `net_pair` | the page, in a Chrome as users have it (mDNS on): a room whose link is opened in a second tab, over WebRTC, with the host's game held until player 2 is in; again with player 2's link at 60±30 ms and 10% loss; and again through the relay alone (`?relay=1`), whose route must say `relay`. Each plays stage 1 with player 2 joining and shooting through its own camera, the audit finding nothing written on player 2's page, and the replica's systems' slices compared with what was applied. The first also takes a pause (player 2 on the host's exact frame) and a stage change (player 2 follows, matching), and ends with player 2 closing the tab, which the host's card must report. No console error anywhere |
 
-All five are rows in `tools/verify_all.py`.
+| `crosshair_page --net` | two tabs: each page draws the other player's reticle with that player's sprite, and a tap on either page takes that player's reticle off both. Real time, so run by hand; the rest of the harness is the `crosshair` row |
+
+All five of the first are rows in `tools/verify_all.py`.
 
 ## Not yet exercised
 

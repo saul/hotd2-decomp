@@ -91,7 +91,7 @@ function projection(): UiProjection {
     // The game drew the crosshair: the fixture renders the chrome as it is in
     // play, and `Viewport` hangs the reticle off this.
     crosshair: true,
-    crosshairImage: null,
+    crosshairSprite: null,
     toggles: TOGGLE_DEFAULTS,
     transport: { playing: false, mode: "play",
                  camLabel: "cp_st2[0] slot 57  frame 10 / 100" },
@@ -1169,6 +1169,73 @@ console.log("\nThe Home Screen, not fullscreen, on an iPhone or an iPad:\n");
         hint.includes("Add to Home Screen"), hint);
   check("...and nothing else",
         !renderIn(projection(), createElement(PauseScreen)).includes("Home Screen"));
+}
+
+// The reticles are the game's crosshair sprites, and whether each is there
+// is the game's `HudDrawCrosshair` for that player's device: a mouse has one,
+// a finger -- the light gun -- none (`app/device.ts`).
+console.log("\nThe crosshairs are the game's sprites, and a finger has none:\n");
+{
+  const { pointerInputMode, initialInputMode } = await import("../src/app/device");
+  const { InputMode } = await import("../src/game/input_mode");
+  check("a mouse is the mouse and keyboard (6), a finger the light gun (0xD), "
+        + "a pen neither",
+        pointerInputMode("mouse") === InputMode.MouseKeyboard
+        && pointerInputMode("touch") === InputMode.LightGun1
+        && pointerInputMode("pen") === null,
+        `${pointerInputMode("mouse")} ${pointerInputMode("touch")} ${pointerInputMode("pen")}`);
+  const was = Object.getOwnPropertyDescriptor(globalThis, "window");
+  const withPointer = (fine: boolean) => {
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: { matchMedia: (q: string) => ({ matches: q === "(any-pointer: fine)" && fine }) },
+    });
+    return initialInputMode();
+  };
+  const desk = withPointer(true);
+  const phone = withPointer(false);
+  if (was) Object.defineProperty(globalThis, "window", was);
+  else delete (globalThis as { window?: unknown }).window;
+  check("before any press: the mouse where there is a fine pointer, the "
+        + "light gun on a device with none -- a phone never shows a reticle",
+        desk === InputMode.MouseKeyboard && phone === InputMode.LightGun1,
+        `${desk} ${phone}`);
+
+  const SPRITE = { url: "data:image/png;base64,QUFB", w: 53, h: 53 };
+  const drawn = viewportOf(render({ ...projection(), crosshairSprite: SPRITE }));
+  const tag = tagOf(drawn, "crosshair sprite");
+  check("the game drew it: the reticle is the Sight Graphic's sprite, at the "
+        + "size the exe's quad has on the frame, centred on the pointer",
+        tag !== "" && !tag.includes("hidden") && tag.includes(SPRITE.url)
+        && tag.includes("width:53px") && tag.includes("height:53px")
+        && tag.includes("margin-left:-26.5px") && tag.includes("margin-top:-26.5px"),
+        tag);
+  const gone = viewportOf(render({ ...projection(), crosshair: false,
+                                   crosshairSprite: SPRITE }));
+  check("the game drew none (a finger, the light gun): the reticle is hidden",
+        tagOf(gone, "crosshair sprite").includes("hidden"),
+        tagOf(gone, "crosshair sprite"));
+  check("...and with no sprite in the bundle the ring stands in",
+        tagOf(viewportOf(render(projection())), "crosshair") !== "");
+
+  const P2 = { url: "data:image/png;base64,QkJC", w: 40, h: 40 };
+  const peer = viewportOf(render({ ...projection(),
+    netPeer: { x: 300, y: 200, player: 2, sprite: P2 } }));
+  const peerTag = tagOf(peer, "crosshair peer sprite p2");
+  check("the other player's reticle is their sprite -- player 2's, the blue "
+        + "set -- where the game says they aim, and no ring's label",
+        peerTag.includes(P2.url) && peerTag.includes("left:300px")
+        && peerTag.includes("top:200px") && peerTag.includes("width:40px")
+        && !peer.includes("<span>P2</span>"),
+        peerTag);
+  check("...and none at all when the game drew theirs none -- a peer on a "
+        + "finger", !viewportOf(render({ ...projection(), netPeer: null }))
+          .includes("crosshair peer"));
+  const ring = viewportOf(render({ ...projection(),
+    netPeer: { x: 10, y: 20, player: 1, sprite: null } }));
+  check("...the ring and its label only for a bundle without the sprites",
+        tagOf(ring, "crosshair peer p1") !== "" && ring.includes("<span>P1</span>"),
+        tagOf(ring, "crosshair peer p1"));
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

@@ -446,23 +446,25 @@ export interface UiProjection {
    */
   homeScreenHint: boolean;
   /**
-   * The game drew player 1's crosshair this frame.
+   * The game drew this page's player's crosshair this frame.
    *
    * `HudDrawCrosshair` (0x004169C0) decides it, in `game/`, and it is called
    * only from `PlayerUpdateInPlay` (0x00413E90): app state 6, a life, and the
    * firing gate up -- so a cutscene takes the reticle away, and so does the
    * continue screen, where the player has no life and no in-play task. A
    * reticle over "CONTINUE?" would be the port telling the viewer something
-   * the game does not.
+   * the game does not. And a mouse, never a gun: a finger is the light gun
+   * (`app/device.ts`), so a touch takes it away and the mouse brings it back.
    */
   crosshair: boolean;
   /**
-   * The crosshair's own image, when the game drew one: the sprite
+   * The crosshair's own sprite, when the game drew one: the one
    * `HudDrawCrosshair` picks by the options' Sight Graphic
-   * (`g_crosshair_sprites`, `0x00579F58`), as a data URL. Null for the page's
-   * plain ring -- no sprite drawn, or a bundle without it.
+   * (`g_crosshair_sprites`, `0x00579F58`), at the size it has on this frame.
+   * Null for the page's plain ring -- no sprite drawn, or a bundle without
+   * it.
    */
-  crosshairImage: string | null;
+  crosshairSprite: CrosshairSprite | null;
   toggles: Readonly<Record<ToggleName, boolean>>;
   transport: TransportProjection;
   sound: SoundProjection;
@@ -527,7 +529,32 @@ export interface UiProjection {
    * The other player's crosshair, where the game drew it this frame, in the
    * viewport's pixels -- the game's decision (`g_crosshair_drawn`) and aim
    * (`g_crosshair_x`) for the player this page is not. Null when there is no
-   * other player, or the game drew none.
+   * other player, or the game drew none -- which is always, for a player on
+   * a finger: the light gun has no crosshair.
    */
-  netPeer: { x: number; y: number; player: 1 | 2 } | null;
+  netPeer: NetPeerProjection | null;
+}
+
+/**
+ * A crosshair sprite as the page draws it: the bundle's image, and its size
+ * in CSS pixels -- the exe's quad, the sprite's own size in the 640x480
+ * screen (`g_crosshair_sprite_record`, sx and sy 1.0), scaled to the frame.
+ * Centred on the aim: the record's anchor is (2, 2).
+ */
+export interface CrosshairSprite {
+  url: string;
+  w: number;
+  h: number;
+}
+
+/** See {@link UiProjection.netPeer}. */
+export interface NetPeerProjection {
+  x: number;
+  y: number;
+  player: 1 | 2;
+  /**
+   * The sprite the game drew the crosshair with: that player's Sight
+   * Graphic, from player 2's blue set at `+4` for player 2. Null for the ring.
+   */
+  sprite: CrosshairSprite | null;
 }

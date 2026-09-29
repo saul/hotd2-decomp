@@ -342,8 +342,9 @@ export const G = {
   g_crosshair_y: [0, 0],
   /**
    * `g_aim_on_screen` — 0x009C8FD0 + player*0x28. `PollPlayerAimInput`
-   * sets it to 1 every frame for a mouse. [port-only] Player 2 has no input
-   * device in the port, so theirs stays 0.
+   * sets it to 1 every frame for a mouse. [port-only] Player 2's comes off
+   * their input packets in a two-player session (`app/`), and stays 0
+   * without one.
    */
   g_aim_on_screen: [1, 0],
 
@@ -445,6 +446,13 @@ export const G = {
    * two things in the options list: a mode-6 player may change their Sight
    * Graphic, and Gun Calibration is offered only outside mode 6. It was 5
    * here until the options screen, whose arrows made the difference matter.
+   *
+   * **And a finger is the light gun, `0xD`** (`InputMode.LightGun1`): the
+   * page's pointer is whichever device was used last, and `app/` writes both
+   * players' modes through `SetPlayerInputModes` at the head of every tick
+   * -- player 2's from their input packet, as `NetApplyPeerInput`
+   * (`FUN_0049EE10`) takes the peer's mode from theirs. `HudDrawCrosshair`
+   * gives a gun outside modes 5 and 6 no crosshair. See `game/input_mode.ts`.
    */
   g_input_mode: [6, 6] as number[],
   /**
@@ -2155,8 +2163,9 @@ export const G = {
    * the crosshair for this frame, 1 or 0. The engine draws a sprite; the
    * port's crosshair is the page's reticle, which follows the pointer between
    * ticks, so what the routine decides is recorded here and `app/` hands it
-   * across. Cleared with `g_screen_sprite_draws` at the head of the player
-   * walk.
+   * across -- this page's player's to its own reticle, the other player's to
+   * the peer reticle a two-player session draws. Cleared with
+   * `g_screen_sprite_draws` at the head of the player walk.
    */
   g_crosshair_drawn: [0, 0] as number[],
   /**

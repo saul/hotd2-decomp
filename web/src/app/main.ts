@@ -75,8 +75,8 @@ import type { ToggleName, UiCommand } from "../ui/commands";
 import { TOGGLE_DEFAULTS } from "../ui/panels/Toggles";
 import { feedRow } from "./projection/script";
 import type {
-  BranchProjection, ContinueProjection, JoinProjection, FeedRow, LoadingProjection,
-  NetProjection, PerfProjection, FpsProjection,
+  BranchProjection, ContinueProjection, CrosshairSprite, JoinProjection, FeedRow,
+  LoadingProjection, NetPeerProjection, NetProjection, PerfProjection, FpsProjection,
   SkipProjection, SoundProjection, StatusProjection, TransportProjection,
   TreeProjection,
 } from "../ui/projection";
@@ -105,7 +105,10 @@ import type { Snapshot } from "../core/snapshot";
 import { TICK } from "./loop";
 import { DRIVEN_TICK, Pacer, STOPPED_TICK, type PacerHost } from "./pacer";
 import { SnapshotRing } from "./ring";
-import { TiltReload, homeScreenHint, touchFirst, unlockDevice } from "./device";
+import { TiltReload, homeScreenHint, initialInputMode, pointerInputMode, touchFirst,
+         unlockDevice } from "./device";
+import { InputMode, SetPlayerInputModes } from "../game/input_mode";
+import { CROSSHAIR_SX, CROSSHAIR_SY } from "../game/continue_readout";
 import {
   CharacterBindSystem, GameSystem, GunLightBuildSystem,
   ScriptSystem, drawSystem,
@@ -403,6 +406,25 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
   /** The aim this page's own gun last had, in the exe's pixels. */
   private localAim = { x: 0, y: 0 };
   /**
+   * The device this page's gun is -- its PC input mode, the mouse (6) or a
+   * finger's light gun (`0xD`) -- as the last pointer used says
+   * (`app/device.ts`). Into `G` at the head of every tick; as player 2, out
+   * to the host with the aim.
+   */
+  private inputMode: InputMode = initialInputMode();
+  /**
+   * Player 2's device while hosting, off their input packets -- the byte the
+   * exe's own network game carries (`NetApplyPeerInput`, `FUN_0049EE10`) --
+   * or null with nobody on the other end yet.
+   */
+  private peerInputMode: number | null = null;
+  /**
+   * Player 2's mode as it stood when this page began hosting, to put back
+   * when the session ends: `NetworkScreenSetup` (`FUN_0049F610`) keeps both
+   * and `NetSessionClose` (`FUN_0049F040`) restores them.
+   */
+  private savedPeerInputMode: number | null = null;
+  /**
    * Which player this page's gun is: player 1 (index 0) alone or hosting,
    * player 2 (index 1) as a replica.
    */
@@ -603,6 +625,16 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
       }
       SetPlayerAimFromPointer(0, x, y);
       if (EntityLightLive(GUN_LIGHT_FIRST)) this.pacer.wake();
+    };
+    // Which device the pointer is: a mouse is the mouse and a finger the
+    // light gun, and the crosshair is the exe's answer for each
+    // (`HudDrawCrosshair`). Into `G` at the next tick's head as player 1's;
+    // as player 2, out with the next input packet to the host.
+    this.shooting.onPointerKind = (type) => {
+      const mode = pointerInputMode(type);
+      if (mode === null) return;
+      this.inputMode = mode;
+      this.net.replica?.setInputMode(mode);
     };
     this.hudLayer = new HudLayer(host.hud);
     this.renderer = new WebGLRenderer({
@@ -923,13 +955,15 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
   /**
    * The other player's crosshair, off `G`: where the game says they are
    * aiming, in its pixels from the frame's centre, put through this page's
-   * own camera into the viewport's pixels. Drawn only when the game drew it
-   * (`g_crosshair_drawn`) and the aim is on the screen.
+   * own camera into the viewport's pixels, with the sprite the game drew it
+   * with. Drawn exactly when the game drew it (`g_crosshair_drawn`) -- which
+   * for a player on a finger, the light gun, is never -- and only over the
+   * frame: a pointer over the bars beside it is off the game's screen.
    */
-  get netPeer(): { x: number; y: number; player: 1 | 2 } | null {
+  get netPeer(): NetPeerProjection | null {
     if (!this.net.active || !this.walker) return null;
     const other = 1 - this.localPlayer;
-    if (!G.g_crosshair_drawn[other] || !G.g_aim_on_screen[other]) return null;
+    if (!G.g_crosshair_drawn[other]) return null;
     const half = Math.tan((this.camera.fov * Math.PI) / 360) * PROJECTION_DISTANCE_PX;
     const nx = G.g_crosshair_x[other] / (half * this.camera.aspect);
     const ny = G.g_crosshair_y[other] / half;
@@ -939,6 +973,7 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
       x: Math.round(b.left + ((nx + 1) / 2) * b.width),
       y: Math.round(b.top + ((1 - ny) / 2) * b.height),
       player: other === 0 ? 1 : 2,
+      sprite: this.crosshairSpriteOf(other),
     };
   }
   /** Where the canvas sits in the viewport, in CSS pixels. Set by `resize`. */
@@ -952,15 +987,31 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     return joinProjection(this.localPlayer);
   }
   /**
-   * The image of the crosshair sprite `HudDrawCrosshair` picked for this
-   * page's player -- `g_crosshair_sprites[sight graphic + player*4]` -- as
-   * the bundle carries it, or null when it drew none or the bundle predates
-   * the sprite.
+   * The crosshair sprite `HudDrawCrosshair` picked for this page's player --
+   * `g_crosshair_sprites[sight graphic + player*4]` -- or null when it drew
+   * none or the bundle predates the sprite.
    */
-  get crosshairImage(): string | null {
-    const id = G.g_crosshair_sprite[this.localPlayer] ?? -1;
+  get crosshairSprite(): CrosshairSprite | null {
+    return this.crosshairSpriteOf(this.localPlayer);
+  }
+
+  /**
+   * One player's crosshair sprite as the page draws it: the bundle's image,
+   * at the size the exe's quad has on this frame. The quad is the sprite's
+   * own width and height times the record's sx and sy (`CROSSHAIR_SX`,
+   * `CROSSHAIR_SY`) in the 640x480 screen, and a screen pixel is the frame's
+   * height over 480 -- the frustum's height is the fixed one, and a frame
+   * wider than 4:3 only shows more at the sides.
+   */
+  private crosshairSpriteOf(player: number): CrosshairSprite | null {
+    const id = G.g_crosshair_sprite[player] ?? -1;
     if (id < 0) return null;
-    return this.hudLayer.spriteImages(id)?.url ?? null;
+    const img = this.hudLayer.spriteImages(id);
+    if (!img) return null;
+    const px = this.canvasBox.height / 480;
+    return { url: img.url,
+             w: Math.round(img.w * CROSSHAIR_SX * px),
+             h: Math.round(img.h * CROSSHAIR_SY * px) };
   }
   get perf(): PerfProjection | null {
     return this.perfMeter.enabled ? this.perfMeter.snapshot : null;
@@ -1709,13 +1760,30 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
    */
   private applyRemoteInput(): void {
     const h = this.net.host;
-    if (!h) return;
+    // A session that has ended keeps its host for the overlay's figures, and
+    // its last packet with it: re-applied every tick, that would pick player
+    // 2's gun back up from where `netPeerGone` put it down.
+    if (!h || h.isClosed) return;
     const input = h.takeInput();
     if (input.aim) {
       if (input.aim.on) SetPlayerAimFromPointer(1, input.aim.x, input.aim.y);
       else G.g_aim_on_screen[1] = 0;
+      this.peerInputMode = input.aim.mode;
     }
     for (const q of input.presses) this.remotePress(q);
+  }
+
+  /**
+   * Player 2's page has gone: their gun put down. That is a light gun --
+   * player 2's is `0xE` (`InputModesFromDeviceConfig`, `FUN_0041E440`) --
+   * pointed off the screen, so `HudDrawCrosshair` draws them no crosshair
+   * and their player plays on as the game plays any player nobody is aiming.
+   * A mouse (mode 6) would keep its crosshair wherever it was left, and the
+   * reticle on this page would be pointing at nobody.
+   */
+  netPeerGone(): void {
+    G.g_aim_on_screen[1] = 0;
+    this.peerInputMode = InputMode.LightGun2;
   }
 
   private remotePress(q: Press): void {
@@ -1985,6 +2053,9 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     if (this.net.active) {
       const now = performance.now();
       this.net.poll(now);
+      // The device rides every packet, from the first: a replica made after
+      // the last pointer event has not heard it otherwise.
+      this.net.replica?.setInputMode(this.inputMode);
       this.net.replica?.flushInput(now);
     }
   }
@@ -2062,6 +2133,15 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
    */
   netRoleChanged(role: NetRole): void {
     this.autoJoin = { armed: role === "replica", at: -Infinity, tries: 0 };
+    // Player 2's device: kept as it stood when hosting began and put back
+    // when it ends, as `NetworkScreenSetup` and `NetSessionClose` do.
+    if (role === "host" && this.savedPeerInputMode === null) {
+      this.savedPeerInputMode = G.g_input_mode[1];
+    } else if (role !== "host" && this.savedPeerInputMode !== null) {
+      SetPlayerInputModes(this.inputMode, this.savedPeerInputMode);
+      this.savedPeerInputMode = null;
+    }
+    this.peerInputMode = null;
     if (role === "replica") {
       this.world.setDormant([this.game, this.rainSim, this.gunLightBuild]);
       this.playing = false;
@@ -2632,6 +2712,14 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     // Player 2's gun, before anything of this tick runs -- the same moment a
     // local press made between frames is in `G`.
     if (this.net.host) this.applyRemoteInput();
+    // Both players' devices, every tick, as `NetApplyPeerInput` puts them
+    // every network frame: this page's in player 1's slot, player 2's as
+    // their packets last said -- or, alone, as it stands. Every tick rather
+    // than on a change because a seek, a load or a rewind hands `G` back
+    // with whatever device its snapshot had, and the device is the one in
+    // the viewer's hand now.
+    SetPlayerInputModes(this.inputMode,
+                        this.peerInputMode ?? G.g_input_mode[1]);
     if (this.playing && this.state.mode !== "free") {
       if (w.branch) {
         // On the script's clock rather than the wall's. The countdown is what

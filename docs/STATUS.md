@@ -19,22 +19,22 @@ is in `tools/verify_all.py`, beside the command that runs it.
 
 | Directory | Lines | Files | Layer |
 |---|---:|---:|---|
-| `game/` | 107707 | 350 | engine |
+| `game/` | 107819 | 351 | engine |
 | `hod2lib/` | 19571 | 35 | engine |
-| `render/` | 15341 | 56 | render |
-| `app/` | 12471 | 43 | app |
+| `render/` | 15352 | 56 | render |
+| `app/` | 12616 | 43 | app |
 | `script/` | 4471 | 25 | engine |
-| `ui/` | 3719 | 27 | ui |
-| `core/` | 3523 | 13 | engine |
+| `ui/` | 3773 | 27 | ui |
+| `core/` | 3533 | 13 | engine |
 | `bundle/` | 2862 | 11 | engine |
 | `audio/` | 1053 | 3 | render |
 | `hud/` | 526 | 1 | ui |
-| **total** | **171244** | **564** | |
+| **total** | **171576** | **565** | |
 
 The largest files, which is where the pressure to split next is:
 
-* `game/globals.ts` — 3108
-* `app/main.ts` — 3100
+* `app/main.ts` — 3188
+* `game/globals.ts` — 3117
 * `game/actor.ts` — 2724
 * `hod2lib/bundle.ts` — 2458
 * `hod2lib/exetab.ts` — 2347
@@ -44,8 +44,8 @@ The largest files, which is where the pressure to split next is:
 | | |
 |---|---|
 | Gameplay coverage | **233 of 299** annotated functions in the gameplay address ranges have a port (77%) |
-| Ported outside those ranges | 573 (opcodes, and the classes whose handlers sit elsewhere) |
-| Citations checked | 806 ported functions match `functions.tsv` under the same name |
+| Ported outside those ranges | 575 (opcodes, and the classes whose handlers sit elsewhere) |
+| Citations checked | 808 ported functions match `functions.tsv` under the same name |
 | Spawn classes | **31 of 42** read classes have a module, covering 1544 of 1619 placements |
 | Declared `[diverges]` | **132** — where the port knowingly departs from the exe, each with its reason on the spot |
 | `[open]` markers | **124** — questions the port and the exporter are honest about not having answered |
@@ -65,8 +65,8 @@ The two declared seams between the UI and the player: **`PlayerCommands` has 54 
 
 | | |
 |---|---|
-| Named functions | 1431 in `ghidra/annotations/functions.tsv` |
-| Named globals | 733 in `ghidra/annotations/globals.tsv` |
+| Named functions | 1439 in `ghidra/annotations/functions.tsv` |
+| Named globals | 738 in `ghidra/annotations/globals.tsv` |
 | Verifier scripts | 47 under `tools/`, run together by `verify_all.py` |
 
 Phase and format status is a judgement about what counts as solved,
@@ -131,6 +131,7 @@ nothing exits 3 and is never counted as green.
 | `keys` | that the page's keys do what the `?` list says when pressed -- test:ui holds the list to the handlers' source, this reads back what a press did -- and that a click on a control over the game hands Space and Enter (START) back to the game rather than leaving them with the button | bundle |
 | `continue` | that the last life lost with credits left puts CONTINUE? and its digit where the exe draws them, holds the script at its wait, and that START -- pressed on the corner button, the one START a phone has -- spends a credit and puts the player back in play | bundle |
 | `options` | that the menu's Options reaches the game's options screen in the real page, that its title and red highlighted row are on the HUD canvas, that the page's arrows and Enter drive the list -- lives and continues changed, the hidden rows stepped over, a held arrow running the sound test -- and that EXIT saves the profile in the browser and starts a game with five lives, four credits and the chosen crosshair on the reticle, and that a reload boots what was saved in place of the free-play default | bundle |
+| `crosshair` | that real pointer events reach HudDrawCrosshair as the exe's devices -- a mouse move is input mode 6 and the reticle is the Sight Graphic's sprite out of the bundle, sized to the frame and centred on the pointer; a touch is the light gun, 0xD, and the game draws no crosshair until the mouse moves again; and a phone, with no fine pointer, never shows one | bundle |
 | `animals` | that the frog, the owl and the fish are placed from a real bundle and leave their opening state -- none of the three is a skinned enemy the character layer can build, and two have no character type at all | bundle |
 | `horde` | that each of the five class-0x40 hordes is built from a real bundle, walks in, dives and bites, and that shooting every member gives both counters back and lets the walker past the room's wait_enemies_alive -- the members are runtime children with no descriptor, so only the placer's own spawn can bring them into play | bundle |
 | `dives` | that a class-0x43 dive reaches the camera it is aimed at, strikes and comes round again -- the only check that drives a class against the stage's own `cam_play` rather than an eye the harness made up, which is what every other owl check does and why none of them could see a run-in parked five units under the eye | bundle |
@@ -167,7 +168,7 @@ nothing exits 3 and is never counted as green.
 | `verify_geometry` | that every scenery part in a stage bundle holds every triangle its `pol/` models declare -- the only check that compares an export against the files it was made from rather than against another export | game-dir |
 | `baseline` | that the installed assets still hash to `manifest.csv` | game-dir |
 
-24 of them need the installed game and 22 need an exported
+24 of them need the installed game and 23 need an exported
 bundle. **That is a known hole, not a design:** a machine with
 neither cannot run the checks that compare two histories, and a
 bundle-free fixture is the open work that closes it.

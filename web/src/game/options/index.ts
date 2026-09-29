@@ -10,19 +10,25 @@
  *
  * The frame pointer is the list (`OptionsFrameList`) or one of two
  * sub-screens the list hands the screen to: Sight Speed (row 5) and Gun
- * Calibration (row 8). **Neither is reachable in the port**, and the port
- * has their gates and not their bodies:
+ * Calibration (row 8). The port has their gates and not their bodies:
  *
  * * Sight Speed is for a player on a standard controller --
- *   `g_player_input_is_gun` 0 -- and the page's players are mouse guns (1):
- *   the list's cursor steps over the row, and `OptionsSightSpeedFrame`'s
- *   first test (no player with a pad kind) sends the screen straight back.
- * * Gun Calibration is for a gun **not** in PC input mode 6, and the page is
+ *   `g_player_input_is_gun` 0 -- and the page's players are guns (1), the
+ *   mouse or the finger: the list's cursor steps over the row, and
+ *   `OptionsSightSpeedFrame`'s first test (no player with a pad kind) sends
+ *   the screen straight back. **Not reachable.**
+ * * Gun Calibration is for a gun **not** in PC input mode 6. The mouse is
  *   mode 6 -- the mouse with the keyboard ORed into its pad word
  *   (`InputMapDevicesToMaple`, `FUN_0041E530`, whose case 6 falls into case
- *   5): the cursor steps over the row, and `OptionsCalibrationEntry`
- *   refuses. Mode 6 reads a fixed table for the mouse and never the
- *   calibration, so it could change nothing the page aims with.
+ *   5) -- and for it the cursor steps over the row and
+ *   `OptionsCalibrationEntry` refuses. **A finger is the light gun, mode
+ *   `0xD`** (`game/input_mode.ts`), and for a player whose last press was a
+ *   touch the row is offered and the entry takes them, as the exe does. The
+ *   arm behind it is not ported, so the frame stays on the entry, which
+ *   draws nothing and asks again each frame: the screen is blank until that
+ *   player's mouse moves (mode 6, refused, back to the list on EXIT) or the
+ *   page's menu leaves. A phone cannot get there -- it has no arrows to
+ *   reach row 8 with.
  *
  * `docs/re/options-screen.md` has both bodies read in full; they land here
  * with an input model that has a keyboard crosshair or a calibrated gun.
@@ -141,9 +147,10 @@ export function OptionsSightSpeedFrame(): void {
  * (`FUN_00486020`). Neither: `FUN_004ABEF0(0)`, `0x009C6EF4 = 0`, and back
  * to the list with the cursor on EXIT. `[proved]`
  *
- * The port has the refusal, which is the arm every port player takes (input
- * mode 6); the arm and the calibration screen behind it are not ported (see
- * the file note).
+ * The port has the refusal, which is the arm a mouse player takes (input
+ * mode 6), and the choice of player, which a touch player's light gun
+ * (`0xD`) takes; the arm and the calibration screen behind it are not
+ * ported (see the file note).
  */
 export function OptionsCalibrationEntry(): void {
   const gun = G.g_player_input_is_gun;

@@ -6,6 +6,9 @@
  * phone onto the gun the engine already understands, without inventing any
  * input the engine does not have:
  *
+ * * **A finger is the PC build's light gun**, input mode `0xD`, and a mouse
+ *   is the mouse, mode 6 ({@link pointerInputMode}) -- so the crosshair is
+ *   the exe's decision for whichever was used last.
  * * **A tap is a trigger pull.** Nothing here: pointer events already carry
  *   touches, and `render/shooting.ts` fires on a `pointerdown` whatever made
  *   it. A tap in the black bars beside the 4:3 frame is a pull *off the
@@ -39,6 +42,7 @@
  * opens as an app with no browser around it (`manifest.webmanifest`, and the
  * `apple-mobile-web-app-*` tags in `index.html`), on an iPhone as on an iPad.
  */
+import { InputMode } from "../game/input_mode";
 
 /**
  * How fast the phone has to pitch to count as a flick, in degrees a second.
@@ -128,6 +132,46 @@ export function touchFirst(): boolean {
   return typeof window !== "undefined"
     && typeof window.matchMedia === "function"
     && window.matchMedia("(pointer: coarse)").matches;
+}
+
+/**
+ * Which of the exe's devices the page's pointer is -- the PC input mode
+ * (`g_input_mode`, `game/input_mode.ts`) this page's gun is in.
+ *
+ * **A mouse is mode 6**, the mouse and the keyboard: the PC build's own
+ * pointer, a gun (`InputMapDevicesToMaple`, `FUN_0041E530`) whose crosshair
+ * `HudDrawCrosshair` draws at once. **A finger is the light gun**, mode `0xD`
+ * (`InputModesFromDeviceConfig`, `FUN_0041E440`, gives player 1's MC PC gun
+ * that mode): it fires where it lands and points at nothing before it does,
+ * which is exactly the device the exe gives no crosshair -- a reticle left
+ * where the last shot landed would be pointing at nothing. The mode is this
+ * *page's* -- player 1's slot alone or hosting, and the byte player 2's
+ * packet carries as a replica, which is how the exe's own network game sends
+ * the peer's device (`NetBuildInputPacket`, `FUN_004A02F0`, byte `+0x14`).
+ *
+ * `[port-only]`: the exe reads its devices from a configuration at boot; the
+ * page has one pointer that is either, and the last one used is the device.
+ * A pen changes nothing -- it can hover like a mouse and lands like a finger,
+ * and neither claim is the better.
+ */
+export function pointerInputMode(pointerType: string): InputMode | null {
+  if (pointerType === "mouse") return InputMode.MouseKeyboard;
+  if (pointerType === "touch") return InputMode.LightGun1;
+  return null;
+}
+
+/**
+ * The device before the first press: the mouse wherever there is one --
+ * `(any-pointer: fine)`, which a touchscreen laptop and an iPad with a
+ * trackpad both answer -- and otherwise the finger, so a phone shows no
+ * reticle from the first frame rather than from its first tap.
+ */
+export function initialInputMode(): InputMode {
+  const fine = typeof window !== "undefined"
+    && typeof window.matchMedia === "function"
+    && window.matchMedia("(any-pointer: fine)").matches;
+  return fine || typeof window === "undefined"
+    ? InputMode.MouseKeyboard : InputMode.LightGun1;
 }
 
 /**

@@ -233,6 +233,19 @@ try {
     delete (crypto as unknown as Record<string, unknown>).getRandomValues;
   }
 
+  // Which matchmaker a page uses.
+  const { DEFAULT_MATCHMAKER, matchmakerBase } = await import("../src/app/net/matchmaker");
+  (globalThis as { location?: unknown }).location = { href: "http://127.0.0.1:5173/?stage=1" };
+  check("a page uses the deployed matchmaker unless told otherwise",
+        matchmakerBase("?stage=1") === DEFAULT_MATCHMAKER
+        && DEFAULT_MATCHMAKER.startsWith("https://"), matchmakerBase("?stage=1"));
+  check("...?matchmaker=local is the dev server's own, beside the page",
+        matchmakerBase("?matchmaker=local") === "http://127.0.0.1:5173/net/matchmaker",
+        matchmakerBase("?matchmaker=local"));
+  check("...and ?matchmaker=<url> is that one, trailing slash or not",
+        matchmakerBase("?matchmaker=https://m.example/net/matchmaker/")
+          === "https://m.example/net/matchmaker");
+
   // Cloudflare's credential answer, in both of its shapes.
   const cf = { keyId: "key", token: "tok", ttlSeconds: 600 };
   const answering = (body: unknown, status = 200) =>

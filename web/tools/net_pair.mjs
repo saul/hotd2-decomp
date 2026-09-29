@@ -1,8 +1,9 @@
 /**
  * Two-player netplay in the real page: a host and a replica, two tabs of one
  * headless Chrome, joined the way a player joins -- a room at the dev
- * server's rendezvous, its link opened in the second tab -- over WebRTC,
- * playing a stage.
+ * server's own matchmaker (`?matchmaker=local`; pages default to the deployed
+ * Cloudflare one), its link opened in the second tab -- over WebRTC, playing
+ * a stage.
  *
  * **Chrome as users have it.** No flag makes WebRTC easier here: host
  * addresses stay hidden behind mDNS names, which is what every real Chrome
@@ -170,7 +171,9 @@ async function session(label, { both = "", replicaQuery = "", seconds, robust = 
                                 relayOnly = false }) {
   console.log(`\n${label}`);
   context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
-  const host = await open("host", `net=host${both ? `&${both}` : ""}`);
+  // The dev server's own matchmaker and TURN relay, not the deployed one: the
+  // suite runs often, from many sessions, and should need no internet.
+  const host = await open("host", `net=host&matchmaker=local${both ? `&${both}` : ""}`);
   await host.keyboard.press("Space"); // past the start screen, and play
   // The room the host made at the dev server's rendezvous, off its card.
   const code = await host.waitForSelector("#net-lobby .net-code", { timeout: 20_000 })
@@ -181,7 +184,7 @@ async function session(label, { both = "", replicaQuery = "", seconds, robust = 
   const card = await host.$eval("#net-lobby", (e) => e.textContent).catch(() => "");
   check(`the host's game waits for player 2 (frame ${a} then ${b}), and says so`,
         a === b && /held until they are in/.test(card), `${a} -> ${b}; card: ${card}`);
-  const query = [both, replicaQuery].filter(Boolean).join("&");
+  const query = ["matchmaker=local", both, replicaQuery].filter(Boolean).join("&");
   const replica = await open("replica", `${query}#join=${code}`);
   await replica.mouse.click(5, 5); // a press, for the audio; the start screen is the host's
   // Streaming: the replica verifies ticks. If it never does, what the lobby

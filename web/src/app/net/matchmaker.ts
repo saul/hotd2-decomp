@@ -11,13 +11,26 @@ export interface IceServer {
   credential?: string;
 }
 
-/** Where the matchmaker is: `?matchmaker=`, the build's setting, or the dev server. */
+/**
+ * The deployed matchmaker: the Cloudflare Worker in `matchmaker/`, which mints
+ * Cloudflare TURN credentials. Every page uses it unless told otherwise, the
+ * dev server's included -- so a session between two machines, or two tabs,
+ * goes the way a hosted one does, relay and all.
+ */
+export const DEFAULT_MATCHMAKER =
+  "https://hotd2-matchmaker.saul-rennison.workers.dev/net/matchmaker";
+
+/**
+ * Where the matchmaker is: `?matchmaker=<url>`; `?matchmaker=local` for the
+ * dev server's own, with its own TURN relay (no internet needed, and what the
+ * tests use); a build's `VITE_HOTD2_MATCHMAKER`; else {@link DEFAULT_MATCHMAKER}.
+ */
 export function matchmakerBase(search: string): string {
   const q = new URLSearchParams(search).get("matchmaker");
+  if (q === "local") return new URL("net/matchmaker", location.href).href.replace(/\/+$/, "");
   if (q) return q.replace(/\/+$/, "");
   const built = import.meta.env?.VITE_HOTD2_MATCHMAKER as string | undefined;
-  if (built) return built.replace(/\/+$/, "");
-  return new URL("net/matchmaker", location.href).href.replace(/\/+$/, "");
+  return (built || DEFAULT_MATCHMAKER).replace(/\/+$/, "");
 }
 
 /** How often a side asks whether the other's message has arrived. */

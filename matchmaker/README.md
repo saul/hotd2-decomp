@@ -19,13 +19,22 @@ through it. The protocol is at the top of `rooms.ts`.
 Tests, from `web/`: `npm run test:matchmaker` (the protocol, against both the
 Node server and the Worker) and `npm run test:turn` (the relay).
 
-## On your machine
+## Which one a page uses
 
-`npm run dev` in `web/` serves the matchmaker at `/net/matchmaker`, and the
-page finds it there with no setting. It also starts the TURN relay on a free
-UDP port and hands it out, so two tabs, or a laptop and a phone on the LAN
-(`npm run dev -- --host`), connect even where no direct path works. The log
-says where: `netplay: TURN relay on udp/…`. `HOTD2_DEV_TURN=0` turns it off.
+**The deployed Worker, by default** -- `DEFAULT_MATCHMAKER` in
+`web/src/app/net/matchmaker.ts`, currently
+`https://hotd2-matchmaker.saul-rennison.workers.dev/net/matchmaker` -- from
+the dev server as from a hosted page, so every session gets Cloudflare's relay
+where it needs one. `?matchmaker=<url>` picks another, and a build's
+`VITE_HOTD2_MATCHMAKER` changes the default for that build.
+
+**`?matchmaker=local`** uses the dev server's own, at `/net/matchmaker`: `npm
+run dev` in `web/` serves it, and starts the TURN relay (`turn.ts`) on a free
+UDP port for its rooms, so two tabs, or a laptop and a phone on the LAN (`npm
+run dev -- --host`), connect with no internet. The log says where:
+`netplay: TURN relay on udp/…`. `HOTD2_DEV_TURN=0` turns the relay off. The
+browser harness (`tools/net_pair.mjs`) uses this one, so the suite does not
+spend the relay allowance or need the network.
 
 ## On Cloudflare
 
@@ -80,41 +89,37 @@ the Worker's log, where the reason is (`Cloudflare TURN credentials failed:
 
 ### 5. Try it from this machine
 
-A local page can use the deployed matchmaker. Open two tabs (the second with
-the code the first shows, as `#join=CODE`):
+A local page uses the deployed matchmaker once `DEFAULT_MATCHMAKER` names it
+(or with `?matchmaker=<its address>`). Open two tabs (the second with the code
+the first shows, as `#join=CODE`):
 
 ```
-http://localhost:5173/?stage=1&net=host&relay=1&matchmaker=https://hotd2-matchmaker.<your-subdomain>.workers.dev/net/matchmaker
+http://localhost:5173/?stage=1&net=host&relay=1
 ```
 
 `relay=1` allows only the relay. The overlay (`I`) should say
 `relay→relay … via TURN`: the traffic is going through Cloudflare.
 
-### 6. Point the hosted page at it
+### 6. Point the pages at it
 
-Build the page with the address, and host it (`docs/HOSTING.md`):
-
-```sh
-cd web
-VITE_HOTD2_MATCHMAKER=https://hotd2-matchmaker.<your-subdomain>.workers.dev/net/matchmaker npm run site -- --gzip --check
-```
-
-Or, for one visit, add `?matchmaker=<that address>` to the page's address.
+Set `DEFAULT_MATCHMAKER` in `web/src/app/net/matchmaker.ts` to the Worker's
+address, and every page uses it, hosted ones included (`docs/HOSTING.md`). A
+build can override it with `VITE_HOTD2_MATCHMAKER`; one visit, with
+`?matchmaker=<address>`.
 
 ### What it costs
 
 The Worker makes a handful of short requests per session (create, join, two
 posts, a few polls a second while someone waits) -- far inside the free plan.
-TURN is billed by the traffic relayed, and only sessions that need the relay
-use it: about 400–600 MB per hour of relayed play. Check Cloudflare's
-current TURN pricing.
+TURN is billed by the traffic relayed, past the 1 TB a month the account
+includes, and only sessions that need the relay use it: about 400–600 MB per
+hour of relayed play.
 
-### Not yet run against Cloudflare
+### If the relay credentials fail
 
-The request for TURN credentials (`cloudflareIce` in `rooms.ts`) is written
-from Cloudflare's documentation, tested against both shapes of answer it
-describes, but not against a real key. If it fails, the room still works, on
-STUN alone; steps 4 and 5 are where that shows.
+The Worker asks Cloudflare for them on every create and join
+(`cloudflareIce` in `rooms.ts`). If that fails -- an expired or rolled key --
+the room still works, on STUN alone, and `npx wrangler tail` shows why.
 
 ## Elsewhere
 

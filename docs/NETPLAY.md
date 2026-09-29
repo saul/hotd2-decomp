@@ -78,8 +78,9 @@ public one, needs a router that routes to itself. With neither, the first two
 tabs anyone tried sat on "Finding a way through both networks" for good. What
 always gets through is a relay, so:
 
-**The dev server runs a TURN relay** (`matchmaker/turn.ts`) beside its
-matchmaker, on a free UDP port, and the rooms hand it out with credentials.
+**The dev server runs a TURN relay** (`matchmaker/turn.ts`) beside its own
+matchmaker, on a free UDP port, and those rooms hand it out with credentials;
+the deployed matchmaker hands out Cloudflare's.
 Where a direct path works, ICE takes it and the overlay's route says
 `srflx→srflx` or `host→host`; where none does, it says `relay→relay … via
 TURN`. `HOTD2_DEV_TURN=0` turns it off.
@@ -91,11 +92,14 @@ host posts its **offer** and player 2 its **answer**, each carrying every
 address its browser gathered (its LAN address, its public address as STUN saw
 it, its relay address), and the two connect. That is all the matchmaker does:
 one message each way, no stream, and nothing after the connection is made. The
-dev server has one at `/net/matchmaker`, so two tabs, or a laptop and a phone
-on the LAN, need no cloud. For a hosted copy, deploy the Cloudflare Worker in
-the same directory: [`matchmaker/README.md`](../matchmaker/README.md). The page
-finds it through `?matchmaker=<url>`, a build's `VITE_HOTD2_MATCHMAKER`, or
-`net/matchmaker` beside the page, in that order.
+deployed one is the Cloudflare Worker in the same directory
+([`matchmaker/README.md`](../matchmaker/README.md)), with Cloudflare's TURN
+service as the relay, and **every page uses it by default**, the dev server's
+included: the account's allowance is 1 TB of relayed traffic a month, and a
+relayed session uses 400–600 MB an hour. `?matchmaker=local` uses the dev
+server's own at `/net/matchmaker` instead, with its own relay: no internet
+needed, and what the tests use. The page takes `?matchmaker=<url>` first, then
+`local`, then a build's `VITE_HOTD2_MATCHMAKER`, then the deployed Worker.
 
 **A session that drops is over.** There is no reconnecting: the card says why,
 each page goes back to playing alone, and hosting again makes a new room.
@@ -105,7 +109,8 @@ each page goes back to playing alone, and hosting again makes a new room.
 | in the address | does |
 |---|---|
 | `?net=host` | make a room as the page opens |
-| `&matchmaker=URL` | use that matchmaker, e.g. a deployed Worker, from a local page |
+| `&matchmaker=local` | the dev server's own matchmaker and TURN relay, instead of the deployed Worker |
+| `&matchmaker=URL` | that matchmaker |
 | `#join=CODE` | join that room (what the link is) |
 | `&netsim=lat:80,jit:20,loss:5` | make this end's outgoing link that bad: ms, ms, percent |
 | `&relay=1` | force WebRTC through TURN (`iceTransportPolicy: "relay"`) |

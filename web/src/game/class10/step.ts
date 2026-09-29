@@ -15,7 +15,7 @@ import { G } from "../globals";
 import { MotionPlayFrame } from "../tables";
 import { CivilianOp, CivilianTarget, CivilianWait, CmdAt } from "./ops";
 import { CivilianReapplyWaitCommand } from "./script";
-import { CivilianTargetPoint, HeadingError } from "./turn";
+import { CivilianCarrierBase, CivilianTargetPoint, HeadingError } from "./turn";
 
 /**
  * `CivilianStepScript` — `FUN_0048B1E0`.
@@ -219,7 +219,9 @@ function CivilianArrived(obj: Actor, word: number): "advance" | "wait" {
 
   if ((word & (CivilianWait.Reach | CivilianWait.Face)) === 0) return tail();
 
-  const to = CivilianTargetPoint(obj);
+  // The camera modes on a carrier compose onto the stack, not an identity --
+  // see `CivilianTargetPoint`.
+  const to = CivilianTargetPoint(obj, CivilianCarrierBase.StackTop);
   if ((word & CivilianWait.Reach) === 0) {
     // Turn only: arrived the frame the heading error rounds to zero.
     if (HeadingError(obj, to) === 0) {

@@ -117,6 +117,51 @@ followed by `SetHudShutterState 1`). None of the 16 wait words carrying
 tracked camera never raises `g_camera_settled`, so a script untracks her before
 it waits for the camera.
 
+### Where the target is — and on a carrier, which frame
+
+Bits `0x10` and `0x20`, and the turn `CivilianUpdate` runs while `sub+0x40` is
+non-zero, resolve one point by three rules `[proved]`:
+
+| `sub+0x40` | The point |
+|---|---|
+| `-1` | the gameplay eye, `g_camera_eye` (`0x009C71E0`) |
+| other negative | the actor's position mirrored through the eye in `x` and `z`, the eye's `y` |
+| `>= 0` | `sub+0x30..0x38`, raw |
+
+Bit `0x40` does not resolve anything: it reads `sub+0x30..0x38` raw whatever
+the mode, through the actor's inverse orientation, and holds while the local
+`z` is not above `0.0` (`0x004C436C`).
+
+**On a carrier, a camera point is taken into the carrier's frame** -- the frame
+her position is kept in, since `CivilianUpdateOnCarrier` (`FUN_0048B140`) runs
+the whole update under the carrier's matrix. Both copies test
+`CMP dword ptr [EAX], 0x48b140` after resolving a negative mode, push, make the
+carrier's `Translate(+0x40); RotX(+0x64); RotZ(+0x6C); RotY(+0x68)`, invert and
+transform the point. A fixed point is never transformed. **The two copies
+differ by one instruction**:
+
+| | Composes onto | Gets |
+|---|---|---|
+| `CivilianStepTurnToTarget` (`FUN_0048C850`) | `MatrixLoadIdentity` at `0x0048C8D4` | `C⁻¹·eye`, the camera in her frame |
+| `CivilianStepScript` (`FUN_0048B1E0`) | the pushed copy of the top (`0x0048B3B0`, straight to `MatrixTranslate` at `0x0048B3C0`) | `(V·C·C)⁻¹·eye` |
+
+`V` is the world-to-view `UpdateSceneViewAndLight` leaves on the stack for
+every draw (`0x00402136`), and the first `C` is `CivilianUpdateOnCarrier`'s own
+push. So the step's reach and facing tests measure against a point that is not
+the camera in any frame, while the turn faces the camera correctly. The calls
+are `[proved]`; that the top is `V` when `CivilianUpdate` starts is `[likely]`,
+from `CivilianUpdate`'s sphere switch, which gets world points back out of the
+draw's records by multiplying by the view-to-world matrix. The step's
+pseudocode stops at this arm's `MatrixStackPop` (`0x0048B429`) and hides the
+store and the tests after it (L35).
+
+The shipped inputs: stage 3's `0x0BC0`, riding the boat, runs script 25 --
+`SetTarget(-1, 18)` at command 5 and a reach word at command 6 -- and stage 4's
+four riders (scripts 65 and 66) set mode `-1` behind a counter wait and turn to
+the camera until a later `SetTarget(0, 0)`. Of the seven riders (every script
+each can switch to followed), none uses the mirrored mode and `0x0BC0` is the
+only one with a reach or face word.
+
 ### The root-motion gate — `0x00100000`
 
 **The engine's civilians are carried by their clips, through the same routine
@@ -258,7 +303,7 @@ Two consequences worth knowing, both the engine's:
 | `0x03` | `SetMotionBlend` | the fade of the next clip change, `sub+0xE`; the Init's default is 10. Its one reader is `CivilianApplyMotionPose`. It was `SetTurnRate`, which nothing read supported |
 | `0x04` | `SetMotionFrame` | the frame wait bit `0x200` looks for |
 | `0x05` | `SetTarget` | point pointer or mode, arrival radius |
-| `0x06` | `SetTargetPoint` | point pointer, kept at `sub+0x44`; the point goes to `sub+0x30..0x38` and **the mode at `sub+0x40` is not written** (`0x0048BC93`, `0x0048B84E`), so it turns nobody. All eleven shipped sit in a block waiting on `0x40`, the in-front test that reads `sub+0x30` raw. `[proved]` |
+| `0x06` | `SetTargetPoint` | point pointer, kept at `sub+0x44`; the point goes to `sub+0x30..0x38` and **the mode at `sub+0x40` is not written** (`0x0048BC93`, `0x0048B84E`), so it turns nobody. All eleven shipped sit in a block waiting on `0x40`, the in-front test that reads `sub+0x30` raw. `[proved]` Nothing in the class reads `sub+0x44` but these two arms: every instruction naming `g_cur_civilian` (a byte scan for `a0d07d00`) lies in `0x0048A41C..0x0048DDD3`, which the operand sweep for `[r + 0x44]` covered. The other road to the sub-block, `obj+0x1310`, has 416 operand hits in 216 functions of other classes, where the field is their own (L3), so "nothing outside the class" is `[likely]`. |
 | `0x07` | `SetTargetHeading` | BAMS; the point is 100 units along it |
 | `0x08` | `SetYaw` | |
 | `0x09` | `SetTimer` | frames |

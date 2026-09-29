@@ -1281,3 +1281,18 @@ with no clip playing -- never has its word loaded, and a test of anything the
 word triggers (the held item's give) sees nothing happen. **Give a hand-written
 fixture's block a condition that holds, or drop the one that cannot**, and
 check the word arrived (`sub.wait`) before asserting what it does.
+
+**L86 -- A helper that merges two inline copies is a claim that they are the
+same, and it is checked one instruction at a time.** Class 0x10 resolves its
+target twice, in `CivilianStepTurnToTarget` and in `CivilianStepScript`, and
+the port wrote one `CivilianTargetPoint` for both: "the same three rules. One
+copy, because two is how they drift." The rules were the same. The fourth
+arm, for a civilian on a carrier, was in neither port -- the turn's row in
+`functions.tsv` described it and the step's pseudocode stopped at its
+`MatrixStackPop` (L35) -- and **the copies of that arm differ**: the turn
+loads the identity before composing the carrier and the step does not, so
+one gets the camera in her frame and the other a point that is in no frame
+at all. The helper's own comment was the reason nobody diffed them. **Before
+merging inline copies into one function, disassemble both and compare them
+call for call**, arms the pseudocode hides included; where they differ, the
+difference is the helper's argument, named for the instruction.

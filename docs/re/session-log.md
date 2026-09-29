@@ -26163,3 +26163,87 @@ through `FireShotRequest`. Only the words were wrong.
 
 Proof: seven new checks in `port.test.ts` "ResolveHit:", all failing on the
 base; restoring only the `head_bone` read fails five of them.
+
+## 2026-09-29 -- class 0x10: a camera target on a carrier, and the step's missing identity
+
+The brief asked for two class-0x10 divergences: op 0x06 writing the target
+mode, and `CivilianStepScript` restoring only when nothing resumed. **Both had
+already landed** in `8354e06e`, on `main` since earlier the same day, with
+their tests. So this session audited that commit against the brief instead of
+redoing it, and the audit found a third divergence in the arm the brief
+pointed at.
+
+**What the audit confirmed, re-read here.** Every exit of the step's loop
+reaches the restore: the loop-head tests at `0x0048B254` (`JL`) and
+`0x0048B260` (`JNZ`) jump to `0x0048B6DC`, the timer's `JL` at `0x0048B608`
+does too, its `JNZ` at `0x0048B615` and the `End` fall-through reach
+`0x0048B6D6`, and the three post-`MatrixStackPop` bodies run on (`0x0048B42E`,
+`0x0048B525`, `0x0048B5B2`). The reach arm is `FCOMP [ECX+0x3C]; TEST AH,
+0x41` (arrived at distance <= radius) with the snap only for mode > 0 and
+radius <= `1.0` (`0x004C4380`). The face arm's `FPATAN` of the rotated
+`pos - point` goes to the tail when non-zero. In-front compares the rotated
+raw `sub+0x30` delta's `z` with `0.0` (`0x004C436C`). All of that was as ported.
+
+**What it did not confirm: the carrier arm.** For a negative mode, both
+`CivilianStepScript` (`0x0048B39D`) and `CivilianStepTurnToTarget`
+(`0x0048C8C1`) test `CMP dword ptr [EAX], 0x48b140` -- is the update still
+`CivilianUpdateOnCarrier` -- and take the camera point into the carrier's
+frame with the carrier's `Translate; RotX; RotZ; RotY; MatrixInvert(0);
+MatrixTransformPoint`. The port had no carrier arm in either. The turn's row
+in `functions.tsv` had said so all along ("for a civilian riding a carrier it
+pulls the point into the carrier's frame first"). The step's pseudocode stops
+at the arm's `MatrixStackPop`, which is L35, and hid it.
+
+**And the two copies differ by one instruction.** The turn calls
+`MatrixLoadIdentity` (`0x0048C8D4`) after its push. The step pushes
+(`0x0048B3B0`, and `MatrixStackPush(0)` copies the top -- read, not recalled)
+and goes straight to `MatrixTranslate` (`0x0048B3C0`). Under
+`CivilianUpdateOnCarrier` the top is `V·C`: the world-to-view
+`UpdateSceneViewAndLight` sets at `0x00402136`, which is `[likely]` still the
+base when `CivilianUpdate` starts, since its sphere switch recovers world
+points by multiplying the draw's records by the view-to-world. So the step's
+reach and face tests measure against `(V·C·C)⁻¹·eye`, and only the turn gets
+the camera in her frame. The port's `CivilianTargetPoint` was written as "one
+copy, because two is how they drift", on the belief that the copies were the
+same. They were not, and the difference sat in the one arm the helper had not
+got. The helper now takes the difference as an argument
+(`CivilianCarrierBase`), and both compose with `game/matrix.ts` in the
+engine's order. `CarrierMatrixCompose` in `carrier.ts` is the four calls.
+
+**Shipped inputs.** A scan of all twelve bundles for class-0x10 spawns with
+`hp != 0` found seven riders; following every script each can switch to
+(op 0x0E/0x0F's `scripts`), three scripts set mode −1 and none the mirror.
+Stage 3's `0x0BC0` (script 25) parks on a reach within 18 of the camera.
+Stage 4's four (scripts 65/66) set −1 behind a counter wait, so for them it is
+the turn only. The civilians harness is unchanged (53/37/19/4/60/58/12). It
+does not measure heading, and no rider reaches the camera in 30 s in either
+frame.
+
+**`sub+0x44`, and the byte scan the brief asked for.** Every instruction
+naming `g_cur_civilian` (`a0d07d00`) lies in `0x0048A41C..0x0048DDD3`, inside
+the range the earlier operand sweep of `[r + 0x44]` covered, so no class-0x10
+routine reads `sub+0x44` but op 0x06's two arms `[proved]`. The other road to
+the sub-block is `obj+0x1310`: 416 operand hits in 216 functions of other
+classes, where the field is their own (L3). Not enumerated, so "nothing
+outside the class" stays `[likely]`.
+
+**Wrong turns.** The test fixture first opened with `Wait Free` before the
+`SetTarget` and a `Wait Reach`. That is L85 exactly: the step passed the free
+wait and tested the reach word in the same frame, then ran on to `End`, so
+the two reach checks failed with the arithmetic right. Rewritten so the Init
+loads the reach word itself, with `sub.wait` asserted. Also a count: the
+format doc briefly said "none of the 47 civilians rides with the mirrored
+mode", from a reachability scan that followed op 0x0E through `args` -- a
+pointer -- and not the bundle's `scripts`. The rescan with the right field
+gives the same answer for the seven riders, which is what the doc says now.
+
+Proof: three checks after "...and so does the action VM's, once the block
+runs" in `port.test.ts`. The worked numbers come from `FUN_004A9AE0`'s row
+swap (`Ry(0x4000)` sends `(x, z)` to `(z, -x)`). With a boat at `(10, 0, 0)`
+turned a quarter and a camera block at `(0, 0, 50)` with no angles, an eye at
+`(10, 0, -60)` is exactly on her in the step's frame (the exe releases, the
+base held), an eye at `(10, 0, 0)` is 60 away there but at her in the turn's
+frame (the exe holds, the base released), and an eye at `(10, 0, 60)` turns her
+`+0x100` (the base turned `-0x100`). All three fail on the base. A mutant that
+gives the step the turn's identity fails both reach checks and passes the
+turn.

@@ -15775,6 +15775,121 @@ console.log("\nclass 0x10, the civilian and the rescue:");
     }
   }
 
+  // **A camera target on a carrier is taken into the carrier's frame, and the
+  // turn and the step take it there differently.** Both test `obj[0] ==
+  // CivilianUpdateOnCarrier` (`0x0048C8C1`, `0x0048B39D`), push, make the
+  // carrier's `T RotX RotZ RotY`, invert and transform the eye. The turn
+  // loads the identity first (`0x0048C8D4`), so it gets the camera in her
+  // frame, C^-1 eye. The step does not (`0x0048B3B0` push, `0x0048B3C0`
+  // translate), so it inverts the view `UpdateSceneViewAndLight` left on the
+  // stack, the update's own push of the carrier, and its own:
+  // (V C C)^-1 eye. The port used the world eye in both, against a
+  // carrier-relative position.
+  //
+  // Worked by hand from the engine's calls. `MatrixRotateY(0x4000)`
+  // (`FUN_004A9AE0`: row0' = -row2, row2' = row0) sends (x, z) to (z, -x),
+  // so a boat at P = (10, 0, 0) turned a quarter is C(x) = P + Ry(x). A
+  // camera block at E = (0, 0, 50) with no angles builds V(x) = x - E. Her
+  // own position is her carrier's origin.
+  {
+    const riderScene = (cmds: CivilianCmdJson[]) => {
+      ResetGameGlobals();
+      EnterPlay();
+      SetGameTables(CHARS, undefined, undefined, undefined, undefined, {
+        entries: [0], scripts: [cmds], items: [],
+        spawns: { "16384": { charType: 1, script: 0, removePath: -1,
+                             removeFrame: 0, removeDelay: 0, children: [] } },
+      });
+      const boat = ActorSpawn(0x9e00, SpawnClass.ScriptedProp, -1, "boat", {
+        class13: { slot: 6711, cam_path: -1, cam_frame: -1, scale: 1,
+                   behaviour: 0, selector: 0 },
+      }, rng);
+      boat.pos = vec3(10, 0, 0);
+      boat.yaw = 0x4000;
+      G.g_civilian_carrier = boat.at;
+      // `obj+0x11C != 0` is what installs `CivilianUpdateOnCarrier`.
+      const a = ActorSpawn(0x4000, SpawnClass.Civilian, 1, "rider",
+                           { hp: 1 }, rng);
+      a.visible = true;
+      a.pos = vec3(0, 0, 0);
+      G.g_camera_block_eye = vec3(0, 0, 50);
+      UpdateSceneViewAndLight();
+      return { a, boat, events: new Events() };
+    };
+    // The word a Wait carries governs the park that follows it (L85), so the
+    // Init loads the reach word itself and parks on the next wait with the
+    // mode set: stage 3's script 25 in two commands -- cmd 5's target, 18
+    // units, and cmd 6's reach bit.
+    const reach = (): CivilianCmdJson[] => [
+      cmd(CivilianOp.Wait, CivilianWait.Reach),
+      { op: CivilianOp.SetTarget, args: [CivilianTarget.Camera, 0],
+        radius: 18 },
+      cmd(CivilianOp.Wait, 0),                  // 2: parked on the reach
+      cmd(CivilianOp.SetMotionBlend, 44),       //    run once it is over
+      cmd(CivilianOp.Wait, 0),                  // 4
+      cmd(CivilianOp.End),
+    ];
+    {
+      const { a } = riderScene(reach());
+      const v = G.g_camera_world_to_view;
+      check("the rider rides, parked on the reach word with the camera "
+            + "mode, under a view of x - (0, 0, 50)",
+            a.carrierAt === 0x9e00 && a.civ?.cursor === 2
+            && a.civ?.wait === CivilianWait.Reach
+            && a.civ?.targetMode === CivilianTarget.Camera
+            && v[12] === 0 && v[13] === 0 && v[14] === -50 && v[0] === 1,
+            `carrier ${a.carrierAt} cursor ${a.civ?.cursor} `
+            + `wait 0x${a.civ?.wait.toString(16)} mode ${a.civ?.targetMode} `
+            + `view row 3 ${v.slice(12, 15)}`);
+    }
+    // V C C (0) = P + Ry(P) - E = (10, 0, 0) + (0, 0, -10) - (0, 0, 50):
+    // an eye at (10, 0, -60) is exactly where she stands, in the step's frame.
+    // The world eye is 60.8 away and C^-1 eye = (60, 0, 0) is 60 away.
+    {
+      const { a, events } = riderScene(reach());
+      G.g_camera_eye = vec3(10, 0, -60);
+      cFrame(a, events);
+      check("the step's reach is measured against (V C C)^-1 eye: an eye "
+            + "that lands on her there releases the wait",
+            a.civ?.cursor === 4 && a.civ?.motionBlend === 44
+            && a.civ?.targetMode === CivilianTarget.None,
+            `cursor ${a.civ?.cursor} blend ${a.civ?.motionBlend} `
+            + `mode ${a.civ?.targetMode}`);
+    }
+    // And from the other side: an eye at P, where C^-1 eye is her own origin
+    // and the world eye is 10 away -- both inside 18 -- is (0, 0, -60) in
+    // the step's frame, so the wait holds.
+    {
+      const { a, events } = riderScene(reach());
+      G.g_camera_eye = vec3(10, 0, 0);
+      cFrame(a, events);
+      check("...and an eye in her own frame's origin does not: the step does "
+            + "not load the identity the turn does",
+            a.civ?.cursor === 2 && a.civ?.motionBlend !== 44
+            && a.civ?.targetMode === CivilianTarget.Camera,
+            `cursor ${a.civ?.cursor} blend ${a.civ?.motionBlend} `
+            + `mode ${a.civ?.targetMode}`);
+    }
+    // The turn: an eye at (10, 0, 60) is C^-1 eye = Ry^-1(0, 0, 60) =
+    // (-60, 0, 0) in her frame, a quarter turn one way; the world eye was
+    // most of a half turn the other. One frame is the cap, 0x100.
+    {
+      const { a, events } = riderScene([
+        cmd(CivilianOp.Wait, CivilianWait.Free),
+        { op: CivilianOp.SetTarget, args: [CivilianTarget.Camera, 0],
+          radius: 18 },
+        cmd(CivilianOp.Wait, 0),
+        cmd(CivilianOp.End),
+      ]);
+      G.g_camera_eye = vec3(10, 0, 60);
+      a.yaw = 0;
+      cFrame(a, events);
+      check("the turn faces C^-1 eye, the camera in the carrier's frame",
+            a.yaw === 0x100 && a.civ?.targetMode === CivilianTarget.Camera,
+            `yaw 0x${a.yaw.toString(16)} mode ${a.civ?.targetMode}`);
+    }
+  }
+
   // **Does a dead civilian leave `g_civilians_alive`?** This is the counter
   // `wait_scripted_actors` blocks on, and a civilian that dies without leaving
   // it parks the script for ever. `CivilianInit` raises the count

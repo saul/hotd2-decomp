@@ -186,6 +186,24 @@ civilians reaches an op 0x06 block or a passed block that sets a restored
 word, and every captor it shoots dies the same way); tests in `port.test.ts`,
 each seen failing on the base.
 
+**A civilian on a carrier sees the camera from the carrier, and her step sees
+it from somewhere else again.** Both places that resolve a camera target
+(mode −1, or the mirror) take it into the carrier's frame when the civilian
+rides one, because her position is kept there -- and the port did neither, so
+stage 4's four riders turned toward the world eye from a boat-relative
+position. The two copies of that arm are not the same: the turn
+(`CivilianStepTurnToTarget`, `0x0048C8D4`) loads the identity first and gets
+the camera in her frame, and `CivilianStepScript`'s copy does not, so its reach
+and face tests invert the carrier composed onto the view and the carrier the
+update already pushed -- `(V·C·C)⁻¹·eye`, a point that is not the camera. The
+port keeps both, from `game/matrix.ts` in the engine's call order; the shared
+`CivilianTargetPoint` now takes that one instruction as its argument. Stage 3's
+boat rider `0x0BC0` (script 25, a reach within 18) is the one shipped wait it
+decides. Three checks in `port.test.ts`, each failing on the base; a mutant
+that gives the step the turn's identity fails both reach checks. The civilians
+harness does not move (53/37/19/4/60/58/12): it counts steps, not headings, and
+no rider reaches the camera in 30 s either way.
+
 **...and the rest of `ResolveHit`'s tail is `ResolveHit`'s.** Read again from
 `0x004096F6` to the `RET` at `0x00409865`, the kill test above stands. Two
 things around it did not: the payout lived in `FireShotRequest`, summed into

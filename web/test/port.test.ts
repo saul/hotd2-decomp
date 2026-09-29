@@ -15688,6 +15688,216 @@ console.log("\nclass 0x10, the civilian and the rescue:");
     }
   }
 
+  // **Op 0x10 calls a routine; the routine installs a step.** The operand of
+  // op 0x10 names an *install* routine, both VMs call it as `hook(obj, cmd +
+  // 2)`, and what lands in `sub+0x5C` is the step it writes -- which
+  // `CivilianUpdate` calls at `0x0048A962`. Read in full: `CivilianHookStartFall`
+  // (`FUN_0048D9F0`), `CivilianHookFallStep` (`FUN_0048DA20`),
+  // `CivilianHookStartMoveY` (`FUN_0048DB90`) and its step `FUN_0048DBC0`,
+  // `CivilianHookStartMoveLocal` (`FUN_0048DBD0`) and its step `FUN_0048DC10`.
+  // The port stored the operand itself, inlined three installs into the action
+  // VM with the fall's gravity for all three, and ran the fall step -- which it
+  // also had moving x and z and zeroing the velocity -- for every one of them.
+  //
+  // The addresses are the exe's, written as literals so this block reads the
+  // same against any revision of the port.
+  {
+    const HOOK_START_FALL = 0x0048d9f0, HOOK_RIDE_CHILDREN = 0x0048da90;
+    const HOOK_START_MOVE_Y = 0x0048db90, HOOK_START_MOVE_LOCAL = 0x0048dbd0;
+    const STEP_NONE = 0x0041ebb0;              // NoOpStub
+    const STEP_FALL = 0x0048da20, STEP_RIDE = 0x0048dab0;
+    const STEP_MOVE_Y = 0x0048dbc0, STEP_MOVE_LOCAL = 0x0048dc10;
+    const f32 = (bits: number): number => {
+      const d = new DataView(new ArrayBuffer(4));
+      d.setUint32(0, bits >>> 0, true);
+      return d.getFloat32(0, true);
+    };
+    // `MOV dword ptr [EDX + 0x1C], 0xBCDF0123` at `0x0048DA13`.
+    const FALL_G = f32(0xbcdf0123);
+    // The shipped operands: -0.2 (streams 61, 67, 71) and -0.05 (stream 72).
+    const M02 = 0xbe4ccccd, M005 = 0xbd4ccccd;
+    const savedEye = G.g_camera_fixed_eye_y;
+
+    // The fall. Wait bit 0x400 holds the block on `sub+0x18`.
+    {
+      const { a, events } = civScene([[
+        cmd(CivilianOp.Wait, CivilianWait.Hook),
+        cmd(CivilianOp.SetHook, HOOK_START_FALL),
+        cmd(CivilianOp.Wait, 0),
+        cmd(CivilianOp.SetMotionBlend, 55),
+        cmd(CivilianOp.Wait, 0),
+        cmd(CivilianOp.End),
+      ]]);
+      G.g_camera_fixed_eye_y = 0;              // no coli: the ground is 0
+      check("(fixture) the ground under the fall is at 0",
+            QueryGroundHeightAt(0, 110, 0) === 0,
+            `${QueryGroundHeightAt(0, 110, 0)}`);
+      check("op 0x10 calls CivilianHookStartFall: the slot holds its STEP, "
+            + "vel.y 0, and obj+0x5C the exe's exact float",
+            a.civ?.hook === STEP_FALL && a.vel.y === 0 && a.accY === FALL_G
+            && a.civ?.hookDone === 0,
+            `hook 0x${a.civ?.hook.toString(16)} vel.y ${a.vel.y} `
+            + `accY ${a.accY} done ${a.civ?.hookDone}`);
+      a.pos = vec3(0, 10, 0);
+      a.vel.x = 0.5; a.vel.z = -0.25;         // an op 0x26 move's leftovers
+      cFrame(a, events);
+      const y1 = Math.fround(10 + Math.fround(FALL_G));
+      check("the fall step moves y by the accelerated velocity...",
+            a.pos.y === y1, `y ${a.pos.y} want ${y1}`);
+      check("...and y only: x and z stay where they were",
+            a.pos.x === 0 && a.pos.z === 0 && a.vel.x === 0.5
+            && a.vel.z === -0.25,
+            `pos ${JSON.stringify(a.pos)} vel ${JSON.stringify(a.vel)}`);
+      // From the routine: v += g; y += v; land when the ground is at or above
+      // the new y. With g = -0.0272222 from y = 10 that is n(n+1)/2 * g <= -10,
+      // first true at n = 27.
+      let v = Math.fround(FALL_G), y = y1, n = 1;
+      while (!(0 >= y)) {
+        v = Math.fround(FALL_G + v); y = Math.fround(v + y); n++;
+      }
+      let frames = 1;
+      while (a.civ?.hook === STEP_FALL && frames < 200) {
+        cFrame(a, events); frames++;
+      }
+      check("it lands on frame 27, where the arithmetic puts it",
+            n === 27 && frames === 27, `derived ${n} ran ${frames}`);
+      check("...snapped to the ground, with the step uninstalled (NoOpStub)",
+            a.pos.y === 0 && a.civ?.hook === STEP_NONE,
+            `y ${a.pos.y} hook 0x${a.civ?.hook.toString(16)}`);
+      check("...keeping the velocity it landed with -- nothing zeroes it",
+            a.vel.y === v && v < -0.7 && a.vel.x === 0.5,
+            `vel ${JSON.stringify(a.vel)} want y ${v}`);
+      check("...and sub+0x18 released wait bit 0x400 on that same frame",
+            a.civ?.motionBlend === 55 && a.civ?.cursor === 4,
+            `blend ${a.civ?.motionBlend} cursor ${a.civ?.cursor}`);
+    }
+
+    // `CivilianHookStartMoveY`: one operand into vel.y, the shadow bit, no
+    // gravity -- and its step is `y += vel.y` for ever, through the floor.
+    {
+      const { a, events } = civScene([[
+        cmd(CivilianOp.Wait, 0),
+        cmd(CivilianOp.SetHook, HOOK_START_MOVE_Y, M02 | 0),
+        cmd(CivilianOp.Wait, 0),
+        cmd(CivilianOp.End),
+      ]]);
+      G.g_camera_fixed_eye_y = 0;
+      check("op 0x10 calls CivilianHookStartMoveY: its own step, the operand "
+            + "in vel.y, obj+0x34 bit 0x80000, and no gravity written",
+            a.civ?.hook === STEP_MOVE_Y && a.vel.y === f32(M02)
+            && (a.flags & 0x80000) !== 0 && a.accY === 0,
+            `hook 0x${a.civ?.hook.toString(16)} vel.y ${a.vel.y} `
+            + `flags 0x${a.flags.toString(16)} accY ${a.accY}`);
+      a.pos = vec3(3, 10, 4);
+      let y = 10;
+      for (let i = 0; i < 100; i++) {
+        cFrame(a, events);
+        y = Math.fround(f32(M02) + y);
+      }
+      check("its step sinks at a constant -0.2 a frame, past the ground at 0",
+            a.pos.y === y && y < -9.9 && a.vel.y === f32(M02)
+            && a.pos.x === 3 && a.pos.z === 4,
+            `pos ${JSON.stringify(a.pos)} want y ${y} vel.y ${a.vel.y}`);
+      check("...and never uninstalls itself or raises sub+0x18",
+            a.civ?.hook === STEP_MOVE_Y && a.civ?.hookDone === 0,
+            `hook 0x${a.civ?.hook.toString(16)} done ${a.civ?.hookDone}`);
+    }
+
+    // `CivilianHookStartMoveLocal`: three operands into the velocity, and a
+    // step that adds it **turned by the actor's rotation** --
+    // Translate, RotateX(obj+0x64), RotateZ(obj+0x6C), RotateY(obj+0x68),
+    // TransformPoint. Each call pre-multiplies, so the velocity meets the Y
+    // turn first and the X turn last. With yaw and pitch both 0x4000 and the
+    // velocity along -Z: the yaw takes (0, 0, -0.05) to (-0.05, 0, 0), and a
+    // turn about X leaves an x vector alone. Taken the other way round the
+    // pitch would lift it into y and the yaw would never see it.
+    {
+      const { a, events } = civScene([[
+        cmd(CivilianOp.Wait, 0),
+        cmd(CivilianOp.SetHook, HOOK_START_MOVE_LOCAL, 0, 0, M005 | 0),
+        cmd(CivilianOp.Wait, 0),
+        cmd(CivilianOp.End),
+      ]]);
+      G.g_camera_fixed_eye_y = 0;
+      check("op 0x10 calls CivilianHookStartMoveLocal: its own step and the "
+            + "three operands as the velocity, no gravity written",
+            a.civ?.hook === STEP_MOVE_LOCAL && a.vel.x === 0 && a.vel.y === 0
+            && a.vel.z === f32(M005) && a.accY === 0,
+            `hook 0x${a.civ?.hook.toString(16)} vel ${JSON.stringify(a.vel)} `
+            + `accY ${a.accY}`);
+      a.pos = vec3(5, 0, 7);
+      a.yaw = 0x4000; a.pitch = 0x4000; a.roll = 0;
+      cFrame(a, events);
+      check("its step moves along the turned axes: yaw first, so -Z goes to -X",
+            Math.abs(a.pos.x - (5 + f32(M005))) < 1e-6
+            && Math.abs(a.pos.y) < 1e-6 && Math.abs(a.pos.z - 7) < 1e-6,
+            `pos ${JSON.stringify(a.pos)}`);
+      for (let i = 1; i < 30; i++) cFrame(a, events);
+      check("...every frame, with no ground to stop it and no uninstall",
+            Math.abs(a.pos.x - (5 + 30 * f32(M005))) < 1e-4
+            && Math.abs(a.pos.y) < 1e-4 && a.civ?.hook === STEP_MOVE_LOCAL,
+            `pos ${JSON.stringify(a.pos)} hook 0x${a.civ?.hook.toString(16)}`);
+    }
+
+    // The reapply walk's arm, `0x0048B913`: a null operand writes nothing; any
+    // other is CALLED -- its side effects land -- and then `sub+0x5C` gets
+    // `NoOpStub`. `sub+0x18` is not touched either way.
+    {
+      const { a } = civScene([[
+        cmd(CivilianOp.Wait, 0),
+        cmd(CivilianOp.SetHook, HOOK_START_FALL),
+        cmd(CivilianOp.Wait, 0),                            // 2
+        cmd(CivilianOp.SetHook, HOOK_START_MOVE_Y, M02 | 0),
+        cmd(CivilianOp.Wait, 0),                            // 4
+        cmd(CivilianOp.SetHook, 0),
+        cmd(CivilianOp.Wait, 0),                            // 6
+        cmd(CivilianOp.End),
+      ]]);
+      const sub = a.civ;
+      if (sub) sub.hookDone = 1;
+      const at6 = CivilianReapplyWaitCommand(a, 0, 4);
+      check("the reapply walk's null op 0x10 writes nothing: the fall stands",
+            at6 === 6 && a.civ?.hook === STEP_FALL,
+            `at ${at6} hook 0x${a.civ?.hook.toString(16)}`);
+      const at4 = CivilianReapplyWaitCommand(a, 0, 2);
+      check("its non-null op 0x10 CALLS the install: vel.y and the flag land",
+            at4 === 4 && a.vel.y === f32(M02) && (a.flags & 0x80000) !== 0
+            && a.accY === FALL_G,
+            `at ${at4} vel.y ${a.vel.y} flags 0x${a.flags.toString(16)} `
+            + `accY ${a.accY}`);
+      check("...and then takes the step it installed back out (NoOpStub), "
+            + "leaving sub+0x18 alone",
+            a.civ?.hook === STEP_NONE && a.civ?.hookDone === 1,
+            `hook 0x${a.civ?.hook.toString(16)} done ${a.civ?.hookDone}`);
+    }
+
+    // The action VM's arm, `0x0048BD81`: null is `NoOpStub` and nothing else;
+    // non-null is the call and then `sub+0x18 = 0`.
+    {
+      const { a } = civScene([[
+        cmd(CivilianOp.Wait, 0),
+        cmd(CivilianOp.SetHook, HOOK_RIDE_CHILDREN),
+        cmd(CivilianOp.Wait, 0),                            // 2
+        cmd(CivilianOp.SetHook, 0),
+        cmd(CivilianOp.Wait, 0),                            // 4
+        cmd(CivilianOp.End),
+      ]]);
+      check("CivilianHookRideChildren installs CivilianHookRideChildrenStep",
+            a.civ?.hook === STEP_RIDE, `hook 0x${a.civ?.hook.toString(16)}`);
+      const sub = a.civ;
+      if (sub) sub.hookDone = 1;
+      CivilianRunScript(a, 0, 2);
+      check("the action VM's null op 0x10 is NoOpStub, and sub+0x18 stands",
+            a.civ?.hook === STEP_NONE && a.civ?.hookDone === 1,
+            `hook 0x${a.civ?.hook.toString(16)} done ${a.civ?.hookDone}`);
+      CivilianRunScript(a, 0, 0);
+      check("...and a non-null one puts sub+0x18 down after the call",
+            a.civ?.hook === STEP_RIDE && a.civ?.hookDone === 0,
+            `hook 0x${a.civ?.hook.toString(16)} done ${a.civ?.hookDone}`);
+    }
+    G.g_camera_fixed_eye_y = savedEye;
+  }
+
   // **Does a dead civilian leave `g_civilians_alive`?** This is the counter
   // `wait_scripted_actors` blocks on, and a civilian that dies without leaving
   // it parks the script for ever. `CivilianInit` raises the count

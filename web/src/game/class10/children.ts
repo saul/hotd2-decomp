@@ -11,7 +11,7 @@
  */
 import { ActorFlag, type Actor } from "../actor";
 import { ActorByAt } from "../globals";
-import { CivilianHook } from "./ops";
+import { CivilianFrameHook } from "./ops";
 import { ActorTurnTowardPoint } from "./turn";
 
 /** `CivilianHookRideChildrenStep`'s turn cap, 0x0048DB6C. */
@@ -66,12 +66,17 @@ export function CivilianPruneDeadChildren(obj: Actor): void {
 export function CivilianHookRideChildrenStep(obj: Actor): void {
   const sub = obj.civ;
   if (!sub) return;
-  if (obj.flags & ActorFlag.Dead) { sub.hook = CivilianHook.None; return; }
-  const n = sub.children.length;
+  if (obj.flags & ActorFlag.Dead) {
+    sub.hook = CivilianFrameHook.None;
+    return;
+  }
+  // `MOVSX EDX, word ptr [ESI + 0x1E]` at `0x0048DADB`: the count word, and
+  // the loop runs `sub+0x60[0..n)` off it.
+  const n = sub.childCount;
   if (n === 0) return;
   const mid = { x: 0, y: 0, z: 0 };
-  for (const at of sub.children) {
-    const kid = ActorByAt(at);
+  for (let i = 0; i < n; i++) {
+    const kid = ActorByAt(sub.children[i] ?? 0);
     if (!kid) continue;
     mid.x += kid.pos.x; mid.y += kid.pos.y; mid.z += kid.pos.z;
   }

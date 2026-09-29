@@ -82,7 +82,8 @@ import { ActorDespawn } from "../despawn";
 import { CameraSlotVacate, RegisterEnemySlot, RegisterForCameraTracking }
   from "../camera/slots";
 import { G } from "../globals";
-import { CameraBlockEye, CameraBlockYaw } from "../camera/view";
+import { CameraBlockEye, CameraBlockPathFrame, CameraBlockYaw }
+  from "../camera/view";
 import {
   registerClass, type ActorDebug, type ClassFrame, type ClassHandler,
 } from "../registry";
@@ -588,6 +589,12 @@ export function PlaceOwlFlockMember(obj: Actor, rng?: Rng): void {
  *
  * The first test is the odd one: **a sub-type-0 owl cannot be shot until the
  * camera's path frame passes 682**, and no other sub-type has that guard.
+ * The frame is the drawn block's -- `FILD [EAX*4 + 0x9a6110]` at
+ * `0x004460EA`, `EAX` from `MOV ECX, [0x009c6f00]` times 0x69 -- so under
+ * scene state (1, 3) it is block 2's, which is always 0, and the owl cannot
+ * be shot at all. Stage 2's sub-type-0 owl is in the pool through one such
+ * stretch: placed at path 60 frame 680, it is still there while (1, 3) plays
+ * frames 707..845 of the same path.
  * **Nothing clears bit 3 while it waits** — no instruction in the class ANDs
  * `obj+0x34` with a mask that drops it, and `MarkActorShot` only raises it —
  * so a bullet that lands early is kept, and the owl dies on the first frame
@@ -603,7 +610,8 @@ export function PlaceOwlFlockMember(obj: Actor, rng?: Rng): void {
 export function OwlResolveShot(obj: Actor, f: ClassFrame): boolean {
   const sub = Tail(obj);
   if (!sub) return false;
-  if (sub.subtype === 0 && G.g_cam_path_frame < OWL_SUBTYPE0_INVULN_FRAME) {
+  if (sub.subtype === 0
+      && CameraBlockPathFrame(G.g_camera_index) < OWL_SUBTYPE0_INVULN_FRAME) {
     return false;
   }
   if (sub.state === OwlState.Dead) return false;

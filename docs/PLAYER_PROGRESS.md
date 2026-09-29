@@ -5732,6 +5732,31 @@ end on five.** It is chaos rather than one bug: putting back either the old
 rank or the old eye in `TurnActorTowardCamera` alone -- whose point turns by
 `ftol(eye.y)` BAMS, 49 against 34 -- restores the old run.
 
+**And the path frame** (2026-09-29). Each camera block has a path frame too,
+and block 2's, `g_cam_path_frame_2` (`0x009A6458`), is **always 0**: only
+`CameraBlocksReset`, a zeroing of all four blocks, and the path actions run as
+block 2 write it, and nothing ever runs as block 2 -- every action slot starts
+as `NoOpStub` and only an action already running in a block writes that
+block's slot. It is now in `G`. Two kinds of reader change:
+
+* **Through the index**, `[g_camera_index * 0x1A4 + 0x9A6110]`, read as
+  `CameraBlockPathFrame(G.g_camera_index)`: under scene state (1, 3) these see
+  0. The sub-type-0 owl cannot be shot then -- stage 2's is in the pool while
+  (1, 3) plays path 60's frames 707..845, where the port let it die -- and
+  neither path 0x7E's ripple pause nor type 72's cue can fire, though both
+  come round under index 0 in the shipped scripts, so neither moves.
+* **By address, as a second arm**: `g_cam_path_frame == c ||
+  g_cam_path_frame_2 == c` in class 0x30 states 18, 19 and 23,
+  `ThrowerStateGrabPlayer` and `ScriptedCarrierUpdate33`. That arm is "`c` is
+  0", and no shipped cue is 0, so the three `[diverges]` notes that said the
+  port had no second block are gone and nothing plays differently.
+
+The one remaining reader is class 0x33 selector 5,
+`ScriptedEffectAtCameraCue33` (`FUN_00433B00`, named): a camera-cued sprite
+effect, one stage-2 spawn at evt `0x12568`, cue 340, **not ported** -- the
+port builds nothing for it. The table is `docs/formats/cam.md` § *The path
+frame, and block 2's*.
+
 ### Stage 2 block 11: the fire strip ends
 
 Reported at `?stage=2&original=1&mode=play&block=11&step=1&op=28&frame=0`:

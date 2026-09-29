@@ -32,9 +32,16 @@
  * replace. `[proved]`
  *
  * Everything is `G`'s: the ring, the cursor mode, the operand scratch and the
- * handler identity. Only slot 0 of the four evt-action blocks is modelled --
- * the other three are the two-player camera blocks' and the shipped scripts
- * never queue into them.
+ * handler identity. Only slot 0 of the four evt-action blocks is modelled,
+ * because only slot 0 ever holds anything but `NoOpStub`: `CameraActorInit`
+ * fills all four from `0x00576CA4` (four `NoOpStub`s), every store that
+ * names a slot by address names slot 0's (`[0x009a610c]`, nine sites, this
+ * routine's at `0x00402372` among them), and every other writer of
+ * a slot is an action writing the slot of the block it was called with -- `[ESP + 4]`
+ * times `0x1A4` -- which for blocks 1..3 would have to be running there
+ * already. So `CameraActorTick`'s calls of blocks 1..3 (`0x004022D5`) are
+ * always `NoOpStub`, and block 2's path frame is never stepped
+ * (`g_cam_path_frame_2`). `[proved]`
  */
 import { G } from "../globals";
 import { MatIdentity, MatrixLoadIdentity, MatrixRotateX, MatrixRotateY,
@@ -526,7 +533,9 @@ export function CheckpointResetCamera(): void {
  *
  * Blocks 0 and 2 are the port's -- block 2 only for the pose
  * `EvtRunQueuedActionsSyncViewBlock` copies into it; `+0x110` is
- * `g_cam_path_frame`. The two light blocks are the walker's. `[proved]`
+ * `g_cam_path_frame` and, in block 2, `g_cam_path_frame_2`, which nothing
+ * after this ever writes (see the global). The two light blocks are the
+ * walker's. `[proved]`
  */
 export function CameraBlocksReset(): void {
   G.g_camera_block_eye = vec3();
@@ -540,6 +549,7 @@ export function CameraBlocksReset(): void {
   G.g_camera_block2_roll_bams = 0;
   G.g_camera_block2_target = vec3();
   G.g_cam_path_frame = 0;
+  G.g_cam_path_frame_2 = 0;
   G.g_camera_turn_curve = 1;
   G.g_camera_index = 0;
   EvtEnterSceneState(0, 0);

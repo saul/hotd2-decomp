@@ -138,6 +138,20 @@ export function CameraBlockYaw(i: number): number {
 }
 
 /**
+ * `[port-only]` -- `g_camera_blocks + i * 0x1A4 + 0xD0` (`0x009A6110`), camera
+ * block `i`'s path frame, as {@link CameraBlockEye}: what a reader of
+ * `[g_camera_index * 0x1A4 + 0x9A6110]` reads -- `PropUpdateType72`
+ * (`0x0047095A`), `WaterSurfaceUpdate` (`0x0046E50B`) and
+ * `OwlUpdateAndResolveShot` (`0x004460EA`), each after `MOV reg,
+ * [0x009c6f00]`. Block 2's is `G.g_cam_path_frame_2`, which is always 0, so
+ * under scene state (1, 3) such a reader sees 0 whatever path is playing.
+ */
+export function CameraBlockPathFrame(i: number): number {
+  return i === CAMERA_INDEX_VIEW_ANGLES ? G.g_cam_path_frame_2
+    : G.g_cam_path_frame;
+}
+
+/**
  * `[port-only]` -- `g_camera_blocks + i * 0x1A4 + 0x8C` (`0x009A60CC`), camera
  * block `i`'s pitch, as {@link CameraBlockYaw}.
  */

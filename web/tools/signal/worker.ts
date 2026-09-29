@@ -222,8 +222,8 @@ export class SignalRoom {
       if (verb === "events" && request.method === "GET") return this.events(code, token);
       if (verb === "send" && request.method === "POST") {
         const body = JSON.parse(await readBody(request)) as { data: unknown };
-        this.rooms.send(code, token, body.data);
-        return json(200, { ok: true });
+        const delivered = this.rooms.send(code, token, body.data);
+        return json(200, { ok: true, delivered });
       }
       if (verb === "leave" && request.method === "POST") {
         this.rooms.leave(code, token);

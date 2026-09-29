@@ -846,7 +846,7 @@ web/src/
     stage_load.ts, walker_host.ts, urlstate.ts, viewprefs.ts
     net/          two players over WebRTC: session.ts (roles, lobby,
                   rejoin), host.ts and replica.ts (the two ends), rtc.ts,
-                  local.ts and signal.ts (the links and the rendezvous),
+                  signal.ts (the rendezvous),
                   player_hooks.ts (the player as netplay sees it), stats.ts.
                   See docs/NETPLAY.md
   core/         the framework. No three.js, no DOM.

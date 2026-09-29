@@ -105,9 +105,6 @@ export type UiCommand =
   | { kind: "netHost" }
   /** Join a room by its code, as player 2. */
   | { kind: "netJoin"; code: string }
-  /** Host or join another tab of this browser, with no network. */
-  | { kind: "netHostLocal" }
-  | { kind: "netJoinLocal" }
   /** Leave the session, whichever end this is. */
   | { kind: "netLeave" }
   /** Ask the host for a keyframe: the overlay's repair button. */

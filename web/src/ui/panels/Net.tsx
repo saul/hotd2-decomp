@@ -108,10 +108,9 @@ function lobbyText(net: NetProjection): { title: string; body: string } | null {
         return { title: "Connecting to player 2…",
                  body: "Their page is in the room. The game is held until they are in." };
       }
-      return { title: "Waiting for player 2", body: (l.code === "local"
-        ? "Open this page in another tab with ?net=local-join."
-        : "Send them the link, or have them choose Join and type the code.")
-        + " The game is held until they are in; Cancel plays on alone." };
+      return { title: "Waiting for player 2",
+               body: "Send them the link, or have them choose Join and type the code."
+                 + " The game is held until they are in; Cancel plays on alone." };
     case "joining": return { title: `Joining ${l.code ?? ""}…`, body: "" };
     case "connecting":
       return l.hint
@@ -141,7 +140,7 @@ export function NetLobbyCard() {
   return (
     <div id="net-lobby" className={bad ? "net-bad" : undefined} role="status">
       <h5>{t.title}</h5>
-      {net.role === "host" && l.phase === "waiting" && l.code && l.code !== "local" && (
+      {net.role === "host" && l.phase === "waiting" && l.code && (
         <>
           <div className="net-code">{l.code}</div>
           {l.link && (
@@ -175,7 +174,7 @@ export function NetMenuSection({ onClose }: { onClose: () => void }) {
         <div className="net-menu-row">
           <span className="net-dim">
             {net.role === "host" ? "Hosting" : "Player 2"}
-            {net.lobby.code && net.lobby.code !== "local" ? ` · ${net.lobby.code}` : ""}
+            {net.lobby.code ? ` · ${net.lobby.code}` : ""}
           </span>
           <button onClick={() => { dispatch({ kind: "netLeave" }); onClose(); }}>
             Leave

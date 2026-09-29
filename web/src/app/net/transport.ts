@@ -93,8 +93,7 @@ export function describePath(p: IcePath, ice: string, now: number): { line: stri
       + "a Mac, allow the browser in System Settings → Privacy & Security → Local "
       + "Network. Between networks, a strict NAT, or a router that will not route to "
       + `its own address, needs a TURN relay${p.turn ? "" : ", and this rendezvous has none"} `
-      + "(web/tools/signal/README.md). Two tabs of one browser pair without WebRTC "
-      + "unless ?rtc=1 is set.";
+      + "(web/tools/signal/README.md).";
   }
   return { line, hint };
 }
@@ -269,62 +268,5 @@ export class SimLink implements Transport {
 
   close(reason?: string): void {
     this.inner.close(reason);
-  }
-}
-
-/**
- * Several ways to the same peer, tried at once. The first to open is the
- * link and the rest are closed; until one opens, {@link info} is the first
- * way's, which is the one worth watching (WebRTC's ICE state).
- *
- * Before one has opened, any way closing closes them all. A way that gives
- * up is saying something the session must hear -- WebRTC closes when player
- * 2 comes back on a new connection, and the session answers by making a new
- * one -- and a race left running on the other ways would swallow it.
- */
-export class FirstOpen implements Transport {
-  onMessage: (ch: Channel, data: Uint8Array) => void = () => {};
-  onOpen: () => void = () => {};
-  onClose: (reason: string) => void = () => {};
-  private winner: Transport | null = null;
-  private closed = false;
-
-  constructor(private readonly ways: readonly Transport[]) {
-    for (const t of ways) {
-      t.onOpen = () => {
-        if (this.winner || this.closed) return;
-        this.winner = t;
-        for (const o of ways) if (o !== t) o.close("another way connected first");
-        this.onOpen();
-      };
-      t.onMessage = (ch, d) => {
-        if (t === this.winner) this.onMessage(ch, d);
-      };
-      t.onClose = (reason) => {
-        if (this.closed) return;
-        if (this.winner && t !== this.winner) return;
-        this.close(reason);
-      };
-    }
-  }
-
-  get info(): TransportInfo {
-    return (this.winner ?? this.ways[0]).info;
-  }
-
-  poll(): Promise<void> {
-    const t = this.winner ?? this.ways[0];
-    return t.poll?.() ?? Promise.resolve();
-  }
-
-  send(ch: Channel, data: Uint8Array): void {
-    this.winner?.send(ch, data);
-  }
-
-  close(reason = "closed"): void {
-    if (this.closed) return;
-    this.closed = true;
-    for (const t of this.ways) t.close(reason);
-    this.onClose(reason);
   }
 }

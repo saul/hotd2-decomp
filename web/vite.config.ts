@@ -2,6 +2,8 @@ import { defineConfig } from "vite";
 import { execSync } from "node:child_process";
 import { configFromEnv } from "./tools/signal/rooms";
 import { handle as handleSignal, nodeRooms } from "./tools/signal/node";
+import { startTurn } from "./tools/signal/turn";
+import { randomBytes } from "node:crypto";
 import {
   appendFileSync,
   createReadStream,
@@ -201,7 +203,28 @@ function serveSignal() {
   return {
     name: "hod2-signal",
     configureServer(server: import("vite").ViteDevServer) {
-      const rooms = nodeRooms(configFromEnv(process.env));
+      const cfg = configFromEnv(process.env);
+      const rooms = nodeRooms(cfg);
+      // A TURN relay of its own, unless one is configured or it is turned
+      // off (`HOTD2_DEV_TURN=0`): on a machine where two tabs, or a laptop and
+      // a phone, find no direct path -- mDNS that does not resolve, a router
+      // that does not route to itself -- WebRTC still connects. Any free UDP
+      // port, since several dev servers may run at once; the rooms hand out
+      // `turn:{host}:<port>` with credentials from a secret made per start.
+      if (!cfg.turn && !cfg.cloudflareTurn && process.env.HOTD2_DEV_TURN !== "0") {
+        const secret = randomBytes(16).toString("hex");
+        void startTurn({ secret, port: Number(process.env.HOTD2_DEV_TURN_PORT ?? 0) })
+          .then((turn) => {
+            cfg.turn = { urls: [`turn:{host}:${turn.port}?transport=udp`], secret,
+                         ttlSeconds: 6 * 3600 };
+            server.httpServer?.on("close", () => void turn.close());
+            server.config.logger.info(`  netplay: TURN relay on udp/${turn.port}, `
+              + `relays at ${turn.relayIp}`);
+          })
+          .catch((e: Error) => {
+            server.config.logger.warn(`  netplay: no TURN relay: ${e.message}`);
+          });
+      }
       const sweep = setInterval(() => rooms.sweep(), 15_000);
       sweep.unref();
       server.httpServer?.on("close", () => clearInterval(sweep));

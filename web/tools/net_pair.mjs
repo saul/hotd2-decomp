@@ -1,9 +1,16 @@
 /**
  * Two-player netplay in the real page: a host and a replica, two tabs of one
- * headless Chrome, playing a stage -- joined the way a player joins (a room
- * at the dev server's rendezvous, its link opened in the second tab, which
- * finds the host in the same browser), over `?net=local-host` /
- * `?net=local-join` with a bad link, and over WebRTC (`?rtc=1`).
+ * headless Chrome, joined the way a player joins -- a room at the dev
+ * server's rendezvous, its link opened in the second tab -- over WebRTC,
+ * playing a stage.
+ *
+ * **Chrome as users have it.** No flag makes WebRTC easier here: host
+ * addresses stay hidden behind mDNS names, which is what every real Chrome
+ * does, and on the machine this was written on they do not resolve and the
+ * router does not route to itself -- so the sessions below connect through
+ * the dev server's TURN relay (`tools/signal/turn.ts`), and the route they
+ * report says so. An earlier version launched Chrome with the hiding off, and
+ * passed for days while two real tabs could not connect at all (L80).
  *
  * `test:net` proves the session code on a real stage with no browser; this
  * proves the page around it -- the replica's install into `G`, the render
@@ -18,9 +25,10 @@
  *   as player 2's, and the host's aim check says they agree with its camera;
  * - a rewind on the host moves both to a new epoch without a desync;
  * - the host's game waits while it waits for player 2;
- * - and all of it again with the replica's outgoing link made bad, and over
- *   WebRTC; and, with Chrome hiding host addresses behind mDNS names as it
- *   does for every real user, WebRTC either connects or the lobby says why.
+ * - WebRTC connected, and by which route;
+ * - and all of it again with the replica's outgoing link made bad, and once
+ *   more through the relay alone (`?relay=1`), which must report a relayed
+ *   route.
  *
  *     HOTD2_BUNDLE=<dir> node tools/net_pair.mjs [--stage 1] [--seconds 20]
  *
@@ -47,19 +55,24 @@ const check = (name, ok, detail = "") => {
 
 const port = await freePort();
 const vite = await serve(port);
-// Host candidates as plain addresses: two pages of one browser on one machine
-// find each other that way whether or not mDNS resolves, or STUN is reachable.
-// **No real user's browser does this** -- the flag hid, for a whole round of
-// testing, that two tabs over WebRTC do not connect on this machine (L80) --
-// so the last section launches Chrome again without it.
-let browser = await chromium.launch({
-  channel: "chrome", headless: true,
-  args: ["--disable-features=WebRtcHideLocalIpsWithMdns"],
-});
+const browser = await chromium.launch({ channel: "chrome", headless: true });
 const faults = [];
 // One context for both tabs: `browser.newPage` would give each its own, and a
 // `BroadcastChannel` does not cross contexts any more than it crosses profiles.
 let context = null;
+
+/**
+ * The loading screen gone, or -- if it is still up after `ms` -- what it says,
+ * which is the reason a load failed where there is one.
+ */
+async function loaded(page, ms = 120_000) {
+  try {
+    await page.waitForSelector("#loading", { state: "detached", timeout: ms });
+    return null;
+  } catch {
+    return (await page.$eval("#loading", (e) => e.textContent).catch(() => "")) || "still loading";
+  }
+}
 
 async function open(label, query) {
   const page = await context.newPage();
@@ -76,7 +89,8 @@ async function open(label, query) {
   });
   await page.goto(`http://127.0.0.1:${port}/?stage=${STAGE}&${query}`,
                   { waitUntil: "domcontentloaded" });
-  await page.waitForSelector("#loading", { state: "detached", timeout: 120_000 });
+  const stuck = await loaded(page);
+  if (stuck) throw new Error(`${label} did not load: ${stuck}`);
   return page;
 }
 
@@ -148,42 +162,39 @@ async function frameMoves(page, ms) {
 }
 
 /**
- * One session. `how`: "room" -- an online room, its link opened in the second
- * tab, which pairs over the same-browser path; "local" -- `?net=local-host`
- * and `?net=local-join`; "webrtc" -- a room with `?rtc=1` on both pages.
+ * One session: a room made by the host, its link opened by the replica.
+ * `both` goes on both pages' addresses (`relay=1`), `replicaQuery` on the
+ * replica's alone (`netsim=...`).
  */
-async function session(label, replicaQuery, seconds, how) {
+async function session(label, { both = "", replicaQuery = "", seconds, robust = false,
+                                relayOnly = false }) {
   console.log(`\n${label}`);
   context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
-  const host = await open("host", how === "local" ? "net=local-host"
-    : how === "webrtc" ? "net=host&rtc=1" : "net=host");
+  const host = await open("host", `net=host${both ? `&${both}` : ""}`);
   await host.keyboard.press("Space"); // past the start screen, and play
-  let replica;
-  if (how !== "local") {
-    // The room the host made at the dev server's rendezvous, off its card.
-    const code = await host.waitForSelector("#net-lobby .net-code", { timeout: 20_000 })
-      .then((el) => el.textContent());
-    console.log(`        room ${code}`);
-    // Nobody to play with yet: the host's game waits, and its card says so.
-    const [a, b] = await frameMoves(host, 1500);
-    const card = await host.$eval("#net-lobby", (e) => e.textContent).catch(() => "");
-    check(`the host's game waits for player 2 (frame ${a} then ${b}), and says so`,
-          a === b && /held until they are in/.test(card), `${a} -> ${b}; card: ${card}`);
-    const rtc = how === "webrtc" ? "rtc=1&" : "";
-    replica = await open("replica", `${rtc}${replicaQuery}#join=${code}`);
-  } else {
-    replica = await open("replica", `net=local-join&${replicaQuery}`);
-  }
+  // The room the host made at the dev server's rendezvous, off its card.
+  const code = await host.waitForSelector("#net-lobby .net-code", { timeout: 20_000 })
+    .then((el) => el.textContent());
+  console.log(`        room ${code}`);
+  // Nobody to play with yet: the host's game waits, and its card says so.
+  const [a, b] = await frameMoves(host, 1500);
+  const card = await host.$eval("#net-lobby", (e) => e.textContent).catch(() => "");
+  check(`the host's game waits for player 2 (frame ${a} then ${b}), and says so`,
+        a === b && /held until they are in/.test(card), `${a} -> ${b}; card: ${card}`);
+  const query = [both, replicaQuery].filter(Boolean).join("&");
+  const replica = await open("replica", `${query}#join=${code}`);
   await replica.mouse.click(5, 5); // a press, for the audio; the start screen is the host's
-  // Streaming: the replica verifies ticks.
+  // Streaming: the replica verifies ticks. If it never does, what the lobby
+  // card said about the search is the first thing worth knowing.
   let f = {};
   for (let i = 0; i < 60; i++) {
     f = await figures(replica);
     if (num(f["ticks verified"]) > 120) break;
     await replica.waitForTimeout(500);
   }
-  check("the replica streams and verifies ticks", num(f["ticks verified"]) > 120,
-        JSON.stringify(f));
+  const search = await replica.$eval("#net-lobby", (e) => e.textContent).catch(() => "");
+  check("the replica connects, streams and verifies ticks", num(f["ticks verified"]) > 120,
+        `${JSON.stringify(f)}; lobby: ${search}`);
 
   // Player 2 presses START. The shell goes through pending-start (10) and
   // into play (5) when the game lets a player in, which can take a while if
@@ -197,23 +208,36 @@ async function session(label, replicaQuery, seconds, how) {
   check("START on the replica puts player 2 in play on the host", p2 === 5,
         `g_player_state[1] = ${p2}`);
 
-  // Player 2 shoots what it can see, through its own camera.
-  const end = Date.now() + seconds * 1000;
+  // Player 2 shoots what it can see, through its own camera: for `seconds`,
+  // and on until a hit has scored -- the host's game waited for player 2, so
+  // the stage starts from its beginning, and the first zombies take a while.
+  //
+  // **The best score, not the last.** Aimed at "the nearest enemy", a shot
+  // at a captor can take the civilian it holds, which costs player 2 100
+  // points and a life (`ScoreAddForPlayer`, class 0x10), and the rewind puts
+  // the score back with everything else. What this asks is whether player
+  // 2's hits count on the host, and the best score seen says so.
+  const start = Date.now();
+  const end = start + seconds * 1000;
+  const giveUp = end + 45_000;
   let shots = 0, reloads = 0;
   let rewound = false;
-  while (Date.now() < end) {
+  let best = 0;
+  while (Date.now() < end || (!best && Date.now() < giveUp)) {
     const t = await enemyOnScreen(replica);
     if (t) {
       await replica.mouse.click(t.x, t.y);
       shots++;
       if (shots % 6 === 0) { await replica.keyboard.press("KeyR"); reloads++; }
     }
-    if (!rewound && Date.now() > end - seconds * 500) {
+    if (!rewound && Date.now() > start + seconds * 500) {
       rewound = true;
       await host.keyboard.press("ArrowLeft"); // a rewind: a new epoch
     }
+    best = Math.max(best, await readG(host, (G) => G.g_player_score[1]));
     await replica.waitForTimeout(120);
   }
+  console.log(`        ${shots} shots over ${((Date.now() - start) / 1000).toFixed(0)} s`);
   await replica.waitForTimeout(1500);
   const rf = await figures(replica);
   const hf = await figures(host);
@@ -237,50 +261,16 @@ async function session(label, replicaQuery, seconds, how) {
   check(`player 2's aim agrees with the host's camera (${hf["player 2's aim"]})`,
         /\d/.test(hf["player 2's aim"] ?? "") && num(hf["player 2's aim"]) < 0.05,
         hf["player 2's aim"]);
-  check(`player 2 scored (${score})`, score > 0, `score ${score}`);
+  check(`player 2's hits scored on the host (best ${best}, now ${score})`, best > 0,
+        `best ${best}`);
   check(`the rewind moved both ends to the same new epoch (${epochs.join(" / ")})`,
         epochs[0] >= 2 && epochs[0] === epochs[1], JSON.stringify(epochs));
-  if (how === "webrtc") {
-    check(`WebRTC connected (${rf.transport}, route ${rf.route}, ICE ${rf.ICE})`,
-          rf.transport.startsWith("webrtc") && /connected|completed/.test(rf.ICE), rf.ICE);
-    await robustness(host, replica);
+  check(`WebRTC connected (${rf.transport}, route ${rf.route}, ICE ${rf.ICE})`,
+        /^webrtc/.test(rf.transport ?? "") && /connected|completed/.test(rf.ICE ?? ""), rf.ICE);
+  if (relayOnly) {
+    check(`...through the relay alone (${rf.route})`, /relay/.test(rf.route ?? ""), rf.route);
   }
-  if (how === "room") {
-    check(`the second tab found the host in its own browser, no WebRTC (${rf.transport})`,
-          /^local/.test(rf.transport ?? ""), rf.transport);
-  }
-  await context.close();
-}
-
-/**
- * WebRTC between two tabs with Chrome as users have it: host addresses hidden
- * behind mDNS names. Where the name resolves it connects; where it does not
- * -- a Mac that has not given the browser Local Network access -- ICE finds
- * no pair, and the page must say so rather than show "connecting" for ever.
- */
-async function mdnsSession() {
-  console.log("\nstage 1, WebRTC with Chrome's mDNS host names, as a real browser has them");
-  context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
-  const host = await open("host", "net=host&rtc=1");
-  const code = await host.waitForSelector("#net-lobby .net-code", { timeout: 20_000 })
-    .then((el) => el.textContent());
-  const replica = await open("replica", `rtc=1#join=${code}`);
-  let connected = false, hint = "", path = "";
-  for (let i = 0; i < 50 && !connected && !hint; i++) {
-    await replica.waitForTimeout(500);
-    connected = /connected|completed/.test((await figures(replica)).ICE ?? "");
-    hint = await replica.$eval("#net-lobby .net-hint", (e) => e.textContent).catch(() => "");
-    path = await replica.$eval("#net-lobby .net-path", (e) => e.textContent).catch(() => path);
-  }
-  const hostPath = await host.$eval("#net-lobby .net-path", (e) => e.textContent).catch(() => "");
-  console.log(`        ${connected ? "connected" : `not connected: ${path}`}`);
-  if (!connected) console.log(`        host: ${hostPath}`);
-  check("WebRTC either connects or, within 25 s, the lobby says why "
-        + `(${connected ? "connected" : "explained"})`,
-        connected || (hint.length > 40 && /offered/.test(path)), `path "${path}", hint "${hint}"`);
-  if (!connected) {
-    check("...and the host's card shows the same search", /offered/.test(hostPath), hostPath);
-  }
+  if (robust) await robustness(host, replica);
   await context.close();
 }
 
@@ -317,7 +307,11 @@ async function robustness(host, replica) {
 
   // Player 2 reloads the tab: the same game comes back, and matches.
   await replica.reload({ waitUntil: "domcontentloaded" });
-  await replica.waitForSelector("#loading", { state: "detached", timeout: 120_000 });
+  const stuck = await loaded(replica);
+  if (stuck) {
+    check("a reloaded player 2 loads the page", false, stuck);
+    return;
+  }
   let f = {};
   for (let i = 0; i < 60; i++) {
     f = await figures(replica);
@@ -337,7 +331,11 @@ async function robustness(host, replica) {
     // A stage picked from the menu loads and plays by itself (`loadAndPlay`):
     // no Space here, which would pause it.
     await picked.click();
-    await host.waitForSelector("#loading", { state: "detached", timeout: 120_000 });
+    const hostStuck = await loaded(host);
+    if (hostStuck) {
+      check("the host loads stage 2", false, hostStuck);
+      return;
+    }
     let rf2 = {};
     for (let i = 0; i < 80; i++) {
       await replica.waitForTimeout(500);
@@ -356,22 +354,16 @@ async function robustness(host, replica) {
 
 const ONLY = flag("only", "");
 try {
-  if (!ONLY || ONLY === "local") {
-    await session(`stage ${STAGE}, a room, its link opened in a second tab`, "", SECONDS, "room");
+  if (!ONLY || ONLY === "clean") {
+    await session(`stage ${STAGE}, two tabs over WebRTC`, { seconds: SECONDS, robust: true });
   }
   if (!ONLY || ONLY === "sim") {
-    await session(`stage ${STAGE}, two tabs, replica's link 60±30 ms, 10% loss`,
-                  "netsim=lat:60,jit:30,loss:10", SECONDS, "local");
+    await session(`stage ${STAGE}, WebRTC, replica's link 60±30 ms, 10% loss`,
+                  { replicaQuery: "netsim=lat:60,jit:30,loss:10", seconds: SECONDS });
   }
-  if (!ONLY || ONLY === "webrtc") {
-    await session(`stage ${STAGE}, WebRTC through the dev server's rendezvous`,
-                  "", SECONDS, "webrtc");
-  }
-  if (!ONLY || ONLY === "mdns") {
-    // One Chrome at a time (L29): the first goes before this one comes.
-    await browser.close();
-    browser = await chromium.launch({ channel: "chrome", headless: true });
-    await mdnsSession();
+  if (!ONLY || ONLY === "relay") {
+    await session(`stage ${STAGE}, WebRTC through the TURN relay alone (?relay=1)`,
+                  { both: "relay=1", seconds: SECONDS, relayOnly: true });
   }
 } finally {
   await browser.close();

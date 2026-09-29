@@ -324,7 +324,10 @@ async function suite(api: Api): Promise<void> {
   check(`${n}: the replica's leave is 200`, left.status === 200, `${left.status}`);
   check(`${n}: the host hears {peer, joined:false}`, isPeer(await host2.next(), false));
   check(`${n}: ...and the replica's own stream is ended`, await replica3.end());
-  check(`${n}: a send to nobody is 409`, (await say(C, H, 1)).status === 409);
+  const nobody = await say(C, H, 1);
+  check(`${n}: a send to nobody is dropped, and says so`, nobody.status === 200
+        && (nobody.body as { delivered?: boolean }).delivered === false,
+        `${nobody.status}`);
   check(`${n}: the old replica token is refused with 403`, (await say(C, rep.token, 1)).status === 403);
   const j2 = await post(api, `${rooms}/${C}/join`);
   check(`${n}: the slot is free: a new join is 200`, j2.status === 200, `${j2.status}`);
@@ -439,7 +442,10 @@ async function workerOnly(api: Api, ns: FakeNamespace): Promise<void> {
     check("...having asked the live room's object, and then a fresh one",
           ns.objects.size === objects + 1);
     const intact = await post(api, `${BASE}/rooms/${first.code}/send?token=${first.token}`, { data: 1 });
-    check("...and the first room is untouched: its host is still its host", intact.status === 409,
+    // Its token still names its host -- a replaced room would answer 403 --
+    // and it still has nobody to send to.
+    check("...and the first room is untouched: its host is still its host",
+          intact.status === 200 && (intact.body as { delivered?: boolean }).delivered === false,
           `${intact.status} ${JSON.stringify(intact.body)}`);
     await post(api, `${BASE}/rooms/${first.code}/leave?token=${first.token}`);
     await post(api, `${BASE}/rooms/${code2}/leave?token=${(second.body as Created).token}`);

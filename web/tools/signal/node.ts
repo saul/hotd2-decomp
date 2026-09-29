@@ -60,14 +60,16 @@ export function handle(rooms: Rooms, base: string, req: IncomingMessage,
     return true;
   }
   const token = url.searchParams.get("token") ?? "";
+  // Where the page reached this server: a `{host}` TURN URL is written with it.
+  const host = req.headers.host;
   void (async () => {
     try {
       if (!r.code && req.method === "POST") {
-        json(res, 200, await rooms.create());
+        json(res, 200, await rooms.create(undefined, host));
       } else if (r.code && r.verb === "join" && req.method === "POST") {
         const raw = await readBody(req);
         const body = (raw ? JSON.parse(raw) : {}) as { token?: string };
-        json(res, 200, await rooms.join(r.code, body.token));
+        json(res, 200, await rooms.join(r.code, body.token, host));
       } else if (r.code && r.verb === "events" && req.method === "GET") {
         // Headers set, not sent: `attach` refuses a wrong token or a gone room
         // by throwing, and that has to reach the client as a 403 or a 404 --
@@ -92,8 +94,7 @@ export function handle(rooms: Rooms, base: string, req: IncomingMessage,
         req.on("close", detach);
       } else if (r.code && r.verb === "send" && req.method === "POST") {
         const body = JSON.parse(await readBody(req)) as { data: unknown };
-        rooms.send(r.code, token, body.data);
-        json(res, 200, { ok: true });
+        json(res, 200, { ok: true, delivered: rooms.send(r.code, token, body.data) });
       } else if (r.code && r.verb === "leave" && req.method === "POST") {
         rooms.leave(r.code, token);
         json(res, 200, { ok: true });

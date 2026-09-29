@@ -131,6 +131,12 @@ CHECKS: list[Check] = [
           "all three of its servers -- the dev server's, the standalone one "
           "and the Cloudflare Worker's -- refusals, queues, reconnects, "
           "rejoins and the TURN credentials included"),
+    Check("test:turn", "web", ["npm", "run", "--silent", "test:turn"],
+          "that the TURN relay the dev server runs keeps RFC 8656 over real "
+          "UDP: the credential challenge, the minted credentials accepted and "
+          "bad ones refused, permissions before any traffic, indications and "
+          "channels both ways -- the relay every WebRTC session on a machine "
+          "without a direct path goes through"),
     Check("test:pose", "web", ["npm", "run", "--silent", "test:pose"],
           "that a skeleton posed from a motion lands where the exporter says"),
     Check("test:render", "web", ["npm", "run", "--silent", "test:render"],
@@ -169,12 +175,14 @@ CHECKS: list[Check] = [
     Check("net_pair", "web", ["npm", "run", "--silent", "net-pair", "--",
                               "--seconds", "8"],
           "that two-player netplay works in the page: a host and a replica "
-          "in two tabs and over real WebRTC through the dev server's "
-          "rendezvous, every tick the replica applies hash-equal to the "
-          "host's, player 2 joining and scoring, its aim checked against the "
-          "host's camera, and a pause, a reload and a stage change survived "
-          "-- the only check of the replica's install into G and of the "
-          "render layers following a state they did not make",
+          "in two tabs of a Chrome as users have it, over real WebRTC through "
+          "the dev server's rendezvous -- directly, on a bad link, and "
+          "through its TURN relay alone -- every tick the replica applies "
+          "hash-equal to the host's, player 2 joining and scoring, its aim "
+          "checked against the host's camera, and a pause, a reload and a "
+          "stage change survived -- the only check of the replica's install "
+          "into G and of the render layers following a state they did not "
+          "make",
           NEEDS_BUNDLE, LANE_BROWSER),
     Check("loops", "web", ["npm", "run", "--silent", "loops"],
           "that the looping sound effects reach an <audio> element, wrap "

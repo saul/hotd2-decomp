@@ -120,15 +120,13 @@ export function writeState(s: PlayerState, replace = true): void {
   if (s.drive) q.set("drive", "1");
   // Netplay's settings are the session's, not the stage's, and a reload has to
   // find them where it left them: which rendezvous, a forced relay, a
-  // simulated link, the tab pair's room -- and `#join=`, which is how a
-  // player 2 that reloads comes back to its game.
+  // simulated link -- and `#join=`, which is how a player 2 that reloads
+  // comes back to its game.
   const was = new URLSearchParams(window.location.search);
   for (const k of NET_PARAMS) {
     const v = was.get(k);
     if (v !== null) q.set(k, v);
   }
-  const net = was.get("net");
-  if (net?.startsWith("local-")) q.set("net", net);
   const hash = /^#join=/.test(window.location.hash) ? window.location.hash : "";
   const url = `${window.location.pathname}?${q.toString()}${hash}`;
   if (replace) window.history.replaceState(null, "", url);
@@ -136,4 +134,4 @@ export function writeState(s: PlayerState, replace = true): void {
 }
 
 /** The netplay settings the address carries across every rewrite. See `writeState`. */
-const NET_PARAMS = ["signal", "relay", "netsim", "room"] as const;
+const NET_PARAMS = ["signal", "relay", "netsim"] as const;

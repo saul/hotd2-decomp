@@ -985,7 +985,7 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     await this.loadStage();
     this.setMode(this.state.mode);
     this.resumeAfterReload();
-    // `#join=CODE`, `?net=local-host`, `?net=local-join`: a session the URL
+    // `?net=host`, `#join=CODE`: a session the URL
     // asked for, now that there is a bundle to say who this page is -- read
     // from the address as the page opened, because the load above rewrites
     // it (`pushUrl`) and the rewrite has no hash.

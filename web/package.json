@@ -28,6 +28,7 @@
     "test:net-codec": "node tools/run_test.mjs test/net_codec.test.ts",
     "test:net": "node tools/run_test.mjs test/net.test.ts",
     "test:signal": "node tools/run_test.mjs test/signal.test.ts",
+    "test:turn": "node tools/run_test.mjs test/turn.test.ts",
     "net-pair": "node tools/net_pair.mjs",
     "signal": "node tools/run_ts.mjs tools/signal/serve.ts",
     "verify:ui": "node tools/verify_ui.mjs",

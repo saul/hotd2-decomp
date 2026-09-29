@@ -160,7 +160,7 @@ const REPLICA_MAY: ReadonlySet<UiCommand["kind"]> = new Set<UiCommand["kind"]>([
   "toggle", "boxClass", "foldClass", "boxWait", "setLightMode", "setFogMode",
   "setFilterMode", "setPillarbox", "setPixelRatio", "setVolume", "toggleMute",
   "toggleFullscreen", "start", "pressStart",
-  "netHost", "netJoin", "netHostLocal", "netJoinLocal", "netLeave", "netResync",
+  "netHost", "netJoin", "netLeave", "netResync",
 ]);
 
 /** What a host may not do while player 2 is connected: it would load stages behind their back. */
@@ -184,8 +184,6 @@ export function runCommand(p: PlayerCommands, c: UiCommand): void {
   switch (c.kind) {
     case "netHost": void p.net.hostOnline(); return;
     case "netJoin": void p.net.joinOnline(c.code); return;
-    case "netHostLocal": p.net.hostLocal(); return;
-    case "netJoinLocal": p.net.joinLocal(); return;
     case "netLeave": p.net.leave(); return;
     case "netResync": p.net.replica?.resync(); return;
     case "boxClass":

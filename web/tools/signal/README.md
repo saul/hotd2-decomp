@@ -24,12 +24,16 @@ against `worker.ts` in-process:
 the dev server itself, and the page finds it there with no setting at all.
 Two tabs work at once. For a phone on the LAN, start it with
 `npm run dev -- --host` and open the address Vite prints for the network.
-TURN settings are read from the environment when the server starts.
+It also runs a TURN relay (`turn.ts`) on a free UDP port, which the rooms
+hand out as `turn:<the host the page used>:<port>`, unless TURN is configured
+in the environment or `HOTD2_DEV_TURN=0`. Its log line says where:
+`netplay: TURN relay on udp/…`.
 
 **The standalone server**, for a machine that does not run the dev server: a
 small VPS, a Raspberry Pi, a laptop at a LAN party.
 
     npm run signal -- --port 8787 --base /net/signal
+    npm run signal -- --turn --turn-ip 203.0.113.7    # with the relay, on a public address
 
 `npm run signal` runs `node tools/run_ts.mjs tools/signal/serve.ts`, which
 needs `npm install` done in `web/` (esbuild comes with Vite). The flags shown
@@ -81,12 +85,31 @@ hole-punching fails, and only a relay gets through. Offices, hotels and some
 campuses block UDP outright, and only TURN over TLS on port 443 gets out of
 those. The player is meant to be played on a phone, so plan on a TURN server.
 
-The rendezvous mints a credential per peer, the way coturn's `use-auth-secret`
-expects: the username is `<expiry>:<room code>` and the password
-`base64(HMAC-SHA1(secret, username))`. The secret stays on the server. A
-managed TURN service that issues credentials through its own API (Cloudflare's,
-Twilio's) is not this scheme and would need its own minting; eturnal and coturn
-both implement it.
+There are three relays the rendezvous can hand out.
+
+**Its own** (`turn.ts`): TURN over UDP, written for this player. The dev
+server runs it by default; `npm run signal -- --turn` runs it beside the
+standalone server, on UDP 3478 (`--turn-port`), advertising relays at
+`--turn-ip` (the address peers reach the machine at; the LAN address if
+left out). Open UDP 3478 and the ephemeral UDP range to the players. It has
+no TCP or TLS, so it does not get out of a network that blocks UDP, and no
+quotas: use it on a LAN or a small server for people you know.
+
+**Cloudflare's TURN service.** Make a TURN key in the Cloudflare dashboard
+(Realtime → TURN), then give the Worker its id and API token:
+
+    npx wrangler secret put HOTD2_CF_TURN_KEY_ID
+    npx wrangler secret put HOTD2_CF_TURN_TOKEN
+
+Every create and join then asks Cloudflare for credentials (`rooms.ts`,
+`cloudflareIce`) that live `HOTD2_TURN_TTL` seconds. It relays over UDP,
+TCP and TLS on 443, and there is nothing to run. Written from Cloudflare's
+documentation and not yet run against a real key: a failure is logged and
+costs only the relay, not the room.
+
+**coturn** (or eturnal), with the scheme the rendezvous mints for coturn's
+`use-auth-secret`: the username is `<expiry>:<room code>` and the password
+`base64(HMAC-SHA1(secret, username))`. The secret stays on the server.
 
 A coturn configuration (`/etc/turnserver.conf`) for a VM with a public
 address and a certificate for `turn.example.com`:
@@ -144,6 +167,9 @@ the Worker from `[vars]` and its secret. TURN is handed out only when both
 | `HOTD2_TURN_URLS` | none | TURN URLs, comma-separated |
 | `HOTD2_TURN_SECRET` | none | coturn's `static-auth-secret`. A secret: never in a file that is committed |
 | `HOTD2_TURN_TTL` | `21600` (6 h) | seconds a credential lives. Longer than any session: coturn checks it on every refresh |
+| `HOTD2_CF_TURN_KEY_ID`, `HOTD2_CF_TURN_TOKEN` | none | a Cloudflare TURN key and its API token: credentials are minted through Cloudflare's API. Secrets |
+| `HOTD2_DEV_TURN` | on | `0` stops the dev server running its own relay. Dev server only |
+| `HOTD2_DEV_TURN_PORT` | any free port | the dev server's relay's UDP port |
 | `HOTD2_MAX_ROOMS` | `500` | rooms at once. Node only |
 | `HOTD2_ROOM_IDLE_MS` | `1800000` (30 min) | how long a room with nobody listening lives |
 

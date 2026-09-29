@@ -1208,6 +1208,6 @@ through both networks" for good: every real Chrome hides host addresses
 behind `.local` names, this Mac does not resolve them, and its router does not
 route its own public address back in. The flag was written down, with its
 reason, and the reason was the failure. **When a harness needs a flag the
-user's environment does not have, run the case once without it too** -- here
-`tools/net_pair.mjs` now ends with an mDNS run that must either connect or
-have the page say why.
+user's environment does not have, the flag is the finding**: here it meant a
+TURN relay was not optional even for two tabs, and `tools/net_pair.mjs` now
+runs Chrome with no such flag, through the relay the dev server runs.

@@ -69,16 +69,20 @@ their way back, the host's clock is held, as it is while player 2 loads a
 stage: nothing attacks a player who is still reading out the code. The card
 says so; *Cancel* plays on alone.
 
-**Two tabs of one browser do not use WebRTC.** The host listens for its room
-on a `BroadcastChannel` beside WebRTC, and a join looks there first, for
-400 ms. On one machine there is nothing to traverse, and it is the case
-WebRTC is worst at: Chrome hides every host address behind an mDNS `.local`
-name, which a Mac that has not given the browser Local Network access cannot
-resolve, and a home router seldom routes its own public address back in. On
-this machine exactly that happened: two tabs sat on "Finding a way through
-both networks" with one candidate pair to try and no answer. The overlay's
-transport line says `local` for a session that took this path; `?rtc=1` on
-both pages forces WebRTC.
+**Every session is WebRTC**, two machines and two tabs of one browser alike.
+Two tabs are the hardest case for it, not the easiest. Chrome hides every
+host address behind an mDNS `.local` name, and on the machine this was
+written on those names do not resolve (not even the Mac's own
+`Sauls-MacBook-Pro.local`); the other address each tab has, the router's
+public one, needs a router that routes to itself. With neither, the first two
+tabs anyone tried sat on "Finding a way through both networks" for good. What
+always gets through is a relay, so:
+
+**The dev server runs a TURN relay** (`web/tools/signal/turn.ts`) beside its
+rendezvous, on a free UDP port, and the rooms hand it out with credentials.
+Where a direct path works, ICE takes it and the overlay's route says
+`srflx→srflx` or `host→host`; where none does, it says `relay→relay … via
+TURN`. `HOTD2_DEV_TURN=0` turns it off.
 
 **The rendezvous.** The dev server has one at `/net/signal`, so two tabs, or a
 laptop and a phone on the LAN, need no cloud. For a hosted copy, run one: see
@@ -93,11 +97,8 @@ The page finds it through `?signal=<url>`, a build's `VITE_HOTD2_SIGNAL`, or
 |---|---|
 | `?net=host` | make a room as the page opens |
 | `#join=CODE` | join that room (what the link is) |
-| `?net=local-host` / `?net=local-join` | pair two tabs of one browser over a `BroadcastChannel`, with no network at all |
-| `&room=NAME` | keep several local pairs apart |
 | `&netsim=lat:80,jit:20,loss:5` | make this end's outgoing link that bad: ms, ms, percent |
 | `&relay=1` | force WebRTC through TURN (`iceTransportPolicy: "relay"`) |
-| `&rtc=1` | use WebRTC even between two tabs of one browser |
 
 The address keeps these, and the join hash, through every rewrite the player
 makes of it (`urlstate.ts`), so a reload finds them.
@@ -176,7 +177,6 @@ app/net/session.ts       roles, the lobby, rebuild and rejoin, the page's hooks
 app/net/player_hooks.ts  the player as netplay sees it: live root, install, afterApply
 app/net/transport.ts     the transport seam, MemoryLink (tests), SimLink (?netsim)
 app/net/rtc.ts           WebRTC: two negotiated channels, ICE restart, candidate stats
-app/net/local.ts         two tabs over a BroadcastChannel
 app/net/signal.ts        the rendezvous client (HTTP + server-sent events)
 app/net/stats.ts         rates, loss by sequence, round trips, jitter, NetStats
 app/projection/net.ts    the badge, the overlay, the sidebar rows, judged
@@ -186,7 +186,7 @@ tools/signal/            rooms.ts (the rendezvous), node.ts, serve.ts, worker.ts
 
 `verify_layers.py` needed no new baseline. `core/net` is pure; `app/net` is the
 composition root doing its job; `ui/` reads a `net` slice of the projection
-and sends six `net*` commands.
+and sends four `net*` commands.
 
 ## The state codec
 
@@ -381,7 +381,8 @@ credentials are minted per peer and short-lived (the coturn
 `base64(HMAC-SHA1(secret, username))`), so the secret never reaches a page.
 TURN is not optional for this player. It is built for phones, and a phone on
 cellular sits behind carrier-grade NAT, where hole-punching often fails;
-TURN over TLS on 443 also covers networks that block UDP. When ICE drops
+TURN over TLS on 443 also covers networks that block UDP. And, as it turned
+out, two tabs on one machine can need it too (*Using it*). When ICE drops
 (`disconnected` for 2.5 s, or `failed`), the host restarts it through the
 rendezvous (the replica asks it to), up to four times in a row; a restart
 that reconnects gives the budget back. Both ends usually see a drop together,
@@ -399,21 +400,53 @@ for it. The overlay's route row says whether a session is direct or relayed.
 | `test:net-codec` | fuzzed trees, lossy, reordered and duplicated delivery, acks up to 60 ticks late: every applied tick deep-equal and hash-equal to the host's; pool identity kept and a respawn a new object, asserted over every window, the only survivor's respawn included; a rebuilt list free; a `Map` refused by name. No bundle, about 20 s |
 | `test:net` | a real stage, host and replica sessions on a `MemoryLink` at clean, lossy and bad settings: every tick hash-verified, a whole-tree comparison every 30th, player 2's tab hidden for five seconds with the host's deltas staying narrow, a seek's epoch followed, every press of the final epoch taken once and none twice, player 2 scoring, the aim check exact for a true shot and catching a false one. Sabotaged once: a changed value and a removed actor caught and named, a lost desync report recovered by the replica's own retry. Needs a bundle |
 | `test:signal` | the rendezvous over real HTTP in its Node binding and its Worker: codes, TURN credentials, 404/409/403, queues, reconnects, rejoins, the sweep. It found three bugs, now fixed |
-| `net_pair` | the page: a room whose link is opened in a second tab (the same-browser path, with the host's game held until player 2 is in), two tabs at 60±30 ms and 10% loss, and real WebRTC through the dev server's rendezvous, each playing stage 1 with player 2 joining and shooting through its own camera, and the replica's systems re-hashed against the host's. Then, on WebRTC, a pause (player 2 on the host's exact frame), a reload of player 2 (rejoined, matching) and a stage change (player 2 follows, matching). Last, WebRTC again in a Chrome that hides host addresses behind mDNS names, as every user's does: it either connects or, within 25 s, both lobby cards say why. On this machine it says why. No console error anywhere |
+| `test:turn` | the relay over real UDP on loopback, driven by a client written from the RFC: the 401 challenge, the minted credentials accepted and a wrong or expired one refused, response integrity and fingerprint, nothing crossing before both ends have a permission, Send and Data indications, ChannelData both ways, a Refresh freeing the relay. No bundle, about a second |
+| `net_pair` | the page, in a Chrome as users have it (mDNS on): a room whose link is opened in a second tab, over WebRTC, with the host's game held until player 2 is in; again with player 2's link at 60±30 ms and 10% loss; and again through the relay alone (`?relay=1`), whose route must say `relay`. Each plays stage 1 with player 2 joining and shooting through its own camera, and the replica's systems re-hashed against the host's. The first also takes a pause (player 2 on the host's exact frame), a reload of player 2 (rejoined, matching) and a stage change (player 2 follows, matching). No console error anywhere |
 
-All four are rows in `tools/verify_all.py`.
+All five are rows in `tools/verify_all.py`.
 
 ## Not yet exercised
 
-* **A real TURN server, and carrier NAT.** `?relay=1` and the minted
-  credentials are written, and the credential arithmetic is tested, but no
-  session in this tree has gone through a relay. The first real test is a
-  phone on cellular against a desktop on Wi-Fi, once with `?relay=1`.
-* **Two machines.** Every WebRTC session so far ran two pages of one Chrome.
-  The ones that connected had mDNS turned off, which no user's browser has;
-  with it on, two tabs on this Mac do not connect at all (see *Using it*).
+* **A relay on the public internet, and carrier NAT.** Sessions go through
+  the dev server's relay (`net_pair`, `?relay=1`), but no session has gone
+  through a relay across the internet, nor through Cloudflare's TURN, whose
+  credential minting is written from its documentation and untested without
+  a key. The first real test is a phone on cellular against a desktop on
+  Wi-Fi.
+* **Two machines.** Every WebRTC session so far ran two pages of one Chrome
+  on one machine.
 * **A long session.** The runs are tens of seconds per stage. A whole
   playthrough with stage advances is the next soak.
+
+## What playing over the internet takes
+
+What is built runs on one machine or one network with nothing else. For two
+people on two networks:
+
+1. **The page, hosted**, over https: `npm run site` stages the build
+   (`VITE_HOTD2_SIGNAL` pointing at the rendezvous below). No game data goes
+   with it: each player's page decodes its own bundle from their own copy of
+   the game, and both must be the same build, which the handshake enforces.
+2. **The rendezvous, hosted**: the Cloudflare Worker (`npx wrangler deploy`
+   in `web/tools/signal`), on the Workers Free plan, or `npm run signal`
+   behind TLS on any server.
+3. **A TURN relay reachable from the internet, with TCP and TLS on 443.**
+   Needed by a phone on carrier-grade NAT, strict NATs, networks that block
+   UDP, and -- as this machine shows -- sometimes by two devices on one
+   network. Either:
+   * **Cloudflare's TURN service**: make a TURN key in the dashboard and give
+     the Worker `HOTD2_CF_TURN_KEY_ID` and `HOTD2_CF_TURN_TOKEN` as secrets;
+     it mints credentials per player. Nothing to run. Billed by traffic
+     relayed, about 400–600 MB per hour of play.
+   * **coturn** on a server with a public address, sharing
+     `HOTD2_TURN_SECRET` with the rendezvous (`web/tools/signal/README.md`
+     has the configuration).
+   * The relay here (`npm run signal -- --turn --turn-ip <public address>`)
+     on a small server works for UDP but has no TCP or TLS, so it does not
+     reach networks that block UDP. It is for people you know, not the open
+     internet.
+4. **The test that has not been run**: a phone on cellular against a desktop
+   on Wi-Fi, through the deployed Worker and relay.
 
 ## Known limits
 

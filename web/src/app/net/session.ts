@@ -8,24 +8,16 @@
  * knows nothing of the player; everything above it (`ui/`) reads its
  * projection and sends commands. See `docs/NETPLAY.md`.
  *
- * Ways in:
- *
- * * **Online.** "Host a two-player game" makes a room at the rendezvous
- *   (`signal.ts`) and shows its code and a link; player 2 opens the link
- *   (`#join=CODE`) or types the code. WebRTC does the rest (`rtc.ts`).
- * * **Local.** `?net=local-host` in one tab and `?net=local-join` in another
- *   join over a `BroadcastChannel` (`local.ts`) -- for development, and for
- *   the headless harness.
+ * **One way in, and one way through.** "Host a two-player game" makes a room
+ * at the rendezvous (`signal.ts`) and shows its code and a link; player 2
+ * opens the link (`#join=CODE`) or types the code. WebRTC does the rest
+ * (`rtc.ts`) -- between two machines, and between two tabs of one browser
+ * alike, through the rendezvous's TURN relay where no direct path works.
  *
  * **A dropped connection is not the end of the session.** The host keeps its
  * room and goes back to waiting; player 2 rejoins by itself, a few times,
  * with the token it had -- and a reloaded tab rejoins from its link. The
  * game on the host plays on meanwhile, with player 2's gun put down.
- *
- * **Two tabs of one browser never use WebRTC.** The host listens on a
- * `BroadcastChannel` for its room beside WebRTC, and a join looks there
- * first (`local.ts`): on one machine there is nothing to traverse, and it is
- * the case WebRTC handles worst. `?rtc=1` on both pages turns this off.
  *
  * **The host's game waits for player 2.** From the moment it makes a room
  * until player 2's page answers -- and again after a drop, while player 2
@@ -37,13 +29,12 @@
  */
 import type { HoldReason } from "../../core/net/protocol";
 import { NetHost, type HostSim } from "./host";
-import { LocalTransport } from "./local";
 import type { Identity, NetPeer } from "./peer";
 import { NetReplica, type ReplicaSim } from "./replica";
 import { RtcTransport } from "./rtc";
 import { SignalClient, signalBase } from "./signal";
 import { pushLog, type NetStats } from "./stats";
-import { FirstOpen, SimLink, parseSim, type Transport, type TransportInfo } from "./transport";
+import { SimLink, parseSim, type Transport, type TransportInfo } from "./transport";
 
 export type NetRole = "solo" | "host" | "replica";
 
@@ -79,11 +70,6 @@ const POLL_MS = 100;
 /** Player 2's rejoin attempts after a drop, and the wait before each. */
 const REJOIN_DELAYS_MS = [500, 1500, 3000, 6000, 10000];
 
-/** The `BroadcastChannel` room a host's online room is also open on, in its own browser. */
-function sameBrowserRoom(code: string): string {
-  return `room-${code}`;
-}
-
 export class NetSession {
   role: NetRole = "solo";
   host: NetHost | null = null;
@@ -93,8 +79,6 @@ export class NetSession {
   private transport: Transport | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
   private readonly params: URLSearchParams;
-  /** Online or over the tab link: what a rebuild makes again. */
-  private kind: "online" | "local" = "online";
   private rejoins = 0;
   private rejoinTimer: ReturnType<typeof setTimeout> | null = null;
   /** The last peer's log, carried into the next so a drop does not erase the story. */
@@ -114,14 +98,11 @@ export class NetSession {
 
   /**
    * The URL asked for a session: `?net=host` makes a room at once (what the
-   * harness uses, and a bookmark for somebody who always hosts),
-   * `?net=local-host` / `?net=local-join` pair two tabs, `#join=CODE` joins.
+   * harness uses, and a bookmark for somebody who always hosts), and
+   * `#join=CODE` joins one.
    */
   autostart(hash: string): void {
-    const net = this.params.get("net");
-    if (net === "host") void this.hostOnline();
-    else if (net === "local-host") this.hostLocal();
-    else if (net === "local-join") this.joinLocal();
+    if (this.params.get("net") === "host") void this.hostOnline();
     const m = /(?:^#|&)join=([A-Za-z0-9]{4,12})/.exec(hash);
     if (m && this.role === "solo") void this.joinOnline(m[1]);
   }
@@ -170,7 +151,6 @@ export class NetSession {
   /** Host over the internet: make a room, and wait for player 2. */
   async hostOnline(): Promise<void> {
     if (this.active) return;
-    this.kind = "online";
     this.lobby = { phase: "creating", code: null, link: null, error: null };
     this.hooks.wake();
     try {
@@ -180,7 +160,7 @@ export class NetSession {
       link.hash = `join=${signal.code}`;
       link.searchParams.delete("net");
       this.lobby = { phase: "waiting", code: signal.code, link: link.href, error: null };
-      this.attach("host", this.hostWays(signal));
+      this.attach("host", this.rtc(signal));
     } catch (e) {
       this.fail(`could not make a room: ${(e as Error).message}`);
     }
@@ -190,33 +170,15 @@ export class NetSession {
     return new RtcTransport(signal, { relayOnly: this.params.has("relay") });
   }
 
-  /** Where player 2 may come from: over WebRTC, or from another tab of this browser. */
-  private hostWays(signal: SignalClient): Transport {
-    if (this.params.has("rtc")) return this.rtc(signal);
-    return new FirstOpen([this.rtc(signal),
-                          new LocalTransport("host", sameBrowserRoom(signal.code))]);
-  }
 
   /** Join over the internet, by the host's code. */
   async joinOnline(code: string): Promise<void> {
     if (this.active && this.lobby.phase !== "reconnecting") return;
-    this.kind = "online";
     const c = code.toUpperCase();
     if (this.lobby.phase !== "reconnecting") {
       this.lobby = { phase: "joining", code: c, link: null, error: null };
     }
     this.hooks.wake();
-    // The host in another tab of this browser, if it is: no rendezvous, no
-    // WebRTC. Attached straight after the await, before its first message.
-    const near = this.params.has("rtc") ? null : await LocalTransport.find(sameBrowserRoom(c));
-    if (near) {
-      this.signal?.close();
-      this.signal = null;
-      this.showJoined(c);
-      this.lobby = { ...this.lobby, phase: "connecting", code: c };
-      this.attach("replica", near);
-      return;
-    }
     try {
       const signal = await SignalClient.join(signalBase(location.search), c);
       this.signal?.pause();
@@ -247,20 +209,6 @@ export class NetSession {
       history.replaceState(history.state, "",
                            `${location.pathname}${location.search}#join=${code}`);
     }
-  }
-
-  hostLocal(): void {
-    if (this.active) return;
-    this.kind = "local";
-    this.lobby = { phase: "waiting", code: "local", link: null, error: null };
-    this.attach("host", new LocalTransport("host", this.params.get("room") ?? "default"));
-  }
-
-  joinLocal(): void {
-    if (this.active && this.lobby.phase !== "reconnecting") return;
-    this.kind = "local";
-    this.lobby = { phase: "connecting", code: "local", link: null, error: null };
-    this.attach("replica", new LocalTransport("replica", this.params.get("room") ?? "default"));
   }
 
   /** Leave, whichever role this is. The player goes back to playing alone. */
@@ -312,11 +260,7 @@ export class NetSession {
       this.host = null;
       this.lobby = { ...this.lobby, phase: "waiting",
                      error: `player 2 dropped (${why}); the room is still open` };
-      if (this.kind === "local") {
-        this.attach("host", new LocalTransport("host", this.params.get("room") ?? "default"));
-      } else if (this.signal) {
-        this.attach("host", this.hostWays(this.signal));
-      }
+      if (this.signal) this.attach("host", this.rtc(this.signal));
     } else {
       // A host that closed its room is not coming back.
       if (/host left|host closed/.test(why)) {
@@ -342,8 +286,7 @@ export class NetSession {
     this.rejoinTimer = setTimeout(() => {
       this.rejoinTimer = null;
       if (this.lobby.phase !== "reconnecting") return;
-      if (this.kind === "local") this.joinLocal();
-      else if (this.lobby.code) void this.joinOnline(this.lobby.code);
+      if (this.lobby.code) void this.joinOnline(this.lobby.code);
     }, delay);
   }
 

@@ -64,7 +64,14 @@ in the same commit as the finding:
 ```
 ghidra/annotations/functions.tsv    address <TAB> name <TAB> comment
 ghidra/annotations/globals.tsv      address <TAB> name <TAB> comment
+ghidra/annotations/prototypes.tsv   address <TAB> prototype <TAB> attributes <TAB> comment
 ```
+
+**When a callee decompiles wrong at its call sites, fix the callee, not the
+reading** (L89). An argument in an x87 register, a float return, an output
+struct, a wrong no-return flag: give it a row in `prototypes.tsv` with the
+instruction that proves it (`set_function_prototype` over MCP, then export),
+and every caller inherits it.
 
 Then check them:
 
@@ -79,7 +86,8 @@ If you renamed anything in the live database over MCP, export it:
 ```
 
 A fresh checkout must rebuild to the same database:
-`./ghidra/run.sh rebuild`.
+`./ghidra/run.sh rebuild`. `tools/verify_ghidra_db.py` holds the live
+database to the annotations; if it fails, it names the command that fixes it.
 
 ### 4. Verify
 
@@ -146,9 +154,9 @@ Both of these are the difference between naming a thing and guessing at it:
 **[`docs/LESSONS.md`](../../../docs/LESSONS.md) is the list.** The ones that
 bite hardest when reading the binary:
 
-* **L1** — the decompiler silently drops FPU arguments to the matrix calls.
-* **L2** — `CamEvalObjectPath6` returns `{float x,y,z; int rx,ry,rz}`; Ghidra
-  types all six as float.
+* **L89** — a pseudocode error that recurs is a wrong callee prototype or
+  flag; fix it once in `prototypes.tsv`. Dropped x87 arguments and the
+  "missing code after `MatrixStackPop`" were both this.
 * **L4** — match brace depth on the matrix stack.
 * **L5** — two consecutive `MatrixTranslate` calls compose by addition.
 * **L3** — object fields are polymorphic; check the class.

@@ -372,6 +372,17 @@ CHECKS: list[Check] = [
          "that every row of `ghidra/annotations/*.tsv` is an address in a real "
          "section of the EXE -- functions in `.text` -- with no address or "
          "name listed twice and none in both files"),
+    Check("verify_ghidra_db", ".",
+          ["python3", "tools/verify_ghidra_db.py", "--game-dir", "{game_dir}"],
+          "that the Ghidra database every session decompiles from says what "
+          "`ghidra/annotations/` says -- every prototype and no-return flag "
+          "in `prototypes.tsv` applied, no flag it does not declare -- and "
+          "that no `CALL` to a function that returns carries the "
+          "`CALL_RETURN` override that prints as a clean `return;`: the only "
+          "check that reads the database rather than the exe, and so the "
+          "only thing that can say the pseudocode is not missing code (L89). "
+          "Asserts nothing without Ghidra or a project",
+          NEEDS_GAME),
     game("prop_pose",
          "that every class-0x41 generic prop is posed in the order its own "
          "update routine poses it -- read out of the EXE per type and matched "

@@ -1,0 +1,55 @@
+# HOTD2 function prototypes and no-return flags — the committed source of truth
+# for what the decompiler is told about a callee.
+#
+# Format: <address>\t<prototype>\t<attributes>\t<optional comment>
+#
+#   prototype   a C declaration, calling convention included:
+#               `void __cdecl MatrixTranslate(float x, float y, float z)`.
+#               Its name is for the reader; applying a row never renames.
+#               `-` sets only the attributes.
+#   attributes  space-separated, `-` for none:
+#               `noreturn`     the function never returns
+#               `returns`      it does, and it has been wrongly flagged before;
+#                              verify_ghidra_db fails if it is flagged again
+#               `x@ST0`        custom storage for parameter `x`
+#               `return@EDX:EAX`  custom storage for the return value
+#
+# Replay:      HOTD2_APPLY=1 ./ghidra/run.sh apply-annotations
+# Regenerate:  ./ghidra/run.sh export-annotations  (merges; a prototype set
+#              over MCP or in the GUI lands here)
+#
+# **Why this file exists.** 2,553 of the database's 2,735 functions had
+# Ghidra's placeholder `undefined f()`, so the decompiler re-guessed every call
+# site from the instructions around it. It gets integer pushes right and
+# anything in an x87 register wrong: `__ftol` takes ST0, and 271 of its calls
+# printed as `__ftol()` with the multiplier gone (L89). And the no-return
+# flag is a claim about every caller at once -- two wrong ones cut 517
+# functions short (L89). A row here is read by every call site, which
+# is the point: fix the callee once instead of re-reading 700 callers.
+#
+# **Rows are sorted by address, and every writer keeps them that way.**
+# Tags follow CLAUDE.md's evidence convention; a row without `[proved]` says why.
+
+004040f0	float __cdecl CamEvalHermiteCurve(ushort * curve, float t)	-	Leaves its value on ST0 (FLD ST0 .. FSTP ST0 / RET); after two PUSHes it reads `curve` at [ESP+0xC] and `t` as FLD float ptr [ESP+0x10]. Without a float return every caller's use of it is a dropped ST0. [proved]
+004042d0	void __cdecl CamEvalObjectPath6(int path, float t, void * out)	-	out is {float x, y, z; int rx, ry, rz}: FSTP float ptr [EBP], [EBP+4], [EBP+8], then MOV dword ptr [EBP+0xC], [EBP+0x10], [EBP+0x14], EAX after each __ftol. Typed float * (as the decompiler guessed from the first three stores) the three rotations print as `(float)lVar3`, a conversion the code does not make (L89). void * lets each store carry its own type until the struct is declared. [proved]
+0040acd0	int __cdecl LzDecompress(uchar * src, uchar * dst)	-	Set in the database by an earlier session and exported from it; not re-read here. [open]
+0041cfd0	void __cdecl PlaySoundId(uint id)	returns	Eight plain RETs, so it returns and the caller cleans up. The "Non-Returning Functions - Discovered" analyzer flagged it in the live database, which cut every hit arm the decompiler showed at its sound (L89). [proved]
+004759c0	void __cdecl CurlModelSlot3F7ByYaw(int yaw)	-	Set in the database by an earlier session and exported from it; not re-read here. [open]
+004a7040	void __cdecl ActorKill(void)	returns	Returns only when the current task (0x007DF8B0) is the root task (&0x007DF878); from inside an actor's task it _longjmps out of the task walk, which is why a caller "does not carry on" (L72). The root path returns, so it must not be flagged. [proved]
+004a8a80	void __cdecl MatrixTransformPoint(float * in, float * out)	-	out[0..2] = top * (in[0..2], 1). [proved]
+004a8ca0	void __cdecl MatrixStore(float * out)	-	Copies the top's sixteen floats to out. [proved]
+004a8cc0	void __cdecl MatrixGetTranslation(float * out)	-	out[0..2] = top[12..14]. [proved]
+004a8d20	void __cdecl MatrixInvert(float * m)	-	Inverts m in place; NULL means the top. A singular m is filled with 3.4e38. [proved]
+004a9230	void __cdecl MatrixStackSetTopFromArray(float * m)	-	Copies sixteen floats from m to the top. [proved]
+004a92a0	void __cdecl MatrixMultiply(float * m)	-	Composes m into the top, through a local copy of the top. [proved]; which side m multiplies on is [open]
+004a9840	int __cdecl MatrixStackPop(int count)	returns	Sixteen instructions, two RETs: 0 if count would underflow, else pops count and returns 1. Once flagged no-return; the CALL_RETURN overrides that left on 587 call sites cut 383 functions short, silently, after the flag itself was cleared (L89). [proved]
+004a9880	int __cdecl MatrixStackPush(float * src)	-	Pushes a copy of src, or of the top when src is NULL -- so MatrixStackPush(0) duplicates it (L4); 0 when the stack is full. [proved]
+004a99f0	void __cdecl MatrixRotateX(int angle)	-	angle in 0x10000-per-turn units: FILD, then times 9.58738e-05 = 2*pi/65536. [proved]
+004a9ae0	void __cdecl MatrixRotateY(int angle)	-	As MatrixRotateX (FILD dword ptr [EBP+0x8]; FMUL double ptr [0x004C4370]). [proved]
+004a9bd0	void __cdecl MatrixRotateZ(int angle)	-	As MatrixRotateX. [proved]
+004a9cc0	void __cdecl MatrixScale(float x, float y, float z)	-	Scales rows 0, 1 and 2 of the top by x, y and z. [proved]
+004a9d80	void __cdecl MatrixTranslate(float x, float y, float z)	-	row3 += x*row0 + y*row1 + z*row2, reading x, y, z at [ESP+4], [ESP+8], [ESP+0xC]. Unprototyped, the decompiler printed the floats as hex integers. [proved]
+004a9e10	void __cdecl MatrixLoadIdentity(void)	-	Copies g_identity_matrix to the top. [proved]
+004acf50	longlong __cdecl __ftol(float10 x)	x@ST0 return@EDX:EAX	MSVC's float-to-integer: FISTP qword of ST0 under a truncating control word, the result in EDX:EAX. It has no stack argument, so the decompiler dropped the value every caller converts and typed the result by whatever it was stored into (L89). [proved]
+004adc00	-	noreturn	_longjmp: no RET. [proved]
+004af994	-	noreturn	__exit calls the CRT's exit worker with the quick-exit arguments (PUSH 0; PUSH 1), which ends the process; the RET after it is unreachable. Flagged by the "Known" analyzer at import. [likely] -- the worker is not read here.

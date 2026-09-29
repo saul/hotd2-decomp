@@ -4,16 +4,23 @@
 #   ./ghidra/run.sh rebuild             import + apply every committed annotation
 #   ./ghidra/run.sh import              create the project and run auto-analysis
 #   ./ghidra/run.sh apply-annotations   replay ghidra/annotations/*.tsv onto the DB
+#   ./ghidra/run.sh repair-flow         undo wrong no-return damage (RepairFlowDamage)
 #   ./ghidra/run.sh export-annotations  dump the DB's project symbols back to TSV
 #   ./ghidra/run.sh script <Name>       run ghidra/scripts/<Name> against the program
 #   ./ghidra/run.sh list                list available scripts
 #
 # `rebuild` is the one to run after a fresh checkout: it produces a database
-# with every name, label and dispatch table this project has recovered.
+# with every name, label, prototype and dispatch table this project has
+# recovered, and with the no-return analyzer that cut 517 functions short
+# (L89) switched off.
+#
+# `apply-annotations` and `repair-flow` only report unless HOTD2_APPLY=1.
 #
 # Environment overrides:
 #   GHIDRA_HOME   default ~/ghidra_12.1.3_PUBLIC
 #   GAME_DIR      default "$HOME/THE HOUSE OF THE DEAD 2"
+#   HOTD2_PROJECT_DIR  default ghidra/project -- point it elsewhere to build or
+#                 check a scratch database without touching the live one
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -21,7 +28,7 @@ GHIDRA_HOME="${GHIDRA_HOME:-$HOME/ghidra_12.1.3_PUBLIC}"
 GAME_DIR="${GAME_DIR:-$HOME/THE HOUSE OF THE DEAD 2}"
 HEADLESS="$GHIDRA_HOME/support/analyzeHeadless"
 
-PROJECT_DIR="$REPO/ghidra/project"
+PROJECT_DIR="${HOTD2_PROJECT_DIR:-$REPO/ghidra/project}"
 PROJECT_NAME="HOTD2"
 PROGRAM="Hod2.exe"
 SCRIPTS="$REPO/ghidra/scripts"
@@ -51,7 +58,13 @@ case "${1:-}" in
     HOTD2_APPLY=1 "$0" script ApplyKnownTables.java
     echo "Applying committed annotations..."
     HOTD2_APPLY=1 "$0" script ApplyAnnotations.java
+    echo "Repairing flow damage and switching the Discovered no-return analyzer off..."
+    HOTD2_APPLY=1 "$0" script RepairFlowDamage.java
     echo "Done. The database now carries every symbol in ghidra/annotations/."
+    ;;
+
+  repair-flow)
+    HOTD2_APPLY="${HOTD2_APPLY:-}" "$0" script RepairFlowDamage.java
     ;;
 
   apply-annotations)

@@ -19,8 +19,10 @@ Override with `GHIDRA_HOME` and `GAME_DIR`.
 ```
 
 That is the whole thing. It imports the EXE, runs auto-analysis, applies every
-dispatch table the project has recovered, and then replays every function name,
-label and comment from `annotations/`. The result is the annotated database.
+dispatch table the project has recovered, replays every function name, label,
+comment, prototype and no-return flag from `annotations/`, and repairs the call
+sites a wrong no-return flag cut short (below). The result is the annotated
+database.
 
 The steps individually, if you want them:
 
@@ -28,8 +30,12 @@ The steps individually, if you want them:
 ./ghidra/run.sh import                        # import + auto-analysis, ~2 min
 HOTD2_APPLY=1 ./ghidra/run.sh script ApplyKnownTables.java
 HOTD2_APPLY=1 ./ghidra/run.sh apply-annotations
+HOTD2_APPLY=1 ./ghidra/run.sh repair-flow
 ./ghidra/run.sh script ExportInventory.java   # regenerate ghidra/out/
 ```
+
+`HOTD2_PROJECT_DIR` points any of these at a scratch database instead of
+`project/`.
 
 ## Annotations are the source of truth
 
@@ -41,6 +47,7 @@ what is committed**, and it is the project's record of every symbol recovered
 |---|---|
 | `annotations/functions.tsv` | `address`, `name`, optional comment — sorted by address |
 | `annotations/globals.tsv` | `address`, `name`, optional comment — sorted by address |
+| `annotations/prototypes.tsv` | `address`, C prototype, attributes (`noreturn`, `returns`, custom storage), optional comment — sorted by address |
 
 Add or rename a row with `python3 tools/annotate.py`, which upserts and keeps
 the address order.
@@ -79,6 +86,33 @@ the function ID analyser finds — so the committed file stays a record of
 *this project's* findings. Its filter is a prefix list, so read the diff: a
 Ghidra release that renames an auto-label prefix lets those labels through.
 The export fails while a Ghidra GUI holds the project lock.
+
+## Prototypes and no-return flags
+
+The decompiler reads a callee's prototype at every call site, so a wrong or
+missing one is wrong at every caller at once -- which is why the dropped x87
+arguments and the code missing after `MatrixStackPop` kept recurring (`L89`).
+Two things fix it at the source:
+
+* **`annotations/prototypes.tsv`**, applied by `ApplyAnnotations`. A row's
+  flags always win; its prototype replaces one Ghidra made up but never one
+  set by hand, which is reported as `kept` until `export-annotations` brings
+  it into the file. Write a row for a callee whose calls decompile wrong --
+  an x87 argument (`__ftol` takes ST0), a float return, an output struct --
+  with the instruction that proves it. Do not bulk-commit the decompiler's own
+  guesses: doing that for every function made the output worse.
+* **`scripts/RepairFlowDamage.java`** (`repair-flow`). Ghidra's
+  "Non-Returning Functions - Discovered" analyzer, run by the GUI's
+  incremental analysis, once flagged `MatrixStackPop` and `PlaySoundId`
+  no-return and wrote a `CALL_RETURN` override on every call site; each one
+  prints as a clean `return;`. The script turns that analyzer off in the
+  program's options, clears every `CALL_RETURN` on a `CALL` to a function that
+  returns, and regrows the bodies. A no-return flag `prototypes.tsv` does not
+  declare is reported, not changed.
+
+`python3 tools/verify_ghidra_db.py --game-dir ...` (in `verify_all`) runs
+both in report mode over a copy of the saved database -- so it works with the
+GUI open -- and fails unless they have nothing to do.
 
 ## Layout
 

@@ -17,8 +17,18 @@
  *   inline jump tables and class state tables, which MSVC emits inside the
  *   function body, so a global in `.text` is listed rather than rejected;
  * * no address is listed twice, and no name is used twice;
+ * * rows are in address order, which every writer keeps (`annotate.py`,
+ *   `ExportAnnotations`) and which is what keeps two branches' new rows out of
+ *   each other's way;
  *
- * and across the two: **no address is in both files.** The `.text` rule
+ * and for `prototypes.tsv`, which is read by every call site of the function
+ * it names (L89): every address is in `.text` and listed once, in order; its
+ * prototype names the function `functions.tsv` gives that address, so a typed
+ * address cannot hand one function's signature to another; and its attributes
+ * are `-`, `noreturn` or `returns` -- not both -- or `<param>@<REG[:REG]>`
+ * custom storage.
+ *
+ * And across the two: **no address is in both files.** The `.text` rule
  * cannot catch a function wrongly filed as a global, because some globals
  * legitimately live in `.text`, so a misfiled function slips straight through
  * it. Being in both files is never legitimate, so this is the rule that bites.
@@ -88,17 +98,20 @@ for (const [file, wantText] of [["functions.tsv", true], ["globals.tsv", false]]
     continue;
   }
   const bad = { parse: [] as string[], section: [] as string[], text: [] as string[],
-                addr: [] as string[], name: [] as string[] };
+                addr: [] as string[], name: [] as string[], order: [] as string[] };
   const seenVa = new Map<number, string>();
   const seenName = new Map<string, number>();
   const inText: string[] = [];
   let count = 0;
+  let prev = -1;
   for (const { line, va, name, err } of rows(readFileSync(path, "utf8"))) {
     if (err !== null || va === null || name === null) {
       bad.parse.push(`${file}:${line}: ${err}`);
       continue;
     }
     count++;
+    if (va <= prev) bad.order.push(`${file}:${line}: ${name} at ${hex(va, 8)} follows ${hex(prev, 8)}`);
+    prev = va;
     const hit = sections.find((s) => s.lo <= va && va < s.hi);
     if (hit === undefined) {
       bad.section.push(`${file}:${line}: ${name} at ${hex(va, 8)} is in no section`);
@@ -134,6 +147,7 @@ for (const [file, wantText] of [["functions.tsv", true], ["globals.tsv", false]]
   if (wantText) rule(bad.text, `${file}: every function address is in .text`);
   rule(bad.addr, `${file}: ${seenVa.size} distinct addresses, none listed twice`);
   rule(bad.name, `${file}: no name used twice`);
+  rule(bad.order, `${file}: rows are in address order`);
   if (inText.length) {
     c.note(`${file}: ${inText.length} inline tables inside .text (MSVC emits `
            + "them in the function body):");
@@ -153,5 +167,62 @@ for (const va of both) {
          + `globals.tsv as ${globals.get(va)} -- an address belongs to exactly `
          + "one of the two, and verify_port checks citations against the file "
          + "the kind implies");
+}
+
+// prototypes.tsv: <address> <prototype> <attributes> [comment]. The name in a
+// prototype is only for the reader -- applying a row never renames -- which is
+// exactly why it is checked: it is the one thing that says which function the
+// row's author meant.
+{
+  const file = "prototypes.tsv";
+  const path = join(ANNOT, file);
+  const text = sections.find((s) => s.name === ".text");
+  const problems: string[] = [];
+  const seen = new Set<number>();
+  let count = 0;
+  let prev = -1;
+  if (!existsSync(path)) problems.push(`${file}: missing from ${ANNOT}`);
+  else {
+    readFileSync(path, "utf8").split(/\r\n|\r|\n/).forEach((raw, i) => {
+      if (!raw.trim() || raw.trimStart().startsWith("#")) return;
+      const at = `${file}:${i + 1}`;
+      const [addr, proto, attrs] = raw.split("\t").map((s) => s.trim());
+      if (!addr || !proto || !attrs || !/^[0-9a-f]{8}$/.test(addr)) {
+        problems.push(`${at}: not <address>\\t<prototype>\\t<attributes>`);
+        return;
+      }
+      count++;
+      const va = Number.parseInt(addr, 16);
+      if (text === undefined || va < text.lo || va >= text.hi) {
+        problems.push(`${at}: ${hex(va, 8)} is not in .text`);
+      }
+      if (seen.has(va)) problems.push(`${at}: ${hex(va, 8)} listed twice`);
+      if (va <= prev) problems.push(`${at}: ${hex(va, 8)} follows ${hex(prev, 8)}`);
+      seen.add(va);
+      prev = va;
+      if (proto !== "-") {
+        const m = /([A-Za-z_][A-Za-z0-9_@]*)\s*\(/.exec(proto);
+        const named = funcs.get(va);
+        if (m === null) problems.push(`${at}: prototype ${JSON.stringify(proto)} names no function`);
+        else if (named !== undefined && named !== m[1]) {
+          problems.push(`${at}: prototype names ${m[1]} but functions.tsv has ${named} at ${hex(va, 8)}`);
+        }
+      }
+      const tokens = attrs === "-" ? [] : attrs.split(/\s+/);
+      for (const t of tokens) {
+        if (t !== "noreturn" && t !== "returns" && !/^\w+@[A-Z0-9]+(:[A-Z0-9]+)*$/.test(t)) {
+          problems.push(`${at}: unknown attribute ${JSON.stringify(t)}`);
+        }
+      }
+      if (tokens.includes("noreturn") && tokens.includes("returns")) {
+        problems.push(`${at}: both noreturn and returns`);
+      }
+    });
+  }
+  if (!problems.length) {
+    c.ok(true, `${file}: all ${count} rows in .text, in order, once each, naming `
+         + "the function functions.tsv puts there, with well-formed attributes");
+  }
+  for (const p of problems) c.fail(p);
 }
 c.finish();

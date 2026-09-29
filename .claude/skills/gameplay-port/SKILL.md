@@ -74,11 +74,13 @@ old shape. Remove the divergence and open-question notes the reading settles.
 
 `/decomp` owns the procedure. What bites a port:
 
-* **The decompiler drops code.** FPU arguments (L1), arms folded together
-  (L37), everything after a call it believes never returns (L35, L60), bodies
-  cut by a flow override (L55), arms that fall through into the next (L53).
-  When the pseudocode says something the shipped game contradicts — no writer,
-  no caller, a body that just stops — disassemble before believing it.
+* **The decompiler drops code** when a callee's prototype or no-return flag
+  is wrong, and a fix there fixes every caller (L89); `verify_ghidra_db`
+  holds the database to `ghidra/annotations/prototypes.tsv`. Arms fall
+  through into the next (L53). When the pseudocode says something the shipped
+  game contradicts — no writer, no caller, a body that just stops —
+  disassemble before believing it, and if a callee is the cause, give it a
+  row.
 * **A dispatch table is read, not recalled**: `read_memory` the entries and
   check the neighbours against what the port believes (L38).
 * **A negative is a claim.** Enumerate every caller, addressing mode and

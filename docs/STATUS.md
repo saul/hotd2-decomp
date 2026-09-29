@@ -66,7 +66,7 @@ The two declared seams between the UI and the player: **`PlayerCommands` has 54 
 |---|---|
 | Named functions | 1455 in `ghidra/annotations/functions.tsv` |
 | Named globals | 753 in `ghidra/annotations/globals.tsv` |
-| Checks | 69, run together by `tools/verify_all.py` (listed below) |
+| Checks | 70, run together by `tools/verify_all.py` (listed below) |
 
 ## Ratchets
 
@@ -144,6 +144,7 @@ nothing exits 3 and is never counted as green.
 | `verify_death_clips` | that every clip `ChooseDeathMotion` can put on a dying class-0x30 actor is baked for that spawn's own character type -- the only check that reads a death clip out of a real bundle, and the one that says whether an actor can leave state 12 at all, since that state's exit is an exact `obj+0x19C >= 0x3C` against a play clock that is 0 for a clip nothing carried | bundle |
 | `verify_cam_waits` | that every `wait_camera_path_frame <n>` asks for a frame the play in force actually publishes -- the only check that holds the three routines that publish a camera frame against the scripts that wait on them, and the one that says the strict `frame > operand` of `EvtOpWaitCameraPathFrame41` is safe to transcribe. Model scene state 7 as stopping on its range's end rather than one past it and twenty of the sites it checks become gates nothing can open | bundle |
 | `game:annotations` | that every row of `ghidra/annotations/*.tsv` is an address in a real section of the EXE -- functions in `.text` -- with no address or name listed twice and none in both files | game-dir |
+| `verify_ghidra_db` | that the Ghidra database every session decompiles from says what `ghidra/annotations/` says -- every prototype and no-return flag in `prototypes.tsv` applied, no flag it does not declare -- and that no `CALL` to a function that returns carries the `CALL_RETURN` override that prints as a clean `return;`: the only check that reads the database rather than the exe, and so the only thing that can say the pseudocode is not missing code (L89). Asserts nothing without Ghidra or a project | game-dir |
 | `game:prop_pose` | that every class-0x41 generic prop is posed in the order its own update routine poses it -- read out of the EXE per type and matched to the field each `MatrixRotate*` is handed -- that both copies of the generic slot tables are what the routines and the shipped `+0x11C` words say, and that `render/breakables.ts` composes a pose in one place, from the table | game-dir |
 | `game:prop_tables` | that the tables class 0x41 types 38, 39, 40, 44, 50 and 66 build their objects from -- positions, angles, hull corners, slots, counts, scales -- and class 0x28's route, length and pose tables are the EXE's own words, compared as 32-bit patterns against the values the port evaluates; a mistyped row puts a church chair where the engine does not, with nothing else to notice | game-dir |
 | `game:flag_strips` | that `class12Tail`, the exporter's read of class 0x12's descriptor tail, takes each field at the offset and width `ScriptedPropInit12` loads it, decoded out of the EXE; that every class-0x12 spawn on the disc is placed with exactly those fields; and, with a bundle, that every slot its strip can draw is in it | game-dir |
@@ -164,7 +165,7 @@ nothing exits 3 and is never counted as green.
 | `game:bone_cels` | that every cel run `ZombieDrawBonePart` (`FUN_004534A0`) draws is the arithmetic in the EXE and is in the bundle -- no table in the image names those models, so this is the only thing standing between a hand-written run and a character losing a part | game-dir |
 | `baseline` | that the installed assets still hash to `manifest.csv` | game-dir |
 
-20 of them need the installed game and 28 need an exported
+21 of them need the installed game and 28 need an exported
 bundle. **That is a known hole, not a design:** a machine with
 neither cannot run the checks that compare two histories, and a
 bundle-free fixture is the open work that closes it.

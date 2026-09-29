@@ -286,7 +286,6 @@ bite hardest here:
   the thing you are debugging is on before blaming it.
 * **L19** — the screenshot is evidence and the render is not the game.
 * **L3** — object fields are polymorphic; check the class.
-* **L1** — the decompiler silently drops FPU arguments.
 * **L15** — a green build is not a working page.
 
 A new trap found here goes in `LESSONS.md`, not in this file.

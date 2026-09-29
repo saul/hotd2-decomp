@@ -10,18 +10,18 @@ reading the binary, transcribing behaviour, running the tools, and believing
 what you are looking at. Each entry's evidence is what happened when the trap
 was sprung; the rule in its first sentence is what holds now.
 
+**A lesson nobody needs to heed any more** -- because a fix or a check has made
+the trap impossible -- is cut to one line naming what superseded it. Its id
+stays, so a citation still resolves, and the file stays short enough to read
+before every change.
+
 ---
 
 ## Reading the binary
 
-**L1 — The decompiler silently drops FPU arguments** to the matrix calls.
-The pseudocode shows a call with fewer arguments than the instruction stream
-passes, and nothing marks the omission. Re-read every constant with
-`disassemble_bytes` and quote the raw hex in the annotation.
+**L1 — Superseded by L89.** (The decompiler dropped x87 arguments at the calls of an unprototyped callee.)
 
-**L2 — `CamEvalObjectPath6` returns `{float x,y,z; int rx,ry,rz}`.** Ghidra
-types all six as float. It is wrong, and the rotations come out as garbage
-floats that look plausible enough to build on.
+**L2 — Superseded by L89.** (`CamEvalObjectPath6`'s three integer rotations decompiled as floats.)
 
 **L3 — Object fields are polymorphic.** `obj+0x11C` is hit points for combat
 classes and a sub-type selector for others; `obj+0x1390` is a descriptor tail
@@ -66,50 +66,9 @@ with a byte-pattern search for the little-endian bytes** (`fe729c00` found the
 one instruction in the image that names `g_script_flags[254]`, which the
 operand search and `get_xrefs_to` had both missed as a *write*).
 
-**L35 — A Ghidra xref list stops at a no-return tail call, and so does the
-decompilation.** `get_xrefs_to 0x00408ec0` returns eleven callers of
-`RegisterForCameraTracking` and not one of them is an enemy class, which reads
-as proof that class 0x30 and 0x31 never become camera candidates — and that
-would make the port's whole `g_enemy_slots` model invented. They do.
-`ActorRegisterCameraPoint` (`FUN_00409B70`) ends `PUSH ESI / CALL 0x00408ec0`
-at `0x00409bec`–`0x00409c03`, **after** the `JMP` to `MatrixStackPop` that
-Ghidra has marked no-return: the function body ends there, the pseudocode ends
-there with a `WARNING: Subroutine does not return`, and the call past it is in
-no xref list. `disassemble_bytes` from the last address the body claims is what
-finds it. The same thing hides a **loop**: `RegionDrawResidentSet`'s body ends
-at `0x0040143E` and its loop tail, `0x00401443..0x0040145F`, lies outside it,
-so the decompile of a list walk draws one entry and stops.
+**L35 — Superseded by L89.** (A wrong no-return flag ended bodies and xref lists at `MatrixStackPop`.)
 
-It is **L32** one level down — that lesson is about a search over decoded
-operands seeing one addressing mode; this is about a search over Ghidra's
-graph seeing only what Ghidra has decided is code. Both have the same tell: a
-negative result that would make a large, working piece of the port impossible.
-When a cross-reference search says a routine nothing could work without is
-never called, disassemble past the end of every function that ought to call it
-before believing the search.
-
-**L37 — The decompiler folds arms that look alike and drops the tails that
-make them different.** `HudDrawShutterState` (`FUN_00413970`) is a nine-arm
-switch that drives `g_nFiringGate`, and Ghidra's pseudocode for it contains
-**no write to that global at all** in three of the arms: cases 0, 3-at-zero and
-5 each draw an identical closed shutter and `return`. Read literally that says
-the engine never lowers the firing gate, which would make a shipped room the
-player cannot shoot in a port bug rather than the script's own doing — and that
-is exactly the conclusion it was about to be used for.
-
-The three arms are not identical. Their tails sit in bytes the listing walks
-past: `00413A0B` writes `1`, `00413A74` and `00413B06` write `0`, and each also
-sets the state to 4. `disassemble_bytes` over the gaps between the arms is what
-finds them, and the jump table — here `0x00413C80` — is what says which arm
-belongs to which case, because the pseudocode's `case N:` labels are the one
-part you can still trust.
-
-It is **L35** one step over: that lesson is a cross-reference list stopping at a
-no-return tail call, this is a *decompilation* stopping at the end of the block
-it chose to show. Same tell in both, and it is the useful one: a negative result
-that would make a working piece of the shipped game impossible. When the
-pseudocode of a state machine has no writer for the global the state machine
-exists to drive, disassemble every arm before believing it.
+**L37 — Superseded by L89.** (`HudDrawShutterState`'s arms lost their firing-gate writes to the same cut.)
 
 **L38 — A dispatch table entry is settled by reading the table, and a name in
 a doc comment is not a reading.** `ZombieState.Leave = 10` carried
@@ -192,21 +151,7 @@ last instruction is not a `RET`, a `JMP` to the epilogue or a `JMP` elsewhere
 falls through, and the jump table says where to. Check each arm's last
 instruction against the next arm's first address before writing its `return`.
 
-**L55 — A body Ghidra cut short at a call may be one flow override, and it
-can be cleared.** `ActorAimHeadAtCamera` (`FUN_00453BE0`) decompiled as a
-transform and a `MatrixStackPop` and nothing else, which is L35's shape --
-and `MatrixStackPop` is not marked no-return: `ActorHeadAimAngles` flows past
-its own pop. What cut this body was a `CALL_RETURN` flow override on the one
-`CALL` instruction at `0x00453C78`, and class 0x25's twin had the same on its
-pop at `0x00485C38`. `clear_instruction_flow_override` with `dry_run: true`
-names it without touching anything; clearing it, disassembling the tail and
-re-creating the function gave both routines their whole pseudocode -- the
-stepping, the tolerance test and the three rotations the listing had been
-hiding for as long as the head aim was believed not to exist. So when a
-decompilation stops at a call that does return, **ask the instruction before
-the function**: L35 says read past the end, and this says the end may be
-movable. The override lives in the database and not in `ghidra/annotations/`,
-so a rebuild can bring it back; say so in the row.
+**L55 — Superseded by L89.** (The cut was a `CALL_RETURN` flow override on the call.)
 
 **L60 -- "The engine leaves it uninitialised" is a claim about the caller,
 not the allocator.** Every thrown weapon in the port tumbled at a rate of its
@@ -246,23 +191,14 @@ overturns an earlier reading, it owes the earlier one the same trace, not a
 louder adjective. `web/tools/checks/combat.ts` check 15 reads the `LEA`'s
 operand out of the image in both routines.
 
-**L72 -- `PlaySoundId` is marked no-return too, and `ActorDespawn` really
-does not return.** Two facts about the same kind of call, pointing opposite
-ways, and the class-0x41 generic props were full of both. The database marks
-`PlaySoundId` (`FUN_0041CFD0`) no-return, so **every hit arm the decompiler
-shows ends at its sound**: `PropUpdateType41`'s decompile stops before the
-`+0x2A0 = 0x200` that starts its swing, `PropUpdateType28`'s before the clamp
-that stops it, `PropUpdateType7`'s before the kick, the hit effect and the
-Original Mode item drop that are the rest of its hit arm.
-L35 and L37 name `MatrixStackPop`; this is the same trap on the commonest
-call in a hit arm. Meanwhile `ActorDespawn` (`FUN_00409CC0`) ends in a call to
-`ActorKill`, which longjmps out of the task walk, so a routine that calls
-`PropExpireByStepLifetime` and ignores its result **does** stop when it
-despawns -- and `class41/type35.ts` had built "a retired door runs its rattle
-once more before the pool drops it" on a return that never happens. **Read
-the listing past every `PlaySoundId`, and read the callee before believing a
-caller carries on**: the pseudocode is wrong in the first direction and a
-reading of the pseudocode is wrong in the second.
+**L72 -- `ActorDespawn` really does not return.** It ends in a call to
+`ActorKill` (`FUN_004A7040`), which longjmps out of the task walk whenever
+the current task is an actor's (it returns only on the root task's path), so
+a routine that calls `PropExpireByStepLifetime` and ignores its result
+**does** stop when it despawns -- and `class41/type35.ts` had built "a retired
+door runs its rattle once more before the pool drops it" on a return that
+never happens. **Read the callee before believing a caller carries on.** (Its
+other half, `PlaySoundId` wrongly flagged no-return, is superseded by L89.)
 
 **L73 -- A load through initialised data comes out of the decompiler as a
 literal.** `ThrowerStateRearm` (`FUN_0044F7A0`) decompiles to eight float
@@ -300,6 +236,31 @@ call for call**, arms the pseudocode hides included; where they differ, the
 difference is the helper's argument, named for the instruction.
 
 ---
+
+**L89 -- A trap every session reads around is a defect in the database, and
+it is fixed once, for every caller.** L1, L2, L35, L37, L55 and half of L72
+were six lessons about one database, and L86's missing arm was the same cut. Ghidra's "Non-Returning Functions -
+Discovered" analyzer -- run by the GUI's incremental analysis long after the
+import, which flags nothing of the kind -- decided `MatrixStackPop` and
+`PlaySoundId` never return, and its "Repair Flow Damage" option wrote a
+`CALL_RETURN` override on 1,085 call sites. A later session cleared
+`MatrixStackPop`'s flag and none of the overrides, so 517 functions went on
+decompiling short, **silently** -- an override prints as a clean `return;`
+with no warning -- and 59,534 bytes of code sat outside the body they belong
+to: `HudDrawShutterState`'s firing-gate writes, `RegionDrawResidentSet`'s
+loop, `ActorRegisterCameraPoint`'s shot-test registration. Beside it, 2,553 of
+2,735 functions still had Ghidra's placeholder `undefined f()`, so `__ftol`,
+which takes its argument in ST0, printed 271 times as `__ftol()` and
+`MatrixTranslate(0,0x3eb33333,0xbf800000)` hid `(0.0, 0.35, -1.0)`. Each
+session learned to disassemble past the end; nobody asked why the end was
+there. `ghidra/scripts/RepairFlowDamage.java` and
+`ghidra/annotations/prototypes.tsv` fix both at the source, `rebuild` replays
+them, and `tools/verify_ghidra_db.py` fails when the database drifts from
+them. **When the pseudocode is wrong the same way twice, the callee is what
+is wrong: give it a prototype or a flag, prove it, commit it as a row, and
+every caller inherits it.** Choose rows, do not bulk-commit the decompiler's
+own guesses: committing all 2,520 of them took `extraout_` markers from 184 to
+880, because it guesses `void` for functions whose callers read EAX.
 
 ## Transcribing behaviour into the port
 

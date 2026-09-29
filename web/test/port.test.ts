@@ -562,6 +562,10 @@ import {
   PROP_TABLE38, TYPE38_SLOT, TYPE38_SLOT_HIT, Type38State,
 } from "../src/game/class41/type38";
 import { Type39StackHeight } from "../src/game/class41/type39";
+import { PROP_TABLE50, PROP_TABLE50_SCALE_Z } from "../src/game/class41/type50";
+import {
+  PROP_TABLE66_A, PROP_TABLE66_B, SFX_TYPE66_HIT,
+} from "../src/game/class41/type66";
 import {
   TYPE44_WHOLE_SLOT, TYPE44_EFFECT,
 } from "../src/game/class41/type44";
@@ -9623,6 +9627,256 @@ console.log("\nclass 0x41 types 38, 39, 40 and 44 -- stage 1's church (new bugs 
         G.g_breakable_props.filter((q) => q.at === 0x1994 || q.at === 0x19bc
           || q.at === 0x1b48 || q.at === 0x19e4).length === 0,
         String(G.g_breakable_props.length));
+}
+
+console.log("\nclass 0x41 constructors 50 and 66 -- the table scenery (stage 1's bin crate, stage 2 block 17, the signs):");
+{
+  // Driven the way the level drives them: a placement in the bundle, the
+  // walker's spawn list, `SpawnPropContainers`, and a frame of `GameUpdate`.
+  // Before these were ported, `g_class41_constructors[50]` and `[66]` had no
+  // entry and both placers died having built nothing.
+  const rng = new Rng(50);
+  const events = propScene(rng, GameMode.Arcade);
+  const sounds: number[] = [];
+  events.on("sound.play", (e) => sounds.push(e.id));
+  // The descriptors stand at the origin: neither constructor reads it.
+  const ORIGIN: [number, number, number] = [0, 0, 0];
+  const placements = [
+    ...(BREAKABLES.placements ?? []),
+    // Stage 1 block 4 step 3: `+0x1F4` 3, `+0x11C` 4 (evt 0x3B14).
+    { at: 0x3b14, container: "table50" as const, field_1f4: 3,
+      lifetime_evt_steps: 4, pos: ORIGIN },
+    // Stage 1 blocks 3 and 8: table 5, lifetime 11 (evt 0x2D9C).
+    { at: 0x2d9c, container: "table50" as const, field_1f4: 5,
+      lifetime_evt_steps: 11, pos: ORIGIN },
+    // Stage 2 block 17 step 1: table 2, lifetime 5 (evt 0xBE60).
+    { at: 0xbe60, container: "table50" as const, field_1f4: 2,
+      lifetime_evt_steps: 5, pos: ORIGIN },
+    // Stage 1 blocks 6, 14, 16: table a, lifetime 4 (evt 0x6884).
+    { at: 0x6884, container: "table66" as const, field_1f4: 0,
+      lifetime_evt_steps: 4, pos: ORIGIN },
+    // Stage 2 block 3: table b, lifetime 8 (evt 0x2554).
+    { at: 0x2554, container: "table66" as const, field_1f4: 1,
+      lifetime_evt_steps: 8, pos: ORIGIN },
+  ];
+  SetGameTables(CHARS, { ...BREAKABLES, placements });
+  SpawnPropContainers([0x3b14, 0x2d9c, 0xbe60, 0x6884, 0x2554].map(
+    (at) => ({ at, class: SpawnClass.PropContainerPlacer })));
+  const placers = G.g_object_list.filter(
+    (o) => o.cls === SpawnClass.PropContainerPlacer);
+  check("each placer carries its table in +0x1F4 and its lifetime in +0x11C",
+        placers.length === 5
+        && placers.map((o) => `${o.condition}/${o.charType}/${o.hp}`).join()
+          === "50/3/4,50/5/11,50/2/5,66/0/4,66/1/8",
+        placers.map((o) => `${o.condition}/${o.charType}/${o.hp}`).join());
+  GameUpdate(1 / 60, NULL_HOST, rng, events);
+  const at = (a: number) => G.g_breakable_props.filter((q) => q.at === a);
+  const crate = at(0x3b14);
+  check("constructor 50 table 3 builds five komono_st1b models on the crate: "
+        + "slots 0xD40, 0xD45, 0xD46, 0xD41, 0xD42",
+        crate.map((q) => q.slot.toString(16)).join() === "d40,d45,d46,d41,d42",
+        crate.map((q) => q.slot.toString(16)).join());
+  check("...each running PropDrawOnlyType12, at the row's point and BAMS",
+        crate.length === 5
+        && crate.every((q) => q.family === PropFamily.DrawOnlyType12)
+        && crate[0].x === Math.fround(-693.816)
+        && crate[0].y === Math.fround(-3.525)
+        && crate[0].z === Math.fround(-536.116)
+        && crate[0].pitch === -0xca1 && crate[0].yaw === 0x4885
+        && crate[0].roll === 0x684,
+        `${crate[0]?.x} ${crate[0]?.y} ${crate[0]?.z} ${crate[0]?.pitch}`);
+  check("...+0x290 the table, +0x2A0 the row, the step lifetime copied",
+        crate.length === 5 && crate.every((q, i) => q.kind === 3
+                                          && q.storyItem === i
+                                          && q.lifetime === 4));
+  check("...unit scale, no sphere and no +0x34",
+        crate.length === 5
+        && crate.every((q) => q.restX === 1 && q.restY === 1 && q.restZ === 1
+                       && q.hitRadius === 0 && q.flags === 0
+                       && !q.shotRegistered));
+  check("...and each draws its slot, placed where its row says",
+        crate.length === 5
+        && crate.every((q) => q.draws?.length === 1
+                       && q.draws[0].slot === q.slot
+                       && Math.abs(q.draws[0].m[12] - q.x) < 1e-4
+                       && Math.abs(q.draws[0].m[13] - q.y) < 1e-4
+                       && Math.abs(q.draws[0].m[14] - q.z) < 1e-4),
+        JSON.stringify(crate[0]?.draws?.[0]?.m));
+  const rails = at(0x2d9c);
+  check("table 5 is five komono_st1b.bin[15], each z-scaled by "
+        + "g_prop_table50_scale_z: 0.6, 1, 0.5, 0.715, 0.715",
+        rails.length === 5 && rails.every((q) => q.slot === 0x17d6)
+        && rails.map((q) => q.restZ).join()
+          === [0.6, 1, 0.5, 0.715, 0.715].map(Math.fround).join()
+        && rails.every((q) => q.restX === 1 && q.restY === 1),
+        rails.map((q) => q.restZ).join());
+  const room = at(0xbe60);
+  check("table 2, stage 2 block 17: komono_suimonie [5], [6] and [7] twice",
+        room.map((q) => q.slot.toString(16)).join() === "1980,1982,1983,1983"
+        && room[2].x === -602.5 && room[2].y === 38.5
+        && room[2].z === -1532.5 && room[3].z === -1548.5
+        && room[2].yaw === 0x8000 && room[3].yaw === 0x8000,
+        room.map((q) => `${q.slot.toString(16)}@${q.x},${q.y},${q.z}`)
+          .join(" "));
+  check("PROP_TABLE50 has g_prop_table50_counts' 7, 11, 4, 5, 6, 5 rows",
+        PROP_TABLE50.map((t) => t.length).join() === "7,11,4,5,6,5"
+        && PROP_TABLE50_SCALE_Z.length === 5);
+
+  const signs = at(0x6884);
+  const signsB = at(0x2554);
+  check("constructor 66 builds 20 of table a and 29 of table b",
+        signs.length === 20 && signsB.length === 29
+        && signs.every((q) => q.family === PropFamily.Type66)
+        && signs.map((q) => q.slot).join()
+          === PROP_TABLE66_A.map((r) => r[0]).join()
+        && signsB.map((q) => q.slot).join()
+          === PROP_TABLE66_B.map((r) => r[0]).join(),
+        `${signs.length} ${signsB.length}`);
+  const sign = (i: number) => signs[i] ?? makeBreakableProp(-1, 0, 0);
+  const signB = (i: number) => signsB[i] ?? makeBreakableProp(-1, 0, 0);
+  check("...+0x124 4.0 and +0x2C0 -3.5, but 6.5 and -5.0 for slot 0x10DC",
+        sign(3).slot === 0x10dd && sign(3).hitRadius === 4
+        && sign(3).shake === -3.5
+        && sign(1).slot === 0x10dc && sign(1).hitRadius === 6.5
+        && sign(1).shake === -5,
+        `${sign(1).hitRadius} ${sign(1).shake}`);
+  check("...slot 0x10B1 laid back -0x4000, the rest only turned in yaw",
+        signB(27).slot === 0x10b1 && signB(27).pitch === -0x4000
+        && signB(27).yaw === -0x4d22
+        && signs.every((q) => q.pitch === 0 && q.roll === 0),
+        `${signB(27).pitch}`);
+  check("...the row's scale and a live +0x34",
+        sign(4).restX === Math.fround(0.7606) && sign(4).restY === 1
+        && sign(4).restZ === Math.fround(0.5404)
+        && signs.every((q) => q.flags === (0x80000001 | 0)
+                       || q.flags === 0x80000001));
+  check("only 0x10DC, 0x10DD and 0x10DE register, at y + the +0x2C0 drop",
+        signs.filter((q) => q.shotRegistered).map((q) => q.slot.toString(16))
+          .join() === "10dc,10dd,10dd,10dc,10dc,10dd"
+        && sign(1).shotY === Math.fround(sign(1).y - 5)
+        && sign(3).shotY === Math.fround(sign(3).y - 3.5),
+        signs.filter((q) => q.shotRegistered).map((q) => q.slot.toString(16))
+          .join());
+
+  // The hit: bit 3 cleared, the ricochet, no points, and a swing rate of
+  // rand() % 0x201 + 0x600, sprung once on the same frame.
+  const s = sign(3);
+  const score0 = G.g_player_score[0];
+  const hits0 = G.g_player_hit_count[0] ?? 0;
+  BreakablePropTakeShot(s, 0);
+  sounds.length = 0;
+  GameUpdate(1 / 60, NULL_HOST, rng, events);
+  const s0 = [...Array(0x201).keys()].map((r) => r + 0x600)
+    .find((v) => v - Math.trunc(v / 24) === s.spin);
+  check("a shot 0x10DD swings: rate rand()%0x201 + 0x600, less a 24th",
+        s0 !== undefined && s.pitch === s.spin
+        && (s.flags & BreakableFlag.Hit) === 0,
+        `spin ${s.spin} pitch ${s.pitch}`);
+  check("...plays 0x1116A9, counts the hit and pays nothing",
+        sounds.includes(SFX_TYPE66_HIT) && G.g_player_score[0] === score0
+        && G.g_player_hit_count[0] === hits0 + 1,
+        `${sounds} ${G.g_player_score[0]}`);
+  let neg = false;
+  for (let f = 0; f < 240; f++) {
+    GameUpdate(1 / 60, NULL_HOST, rng, events);
+    if (s.pitch < 0) neg = true;
+  }
+  check("...and swings back through zero: rate -= (pitch + rate) / 24",
+        neg, `${s.pitch}`);
+
+  // The pivot: 0x10DE swings about a point 1.5 above its origin, so a pitch
+  // moves the drawn origin on a circle of radius 1.5.
+  const piv = signB(19);
+  piv.spin = 0x800;
+  GameUpdate(1 / 60, NULL_HOST, rng, events);
+  const m = piv.draws?.[0]?.m ?? [];
+  const moved = Math.hypot(m[12] - piv.x, m[13] - piv.y, m[14] - piv.z);
+  const chord = 2 * 1.5 * Math.abs(Math.sin(piv.pitch / 65536 * Math.PI));
+  check("slot 0x10DE is drawn about (0, 1.5, 0): its origin moves 2 * 1.5 * "
+        + "sin(pitch / 2)",
+        piv.slot === 0x10de && piv.pitch !== 0
+        && Math.abs(moved - chord) < 1e-3,
+        `moved ${moved} chord ${chord}`);
+  const mp = s.draws?.[0]?.m ?? [];
+  check("...where 0x10DD is drawn at its own origin however it swings",
+        s.pitch !== 0 && Math.abs(mp[12] - s.x) < 1e-4
+        && Math.abs(mp[13] - s.y) < 1e-4 && Math.abs(mp[14] - s.z) < 1e-4);
+
+  // The shake: scene 0, and the pool reading g_screen_shake_frames at 0x2F or
+  // 0x17. A latched player hit is what restarts the countdown at 0x30, and
+  // `UpdateScreenShake` takes a frame off before the pool runs.
+  const still = sign(12);
+  const board = sign(0);
+  check("an unshot 0x10DC hangs still", still.slot === 0x10dc
+        && still.pitch === 0 && still.spin === 0);
+  G.g_scene_index = 0;
+  G.g_player_was_hit[0] = 1;
+  GameUpdate(1 / 60, NULL_HOST, rng, events);
+  const kick = (frames: number, rate: number) =>
+    [...Array(0x201).keys()].some((r) => {
+      const v = r + frames * 32;
+      return Math.abs(rate) === v - Math.trunc(v / 24);
+    });
+  check("a hit's shake swings it the frame the countdown reads 0x2F: "
+        + "±(rand()%0x201 + 0x2F * 32), less a 24th",
+        G.g_screen_shake_frames === 0x2f && kick(0x2f, still.spin)
+        && still.pitch === still.spin && board.pitch === 0,
+        `${G.g_screen_shake_frames} ${still.spin} ${board.pitch}`);
+  // From 0x2E down the rate only springs, until the countdown reads 0x17.
+  const kicked: number[] = [];
+  while (G.g_screen_shake_frames > 1) {
+    const rate = still.spin;
+    const sprung = (rate - Math.trunc((still.pitch + rate) / 24)) | 0;
+    GameUpdate(1 / 60, NULL_HOST, rng, events);
+    if (still.spin !== sprung) kicked.push(G.g_screen_shake_frames);
+  }
+  check("...and kicks it again at 0x17 and at no other frame",
+        kicked.join() === "23" && board.pitch === 0, kicked.join());
+  G.g_scene_index = 1;
+  G.g_player_was_hit[0] = 1;
+  const quiet = sign(19);
+  const quietRate = quiet.spin;
+  const quietSprung =
+    (quietRate - Math.trunc((quiet.pitch + quietRate) / 24)) | 0;
+  GameUpdate(1 / 60, NULL_HOST, rng, events);
+  check("...in scene 0 only: scene 1's 0x2F only springs it",
+        quiet.slot === 0x10dd && G.g_screen_shake_frames === 0x2f
+        && quiet.spin === quietSprung,
+        `${quiet.spin} ${quietSprung}`);
+  G.g_screen_shake_frames = 0;
+  G.g_scene_index = 0;
+
+  // The lifetimes: table 3 and the signs both live four step changes; the
+  // crate's objects despawn, the signs are killed (`ActorKill` writes no
+  // flag word, `ActorDespawn` clears the live bit).
+  const crate0 = crate[0] ?? makeBreakableProp(-1, 0, 0);
+  const sign0 = sign(0);
+  for (let step = 2; step <= 6; step++) {
+    G.g_evt_step_index = step;
+    GameUpdate(1 / 60, NULL_HOST, rng, events);
+  }
+  check("after five step changes table 3's objects and table a's are gone",
+        crate.length === 5 && signs.length === 20
+        && at(0x3b14).length === 0 && at(0x6884).length === 0
+        && at(0x2d9c).length === 5 && at(0x2554).length === 29,
+        `${at(0x3b14).length} ${at(0x6884).length} ${at(0x2554).length}`);
+  check("...the crate's by ActorDespawn, the signs' by ActorKill",
+        crate0.dead && sign0.dead
+        && (crate0.flags & BreakableFlag.Live) === 0
+        && (crate0.flags & 0x18000) === 0x18000
+        && (sign0.flags & BreakableFlag.Live) !== 0);
+
+  // Scene 1's sweep, `g_script_flags[0x77]`: PropDrawOnlyType12 runs the
+  // shared prologue and goes; PropUpdateType66 inlines its lifetime without it.
+  G.g_scene_index = 1;
+  G.g_script_flags[0x77] = 1;
+  GameUpdate(1 / 60, NULL_HOST, rng, events);
+  check("scene 1's sweep takes the table-50 objects and leaves the signs",
+        rails.length === 5 && signsB.length === 29
+        && at(0x2d9c).length === 0 && at(0xbe60).length === 0
+        && at(0x2554).length === 29,
+        `${at(0x2d9c).length} ${at(0xbe60).length} ${at(0x2554).length}`);
+  G.g_script_flags[0x77] = 0;
 }
 
 console.log("\nMatrixInterpolateSwingTwist, effect interpolation mode 2:");

@@ -19,24 +19,24 @@ is in `tools/verify_all.py`, beside the command that runs it.
 
 | Directory | Lines | Files | Layer |
 |---|---:|---:|---|
-| `game/` | 105014 | 341 | engine |
-| `hod2lib/` | 19395 | 35 | engine |
+| `game/` | 105523 | 343 | engine |
+| `hod2lib/` | 19484 | 35 | engine |
 | `render/` | 15102 | 54 | render |
 | `app/` | 12114 | 41 | app |
 | `script/` | 4471 | 25 | engine |
 | `ui/` | 3620 | 26 | ui |
 | `core/` | 3514 | 13 | engine |
-| `bundle/` | 2757 | 11 | engine |
+| `bundle/` | 2766 | 11 | engine |
 | `audio/` | 973 | 2 | render |
 | `hud/` | 491 | 1 | ui |
-| **total** | **167451** | **549** | |
+| **total** | **168058** | **551** | |
 
 The largest files, which is where the pressure to split next is:
 
 * `app/main.ts` — 2964
 * `game/globals.ts` — 2860
 * `game/actor.ts` — 2722
-* `hod2lib/bundle.ts` — 2353
+* `hod2lib/bundle.ts` — 2442
 * `hod2lib/exetab.ts` — 2276
 
 ## The port
@@ -44,17 +44,17 @@ The largest files, which is where the pressure to split next is:
 | | |
 |---|---|
 | Gameplay coverage | **231 of 297** annotated functions in the gameplay address ranges have a port (77%) |
-| Ported outside those ranges | 535 (opcodes, and the classes whose handlers sit elsewhere) |
-| Citations checked | 766 ported functions match `functions.tsv` under the same name |
+| Ported outside those ranges | 538 (opcodes, and the classes whose handlers sit elsewhere) |
+| Citations checked | 769 ported functions match `functions.tsv` under the same name |
 | Spawn classes | **31 of 42** read classes have a module, covering 1544 of 1619 placements |
 | Declared `[diverges]` | **132** — where the port knowingly departs from the exe, each with its reason on the spot |
-| `[open]` markers | **121** — questions the port and the exporter are honest about not having answered |
+| `[open]` markers | **122** — questions the port and the exporter are honest about not having answered |
 
 Both markers are counted in **every** `.ts`/`.tsx` file under `web/src/`, one per occurrence, and only in comments — a word in code or in a string is not a marker (`verify_port.marker_lines`). Each departure and each question is written once, where it is made; everything that refers to it names it in words ([`PLAYER_ARCHITECTURE.md`](PLAYER_ARCHITECTURE.md), "One departure, one tag"). By layer, from the same table as the directories above:
 
 | Layer | Directories | `[diverges]` | `[open]` |
 |---|---|---:|---:|
-| engine | `core/`, `bundle/`, `script/`, `game/`, `hod2lib/` | 118 | 118 |
+| engine | `core/`, `bundle/`, `script/`, `game/`, `hod2lib/` | 118 | 119 |
 | render | `render/`, `audio/` | 13 | 3 |
 | ui | `hud/`, `ui/` | 0 | 0 |
 | app | `app/` | 1 | 0 |
@@ -65,8 +65,8 @@ The two declared seams between the UI and the player: **`PlayerCommands` has 53 
 
 | | |
 |---|---|
-| Named functions | 1380 in `ghidra/annotations/functions.tsv` |
-| Named globals | 677 in `ghidra/annotations/globals.tsv` |
+| Named functions | 1383 in `ghidra/annotations/functions.tsv` |
+| Named globals | 688 in `ghidra/annotations/globals.tsv` |
 | Verifier scripts | 46 under `tools/`, run together by `verify_all.py` |
 
 Phase and format status is a judgement about what counts as solved,
@@ -142,7 +142,7 @@ nothing exits 3 and is never counted as green.
 | `verify_death_clips` | that every clip `ChooseDeathMotion` can put on a dying class-0x30 actor is baked for that spawn's own character type -- the only check that reads a death clip out of a real bundle, and the one that says whether an actor can leave state 12 at all, since that state's exit is an exact `obj+0x19C >= 0x3C` against a play clock that is 0 for a clip nothing carried | bundle |
 | `verify_cam_waits` | that every `wait_camera_path_frame <n>` asks for a frame the play in force actually publishes -- the only check that holds the three routines that publish a camera frame against the scripts that wait on them, and the one that says the strict `frame > operand` of `EvtOpWaitCameraPathFrame41` is safe to transcribe. Model scene state 7 as stopping on its range's end rather than one past it and twenty of the sites it checks become gates nothing can open | bundle |
 | `verify_prop_pose` | that every class-0x41 generic prop is posed in the order its own update routine poses it -- read out of the EXE per type, matched to the field each `MatrixRotate*` is handed. `render/breakables.ts` composed one order for all fifty, and it was type 51's alone: twenty shipped spawns came out somewhere else, four of them by more than a degree and the worst by 19.65 | game-dir |
-| `verify_prop_tables` | that the tables class 0x41 types 38, 39, 40 and 44 build their objects from -- positions, angles, hull corners, slots, counts, scales -- are the EXE's own words, and class 0x28's route, length and pose tables with them: the port carries them as literals, and a mistyped row would put a church chair somewhere the engine does not, with nothing else to notice | game-dir |
+| `verify_prop_tables` | that the tables class 0x41 types 38, 39, 40, 44, 50 and 66 build their objects from -- positions, angles, hull corners, slots, counts, scales -- are the EXE's own words, and class 0x28's route, length and pose tables with them: the port carries them as literals, and a mistyped row would put a church chair somewhere the engine does not, with nothing else to notice | game-dir |
 | `verify_flag_strips` | that the exporter reads class 0x12's descriptor tail at the offsets and widths `ScriptedPropInit12` reads it, quoted out of the EXE, that every class-0x12 spawn on the disc is placed with exactly those fields, and that every slot its strip can draw is in its bundle -- the check for stage 1's door, the wood the bin captor bursts out of, which the port built nothing for until the class had a module | game-dir |
 | `verify_annotations` | that every annotated address is a real function in the EXE | game-dir |
 | `verify_branches` | that every value a branch trigger can write into `g_script_branch_var` names a route slot its own block actually fills -- the one check that ties the gameplay half of branching to the route tables | game-dir |

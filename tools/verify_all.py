@@ -311,7 +311,7 @@ CHECKS: list[Check] = [
           NEEDS_GAME),
     Check("verify_prop_tables", ".",
           ["python3", "tools/verify_prop_tables.py", "--game-dir", "{game_dir}"],
-          "that the tables class 0x41 types 38, 39, 40 and 44 build their "
+          "that the tables class 0x41 types 38, 39, 40, 44, 50 and 66 build their "
           "objects from -- positions, angles, hull corners, slots, counts, "
           "scales -- are the EXE's own words, and class 0x28's route, "
           "length and pose tables with them: the port carries them as "

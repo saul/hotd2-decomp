@@ -629,6 +629,8 @@ export function SpawnPropContainers(spawns: readonly ScriptSpawn[]): void {
       : pl.container === "table38" ? PropContainerType.Table38Props
       : pl.container === "table39" ? PropContainerType.Table39Stacks
       : pl.container === "table44" ? PropContainerType.Table44Props
+      : pl.container === "table50" ? PropContainerType.Table50Props
+      : pl.container === "table66" ? PropContainerType.Table66Props
       : pl.container === "water_surface" ? PropContainerType.WaterSurface
       : PropContainerType.BreakableGroup;
     // The three table constructors read the placer's `+0x11C` as the step
@@ -636,19 +638,20 @@ export function SpawnPropContainers(spawns: readonly ScriptSpawn[]): void {
     // them; for a group it is the group id.
     const table = pl.container === "table38" || pl.container === "table39"
       || pl.container === "table44";
-    // The water task reads both descriptor fields as themselves: `+0x1F4`
-    // the table index, `+0x11C` the lifetime.
-    const water = pl.container === "water_surface";
+    // The water task and constructors 50 and 66 read both descriptor fields
+    // as themselves: `+0x1F4` the table index, `+0x11C` the lifetime.
+    const bothFields = pl.container === "water_surface"
+      || pl.container === "table50" || pl.container === "table66";
     const a = ActorSpawn(s.at, SpawnClassValue.PropContainerPlacer,
-                         water ? pl.field_1f4 ?? 0 : pl.lifetime_evt_steps,
+                         bothFields ? pl.field_1f4 ?? 0 : pl.lifetime_evt_steps,
                          pl.container === "kinded"
                            ? `prop kind ${pl.kind}`
                            : pl.container === "flicker_light"
                              ? "flicker light"
-                             : water
-                               ? `water surface ${pl.field_1f4}`
+                             : bothFields
+                               ? `${pl.container} ${pl.field_1f4}`
                                : `breakable group ${pl.group}`,
-                         { hp: table || water ? pl.lifetime_evt_steps
+                         { hp: table || bothFields ? pl.lifetime_evt_steps
                                               : pl.group ?? 0,
                            condition: type });
     a.pos = vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0, s.pos?.[2] ?? 0);

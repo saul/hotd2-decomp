@@ -25584,3 +25584,67 @@ from the port too; not the wall, and not chased here.
 after, at `?stage=1&block=6&step=1&op=0&drive=1&seed=1` with `0x3C7C` shot at
 frame 60: an open doorway before, boards after, bursting on the frame flag 34
 rises.
+
+## 2026-09-29 -- class 0x41 constructors 50 and 66: the bin-scene crate, stage 2's furniture, the signs
+
+The last entry found both and chased neither. Both are ported now, with every
+shipped use.
+
+**The reading** (`[proved]`, disassembly throughout). `g_class41_constructors`
+(`0x00593580`) read entry by entry: 50 is `FUN_00463BA0`, 66 `FUN_00464500`;
+`g_class41_updates` (`0x005936BC`) has `NoOpStub` at 50 and `FUN_0046FE00` at
+66. Named `PlaceTable50Props`, `PlaceTable66Props`, `PropUpdateType66`, and
+the eleven tables they read (`g_prop_table50_0`..`_5`, `_scale_z`, `_ptrs`,
+`_counts`, `g_prop_table66_a`/`_b`). Constructor 50 hands `ActorAlloc`
+`PropDrawOnlyType12` itself: six tables through a pointer array and an s8
+count array, `+0x290` the table, `+0x2A0` the row, table 5 alone Z-scaled from
+a float per row. Its scale array holds six floats and table 5 reads five; the
+image also has a sixth 28-byte row after table 5 that its count of 5 never
+reaches (`L6`, both left out). Constructor 66 picks one of two 32-byte-row
+tables on `(s16)+0x1F4 > 0`, with the counts as `MOV` immediates;
+`PropUpdateType66` inlines a lifetime that ends in `ActorKill`, and only slots
+`0x10DC`/`0x10DD`/`0x10DE` swing, shoot and score. Ghidra's decompile stops at
+its `PlaySoundId` (`L72`) and drops the swing rate the hit writes after it.
+
+**Every shipped use**, surveyed with `hod2lib.script` over scenes 0-11:
+constructor 50 tables 5 (stage 1 blocks 3 and 8), 3 (stage 1 block 4, and
+training block 1), 4, 1, 2, 0 (stage 2 blocks 7, 8, 17, 25); constructor 66
+table a at stage 1 blocks 6, 14, 16 and stage 2 block 0, table b at stage 2
+block 3. All eight descriptors in the bundled stages are placements now.
+
+**The survey the brief asked for** is in `docs/formats/spawns.md`, *Class
+0x41's constructors: which are ported*: 50 entries are `PlaceGenericProp`
+(every type has its routine), 5 `NoOpStub`, 11 ported, and **13 unported**,
+each placed by a script -- 3, 16, 17, 26, 29, 37, 42, 47, 52, 55, 61, 65, 68 --
+with what each allocates and where. Constructor 52 (`FUN_00463D20`, stage 1
+block 14 beside `0x6884`, and stage 5 block 0) is two more
+`PropDrawOnlyType12` objects and the cheapest next port.
+
+**The port.** `game/class41/type50.ts` and `type66.ts`, two new families
+(`Type66`, and `DrawOnlyType12` -- not `Generic` with kind 12, because for
+these `+0x290` is the table and the generic arm dispatches on that word), the
+director mapping (`+0x1F4` the table, `+0x11C` the lifetime) and the exporter's
+`table50`/`table66` placements with the chosen table's slots read out of the
+image. The bundle changed: hashes regenerated before the export (`L33`).
+
+**Wrong turns.** The first shake test set `g_screen_shake_frames` to 0x18 and
+expected no swing; `UpdateScreenShake` takes a frame off before the pool runs,
+so the pool read 0x17 and swung. The test now raises a latched player hit,
+which restarts the countdown at 0x30 the engine's way, and asserts the kicks
+land exactly when the pool reads 0x2F and 0x17. Its scene-1 control first
+picked a sign the scene-0 shake had already kicked. `props13_look.mjs`'s
+default frame 420 shows block 17's sofa and table, not the cabinet the four
+models stand in; that is the hold at camera 81 frame 425, driven frame 460
+on. One look run timed out on the loading overlay under a peer's Chrome and
+passed alone.
+
+**Proof.** `test:port` "class 0x41 constructors 50 and 66": 25 of 26 fail
+with the two constructor entries and the director arms removed; the pivot,
+`ActorKill` and family checks each fail on their own mutation.
+`verify_prop_tables` (1279 words) fails on one slot or one float changed in
+either file; `verify_prop_slots` fails when a row names a slot the bundle
+lacks. Headless, before (constructors unregistered) and after:
+`?stage=1&block=6&step=1&op=0` f70 and f280 (the crate empty, then set with
+five models and her landing among them), `?stage=2&block=17&step=1&op=0` f650
+(four models in mid-air, then in the cabinet), `?stage=2&block=3&step=1&op=0`
+f112 (no sign, then the hanging sign over the van).

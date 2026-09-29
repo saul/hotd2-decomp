@@ -32,7 +32,8 @@ import { ActorSpawn, GameUpdate } from "../src/game/director.ts";
 import { G, ResetGameGlobals } from "../src/game/globals.ts";
 import { SeatHarnessEye } from "./lib/harness_eye.ts";
 import { NULL_HOST } from "../src/game/host.ts";
-import { CharacterTypeOf, SetGameTables } from "../src/game/tables.ts";
+import { CharacterTypeOf, MotionPlayLength, SetGameTables }
+  from "../src/game/tables.ts";
 import { ZombieState } from "../src/game/class30/states.ts";
 import { TARGET_STATES } from "../src/game/class30/target.ts";
 import { SpawnClass } from "../src/game/spawn_class.ts";
@@ -67,6 +68,7 @@ const VERBOSE = process.argv.includes("--verbose");
 let total = 0, moved = 0, rescued = 0, holding = 0, bad = 0;
 let captors = 0, towardCiv = 0, towardEye = 0, mauled = 0;
 let inCaptorState = 0, unplaced = 0, misPaid = 0;
+let clipChanges = 0, snapWrong = 0;
 const closing = new Map();
 
 for (let stage = 1; stage <= 6; stage++) {
@@ -196,9 +198,38 @@ for (let stage = 1; stage <= 6; stage++) {
         }
       }
     }
+    // **Where each clip change fades from.** `CivilianApplyMotionPose`
+    // (`FUN_0048C310`) blends out of the draw records -- the pose the
+    // outgoing clip was drawn in -- so the snapshot is that clip's cursor as
+    // this frame left it: one tick on from the last, or where the loop arm
+    // held it. `CivilianReapplyWaitCommand` (`FUN_0048B760`) runs first and
+    // stores 0 into the cursor word, not the clock; while the port wrote the
+    // clock, 22 of the 32 changes here faded from their clip's first frame
+    // and stage 1's fountain man turned 145 degrees. A change made inside a
+    // running fade keeps that fade's snapshot and is not counted.
+    const pre = actors.map((a) => ({ motion: a.motion, ticks: a.playTicks,
+                                     fading: a.fadeFrom !== null }));
     SeatHarnessEye(EYE);
     GameUpdate(1 / 60, NULL_HOST, rng, events);
     steps += 1;
+    for (let k = 0; k < actors.length; k++) {
+      const a = actors[k];
+      const b = pre[k];
+      if (a.despawned || a.motion === b.motion || !a.fadeFrom || b.fading) {
+        continue;
+      }
+      clipChanges += 1;
+      // As cursors, `counter % (play + 1)`: the loop arm's hold pins the
+      // port's counter at the play length, which is the same cursor.
+      const len = MotionPlayLength(a, b.motion) + 1;
+      const t = a.fadeFrom.ticks % len;
+      if (t !== b.ticks % len && t !== (b.ticks + 1) % len) {
+        snapWrong += 1;
+        console.log(`  FAIL ${a.name}: ${b.motion} -> ${a.motion} faded from `
+                    + `cursor ${t}, drawn at ${b.ticks % len}..`
+                    + `${(b.ticks + 1) % len}`);
+      }
+    }
   }
   for (const a of actors) {
     if (a.flags & 0x4000000) mauled += 1;
@@ -246,6 +277,8 @@ console.log(`\n${captors} captors tracked: ${inCaptorState} ran a state that `
             + `works on their civilian; at 15s ${towardCiv} face the civilian `
             + `more squarely than the camera and ${towardEye} the other way`);
 console.log(`${mauled} civilians were killed by their captors`);
+console.log(`${clipChanges} clip changes faded, ${snapWrong} from a pose `
+            + `other than the one drawn`);
 console.log(`${total} civilians driven, ${moved} advanced, `
             + `${rescued} rescued (${misPaid} paid to anyone but the `
             + `shooter), ${holding} holding something, ${bad} runaway, `
@@ -296,13 +329,17 @@ const EXPECT = { total: 53, moved: 37, rescued: 19, holding: 4,
                  captors: 60, inCaptorState: 58, mauled: 12 };
 const got = { total, moved, rescued, holding, captors, inCaptorState, mauled };
 const missing = Object.keys(EXPECT).filter((k) => EXPECT[k] !== got[k]);
-if (bad || unplaced || misPaid || total === 0 || missing.length) {
+if (bad || unplaced || misPaid || snapWrong || total === 0
+    || missing.length) {
   console.log("\nFAIL");
   for (const k of missing) {
     console.log(`  ${k}: expected ${EXPECT[k]}, got ${got[k]}`);
   }
   if (misPaid) {
     console.log(`  ${misPaid} rescues paid someone other than the shooter`);
+  }
+  if (snapWrong) {
+    console.log(`  ${snapWrong} clip changes faded from a pose not drawn`);
   }
   if (total && total !== EXPECT.total) {
     console.log("  (a bundle built for fewer than six stages will not match; "

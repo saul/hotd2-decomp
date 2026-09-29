@@ -15577,6 +15577,141 @@ console.log("\nclass 0x10's clip change, CivilianApplyMotionPose:");
   }
 }
 
+// **A resume stores the cursor, not the clock.** `CivilianStepScript` runs
+// `CivilianReapplyWaitCommand` (`FUN_0048B760`) over the block at the cursor
+// before `CivilianRunScript` runs it, and the walk's op 0x00 is `MOV dword ptr
+// [ECX + 0x8], 0x0` (`0x0048B794`): `model+0x08`, the cursor the next draw
+// recomputes from the counter at `model+0x00` -- which it leaves alone. The
+// port wrote its one clock, so the outgoing clip was back on its first frame
+// when `CivilianApplyMotionPose` (`FUN_0048C310`) read the drawn pose, which
+// it takes from the draw records and never from `model+0x08`. Stage 1's
+// fountain man (`0x1828`, stream 0: clip 378 once and held, then `0x8200` and
+// 377) turned +26345 BAMS in one frame and swung back through the fade.
+//
+// Driven in the director's order -- the clock, then the update -- over clips
+// whose frames differ (L48): 702's bone 1 faces 0x2000 on its last frame and
+// nothing on its first, 703 faces 0x2000 throughout, 704 turns 0x100 a frame.
+console.log("\nclass 0x10's resume stores the cursor, not the clock:");
+{
+  const rng = new Rng(23);
+  const N = TYPE.bone_count;
+  const FRAMES = 20;
+  /** `mot/` authors at 30; the cursor runs to `2 * frames - 2`. */
+  const PLAY = FRAMES * 2 - 2;
+  /** A clip standing still whose bone 1 is turned `yaw(f)` on frame `f`. */
+  const turning = (yaw: (f: number) => number) => ({
+    bank: "t", frames: FRAMES, fps: 30,
+    root: Array.from({ length: FRAMES * 3 }, (_, i) => (i % 3 === 1 ? 11 : 0)),
+    rot: Array.from({ length: FRAMES * N * 3 }, (_, i) =>
+      (Math.floor(i / 3) % N === 1 && i % 3 === 1
+        ? yaw(Math.floor(i / (N * 3))) : 0)),
+  });
+  const RESUME_CHARS = {
+    ...CHARS,
+    types: { "1": { ...TYPE, motions: {
+      ...TYPE.motions,
+      "702": turning((f) => (f === FRAMES - 1 ? 0x2000 : 0)),
+      "703": turning(() => 0x2000),
+      "704": turning((f) => f * 0x100),
+    } } },
+  } as unknown as CharactersJson;
+  const cmd = (op: CivilianOp, ...args: number[]): CivilianCmdJson =>
+    ({ op, args });
+  /**
+   * Spawn a civilian on `script` at yaw 0x1234 and run it until `until` says
+   * stop -- ticking the clip before each update, as `GameUpdate` does.
+   * Returns the actor and the play cursor the frame before the last.
+   */
+  const run = (script: CivilianCmdJson[],
+               until: (a: ReturnType<typeof ActorSpawn>) => boolean) => {
+    ResetGameGlobals();
+    EnterPlay();
+    SetGameTables(RESUME_CHARS, undefined, undefined, undefined, undefined, {
+      entries: [0], items: [], scripts: [script],
+      spawns: { "16384": { charType: 1, script: 0, removePath: -1,
+                           removeFrame: 0, removeDelay: 0, children: [] } },
+    });
+    const a = ActorSpawn(0x4000, SpawnClass.Civilian, 1, "civilian",
+                         undefined, rng);
+    a.visible = true;
+    a.pos = vec3(0, 0, 0);
+    a.yaw = 0x1234;
+    const events = new Events();
+    let before = a.playTicks;
+    for (let i = 0; i < 400 && !until(a); i++) {
+      before = a.playTicks;
+      ActorAdvanceMotion(a, 1 / 60);
+      CivilianUpdate(a, { dt: 1 / 60, rng, host: NULL_HOST, events });
+    }
+    return { a, before };
+  };
+
+  // 702 plays once and holds its last frame (the loop arm stops stepping the
+  // counter at the play length); a timer later the `0x8000` block changes to
+  // 703. The drawn heading is 702's last frame's, 0x2000, and 703's first
+  // frame has the same, so `yaw += 0x2000 - 0x2000`: no turn at all.
+  {
+    const { a } = run([
+      cmd(CivilianOp.Wait, CivilianWait.RootMotion),
+      cmd(CivilianOp.SetMotion, 702, 1),
+      cmd(CivilianOp.SetTimer, 80),
+      cmd(CivilianOp.Wait, CivilianWait.TurnKeepBones | CivilianWait.RootMotion),
+      cmd(CivilianOp.SetMotion, 703, -1),
+      cmd(CivilianOp.Wait, 0),
+      cmd(CivilianOp.End),
+    ], (x) => x.motion === 703);
+    check("a 0x8000 change turns by the pose she was drawn in, not the "
+          + "outgoing clip's first frame",
+          a.motion === 703 && a.yaw === 0x1234,
+          `motion ${a.motion} yaw ${a.yaw.toString(16)} (0x1234 - 0x2000 is `
+          + "the first frame's)");
+    // `MotionLoadPoseSlot` mode 0xC snapshots the draw records, and they
+    // are 702's held last frame -- the cursor at the play length.
+    check("...and the fade dissolves from the held frame, not from frame 0",
+          a.fadeFrom?.motion === 702 && a.fadeFrom?.ticks === PLAY,
+          JSON.stringify(a.fadeFrom));
+  }
+  // A block that re-states the clip already playing changes nothing in
+  // `CivilianRunScript` (`if (model+0x20 != clip)`), and the reapply's store
+  // is gone at the next draw: the counter runs on, one tick a frame.
+  {
+    const { a, before } = run([
+      cmd(CivilianOp.Wait, CivilianWait.RootMotion),
+      cmd(CivilianOp.SetMotion, 704, -1),
+      cmd(CivilianOp.SetTimer, 20),
+      cmd(CivilianOp.Wait, CivilianWait.RootMotion),
+      cmd(CivilianOp.SetMotion, 704, -1),
+      cmd(CivilianOp.Wait, 0),
+      cmd(CivilianOp.End),
+    ], (x) => (x.civ?.cursor ?? 3) > 3);
+    check("a resume that re-states the playing clip does not restart it",
+          a.motion === 704 && before > 0 && a.playTicks === before + 1,
+          `ticks ${before} -> ${a.playTicks}`);
+  }
+  // The store's one reader: the step loop tests the block it has just walked
+  // before any draw -- `CMP [model+0x8], sub+0x16` for bit 0x200. The walk
+  // stored 0 and op 0x04 asked for 0, so the block is already satisfied and
+  // the loop walks past it; its flag is never raised and the next block's is.
+  {
+    const { a } = run([
+      cmd(CivilianOp.Wait, CivilianWait.RootMotion),
+      cmd(CivilianOp.SetMotion, 704, -1),
+      cmd(CivilianOp.SetTimer, 20),
+      cmd(CivilianOp.Wait, CivilianWait.MotionFrame | CivilianWait.RootMotion),
+      cmd(CivilianOp.SetMotion, 704, -1),
+      cmd(CivilianOp.SetMotionFrame, 0),
+      cmd(CivilianOp.SetScriptFlag, 7),
+      cmd(CivilianOp.Wait, 0),
+      cmd(CivilianOp.SetScriptFlag, 8),
+      cmd(CivilianOp.End),
+    ], () => G.g_script_flags[7] === 1 || G.g_script_flags[8] === 1);
+    check("the 0x200 test reads the cursor the walk just stored",
+          a.motion === 704 && (G.g_script_flags[7] ?? 0) === 0
+          && G.g_script_flags[8] === 1,
+          `flags 7:${G.g_script_flags[7]} 8:${G.g_script_flags[8]}`);
+  }
+}
+
 console.log("\nclass 0x30's captor family — the zombies work on the civilian:");
 {
   const rng = new Rng(11);

@@ -5,10 +5,10 @@
  * opcodes `0x00..0x2C` and stops before anything above `0x2B`, parking the
  * cursor on the next `Wait`. `CivilianReapplyWaitCommand` (`FUN_0048B760`) is
  * a second, smaller VM over the same stream, and it exists because
- * `CivilianStepScript` may **skip** a block: a skipped block's clip, target,
- * timer and cues still have to be in place for the wait that follows it to
- * mean anything, and its sounds, dialogue and score must not run, because
- * those are not conditions.
+ * `CivilianStepScript` may **skip** a block: a skipped block's loop count,
+ * play cursor, target, timer and cues still have to be in place for the wait
+ * that follows it to mean anything, and its sounds, dialogue and score must
+ * not run, because those are not conditions. It never writes the clip itself.
  */
 import { ActorFlag, MotionFlag, type Actor } from "../actor";
 import type { Rng } from "../../core/rng";
@@ -19,6 +19,7 @@ import { NULL_HOST, type GameHost } from "../host";
 import { CivilianAddHeldItem, CivilianAddPickedItem, CivilianPickHeldItem }
   from "./items";
 import { FALL_ACCEL } from "./hooks";
+import { ActorStorePlayCursor } from "../motion";
 import { AsFloat, CivilianHook, CivilianOp, CivilianWait, CmdAt } from "./ops";
 import { CivilianApplyMotionPose } from "./pose";
 
@@ -358,9 +359,16 @@ function CivilianSetMotion(obj: Actor, motion: number, start: number,
  * Walks forward from one wait command to the next, applying **only** the
  * opcodes whose state a wait condition reads. That is the whole reason it
  * exists as a second, smaller VM: `CivilianStepScript` may skip a block, and a
- * skipped block's clip, target and cue still have to be in place for the wait
- * that follows it to mean anything. Its actions — the sounds, the dialogue,
- * the score — are not run, because they are not conditions.
+ * skipped block's loop count, cursor, target and cue still have to be in place
+ * for the wait that follows it to mean anything. Its actions — the sounds, the
+ * dialogue, the score — are not run, because they are not conditions; and of
+ * ops 0x00 and 0x01 it runs only the loop count and the **cursor** store,
+ * never the clip change (`model+0x20`) or the pose call that goes with it.
+ *
+ * Its two callers are both `CivilianStepScript`'s -- `0x0048B699` (the skip
+ * walk) and `0x0048B6C3` (the block at the cursor), `[proved]` by a byte scan
+ * for `E8` calls into it -- so everything it stores is read, if at all, by the
+ * rest of that step and by the `CivilianRunScript` it hands the frame to.
  */
 export function CivilianReapplyWaitCommand(obj: Actor, script: number,
                                            pc: number): number {
@@ -371,16 +379,25 @@ export function CivilianReapplyWaitCommand(obj: Actor, script: number,
     if (!c) return pc;
     const a = c.args;
     switch (c.op as CivilianOp) {
+      // `MOV dword ptr [ECX + 0x8], 0x0` at `0x0048B794`: the **cursor**,
+      // `model+0x08`, and not the counter at `model+0x00` -- nor the clip at
+      // `model+0x20`, which this walk never writes. The next draw recomputes
+      // the cursor from the counter, so the clip plays on where it was; the
+      // store is for this frame's `0x200` test, and for a fade that holds the
+      // cursor. This wrote the port's one clock, and so restarted the clip a
+      // frame before `CivilianRunScript` changed it: `CivilianApplyMotionPose`
+      // then took the drawn pose -- the turn and the fade's snapshot -- from
+      // the outgoing clip's first frame. See `ActorStorePlayCursor`.
       case CivilianOp.SetMotion:
         sub.loops = a[1];
-        obj.playTicks = 0;
+        ActorStorePlayCursor(obj, 0);
         break;
-      // `*(int *)(model + 8) = param_2[3]`: the start **cursor**, as it is.
-      // This converted it as an authored frame and started the clip twice
-      // as far in.
+      // `MOV dword ptr [ECX + 0x8], EDX` at `0x0048B7BA`, EDX = `cmd[3]`: the
+      // start cursor, as it is, into the same word. This once converted it as
+      // an authored frame and started the clip twice as far in.
       case CivilianOp.SetMotionFrom:
         sub.loops = a[1];
-        obj.playTicks = a[2] ?? 0;
+        ActorStorePlayCursor(obj, a[2] ?? 0);
         break;
       case CivilianOp.SetMotionFrame: sub.motionCompare = a[0]; break;
       case CivilianOp.SetTarget:

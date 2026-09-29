@@ -675,7 +675,7 @@ last.
 | 1 | damaged, part swapped |
 | 2 | damaged only |
 | 3 | severed |
-| 5 | no effect — the `2` sentinel. **Scores nothing.** |
+| 5 | no effect — the `2` sentinel. Withholds the body hit's 10 and nothing else — see below. |
 
 ## 5. Score — `ScoreAddForPlayer`
 
@@ -688,15 +688,29 @@ last.
 The head combo (`g_head_combo_bonus`, `+player*0x98`) is added *and then
 incremented by 10*, so consecutive headshots pay 120, 130, 140 … and any
 non-head hit resets it to zero. The hit counter at `g_player_hit_count` feeds
-the end-of-stage accuracy grade that evt `0x2B` reads. A **result-5** hit scores
-nothing at all and does not count towards accuracy.
+the end-of-stage accuracy grade that evt `0x2B` reads. A **result-5** hit is
+tested in one place in the tail, `CMP [g_hit_result + p*4], 5 / JZ` at
+`0x00409819`, ahead of the **body** arm's 10 and its hit count: that pays
+nothing and does not count towards accuracy. The head arm (`0x004097DC`) has
+no such test and pays its 120 and combo whatever the result, and the kill's 80
+is charged inside the kill block, which the result does not gate either.
+`[proved]` The port zeroed all three until 2026-09-29.
+
+**The kill** is two tests: `obj+0x34 & 0x4000000` clear (`0x0040972A`) and
+the s16 at `obj+0x11C` not above zero (`0x00409733`). Then the bit, the 80 and
+the killer's byte at `obj+0x131C`. The result gates only the head burst below.
+The port also refused the kill on a result-5 hit, and read its own
+`Actor.dead` rather than the bit -- which a captor released by
+`ZombieStateDragTarget`, or a body creature let go, carries without the
+field.
 
 **The headshot burst.** When a head hit is the one that kills, `ResolveHit`
 rolls `rand() % 4` and on a zero runs three routines: `SpawnBoneHitSprite`
 (`FUN_00407200`), `SpawnSeveredHead` (`FUN_0040A130`), and
 `ActorSwapDamagedPart(rec, 0, 2)` — slot **0**, which is `RemoveBoneSubtree`'s
 "gone". One headshot kill in four takes the head off. Gated on app state 6,
-character type not 3/0x12/0x18, and `obj+0x3B8 < 2`.
+character type not 3/0x12/0x18, `obj+0x3B8 < 2` and `g_hit_result != 5`
+(`0x0040976F`), in that order, and the roll is drawn only past all of them.
 
 **`FUN_0040A130` is not a blood spray**, which is what this page said until
 2026-09-04 and why the port removed the head and drew nothing in its place. It

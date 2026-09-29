@@ -25584,3 +25584,102 @@ from the port too; not the wall, and not chased here.
 after, at `?stage=1&block=6&step=1&op=0&drive=1&seed=1` with `0x3C7C` shot at
 frame 60: an open doorway before, boards after, bursting on the frame flag 34
 rises.
+
+## 2026-09-29 -- class 0x10's op 0x06 and step restore, `ResolveHit`'s kill test, and the fountain man
+
+Three items the fountain-man and bin-scene agents left, plus a check on the
+kill test.
+
+**Op 0x06 does not write the target mode.** `CivilianRunScript`'s arm is
+`MOV EDX, [ESI+4] / MOV [EAX+0x44], EDX / ... LEA ECX, [EAX+0x30]` and three
+`MOV`s (`0x0048BC8D`..`0x0048BCAE`); `CivilianReapplyWaitCommand`'s is the
+same at `0x0048B84E`. `sub+0x40` is not touched, so the turn (`CivilianUpdate`
+calls `CivilianStepTurnToTarget` only while `sub+0x40 != 0`, `0x0048A970`)
+does not run for it. An operand sweep of `[r + 0x44]` over
+`0x0048A000..0x0048E000` finds those two arms' store and re-read and nothing
+else on the sub-block, so the port keeps no field for `sub+0x44`. All eleven
+op 0x06 in the shared table sit in a block waiting on `0x40`; stage 1's
+`0x18A8` (stream 3, command 10) is the one the harness spawns. Without the
+fix a civilian at yaw `0x4000` with mode 0 turned to `0x2C00` in 20 frames.
+
+**`CivilianStepScript` restores on every exit.** The eight words saved at
+`0x0048B1EC..0x0048B23B` are written back at `0x0048B6DC..0x0048B750`, and every
+exit reaches it: the three arms the pseudocode shows returning after
+`MatrixStackPop` (`0x0048B429`, `0x0048B520`, `0x0048B5AD`) run on at
+`0x0048B42E` (`ADD ESP, 0x2C / JMP 0x0048B451`), `0x0048B525` (into the tail
+at `0x0048B52E`) and `0x0048B5B2` (the in-front compare). L35 again. The
+port's `if (!ran)` restored on the one exit where nothing had been written.
+The existing "a skipped block re-applies its wait conditions" test asserted
+the skipped goal survived the step -- calibrated on the port -- and is
+rewritten: the skipped goal is live inside the loop (the next wait passes on
+it in the same frame) and gone afterwards. No shipped stream uses op 0x11 (a
+scan of the table), so what the restore changes in play is a block the loop
+passes in one frame.
+
+**Found on the way, not fixed**: the reapply walk's op 0x10 does not install
+the hook -- with a non-null operand it **calls** it (its install side effects
+run) and then writes `NoOpStub` to `sub+0x5C`; with a null one it writes
+nothing -- where the port's walk writes the operand into `sub.hook`. And the
+hooks behind it are not what `hooks.ts` says: `CivilianHookLaunchUp`
+(`FUN_0048DB90`) installs `LAB_0048DBC0`, which is `pos.y += vel.y` with no
+gravity, raises `obj+0x34 |= 0x80000` and does not write `obj+0x5C`;
+`CivilianHookLaunch` (`FUN_0048DBD0`) installs `LAB_0048DC10`, a matrix step
+not yet read. The port runs the fall step for both. A rewrite of the hook
+family, left for its own session.
+
+**`ResolveHit`'s kill test.** `0x00409709..0x0040973B`: `TEST [EDI+0x34],
+0x4000000 / JNZ skip` and `CMP word [EDI+0x11C], 0 / JG skip` -- two tests.
+`g_hit_result == 5` is read once in the block, at `0x0040976F`, as a head-pop
+gate. The port tested `!obj.dead && hp < 1 && result != 5`. Both differences
+are fixed; the head-pop gate gained the result test and `rng.int(4) === 0`
+(the same draws as `next() < 0.25`, spelled as the rule asks). Then the tail,
+`0x004097D7..0x00409860`: bone 2 pays `0x78 + combo` with no result test, any
+other bone pays 10 only when the result is not 5 -- so `FireShotRequest`'s
+`if (result === 5) points = 0` was wrong three ways (the head's 120, the
+combo, the kill's 80) and now withholds only the 10. **Does it decide when
+captors die?** Not on any input I found: the paths that raise the bit without
+`dead` (`ZombieStateDragTarget`'s release, the znjoe release) hold
+`ShotImmune` too -- the drag raised `0x10100` at its kill, the release state
+raises `0x3500` on its first frame (a second round inside that one frame is
+the only gap) -- so `DispatchHit` does not reach `ResolveHit`, and
+`ActorInitHitPoints` floors class 0x30/0x31 at 1 hit point, so a result-5 hit
+never meets an actor at zero with the bit down. The tests pin the
+transcription by hand and say so.
+
+**The fountain man, `0x1828`** -- measured before the user confirmed there is
+no chance to save him, and kept as the confirmation. Headless, from
+`?stage=1&mode=play&entry=0&block=1&step=7&op=0&frame=0&drive=1&seed=1`, one
+driven frame per sample: spawned at driven frame 57 (camera slot 38 frame 277,
+the frame after step 7's `wait_camera_path_frame 275`), captor `0x1868` in
+state 35 sub 2 on 788 at play cursor 7 the same frame; the captor on screen
+from slot 38 frame 309, he from 312; the maul at cursor 64 on frame 114
+(slot 38:334, 57 frames after the spawn); his killed stream's
+`SetHudShutterState 1` on frame 115 and `g_nFiringGate` up on 116. With a pull
+at the captor's projected position every frame it was on screen (84 pulls),
+its hit points did not move until after the gate came up. The script says the
+same without a measurement: step 6 op 3 closes the shutter and disables
+firing, steps 6-8 reopen it nowhere before the maul, his stream 1 is
+`Wait 0x08300000 / SetMotion 399 -1 / SetOnShot -> 0 / End` (uncounted, no
+rescue block), and the only `SetHudShutterState 1` is command 3 of the killed
+stream, which then waits on `SetCameraCue 39, 60` -- the step-8 path-7
+cutscene where evt message 16, "I don't wanna die." (`ST1\21YNGMB1.WAV`, a
+young man; his character type 0x25 is `COM\220_Y_M`'s), plays at frame 100.
+So he is that civilian, and the exe kills him on the same clock. The only
+port-side timing question is L62's one frame (the state reads the cursor a
+tick ahead of the engine's), which this does not change.
+
+**Wrong turns.** I read "mauled off screen" as a port fault before looking at
+the shutter; the civilians harness parks its eye 5000 units away, so every
+civilian in it is off screen by construction. And "`0x18A8` is the one who
+says it" for a while, because her stream queues two `56_*_Y_W` voices and
+says "Please help him!" -- the "him" is the fountain man.
+
+**Proof.** `test:port`: "op 0x06 leaves the target mode at 0" and its two
+siblings (three fail with `targetMode = a[0]` restored), "...and the step puts
+the goals back on its way out" (fails with `if (!ran)`), "the dead BIT refuses
+the kill" and "a result-5 hit at zero hit points kills" (both fail on the old
+test), "...takes no head: the roll is not drawn" (fails without the gate),
+"a result-5 head hit pays 120" and "a result-5 kill on the head pays the combo
+and the 80" (both fail with the old zeroing). Civilians harness: 53 driven,
+37 advanced, 19 rescued, 4 holding, 60 captors, 58 in a captor state, 12
+mauled -- before and after, identical.

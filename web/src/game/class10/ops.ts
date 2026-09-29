@@ -40,7 +40,33 @@ export enum CivilianOp {
   SetMotionFrame = 0x04,
   /** A target point: `(pointer or mode, radius)`. See {@link CivilianTarget}. */
   SetTarget = 0x05,
-  /** A target point, always dereferenced. */
+  /**
+   * **A target point, and not a target mode.** The operand is a pointer, kept
+   * at `sub+0x44`, and the three words it names are copied into
+   * `sub+0x30..0x38`; `sub+0x40`, the mode {@link SetTarget} writes, is not
+   * touched:
+   *
+   * ```
+   * 0048BC8D  8b5604    MOV EDX, dword ptr [ESI + 0x4]
+   * 0048BC93  895044    MOV dword ptr [EAX + 0x44], EDX
+   * 0048BC9B  8b5044    MOV EDX, dword ptr [EAX + 0x44]
+   * 0048BC9E  8d4830    LEA ECX, [EAX + 0x30]      ; then three MOVs through it
+   * ```
+   *
+   * and `CivilianReapplyWaitCommand` has the same arm at `0x0048B84E`. So it
+   * turns nobody -- `CivilianUpdate` steps the turn only while `sub+0x40` is
+   * non-zero -- and all eleven in the shipped table sit in a block whose
+   * wait word carries {@link CivilianWait.InFront}, the one test that reads
+   * `sub+0x30..0x38` raw. It is the point the civilian walks **past** on her
+   * own clip. The port wrote the pointer into the mode as well, which made
+   * every one of them turn toward it. `[proved]`
+   *
+   * `sub+0x44` is read back by these two arms' own dereference and by
+   * nothing else in the class (an operand sweep of `0x0048A000..0x0048E000`
+   * finds the four instructions above and no other `[r + 0x44]` on the
+   * sub-block), `[likely]` nothing anywhere; the port carries the decoded
+   * point instead of the pointer and keeps no field for it.
+   */
   SetTargetPoint = 0x06,
   /** A target 100 units away along a BAMS heading. */
   SetTargetHeading = 0x07,

@@ -35,9 +35,25 @@ export function CivilianStepScript(obj: Actor): boolean {
   const sub = obj.civ;
   if (!sub || sub.script < 0) return false;
 
-  // The engine saves the fields `CivilianReapplyWaitCommand` may clobber and
-  // puts them back before returning false, so a frame that does not resume
-  // leaves the sub-block exactly as it found it.
+  // The engine saves eight of the fields `CivilianReapplyWaitCommand` writes
+  // and puts them back on **every** way out: the loop's exits all land on
+  // `0x0048B6DC`, and that is the restore (`MOV word ptr [ECX + 0xc], AX` ...
+  // `MOV word ptr [ECX + 0x1a], DX`, `0x0048B6E6`..`0x0048B750`) with the
+  // return value loaded beside it. The three arms Ghidra's pseudocode shows
+  // returning early after a `MatrixStackPop` do not return: the bytes past
+  // each pop (`0x0048B42E`, `0x0048B525`, `0x0048B5B2`) run on into the tests
+  // (L35). `[proved]`
+  //
+  // So what the walks write here is **for this loop's own tests**: the block a
+  // resume lands on is judged with the goals, cue and loop count the walk just
+  // gave it, and a block passed in the same frame is judged with its own. Once
+  // the step returns, those eight words are what they were when it started,
+  // and `CivilianRunScript` -- which `CivilianUpdate` calls next, from the
+  // cursor -- sets whichever of them the block at the cursor sets. A block the
+  // loop passed, or one op 0x11 skipped, leaves none of them behind.
+  //
+  // The port restored only when nothing had resumed, which is the one exit
+  // where nothing had been written.
   const saved = {
     loops: sub.loops, childrenGoal: sub.childrenGoal,
     enemiesGoal: sub.enemiesGoal, civiliansGoal: sub.civiliansGoal,
@@ -77,7 +93,7 @@ export function CivilianStepScript(obj: Actor): boolean {
     if (CmdAt(sub.script, pc)?.op === CivilianOp.End) break;
   }
 
-  if (!ran) Object.assign(sub, saved);
+  Object.assign(sub, saved);
   return ran;
 }
 

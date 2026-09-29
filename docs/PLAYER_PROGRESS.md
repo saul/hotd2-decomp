@@ -78,6 +78,27 @@ giving civilian from her own spawn step: all five life-givers and four of
 the eight Original-item civilians give, in both modes; the other four sit
 behind op 0x1F's second arm, whose selector `DAT_009A2226` is `[open]`.
 
+**A civilian's op 0x10 calls a routine, and the routine installs a step.**
+The operand names one of four install routines, which both VMs call as
+`hook(obj, cmd + 2)`; what lands in `sub+0x5C` is the step each writes, and
+that is what `CivilianUpdate` calls every frame. The port stored the operand
+itself, inlined three of the installs into the action VM with the fall's
+gravity for all three, and ran the fall step for every one -- a fall step it
+also had moving `x` and `z` and zeroing the velocity on landing, neither of
+which the exe does. Read in full, `CivilianHookStartMoveY` (`FUN_0048DB90`)
+installs `y += vel.y` and `CivilianHookStartMoveLocal` (`FUN_0048DBD0`) the
+velocity turned by the actor's own rotation, both for ever, with no gravity
+and no ground: the renamed `LaunchUp` and `Launch`, which were neither. The
+reapply walk calls the install too -- its writes land -- and then puts
+`NoOpStub` back, where the port installed the hook; a null operand there
+writes nothing, where the port uninstalled. `hooks.ts` is the four installs
+and three of the steps now (the fourth is `children.ts`'s), `sub+0x18` is
+`hookDone`, and `SNAPSHOT_VERSION` is 5. Nothing moves in the six stages as
+exported: the move steps are reached only from streams 61/67/71/72, which no
+bundled spawn runs, and stage 3's two falling civilians never have an `x` or
+`z` velocity for the old step to have used. `npm run civilians` is identical
+before and after; `test:port`'s op-0x10 block is what holds it.
+
 **A rescued civilian holds the room while she speaks** (bug 18). There is no
 "wait for the dialogue" opcode: `CivilianUpdate` (`FUN_0048A920`) calls
 `ActorRegisterCameraPoint` every frame (`0x0048ADB0`), which tail-calls

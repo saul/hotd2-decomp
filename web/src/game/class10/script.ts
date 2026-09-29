@@ -21,9 +21,10 @@ import type { ClassFrame } from "../registry";
 import { NULL_HOST, type GameHost } from "../host";
 import { CivilianAddHeldItem, CivilianAddPickedItem, CivilianPickHeldItem }
   from "./items";
-import { FALL_ACCEL } from "./hooks";
+import { CivilianCallHookInstall } from "./hooks";
 import { ActorStorePlayCursor } from "../motion";
-import { AsFloat, CivilianHook, CivilianOp, CivilianWait, CmdAt } from "./ops";
+import { AsFloat, CivilianFrameHook, CivilianHookInstall, CivilianOp,
+         CivilianWait, CmdAt } from "./ops";
 import { CivilianApplyMotionPose } from "./pose";
 
 /** What a rescue pays — `ScoreAddForPlayer`'s operand. */
@@ -112,21 +113,21 @@ export function CivilianRunScript(obj: Actor, script: number, pc: number,
       case CivilianOp.SetOnShotKilled:
         sub.onShotAlt = a[0]; sub.onShotAltScript = c.scripts?.[0] ?? -1;
         break;
+      // `0x0048BD81`. A null operand is `MOV dword ptr [EAX + 0x5C],
+      // NoOpStub` and nothing else. Any other is **called** -- `PUSH ESI
+      // (cmd + 2); PUSH EDI (obj); CALL ECX; MOV ESI, EAX` -- so the install
+      // routine writes the step and whatever else it writes, and the pointer
+      // it returns is the next command; then `MOV word ptr [EAX + 0x18], BP`
+      // puts the done flag down. The port used to store the operand itself
+      // and inline three of the four installs here, with the fall's gravity
+      // for all three.
       case CivilianOp.SetHook:
-        sub.hook = a[0];
-        sub.hookBusy = 0;
-        if (sub.hook === CivilianHook.LaunchUp) obj.vel.y = AsFloat(a[1]);
-        if (sub.hook === CivilianHook.Launch) {
-          obj.vel.x = AsFloat(a[1]);
-          obj.vel.y = AsFloat(a[2]);
-          obj.vel.z = AsFloat(a[3]);
+        if (a[0] === CivilianHookInstall.None) {
+          sub.hook = CivilianFrameHook.None;
+          break;
         }
-        if (sub.hook === CivilianHook.Fall
-            || sub.hook === CivilianHook.LaunchUp
-            || sub.hook === CivilianHook.Launch) {
-          obj.accY = FALL_ACCEL;
-          if (sub.hook === CivilianHook.Fall) obj.vel.y = 0;
-        }
+        CivilianCallHookInstall(obj, a[0], a.slice(1));
+        sub.hookDone = 0;
         break;
       case CivilianOp.SetSkipCount: sub.skipCount = a[0]; break;
       case CivilianOp.SetRemoveDelay: sub.removeDelay = a[0]; break;
@@ -380,6 +381,8 @@ function CivilianSetMotion(obj: Actor, motion: number, start: number,
  * dialogue, the score — are not run, because they are not conditions; and of
  * ops 0x00 and 0x01 it runs only the loop count and the **cursor** store,
  * never the clip change (`model+0x20`) or the pose call that goes with it.
+ * Op 0x10 is the one exception to "conditions only": it calls the install
+ * routine for its side effects and then uninstalls what it installed.
  *
  * Its two callers are both `CivilianStepScript`'s -- `0x0048B699` (the skip
  * walk) and `0x0048B6C3` (the block at the cursor), `[proved]` by a byte scan
@@ -443,7 +446,19 @@ export function CivilianReapplyWaitCommand(obj: Actor, script: number,
       case CivilianOp.SetCiviliansGoal: sub.civiliansGoal = a[0]; break;
       case CivilianOp.SetCameraCue:
         sub.cuePath = a[0]; sub.cueFrame = a[1]; break;
-      case CivilianOp.SetHook: sub.hook = a[0]; break;
+      // `0x0048B913`. A null operand writes **nothing** -- `JZ` to the
+      // length bump -- so the step already installed stands. Any other is
+      // called exactly as the action VM calls it, so its velocity, gravity and
+      // flag writes all land, and then `MOV dword ptr [ECX + 0x5C], NoOpStub`
+      // at `0x0048B92E` takes the step it installed straight back out.
+      // `sub+0x18` is not touched. The port stored the operand into the slot,
+      // which installed a hook the exe never runs from here and, for a null
+      // operand, uninstalled one it leaves running.
+      case CivilianOp.SetHook:
+        if (a[0] === CivilianHookInstall.None) break;
+        CivilianCallHookInstall(obj, a[0], a.slice(1));
+        sub.hook = CivilianFrameHook.None;
+        break;
       case CivilianOp.SetFlagIndex: sub.flagIndex = a[0]; break;
       default: break;
     }

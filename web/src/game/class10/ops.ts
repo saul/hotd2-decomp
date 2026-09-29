@@ -86,7 +86,7 @@ export enum CivilianOp {
   SetOnShot = 0x0E,
   /** The script a *killing* shot switches to, when it differs. */
   SetOnShotKilled = 0x0F,
-  /** Install a native per-frame hook — see {@link CivilianHook}. */
+  /** Call a hook install routine — see {@link CivilianHookInstall}. */
   SetHook = 0x10,
   /** Wait commands to re-apply and skip past on the next resume. */
   SetSkipCount = 0x11,
@@ -441,23 +441,51 @@ export enum CivilianSphereMode {
 }
 
 /**
- * The native hooks op {@link CivilianOp.SetHook} installs at `sub+0x5C`.
+ * The routines op {@link CivilianOp.SetHook}'s operand names, or 0 for none.
  *
- * The command's length is **the hook's** to decide — the engine calls it as
- * `next = hook(obj, cmd + 2)` and takes the pointer back — which is why the
- * exporter has to know them by address to decode the stream at all.
+ * Each is an **install**: both VMs call it as `next = hook(obj, cmd + 2)`
+ * (`CALL ECX` at `0x0048BD8D` in `CivilianRunScript`, at `0x0048B923` in
+ * `CivilianReapplyWaitCommand`), it writes a step into `sub+0x5C` with
+ * whatever else it writes, and the pointer it returns is the next command --
+ * so the command's length is the routine's to decide, which is why the
+ * exporter has to know them by address to decode the stream at all
+ * (`CIVILIAN_HOOK_LEN` in `hod2lib/exetab.ts`). What `sub+0x5C` holds
+ * afterwards is a {@link CivilianFrameHook}, never one of these.
  */
-export enum CivilianHook {
-  /** `NoOpStub` (`FUN_0041EBB0`): uninstall. */
+export enum CivilianHookInstall {
+  /** A null operand, and no call: see the two VMs' arms for what each does. */
   None = 0,
-  /** `0x0048D9F0`: fall under gravity until the ground catches it. */
-  Fall = 0x0048d9f0,
-  /** `0x0048DA90`: ride the surviving children. `[open]` — pose only. */
+  /** `CivilianHookStartFall` (`FUN_0048D9F0`). No operand. */
+  StartFall = 0x0048d9f0,
+  /** `CivilianHookRideChildren` (`FUN_0048DA90`). No operand. */
   RideChildren = 0x0048da90,
-  /** `0x0048DB90`: take a launch speed in y, then fall. */
-  LaunchUp = 0x0048db90,
-  /** `0x0048DBD0`: take a whole launch velocity, then fall. */
-  Launch = 0x0048dbd0,
+  /** `CivilianHookStartMoveY` (`FUN_0048DB90`). One operand, a float. */
+  StartMoveY = 0x0048db90,
+  /** `CivilianHookStartMoveLocal` (`FUN_0048DBD0`). Three, a float vector. */
+  StartMoveLocal = 0x0048dbd0,
+}
+
+/**
+ * What `sub+0x5C` holds: the step `CivilianUpdate` calls once a frame with the
+ * object pushed, `CALL dword ptr [EAX + 0x5C]` at `0x0048A962` -- straight
+ * after the child prune. Only the install routines above write one in, and
+ * only `NoOpStub` is ever written back over it.
+ */
+export enum CivilianFrameHook {
+  /**
+   * `NoOpStub` (`FUN_0041EBB0`), a bare `RET`: what `CivilianInit` writes
+   * (`g_cur_civilian[0x17]`), what the action VM writes for a null operand and
+   * the reapply walk after every call, and what the steps that finish write.
+   */
+  None = 0x0041ebb0,
+  /** `CivilianHookFallStep` (`FUN_0048DA20`), from `StartFall`. */
+  FallStep = 0x0048da20,
+  /** `CivilianHookRideChildrenStep` (`FUN_0048DAB0`), from `RideChildren`. */
+  RideChildrenStep = 0x0048dab0,
+  /** `CivilianHookMoveYStep` (`FUN_0048DBC0`), from `StartMoveY`. */
+  MoveYStep = 0x0048dbc0,
+  /** `CivilianHookMoveLocalStep` (`FUN_0048DC10`), from `StartMoveLocal`. */
+  MoveLocalStep = 0x0048dc10,
 }
 
 /**

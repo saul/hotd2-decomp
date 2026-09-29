@@ -26340,3 +26340,86 @@ name, as the EXE's would; the exporter bakes record `i`'s clip for all ten
 indices, past the terminator included, so that such a figure is posed at all.
 Whether any shipped scene offers more rescues than its list has places is
 `[open]`; I did not count.
+
+## 2026-09-29 -- class 0x10 op 0x10: the install routines, and the steps they install
+
+Picked up the "found on the way, not fixed" note in the 2026-09-29 entry
+"class 0x10's op 0x06 and step restore, ...": the reapply walk's op 0x10 and
+the hooks behind it.
+
+**The reading.** Op 0x10's operand is a pointer to an **install** routine and
+both VMs *call* it, `next = hook(obj, cmd + 2)`. `CivilianRunScript`'s arm
+(`0x0048BD81`, table entry `[0x10]` at `0x0048C298` read out of the image):
+`0` writes `NoOpStub` to `sub+0x5C` and nothing else; anything else is `PUSH
+ESI; PUSH EDI; CALL ECX; MOV ESI, EAX` and then `MOV word [EAX+0x18], BP`.
+`CivilianReapplyWaitCommand`'s (`0x0048B913`, byte table `0x0048B9A4[0x10] =
+0x0B`, jump table entry 11 = `0x0048B913`): `0` is `JZ` straight to the length
+bump -- nothing written -- and anything else is the same call followed by `MOV
+dword [ECX+0x5C], 0x0041EBB0`. The installs, each disassembled whole:
+
+* `CivilianHookStartFall` (`FUN_0048D9F0`): step `0x0048DA20`, `vel.y = 0`,
+  `obj+0x5C = 0xBCDF0123` (-0.027222222; the port had -0.02722). No operand.
+* `CivilianHookFallStep` (`FUN_0048DA20`): ground query first, at the old
+  position; `vel.y += acc; y += vel.y`; `FCOM / TEST AH,1 / JNZ` -- land when
+  the ground is at or above the new `y`, snap, `sub+0x18 = 1`, `NoOpStub`.
+  **y only, and the velocity is kept.** The port moved `x` and `z` too, zeroed
+  all three on landing and scaled each term by the frame count.
+* `CivilianHookRideChildren` (`FUN_0048DA90`): step `0x0048DAB0`, nothing else.
+* `CivilianHookStartMoveY` (`FUN_0048DB90`, was `CivilianHookLaunchUp`): step
+  `0x0048DBC0`, `vel.y` = the operand, `obj+0x34 |= 0x80000`, **no** `obj+0x5C`.
+  Its step, now `CivilianHookMoveYStep` (`FUN_0048DBC0`, created), is `FLD
+  [xform+0x10]; FADD [xform+4]; FSTP [xform+4]; RET` -- `y += vel.y`, for ever.
+* `CivilianHookStartMoveLocal` (`FUN_0048DBD0`, was `CivilianHookLaunch`): step
+  `0x0048DC10`, the velocity from three operands. Its step, now
+  `CivilianHookMoveLocalStep` (`FUN_0048DC10`, created), is `Push(0);
+  LoadIdentity; Translate(pos); RotateX(+0x64); RotateZ(+0x6C); RotateY(+0x68);
+  TransformPoint(vel -> out); pos = out; Pop(1)`, with `ADD ESP,0x40; RET` past
+  the pop Ghidra marks no-return (L35; only the stack cleanup is past it).
+
+**Renamed**, in the TSV and the live database: `CivilianHookLaunchUp` ->
+`CivilianHookStartMoveY`, `CivilianHookLaunch` -> `CivilianHookStartMoveLocal`.
+Neither launches anything -- the one shipped `StartMoveY` operand is -0.2, a
+steady sink, and neither step has gravity. The MCP naming gate refused
+`CivilianHookMoveY` as a token subset of its step's name; `Start...` is the
+family's own pattern (`StartFall` / `FallStep`).
+
+**Where they are used.** A scan of the shared table (the same 136 streams in
+every stage): `StartFall` in stream 30 (stage 3, `0x701C` and `0x70EC`, after
+the rescue), `RideChildren` in 35 (stage 4 `0x23F8`) and 58, `StartMoveY` in
+61, 67 and 71 (each -0.2), `StartMoveLocal` in 72 (`(0, 0, -0.05)`), and null
+operands in 12, 34, 58 and 72. Streams 58, 62, 68 and 72 are spawned by
+nothing the bundle carries and referenced by no command, so 61/67/71 (their
+on-shot streams) are unreached too: **neither move step runs in the six
+stages as exported.** `[open]` whether something the exporter does not see
+spawns them.
+
+**The port.** `hooks.ts` is the four installs and three steps (the fourth is
+`CivilianHookRideChildrenStep` in `children.ts`, which now reads the count
+word `sub+0x1E` as the exe does), with `CivilianCallHookInstall` for op 0x10's
+`CALL ECX` that both VMs use. `sub.hook` holds the **step's** address, as
+`sub+0x5C` does, starting at `NoOpStub` (`0x0041EBB0`) where `CivilianInit`
+writes it; `CivilianHook` split into `CivilianHookInstall` and
+`CivilianFrameHook`. `sub+0x18` was `hookBusy`, documented as "raised while
+the hook is still running" -- its one writer raises it when the fall *lands* --
+and is `hookDone`. `SNAPSHOT_VERSION` 4 -> 5 for both. `FALL_ACCEL` is gone.
+
+**What moved.** Nothing measurable in the shipped stages: `npm run civilians
+-- --verbose` is byte-identical on the old and new trees (private bundle).
+Stage 3's fallers have no `x`/`z` velocity for the old step to have used and
+nothing reads `vel.y` after they land. The difference is in the unreached
+streams and in the reapply walk, which no stage exercises on an op 0x10 block
+(op 0x11 is unused, and a passed block would need a hook in it).
+
+**Proof.** `test:port`, "Op 0x10 calls a routine; the routine installs a
+step": 19 checks, and all 19 fail on the tree before the change and nothing
+else does -- the slot held the install address, `x` moved 0.5 a frame, the
+sink stopped on the floor, the local move went along -Z with no turn, the
+reapply walk installed `0x48DB90` without its velocity and uninstalled on a
+null operand. The local move's case (yaw and pitch both `0x4000`) pins the
+order: with the Y turn first -Z goes to -X and the X turn leaves it; X first
+would have put it in `y`.
+
+**Wrong turns.** None in the reading that I know of; two in the doing. The
+first rename was refused by the naming gate (above), and the first scan of the
+bundle assumed `civilians.spawns` was a list -- it is keyed by spawn address --
+and crashed rather than miscounting, which is the better way round.

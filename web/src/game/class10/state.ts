@@ -11,7 +11,7 @@
  * side. The fields the port does not use yet are still named and still carry
  * their offset: an unnamed gap is where the next wrong reading goes.
  */
-import { CivilianSphereMode } from "./ops";
+import { CivilianFrameHook, CivilianSphereMode } from "./ops";
 
 /** One 8-byte entry of the held-item array at `sub+0x70`. */
 export interface CivilianHeldItem {
@@ -62,8 +62,14 @@ export interface CivilianState {
   timer: number;
   /** +0x16 op 4 — the motion id wait bit 0x200 compares against. */
   motionCompare: number;
-  /** +0x18 raised by a frame hook while it is still running; bit 0x400. */
-  hookBusy: number;
+  /**
+   * +0x18 **the frame hook has finished**, and wait bit 0x400 holds until it
+   * is up. `CivilianHookFallStep` raises it on landing -- the only writer of
+   * a 1 -- and op 0x10's action arm and every resume of `CivilianStepScript`
+   * put it down. It was `hookBusy`, documented as raised *while* the hook
+   * runs: the reverse of what the one writer does.
+   */
+  hookDone: number;
   /** +0x1A op 0x20 — which `g_script_flags` byte wait bit 0x2000 reads. */
   flagIndex: number;
   /** +0x1C op 0x11 — wait commands to re-apply and skip on the next resume. */
@@ -115,7 +121,11 @@ export interface CivilianState {
   resume: number;
   /** +0x58 op 0x22's remaining `(id, delay)` pairs. */
   sounds: [number, number][];
-  /** +0x5C op 0x10's per-frame hook — see {@link CivilianHook}. */
+  /**
+   * +0x5C the step `CivilianUpdate` calls every frame -- a
+   * {@link CivilianFrameHook}, the step's own address and never the install
+   * routine op 0x10 names. `CivilianInit` writes `NoOpStub`.
+   */
   hook: number;
   /** +0x60 the actors `CivilianInit` built, by spawn address. */
   children: number[];
@@ -184,12 +194,12 @@ export function makeCivilianState(): CivilianState {
   return {
     wait: 0, subFlags: 0, frameLimit: 0, loops: 0,
     motionBlend: 10, cuePath: 0, cueFrame: 0, timer: -1, motionCompare: 0,
-    hookBusy: 0, flagIndex: 0, skipCount: 0, childCount: 0, childrenGoal: 0,
+    hookDone: 0, flagIndex: 0, skipCount: 0, childCount: 0, childrenGoal: 0,
     enemiesGoal: 0, civiliansGoal: 0, removePath: 0, removeFrame: 0,
     removeDelay: 0, childOrder: 0, childOrderFrames: 0, pouncer: 0,
     target: { x: 0, y: 0, z: 0 }, radius: 0, targetMode: 0,
     cursor: 0, onShot: 0, onShotAlt: 0, resume: 0, sounds: [],
-    hook: 0, children: [], carrier: 0, rescuePlayer: -1,
+    hook: CivilianFrameHook.None, children: [], carrier: 0, rescuePlayer: -1,
     items: [], heldDrawn: [], pickedItem: -1, attachSet: 5,
     scaleTarget: 1, scaleStep: 0, sphereCentreMode: CivilianSphereMode.Bone1,
     deathVoice: 0xff,

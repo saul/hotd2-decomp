@@ -25506,3 +25506,81 @@ turns a civilian toward an op-6 point the exe does not; and
 loop in the decompile, on every exit that reaches `0x0048B6D6`, where the port
 restores only when nothing resumed. And the port's "drawn" cursor is still a
 tick ahead of the engine's draw (L62), for every class.
+
+## 2026-09-29 -- class 0x12: the boards the bin captor bursts through
+
+**Report.** "The zombie at end of stage 2 in the civilian scripted sequence
+should burst out of a wooden wall. The wood doesn't seem to exist in the
+port." Corrected by the user mid-task: the scene is stage 1's -- block 6 step
+1, the civilian off the bridge onto the bin (`0x3C38`) and the captor that
+bursts out of the wood after she climbs down (`0x3D24`, state 39 -> 36, clip
+967 from cursor 33, flag 34 on cursor 63).
+
+**Found.** The step's spawn list holds `0x3D88`, opcode 0x0C, **class 0x12**
+-- a class the port had no `SpawnClass` member, handler or placement for.
+`g_class_handler_pairs` (`0x00593358`) pairs it with `0x0043F9D0`; Ghidra had
+no function there or at the update it installs, `0x0043FA60`. Both created
+and named: `ScriptedPropInit12`, `ScriptedPropUpdate12` (`functions.tsv`).
+The descriptor: start slot `0x11FD` = `door_1.bin[41]`, delay 1, a shot mesh
+(`coli1.bin:5144`), behaviour 0, despawn on camera path 47 frame 130, strip
+`0x11FE..0x1233`, **flag 34**, step 1.0, scale 1.0, flags word `0x10`.
+`door_1.bin[41]` is modelled in world space across the doorway (`x -675..-661,
+y -16..7, z -551..-545`), between the captor at `(-660, -15.5, -565)` and the
+bin; `[42..95]` are the same geometry pulled apart, the last over 90 units.
+So the wood is a flag-driven slot strip, and flag 34 -- which 101e4929 made
+the captor raise -- is what starts it. `[proved]` from the disassembly of
+both routines (the pseudocode drops both `__ftol` operands, `L1`). Two more
+class-0x12 records ship, `sanbasi.bin[12..90]` at half a slot a frame: stage
+2 block 37 (flag 95) and stage 5 block 3 (flag 11).
+
+**Ported.** `game/class12/`, `SpawnSlotActor`'s arm, the draw in
+`render/slotmodels.ts`, the exporter (`class12Tail`, `class12_tail`,
+`SLOT_DRAWN_CLASSES`, the strip slots in `slots_actor`), and
+`tools/verify_flag_strips.py`, which holds the exporter's tail reads to the
+Init's eleven instructions quoted out of the EXE, every shipped spawn's
+placement to the evt, and every strip slot to its bundle. Fails on the old
+bundle (six stages without placements) and on `cam_frame` moved to `+0x0E`.
+
+**Not ported, and said so where it bites.** `ShotTestMesh` for an actor: the
+door files itself with `0x10` until its strip starts, so in the engine a shot
+at the boards stops on them; the port's pick passes a mesh entry by
+(`combat/shot_test.ts`, whose note used to say no registering class raised
+the bit).
+
+**Wrong turns -- most of the session.** The first brief said stage 2, and the
+search went through every civilian scene from block 14 on: 16/5 (the
+`hito_gal` out of the double doors with the axe man -- the doors are hinges,
+drawn), 16/11 (the boat), 16/14 (the jetty doorway), 17/1-2 (the `znkage` in
+the wallpapered room), 21/5 (the clock tower). Two hypotheses died on the
+data: that clip 1027 (`zom.bin` 77) or 784 (`ono.bin` 10) was a burst -- both
+are walk heads in five other captors' scripts. The brief's suspect,
+constructor 66 (`FUN_00464500`), is **not** the wood: its two tables place
+`komono_kanban.bin` and `komono_uemiti.bin` models whose update
+(`FUN_0046FE00`) swings them when shot and on the screen shake in scene 0 --
+signs, `[likely]` from the file name -- 340 to 800 units from the bin, placed
+at stage 1 blocks 6, 14 and 16 and stage 2 blocks 0 and 3. Unported, not
+chased. The earlier entry's "flag 34's one reader, `MouseBranchTriggerUpdate`,
+despawns a mouse" is true of subtype 4 alone, which is stage 4 block 10's
+mouse; stage 1's mice are subtype 0 and never read it (corrected in
+`PLAYER_PROGRESS.md`). `L83`.
+
+**Found on the way, not fixed.** Stage 2 block 17 step 1's `0xBE60` is class
+0x41 **constructor 50** (`FUN_00463BA0`, table 2 at `0x00594CA0`): four
+`PropDrawOnlyType12` objects, `komono_suimonie.bin[5]`, `[6]` and `[7]` twice
+-- the last two at `x -602.5, z -1532.5/-1548.5`, 32.7 units tall, under the
+four class-0x13 `komono_st1.bin[3]` records at the same x that PLAYER_PROGRESS
+calls "four wooden models on the far wall". Unported, so in the port those
+four hang in the air. Constructor 50 is six descriptors, one per table:
+stage 1 blocks 3/8 (table 5) and 4 (table 3), stage 2 blocks 7, 8, 17 and
+25 (tables 4, 1, 2, 0). **Stage 1's table 3 is in this very scene**: placed
+at block 4 step 3 with a four-step lifetime, it is still alive at block 6
+step 1 on the direct route from block 4 (four step changes), and its five `komono_st1b.bin` models ([0], [5], [6], [1], [2]) sit
+at `x -688..-696, y -2..-4, z -536..-543` -- on the bin she lands on. Missing
+from the port too; not the wall, and not chased here.
+
+**Proof.** `test:port` "class 0x12, the door the bin captor bursts out of"
+(six fail with the registration and the spawn arm removed); `test:render`
+"class 0x12's strip" (three fail without the draw arm); the page, before and
+after, at `?stage=1&block=6&step=1&op=0&drive=1&seed=1` with `0x3C7C` shot at
+frame 60: an open doorway before, boards after, bursting on the frame flag 34
+rises.

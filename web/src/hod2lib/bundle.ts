@@ -37,6 +37,8 @@ import { HumanoidDrawVariant, HUMANOID_VARIANT3_SLOT }
 // Same argument: `class13/state.ts` is data only, `class13/index.ts` registers.
 import { CARRIER_SELECTORS_PORTED, CarrierDrawSlots }
   from "../game/class13/state";
+// ...and `class12/state.ts` for the slot strip class 0x12 steps through.
+import { ScriptedProp12DrawSlots } from "../game/class12/state";
 // ...and `class19/slots.ts` for the stage-4 boss's prop and hit mark.
 import { Boss4EffectSlots } from "../game/class19/slots";
 // ...and `class41/water_slots.ts` for the tiles the canal water task pairs
@@ -1406,6 +1408,34 @@ export function scriptedPropDrawSlots(
 }
 
 /**
+ * The asset slots a stage's class-0x12 descriptors draw: the one each waits
+ * on and the strip `ScriptedPropUpdate12` (`FUN_0043FA60`) runs through once
+ * its flag is up, `AssetDrawSlot(__ftol(sub+0x14))` on every frame between.
+ *
+ * Like {@link scriptedPropDrawSlots}, a property of the spawn and not of the
+ * class: stage 1's door and stages 2 and 5's `sanbasi.bin` strip name their
+ * own slots, and `characters.placements` carries a class-0x12 placement only
+ * for a behaviour the port runs.
+ */
+export function flagStripPropDrawSlots(
+    placements: readonly {
+      class12?: { slot?: number; first?: number; last?: number } | null;
+    }[],
+): number[] {
+  const out: number[] = [];
+  for (const p of placements) {
+    const t = p.class12;
+    if (!t) continue;
+    for (const s of ScriptedProp12DrawSlots({
+      slot: t.slot ?? 0, first: t.first ?? 0, last: t.last ?? 0,
+    })) {
+      if (!out.includes(s)) out.push(s);
+    }
+  }
+  return out;
+}
+
+/**
  * A hidden rig holding the models an **actor** class draws by asset slot.
  *
  * The counterpart of {@link breakableSlotEntry}, for the classes whose draw is
@@ -1983,6 +2013,7 @@ export async function buildStage(stage: Stage, sink: BundleSink,
     stage, spawnRecords.map((r) => r.cls),
     [...humanoidDrawSlots(humanoids), ...sceneryDrawSlots(charPlaces),
      ...scriptedPropDrawSlots(charPlaces),
+     ...flagStripPropDrawSlots(charPlaces),
      ...waterSurfaceDrawSlots(placements)],
     cache);
   const eff = await effectSlotEntry(stage, cache, [

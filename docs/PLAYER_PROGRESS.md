@@ -6617,8 +6617,8 @@ The routine takes the cursor as it stands now, and `ZombieSetMotionIfIdle`'s
 spreads are cursors (`"clip"` is `rand() % g_motion_play_length`, not a
 doubled authored frame). **Changes behaviour**: every class-0x30 captor-script
 start (the bin captor's burst, 967 from 33, used to begin at 66, past its
-flag-34 cue at 63, so the flag never came up and the stage-1 mouse it removes
-stayed; 28 nonzero script starts ship), every class-0x30 random spread
+flag-34 cue at 63, so the flag never came up -- and with it the boards the
+captor bursts through, class 0x12's, below; 28 nonzero script starts ship), every class-0x30 random spread
 (`rand() % 5/10/play_length`: the walks, idles, retreats, landings), the fall's
 landing (15, not 30) and body condition 4's special death (25, not 50),
 class 0x31's stand-and-decide and wait-for-cue starts, and class 0x23's walk
@@ -6652,6 +6652,65 @@ and flag 34 comes up 30 frames later on cursor 63. Playthroughs (seed 1,
 at block 16; GAME OVER at block 2) at different frames, stage 4 now reaches
 its end block where it ran out of credits at block 6 -- the fights diverge,
 nothing in stage 4 was fixed -- and stages 5 and 6 hang where they hung.
+
+## Class 0x12: the boards the bin captor bursts through
+
+Stage 1 block 6 step 1 -- the civilian off the bridge, onto the bin -- places
+evt `0x3D88` at camera frame 640, and it is **class 0x12**, a class the port had
+no enum member, no handler and no placement for: the spawn built nothing, and
+the captor (`0x3D24`) walked out of an empty doorway. `g_class_handler_pairs`
+names `{0x12, 0x0043F9D0}`; Ghidra had no function at either address, and both
+are named now.
+
+* `ScriptedPropInit12` (`FUN_0043F9D0`) fills a 0x1C-byte block from the
+  opcode-0x0C tail: the slot it waits on, a delay, a shot-mesh `coli` pointer
+  into `obj+0x14C`, the behaviour, the despawn camera path and frame, the
+  strip's first and last slots, a script flag, the cursor's step and a scale.
+  It does not call the behaviour (class 0x13's Init does).
+* `ScriptedPropUpdate12` (`FUN_0043FA60`) draws `AssetDrawSlot(__ftol(cursor))`
+  under class 0x13's `T; RotX; RotZ; RotY` and registers for the shot test
+  until the flag is up; then counts the delay down, jumps to the first slot,
+  installs `NoOpStub` and raises `0x8000`; then steps the cursor a frame at a
+  time and despawns, undrawn, once it is strictly past the last slot. The
+  camera cue despawns it too. `[proved]` from the disassembly: the pseudocode
+  drops both `__ftol` operands (`L1`).
+
+Stage 1's record: `door_1.bin[41]` (`0x11FD`), a 14 x 23 panel modelled in
+world space across the doorway at `x -675..-661, z -551..-545`; flag 34, which
+the captor's `ZombieStateTargetScriptWithFlag` raises on cursor 63 of its burst
+(967 from 33); delay 1; then `door_1.bin[42..95]` a slot a frame, the boards
+flying apart over 90 units of the alley; gone on camera path 47 frame 130. So
+flag 34's reader in stage 1 is this door -- the mouse arm that tests flag 34
+(`MouseBranchTriggerUpdate`, subtype 4) is stage 4 block 10's. Two more records
+ship, both `sanbasi.bin[12..90]` at half a slot a frame: stage 2 block 37 on
+flag 95 and stage 5 block 3 on flag 11. All three name behaviour 0.
+
+What changed: `game/class12/` (both routines, the tail in `state.ts`),
+`SpawnSlotActor`'s arm, `render/slotmodels.ts`'s draw (the truncation is the
+draw's), and the exporter: `class12Tail` (and `class12_tail` in the Python
+half), class 0x12 in `SLOT_DRAWN_CLASSES` for behaviour 0 only, and the strip's
+slots in the `slots_actor` rig -- **a fresh bundle is needed**.
+
+Not here: `ShotTestMesh` (`FUN_00404A00`) for an actor. The door's record
+carries `0x10`, so in the engine a shot at the boarded doorway is tested
+against `coli1.bin:5144` and stops on the boards until the strip starts; the
+port files the door and its pick passes a mesh entry by, as it did before any
+class raised the bit. Its `0x40` bit is clear, so neither collision pass takes
+the blob in either.
+
+Checked by `test:port` ("class 0x12, the door the bin captor bursts out of":
+the spawn, the Init, the wait, the flag frame, 54 frames of strip, the despawn,
+the camera cue, a negative delay, stage 2's half step and its equality arm;
+six fail with the registration and the spawn arm taken out), `test:render`
+(the waiting slot, `T * Rx * Rz * Ry * S` at three unequal angles and scale
+2, the truncated cursor; three fail without the draw arm), and
+`tools/verify_flag_strips.py`: the exporter's tail offsets against the eleven
+instructions that read them, every shipped spawn placed with the fields the
+evt holds, and every strip slot in its bundle (fails on the old bundle, and
+on moving `cam_frame` to `+0x0E`). In the page at
+`?stage=1&block=6&step=1&op=0&drive=1&seed=1`, the bridge captor shot: the
+doorway is boarded from the spawn (camera frame 640) on, the boards burst on
+the frame flag 34 rises, and 54 frames later they are gone.
 
 ## Every opcode, and what the player does with it
 

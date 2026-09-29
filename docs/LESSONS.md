@@ -1242,3 +1242,19 @@ costing a phone thirty times what it costs a Mac -- was nearly argued away.
 **Ask what the device is before explaining its numbers away**, and treat
 `ua`, `from` and `view` in a report as clues rather than identification: a
 `dpr` of 2 at 2048×1536 is an iPad as much as it is a Retina Mac.
+
+**L83 -- A class with no module is in no list of what is unported.** Stage
+1's bin scene was missing the boards the captor bursts through. The agent
+that fixed the scene's captor listed what the step placed and the port did
+not build, and named class 0x41's constructor 66 -- a type in a class that
+*has* a module, whose `g_class41_constructors` gap every class-0x41 audit
+enumerates. The boards were `0x3D88`, **class 0x12**: no `SpawnClass` member,
+no handler, no placement, so `SpawnSlotActor` built nothing and nothing
+anywhere reported an unported type, because every "unported" list in the tree
+is a list of arms inside a class somebody had already opened. Constructor 66
+turned out to place `komono_kanban.bin` models (signs, `[likely]` from the
+file name) 340 units and more from the bin. **When something the
+game draws is missing, list every spawn record in that step by class id and
+ask of each whether the pool holds an object for it** -- `G.g_object_list`
+against the step's spawn ops -- before reading any class's sub-types; a
+class id with no handler is the one gap no sub-type audit can see.

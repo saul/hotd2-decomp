@@ -3354,6 +3354,16 @@ credit; otherwise the run's own continue screen counts down and asks for the
 game-over screen (below). Player 2 can join by the same route, but the page
 has no second START key yet.
 
+**Free play by default** (2026-09-29, at the user's request). The options'
+credit setting is `g_option_credits` (`0x009C9F25`, a signed byte) in `G`
+now, not a constant, and it starts at **-1**: free play, which
+`ModeStartCounterValue` (`CMP AL,0xff` at `0x00496B8B`) turns into
+`SetBothPlayerCounters(-1)`. Every start and continue succeeds and the credit
+line reads free play. The factory reset writes 5 (six credits);
+`OPTION_CREDITS_FACTORY` keeps that number, and the tests that count credits
+set it. Declared `[diverges]` on the field until the options screen and
+saved options exist to hold the choice.
+
 **The continue screen is drawn, and the script waits under it** (2026-09-28,
 `NEW-BUGS-2`). It used to be state with nothing on screen: the countdown ran
 and the reticle stayed up over a scene that played on, script and all. Now,

@@ -182,9 +182,15 @@ export interface NetStats {
   mismatches: number;
   applyErrors: number;
   /**
-   * Replica: checks, a few a second, that found the page's systems holding
+   * Replica: sections the audit found written by this page rather than by
+   * the host's ops -- a system that should only read the state writing it.
+   * The kept hash cannot see these; see `StateMirror.audit`.
+   */
+  pageWrites: number;
+  /**
+   * Replica: checks, once a second, that found the page's systems holding
    * a different state from the one applied -- a `load` that does not take
-   * what it is handed. The host cannot see these; see `DEEP_EVERY`.
+   * what it is handed. The host cannot see these; see `LIVE_EVERY`.
    */
   liveMismatches: number;
   /** Replica: whether its state is known to differ from the host's right now. */
@@ -192,8 +198,9 @@ export interface NetStats {
   /**
    * What a tick costs this end, in ms, over the last second: the mean, the
    * worst, and the mean by phase -- host: `state` (reading the live state),
-   * `diff` (finding what changed), `hash`, `send` (encoding and sending);
-   * replica: `apply`, `load` (handing slices to the systems), `hash`, `deep`.
+   * `diff` (finding what changed, and keeping the hash), `encode`, `send`;
+   * replica: `apply` (and keeping the hash), `load` (handing slices to the
+   * systems), `audit`, `live` (the systems' slices against the mirror's).
    */
   costMs: number;
   costMax: number;
@@ -212,7 +219,7 @@ export function emptyStats(role: "host" | "replica"): NetStats {
     kbIn: 0, kbOut: 0, pktIn: 0, pktOut: 0, silence: 0, expectTicks: false,
     epoch: 0, tick: 0, lag: 0, depth: 0, target: 0, jitter: 0, underruns: 0,
     skips: 0, deltaBytes: 0, keyframeBytes: 0, keyframes: 0, verified: 0,
-    mismatches: 0, applyErrors: 0, liveMismatches: 0, desynced: false, costMs: 0, costMax: 0, costParts: [], aimError: NaN,
+    mismatches: 0, applyErrors: 0, pageWrites: 0, liveMismatches: 0, desynced: false, costMs: 0, costMax: 0, costParts: [], aimError: NaN,
     presses: 0, log: [],
   };
 }

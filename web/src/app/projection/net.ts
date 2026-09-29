@@ -99,7 +99,7 @@ function sections(net: NetSession, s: NetStats): { title: string; rows: NetRow[]
     { label: "delta, mean", value: `${Math.round(s.deltaBytes)} B`, level: level(s.deltaBytes > 12000, s.deltaBytes > 4000) },
     { label: "keyframes", value: `${s.keyframes} (last ${(s.keyframeBytes / 1024).toFixed(1)} KiB)`, level: "" },
     { label: "cost per tick", value: cost(s), level: level(s.costMs > 4, s.costMs > 2),
-      title: "Diffing the state, hashing it and encoding the packet, on this machine." },
+      title: "Diffing the state -- which keeps its hash as it goes -- and encoding the packet, on this machine." },
     { label: "presses taken", value: String(s.presses), level: "" },
     { label: "player 2's aim", value: Number.isNaN(s.aimError) ? "—" : `${s.aimError.toFixed(4)}° off`,
       level: Number.isNaN(s.aimError) ? "" : level(s.aimError > 1, s.aimError > 0.05),
@@ -115,7 +115,7 @@ function sections(net: NetSession, s: NetStats): { title: string; rows: NetRow[]
       title: "A frame with nothing new to show, and ticks jumped over. Both follow lost packets; neither loses state." },
     { label: "keyframes", value: `${s.keyframes} (last ${(s.keyframeBytes / 1024).toFixed(1)} KiB)`, level: "" },
     { label: "cost per tick", value: cost(s), level: level(s.costMs > 4, s.costMs > 2),
-      title: "Applying the host's delta and hashing the result." },
+      title: "Applying the host's delta, which keeps the state's hash as it goes, and a slice of the audit." },
     { label: "presses sent", value: String(s.presses), level: "" },
   ];
   const truth: NetRow[] = host ? [
@@ -125,12 +125,15 @@ function sections(net: NetSession, s: NetStats): { title: string; rows: NetRow[]
     { label: "state", value: s.desynced ? "DIFFERS from the host's" : "matches the host's",
       level: s.desynced ? "bad" : s.verified ? "ok" : "" },
     { label: "ticks verified", value: String(s.verified), level: "",
-      title: "Every tick applied is hashed and compared with the hash the host sent with it." },
+      title: "Every tick applied is checked: the hash kept as the delta lands against the one the host sent with it." },
     { label: "hash mismatches", value: String(s.mismatches), level: s.mismatches ? "bad" : "ok" },
     { label: "apply errors", value: String(s.applyErrors), level: s.applyErrors ? "bad" : "ok" },
+    { label: "page wrote the state", value: String(s.pageWrites), level: s.pageWrites ? "bad" : "ok",
+      title: "The audit, a slice a tick, found a value the host never sent: this page's own "
+        + "systems writing a state they should only read. The hash cannot see these." },
     { label: "systems disagree", value: String(s.liveMismatches),
       level: s.liveMismatches ? "bad" : "ok",
-      title: "The page's systems re-read and hashed a few times a second: a system "
+      title: "The page's systems re-read once a second and compared with what was applied: a system "
         + "that does not load what the host sent it shows here and nowhere else." },
   ];
   return [
@@ -206,7 +209,8 @@ export function netRows(net: NetSession): StripRow[] {
     ["loss in / out", `${pct(s.lossIn)} / ${pct(s.lossOut)}`],
     ["route", s.route || "—"],
     ...(net.role === "replica"
-      ? [["verified · mismatches", `${s.verified} · ${s.mismatches}`, s.mismatches > 0] as StripRow]
+      ? [["verified · mismatches", `${s.verified} · ${s.mismatches + s.pageWrites}`,
+          s.mismatches + s.pageWrites > 0] as StripRow]
       : [["player 2 behind", `${s.lag} ticks`] as StripRow]),
   ];
 }

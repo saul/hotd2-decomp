@@ -318,6 +318,8 @@ import { CivilianAttachSet, CivilianCountMotionLoops, CivilianOp,
 import { CivilianLeaveField } from "../src/game/class10/update";
 import type { CivilianCmdJson, CivilianItemJson } from "../src/bundle/scene";
 import { GameMode } from "../src/game/game_mode";
+import { CreditTrySpend, CreditsAvailable, ModeStartCounterValue,
+  OPTION_CREDITS_FACTORY } from "../src/game/credits";
 import {
   ARCADE_MAGAZINE, INPUT_BINDINGS, InputBindingSet, PlayerInputBindingSet,
   RELOAD_SOUND,
@@ -17579,6 +17581,7 @@ console.log("\nthe player shell: in, hit, out, continue, over:");
   const rng = new Rng(3);
   const f = { host: NULL_HOST, rng };
   G.g_GameMode = GameMode.Arcade;
+  G.g_option_credits = OPTION_CREDITS_FACTORY;  // counts, not free play
   ResetGameGlobals();
   SetGameTables(CHARS);
   check("the reset's start press spends one credit of six and puts the "
@@ -17822,6 +17825,30 @@ console.log("\nthe player shell: in, hit, out, continue, over:");
         G.g_app_state === 3 && G.g_credits[0] === 0
         && G.g_player_state[0] === PlayerState.Out,
         `app ${G.g_app_state} done ${G.g_game_over_route_done}`);
+  G.g_option_credits = -1;
+}
+
+{
+  // The port's options: `g_option_credits` (0x009C9F25) at -1, free play --
+  // the value `ModeStartCounterValue` meets with `CMP AL,0xff` at
+  // `0x00496B8B`. The start from the title seeds free play, and a spend in
+  // play succeeds without taking anything.
+  G.g_GameMode = GameMode.Arcade;
+  ResetGameGlobals();
+  SetGameTables(CHARS);
+  check("the port starts in free play: g_option_credits is -1 and an Arcade "
+        + "start from the title seeds free play, not six credits",
+        G.g_option_credits === -1
+        && ModeStartCounterValue(GameMode.Arcade) === -1
+        && G.g_free_play === 1 && CreditsAvailable() === 1,
+        `option ${G.g_option_credits} free ${G.g_free_play} `
+        + `credits ${G.g_credits}`);
+  const before = [...G.g_credits];
+  let spent = 0;
+  for (let i = 0; i < 20; i++) spent += CreditTrySpend(0, 1);
+  check("...and twenty continues all succeed and take nothing",
+        spent === 20 && G.g_credits[0] === before[0],
+        `spent ${spent} credits ${before} -> ${G.g_credits}`);
 }
 
 {
@@ -17979,6 +18006,7 @@ console.log("\nthe continue screen, as the exe draws it:");
   const rng = new Rng(5);
   const ev = new Events();
   G.g_GameMode = GameMode.Arcade;
+  G.g_option_credits = OPTION_CREDITS_FACTORY;  // counts, not free play
   scene(0, rng);
   const at = (id: number) => G.g_screen_sprite_draws.filter((d) => d.id === id);
   const listed = () => JSON.stringify(G.g_screen_sprite_draws.map((d) =>
@@ -18072,6 +18100,7 @@ console.log("\nthe continue screen, as the exe draws it:");
         && G.g_crosshair_drawn[0] === 1 && EvtGameplayLiveUpdate() === 1
         && G.g_credits[0] === 4,
         `state ${G.g_player_state[0]} credits ${G.g_credits[0]} ${listed()}`);
+  G.g_option_credits = -1;
 }
 
 {

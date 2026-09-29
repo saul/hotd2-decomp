@@ -26163,3 +26163,41 @@ through `FireShotRequest`. Only the words were wrong.
 
 Proof: seven new checks in `port.test.ts` "ResolveHit:", all failing on the
 base; restoring only the `head_bone` read fails five of them.
+
+## 2026-09-29 -- `head_bone` leaves the bundle
+
+e8e0a55f made `ResolveHit`'s head the immediate it is -- `CMP EBP, 0x2` at
+`0x00409760` and `0x004097D7`, on `g_shot_bone[p]` -- and left the bundle's
+`head_bone` written with nothing in `game/` reading it: a `.text` immediate
+carried as data, which `/gameplay-port` keeps in `game/`. Removed from both
+writers (`web/src/hod2lib/charbuild.ts`, `tools/hod2lib/charbuild.py`) and
+from `CharacterType`, in one commit; `schema_hash.ts` and `builder_hash.ts`
+regenerated before the export (L33). `BUNDLE_FORMAT` stays at 15: a field is
+the schema digest's to catch.
+
+**"No reader left" was not quite true.** Three harnesses -- `civ_gives.mjs`,
+`civilians.mjs` and `zombies.mjs` -- aimed their headshots at
+`CharacterTypeOf(o)?.head_bone ?? 2`, which the fallback would have kept right
+without anyone noticing the field had gone. They import `HEAD_BONE` from
+`resolve_hit.ts` now, exported for them. `render.test.ts`'s fixtures and
+`port.test.ts`'s `TYPE` dropped the field.
+
+**The mislabelled type.** "ResolveHit:" proved bone 2 is the head by pointing
+`head_bone` at bone 1. With the field gone it relabels the table instead:
+the type's bone-1 record is the part `head` and bone 2's the part `torso` --
+a part name is the only thing left in a type that could claim to say where
+the head is -- and a new check reads back through `CharacterTypeOf` that the
+table does call bone 1 the head, so the swap cannot be vacuous. Mutation:
+taking the head from `bones.find(part === "head")` fails five checks, the two
+head/body checks and the three whose numbers ride on the combo.
+
+Proof: all twelve stages exported to a private bundle -- 246 character types,
+none carrying `head_bone`, where the shared `extract/player` has it on all 246.
+`verify_all.py --game-dir` against it: 67 passed, and two failed. `status`
+failed because STATUS.md had not been regenerated yet; regenerated from the
+staged tree, it is clean. `net_pair` timed out loading the replica in its last
+scenario, the TURN relay, with five peer Chromes running; it passed all three
+scenarios run alone (L29). `verify_geometry` skips under `HOTD2_BUNDLE` and
+passed run with `--bundle`. `zombies.mjs` is not in the suite and stops on HEAD
+before it shoots (`walker.flags is not iterable`, line 165), so its edit is
+proved only as far as the import linking; left for its own task.

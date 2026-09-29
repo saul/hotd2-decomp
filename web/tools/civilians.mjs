@@ -27,13 +27,12 @@ import { BUNDLE_ROOT, hasBundle, skipNoBundle } from "./lib/bundle_root.ts";
 import { Rng } from "../src/core/rng.ts";
 import { Events } from "../src/core/events.ts";
 import { ActorFlag } from "../src/game/actor.ts";
-import { DispatchHit } from "../src/game/combat/resolve_hit.ts";
+import { DispatchHit, HEAD_BONE } from "../src/game/combat/resolve_hit.ts";
 import { ActorSpawn, GameUpdate } from "../src/game/director.ts";
 import { G, ResetGameGlobals } from "../src/game/globals.ts";
 import { SeatHarnessEye } from "./lib/harness_eye.ts";
 import { NULL_HOST } from "../src/game/host.ts";
-import { CharacterTypeOf, MotionPlayLength, SetGameTables }
-  from "../src/game/tables.ts";
+import { MotionPlayLength, SetGameTables } from "../src/game/tables.ts";
 import { ZombieState } from "../src/game/class30/states.ts";
 import { TARGET_STATES } from "../src/game/class30/target.ts";
 import { SpawnClass } from "../src/game/spawn_class.ts";
@@ -192,9 +191,8 @@ for (let stage = 1; stage <= 6; stage++) {
     if (i >= HALF) {
       for (const o of captorList) {
         if (o.despawned || (o.flags & ActorFlag.Dead)) continue;
-        const head = CharacterTypeOf(o)?.head_bone ?? 2;
         for (let s = 0; s < 60 && !(o.flags & ActorFlag.Dead); s++) {
-          if (!DispatchHit(o, head, NULL_HOST, rng, SHOOTER)) break;
+          if (!DispatchHit(o, HEAD_BONE, NULL_HOST, rng, SHOOTER)) break;
         }
       }
     }

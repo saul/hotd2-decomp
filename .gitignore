@@ -71,3 +71,9 @@ web/shots/
 # Agent worktrees. `.claude/worktrees/<id>/` is a full checkout each, made by
 # the tooling and thrown away with it -- repo scratch, not repo content.
 .claude/worktrees/
+
+# The matchmaker's secrets: the Cloudflare TURN key and its API token, as
+# `wrangler dev` reads them (`matchmaker/README.md`). Never committed.
+.dev.vars
+.dev.vars.*
+

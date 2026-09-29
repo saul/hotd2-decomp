@@ -110,6 +110,8 @@ export interface HitResult {
   result: HitResultCode;
   death?: number;
   react?: number;
+  /** What the routine paid through `ScoreAddForPlayer`, for the readout. */
+  points: number;
 }
 
 /**
@@ -650,6 +652,25 @@ const HEAD_LAUNCH_RISE = 11;
 const HEADLESS_EXEMPT = new Set([3, 0x12, 0x18]);
 
 /**
+ * The head, as `ResolveHit` asks it: `00409760 83fd02 CMP EBP, 0x2` for the
+ * pop and `004097D7 83fd02 CMP EBP, 0x2` for the tail's payout, `EBP` loaded
+ * from `g_shot_bone[p]` at `0x0040943A`. An immediate, so it lives here --
+ * this used to read the bundle's `head_bone`, which the exporter writes as
+ * the same `2` for every character type.
+ */
+const HEAD_BONE = 2;
+
+// `ScoreAddForPlayer` amounts, all immediates in this routine's tail.
+/** `004097DC 6a78 PUSH 0x78` -- a hit on bone 2. */
+const SCORE_HEAD = 120;
+/** `004097FF ADD word ptr [ESI + 0x9a5c82], 0xa` -- the combo's step. */
+const SCORE_HEAD_COMBO_STEP = 10;
+/** `00409823 6a0a PUSH 0xa` -- any other bone, unless the result is 5. */
+const SCORE_HIT = 10;
+/** `004097B9 6a50 PUSH 0x50` -- inside the kill block. */
+const SCORE_KILL = 80;
+
+/**
  * `DispatchHit` — `FUN_004092F0`. **The only caller of {@link ResolveHit} in
  * the whole image**, and the gate on it.
  *
@@ -704,8 +725,8 @@ export function DispatchHit(obj: Actor, bone: number,
  * index and reads the bone out of `g_shot_bone[player]`, which `DispatchHit`
  * (`FUN_004092F0`) has just filled from `obj+0x190 + player`. The port
  * resolves one queued request at a time and so passes the bone directly — but
- * the player is still needed, because `ActorReactToHit`'s `znjoe` arm pays a
- * score to whoever fired.
+ * the player is still needed: the routine pays whoever fired, names them as
+ * the killer and steps their combo and hit count.
  */
 export function ResolveHit(obj: Actor, bone: number,
                            host: GameHost, rng: Rng,
@@ -723,7 +744,10 @@ export function ResolveHit(obj: Actor, bone: number,
   const step = b?.steps?.[n];
   const slot = step?.[0] ?? 0;
   const code: EffectCode = step?.[1] ?? EffectCode.Last;
-  const head = bone === type?.head_bone;
+  // Bone 2, whatever the character: `EBP` is `g_shot_bone[p]`
+  // (`0040943A MOV EBP, [EAX*4 + 0x9a2d88]`), and both readers compare it
+  // with an immediate -- see {@link HEAD_BONE}.
+  const head = bone === HEAD_BONE;
   // **The dead bit, `obj+0x34 & 0x4000000`** -- `MOV EBX, 0x4000000 / TEST
   // EBX, ECX` at `0x0040970C`, with ECX just loaded from `[EDI + 0x34]` --
   // and not `Actor.dead`, the port's own field, which several paths set
@@ -816,7 +840,9 @@ export function ResolveHit(obj: Actor, bone: number,
   // did all stand, and only the reported result is thrown away.
   if (obj.flags & ActorFlag.NoHitResult) result = HitResultCode.None;
 
-  // A hit on something already dead scores nothing and cannot kill twice.
+  // A hit on something already dead reports nothing and cannot kill twice --
+  // `00409715`..`0040971F`, then the bit's second test at `0x0040972A`. It is
+  // not worth nothing: result 0 is not 5, so the tail still pays a body hit.
   if (wasDead && result === HitResultCode.Plain) result = HitResultCode.None;
   G.g_hit_result = result;
 
@@ -957,11 +983,12 @@ export function ResolveHit(obj: Actor, bone: number,
       severed = true;
     }
     // `ResolveHit` also raises `obj+0x34` bit 0x4000000, which is what
-    // `ThrowerOnShot` reads to tell a killing blow from a survivable one.
+    // `ThrowerOnShot` reads to tell a killing blow from a survivable one...
     obj.flags |= ActorFlag.Dead;
+    // ...pays the kill, `004097B9 PUSH 0x50` / `004097C1 CALL 0x004156c0`...
+    ScoreAddForPlayer(player, SCORE_KILL);
     // ...and names the killer: `004097D1 888f1c130000 MOV byte ptr
-    // [EDI + 0x131c], CL`, CL the player argument, straight after the
-    // `ScoreAddForPlayer(p, 0x50)` the port charges in `FireShotRequest`.
+    // [EDI + 0x131c], CL`, CL the player argument.
     // `CivilianPruneDeadChildren` (`FUN_0048CA60`) copies it off a dead
     // captor into `sub+0x6C`, the rescue's payee; left at -1 every rescue
     // paid both players.
@@ -973,8 +1000,44 @@ export function ResolveHit(obj: Actor, bone: number,
       }
     }
   }
+
+  // `004097D7`, the tail, reached by every hit the dispatch above charged --
+  // alive, dead or just killed. **The payout is this routine's**, and it used
+  // to be `FireShotRequest`'s, which summed the four amounts into one call and
+  // never counted the hit:
+  //
+  // ```
+  // 004097D7  CMP EBP, 0x2 / JNZ 0x00409819          ; bone 2?
+  //           ScoreAddForPlayer(p, 0x78)
+  //           ScoreAddForPlayer(p, (s16)g_head_combo_bonus[p])
+  //           g_head_combo_bonus[p] += 10;  g_player_hit_count[p]++;  return
+  // 00409819  CMP [g_hit_result + p*4], 5 / JZ 0x0040984c
+  //           ScoreAddForPlayer(p, 10);  g_player_hit_count[p]++
+  // 0040984C  g_head_combo_bonus[p] = 0
+  // ```
+  //
+  // So the head pays on any result and the body's ten and its count are
+  // withheld from a result-5 hit alone -- `g_hit_result` as it stands after
+  // the two overwrites above. `g_player_hit_count` (`0x009A5C86`) is the
+  // numerator of the end-of-stage accuracy grade.
+  let points = killed ? SCORE_KILL : 0;
+  if (head) {
+    const combo = G.g_head_combo_bonus[player];
+    ScoreAddForPlayer(player, SCORE_HEAD);
+    ScoreAddForPlayer(player, combo);
+    G.g_head_combo_bonus[player] = combo + SCORE_HEAD_COMBO_STEP;
+    G.g_player_hit_count[player] += 1;
+    points += SCORE_HEAD + combo;
+  } else {
+    if (result !== HitResultCode.NoEffect) {
+      ScoreAddForPlayer(player, SCORE_HIT);
+      G.g_player_hit_count[player] += 1;
+      points += SCORE_HIT;
+    }
+    G.g_head_combo_bonus[player] = 0;
+  }
   return { damage, killed, head, hp: Math.max(0, obj.hp), gore, severed,
-           result, death, react };
+           result, death, react, points };
 }
 
 /** What {@link ActorKillAll} cleared, split by which gate it opens. */

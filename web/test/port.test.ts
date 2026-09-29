@@ -1551,7 +1551,7 @@ console.log("ResolveHit:");
   check("...and the hit its death chain reads is left on the actor",
         z.pendingHit !== null, `${JSON.stringify(z.pendingHit)}`);
   const again = ResolveHit(z, 1, NULL_HOST, rng);
-  check("a hit on a corpse scores nothing", !again.killed
+  check("a hit on a corpse reports nothing and kills nothing", !again.killed
         && again.result === 0);
 
   // **The killer's byte.** The kill arm ends `obj+0x34 |= 0x4000000;
@@ -1653,6 +1653,91 @@ console.log("ResolveHit:");
     check("...and a result-5 kill on the head pays the combo and the 80",
           kill === 120 + 10 + 80 && (target.flags & ActorFlag.Dead) !== 0,
           `kill ${kill}`);
+    SetGameTables(CHARS);
+  }
+
+  // **The payout is `ResolveHit`'s own tail, and so is the hit count.**
+  // `004097D7 CMP EBP, 0x2` -- `EBP` loaded from `g_shot_bone[p]` at
+  // `0x0040943A` -- pays bone 2 `0x78` and the combo, steps the combo by 10
+  // and counts the hit, on any result; `00409819` pays any other bone 10 and
+  // counts it unless `g_hit_result` is 5, and zeroes the combo either way. The
+  // kill's `0x50` is paid inside the kill block (`004097B9`). The port paid
+  // all of it from `FireShotRequest`, in one call, never touched
+  // `g_player_hit_count` (`0x009A5C86`, the accuracy grade's numerator), and
+  // took the head from the bundle's `head_bone`.
+  //
+  // So `ResolveHit` is called bare here, for player 1 so that neither the
+  // default argument nor slot 0 can pass for the payee, and the fixture names
+  // **bone 1** as its head: the exe never reads that field, so bone 2 is the
+  // head and bone 1 is a body hit whatever it says. Every expected number is
+  // one of the tail's immediates.
+  {
+    const MISLABELLED = 0x79;
+    SetGameTables({
+      ...CHARS,
+      types: {
+        ...CHARS.types,
+        [String(MISLABELLED)]: {
+          ...TYPE, type: MISLABELLED, head_bone: 1,
+          // The forearm's one step is the sentinel, for a result-5 body hit.
+          bones: TYPE.bones.map((b) => (b.bone === 5
+            ? { ...b, steps: [[2, EffectCode.Last, 3]] } : b)),
+        },
+      },
+    } as unknown as CharactersJson);
+    const t = spawnZombie(0x1140, MISLABELLED, "the tail");
+    t.visible = true;
+    t.hp = 100;
+    G.g_head_combo_bonus[1] = 0;
+    const count0 = G.g_player_hit_count[1];
+    const other = [G.g_player_score[0], G.g_player_hit_count[0]];
+    const hit = (bone: number): { paid: number; combo: number;
+                                  counted: number; points: number } => {
+      const s0 = G.g_player_score[1], c0 = G.g_player_hit_count[1];
+      const out = ResolveHit(t, bone, NULL_HOST, rng, 1);
+      return { paid: G.g_player_score[1] - s0, combo: G.g_head_combo_bonus[1],
+               counted: G.g_player_hit_count[1] - c0, points: out.points };
+    };
+    const h1 = hit(2), h2 = hit(2), b1 = hit(1), h3 = hit(2), b5 = hit(5);
+    check("bone 2 is the head, whatever `head_bone` says: 120, then 130",
+          h1.paid === 0x78 && h1.combo === 10 && h2.paid === 0x78 + 10
+          && h2.combo === 20,
+          `${JSON.stringify(h1)} ${JSON.stringify(h2)}`);
+    check("...and the bone `head_bone` names is a body hit: 10, combo gone",
+          b1.paid === 10 && b1.combo === 0,
+          JSON.stringify(b1));
+    check("a result-5 body hit pays nothing, counts nothing, and still ends "
+          + "the combo",
+          h3.combo === 10 && b5.paid === 0 && b5.counted === 0
+          && b5.combo === 0,
+          `${JSON.stringify(h3)} ${JSON.stringify(b5)}`);
+    check("every other hit is counted into g_player_hit_count, for the "
+          + "shooter alone",
+          h1.counted === 1 && h2.counted === 1 && b1.counted === 1
+          && h3.counted === 1 && G.g_player_hit_count[1] === count0 + 4
+          && G.g_player_score[0] === other[0]
+          && G.g_player_hit_count[0] === other[1],
+          `count ${count0} -> ${G.g_player_hit_count[1]}, player 0 `
+          + `${G.g_player_score[0]}/${G.g_player_hit_count[0]}`);
+    check("...and what the call reports is what it paid",
+          [h1, h2, b1, h3, b5].every((h) => h.points === h.paid),
+          [h1, h2, b1, h3, b5].map((h) => `${h.points}/${h.paid}`).join(" "));
+
+    // The kill: `0x50` in the kill block, then the body's 10 in the tail.
+    t.hp = 1;
+    const k = hit(1);
+    check("a killing body hit pays 0x50 and 10 from inside ResolveHit",
+          k.paid === 0x50 + 10 && k.counted === 1
+          && (t.flags & ActorFlag.Dead) !== 0,
+          JSON.stringify(k));
+    // The corpse: the dead bit turns result 2 into 0 (`0x0040971F`) and
+    // skips the kill block, and 0 is not 5 -- so the tail pays it all the
+    // same. "Reports nothing" is not "worth nothing".
+    const c = hit(1);
+    check("a body hit on a corpse reports nothing, kills nothing, and is "
+          + "still worth 10",
+          c.paid === 10 && c.counted === 1 && G.g_hit_result === 0,
+          `${JSON.stringify(c)} result ${G.g_hit_result}`);
     SetGameTables(CHARS);
   }
 }
@@ -15246,14 +15331,15 @@ console.log("\nclass 0x10, the civilian and the rescue:");
     // Killed the way a shot kills (L49): `ResolveHit` (`FUN_00409430`) raises
     // the bit `CivilianPruneDeadChildren` tests and writes the shooter into
     // `obj+0x131C`, which the prune copies to `sub+0x6C`. Player **1** fires,
-    // so a payee of 0 or -1 cannot pass. `ResolveHit` pays no kill score here
-    // -- the port charges that in `FireShotRequest` -- so every point on the
-    // board below is the rescue's.
+    // so a payee of 0 or -1 cannot pass. Each killing shot pays its shooter
+    // what `ResolveHit`'s own tail pays -- the kill's 0x50 and a body hit's 10
+    // -- so the rescue's 400 is what is on the board beyond two of those.
+    const KILL_SHOT = 0x50 + 10;
     kids[0].hp = 1;
     ResolveHit(kids[0], 1, NULL_HOST, rng, 1);
     cFrame(a, events);
     check("one captor down is not enough",
-          a.civ?.childCount === 1 && G.g_player_score[1] === 0,
+          a.civ?.childCount === 1 && G.g_player_score[1] === KILL_SHOT,
           `left ${a.civ?.childCount} score ${G.g_player_score.join("/")}`);
     kids[1].hp = 1;
     ResolveHit(kids[1], 1, NULL_HOST, rng, 1);
@@ -15262,7 +15348,8 @@ console.log("\nclass 0x10, the civilian and the rescue:");
     // the engine's "could not name one". A shot always names one.
     check("the last captor down pays 400 to the player who shot it, and to "
           + "nobody else",
-          paid === 1 && payee === 1 && G.g_player_score[1] === 400
+          paid === 1 && payee === 1
+          && G.g_player_score[1] === 2 * KILL_SHOT + 400
           && G.g_player_score[0] === 0,
           `paid ${paid} to ${payee}, scores ${G.g_player_score.join("/")}`);
   }
@@ -21774,12 +21861,10 @@ console.log("\nthe shot queue:");
 {
   const rng = new Rng(21);
   const events = scene(3, rng);
-  // Bone 1 -- the torso, the one bone in the fixture with a `Last` effect row
-  // -- stands in for the head, so a "headshot" lands on a real table entry and
-  // the score is the only thing under test.
-  SetGameTables({
-    ...CHARS, types: { "1": { ...TYPE, head_bone: 1 } },
-  } as unknown as CharactersJson);
+  // The headshots are on bone 2, the fixture's head. They used to be on bone 1
+  // with the fixture's `head_bone` pointed at it, which the port read; the exe
+  // asks `CMP EBP, 0x2` of the shot bone, an immediate, so no table can move
+  // the head anywhere else.
   for (const o of G.g_object_list) o.hp = 100;
   const [z0, z1, z2] = G.g_object_list;
 
@@ -21816,7 +21901,7 @@ console.log("\nthe shot queue:");
         heard.map((h) => h.toString(16)).join(" "));
 
   // Two headshots, then a body shot.
-  pick = { kind: "actor", at: z0.at, bone: 1, point: vec3() };
+  pick = { kind: "actor", at: z0.at, bone: 2, point: vec3() };
   QueueShotRequest(0, RAY);
   GameUpdate(1 / 60, host, rng, events);
   check("a headshot pays 120", G.g_player_score[0] === 120,
@@ -21824,7 +21909,7 @@ console.log("\nthe shot queue:");
   check("...and arms `g_head_combo_bonus`, which is the engine's own global",
         G.g_head_combo_bonus[0] === 10, `${G.g_head_combo_bonus[0]}`);
 
-  pick = { kind: "actor", at: z1.at, bone: 1, point: vec3() };
+  pick = { kind: "actor", at: z1.at, bone: 2, point: vec3() };
   QueueShotRequest(0, RAY);
   GameUpdate(1 / 60, host, rng, events);
   check("the second consecutive headshot pays 130",
@@ -31405,12 +31490,18 @@ console.log("\nznjoe's creature:");
   {
     const rng = new Rng(11);
     const { joe, events } = joeScene(rng);
-    const score = G.g_player_score[0];
+    const before = G.g_player_score[0];
     const out = ResolveHit(joe, 1, JOE_HOST, rng, 0);
     check("a torso hit on znjoe plays no stagger and leaves it alive",
           out.react === undefined && out.result === 1 && joe.hp > 0
           && !joe.dead,
           `react ${out.react} result ${out.result} hp ${joe.hp}`);
+    // `ResolveHit`'s tail pays the body hit its 10 there and then; the arm's
+    // 0x50 is on top of that, a frame later.
+    const score = G.g_player_score[0];
+    check("...and `ResolveHit` pays it as a body hit, 10 and no kill",
+          score === before + 10 && !out.killed,
+          `${before} -> ${score} killed ${out.killed}`);
     check("...and the hit carries the player who fired it, per `obj+0x190`",
           joe.pendingHit?.player === 0,
           `${JSON.stringify(joe.pendingHit)}`);

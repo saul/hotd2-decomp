@@ -78,6 +78,8 @@ web/shots/
 .dev.vars
 .dev.vars.*
 .cloudflare.env
+# The site deploy's settings and secret path (`r2site/`, `web/tools/deploy.ts`).
+.deploy.env
 # wrangler's own cache, written beside wrangler.toml by every deploy.
 .wrangler/
 

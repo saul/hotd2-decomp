@@ -1958,6 +1958,31 @@ export const G = {
   g_active_cam_path: -1,
   g_cam_path_frame: 0,
   /**
+   * `g_cam_path_frame_2` — `0x009A6458`, camera block **2**'s path frame, the
+   * same `+0xD0` word as {@link g_cam_path_frame} at `g_camera_blocks + 2 *
+   * 0x1A4`.
+   *
+   * **Always 0.** Its writers are `CameraBlocksReset`'s zero (`MOV [EAX +
+   * 0x38], EBX` at `0x004021EC`), the `REP STOSD` that zeroes all four blocks
+   * at `0x0049F40C`, and the three path actions -- `CamEvalStaticPose`,
+   * `CamStartPathPlayback`, `CamAdvancePathFrame` -- on block 2, which never
+   * run as block 2: an action runs as block `b` only from block `b`'s slot
+   * (`CameraActorTick`'s loop calls blocks 1..3's with their number,
+   * `0x004022D5`), `CameraActorInit` fills every slot with `NoOpStub`
+   * (`0x00576CA4`), and the only other writers of a slot are the actions
+   * themselves, each on the block it was called with. `[proved]`
+   *
+   * Two kinds of reader: the cues that accept **either** block's frame --
+   * class 0x30 states 18, 19 and 23, `ThrowerStateGrabPlayer`,
+   * `ScriptedCarrierUpdate33`, and two the port has not got,
+   * `ZombieStateArcScriptedEntrance`'s camera arm and class 0x33 selector 5
+   * (`ScriptedEffectAtCameraCue33`) -- read it by address; `PropUpdateType72`,
+   * `WaterSurfaceUpdate` and `OwlUpdateAndResolveShot` read it as the
+   * drawn block's frame, `CameraBlockPathFrame(G.g_camera_index)`, so under
+   * scene state (1, 3) they read 0.
+   */
+  g_cam_path_frame_2: 0,
+  /**
    * `g_scene_state_major_entered` — 0x009C6F08. The copy of the scene state's
    * major that only a full `EvtEnterSceneState` (`FUN_00403BD0`) stamps.
    *

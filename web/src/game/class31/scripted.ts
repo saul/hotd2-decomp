@@ -212,11 +212,11 @@ const GRAB_BLINK_FRAMES = 15;
  * permit **outright** rather than claiming one, and the only one that names
  * its victim in the descriptor.
  *
- * [diverges] The engine rides subs 2 to 4 through
- * `MatrixTranslate(camera eye); MatrixRotateY(g_camera_yaw_bams + 0x8000)` and
- * writes only X and Z, leaving Y to the descent. That is reproduced. What is
- * not is the second camera block's path frame (`g_cam_path_frame_2`), which
- * the cue also accepts and the port has no second block for.
+ * The engine rides subs 2 to 4 through `MatrixTranslate(camera eye);
+ * MatrixRotateY(g_camera_yaw_bams + 0x8000)` and writes only X and Z, leaving
+ * Y to the descent. The cue accepts either camera block's path frame, each by
+ * address (`CMP [0x9a6110], EAX` / `CMP [0x9a6458], EAX` at `0x0044F070` and
+ * `0x0044F078`), and block 2's is always 0; no shipped cue is 0.
  */
 export function ThrowerStateGrabPlayer(obj: ThrowerActor, dt: number,
                                        rng: Rng, events?: Events): void {
@@ -240,7 +240,8 @@ export function ThrowerStateGrabPlayer(obj: ThrowerActor, dt: number,
     obj.pos.x = eye.x + obj.arcFrom.x;
     obj.pos.y = eye.y + obj.arcFrom.y;
     obj.pos.z = eye.z + obj.arcFrom.z;
-    if (G.g_cam_path_frame !== g.cue_frame) return ThrowerGrabRide(obj);
+    if (G.g_cam_path_frame !== g.cue_frame
+        && G.g_cam_path_frame_2 !== g.cue_frame) return ThrowerGrabRide(obj);
     // Only the Y of the destination offset is ever read; the engine stores the
     // other two and never looks at them again.
     obj.vel.y = (obj.arcTo.y - obj.arcFrom.y) / g.drop_frames;

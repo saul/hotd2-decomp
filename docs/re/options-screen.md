@@ -434,9 +434,12 @@ calibration copied into the aim records `[proved]`.
   screen behind it is `[open]` work.
 * **Free play is the boot's, by the user's choice** (`ProfileBoot`'s
   `[diverges]`): a profile with nothing saved starts at -1. Default still
-  writes 5, and the Continue row -- faithfully -- will not go back to free
-  play without the three unlock bits, none of which the port can set (no
-  Training or Boss Mode stage exists in any bundle).
+  writes 5. **And the Continue row always offers free play** (2026-09-29,
+  the user's choice; `FREE_PLAY_ALWAYS_OFFERED` in `game/options/list.ts`,
+  `[diverges]`): the exe's row only goes back to free play with the three
+  unlock bits, none of which the port can set (no Training or Boss Mode
+  stage exists in any bundle), so a player who stepped off it could never
+  return. `g_option_unlocks` is still written and saved as the exe does.
 * The profile the port keeps is the options, the unlocks, each player's
   record and the saved Original items -- what `G` has. The rankings and the
   grades are not.

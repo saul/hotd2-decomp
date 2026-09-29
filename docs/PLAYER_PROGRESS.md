@@ -3407,9 +3407,10 @@ the keyboard's pad ORed in), which is what makes Sight Graphic editable and
 takes Gun Calibration off the list; the two sub-screens are unreachable with
 the page's mouse guns, so the port has their gates and not their bodies (a
 finger is the light gun, `0xD`, and reaches Gun Calibration's gate -- below).
-Blood Color is dead in the exe and stays so. Free play, once changed on the
-Continue row, does not come back without three unlock bits no bundle can set
--- the exe's rule. `port.test.ts` drives it all with pad bits: lives 4 is
+Blood Color is dead in the exe and stays so. The Continue row always offers
+free play -- a declared `[diverges]`, by the user's choice: the exe only
+offers it with three unlock bits no bundle can set, so a player who stepped
+off it could never get back. `port.test.ts` drives it all with pad bits: lives 4 is
 five lives in the next game, credits 3 is four credits.
 
 **In the page** it is the menu's **Options** (`≡`): what the title's OPTION

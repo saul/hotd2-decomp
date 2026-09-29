@@ -26025,3 +26025,14 @@ Graphic 2 -> `0xAAB`; tap -> mode `0xD`, hidden, system pointer back; mouse ->
 back; a phone context -> `0xD` from the first frame and no reticle through
 play and three taps. `--net`: two tabs, each drawing the other's reticle with
 that player's sprite, a tap on either taking it off both.
+
+## 2026-09-29 -- free play always on the Continue row
+
+The user chose to diverge: free play is always selectable on the options
+screen's Continue row. `OptionsRowContinue` (`FUN_004874A0`) wraps 0..9 with
+0 as free play only when `g_option_unlocks & 7 == 7`, and 1..9 otherwise
+`[proved]`; the port takes the first arm always (`FREE_PLAY_ALWAYS_OFFERED`,
+declared `[diverges]`). The unlock bits are still written and saved as the
+exe does -- only this test ignores them. The pad-bit test that walked the
+locked wrap now walks the open one: left from 1 is free play without the
+bits, which fails on the old code.

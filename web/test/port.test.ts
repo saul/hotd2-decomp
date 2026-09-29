@@ -37919,18 +37919,23 @@ console.log("the options screen, driven with pad bits:");
   check("...shown as \"Free Play\"", glyphText(5).endsWith("FreePlay"),
         glyphText(5));
   frame(0x80);
-  check("right from free play without the three unlock bits: 1, not 0 -- "
-        + "free play is not on offer",
-        G.g_option_credits === 1 && G.g_options_edit_credits === 1,
-        `${G.g_option_credits}`);
+  check("right from free play: 1", G.g_option_credits === 1
+        && G.g_options_edit_credits === 1, `${G.g_option_credits}`);
+  // [diverges] The port offers free play without the three unlock bits
+  // (`FREE_PLAY_ALWAYS_OFFERED`): the row wraps 0..9 as the exe's does only
+  // with them.
   frame(0x40);
-  check("...and left from 1 wraps to 9, not to free play",
-        G.g_option_credits === 9);
+  check("...left from 1 is free play again, without the unlock bits: -1",
+        G.g_option_unlocks === 0 && G.g_option_credits === -1
+        && G.g_options_edit_credits === 0, `${G.g_option_credits}`);
+  frame(0x40);
+  check("...left from free play wraps to 9", G.g_option_credits === 9);
   frame(0x80);
-  check("...right from 9 wraps to 1", G.g_option_credits === 1);
+  check("...right from 9 is free play", G.g_option_credits === -1);
   frame(0x80);
   frame(0x80);
-  check("...two more: 3", G.g_option_credits === 3);
+  frame(0x80);
+  check("...three more: 3", G.g_option_credits === 3);
   frame(0x20);
   check("down from Continue steps over the hidden Blood Color: Sight Graphic",
         G.g_options_cursor === OptionsRow.SightGraphic);
@@ -38029,7 +38034,7 @@ console.log("the options screen, driven with pad bits:");
   check("OptionsFactoryReset writes 5 whatever the boot's free play",
         G.g_option_credits === 5);
 
-  // The three unlock bits put free play back on the Continue row.
+  // With the three unlock bits, the exe's own arm: the same wrap.
   G.g_option_unlocks = 7;
   G.g_options_cursor = OptionsRow.Continue;
   G.g_options_edit_credits = 9;

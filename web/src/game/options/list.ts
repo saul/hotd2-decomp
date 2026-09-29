@@ -382,6 +382,16 @@ export function OptionsRowLife(events?: Events): void {
 const FREE_PLAY_UNLOCKS = 7;
 
 /**
+ * [diverges] Free play is always on the Continue row: the row wraps 0..9 as
+ * the exe's does only once `g_option_unlocks` has all three bits. By the
+ * user's choice, since the port starts in free play and a player who steps
+ * off it could otherwise never get back. `g_option_unlocks` is still written
+ * and saved as the exe does; only {@link OptionsRowContinue}'s test ignores
+ * it.
+ */
+const FREE_PLAY_ALWAYS_OFFERED = true;
+
+/**
  * `OptionsRowContinue` — `FUN_004874A0`, row 2: the continues an Arcade game
  * gets, 1..9 at column 37 -- or "Free Play" at column 29 while the working
  * copy is 0. Right and left step it, and then:
@@ -391,10 +401,12 @@ const FREE_PLAY_UNLOCKS = 7;
  * * without them it wraps **1..9**, so free play is not on offer -- and a
  *   step from a free-play profile goes to 1.
  *
- * `[proved]`
+ * `[proved]`. The port always takes the first arm: see
+ * {@link FREE_PLAY_ALWAYS_OFFERED}.
  */
 export function OptionsRowContinue(events?: Events): void {
-  const unlocked = (G.g_option_unlocks & 7) === FREE_PLAY_UNLOCKS;
+  const unlocked = FREE_PLAY_ALWAYS_OFFERED
+    || (G.g_option_unlocks & 7) === FREE_PLAY_UNLOCKS;
   const line = T.options?.rows?.[OptionsRow.Continue]?.row ?? 0;
   if (G.g_options_edit_credits === 0) {
     OptionsDrawText(29, line, T.options?.free_play ?? "", 1);

@@ -28,6 +28,7 @@
     "test",
     "tools",
     "vite.config.ts",
-    "../matchmaker"
+    "../matchmaker",
+    "../r2site"
   ]
 }

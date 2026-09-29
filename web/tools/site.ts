@@ -31,7 +31,11 @@
  *
  * `--gzip` stores every bundle file gzip-compressed under its own name, for a
  * host told to send `Content-Encoding: gzip` with them -- which `--sync` does
- * and `tools/site_check.mjs` does. A stage's GLB is 73 MB and 30 MB gzipped,
+ * and `tools/site_check.mjs` does -- and every voice clip too, which gzip
+ * takes to 69% (70 MB to 48). Not the music, which it takes only to 95%, and
+ * not the sound effects: the looping ones play through `<audio>` elements,
+ * which read byte ranges, and a range of a compressed file is not a range of
+ * the sound. A stage's GLB is 73 MB and 30 MB gzipped,
  * and CloudFront will not compress anything over 10 MB itself. Off by
  * default, because a plain host (`tailscale serve`, `python -m http.server`)
  * would hand the page the compressed bytes as they are.
@@ -84,6 +88,8 @@ interface Args {
 /** What was staged, so a later run knows whether `--gzip` changed. */
 interface SiteRecord {
   gzip: boolean;
+  /** Whether `voice/` is stored compressed: `--gzip` since it included them. */
+  voiceGzip?: boolean;
   sound: boolean;
   bundle: string;
   staged: string;
@@ -275,7 +281,7 @@ function stageSounds(a: Args, m: Manifest): void {
     let bytes = 0;
     let n = 0;
     for (const [low, rel] of lower) {
-      const b = stageFile(join(src, rel), join(dst, low), false);
+      const b = stageFile(join(src, rel), join(dst, low), a.gzip && kind === "voice");
       if (b) { bytes += b; n++; }
     }
     const pruned = prune(dst, new Set(lower.keys()));
@@ -305,7 +311,8 @@ function sync(a: Args, gzip: boolean): void {
     ...["bgm", "se", "voice"].filter((k) => existsSync(join(a.out, k)))
       .map((k) => ["s3", "sync", join(a.out, k), `${dst}/${k}`, "--delete",
                    "--cache-control", "public, max-age=604800",
-                   "--content-type", "audio/wav"]),
+                   "--content-type", "audio/wav",
+                   ...(gzip && k === "voice" ? ["--content-encoding", "gzip"] : [])]),
     ["s3", "sync", join(a.out, "assets"), `${dst}/assets`, "--delete",
      "--cache-control", "public, max-age=31536000, immutable"],
     ["s3", "sync", join(a.out, "icons"), `${dst}/icons`, "--delete",
@@ -334,6 +341,11 @@ const m = checkBundle(a);
 mkdirSync(a.out, { recursive: true });
 const before = readRecord(a.out);
 const restage = before !== null && before.gzip !== a.gzip;
+// Staging skips a file whose copy is newer than its source, so a change of
+// compression has to start the directory again.
+if (before !== null && (before.voiceGzip ?? false) !== a.gzip) {
+  rmSync(join(a.out, "voice"), { recursive: true, force: true });
+}
 
 console.log(`site: staging into ${a.out}`);
 buildPage(a.out);
@@ -345,7 +357,8 @@ if (a.sound) {
   for (const k of ["bgm", "se", "voice"]) rmSync(join(a.out, k), { recursive: true, force: true });
 }
 const record: SiteRecord = {
-  gzip: a.gzip, sound: a.sound, bundle: a.bundle, staged: new Date().toISOString(),
+  gzip: a.gzip, voiceGzip: a.gzip, sound: a.sound, bundle: a.bundle,
+  staged: new Date().toISOString(),
 };
 writeFileSync(join(a.out, "site.json"), JSON.stringify(record, null, 1));
 console.log(`  total: ${mb(du(a.out))} in ${relative(process.cwd(), a.out) || "."}`);

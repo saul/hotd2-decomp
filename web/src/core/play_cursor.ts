@@ -43,12 +43,18 @@ export function secondsOfTicks(ticks: number): number {
  *
  * The unit the animation data is actually indexed by, and the one the cursor
  * is not. At the shipped 30 Hz this is the cursor halved.
+ *
+ * Halved **toward zero**, as `ActorSetMotionBlended` (`FUN_004119A0`) halves
+ * it -- `CDQ / SUB EAX, EDX / SAR EAX, 1` at `0x004119B2` -- because the
+ * cursor can be negative: class 0x25's `op 3` starts a clip at cursor -1,
+ * which is authored frame 0, not -1 (and -1 indexed off the front of the
+ * clip and posed NaN).
  */
 export function authoredFrameOfTicks(ticks: number, fps: number,
                                      frames: number): number {
   if (frames <= 0) return 0;
-  const f = Math.floor(ticks * (fps || TICKS_PER_SECOND) / TICKS_PER_SECOND);
-  return f % frames;
+  const f = Math.trunc(ticks * (fps || TICKS_PER_SECOND) / TICKS_PER_SECOND);
+  return f % frames + 0;                          // -0 -> 0
 }
 
 /**

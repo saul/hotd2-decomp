@@ -17,7 +17,7 @@ import { ActorFlag, ThrowerFlag, type ThrowerActor } from "../actor";
 import { ThrowerLeave } from "./death";
 import { PlayerTakeDamage } from "../combat/player";
 import { ActorPlayCursor, ArcPhase } from "./arc";
-import { Class31SetOf, ThrowerAttackOf } from "./tables";
+import { ThrowerAttackOf, ThrowerThrowEntryOf } from "./tables";
 
 /**
  * `CMP ECX, -0x1` at `0x0044CEA3`: a melee hit frame of `-1` means "when the
@@ -80,10 +80,9 @@ export function ThrowerStrikeConnect(obj: ThrowerActor,
                                      events?: Events): boolean {
   const cursor = ActorPlayCursor(obj);                     // obj+0x19C
   if (obj.flags2 & ThrowerFlag.UseThrowTable) {
-    // `[port-only]` A missing entry is one the exporter omitted as zero, and a
-    // zero entry's mask of 0 whiffs every time -- the same answer.
-    const t = Class31SetOf(obj)?.strikes?.[String(obj.attack)];
-    if (!t) return false;
+    // The row as the engine reads it, the zero row where the bundle omits one
+    // -- see `ThrowerThrowEntryOf`. A zero row's mask of 0 whiffs on frame 0.
+    const t = ThrowerThrowEntryOf(obj, obj.attack);
     if (cursor !== t.hit_frame) return false;
     if ((obj.zones & 7 & t.cancel_mask) === t.cancel_mask) return false;
     if (obj.flags & ActorFlag.StrikeAndLeave) {

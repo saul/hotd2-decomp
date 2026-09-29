@@ -48,6 +48,7 @@
     "boss4_fight": "node tools/run_test.mjs tools/boss4_fight.mjs",
     "handback": "node tools/run_test.mjs tools/handback.mjs",
     "civ_speech": "node tools/run_test.mjs tools/civ_speech.mjs",
+    "civilians": "node tools/run_test.mjs tools/civilians.mjs",
     "loops": "node tools/loops.mjs",
     "bgm-loop": "node tools/bgm_loop.mjs",
     "cam-cues": "node tools/run_test.mjs tools/cam_cues.mjs",

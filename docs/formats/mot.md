@@ -91,6 +91,15 @@ baseline to the blended root every frame, so the object does not move. When
 for `n + 1` frames at weights `1/(n+1) .. 1`, **out of a still**, and only
 then starts the clip. `[proved]`
 
+The start is a **play cursor** at every one of the routine's 367 call sites
+(352 direct, 15 through `SetCurrentActorMotionBlended` and
+`ZombieSetMotionIfIdle`): literals, `rand() % 5`, `rand() % 10`,
+`rand() % g_motion_play_length[m]`, script start words, table words and
+computed cursors, none converted on the way in. A negative start is legal --
+class 0x25's `op 3` passes -1, whose authored frame is 0 (`SAR` truncates
+toward zero) and which, held through the fade, plays the clip from 0.
+`[proved]`; the survey is in `docs/re/session-log.md`, 2026-09-29.
+
 `MotionStartBetweenFrames` (`FUN_00411F20`) is the odd-cursor arm of the same
 start: slot A from authored frame `f`, slot B from `f + 1`.
 `MotionWriteBoneAngles` (`FUN_00411D70`) writes a bone only when its record's

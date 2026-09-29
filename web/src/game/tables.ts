@@ -10,8 +10,7 @@ import type {
   AttackJson, BakedMotion, BreakablesJson, CharacterBone, CharactersJson,
   CharacterType, ColiJson, PartSphereRow, ThrowHandJson,
 } from "../bundle";
-import { authoredFrameOfTicks, ticksOfAuthoredFrame, ticksOfSeconds }
-  from "../core/play_cursor";
+import { authoredFrameOfTicks, ticksOfSeconds } from "../core/play_cursor";
 import type { Actor } from "./actor";
 import type { SetPieceParams } from "./class24";
 import type { CiviliansJson } from "../bundle/scene";
@@ -253,17 +252,6 @@ export function MotionAuthoredFrame(a: Actor, m: BakedMotion): number {
  */
 export function SecondsToTicks(seconds: number): number {
   return ticksOfSeconds(seconds);
-}
-
-/**
- * An authored frame of `m` to the play cursor's ticks.
- *
- * [port-only] The engine's states write `obj+0x19C` directly, in cursor units,
- * because that is the only unit they have. The bundle's clips are indexed by
- * authored frame, so the port needs the conversion the engine does not.
- */
-export function FrameToTicks(frame: number, m: BakedMotion | null): number {
-  return ticksOfAuthoredFrame(frame, m?.fps ?? 0);
 }
 
 /**

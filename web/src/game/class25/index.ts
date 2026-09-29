@@ -674,10 +674,10 @@ function RunCommand(obj: HumanoidActor, c: HumanoidCmd, f: ClassFrame): boolean 
       // **cursor** and `mode` the fade length, as the routine takes them. This
       // cut to frame 0 and ignored both, so every scripted clip change snapped
       // -- the zombies' fall back into the canal included (mode 5). The port's
-      // primitive takes an authored frame and rebuilds the cursor from it, so
-      // the cursor is halved on the way in, which at the shipped 30 Hz is
-      // exact (the frog makes the same call the same way).
-      ActorSetMotionBlended(obj, c.a, c.b / 2, c.mode);
+      // primitive takes the cursor as it stands, `-1` included: eighteen
+      // shipped commands pass it, which holds the cursor at -1 for the fade
+      // and plays the clip from 0 when the fade lets go.
+      ActorSetMotionBlended(obj, c.a, c.b, c.mode);
       obj.hum.playCursor = c.b;
       obj.hum.stallFrames = 0;
       obj.hum.pc += 1;

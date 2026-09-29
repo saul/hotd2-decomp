@@ -278,7 +278,7 @@ import { ActorSnapToGroundHeight, ZombiePushOutOfWorldAndActors }
   from "../src/game/class30/ground";
 import { ActorArcBeginFalling } from "../src/game/class30/emerge";
 import { ActorPointIsAhead, ZombieScriptEnded, ZombieStateHoldForCameraCue,
-         ZombieStateTargetMotionScript }
+         ZombieStateTargetMotionScript, ZombieStateWalkToPoint }
   from "../src/game/class30/target";
 import { ActorModelScale, ApplyRootMotion } from "../src/game/root_motion";
 import { ZOMBIE_SPRINTS, ZombieRunMotion, ZombieWaitMotion }
@@ -341,7 +341,8 @@ import { FALL_GRAVITY, SND_BOUNCE, ThrowerBeginKnockbackArc,
   from "../src/game/class31/death";
 import { GroundDustCode, ThrowerEmitGroundDust }
   from "../src/game/class31/ground_dust";
-import { ThrowerStateStandAndDecide } from "../src/game/class31/stand";
+import { ThrowerStateStandAndDecide, ThrowerStateWaitForPermit }
+  from "../src/game/class31/stand";
 import { ThrowerStateCloseAndStrike, ThrowerStateRearm,
          ThrowerStateRestoreBothHands, ThrowerStateStrikeOnTheSpot }
   from "../src/game/class31/standing";
@@ -595,6 +596,8 @@ import { SetCameraPaths } from "../src/game/tables";
 import { Class22SubActorAt } from "../src/game/class22/records";
 import { Class22Relative } from "../src/game/class22/state";
 import { Class23State } from "../src/game/class23/state";
+import { CLASS23_BLEND_WALK, Class23BlendStart }
+  from "../src/game/class23/records";
 import {
   Boss3BodyState, Boss3HeadState, Boss3Phase, Boss3Routine, Boss3Subtype,
   Boss3Variant,
@@ -1530,6 +1533,20 @@ console.log("ResolveHit:");
   const again = ResolveHit(z, 1, NULL_HOST, rng);
   check("a hit on a corpse scores nothing", !again.killed
         && again.result === 0);
+
+  // **The killer's byte.** The kill arm ends `obj+0x34 |= 0x4000000;
+  // ScoreAddForPlayer(p, 0x50); *(char *)(obj + 0x131C) = p` -- the store is
+  // `004097D1 888f1c130000 MOV byte ptr [EDI + 0x131c], CL`, CL the player
+  // argument. `CivilianPruneDeadChildren` reads it back off a dead captor as
+  // the rescue's payee. Player 1, so neither the field's `-1` nor the
+  // argument's default of 0 can pass for it.
+  const k1 = spawnZombie(0x1100, 1, "shot by player 1");
+  k1.visible = true;
+  k1.hp = 1;
+  ResolveHit(k1, 1, NULL_HOST, rng, 1);
+  check("the killing shot names its player at obj+0x131C",
+        (k1.flags & ActorFlag.Dead) !== 0 && k1.killedBy === 1,
+        `flags ${k1.flags.toString(16)} killedBy ${k1.killedBy}`);
 }
 
 // -- 4a. the three bits `ResolveHit` reads on `obj+0x34` ---------------------
@@ -13112,6 +13129,283 @@ console.log("class 0x31, states 22, 24 and 32 raise 0x10000000, not 0x20000000:"
           && (z.flags & ActorFlag.BackingOff) === 0, hex(z.flags));
   }
 }
+// `ThrowerStateCloseAndStrike` (`FUN_0044EA50`) against its listing, with
+// the state that hands it over (`ThrowerStateWaitForPermit`, `FUN_0044B3E0`)
+// and the two siblings that swing off the same rows.
+console.log("class 0x31 state 24, zskamere's standing swing, as the exe has it:");
+{
+  const SET0 = CLASS31.sets[0]!;
+  // One `g_class31_throws` row: motion 9's swing, 287's approach, a reach of
+  // 20, a hit on play-cursor frame 48 and mask 8, which never cancels -- the
+  // shape of set 2's rows 0, 1 and 3.
+  const ROW = { strike: 9, lunge: 287, distance: 20, hit_frame: 48,
+                overlay_kind: 6, cancel_mask: 8 };
+  // `zskamere`, whose swing's `g_motion_play_length` is pinned to 2n - 3: a
+  // routine that ends it on the clip's own length ends it three frames late.
+  const TYPE31_ZSKAMERE: CharacterType = {
+    ...TYPE31,
+    type: 0x17, name: "zskamere", file: "zskamere.bin",
+    motions: { ...TYPE31.motions, "9": motion(40, 0, 77), "296": motion(31) },
+  };
+  const GROUND_ROW = {
+    ...SET0.attacks["0"],
+    "0": { ...SET0.attacks["0"]["0"], hit_frame: 30 },
+  };
+  const tables = (picks: number[]) => ({
+    ...CHARS31,
+    types: { ...CHARS31.types, "23": TYPE31_ZSKAMERE },
+    class31: {
+      ...CLASS31,
+      sets: [{
+        ...SET0,
+        // Two different idles, so "the first" can be told from "either".
+        motions: [295, 296, 313, 313, 283, 934],
+        // The ground row, and the mid-pounce row state 22 installs its arc
+        // from, with a hit frame the arc's cursor passes (it ends on 48).
+        attacks: { ...SET0.attacks, "0": GROUND_ROW, "4": GROUND_ROW },
+        strikes: { "0": ROW },
+        attack_picks: picks,
+      }],
+    },
+    combat: {
+      impact: [], head_impact: [],
+      voice: { hurt: [], kill: [], head: [],
+               attack: [[{ id: 40, file: "" }, { id: 41, file: "" }],
+                        [{ id: 50, file: "" }, { id: 51, file: "" }]] },
+      voice_set_a_types: [], ricochet: {},
+    },
+  } as unknown as CharactersJson);
+  const ALWAYS_0 = new Array(80).fill(0);
+  let frame = 0;
+  const heard: number[] = [];
+  const hits: number[] = [];
+  const ev = new Events();
+  ev.on("sound.play", (d) => heard.push(d.id));
+  ev.on("player.damaged", () => hits.push(frame));
+  const cried = () => heard.some((id) => id === 50 || id === 51);
+  const spawn = (type: number, state: ThrowerState, picks = ALWAYS_0,
+                 twoPlayers = false) => {
+    // Arcade, so a credit is left for player 2 to join on.
+    G.g_GameMode = GameMode.Arcade;
+    ResetGameGlobals();
+    SetGameTables(tables(picks));
+    G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    G.g_scene_state_major = SCENE_MAJOR_PLAYING;
+    EnterPlay();
+    if (twoPlayers) JoinPlayerTwo();
+    G.g_camera_yaw_bams = 0;
+    const a = ActorSpawn(0x9100, SpawnClass.Thrower, type, "t",
+                         { initialState: state, condition: 0 });
+    if (a.cls !== SpawnClass.Thrower) throw new Error("not class 0x31");
+    a.visible = true;
+    a.hp = 100;
+    a.pos = vec3(0, 0, 80);
+    a.state = state;
+    a.sub = 0;
+    heard.length = 0;
+    hits.length = 0;
+    frame = 0;
+    return a;
+  };
+  // The mark `ThrowerPickLandingPoint` hands back, wherever the test puts it.
+  const markAt = (m: Vec3) => ({
+    ...NULL_HOST,
+    viewPoint: (_x: number, _y: number, _z: number, out: Vec3) => {
+      out.x = m.x; out.y = m.y; out.z = m.z;
+    },
+  });
+
+  {
+    // Driven from state 8, two players in play, the mark 40 short of it.
+    const z = spawn(0x17, ThrowerState.WaitForPermit, ALWAYS_0, true);
+    z.arcPhase = ArcPhase.Settled;           // its entrance arc's last phase
+    const host = markAt(vec3(0, 0, 40));
+    const rng = new Rng(3);
+    ThrowerStateWaitForPermit(z, rng, host, ev);
+    check("a zskamere's claim raises 0x400 and goes to state 24 playing "
+          + "0x2416A9 (`PUSH 0x2416a9` at `0x0044B5A5`)",
+          z.state === ThrowerState.CloseAndStrike && z.attackPermit >= 0
+          && (z.flags2 & ThrowerFlag.UseThrowTable) !== 0
+          && heard.includes(0x2416a9),
+          `state ${z.state} permit ${z.attackPermit} heard ${heard}`);
+    heard.length = 0;
+    ThrowerStateCloseAndStrike(z, rng, host, ev);
+    check("sub 0 writes g_players_in_play into obj+0x1360, over the arc's "
+          + "phase (`MOV [ESI + 0x1360], EDX` at `0x0044EA93`)",
+          G.g_players_in_play === 2 && z.arcPhase === 2,
+          `players ${G.g_players_in_play} arcPhase ${z.arcPhase}`);
+    check("...and out of reach it takes the row's approach clip, silently",
+          z.sub === 1 && z.motion === 287 && !z.action && !cried(),
+          `sub ${z.sub} motion ${z.motion} heard ${heard}`);
+    // Into reach: 15 from the mark. The fixture's approach clip carries no
+    // root, so the step is the test's.
+    z.pos.z = 55;
+    let start = -1, cry = -1, hitCursor = -1, exitCursor = -1;
+    for (frame = 1; frame < 200 && z.state === ThrowerState.CloseAndStrike;
+         frame++) {
+      ActorAdvanceMotion(z, 1 / 60);
+      const was = z.sub;
+      ThrowerStateCloseAndStrike(z, rng, host, ev);
+      if (was === 1 && z.sub === 2) start = frame;
+      if (cry < 0 && cried()) cry = frame;
+      if (hitCursor < 0 && hits.length) hitCursor = ActorPlayCursor(z);
+      if (z.state !== ThrowerState.CloseAndStrike) {
+        exitCursor = ActorPlayCursor(z);
+      }
+    }
+    check("the swing cries out on the frame it starts "
+          + "(`ActorPlayHitVoice(obj, 3)` at `0x0044EC02`)",
+          start > 0 && cry === start, `start ${start} cry ${cry}`);
+    // `ActorSetMotionBlended(obj+0x194, strike, 0, 5)` at `0x0044EBFA` holds
+    // the cursor on 0 for the fade: the port's state reads it six times, so
+    // 48 comes 53 frames after the swing starts. (The engine's state reads it
+    // once more, 54 -- the port's phase, L62, not this routine's.)
+    check("the hit lands once, on the frame the play cursor reads the row's "
+          + "48, 53 frames into the swing (`CMP [ESI + 0x19c], EAX` at "
+          + "`0x0044EC15`)",
+          hits.length === 1 && hitCursor === 48 && hits[0] - start === 53,
+          `hits ${hits} start ${start} cursor ${hitCursor}`);
+    check("...and state 25 follows on g_motion_play_length - 1, 76, with "
+          + "0x10000000 down (`0x0044EC3B`, `0x0044EC52`)",
+          z.state === ThrowerState.Withdraw && exitCursor === 76
+          && (z.flags & ActorFlag.Committed) === 0,
+          `state ${z.state} exit at ${exitCursor} flags 0x${z.flags.toString(16)}`);
+  }
+  {
+    // No latch: a cursor that steps over 48 lands nothing, and one put back
+    // on 48 lands then.
+    const z = spawn(0x17, ThrowerState.WaitForPermit);
+    const host = markAt(vec3(0, 0, 75));
+    const rng = new Rng(3);
+    ThrowerStateWaitForPermit(z, rng, host, ev);
+    let skipped = false, restored = false, hitCursor = -1;
+    for (frame = 1; frame < 200 && z.state === ThrowerState.CloseAndStrike;
+         frame++) {
+      ActorAdvanceMotion(z, 1 / 60);
+      ThrowerStateCloseAndStrike(z, rng, host, ev);
+      const c = ActorPlayCursor(z);
+      if (hitCursor < 0 && hits.length) hitCursor = c;
+      if (!skipped && z.sub === 2 && c === 47) {
+        z.action!.ticks = 48;                 // the next frame reads 49
+        skipped = true;
+      } else if (skipped && !restored && c === 49) {
+        z.action!.ticks = 47;                 // ...and the one after, 48
+        restored = true;
+      }
+    }
+    check("the hit test is `==` on every frame behind no latch: stepped over, "
+          + "48 lands nothing; put back, it lands",
+          skipped && restored && hits.length === 1 && hitCursor === 48,
+          `skipped ${skipped} restored ${restored} hits ${hits.length} `
+          + `at ${hitCursor}`);
+  }
+  {
+    // A row the bundle omits is the zero row the engine reads -- here the
+    // picks name 3, which the fixture, like row A, leaves out.
+    const z = spawn(0x17, ThrowerState.WaitForPermit, new Array(80).fill(3));
+    const host = markAt(vec3(0, 0, 40));
+    const rng = new Rng(3);
+    ThrowerStateWaitForPermit(z, rng, host, ev);
+    for (frame = 1; frame < 60; frame++) {
+      ActorAdvanceMotion(z, 1 / 60);
+      ThrowerStateCloseAndStrike(z, rng, host, ev);
+    }
+    check("an omitted row is not a way out: a reach of 0 it never closes "
+          + "keeps it in sub 1 with 0x10000000 up (`0x0044EBBA`)",
+          z.state === ThrowerState.CloseAndStrike && z.sub === 1
+          && z.attack === 3 && (z.flags & ActorFlag.Committed) !== 0
+          && hits.length === 0,
+          `state ${z.state} sub ${z.sub} attack ${z.attack} `
+          + `flags 0x${z.flags.toString(16)}`);
+  }
+  {
+    // Waiting with the permit taken: 0x17 stands in the set's first idle
+    // and draws nothing for it (`CMP AX, 0x17` at `0x0044B458`).
+    let idles = "";
+    for (let s = 1; s <= 8; s++) {
+      const z = spawn(0x17, ThrowerState.WaitForPermit);
+      G.g_attack_permits[0] = G.g_attack_permits[1] = 0x7777;
+      ThrowerStateWaitForPermit(z, new Rng(s), CAM_HOST, ev);
+      idles += `${z.motion} `;
+    }
+    check("a waiting zskamere stands in idle 0 whatever the draw",
+          idles === "295 ".repeat(8), idles);
+  }
+  {
+    // zstin's claim plays the same sound on its way to the pounce.
+    const z = spawn(0x19, ThrowerState.WaitForPermit);
+    ThrowerStateWaitForPermit(z, new Rng(3), CAM_HOST, ev);
+    check("a zstin's claim goes to state 9 playing 0x2416A9 "
+          + "(`PUSH 0x2416a9` at `0x0044B526`)",
+          z.state === ThrowerState.Pounce && heard.includes(0x2416a9)
+          && (z.flags2 & ThrowerFlag.UseThrowTable) === 0,
+          `state ${z.state} heard ${heard}`);
+  }
+
+  // -- state 32, `ThrowerStateStrikeOnTheSpot` -------------------------------
+  {
+    const z = spawn(0x17, ThrowerState.StrikeOnTheSpot);
+    z.flags2 |= ThrowerFlag.UseThrowTable;
+    z.sub = 2;
+    z.strikeStart = { x: 0, y: 0, z: 80 };
+    const rng = new Rng(3);
+    ThrowerStateStrikeOnTheSpot(z, 1 / 60, rng, CAM_HOST, ev);
+    check("strike-on-the-spot cries out as its swing starts "
+          + "(`ActorPlayHitVoice(obj, 3)` at `0x00450C30`)",
+          z.sub === 3 && cried(), `sub ${z.sub} heard ${heard}`);
+    let endCursor = -1;
+    for (frame = 1; frame < 200 && z.sub === 3; frame++) {
+      ActorAdvanceMotion(z, 1 / 60);
+      const c = ActorPlayCursor(z);
+      // The permit gone and the off-screen latch still up as the swing ends:
+      // `FUN_0044CFB0` drops the latch whether or not it frees a permit.
+      if (c === 70) {
+        ReleaseAttackSlot(z, ThrowerFlag.OffScreenPermit);
+        z.flags2 |= ThrowerFlag.OffScreenPermit;
+        G.g_attack_committed = 1;
+      }
+      ThrowerStateStrikeOnTheSpot(z, 1 / 60, rng, CAM_HOST, ev);
+      if (z.sub !== 3) endCursor = c;
+    }
+    check("...ends the swing on g_motion_play_length - 1, 76 "
+          + "(`0x00450C5E`)", endCursor === 76, `ended at ${endCursor}`);
+    check("...drops the off-screen latch with no permit held "
+          + "(`CALL 0x0044cfb0` at `0x00450C75`, unconditional)",
+          (z.flags2 & ThrowerFlag.OffScreenPermit) === 0
+          && G.g_attack_committed === 0,
+          `flags2 0x${z.flags2.toString(16)} committed ${G.g_attack_committed}`);
+    check("...and waits in the set's second idle on the one track, not as a "
+          + "one-shot (`0x00450C96`)",
+          z.sub === 5 && z.motion === 296 && !z.action,
+          `sub ${z.sub} motion ${z.motion} action ${z.action?.motion}`);
+  }
+
+  // -- state 22, `ThrowerStateLeapStrike` ------------------------------------
+  {
+    // Nobody may be attacked: the scene is not on its path camera.
+    const z = spawn(0x19, ThrowerState.LeapStrike);
+    z.leapStrikeFrames = 30;
+    G.g_scene_state_major_entered = 1;
+    const rng = new Rng(3);
+    // The connect's melee arm raises `obj+0x136C` 0x800 on its hit frame,
+    // 30 here, whether or not `PlayerTakeDamage` takes a life.
+    let struck = false, passed30 = false;
+    for (frame = 0; frame < 400 && z.state === ThrowerState.LeapStrike;
+         frame++) {
+      if (frame) ActorAdvanceMotion(z, 1 / 60);
+      ThrowerStateLeapStrike(z, 1 / 60, rng, CAM_HOST, ev);
+      if (ActorPlayCursor(z) === 30) passed30 = true;
+      if (z.flags2 & ThrowerFlag.Struck) struck = true;
+    }
+    check("the leap strike connects only while IsPlayerAttackable says so "
+          + "(`CALL 0x00409dc0` at `0x0044E7C1`), not whenever obj+0x121 is "
+          + "a player",
+          z.state === ThrowerState.LeapAside && z.attackPermit >= 0
+          && passed30 && !struck,
+          `state ${z.state} permit ${z.attackPermit} passed 30 ${passed30} `
+          + `struck ${struck}`);
+  }
+}
 {
   // The drawn block. `CameraInstallViewAngles` (`MOV [0x009c6f00], 2` at
   // `0x004039D5`) makes block 2 the one `g_camera_index` names, and
@@ -14583,29 +14877,55 @@ console.log("\nclass 0x10, the civilian and the rescue:");
       cmd(CivilianOp.End),
     ]], [0x4100, 0x4200]);
     let paid = 0;
-    events.on("civilian.rescued", () => { paid += 1; });
+    let payee = -2;
+    events.on("civilian.rescued", (d) => { paid += 1; payee = d.player; });
     check("the civilian starts holding both its captors",
           a.civ?.childCount === 2, `${a.civ?.childCount}`);
     for (let i = 0; i < 5; i++) cFrame(a, events);
     check("...and the rescue does not pay while either is alive",
           G.g_player_score[0] === 0 && paid === 0,
           `score ${G.g_player_score[0]}`);
-    // `CivilianPruneDeadChildren` reads the child's `obj+0x34` bit and
-    // nothing else, so a kill here is the bit every real kill raises.
-    kids[0].dead = true;
-    kids[0].flags |= ActorFlag.Dead;
+    // Killed the way a shot kills (L49): `ResolveHit` (`FUN_00409430`) raises
+    // the bit `CivilianPruneDeadChildren` tests and writes the shooter into
+    // `obj+0x131C`, which the prune copies to `sub+0x6C`. Player **1** fires,
+    // so a payee of 0 or -1 cannot pass. `ResolveHit` pays no kill score here
+    // -- the port charges that in `FireShotRequest` -- so every point on the
+    // board below is the rescue's.
+    kids[0].hp = 1;
+    ResolveHit(kids[0], 1, NULL_HOST, rng, 1);
     cFrame(a, events);
     check("one captor down is not enough",
-          a.civ?.childCount === 1 && G.g_player_score[0] === 0,
-          `left ${a.civ?.childCount} score ${G.g_player_score[0]}`);
-    kids[1].dead = true;
-    kids[1].flags |= ActorFlag.Dead;
+          a.civ?.childCount === 1 && G.g_player_score[1] === 0,
+          `left ${a.civ?.childCount} score ${G.g_player_score.join("/")}`);
+    kids[1].hp = 1;
+    ResolveHit(kids[1], 1, NULL_HOST, rng, 1);
     cFrame(a, events);
-    check("the last captor down pays 400 -- to both players, since the port "
-          + "cannot name a shooter",
-          paid === 1 && G.g_player_score[0] === 400
-          && G.g_player_score[1] === 400,
-          `paid ${paid} ${G.g_player_score.join("/")}`);
+    // `CivilianApplyWaitWord` pays both players only when `sub+0x6C` is -1,
+    // the engine's "could not name one". A shot always names one.
+    check("the last captor down pays 400 to the player who shot it, and to "
+          + "nobody else",
+          paid === 1 && payee === 1 && G.g_player_score[1] === 400
+          && G.g_player_score[0] === 0,
+          `paid ${paid} to ${payee}, scores ${G.g_player_score.join("/")}`);
+  }
+  // ...and the other arm of `CivilianApplyWaitWord`'s payee test: a captor
+  // that died with `obj+0x131C` still at -1 names nobody, and both players
+  // are paid. The bit is set by hand because this checks the payee branch
+  // alone, not how a captor comes to die.
+  {
+    const { a, kids, events } = civScene([[
+      cmd(CivilianOp.Wait, CivilianWait.Free),
+      cmd(CivilianOp.SetChildrenGoal, 0),
+      cmd(CivilianOp.Wait, CivilianWait.ChildrenAlive),
+      cmd(CivilianOp.Wait, CivilianWait.Rescued),
+      cmd(CivilianOp.End),
+    ]], [0x4100]);
+    cFrame(a, events);
+    kids[0].flags |= ActorFlag.Dead;
+    cFrame(a, events);
+    check("a captor dead with no killer named pays both players 400",
+          G.g_player_score[0] === 400 && G.g_player_score[1] === 400,
+          `scores ${G.g_player_score.join("/")}`);
   }
 
   // Shooting one. `SetOnShot` is the gate: without it the hit bits are simply
@@ -19175,6 +19495,98 @@ console.log("\nthe bin captor's walk hands state 35 its attack list, once:");
         seen.filter((x) => x === burst).length === 1
         && seen.filter((x) => x === walk).length === 1
         && z.state === ZombieState.AttackRun, path);
+}
+
+// **`ActorSetMotionBlended`'s start is a play cursor**, and a script's start
+// word is one. `FUN_004119A0` writes its third argument into the cursor as it
+// stands (`MOV [ECX+0x8], EAX` at `0x004119AD`) and only its half into the
+// authored frame (`CDQ / SUB / SAR` into `[ECX+0x18]`); state 36's sub 0 pushes
+// the entry's second word straight in (`ActorSetMotionBlended(track, e[0],
+// e[1], 0)`, `0x0045B273`). The bin captor's one entry is the real one from
+// stage 1's placement 73: clip 967 -- 43 frames, play length 84 -- from cursor
+// 33, raising `g_script_flags[34]` on cursor 63. The port doubled the word, so
+// the burst began at 66, past its own cue, and flag 34 never came up (its one
+// reader, `MouseBranchTriggerUpdate` at `0x0043F743`, despawns a mouse).
+// Driven through `GameUpdate` from `ResetGameGlobals`.
+console.log("\nthe bin captor's burst starts on the cursor its entry names:");
+{
+  const rng = new Rng(5);
+  const events = scene(0, rng);
+  SetGameTables({ ...CHARS, types: { ...CHARS.types,
+    "1": { ...TYPE, motions: { ...TYPE.motions,
+                               "967": motion(43, 0, 84) } } } } as
+                unknown as CharactersJson);
+  const z = spawnZombie(0x3d34, 1, "bin captor");
+  z.visible = true;
+  z.hp = 100;
+  z.pos = vec3(0, 0, 0);
+  z.attackState = ZombieState.WalkPastPoint;
+  z.script = {
+    target: { state: 36, head: {},
+              entries: [{ motion: 967, frame: 33, loops: 1, mode: 63,
+                          flag: 34 }] },
+    attack: { state: 40, head: { point: [0, 0, -6], motion: 12, frame: 0 },
+              entries: [] },
+  };
+  z.state = ZombieState.TargetScriptWithFlag;
+  z.sub = 0;
+  GameUpdate(1 / 60, NULL_HOST, rng, events);
+  const first = MotionPlayFrame(z);
+  check("state 36 starts clip 967 at play cursor 33, the entry's word",
+        z.motion === 967 && z.playTicks === 33 && first === 33,
+        `motion ${z.motion} counter ${z.playTicks} cursor ${first}`);
+  let raisedOn = -1;
+  for (let i = 0; i < 200 && z.state === ZombieState.TargetScriptWithFlag;
+       i++) {
+    GameUpdate(1 / 60, NULL_HOST, rng, events);
+    if (raisedOn < 0 && G.g_script_flags[34]) raisedOn = MotionPlayFrame(z);
+  }
+  check("...and raises g_script_flags[34] on its cue, cursor 63, before the "
+        + "clip runs out", G.g_script_flags[34] === 1 && raisedOn === 63,
+        `flag ${G.g_script_flags[34]} on cursor ${raisedOn}`);
+}
+
+// **The two drift tails.** A captor whose clip has drifted off its script's
+// (`obj+0x1B4 != obj+0x1320`) is pulled back by its state's tail, and there
+// are two. The list-stepping states' (`0x0045B01C` in state 35) blend hard on
+// their last loop, from `g_motion_play_length[obj+0x1B4] - 1` -- the drifted
+// clip's length, a cursor: `MOVSX ECX, word ptr [ECX*2 + 0x4E07D0]` /
+// `DEC ECX` / `PUSH ECX` -- and soft otherwise, spending a loop. The walking
+// states' (`0x0045BF96` in state 41) only ever fade back from 0, and read no
+// loop count. Clip 923 stands in as the drifted one: 41 frames, play length
+// 79, so the hard start is 78 -- where the port passed the last authored
+// frame, 40, and doubled it to 80.
+console.log("\nthe script states' drift tails:");
+{
+  const rng = new Rng(5);
+  scene(0, rng);
+  const z = spawnZombie(0x3d38, 1, "drifted captor");
+  const drift = (state: ZombieState, loops: number) => {
+    z.state = state;
+    z.sub = 2;
+    z.zom.targetCue = -1;
+    z.zom.scriptMotion = 100;
+    z.zom.targetLoops = loops;
+    z.motion = 923;
+    z.playTicks = 5;
+    z.target = vec3(0, 0, -500);
+  };
+  drift(ZombieState.TargetMotionScript, 1);
+  ZombieStateTargetMotionScript(z, rng);
+  check("state 35's last loop blends back from g_motion_play_length[923] - 1 "
+        + "= cursor 78, and spends nothing",
+        z.motion === 100 && z.playTicks === 78 && z.zom.targetLoops === 1,
+        `motion ${z.motion} counter ${z.playTicks} loops ${z.zom.targetLoops}`);
+  drift(ZombieState.WalkToPoint, 1);
+  ZombieStateWalkToPoint(z);
+  check("state 41's tail fades back from cursor 0 even on a last loop",
+        z.motion === 100 && z.playTicks === 0 && z.zom.targetLoops === 1,
+        `motion ${z.motion} counter ${z.playTicks} loops ${z.zom.targetLoops}`);
+  drift(ZombieState.WalkToPoint, 3);
+  ZombieStateWalkToPoint(z);
+  check("...and spends no loop count doing it",
+        z.motion === 100 && z.playTicks === 0 && z.zom.targetLoops === 3,
+        `motion ${z.motion} counter ${z.playTicks} loops ${z.zom.targetLoops}`);
 }
 
 // State 42, the camera-cue hold (`ZombieStateHoldForCameraCue`,
@@ -33664,6 +34076,36 @@ console.log("\nclasses 0x22/0x23: JUDGMENT, the flier and the walker:");
   while (!G.g_script_flags[0] && n5++ < 1200) tick(1);
   check("variant 2's death raises g_script_flags[0], and not 3",
         G.g_script_flags[0] === 1 && !G.g_script_flags[3], `after ${n5}`);
+
+  // **The walker's walk starts on the cursor its table names.**
+  // `Class23FightBesideCompanion` sub 5: `MOVSX ECX, word ptr [EAX +
+  // 0x570410]` / `PUSH ECX` into `ActorSetMotionBlended` at `0x00490681` --
+  // `g_class23_blend_start_frames`, 175 for hit-point stage 0, and a play
+  // cursor like every start that routine takes (`MOV [ECX+0x8], EAX` at
+  // `0x004119AD`). The port doubled it to 350, past the walk's own play length
+  // of 304, and the walk opened 45 ticks in. Clip 915 (0x393) with its real
+  // shape: 153 frames, play length 304.
+  WALKER.motions["915"] = motion(153, 0, 304);
+  spawnFlier(1, 0);
+  G.g_active_cam_path = 0x2f;
+  G.g_cam_path_frame = 0x100;
+  tick(1);
+  const w23 = ActorByAt(WALKER_AT);
+  if (w23?.cls !== SpawnClass.JudgmentCompanion) {
+    check("the walker is spawned for the walk-start test", false, `${w23?.cls}`);
+  } else {
+    w23.state = Class23State.Fight;
+    w23.sub = 5;
+    G.g_active_player = 0;
+    tick(1);
+    const want = Class23BlendStart(CLASS23_BLEND_WALK, w23.companion.hpStage);
+    check("class 0x23's walk back in starts at play cursor 175, "
+          + "g_class23_blend_start_frames' word as it stands",
+          want === 175 && w23.motion === 915 && w23.playTicks === want
+          && MotionPlayFrame(w23) === want,
+          `stage ${w23.companion.hpStage} want ${want} motion ${w23.motion} `
+          + `counter ${w23.playTicks} cursor ${MotionPlayFrame(w23)}`);
+  }
 }
 
 // -- the shot test the engine's way: registration, the sphere, the fork -----

@@ -755,6 +755,19 @@ captors run a state that works on their own civilian**, and four civilians are
 mauled inside fifteen seconds — four that can no longer be rescued, which is
 why the rescue count in that harness went down.
 
+**2026-09-29: the rescue pays the shooter, and the harness is a check.** The
+harness had been failing since 919bcae4 and read `0 rescued` from a41baa08 on,
+both stale driving rather than the port; see `docs/re/session-log.md` for the
+bisect. It now kills through `DispatchHit` and runs in `verify_all.py`: 58 of
+60 captors (57 class 0x30, three class 0x18) work on their civilian, 12
+civilians are mauled, 19 are rescued. Driving the page showed the defect the
+harness then pinned: `ResolveHit`'s kill arm writes the shooter into
+`obj+0x131C` (`0x004097D1`) and the port did not, so `sub+0x6C` read -1 and
+every rescue paid 400 to **both** players — player 2 scored with nobody
+holding the gun. Played from their block starts with real pulls, stage 1's
+`0x18A8`, stage 2's `0x2C38` and stage 3's `0x3208` are each rescued, and
+each pays player 0 alone.
+
 **Class 0x25, the scripted humanoid, is ported** (`game/class25/`) — the
 second-largest class in the game and a **bytecode VM**. The spawn's tail points
 at a command block; the Init installs the interpreter and it walks 8-byte
@@ -5309,6 +5322,40 @@ now shoves a zombie it bumps 1.8x as hard, because
 dust column when it lands. No class-0x31 actor is distance-ranked, so
 `RankEnemiesByDistance`'s `0x20000000` test never saw the wrong bit.
 
+**`zskamere`'s standing swing is the listing, top to bottom.**
+`ThrowerStateCloseAndStrike` (`FUN_0044EA50`) was re-read against the port.
+Four departures went. The hit test is `obj+0x19C == entry+8` on every frame
+behind no latch (`0x0044EC15`), in the play cursor's own unit. The swing cries
+out with `ActorPlayHitVoice(obj, 3)` (`0x0044EC02`). Sub 0 writes
+`g_players_in_play` into `obj+0x1360` (`0x0044EA93`). And a row the bundle
+omits is the zero row the engine reads, not a port-only exit to state 25.
+`obj+0x1360` is the thrower's arc phase, and nothing reads the value state 24
+writes. Its connect takes the throw-table arm, and every `ActorArcStep` caller
+zeroes the phase before its first step. Both clips now go through
+`ActorSetMotionBlended(.., 0, 5)`, where the port cut to them. The swing's
+cursor holds on 0 for the fade, and the clip ends on `g_motion_play_length`
+rather than its authored length.
+
+The same reading fixed the state on either side of it. `ThrowerStateWaitForPermit`
+(`FUN_0044B3E0`) plays `0x2416A9` on every claim that leads to state 9 or
+0x18 (`0x0044B526`, `0x0044B5A5`), which the port never played. A waiting
+`zskamere` stands in its set's first idle with no draw (`0x0044B458`).
+`ThrowerStateStrikeOnTheSpot` (`FUN_00450B20`) had the missing cry too
+(`0x00450C30`). It also released the permit only when one was held, where
+`FUN_0044CFB0` drops the off-screen latch either way. It now ends each clip on
+`g_motion_play_length` and idles on the one track. `ThrowerStateLeapStrike`
+connects while `IsPlayerAttackable` allows (`0x0044E7C1`), not while
+`obj+0x121 >= 0`, which its own sub 0 guarantees. `ThrowerStateDelayedPounce`
+already matched.
+
+What moved, measured by `web/tools/close_strike.mjs` at stage 4 block 1 on
+seed 1: the first `zskamere` claims at frame 69 and now plays `0x2416A9`, and
+its swing starts at frame 70 with the cry `0x1617A9`. It takes a life at
+frame 110, cursor 35, 40 frames into the swing. Before, the hit came at frame
+105, 35 frames in, because the swing did not hold its first frame. State 25
+follows on cursor 48, `g_motion_play_length(441) - 1`, where the port waited
+for 51.
+
 ### A zombie's swing holds its first frame, and its run becomes its lunge
 
 `ZombieStateStrike` (`FUN_00455A40`) sets both of its clips on the one track
@@ -6514,6 +6561,62 @@ Still declared, in the same file: the Init's Original Mode remap of types 0x39
 and 0x3A, which the engine makes before the model is built and the port builds
 in `ActorSpawn`. It was described as Boss Mode; it is `g_GameMode == 1`, and
 with `g_original_character` as its one writer leaves it, the identity.
+
+## `ActorSetMotionBlended`'s start is a play cursor, at every caller
+
+`ActorSetMotionBlended` (`FUN_004119A0`) writes its third argument into the
+play cursor (`MOV [ECX+0x8], EAX` at `0x004119AD`, `obj+0x19C`) and only its
+half, truncated toward zero, into the authored frame. The port's took an
+authored frame and doubled it, so every nonzero start that reached it
+unconverted began twice as far into its clip. `[proved]` for the routine and
+for every caller: a byte scan finds 367 call sites (352 direct -- Ghidra's
+xref list stops at 332 -- and 15 through `SetCurrentActorMotionBlended` and
+`ZombieSetMotionIfIdle`), and each start `PUSH`, walked back to its source,
+is a value in cursor units: 288 literal zeros; literals 5, 8, 10, 12, 15, 17,
+25, 26, 30, 35 and 61; `rand() % 5`, `rand() % 10` and
+`rand() % g_motion_play_length[m]`; a script's start word; the drifted
+clip's `g_motion_play_length - 1`; class 0x23's table words; a counter
+difference (class 0x14); the arc script's stage starts.
+
+The routine takes the cursor as it stands now, and `ZombieSetMotionIfIdle`'s
+spreads are cursors (`"clip"` is `rand() % g_motion_play_length`, not a
+doubled authored frame). **Changes behaviour**: every class-0x30 captor-script
+start (the bin captor's burst, 967 from 33, used to begin at 66, past its
+flag-34 cue at 63, so the flag never came up and the stage-1 mouse it removes
+stayed; 28 nonzero script starts ship), every class-0x30 random spread
+(`rand() % 5/10/play_length`: the walks, idles, retreats, landings), the fall's
+landing (15, not 30) and body condition 4's special death (25, not 50),
+class 0x31's stand-and-decide and wait-for-cue starts, and class 0x23's walk
+and after-strike clips (175/141, 28/23 and 60/49, not doubled past their own
+lengths). **Unchanged, the compensation removed**: the frog, class 0x21's
+freed clip, class 0x25's `op 3`, Strength's arena idle (10), class 0x10's
+`CivilianApplyMotionPose` and the thrower's throw had each halved the word or
+written the cursor after the call. Class 0x14 and class 0x45 already kept the
+engine's cursor. Class 0x25's `op 3` passes `-1` in eighteen shipped
+commands, which is held through the fade and plays the clip from 0; the
+authored frame of a negative cursor truncates toward zero, as the routine's
+`SAR` does, instead of indexing off the front of the clip.
+
+**Found on the way**: the drift tail -- blend back to the script's clip when
+`obj+0x1B4 != obj+0x1320` -- is two tails in the exe, and the port ran one
+for all eight states. The four list-stepping states (35, 36, 37, 38) blend
+hard from `g_motion_play_length[drifted] - 1` on their last loop and spend a
+loop on the soft blend; the four walking states (34, 40, 41, and the lost
+pause) only ever blend soft from 0 and read no loop count -- the pause's
+count is its timer, which the shared tail spent.
+
+Checked by `test:port`: "the bin captor's burst starts on the cursor its
+entry names" (clip 967 at cursor 33, flag 34 on cursor 63), "the script
+states' drift tails", and class 0x23's walk at cursor 175 in the JUDGMENT
+block -- six assertions, all failing on the base. In the page
+(`?stage=1&block=6&step=1&op=0&drive=1&seed=1`, the bridge captor shot so
+the civilian takes the rescue path): the burst's first frame was cursor 66,
+running to 83 in 18 frames with flag 34 never raised; it is cursor 33 now,
+and flag 34 comes up 30 frames later on cursor 63. Playthroughs (seed 1,
+`--continue`): stages 1, 2 and 3 end as they did (the end block; GAME OVER
+at block 16; GAME OVER at block 2) at different frames, stage 4 now reaches
+its end block where it ran out of credits at block 6 -- the fights diverge,
+nothing in stage 4 was fixed -- and stages 5 and 6 hang where they hung.
 
 ## Every opcode, and what the player does with it
 

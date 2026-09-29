@@ -630,16 +630,20 @@ out. See `docs/PLAYER_HANGS.md` item 31.
 descriptor pointers at `+0x10`, and calls `SpawnFromDescriptor` on each,
 parenting every one at `child+0x1394` and scaling its hit points by
 `g_hp_percent_by_rank`. Those children are the zombies holding the civilian:
-**47 of them across the six stages, all class 0x30** (plus three class-0x18
-that resolve to no character), and *nothing in the evt's instruction stream
-points at their descriptors* — so a walk of the script never returns them.
+**60 of them across the six stages: 57 class 0x30 and three class 0x18**
+(stage 2's `0xA174`, stage 3's `0xC00` and `0x71D0`, placed since 902de88a
+gave class 0x18 a character-type rule), and *nothing in the evt's instruction
+stream points at their descriptors* — so a walk of the script never returns them.
 
 `CivilianPruneDeadChildren` (`FUN_0048CA60`) drops a child when it dies and
 remembers that child's `obj+0x131C`, the player who killed it. "Dies" is
 exactly `child+0x34 & 0x4000000` `[proved]` — the loop reads nothing else, so a
 captor that leaves by `ActorDespawn` (`FUN_00409CC0`, which ORs `0x80018000`)
 is still held; `ZombieRetireAndCredit` (`FUN_0045BA40`, `0x4008001`) and
-`ResolveHit`'s kill raise the bit and are. Wait bit `0x04`
+`ResolveHit`'s kill raise the bit and are. `ResolveHit` (`FUN_00409430`)
+writes the shooter into `obj+0x131C` on that kill (`0x004097D1`, `MOV byte
+ptr [EDI + 0x131c], CL`) `[proved]`; the port left it at -1 until 2026-09-29,
+so every shot-earned rescue paid both players. Wait bit `0x04`
 blocks until the list is shorter than `sub+0x20`, and the block it unblocks
 ends with a wait word carrying `0x10000000` — which is where
 `ScoreAddForPlayer` pays **400**, to that player or, when it is `-1`, to both.

@@ -64,7 +64,7 @@ import { ActorDespawn } from "../despawn";
 import { ActorByAt, G, HIT_SLOT_NONE } from "../globals";
 import { CameraBlockYaw } from "../camera/view";
 import { ActorSetMotionBlended } from "./motion_cue";
-import { MotionOf, MotionPlayFrame, MotionPlayLength, SecondsToTicks } from "../tables";
+import { MotionPlayFrame, MotionPlayLength, SecondsToTicks } from "../tables";
 import { ZombieState } from "./states";
 import { SpawnClass } from "../spawn_class";
 import { vec3 } from "../vec";
@@ -343,21 +343,59 @@ export function atLastFrame(obj: ZombieActor): boolean {
 }
 
 /**
- * The tail every scripted state shares: if the clip has drifted off the one
- * the script asked for, blend back to it — hard when the loop count is nearly
- * spent, soft otherwise.
+ * The tail the four list-stepping states share -- `ZombieStateTargetMotionScript`
+ * (`0x0045B013`), `ZombieStateTargetScriptWithFlag` (`0x0045B318`),
+ * `ZombieStateCarryProp` (`0x0045B732`) and `ZombieStateRetireOffScreen`
+ * (`0x0045B9BD`): if the clip has drifted off the one the script asked for,
+ * blend back to it — hard when the loop count is nearly spent, soft
+ * otherwise, and only the soft one spends a loop.
+ *
+ * ```
+ * if (!(obj+0x34 & 0x40000000) && obj+0x1B4 != obj+0x1320)
+ *   if (obj+0x1350 <= 1)                         ; CMP [ESI+0x1350], 1 / JG
+ *     ActorSetMotionBlended(track, obj+0x1320,
+ *                           g_motion_play_length[obj+0x1B4] - 1, 1)
+ *   else { ActorSetMotionBlended(track, obj+0x1320, 0, 10); obj+0x1350-- }
+ * ```
+ *
+ * The hard start is a **play cursor** (`MOVSX ECX, word ptr [ECX*2 +
+ * 0x4E07D0]` / `DEC ECX` / `PUSH ECX` at `0x0045B035`), one short of the
+ * length of the clip that drifted in -- not the script's clip. This used to
+ * pass that clip's last authored frame, which the setter doubled.
  * `[port-only]` as an export -- `class30/carry_prop.ts` reads the same cursor.
  */
 export function reblend(obj: ZombieActor): void {
   if (obj.flags & ActorFlag.Reacting) return;
   if (obj.motion === obj.zom.scriptMotion || !obj.zom.scriptMotion) return;
-  const m = MotionOf(obj, obj.motion);
   if (obj.zom.targetLoops < 2) {
-    ActorSetMotionBlended(obj, obj.zom.scriptMotion, Math.max(0, (m?.frames ?? 1) - 1), 1);
+    ActorSetMotionBlended(obj, obj.zom.scriptMotion,
+                          MotionPlayLength(obj) - 1, 1);
     return;
   }
   ActorSetMotionBlended(obj, obj.zom.scriptMotion, 0, 10);
   obj.zom.targetLoops -= 1;
+}
+
+/**
+ * The walking states' tail -- `ZombieStateWalkToTarget` (`0x0045AA28`),
+ * `ZombieStateWalkPastPoint` (`0x0045BDF9`), `ZombieStateWalkToPoint`
+ * (`0x0045BF96`) and `ZombieStateTargetLostPause` (`0x0045C869`): the soft
+ * blend back and nothing else.
+ *
+ * ```
+ * if (!(obj+0x34 & 0x40000000) && obj+0x1B4 != obj+0x1320)
+ *   ActorSetMotionBlended(track, obj+0x1320, 0, 10)       ; PUSH 0xA; PUSH 0
+ * ```
+ *
+ * No loop count is read or spent: in these states `obj+0x1350` is the walk's
+ * header count or, in the pause, its timer, and the shared tail above used to
+ * run here too and spend it.
+ * `[port-only]` as a function.
+ */
+function reblendSoft(obj: ZombieActor): void {
+  if (obj.flags & ActorFlag.Reacting) return;
+  if (obj.motion === obj.zom.scriptMotion || !obj.zom.scriptMotion) return;
+  ActorSetMotionBlended(obj, obj.zom.scriptMotion, 0, 10);
 }
 
 /** Take one entry off the list into the actor's fields. */
@@ -411,7 +449,7 @@ export function ZombieStateWalkToTarget(obj: ZombieActor): void {
       TurnActorAwayFromPoint(obj, t.pos, TARGET_TURN_RATE, 1 / 60);
     }
   }
-  reblend(obj);
+  reblendSoft(obj);
   if (ZombieTargetIsDead(obj)) loseTarget(obj);
 }
 
@@ -788,7 +826,7 @@ export function ZombieStateWalkPastPoint(obj: ZombieActor): void {
       obj.sub = 1;
     }
   }
-  reblend(obj);
+  reblendSoft(obj);
 }
 
 /**
@@ -820,7 +858,7 @@ export function ZombieStateWalkToPoint(obj: ZombieActor): void {
       TurnActorAwayFromPoint(obj, obj.target, TARGET_TURN_RATE, 1 / 60);
     }
   }
-  reblend(obj);
+  reblendSoft(obj);
 }
 
 // `ActorPointIsAhead` (`FUN_0045BC10`) is in `game/actor_turn.ts`, whole --
@@ -1189,7 +1227,7 @@ export function ZombieStateTargetLostPause(obj: ZombieActor, rng: Rng,
       obj.sub = obj.zom.resumeSub;
     }
   }
-  reblend(obj);
+  reblendSoft(obj);
 }
 
 /**

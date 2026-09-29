@@ -2943,7 +2943,12 @@ its hit frame -- a fit that skips into the middle of a clip, a connect first
 called after the frame has gone -- does not hit. And **the connect latch is
 the callers'**: `ThrowerStateLeapDown` tests `0x800` before calling,
 `ThrowerStateDelayedPounce` and `ThrowerStateStrikeOnTheSpot` do not,
-`ThrowerStateCloseAndStrike` calls only on its throw entry's own frame.
+`ThrowerStateCloseAndStrike` calls only on its throw entry's own frame (the
+same `==`, at `0x0044EC15`), and `ThrowerStateLeapStrike` on the frames
+`IsPlayerAttackable` allows (`0x0044E7C1`). `obj+0x1360` is the arc phase;
+state 24 writes `g_players_in_play` into it (`0x0044EA93`), and the melee
+arm's `== 4` never sees that value, because state 24 is only entered with
+`0x400` up.
 `ThrowerStateWaitForPermit` raises `0x400` for character type 0x17 alone, so
 the throw-table arm is `zskamere`'s. The aiming is the arc: the landing point
 is a pixel offset unprojected at a fixed depth, so the actor is where the

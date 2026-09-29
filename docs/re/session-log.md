@@ -25103,3 +25103,308 @@ listing in ways this commit does not touch. It fires the connect on
 cry, `ActorPlayHitVoice(obj, 3)` (`CALL 0x0040a6f0` at `0x0044EC02`). And a
 port-only `!e` guard sends a missing strike entry to state 25 with
 `Committed` still up.
+
+## 2026-09-29 -- state 24 against its listing: the `==`, the cry, `obj+0x1360`, the zero row
+
+The previous entry left four departures in `ThrowerStateCloseAndStrike`
+(`FUN_0044EA50`). Each was read in the bytes and transcribed, and the whole
+routine was then re-read against the port.
+
+**The bytes.** `EDI` is the row, `g_class31_throws[obj+0x130C] +
+(s8)obj+0x131A * 0x10`, computed before a four-arm jump table at `0x0044EC68`
+(`0x0044EA86`, `0x0044EB98`, `0x0044EC11`, `0x0044EC46`, behind `CMP EAX, 0x3
+/ JA`). The arms fall into each other.
+
+1. `MOVSX EAX, word ptr [EDI + 0x8]` / `CMP dword ptr [ESI + 0x19c], EAX` /
+   `JNZ` at `0x0044EC11`..`0x0044EC1B`, every frame of sub 2, then `CALL
+   0x0044ce60`. Both sides are play-cursor units: the connect compares the
+   same `+0x8` against the same `obj+0x19C` again. The port's
+   `ActorPlayCursor` reads the one-shot's `ticks`, which gain one a tick, so
+   the equality is met. The shipped rows name 35, 22 and 40 against
+   `g_motion_play_length` 49, 59 and 79. `[proved]`
+2. `PUSH 0x3 / PUSH ESI / CALL 0x0040a6f0` at `0x0044EBFF`, straight after
+   `ActorSetMotionBlended(obj+0x194, entry+0, 0, 5)` at `0x0044EBFA`.
+3. `MOVSX EDX, word ptr [0x009c8e80]` / `MOV dword ptr [ESI + 0x1360], EDX`
+   at `0x0044EA86`/`0x0044EA93`: `g_players_in_play`, a count. On a thrower
+   `obj+0x1360` is the arc phase. A byte search for the displacement `60 13
+   00 00` over class 0x31's range finds `ThrowerStrikeConnect`'s `CMP ..., 4`
+   (`0x0044CEAC`), `ActorArcBeginToWaypoint`'s two zeroes, `ActorArcStep`'s
+   dispatch and increments, `ThrowerStateLeapToPoint`'s zero and compare,
+   and the zeroes in `ThrowerStateLeapStrike`, `ThrowerStateDelayedPounce`
+   and `ThrowerStateLeapToSurface` (`0x0044C239`). Nothing reads what state
+   24 writes. Its connect takes the throw-table arm, because the only entry
+   (`MOV word ptr [ESI + 0x1310], 0x18` at `0x0044B5BB`, the one such store in
+   the image) comes one instruction after `OR DH, 0x4` on `obj+0x136C`. And
+   every `ActorArcStep` caller zeroes the phase before stepping. The name
+   stays `arcPhase`, and the store is transcribed. `[proved]`
+4. There is no missing-entry test. The engine dereferences the row. Measured
+   across all six stages, every `zskamere` spawn (fifteen, all stage 4) takes
+   set 2. State 24 draws set 0's picks for type 0x17 (`MOV EDX, dword ptr
+   [0x00592a20]` at `0x0044EAF9`), which name 0, 1 and 3, and row B has all
+   three. So no shipped spawn reads an omitted row here. Where the bundle
+   does omit a row a pick can name, the image holds zeros there: row A's
+   entry 3, sixteen zero bytes at `0x00564848`. The port now reads the zero
+   row (`ThrowerThrowEntryOf`), which keeps the actor in sub 1 on a reach of
+   0.0, as the engine would.
+
+**Also found in the re-read.** The port had the two clips wrong. It set the
+approach clip outright where the exe calls `ActorSetMotionBlended(.., 0, 5)`
+(`0x0044EBE0`), and it cut to the swing with no fade hold. It also ended the
+swing on the clip's authored length (`2n`) where the exe uses
+`g_motion_play_length` (`0x0044EC32`). `ThrowerStateWaitForPermit`, the only
+way in, plays `PlaySoundId(0x2416A9)` on every claim that leads to state 9
+or 0x18 (`0x0044B52B`, `0x0044B5B3`). A waiting 0x17 on the ground stands in
+`[set][0]` with no draw (`CMP AX, 0x17` at `0x0044B458`). Neither was
+ported. Ghidra lists the pounce arm's tail as misaligned bytes from
+`0x0044B53E`; `66c786101300000900` at `0x0044B53C` is the state-9 store.
+
+**The siblings.** `ThrowerStateStrikeOnTheSpot` (`FUN_00450B20`, table
+`0x00450CD0`) had the missing cry (`0x00450C30`) but no latch: its connect
+runs every frame, as the exe's does. It gated `ThrowerReleaseAttackPermit`
+on a held permit, where `FUN_0044CFB0` drops the off-screen latch
+regardless. It cleared `0x800`, which no arm writes. Its clips had no fade,
+it ended them on the authored length, and it played the idle as a one-shot.
+`ThrowerStateLeapStrike` has no cry and no latch in the exe. But its connect
+is gated on `IsPlayerAttackable((s8)obj+0x121) == 1` (`0x0044E7C1`), which
+the port had as `obj+0x121 >= 0`, true after its own sub 0 whatever the
+claim said. `ThrowerStateDelayedPounce` matches: no cry, and the connect
+every frame `obj+0x121 != 0xFF` (`0x0044E999`).
+
+**Proof.** Fifteen checks in `port.test.ts` ("state 24, zskamere's standing
+swing"). Fourteen fail with the six source files reverted. The hit lands at
++48 not +53, the exit comes on 79 not 76, there is no cry and no `0x2416A9`,
+`obj+0x1360` stays 4, the rewound cursor lands nothing, the omitted row goes
+to state 25, a waiting 0x17's idles read `296 296 296 296 296 296 295 295`,
+the latch stays up, and state 22 raises `0x800`. `web/tools/close_strike.mjs`
+drives stage 4 block 1 on seed 1. After the change: the claim at frame 69
+plays `0x2416A9`, the swing starts at frame 70 crying `0x1617A9`, the life
+goes at frame 110 on cursor 35, and state 25 comes on cursor 48. Before: no
+sound, the life at frame 105, and state 25 on cursor 51.
+
+**Wrong turns.** `search_instructions` for `0x1360` missed
+`ThrowerStateLeapToSurface`'s zero. It sits past a `PlaySoundId` that Ghidra
+treats as no-return (L72), so the byte search was what found it, as L35
+says. The first state-22 check passed against the old code: the fixture's
+hit frame was 62, and the arc's cursor ends on 48, so the connect never fired
+either way. It now uses 30. The harness first counted no swings, because a
+swing can start on the frame after state 8 hands over, with sub 0 run the
+frame before. It had only looked for sub 1 to 2 inside state 24.
+`JoinPlayerTwo` left one player in play until the fixture set
+`GameMode.Arcade` (a credit to join on). I planned to make the exporter
+emit every row, and dropped that: every omitted row a pick can name is zero
+in the image, so the zero row is exact.
+
+**Left open, read but not changed.** `ThrowerStateRearm` (`FUN_0044F7A0`)
+restores its hands on `obj+0x19C == g_motion_play_length[obj+0x1B4] / 2`
+(`CMP EBX, EAX / JNZ` at `0x0044F7F6`). The port uses `>=` behind `struck`
+and `ActorClipLength`. The exe also raises `obj+0x34 |= 0x2000` on entry
+(`0x0044F7C3`) and drops it on exit (`0x0044F8E9`), which the port does not.
+The port's early exit for types other than 0x16 is its own: the exe tests
+the type only at the swap (`0x0044F7FE`). `ThrowerStateLeapToSurface` does
+not play `0x2416A9` (`0x0044C225`) in the port. And `ZombieStateStrike`'s
+port still connects on `>=` behind `struck`, where its own comment cites the
+exe's `obj+0x19C == entry+0x08`. That last one is `[likely]`: the class-0x30
+bytes were not read here.
+
+## 2026-09-29 -- `ActorSetMotionBlended`'s start is a play cursor, at every caller
+
+**Brief.** Left open by the bin-scene session: the port's
+`ActorSetMotionBlended` took its start as an authored frame and doubled it,
+so stage 1's bin captor (`0x3D24`, char type 7) began its burst, clip 967
+from cursor 33, at 66 -- past its own flag-34 cue at 63.
+
+**The routine** `[proved]`, `0x004119A0..0x004119E3`: `MOV EAX, [ESP+0xC]`
+(the start), `MOV [ECX+0x8], EAX` at `0x004119AD` -- the cursor, `obj+0x19C`
+for an actor's track -- and `CDQ / SUB EAX, EDX / SAR EAX, 1` into
+`[ECX+0x18]`, the authored frame, truncated toward zero. `MotionStartOnTrack`
+(`FUN_004119F0`) then chooses its pose load by the start's parity and reads
+the authored frame from `+0x18`. Nothing converts. So the routine defines the
+unit and the port's routine was the thing to change, not its callers.
+
+**Every caller** `[proved]`: a byte scan of `.text` for `E8` to `0x004119A0`,
+`0x0044D230` (`SetCurrentActorMotionBlended`) and `0x00454770`
+(`ZombieSetMotionIfIdle`) finds 367 sites -- 352 direct, where Ghidra's xref
+list stops at 332 (L35) -- and a capstone walk back from each call, tracking
+the stack through `PUSH`/`POP`/`ADD ESP`, found the start's `PUSH` and its
+source. 288 push 0. The rest: literal 5 (`0x00415DDC`), 8 (five boss-3
+sites), 10 (Strength's arena, `0x00492E64`), 12 (`0x00428BB3`), 15
+(`RescueTargetHeldState`, `0x004526AE`, `ZombieStateFallToGround`
+`0x00454CAD`), 17 (`Boss3OpeningBystanderUpdate`), 25 (`ChooseDeathMotion`'s
+clip-0x3DA path, `0x004561C9`), 26 (`ThrowerStateThrow` `0x0044FB89`,
+`0x0047DA8A`), 30 (class 0x32 x2), 35 (`Class14StateLeapFromSide`), 61
+(`FrogStateLeapAtPlayer`); `rand() % 5` x6 and `rand() % 10` x8 (class 0x30);
+`rand() % g_motion_play_length[m]` x13 (classes 0x30 and 0x31); a script
+start word x15 (class-0x30 states 34-41, class 0x25 `op 3`);
+`g_motion_play_length[obj+0x1B4] - 1` x4; `g_class23_blend_start_frames` x5;
+a counter difference x5 (`Class14StateKnockedDown`); the arc script's stage
+starts x3 (`ActorArcStep`); `CivilianApplyMotionPose`'s start; and the two
+thunks' pass-throughs. All are cursors. The scan's rows are in the commit's
+annotations for `0x004119A0`, `0x0044D230` and `0x00454770`.
+
+**The port, by caller.** The routine takes the cursor as it stands
+(`game/class30/motion_cue.ts`), unclamped; `ZombieSetMotionIfIdle`'s
+`"clip"` spread is `rand() % MotionPlayLength` and its numeric spreads are
+cursors. `FrameToTicks` had no caller left and is gone. Behaviour changes
+where the port passed the exe's word through: every class-0x30 script start
+(28 nonzero ship), the class-0x30 `rand()` spreads (walks, idles, retreats,
+the body's landing), `ZombieStateFallToGround`'s landing (15), body
+condition 4's special death (25), class 0x31's stand-and-decide (ground arm
+`rand() % play_length`, other arms `rand() % 10`) and wait-for-cue starts,
+and class 0x23's walk, after-strike and after-react starts (175/141, 28/23,
+60/49 -- doubled, the walk's 350 was past its own play length of 304 and
+wrapped to 45). Six callers had compensated and now pass the exe's word
+unchanged: the frog (`cursor / 2`), class 0x21 (`15 / 2`), class 0x25 `op 3`
+(`c.b / 2`), Strength's arena (5 for the exe's 10), and class 0x10 and the
+thrower, which called with 0 and wrote `playTicks` after.
+
+`op 3`'s `b` is `-1` in eighteen shipped stage-1 commands (clip 890, fades 10
+and 20). The exe holds the cursor at -1 through the fade and `track[0] =
+track[2] + 1` plays the clip from 0; the old clamp played it from 1. A
+negative cursor's authored frame is now truncated toward zero in
+`core/play_cursor.ts` (`authoredFrameOfTicks`), as the `SAR` does -- the
+floor gave -1 and posed off the front of the clip.
+
+**Found on the way, fixed**: the drift tail. `reblend` ran the list-stepping
+states' tail in all eight states that call it. The exe has two: states 35,
+36, 37 and 38 (`0x0045B013`, `0x0045B318`, `0x0045B732`, `0x0045B9BD`) blend
+hard from `g_motion_play_length[obj+0x1B4] - 1` when `obj+0x1350 <= 1` and
+soft from 0 otherwise, spending a loop; states 34, 40, 41 and the lost pause
+(`0x0045AA28`, `0x0045BDF9`, `0x0045BF96`, `0x0045C869`) only ever blend soft
+from 0 and read no count -- in the pause `obj+0x1350` is the timer.
+`reblendSoft` is those four's.
+
+**Proof.** `test:port`: "the bin captor's burst starts on the cursor its
+entry names" (the real placement-73 entry, clip 967 with its real play length
+84: counter 33, cursor 33, flag 34 on cursor 63), "the script states' drift
+tails" (state 35's hard start 78 on a 79-long clip, state 41's soft start 0
+with the count untouched), and class 0x23's walk at cursor 175 in the
+JUDGMENT block. All six fail on the base (66/66 and no flag; 80, 80, loops
+2; 350 and cursor 45). In the page, `?stage=1&block=6&step=1&op=0&drive=1
+&seed=1` with the bridge captor (`0x3C7C`) shot through the shot queue at
+frame 20: before, the burst's first frame (driven 433) is cursor 66, it runs
+66..83 in 18 frames and `g_script_flags[34]` never rises; after, cursor 33 on
+the same frame, 51 frames of burst, flag 34 up at frame 463 on cursor 63 --
+the only reader of which, `MouseBranchTriggerUpdate`, removes subtype 4's
+mouse.
+
+Playthroughs, `web/tools/playthrough.mjs --stage N --headless --continue`,
+seed 1, one at a time, before on a `git archive` of 55b9cb52 and after on
+this tree:
+
+| Stage | Before | After |
+|---|---|---|
+| 1 | end block 14 at frame 9405, 95 instructions, 5 STARTs | end block 14 at frame 9225, 92 instructions, 5 STARTs |
+| 2 | GAME OVER at block 16 (6/10), frame 10020, 5 STARTs | GAME OVER at block 16 (6/10), frame 10050, 5 STARTs |
+| 3 | GAME OVER at block 2 (4/53), frame 7260, 5 STARTs | GAME OVER at block 2 (4/32), frame 6825, 6 STARTs |
+| 4 | GAME OVER at block 6 (2/8), frame 7335, 6 STARTs | **end block 25** at frame 7680, 5 STARTs |
+| 5 | HUNG at block 1 (1/69), JUDGMENT's camera gate | the same |
+| 6 | HUNG at block 2 (1/77), a camera gate | the same |
+
+Every stage plays differently, as it should: the random starts are drawn
+from different ranges and the scripted clips run different lengths, so the
+fights diverge within a block or two. Stage 4 reaching its end is that
+divergence (fewer lives lost), not a fix of anything in stage 4. Stages 5
+and 6 hang where they hung. The two after-runs of stages 2 and 3 first died
+in `page.goto`'s 30 s timeout under other agents' vite servers, and were
+rerun alone.
+
+**Wrong turns.** The brief's `0x3D34` and `0x3C8C` are not the port's `at`s
+(`0x3D24`, `0x3C7C`), and the first harness run found neither and printed
+nulls; it also forgot the Space press, so nothing spawned. `MarkActorShot`
+does not kill a class-0x30 actor (it marks; the damage is the resolve's), so
+the first "shoot the bridge captor" left it at 110 hp; the harness queues a
+real shot request instead. The first scan read the start's source by linear
+decode, so a `POP EBX` from another path's epilogue stood in for the
+prologue's `XOR EBX, EBX`, and a start pushed on a path that jumps straight to
+the `CALL` (`ThrowerStateThrow`'s `0x1A`, `ChooseDeathMotion`'s 25) was
+invisible; the second pass skips epilogue pops and flags every branch target
+between the start's `PUSH` and the `CALL`, and the 25 such sites were read by
+hand.
+
+**Left open, not this commit's.** `ZombieSetMotionIfIdle`'s six callers draw
+their `rand()` before the call, every time they reach it; the port's draws
+inside, only when the clip changes; and nine class-0x30 port call sites
+(`ZombieStateApproach`, `ZombieStateHoldAtRange`, `ZombieStateStandAndThrow`
+x4, `ZombieStateWaitScriptFlagThenEnter` x2, `ZombieStateDelayedStrikeInPlace`)
+use it where the exe calls `ActorSetMotionBlended` directly, most behind an
+inline `obj+0x1B4 != motion` test and none with the reaction latches -- so
+the draw count and the guards differ. `ThrowerStateStandAndDecide` draws `rand() % 10` on every
+frame at `0x0044B1A0`, before the sub switch; the port draws it in sub 0
+only. `ThrowerStateWalkDistance` calls `SetCurrentActorMotionBlended`
+unconditionally (`0x0044E358`) and raises `obj+0x136C` 0x1000 and `obj+0x34`
+0x2000 first; the port goes through class 0x30's conditional routine and
+writes neither. `ThrowerStateWaitForCue` plays its clip on the one-shot
+channel with no fade where the exe fades 4. State 36's flag test also
+requires `obj+0x1CB` bit 0 clear (no fade up); the port does not test it.
+The port starts no fade, and so no hold, when the new clip is the one already
+playing; the exe raises the fade bit regardless. Class 0x20's Init seeds the
+counter with a doubled `rng.int(frames)` where the exe writes `rand()`.
+
+## 2026-09-29 -- `civilians.mjs` read `0 rescued`: a stale harness, and a rescue that paid both players
+
+**The report.** `web/tools/civilians.mjs` gave 17 moved / 0 rescued / 14
+mauled against a pin of 37 / 21 / 10. The session that saw it (stage 1's bin
+civilian) got the same numbers with and without its change.
+
+**Bisect.** Every probe used that commit's own harness against a bundle its
+own exporter wrote (Python before 2165ccd0, TypeScript after), keyed on the
+exporter's tree so a bundle was reused only where the exporter had not moved.
+Over main's first-parent chain from b9bb4960 (the pin's commit, which passes)
+to 70910e4a: **the first failing commit is 919bcae4** ("the motion clock
+counts frames"). b885f3fe passes and 919bcae4 fails on the *same* bundle, so
+the cause is code: rescued 21 -> 20, mauled 10 -> 11, and a per-civilian
+dump names the one civilian that moved -- stage 1's `0x3C38`, rescued before
+and mauled after. That commit fixed the clock that skipped cursor values, so
+the maul cue landing inside fifteen seconds is `[likely]` the faithful answer
+and the pin was simply never updated; nothing ran the harness. The collapse
+to zero is later: eba685d7 gives 37 / 17 / 14 and **a41baa08 gives 18 / 0 /
+15 on the same bundle** `[proved]`. a41baa08 made `CivilianPruneDeadChildren`
+test the dead bit alone -- re-read here, `0x0048CA75 TEST dword ptr
+[EAX + 0x34], 0x4000000` is the loop's only test -- and the harness killed
+captors with a bare `dead = true`, which raises no bit (L49). A mutant with
+`dead = true` put back gives exactly 17 / 0 / 14 on today's tree.
+
+**Not new.** A peer found the same bisect on 2026-09-28 (5ba50455, "Two
+stale harnesses", on `claude/focused-brahmagupta-0631a9`), and it never
+reached main. Its harness predates the eye change (it passes an eye to
+`GameUpdate`), so this is a fresh fix on today's harness rather than a merge;
+its numbers reproduce independently (19 / 60 / 58 / 12).
+
+**Rescues in real play.** Driven in the page from block starts
+(`?stage=N&mode=play&entry=0&block=B&drive=1&seed=1`), shooting every enemy
+with real pulls aimed through the page's own projection: stage 1's `0x18A8`
+(captor `0x18E8`), stage 2's `0x2C38` (`0x2C78`) and stage 3's `0x3208`
+(`0x3244`) are each rescued -- the child list empties on the killing shot and
+`civilian.rescued` fires. So rescues were never broken. **But the first run
+paid them to player -1**: +400 to both players, player 2 scoring with no one
+on the gun. `ResolveHit` (`FUN_00409430`) ends its kill arm with
+`ScoreAddForPlayer(p, 0x50)` then `0x004097D1 MOV byte ptr [EDI + 0x131c],
+CL` -- the killer byte `CivilianPruneDeadChildren` copies to `sub+0x6C` -- and
+the port's kill arm raised the bit and stopped. It writes it now; the same
+three rescues pay player 0 alone.
+
+**Harness.** Kills through `DispatchHit` (the shot's own gate, so a
+shot-immune captor is tried again next frame), spawns and tracks every
+captor whatever its class, fails on a captor the bundle names and does not
+place, fails on a rescue paid to anyone but the shooter, and `--verbose`
+prints each civilian's outcome. Pin: 53 / 37 moved / 19 rescued / 4 holding /
+60 captors / 58 in a captor state / 12 mauled. Against the pin era, the only
+civilians whose outcome differs are stage 3's `0xBC0` and `0x7190`: in the
+pin era their class-0x18 captors had no placement (checked in b885f3fe's
+bundle), the harness spawned nothing for them and the old prune freed them
+for nothing; today they are mauled. Stage 2's `0xA134`, the third, is
+rescued by a real kill. It is a `verify_all.py` row (`civilians`, bundle-gated,
+exit 3 without one), about two seconds.
+
+**Wrong turns.** The real-play probe's first two runs "lost" stage 1's
+`0x1828` and `0x18A8` to what looked like stray shots; `civilian.shot` with
+player -1 is the *killed* arm, which a maul reaches as well as a bullet, and
+logging `shot.resolved` showed no pull had touched either. `0x1828` is mauled
+51 frames after she spawns, off screen, on every run -- not chased. The
+probe also aimed at `obj+0x70`, which for class 0x30 sits at the feet, and
+then kept out of a civilian's projected radius so wide that it never fired at
+the bin captor at all; it aims at torso and head heights now.
+
+**Left open.** The port's kill test is `!obj.dead && hp < 1 && result != 5`;
+the exe's is the dead *bit* and `hp < 1`, with result 5 gating only the head
+pop. Not changed here.

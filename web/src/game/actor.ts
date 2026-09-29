@@ -1569,6 +1569,12 @@ export interface ActorBase {
    * `obj+0x1360` — which of `ActorArcStep`'s five phases the arc is in. The
    * same word the path rider keeps its offset in; only one class uses it at a
    * time, which is why they are two names for one offset here.
+   *
+   * On a thrower its readers are `ActorArcStep`'s dispatch,
+   * `ThrowerStrikeConnect`'s melee arm and `ThrowerStateLeapToPoint`, all
+   * against the phase. `ThrowerStateCloseAndStrike` writes
+   * `g_players_in_play` into it (`0x0044EA93`) and none of them reads that:
+   * see the routine.
    */
   arcPhase: number;
   /**
@@ -1898,9 +1904,10 @@ export interface ActorBase {
    * `obj+0x131C` — which player's shot killed this actor.
    *
    * `CivilianPruneDeadChildren` reads it off a dead captor to decide who is
-   * paid for the rescue. `[open]` here: the port's shot path carries no player
-   * at all, so nothing writes it and it stays `-1` — which is the engine's own
-   * "could not name one", and pays both players.
+   * paid for the rescue. `ResolveHit`'s kill arm writes the shooter here
+   * (`0x004097D1`); `ActorReactToHit`'s `znjoe` arm, `ZombieRetireAndCredit`
+   * and `ZombieStateAwaitCivilianOrder` are the other writers. `-1` is the
+   * engine's own "could not name one", and pays both players.
    */
   killedBy: number;         // +0x131C
   /**

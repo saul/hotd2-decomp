@@ -80,7 +80,7 @@ const BOUNCE_NORMAL = -0.25;
 const SETTLE_SPEED = 0.15;
 /** `obj+0x19C < 0x3C` — sixty ticks of the death clip before the fall opens. */
 const BOUNCE_HOLD_TICKS = 0x3c;
-/** The clip that plays when the thrown body lands, at a random start frame. */
+/** The clip that plays when the thrown body lands, at a random start cursor (`rand() % 10`, `0x00456EEA`). */
 const BOUNCE_LANDING_CLIP = 0x3f8;
 const BOUNCE_LANDING_SPREAD = 10;
 /** The death clip `ChooseDeathMotion` gives an actor still holding a weapon. */

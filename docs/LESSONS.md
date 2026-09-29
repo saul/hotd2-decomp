@@ -1229,3 +1229,16 @@ in the image (a byte scan for the `E8`, not the xref list: L35) and walk each
 argument `PUSH` back to its source, and grep the port for the compensations
 (`/ 2` at the call, a write straight after it) so they come out in the same
 commit. A comment that explains a workaround at a call site is the tell.
+
+**L82 -- A user agent names a browser, not a device, and an address names a
+network, not a machine.** Netplay's perf log had two sessions' rows, one from
+a user agent saying `Macintosh` and one saying `iPhone`, both from the same
+LAN address. That read as Safari on a Mac and the iOS Simulator beside it on
+one overloaded machine, and the analysis told the user the numbers were
+contention, not Safari. They were an iPad and an iPhone: iPadOS Safari asks
+for desktop sites and says `Macintosh`, and the two sat behind one address.
+The numbers were real, and the thing to fix -- a walk of the whole state
+costing a phone thirty times what it costs a Mac -- was nearly argued away.
+**Ask what the device is before explaining its numbers away**, and treat
+`ua`, `from` and `view` in a report as clues rather than identification: a
+`dpr` of 2 at 2048×1536 is an iPad as much as it is a Retina Mac.

@@ -99,6 +99,37 @@ export function labelOf(path: string): string {
 }
 
 /**
+ * The hashes of a path's prefixes, as {@link TreeHasher} derives them. The
+ * changes a tick makes share most of their paths -- the fields of one actor,
+ * the elements of one array -- so each prefix's hash is kept, and only the
+ * segments after the first that differs from the last path asked for are
+ * hashed again.
+ */
+class PathHashes {
+  private readonly segs: Seg[] = [];
+  private readonly hs: number[] = [PATH_ROOT];
+
+  /** The hash of the path `segs[0..n)`. */
+  of(segs: readonly Seg[], n: number): number {
+    const mine = this.segs, hs = this.hs;
+    const m = Math.min(n, mine.length);
+    let i = 0;
+    while (i < m && mine[i] === segs[i]) i++;
+    if (i < n) {
+      for (let j = i; j < n; j++) {
+        const g = segs[j];
+        mine[j] = g;
+        hs[j + 1] = typeof g === "string" ? pathKey(hs[j], g)
+          : g >= 0 ? pathIndex(hs[j], g) : pathKeyed(hs[j], segAt(g));
+      }
+      // What followed the segment that changed was another path's.
+      mine.length = n;
+    }
+    return hs[n];
+  }
+}
+
+/**
  * The `at`s of a pool, or null if `arr` is not one: every element present, a
  * plain object, with a distinct integer `at` within `±2^31`. Empty is not a
  * pool by content -- an empty array keeps whatever it was.
@@ -292,6 +323,15 @@ export type Extra = (w: ByteWriter, value: (v: unknown) => void) => void;
  */
 export class StateTracker {
   private shadow: Record<string, unknown> | null = null;
+  /**
+   * The shadow's hash, kept as the walk goes: every change subtracts what
+   * the old value added to it and adds what the new one does. A walk of the
+   * whole state to hash it was the largest part of a tick's cost -- ten
+   * milliseconds of an iPad's -- and this costs what the change is.
+   */
+  private sum = 0;
+  private readonly hasher = new TreeHasher();
+  private readonly paths = new PathHashes();
   private readonly pools = new WeakMap<unknown[], PoolInfo>();
   private readonly lookups = new WeakMap<unknown[], Map<number, unknown>>();
   /**
@@ -323,6 +363,34 @@ export class StateTracker {
     return this.tick;
   }
 
+  /** The shadow's {@link TreeHasher} hash, without walking it. */
+  get hash(): number {
+    return this.sum >>> 0;
+  }
+
+  /**
+   * The shadow hashed the long way, against the kept hash. Returns false,
+   * and takes the walked one, if the two had drifted apart -- which is a bug
+   * here, and what a desync report asks the host to rule out.
+   */
+  checkHash(): boolean {
+    if (!this.shadow) return true;
+    const walked = this.hasher.subtree(this.shadow, PATH_ROOT);
+    if (walked === this.sum) return true;
+    this.sum = walked;
+    return false;
+  }
+
+  /** `v`, standing at `segs[0..n)`, joins the state. */
+  private enter(v: unknown, n: number): void {
+    this.sum = (this.sum + this.hasher.subtree(v, this.paths.of(this.segs, n))) | 0;
+  }
+
+  /** `v`, standing at `segs[0..n)`, leaves it. */
+  private leave(v: unknown, n: number): void {
+    this.sum = (this.sum - this.hasher.subtree(v, this.paths.of(this.segs, n))) | 0;
+  }
+
   /**
    * Whether a delta from `base` can be built: every tick of its window is in
    * the ring. `base` must be a tick the tracker has seen.
@@ -349,6 +417,7 @@ export class StateTracker {
     this.segs.length = 0;
     if (!this.shadow) {
       this.shadow = this.copy(live) as Record<string, unknown>;
+      this.sum = this.hasher.subtree(this.shadow, PATH_ROOT);
       // Everything is new: the root itself is the one dirty path.
       this.cur.set("", { segs: [], kinds: Dirty.Value, minLen: Infinity });
     } else {
@@ -430,7 +499,9 @@ export class StateTracker {
           && (lv !== 0 || 1 / (lv as number) === 1 / (sv as number))) continue;
       segs[d] = k;
       if (sv === undefined && !Object.hasOwn(shadow, k)) {
-        shadow[k] = this.copy(lv);
+        const c = this.copy(lv);
+        shadow[k] = c;
+        this.enter(c, d + 1);
         added++;
         this.mark(d + 1, Dirty.Value);
         continue;
@@ -446,8 +517,9 @@ export class StateTracker {
     }
     for (const k in shadow) {
       if (!Object.hasOwn(live, k)) {
-        delete shadow[k];
         segs[d] = k;
+        this.leave(shadow[k], d + 1);
+        delete shadow[k];
         this.mark(d + 1, Dirty.Value);
       }
     }
@@ -466,6 +538,8 @@ export class StateTracker {
           throw new NetStateError(`a ${typeof lv} at ${pathLabel(this.segs.slice(0, cd))}`);
         }
         container[key] = lv;
+        const ph = this.paths.of(this.segs, cd);
+        this.sum = (this.sum - primLeaf(sv, ph) + primLeaf(lv, ph)) | 0;
         this.mark(cd, Dirty.Value);
       }
       return;
@@ -502,16 +576,31 @@ export class StateTracker {
       // A pool that stopped being one, or the other way round, with elements
       // on both sides: the array is replaced whole.
     }
-    container[key] = this.copy(lv);
+    this.leave(sv, cd);
+    const c = this.copy(lv);
+    container[key] = c;
+    this.enter(c, cd);
     this.mark(cd, Dirty.Value);
   }
 
   private diffIndexed(live: unknown[], shadow: unknown[], d: number): void {
     const segs = this.segs;
     const n = live.length;
-    if (n !== shadow.length) {
+    const old = shadow.length;
+    if (n !== old) {
       this.mark(d, Dirty.Len, n);
-      if (n < shadow.length) shadow.length = n;
+      // The length is a leaf, and so is every hole inside it: what is cut
+      // off leaves the hash, and what grows arrives as holes until the loop
+      // below fills it.
+      const ph = this.paths.of(segs, d);
+      let sum = (this.sum - arrayLeaf(ph, old) + arrayLeaf(ph, n)) | 0;
+      for (let i = n; i < old; i++) {
+        sum = (sum - (i in shadow ? this.hasher.subtree(shadow[i], pathIndex(ph, i))
+          : holeLeaf(ph, i))) | 0;
+      }
+      for (let i = old; i < n; i++) sum = (sum + holeLeaf(ph, i)) | 0;
+      this.sum = sum;
+      if (n < old) shadow.length = n;
     }
     for (let i = 0; i < n; i++) {
       const lv = live[i];
@@ -525,12 +614,17 @@ export class StateTracker {
       if (!has && !had) continue;
       segs[d] = i;
       if (!has) {
+        this.leave(shadow[i], d + 1);
+        this.sum = (this.sum + holeLeaf(this.paths.of(segs, d), i)) | 0;
         delete shadow[i];
         this.mark(d + 1, Dirty.Value);
         continue;
       }
       if (!had) {
-        shadow[i] = this.copy(live[i]);
+        const c = this.copy(live[i]);
+        shadow[i] = c;
+        this.sum = (this.sum - holeLeaf(this.paths.of(segs, d), i)) | 0;
+        this.enter(c, d + 1);
         this.mark(d + 1, Dirty.Value);
         continue;
       }
@@ -611,11 +705,33 @@ export class StateTracker {
     info.objs = (live as object[]).slice();
     if (changed) {
       this.mark(d, Dirty.Order);
+      // The hash: the length and every position's `at` are leaves; an
+      // element no survivor came from leaves, and a new one arrives. A
+      // survivor's leaves stand at its `at`, wherever it moved to.
+      const ph = this.paths.of(this.segs, d);
+      const was = info.ats;
+      let sum = (this.sum - arrayLeaf(ph, was.length) + arrayLeaf(ph, n)) | 0;
+      const kept = new Uint8Array(was.length);
+      for (let i = 0; i < n; i++) {
+        if (from[i] >= 0) kept[from[i]] = 1;
+        sum = (sum + orderLeaf(ph, i, ats[i])) | 0;
+      }
+      for (let j = 0; j < was.length; j++) {
+        sum = (sum - orderLeaf(ph, j, was[j])) | 0;
+        if (!kept[j]) sum = (sum - this.hasher.subtree(shadow[j], pathKeyed(ph, was[j]))) | 0;
+      }
       const next = new Array<unknown>(n);
       for (let i = 0; i < n; i++) {
         this.segs[d] = keyedSeg(ats[i]);
-        next[i] = from[i] >= 0 ? shadow[from[i]] : this.copy(live[i]);
+        if (from[i] >= 0) {
+          next[i] = shadow[from[i]];
+        } else {
+          const c = this.copy(live[i]);
+          next[i] = c;
+          sum = (sum + this.hasher.subtree(c, pathKeyed(ph, ats[i]))) | 0;
+        }
       }
+      this.sum = sum;
       // In place: the pool's bookkeeping is keyed on this array.
       this.lookups.delete(shadow);
       shadow.length = 0;
@@ -900,15 +1016,71 @@ export class StateTracker {
 // -- the replica ------------------------------------------------------------
 
 /**
+ * How deep a section of the replica's kept hash is: a path this long --
+ * `parts.game.g_frame` -- or, in a pool that deep, one element of it --
+ * `parts.game.g_object_list[@6720]`. Fine enough that an audit of one is a
+ * small piece of a tick; a shorter path is a section of its own leaves.
+ */
+const SECTION_DEPTH = 3;
+
+/** The length of the section a path of length `n` lies in. */
+function sectionLen(segs: readonly Seg[], n: number): number {
+  if (n <= SECTION_DEPTH) return n;
+  const g = segs[SECTION_DEPTH];
+  return typeof g === "number" && g < 0 ? SECTION_DEPTH + 1 : SECTION_DEPTH;
+}
+
+/**
+ * Whether the node `v` at depth `n` is split into sections: its own leaves
+ * in its own, each child in another. Every container above the section
+ * depth is; at it, only a pool, whose elements are sections one deeper.
+ */
+function splits(v: unknown, n: number): boolean {
+  if (v === null || typeof v !== "object" || n > SECTION_DEPTH) return false;
+  return n < SECTION_DEPTH || (Array.isArray(v) && poolAts(v) !== null);
+}
+
+/** One section: where it is, and its share of the hash. */
+interface Section {
+  segs: Seg[];
+  sum: number;
+}
+
+/** Nothing at a path, to {@link StateMirror.audit}. */
+const MISSING: unique symbol = Symbol("missing");
+
+/**
  * The replica's side: the key strings it has been given, and each pool's
  * serials. It holds no state of its own -- it writes into the tree it is
  * handed, which for the player is `G` itself, so every object that did not
  * change keeps its identity and the render layers' references stay good.
+ *
+ * **It keeps that tree's hash as it writes**, the way the host keeps its
+ * shadow's: an op subtracts the share of what it overwrites and adds the
+ * share of what it writes, so checking a tick against the host's hash costs
+ * what the tick changed. The shares are kept by section too, and that is
+ * what lets {@link audit} look at the tree a slice at a time against what the
+ * ops left there -- and find a write that did not come from the host, which
+ * nothing that only keeps a hash can see.
  */
 export class StateMirror {
   private keys: string[] = [];
   private readonly pools = new WeakMap<unknown[], Map<number, number>>();
   private readonly byAtCache = new Map<unknown[], Map<number, unknown>>();
+  private readonly hasher = new TreeHasher();
+  private readonly paths = new PathHashes();
+  /** The tree the sums are of: the last one {@link rehash}ed. */
+  private tracked: object | null = null;
+  private sum = 0;
+  private readonly sections = new Map<string, Section>();
+  /** An op's path, copied, for the accounting to write past. */
+  private readonly work: Seg[] = [];
+  private keySegs: readonly Seg[] = [];
+  private keyStr = "";
+  // The audit: this cycle's sections, how far it has got, and which it found.
+  private cycle: { segs: Seg[]; key: string }[] = [];
+  private cyclePos = 0;
+  private visited = new Set<string>();
 
   /** Read the key strings a packet carries. */
   readDefs(r: ByteReader): void {
@@ -999,6 +1171,7 @@ export class StateMirror {
    */
   applyOps(r: ByteReader, root: Record<string, unknown>,
            touched: Set<string>): number {
+    if (root !== this.tracked) this.rehash(root);
     this.byAtCache.clear();
     const n = r.uvar();
     const segs: Seg[] = [];
@@ -1022,22 +1195,38 @@ export class StateMirror {
             if (kindOf(v) !== 1) throw new ApplyError("a root that is not an object");
             for (const k of Object.keys(root)) delete root[k];
             Object.assign(root, v as object);
+            this.rehash(root);
             break;
           }
           const parent = this.resolve(root, segs, segs.length - 1);
-          const last = segs[segs.length - 1];
+          const n = segs.length;
+          const last = segs[n - 1];
           if (typeof last === "string") {
             if (kindOf(parent) !== 1) throw this.fail("set under a non-object", segs);
             if (v === HOLE) throw this.fail("a hole in an object", segs);
-            (parent as Record<string, unknown>)[last] = v;
+            const o = parent as Record<string, unknown>;
+            const w = this.path(segs);
+            const ph = this.paths.of(w, n);
+            if (Object.hasOwn(o, last)) this.account(o[last], w, n, ph, -1);
+            o[last] = v;
+            this.account(v, w, n, ph, 1);
           } else if (last >= 0) {
             if (kindOf(parent) !== 2) throw this.fail("index into a non-array", segs);
             const arr = parent as unknown[];
+            // Past the end grows the array, in holes, first.
+            if (last >= arr.length) this.resize(arr, this.path(segs), n - 1, last + 1);
+            const w = this.path(segs);
+            const aph = this.paths.of(w, n - 1);
+            const ph = this.paths.of(w, n);
+            // A hole is a leaf of its array's; a value is a subtree of its own.
+            if (last in arr) this.account(arr[last], w, n, ph, -1);
+            else this.credit(w, n - 1, -holeLeaf(aph, last));
             if (v === HOLE) {
-              if (last >= arr.length) arr.length = last + 1;
               delete arr[last];
+              this.credit(w, n - 1, holeLeaf(aph, last));
             } else {
               arr[last] = v;
+              this.account(v, w, n, ph, 1);
             }
             this.byAtCache.delete(arr);
           } else {
@@ -1051,7 +1240,12 @@ export class StateMirror {
           if (typeof last !== "string" || kindOf(parent) !== 1) {
             throw this.fail("delete of a non-key", segs);
           }
-          delete (parent as Record<string, unknown>)[last];
+          const o = parent as Record<string, unknown>;
+          if (Object.hasOwn(o, last)) {
+            const w = this.path(segs);
+            this.account(o[last], w, segs.length, this.paths.of(w, segs.length), -1);
+          }
+          delete o[last];
           break;
         }
         case OpCode.Len: {
@@ -1062,8 +1256,9 @@ export class StateMirror {
           // Cut to the shortest the window saw, then grow: what was cut and
           // came back as a hole stays a hole, and what came back with a value
           // is set by its own op, which sorts after this one.
-          if (arr.length > cut) arr.length = cut;
-          arr.length = len;
+          const w = this.path(segs);
+          if (arr.length > cut) this.resize(arr, w, segs.length, cut);
+          this.resize(arr, w, segs.length, len);
           this.byAtCache.delete(arr);
           break;
         }
@@ -1075,6 +1270,17 @@ export class StateMirror {
           const byAt = this.byAt(arr);
           const next = new Array<unknown>(count);
           const serials = new Map<number, number>();
+          // The hash: a pool's own leaves are its length and each position's
+          // `at`; an element that goes takes its share with it and one that
+          // arrives brings its own, while one that stays keeps its share
+          // wherever it moves, since it stands at its `at`. An array that was
+          // not a pool is taken out whole and put back whole.
+          const n = segs.length;
+          const w = this.path(segs);
+          const ph = this.paths.of(w, n);
+          const was = arr.length === 0 || poolAts(arr) !== null ? new Set<unknown>(arr) : null;
+          if (was) this.credit(w, n, -poolOwn(arr, ph));
+          else this.account(arr, w, n, ph, -1);
           for (let i = 0; i < count; i++) {
             const at = r.svar();
             const serial = r.uvar();
@@ -1092,8 +1298,14 @@ export class StateMirror {
               const e = byAt.get(at);
               if (e !== undefined && had.get(at) === serial && kindOf(e) === 1) {
                 const o = e as Record<string, unknown>;
+                if (was) {
+                  w[n] = keyedSeg(at);
+                  this.account(o, w, n + 1, pathKeyed(ph, at), -1);
+                }
                 for (const k of Object.keys(o)) if (!Object.hasOwn(v, k)) delete o[k];
                 Object.assign(o, v);
+                if (was) this.account(o, w, n + 1, pathKeyed(ph, at), 1);
+                w.length = n;
                 next[i] = o;
               } else {
                 next[i] = v;
@@ -1108,10 +1320,35 @@ export class StateMirror {
             }
             serials.set(at, serial);
           }
+          if (was) {
+            const stay = new Set<unknown>(next);
+            for (const e of arr) {
+              if (stay.has(e)) continue;
+              const at = (e as { at: number }).at;
+              w[n] = keyedSeg(at);
+              this.account(e, w, n + 1, pathKeyed(ph, at), -1);
+            }
+            w.length = n;
+          }
           arr.length = 0;
           for (let i = 0; i < count; i++) arr.push(next[i]);
           this.pools.set(arr, serials);
           this.byAtCache.delete(arr);
+          if (count > 0 && poolAts(arr) === null) {
+            throw this.fail("a pool with an `at` twice, or out of range", segs);
+          }
+          if (was) {
+            for (const e of arr) {
+              if (was.has(e)) continue;
+              const at = (e as { at: number }).at;
+              w[n] = keyedSeg(at);
+              this.account(e, w, n + 1, pathKeyed(ph, at), 1);
+            }
+            w.length = n;
+            this.credit(w, n, poolOwn(arr, ph));
+          } else {
+            this.account(arr, w, n, ph, 1);
+          }
           break;
         }
         default:
@@ -1119,6 +1356,254 @@ export class StateMirror {
       }
     }
     return n;
+  }
+
+  // -- the kept hash ----------------------------------------------------
+
+  /**
+   * Hash `root` whole and keep the sums from here: after a keyframe is
+   * installed. Returns the hash. {@link applyOps} does this itself for a
+   * tree it has not seen.
+   */
+  rehash(root: Record<string, unknown>): number {
+    this.tracked = root;
+    this.sum = 0;
+    this.sections.clear();
+    this.cycle = [];
+    this.cyclePos = 0;
+    this.visited = new Set();
+    const w = this.work;
+    w.length = 0;
+    this.account(root, w, 0, PATH_ROOT, 1);
+    return this.sum >>> 0;
+  }
+
+  /** The {@link TreeHasher} hash of the tree the ops wrote, kept rather than walked. */
+  get hash(): number {
+    return this.sum >>> 0;
+  }
+
+  /** `segs`, copied where the accounting can write past its end. */
+  private path(segs: readonly Seg[]): Seg[] {
+    const w = this.work;
+    w.length = 0;
+    for (let i = 0; i < segs.length; i++) w.push(segs[i]);
+    return w;
+  }
+
+  /** `share` joins the whole and the section `segs[0..n)` lies in. */
+  private credit(segs: readonly Seg[], n: number, share: number): void {
+    if (share === 0) return;
+    this.sum = (this.sum + share) | 0;
+    const k = sectionLen(segs, n);
+    const key = this.sectionKey(segs, k);
+    const s = this.sections.get(key);
+    if (!s) {
+      this.sections.set(key, { segs: segs.slice(0, k), sum: share | 0 });
+    } else if ((s.sum = (s.sum + share) | 0) === 0) {
+      // Gone. One that sums to nothing by chance is one the audit expects
+      // nothing of, which is the same thing.
+      this.sections.delete(key);
+    }
+  }
+
+  /** `pathString(segs, k)`, kept while the ops stay in one section. */
+  private sectionKey(segs: readonly Seg[], k: number): string {
+    const c = this.keySegs;
+    if (c.length === k) {
+      let i = 0;
+      while (i < k && c[i] === segs[i]) i++;
+      if (i === k) return this.keyStr;
+    }
+    this.keySegs = segs.slice(0, k);
+    return (this.keyStr = pathString(segs, k));
+  }
+
+  /**
+   * `v`, standing at `segs[0..n)` whose hash is `ph`, joins the sums
+   * (`sign` 1) or leaves them (-1), section by section. Writes `segs` past
+   * `n`, and puts its length back.
+   */
+  private account(v: unknown, segs: Seg[], n: number, ph: number, sign: number): void {
+    if (!splits(v, n)) {
+      const h = this.hasher.subtree(v, ph);
+      this.credit(segs, n, sign < 0 ? -h : h);
+      return;
+    }
+    let own: number;
+    if (Array.isArray(v)) {
+      own = arrayLeaf(ph, v.length);
+      const ats = poolAts(v);
+      for (let i = 0; i < v.length; i++) {
+        if (ats) {
+          own = (own + orderLeaf(ph, i, ats[i])) | 0;
+          segs[n] = keyedSeg(ats[i]);
+          this.account(v[i], segs, n + 1, pathKeyed(ph, ats[i]), sign);
+        } else if (!(i in v)) {
+          own = (own + holeLeaf(ph, i)) | 0;
+        } else {
+          segs[n] = i;
+          this.account(v[i], segs, n + 1, pathIndex(ph, i), sign);
+        }
+      }
+    } else {
+      own = objectLeaf(ph);
+      const o = v as Record<string, unknown>;
+      for (const k in o) {
+        segs[n] = k;
+        this.account(o[k], segs, n + 1, pathKey(ph, k), sign);
+      }
+    }
+    segs.length = n;
+    this.credit(segs, n, sign < 0 ? -own : own);
+  }
+
+  /**
+   * The indexed array at `segs[0..n)` to `len`: what is cut off leaves the
+   * sums, and what grows arrives as holes. Puts `segs`' length back to `n`.
+   */
+  private resize(arr: unknown[], segs: Seg[], n: number, len: number): void {
+    const old = arr.length;
+    if (len === old) return;
+    const ph = this.paths.of(segs, n);
+    let own = (arrayLeaf(ph, len) - arrayLeaf(ph, old)) | 0;
+    for (let i = len; i < old; i++) {
+      if (i in arr) {
+        segs[n] = i;
+        this.account(arr[i], segs, n + 1, pathIndex(ph, i), -1);
+      } else {
+        own = (own - holeLeaf(ph, i)) | 0;
+      }
+    }
+    for (let i = old; i < len; i++) own = (own + holeLeaf(ph, i)) | 0;
+    segs.length = n;
+    arr.length = len;
+    this.credit(segs, n, own);
+  }
+
+  /** The leaves of `v`, at depth `n` and `ph`, that are its section's own. */
+  private ownShare(v: unknown, n: number, ph: number): number {
+    if (!splits(v, n)) return this.hasher.subtree(v, ph);
+    if (!Array.isArray(v)) return objectLeaf(ph);
+    if (poolAts(v)) return poolOwn(v, ph);
+    let own = arrayLeaf(ph, v.length);
+    for (let i = 0; i < v.length; i++) if (!(i in v)) own = (own + holeLeaf(ph, i)) | 0;
+    return own;
+  }
+
+  /**
+   * Look at the next few sections of `root` -- about `budget` leaves -- and
+   * compare each with the share the ops left it. Returns the first that
+   * differs, as a path, or null.
+   *
+   * Nothing but an op changes the tree with the sums knowing, so a section
+   * that differs is one this page wrote: the replica's own systems, which
+   * should only read the state, writing it. The kept hash cannot see that --
+   * it is what the host sent, right as ever -- until the host happens to
+   * change the same value. A cycle covers every section the tree has when it
+   * starts, and ends by looking for any the sums have that the tree has lost.
+   */
+  audit(root: Record<string, unknown>, budget: number): string | null {
+    if (root !== this.tracked) return null;
+    const hasher = this.hasher;
+    const end = hasher.leaves + budget;
+    let started = false;
+    // Every section counts one, so a run of small ones is bounded too.
+    for (let spent = 0; hasher.leaves + spent < end; spent++) {
+      if (this.cyclePos >= this.cycle.length) {
+        if (started) break;
+        started = true;
+        const gone = this.cycle.length ? this.lost(root) : null;
+        this.startCycle(root);
+        if (gone) return gone;
+        continue;
+      }
+      const { segs, key } = this.cycle[this.cyclePos++];
+      const node = this.find(root, segs);
+      // Gone since the cycle began. An op took its share with it; a write
+      // that took it is what `lost` is for.
+      if (node === MISSING) continue;
+      this.visited.add(key);
+      // Signed, as the sums are: a lone leaf's share is `fmix`'s unsigned word.
+      const have = this.ownShare(node, segs.length, this.paths.of(segs, segs.length)) | 0;
+      if (have !== (this.sections.get(key)?.sum ?? 0)) return pathLabel(segs) || "(root)";
+    }
+    return null;
+  }
+
+  private startCycle(root: unknown): void {
+    const out: { segs: Seg[]; key: string }[] = [];
+    this.sectionsOf(root, [], 0, out);
+    this.cycle = out;
+    this.cyclePos = 0;
+    this.visited = new Set();
+  }
+
+  /** Every section of `v` at `segs[0..n)`, into `out`. */
+  private sectionsOf(v: unknown, segs: Seg[], n: number,
+                     out: { segs: Seg[]; key: string }[]): void {
+    out.push({ segs: segs.slice(0, n), key: pathString(segs, n) });
+    if (!splits(v, n)) return;
+    if (Array.isArray(v)) {
+      const ats = poolAts(v);
+      for (let i = 0; i < v.length; i++) {
+        if (ats) segs[n] = keyedSeg(ats[i]);
+        else if (i in v) segs[n] = i;
+        else continue;
+        this.sectionsOf(v[i], segs, n + 1, out);
+      }
+    } else {
+      const o = v as Record<string, unknown>;
+      for (const k in o) {
+        segs[n] = k;
+        this.sectionsOf(o[k], segs, n + 1, out);
+      }
+    }
+    segs.length = n;
+  }
+
+  /** A section the sums hold that the cycle did not find, and the tree has not got. */
+  private lost(root: unknown): string | null {
+    for (const [key, s] of this.sections) {
+      if (this.visited.has(key)) continue;
+      // Not found by the cycle but here now: it arrived since the cycle began.
+      if (this.find(root, s.segs) === MISSING) return `${pathLabel(s.segs)} (gone)`;
+    }
+    return null;
+  }
+
+  /**
+   * The node at `segs`, or {@link MISSING}. Never throws, and caches nothing.
+   * Addressed as the codec addresses it: a pool's elements by `at` and only
+   * by `at`, an indexed array's by index -- so a section the cycle listed
+   * while an array was one is gone once it is the other.
+   */
+  private find(root: unknown, segs: readonly Seg[]): unknown {
+    let node = root;
+    for (const g of segs) {
+      if (node === null || typeof node !== "object") return MISSING;
+      if (typeof g === "string") {
+        if (Array.isArray(node) || !Object.hasOwn(node, g)) return MISSING;
+        node = (node as Record<string, unknown>)[g];
+      } else if (!Array.isArray(node) || (g < 0) !== (poolAts(node) !== null)) {
+        return MISSING;
+      } else if (g >= 0) {
+        if (!(g in node)) return MISSING;
+        node = node[g];
+      } else {
+        const at = segAt(g);
+        let hit: unknown = MISSING;
+        for (const e of node) {
+          if (e !== null && typeof e === "object" && (e as { at?: unknown }).at === at) {
+            hit = e;
+            break;
+          }
+        }
+        if (hit === MISSING) return MISSING;
+        node = hit;
+      }
+    }
+    return node;
   }
 
   private readSeg(r: ByteReader): Seg {
@@ -1173,143 +1658,147 @@ export class StateMirror {
 
 // -- the hash ----------------------------------------------------------------
 
-/** The depth at which a path becomes its own section: `parts.<id>.<key>`. */
-const SECTION_DEPTH = 3;
+/*
+ * The leaves, once. The hash is the sum of `fmix` of every leaf, so a
+ * leaf's share is added when it appears and subtracted when it goes -- which
+ * is what lets both ends keep the hash as the state changes rather than walk
+ * the state to take it. These are the one definition of each: the walk below
+ * and the running sums in `StateTracker` and `StateMirror` all use them.
+ */
 
-/** Where a hash's sections go: each section's name and its own hash, once. */
-export interface SectionSink {
-  add(name: string, hash: number): void;
+/** A primitive's share, standing at the path whose hash is `ph`. */
+function primLeaf(v: unknown, ph: number): number {
+  if (v === undefined) return fmix(combine(ph, LeafTag.Undefined));
+  if (v === null) return fmix(combine(ph, LeafTag.Null));
+  switch (typeof v) {
+    case "boolean":
+      return fmix(combine(ph, v ? LeafTag.True : LeafTag.False));
+    case "number":
+      return fmix(combineNumber(combine(ph, LeafTag.Number), v));
+    case "string":
+      return fmix(combine(combine(ph, LeafTag.String), hashString(v)));
+    default:
+      throw new NetStateError(`cannot hash a ${typeof v}`);
+  }
 }
 
-/** A plain `Map` as a sink, for the rare caller that wants one. */
-export function sectionMap(map: Map<string, number>): SectionSink {
-  return { add: (n, h) => { map.set(n, h); } };
+/** An array's length. */
+function arrayLeaf(ph: number, n: number): number {
+  return fmix(combine(combine(ph, LeafTag.Array), n));
+}
+
+/** The hole at index `i` of the indexed array at `ph`. */
+function holeLeaf(ph: number, i: number): number {
+  return fmix(combine(pathIndex(ph, i), LeafTag.Hole));
+}
+
+/** Which `at` stands at position `i` of the pool at `ph`. */
+function orderLeaf(ph: number, i: number, at: number): number {
+  return fmix(combineNumber(combine(combine(ph, LeafTag.Order), i), at));
+}
+
+/** That an object stands at `ph`. */
+function objectLeaf(ph: number): number {
+  return fmix(combine(ph, LeafTag.Object));
+}
+
+/** A pool's own leaves: its length, and which `at` stands where. */
+function poolOwn(arr: readonly unknown[], ph: number): number {
+  let own = arrayLeaf(ph, arr.length);
+  for (let i = 0; i < arr.length; i++) {
+    own = (own + orderLeaf(ph, i, (arr[i] as { at: number }).at)) | 0;
+  }
+  return own;
 }
 
 /**
- * The state's hash, and optionally its sections'.
+ * The state's hash, by walking it.
  *
- * Both ends run this one class over their own tree, so there is no second
- * copy of the leaf rules to drift. A section is a path one deep -- `frame`,
- * `rng` -- or three deep -- `parts.game.g_frame` -- or, under a pool that
- * deep, one element of it -- `parts.game.g_object_list[@6720]`. That is fine
- * enough to say which global or which actor a desync is in without shipping
- * the state to find out. A section's hash is its own leaves only; a section
- * inside it is its own entry.
+ * Both ends run this one class, so there is no second copy of the leaf rules
+ * to drift. Neither walks the state with it every tick any more -- the host
+ * keeps its hash as it diffs, the replica as it applies -- but a keyframe is
+ * hashed whole, a subtree that arrives or goes is, and so are the checks that
+ * the kept sums are right.
  */
 export class TreeHasher {
   private acc = 0;
-  private readonly segs: Seg[] = [];
-  private sections: SectionSink | null = null;
-  /** The sum of the sections nested directly inside each open section. */
-  private readonly nested: number[] = [];
+  /** Leaves hashed, ever: what the replica's audit measures its work in. */
+  leaves = 0;
+
+  hash(root: unknown): number {
+    return this.subtree(root, PATH_ROOT) >>> 0;
+  }
+
   /**
-   * Section names, built once: `parent -> key -> name`. The host hashes its
-   * sections every tick, and building eight hundred path strings a tick to
-   * name the same eight hundred sections was most of the garbage it made.
+   * `v`'s share of the hash, standing at the path whose hash is `ph`: the sum
+   * of its leaves. Signed, as the running sums add and subtract it.
    */
-  private readonly names = new Map<string, Map<string | number, string>>();
-
-  hash(root: unknown, sections?: SectionSink): number {
+  subtree(v: unknown, ph: number): number {
+    const outer = this.acc;
     this.acc = 0;
-    this.segs.length = 0;
-    this.nested.length = 0;
-    this.sections = sections ?? null;
-    this.value(root, 0, PATH_ROOT);
-    this.sections = null;
-    return this.acc >>> 0;
+    this.value(v, ph);
+    const h = this.acc;
+    this.acc = outer;
+    return h;
   }
 
-  private leaf(h: number): void {
-    this.acc = (this.acc + fmix(h)) | 0;
+  private leaf(share: number): void {
+    this.acc = (this.acc + share) | 0;
+    this.leaves++;
   }
 
-  /** `parent` + SEP + `key`, from the cache. */
-  private child(parent: string, key: Seg): string {
-    let m = this.names.get(parent);
-    if (!m) this.names.set(parent, (m = new Map()));
-    let s = m.get(key);
-    if (s === undefined) {
-      const part = typeof key === "string" ? key : key >= 0 ? `#${key}` : `@${segAt(key)}`;
-      s = parent === "" ? part : parent + SEP + part;
-      m.set(key, s);
-    }
-    return s;
-  }
-
-  /** The name of the section `segs[0..d)`. */
-  private sectionName(d: number): string {
-    let s = "";
-    for (let i = 0; i < d; i++) s = this.child(s, this.segs[i]);
-    return s;
-  }
-
-  private node(v: unknown, d: number, ph: number, inPool: boolean): void {
-    if (!this.sections || !(d === 1 || d === SECTION_DEPTH
-                            || (d === SECTION_DEPTH + 1 && inPool))) {
-      this.value(v, d, ph);
-      return;
-    }
-    const name = this.sectionName(d);
-    const start = this.acc;
-    this.nested.push(0);
-    this.value(v, d, ph);
-    const inner = this.nested.pop()!;
-    const total = (this.acc - start) | 0;
-    this.sections.add(name, ((total - inner) | 0) >>> 0);
-    if (this.nested.length) {
-      this.nested[this.nested.length - 1] =
-        (this.nested[this.nested.length - 1] + total) | 0;
-    }
-  }
-
-  private value(v: unknown, d: number, ph: number): void {
-    if (v === undefined) return this.leaf(combine(ph, LeafTag.Undefined));
-    if (v === null) return this.leaf(combine(ph, LeafTag.Null));
-    switch (typeof v) {
-      case "boolean":
-        return this.leaf(combine(ph, v ? LeafTag.True : LeafTag.False));
-      case "number":
-        return this.leaf(combineNumber(combine(ph, LeafTag.Number), v));
-      case "string":
-        return this.leaf(combine(combine(ph, LeafTag.String), hashString(v)));
-      case "object":
-        break;
-      default:
-        throw new NetStateError(`cannot hash a ${typeof v}`);
-    }
-    const segs = this.segs;
+  private value(v: unknown, ph: number): void {
+    if (v === null || typeof v !== "object") return this.leaf(primLeaf(v, ph));
     if (Array.isArray(v)) {
-      this.leaf(combine(combine(ph, LeafTag.Array), v.length));
+      this.leaf(arrayLeaf(ph, v.length));
       const ats = poolAts(v);
       if (ats) {
         for (let i = 0; i < v.length; i++) {
-          this.leaf(combineNumber(combine(combine(ph, LeafTag.Order), i), ats[i]));
-          segs[d] = keyedSeg(ats[i]);
-          this.node(v[i], d + 1, pathKeyed(ph, ats[i]), true);
+          this.leaf(orderLeaf(ph, i, ats[i]));
+          this.value(v[i], pathKeyed(ph, ats[i]));
         }
       } else {
         for (let i = 0; i < v.length; i++) {
-          const ch = pathIndex(ph, i);
-          if (!(i in v)) {
-            this.leaf(combine(ch, LeafTag.Hole));
-            continue;
-          }
-          segs[d] = i;
-          this.node(v[i], d + 1, ch, false);
+          if (!(i in v)) this.leaf(holeLeaf(ph, i));
+          else this.value(v[i], pathIndex(ph, i));
         }
       }
-      segs.length = d;
       return;
     }
-    this.leaf(combine(ph, LeafTag.Object));
+    this.leaf(objectLeaf(ph));
     const o = v as Record<string, unknown>;
-    for (const k in o) {
-      segs[d] = k;
-      this.node(o[k], d + 1, pathKey(ph, k), false);
-    }
-    segs.length = d;
+    for (const k in o) this.value(o[k], pathKey(ph, k));
   }
+}
+
+/**
+ * Whether two trees hold the same values, by the codec's rules: `-0` is not
+ * `0`, `NaN` is `NaN`, a hole is not `undefined`, and key order does not
+ * matter. {@link diffTrees} says where they differ; this only says whether,
+ * without building a path for every node, so it can run a few times a second.
+ */
+export function sameTree(a: unknown, b: unknown): boolean {
+  if (Object.is(a, b)) return true;
+  const ka = kindOf(a);
+  if (ka === 0 || ka !== kindOf(b)) return false;
+  if (ka === 2) {
+    const aa = a as unknown[], bb = b as unknown[];
+    if (aa.length !== bb.length) return false;
+    for (let i = 0; i < aa.length; i++) {
+      const has = i in aa;
+      if (has !== i in bb) return false;
+      if (has && !sameTree(aa[i], bb[i])) return false;
+    }
+    return true;
+  }
+  const oa = a as Record<string, unknown>, ob = b as Record<string, unknown>;
+  let n = 0;
+  for (const k in oa) {
+    if (!Object.hasOwn(ob, k) || !sameTree(oa[k], ob[k])) return false;
+    n++;
+  }
+  for (const _ in ob) n--;
+  return n === 0;
 }
 
 /** Two trees' differences, as readable lines. For the desync report and tests. */

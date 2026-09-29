@@ -17,6 +17,11 @@
  * - **Lossless.** `-0`, `undefined`, `null`, holes and trailing holes, long
  *   strings and non-ASCII ones, integers past 2^31 and past 2^51 come back
  *   bit for bit; the hash of the replica's tree equals the host's every time.
+ * - **The kept hashes are the hashes.** Neither end walks its state to hash
+ *   it: the host keeps its shadow's hash as it diffs and the replica its
+ *   tree's as it applies. Both are checked against a walk on every tick, and
+ *   the replica's audit -- a slice of its sections a tick -- never cries wolf
+ *   over a tree only ops wrote, and names what was written behind its back.
  *
  * Every applied tick is checked against a clone of the host's state at that
  * tick. No bundle: this runs everywhere, in about a second.
@@ -280,6 +285,9 @@ function run(seed: number, ticks: number, opts: {
   for (let t = 1; t <= ticks; t++) {
     f.mutate(live);
     tracker.update(live, t);
+    check(`seed ${seed} tick ${t}: the host's kept hash`,
+          tracker.hash === hasher.hash(tracker.state), `${tracker.hash} kept, `
+          + `${hasher.hash(tracker.state)} walked`);
     history.set(t, structuredClone(live));
     history.delete(t - 300);
     // The churn may have made the list anything, or deleted it.
@@ -323,6 +331,7 @@ function run(seed: number, ticks: number, opts: {
       if (p.keyframe) {
         if (p.tick <= at) continue;
         replica = mirror.readKeyframe(r);
+        mirror.rehash(replica);
         at = p.tick;
       } else {
         if (!replica || p.base > at || p.tick <= at) continue;
@@ -335,6 +344,13 @@ function run(seed: number, ticks: number, opts: {
       const d = diffTrees(want, replica, 5);
       check(`seed ${seed} tick ${at} (base ${p.base})`, d.length === 0, d.join("; "));
       check(`seed ${seed} tick ${at}: hash`, hasher.hash(replica) === hasher.hash(want));
+      check(`seed ${seed} tick ${at}: the replica's kept hash`,
+            mirror.hash === hasher.hash(replica),
+            `${mirror.hash} kept, ${hasher.hash(replica)} walked`);
+      // A slice a tick, as the page runs it; now and then the whole of it.
+      const bad = mirror.audit(replica, applied % 16 === 0 ? Infinity : 40);
+      check(`seed ${seed} tick ${at}: the audit finds nothing the ops did not write`,
+            bad === null, bad ?? "");
       // Identity across the ticks this apply moved over, while the list
       // stayed a pool: an actor the host kept is the replica's same object,
       // and one the host replaced is replaced there too, never patched.
@@ -425,6 +441,57 @@ function run(seed: number, ticks: number, opts: {
   const quiet = step(6);
   report("a list rebuilt from fresh objects with the same values sends no ops",
          quiet <= 3, `${quiet} bytes`);
+}
+
+// -- the audit: writes behind the codec's back -------------------------------------
+
+{
+  const f = new Fuzz(rng(4242));
+  const live = f.state();
+  const tracker = new StateTracker();
+  const mirror = new StateMirror();
+  tracker.update(live, 1);
+  let w = new ByteWriter();
+  tracker.encodeKeyframe(w);
+  const replica = mirror.readKeyframe(new ByteReader(w.finish()));
+  mirror.rehash(replica);
+  // Ticks the ops build the sums through: actors move, arrive and go.
+  const lg = (live.parts as Obj).game as Obj;
+  for (let t = 2; t <= 40; t++) {
+    for (const a of lg.g_object_list as Obj[]) (a.pos as Obj).x = (a.pos as Obj).x as number + 1;
+    if (t % 5 === 0) (lg.g_object_list as Obj[]).push(f.actor());
+    if (t % 7 === 0) lg.g_object_list = (lg.g_object_list as Obj[]).slice(1);
+    lg.g_frame = t;
+    tracker.update(live, t);
+    w = new ByteWriter();
+    tracker.encodeDelta(t - 1, w);
+    const r = new ByteReader(w.finish());
+    mirror.readDefs(r);
+    mirror.applyOps(r, replica, new Set());
+  }
+  const g = () => (replica.parts as Obj).game as Obj;
+  const pool = () => g().g_object_list as Obj[];
+  // Each write is made, found, and undone by a rehash, which is what a
+  // keyframe does.
+  const cases: [string, () => void, RegExp][] = [
+    ["a field of an actor", () => { pool()[0].hp = -12345; }, /g_object_list\[@-?\d+\]/],
+    ["a global's element", () => { (g().g_rings as number[])[1] += 77; }, /^parts\.game\.g_rings$/],
+    ["a global added", () => { g().g_new = 1; }, /^parts\.game\.g_new$/],
+    ["a global deleted", () => { delete g().g_rings; }, /^parts\.game\.g_rings \(gone\)$/],
+    ["an actor taken out", () => { pool().splice(1, 1); }, /g_object_list/],
+    ["the frame", () => { replica.frame = -1; }, /^frame$/],
+  ];
+  for (const [what, write, where] of cases) {
+    const before = mirror.hash;
+    write();
+    const found = mirror.audit(replica, Infinity) ?? mirror.audit(replica, Infinity);
+    report(`the audit finds ${what} written behind the codec's back: ${found}`,
+           found !== null && where.test(found), `found ${found}`);
+    report(`...which the kept hash cannot see (${what})`, mirror.hash === before);
+    mirror.rehash(replica);
+    report(`...and after a rehash there is nothing to find (${what})`,
+           mirror.audit(replica, Infinity) === null);
+  }
 }
 
 // -- what the state may not hold -------------------------------------------------

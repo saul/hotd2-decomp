@@ -20,7 +20,8 @@
  * asserts what the overlay says, because the overlay is what a player sees:
  *
  * - the replica streams, every tick it applies is verified by hash, and
- *   **none** differs from the host's; no delta fails to apply;
+ *   **none** differs from the host's; no delta fails to apply; the audit
+ *   finds nothing on the page writing the state it was sent;
  * - START pressed on the replica puts player 2 in play on the host;
  * - shots aimed at enemies through the replica's own camera reach the host
  *   as player 2's, and the host's aim check says they agree with its camera;
@@ -252,8 +253,12 @@ async function session(label, { both = "", replicaQuery = "", seconds, robust = 
         rf["hash mismatches"] === "0" && num(rf["ticks verified"]) > 50,
         `mismatches ${rf["hash mismatches"]}`);
   check("no delta failed to apply", rf["apply errors"] === "0", rf["apply errors"]);
-  // The mirror the deltas land in is what the per-tick hash sees; this is the
-  // state the page's systems made of it, re-read a few times a second.
+  // The per-tick hash is kept as the deltas land, so it cannot see the page
+  // writing the tree they land in; the audit looks, a slice a tick.
+  check("nothing on the replica's page wrote the state it was sent "
+        + `(${rf["page wrote the state"]} sections found)`,
+        rf["page wrote the state"] === "0", rf["page wrote the state"]);
+  // And the state the page's systems made of their slices, re-read once a second.
   check("the replica's systems hold the state they were handed "
         + `(${rf["systems disagree"]} disagreements)`,
         rf["systems disagree"] === "0", rf["systems disagree"]);

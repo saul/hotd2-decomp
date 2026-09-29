@@ -12,18 +12,25 @@
  * * {@link NetReplica.poll} with the clock, for pings and statistics.
  *
  * **Every applied tick is checked.** The host sends the hash of its state
- * with each tick, and the replica hashes its own after applying. A mismatch is
- * a desync: logged, reported to the host with the replica's section hashes so
- * the host can say *which* global or actor differs, and repaired with a
- * keyframe. Nothing about it is silent.
+ * with each tick, and the replica compares its own -- kept as the ops land,
+ * not walked (`StateMirror.hash`). A mismatch is a desync: logged, reported,
+ * and repaired with a keyframe, against which the replica then compares its
+ * own state value by value and tells the host *which* values differed.
+ * Nothing about it is silent.
+ *
+ * **What the kept hash cannot see, the audit does.** A write into the state
+ * by this page's own systems, which should only read it, leaves the kept
+ * hash as right as the host's ops made it. So each tick the replica also
+ * looks at a few sections of the tree against the shares the ops left them
+ * (`StateMirror.audit`); a whole pass takes about a second.
  */
 import { ByteReader, ByteWriter } from "../../core/net/bytes";
 import {
-  ApplyError, StateMirror, TreeHasher, diffTrees, sectionMap,
+  ApplyError, StateMirror, TreeHasher, diffTrees, sameTree,
 } from "../../core/net/codec";
 import {
   Msg, decodeJson, readKeyframeChunk, readTickHead, writeInput,
-  type Channel, type DesyncReportMsg, type HoldReason, type KeyframeChunk,
+  type Channel, type DesyncMsg, type DesyncReportMsg, type HoldReason, type KeyframeChunk,
   type LoadMsg, type Press, type PressKind, type ReadyMsg, type SessionMsg,
   type TickHead,
 } from "../../core/net/protocol";
@@ -48,7 +55,7 @@ export interface ReplicaSim {
   root(): Record<string, unknown>;
   /**
    * The state as the page's systems hold it -- `world.save()`'s layout, read
-   * back from them -- or absent where there is no page. See `DEEP_EVERY`.
+   * back from them -- or absent where there is no page. See `LIVE_EVERY`.
    */
   liveRoot?(): Record<string, unknown>;
   /** A delta was applied; `touched` names the parts it wrote. */
@@ -80,16 +87,33 @@ const RESYNC_RETRY_MAX_MS = 8000;
  */
 const IDLE_MS = 250;
 /**
- * Every this many verified ticks -- about twice a second, at the host's
- * `HASH_EVERY` -- the state is hashed again as the page's systems hold it
- * rather than as the deltas left it. The deltas land in a mirrored tree, and
- * every slice but `G` is then handed to its system's `load`. A `load` that
- * drops or changes what it is handed diverges the game while the mirror --
- * and so the tick's hash -- stays right.
+ * How much of the state the audit looks at a tick, in leaves (and sections).
+ * The state is some four thousand leaves in four hundred sections, so a pass
+ * over all of it takes about a second of ticks, and a tick's share is a few
+ * hundred small hashes -- where walking the whole of it, as each hashed tick
+ * used to, cost an iPhone ten milliseconds.
  */
-const DEEP_EVERY = 5;
+const AUDIT_BUDGET = 96;
+/**
+ * Every this many verified ticks, once a second, the slices the page's
+ * systems hold are compared with the ones the deltas left. The deltas land in
+ * a mirrored tree, and every slice but `G` is then handed to its system's
+ * `load`: a `load` that drops or changes what it is handed diverges the game
+ * while the mirror -- and so the tick's hash -- stays right. `G` is the
+ * mirror's own, which the audit covers.
+ */
+const LIVE_EVERY = 60;
+/**
+ * A keyframe that answers a desync waits this long, at most, for the delta of
+ * its own tick, which the host sends beside it: applied, it brings this end's
+ * state to the keyframe's tick, where the two can be compared value by value.
+ */
+const EXPLAIN_WAIT_MS = 250;
 /** Input goes at most this often, apart from presses, which go at once. */
 const INPUT_MS = 15;
+
+const isObject = (v: unknown): v is Record<string, unknown> =>
+  v !== null && typeof v === "object" && !Array.isArray(v);
 
 interface Buffered {
   head: TickHead;
@@ -123,9 +147,23 @@ export class NetReplica extends NetPeer {
   private retryMs = RESYNC_RETRY_MS;
   /** When the player last stepped: its loop is idle long after. */
   private lastStepAt = -Infinity;
-  private deepCount = 0;
+  private liveCount = 0;
   private readonly cost = new CostMeter();
-  private deepLoggedAt = -Infinity;
+  private liveLoggedAt = -Infinity;
+  /**
+   * The tick a desync was found at, while the keyframe that answers it is on
+   * its way; -1 otherwise. The keyframe is compared with this end's state
+   * before it is installed, which is what names the values that differed.
+   */
+  private explainFrom = -1;
+  /**
+   * Whether it was the hash that found it -- the one case where this end's
+   * kept hash against its walked one says something the reason does not.
+   */
+  private explainKept = false;
+  /** That keyframe, assembled, while it waits for its tick's delta. */
+  private held: { tick: number; stage: number; hash: number; bytes: Uint8Array;
+                  until: number } | null = null;
   // -- the gun --
   private aim = { x: 0, y: 0, on: false };
   private readonly unacked: Press[] = [];
@@ -173,6 +211,7 @@ export class NetReplica extends NetPeer {
         if (head.tick <= this.at || this.buffer.has(head.tick)) return;
         this.buffer.set(head.tick, { head, bytes: data, arrived: this.now });
         if (head.tick > this.newest) this.newest = head.tick;
+        if (this.held && head.tick === this.held.tick) this.release();
         // No step is coming for this -- the host's clock is held, so the
         // player's is; or the player's loop is not running at all, a hidden
         // tab -- so it is applied as it lands, and acknowledged, so the host's
@@ -192,12 +231,6 @@ export class NetReplica extends NetPeer {
         this.hold = s.hold;
         this.branch = s.branch;
         if (was !== s.hold) this.sim.wake();
-        return;
-      }
-      case Msg.DesyncReport: {
-        const d = decodeJson<DesyncReportMsg>(data);
-        this.log("report", d.tick, d.differ.length
-          ? `host: ${d.differ.join(", ")}` : `host: ${d.note}`);
         return;
       }
       default:
@@ -221,6 +254,9 @@ export class NetReplica extends NetPeer {
     // The host counts this epoch's input from zero, as this counts its ticks.
     this.inputSeq = 0;
     this.desynced = false;
+    this.explainFrom = -1;
+    this.explainKept = false;
+    this.held = null;
     this.retryAt = Infinity;
     this.retryMs = RESYNC_RETRY_MS;
     this.hold = "loading";
@@ -269,7 +305,19 @@ export class NetReplica extends NetPeer {
     const all = new Uint8Array(total);
     let o = 0;
     for (const b of k.chunks) { all.set(b, o); o += b.length; }
+    if (this.explainFrom >= 0 && this.at < k.tick && !this.buffer.has(k.tick)) {
+      this.held = { tick: k.tick, stage: k.stage, hash: k.hash, bytes: all,
+                    until: this.now + EXPLAIN_WAIT_MS };
+      return;
+    }
     this.installKeyframe(k.tick, k.stage, k.hash, all);
+  }
+
+  /** The held keyframe, installed: its delta came, or it waited long enough. */
+  private release(): void {
+    const h = this.held!;
+    this.held = null;
+    this.installKeyframe(h.tick, h.stage, h.hash, h.bytes);
   }
 
   private installKeyframe(tick: number, stage: number, hash: number,
@@ -294,6 +342,7 @@ export class NetReplica extends NetPeer {
       this.stale("keyframe did not decode", tick);
       return;
     }
+    if (this.explainFrom >= 0) this.explain(tick, root);
     // Compared before it is installed, so a difference is the codec's...
     const decoded = this.hasher.hash(root);
     if (decoded !== hash) {
@@ -313,8 +362,9 @@ export class NetReplica extends NetPeer {
     this.desynced = false;
     this.resyncAt = -Infinity;
     // ...and after, so a difference is the install's: something that runs on
-    // a load wrote state it should only have read.
-    const installed = this.hasher.hash(this.sim.root());
+    // a load wrote state it should only have read. The mirror keeps the hash
+    // from here.
+    const installed = this.mirror.rehash(this.sim.root());
     if (installed !== hash) {
       this.log("keyframe", tick, `installed state hashes ${hex(installed)}, `
         + `the host's was ${hex(hash)}: ${diffTrees(root, this.sim.root(), 4).join("; ")
@@ -452,16 +502,25 @@ export class NetReplica extends NetPeer {
     this.at = head.tick;
     this.sim.afterApply(touched);
     cost.lap("load");
-    // Only the ticks that carry the host's hash are checked: every
-    // `HASH_EVERY`th, so a full walk of the state is not every tick's cost.
-    if (this.verify && head.hash !== null) {
-      const mine = this.hasher.hash(this.sim.root());
+    if (this.verify) {
+      const mine = this.mirror.hash;
       this.stats.verified++;
-      cost.lap("hash");
-      if (mine !== head.hash) this.mismatch(head, mine, head.hash);
-      else if (++this.deepCount >= DEEP_EVERY) {
-        this.deepVerify(head, head.hash);
-        cost.lap("deep");
+      if (mine !== head.hash) {
+        this.mismatch(head, mine, head.hash);
+      } else if (!this.desynced) {
+        // Known wrong already, there is nothing to learn from either.
+        const wrote = this.mirror.audit(this.sim.root(), AUDIT_BUDGET);
+        cost.lap("audit");
+        if (wrote !== null) {
+          this.stats.pageWrites++;
+          this.log("hash", head.tick, `this page wrote ${wrote}: the state holds `
+            + "what the host never sent");
+          this.desync(head.tick, `this page wrote ${wrote}`);
+        } else if (++this.liveCount >= LIVE_EVERY) {
+          this.liveCount = 0;
+          this.checkLive(head.tick);
+          cost.lap("live");
+        }
       }
     }
     // The host's events for every tick this apply moved over, oldest first,
@@ -483,25 +542,69 @@ export class NetReplica extends NetPeer {
     this.stats.mismatches++;
     if (this.desynced) return; // already reported; a keyframe is on its way
     this.log("hash", head.tick, `state hash ${hex(mine)}, the host's ${hex(theirs)}`);
+    this.explainKept = true;
     this.desync(head.tick, "state hash differs");
   }
 
   /**
-   * The state is known wrong. Said once an episode: the host is sent this
-   * replica's section hashes, so it can name *which* global or actor
-   * differs, and answers with a keyframe. If that keyframe does not come, or
-   * does not fix it, `poll` asks again.
+   * The state is known wrong. Said once an episode: the host answers with a
+   * keyframe, which `explain` compares with this end's state to say which
+   * values differ. If that keyframe does not come, or does not fix it, `poll`
+   * asks again.
    */
   private desync(tick: number, reason: string): void {
     if (this.desynced) return;
     this.desynced = true;
     this.stats.desynced = true;
     this.retryAt = this.now + this.retryMs;
-    const sections = new Map<string, number>();
-    this.hasher.hash(this.sim.root(), sectionMap(sections));
-    this.sendCtrl(Msg.Desync, { epoch: this.epoch, tick, sections: [...sections] });
+    this.explainFrom = tick;
+    const msg: DesyncMsg = { epoch: this.epoch, tick, reason };
+    this.sendCtrl(Msg.Desync, msg);
     this.resyncAt = this.now;
     this.log("report", tick, `asked the host for a keyframe: ${reason}`);
+  }
+
+  /**
+   * The keyframe that answers a desync, against this end's own state at the
+   * same tick: the values that differ, named, here and to the host. The
+   * stream is usually a tick or two short of the keyframe's tick, and the
+   * delta that closes the gap is in the buffer; applied, the two are of one
+   * tick and every difference is real. One walk of each, on a desync only.
+   */
+  private explain(tick: number, want: Record<string, unknown>): void {
+    this.explainFrom = -1;
+    // Up to the keyframe's tick, by the newest delta that applies from here.
+    while (this.at < tick) {
+      let pick: Buffered | null = null;
+      for (const [t, b] of this.buffer) {
+        if (t > this.at && t <= tick && b.head.base <= this.at
+            && (!pick || t > pick.head.tick)) pick = b;
+      }
+      if (!pick) break;
+      this.apply(pick);
+    }
+    let differ: string[] = [];
+    let note: string;
+    if (this.at !== tick) {
+      note = `not compared: this end was at tick ${this.at}, the keyframe is of ${tick}`;
+    } else {
+      const mine = this.sim.root();
+      differ = diffTrees(want, mine, 12);
+      note = differ.length ? "" : "every value agrees";
+      // A hash that differed: from the ops, or from a write the audit had
+      // not reached yet? The kept hash is what the ops left; the walked one
+      // is what the state is.
+      const walked = this.explainKept ? this.hasher.hash(mine) : this.mirror.hash;
+      if (walked !== this.mirror.hash) {
+        note += `${note ? "; " : ""}this end's state hashes ${hex(walked)} and its ops `
+          + `left ${hex(this.mirror.hash)}: something besides the host's ops wrote it`;
+      }
+    }
+    this.explainKept = false;
+    const report: DesyncReportMsg = { epoch: this.epoch, tick, differ, note };
+    this.sendCtrl(Msg.DesyncReport, report);
+    this.log("report", tick, `against the keyframe (host's vs this end's): `
+      + [...differ, ...(note ? [note] : [])].join(", "));
   }
 
   /** The state is behind rather than wrong: a keyframe was lost or refused. */
@@ -512,22 +615,33 @@ export class NetReplica extends NetPeer {
   }
 
   /**
-   * The state as the systems hold it, against the host's hash. Local, so a
+   * The state as the systems hold it, against the mirror. Local, so a
    * difference is named exactly: the mirror is what the host sent, and the
-   * live tree is what the page made of it.
+   * live tree is what the page made of it. A slice the two share -- `G` --
+   * is the mirror's, and the audit's to check.
    */
-  private deepVerify(head: TickHead, theirs: number): void {
-    this.deepCount = 0;
+  private checkLive(tick: number): void {
     const live = this.sim.liveRoot?.();
     if (!live) return;
-    const h = this.hasher.hash(live);
-    if (h === theirs) return;
+    const mine = this.sim.root();
+    const d: string[] = [];
+    for (const k of new Set([...Object.keys(mine), ...Object.keys(live)])) {
+      const a = mine[k], b = live[k];
+      if (k !== "parts" || !isObject(a) || !isObject(b)) {
+        if (!sameTree(a, b)) d.push(...diffTrees(a, b, 4, [k]));
+        continue;
+      }
+      const pa = a as Record<string, unknown>, pb = b as Record<string, unknown>;
+      for (const id of new Set([...Object.keys(pa), ...Object.keys(pb)])) {
+        if (!sameTree(pa[id], pb[id])) d.push(...diffTrees(pa[id], pb[id], 4, ["parts", id]));
+      }
+    }
+    if (!d.length) return;
     this.stats.liveMismatches++;
-    if (this.now - this.deepLoggedAt < 5000) return;
-    this.deepLoggedAt = this.now;
-    const d = diffTrees(this.sim.root(), live, 4);
-    this.log("hash", head.tick, "the page's systems hold a different state from "
-      + `the one applied: ${d.join("; ") || "a difference the diff cannot see"}`);
+    if (this.now - this.liveLoggedAt < 5000) return;
+    this.liveLoggedAt = this.now;
+    this.log("hash", tick, "the page's systems hold a different state from "
+      + `the one applied: ${d.slice(0, 4).join("; ")}`);
   }
 
   private requestResync(reason: string, tick: number): void {
@@ -597,6 +711,7 @@ export class NetReplica extends NetPeer {
   override poll(now: number): void {
     super.poll(now);
     if (this.closed) return;
+    if (this.held && now >= this.held.until) this.release();
     if (this.desynced && (this.phase === "streaming" || this.phase === "waiting")
         && now >= this.retryAt) {
       this.retryAt = now + this.retryMs;

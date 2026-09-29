@@ -2368,7 +2368,8 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
       role: this.net.role, phase: s.phase, cost: s.costMs, worst: s.costMax,
       parts: Object.fromEntries(s.costParts), rtt: s.rtt, route: s.route,
       delta: s.deltaBytes, depth: s.depth, underruns: s.underruns, skips: s.skips,
-      verified: s.verified, mismatches: s.mismatches,
+      verified: s.verified, mismatches: s.mismatches, pageWrites: s.pageWrites,
+      liveMismatches: s.liveMismatches, keyframes: s.keyframes,
     };
   }
 

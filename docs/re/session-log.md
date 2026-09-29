@@ -25409,6 +25409,20 @@ the bin captor at all; it aims at torso and head heights now.
 the exe's is the dead *bit* and `hp < 1`, with result 5 gating only the head
 pop. Not changed here.
 
+## 2026-09-29 -- free play by default
+
+The user asked for infinite credits by default. The exe has the setting:
+`ModeStartCounterValue` (`FUN_00496B70`) reads the options' credit byte
+`0x009C9F25` (`MOV AL,[0x009c9f25]; CMP AL,0xff`, `0x00496B86`) and returns -1,
+free play, when it is `0xFF`; else it plus one. The port had it as a constant
+at the factory value 5 (`FUN_00401130`). It is `G.g_option_credits` now,
+starting at -1 -- a declared `[diverges]` from the factory reset, at the
+user's choice, until the options screen can hold it. First try changed the
+constant, and five tests that walk a game through its credits (the shell's
+start, continue and game over; the continue screen's credit line) failed;
+they set `OPTION_CREDITS_FACTORY` now, which is why the setting had to be a
+field and not a constant. New checks: the port starts in free play, and
+twenty continues all succeed and take nothing.
 ## 2026-09-29 -- class 0x12: the boards the bin captor bursts through
 
 **Report.** "The zombie at end of stage 2 in the civilian scripted sequence
@@ -25464,7 +25478,7 @@ at stage 1 blocks 6, 14 and 16 and stage 2 blocks 0 and 3. Unported, not
 chased. The earlier entry's "flag 34's one reader, `MouseBranchTriggerUpdate`,
 despawns a mouse" is true of subtype 4 alone, which is stage 4 block 10's
 mouse; stage 1's mice are subtype 0 and never read it (corrected in
-`PLAYER_PROGRESS.md`). `L82`.
+`PLAYER_PROGRESS.md`). `L83`.
 
 **Found on the way, not fixed.** Stage 2 block 17 step 1's `0xBE60` is class
 0x41 **constructor 50** (`FUN_00463BA0`, table 2 at `0x00594CA0`): four

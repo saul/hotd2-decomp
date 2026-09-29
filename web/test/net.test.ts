@@ -12,7 +12,9 @@
  *
  * - **the replica's state is the host's**, by hash on every tick it applies
  *   and by a full structural comparison every thirtieth, against a copy of
- *   the host's state taken at that tick;
+ *   the host's state taken at that tick -- and, sabotaged, that a value
+ *   written behind the codec's back is found by the audit and named by both
+ *   ends once the keyframe that repairs it lands;
  * - **a timeline jump** -- a seek, in the page -- moves both ends to a new
  *   epoch without a desync;
  * - **player 2 plays**: START puts player index 1 in play, every press of the
@@ -32,7 +34,7 @@
 import type { EventMap } from "../src/core/events";
 import { TreeHasher, diffTrees } from "../src/core/net/codec";
 import { Msg, PressKind } from "../src/core/net/protocol";
-import { HASH_EVERY, NetHost, type HostSim } from "../src/app/net/host";
+import { NetHost, type HostSim } from "../src/app/net/host";
 import { NetReplica, type ReplicaSim } from "../src/app/net/replica";
 import { MemoryLink } from "../src/app/net/transport";
 import type { Identity } from "../src/app/net/peer";
@@ -272,7 +274,8 @@ async function run(stage: number, p: Profile, seconds: number,
           // An actor gone from the replica's pool: the next op for it cannot land.
           sab2 = replica.tick;
           sabEpoch = replica.stats.epoch;
-          mismatchesBefore2 = replica.stats.mismatches + replica.stats.applyErrors;
+          mismatchesBefore2 = replica.stats.mismatches + replica.stats.applyErrors
+            + replica.stats.pageWrites;
           loseDesync = true;
           pool.splice(1, 1);
         }
@@ -338,22 +341,25 @@ async function run(stage: number, p: Profile, seconds: number,
     .map(([id]) => id);
   const dropped = [...fired].filter(([id, ep]) => ep !== finalEpoch && !taken.has(id)).length;
   check(`${tag}: the replica streamed (${rs.verified} ticks verified by hash)`,
-        // One tick in HASH_EVERY carries the host's hash, and only those are checked.
-        rs.verified > frames / (4 * HASH_EVERY), `${rs.verified} of ${frames} frames; phase ${rs.phase}`);
+        // Every tick carries the host's hash, and every one applied is checked.
+        rs.verified > frames / 4, `${rs.verified} of ${frames} frames; phase ${rs.phase}`);
   const logs = (s: typeof rs) => s.log.map((e) => `${e.kind}@${e.tick}: ${e.text}`).join(" | ");
   if (sabotage) {
     // What the overlay exists to show: a replica that is not the host's is
-    // caught on the tick it happens, the host says which part of the state
-    // it is, and a keyframe puts it right.
-    check(`${tag}: a value changed behind the codec's back is caught by the hash `
-          + `(${rs.mismatches} mismatched ticks)`, sab1 > 0 && rs.mismatches > 0, logs(rs));
-    check(`${tag}: ...and the host names the section it is in`,
-          hs.log.some((e) => e.kind === "report" && /parts\.game\.g_credits/.test(e.text)),
+    // caught within a pass of the audit -- the kept hash is the host's ops',
+    // right as ever, and cannot see it -- the replica names the value against
+    // the keyframe that repairs it, and the host hears which.
+    check(`${tag}: a value changed behind the codec's back is found by the audit `
+          + `(${rs.pageWrites} found)`, sab1 > 0 && rs.pageWrites > 0
+          && rs.log.some((e) => /this page wrote parts\.game\.g_credits/.test(e.text)), logs(rs));
+    check(`${tag}: ...and the replica names the value against the keyframe`,
+          rs.log.some((e) => e.kind === "report" && /g_credits\[0\]/.test(e.text)), logs(rs));
+    check(`${tag}: ...and the host hears which`,
+          hs.log.some((e) => /player 2 compared the keyframe: .*g_credits\[0\]/.test(e.text)),
           logs(hs));
-    check(`${tag}: ...and the replica hears the host's answer`,
-          rs.log.some((e) => e.kind === "report" && /g_credits/.test(e.text)), logs(rs));
     check(`${tag}: an actor taken from the replica's pool is caught too`,
-          sab2 > 0 && rs.mismatches + rs.applyErrors > mismatchesBefore2, logs(rs));
+          sab2 > 0 && rs.mismatches + rs.applyErrors + rs.pageWrites > mismatchesBefore2,
+          logs(rs));
     check(`${tag}: ...whose report the host never got, so the replica asked again `
           + "by itself", lostDesync
           && hs.log.some((e) => /asked for a keyframe: the state is still wrong/.test(e.text)),

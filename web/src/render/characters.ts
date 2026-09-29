@@ -56,7 +56,7 @@ import { Box3, Group, Object3D, Ray, Vector3 } from "three";
 import type {
   CharacterPlacement, CharacterType, CharactersJson,
 } from "../bundle";
-import type { CiviliansJson, CivilianItemJson } from "../bundle/scene";
+import type { CiviliansJson } from "../bundle/scene";
 import { ActorFlag, type Actor } from "../game/actor";
 import { ATTACHMENT_REPLACES_BELOW } from "../game/attachments";
 import type { Vec3 } from "../game/vec";
@@ -101,6 +101,7 @@ import { clearBoneCels, syncBoneCels } from "./characters/cels";
 import { alphaGatesWholeActor, applyDrawGates }
   from "./characters/draw_gates";
 import { applyHeadAim } from "./characters/head_aim";
+import { clearHeldItems, syncHeldItems } from "./characters/held_items";
 import {
   placeJudgmentRoot, seatJudgmentSubActors, syncJudgmentWings,
 } from "./characters/judgment";
@@ -573,7 +574,12 @@ export class CharacterLayer implements System {
       // `game/class30/bonecels.ts` for why no table names the models.
       syncBoneCels(this.goreParts, inst);
       this.syncAttachments(inst);
-      if (inst.a.civ) this.syncHeldItems(inst);
+      // `CivilianDrawHeldItems` (`FUN_0048CD10`)'s draw -- see
+      // `render/characters/held_items.ts`.
+      if (inst.a.civ) {
+        syncHeldItems(inst, this.civilians?.items ?? [],
+                      (slot) => this.cloneSlot(slot), _ctx);
+      }
       // Last, so that a cel or a gore piece hung on a bone this frame arrives
       // under the gate and an attachment made this frame is known to be one.
       applyDrawGates(inst);
@@ -694,57 +700,6 @@ export class CharacterLayer implements System {
       bone.add(model);
       have.set(id, model);
     }
-  }
-
-  /**
-   * `CivilianDrawHeldItems` — `FUN_0048CD10`. What is in a civilian's hands.
-   *
-   * The record says which bone, which asset slot and how to sit on it; the
-   * character type says which of the record's six attach sets to use, which is
-   * why one bottle fits an old man and a schoolgirl. The draw's rotation order
-   * is X, then Z, then Y, and the translate follows it — copied from the
-   * routine rather than guessed, because a hand prop is exactly the thing that
-   * looks nearly right in three wrong orders.
-   *
-   * [diverges] The engine re-draws the item from scratch every frame and runs
-   * the record's own per-frame callback (`rec+0x18`) after it. Here the model
-   * is parented to the bone once and the callback is `[open]` — the four that
-   * appear are unread.
-   */
-  private syncHeldItems(inst: Instance): void {
-    const want = inst.a.civ?.items ?? [];
-    const have = inst.held ?? (inst.held = new Map());
-    if (want.length === have.size && want.every((k) => have.has(k))) return;
-    const items = this.civItems;
-    for (const [k, node] of have) {
-      if (want.includes(k)) continue;
-      node.removeFromParent();
-      have.delete(k);
-    }
-    for (const k of want) {
-      if (have.has(k)) continue;
-      const rec = items[k];
-      const bone = rec && inst.bones.get(rec.bone);
-      if (!rec || !bone) { have.set(k, new Object3D()); continue; }
-      const group = new Object3D();
-      for (const slot of [rec.slot, rec.extra ?? 0]) {
-        const m = slot ? this.cloneSlot(slot) : null;
-        if (m) group.add(m);
-      }
-      const set = rec.sets[inst.a.civ?.attachSet ?? 5] ?? rec.sets[5]
-        ?? [0, 0, 0, 1];
-      group.rotation.set(rec.rot[0] * BAMS_TO_RAD, rec.rot[1] * BAMS_TO_RAD,
-                         rec.rot[2] * BAMS_TO_RAD, "XZY");
-      group.position.set(set[0], set[1], set[2]);
-      group.scale.setScalar(set[3] || 1);
-      bone.add(group);
-      have.set(k, group);
-    }
-  }
-
-  /** `civilians.items` — the records the held-item ops name. */
-  private get civItems(): CivilianItemJson[] {
-    return this.civilians?.items ?? [];
   }
 
   /**
@@ -1034,8 +989,7 @@ export class CharacterLayer implements System {
     clearBoneCels(inst);
     inst.hidden = 0;
     inst.slots = undefined;
-    for (const g of inst.held?.values() ?? []) g.removeFromParent();
-    inst.held?.clear();
+    clearHeldItems(inst);
     for (const node of inst.bones.values()) {
       node.visible = true;
       for (const c of node.children) c.visible = true;

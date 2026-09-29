@@ -70,10 +70,11 @@
  * ## What this does not do
  *
  * [diverges] The **drawing** stays in the renderer, which is where it belongs:
- * `CivilianDrawHeldItems` (`FUN_0048CD10`) is `syncHeldItems` in
- * `render/characters.ts`, and `ActorRegisterCameraPoint`'s shot sphere is that
- * layer's `pick` — this side owns the radius at `obj+0x124` and the item list,
- * and nothing else.
+ * the matrices and `AssetDrawSlot` of `CivilianDrawHeldItems` (`FUN_0048CD10`)
+ * are `render/characters/held_items.ts`, and `ActorRegisterCameraPoint`'s
+ * shot sphere is that layer's `pick` — this side owns the radius at
+ * `obj+0x124`, the item list, and the routine each held record names, which
+ * is where the extra life is paid (`items.ts`).
  *
  * **`CivilianApplyMotionPose` (`FUN_0048C310`) is ported** (`pose.ts`). It
  * used to be passed over on the grounds that the generic root walk already
@@ -113,7 +114,8 @@
  * | `init.ts`     | `CivilianInit` `FUN_0048A3E0`                              |
  * | `script.ts`   | `CivilianRunScript` `FUN_0048B9E0`, `CivilianReapplyWaitCommand` `FUN_0048B760` |
  * | `pose.ts`     | `CivilianApplyMotionPose` `FUN_0048C310`                   |
- * | `items.ts`    | `CivilianAddHeldItem` `FUN_0048CAE0`, `CivilianAddPickedItem` `FUN_0048CB60`, `CivilianPickHeldItem` `FUN_0048CBF0` |
+ * | `items.ts`    | `CivilianAddHeldItem` `FUN_0048CAE0`, `CivilianAddPickedItem` `FUN_0048CB60`, `CivilianPickHeldItem` `FUN_0048CBF0`, `CivilianDrawHeldItems` `FUN_0048CD10` (its game half), `CivilianHeldItemGrantLife` `FUN_0048DCC0`, `CivilianHeldItemGrantOriginalItem` `FUN_0048DD60` |
+ * | `life_marker.ts` | `SpawnLifeGrantedMarker` `FUN_0048DF10`, `LifeGrantedMarkerUpdate` `FUN_0048DFE0` |
  * | `step.ts`     | `CivilianStepScript` `FUN_0048B1E0`                        |
  * | `turn.ts`     | `CivilianStepTurnToTarget` `FUN_0048C850`, `ActorTurnTowardPoint` `FUN_0048C990` |
  * | `children.ts` | `CivilianPruneDeadChildren` `FUN_0048CA60`, `CivilianHookRideChildrenStep` `FUN_0048DAB0` |
@@ -137,6 +139,7 @@ import type { CivilianState } from "./state";
 // `./ops` for the enums is the common case -- rather than the whole class.
 export * from "./ops";
 export * from "./items";
+export * from "./life_marker";
 export * from "./turn";
 export * from "./children";
 export * from "./hooks";

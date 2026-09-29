@@ -10,6 +10,8 @@
 import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
 import { G } from "../globals";
+import { ScoreAddForPlayer } from "../combat/score";
+import { GameMode } from "../game_mode";
 import { CameraBlockEye } from "../camera/view";
 import { COLLECTIBLE_WORDS_ZERO, PickOriginalModeItem } from "./original_item";
 import { PropWords } from "./words";
@@ -29,28 +31,29 @@ export const EXTRA_LIFE_RISE = 1.0;
 /** `PlaySoundId` id for taking the extra life. */
 export const SFX_EXTRA_LIFE = 0x3616a9;
 
-/** Score for a pickup taken while the player is already at the life cap. */
+/** `PUSH 0x12c` — the score `GrantExtraLife` pays at the life cap. */
 export const EXTRA_LIFE_CAP_SCORE = 300;
-
-/**
- * `g_max_lives` — the cap `GrantExtraLife` tests against. `[open]` as an
- * address: the exe reads `DAT_009A2440` in modes other than 1 and a per-player
- * `0x009A2245 + p*0x14` in mode 1, and neither is in `globals.tsv` yet. The
- * port carries the value the player starts a credit with.
- */
-export const DEFAULT_MAX_LIVES = 5;
 
 /**
  * `GrantExtraLife` — `FUN_00415630`.
  *
- * One more life, unless the player already has the cap's worth — in which case
- * the item pays 300 points instead, so it is never simply wasted.
+ * ```
+ * 00415630  if (g_GameMode == 1) cap = (s8)g_original_life_cap[p];   0x009A2245 + p*0x14
+ *           else                 cap = g_max_lives;                 0x009A2440
+ *           if ((s16)g_player_lives[p] >= cap) { ScoreAddForPlayer(p, 300); return 0; }
+ * 004156b1  g_player_lives[p] += 1; return 1;
+ * ```
+ *
+ * One more life, unless the player already has the cap's worth -- in which
+ * case 300 points instead, through `ScoreAddForPlayer`, so it is never simply
+ * wasted. No sound here: the callers play their own, or none. `[proved]`
  */
-export function GrantExtraLife(player: number): boolean {
+export function GrantExtraLife(player: number, events?: Events): boolean {
   const lives = G.g_player_lives[player] ?? 0;
-  if (lives >= DEFAULT_MAX_LIVES) {
-    G.g_player_score[player] = (G.g_player_score[player] ?? 0)
-      + EXTRA_LIFE_CAP_SCORE;
+  const cap = G.g_GameMode === GameMode.Original
+    ? (G.g_original_life_cap[player] ?? 0) : G.g_max_lives;
+  if (lives >= cap) {
+    ScoreAddForPlayer(player, EXTRA_LIFE_CAP_SCORE, events);
     return false;
   }
   G.g_player_lives[player] = lives + 1;

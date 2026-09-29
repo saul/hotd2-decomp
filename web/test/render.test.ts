@@ -2673,6 +2673,227 @@ console.log("\ncivilian attachments: the face swaps, the hair is added");
 }
 
 /**
+ * **Where a civilian holds her item, and that she lets go of it.**
+ *
+ * Bug: "rescued civilians don't have the item they present to you in
+ * precisely the right part of their hand. And they still carry it after you
+ * should receive its effect".
+ *
+ * `CivilianDrawHeldItems` (`FUN_0048CD10`) sets the top to the bone's record
+ * and then post-multiplies `RotX(rec+0xC) RotZ(rec+0x14) RotY(rec+0x10)
+ * T(set.xyz) Scale(set.w)`, so the translate is along the *turned* axes. The
+ * layer used to put the node at `t` and turn it about its own origin. The
+ * expected frames here are worked by hand from the record, not read back
+ * from the layer: record `0x0056B190` (the extra life) is `X 0x4000, Z
+ * 0xC000` and `t = (0, 1, 1)`, which puts the item's origin at `(1, -1, 0)`
+ * in the hand's frame with its X along the hand's -Z, its Y along +X and its
+ * Z along -Y. Record `0x0056B390` (kind 4) adds a scale of 0.8 and its own
+ * second slot in the same matrix, and a set that differs by character type.
+ */
+console.log("\ncivilian held items: on the hand as the draw puts them, and gone once given");
+{
+  const { CharacterLayer } = await import("../src/render/characters");
+  const { SpawnScriptedCharacters } = await import("../src/game/director");
+  const { G, ResetGameGlobals } = await import("../src/game/globals");
+  const { SetGameTables } = await import("../src/game/tables");
+  const { CivilianOp, CivilianUpdate } = await import("../src/game/class10");
+  const { NULL_HOST } = await import("../src/game/host");
+  const { Rng } = await import("../src/core/rng");
+  const { Events } = await import("../src/core/events");
+  const { BoxGeometry, Matrix4, Mesh, MeshBasicMaterial, Object3D, Vector3 } =
+    await import("three");
+
+  const TYPE = {
+    type: 0x26, name: "hito_gal", file: "hito_gal.bin", bone_count: 2,
+    actor_radius: 10,
+    bones: [
+      { bone: 1, part: "bone01_0eb9", slot: 0x0eb9, offset: [0, 0, 0],
+        parent: null, damage_rank: [], hit_radius: 2, steps: [] },
+      { bone: 5, part: "bone05_0eb0", slot: 0x0eb0, offset: [0, 0, 0],
+        parent: 0, damage_rank: [], hit_radius: 2, steps: [] },
+    ],
+    head_bone: 2, reactions: {}, attacks: {},
+    motions: {
+      "660": { bank: "people", frames: 1, fps: 30, root: [0, 0, 0],
+               rot: [0, 0, 0, 0, 0, 0, 0, 0, 0], play: 0 },
+    },
+  };
+  const AT = 0x8620;
+  const CHARS = {
+    types: { "38": TYPE },
+    placements: [{
+      at: AT, class: 0x10, char_type: 0x26, motion: 660, hp: 0, yaw: 0,
+      body_condition: 0, initial_state: 0, attack_state: 0, ring_set: 0,
+    }],
+    attachments: [], attachment_replaces_below: 0x24,
+    approach: { rings: [{ inner: 25, mid: 38, outer: 51 }],
+                steps: { base: 2, mid_add: 3, outer_add: 4 },
+                ring_set_for_char0: 1 },
+    difficulty: { hp_delta: [0, 0, 0, 0, 0], hp_min: 1, hp_max: 300,
+                  initial_rank: [0, 0, 2, 0, 0], default: 2 },
+  };
+  const sets = (rows: number[][]) =>
+    rows as [number, number, number, number][];
+  const LIFE = {
+    bone: 5, slot: 0x10c3, kind: -1, extra: null,
+    rot: [0x4000, 0, 0xc000] as [number, number, number],
+    sets: sets(Array.from({ length: 6 }, () => [0, 1, 1, 1])),
+    callback: 0x0048dcc0, banner: null,
+  };
+  // Record `0x0056B390` as the exporter reads it: set 5 differs.
+  const KIND4 = {
+    bone: 5, slot: 0x10a8, kind: 4, extra: 0x10a7,
+    rot: [0xb83a, 0x7a8a, 0xb51f] as [number, number, number],
+    sets: sets([[0.5, -0.6, 1.1, 0.8], [0.5, -0.6, 1.1, 0.8],
+                [0.5, -0.6, 1.1, 0.8], [0.5, -0.6, 1.1, 0.8],
+                [0.5, -0.6, 1.1, 0.8], [0, -0.6, 1.1, 0.8]]),
+    callback: 0x0048dd60, banner: 0x5c1,
+  };
+  const cmd = (op: number, ...args: number[]) => ({ op, args });
+  const CIV = {
+    entries: [0],
+    scripts: [[
+      cmd(CivilianOp.Wait, 0),
+      { op: CivilianOp.AddHeldItem, args: [0x0056b190, 0x800000], item: 0 },
+      { op: CivilianOp.AddHeldItem, args: [0x0056b390, 0x800000], item: 1 },
+      cmd(CivilianOp.SetTimer, 3),
+      // `0x940100` less the loop wait, which holds only while a clip plays.
+      cmd(CivilianOp.Wait, 0x940000),
+      cmd(CivilianOp.Wait, 0),
+      cmd(CivilianOp.End),
+    ]],
+    items: [LIFE, KIND4],
+    // A removal cue on no path the test plays: `CamPathCueReached(-1, 0)`
+    // is met by the reset's `g_active_cam_path` of -1, and she would leave.
+    spawns: { [String(AT)]: { charType: 0x26, script: 0, removePath: 999,
+                              removeFrame: 0, removeDelay: 0, children: [] } },
+  };
+
+  const template = (slot: number): InstanceType<typeof Object3D> => {
+    const n = new Mesh(new BoxGeometry(1, 1, 1), new MeshBasicMaterial());
+    n.name = `gore_hito_gal_fixed000_gore_${slot.toString(16).padStart(4, "0")}`;
+    n.userData = { hod2_kind: "rig_part", hod2_rig: "gore_hito_gal",
+                   hod2_part: `gore_${slot.toString(16).padStart(4, "0")}` };
+    return n;
+  };
+  const root = new Object3D();
+  const rig = new Object3D();
+  rig.name = "chr_hito_gal_spawn000";
+  rig.userData = { hod2_kind: "rig", hod2_rig: "chr_hito_gal",
+                   hod2_spawn_at: AT };
+  const torso = new Object3D();
+  torso.name = "chr_hito_gal_spawn000_bone01_0eb9";
+  const hand = new Object3D();
+  hand.name = "chr_hito_gal_spawn000_bone05_0eb0";
+  // A hand that is not at the origin nor square to the world, so a frame
+  // taken in the wrong space cannot pass by accident.
+  hand.position.set(3, 7, -2);
+  hand.rotation.set(0.3, -0.7, 0.2);
+  torso.add(hand);
+  rig.add(torso);
+  root.add(rig);
+  const gore = new Object3D();
+  gore.name = "gore_hito_gal_fixed000";
+  gore.userData = { hod2_kind: "rig", hod2_rig: "gore_hito_gal" };
+  for (const slot of [0x10c3, 0x10a8, 0x10a7]) gore.add(template(slot));
+  root.add(gore);
+
+  ResetGameGlobals();
+  SetGameTables(CHARS as never, undefined, undefined, undefined, undefined,
+                CIV as never);
+  G.g_difficulty = 2;
+  const chars = new CharacterLayer();
+  chars.civilians = CIV as never;
+  const stage = new Scope("stage");
+  chars.build(root, stage, CHARS as never);
+  const made = SpawnScriptedCharacters(chars.readySpawns([{ at: AT }]));
+  const a = made[0];
+  a.visible = true;
+  chars.syncSpawns([{ at: AT }], made);
+  const rng = new Rng(1);
+  const events = new Events();
+  const frame = () => CivilianUpdate(a, { dt: 1 / 60, rng, host: NULL_HOST,
+                                          events });
+  frame();
+  chars.update({} as never);
+
+  /** `slot`'s model under the hand, in the hand's own frame. */
+  const inHand = (slot: number) => {
+    let found: InstanceType<typeof Object3D> | null = null;
+    hand.traverse((o) => {
+      if (!found && (o as { isMesh?: boolean }).isMesh
+          && o.name.endsWith(slot.toString(16).padStart(4, "0"))) found = o;
+    });
+    if (!found) return null;
+    const f = found as InstanceType<typeof Object3D>;
+    f.updateWorldMatrix(true, false);
+    return new Matrix4().copy(hand.matrixWorld).invert()
+      .multiply(f.matrixWorld);
+  };
+  const near = (m: InstanceType<typeof Matrix4>, want: number[]) =>
+    m.elements.every((v, i) => Math.abs(v - want[i]) < 1e-4);
+  const fmt = (m: InstanceType<typeof Matrix4> | null) =>
+    m ? m.elements.map((v) => v.toFixed(3)).join(",") : "none";
+
+  // Column-major, as `Matrix4.elements` is: X axis, Y axis, Z axis, origin.
+  const life = inHand(0x10c3);
+  check("the extra life sits where the draw puts it: origin (1, -1, 0) in "
+        + "the hand, X along -Z, Y along +X, Z along -Y",
+        !!life && near(life, [0, 0, -1, 0, 1, 0, 0, 0, 0, -1, 0, 0,
+                              1, -1, 0, 1]),
+        fmt(life));
+
+  // Record `0x0056B390` in attach set 1: `Rx(0xB83A) Rz(0xB51F)
+  // Ry(0x7A8A) T(0.5, -0.6, 1.1) S(0.8)`, by the textbook matrices.
+  const rad = (b: number) => b * (2 * Math.PI / 65536);
+  const rx = (t: number) => new Matrix4().makeRotationX(t);
+  const expect = new Matrix4()
+    .multiply(rx(rad(0xb83a)))
+    .multiply(new Matrix4().makeRotationZ(rad(0xb51f)))
+    .multiply(new Matrix4().makeRotationY(rad(0x7a8a)))
+    .multiply(new Matrix4().makeTranslation(0.5, -0.6, 1.1))
+    .multiply(new Matrix4().makeScale(0.8, 0.8, 0.8));
+  const k4 = inHand(0x10a8);
+  check("a scaled item: turned, then moved along the turned axes by its "
+        + "character's attach set, then scaled",
+        !!k4 && near(k4, expect.elements), `${fmt(k4)} want ${fmt(expect)}`);
+  const origin = new Vector3().setFromMatrixPosition(expect);
+  check("...which is not where the offset alone would put it",
+        origin.distanceTo(new Vector3(0.5, -0.6, 1.1)) > 0.5,
+        `${origin.x}, ${origin.y}, ${origin.z}`);
+  const k4b = inHand(0x10a7);
+  check("...and kind 4's second slot is drawn in the same matrix",
+        !!k4b && near(k4b, expect.elements), fmt(k4b));
+
+  // Given: the wait word's `0x800000` is the first entry's routine's to take.
+  // `CivilianHeldItemGrantLife` clears it from the word (`NOT EAX; AND EAX,
+  // EDX` at `0x0048DCD6`) before the second entry's routine looks, so one
+  // word gives one item -- every shipped stream appends exactly one.
+  const lives = G.g_player_lives.join();
+  for (let i = 0; i < 10 && (a.civ?.items.length ?? 0) > 1; i++) {
+    frame();
+    chars.update({} as never);
+  }
+  check("on the frame she gives it the hand still shows it -- the engine "
+        + "draws before it calls the record's routine",
+        a.civ?.items.length === 1 && !!inHand(0x10c3),
+        `items ${JSON.stringify(a.civ?.items)}`);
+  frame();
+  chars.update({} as never);
+  check("...and on the next the life is gone from the hand, paid",
+        !inHand(0x10c3) && G.g_player_lives.join() !== lives,
+        `lives ${lives} -> ${G.g_player_lives.join()}`);
+  check("...while the second item, whose routine found the bit already "
+        + "taken, is still held where it was",
+        a.civ?.items.length === 1 && a.civ.items[0].record === 1
+        && !!inHand(0x10a8) && near(inHand(0x10a8)!, expect.elements),
+        `items ${JSON.stringify(a.civ?.items)}`);
+
+  stage.dispose();
+  G.g_object_list.length = 0;
+}
+
+/**
  * **The model's size, `model+0x116C`, on every skinned actor.**
  *
  * `SkeletonApplyRootMotion` (`FUN_00410C50`) draws `T(obj+0x40)`, the actor's

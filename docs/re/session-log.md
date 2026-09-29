@@ -26049,6 +26049,72 @@ offer test now returns false first (`GUN_CALIBRATION_OFFERED`, declared
 is unchanged. New check: a light-gun player's cursor steps over the row both
 ways and nothing draws it; it fails with the flag true.
 
+## 2026-09-29 -- a civilian's held item: the give, the removal and the pose
+
+Bug: "rescued civilians don't have the item they present to you in precisely
+the right part of their hand. And they still carry it after you should receive
+its effect (e.g. extra life). The effect doesn't seem to apply either."
+
+**The reading.** `CivilianDrawHeldItems` (`FUN_0048CD10`), called from
+`CivilianUpdate` at `0x0048AF89`, walks the `{record, operand}` pairs at
+`sub+0x70`, draws each and calls its record's `rec+0x18(obj)`. Only two
+pointers occur in the fourteen records, and neither was a function in the
+database (created and named): `CivilianHeldItemGrantLife` (`FUN_0048DCC0`),
+record `0x0056B190` alone, and `CivilianHeldItemGrantOriginalItem`
+(`FUN_0048DD60`), the rest. Both test `entry.operand & wait word` (every op
+0x13/0x14 passes `0x800000`; the next wait word after each of the eleven
+appends is `0x940100`), clear those bits, raise `0x400000` and pick the player
+into `sub+0x6C` (`g_active_player` with one player in play, else `rand() % 2`
+only if still -1). The first pays `GrantExtraLife` and, on a life,
+`SpawnLifeGrantedMarker` (`FUN_0048DF10`) -- whose model, `common.bin` 303,
+renders "LIFE UP!" -- updated by `LifeGrantedMarkerUpdate` (`FUN_0048DFE0`).
+The second counts the kind (an Original item id) into `g_original_items_taken`
+and raises the banner `g_original_item_bank_sprite` (`0x0056B0F4`) names; its
+two unloads and `DelayedTexbankFreeUpdate` (`FUN_0048DEE0`) are residency,
+dropped. The draw answers `0x400000` by zeroing the entry and, after the loop,
+compacting -- code after the `MatrixStackPop` that the pseudocode does not show
+at all (L35): `0x0048CFAB`..`0x0048D01E`. `GrantExtraLife`'s caps were `[open]`
+in the port as one constant 5: `g_max_lives` (`0x009A2440`, one writer,
+`ProfileApplyToRun`'s 5) and `g_original_life_cap` (`0x009A2245 + p*0x14`, both
+writers by address store 5), named.
+
+**The pose.** Every matrix call post-multiplies, so `RotX RotZ RotY T` puts the
+item's origin at `Rx Rz Ry t` in the bone's frame. The renderer set the node's
+position to `t` and its Euler to the turns, which three.js composes as `T R` --
+the right orientation at the wrong point. The extra life's `t = (0, 1, 1)`
+under `X 0x4000 Z 0xC000` is `(1, -1, 0)` in the hand; the port drew it at
+`(0, 1, 1)`, 2.2 world units away at stage 1's 0.9 scale. The camera-facing
+second slot of kinds 7-10/0x0E-0x12 was also drawn turned with the item; it is
+placed from the view matrices now.
+
+**Wrong turns.** The first cut of the port tests loaded the shipped `0x940100`
+in clip-less fixtures, and nothing was given: its `0x100` is a loop wait that
+fails with no clip, so `CivilianStepScript`'s loop walks straight past the
+block and its word is never loaded. The fixtures use `0x940000`; the harness
+checks the shipped word on real streams. The render test's first version
+expected two items given by one word and failed -- correctly: the first
+routine clears `0x800000` before the second looks, so one word gives one item
+(no shipped stream holds two). The same test's civilian then vanished, which
+was her removal cue `(-1, 0)` meeting the reset's `g_active_cam_path` of -1,
+not the change. And the gives harness first shot only each civilian's captors:
+two life-givers wait on `g_enemies_alive` after the rescue, so it clears the
+whole room now. Four Original-item civilians (stage 2 `0x8510`, `0x1158C`,
+`0x12098`, stage 4 `0x23F8`) still never give: their item is only in the second
+arm of an op 0x1F, whose selector `DAT_009A2226 == DX` at `0x0048BF79` is
+`[open]` (the port takes the first arm) -- not read further here.
+
+**Proof.** `test:port` "The item is given, and taken away": every new check
+fails on the tree before the change (life not paid, entry kept, no marker, no
+life for player 1, no banner). `test:render` "civilian held items": the life at
+`(1, -1, 0)` with its axes, the kind-4 record against the textbook product,
+the second slot in the same matrix, the hand showing the item on the give
+frame and not after -- six fail before. `tools/civ_gives.mjs`: every giver
+from her spawn step, both modes -- 18 of 26 give, the other eight are the four
+op-0x1F civilians twice. In the page (stage 1 `?block=6&step=1`, 0x3C38): she
+takes the box at f675, gives it at f710, lives 3 -> 4, LIFE UP on screen, hand
+empty from f711; on the old tree the box floats beside the hand and is still
+held at f795 with lives 3.
+
 ## 2026-09-29 -- the result card read: figures, the life bonus, the score
 
 Read in full for the end-of-stage port: `ResultCardInstall` (`FUN_00434EF0`),

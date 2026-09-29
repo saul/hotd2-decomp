@@ -445,12 +445,23 @@ class ExeTables:
     #:     +0x0C  s32       rotate X, BAMS
     #:     +0x10  s32       rotate Y
     #:     +0x14  s32       rotate Z
-    #:     +0x18  fn        per-frame callback, run after the draw
+    #:     +0x18  fn        per-frame callback, run after the draw --
+    #:                      `CivilianHeldItemGrantLife` or
+    #:                      `CivilianHeldItemGrantOriginalItem`
     #:     +0x1C  f32[6][4] per attach set: translate x/y/z, then scale
     #:
     #: The attach set is ``sub+0x82``, which `CivilianInit` picks from the
     #: character type -- so one record serves every skin that can hold it.
     CIVILIAN_ITEM_BYTES = 0x7C
+
+    #: `g_original_item_bank_sprite` -- ``{s16 texbank, s16 banner sprite}``
+    #: per Original Mode item id, which a held-item record's kind is:
+    #: `CivilianHeldItemGrantOriginalItem` hands the ``+2`` half to
+    #: `SpawnOriginalItemBanner` (``0x0048DE6A``). No bound in the exe; the 33
+    #: rows end at ``0x0056B178``, where `SpawnLifeGrantedMarker`'s ``-32.0``
+    #: begins (L6).
+    ORIGINAL_ITEM_BANK_SPRITE = 0x0056B0F4
+    ORIGINAL_ITEM_BANK_SPRITE_ROWS = 33
 
     #: `CivilianDrawHeldItems`' second-asset switch, by the record's kind.
     CIVILIAN_ITEM_EXTRA = {3: 0x10A5, 4: 0x10A7, 5: 0x10A9, 6: 0x10A3,
@@ -610,11 +621,18 @@ class ExeTables:
             sets.append([struct.unpack("<f", struct.pack("<i", w[7 + k * 4 + j]
                                                         ))[0]
                          for j in range(4)])
+        kind = w[2]
+        sprite = (self._u16(self.ORIGINAL_ITEM_BANK_SPRITE + kind * 4 + 2)
+                  if 0 <= kind < self.ORIGINAL_ITEM_BANK_SPRITE_ROWS else None)
         seen[va] = len(self._civ_items)
         self._civ_items.append({
-            "bone": w[0], "slot": w[1] & 0xFFFF, "kind": w[2],
-            "extra": self.CIVILIAN_ITEM_EXTRA.get(w[2]),
+            "bone": w[0], "slot": w[1] & 0xFFFF, "kind": kind,
+            "extra": self.CIVILIAN_ITEM_EXTRA.get(kind),
             "rot": [w[3], w[4], w[5]], "sets": sets,
+            # `rec+0x18`, what `CivilianDrawHeldItems` calls after the draw.
+            "callback": w[6] & 0xFFFFFFFF,
+            "banner": (None if sprite is None
+                       else sprite - 0x10000 if sprite & 0x8000 else sprite),
         })
         return seen[va]
 

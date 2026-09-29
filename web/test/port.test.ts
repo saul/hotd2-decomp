@@ -427,6 +427,7 @@ import {
   WATER_ARENA_ALT_SLOT, WATER_ARENA_PAIR_SLOT, WATER_ARENA_SLOT,
   WATER_CANAL_SLOT, WATER_DEATH_ALT_SLOT, WATER_DEATH_CAM_PATH,
   WATER_DEATH_SLOT, WATER_PHASE_PER_TICK, WATER_SURFACE_ALSO_DRAWS,
+  WATER_PAUSE_CAM_FRAME, WATER_PAUSE_CAM_PATH,
   PropCuePhase, PropContainerRaisesScriptFlag, PROP75_DROP_AT,
   PROP75_RIDE_LENGTH, PROP75_SCRIPT_FLAG, PROP75_TYPE, PROP75_PATH,
   PROP75_SLOT, SFX_PROP75_HIT, SFX_PROP75_RIDE, SFX_PROP75_RIDE_END,
@@ -2434,6 +2435,29 @@ console.log("\nclass 0x41 type 1, the canal water task:");
   G.g_script_flags[WaterSurfaceFlag.KillAllStage3] = 1;
   WaterSurfacesTick();
   check("...as flag 4 kills every one", G.g_water_surfaces.length === 0);
+  G.g_script_flags[WaterSurfaceFlag.KillAllStage3] = 0;
+  // `CMP [ECX*4 + 0x9a6110], 0x163` at `0x0046E50B`, `ECX` from `MOV EDX,
+  // [0x009c6f00]`: path 0x7E's pause is on the frame of the block
+  // `g_camera_index` names. Under the checkpoint's (1, 3) that is block 2's,
+  // always 0, so block 0 sitting on 0x163 does not hold the ripple.
+  {
+    const still = place(0x237c, 4, 11).task!;
+    const rippled = () => uvOf(still.slot)?.frames ?? 0;
+    G.g_active_cam_path = WATER_PAUSE_CAM_PATH;
+    G.g_cam_path_frame = WATER_PAUSE_CAM_FRAME;
+    let n0 = rippled();
+    WaterSurfacesTick();
+    check("path 0x7E at frame 0x163 holds the ripple for the frame",
+          G.g_camera_index === 0 && rippled() === n0, `${n0} -> ${rippled()}`);
+    CheckpointResetCamera();
+    G.g_cam_path_frame = WATER_PAUSE_CAM_FRAME;
+    n0 = rippled();
+    WaterSurfacesTick();
+    check("...but not under the checkpoint's (1, 3): the frame it reads is "
+          + "block 2's, which is 0 (`0x0046E50B`)",
+          G.g_camera_index === 2 && rippled() === n0 + 1,
+          `index ${G.g_camera_index} ${n0} -> ${rippled()}`);
+  }
   G.g_script_flags[WaterSurfaceFlag.KillAllStage3] = 0;
   G.g_script_flags[WaterSurfaceFlag.ArenaRipple] = 0;
   G.g_script_flags[WaterSurfaceFlag.SwapTiles] = 0;
@@ -10984,6 +11008,33 @@ console.log("\nclass 0x41 types 70-77, Original Mode's collectibles and neighbou
           slots(r).join());
   }
 
+  // `CMP [EAX*4 + 0x9a6110], 0x276` at `0x0047095A`, `EAX` from `MOV ECX,
+  // [0x009c6f00]`: the cue is the frame of the block `g_camera_index` names.
+  // Under the checkpoint's (1, 3) that is block 2's, always 0, so block 0's
+  // path reaching 0x276 does not throw it -- until a starter hands the index
+  // back to block 0.
+  {
+    const events = propScene(new Rng(1));
+    const rng = new Rng(73);
+    G.g_scene_index = 1;
+    G.g_script_flags[TYPE72_SCRIPT_FLAG] = 1;
+    const p = place(72, rng);
+    CheckpointResetCamera();
+    G.g_active_cam_path = TYPE72_CUE_CAM_PATH;
+    G.g_cam_path_frame = TYPE72_CUE_CAM_FRAME;
+    BreakablePropPoolUpdate(rng, events);
+    check("under (1, 3) type 72 keeps waiting though block 0's path is on its "
+          + "cue: the cue reads block 2's frame (`0x0047095A`)",
+          G.g_camera_index === 2 && alive(p)
+          && p.routinePhase === Type72Phase.Wait,
+          `index ${G.g_camera_index} phase ${p.routinePhase}`);
+    CameraResetForPathShot();
+    BreakablePropPoolUpdate(rng, events);
+    check("...and is thrown the frame a starter hands the index back to "
+          + "block 0", p.routinePhase === Type72Phase.Fall,
+          String(p.routinePhase));
+  }
+
   // --- type 74: three shots, the drop, the fall, flag 0x13 -----------------
   {
     const events = propScene(new Rng(1), GameMode.Arcade);
@@ -13309,6 +13360,29 @@ console.log("class 0x31, ThrowerStateGrabPlayer's sound cues:");
   check("...and the `_OFF` stopper fires on each of the 10 non-blinking frames",
         offs === 10, `${offs}`);
 
+}
+
+{
+  // `CMP [0x9a6458], EAX` at `0x0044F078`: the drop's cue takes camera block
+  // 2's path frame too, which is always 0, so a cue of 0 drops on the first
+  // frame wherever block 0's path is.
+  const rng = new Rng(62);
+  const events = new Events();
+  const heard: number[] = [];
+  events.on("sound.play", (e: { id: number }) => heard.push(e.id));
+  const z = thrower(ThrowerState.GrabPlayer, {
+    attackState: 7,
+    grab: {
+      offset: [0, -40, 0], cue_frame: 0, drop_frames: 10, hold_frames: 25,
+      player: 0,
+    },
+  });
+  z.pos = vec3(0, 60, 0);
+  G.g_cam_path_frame = 7;
+  for (let i = 0; i < 2; i++) GameUpdate(1 / 60, CAM_HOST, rng, events);
+  check("a zslman whose cue is 0 drops at once, on block 2's frame "
+        + "(`0x0044F078`)", heard.includes(0x2516a9),
+        heard.map((h) => h.toString(16)).join());
 }
 
 // **Which eye.** The engine has three camera points, each read by address:
@@ -18172,6 +18246,19 @@ console.log("\nclass 0x30's twelve entrance states — do the waits end?");
     run(z, 60);
     check("...but a camera already past it waits for ever, as the exe does",
           z.state === ZombieState.WaitCameraFrameThenBranch, String(z.state));
+  }
+  {
+    // `CMP [0x9a6458], EAX` at `0x004575F1`: the cue also takes camera block
+    // 2's path frame, by address, and nothing ever steps block 2's -- so a
+    // cue of 0 goes on the first frame whatever block 0's path is doing.
+    // No shipped spawn's cue is 0.
+    const z = spawn(ZombieState.WaitCameraFrameThenBranch,
+                    { motion: 700, cue: 0 });
+    G.g_cam_path_frame = 41;
+    run(z, 1);
+    check("...and a cue of 0 is met by block 2's frame, which is always 0 "
+          + "(`0x004575F1`)", z.state === ZombieState.AttackRun,
+          String(z.state));
   }
 
   // -- state 13: the same wait, but `>=` ------------------------------------
@@ -25260,6 +25347,33 @@ console.log("\nthe camera block's yaw (0x009A60D0) and its readers:");
           `${shot} ${t.vx.toFixed(3)},${t.vz.toFixed(3)}`);
   }
 
+  // `FILD [EAX*4 + 0x9a6110]` at `0x004460EA`, `EAX` from `MOV ECX,
+  // [0x009c6f00]`: a sub-type-0 owl's guard reads the frame of the block
+  // `g_camera_index` names. Under the checkpoint's (1, 3) that is block 2's,
+  // always 0, so it cannot be shot however far block 0's path has run --
+  // stage 2's is in the pool through such a stretch.
+  {
+    const shoot = (checkpoint: boolean) => {
+      const rng = new Rng(38);
+      scene(0, rng);
+      if (checkpoint) CheckpointResetCamera();
+      G.g_cam_path_frame = 700;
+      const o = ActorSpawn(0x9602, SpawnClass.FlyingEnemy, -1, "owl", {
+        pos: vec3(0, 0, 40), class43: { subtype: 0, member: 0 },
+      }, rng);
+      o.flags |= ActorFlag.Hit | ActorFlag.HitByPlayer0;
+      return { shot: OwlResolveShot(o, { dt: 1 / 60, rng, host: NULL_HOST }),
+               index: G.g_camera_index };
+    };
+    const open = shoot(false);
+    check("a sub-type-0 owl can be shot once block 0's path passes 682",
+          open.shot && open.index === 0, JSON.stringify(open));
+    const held = shoot(true);
+    check("...but not under the checkpoint's (1, 3), where the guard reads "
+          + "block 2's frame, always 0 (`0x004460EA`)",
+          !held.shot && held.index === 2, JSON.stringify(held));
+  }
+
   // `CarrierPropRoutine6` (`0x004415D3`): the bow strip faces the block.
   {
     const rng = new Rng(66);
@@ -25325,6 +25439,10 @@ console.log("\nthe camera block's yaw (0x009A60D0) and its readers:");
     check("`CameraBlocksReset` zeroes it with the other three",
           G.g_camera_block2_yaw_bams === 0
           && G.g_camera_block2_eye.x === 0 && G.g_camera_block2_target.x === 0);
+    G.g_cam_path_frame_2 = 5;
+    CameraBlocksReset();
+    check("...and block 2's path frame, `+0x110` (`0x004021EC`)",
+          G.g_cam_path_frame_2 === 0, String(G.g_cam_path_frame_2));
   }
 
   // Scene state (1, 3) **draws** camera block 2. Its installer,
@@ -28088,6 +28206,19 @@ console.log("\nclass 0x33 selector 1: the carrier, and the room it opens:");
     G.g_script_flags[0x80] = 1;
     tick(c, 1);
     check("...and goes when the script raises it", c.despawned);
+  }
+  {
+    // `CMP dword ptr [0x9a6458], EBX` at `0x004333DF`: the despawn also takes
+    // camera block 2's path frame, which is always 0 -- so a despawn frame
+    // of 0 leaves on the first frame whatever block 0's is. No shipped
+    // carrier's is 0 (650 or -1).
+    reset();
+    const c = makeCarrier({ ...STAGE5(), despawn_frame: 0 });
+    tick(c, 1);
+    check("a carrier whose despawn frame is 0 goes at once, on block 2's "
+          + "frame (`0x004333DF`)",
+          c.despawned && G.g_cam_path_frame === CAM_AT_SPAWN,
+          `despawned ${c.despawned} frame ${G.g_cam_path_frame}`);
   }
 
   // -- stage 5 block 2's room, end to end ---------------------------------

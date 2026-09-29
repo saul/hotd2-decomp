@@ -26202,6 +26202,61 @@ passed run with `--bundle`. `zombies.mjs` is not in the suite and stops on HEAD
 before it shoots (`walker.flags is not iterable`, line 165), so its edit is
 proved only as far as the import linking; left for its own task.
 
+## 2026-09-29 -- camera block 2's path frame is always 0, and who reads it
+
+**The brief was a tree behind.** It asked for the ~30 readers of block 0's eye
+and yaw that 581a0a6c had left, and for five class-0x41 comments claiming
+"`g_camera_index` is 0 in every shipped write". d248ef5d ("Which eye") had
+already moved every one of those readers onto `CameraBlockEye`/`CameraBlockYaw`
+and rewritten the comments; `git log` on `camera/view.ts` showed it before any
+edit. What it had not done is the path frame: it enumerated the eye and angle
+bytes and left `PropUpdateType72`'s indexed frame `[open]`. The brief's grep
+still finds two `render/` sites; both already pick the block by the index.
+
+**The reading.** Every reference into the four blocks (`0x009A6000..0x009A6690`)
+in `.text`, by the bytes of each displacement, decoded by majority vote over
+sliding starts. `+0x110` (by `0x009A6000`; `+0xD0` by `g_camera_blocks`) has
+nine indexed references: three readers -- `OwlUpdateAndResolveShot`
+`0x004460EA`, `WaterSurfaceUpdate` `0x0046E50B`, `PropUpdateType72`
+`0x0047095A`, each after `MOV reg, [0x009c6f00]` times 0x69 -- and six in the
+path actions, which take the block as `[ESP + 4]`. Block 2's word
+(`0x009A6458`) has seven readers, every one a `CMP` by address as the second
+arm of a cue, and no writer by address. The actions run as block `b` only from
+block `b`'s slot (`EvtRunQueuedActions` `PUSH 0; CALL [0x009a610c]`,
+`CameraActorTick`'s loop `PUSH EDI; CALL [ESI]` for 1..3); `CameraActorInit`
+fills every slot with `NoOpStub` (`0x00576CA4`, four entries read); every store
+naming a slot by address names slot 0's; the rest are actions writing their
+own block's (`EvtActionSetContinuation13`, `CamStartPathPlayback`, the
+retires). So block 2's frame is written only by zeroes: `g_cam_path_frame_2`
+is always 0 `[proved]`.
+
+**Wrong turn.** The first scan said nothing zeroes it, because the reset's
+store is `MOV [EAX + 0x38], EBX` with `EAX` = block + `0xD8` -- a
+register-relative form a displacement scan cannot see. It is L32 again, one
+addressing mode down. The pointer-forming instructions were then listed
+(`MOV reg, imm`, `LEA`) and each followed to what it is passed to: the
+`0x0049F40C` `REP STOSD` over all four blocks, and 181 matrix pointers, all
+into `MatrixStackSetTopFromArray`, `MatrixMultiply` or `MatrixPremultiplyTop`.
+
+**What moved.** `G.g_cam_path_frame_2`, zeroed by `CameraBlocksReset`;
+`CameraBlockPathFrame(i)` beside `CameraBlockEye`. The three indexed readers
+read the drawn block's frame. `CamCueHit` (states 18, 19, 23),
+`ThrowerStateGrabPlayer` and `ScriptedCarrierUpdate33` test both words, and
+their three `[diverges]` went. A headless probe on the real `Walker`
+(scratch, not committed) found type 72's cue (path 0x4E frame 0x276) and
+water's pause (0x7E, 0x163) arrive under index 0 in the shipped scripts, so
+neither moves; stage 2's sub-type-0 owl is in the pool through a (1, 3)
+stretch of path 60 (707..845), where the exe's guard reads 0 and the port's
+read 707+. No shipped either-block cue is 0 (every class-0x30/0x31/0x33
+placement read). `FUN_00433B00` is class 0x33 selector 5's update, named
+`ScriptedEffectAtCameraCue33`; its one stage-2 spawn (evt `0x12568`, cue 340)
+is not ported and is left as its own task.
+
+**Proof.** Seven new `port.test` checks, each driven through
+`CheckpointResetCamera` or `ResetGameGlobals` rather than a hand-set index;
+all seven fail with the `src/` change reversed and pass with it.
+`verify_port`: divergences 134 -> 131, uncited exports 81 held.
+
 ## 2026-09-29 -- class 0x10: a camera target on a carrier, and the step's missing identity
 
 The brief asked for two class-0x10 divergences: op 0x06 writing the target

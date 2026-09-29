@@ -34,6 +34,7 @@
 import { BAMS_TO_RAD_F64 } from "../../core/bams";
 import { GameMode } from "../game_mode";
 import { G } from "../globals";
+import { CameraBlockPathFrame } from "../camera/view";
 import { T } from "../tables";
 import type { Actor } from "../actor";
 import { SCRIPT_FLAG_CLEAR_PROPS } from "./lifetime";
@@ -212,7 +213,7 @@ export function PlaceWaterSurface(obj: Actor): WaterSurface | null {
  * }
  * if (resident(+0x40) && (+0x40 != 0x13A7 || flags[8])
  *     && (+0x40 != 0x13A0 || cam == 0x6E) && !flags[0x6A]
- *     && !(cam == 0x7E && frame == 0x163)
+ *     && !(cam == 0x7E && block[g_camera_index].frame == 0x163)
  *     && (mode != 2 || (flags[0xF1] && !flags[0xF2])))  walk the model
  * AssetDrawSlot(+0x40)
  * if (+0x40 == 0x13A7) AssetDrawSlot(0x13A5)
@@ -220,6 +221,11 @@ export function PlaceWaterSurface(obj: Actor): WaterSurface | null {
  * if (flags[9]) { 0x13A7 -> 0x13A9, or 0x13A0 -> 0x13A2 }
  * if (+0x40 == 0x13A2 && cam == 0x6E) +0x40 = 0x13A0
  * ```
+ *
+ * The pause's frame is the drawn block's -- `CMP [ECX*4 + 0x9a6110], 0x163`
+ * at `0x0046E50B`, `ECX` from `MOV EDX, [0x009c6f00]` times 0x69 -- so under
+ * scene state (1, 3) it is block 2's, which is always 0, and the tiles do not
+ * pause. Stage 3's path 0x7E reaches 0x163 under (2, 7), index 0.
  *
  * The last line reads the slot the swap above it may just have written, so
  * with flag 9 up on camera path 0x6E the death water swaps and swaps back in
@@ -265,7 +271,7 @@ export function WaterSurfaceUpdate(w: WaterSurface): boolean {
       && (w.slot !== WATER_DEATH_SLOT || cam === WATER_DEATH_CAM_PATH)
       && !flag(WaterSurfaceFlag.RippleOff)
       && !(cam === WATER_PAUSE_CAM_PATH
-           && G.g_cam_path_frame === WATER_PAUSE_CAM_FRAME)
+           && CameraBlockPathFrame(G.g_camera_index) === WATER_PAUSE_CAM_FRAME)
       && (G.g_GameMode !== GameMode.Training
           || (flag(WaterSurfaceFlag.TrainingRippleOn)
               && !flag(WaterSurfaceFlag.TrainingRippleOff)))) {

@@ -18,7 +18,7 @@
  * it gains from being a file is that the order is visible as one thing rather
  * than as two hundred lines in the middle of a class.
  */
-import { loadStage, releaseGeometry } from "../bundle";
+import { loadStage } from "../bundle";
 import { sourceOf } from "./bundles";
 import type { StageSlot } from "./bundles";
 import { StageScene } from "../render/stagescene";
@@ -33,6 +33,7 @@ import { PlayerTasksDrawWithoutAFrame } from "../game/player_shell";
 import { treeProjection } from "./projection/script";
 import { screenMessage } from "./projection/message";
 import { makeWalkerHost } from "./walker_host";
+import { LoadMeter } from "./load_meter";
 import type { Player } from "./main";
 import type { PlayerState } from "./urlstate";
 import type { ScriptJson } from "../bundle/stage";
@@ -58,6 +59,21 @@ async function slotFor(p: Player, stage: number,
   return have();
 }
 
+/**
+ * Until the page has painted what it has: a frame, then out of it. A promise
+ * settled in the frame's own callback would run on before the paint; the
+ * timeout is for a hidden tab, which has no frames and must not stall.
+ */
+function afterPaint(): Promise<void> {
+  return new Promise((resolve) => {
+    const t = setTimeout(resolve, 100);
+    requestAnimationFrame(() => setTimeout(() => {
+      clearTimeout(t);
+      resolve();
+    }, 0));
+  });
+}
+
 export async function loadStageInto(p: Player): Promise<void> {
   // **Which load owns the scope.** Two of the four callers are
   // `void p.loadStage()` in `ui/commands.ts` -- fire and forget -- so picking
@@ -81,7 +97,11 @@ export async function loadStageInto(p: Player): Promise<void> {
   }
   const entry = slot.entry;
 
-  p.setLoading(`loading ${entry.name}…`);
+  const meter = new LoadMeter(
+    `Loading stage ${entry.stage ?? p.state.stage}`
+      + (entry.name.endsWith("_original") ? " (Original Mode)" : ""),
+    (shown) => p.showLoading(shown));
+  meter.begin("download");
   p.playing = false;
 
   // Cleared before anything is torn down: `world.detach` and the layers'
@@ -110,18 +130,21 @@ export async function loadStageInto(p: Player): Promise<void> {
   p.cam.rails = null;
 
   const src = sourceOf(slot.from);
-  const bundle = await loadStage(src, entry);
+  const bundle = await loadStage(src, entry, (loaded, total) => meter.bytes(loaded, total));
   if (superseded()) return;
   p.paths = new CamPaths(bundle.cam);
   // The same curves, for the port's `CamEvalPath7`: every camera routine in
   // `game/camera/` evaluates them there, with no renderer attached.
   SetCameraPaths(p.paths);
-  const scene3d = await StageScene.load(bundle.geometryUrl, bundle.script);
-  // A bundle read out of the browser's own cache hands over a `blob:` URL, and
-  // a 58 MB blob nothing revokes is 58 MB the tab keeps until it closes. The
-  // loader is done with it by here; over the server it is a plain path and
-  // this is a no-op.
-  releaseGeometry(src, bundle.geometryUrl);
+  meter.begin("unpack");
+  const scene3d = await StageScene.load(bundle.geometry, bundle.script);
+  if (superseded()) return scene3d.dispose();
+  // What follows is one synchronous stretch, so its label has to be on the
+  // screen before it starts: a frame is let through first. And again before
+  // the shaders -- `endFrame` draws nothing while the loading screen is up,
+  // so that frame does not compile them itself.
+  meter.begin("build");
+  await afterPaint();
   if (superseded()) return scene3d.dispose();
   p.scene3d = scene3d;
   // Honour the per-mesh fog bit and compile the radial-fog variant.
@@ -304,7 +327,11 @@ export async function loadStageInto(p: Player): Promise<void> {
   // opened a step early and the script's own `se_play` of the same track,
   // which in the engine starts it from the top, found it already playing.
   // The shader programs, while the loading screen still covers the cost.
+  meter.begin("shaders");
+  await afterPaint();
+  if (superseded()) return;
   p.warmShaders();
+  meter.done();
   p.setLoading(null);
   // The bundle screen's picker shows a frame of each stage, and this is the
   // **fallback** ask: a few frames along, so the script has placed the camera

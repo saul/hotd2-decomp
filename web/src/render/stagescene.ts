@@ -63,8 +63,18 @@ export class StageScene {
   private waterOwned: ReadonlySet<number> = new Set();
   private waterDrawn: ReadonlySet<number> = new Set();
 
-  static async load(url: string, script: ScriptJson): Promise<StageScene> {
-    const gltf = await new GLTFLoader().loadAsync(url);
+  /**
+   * The stage, parsed from its glTF's bytes -- which the loader has already
+   * downloaded, counting them, alongside the script.
+   *
+   * The parse cannot say how far it has got: it is one long run of promise
+   * callbacks that holds the main thread until the scene is built, and the
+   * two thousand images it decodes off the thread all report in the last
+   * tenth of it. Nothing on the page repaints meanwhile, which is why the
+   * loading bar's movement then is a compositor animation.
+   */
+  static async load(geometry: ArrayBuffer, script: ScriptJson): Promise<StageScene> {
+    const gltf = await new GLTFLoader().parseAsync(geometry, "");
     // Before anything clones a node: every layer that draws a stage model
     // copies it, and the copies must carry the engine's draw state and the
     // primitive marks the translucent sort groups by. See `draw_order.ts`.

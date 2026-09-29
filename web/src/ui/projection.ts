@@ -365,6 +365,13 @@ export interface SoundProjection {
 export interface LoadingProjection {
   text: string;
   failed: boolean;
+  /**
+   * A stage load's progress, 0 to 1 over all of its steps, and the step's own
+   * line -- "Downloading · 12.4 of 51.2 MB". Absent for the other things the
+   * overlay says: the bundle's index, a build, a failure.
+   */
+  progress?: number;
+  detail?: string;
 }
 
 /**

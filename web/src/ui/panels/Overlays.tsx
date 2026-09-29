@@ -13,6 +13,7 @@
  */
 import { useDispatch } from "../store_context";
 import { useSlice } from "../useSlice";
+import { LoadBar } from "./LoadBar";
 
 /**
  * The start screen, and the pause screen: one element, `#paused-overlay`.
@@ -112,6 +113,7 @@ export function SoundButton() {
  * browser's own answer to the question, with nothing to keep in step.
  */
 export function RotateHint() {
+  const loading = useSlice((p) => p?.loading);
   return (
     <div id="rotate-hint" aria-hidden="true">
       <svg viewBox="0 0 48 48" width="56" height="56">
@@ -123,6 +125,14 @@ export function RotateHint() {
               strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
       </svg>
       <span>Turn your phone sideways</span>
+      {/* The stage loads meanwhile: say so, rather than hide it. */}
+      {loading && !loading.failed && loading.progress !== undefined && (
+        <div className="rotate-load">
+          <span className="rotate-load-title">{loading.text}</span>
+          <LoadBar progress={loading.progress} detail={loading.detail} />
+        </div>
+      )}
+      {loading === null && <span className="rotate-ready">Ready when you are</span>}
     </div>
   );
 }

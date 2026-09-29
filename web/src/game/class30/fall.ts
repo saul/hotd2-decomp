@@ -19,7 +19,7 @@ import { ZombieState } from "./states";
 /** `0xBE2740DA` and `0xBDA740DA` — the ordinary fall and body condition 4's. */
 const FALL_GRAVITY = -0.16333;
 const FALL_GRAVITY_LIGHT = -0.08167;
-/** The clip the landing plays, from frame 15, when the actor is still alive. */
+/** The clip the landing plays, from play cursor 15 (`PUSH 0xF`, `0x00454C9F`), when the actor is still alive. */
 const LAND_MOTION = 0x3ba;
 const LAND_FRAME = 0xf;
 /** Body condition 4 bounces instead, at a quarter of the impact speed. */

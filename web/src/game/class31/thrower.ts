@@ -454,11 +454,9 @@ export function ThrowerStateThrow(obj: ThrowerActor, host: GameHost,
       return;
     }
     const cue = ThrowerThrowCue(obj, ThrowHandsOf(obj)[obj.attack]);
-    ActorSetMotionBlended(obj, cue.motion, 0, THROW_FADE);
-    // `FUN_004119A0`'s third argument is the play **cursor**, not an authored
-    // frame — `param_1[2] = param_3` writes `obj+0x19C` outright — and the
-    // port's wrapper takes an authored frame, so the cursor is written here.
-    obj.playTicks = cue.start;
+    // `FUN_004119A0`'s third argument is the play **cursor** --
+    // `param_1[2] = param_3` writes `obj+0x19C` outright.
+    ActorSetMotionBlended(obj, cue.motion, cue.start, THROW_FADE);
     obj.sub = ThrowSub.Winding;
     // ...and falls straight through, as `INC word ptr [ESI + 0x1312]` at
     // 0x0044FC7C does into the release test at 0x0044FC83.

@@ -363,8 +363,8 @@ export function SkeletonModelSetMotion(obj: Actor, skel: SkeletonModel,
 /**
  * `[port-only]` — `ActorSetMotionBlended`'s (`FUN_004119A0`) body for an
  * actor that carries the model block. `start` is **the engine's own
- * argument, a play cursor** (60 Hz), not the authored frame the function's
- * other callers pass: it lands in `M[0x08]` as it is and in `M[0x18]` halved.
+ * argument, a play cursor** (60 Hz), as every caller passes it: it lands in
+ * `M[0x08]` as it is and in `M[0x18]` halved.
  *
  * ```
  * M[0x08]=start; M[0x18]=start/2; M[0x28]=M[0]-1; M[0x20]=motion

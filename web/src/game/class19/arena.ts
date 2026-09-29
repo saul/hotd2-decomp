@@ -369,9 +369,9 @@ export function Boss4AdvanceArenaWaypoint(obj: Actor, b: Blk): void {
       return;
     case 14:
       Seat(obj, seat);
-      // `PUSH 0; PUSH 0xA; PUSH 0x6B` -- a start **cursor** of 10, which is
-      // authored frame 5 in the port's unit, and no fade.
-      ActorSetMotionBlended(obj, Boss4Clip.Idle, 5, 0);
+      // `PUSH 0; PUSH 0xA; PUSH 0x6B` at `0x00492E42` -- a start **cursor**
+      // of 10, and no fade.
+      ActorSetMotionBlended(obj, Boss4Clip.Idle, 10, 0);
       Boss4Enter(b, Boss4State.FaceCamera);
       TailA(obj, b);
       obj.flags &= ~(ActorFlag.NoCameraTrack | ActorFlag.PoseFrozen);

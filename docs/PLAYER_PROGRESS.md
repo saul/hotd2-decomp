@@ -6515,6 +6515,62 @@ and 0x3A, which the engine makes before the model is built and the port builds
 in `ActorSpawn`. It was described as Boss Mode; it is `g_GameMode == 1`, and
 with `g_original_character` as its one writer leaves it, the identity.
 
+## `ActorSetMotionBlended`'s start is a play cursor, at every caller
+
+`ActorSetMotionBlended` (`FUN_004119A0`) writes its third argument into the
+play cursor (`MOV [ECX+0x8], EAX` at `0x004119AD`, `obj+0x19C`) and only its
+half, truncated toward zero, into the authored frame. The port's took an
+authored frame and doubled it, so every nonzero start that reached it
+unconverted began twice as far into its clip. `[proved]` for the routine and
+for every caller: a byte scan finds 367 call sites (352 direct -- Ghidra's
+xref list stops at 332 -- and 15 through `SetCurrentActorMotionBlended` and
+`ZombieSetMotionIfIdle`), and each start `PUSH`, walked back to its source,
+is a value in cursor units: 288 literal zeros; literals 5, 8, 10, 12, 15, 17,
+25, 26, 30, 35 and 61; `rand() % 5`, `rand() % 10` and
+`rand() % g_motion_play_length[m]`; a script's start word; the drifted
+clip's `g_motion_play_length - 1`; class 0x23's table words; a counter
+difference (class 0x14); the arc script's stage starts.
+
+The routine takes the cursor as it stands now, and `ZombieSetMotionIfIdle`'s
+spreads are cursors (`"clip"` is `rand() % g_motion_play_length`, not a
+doubled authored frame). **Changes behaviour**: every class-0x30 captor-script
+start (the bin captor's burst, 967 from 33, used to begin at 66, past its
+flag-34 cue at 63, so the flag never came up and the stage-1 mouse it removes
+stayed; 28 nonzero script starts ship), every class-0x30 random spread
+(`rand() % 5/10/play_length`: the walks, idles, retreats, landings), the fall's
+landing (15, not 30) and body condition 4's special death (25, not 50),
+class 0x31's stand-and-decide and wait-for-cue starts, and class 0x23's walk
+and after-strike clips (175/141, 28/23 and 60/49, not doubled past their own
+lengths). **Unchanged, the compensation removed**: the frog, class 0x21's
+freed clip, class 0x25's `op 3`, Strength's arena idle (10), class 0x10's
+`CivilianApplyMotionPose` and the thrower's throw had each halved the word or
+written the cursor after the call. Class 0x14 and class 0x45 already kept the
+engine's cursor. Class 0x25's `op 3` passes `-1` in eighteen shipped
+commands, which is held through the fade and plays the clip from 0; the
+authored frame of a negative cursor truncates toward zero, as the routine's
+`SAR` does, instead of indexing off the front of the clip.
+
+**Found on the way**: the drift tail -- blend back to the script's clip when
+`obj+0x1B4 != obj+0x1320` -- is two tails in the exe, and the port ran one
+for all eight states. The four list-stepping states (35, 36, 37, 38) blend
+hard from `g_motion_play_length[drifted] - 1` on their last loop and spend a
+loop on the soft blend; the four walking states (34, 40, 41, and the lost
+pause) only ever blend soft from 0 and read no loop count -- the pause's
+count is its timer, which the shared tail spent.
+
+Checked by `test:port`: "the bin captor's burst starts on the cursor its
+entry names" (clip 967 at cursor 33, flag 34 on cursor 63), "the script
+states' drift tails", and class 0x23's walk at cursor 175 in the JUDGMENT
+block -- six assertions, all failing on the base. In the page
+(`?stage=1&block=6&step=1&op=0&drive=1&seed=1`, the bridge captor shot so
+the civilian takes the rescue path): the burst's first frame was cursor 66,
+running to 83 in 18 frames with flag 34 never raised; it is cursor 33 now,
+and flag 34 comes up 30 frames later on cursor 63. Playthroughs (seed 1,
+`--continue`): stages 1, 2 and 3 end as they did (the end block; GAME OVER
+at block 16; GAME OVER at block 2) at different frames, stage 4 now reaches
+its end block where it ran out of credits at block 6 -- the fights diverge,
+nothing in stage 4 was fixed -- and stages 5 and 6 hang where they hung.
+
 ## Every opcode, and what the player does with it
 
 > The status column is a copy. The original lives on `Walker.OPS` in

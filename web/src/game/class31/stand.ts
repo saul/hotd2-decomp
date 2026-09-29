@@ -16,7 +16,7 @@ import { TurnActorAwayFromPointTestArrival } from "../actor_turn";
 import { ThrowerTryClaimAttackSlot } from "../combat/permits";
 import type { GameHost } from "../host";
 import { QueryGroundSurfaceAt } from "../coli";
-import { MotionOf } from "../tables";
+import { MotionOf, MotionPlayLength } from "../tables";
 import { G } from "../globals";
 import type { Vec3 } from "../vec";
 import { SetCurrentActorMotionBlended } from "../class30/motion_cue";
@@ -107,13 +107,11 @@ export function ThrowerStateStandAndDecide(obj: ThrowerActor,
         obj.target.z = obj.pos.z;
       } else {
         // `rand() % g_motion_play_length[motion]` at `0x0044B211`: on the
-        // ground the start frame is drawn from the clip's own length, which is
-        // what keeps a pair of them out of lockstep.
-        //
-        // [port-only] in the clip's authored frames rather than the engine's
-        // cursor ticks, which is the unit every caller of
-        // `ActorSetMotionBlended` in this port passes — see `FrameToTicks`.
-        start = rng.int(Math.max(1, MotionOf(obj, motion ?? -1)?.frames ?? 1));
+        // ground the start is drawn from the clip's own play length, which is
+        // what keeps a pair of them out of lockstep. A play cursor, as
+        // `ActorSetMotionBlended` takes every start -- and so is the
+        // `rand() % 10` above (`0x0044B1AB`), which the other arms pass.
+        start = rng.int(Math.max(1, MotionPlayLength(obj, motion ?? -1)));
       }
     } else {
       motion = (obj.charType === CHAR_ZSLMAN

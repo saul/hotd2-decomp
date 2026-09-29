@@ -278,7 +278,7 @@ import { ActorSnapToGroundHeight, ZombiePushOutOfWorldAndActors }
   from "../src/game/class30/ground";
 import { ActorArcBeginFalling } from "../src/game/class30/emerge";
 import { ActorPointIsAhead, ZombieScriptEnded, ZombieStateHoldForCameraCue,
-         ZombieStateTargetMotionScript }
+         ZombieStateTargetMotionScript, ZombieStateWalkToPoint }
   from "../src/game/class30/target";
 import { ActorModelScale, ApplyRootMotion } from "../src/game/root_motion";
 import { ZOMBIE_SPRINTS, ZombieRunMotion, ZombieWaitMotion }
@@ -595,6 +595,8 @@ import { SetCameraPaths } from "../src/game/tables";
 import { Class22SubActorAt } from "../src/game/class22/records";
 import { Class22Relative } from "../src/game/class22/state";
 import { Class23State } from "../src/game/class23/state";
+import { CLASS23_BLEND_WALK, Class23BlendStart }
+  from "../src/game/class23/records";
 import {
   Boss3BodyState, Boss3HeadState, Boss3Phase, Boss3Routine, Boss3Subtype,
   Boss3Variant,
@@ -19177,6 +19179,98 @@ console.log("\nthe bin captor's walk hands state 35 its attack list, once:");
         && z.state === ZombieState.AttackRun, path);
 }
 
+// **`ActorSetMotionBlended`'s start is a play cursor**, and a script's start
+// word is one. `FUN_004119A0` writes its third argument into the cursor as it
+// stands (`MOV [ECX+0x8], EAX` at `0x004119AD`) and only its half into the
+// authored frame (`CDQ / SUB / SAR` into `[ECX+0x18]`); state 36's sub 0 pushes
+// the entry's second word straight in (`ActorSetMotionBlended(track, e[0],
+// e[1], 0)`, `0x0045B273`). The bin captor's one entry is the real one from
+// stage 1's placement 73: clip 967 -- 43 frames, play length 84 -- from cursor
+// 33, raising `g_script_flags[34]` on cursor 63. The port doubled the word, so
+// the burst began at 66, past its own cue, and flag 34 never came up (its one
+// reader, `MouseBranchTriggerUpdate` at `0x0043F743`, despawns a mouse).
+// Driven through `GameUpdate` from `ResetGameGlobals`.
+console.log("\nthe bin captor's burst starts on the cursor its entry names:");
+{
+  const rng = new Rng(5);
+  const events = scene(0, rng);
+  SetGameTables({ ...CHARS, types: { ...CHARS.types,
+    "1": { ...TYPE, motions: { ...TYPE.motions,
+                               "967": motion(43, 0, 84) } } } } as
+                unknown as CharactersJson);
+  const z = spawnZombie(0x3d34, 1, "bin captor");
+  z.visible = true;
+  z.hp = 100;
+  z.pos = vec3(0, 0, 0);
+  z.attackState = ZombieState.WalkPastPoint;
+  z.script = {
+    target: { state: 36, head: {},
+              entries: [{ motion: 967, frame: 33, loops: 1, mode: 63,
+                          flag: 34 }] },
+    attack: { state: 40, head: { point: [0, 0, -6], motion: 12, frame: 0 },
+              entries: [] },
+  };
+  z.state = ZombieState.TargetScriptWithFlag;
+  z.sub = 0;
+  GameUpdate(1 / 60, NULL_HOST, rng, events);
+  const first = MotionPlayFrame(z);
+  check("state 36 starts clip 967 at play cursor 33, the entry's word",
+        z.motion === 967 && z.playTicks === 33 && first === 33,
+        `motion ${z.motion} counter ${z.playTicks} cursor ${first}`);
+  let raisedOn = -1;
+  for (let i = 0; i < 200 && z.state === ZombieState.TargetScriptWithFlag;
+       i++) {
+    GameUpdate(1 / 60, NULL_HOST, rng, events);
+    if (raisedOn < 0 && G.g_script_flags[34]) raisedOn = MotionPlayFrame(z);
+  }
+  check("...and raises g_script_flags[34] on its cue, cursor 63, before the "
+        + "clip runs out", G.g_script_flags[34] === 1 && raisedOn === 63,
+        `flag ${G.g_script_flags[34]} on cursor ${raisedOn}`);
+}
+
+// **The two drift tails.** A captor whose clip has drifted off its script's
+// (`obj+0x1B4 != obj+0x1320`) is pulled back by its state's tail, and there
+// are two. The list-stepping states' (`0x0045B01C` in state 35) blend hard on
+// their last loop, from `g_motion_play_length[obj+0x1B4] - 1` -- the drifted
+// clip's length, a cursor: `MOVSX ECX, word ptr [ECX*2 + 0x4E07D0]` /
+// `DEC ECX` / `PUSH ECX` -- and soft otherwise, spending a loop. The walking
+// states' (`0x0045BF96` in state 41) only ever fade back from 0, and read no
+// loop count. Clip 923 stands in as the drifted one: 41 frames, play length
+// 79, so the hard start is 78 -- where the port passed the last authored
+// frame, 40, and doubled it to 80.
+console.log("\nthe script states' drift tails:");
+{
+  const rng = new Rng(5);
+  scene(0, rng);
+  const z = spawnZombie(0x3d38, 1, "drifted captor");
+  const drift = (state: ZombieState, loops: number) => {
+    z.state = state;
+    z.sub = 2;
+    z.zom.targetCue = -1;
+    z.zom.scriptMotion = 100;
+    z.zom.targetLoops = loops;
+    z.motion = 923;
+    z.playTicks = 5;
+    z.target = vec3(0, 0, -500);
+  };
+  drift(ZombieState.TargetMotionScript, 1);
+  ZombieStateTargetMotionScript(z, rng);
+  check("state 35's last loop blends back from g_motion_play_length[923] - 1 "
+        + "= cursor 78, and spends nothing",
+        z.motion === 100 && z.playTicks === 78 && z.zom.targetLoops === 1,
+        `motion ${z.motion} counter ${z.playTicks} loops ${z.zom.targetLoops}`);
+  drift(ZombieState.WalkToPoint, 1);
+  ZombieStateWalkToPoint(z);
+  check("state 41's tail fades back from cursor 0 even on a last loop",
+        z.motion === 100 && z.playTicks === 0 && z.zom.targetLoops === 1,
+        `motion ${z.motion} counter ${z.playTicks} loops ${z.zom.targetLoops}`);
+  drift(ZombieState.WalkToPoint, 3);
+  ZombieStateWalkToPoint(z);
+  check("...and spends no loop count doing it",
+        z.motion === 100 && z.playTicks === 0 && z.zom.targetLoops === 3,
+        `motion ${z.motion} counter ${z.playTicks} loops ${z.zom.targetLoops}`);
+}
+
 // State 42, the camera-cue hold (`ZombieStateHoldForCameraCue`,
 // `FUN_0045BFD0`). A captor that has finished its script and would turn on the
 // player is instead **staged for a shot**: it runs at the player and holds at
@@ -33664,6 +33758,36 @@ console.log("\nclasses 0x22/0x23: JUDGMENT, the flier and the walker:");
   while (!G.g_script_flags[0] && n5++ < 1200) tick(1);
   check("variant 2's death raises g_script_flags[0], and not 3",
         G.g_script_flags[0] === 1 && !G.g_script_flags[3], `after ${n5}`);
+
+  // **The walker's walk starts on the cursor its table names.**
+  // `Class23FightBesideCompanion` sub 5: `MOVSX ECX, word ptr [EAX +
+  // 0x570410]` / `PUSH ECX` into `ActorSetMotionBlended` at `0x00490681` --
+  // `g_class23_blend_start_frames`, 175 for hit-point stage 0, and a play
+  // cursor like every start that routine takes (`MOV [ECX+0x8], EAX` at
+  // `0x004119AD`). The port doubled it to 350, past the walk's own play length
+  // of 304, and the walk opened 45 ticks in. Clip 915 (0x393) with its real
+  // shape: 153 frames, play length 304.
+  WALKER.motions["915"] = motion(153, 0, 304);
+  spawnFlier(1, 0);
+  G.g_active_cam_path = 0x2f;
+  G.g_cam_path_frame = 0x100;
+  tick(1);
+  const w23 = ActorByAt(WALKER_AT);
+  if (w23?.cls !== SpawnClass.JudgmentCompanion) {
+    check("the walker is spawned for the walk-start test", false, `${w23?.cls}`);
+  } else {
+    w23.state = Class23State.Fight;
+    w23.sub = 5;
+    G.g_active_player = 0;
+    tick(1);
+    const want = Class23BlendStart(CLASS23_BLEND_WALK, w23.companion.hpStage);
+    check("class 0x23's walk back in starts at play cursor 175, "
+          + "g_class23_blend_start_frames' word as it stands",
+          want === 175 && w23.motion === 915 && w23.playTicks === want
+          && MotionPlayFrame(w23) === want,
+          `stage ${w23.companion.hpStage} want ${want} motion ${w23.motion} `
+          + `counter ${w23.playTicks} cursor ${MotionPlayFrame(w23)}`);
+  }
 }
 
 // -- the shot test the engine's way: registration, the sphere, the fork -----

@@ -1198,3 +1198,21 @@ engine's one word, sweep the image for every store to that offset** (`search
 _instructions` with the operand, and the byte pattern -- L32) and make each
 store write every field. It is L63's cousin: there a port encoding leaked
 into a reader's constant; here it silently kept a writer's old meaning.
+
+**L80 -- A caller that converts the exe's value before handing it to a port
+primitive is the primitive's divergence, documented in the wrong place.**
+`ActorSetMotionBlended` (`FUN_004119A0`) writes its start into the play
+cursor as it stands; the port's took an authored frame and doubled it. Six
+callers were fixed against that, one at a time: the frog, class 0x21, class
+0x25 and Strength's arena halved the exe's word on the way in, and class 0x10
+and the thrower called with 0 and wrote the cursor afterwards -- each with a
+comment saying the port's primitive takes an authored frame. Every caller
+that passed the exe's word unconverted stayed wrong, and they were the ones
+nobody was looking at: every class-0x30 script start, every `rand() % n`
+spread, class 0x23's table words. Stage 1's bin captor began its burst past
+its own flag cue. **When a fix has to convert an argument for a port routine,
+fix the routine and sweep its callers instead** -- enumerate every call site
+in the image (a byte scan for the `E8`, not the xref list: L35) and walk each
+argument `PUSH` back to its source, and grep the port for the compensations
+(`/ 2` at the call, a write straight after it) so they come out in the same
+commit. A comment that explains a workaround at a call site is the tell.

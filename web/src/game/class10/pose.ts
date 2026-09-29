@@ -122,11 +122,10 @@ function Rebased(m: Mat, r: [number, number, number]):
  *
  * **The start is a play cursor.** The engine's `ActorSetMotionBlended`
  * writes its third argument straight into `model+0x08` (`param_1[2] =
- * param_3` at `0x004119A0`, and `param_1[6] = param_3 / 2` beside it); the
- * port's takes an authored frame and doubles it. So the blend is started at
- * 0 and the cursor written after it, as the engine has it. The old
- * clip-change here doubled op 0x01's operand, and so started 21 of the
- * shipped clips twice as far in as the game does.
+ * param_3` at `0x004119A0`, and `param_1[6] = param_3 / 2` beside it), and
+ * the port's takes it the same way. The old clip-change here doubled op
+ * 0x01's operand, and so started 21 of the shipped clips twice as far in as
+ * the game does.
  */
 export function CivilianApplyMotionPose(obj: Actor, oldWord: number,
                                         start: number, motion: number,
@@ -183,12 +182,10 @@ export function CivilianApplyMotionPose(obj: Actor, oldWord: number,
     }
     blend = sub.motionBlend;
   }
-  ActorSetMotionBlended(obj, motion, 0, blend);
+  ActorSetMotionBlended(obj, motion, start, blend);
   // [port-only] The primitive refuses a clip the bundle did not bake, and
-  // leaves the outgoing one playing; its cursor is not this start's.
+  // leaves the outgoing one playing; its fade is not this blend's.
   if (obj.motion !== motion) return;
-  // `param_1[2] = param_3`: the start is a cursor -- see the note above.
-  obj.playTicks = start;
 
   const fade = obj.fadeFrom;
   if (!fade) return;

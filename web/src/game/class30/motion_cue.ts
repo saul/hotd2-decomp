@@ -13,10 +13,20 @@
  * zero, as this did, makes a crowd move in lockstep — two zombies given the
  * same order at the same moment take exactly the same steps at exactly the
  * same time, which is the one thing a crowd of shambling corpses never does.
+ *
+ * **The draw is a play cursor**, because it goes straight into
+ * `ActorSetMotionBlended`'s start (`0x004547B5`, the third argument passed
+ * through). "`clip_length`" is `g_motion_play_length[motion]` -- `MOVSX ECX,
+ * word ptr [EDI*2 + 0x4E07D0]` / `CDQ` / `IDIV ECX` / `PUSH EDX` at
+ * `0x00457A07` (`ZombieStateApproach`), `0x0045550C` (`ZombieStateAttackRun`)
+ * and every other `"clip"` caller -- so the start is any cursor from 0 to one
+ * short of the play length, odd ones included. This drew an authored frame
+ * and doubled it, which reached only even cursors, and the spreads of 5 and
+ * 10 twice as far in as the exe's.
  */
 import type { Rng } from "../../core/rng";
 import type { Actor } from "../actor";
-import { FrameToTicks, MotionOf } from "../tables";
+import { MotionOf, MotionPlayLength } from "../tables";
 import { MotionFade } from "./states";
 import { SkeletonModelSetMotion, SkeletonModelSetMotionBlended }
   from "../skeleton";
@@ -41,8 +51,8 @@ export function ZombieSetMotionIfIdle(obj: Actor, motion: number | undefined,
     ActorStartFade(obj, obj.motion, obj.playTicks, fade);
   }
   obj.motion = motion;
-  const frames = Math.max(1, spread === "clip" ? m.frames : spread);
-  obj.playTicks = FrameToTicks(rng.int(frames), m);
+  obj.playTicks = rng.int(spread === "clip"
+    ? MotionPlayLength(obj, motion) : spread);
   obj.rootFrame = -1;
 }
 
@@ -123,23 +133,50 @@ function ActorEndOneShot(obj: Actor, fade: number): void {
 }
 
 /**
- * `ActorSetMotionBlended` — `FUN_004119A0`. Start a clip at a frame, over a
- * cross-fade.
+ * `ActorSetMotionBlended` — `FUN_004119A0`. Start a clip at a play cursor,
+ * over a cross-fade.
  *
  * The engine's own primitive, and the one the whole captor-script family calls
  * — a script entry is `{motion, frame, loops, mode}`, and its frame is a
  * literal, not a random spread. `ZombieSetMotionIfIdle` above is the *other*
  * caller shape: the one that draws the start frame, because a crowd must not
  * move in lockstep.
+ *
+ * **`start` is a play cursor, as the engine takes it:**
+ *
+ * ```
+ * 004119a4  MOV EAX, [ESP+0xC]        ; start
+ * 004119ad  MOV [ECX+0x8], EAX        ; track[2] = start      -- obj+0x19C
+ * 004119b2  CDQ / SUB EAX, EDX / SAR EAX, 1
+ * 004119bb  MOV [ECX+0x18], EAX       ; track[6] = start / 2  -- authored
+ * ```
+ *
+ * and `MotionStartOnTrack` (`FUN_004119F0`) picks the pose it loads by the
+ * start's parity and reads the authored frame from `track[6]`. Nothing in the
+ * routine converts, and no caller does either: of its 367 call sites (352
+ * direct -- Ghidra's xref list stops at 332 -- 9 through
+ * `SetCurrentActorMotionBlended` and 6 through `ZombieSetMotionIfIdle`, a byte
+ * scan for `E8` with each start `PUSH` walked back to its source) every one
+ * pushes a value in that unit -- a literal (288 of them 0; 5, 8, 10, 12, 15,
+ * 17, 25, 26, 30, 35 and 61 elsewhere), `rand() % 5`, `rand() % 10`,
+ * `rand() % g_motion_play_length[m]`, a script's start word,
+ * `g_motion_play_length[m] - 1`, a table word, or a cursor another routine
+ * computed. This took an authored frame and doubled it for as long as it
+ * existed, so every nonzero start in class 0x30's scripts landed twice as far
+ * in -- the bin captor's burst (967 from 33) began at 66, past its own
+ * flag-34 cue at 63 -- and six callers had worked round it: four halved the
+ * exe's word on the way in, two called with 0 and wrote the cursor after.
+ *
+ * Not clamped: class 0x25's `op 3` passes `-1` in eighteen shipped commands,
+ * which holds the cursor at -1 for the fade and so plays the clip from 0 when
+ * it lets go (`track[0] = track[2] + 1`).
  */
 export function ActorSetMotionBlended(obj: Actor, motion: number,
-                                      frame: number, fade: number): void {
-  // The model block's arm takes the engine's own argument -- a **play
-  // cursor**, not the authored frame this function's other callers pass --
-  // because that block keeps the engine's cursor and the rest of the port
-  // does not. See `SkeletonModelSetMotionBlended`.
+                                      start: number, fade: number): void {
+  // The model block's arm: that block keeps the engine's cursor, counter and
+  // fade bytes. See `SkeletonModelSetMotionBlended`.
   if (obj.skel) {
-    SkeletonModelSetMotionBlended(obj, obj.skel, motion, frame, fade);
+    SkeletonModelSetMotionBlended(obj, obj.skel, motion, start, fade);
     return;
   }
   const m = MotionOf(obj, motion);
@@ -155,7 +192,7 @@ export function ActorSetMotionBlended(obj: Actor, motion: number,
     }
   }
   obj.motion = motion;
-  obj.playTicks = FrameToTicks(Math.max(0, frame), m);
+  obj.playTicks = start;                         // `track[2] = start`
   obj.rootFrame = -1;
 }
 
@@ -255,14 +292,14 @@ export function ActorSetOneShotBlended(obj: Actor, motion: number,
  * again. `L11` — do not move a test across a function boundary — with the
  * whole function being the wrong one.
  *
- * `frame` is a start frame inside the clip, not a blend length, and it is in
- * the port's authored-frame unit like every other caller of
- * {@link ActorSetMotionBlended}.
+ * `start` is a start inside the clip, not a blend length, and it is a play
+ * cursor, as {@link ActorSetMotionBlended} takes it: the thunk passes its
+ * third argument through untouched (`0x0044D24A`).
  */
 export function SetCurrentActorMotionBlended(obj: Actor, motion: number,
-                                             frame: number,
+                                             start: number,
                                              fade: number): void {
-  ActorSetMotionBlended(obj, motion, frame, fade);
+  ActorSetMotionBlended(obj, motion, start, fade);
 }
 
 /**

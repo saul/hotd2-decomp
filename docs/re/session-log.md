@@ -26048,3 +26048,43 @@ offer test now returns false first (`GUN_CALIBRATION_OFFERED`, declared
 `[diverges]`); the exe's test stays below it, and `OptionsCalibrationEntry`
 is unchanged. New check: a light-gun player's cursor steps over the row both
 ways and nothing draws it; it fails with the flag true.
+
+## 2026-09-29 -- the result card read: figures, the life bonus, the score
+
+Read in full for the end-of-stage port: `ResultCardInstall` (`FUN_00434EF0`),
+`ResultCardTally` (`FUN_00435930`), the figure task the card allocates
+(`ResultCardFigureInit` / `Update` / `DrawNode`, `FUN_004356A0` /
+`FUN_00435760` / `FUN_004357F0`, named here), `ResultCardDrawScore` and
+`ResultCardDrawAccuracy` (`FUN_004362E0`, `FUN_00436620`), the two accuracy
+opcodes (`0x2B`, `0x2F`) and both rescue writers. The whole sequence, per
+stage, is [`docs/re/stage-end.md`](stage-end.md); twelve globals and seven
+functions went into the TSVs.
+
+**What was believed and was wrong.** Three claims in the record did not
+survive the reading. (1) "Sub 1 hands over to the score count-up once the
+dwell is at or below `0x78`" -- `spawns.md` and the class-0x61 module both
+said it. Sub 2, which that test reaches, is the **life bonus**: both players'
+lives go up by `g_result_life_bonus[scene][min(rescues, 7)]`, capped, once, on
+the card's frame 302. There is no score count-up on the card at all; the
+count that climbs is the *rescues*, one every twenty frames from frame 31.
+(2) "Class 0x62 loads sound `0x7C`" -- `0x7C` is a pol **file** index
+(`result.bin`), through `PolFileQueueLoad` (`FUN_0041D650`, job kind 3, the
+call evt opcode `0x52` makes); `0x16A` is `scr_result`. The class is a loader,
+and it is `0x61` that walks the rescue list. (3) The decompile of
+`ResultCardInstall` ends at `PlaySoundId` in sub 0 and after one glyph in the
+draw (L72, L35) -- the figures, the whole card draw and the countdown are all
+past those two calls; the decompiles of both digit routines stop after their
+first digit the same way.
+
+**How the life is shown.** Only by the first rescued figure: at camera frame
+`0x104` it changes to motion `0x180` and holds `common.bin[199]` (slot
+`0x10C3`, which is also `civilians.items[0]`) up on bone 5 for cursor
+`0x1E..0x57`. `g_rescued_char_types` (`0x009C8EC0`, s16 `[scene*10 + n]`) is
+where both rescue writers record the rescued civilian's character type, and it
+is what makes the figures *the civilians you saved* rather than a fixed cast.
+
+**Found on the way.** The port's `G.g_nPlayerFired` is used as the shot count,
+but `0x009A5C78` is a flag (`= 1` at the pull) and the count is
+`g_player_shot_count` (`0x009A5C84`), guarded by `g_accuracy_stats_suppressed`
+(`0x009A5C48`, evt opcode `0x2F`). Opcodes `0x2B` and `0x2F` were unported, so
+the accuracy bonus the card's score includes was never paid.

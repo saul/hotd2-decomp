@@ -53,6 +53,7 @@
  */
 
 import { Box3, Group, Object3D, Ray, Vector3 } from "three";
+import { clone as cloneSkinned } from "three/examples/jsm/utils/SkeletonUtils.js";
 import type {
   CharacterPlacement, CharacterType, CharactersJson,
 } from "../bundle";
@@ -1131,9 +1132,17 @@ export class CharacterLayer implements System {
    * materials shared -- beside it in the scene, with its pose group and its
    * bones found again by the names `build` matched them by. Hidden until the
    * frame's update shows it.
+   *
+   * **Cloned with its skins rebound.** The vertex-blended parts -- the waist,
+   * `SkeletonDrawWalk`'s `DrawCharacterPart` -- are glTF skins
+   * (`hod2lib/charbuild.ts`), and `Object3D.clone` copies a `SkinnedMesh`'s
+   * skeleton by reference: every figure's waist stayed bound to the hidden
+   * template's bones and was drawn where they stand, at the template's own
+   * place, so each figure had a hole from its chest to its belt.
+   * `SkeletonUtils.clone` points each copy at the copy's own bones.
    */
   private cloneTemplate(t: Pending, at: number): Pending {
-    const root = t.root.clone(true);
+    const root = cloneSkinned(t.root);
     root.name = `${t.root.name}_figure${at.toString(16)}`;
     root.visible = false;
     t.root.parent?.add(root);

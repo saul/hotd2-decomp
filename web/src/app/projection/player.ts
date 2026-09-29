@@ -57,6 +57,8 @@ export interface PlayerView {
   readonly anisotropyLimit: number;
   /** See {@link UiProjection.pillarbox}. */
   readonly pillarbox: boolean;
+  /** See {@link UiProjection.boxed}. */
+  readonly boxed: boolean;
   /** See {@link UiProjection.pixelRatio}. */
   readonly pixelRatio: number;
   readonly pixelRatioOptions: readonly number[];
@@ -134,6 +136,7 @@ export function buildProjection(v: PlayerView,
     filterMode: v.filterMode,
     anisotropyLimit: v.anisotropyLimit,
     pillarbox: v.pillarbox,
+    boxed: v.boxed,
     pixelRatio: v.pixelRatio,
     pixelRatioOptions: v.pixelRatioOptions,
     // A slice nothing is showing is not built. Its *selection* still counts,

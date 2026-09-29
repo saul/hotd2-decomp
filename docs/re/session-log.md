@@ -25715,3 +25715,14 @@ called `advance(0)`, which redraws the last tick's pose and runs no
 drawn (L69, again). One more frame draws them. The reticle check then waited
 1200 frames for the firing gate and never saw it: stage 1's opening holds
 the gate down for longer than that, and START skips it.
+
+## 2026-09-29 -- the options screen: the profile kept
+
+**Keeping it.** `app/profile_store.ts` is `ProfileSave`'s and `ProfileLoad`'s
+file half: one `localStorage` key, read once at construction into
+`ProfileBoot`, written on `profile.save`. Nothing saved is the exe's failure
+arm plus the user's free play. The harness now reloads after EXIT and reads the
+boot's profile back: three continues and five lives, not free play. A reload
+under `?drive=1` never takes the loading overlay down by itself -- the drive
+owes it a frame -- so the check waits for the player's construction, which is
+where the boot runs, not for the overlay.

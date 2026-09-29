@@ -22,19 +22,19 @@ is in `tools/verify_all.py`, beside the command that runs it.
 | `game/` | 106906 | 348 | engine |
 | `hod2lib/` | 19482 | 35 | engine |
 | `render/` | 15185 | 55 | render |
-| `app/` | 12218 | 41 | app |
+| `app/` | 12285 | 42 | app |
 | `script/` | 4471 | 25 | engine |
 | `ui/` | 3657 | 26 | ui |
 | `core/` | 3523 | 13 | engine |
 | `bundle/` | 2805 | 11 | engine |
 | `audio/` | 973 | 2 | render |
 | `hud/` | 526 | 1 | ui |
-| **total** | **169746** | **557** | |
+| **total** | **169813** | **558** | |
 
 The largest files, which is where the pressure to split next is:
 
 * `game/globals.ts` — 3108
-* `app/main.ts` — 3054
+* `app/main.ts` — 3064
 * `game/actor.ts` — 2722
 * `hod2lib/bundle.ts` — 2369
 * `hod2lib/exetab.ts` — 2347
@@ -130,7 +130,7 @@ nothing exits 3 and is never counted as green.
 | `bgm_loop` | that the page's music is the engine's stream -- the buffer the script's own track reaches Web Audio as is one period of the file from its first sample to end of file, looped, sample for sample -- and that it is audible | bundle |
 | `keys` | that the page's keys do what the `?` list says when pressed -- test:ui holds the list to the handlers' source, this reads back what a press did -- and that a click on a control over the game hands Space and Enter (START) back to the game rather than leaving them with the button | bundle |
 | `continue` | that the last life lost with credits left puts CONTINUE? and its digit where the exe draws them, holds the script at its wait, and that START -- pressed on the corner button, the one START a phone has -- spends a credit and puts the player back in play | bundle |
-| `options` | that the menu's Options reaches the game's options screen in the real page, that its title and red highlighted row are on the HUD canvas, that the page's arrows and Enter drive the list -- lives and continues changed, the hidden rows stepped over, a held arrow running the sound test -- and that EXIT saves the profile in the browser and starts a game with five lives, four credits and the chosen crosshair on the reticle | bundle |
+| `options` | that the menu's Options reaches the game's options screen in the real page, that its title and red highlighted row are on the HUD canvas, that the page's arrows and Enter drive the list -- lives and continues changed, the hidden rows stepped over, a held arrow running the sound test -- and that EXIT saves the profile in the browser and starts a game with five lives, four credits and the chosen crosshair on the reticle, and that a reload boots what was saved in place of the free-play default | bundle |
 | `animals` | that the frog, the owl and the fish are placed from a real bundle and leave their opening state -- none of the three is a skinned enemy the character layer can build, and two have no character type at all | bundle |
 | `horde` | that each of the five class-0x40 hordes is built from a real bundle, walks in, dives and bites, and that shooting every member gives both counters back and lets the walker past the room's wait_enemies_alive -- the members are runtime children with no descriptor, so only the placer's own spawn can bring them into play | bundle |
 | `dives` | that a class-0x43 dive reaches the camera it is aimed at, strikes and comes round again -- the only check that drives a class against the stage's own `cam_play` rather than an eye the harness made up, which is what every other owl check does and why none of them could see a run-in parked five units under the eye | bundle |

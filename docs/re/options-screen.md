@@ -437,3 +437,11 @@ calibration copied into the aim records `[proved]`.
   layer the background at 200. The idle dimmer's slot `0x93E` is exported and
   drawn by `render/screen_idle_dim.ts`; how it layers against the 2D quads is
   `[open]`.
+* **Keeping it.** `app/profile_store.ts` is the file half of `ProfileSave`
+  and `ProfileLoad`: the port's `ProfileBlock` as JSON under one
+  `localStorage` key, read once as the player is built (`ProfileBoot`) and
+  written on `profile.save` -- the options' EXIT and the Original Mode game
+  over, the two savers the port has. The exe's byte sum and version are its
+  test that the four files read back whole; here a store that will not parse
+  is a profile with nothing saved. Storage blocked, the page plays as with
+  nothing saved and an EXIT does not persist.

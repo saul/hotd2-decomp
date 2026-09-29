@@ -129,6 +129,8 @@ import {
   PadBit, PlayerBlockCapture, PlayerTasksDrawWithoutAFrame,
 } from "../game/player_shell";
 import { RequestAppState } from "../game/app_state";
+import { ProfileBoot } from "../game/profile";
+import { readProfile, writeProfile } from "./profile_store";
 import { OptionsPad } from "../game/options/list";
 import { SetBoss4Tables, SetGameOverTables, SetGameTables, SetOptionsTables }
   from "../game/tables";
@@ -811,6 +813,14 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     this.events.on("sound.play", (d) => { this.lastSoundNote = this.bgm.play(d.id); });
     // `SoundStopAll` (`FUN_0041D350`) from a screen's arm -- the options'.
     this.events.on("sound.stopAll", () => this.bgm.stopAll());
+    // The profile: read once, before any game starts -- `ProfileLoad` and the
+    // two lines of the boot's reset that touch it (`ProfileBoot`) -- and kept
+    // whenever the game saves it: the options' EXIT, the Original Mode game
+    // over. A second player's page plays the host's options and keeps none.
+    ProfileBoot(readProfile());
+    this.events.on("profile.save", (d) => {
+      if (!this.asReplica) writeProfile(d.profile);
+    });
 
     // -- class 0x10, the civilians ---------------------------------------
     // Op 0x1D is `EvtOpPlayDialogue2D`, the same call evt op 0x2D makes, so a

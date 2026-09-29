@@ -678,7 +678,8 @@ it end to end against an empty server.
 
 **A reload is not a new visit.** Vite reloads the page for every edit, so the
 tab keeps what a reload should bring back: the sidebar, its tab and its folds
-in `localStorage` (`ui/persist.ts`), the stage and address in the URL, and
+in `localStorage` (`ui/persist.ts`), the game's own profile -- the options --
+beside them (`app/profile_store.ts`, what the exe's save files were), the stage and address in the URL, and
 whether the game was started and running in `sessionStorage`
 (`Player.resumeMark`) -- so a saved file comes back to the game running
 where it was, not to the start screen.

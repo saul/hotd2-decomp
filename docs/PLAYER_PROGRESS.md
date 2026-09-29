@@ -3394,6 +3394,11 @@ the reticle in play is the game's crosshair sprite, the one the Sight Graphic
 picks. `web/tools/options_page.mjs` drives it end to end. Not on a touch
 screen: the list needs a pad's directions, and the menu hides the item there.
 
+**The profile is kept** in the browser (`app/profile_store.ts`), where the
+exe writes four disguised files: saved at EXIT and at the Original Mode game
+over, read once when the page starts. A saved setting overrides the
+free-play default; a browser with nothing saved gets free play.
+
 **The continue screen is drawn, and the script waits under it** (2026-09-28,
 `NEW-BUGS-2`). It used to be state with nothing on screen: the countdown ran
 and the reticle stayed up over a scene that played on, script and all. Now,

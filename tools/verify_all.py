@@ -220,7 +220,8 @@ CHECKS: list[Check] = [
           "and continues changed, the hidden rows stepped over, a held arrow "
           "running the sound test -- and that EXIT saves the profile in the "
           "browser and starts a game with five lives, four credits and the "
-          "chosen crosshair on the reticle",
+          "chosen crosshair on the reticle, and that a reload boots what "
+          "was saved in place of the free-play default",
           NEEDS_BUNDLE, LANE_BROWSER),
     Check("animals", "web", ["npm", "run", "--silent", "animals"],
           "that the frog, the owl and the fish are placed from a real bundle "

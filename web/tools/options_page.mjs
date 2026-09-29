@@ -9,8 +9,9 @@
  * down to Continue and right three times (free play to 3), a click on the
  * Sight Graphic row's right, then up to EXIT and Enter. EXIT hands back to the
  * title, which the page is by starting the stage again; the new game is read
- * back out of `G` -- five lives, four credits spent to three, no free play.
- * Every claim is read
+ * back out of `G` -- five lives, four credits spent to three, no free play --
+ * the profile the page saved out of `localStorage`, and, after a reload, the
+ * saved settings booted in place of free play. Every claim is read
  * back out of the page, never echoed from this script (L44, L47): `G`, the HUD
  * canvas's own pixels, the DOM. Screenshots go to `web/shots/`.
  *
@@ -31,9 +32,15 @@ const { page, close, state: faults } = await openPlayer({
   url: `?stage=${STAGE}&drive=1&seed=1`,
   size: "1280x960", headless: flag("headless"), quiet: !flag("loud"),
   // A fresh profile every run: whatever an earlier run saved is not this
-  // one's starting point.
+  // one's starting point. Once a tab, so the reload at the end keeps what
+  // this run saved.
   init: () => {
-    try { localStorage.removeItem("hod2.profile"); } catch { /* */ }
+    try {
+      if (!sessionStorage.getItem("options_page.fresh")) {
+        localStorage.removeItem("hod2.profile");
+        sessionStorage.setItem("options_page.fresh", "1");
+      }
+    } catch { /* */ }
   },
 });
 
@@ -193,6 +200,13 @@ try {
   await page.screenshot({ path: join(SHOTS, "options-exit.png") });
   await page.keyboard.press("Enter");
   await advance(3);
+  const saved = await page.evaluate(() => {
+    try { return JSON.parse(localStorage.getItem("hod2.profile") ?? "null"); }
+    catch { return null; }
+  });
+  check(saved?.profile?.lives === 4 && saved?.profile?.credits === 3,
+        "EXIT saves the profile where the browser keeps it",
+        JSON.stringify(saved?.profile ?? null).slice(0, 120));
 
   s = await untilInPlay();
   // The reticle is up once the stage's script opens the firing gate; START
@@ -224,6 +238,19 @@ try {
   check(!!reticle && reticle.cls.includes("sprite") && reticle.bg.includes("url("),
         "the reticle is the game's crosshair sprite -- the Sight Graphic chosen",
         JSON.stringify(reticle));
+  // The boot reads it back: a reload is a new page, and what EXIT saved
+  // overrides the free-play default a profile with nothing saved gets.
+  // The boot is the player's construction, ahead of any stage: the drive
+  // seam appearing is the player having been built.
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.waitForFunction(() => !!globalThis.__hotd2Drive,
+                             null, { timeout: 60_000 });
+  s = await state();
+  check(s.optCredits === 3 && s.optLives === 4 && s.startLives === 5
+        && s.sight[0] === 1,
+        "a reload boots the saved profile: three continues, not free play; "
+        + "five lives; crosshair 1",
+        `credits ${s.optCredits} life ${s.optLives} sight ${s.sight}`);
   check(faults.faults === 0, "no console error or throw on the way",
         faults.faultLines.join(" | "));
 } catch (e) {

@@ -2292,6 +2292,9 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
 
   /** Draw, then publish. Every frame, whether or not it owed a tick. */
   endFrame(): void {
+    // Nothing is seen under the loading screen, and a draw there is shaders
+    // compiled in a frame the stage load let through to paint its label.
+    if (this.loading) return this.publishUi();
     if (this.perfMeter.enabled) return this.endFrameMeasured();
     this.drawOrder.beginFrame();
     this.lighting.beforeRender();
@@ -2877,6 +2880,12 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
    */
   setLoading(text: string | null): void {
     this.loading = text === null ? null : { text, failed: false };
+    this.wake();
+  }
+
+  /** A stage load's progress: `LoadMeter`'s, a new object each time it moves. */
+  showLoading(shown: LoadingProjection): void {
+    this.loading = shown;
     this.wake();
   }
 

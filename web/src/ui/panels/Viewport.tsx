@@ -67,6 +67,7 @@ import type { ReactNode, RefObject } from "react";
 import { useSlice } from "../useSlice";
 import type { LoadingProjection } from "../projection";
 import { PeerCrosshair } from "./Net";
+import { LoadBar } from "./LoadBar";
 
 /**
  * The nodes `app/` is handed, as the refs that fill them in.
@@ -195,10 +196,12 @@ export function LoadingOverlay() {
   if (!shown) return null;
   return (
     <div id="loading">
-      {!shown.failed && <div className="spinner" />}
+      {!shown.failed && shown.progress === undefined && <div className="spinner" />}
       <p id="loading-text" className={shown.failed ? "err" : undefined}>
         {shown.text}
       </p>
+      {!shown.failed && shown.progress !== undefined
+        && <LoadBar progress={shown.progress} detail={shown.detail} />}
     </div>
   );
 }

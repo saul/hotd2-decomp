@@ -164,11 +164,15 @@ palettes, and the third is a copy of one of them.
 the channel moved: `common` and `scr_blood_green` are alpha-weighted
 `(0, 119, 0)`, and `scr_blood_red` is `(119, 0, 0)`.
 
-So the shipped default in `common.bin` is **green**, and the red bank is the
-override the game's own **Blood Color** option loads over the same slots — the
+So the shipped default in `common.bin` is **green**, and the red bank carries
+the same slots in red. The options screen has a **Blood Color** row -- the
 string is at `0x005971C4`, beside `"  Red"` and `"Green"` at `0x0056974C` and
-`0x00569752`, and the two filenames are ordinary entries in the `tex/` name
-table at `0x004D1410`.
+`0x00569752` -- but in this build the row is never shown and its setting
+(`0x009C9F22`) is read by nothing but the screen's own copy
+(`docs/re/options-screen.md`); what loads the red bank, if anything, is
+`[open]`. The two filenames are ordinary entries in the `tex/` name table at
+`0x004D1410`. (This said the option loaded the red bank, until the options
+screen was read.)
 
 `G_ENABLE` in `Hod2.ini` is **not** this. `FUN_0049E4A0` reads it out of
 `[Flush Setting]` alongside `FLUSH_POWER`, `FLUSH_FRAME` and `SCREEN_LIGHT`, so

@@ -48,6 +48,17 @@ from `CONTINUE_SCREEN_SPRITES` in `web/src/game/hud_sprites.ts` (see
 and a bundle built before it reads fine and draws no continue screen until it
 is re-exported, which the builder hash says.
 
+`script.json` carries an `options` block -- the options screen's `.rdata`, read
+by `ExeTables.optionsTables` in both halves (`OptionsJson`): the eleven rows
+through `g_options_rows`' pointers, the difficulty, digit and blood labels,
+"Free Play" and "No.", the 96-entry glyph table from `0x0056AF10`, the
+crosshair sprites, the two sound tests' lists and Sight Speed's four sprites
+-- and `screen_sprites` holds every sprite the screen can draw: the
+immediates in `OPTIONS_SCREEN_SPRITES` (`web/src/game/options_data.ts`) and
+the ids those tables name. An optional field, so the schema digest moved and
+no format bump: a bundle built before it is refused by the digest and rebuilt,
+which is one click. `tools/verify_options.py` holds the block to the image.
+
 ## Three versions, and only one of them moves on its own
 
 **1. `format` — `BUNDLE_FORMAT` in `web/src/hod2lib/bundle.ts`, `SUPPORTED_FORMAT` in

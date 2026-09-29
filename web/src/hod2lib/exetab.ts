@@ -1548,6 +1548,77 @@ export class ExeTables {
     });
   }
 
+  /**
+   * The options screen's `.rdata` (app state `0x0C`, `OptionsRunPhase`,
+   * `0x004869E0`), for `script.json`'s `options` block. Every field is read
+   * by the routine named beside it; `docs/re/options-screen.md` has the
+   * readings.
+   *
+   * * `rows` -- `g_options_rows`, `0x005696E0`: eleven `{row*, handler}`
+   *   pairs, each row `{s8 col, s8 row, pad[2], char *label}`
+   *   (`OptionsDrawListTask`). Read through the pointers, as the draw does;
+   *   the record at `0x00569680` ("OPTIONS") is named by nothing and is left
+   *   out (L6).
+   * * `difficulty_labels` -- `0x00569758 + v*10`, five (`OptionsRowDifficulty`).
+   * * `digits` -- `0x00569738 + d*2`, "0".."9" (`OptionsRowLife` reads it
+   *   from `+2`, so its "1".."5"; `OptionsRowContinue` from `+0`).
+   * * `blood_labels` -- `0x0056974C + v*6`, two (`OptionsRowBloodColor`).
+   * * `free_play` -- `0x005971F8`, and `number` -- `0x00597204`, "No."
+   *   (`OptionsRowContinue`, the two sound-test rows).
+   * * `glyphs` -- `g_options_glyphs`, `0x0056AF10`, s16[96]: the sprite of
+   *   each character `0x20`..`0x7F` (`OptionsDrawText`'s
+   *   `[char*2 + 0x56AED0]`; below `0x20` that address is the sound-test
+   *   table's tail, which no character reaches).
+   * * `crosshair_sprites` -- `g_crosshair_sprites`, `0x00579F58`, s16[2][4]:
+   *   by player, by the Sight Graphic setting (`OptionsRowSightGraphic`,
+   *   `HudDrawCrosshair`).
+   * * `se_test` / `se_test_packs` -- `g_options_se_test`, `0x00569798`,
+   *   751 `{u32 id, s32 pack}` (`OptionsRowSoundTestSe`: 0..`0x2EE`).
+   * * `music_test` -- `g_options_music_test`, `0x005970C4`, u32[19]
+   *   (`OptionsRowSoundTestMusic`: 0..`0x12`).
+   * * `sight_speed_sprites` -- `0x0056AFE0`, s16[4]: each player's knob,
+   *   then each player's slider (`OptionsSightSpeedAdjust`).
+   */
+  optionsTables(): Record<string, unknown> {
+    const s8 = (va: number) => {
+      const r = this.v2r(va);
+      if (r === null) return 0;
+      const v = this.data[r];
+      return v >= 0x80 ? v - 0x100 : v;
+    };
+    const s16 = (va: number) => {
+      const v = this.ru16(va) ?? 0;
+      return v >= 0x8000 ? v - 0x10000 : v;
+    };
+    const rows = Array.from({ length: 11 }, (_u, i) => {
+      const p = this.ru32(0x005696e0 + i * 8) ?? 0;
+      return { col: s8(p), row: s8(p + 1),
+               label: this.cstr(this.ru32(p + 4) ?? 0) ?? "" };
+    });
+    return {
+      rows,
+      difficulty_labels: Array.from({ length: 5 },
+        (_u, i) => this.cstr(0x00569758 + i * 10) ?? ""),
+      digits: Array.from({ length: 10 },
+        (_u, i) => this.cstr(0x00569738 + i * 2) ?? ""),
+      blood_labels: Array.from({ length: 2 },
+        (_u, i) => this.cstr(0x0056974c + i * 6) ?? ""),
+      free_play: this.cstr(0x005971f8) ?? "",
+      number: this.cstr(0x00597204) ?? "",
+      glyphs: Array.from({ length: 96 }, (_u, i) => s16(0x0056af10 + i * 2)),
+      crosshair_sprites: Array.from({ length: 8 },
+        (_u, i) => s16(0x00579f58 + i * 2)),
+      se_test: Array.from({ length: 0x2ef },
+        (_u, i) => this.ru32(0x00569798 + i * 8) ?? 0),
+      se_test_packs: Array.from({ length: 0x2ef },
+        (_u, i) => this.ri32(0x0056979c + i * 8) ?? -1),
+      music_test: Array.from({ length: 0x13 },
+        (_u, i) => this.ru32(0x005970c4 + i * 4) ?? 0),
+      sight_speed_sprites: Array.from({ length: 4 },
+        (_u, i) => s16(0x0056afe0 + i * 2)),
+    };
+  }
+
   soundName(soundId: number): string | null {
     return this.soundRecords().get(soundId) ?? null;
   }

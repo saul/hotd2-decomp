@@ -86,6 +86,8 @@ export interface PlayerView {
   readonly transport: TransportProjection;
   /** Which player this page's gun is: 0 alone or hosting, 1 as player 2. */
   readonly localPlayer: number;
+  /** See {@link UiProjection.crosshairImage}. */
+  readonly crosshairImage: string | null;
   /** See {@link UiProjection.net}. */
   readonly netView: NetProjection | null;
   /** See {@link UiProjection.netPeer}. */
@@ -120,6 +122,7 @@ export function buildProjection(v: PlayerView,
     // `HudDrawCrosshair`'s decision, off `G`. Off before the first player
     // turn, which is also what the engine's BSS says.
     crosshair: crosshairProjection(v.localPlayer),
+    crosshairImage: v.crosshairImage,
     toggles: v.toggles,
     transport: v.transport,
     sound: v.sound,

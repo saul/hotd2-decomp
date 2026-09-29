@@ -53,3 +53,13 @@ export function Boss3PlayStageSound(n: number, events?: Events): void {
 export function PlaySoundId(id: number, events?: Events): void {
   if (id) events?.emit("sound.play", { id });
 }
+
+/**
+ * `SoundStopAll` (`FUN_0041D350`) -- the music, the voice and every SE
+ * channel, and `g_current_bgm_id` back to 0. The port raises
+ * `sound.stopAll` and the host's mixer does it. `[port-only]` as a function,
+ * as {@link PlaySoundId} is.
+ */
+export function SoundStopAll(events?: Events): void {
+  events?.emit("sound.stopAll", {});
+}

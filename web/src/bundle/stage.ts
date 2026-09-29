@@ -83,6 +83,12 @@ export interface ScriptJson {
    */
   game_over?: GameOverJson;
   /**
+   * The options screen's `.rdata` -- see `ExeTables.optionsTables` in the
+   * exporter. Absent in a bundle written before it, which draws the screen
+   * with no text.
+   */
+  options?: OptionsJson;
+  /**
    * Class 0x19's `.rdata` -- the stage-4 boss's seven tables. See
    * `ExeTables.boss4Tables` in the exporter for where each is read from.
    */
@@ -149,6 +155,47 @@ export interface Boss4TablesJson {
   head_slot_by_bar: number[];
   /** `g_boss4_approach_picks`, `0x005709B4`: `[rank][9]`. */
   approach_picks: number[][];
+}
+
+/** One row of the options list: `g_options_rows[i]`'s record. */
+export interface OptionsRowJson {
+  /** `+0x00` s8: the column, in 16-pixel characters. */
+  col: number;
+  /** `+0x01` s8: the line, in 24-pixel lines. */
+  row: number;
+  /** `+0x04`: the label. */
+  label: string;
+}
+
+/**
+ * `script.json`'s `options` block -- the options screen's `.rdata`. See
+ * `ExeTables.optionsTables` in the exporter for where each is read from.
+ */
+export interface OptionsJson {
+  /** `0x005696E0`: the eleven rows, through their pointers. */
+  rows: OptionsRowJson[];
+  /** `0x00569758 + v*10`: "Very Easy" .. "Very Hard". */
+  difficulty_labels: string[];
+  /** `0x00569738 + d*2`: "0".."9". */
+  digits: string[];
+  /** `0x0056974C + v*6`: "  Red", "Green". */
+  blood_labels: string[];
+  /** `0x005971F8`: "Free Play". */
+  free_play: string;
+  /** `0x00597204`: "No.". */
+  number: string;
+  /** `0x0056AF10`, s16[96]: the glyph sprite of each character 0x20..0x7F. */
+  glyphs: number[];
+  /** `0x00579F58`, s16[8]: the crosshair sprite, `[setting + player*4]`. */
+  crosshair_sprites: number[];
+  /** `0x00569798`, stride 8: the SE test's 751 sound ids. */
+  se_test: number[];
+  /** `0x0056979C`, stride 8: the pack each loads first, -1 for none. */
+  se_test_packs: number[];
+  /** `0x005970C4`, u32[19]: the music test's sound ids. */
+  music_test: number[];
+  /** `0x0056AFE0`, s16[4]: the Sight Speed knobs, then its two sliders. */
+  sight_speed_sprites: number[];
 }
 
 /** `script.json`'s `game_over` block. */

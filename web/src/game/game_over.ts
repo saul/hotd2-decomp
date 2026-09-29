@@ -70,6 +70,7 @@ import { PlayerSetState, PlayerTasksCreate, PlayerTasksRun,
   from "./player_shell";
 import { PlayerState } from "./player_state";
 import { PlayerBodiesCreate } from "./player_body";
+import { ProfileSaveAndApply } from "./profile";
 import { GameOverRouteMapArm, GameOverRouteMapWait } from "./route_map";
 import { ScreenSpriteDraw } from "./screen_sprite";
 import { GAME_OVER_CAM_PATH } from "./player_body_data";
@@ -100,6 +101,8 @@ export const GAME_OVER_SKIP_BITS = 0x2 | 0x20000;
 const FLY_OVER_FRAMES = 200;
 /** The fly-over can be cut once the timer is under this. */
 const FLY_OVER_SKIP_BELOW = 0xa5;
+/** `CMP EAX, 0xC6` at `0x00460B43`: the fly-over frame Original Mode saves on. */
+const GAME_OVER_SAVE_FRAME = 0xc6;
 /** Phase 2's timer: 180 frames of logo. */
 const LOGO_FRAMES = 0xb4;
 /** The logo can be cut once the timer is under this. */
@@ -417,8 +420,14 @@ export function GameOverRunPhase(f: PlayerFrame, events?: Events): void {
       GameOverBodiesUndrawn();
       GameOverCameraFlyTick();
       PlayerTasksRun(f);
-      // Original Mode copies the carried items out on frame 0xC6 and saves
-      // them (`FUN_004011F0`); the port keeps no save.
+      // Original Mode copies the items it has counted into the profile on
+      // frame 0xC6 and saves it (`ProfileSaveAndApply`, `FUN_004011F0`):
+      // `REP MOVSD` from `0x009C90C0` to `0x009C9F3D` at `0x00460B64`.
+      if (G.g_game_over_timer === GAME_OVER_SAVE_FRAME
+          && G.g_GameMode === GameMode.Original) {
+        G.g_profile_original_items = [...G.g_original_items_taken];
+        ProfileSaveAndApply(events);
+      }
       if (G.g_game_over_timer < FLY_OVER_SKIP_BELOW
           && (G.g_pad_state & GAME_OVER_SKIP_BITS) !== 0) {
         G.g_game_over_timer = 1;

@@ -34,6 +34,7 @@ import { ShotTestListReset } from "./combat/shot_test";
 import { ColiPublishDynamicList } from "./coli";
 import { CommitAppState } from "./app_state";
 import { GameOverRunPhase } from "./game_over";
+import { OptionsRunPhase } from "./options";
 import { PlayerTasksRun } from "./player_shell";
 import { HudDrawShutterState } from "./hud_shutter";
 import { AutoReloadEmptyGuns } from "./player_gun";
@@ -694,6 +695,8 @@ export function GameUpdate(dt: number, host: GameHost, rng: Rng,
   // `SetupSceneProjection`'s `ScreenSpriteQueueReset` (`FUN_0041CF00`): the
   // layered queue starts every frame empty, whatever screen is up.
   ScreenSpriteQueueReset();
+  // `[port-only]` -- the idle dimmer's draw is this frame's or nothing.
+  G.g_screen_idle_dim = 0;
   // The input read, `FUN_0040E4D0` -> `InputReadFrame`: the frame counter the
   // credit line's blink runs on, and the credit tiers.
   InputReadFrameCounters(SecondsToTicks(dt));
@@ -707,17 +710,22 @@ export function GameUpdate(dt: number, host: GameHost, rng: Rng,
   // same property for a different reason: `ActorAlloc` appends, and the walk
   // that would step a new task has already gone past the end.
   // `AppStateDispatch` (`FUN_004608A0`): only app state 6 runs the scene.
-  // The game-over screen, 7, runs its own phases and task lists
-  // (`game/game_over.ts`) and the stage's actors stand still; any other
-  // screen (3, after the game over) runs nothing the port has -- not even the
-  // dispatch's last call, `CreditBlinkTick`, since the port has no screen 3
-  // to draw its PRESS START on.
+  // The game-over screen, 7, and the options screen, 0x0C, run their own
+  // phases and task lists (`game/game_over.ts`, `game/options/`) and the
+  // stage's actors stand still; any other screen (3, after the game over;
+  // 4, the title) runs nothing the port has -- not even the dispatch's last
+  // call, `CreditBlinkTick`, since the port has no screen 3 to draw its
+  // PRESS START on and no title.
   if (G.g_app_state !== AppState.InPlay) {
     // The letterbox is one of the scene list's tasks (`HudShutterTaskCreate`,
     // `0x00460733`), so a screen that does not walk that list draws no bars.
     G.g_hud_shutter_bars = [];
     if (G.g_app_state === AppState.GameOver) {
       GameOverRunPhase({ host, rng, events }, events);
+      CreditBlinkTick();
+      ScreenSpriteQueueFlush();
+    } else if (G.g_app_state === AppState.Options) {
+      OptionsRunPhase(events);
       CreditBlinkTick();
       ScreenSpriteQueueFlush();
     }

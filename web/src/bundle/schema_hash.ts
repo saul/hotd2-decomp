@@ -24,8 +24,8 @@ export const SCHEMA_FILES: Readonly<Record<string, string>> = {
   "scene.ts": "d8f5f0dd941b95f986fc0d7152f17868b8f7980b64ee1181062b39bceff458c3",
   "script.ts": "05e0793ed5c5771b326f7a1e094f250a25a96bf2805849da33bbf846ab132100",
   "sound.ts": "69f5c5cdf7a96b4ef01e41cbee9805c81e709f15a396ed2456b017389b3cefd8",
-  "stage.ts": "2fbd35dfd80b92fabedfd964ef6a10a6d67c80295d1fb0ce28fda8b97279c498",
+  "stage.ts": "a2c349e41b039259b4fd1f4989b0ecfb749ddef05575919e4a42c2ace7b0fcf6",
 };
 
 /** One digest over {@link SCHEMA_FILES}, in filename order. */
-export const SCHEMA_HASH = "9dac7aaa369d396e84d5875d9d99142a95fd5551d4904c3bf29c730b5d53c91b";
+export const SCHEMA_HASH = "d5519c97264000fe6ea61f9bd5a933e9b842ac5611f230d9cf2c8ad8f550b461";

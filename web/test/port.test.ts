@@ -319,10 +319,11 @@ import { CivilianAttachSet, CivilianCountMotionLoops, CivilianOp,
 import { CivilianLeaveField } from "../src/game/class10/update";
 import type { CivilianCmdJson, CivilianItemJson } from "../src/bundle/scene";
 import { GameMode } from "../src/game/game_mode";
-import { CreditTrySpend, CreditsAvailable, ModeStartCounterValue,
-  OPTION_CREDITS_FACTORY } from "../src/game/credits";
+import { CreditTrySpend, CreditsAvailable, ModeStartCounterValue }
+  from "../src/game/credits";
+import { OPTIONS_FACTORY } from "../src/game/options_data";
 import {
-  ARCADE_MAGAZINE, INPUT_BINDINGS, InputBindingSet, PlayerInputBindingSet,
+  ARCADE_MAGAZINE, BINDING_RELOAD, InputBindingSet, PlayerInputBindingSet,
   RELOAD_SOUND,
 } from "../src/game/player_gun";
 import {
@@ -595,6 +596,14 @@ import { HumanoidRoutine } from "../src/game/class25/state";
 
 import { GameOverCameraFlyTick } from "../src/game/game_over";
 import { SetGameOverTables } from "../src/game/tables";
+import { OptionsCalibrationEntry } from "../src/game/options";
+import { OptionsRow } from "../src/game/options/list";
+import { OptionsFrame } from "../src/game/options/state";
+import { OptionsFactoryReset, ProfileBoot, ProfileCapture, ProfileLoad,
+         type ProfileBlock } from "../src/game/profile";
+import { OptionsSprite } from "../src/game/options_data";
+import { RequestAppState } from "../src/game/app_state";
+import { SetOptionsTables } from "../src/game/tables";
 import { RouteFigureTick } from "../src/game/route_map";
 import { CamPath, CamPaths } from "../src/game/camera/curve";
 import { SetCameraPaths } from "../src/game/tables";
@@ -17760,7 +17769,7 @@ console.log("\nthe player shell: in, hit, out, continue, over:");
   const rng = new Rng(3);
   const f = { host: NULL_HOST, rng };
   G.g_GameMode = GameMode.Arcade;
-  G.g_option_credits = OPTION_CREDITS_FACTORY;  // counts, not free play
+  G.g_option_credits = OPTIONS_FACTORY.credits;  // counts, not free play
   ResetGameGlobals();
   SetGameTables(CHARS);
   check("the reset's start press spends one credit of six and puts the "
@@ -18185,7 +18194,7 @@ console.log("\nthe continue screen, as the exe draws it:");
   const rng = new Rng(5);
   const ev = new Events();
   G.g_GameMode = GameMode.Arcade;
-  G.g_option_credits = OPTION_CREDITS_FACTORY;  // counts, not free play
+  G.g_option_credits = OPTIONS_FACTORY.credits;  // counts, not free play
   scene(0, rng);
   const at = (id: number) => G.g_screen_sprite_draws.filter((d) => d.id === id);
   const listed = () => JSON.stringify(G.g_screen_sprite_draws.map((d) =>
@@ -33516,7 +33525,8 @@ console.log("\nthe gun: the magazine, the reload, and the HUD readouts:");
         `${G.g_player_ammo[0]} ${G.g_player_magazine_empty[0]}`);
   check("the mouse is a gun: its binding set is the gun's, which has no "
         + "reload bit", PlayerInputBindingSet(0) === InputBindingSet.Gun
-        && INPUT_BINDINGS[0][InputBindingSet.Gun].reload === 0);
+        && G.g_player_input_bindings[0][InputBindingSet.Gun][BINDING_RELOAD]
+           === 0);
   check("six bullets are drawn from x = 24, 24 px apart, at y = 364",
         bullets().length === 6
         && bullets().every((b, i) => b.x === 24 + 24 * i && b.y === 364
@@ -33684,7 +33694,8 @@ console.log("\nthe gun: the magazine, the reload, and the HUD readouts:");
         sprites(HudSprite.PressReloadButton).length === 1
         || G.g_player_reload_prompt_timer[0] % 60 > 45,
         JSON.stringify(G.g_screen_sprite_draws.map((s) => s.id.toString(16))));
-  G.g_pad_state = INPUT_BINDINGS[0][InputBindingSet.Controller].reload & 0x2;
+  G.g_pad_state = G.g_player_input_bindings[0][InputBindingSet.Controller][
+    BINDING_RELOAD] & 0x2;
   step();
   G.g_pad_state = 0;
   check("...and pad B -- Right Ctrl -- does", G.g_player_ammo[0] === 6,
@@ -37519,6 +37530,292 @@ console.log("\nShotTestMesh: the boards stop the shot:");
   T.coli = null;
   SetGameTables(CHARS);
   ResetGameGlobals();
+}
+
+// -- the options screen (app state 0x0C) ---------------------------------------
+
+console.log("the options screen, driven with pad bits:");
+{
+  // `OptionsRunPhase` (`FUN_004869E0`) and its list, from the page's boot:
+  // `ProfileBoot` with nothing saved, then the menu's request for app state
+  // 0x0C, which is what the title's OPTION row makes.
+  const rng = new Rng(5);
+  const heard: number[] = [];
+  const saved: ProfileBlock[] = [];
+  const ev = new Events();
+  ev.on("sound.play", (d) => heard.push(d.id));
+  ev.on("profile.save", (d) => saved.push(d.profile));
+  // The screen's `.rdata`, as `ExeTables.optionsTables` reads it: the rows
+  // and labels are the image's; the glyph table is one sprite per character
+  // (`0x1000 + code`) so a drawn string can be read back; the SE test's
+  // first two entries.
+  const rows = [
+    [2, 3, "Difficulty"], [2, 4, "Life"], [2, 5, "Continue"],
+    [2, 6, "Blood Color"], [2, 7, "Sight Graphic"], [2, 8, "Sight Speed"],
+    [2, 9, "Sound Test Special Effects"], [2, 10, "Sound Test Music"],
+    [2, 11, "Gun Calibration"], [2, 12, "Default"], [15, 18, "EXIT"],
+  ].map(([col, row, label]) => ({ col: col as number, row: row as number,
+                                   label: label as string }));
+  SetOptionsTables({
+    rows,
+    difficulty_labels: ["Very Easy", "     Easy", "   Normal", "     Hard",
+                        "Very Hard"],
+    digits: "0123456789".split(""), blood_labels: ["  Red", "Green"],
+    free_play: "Free Play", number: "No.",
+    glyphs: Array.from({ length: 96 }, (_u, i) => (i === 0 ? 0 : 0x1020 + i)),
+    crosshair_sprites: [2728, 2730, 2731, 2732, 2729, 2733, 2734, 2735],
+    se_test: [0x80000000, 0x15a9], se_test_packs: [-1, -1],
+    music_test: [0x80000000, 0x1000001a],
+    sight_speed_sprites: [0xa91, 0xa92, 0xa93, 0xa94],
+  });
+  /** The glyphs drawn on one line, left to right, as text. */
+  const glyphText = (line: number) => G.g_screen_sprite_draws
+    .filter((s) => s.id > 0x1020 && s.id < 0x1080
+      && s.y >= line * 24 && s.y < line * 24 + 8)
+    .sort((a, b) => a.x - b.x)
+    .map((s) => String.fromCharCode(s.id - 0x1000)).join("");
+  const frame = (pad = 0, held = 0) => {
+    G.g_pad_state = pad;
+    G.g_pad_held = held;
+    GameUpdate(1 / 60, NULL_HOST, rng, ev);
+    G.g_pad_state = 0;
+    G.g_pad_held = 0;
+  };
+  G.g_GameMode = GameMode.Arcade;
+  G.g_option_credits = 5;
+  ProfileBoot(null);
+  check("a profile with nothing saved boots in free play -- the port's "
+        + "declared departure -- at three lives and Normal, blood 1",
+        G.g_option_credits === -1 && G.g_option_lives === 2
+        && G.g_start_lives === 3 && G.g_difficulty === 2
+        && G.g_option_blood_color === 1 && G.g_profile_version === 7,
+        `credits ${G.g_option_credits} lives ${G.g_start_lives}`);
+  ResetGameGlobals();
+  SetGameTables(CHARS);
+  check("the page's players are mouse guns in input mode 6: the mouse with "
+        + "the keyboard ORed in (`InputMapDevicesToMaple` case 6)",
+        G.g_input_mode[0] === 6 && G.g_player_input_is_gun[0] === 1
+        && G.g_player_pad_kind[0] === -1);
+  RequestAppState(AppState.Options);
+  frame();
+  check("a request for 0x0C is committed at the frame's end, both players "
+        + "out, run phase 0",
+        G.g_app_state === AppState.Options && G.g_nRunPhase === 0
+        && G.g_player_state[0] === PlayerState.Out,
+        `app ${G.g_app_state} phase ${G.g_nRunPhase}`);
+  heard.length = 0;
+  const stopped: number[] = [];
+  const offStop = ev.on("sound.stopAll", () => stopped.push(1));
+  frame();
+  offStop();
+  check("phase 0 arms the list: every sound stopped, cursor on Difficulty, "
+        + "the working copies taken -- credits 0 for free play -- Blood "
+        + "Color hidden, the rows below it one line up, the stage released",
+        stopped.length === 1
+        && G.g_nRunPhase === 1 && G.g_options_frame === OptionsFrame.List
+        && G.g_options_cursor === OptionsRow.Difficulty
+        && G.g_options_edit_credits === 0 && G.g_options_edit_lives === 2
+        && G.g_options_blood_row_shown === 0 && G.g_options_row_shift === -1
+        && G.g_stage_unloaded === 1,
+        `phase ${G.g_nRunPhase} cursor ${G.g_options_cursor}`);
+  frame();
+  const title = G.g_screen_sprite_draws.find(
+    (s) => s.id === OptionsSprite.Options);
+  const exit = G.g_screen_sprite_draws.find((s) => s.id === OptionsSprite.Exit);
+  const tiles = G.g_screen_sprite_draws.filter(
+    (s) => s.id >= 0x7a && s.id < 0x8e);
+  check("the list draws: \"OPTIONS\" 0xB31 at (344, 16) anchor 6, EXIT 0x803 "
+        + "lit white and centred at (320, 18*24 - 4), twenty background "
+        + "tiles at depth 200",
+        title?.x === 344 && title?.y === 16 && title?.flags === 6
+        && exit?.x === 320 && exit?.y === 428 && exit?.flags === 0x200a
+        && exit?.tint === 0xffffff
+        && tiles.length === 20 && tiles.every((t) => t.depth === 200)
+        && tiles[19].x === 512 && tiles[19].y === 384,
+        JSON.stringify({ title, exit, n: tiles.length }));
+  const firstGlyph = G.g_screen_sprite_draws.find(
+    (s) => s.id === 0x1044 && s.y === 3 * 24);
+  check("...the highlighted row's label red and nearer: \"Difficulty\" on "
+        + "line 3, tint 0xFF0000, depth 0.9, and \"Normal\" beside it, white",
+        glyphText(3).startsWith("Difficulty")
+        && firstGlyph?.tint === 0xff0000 && firstGlyph?.depth === 0.9
+        && glyphText(3).endsWith("Normal"),
+        `${glyphText(3)} ${JSON.stringify(firstGlyph)}`);
+  check("...\"Sight Graphic\" on line 6, not 7: the hidden row's gap closed",
+        glyphText(6).startsWith("SightGraphic") && glyphText(7) === "SightSpeed",
+        `6 "${glyphText(6)}" 7 "${glyphText(7)}"`);
+  heard.length = 0;
+  frame(0x20);
+  check("down: Life, and 0xA9", G.g_options_cursor === OptionsRow.Life
+        && heard.includes(0xa9), `${G.g_options_cursor} ${heard}`);
+  frame(0x80);
+  frame(0x80);
+  check("right twice: the life setting 2 -> 4, written at once",
+        G.g_option_lives === 4 && G.g_options_edit_lives === 4,
+        `${G.g_option_lives}`);
+  frame(0x80);
+  check("...and once more wraps to 0 -- \"1\" life", G.g_option_lives === 0);
+  frame(0x40);
+  check("...left wraps back to 4", G.g_option_lives === 4);
+  frame(0x200000);
+  check("player 2's down moves the same cursor: Continue",
+        G.g_options_cursor === OptionsRow.Continue);
+  check("...shown as \"Free Play\"", glyphText(5).endsWith("FreePlay"),
+        glyphText(5));
+  frame(0x80);
+  check("right from free play without the three unlock bits: 1, not 0 -- "
+        + "free play is not on offer",
+        G.g_option_credits === 1 && G.g_options_edit_credits === 1,
+        `${G.g_option_credits}`);
+  frame(0x40);
+  check("...and left from 1 wraps to 9, not to free play",
+        G.g_option_credits === 9);
+  frame(0x80);
+  check("...right from 9 wraps to 1", G.g_option_credits === 1);
+  frame(0x80);
+  frame(0x80);
+  check("...two more: 3", G.g_option_credits === 3);
+  frame(0x20);
+  check("down from Continue steps over the hidden Blood Color: Sight Graphic",
+        G.g_options_cursor === OptionsRow.SightGraphic);
+  frame(0x80);
+  check("mode 6 may change its sight graphic: player 1's right, 0 -> 1, "
+        + "written back", G.g_player_sight_graphic[0] === 1
+        && G.g_player_sight_graphic[1] === 0,
+        `${G.g_player_sight_graphic}`);
+  frame(0x20);
+  check("down steps over Sight Speed -- no player on a controller -- to the "
+        + "SE test", G.g_options_cursor === OptionsRow.SoundTestSe);
+  frame(0x80);
+  heard.length = 0;
+  frame(0x4);
+  check("the SE test: right to 1, A stops voice and SE and plays 0x15A9",
+        G.g_options_se_test === 1
+        && JSON.stringify(heard) === JSON.stringify(
+          [0x80000002, 0x80000001, 0x15a9]),
+        heard.map((h) => h.toString(16)).join(","));
+  for (let i = 0; i < 31; i++) frame(0, 0x80);
+  check("...a right held 30 frames steps once a frame after",
+        G.g_options_se_test === 3 && G.g_options_hold_repeat === 30,
+        `${G.g_options_se_test} ${G.g_options_hold_repeat}`);
+  heard.length = 0;
+  frame(0x20);
+  check("leaving a sound-test row stops music, voice and SE and plays 0xA9 "
+        + "again", G.g_options_cursor === OptionsRow.SoundTestMusic
+        && JSON.stringify(heard) === JSON.stringify(
+          [0xa9, 0x80000000, 0x80000002, 0x80000001, 0xa9]),
+        heard.map((h) => h.toString(16)).join(","));
+  frame(0x20);
+  check("down steps over Gun Calibration -- mode 6 is not offered it -- to "
+        + "Default", G.g_options_cursor === OptionsRow.Default);
+  frame(0x20);
+  frame(0x20);
+  check("...then EXIT, then round to Difficulty",
+        G.g_options_cursor === OptionsRow.Difficulty);
+  frame(0x10);
+  check("up from the top: EXIT", G.g_options_cursor === OptionsRow.Exit);
+  frame(0x10);
+  frame(0x10);
+  check("up from EXIT: Default, then the music test (Gun Calibration "
+        + "stepped over)", G.g_options_cursor === OptionsRow.SoundTestMusic);
+  for (let i = 0; i < 5; i++) frame(0x10);
+  check("up through the rows to Difficulty",
+        G.g_options_cursor === OptionsRow.Difficulty,
+        `${G.g_options_cursor}`);
+  frame(0x40);
+  check("left from Normal: Easy", G.g_option_difficulty === 1);
+  frame(0x10);
+  heard.length = 0;
+  frame(0x8);
+  check("EXIT on START: 0x121A9, the profile saved with what was set, and "
+        + "applied -- five lives, Easy",
+        heard.includes(0x121a9) && saved.length === 1
+        && saved[0].lives === 4 && saved[0].credits === 3
+        && saved[0].difficulty === 1 && saved[0].sightGraphic[0] === 1
+        && G.g_start_lives === 5 && G.g_difficulty === 1
+        && G.g_nRunPhase === 2,
+        JSON.stringify(saved[0]));
+  frame();
+  check("phase 2: credits cleared and the title asked for, committed at "
+        + "the frame's end", G.g_app_state === AppState.Title
+        && G.g_credits[0] === 0, `app ${G.g_app_state}`);
+  // The title's START, as the page takes it: a game from the title.
+  ResetGameGlobals();
+  SetGameTables(CHARS);
+  check("a game started from the title seeds Arcade with the credit "
+        + "setting plus one -- four -- and the start spends one",
+        ModeStartCounterValue(GameMode.Arcade) === 4
+        && G.g_free_play === 0 && G.g_credits[0] === 3,
+        `credits ${G.g_credits} free ${G.g_free_play}`);
+  run(2, rng, ev);
+  check("...and the player enters play with five lives",
+        G.g_player_state[0] === PlayerState.InPlay
+        && G.g_player_lives[0] === 5, `lives ${G.g_player_lives[0]}`);
+  check("...at Easy", G.g_difficulty === 1);
+
+  // Default: the factory settings, and 5 -- not free play.
+  RequestAppState(AppState.Options);
+  frame();
+  frame();
+  frame(0x10);
+  frame(0x10);
+  check("back in: up twice from Difficulty is Default",
+        G.g_options_cursor === OptionsRow.Default, `${G.g_options_cursor}`);
+  frame(0x4);
+  check("A on Default: the factory settings -- two, two, five credits, "
+        + "sight graphic 0 -- and the working copies taken again",
+        G.g_option_lives === 2 && G.g_option_difficulty === 2
+        && G.g_option_credits === 5 && G.g_options_edit_credits === 5
+        && G.g_player_sight_graphic[0] === 0,
+        `${G.g_option_lives} ${G.g_option_credits}`);
+  G.g_option_credits = 3;
+  OptionsFactoryReset();
+  check("OptionsFactoryReset writes 5 whatever the boot's free play",
+        G.g_option_credits === 5);
+
+  // The three unlock bits put free play back on the Continue row.
+  G.g_option_unlocks = 7;
+  G.g_options_cursor = OptionsRow.Continue;
+  G.g_options_edit_credits = 9;
+  frame(0x80);
+  check("with the unlocks, right from 9 is free play: -1",
+        G.g_option_credits === -1 && G.g_options_edit_credits === 0);
+  G.g_option_unlocks = 0;
+
+  // The two sub-screens' gates.
+  G.g_options_frame = OptionsFrame.Calibration;
+  G.g_options_cursor = OptionsRow.GunCalibration;
+  frame();
+  check("Gun Calibration refuses a mode-6 gun: back to the list, cursor on "
+        + "EXIT", G.g_options_frame === OptionsFrame.List
+        && G.g_options_cursor === OptionsRow.Exit);
+  G.g_input_mode = [5, 5];
+  G.g_options_frame = OptionsFrame.Calibration;
+  OptionsCalibrationEntry();
+  check("...and takes a mode-5 gun: player 1", G.g_calibration_player === 0
+        && G.g_options_frame === OptionsFrame.Calibration);
+  G.g_input_mode = [6, 6];
+  G.g_options_frame = OptionsFrame.SightSpeedArm;
+  frame();
+  frame();
+  check("Sight Speed with no player on a controller goes straight back: "
+        + "list, cursor on EXIT", G.g_options_frame === OptionsFrame.List
+        && G.g_options_cursor === OptionsRow.Exit);
+
+  // The profile: a saved block overrides the boot's free play.
+  const block = ProfileCapture();
+  ProfileBoot({ ...block, credits: 5, lives: 4 });
+  check("a saved profile overrides the free-play default: credits 5, five "
+        + "lives", G.g_option_credits === 5 && G.g_start_lives === 5);
+  ProfileBoot({ ...block, credits: -1 });
+  check("...and a saved free play stays free play", G.g_option_credits === -1);
+  check("a profile of another version is not taken: a reset",
+        ProfileLoad({ ...block, version: 6, lives: 4 }) === 0
+        && G.g_option_lives === 2 && G.g_option_credits === 5);
+  ProfileBoot(null);
+  G.g_app_state = AppState.InPlay;
+  ResetGameGlobals();
+  SetOptionsTables(undefined);
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

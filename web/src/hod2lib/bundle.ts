@@ -58,6 +58,10 @@ import { BOSS_BANNER_SPRITES, bannerCardSlots }
 // `GameOverLogoTask`, its route tiles are `.rdata` read below.
 import { GAME_OVER_LOGO_SPRITES, ROUTE_FIGURE_SHADOW_SLOT, ROUTE_MARK_SLOTS }
   from "../game/player_body_data";
+// And the options screen's: its titles, EXIT and backgrounds are immediates
+// in its routines; its glyphs, crosshairs and sliders are `.rdata` read below.
+import { OPTIONS_SCREEN_SPRITES, SCREEN_IDLE_DIM_SLOT }
+  from "../game/options_data";
 import { f32, i16, i32, u32 } from "./bytes";
 import * as C from "./container";
 import { encodeRgba } from "./png";
@@ -2037,6 +2041,9 @@ export async function buildStage(stage: Stage, sink: BundleSink,
     ...classEffectSlots(spawnRecords.map((r) => r.cls)),
     // ...and Original Mode's weapon-5 round, on the tracer ring.
     ...originalWeaponRoundSlots(stage.original),
+    // ...and the shell screens' idle dimmer, which the options screen draws
+    // over itself after five minutes of nothing held.
+    SCREEN_IDLE_DIM_SLOT,
   ]);
   // Which materials draw blood, so the client can offer the colour the game's
   // own option offers. See `bloodTexturePredicate`.
@@ -2100,11 +2107,20 @@ export async function buildStage(stage: Stage, sink: BundleSink,
   scriptJson.carrier_door_yaw = tables.carrierDoorYaw();
   const routeTiles = (gameOver.route_tiles as number[]).flatMap((base) =>
     Array.from({ length: ROUTE_TILES_PER_SCREEN }, (_u, i) => base + i));
+  // The options screen (app state 0x0C): one block for the whole game, as
+  // `game_over` is, and the sprites its tables name beside its immediates.
+  const options = tables.optionsTables();
+  scriptJson.options = options;
+  const optionTableSprites = [
+    ...(options.glyphs as number[]), ...(options.crosshair_sprites as number[]),
+    ...(options.sight_speed_sprites as number[]),
+  ].filter((id) => id > 0);
   scriptJson.screen_sprites = await screenSpritesJson(
     tables, stage.source, deflate,
     [...HUD_READOUT_SPRITES, ...CONTINUE_SCREEN_SPRITES,
      ...BOSS_HP_BAR_SPRITES, ...BOSS_BANNER_SPRITES, ...BOSS3_CARD_SPRITES,
      ...GAME_OVER_LOGO_SPRITES, ...routeTiles,
+     ...OPTIONS_SCREEN_SPRITES, ...optionTableSprites,
      // `OriginalItemBannerUpdate`'s two sprites, for the ids this stage's
      // collectibles can be.
      ...originalItemSprites(originalItemsJson(tables, placements,

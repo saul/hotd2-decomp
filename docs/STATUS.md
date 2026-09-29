@@ -19,55 +19,55 @@ is in `tools/verify_all.py`, beside the command that runs it.
 
 | Directory | Lines | Files | Layer |
 |---|---:|---:|---|
-| `game/` | 105306 | 341 | engine |
-| `hod2lib/` | 19395 | 35 | engine |
-| `render/` | 15112 | 54 | render |
-| `app/` | 12220 | 42 | app |
+| `game/` | 107198 | 348 | engine |
+| `hod2lib/` | 19482 | 35 | engine |
+| `render/` | 15195 | 55 | render |
+| `app/` | 12391 | 43 | app |
 | `script/` | 4471 | 25 | engine |
-| `ui/` | 3657 | 27 | ui |
-| `core/` | 3514 | 13 | engine |
-| `bundle/` | 2805 | 11 | engine |
+| `ui/` | 3694 | 27 | ui |
+| `core/` | 3523 | 13 | engine |
+| `bundle/` | 2853 | 11 | engine |
 | `audio/` | 973 | 2 | render |
-| `hud/` | 491 | 1 | ui |
-| **total** | **167944** | **551** | |
+| `hud/` | 526 | 1 | ui |
+| **total** | **170306** | **560** | |
 
 The largest files, which is where the pressure to split next is:
 
-* `app/main.ts` — 2973
-* `game/globals.ts` — 2860
+* `game/globals.ts` — 3108
+* `app/main.ts` — 3073
 * `game/actor.ts` — 2724
-* `hod2lib/bundle.ts` — 2353
-* `hod2lib/exetab.ts` — 2276
+* `hod2lib/bundle.ts` — 2369
+* `hod2lib/exetab.ts` — 2347
 
 ## The port
 
 | | |
 |---|---|
-| Gameplay coverage | **231 of 297** annotated functions in the gameplay address ranges have a port (77%) |
-| Ported outside those ranges | 539 (opcodes, and the classes whose handlers sit elsewhere) |
-| Citations checked | 770 ported functions match `functions.tsv` under the same name |
+| Gameplay coverage | **233 of 299** annotated functions in the gameplay address ranges have a port (77%) |
+| Ported outside those ranges | 570 (opcodes, and the classes whose handlers sit elsewhere) |
+| Citations checked | 803 ported functions match `functions.tsv` under the same name |
 | Spawn classes | **31 of 42** read classes have a module, covering 1544 of 1619 placements |
 | Declared `[diverges]` | **132** — where the port knowingly departs from the exe, each with its reason on the spot |
-| `[open]` markers | **120** — questions the port and the exporter are honest about not having answered |
+| `[open]` markers | **123** — questions the port and the exporter are honest about not having answered |
 
 Both markers are counted in **every** `.ts`/`.tsx` file under `web/src/`, one per occurrence, and only in comments — a word in code or in a string is not a marker (`verify_port.marker_lines`). Each departure and each question is written once, where it is made; everything that refers to it names it in words ([`PLAYER_ARCHITECTURE.md`](PLAYER_ARCHITECTURE.md), "One departure, one tag"). By layer, from the same table as the directories above:
 
 | Layer | Directories | `[diverges]` | `[open]` |
 |---|---|---:|---:|
-| engine | `core/`, `bundle/`, `script/`, `game/`, `hod2lib/` | 118 | 117 |
-| render | `render/`, `audio/` | 13 | 3 |
+| engine | `core/`, `bundle/`, `script/`, `game/`, `hod2lib/` | 118 | 118 |
+| render | `render/`, `audio/` | 13 | 5 |
 | ui | `hud/`, `ui/` | 0 | 0 |
 | app | `app/` | 1 | 0 |
 
-The two declared seams between the UI and the player: **`PlayerCommands` has 53 members against `PlayerView`'s 39** — how much of the player a click can move, against how much of it the page can see. Neither can grow without a line appearing in the open.
+The two declared seams between the UI and the player: **`PlayerCommands` has 54 members against `PlayerView`'s 40** — how much of the player a click can move, against how much of it the page can see. Neither can grow without a line appearing in the open.
 
 ## The decomp
 
 | | |
 |---|---|
-| Named functions | 1381 in `ghidra/annotations/functions.tsv` |
-| Named globals | 677 in `ghidra/annotations/globals.tsv` |
-| Verifier scripts | 46 under `tools/`, run together by `verify_all.py` |
+| Named functions | 1428 in `ghidra/annotations/functions.tsv` |
+| Named globals | 722 in `ghidra/annotations/globals.tsv` |
+| Verifier scripts | 47 under `tools/`, run together by `verify_all.py` |
 
 Phase and format status is a judgement about what counts as solved,
 and lives in [`PROGRESS.md`](PROGRESS.md).
@@ -130,6 +130,7 @@ nothing exits 3 and is never counted as green.
 | `bgm_loop` | that the page's music is the engine's stream -- the buffer the script's own track reaches Web Audio as is one period of the file from its first sample to end of file, looped, sample for sample -- and that it is audible | bundle |
 | `keys` | that the page's keys do what the `?` list says when pressed -- test:ui holds the list to the handlers' source, this reads back what a press did -- and that a click on a control over the game hands Space and Enter (START) back to the game rather than leaving them with the button | bundle |
 | `continue` | that the last life lost with credits left puts CONTINUE? and its digit where the exe draws them, holds the script at its wait, and that START -- pressed on the corner button, the one START a phone has -- spends a credit and puts the player back in play | bundle |
+| `options` | that the menu's Options reaches the game's options screen in the real page, that its title and red highlighted row are on the HUD canvas, that the page's arrows and Enter drive the list -- lives and continues changed, the hidden rows stepped over, a held arrow running the sound test -- and that EXIT saves the profile in the browser and starts a game with five lives, four credits and the chosen crosshair on the reticle, and that a reload boots what was saved in place of the free-play default | bundle |
 | `animals` | that the frog, the owl and the fish are placed from a real bundle and leave their opening state -- none of the three is a skinned enemy the character layer can build, and two have no character type at all | bundle |
 | `horde` | that each of the five class-0x40 hordes is built from a real bundle, walks in, dives and bites, and that shooting every member gives both counters back and lets the walker past the room's wait_enemies_alive -- the members are runtime children with no descriptor, so only the placer's own spawn can bring them into play | bundle |
 | `dives` | that a class-0x43 dive reaches the camera it is aimed at, strikes and comes round again -- the only check that drives a class against the stage's own `cam_play` rather than an eye the harness made up, which is what every other owl check does and why none of them could see a run-in parked five units under the eye | bundle |
@@ -154,6 +155,7 @@ nothing exits 3 and is never counted as green.
 | `verify_effects` | that each of the 29 effect trees walks to exactly the node count `g_effect_bone_counts` declares, and that every motion the effect system plays divides by the stride that count implies -- the only check that reads a motion at the effect stride rather than a character's | game-dir |
 | `verify_horde` | that every number the class-0x40 horde is steered by -- its entry splines, spline rates, shot delays, wander grid, second skin and the emerge prop's corners -- is the EXE's, and that the seven descriptors split five hordes to two props on the byte PlaceHorde switches on | game-dir |
 | `verify_continue` | that the continue screen the port draws -- the run's CONTINUE? and digit, the two-player small ones, the small GAME OVER and the credit line -- is at the EXE's positions, scales and sprite ids, read as instruction bytes and `.rdata` rows; that only one credit-line drawer can run, because the credit costs are stored once, as 1; and that all eight wait opcodes read the gameplay gate that holds the script while nobody is in play. Nothing else looks at a picture that, when wrong, is simply not there | game-dir |
+| `verify_options` | that the profile reading is right on the user's own save -- the four disguised files deciphered with the key taken out of `ProfileCipher`'s instructions, and the block's byte sum and version checked -- that Blood Color is dead in this build (one store of its gate, no reader of its byte), and that the options screen's factory tables, sprite ids, positions and glyph table are the EXE's, with the bundle's `options` block when there is one | game-dir |
 | `verify_water` | that class 0x41 type 1, the canal water task, starts from the table the EXE indexes -- ten flat water tiles -- and that every slot, flag, camera cue and multiplier the port's copy of it tests is the immediate at the instruction that holds it; its fifteen spawns sit at the origin, so a wrong reading draws nothing and looks like nothing | game-dir |
 | `verify_draw_order` | that the player's two passes and translucent order are the EXE's: the blend and depth tables `render/draw_order.ts` copies, the alpha-test and blend-enable pushes, and the VIEW matrix and comparator bytes that make the sort nearest-first rather than the painter's order this repo's docs had -- plus that no mesh in `pol/` turns its depth write off, which is why translucent meshes occlude | game-dir |
 | `verify_texture_alpha` | that a texture's alpha reaches the bundle as the bank stores it, because the EXE's D3D path keeps it: the upload's format table and the A1R5G5B5 test, stage 0's alpha args, and a disassembly of the D3D module finding TSP bit 19 read only as half of the pass selector -- plus the corpus premise that makes a glTF alphaMode from the pass right, and, on a current bundle, no `_opaque` image and the IgnoreTexAlpha ARGB images byte-equal to the bank's alpha | game-dir |
@@ -165,7 +167,7 @@ nothing exits 3 and is never counted as green.
 | `verify_geometry` | that every scenery part in a stage bundle holds every triangle its `pol/` models declare -- the only check that compares an export against the files it was made from rather than against another export | game-dir |
 | `baseline` | that the installed assets still hash to `manifest.csv` | game-dir |
 
-23 of them need the installed game and 21 need an exported
+24 of them need the installed game and 22 need an exported
 bundle. **That is a known hole, not a design:** a machine with
 neither cannot run the checks that compare two histories, and a
 bundle-free fixture is the open work that closes it.

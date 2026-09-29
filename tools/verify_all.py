@@ -212,6 +212,17 @@ CHECKS: list[Check] = [
           "that START -- pressed on the corner button, the one START a phone "
           "has -- spends a credit and puts the player back in play",
           NEEDS_BUNDLE, LANE_BROWSER),
+    Check("options", "web",
+          ["node", "tools/options_page.mjs", "--headless"],
+          "that the menu's Options reaches the game's options screen in the "
+          "real page, that its title and red highlighted row are on the HUD "
+          "canvas, that the page's arrows and Enter drive the list -- lives "
+          "and continues changed, the hidden rows stepped over, a held arrow "
+          "running the sound test -- and that EXIT saves the profile in the "
+          "browser and starts a game with five lives, four credits and the "
+          "chosen crosshair on the reticle, and that a reload boots what "
+          "was saved in place of the free-play default",
+          NEEDS_BUNDLE, LANE_BROWSER),
     Check("animals", "web", ["npm", "run", "--silent", "animals"],
           "that the frog, the owl and the fish are placed from a real bundle "
           "and leave their opening state -- none of the three is a skinned "
@@ -414,6 +425,16 @@ CHECKS: list[Check] = [
           "once, as 1; and that all eight wait opcodes read the gameplay gate "
           "that holds the script while nobody is in play. Nothing else looks "
           "at a picture that, when wrong, is simply not there",
+          NEEDS_GAME),
+    Check("verify_options", ".",
+          ["python3", "tools/verify_options.py", "--game-dir", "{game_dir}"],
+          "that the profile reading is right on the user's own save -- the "
+          "four disguised files deciphered with the key taken out of "
+          "`ProfileCipher`'s instructions, and the block's byte sum and "
+          "version checked -- that Blood Color is dead in this build (one "
+          "store of its gate, no reader of its byte), and that the options "
+          "screen's factory tables, sprite ids, positions and glyph table are "
+          "the EXE's, with the bundle's `options` block when there is one",
           NEEDS_GAME),
     Check("verify_water", ".",
           ["python3", "tools/verify_water.py", "--game-dir", "{game_dir}"],

@@ -450,6 +450,13 @@ export interface UiProjection {
    * the game does not.
    */
   crosshair: boolean;
+  /**
+   * The crosshair's own image, when the game drew one: the sprite
+   * `HudDrawCrosshair` picks by the options' Sight Graphic
+   * (`g_crosshair_sprites`, `0x00579F58`), as a data URL. Null for the page's
+   * plain ring -- no sprite drawn, or a bundle without it.
+   */
+  crosshairImage: string | null;
   toggles: Readonly<Record<ToggleName, boolean>>;
   transport: TransportProjection;
   sound: SoundProjection;

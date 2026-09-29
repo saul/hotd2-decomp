@@ -1382,7 +1382,9 @@ Four things follow, and three of them were wrong in this document until
   Their **colour** is not in the models: they carry no vertex colours and a
   white base, so it is entirely the texture's, and the game ships two banks
   for it. See [`texbank.md`](texbank.md) — the default is green and
-  `tex/scr_blood_red.bin` is what the **Blood Color** option loads over it.
+  `tex/scr_blood_red.bin` holds the same slots in red -- not, in this
+  build, by the **Blood Color** option, whose row is never shown and whose
+  byte nothing reads (`docs/re/options-screen.md`).
 * **The position is the hit bone's sphere, not the point the ray met the
   model.** `ShotTestBoneSphere` (`FUN_004047D0`) proves the fields: it tests
   `obj + bone * 0x90 + 0x274/+0x278/+0x27C` as a centre against the radius at

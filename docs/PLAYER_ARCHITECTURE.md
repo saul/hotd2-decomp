@@ -641,7 +641,7 @@ keeping from them moved:
 
 * **Over the game** (`#overlay`): the breadcrumb menu -- `≡`, which holds
   the game while it is open, and in it the stage, the entry, Original Mode,
-  restart, the bundle screen and the sidebar -- the speaker, the start and pause screen, the corner button, the
+  restart, the game's options screen, the bundle screen and the sidebar -- the speaker, the start and pause screen, the corner button, the
   branch bar and the game-over buttons. The corner button is player 1's
   START (`pressStart`, the command Enter's handler makes too), labelled for
   what START would do: **Skip** in a skippable region, **Continue** with the
@@ -678,7 +678,8 @@ it end to end against an empty server.
 
 **A reload is not a new visit.** Vite reloads the page for every edit, so the
 tab keeps what a reload should bring back: the sidebar, its tab and its folds
-in `localStorage` (`ui/persist.ts`), the stage and address in the URL, and
+in `localStorage` (`ui/persist.ts`), the game's own profile -- the options --
+beside them (`app/profile_store.ts`, what the exe's save files were), the stage and address in the URL, and
 whether the game was started and running in `sessionStorage`
 (`Player.resumeMark`) -- so a saved file comes back to the game running
 where it was, not to the start screen.
@@ -706,7 +707,8 @@ harnesses open it by setting that key before the page loads
 
 **Keys have one list.** Three handlers answer them, each for its own reason:
 `app/main.ts` the game's (Space, Enter -- which is START, both the continue
-and the skip -- the digits, the arrow and R),
+and the skip -- the digits, the arrows -- the options screen's directions, and
+off it the left one rewinds -- and R),
 `render/freeroam.ts` flying, and `ui/App.tsx` the page's -- the sidebar, the
 `?` dialog, `M`, `F`, and a key for each debug overlay, which is a column of
 the toggle table (`ToggleSpec.key`) rather than a map of its own. What they
@@ -1384,9 +1386,10 @@ imports, and about thirty methods of 15 to 35 lines. Twenty systems
 constructed and registered, the context built, the scope tree opened.
 
 Two ratios say more than the line count, and both are what to watch:
-`main.ts` holds **three** `addEventListener` sites, none of them a control —
-the keyboard, the browser's back button, and the any-press that lets held
-audio go — and every one of the player's commands is a case in one
+`main.ts` holds **four** `addEventListener` sites, none of them a control —
+the keyboard going down and coming up (the second only for the options
+screen's held directions), the browser's back button, and the any-press that
+lets held audio go — and every one of the player's commands is a case in one
 exhaustive switch.
 
 The extractions that were worth making are the ones that named a seam rather

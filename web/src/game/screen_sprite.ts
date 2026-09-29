@@ -53,19 +53,69 @@ export interface ScreenSprite {
    * `(flags & 3, flags >> 2 & 3)` half-extents, or less `(1, 1)` when the
    * nibble is 0 -- so 0 puts `(x, y)` at the top-left and 10 (`2, 2`) at the
    * centre. `[proved]` Bits `0x10`/`0x20` flip U/V; no call the port makes
-   * sets them.
+   * sets them. Bit `0x2000` is {@link SCREEN_SPRITE_LIT}.
    */
   flags: number;
+  /**
+   * `0xRRGGBB` -- the vertex colour a {@link SCREEN_SPRITE_LIT} quad takes
+   * from `g_render_light_colour_r..b` as it is submitted; absent for every
+   * other sprite, which is drawn white. The image is multiplied by it.
+   */
+  tint?: number;
+}
+
+/**
+ * Flags bit `0x2000`: **the quad is lit.** `SubmitScreenSpriteQuad`
+ * (`FUN_004ACD20`) tests it (`TEST DH, 0x20` at `0x004ACE27`) and builds the
+ * vertex colour from the render light colour `SetRenderLightColour` last set
+ * -- `g_render_light_colour_r`, `g_`, `b` at `0x007E7998`..`A0`, each times
+ * 255 -- instead of white, with the record's alpha on top either way.
+ * `[proved]` The options screen's text and its EXIT are the port's only
+ * callers that set it, which is how a highlighted row comes out red.
+ */
+export const SCREEN_SPRITE_LIT = 0x2000;
+
+/** A light colour as the quad's `0xRRGGBB`: each channel times 255. */
+function LightToTint(rgb: readonly number[]): number {
+  const c = (v: number) => Math.max(0, Math.min(255, Math.trunc(v * 255)));
+  return (c(rgb[0]) << 16) | (c(rgb[1]) << 8) | c(rgb[2]);
+}
+
+/**
+ * `[port-only]` -- one record, as `SubmitScreenSpriteQuad` takes it: the
+ * light colour goes in only when the flags ask for it.
+ */
+function ScreenSpriteRecord(id: number, x: number, y: number, depth: number,
+                            sx: number, sy: number, alpha: number,
+                            flags: number): ScreenSprite {
+  const s: ScreenSprite = { id, x, y, depth, sx, sy, alpha, flags };
+  if ((flags & SCREEN_SPRITE_LIT) !== 0) {
+    s.tint = LightToTint(G.g_render_light_colour);
+  }
+  return s;
+}
+
+/**
+ * `SetRenderLightColour` — `FUN_004AA0A0`. The light colour the next lit
+ * draw takes -- `g_render_light_colour_r`, `g`, `b` -- and the light
+ * generation up one. The port records it for the 2D quads that read it
+ * ({@link SCREEN_SPRITE_LIT}); the 3D draws that call it are the renderer's,
+ * which has its own copy of the scene light (`render/lighting.ts`).
+ */
+export function SetRenderLightColour(r: number, g: number, b: number): void {
+  G.g_render_light_colour = [r, g, b];
 }
 
 /**
  * `DrawScreenSprite` — `FUN_0041C6D0`. Recorded rather than drawn; see
  * `G.g_screen_sprite_draws`. The rotation argument is 0 at every call the
- * port makes and is not carried; the flags word is, for its anchor nibble.
+ * port makes and is not carried; the flags word is, for its anchor nibble
+ * and {@link SCREEN_SPRITE_LIT}.
  */
 export function DrawScreenSprite(id: number, x: number, y: number,
                                  depth = 1, sx = 1, sy = 1, flags = 0): void {
-  G.g_screen_sprite_draws.push({ id, x, y, depth, sx, sy, alpha: 1, flags });
+  G.g_screen_sprite_draws.push(
+    ScreenSpriteRecord(id, x, y, depth, sx, sy, 1, flags));
 }
 
 /** `ScreenSpriteDraw`'s flags word: anchor `(2, 2)`, the sprite's centre. */
@@ -123,7 +173,26 @@ const QUEUED_FLAG_BITS = 0x700;
 export function DrawScreenSpriteLayered(id: number, x: number, y: number,
                                         depth: number, sx: number, sy: number,
                                         flags: number, layer: number): void {
-  ScreenSpriteQueuePush({ id, x, y, depth, sx, sy, alpha: 1, flags }, layer);
+  ScreenSpriteQueuePush(ScreenSpriteRecord(id, x, y, depth, sx, sy, 1, flags),
+                        layer);
+}
+
+/**
+ * `OptionsDrawSprite` — `FUN_00488000`. The same record as
+ * `DrawScreenSprite` builds, with every field the caller's: depth, both
+ * scales, the rotation word (`+0x28`, not carried -- see
+ * {@link DrawScreenSprite}), the alpha (`+0x2C`) and the flags (`+0x34`); UVs
+ * 0..1 and `-1` at `+0x30` as ever. A negative id draws nothing
+ * (`TEST EAX, EAX; JL` at `0x00488007`). Only the options screen and its two
+ * sub-screens call it. `[proved]`
+ */
+export function OptionsDrawSprite(id: number, x: number, y: number,
+                                  depth: number, sx: number, sy: number,
+                                  _rot: number, alpha: number,
+                                  flags: number): void {
+  if (id < 0) return;
+  G.g_screen_sprite_draws.push(
+    ScreenSpriteRecord(id, x, y, depth, sx, sy, alpha, flags));
 }
 
 /**

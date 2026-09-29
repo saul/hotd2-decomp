@@ -3,8 +3,10 @@
  *
  * The engine's own order, which matters: the state runs, *then* the position
  * integrates, then the motion advances. Anything not ported goes through
- * `ActorAbortAttackAndLeave` rather than a fallthrough, so no unmodelled state
- * can sit on a permit.
+ * `ZombieGiveUpAttack` rather than a fallthrough, so no unmodelled state can
+ * sit on a permit. That used to name `ActorAbortAttackAndLeave` as what the
+ * fallback stood for; the routine at `0x0045D9F0` is `ZombieSplitInTwo` and
+ * has nothing to do with it.
  */
 import { ZombieStateCarryProp } from "./carry_prop";
 import type { Events } from "../../core/events";
@@ -27,6 +29,7 @@ import { ZombieStateBackOff } from "./backoff";
 import { ZombieAttackRefusal, ZombieStateHoldAtRange } from "./hold";
 import { ZombieGiveUpAttack } from "./leave";
 import { ZombieStateStrike } from "./strike";
+import { ZombieStateLeapStrike } from "./leap_strike";
 import { ZombieStateWaitTurn } from "./wait_turn";
 import { ZombieReleaseAndDespawn, ZombieStateWalkDistance }
   from "./walk_distance";
@@ -45,6 +48,8 @@ import {
 import { ZombieStateReleaseBodyCreature } from "./release_creature";
 import { ZombieState } from "./states";
 import { ZombieOnShot } from "./on_shot";
+import { ZombieClearHitReactionWhenDone, ZombieTickAltHitReaction }
+  from "./react";
 import {
   COND4_SPECIAL_BIT, ZombieStateCorpseBlink, ZombieStateCorpseSink,
   ZombieStateDeath6,
@@ -86,6 +91,12 @@ const ZOMBIE_BODY_RADIUS = 3.5;
 
 export function EnemyZombieUpdate(obj: ZombieActor, f: ClassFrame): void {
   const { dt, rng, host, events } = f;
+  // `CALL 0x004547C0` at `0x00453402` and `CALL 0x00454660` at `0x00453408`:
+  // the stumble's two per-frame halves, before anything else -- the bits a
+  // reaction raised come down here, so the state below sees them as the engine
+  // does. The port had neither, so nothing ever lowered what they guard.
+  ZombieTickAltHitReaction(obj);
+  ZombieClearHitReactionWhenDone(obj);
   // `EnemyZombieUpdate` (`FUN_004533F0`) runs the shot response **before** the
   // state, at 0x0045340E: the shot that killed this actor puts it in a death
   // state on the same frame that state first runs. Without this call class
@@ -153,6 +164,9 @@ function ZombieRunState(obj: ZombieActor, dt: number, rng: Rng,
       return ZombieStateHoldAtRange(obj, rng, host, events);
     case ZombieState.Strike:
       return ZombieStateStrike(obj, rng, events, host);
+    // Body condition 4's strike -- every `znkager` crawler's.
+    case ZombieState.LeapStrike:
+      return ZombieStateLeapStrike(obj, dt, rng, host, events);
     case ZombieState.BackOff:     return ZombieStateBackOff(obj, dt, rng);
     case ZombieState.WaitTurn:    return ZombieStateWaitTurn(obj, rng);
     // **State 10 is terminal, and the table says so.** `g_class30_states`
@@ -164,7 +178,8 @@ function ZombieRunState(obj: ZombieActor, dt: number, rng: Rng,
     // thing that can settle it.
     //
     // It used to fall through to the `default` arm and `ZombieGiveUpAttack`,
-    // on a citation of `ActorAbortAttackAndLeave` (`FUN_0045D9F0`) that is
+    // on a citation of the routine at `0x0045D9F0`, then named
+    // `ActorAbortAttackAndLeave` and now `ZombieSplitInTwo`, that is
     // not this address at all -- see `class30/leave.ts` and
     // `ZombieState.Leave`. Everything the port sends to state 10 therefore
     // went to `WaitTurn` and stayed alive: stage 5 block 2's four `znnick`,

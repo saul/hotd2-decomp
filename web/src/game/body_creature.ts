@@ -16,9 +16,9 @@
  * `[open]` The species. It draws forty frames of `znjoe.bin` — entries
  * 176..215, the host character's own model bank — and the two sounds it plays
  * are `COMMON\MEET01_22.WAV` and `COMMON\MEET02_22.WAV`, which name nothing.
- * The sound table does hold a `WORM_TUBU`, which is the corroboration
- * there is for calling it a worm, and **nothing in this chain
- * plays it**. So it keeps the engine-shaped name it was read under: a creature
+ * The sound table's `WORM_TUBU1/2_44.wav` are **class 0x42's** kill sounds
+ * (`game/class42/`), not this creature's -- nothing in this chain plays
+ * either. So it keeps the engine-shaped name it was read under: a creature
  * that comes out of a body. `L20`.
  *
  * ## Its position is in camera space, and that is the whole shape of it

@@ -459,12 +459,27 @@ CHECKS: list[Check] = [
          "the *exact* set of attacks the engine can never land is asserted, "
          "which stops the crawlers' condition-4 swing being filtered out as "
          "an impossible row (L65, L71, L73)"),
+    game("split_unreachable",
+         "that nothing the shipped game runs reaches `ZombieSplitInTwo` "
+         "(`FUN_0045D9F0`) -- no store of 4 to `g_hit_result`, one writer "
+         "of the split bit and no way into its state, each beside a control "
+         "that must be found -- which is the whole of the case for the port "
+         "not transcribing the split, and the only check that can say when "
+         "that case stops holding"),
     game("horde",
          "that every number the class-0x40 horde is steered by -- its entry "
          "splines, spline rates, shot delays, wander grid, second skin and "
          "the emerge prop's corners -- is the EXE's, and that the seven "
          "descriptors split five hordes to two props on the byte PlaceHorde "
          "switches on"),
+    game("worm",
+         "that every scalar the class-0x42 worm's port names is the `.rdata` "
+         "word or the instruction operand the EXE loads, that its member "
+         "routine's jump table has the seven arms the port's switch has, that "
+         "its sounds and `buyo.bin` slots are the ones the port names, that "
+         "the game's three class-0x42 descriptors are sub-types 1, 0 and 2, "
+         "and, with a bundle, that the shadow the port draws without the "
+         "scene light array is a black no light can change"),
     game("continue_screen",
          "that the continue screen the port draws -- the run's CONTINUE? and "
          "digit, the two-player small ones, the small GAME OVER and the credit "

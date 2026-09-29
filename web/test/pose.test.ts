@@ -66,7 +66,12 @@ function instance(motions: Record<string, BakedMotion>,
          // skeletal actor in the game: `model+0x64 = 3`, root motion on.
          motionFlags: MOTION_FLAGS_INIT,
          ...a } as unknown as Actor,
-    type: { bone_count: BONES, motions } as unknown as CharacterType,
+    // Two roots, as every class-0x30 skeleton has: bone 1 with bone 2 under
+    // it, and bone 3 on its own -- the upper body and the legs, in small.
+    // `parent` is an index into the list, as the exporter writes it.
+    type: { bone_count: BONES, motions,
+            bones: [{ bone: 1, parent: null }, { bone: 2, parent: 0 },
+                    { bone: 3, parent: null }] } as unknown as CharacterType,
     root: new Object3D(),
     pivot: new Group(),
     bones,
@@ -127,10 +132,23 @@ sweep("a death clip holds its last frame",
       (ticks) => instance(CLIPS, { motion: 1022, playTicks: ticks,
                                death: { motion: 975, ticks } as Actor["death"] }));
 
-sweep("a hit reaction blends without running out",
+/** Track 1, as `MotionCrossFadeTo` leaves it: bone 1's subtree. */
+function overlay(motion: number, ticks: number,
+                 more: Partial<NonNullable<Actor["react"]>> = {}):
+    Actor["react"] {
+  return { motion, ticks, bone: 1, fadeFrom: null, fade: 0, fadeLen: 0,
+           fadeOut: 0, back: false, hold: false, ...more };
+}
+
+sweep("a hit reaction plays past the end of its clip without running out",
       (ticks) => instance(CLIPS, { motion: 1022, playTicks: ticks,
-                               react: { motion: 975, ticks, blend: 10,
-                                        hard: false } as Actor["react"] }));
+                               react: overlay(975, ticks) }));
+
+sweep("...and fades on its track without running out",
+      (ticks) => instance(CLIPS, { motion: 1022, playTicks: ticks,
+                               react: overlay(975, ticks, {
+                                 fadeFrom: { motion: 923, ticks }, fade: 5,
+                                 fadeLen: 12 }) }));
 
 sweep("a cross-fade out of the previous clip stays finite",
       (ticks) => instance(CLIPS, { motion: 1022, playTicks: ticks, fade: 5,
@@ -228,21 +246,22 @@ console.log("\nthe clip root goes to the object or to the pose, never both\n");
         bOFF.pivot.position.x === 6 && bOFF.pivot.position.z === -6,
         `(${bOFF.pivot.position.x}, ${bOFF.pivot.position.z})`);
 
-  // A hit reaction blends two *different* clips, and the engine lerps the two
-  // tracks' roots into one triple at `model+0x6C..0x74` before
-  // `SkeletonApplyRootMotion` sees it. Half way between clip 1022's frame 6
-  // and clip 975's frame 6 is still frame 6's root, because `motion()` gives
-  // every clip the same root track -- what this asserts is that the blend
-  // does not silently drop the horizontal half of it.
+  // A hit reaction does not reach the root at all. `SkeletonPoseRootFrame`
+  // (`FUN_00410920`) takes the root translation and bone 0's rotation from
+  // track 0 with no track test, and the reaction is on track 1. This used to
+  // assert the opposite -- that the reaction's clip blended into the root --
+  // and that is the belief that stood a crawler up on a standing flinch.
   const rOFF = instance(CLIPS, {
     motion: 1022, playTicks: 12,
     motionFlags: MOTION_FLAGS_INIT & ~MotionFlag.RootMotion,
-    react: { motion: 975, ticks: 12, blend: 10,
-             hard: false } as Actor["react"] });
+    react: overlay(975, 12) });
   poser.pose(rOFF);
-  check("a hit reaction blends the root rather than dropping it",
-        rOFF.pivot.position.x !== 0 || rOFF.pivot.position.z !== 0,
-        `(${rOFF.pivot.position.x}, ${rOFF.pivot.position.z})`);
+  check("a hit reaction leaves the root to the base clip",
+        rOFF.pivot.position.x === 6 && rOFF.pivot.position.z === -6
+        && rOFF.pivot.position.y === 10.6
+        && rOFF.pivot.quaternion.equals(OFF.pivot.quaternion),
+        `(${rOFF.pivot.position.x}, ${rOFF.pivot.position.y}, `
+        + `${rOFF.pivot.position.z})`);
 
   // And the death clip keeps the whole root whatever the gate says. It is the
   // one declared override in the file: `ActorAdvanceMotion` does not run root
@@ -256,6 +275,49 @@ console.log("\nthe clip root goes to the object or to the pose, never both\n");
   check("the death clip keeps its own travel even with the gate set",
         dON.pivot.position.x === 6 && dON.pivot.position.z === -6,
         `(${dON.pivot.position.x}, ${dON.pivot.position.z})`);
+}
+
+console.log("\nthe stumble is on bone 1's subtree and nowhere else\n");
+
+// `MotionCrossFadeTo(obj+0x194, 1, clip, ...)` hands track 1 bone 1 and its
+// children -- `SkeletonAssignSubtreeTrack` (`FUN_00412200`) -- and
+// `MotionWriteBoneAngles` (`FUN_00411D70`) poses a bone from the track its
+// record names. The fixture's bone 1 has bone 2 under it and bone 3 is a
+// root of its own, so the reaction's clip (975) must show on 1 and 2 and the
+// base clip (1022) on 3. `motion()` puts the clip id in each bone's first
+// BAMS component, so the pose itself says which clip drew it.
+{
+  const poser = new Poser();
+  const base = instance(CLIPS, { motion: 1022, playTicks: 12 });
+  const hit = instance(CLIPS, { motion: 975, playTicks: 12 });
+  const both = instance(CLIPS, { motion: 1022, playTicks: 12,
+                                 react: overlay(975, 12) });
+  poser.pose(base);
+  poser.pose(hit);
+  poser.pose(both);
+  const q = (i: Instance, b: number): Quaternion => i.bones.get(b)!.quaternion;
+  check("bones 1 and 2 -- the subtree -- take the reaction's clip",
+        q(both, 1).equals(q(hit, 1)) && q(both, 2).equals(q(hit, 2)));
+  check("...and bone 3, a root of its own, keeps the base clip",
+        q(both, 3).equals(q(base, 3)) && !q(both, 3).equals(q(hit, 3)));
+  check("...as do the root's position and rotation",
+        both.pivot.position.equals(base.pivot.position)
+        && both.pivot.quaternion.equals(base.pivot.quaternion));
+
+  // A fade on the track dissolves from its snapshot to the clip by
+  // `1 - fade / fadeLen`, on the subtree alone: half way, bone 1 sits between
+  // the snapshot's clip (923) and the reaction's, and bone 3 is untouched.
+  const from = instance(CLIPS, { motion: 923, playTicks: 12 });
+  const half = instance(CLIPS, {
+    motion: 1022, playTicks: 12,
+    react: overlay(975, 12, { fadeFrom: { motion: 923, ticks: 12 }, fade: 6,
+                              fadeLen: 12 }) });
+  poser.pose(from);
+  poser.pose(half);
+  const mid = new Quaternion().copy(q(from, 1)).slerp(q(hit, 1), 0.5);
+  check("a fade on the track blends the subtree by 1 - fade / fadeLen",
+        q(half, 1).angleTo(mid) < 1e-6 && q(half, 3).equals(q(base, 3)),
+        `angle ${q(half, 1).angleTo(mid)}`);
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

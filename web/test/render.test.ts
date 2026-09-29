@@ -5296,5 +5296,98 @@ console.log("\nthe stage's loaded models: a door is drawn by its routine, once")
         !gate.visible && !shutter.visible && !far.visible && other.visible);
 }
 
+// Class 0x42's draws, composed by three.js, against the same calls made on
+// the engine's own stack (`game/matrix.ts`, which post-multiplies as
+// `MatrixTranslate`/`MatrixRotate*` do) -- at turns where no axis lines up
+// (L84, L48).
+console.log("\nthe worm's draws, against the engine's matrix stack:");
+{
+  const { WormDrawParts } = await import("../src/render/worm");
+  const { WormBodyDraw, WormState } = await import("../src/game/class42/state");
+  const { SpawnClass } = await import("../src/game/spawn_class");
+  const M = await import("../src/game/matrix");
+  const { Vector3 } = await import("three");
+  const at = (m: import("three").Matrix4, x: number, y: number, z: number) =>
+    new Vector3(x, y, z).applyMatrix4(m);
+  const engine = (build: (m: number[]) => void, x: number, y: number,
+                  z: number) => {
+    const m = M.MatIdentity();
+    build(m);
+    const o = { x: 0, y: 0, z: 0 };
+    M.MatrixTransformPoint(m, { x, y, z }, o);
+    return o;
+  };
+  const near = (a: { x: number; y: number; z: number },
+                b: { x: number; y: number; z: number }) =>
+    Math.abs(a.x - b.x) < 1e-3 && Math.abs(a.y - b.y) < 1e-3
+    && Math.abs(a.z - b.z) < 1e-3;
+
+  const a = makeActor(0x3000f001, SpawnClass.Worm, -1, "worm");
+  if (a.cls !== SpawnClass.Worm) throw new Error("not a worm");
+  a.pos = { x: -480, y: 4.6, z: -1330 };
+  a.yaw = 0x2345;
+  a.pitch = 0x1234;
+  a.worm.drawnBody = WormBodyDraw.Member;
+  a.worm.state = WormState.Wait;
+  a.worm.scale = { x: 1.3, y: 0.8, z: 1.1 };
+  a.worm.ground = 3.8;
+  const parts = WormDrawParts(a, []);
+  const p = { x: 0.5, y: 1.0, z: -2.0 };
+  const body = engine((m) => {
+    M.MatrixTranslate(m, a.pos.x, a.pos.y + 1, a.pos.z);
+    M.MatrixRotateY(m, a.yaw); M.MatrixRotateX(m, a.pitch);
+    M.MatrixScale(m, 1.3 * 0.6, 0.8 * 0.6, 1.1 * 0.6);
+  }, p.x, p.y, p.z);
+  const shadow = engine((m) => {
+    M.MatrixTranslate(m, a.pos.x, 3.8 + 2, a.pos.z);
+    M.MatrixScale(m, 1, 0.1, 1);
+    M.MatrixRotateY(m, a.yaw); M.MatrixRotateX(m, a.pitch);
+    M.MatrixScale(m, 1.3 * 0.6, 0.8 * 0.6, 1.1 * 0.6);
+  }, p.x, p.y, p.z);
+  check("a member's body is T(x, y+1, z) Ry Rx S(0.6 scale), slot 0x85A",
+        parts.length === 2 && parts[0]!.slot === 0x85a
+        && near(at(parts[0]!.m, p.x, p.y, p.z), body),
+        `${JSON.stringify(at(parts[0]!.m, p.x, p.y, p.z))} vs ${JSON.stringify(body)}`);
+  check("...and its shadow the same flattened on the ground, 0x85B at 0.5",
+        parts[1]!.slot === 0x85b && parts[1]!.alpha === 0.5
+        && near(at(parts[1]!.m, p.x, p.y, p.z), shadow),
+        `${JSON.stringify(at(parts[1]!.m, p.x, p.y, p.z))} vs ${JSON.stringify(shadow)}`);
+
+  a.worm.drawnBody = WormBodyDraw.None;
+  a.worm.drawnHalves = [
+    { half: 0, landed: 0, halfY: 0, x: -480, y: 20, z: -1330, yaw: 0x2345,
+      t: [1.5, -3, 0.75], r: [0x1000, 0x2200, 0x0f00] },
+    { half: 1, landed: 1, halfY: 5.2, x: -480, y: 20, z: -1330, yaw: 0x2345,
+      t: [-1.5, -30, 0.25], r: [0x0800, 0, 0x3000] },
+  ];
+  const halves = WormDrawParts(a, []);
+  const half = (h: typeof a.worm.drawnHalves[number]) => engine((m) => {
+    M.MatrixTranslate(m, h.x, h.y, h.z);
+    M.MatrixRotateY(m, h.yaw);
+    if (h.landed) {
+      M.MatrixTranslate(m, 0, -h.y, 0);
+      M.MatrixTranslate(m, h.t[0], h.halfY, h.t[2]);
+    } else {
+      M.MatrixTranslate(m, h.t[0], h.t[1], h.t[2]);
+    }
+    M.MatrixRotateZ(m, h.r[2]); M.MatrixRotateY(m, h.r[1]);
+    M.MatrixRotateX(m, h.r[0]);
+    M.MatrixScale(m, 0.6, 0.6, 0.6);
+  }, p.x, p.y, p.z);
+  const h0 = half(a.worm.drawnHalves[0]!), h1 = half(a.worm.drawnHalves[1]!);
+  check("a half in the air rides its track under the yaw, Rz Ry Rx, and "
+        + "draws with its cut",
+        halves.length === 4 && halves[0]!.slot === 0x875
+        && halves[1]!.slot === 0x877
+        && near(at(halves[0]!.m, p.x, p.y, p.z), h0)
+        && near(at(halves[1]!.m, p.x, p.y, p.z), h0),
+        `${JSON.stringify(at(halves[0]!.m, p.x, p.y, p.z))} vs ${JSON.stringify(h0)}`);
+  check("...and a landed one is put at its own height, whatever the object's",
+        halves[2]!.slot === 0x876
+        && near(at(halves[2]!.m, p.x, p.y, p.z), h1)
+        && Math.abs(at(halves[2]!.m, 0, 0, 0).y - 5.2) < 1e-4,
+        `${JSON.stringify(at(halves[2]!.m, p.x, p.y, p.z))} vs ${JSON.stringify(h1)}`);
+}
+
 console.log(failures ? `\n${failures} failed` : "\nall passed");
 process.exit(failures ? 1 : 0);

@@ -1,11 +1,16 @@
 /**
  * Give up an attack and rejoin the queue.
  *
- * [diverges] This is the port's own, not a transcription. `ActorAbortAttackAndLeave`
- * (`FUN_0045D9F0`) was cited here on an assumption and it does not do this —
- * it is three calls that take no actor and assign no state. What this covers
- * is the port's gap: a state index the port has not read, reached because the
- * descriptor named it. The engine has no such case.
+ * [diverges] This is the port's own, not a transcription. The routine at
+ * `0x0045D9F0` was cited here on an assumption, under the name
+ * `ActorAbortAttackAndLeave`, and it does not do this. It is
+ * `ZombieSplitInTwo` (`FUN_0045D9F0`), which cuts the actor in two; an
+ * earlier revision of this note said it "assigns no state", having read its
+ * three calls and not their bodies, and its second call
+ * (`ZombieSplitUpdateSelf`, `FUN_0045DA60`) writes state 0x32. See
+ * `class30/split.ts`. What this covers is the port's gap: a state index the
+ * port has not read, reached because the descriptor named it. The engine has
+ * no such case.
  *
  * **It no longer covers state 10.** That index was reaching this through the
  * dispatch's `default` on the strength of the same wrong citation, and
@@ -18,7 +23,7 @@
  * advances blocks every other enemy for good.
  *
  * It used to clear {@link ZombieFlag2.StrikeAnchor} as well. Nothing in the
- * exe clears that bit outside `FUN_0045DA60` and `EnemyZombieInit`'s whole-word
+ * exe clears that bit outside `ZombieSplitUpdateSelf` and `EnemyZombieInit`'s whole-word
  * assignment, and clearing it here would put the actor back under
  * `ZombieStateHoldAtRange`'s too-close retreat, which is a behaviour the exe
  * only ever gives an actor that has never swung.

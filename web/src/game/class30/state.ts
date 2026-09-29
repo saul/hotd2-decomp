@@ -157,6 +157,18 @@ export function makeHeadAimWords(): HeadAimWords {
  */
 export interface ZombieTail extends HeadAimWords {
   /**
+   * `obj+0x1364` — the result of the last shot that landed, as
+   * `ZombieOnShot` (`FUN_00453EB0`) stashes it at the head of its per-player
+   * loop: `MOV EAX, [g_hit_result + p*4]` at `0x00453F06`, `MOV [ESI+0x1364],
+   * EAX` at `0x00453F1E`. `ZombieClearHitReactionWhenDone` (`FUN_00454660`)
+   * reads it to decide how long a reaction holds its track, and
+   * `ActorPlayHitReaction` (`FUN_004544C0`) for the length of the fade back.
+   *
+   * Class 0x31's word at the same address is the stance row its attack was
+   * drawn against (`ThrowerTail`) -- L3.
+   */
+  hitResult: number;          // +0x1364
+  /**
    * `obj+0x1320` — the clip the captor script wants; the tail re-blends to it.
    *
    * `[proved]`: `ZombieStateTargetMotionScript` (`FUN_0045AAA0`) writes it at
@@ -453,6 +465,7 @@ export interface ZombieTail extends HeadAimWords {
 export function makeZombieTail(): ZombieTail {
   return {
     ...makeHeadAimWords(),
+    hitResult: 0,
     scriptMotion: 0,
     delegate: 0,
     holdFrames: 0,

@@ -15,7 +15,7 @@ import { vec3 } from "../vec";
 import { AngleWithinTolerance } from "../actor_turn";
 import type { Rng } from "../../core/rng";
 import type { CharacterBone, CharacterType } from "../../bundle";
-import { ActorFlag, DamageZone, type Actor } from "../actor";
+import { ActorFlag, DamageZone, ZombieFlag2, type Actor } from "../actor";
 import { AppState, G } from "../globals";
 import { CameraBlockYaw } from "../camera/view";
 import { SpawnClass } from "../spawn_class";
@@ -23,7 +23,10 @@ import { ZombieState } from "../class30/states";
 import { ScoreAddForPlayer } from "./score";
 import { ActorIsEnemy, g_class_handlers } from "../registry";
 import type { GameHost } from "../host";
-import { CharacterTypeOf, MotionOf, PartSphereRowsOf, T } from "../tables";
+import { CharacterTypeOf, MotionOf, MotionRowOf, PartSphereRowsOf, T }
+  from "../tables";
+import { MotionCrossFadeAlt, MotionCrossFadeTo } from "../motion";
+import { ActorSetMotion } from "../class30/motion_cue";
 
 // -- `.text` immediates ----------------------------------------------------
 //
@@ -32,14 +35,24 @@ import { CharacterTypeOf, MotionOf, PartSphereRowsOf, T } from "../tables";
 // `docs/formats/bundle.md`.
 
 /**
- * `ActorPlayHitReaction` (`FUN_004544C0`) cross-fades over this many frames,
- * +1, into the actor's second motion track.
+ * `ActorPlayHitReaction` (`FUN_004544C0`)'s `MotionCrossFadeTo` arguments:
+ * `PUSH 0xa` or `PUSH 0x14` (the fade back out, 20 when the hit severed
+ * something), `PUSH 0x1` (the fade in), `PUSH 0x0` (the start), the clip,
+ * `PUSH 0x1` (the bone whose subtree plays it) -- `0x0045456A`..`0x00454577`
+ * and `0x00454591`..`0x0045459E`.
  */
-const REACT_BLEND = 10;
-/** ...and over this many when the hit severed something (`obj+0x1364 == 3`). */
-const REACT_BLEND_SEVER = 20;
-/** The bone from which the reaction is hard-set instead of cross-faded. */
-const REACT_BLEND_MAX_BONE = 9;
+const REACT_FADE_OUT = 10;
+const REACT_FADE_OUT_SEVER = 0x14;
+const REACT_FADE_IN = 1;
+const REACT_OVERLAY_BONE = 1;
+/** `CMP EDX, 0x9 / JGE` at `0x0045453A`: bone 9 and below cut the base track. */
+const REACT_OVERLAY_BELOW_BONE = 9;
+/** The alt arm's `MotionCrossFadeAlt(obj+0x194, 1, clip, 0, 10)`, `0x004545BE`. */
+const REACT_ALT_FADE_IN = 10;
+/** `MOV ECX, [EAX + EDX*4 + 0x10]` at `0x004545CC`: row entry 4 + the zone. */
+const REACT_ALT_ROW = 4;
+/** `CMP EAX, 0x4` at `0x004545F8` -- the crawler's body condition. */
+const REACT_ALT_NO_PENDING_CONDITION = 4;
 
 /**
  * `ChooseDeathMotionDirectional` (`FUN_00456220`) names two of its four arcs
@@ -54,13 +67,20 @@ const DEATH_ARC = 0x2000;
 
 /**
  * The one character type `ResolveHit`'s sever arm singles out —
- * `004095C2  6683bff40100000c  CMP word ptr [EDI+0x1f4], 0xc`. What is
- * special about type 0x0C here is `[open]`; the test is transcribed because
- * the engine makes it.
+ * `004095C2  6683bff40100000c  CMP word ptr [EDI+0x1f4], 0xc` — which is
+ * `znkager`, stage 2's crawler.
+ *
+ * The gate is closed below bone 9 unless `obj+0x136C` bit 0x80 is up, and
+ * `EnemyZombieInitByCharType` (`FUN_00452FD0`) raises that bit on **every**
+ * class-0x30 `znkager` at birth. So in the shipped game it is always open for
+ * them. Nothing set the bit in the port until the type-0xC arm was ported,
+ * which left every `znkager`'s bones 9 to 15 unseverable. Why the engine
+ * gates at all is `[open]`; the test is transcribed because the engine makes
+ * it.
  */
 const SEVER_GATED_CHAR = 0xc;
-/** ...unless `obj+0x136C` bit 7 is up, which lets it sever anyway. */
-const SEVER_GATED_OVERRIDE = 0x80;
+/** ...unless {@link ZombieFlag2.SeverAnyBone} is up, which lets it sever anyway. */
+const SEVER_GATED_OVERRIDE = ZombieFlag2.SeverAnyBone;
 /** ...and bones below this one sever whatever the type. */
 const SEVER_GATED_FIRST_BONE = 9;
 
@@ -77,6 +97,17 @@ export enum HitResultCode {
   Plain = 2,
   /** Severed: the bone kept its stump and everything below it came off. */
   Severed = 3,
+  /**
+   * **Tested and never written.** `ActorReactToHit` (`FUN_004543F0`) sends
+   * result 4 on bone 1 or 9 to `ZombieSplitInTwo` (`FUN_0045D9F0`) and
+   * swallows it on any other bone. Nothing in the image stores 4 here: the
+   * 25 instructions that name `g_hit_result` by address are `ResolveHit`'s
+   * 0/1/2/3/5, `ThrowerShotFeedback`'s 5 and reads, and the address of the
+   * second player's slot appears nowhere. `[proved]`, and
+   * `tools/verify_split_unreachable.py` counts them. A member rather than a
+   * gap because the engine switches on it; see `class30/split.ts`.
+   */
+  Split = 4,
   /** The sentinel. No damage, no score, and a ricochet rather than blood. */
   NoEffect = 5,
 }
@@ -124,7 +155,10 @@ export function DamageRankModifier(b: CharacterBone | undefined): number {
 }
 
 /**
- * Bone indices whose parent is *bone*.
+ * Bone indices whose parent is *bone*. The engine walks a node's own child
+ * array (`+0x16` count, `+0x18` pointers); the bundle flattens the tree, so
+ * this recovers the children from it. Shared by the sever and by
+ * `class30/split.ts`'s hide, which walk the same tree.
  *
  * `CharacterBone.parent` is an **index into `bones`**, not a bone number — the
  * exporter flattens the EXE's node tree parents-first and records where the
@@ -134,7 +168,8 @@ export function DamageRankModifier(b: CharacterBone | undefined): number {
  */
 const kidCache = new WeakMap<CharacterType, Map<number, number[]>>();
 
-function childBones(type: CharacterType, bone: number): number[] {
+/** `[port-only]` -- see above; exported for `class30/split.ts`. */
+export function childBones(type: CharacterType, bone: number): number[] {
   let kids = kidCache.get(type);
   if (!kids) {
     kids = new Map();
@@ -341,9 +376,37 @@ export function SeverBoneChildren(obj: Actor, bone: number): void {
  *
  * `[proved]`. Twenty-one character types carry a **second** row at body
  * condition 3 — motions 257–263, 43 frames instead of 29 — and nothing in the
- * port could reach it. `znkager`'s crawling body condition 4 is the same row
- * as 0, so this is not why a crawler stands up when it is shot; see
- * `ZombieStateStrike`'s note on the crawler's own attack table for that.
+ * port could reach it.
+ *
+ * ## Where the clip plays, which is what a crawler shows
+ *
+ * ```
+ * 0045453a  CMP bone, 9 / JGE cut               ; the legs
+ * 00454549  TEST DH, 0x8 / JNZ cut              ; obj+0x136C 0x800
+ * 00454552  TEST DH, 0x1 / JNZ alt              ; obj+0x136C 0x100
+ * 0045455d  obj+0x136C |= 0x1000
+ * 0045457a  MotionCrossFadeTo(obj+0x194, 1, clip, 0, 1, result3 ? 0x14 : 10)
+ *           obj+0x34 |= 0x40000000; return
+ * 004545da  alt: MotionCrossFadeAlt(obj+0x194, 1, row[4 + obj+0x1319], 0, 10)
+ *           if (zone) { obj+0x34 |= 0x2000
+ *             if (condition != 4 && hp > 0) { obj+0x136C |= 0x200;
+ *               obj+0x34 |= 0x40000000; return } }
+ * 00454627  cut: obj+0x136C = (& ~0x1000) | 0x2000; ActorSetMotion(obj+0x194, clip)
+ * 00454649  obj+0x34 |= 0x40000000
+ * ```
+ *
+ * An upper-body hit plays the clip on **track 1 over bone 1's subtree** --
+ * torso, head and arms, and nothing else: the root and the legs stay on the
+ * base clip (see `OverlayTrack`). The port blended the whole skeleton onto the
+ * clip, root height included, so every `znkager` -- body condition 4, whose
+ * row here is the standing zombie's -- stood up on a standing flinch when it
+ * was shot. It also read the 10 or 20 as a fade in, where it is the fade back
+ * out, and hard-set the legs' clip as an overlay rather than cutting the base
+ * track, where the states' `ZombieSetMotionIfIdle` then waits on bit 0x2000.
+ *
+ * No class-0x30 instruction or descriptor raises `obj+0x136C` 0x100 or 0x800
+ * (`ZombieFlag2.HitReactionAlt`, `ZombieFlag2.ReactOnBaseTrack`), so the alt
+ * arm and the 0x800 test are transcribed against bits that stay down.
  */
 export function ActorPlayHitReaction(obj: Actor, bone: number,
                                      result: HitResultCode): number | undefined {
@@ -389,13 +452,34 @@ export function ActorPlayHitReaction(obj: Actor, bone: number,
            ?? type?.reactions?.["0"];
   const motion = group === undefined ? undefined : row?.[group];
   if (!motion || !MotionOf(obj, motion)) return undefined;
-  obj.react = {
-    motion,
-    ticks: 0,
-    blend: result === HitResultCode.Severed ? REACT_BLEND_SEVER : REACT_BLEND,
-    // `ActorSetMotion` (`FUN_00411930`) hard-sets the leg reactions: no fade.
-    hard: bone >= REACT_BLEND_MAX_BONE,
-  };
+  if (bone < REACT_OVERLAY_BELOW_BONE
+      && !(obj.flags2 & ZombieFlag2.ReactOnBaseTrack)) {
+    if (!(obj.flags2 & ZombieFlag2.HitReactionAlt)) {
+      obj.flags2 |= ZombieFlag2.HitClipOverlay;
+      // `CMP [ESI+0x1364], 3` -- the hit result `ZombieOnShot` stashed there
+      // for this shot, which is the result the port hands in.
+      MotionCrossFadeTo(obj, REACT_OVERLAY_BONE, motion, 0, REACT_FADE_IN,
+                        result === HitResultCode.Severed
+                          ? REACT_FADE_OUT_SEVER : REACT_FADE_OUT);
+      obj.flags |= ActorFlag.Reacting;
+      return motion;
+    }
+    const alt = MotionRowOf(obj)[REACT_ALT_ROW + obj.lastHitZone] ?? 0;
+    MotionCrossFadeAlt(obj, REACT_OVERLAY_BONE, alt, 0, REACT_ALT_FADE_IN);
+    if (obj.lastHitZone !== 0) {
+      obj.flags |= ActorFlag.NoHitReaction;
+      if (obj.condition !== REACT_ALT_NO_PENDING_CONDITION && obj.hp > 0) {
+        obj.flags2 |= ZombieFlag2.HitReactionPending;
+        obj.flags |= ActorFlag.Reacting;
+        return alt;
+      }
+    }
+  } else {
+    obj.flags2 = (obj.flags2 & ~ZombieFlag2.HitClipOverlay)
+               | ZombieFlag2.HitClipBase;
+    ActorSetMotion(obj, motion);
+  }
+  obj.flags |= ActorFlag.Reacting;
   return motion;
 }
 
@@ -413,17 +497,35 @@ export function ActorPlayHitReaction(obj: Actor, bone: number,
  */
 export function ActorReactToHit(obj: Actor, bone: number,
                                 result: HitResultCode): number | undefined {
+  // `0045440c MOV [ESI+0x1319], DL` (2) and the same for 1 after it: 2 for a
+  // shot on bone 2 and 1 for one on bone 1, before any arm -- the zone
+  // `ActorPlayHitReaction`'s alt arm and `ZombieTickAltHitReaction` read.
+  if (bone === 2) obj.lastHitZone = 2;
+  if (bone === 1) obj.lastHitZone = 1;
   if (bone <= 0) return undefined;
   const ct = CharacterTypeOf(obj)?.type ?? -1;
   // The `znjoe` arm `return`s before the stagger, so a hit that will take it
   // plays no reaction at all. The arm itself runs later in the same frame —
   // see {@link ActorWouldReleaseBodyCreature}.
   if (ActorWouldReleaseBodyCreature(obj, bone, ct, result)) return undefined;
-  const reacts = result === HitResultCode.Damaged
-    || result === HitResultCode.Severed
-    || ((result === HitResultCode.Plain || result === HitResultCode.NoEffect)
-        && (ct === 3 || ct === 0x12));
-  return reacts ? ActorPlayHitReaction(obj, bone, result) : undefined;
+  // The engine's own three-way shape, `00454428 MOV EAX, [g_hit_result + p*4]`
+  // and on: 1 and 3 react, 4 is the split, and **everything else** -- 2, 5 and
+  // 0 alike -- reacts only for character types 0x12 and 3. It used to test 2
+  // and 5 by name, which dropped the 0 that `ResolveHit` leaves while
+  // `obj+0x34` bit 0x800 is up (the attract demo).
+  if (result === HitResultCode.Damaged || result === HitResultCode.Severed) {
+    return ActorPlayHitReaction(obj, bone, result);
+  }
+  if (result === HitResultCode.Split) {
+    // `CMP [g_shot_bone + p*4], 1` / `CMP ..., 9`, then
+    // `CALL ZombieSplitInTwo` -- and on any other bone a bare `RET`. [diverges]
+    // The split is not ported, because nothing in the image writes this
+    // result: see `class30/split.ts`. What the port keeps is the arm's other
+    // half, which is that result 4 never staggers.
+    return undefined;
+  }
+  return ct === 3 || ct === 0x12
+    ? ActorPlayHitReaction(obj, bone, result) : undefined;
 }
 
 /**
@@ -850,14 +952,22 @@ export function ResolveHit(obj: Actor, bone: number,
   // `ZombieOnShot` only reacts while the actor is alive; the death takes over
   // otherwise.
   const survived = !wasDead && obj.hp >= 1;
-  // **Class 0x31 reacts and dies through its own states**, so it takes the
-  // shared damage, gore and score and none of the shared *animation*:
-  // `ThrowerOnShot` reads this result on the actor's next tick and picks the
-  // stumble, the knockdown or the tumble, and its death is a four-state chain
-  // with its own clips. Handing it the shared stagger and the shared
-  // *directional* death gave a `zstin` `zom.bin`'s animations, which belong to
-  // a different creature.
-  const ownReaction = obj.cls === SpawnClass.Thrower;
+  // **Who staggers here: the classes whose update runs `ZombieOnShot`.**
+  // `ActorReactToHit` (`FUN_004543F0`) has one call in the image -- an `E8`
+  // scan of `.text` finds `0x0045401B`, in `ZombieOnShot` (`FUN_00453EB0`),
+  // and nothing else -- and `EnemyZombieUpdate` is what runs that: class
+  // 0x30's update, and class 0x18's through `CarriedZombieUpdate18`. This
+  // used to hand the stagger to every surviving class but 0x31, so a civilian
+  // or a class-0x25 figure with a reaction row played a zombie's stumble no
+  // routine of its own asks for -- and now that the stagger writes
+  // `obj+0x136C` and `obj+0x34` bits, it would have written them into words
+  // that mean something else on those classes (L3).
+  //
+  // **Class 0x31 reacts and dies through its own states** -- `ThrowerOnShot`
+  // reads this result on the actor's next tick and picks the stumble, the
+  // knockdown or the tumble -- which is the same rule seen from its side.
+  const reactsHere = obj.cls === SpawnClass.Zombie
+                  || obj.cls === SpawnClass.CarriedZombie;
   // **Whose death this is.** `ResolveHit` (`FUN_00409430`) drops hit points
   // and nothing else; the clip comes from the class's own machine —
   // `ZombieStateDeath6` (`FUN_00454D20`) sub 0 calls `ChooseDeathMotion` for
@@ -892,7 +1002,7 @@ export function ResolveHit(obj: Actor, bone: number,
       || obj.cls === SpawnClass.CarriedZombie) {
     obj.pendingHit = { bone, result, player };
   }
-  const react = survived && !ownReaction
+  const react = survived && reactsHere
     ? ActorReactToHit(obj, bone, result) : undefined;
 
   let death: number | undefined;

@@ -413,6 +413,12 @@ export const ENEMY_CLASSES: ReadonlySet<number> = new Set([
   // share the class id and are not counted; `ClassHandler.onDeadSweep` and
   // `tracksCamera` are how the class tells them apart.
   SpawnClass.HordeSpawner,
+  // Class 0x42's batch members do both `INC`s in `PlaceWormBatch`
+  // (`FUN_0042F9B0`, `0x0042FBBF`/`0x0042FBC6`) and both `DEC`s on the kill
+  // and on the bounce's exit. The placer and sub-type 1's lone drop share the
+  // class id and are not counted; `ClassHandler.onDeadSweep` and
+  // `countsForEnemyGate` are how the class tells them apart.
+  SpawnClass.Worm,
 ]);
 
 /** Whether this actor is one the enemy counters count. */

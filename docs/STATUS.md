@@ -18,42 +18,42 @@ than a measurement. What each directory is for is in
 
 | Directory | Lines | Files | Layer |
 |---|---:|---:|---|
-| `game/` | 110522 | 362 | engine |
-| `hod2lib/` | 20019 | 35 | engine |
-| `render/` | 15893 | 60 | render |
+| `game/` | 112927 | 368 | engine |
+| `hod2lib/` | 20194 | 36 | engine |
+| `render/` | 16099 | 61 | render |
 | `app/` | 12721 | 44 | app |
 | `script/` | 4495 | 25 | engine |
 | `ui/` | 3779 | 27 | ui |
 | `core/` | 3535 | 13 | engine |
-| `bundle/` | 2938 | 11 | engine |
+| `bundle/` | 2995 | 11 | engine |
 | `audio/` | 1053 | 3 | render |
 | `hud/` | 526 | 1 | ui |
-| **total** | **175481** | **581** | |
+| **total** | **178324** | **589** | |
 
 The largest files, which is where the pressure to split next is:
 
-* `game/globals.ts` — 3251
+* `game/globals.ts` — 3283
 * `app/main.ts` — 3227
-* `game/actor.ts` — 2744
-* `hod2lib/bundle.ts` — 2508
+* `game/actor.ts` — 2882
+* `hod2lib/bundle.ts` — 2526
 * `hod2lib/exetab.ts` — 2409
 
 ## The port
 
 | | |
 |---|---|
-| Gameplay coverage | **233 of 299** annotated functions in the gameplay address ranges have a port (77%) |
-| Ported outside those ranges | 594 (opcodes, and the classes whose handlers sit elsewhere) |
-| Citations checked | 827 ported functions match `functions.tsv` under the same name |
-| Spawn classes | **32 of 42** read classes have a module, covering 1549 of 1619 placements |
-| Declared `[diverges]` | **131** — where the port knowingly departs from the exe, each with its reason on the spot |
-| `[open]` markers | **122** — questions the port and the exporter are honest about not having answered |
+| Gameplay coverage | **237 of 309** annotated functions in the gameplay address ranges have a port (76%) |
+| Ported outside those ranges | 602 (opcodes, and the classes whose handlers sit elsewhere) |
+| Citations checked | 839 ported functions match `functions.tsv` under the same name |
+| Spawn classes | **33 of 42** read classes have a module, covering 1552 of 1619 placements |
+| Declared `[diverges]` | **133** — where the port knowingly departs from the exe, each with its reason on the spot |
+| `[open]` markers | **123** — questions the port and the exporter are honest about not having answered |
 
 Both markers are counted in **every** `.ts`/`.tsx` file under `web/src/`, one per occurrence, and only in comments — a word in code or in a string is not a marker (`verify_port.marker_lines`). Each departure and each question is written once, where it is made; everything that refers to it names it in words ([`PLAYER.md`](PLAYER.md#one-departure-one-tag), "One departure, one tag"). By layer, from the same table as the directories above:
 
 | Layer | Directories | `[diverges]` | `[open]` |
 |---|---|---:|---:|
-| engine | `core/`, `bundle/`, `script/`, `game/`, `hod2lib/` | 118 | 118 |
+| engine | `core/`, `bundle/`, `script/`, `game/`, `hod2lib/` | 120 | 119 |
 | render | `render/`, `audio/` | 12 | 4 |
 | ui | `hud/`, `ui/` | 0 | 0 |
 | app | `app/` | 1 | 0 |
@@ -64,9 +64,9 @@ The two declared seams between the UI and the player: **`PlayerCommands` has 54 
 
 | | |
 |---|---|
-| Named functions | 1459 in `ghidra/annotations/functions.tsv` |
-| Named globals | 753 in `ghidra/annotations/globals.tsv` |
-| Checks | 72, run together by `tools/verify_all.py` (listed below) |
+| Named functions | 1484 in `ghidra/annotations/functions.tsv` |
+| Named globals | 768 in `ghidra/annotations/globals.tsv` |
+| Checks | 74, run together by `tools/verify_all.py` (listed below) |
 
 ## Ratchets
 
@@ -156,7 +156,9 @@ nothing exits 3 and is never counted as green.
 | `game:bgm_stream` | that the music has no loop points to find -- the EXE's own bytes stream channel 0xF and seek it back to the first sample at end of file, the port's one-shot ids and ring length are the EXE's, and every looping track opens under the port's header walk and is long enough for its stream model to be exact | game-dir |
 | `game:root_pose` | that a clip's root translation either moves the object or offsets the pose -- the two arms of one `model+0x64` bit, quoted as bytes -- which actors the posing arm can move, measured over every motion block and paired with the class-0x10 wait word that governs it, and that `ActorModelScale` is `ActorBuildSkinnedModel`'s per-type switch, decoded from its jump table | game-dir |
 | `game:combat` | that the exporter's shot and damage readings hold together across every character type and match the EXE's bytes -- and the only place the *exact* set of attacks the engine can never land is asserted, which stops the crawlers' condition-4 swing being filtered out as an impossible row (L65, L71, L73) | game-dir |
+| `game:split_unreachable` | that nothing the shipped game runs reaches `ZombieSplitInTwo` (`FUN_0045D9F0`) -- no store of 4 to `g_hit_result`, one writer of the split bit and no way into its state, each beside a control that must be found -- which is the whole of the case for the port not transcribing the split, and the only check that can say when that case stops holding | game-dir |
 | `game:horde` | that every number the class-0x40 horde is steered by -- its entry splines, spline rates, shot delays, wander grid, second skin and the emerge prop's corners -- is the EXE's, and that the seven descriptors split five hordes to two props on the byte PlaceHorde switches on | game-dir |
+| `game:worm` | that every scalar the class-0x42 worm's port names is the `.rdata` word or the instruction operand the EXE loads, that its member routine's jump table has the seven arms the port's switch has, that its sounds and `buyo.bin` slots are the ones the port names, that the game's three class-0x42 descriptors are sub-types 1, 0 and 2, and, with a bundle, that the shadow the port draws without the scene light array is a black no light can change | game-dir |
 | `game:continue_screen` | that the continue screen the port draws -- the run's CONTINUE? and digit, the two-player small ones, the small GAME OVER and the credit line -- is at the EXE's positions, scales and sprite ids, read as instruction bytes and `.rdata` rows; that only one credit-line drawer can run; and that all eight wait opcodes read the gameplay gate that holds the script while nobody is in play | game-dir |
 | `game:options` | that the profile reading is right on the user's own save -- the four disguised files deciphered with the key taken out of `ProfileCipher`'s instructions, and the block's byte sum and version checked -- that Blood Color is dead in this build, and that the options screen's factory tables, sprite ids, positions and glyph table are the EXE's, with the bundle's `options` block when there is one | game-dir |
 | `game:result_card` | that every constant the result card's port transcribes is the immediate at its instruction; that the `.rdata` span the card reads with no bound is the EXE's bytes; that every rescuable civilian's type has an attachment list the unbounded lookup can find; and, with a bundle, that each stage placing the card carries a figure template and every clip for every type it can show | game-dir |
@@ -167,7 +169,7 @@ nothing exits 3 and is never counted as green.
 | `game:bone_cels` | that every cel run `ZombieDrawBonePart` (`FUN_004534A0`) draws is the arithmetic in the EXE and is in the bundle -- no table in the image names those models, so this is the only thing standing between a hand-written run and a character losing a part | game-dir |
 | `baseline` | that the installed assets still hash to `manifest.csv` | game-dir |
 
-22 of them need the installed game and 29 need an exported
+24 of them need the installed game and 29 need an exported
 bundle. **That is a known hole, not a design:** a machine with
 neither cannot run the checks that compare two histories, and a
 bundle-free fixture is the open work that closes it.

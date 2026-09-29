@@ -73,6 +73,7 @@ import { BODY_CREATURE_SLOTS, CARRIED_PROP_BREAK, CARRIED_PROP_SLOTS }
 import { charactersJson, resolveForStage as resolveCharacters,
          stagePlacesResultCard } from "./characters";
 import * as charmotion from "./charmotion";
+import { class42Tables } from "./class42";
 import * as degraded from "./degraded";
 import type { Degradation } from "./degraded";
 import * as evtlib from "./evt";
@@ -1261,6 +1262,16 @@ export const ACTOR_SLOTS: Record<number, number[]> = {
   // (`Class23LandingRingUpdate`, `FUN_00491700`: slot `0x17C8`, `boss1q.bin`
   // 94). The walker is only ever made by the flier, so the flier carries both.
   0x22: [...Array.from({ length: 15 }, (_, i) => 0x94 + i), 0x17c8],
+  // Class 0x42, the worm: `buyo.bin` 0..53, every slot its three routines
+  // draw through `WormAssetDrawSlot` (`FUN_00430B90`) -- the body `0x85A`,
+  // its shadow `0x85B`, the landing splat `0x85C..0x874` (which the lone
+  // drop draws the first of), the halves `0x875`/`0x876` and their cut face
+  // `0x877`, and the death strip `0x87A..0x88F`. The run travels whole, as
+  // the owl's does. And the splash `SpawnHordeDeathSplash` (`FUN_0043E4C0`)
+  // leaves where one dies, which is class 0x40's object and draws class
+  // 0x40's slots: the ripple `0x1A38` and the strip `0x15E4..0x1601`.
+  0x42: [...Array.from({ length: 0x88f - 0x85a + 1 }, (_, i) => 0x85a + i),
+         0x1a38, ...Array.from({ length: 30 }, (_, i) => 0x15e4 + i)],
 };
 
 /**
@@ -1602,7 +1613,7 @@ export async function actorSlotEntry(
   if (!parts.length) return null;
   const rig: Rig = {
     name: "slots_actor",
-    routine: "asset-slot actor draws (classes 0x13, 0x14, 0x40, 0x43, "
+    routine: "asset-slot actor draws (classes 0x13, 0x14, 0x40, 0x42, 0x43, "
       + "0x51, 0x52; class 0x25 variant 3; class 0x33 selector 4; "
       + "class 0x41 type 1's water tiles)",
     worldSpace: false,
@@ -2222,6 +2233,13 @@ export async function buildStage(stage: Stage, sink: BundleSink,
   scriptJson.rigs = rigsJson(rigInstances, rigBlocked, campaths, tables);
   scriptJson.rain = rain;
   scriptJson.characters = charactersJson(charDefs, charPlaces, tables);
+  // Class 0x42's `.rdata` and the two motions its split halves follow, for
+  // the one stage that spawns it. Only then: the halves are a motion bank's
+  // frames, and a stage with no worm has no reader for them.
+  if (spawnRecords.some((r) => r.cls === 0x42)) {
+    (scriptJson.characters as Record<string, unknown>).class42 =
+      await class42Tables(stage);
+  }
   scriptJson.props = propslib.propsJson(tables, hinges, statics);
   scriptJson.breakables = breakablesJson(tables, placements, effectDefs,
                                          stage.scene);

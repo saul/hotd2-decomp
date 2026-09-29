@@ -39,6 +39,7 @@ import { makePathRidingPropTail, type PathRidingPropTail }
 import { makeBatTail, type BatTail } from "./class46/state";
 import { makeBoss3Tail, type Boss3Tail } from "./class45/state";
 import { makeHordeTail, type HordeTail } from "./class40/state";
+import { makeWormTail, type WormTail } from "./class42/state";
 import { makeFishTail, type FishTail } from "./class51/state";
 import { makeMouseTail, type MouseTail } from "./class52/state";
 import { makeCatTail, type CatTail } from "./class53/state";
@@ -145,10 +146,16 @@ export enum ActorFlag {
    * `ActorStrikeConnect` (`FUN_00456490`) and `ThrowerStrikeConnect`
    * (`FUN_0044CE60`): with it up the strike lands **without** the hit latch
    * (`PlayerTakeDamage(player, 0, motion)`, so no damage overlay) and the
-   * striker leaves at once -- `ZombieReleaseAndDespawn` or `ThrowerLeave`. It
-   * is raised by `FUN_0045E010` and `FUN_0045E660`, neither of them read, so
-   * what makes an actor strike-and-leave is `[open]` and nothing in the port
-   * sets it.
+   * striker leaves at once -- `ZombieReleaseAndDespawn` or `ThrowerLeave`.
+   *
+   * This used to say the bit is raised by the routines at `0x0045E010` and
+   * `0x0045E660`. They are `ZombieStateSplitLaunch` and
+   * `ZombieStateCollapseToCondition4` now that they have been read, and their
+   * `OR EAX, 0x2000000` (`0045e2e1`, `0045e732`) goes into **`obj+0x136C`**
+   * -- {@link ZombieFlag2.LowSphere} -- not into this word: a search on the
+   * literal found the constant and not the field (`L32`, `L3`). No class-0x30
+   * routine raises this bit, so what makes an actor strike-and-leave is
+   * `[open]` and nothing in the port sets it.
    */
   StrikeAndLeave = 0x2000000,
   /**
@@ -905,17 +912,44 @@ export enum ZombieFlag2 {
    * pushed, so a wedged one tries the other way.
    */
   BackOffTurnFlip = 0x400000,
-  /** Bit `0x2000000` — the bounding sphere sits a half unit up, not one. */
+  /**
+   * Bit `0x2000000` — the bounding sphere sits a half unit up, not one.
+   *
+   * That is the reader the name came from. Its three writers say what it is
+   * *for*: this actor is **half a body**. `ZombieInitHalved` (`FUN_0045DA10`)
+   * raises it on every `znkager` born at body condition 4, and the two states
+   * the split machinery ends in, `ZombieStateSplitLaunch` (`FUN_0045E010`) and
+   * `ZombieStateCollapseToCondition4` (`FUN_0045E660`), raise it on the way
+   * back into the run. `ZombieSplitUpdateSelf` (`FUN_0045DA60`) and
+   * `ZombieSplitCopyToHalf` (`FUN_0045DBC0`) test it to tell a first split
+   * from a second. `[proved]`
+   */
   LowSphere = 0x2000000,
   /**
-   * Bit `0x1000000` — with {@link LowSphere}, what arms
-   * `ZombieStateAttackRun`'s one-in-64 roll into `ActorAbortAttackAndLeave`
-   * (`FUN_0045D9F0`); the roll clears it when it fires (`00455540 25fffffffe`).
-   * Its one writer found so far is `g_class30_states[53]` at `0045e6a2`
-   * (`OR EAX, 0x1000000`), a state the port does not have. What the bit means
-   * beyond that is `[open]`.
+   * Bit `0x1000000` — with {@link LowSphere}, what arms a split:
+   * `ZombieStateAttackRun`'s one-in-64 roll and `ZombieStateLeapStrike`'s
+   * quarter-arc test both clear it and call `ZombieSplitInTwo`
+   * (`FUN_0045D9F0`) (`00455540 25fffffffe`, `0045e4db 25fffffffe`).
+   *
+   * **Nothing the shipped game runs ever raises it.** Its one class-0x30
+   * writer is `ZombieStateCollapseToCondition4` at `0045e6a2`
+   * (`OR EAX, 0x1000000`), and no instruction stores that state's number and
+   * no descriptor, entry tail, captor script or civilian order names it;
+   * `tools/verify_split_unreachable.py` holds that. It used to be called
+   * `AbortRollArmed`, after the routine's old name. `[proved]`
    */
-  AbortRollArmed = 0x1000000,
+  SplitArmed = 0x1000000,
+  /**
+   * Bit `0x80` — lets `ResolveHit` (`FUN_00409430`) sever bones 9 and up on
+   * character type 0xC, whose sever arm is otherwise closed below bone 9
+   * (`004095C2 CMP word ptr [EDI+0x1F4], 0xC`, then `TEST byte [..+0x136C],
+   * 0x80`). `EnemyZombieInitByCharType` (`FUN_00452FD0`) raises it on
+   * **every** `znkager`, and `ZombieInitHalved` raises it again as part of its
+   * `0x6000080`; nothing else in class 0x30 writes it. So for a class-0x30
+   * actor the gate is always open, and what it is for is `[open]` — the one
+   * `znkager` that could reach `ResolveHit` without it is none. `[proved]`
+   */
+  SeverAnyBone = 0x80,
   /**
    * Bit `0x100000` — the actor is being **carried**: riding
    * `g_carrier_object` in `ZombieStateRideCarrier`, or in flight in
@@ -969,9 +1003,9 @@ export enum ZombieFlag2 {
    * (`OR EAX, 0x40000`), `00455bb0 89866c130000`. `[proved]`
    *
    * **Nothing on the melee path ever clears it.** The one `AND` in the program
-   * that does is in `FUN_0045DA60` (`0045db39 25fffffbff`), reached only
-   * through `FUN_0045D9F0` and gated on two bits an ordinary zombie does not
-   * carry; `EnemyZombieInit` clears it only because it *assigns* the whole
+   * that does is in `ZombieSplitUpdateSelf` (`FUN_0045DA60`)
+   * (`0045db39 25fffffbff`), reached only through `ZombieSplitInTwo`
+   * (`FUN_0045D9F0`), which nothing in the shipped game calls; `EnemyZombieInit` clears it only because it *assigns* the whole
    * word (`00452eaf`, from `00452e9a`'s `(s16)obj+0x1316 | 0x60000000`). So
    * after its first swing an actor keeps this bit for the rest of its life,
    * and its two other readers in `ZombieStateHoldAtRange` — the too-close
@@ -1047,16 +1081,23 @@ export enum ZombieFlag2 {
   ShotNearArcTarget = 0x8,
   /**
    * Bit `0x1000` — a hit-reaction clip is running on the **overlay** track,
-   * `obj+0x1B8`/`obj+0x1A0`.
+   * `obj+0x1B8`/`obj+0x1A0` ({@link Actor.react}).
    *
-   * `ActorPlayHitReaction` sets it, `FUN_00454660` tests and clears it when
-   * that track finishes (`0045468a`, `00454716`), and `ZombieSetMotionIfIdle`
-   * refuses to start an idle while either this or
-   * {@link ZombieFlag2.HitClipBase} is up (0x0045477E). `[proved]`
+   * `ActorPlayHitReaction` sets it, `ZombieClearHitReactionWhenDone`
+   * (`FUN_00454660`) clears it once that track is handed back or a quarter of
+   * its clip has played (`0045468a`, `00454716`), and while it is up
+   * `ZombieSetMotionIfIdle` changes only the legs' clip
+   * (`ActorSetMotionBlendedUnderOverlay`, `FUN_00411AC0`) so the stumble plays
+   * on. `[proved]`
    */
   HitClipOverlay = 0x1000,
-  /** Bit `0x2000` — the same, for the **base** track `obj+0x1B4`/`obj+0x19C`
-   *  (`FUN_00454660` at 0x004546CF and 0x00454734). `[proved]` */
+  /**
+   * Bit `0x2000` — a reaction clip cut onto the **base** track
+   * `obj+0x1B4`/`obj+0x19C`, for a hit on bone 9 or below it. While it is up
+   * `ZombieSetMotionIfIdle` changes nothing (`TEST DH, 0x20` at
+   * `0x0045477B`); `ZombieClearHitReactionWhenDone` drops it at the clip's
+   * end or a quarter of the way in (`0x004546CF`, `0x00454734`). `[proved]`
+   */
   HitClipBase = 0x2000,
   /**
    * Bit `0x200` — `ActorPlayHitReaction` raises it (`00454611`, `OR AH, 0x2`);
@@ -1080,16 +1121,36 @@ export enum ZombieFlag2 {
    */
   LetGo = 0x1,
   /**
-   * Bit `0x100` — the other half of that gate. `[open]`: nothing found raises
-   * it, and `ActorSnapToGroundHeight` (0x00454B3B) is the one reader.
+   * Bit `0x100` — the other half of that gate, and **nothing the shipped game
+   * runs raises it** on a class-0x30 actor. `[proved]` both ways a bit gets
+   * into this word: a sweep of class 0x30's code (`0x00452DA0`..`0x0045ECC0`)
+   * for every `OR` whose immediate carries it -- 32-bit, and the byte form on
+   * `AH`/`CH`/`DH`/`BH` -- finds eleven, and every one of them stores to
+   * `obj+0x34` (`ZombieApplyScriptMode`'s `0x0045CA59` and
+   * `ZombieStateCollapseToCondition4`'s `0x0045E69F` among them); and
+   * `EnemyZombieInit`'s copy of the descriptor's `+0x20` word carries it in
+   * none of the twelve bundles' class-0x30 records. Its readers are
+   * `ActorPlayHitReaction`'s alt arm, `ZombieTickAltHitReaction` and
+   * `ActorSnapToGroundHeight` (0x00454B3B), so all three are transcribed
+   * against a bit that stays down.
    *
    * This used to say `ZombieStateCorpseSink` (`FUN_00454F20`) and
    * `ZombieStateCorpseBlink` (`FUN_00454FD0`) clear it with
    * `AND EDX, 0xdffffdff`. **They do not**: `0xdffffdff` has bit 8 set, so
-   * that mask clears `0x20000000` and `0x200` and leaves this one alone. No
-   * writer of bit 0x100 has been found at all.
+   * that mask clears `0x20000000` and `0x200` and leaves this one alone.
    */
   HitReactionAlt = 0x100,
+  /**
+   * Bit `0x800` — with it up, `ActorPlayHitReaction` cuts **every** hit's
+   * reaction onto the base track, as it does a hit on bone 9 or below
+   * (`004544e0`..: `CMP bone, 9 / JGE` and `TEST AH, 0x8 / JNZ` to one arm).
+   * Nothing the shipped game runs raises it: the same sweep and census as
+   * {@link ZombieFlag2.HitReactionAlt} find no class-0x30 `OR` that stores it
+   * here -- the two `OR ?H, 0x8` in class 0x30 (`0x0045A951`, `0x0045B4D6`)
+   * write through a pointer at `obj+0x1310` -- and no descriptor that carries
+   * it. `[proved]`
+   */
+  ReactOnBaseTrack = 0x800,
   /**
    * Bit `0x10000000` — **this actor's position and yaw are an offset on
    * `g_carrier_object`**, and something re-seats it there every frame.
@@ -1172,6 +1233,63 @@ export interface ActorClip {
    * a fade, which is what it did before this existed.
    */
   held?: boolean;
+}
+
+/**
+ * Track 1 of the model block at `obj+0x194` -- the **overlay** a hit
+ * reaction plays on, beside the base track {@link Actor.motion} is.
+ *
+ * `MotionCrossFadeTo` (`FUN_00411B70`) starts it and `MotionStartOnTrack`
+ * (`FUN_004119F0`) hands it **a subtree**: `SkeletonAssignSubtreeTrack`
+ * (`FUN_00412200`) writes the track into the record of `bone` and of every
+ * bone below it, and `MotionWriteBoneAngles` (`FUN_00411D70`) poses a bone
+ * from the track its record names. Both callers pass bone 1, which is bones
+ * 1..8 -- torso, head, arms -- in every class-0x30 and class-0x31 skeleton,
+ * and `SkeletonPoseRootFrame` (`FUN_00410920`) takes the root translation and
+ * bone 0's rotation from track 0 with no track test at all. So a stumble moves
+ * the upper body and nothing else: the legs keep walking, and a crawler
+ * flinches its torso **on the floor**. The port used to blend the whole
+ * skeleton, root included, onto the clip, which stood every crawler up on a
+ * standing flinch.
+ *
+ * `SkeletonAdvanceOverlayCursor` (`FUN_004112E0`) is its clock and decides
+ * when it ends; `ActorSetMotion` and `ActorSetMotionBlended` end it too,
+ * because their `MotionStartOnTrack` puts the whole skeleton back on track 0
+ * and writes `model+0x36 = 0`.
+ */
+export interface OverlayTrack {
+  /** `track+0x24` -- `obj+0x1B8`, the clip. */
+  motion: number;
+  /**
+   * `track+0x04` -- `obj+0x198`, the counter, in the base track's
+   * {@link Actor.playTicks} encoding: held while a fade holds the cursor, and
+   * the cursor `obj+0x1A0` is it modulo the play length + 1.
+   */
+  ticks: number;
+  /** `track+0x35` -- `obj+0x1C9`: the root of the subtree it drives. */
+  bone: number;
+  /**
+   * Slot A: the pose a fade on this track dissolves from --
+   * `MotionLoadPoseSlot` (`FUN_00411C20`) mode 0xC's snapshot, held as the
+   * clip and cursor it was drawn from, as {@link Actor.fadeFrom} is.
+   */
+  fadeFrom: { motion: number; ticks: number } | null;
+  /** Frames of that fade left, in {@link Actor.fade}'s encoding. */
+  fade: number;
+  /** `track+0x31` -- the fade length + 1, as {@link Actor.fadeLen}. */
+  fadeLen: number;
+  /** `track+0x33` -- the fade back to the base clip, length + 1; 0 once spent. */
+  fadeOut: number;
+  /**
+   * `track+0x38` bit `0x10` -- fading back to the base clip, then holding its
+   * frame 0 until the base cursor comes round to it.
+   */
+  back: boolean;
+  /**
+   * `track+0x38` bit 3 -- `MotionCrossFadeAlt`'s (`FUN_00411B20`): the clip
+   * never ends on its own.
+   */
+  hold: boolean;
 }
 
 /**
@@ -1719,6 +1837,12 @@ export interface ActorBase {
    * it pushes up. Only the placer carries it; a member is built with none.
    */
   class40: CharacterPlacement["class40"];
+  /**
+   * Class 0x42's descriptor byte, `desc+0x25` -- the sub-type
+   * `PlaceWormBatch` (`FUN_0042F9B0`) switches on. Only the placer carries
+   * it; the objects it builds are allocated with none.
+   */
+  class42: CharacterPlacement["class42"];
   class51: CharacterPlacement["class51"];
   class52: CharacterPlacement["class52"];
   /**
@@ -2246,9 +2370,17 @@ export interface ActorBase {
   action: ActorClip | null;
   /** The death clip, once. */
   death: { motion: number; ticks: number } | null;
-  /** A stumble, blended over `blend` frames. */
-  react: { motion: number; ticks: number; blend: number; hard: boolean }
-    | null;
+  /** Track 1, the overlay a hit reaction plays on -- see {@link OverlayTrack}. */
+  react: OverlayTrack | null;
+  /**
+   * `obj+0x1319` -- the last zone a hit landed in, a signed byte:
+   * `ActorReactToHit` (`FUN_004543F0`) writes 2 for a shot on bone 2 and 1 for
+   * one on bone 1, before anything else, and nothing else. It indexes the
+   * motion row's second half, `row[4 + zone]`, for the reaction
+   * `ActorPlayHitReaction`'s `obj+0x136C` bit-0x100 arm and
+   * `ZombieTickAltHitReaction` play.
+   */
+  lastHitZone: number;      // +0x1319, s8
   /**
    * `ZombieStateMotionCue21`'s parameters — the descriptor's `+0x04` clip and
    * its `+0x08` hold, in frames. Six spawns across the game carry it, all of
@@ -2423,6 +2555,7 @@ export type Actor =
   | (ActorBase & { cls: SpawnClass.Bat; bat: BatTail })
   | (ActorBase & { cls: SpawnClass.Boss3; boss3: Boss3Tail })
   | (ActorBase & { cls: SpawnClass.HordeSpawner; horde: HordeTail })
+  | (ActorBase & { cls: SpawnClass.Worm; worm: WormTail })
   | (ActorBase & { cls: SpawnClass.ScriptedScenery;
                    scenery: ScriptedSceneryTail })
   | (ActorBase & { cls: SpawnClass.ResultCard; card: ResultCardTail })
@@ -2438,7 +2571,7 @@ export type Actor =
       | SpawnClass.CarriedZombie
       | SpawnClass.ScriptedScenery | SpawnClass.Vehicle
       | SpawnClass.PathRidingProp | SpawnClass.HordeSpawner
-      | SpawnClass.ResultCard> });
+      | SpawnClass.Worm | SpawnClass.ResultCard> });
 
 /** An actor already narrowed to class 0x25, for that class's own routines. */
 export type HumanoidActor = Extract<Actor,
@@ -2598,6 +2731,7 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     class46: null,
     class45: null,
     class40: null,
+    class42: null,
     class51: null,
     class52: null,
     class14: null,
@@ -2656,6 +2790,7 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     action: null,
     death: null,
     react: null,
+    lastHitZone: 0,
     intro: null,
     hits: {},
     latched: [],
@@ -2733,6 +2868,9 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
   }
   if (cls === SpawnClass.HordeSpawner) {
     return { ...head, cls, horde: makeHordeTail() };
+  }
+  if (cls === SpawnClass.Worm) {
+    return { ...head, cls, worm: makeWormTail() };
   }
   if (cls === SpawnClass.ScriptedScenery) {
     return { ...head, cls, scenery: makeScriptedSceneryTail() };

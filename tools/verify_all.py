@@ -192,6 +192,12 @@ CHECKS: list[Check] = [
           "reached by a deep link -- the only check in the tree that measures "
           "the mixer rather than the intent",
           NEEDS_BUNDLE, LANE_BROWSER),
+    Check("offline", "web", ["npm", "run", "--silent", "offline-check"],
+          "that the service worker never shows a stale copy while the server "
+          "answers -- a bundle file changed on disk is the new one on the next "
+          "reload -- and that with the server stopped a reload still loads "
+          "the stage from the device and draws it",
+          NEEDS_BUNDLE, LANE_BROWSER),
     Check("bgm_loop", "web", ["npm", "run", "--silent", "bgm-loop"],
           "that the page's music is the engine's stream -- the buffer the "
           "script's own track reaches Web Audio as is one period of the file "

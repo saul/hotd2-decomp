@@ -22,18 +22,18 @@ is in `tools/verify_all.py`, beside the command that runs it.
 | `game/` | 107842 | 351 | engine |
 | `hod2lib/` | 19571 | 35 | engine |
 | `render/` | 15352 | 56 | render |
-| `app/` | 12616 | 43 | app |
+| `app/` | 12653 | 44 | app |
 | `script/` | 4471 | 25 | engine |
 | `ui/` | 3773 | 27 | ui |
 | `core/` | 3533 | 13 | engine |
 | `bundle/` | 2862 | 11 | engine |
 | `audio/` | 1053 | 3 | render |
 | `hud/` | 526 | 1 | ui |
-| **total** | **171599** | **565** | |
+| **total** | **171636** | **566** | |
 
 The largest files, which is where the pressure to split next is:
 
-* `app/main.ts` — 3188
+* `app/main.ts` — 3192
 * `game/globals.ts` — 3117
 * `game/actor.ts` — 2724
 * `hod2lib/bundle.ts` — 2458
@@ -127,6 +127,7 @@ nothing exits 3 and is never counted as green.
 | `flag_gates` | that every `wait_script_flag` gate no `set_script_flag` on the *route* to it can open has the actor that opens it placed on that same route -- the only check that reads a gate per entry block rather than per bundle, which is the difference between stage 3's block 2 on the entry-0 route and on the entry-7 one -- and the only check that asks the same question of an ACTOR, for the one class-0x30 state whose sole exit is a script flag a civilian's own stream raises | bundle |
 | `net_pair` | that two-player netplay works in the page: a host and a replica in two tabs of a Chrome as users have it, over real WebRTC through the dev server's rendezvous -- directly, on a bad link, and through its TURN relay alone -- every tick the replica applies hash-equal to the host's, player 2 joining and scoring, its aim checked against the host's camera, a pause and a stage change survived, and player 2 leaving ending it -- the only check of the replica's install into G and of the render layers following a state they did not make | bundle |
 | `loops` | that the looping sound effects reach an <audio> element, wrap rather than running out, and are still there when the stage is reached by a deep link -- the only check in the tree that measures the mixer rather than the intent | bundle |
+| `offline` | that the service worker never shows a stale copy while the server answers -- a bundle file changed on disk is the new one on the next reload -- and that with the server stopped a reload still loads the stage from the device and draws it | bundle |
 | `bgm_loop` | that the page's music is the engine's stream -- the buffer the script's own track reaches Web Audio as is one period of the file from its first sample to end of file, looped, sample for sample -- and that it is audible | bundle |
 | `keys` | that the page's keys do what the `?` list says when pressed -- test:ui holds the list to the handlers' source, this reads back what a press did -- and that a click on a control over the game hands Space and Enter (START) back to the game rather than leaving them with the button | bundle |
 | `continue` | that the last life lost with credits left puts CONTINUE? and its digit where the exe draws them, holds the script at its wait, and that START -- pressed on the corner button, the one START a phone has -- spends a credit and puts the player back in play | bundle |
@@ -168,7 +169,7 @@ nothing exits 3 and is never counted as green.
 | `verify_geometry` | that every scenery part in a stage bundle holds every triangle its `pol/` models declare -- the only check that compares an export against the files it was made from rather than against another export | game-dir |
 | `baseline` | that the installed assets still hash to `manifest.csv` | game-dir |
 
-24 of them need the installed game and 23 need an exported
+24 of them need the installed game and 24 need an exported
 bundle. **That is a known hole, not a design:** a machine with
 neither cannot run the checks that compare two histories, and a
 bundle-free fixture is the open work that closes it.

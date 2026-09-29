@@ -16,6 +16,7 @@
  *
  *     index.html, assets/      `vite build`, with `base: "./"`
  *     manifest.webmanifest     the same, from `public/`
+ *     sw.js                    the service worker, the same: the site offline
  *     icons/                   the favicon and Home Screen icons, David's face
  *                              out of the install's exe (`lib/app_icon.ts`)
  *     bundle/                  the export, as `serverSource` fetches it
@@ -311,6 +312,9 @@ function sync(a: Args, gzip: boolean): void {
      "--cache-control", "no-cache", "--content-type", "image/png"],
     ["s3", "cp", join(a.out, "manifest.webmanifest"), `${dst}/manifest.webmanifest`,
      "--cache-control", "no-cache", "--content-type", "application/manifest+json"],
+    // The service worker: `no-cache`, so a new one is found on the next load.
+    ["s3", "cp", join(a.out, "sw.js"), `${dst}/sw.js`,
+     "--cache-control", "no-cache", "--content-type", "text/javascript"],
     ["s3", "cp", join(a.out, "index.html"), `${dst}/index.html`,
      "--cache-control", "no-cache", "--content-type", "text/html; charset=utf-8"],
   ];

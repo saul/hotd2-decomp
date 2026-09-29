@@ -107,6 +107,7 @@ import { DRIVEN_TICK, Pacer, STOPPED_TICK, type PacerHost } from "./pacer";
 import { SnapshotRing } from "./ring";
 import { TiltReload, homeScreenHint, initialInputMode, pointerInputMode, touchFirst,
          unlockDevice } from "./device";
+import { registerServiceWorker } from "./offline";
 import { InputMode, SetPlayerInputModes } from "../game/input_mode";
 import { CROSSHAIR_SX, CROSSHAIR_SY } from "../game/continue_readout";
 import {
@@ -3155,6 +3156,9 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
 // remount -- would build a second `Player` over the same canvas, and the two
 // would fight for the frame.
 let player: Player | null = null;
+// The page and every stage played, kept for when there is no network; see
+// `app/offline.ts`.
+registerServiceWorker(location.search);
 const ui = new UiStore();
 mountUi(ui, (host) => {
   if (player) return;

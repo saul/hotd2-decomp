@@ -1,5 +1,39 @@
 # Putting the player on a phone
 
+## From the dev server, over HTTPS, and offline
+
+The quickest way is the dev server itself. Over plain `http://` a phone gets
+no secure context, and so none of what makes the page an app: no service
+worker, no offline copy. So the dev server can run over HTTPS with a
+certificate authority of this machine's own:
+
+```sh
+cd web
+npm run https-cert     # once, and again when this machine's address changes
+npm run dev-https      # https://<this machine>:5443
+```
+
+`https-cert` makes the CA once and a server certificate for every address the
+machine has, into `extract/https/` (gitignored), and prints what a phone
+needs: open `http://<this machine>:5174/__ca.crt` in Safari, install the
+profile, and turn on full trust for "HOTD2 dev CA" in Settings, General,
+About, Certificate Trust Settings. Then open the HTTPS address and add it to
+the Home Screen, which is the full screen on an iPhone or an iPad
+(`app/device.ts`, `appleTouch`).
+
+Over HTTPS the page registers a **service worker** (`web/public/sw.js`) that
+keeps the page and every stage played on the device. **While the server can
+be reached, nothing kept is ever shown without asking it first:** each load's
+own page request goes to the server, and if it answers within four seconds
+every request of that load is checked against the kept copy -- a 304 uses
+it, anything else is downloaded, handed to the page as it arrives, and kept
+in its place. A re-exported stage is therefore the new one on the next
+reload. Only a load whose page request the server did not answer -- the
+phone away from the LAN, the Mac asleep -- plays from the device, and it
+does so whole, never mixing kept files with new ones. `?sw=0` removes the
+worker and everything it kept. `npm run offline-check` holds it to both
+promises in Chrome.
+
 A phone cannot build a bundle -- no mobile browser can open a folder -- so it
 has to be served one, with the sounds beside it. `npm run site` stages
 exactly that as a plain static site, and can upload it to S3.

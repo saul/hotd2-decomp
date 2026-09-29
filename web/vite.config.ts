@@ -60,6 +60,25 @@ function soundRoot(kind: "bgm" | "SE" | "voice"): string | null {
   return null;
 }
 
+/**
+ * `npm run https-cert`'s output: a CA of this machine's own, and a server
+ * certificate it signed. HTTPS is what gives a phone on the LAN a secure
+ * context, and so the service worker (`public/sw.js`).
+ */
+const HTTPS_DIR = resolve(__dirname, "..", "extract", "https");
+
+/** The server's key and certificate, when `HOTD2_HTTPS` asks for them. */
+function httpsOptions(): { key: Buffer; cert: Buffer } | undefined {
+  if (!process.env.HOTD2_HTTPS) return undefined;
+  try {
+    return { key: readFileSync(join(HTTPS_DIR, "server.key")),
+             cert: readFileSync(join(HTTPS_DIR, "server.pem")) };
+  } catch {
+    throw new Error("HOTD2_HTTPS is set and there is no certificate in "
+      + `${HTTPS_DIR}: run \`npm run https-cert\` first`);
+  }
+}
+
 /** The install the bundle was exported from, as its manifest names it. */
 function installDir(): string | null {
   try {
@@ -136,6 +155,20 @@ function serveBundle() {
           return;
         }
 
+        // The CA's certificate -- never its key -- for a phone to install
+        // and trust, so it can reach this server over HTTPS. `https_cert.ts`.
+        if (url === "/__ca.crt" || url === "/__ca.pem") {
+          try {
+            const pem = readFileSync(join(HTTPS_DIR, "ca.pem"));
+            res.setHeader("Content-Type", "application/x-x509-ca-cert");
+            res.setHeader("Content-Disposition", 'attachment; filename="hotd2-dev-ca.crt"');
+            return res.end(pem);
+          } catch {
+            res.statusCode = 404;
+            return res.end("no CA yet: run `npm run https-cert`");
+          }
+        }
+
         const sound = url.startsWith("/bgm/") ? (["bgm", "bgm"] as const)
           : url.startsWith("/se/") ? (["se", "SE"] as const)
           : url.startsWith("/voice/") ? (["voice", "voice"] as const)
@@ -153,12 +186,23 @@ function serveBundle() {
               `no ${sound[0]} source: neither extract/player/${sound[0]}/ nor ` +
               "the game directory named in manifest.json is readable");
           }
-          const size = statSync(file).size;
+          const st = statSync(file);
+          const size = st.size;
           // Range support, so the browser can seek and so a 14 MB track does
           // not have to buffer end to end before it starts.
           const range = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range ?? "");
           res.setHeader("Content-Type", "audio/wav");
           res.setHeader("Accept-Ranges", "bytes");
+          // A validator, as the bundle has, so the service worker's check
+          // that a kept track is current is a 304 and not the track again.
+          const etag = `W/"${size}-${Math.floor(st.mtime.getTime())}"`;
+          res.setHeader("ETag", etag);
+          res.setHeader("Last-Modified", st.mtime.toUTCString());
+          res.setHeader("Cache-Control", "no-cache");
+          if (!range && req.headers["if-none-match"] === etag) {
+            res.statusCode = 304;
+            return res.end();
+          }
           if (range) {
             const start = range[1] ? Number(range[1]) : 0;
             const end = range[2] ? Number(range[2]) : size - 1;
@@ -304,6 +348,7 @@ export default defineConfig({
   // (`bundle/…`, `bgm/…`) is already relative to the page. See
   // `tools/site.mjs`.
   base: "./",
-  server: { port: 5173, open: false },
+  // `npm run dev-https` sets `HOTD2_HTTPS`: see `tools/https_cert.ts`.
+  server: { port: 5173, open: false, https: httpsOptions() },
   build: { target: "es2022", chunkSizeWarningLimit: 2000 },
 });

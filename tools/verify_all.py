@@ -192,6 +192,11 @@ CHECKS: list[Check] = [
           "reached by a deep link -- the only check in the tree that measures "
           "the mixer rather than the intent",
           NEEDS_BUNDLE, LANE_BROWSER),
+    Check("test:r2site", "web", ["npm", "run", "--silent", "test:r2site"],
+          "the deployed site's Worker, against a bucket in a Map: nothing "
+          "served outside the secret path, and under it the 304s, the ranges "
+          "and the stored-compressed bundle with its decoded length that the "
+          "page's service worker and loading bar rely on"),
     Check("offline", "web", ["npm", "run", "--silent", "offline-check"],
           "that the service worker never shows a stale copy while the server "
           "answers -- a bundle file changed on disk is the new one on the next "

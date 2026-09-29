@@ -57,9 +57,12 @@ export type OnBytes = (loaded: number, total: number) => void;
 /** `r`, with its body counted into `onBytes` as it arrives. */
 function counted(r: Response, onBytes?: OnBytes): Response {
   if (!onBytes || !r.body) return r;
-  // A compressed body's length is the compressed one, and the stream is not.
+  // A compressed body's length is the compressed one, and the stream is not:
+  // then only a server that says the decoded length (`X-Decoded-Length`, which
+  // the site's Worker sends, `r2site/worker.ts`) says how much is coming.
   const total = r.headers.get("content-encoding")
-    ? 0 : Number(r.headers.get("content-length")) || 0;
+    ? Number(r.headers.get("x-decoded-length")) || 0
+    : Number(r.headers.get("content-length")) || 0;
   onBytes(0, total);
   const reader = r.body.getReader();
   let loaded = 0;

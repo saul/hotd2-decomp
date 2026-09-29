@@ -186,6 +186,23 @@ civilians reaches an op 0x06 block or a passed block that sets a restored
 word, and every captor it shoots dies the same way); tests in `port.test.ts`,
 each seen failing on the base.
 
+**...and the rest of `ResolveHit`'s tail is `ResolveHit`'s.** Read again from
+`0x004096F6` to the `RET` at `0x00409865`, the kill test above stands. Two
+things around it did not: the payout lived in `FireShotRequest`, summed into
+one `ScoreAddForPlayer`, and **nothing counted a hit** -- the tail's
+`g_player_hit_count[p]++` on every bone-2 hit and every other hit whose result
+is not 5 (`0x0040980A`, `0x0040983B`) had no port, so the accuracy grade's
+numerator moved only for props and projectiles. And the head was the bundle's
+`head_bone`, where both tests are `CMP EBP, 0x2` on `g_shot_bone[p]`: the same
+2 for every shipped type, from the wrong place. `ResolveHit` now pays the
+kill's 0x50 inside the kill block and then 0x78 and the combo, or 10, in the
+exe's order, counts the hit and reports what it paid; `FireShotRequest` only
+reports. Three tests had been calibrated on the old shape and were rewritten:
+the shot queue's headshots rode bone 1 with the fixture's `head_bone` moved
+onto it, and the rescue and `znjoe` checks assumed a bare `ResolveHit` paid
+nothing. Seven new checks in "ResolveHit:", each failing on the base; a
+mutation that restores only the `head_bone` read fails five of them.
+
 **And they have a size.** `EnemyZombieInit` writes two radii — `obj+0x124`
 from `g_actor_radius_by_char`, which is the shot sphere, and `obj+0x128` = 3.5,
 which is the **body** sphere every collision uses — and the port wrote neither.

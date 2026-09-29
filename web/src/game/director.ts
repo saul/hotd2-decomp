@@ -361,6 +361,23 @@ export function SpawnSlotActor(s: ScriptSpawn, rng: Rng): void {
     // whose routines seat a 40-unit sphere at `obj+0x124` -- were shootable,
     // and a sphere that size round the boat's origin took every pull aimed
     // at a rider standing behind it: the riders "did not die when shot".
+    // Class 0x12 -- the same opcode, the same matrix, and a slot strip rather
+    // than a behaviour. Its record's flags word is `0x10` for stage 1's
+    // door (the shot mesh) and `0x8000` for the other two, and
+    // `ScriptedPropUpdate12` raises `0x8000` itself when its strip starts, so
+    // the word goes on as the class-0x13 arm below explains.
+    if (s.class === SpawnClassValue.FlagStripProp) {
+      if (!pl.class12) return;
+      G.g_slot_actors_built.push(s.at);
+      const a = ActorSpawn(s.at, SpawnClassValue.FlagStripProp, -1, "strip",
+                           { class12: pl.class12, ...PlacementOrientation(pl),
+                             flags: pl.init_flags ?? 0,
+                             pos: vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0,
+                                       s.pos?.[2] ?? 0) },
+                           rng);
+      a.visible = true;
+      return;
+    }
     if (s.class === SpawnClassValue.ScriptedProp) {
       if (!pl.class13) return;
       G.g_slot_actors_built.push(s.at);

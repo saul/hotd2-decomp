@@ -576,6 +576,8 @@ import {
 } from "../src/game/class44";
 import { SpawnPropContainers, SpawnSlotActor, SpawnSlotActors }
   from "../src/game/director";
+import type { ScriptedProp12Tail } from "../src/game/class12/state";
+import { ScriptedProp12DrawSlots } from "../src/game/class12/state";
 import {
   SetPieceState, SetPiecePropUpdate,
   DROP_GRAVITY, SLIDE_FRAMES, SLIDE_VX, SLIDE_VZ,
@@ -20607,6 +20609,7 @@ console.log("\n`g_class_handlers`, filled by the classes themselves:");
     [SpawnClass.OneHitTarget, "0x20 one-hit target"],
     [SpawnClass.RankScaledEnemy, "0x21 rescue target"],
     [SpawnClass.ScriptedProp, "0x13 script-driven prop / the boat"],
+    [SpawnClass.FlagStripProp, "0x12 slot strip on a flag / the bin's door"],
     [SpawnClass.CarriedZombie, "0x18 the zombie that rides it"],
     [SpawnClass.Vehicle, "0x26 subtype 2, the boat the player rides"],
     [SpawnClass.PathRidingProp, "0x28 stage 1's two burning cars"],
@@ -36846,6 +36849,159 @@ console.log("\nclass 0x28 -- held on its route until cp 0x2F, thrown once, "
           a.despawned === true);
     ResetGameGlobals();
   }
+}
+
+// -- class 0x12: the wood the bin captor bursts out of ------------------------
+//
+// Stage 1 block 6 step 1 places evt `0x3D88`, class 0x12, at camera frame 640
+// -- the descriptor as `st1evtbl.bin` carries it, read field by field the way
+// `ScriptedPropInit12` (`FUN_0043F9D0`) reads it: `door_1.bin[41]` (`0x11FD`),
+// delay 1, the shot mesh `coli1.bin:5144`, behaviour 0, gone on camera path
+// 47 frame 130, the strip `0x11FE..0x1233`, flag 34, a slot a frame, scale 1,
+// flags word `0x10`. `ScriptedPropUpdate12` (`FUN_0043FA60`) holds `0x11FD`
+// until flag 34 -- which `ZombieStateTargetScriptWithFlag` raises on the burst
+// clip's cursor 63 -- then jumps to `0x11FE`, leaves the shot test (`0x8000`)
+// and steps a slot a frame, despawning, undrawn, the frame the cursor is
+// strictly past `0x1233`. The port had no class 0x12 at all: the spawn built
+// nothing, and the captor walked out of an empty doorway.
+console.log("\nclass 0x12, the door the bin captor bursts out of:");
+{
+  const rng = new Rng(12);
+  const events = scene(0, rng);
+  const DOOR = 0x3d88;
+  const door12 = {
+    slot: 0x11fd, delay: 1, coli: "coli1.bin:5144", behaviour: 0,
+    cam_path: 47, cam_frame: 130, first: 0x11fe, last: 0x1233, flag: 34,
+    step: 1, scale: 1,
+  };
+  // Stage 2's end (`0x15644`): the other shape, half a slot a frame, and its
+  // first slot is the one it starts on.
+  const JETTY = 0x15644;
+  const jetty12 = {
+    slot: 0x16e1, delay: 1, coli: null, behaviour: 0, cam_path: 106,
+    cam_frame: 0, first: 0x16e1, last: 0x172f, flag: 95, step: 0.5, scale: 1,
+  };
+  // Not shipped: a negative delay, which `TEST AX, AX; JL` never starts.
+  const NEVER = 0x7112;
+  SetGameTables({
+    ...CHARS,
+    placements: [
+      { at: DOOR, class: 0x12, char_type: -1, motion: null, hp: 0, yaw: 0,
+        init_flags: 0x10, class12: door12 },
+      { at: JETTY, class: 0x12, char_type: -1, motion: null, hp: 0, yaw: 0,
+        init_flags: 0x8000, class12: jetty12 },
+      { at: NEVER, class: 0x12, char_type: -1, motion: null, hp: 0, yaw: 0,
+        init_flags: 0x10, class12: { ...door12, delay: -1 } },
+    ],
+  } as unknown as CharactersJson);
+  G.g_active_cam_path = 42;
+  G.g_cam_path_frame = 640;
+  SpawnSlotActors([
+    { at: DOOR, class: SpawnClass.FlagStripProp, pos: [0, 0, 0] },
+    { at: NEVER, class: SpawnClass.FlagStripProp, pos: [0, 0, 0] },
+  ], rng);
+  const door = G.g_object_list.find((o) => o.at === DOOR);
+  const t = () => (door as { prop12: ScriptedProp12Tail }).prop12;
+  check("stage 1's class-0x12 spawn builds an object",
+        door?.cls === SpawnClass.FlagStripProp,
+        door ? `0x${door.cls.toString(16)}` : "nothing built");
+  if (door) {
+    check("ScriptedPropInit12 seeds the cursor on door_1.bin[41] and the rest "
+          + "of its block off the tail",
+          t().cursor === 0x11fd && t().first === 0x11fe && t().last === 0x1233
+          && t().flag === 34 && t().delay === 1 && t().step === 1
+          && t().camPath === 47 && t().camFrame === 130,
+          JSON.stringify(t()));
+    // `ActorInitFlags` (`FUN_00408970`) is `obj+0x34 = flags | 1`.
+    check("...obj+0x14C is the shot mesh, obj+0x3C is -1, and the record's "
+          + "flags word 0x10 stands (with ActorInitFlags' 1)",
+          door.coliBlob === "coli1.bin:5144" && door.motion === -1
+          && door.flags === (ActorFlag.ShotTestMesh | 1),
+          `${door.coliBlob} ${door.motion} 0x${door.flags.toString(16)}`);
+    const frame = () => GameUpdate(1 / 60, NULL_HOST, rng, events);
+    for (let i = 0; i < 30; i++) frame();
+    check("with flag 34 down the door holds 0x11FD and files itself for the "
+          + "shot test every frame, as a mesh",
+          !door.despawned && t().cursor === 0x11fd && t().delay === 1
+          && G.g_shot_test_list.some((e) => e.at === DOOR && e.flags === 0x11),
+          `${t().cursor.toString(16)} ${t().delay} `
+          + JSON.stringify(G.g_shot_test_list.filter((e) => e.at === DOOR)));
+    // `wait_frames`-free: the flag is the input, set the way `set_script_flag`
+    // and the captor's cue both set it.
+    G.g_script_flags[34] = 1;
+    frame();
+    check("the frame flag 34 is up the delay runs out: the cursor jumps to "
+          + "0x11FE, obj+0x1F4 takes it, and 0x8000 takes the door out of the "
+          + "shot test",
+          t().cursor === 0x11fe && t().delay === 0 && t().slot1F4 === 0x11fe
+          && (door.flags & ActorFlag.NoShotTest) !== 0
+          && !G.g_shot_test_list.some((e) => e.at === DOOR),
+          `${t().cursor.toString(16)} ${t().delay} 0x${door.flags.toString(16)}`);
+    const shown = [t().cursor];
+    while (!door.despawned && shown.length < 200) {
+      frame();
+      if (!door.despawned) shown.push(t().cursor);
+    }
+    check("...then a slot a frame through 0x1233, all 54 of door_1.bin[42..95]",
+          shown.length === 0x1233 - 0x11fe + 1
+          && shown.every((c, i) => c === 0x11fe + i),
+          `${shown.length} frames, last 0x${shown.at(-1)?.toString(16)}`);
+    check("...and the frame the cursor is past 0x1233 it despawns", 
+          door.despawned === true && t().cursor === 0x1234,
+          `${door.despawned} 0x${t().cursor.toString(16)}`);
+    const never = G.g_object_list.find((o) => o.at === NEVER) as
+      { prop12: ScriptedProp12Tail; despawned: boolean } | undefined;
+    check("a negative delay never starts, flag or no flag",
+          !!never && !never.despawned && never.prop12.cursor === 0x11fd
+          && never.prop12.delay === -1,
+          JSON.stringify(never?.prop12 ?? null));
+  }
+  // The camera cue, and it is an equality: path 47 frame 130 exactly.
+  {
+    ResetGameGlobals();
+    const a = ActorSpawn(DOOR, SpawnClass.FlagStripProp, -1, "door",
+                         { class12: door12, flags: 0x10 }, rng);
+    const fr: ClassFrame = { dt: 1 / 60, rng, host: NULL_HOST };
+    const mod = await import("../src/game/class12");
+    G.g_active_cam_path = 47;
+    G.g_cam_path_frame = 129;
+    mod.ScriptedPropUpdate12(a, fr);
+    const heldAt129 = !a.despawned;
+    G.g_cam_path_frame = 130;
+    mod.ScriptedPropUpdate12(a, fr);
+    check("camera path 47 frame 130 despawns it, 129 does not",
+          heldAt129 && a.despawned, `${heldAt129} ${a.despawned}`);
+  }
+  // Stage 2's jetty strip: half a slot a frame, the draw truncating it, and
+  // the equality arm -- a cursor that lands exactly on the last slot draws it.
+  {
+    ResetGameGlobals();
+    const a = ActorSpawn(JETTY, SpawnClass.FlagStripProp, -1, "jetty",
+                         { class12: jetty12, flags: 0x8000 }, rng);
+    const tj = (a as { prop12: ScriptedProp12Tail }).prop12;
+    const fr: ClassFrame = { dt: 1 / 60, rng, host: NULL_HOST };
+    const mod = await import("../src/game/class12");
+    G.g_script_flags[95] = 1;
+    mod.ScriptedPropUpdate12(a, fr);
+    mod.ScriptedPropUpdate12(a, fr);
+    mod.ScriptedPropUpdate12(a, fr);
+    check("stage 2's strip steps half a slot a frame from 0x16E1",
+          tj.cursor === 0x16e1 + 1.0 && Math.trunc(tj.cursor) === 0x16e2,
+          String(tj.cursor - 0x16e1));
+    tj.cursor = 0x172f - 0.5;
+    mod.ScriptedPropUpdate12(a, fr);
+    const onLast = !a.despawned && tj.cursor === 0x172f;
+    mod.ScriptedPropUpdate12(a, fr);
+    check("...a cursor exactly on the last slot is drawn, half past it is gone",
+          onLast && a.despawned, `${onLast} ${a.despawned}`);
+  }
+  check("the exporter's slot list for the door is 0x11FD and 0x11FE..0x1233",
+        JSON.stringify(ScriptedProp12DrawSlots(door12))
+          === JSON.stringify([0x11fd, ...Array.from(
+            { length: 0x1233 - 0x11fe + 1 }, (_, i) => 0x11fe + i)]),
+        String(ScriptedProp12DrawSlots(door12).length));
+  SetGameTables(CHARS);
+  ResetGameGlobals();
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

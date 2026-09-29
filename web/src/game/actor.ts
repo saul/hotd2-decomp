@@ -31,6 +31,8 @@ import { makeJudgmentCompanionTail, type JudgmentCompanionTail }
 import { makeFrogTail, type FrogTail } from "./class11/state";
 import { makeOwlTail, type OwlTail } from "./class43/state";
 import { makeScriptedPropTail, type ScriptedPropTail } from "./class13/state";
+import { makeScriptedProp12Tail, type ScriptedProp12Tail }
+  from "./class12/state";
 import { makeVehicleTail, type VehicleTail } from "./class26/state";
 import { makePathRidingPropTail, type PathRidingPropTail }
   from "./class28/state";
@@ -1632,6 +1634,8 @@ export interface ActorBase {
   class11: CharacterPlacement["class11"];
   /** Class 0x13's descriptor tail — the prop's slot, despawn cue, behaviour. */
   class13: CharacterPlacement["class13"];
+  /** Class 0x12's descriptor tail — the strip, its flag, delay and cue. */
+  class12: CharacterPlacement["class12"];
   /** Class 0x18's three — the rider's leave-state and its camera cue. */
   class18: CharacterPlacement["class18"];
   /** Class 0x26 subtype 2's tail — the collision blob its first frame seats. */
@@ -2382,6 +2386,7 @@ export type Actor =
   | (ActorBase & { cls: SpawnClass.Frog; frog: FrogTail })
   | (ActorBase & { cls: SpawnClass.FlyingEnemy; owl: OwlTail })
   | (ActorBase & { cls: SpawnClass.ScriptedProp; prop13: ScriptedPropTail })
+  | (ActorBase & { cls: SpawnClass.FlagStripProp; prop12: ScriptedProp12Tail })
   | (ActorBase & { cls: SpawnClass.Vehicle; vehicle: VehicleTail })
   | (ActorBase & { cls: SpawnClass.PathRidingProp;
                    pathProp: PathRidingPropTail })
@@ -2398,7 +2403,8 @@ export type Actor =
       | SpawnClass.Mouse | SpawnClass.SkinnedNpc | SpawnClass.WaterEnemy
       | SpawnClass.Frog | SpawnClass.FlyingEnemy | SpawnClass.Bat
       | SpawnClass.Boss3
-      | SpawnClass.ScriptedProp | SpawnClass.CarriedZombie
+      | SpawnClass.ScriptedProp | SpawnClass.FlagStripProp
+      | SpawnClass.CarriedZombie
       | SpawnClass.ScriptedScenery | SpawnClass.Vehicle
       | SpawnClass.PathRidingProp | SpawnClass.HordeSpawner> });
 
@@ -2545,6 +2551,7 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     oneHitTarget: null,
     class11: null,
     class13: null,
+    class12: null,
     class18: null,
     class26: null,
     coliBlob: null,
@@ -2671,6 +2678,9 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
   }
   if (cls === SpawnClass.ScriptedProp) {
     return { ...head, cls, prop13: makeScriptedPropTail() };
+  }
+  if (cls === SpawnClass.FlagStripProp) {
+    return { ...head, cls, prop12: makeScriptedProp12Tail() };
   }
   if (cls === SpawnClass.Vehicle) {
     return { ...head, cls, vehicle: makeVehicleTail() };

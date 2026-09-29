@@ -3763,6 +3763,94 @@ console.log("\nclass 0x13's prop: the record's three angles, drawn RotX first");
   SetGameTables({ types: {}, placements: [] } as never);
 }
 
+console.log("\nclass 0x12's strip: the cursor's slot, truncated, under class 0x13's matrix");
+{
+  // `ScriptedPropUpdate12` (`FUN_0043FA60`) draws `MatrixTranslate(obj+0x40);
+  // MatrixRotateX(+0x64); MatrixRotateZ(+0x6C); MatrixRotateY(+0x68)`, the
+  // scale when it is not 1.0, and `AssetDrawSlot(__ftol(sub+0x14))`
+  // (`0x0043FB05`..`0x0043FB5D`). Stage 1's door is modelled in world space
+  // and placed at the origin unturned, so its own record cannot fail a wrong
+  // order; a record with three unequal angles and a scale of 2 can (`L48`).
+  const { SpawnSlotActors } = await import("../src/game/director");
+  const { SetGameTables } = await import("../src/game/tables");
+  const { Rng } = await import("../src/core/rng");
+  const {
+    MatIdentity, MatrixRotateX, MatrixRotateY, MatrixRotateZ, MatrixScale,
+    MatrixTranslate,
+  } = await import("../src/game/matrix");
+  await import("../src/game/classes");
+  const { ScriptedPropUpdate12 } = await import("../src/game/class12");
+  const { NULL_HOST } = await import("../src/game/host");
+
+  const root = new Obj3D();
+  for (const slot of [0x11fd, 0x11fe, 0x11ff]) {
+    const part = new Obj3D();
+    part.name = `slots_actor_fixed000_slot_${slot.toString(16)}`;
+    part.userData = { hod2_kind: "rig_part", hod2_rig: "slots_actor" };
+    root.add(part);
+  }
+  ResetGameGlobals();
+  const layer = new SlotModelLayer();
+  layer.adopt(root);
+  const AT = 0x3d88;
+  SetGameTables({
+    types: {}, placements: [{
+      at: AT, class: 0x12, char_type: -1, motion: null, hp: 0,
+      pitch: 0x2800, yaw: 0x1c00, roll: 0x0a00, init_flags: 0x10,
+      class12: { slot: 0x11fd, delay: 1, coli: null, behaviour: 0,
+                 cam_path: 47, cam_frame: 130, first: 0x11fe, last: 0x1233,
+                 flag: 34, step: 0.5, scale: 2 },
+    }],
+  } as never);
+  const pos = { x: -660, y: -15.5, z: -547 };
+  const rng = new Rng(1);
+  SpawnSlotActors([{ at: AT, class: SpawnClass.FlagStripProp,
+                     pos: [pos.x, pos.y, pos.z] }], rng);
+  const ctx = { paths: null } as unknown as Parameters<typeof layer.update>[0];
+  const slotOf = () => {
+    const n = layer.nodeFor(AT);
+    return n ? Number.parseInt(n.name.split("_slot_")[1] ?? "", 16) : null;
+  };
+  layer.update(ctx);
+  check("the door is drawn on its waiting slot, 0x11FD", slotOf() === 0x11fd,
+        String(slotOf()));
+  const node = layer.nodeFor(AT);
+  node?.updateMatrix();
+  const want = MatIdentity();
+  MatrixTranslate(want, pos.x, pos.y, pos.z);
+  MatrixRotateX(want, 0x2800);
+  MatrixRotateZ(want, 0x0a00);
+  MatrixRotateY(want, 0x1c00);
+  MatrixScale(want, 2, 2, 2);
+  const got = node?.matrix.elements ?? [];
+  const worst = node
+    ? Math.max(...want.map((v, i) => Math.abs(v - got[i]) / Math.max(1, Math.abs(v))))
+    : Infinity;
+  check("a class-0x12 object is drawn T * Rx(pitch) * Rz(roll) * Ry(yaw) * S",
+        worst < 1e-4, node ? `worst relative element ${worst}` : "no node");
+  const a = G.g_object_list.find((o) => o.at === AT);
+  const fr = { dt: 1 / 60, rng, host: NULL_HOST };
+  G.g_script_flags[34] = 1;
+  if (a) ScriptedPropUpdate12(a, fr);           // the delay runs out: 0x11FE
+  layer.update(ctx);
+  const first = slotOf();
+  if (a) ScriptedPropUpdate12(a, fr);           // 0x11FE.5
+  layer.update(ctx);
+  const half = slotOf();
+  if (a) ScriptedPropUpdate12(a, fr);           // 0x11FF
+  layer.update(ctx);
+  check("once the flag is up the node follows the cursor, truncated: "
+        + "0x11FE, 0x11FE again at half a slot, then 0x11FF",
+        first === 0x11fe && half === 0x11fe && slotOf() === 0x11ff,
+        `${first} ${half} ${slotOf()}`);
+  G.g_object_list.length = 0;
+  layer.update(ctx);
+  check("...and nothing is left drawn once the object is gone",
+        layer.nodeFor(AT) === null, String(layer.nodeFor(AT)));
+  SetGameTables({ types: {}, placements: [] } as never);
+  ResetGameGlobals();
+}
+
 console.log("\nthe bat's wings: a synthetic row, adopted not spawned");
 {
   const { CharacterLayer } = await import("../src/render/characters");

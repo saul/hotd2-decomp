@@ -318,6 +318,16 @@ CHECKS: list[Check] = [
           "literals, and a mistyped row would put a church chair somewhere "
           "the engine does not, with nothing else to notice",
           NEEDS_GAME),
+    Check("verify_flag_strips", ".",
+          ["python3", "tools/verify_flag_strips.py", "--game-dir", "{game_dir}"],
+          "that the exporter reads class 0x12's descriptor tail at the "
+          "offsets and widths `ScriptedPropInit12` reads it, quoted out of "
+          "the EXE, that every class-0x12 spawn on the disc is placed with "
+          "exactly those fields, and that every slot its strip can draw is in "
+          "its bundle -- the check for stage 1's door, the wood the bin "
+          "captor bursts out of, which the port built nothing for until the "
+          "class had a module",
+          NEEDS_GAME),
     Check("verify_annotations", ".",
           ["python3", "tools/verify_annotations.py", "--game-dir", "{game_dir}"],
           "that every annotated address is a real function in the EXE",

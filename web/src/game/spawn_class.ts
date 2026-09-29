@@ -104,6 +104,15 @@ export enum SpawnClass {
   Thrower = 0x31,
   /** `FUN_00432FF0` — generic scripted scenery, eleven sub-handlers. */
   /**
+   * `ScriptedPropUpdate12` (`FUN_0043FA60`) — **a slot strip a script flag
+   * starts**: one asset slot under class 0x13's matrix until the flag rises,
+   * then a run of slots a frame at a time, and gone past the last. Three
+   * spawns: stage 1's `door_1.bin` wood the bin captor bursts out of (evt
+   * `0x3D88`, on flag 34), and `sanbasi.bin[12..90]` in stages 2 and 5. See
+   * `game/class12/`.
+   */
+  FlagStripProp = 0x12,
+  /**
    * `ScriptedPropInit13` (`FUN_0043FE10`) — a script-driven prop: one asset
    * slot under a matrix, with a behaviour out of `g_prop_behaviours`. Stage
    * 3's arriving boat is one. See `game/class13/`.

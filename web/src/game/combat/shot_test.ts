@@ -307,8 +307,9 @@ const _view = { x: 0, y: 0, z: 0 };
  * unordered comparison would take it. Nothing picks in a headless run.
  *
  * The mesh arm's matrix copy is not transcribed. It rebuilds `obj+0x150` for
- * `ShotTestMesh`, which no class that registers here reaches, and the port's
- * {@link Actor.coliMatrix} is already the world matrix it produces.
+ * `ShotTestMesh`, which the port has not got for an actor (see
+ * {@link ProcessPlayerShotsTestList}), and the port's {@link Actor.coliMatrix}
+ * is already the world matrix it produces.
  */
 export function RegisterForShotTest(obj: Actor, host: GameHost): void {
   const flags = obj.flags;
@@ -363,9 +364,13 @@ const _w = { x: 0, y: 0, z: 0 };
  *
  * `0x004045A0`..`0x004045C9` is the loop. An object with `obj+0x34` bit `0x10`
  * goes to `ShotTestMesh` (`FUN_00404A00`), which the port has not got for an
- * actor: no class that registers here raises the bit, and the one family
- * that does — the story switch — is `class41/shot_test.ts`'s. The mesh arm is
- * therefore skipped, and says so rather than falling into the sphere.
+ * actor. One class that registers here raises the bit: class 0x12, whose
+ * stage-1 door (`0x3D88`) carries `0x10` in its record and files itself every
+ * frame until its strip starts (`game/class12/`) -- so in the engine a shot
+ * at the boarded doorway stops on the boards, and here it is passed by. The
+ * other family that raises it — the story switch — is
+ * `class41/shot_test.ts`'s. The mesh arm is skipped, and says so rather than
+ * falling into the sphere.
  *
  * What is not here is `ShotTestWorld` (`FUN_00404B80`). In the engine the
  * static collision's hits are candidates in the same list, which is what

@@ -81,6 +81,7 @@ export function DescriptorFromPlacement(p: CharacterPlacement | undefined):
     // shared field would have one class read the other's.
     class11: p?.class11 ?? null,
     class13: p?.class13 ?? null,
+    class12: p?.class12 ?? null,
     class18: p?.class18 ?? null,
     class26: p?.class26 ?? null,
     class43: p?.class43 ?? null,

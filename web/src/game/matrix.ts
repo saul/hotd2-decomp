@@ -56,6 +56,17 @@ export function MatrixTranslate(m: Mat, x: number, y: number, z: number): void {
   m[15] = z * m[11] + y * m[7] + x * m[3] + m[15];
 }
 
+/**
+ * `MatrixClearRotation` — `FUN_004A9F70`. The top's 3x3 back to the
+ * identity -- elements 0, 5 and 10 to 1.0, 1, 2, 4, 6, 8 and 9 to 0 -- its
+ * translation kept: on the view matrix the walk left on the stack, a
+ * billboard at that point. `[proved]`
+ */
+export function MatrixClearRotation(m: Mat): void {
+  m[10] = 1; m[5] = 1; m[0] = 1;
+  m[9] = 0; m[8] = 0; m[6] = 0; m[4] = 0; m[2] = 0; m[1] = 0;
+}
+
 /** `MatrixRotateX` — `FUN_004A99F0`. Rows 1 and 2. */
 export function MatrixRotateX(m: Mat, bams: number): void {
   const c = Math.cos(bams * BAMS_TO_RADIANS);

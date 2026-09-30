@@ -89,10 +89,23 @@ export interface ScriptJson {
    */
   options?: OptionsJson;
   /**
+   * Original Mode's `.rdata` -- the weapon records, fire and ammo-readout
+   * rows, and the trunk's tables. See `ExeTables.originalModeTables` in the
+   * exporter. Absent in a bundle written before it, which arms every item as
+   * the bare gun and opens an empty trunk.
+   */
+  original_mode?: OriginalModeJson;
+  /**
    * Class 0x19's `.rdata` -- the stage-4 boss's seven tables. See
    * `ExeTables.boss4Tables` in the exporter for where each is read from.
    */
   boss4?: Boss4TablesJson;
+  /**
+   * Class 0x2D's `.rdata` -- the stage-6 boss's tables. See
+   * `ExeTables.class2dTables` in the exporter. Absent in a bundle written
+   * before it, which gives the boss no waypoints to fight from.
+   */
+  class2d?: Class2DTablesJson;
   /**
    * `g_carrier2_door_yaw` (`0x005926D0`), s16[59]: the swing class 0x13's
    * carrier routine 2 steps its two doors through.
@@ -221,6 +234,65 @@ export interface Boss4TablesJson {
   approach_picks: number[][];
 }
 
+/** One `g_class2d_path_segments` row (`0x0055D060`, 0x18 bytes). */
+export interface Class2DPathSegmentJson {
+  /** `+0x00` f32 -- frames of object path a game frame. */
+  step: number;
+  /** `+0x04` f32 -- past this frame the boss moves on to the next path. */
+  advance: number;
+  /** `+0x08` f32 -- the strike frame. */
+  strike: number;
+  /** `+0x0C` f32 -- the end frame, where the hits are counted. */
+  end: number;
+  /**
+   * `+0x10` s16[4] -- `[0]` the glide's frames when the hits stop it, `[1]`
+   * and `[2]` the hits it takes with one and with two players in play.
+   */
+  words: number[];
+}
+
+/**
+ * `script.json`'s `class2d` block -- class 0x2D's `.rdata`, the stage-6
+ * boss's tables. See `ExeTables.class2dTables` in the exporter for where each
+ * is read from, and `docs/re/boss-emperor.md` for the readings.
+ */
+export interface Class2DTablesJson {
+  /** `g_class2d_charge_arrive_dist`, `0x0055CCD4`, f32. */
+  charge_arrive_dist: number;
+  /** `g_class2d_hit_damage`, `0x0055CCD6`, s16[3] by `g_players_in_play`. */
+  hit_damage: number[];
+  /** `g_class2d_waypoints`, `0x0055CCE0`, vec3[5]. */
+  waypoints: number[][];
+  /** `g_class2d_attack_picks`, `0x0055CD1C`, s32[16][10] by rank. */
+  attack_picks: number[][];
+  /** `g_class2d_stagger_hits`, `0x0055CF9A`, s16[3] by `g_players_in_play`. */
+  stagger_hits: number[];
+  /** `g_class2d_charge_steps`, `0x0055CFA0`, s16[16] by rank. */
+  charge_steps: number[];
+  /** `g_class2d_child_kind_picks`, `0x0055CFC0`, s32[4][10]. */
+  child_kind_picks: number[][];
+  /** `g_class2d_path_segments`, `0x0055D060`, eight rows. */
+  path_segments: Class2DPathSegmentJson[];
+  /** `g_class2d_child_offsets`, `0x0055D120`, vec3[5] by kind. */
+  child_offsets: number[][];
+  /** `g_class2d_launch_gap`, `0x0055D1B8`, s16[16] by rank. */
+  launch_gap: number[];
+  /** `g_class2d_flight_frames`, `0x0055D1D8`, s16[16] by rank. */
+  flight_frames: number[];
+  /** `g_class2d_pair_flight_frames`, `0x0055D1F8`, s16[16] by rank. */
+  pair_flight_frames: number[];
+  /** `g_class2d_child0_path_start`, `0x0055D234`, s16[2]. */
+  child0_path_start: number[];
+  /** `g_class2d_child_bone_satellite`, `0x0055D238`, u8[16] by bone. */
+  child_bone_satellite: number[];
+  /** `g_class2d_child2_approach`, `0x0055D248`, s16[16] by rank. */
+  child2_approach: number[];
+  /** `g_class2d_child2_bone_satellite`, `0x0055D268`, u8[28] by bone. */
+  child2_bone_satellite: number[];
+  /** `g_class2d_child3_approach`, `0x0055D284`, s16[16] by rank. */
+  child3_approach: number[];
+}
+
 /** One row of the options list: `g_options_rows[i]`'s record. */
 export interface OptionsRowJson {
   /** `+0x00` s8: the column, in 16-pixel characters. */
@@ -260,6 +332,55 @@ export interface OptionsJson {
   music_test: number[];
   /** `0x0056AFE0`, s16[4]: the Sight Speed knobs, then its two sliders. */
   sight_speed_sprites: number[];
+}
+
+/** One row of `g_original_weapon_records` (`0x004EC928`, 8 bytes). */
+export interface OriginalWeaponRecordJson {
+  /** `+0`, s8: the magazine, the block's `+0x08`; -1 is the unlimited one. */
+  magazine: number;
+  /** `+1`, s8: the weapon kind, `+0x09`. */
+  kind: number;
+  /** `+2`, s8: the sound kind, `+0x0A`. */
+  sound: number;
+  /** `+3`, s8: the block's `+0x0B`. */
+  flags: number;
+  /** `+4`, f32: the damage scale, `+0x0C`; -1.0 is the doubling one. */
+  damage: number;
+}
+
+/** One row of `g_original_ammo_hud_rows` (`0x004ECA20`, 12 bytes). */
+export interface OriginalAmmoHudRowJson {
+  /** `+0`, s16: the bullet sprite. */
+  sprite: number;
+  /** `+4`, f32: extra spacing between bullets. */
+  spacing: number;
+  /** `+8`, f32: the row's height from 364. */
+  dy: number;
+}
+
+/**
+ * `script.json`'s `original_mode` block -- Original Mode's `.rdata`. See
+ * `ExeTables.originalModeTables` in the exporter for each table's readers.
+ */
+export interface OriginalModeJson {
+  /** `0x004EC928`: fifteen rows, by item id + 1. */
+  weapon_records: OriginalWeaponRecordJson[];
+  /** `0x00579ED8`: eight bytes a fire mode, fourteen modes. */
+  fire_params: number[][];
+  /** `0x004ECA20`: the ammo readout's row a fire mode, fourteen. */
+  ammo_hud_rows: OriginalAmmoHudRowJson[];
+  /** `0x0056AFF0`: each item's category, 0..12. */
+  item_category: number[];
+  /** `0x0056B014`: may these two be carried together, `[cat_new*13 + cat_held]`. */
+  item_compat: number[];
+  /** `0x0056B0C0`: each player's cursor light colour, r g b. */
+  cursor_colours: number[][];
+  /** `0x0059721C`: each item's label sprite in the trunk's list. */
+  list_sprites: number[];
+  /** `0x004EC9A0`: the gunshot by sound kind; 0 falls back to the player's. */
+  gunshot_ids: number[];
+  /** `0x004EC9C0`: the reload by sound kind; 0 falls back to `RELOAD1_44`. */
+  reload_ids: number[];
 }
 
 /** `script.json`'s `game_over` block. */

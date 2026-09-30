@@ -128,6 +128,7 @@ export function CrumbMenu({ debugOpen, onToggleDebug, onShowKeys, onClose }:
   const entries = useSlice((p) => p?.entries);
   const entry = useSlice((p) => p?.entry);
   const original = useSlice((p) => p?.original);
+  const items = useSlice((p) => p?.originalItems);
   const stale = useSlice((p) => p?.bundleStale) === true;
   const act = (f: () => void, resume = true) => () => { f(); onClose(resume); };
 
@@ -180,6 +181,29 @@ export function CrumbMenu({ debugOpen, onToggleDebug, onShowKeys, onClose }:
                    }} />
             {" "}Original mode
           </label>
+          {/* Debug: Original Mode's saved items, which only the trunk at the
+              start of stage 1 hands out and only a game over or the ending
+              saves. `[port-only]`, and said so. */}
+          {original && items && (
+            <div className="menu-items" id="original-items">
+              <span className="dim"
+                    title="The Original Mode items saved in this browser: what the trunk offers at the start of stage 1.">
+                Items saved: {items.count} ({items.kinds} kinds)
+              </span>
+              <button className="items-give"
+                      title="Debug: put all 33 Original Mode items in the saved profile, 99 of each, so the trunk offers everything."
+                      onClick={act(() => dispatch({ kind: "originalItems",
+                                                    action: "giveAll" }))}>
+                Give all items
+              </button>
+              <button className="items-reset"
+                      title="Debug: back to what a first game holds -- POWER UP 1.2, CHAMBER +2 and CREDIT +2, one each."
+                      onClick={act(() => dispatch({ kind: "originalItems",
+                                                    action: "reset" }))}>
+                Reset items
+              </button>
+            </div>
+          )}
         </section>
       )}
       {stage !== undefined && <NetMenuSection onClose={() => onClose()} />}

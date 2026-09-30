@@ -29,20 +29,52 @@ export function ModeStartCounterValue(mode: number): number {
 
 /**
  * `SetBothPlayerCounters` — `FUN_00406F60`. -1 is free play
- * (`FUN_00407000`), anything else a count (`FUN_00407030(0)` first clears
- * free play); then both counts take the value and `CreditTiersUpdate` runs.
+ * (`CreditsSetFreePlay`), anything else a count (`CreditsSetCount(0)` first
+ * clears free play); then both counts take the value and `CreditTiersUpdate`
+ * runs.
  */
 export function SetBothPlayerCounters(n: number): void {
-  if (n === -1) {
-    G.g_free_play = 1;
-    G.g_credits = [0, 0];
-    CreditTiersUpdate();
-  } else {
-    G.g_free_play = 0;
-    G.g_credits = [0, 0];
-    CreditTiersUpdate();
-  }
+  if (n === -1) CreditsSetFreePlay();
+  else CreditsSetCount(0);
   G.g_credits = [n, n];
+  CreditTiersUpdate();
+}
+
+/**
+ * `CreditsSetFreePlay` — `FUN_00407000`. `g_free_play = 1`, both counts 0,
+ * `CreditTiersUpdate`.
+ */
+export function CreditsSetFreePlay(): void {
+  G.g_free_play = 1;
+  G.g_credits = [0, 0];
+  CreditTiersUpdate();
+}
+
+/**
+ * `CreditsSetCount` — `FUN_00407030`. `g_free_play = 0`, both counts `n`,
+ * `CreditTiersUpdate`.
+ */
+export function CreditsSetCount(n: number): void {
+  G.g_free_play = 0;
+  G.g_credits = [n, n];
+  CreditTiersUpdate();
+}
+
+/**
+ * `CreditsAddToBoth` — `FUN_00406FA0`. A negative `n` adds nothing; any other
+ * is added to **both** counts, each capped at 99. Then `CreditTiersUpdate`,
+ * either way. `ItemSelectApplyToPlayers` (`FUN_0048A140`) calls it once a
+ * player with each one's Original Mode bonus, so one player's CREDIT item
+ * pays into the shared count.
+ */
+export function CreditsAddToBoth(n: number): void {
+  if (n > -1) {
+    for (let p = 0; p < 2; p++) {
+      // `ADD EDX, ECX; CMP EDX, 0x63; JBE`: unsigned, above 99 is 99.
+      const v = (G.g_credits[p] + n) >>> 0;
+      G.g_credits[p] = v > 99 ? 99 : v;
+    }
+  }
   CreditTiersUpdate();
 }
 

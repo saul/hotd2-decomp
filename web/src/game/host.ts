@@ -100,6 +100,15 @@ export type ShotPick =
      * candidate from the registration list.
      */
     t?: number;
+    /**
+     * The radius of the sphere the shot entered, whose centre is `point`:
+     * `obj+0x124` for a thing hit whole, the bone record's `+0x78` for a
+     * bone. `MarkActorShot` (`FUN_00404DB0`) reads it back to put GRENADE's
+     * blast on the sphere's near side -- see `MarkActorShotBlast`. Absent for
+     * a collision-mesh hit, whose `point` is the hit itself, and for a
+     * breakable prop.
+     */
+    radius?: number;
   };
 
 export interface GameHost {

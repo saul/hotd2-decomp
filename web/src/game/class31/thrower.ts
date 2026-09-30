@@ -19,9 +19,11 @@ import { CountEnemyThrowerIn } from "../combat/counts";
 import type { Rng } from "../../core/rng";
 import type { ThrowHandJson } from "../../bundle";
 import {
-  ActorFlag, DamageZone, MotionFlag, ThrowerFlag, ThrowerStance,
-  type ThrowerActor,
+  ActorFlag, DamageZone, MotionFlag, NodeDrawHookId, ThrowerFlag,
+  ThrowerStance, type ThrowerActor,
 } from "../actor";
+import { GameMode } from "../game_mode";
+import { ENLARGED_HEAD_BONE } from "../class30/draw";
 import {
   DeadSweep, registerClass, type ActorDebug, type ClassFrame,
   type ClassHandler,
@@ -55,7 +57,7 @@ import {
 import { ThrowerStateLeapToSurface } from "./surface";
 import { ThrowerPushOutOfWorld } from "./collide";
 import { ActorRunNodeDrawHooks } from "../model_draw";
-import { ThrowerDrawBonePart } from "./draw";
+import { ThrowerDrawBonePart, ThrowerDrawWithEnlargedHead } from "./draw";
 import { HeadAimBeginDraw, HeadAimEndDraw, HeadAimSeed }
   from "../class30/head_aim";
 import { ThrowerOnShot } from "./on_shot";
@@ -527,17 +529,17 @@ export function EnemyThrowerUpdate(obj: ThrowerActor, f: ClassFrame): void {
   // with it the node hook -- which is where the hand grows back. The clock
   // half of that routine is the director's `ActorAdvanceMotion`.
   //
-  // [diverges] The hook is always `ThrowerDrawBonePart`. `EnemyThrowerInit`
-  // installs `ThrowerDrawWithEnlargedHead` (`FUN_0044A300`) instead in
-  // Original Mode with `DAT_009C88A8` up, and in Training
-  // `ThrowerAdvanceMotion` swaps in `ThrowerDrawNodePart` (`FUN_0044A2B0`),
-  // which grows nothing, for the next frame whenever it holds the clock
-  // (`obj+0x34` bit `0x4000`, or bytes `0x009C72F1`/`0x009C72F2` not 1 and
-  // 0). `DAT_009C88A8` has not been read, and the port keeps no hook pointer.
-  // The big-head arm also doubles bone 2's hit radius (`obj+0x3A4`,
-  // `FADD ST0,ST0` at `0x004498E1`), which goes with the item.
+  // The hook is `obj+0x12EC`, which `EnemyThrowerInit` chose: the class's
+  // own, or ROTTEN MEAT's `ThrowerDrawWithEnlargedHead` (`FUN_0044A300`).
+  //
+  // [diverges] In Training `ThrowerAdvanceMotion` swaps in
+  // `ThrowerDrawNodePart` (`FUN_0044A2B0`), which grows nothing, for the next
+  // frame whenever it holds the clock (`obj+0x34` bit `0x4000`, or bytes
+  // `0x009C72F1`/`0x009C72F2` not 1 and 0); no stage bundle is exported in
+  // Training.
   HeadAimBeginDraw(obj, obj.thr, host);
-  ActorRunNodeDrawHooks(obj, ThrowerDrawBonePart, f);
+  ActorRunNodeDrawHooks(obj, obj.nodeDrawHook === NodeDrawHookId.EnlargedHead
+    ? ThrowerDrawWithEnlargedHead : ThrowerDrawBonePart, f);
   HeadAimEndDraw(obj, obj.thr, host);
   // `PUSH 0; CALL 0x00409b70` at `0x0044998F`, the routine's last act and on
   // every path: the camera point, not lifted, and the candidate filing. The
@@ -801,6 +803,16 @@ export function EnemyThrowerInit(obj: ThrowerActor): void {
   // takes a camera slot the moment it exists, until the next
   // `UpdateCameraEnemySlots` deals the table afresh.
   RegisterEnemySlot(obj);
+  // `0x004498C6`..`0x004498ED`: Original Mode's ROTTEN MEAT (`CMP byte ptr
+  // [0x009C88A8], 1`) doubles bone 2's hit radius, `obj+0x3A4` (`FADD ST0,
+  // ST0`), for every type, and installs `ThrowerDrawWithEnlargedHead` at
+  // `obj+0x12EC`.
+  if (G.g_GameMode === GameMode.Original && G.g_original_item_big_head === 1) {
+    const k = String(ENLARGED_HEAD_BONE);
+    const r = obj.boneRadius[k] ?? 0;
+    obj.boneRadius[k] = Math.fround(r + r);
+    obj.nodeDrawHook = NodeDrawHookId.EnlargedHead;
+  }
 }
 
 /**

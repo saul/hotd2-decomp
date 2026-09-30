@@ -243,9 +243,13 @@ console.log("\nthe fog colour is the game's colour");
   // `describe` is the hook: `getHexString()` defaults to `SRGBColorSpace`, so
   // it converts back out of the working space and reports what a screenshot
   // would show. Round-tripping through it is exactly the assertion.
-  const walkerWith = (rgb: [number, number, number], near = 21, far = 507) =>
-    ({ walker: { fog: { near, far, rgb }, fogSet: true } }) as unknown as
+  // Light block 0's fog words, which are `G`'s; `fogSet` is the walker's.
+  const walkerWith = (rgb: [number, number, number], near = 21, far = 507) => {
+    const c = G.g_scene_light_block0.channels;
+    c[0] = near; c[1] = far; c[2] = rgb[0]; c[3] = rgb[1]; c[4] = rgb[2];
+    return ({ walker: { fogSet: true } }) as unknown as
       Parameters<InstanceType<typeof SceneFog>["update"]>[0];
+  };
 
   const fog = new SceneFog(new Scene());
 
@@ -298,8 +302,9 @@ console.log("\nthe fog range is `SetFogRange`'s pair, in either order");
   const scene = new Scene();
   const fog = new SceneFog(scene);
   const drive = (near: number, far: number) => {
-    fog.update(({ walker: { fog: { near, far, rgb: [10, 10, 20] },
-                            fogSet: true } }) as unknown as
+    const c = G.g_scene_light_block0.channels;
+    c[0] = near; c[1] = far; c[2] = 10; c[3] = 10; c[4] = 20;
+    fog.update(({ walker: { fogSet: true } }) as unknown as
       Parameters<InstanceType<typeof SceneFog>["update"]>[0]);
     return scene.fog as { near: number; far: number } | null;
   };
@@ -413,7 +418,7 @@ console.log("\nthe scene light is the light SetLightingDefaultSingle builds");
   // `FUN_00460250` seeds the scene light colour to exactly this.
   const rgb: [number, number, number] = [1.0, 0.2, 0.1];
   const a = 0.5;
-  lights.set({ rgb, ambient: a, pitchDeg: 0, yawDeg: 0 });
+  lights.set({ rgb, ambient: a, pitch: 0, yaw: 0 });
 
   const wantDir = rgb.map((c) => srgbToLinear(c * a * DIFFUSE_SCALE));
   check("diffuse is colour * ambient * 1.4, through the sRGB transfer",
@@ -438,7 +443,7 @@ console.log("\nthe scene light is the light SetLightingDefaultSingle builds");
   // Turning the master brightness down must dim the directional light with
   // it -- the property the port was missing entirely.
   const wasR = dir.color.r;
-  lights.set({ rgb, ambient: a / 2, pitchDeg: 0, yawDeg: 0 });
+  lights.set({ rgb, ambient: a / 2, pitch: 0, yaw: 0 });
   check("the ambient channel is a master brightness and dims the light too",
         dir.color.r < wasR * 0.5,
         `${wasR.toFixed(4)} -> ${dir.color.r.toFixed(4)}`);
@@ -446,11 +451,11 @@ console.log("\nthe scene light is the light SetLightingDefaultSingle builds");
   // `BuildSceneLightDirection` (`0x0040E0B0`): rotate (0,0,1) by Y then X,
   // giving (cos p · sin y, −sin p, cos p · cos y), the direction the light
   // comes *from*.
-  const d = lightDirection(0, 90);
+  const d = lightDirection(0, 0x4000);
   check("the direction is the rotated unit Z, and +90 deg yaw faces +X",
         near(d.x, 1) && near(d.y, 0) && Math.abs(d.z) < 1e-4,
         `${d.x.toFixed(3)},${d.y.toFixed(3)},${d.z.toFixed(3)}`);
-  const dp = lightDirection(90, 0);
+  const dp = lightDirection(0x4000, 0);
   check("...and a +90 deg pitch points straight down",
         near(dp.y, -1), `${dp.y.toFixed(3)}`);
 }
@@ -617,7 +622,7 @@ console.log("\nfree roam: a system, so a rebuild reaches it");
 console.log("\ncharacter spawns: readySpawns -> the port -> adopt");
 {
   const { CharacterLayer } = await import("../src/render/characters");
-  const { SpawnScriptedCharacters, RetireUnlistedActor } =
+  const { RunPendingInits, SpawnScriptedCharacters, RetireUnlistedActor } =
     await import("../src/game/director");
   const { G, ResetGameGlobals } = await import("../src/game/globals");
   const { SetGameTables } = await import("../src/game/tables");
@@ -677,6 +682,7 @@ console.log("\ncharacter spawns: readySpawns -> the port -> adopt");
   check("...and the motion the placement authored", ready[0].motion === 10);
 
   const made = SpawnScriptedCharacters(ready);
+  RunPendingInits();
   check("the port makes exactly one object", made.length === 1
         && G.g_object_list.length === 1, `${G.g_object_list.length}`);
   const a = made[0];
@@ -1581,7 +1587,7 @@ console.log("\nthe weapon-5 round and the tracer face the camera");
   // slot only from a live kind-5 `g_shot_tracer_ring` record, at the record
   // plus the path, after `MatrixClearRotation`.
   const { RIGS } = await import("../src/hod2lib/rigs_data");
-  const { originalWeaponRoundSlots } = await import("../src/hod2lib/bundle");
+  const { originalWeaponEffectSlots } = await import("../src/hod2lib/bundle");
   const { OriginalWeaponKind, TRACER_WEAPON5_SLOT }
     = await import("../src/game/effects/shot_effects");
   const { Euler, Quaternion } = await import("three");
@@ -1589,8 +1595,14 @@ console.log("\nthe weapon-5 round and the tracer face the camera");
   check("obj_416b00 is not a rig the exporter places",
         !!RIGS.find((r) => r.name === "obj_416b00")?.placementBlocked);
   check("...and its slot rides the effect templates, in Original Mode only",
-        originalWeaponRoundSlots(true).includes(0x109d)
-        && originalWeaponRoundSlots(false).length === 0);
+        originalWeaponEffectSlots(true).includes(0x109d)
+        && originalWeaponEffectSlots(false).length === 0);
+  // ...with the grenade's blast (sprite effect 0x53, 0x125..0x13D) and
+  // BULLET BLOW's ring (0xA6F + frames 0..0x17), which the trunk can equip.
+  check("...and the grenade's blast and BULLET BLOW's ring ride with it",
+        [0x125, 0x13d, 0xa6f, 0xa86].every(
+          (s) => originalWeaponEffectSlots(true).includes(s))
+        && !originalWeaponEffectSlots(true).includes(0xa87));
 
   const root = new Obj3D();
   for (const slot of [TRACER_WEAPON5_SLOT, 0xb78]) {
@@ -1618,7 +1630,7 @@ console.log("\nthe weapon-5 round and the tracer face the camera");
   check("no record, no round", layer.group.children.length === 0);
 
   const t = G.g_shot_tracer_ring[0]!;
-  t.live = true; t.player = 0; t.kind = OriginalWeaponKind.Slow;
+  t.live = true; t.player = 0; t.kind = OriginalWeaponKind.BassLure;
   t.pos = { x: 1, y: 2, z: 3 }; t.frame = 30;
   layer.update(ctx);
   const n = layer.group.children[0];
@@ -1937,11 +1949,15 @@ console.log("\nan asset-slot actor is drawn, and can be shot:");
         layer.describe());
   G.g_object_list.length = 0;
 
-  // **The scale is the drawing routine's, and most routines do not set one.**
-  // `MouseWanderUpdate` (`FUN_0043F5C0`) makes no `MatrixScale` call, so a
-  // mouse is life size; `FishDraw` (`FUN_00439860`) calls
-  // `MatrixScale(0.3, 0.3, 0.3)` at `0x00439AC9`, so a fish drawn at one is
-  // three and a third times too big -- which is what it looked like.
+  // **The fish is drawn by `FishDraw` (`FUN_00439860`)'s matrices, which turn
+  // it by the sub-block's angles and never by `obj+0x68`.** The layer drew it
+  // by `obj+0x68` alone at one scale, so every fish swam side-on at its
+  // descriptor's yaw -- 0 for all 56 -- and never pitched. At a quarter turn
+  // (L48): bobbing (the default arm) is `T(x, y - 0.4, z) RotY(sub+0x50)
+  // RotX(sub+0x58) Scale(0.3)`, so the model's +Z, 0.3 long, comes out along
+  // `(cos 22.5, -sin 22.5, 0) * 0.3` for a pitch of 0x1000; drawn solid and
+  // below `g_water_level` it also casts the flattened silhouette at
+  // `water + 0.07`, `RotY` then `Scale(0.4, 0.01, 0.4)`, lit 0.1 grey.
   {
     const fishRoot = new Obj3D();
     const fishPart = new Obj3D();
@@ -1953,14 +1969,62 @@ console.log("\nan asset-slot actor is drawn, and can be shot:");
     const f = makeActor(0x4321, SpawnClass.WaterEnemy, -1, "fish");
     if (f.cls !== SpawnClass.WaterEnemy) throw new Error("not class 0x51");
     f.fish.frame = 0x1156;
-    f.pos = { x: 0, y: 0, z: -20 };
+    f.fish.state = 1;              // FishState.Bob: the default arm
+    f.fish.yaw = 0x4000;
+    f.fish.pitch = 0x1000;
+    f.fish.flags = 0x4 | 0x1;      // Surfaced (drawn solid), Submerged
+    f.yaw = 0;                     // what the layer used to turn it by
+    f.pos = { x: 10, y: -20, z: -30 };
+    G.g_water_level = -10;
     G.g_object_list.push(f);
     fishLayer.update(ctx);
     const node = fishLayer.nodeFor(0x4321);
-    check("a fish is drawn at the 0.3 its own routine sets",
-          !!node && Math.abs(node.scale.x - 0.3) < 1e-6
-          && Math.abs(node.scale.y - 0.3) < 1e-6,
-          node ? `${node.scale.x}` : "no node");
+    const kids = node?.children ?? [];
+    const at = (c: InstanceType<typeof Obj3D> | undefined, x: number,
+                y: number, z: number) => {
+      if (!c) return null;
+      const o = new Vector3(0, 0, 0).applyMatrix4(c.matrix);
+      const e = new Vector3(x, y, z).applyMatrix4(c.matrix).sub(o);
+      return { o, e };
+    };
+    const near = (v: InstanceType<typeof Vector3>, x: number, y: number,
+                  z: number) => Math.abs(v.x - x) < 1e-5
+      && Math.abs(v.y - y) < 1e-5 && Math.abs(v.z - z) < 1e-5;
+    const c22 = Math.cos(Math.PI / 8), s22 = Math.sin(Math.PI / 8);
+    const model = at(kids[1], 0, 0, 1);
+    check("a bobbing fish is turned by sub+0x50 and sub+0x58, at 0.3, 0.4 "
+          + "below its origin",
+          kids.length === 2 && !!model && near(model.o, 10, -20.4, -30)
+          && near(model.e, 0.3 * c22, -0.3 * s22, 0),
+          model ? `${kids.length} parts, origin ${model.o.toArray()}, +Z to `
+            + `${model.e.toArray()}` : `${kids.length} parts`);
+    const shadow = at(kids[0], 0, 0, 1);
+    const flat = at(kids[0], 0, 1, 0);
+    check("...under a silhouette on the water: turned, flattened, lit 0.1",
+          !!shadow && !!flat && near(shadow.o, 10, -9.93, -30)
+          && near(shadow.e, 0.4, 0, 0) && near(flat.e, 0, 0.01, 0)
+          && String(kids[0].userData.hod2_light_colour)
+            === String([Math.fround(0.1), Math.fround(0.1), Math.fround(0.1)]),
+          shadow && flat ? `origin ${shadow.o.toArray()}, +Z to `
+            + `${shadow.e.toArray()}, +Y to ${flat.e.toArray()}` : "none");
+    // The lunge pitches by its progress: `(sub+0x74 << 14) / sub+0x7E -
+    // 0x3D00`, 8 frames of 32 -> -0x2D00, and draws at its origin.
+    f.fish.state = 2;
+    f.fish.yaw = 0;
+    f.fish.lungeStep = 8;
+    f.fish.lungeFrames = 32;
+    f.pos = { x: 0, y: 5, z: 0 };  // above the water: no silhouette
+    fishLayer.update(ctx);
+    const lunge = at(fishLayer.nodeFor(0x4321)?.children[0], 0, 0, 1);
+    const phi = -0x2d00 / 0x10000 * 2 * Math.PI;
+    check("...and a lunging one is pitched by the lunge's progress",
+          (fishLayer.nodeFor(0x4321)?.children.length ?? 0) === 1 && !!lunge
+          && near(lunge.o, 0, 5, 0)
+          && near(lunge.e, 0, -0.3 * Math.sin(phi), 0.3 * Math.cos(phi)),
+          lunge ? `origin ${lunge.o.toArray()}, +Z to ${lunge.e.toArray()}`
+            : "none");
+    G.g_object_list.length = 0;
+    G.g_water_level = 0;
 
     // **The owl is a chain, not a slot.** `OwlDrawBodyChain` (`FUN_00447C20`)
     // draws sixteen models under one root, so the layer builds a group with a
@@ -2511,7 +2575,8 @@ console.log("\nthe blood colour switch moves the map, not the shader:");
 console.log("\ncivilian attachments: the face swaps, the hair is added");
 {
   const { CharacterLayer } = await import("../src/render/characters");
-  const { SpawnScriptedCharacters } = await import("../src/game/director");
+  const { RunPendingInits, SpawnScriptedCharacters } =
+    await import("../src/game/director");
   const { G, ResetGameGlobals } = await import("../src/game/globals");
   const { SetGameTables } = await import("../src/game/tables");
   const { BoxGeometry, Mesh, MeshBasicMaterial, Object3D } =
@@ -2598,6 +2663,7 @@ console.log("\ncivilian attachments: the face swaps, the hair is added");
 
   const headGeom = head.geometry;
   const made = SpawnScriptedCharacters(chars.readySpawns([{ at: 0x8620 }]));
+  RunPendingInits();
   check("the civilian is made", made.length === 1, `${made.length}`);
   const a = made[0];
   // The bind is the port's, and it runs in `CivilianInit` -- so the actor
@@ -2693,7 +2759,8 @@ console.log("\ncivilian attachments: the face swaps, the hair is added");
 console.log("\ncivilian held items: on the hand as the draw puts them, and gone once given");
 {
   const { CharacterLayer } = await import("../src/render/characters");
-  const { SpawnScriptedCharacters } = await import("../src/game/director");
+  const { RunPendingInits, SpawnScriptedCharacters } =
+    await import("../src/game/director");
   const { G, ResetGameGlobals } = await import("../src/game/globals");
   const { SetGameTables } = await import("../src/game/tables");
   const { CivilianOp, CivilianUpdate } = await import("../src/game/class10");
@@ -2807,6 +2874,7 @@ console.log("\ncivilian held items: on the hand as the draw puts them, and gone 
   const stage = new Scope("stage");
   chars.build(root, stage, CHARS as never);
   const made = SpawnScriptedCharacters(chars.readySpawns([{ at: AT }]));
+  RunPendingInits();
   const a = made[0];
   a.visible = true;
   chars.syncSpawns([{ at: AT }], made);
@@ -2912,7 +2980,8 @@ console.log("\ncivilian held items: on the hand as the draw puts them, and gone 
 console.log("\nthe model's size: a civilian at 0.9, her bones and her spheres");
 {
   const { CharacterLayer } = await import("../src/render/characters");
-  const { SpawnScriptedCharacters } = await import("../src/game/director");
+  const { RunPendingInits, SpawnScriptedCharacters } =
+    await import("../src/game/director");
   const { G, ResetGameGlobals } = await import("../src/game/globals");
   const { SetGameTables } = await import("../src/game/tables");
   const { MotionFlag } = await import("../src/game/actor");
@@ -2977,6 +3046,7 @@ console.log("\nthe model's size: a civilian at 0.9, her bones and her spheres");
   const stage = new Scope("stage");
   chars.build(root, stage, CHARS as never);
   const made = SpawnScriptedCharacters(chars.readySpawns([{ at: AT }]));
+  RunPendingInits();
   const a = made[0];
   check("the civilian is made, at her type's 0.9",
         made.length === 1 && a.scale === Math.fround(0.9), `${a?.scale}`);
@@ -3166,7 +3236,8 @@ console.log("\nvertex-blended parts: one joint, weight 1, identity binds");
 console.log("\nthe pelvis veto: bone 9's own draw, and not its legs");
 {
   const { CharacterLayer } = await import("../src/render/characters");
-  const { SpawnScriptedCharacters } = await import("../src/game/director");
+  const { RunPendingInits, SpawnScriptedCharacters } =
+    await import("../src/game/director");
   const { G, ResetGameGlobals } = await import("../src/game/globals");
   const { SetGameTables } = await import("../src/game/tables");
   const { PELVIS_VETO_SLOTS } = await import("../src/game/parts");
@@ -3239,6 +3310,7 @@ console.log("\nthe pelvis veto: bone 9's own draw, and not its legs");
   chars.build(root, stage, CHARS as never);
   const made = SpawnScriptedCharacters(
     chars.readySpawns([{ at: 0x10 }, { at: 0x20 }]));
+  RunPendingInits();
   check("both civilians are made", made.length === 2, `${made.length}`);
   for (const a of made) a.visible = true;
   chars.syncSpawns([{ at: 0x10 }, { at: 0x20 }], made);
@@ -3436,7 +3508,8 @@ console.log("\nthe result card's figures: the waist rides the figure's bones");
 console.log("\nthe draw gates: the skeleton, and each part by index");
 {
   const { CharacterLayer } = await import("../src/render/characters");
-  const { SpawnScriptedCharacters } = await import("../src/game/director");
+  const { RunPendingInits, SpawnScriptedCharacters } =
+    await import("../src/game/director");
   const { G, ResetGameGlobals } = await import("../src/game/globals");
   const { SetGameTables } = await import("../src/game/tables");
   const { MotionFlag } = await import("../src/game/actor");
@@ -3500,6 +3573,7 @@ console.log("\nthe draw gates: the skeleton, and each part by index");
   const stage = new Scope("stage");
   chars.build(root, stage, CHARS as never);
   const [a] = SpawnScriptedCharacters(chars.readySpawns([{ at: 0x30 }]));
+  RunPendingInits();
   a.visible = true;
   chars.syncSpawns([{ at: 0x30 }], [a]);
   chars.update({} as never);
@@ -3687,7 +3761,8 @@ console.log("\nthe draw gates: each node's faded draw, and the parts at 0x138C")
 console.log("\nthe player's character survives its own op 10:");
 {
   const { CharacterLayer } = await import("../src/render/characters");
-  const { SpawnScriptedCharacters } = await import("../src/game/director");
+  const { RunPendingInits, SpawnScriptedCharacters } =
+    await import("../src/game/director");
   const { ScriptedHumanoidUpdate, HumanoidOp, HumanoidCond } =
     await import("../src/game/class25");
   const { SetGameTables } = await import("../src/game/tables");
@@ -3774,6 +3849,7 @@ console.log("\nthe player's character survives its own op 10:");
 
   const listed = [{ at: AT }];
   const made = SpawnScriptedCharacters(chars.readySpawns(listed));
+  RunPendingInits();
   check("the script's spawn makes the character", made.length === 1,
         `${made.length}`);
   const a = made[0];
@@ -4207,7 +4283,8 @@ console.log("\nclass 0x13's prop: the record's three angles, drawn RotX first");
   // those five calls -- three unequal angles and a scale that is not 1, so a
   // dropped angle at the spawn, a wrong order or a wrong axis in the draw each
   // move some element (`L48`).
-  const { SpawnSlotActors } = await import("../src/game/director");
+  const { RunPendingInits, SpawnSlotActors } =
+    await import("../src/game/director");
   const { SetGameTables } = await import("../src/game/tables");
   const { Rng } = await import("../src/core/rng");
   const {
@@ -4238,7 +4315,8 @@ console.log("\nclass 0x13's prop: the record's three angles, drawn RotX first");
   } as never);
   const pos = { x: -1600, y: 1400, z: -2750 };
   SpawnSlotActors([{ at: AT, class: SpawnClass.ScriptedProp,
-                     pos: [pos.x, pos.y, pos.z] }], new Rng(1));
+                     pos: [pos.x, pos.y, pos.z] }]);
+  RunPendingInits(new Rng(1));
   const ctx = { paths: null } as unknown as Parameters<typeof layer.update>[0];
   layer.update(ctx);
   const node = layer.nodeFor(AT);
@@ -4284,7 +4362,8 @@ console.log("\nclass 0x12's strip: the cursor's slot, truncated, under class 0x1
   // (`0x0043FB05`..`0x0043FB5D`). Stage 1's door is modelled in world space
   // and placed at the origin unturned, so its own record cannot fail a wrong
   // order; a record with three unequal angles and a scale of 2 can (`L48`).
-  const { SpawnSlotActors } = await import("../src/game/director");
+  const { RunPendingInits, SpawnSlotActors } =
+    await import("../src/game/director");
   const { SetGameTables } = await import("../src/game/tables");
   const { Rng } = await import("../src/core/rng");
   const {
@@ -4318,7 +4397,8 @@ console.log("\nclass 0x12's strip: the cursor's slot, truncated, under class 0x1
   const pos = { x: -660, y: -15.5, z: -547 };
   const rng = new Rng(1);
   SpawnSlotActors([{ at: AT, class: SpawnClass.FlagStripProp,
-                     pos: [pos.x, pos.y, pos.z] }], rng);
+                     pos: [pos.x, pos.y, pos.z] }]);
+  RunPendingInits();
   const ctx = { paths: null } as unknown as Parameters<typeof layer.update>[0];
   const slotOf = () => {
     const n = layer.nodeFor(AT);
@@ -4367,7 +4447,8 @@ console.log("\nclass 0x12's strip: the cursor's slot, truncated, under class 0x1
 console.log("\nthe bat's wings: a synthetic row, adopted not spawned");
 {
   const { CharacterLayer } = await import("../src/render/characters");
-  const { SpawnScriptedCharacters } = await import("../src/game/director");
+  const { RunPendingInits, SpawnScriptedCharacters } =
+    await import("../src/game/director");
   const { G, ResetGameGlobals } = await import("../src/game/globals");
   const { SetGameTables } = await import("../src/game/tables");
   const { Scope } = await import("../src/core/scope");
@@ -4427,6 +4508,7 @@ console.log("\nthe bat's wings: a synthetic row, adopted not spawned");
         ready.map((r) => r.at.toString(16)).join(","));
 
   const made = SpawnScriptedCharacters(ready);
+  RunPendingInits();
   check("...but nothing is spawned from it: the placer made the wing",
         made.length === 1 && made[0].at === 0x0f04,
         made.map((m) => m.at.toString(16)).join(","));
@@ -4460,7 +4542,8 @@ console.log("\nthe bat's wings: a synthetic row, adopted not spawned");
 console.log("\nthe bat's runtime children: rows at the placer's addresses");
 {
   const { CharacterLayer } = await import("../src/render/characters");
-  const { SpawnScriptedCharacters } = await import("../src/game/director");
+  const { RunPendingInits, SpawnScriptedCharacters } =
+    await import("../src/game/director");
   const { G, ResetGameGlobals } = await import("../src/game/globals");
   const { SetGameTables } = await import("../src/game/tables");
   const { Scope } = await import("../src/core/scope");
@@ -4534,6 +4617,7 @@ console.log("\nthe bat's runtime children: rows at the placer's addresses");
   check("every member's row and every wing's is wanted with the placer's",
         ready.length === 51, `${ready.length}`);
   const made = SpawnScriptedCharacters(ready);
+  RunPendingInits();
   check("...but only the placer is spawned from its row",
         made.length === 1 && made[0].at === PLACER,
         made.map((m) => m.at.toString(16)).join(","));
@@ -5349,7 +5433,8 @@ console.log("\nthe chapter card's model: half a turn about, in the eye's space:"
   G.g_view_slot_draws = [];
   DrawSlotInView(0x1730, 0, 0, -30, 2, 0x8000);
   const seen = new Set<string>();
-  drawViewSlots({ node: () => { view.add(node); return node; }, view }, seen);
+  drawViewSlots({ node: () => { view.add(node); return node; }, view,
+                  world: new Group() }, seen);
   node.updateMatrixWorld(true);
   const p = new Vector3(1, 0, 1).applyMatrix4(node.matrixWorld);
   check("the model's (1, 0, 1) lands at (-2, 0, -32): turned, scaled, then "
@@ -5543,7 +5628,7 @@ console.log("\nclass 0x26 subtypes 6/7: the recorded draws, where they were reco
   // The light colour reaches the material: a twin on block 0's ambient and
   // direction with the draw's colour in place of the block's.
   const lights = new SceneLighting(new Scene());
-  lights.set({ rgb: [1, 1, 1], ambient: 0.5, pitchDeg: 0, yawDeg: 0 });
+  lights.set({ rgb: [1, 1, 1], ambient: 0.5, pitch: 0, yaw: 0 });
   lights.build(new Obj3D());
   lights.addRoot(layer.group);
   lights.beforeRender();
@@ -5563,7 +5648,7 @@ console.log("\nclass 0x26 subtypes 6/7: the recorded draws, where they were reco
         `${plain?.type} ${JSON.stringify(plain?.userData)}`);
   check("...and the lit one a twin keyed on its own colour",
         lit?.type === "MeshLambertMaterial"
-        && lit.userData.lightColour === "0.05,0.01,0",
+        && lit.userData.lightColour === "0.05,0.01,0|null|block",
         `${lit?.type} ${JSON.stringify(lit?.userData)}`);
   // Its terms are `SetLightingDefaultSingle`'s with the colour swapped: the
   // block's ambient 0.5, so diffuse `C * 0.5 * 1.4` and ambient
@@ -5575,7 +5660,7 @@ console.log("\nclass 0x26 subtypes 6/7: the recorded draws, where they were reco
   const set = (lights as unknown as {
     coloured: Map<string, { color: { value: { r: number; g: number } };
                             ambient: { value: { r: number; g: number } } }> })
-    .coloured.get("0.05,0.01,0");
+    .coloured.get("0.05,0.01,0|null|block");
   const lin = (c: number) =>
     c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
   check("...on block 0's ambient with the draw's colour in place of the block's",
@@ -5678,6 +5763,110 @@ console.log("\nScriptedHumanoidBoneDrawHook's extra models:");
   syncHumanoidHookDraws(inst, () => new Obj3D());
   check("...and is hidden once the motion no longer draws it",
         !!node && !node.visible);
+}
+
+console.log("\nclass 0x32: the node hook's draws, and the light each was made under:");
+{
+  const { syncBoss5NodeDraws, BOSS5_DRAW_HOLDER }
+    = await import("../src/render/characters/boss5");
+  type LightSetTag = { ambient: number | null; dir: number[] | null;
+                       rgb: number[] | null };
+  // A draw's own colour between `LightsUseSecondarySet` and
+  // `LightsRestoreScene` keeps block 1's ambient and direction; a tag of null
+  // is the block's own colour, not the parent's.
+  const BOSS_AT = 0x3d84;
+  const root = new Obj3D();
+  root.userData = { hod2_spawn_at: BOSS_AT };
+  const bone = new Mesh(new PlaneGeometry(1, 1), new MeshBasicMaterial());
+  bone.userData = { hod2_light_colour: [1, 0, 0] };
+  const child = new Mesh(new PlaneGeometry(1, 1), new MeshBasicMaterial());
+  child.userData = { hod2_light_colour: null };
+  bone.add(child);
+  root.add(bone);
+  const lights = new SceneLighting(new Scene());
+  lights.set({ rgb: [1, 1, 1], ambient: 0.5, pitch: 0, yaw: 0 });
+  // Block 1 is `G`'s: its ambient 0.4.
+  ResetGameGlobals();
+  G.g_scene_light_block1.channels[10] = 0.4;
+  lights.source = { secondary: (at: number) => at === BOSS_AT };
+  lights.build(root);
+  lights.beforeRender();
+  const ud = (m: unknown) => (m as { userData: Record<string, unknown> }).userData;
+  check("a coloured draw of a block-1 actor gets a twin keyed on block 1",
+        ud(bone.material).lightColour === "block1|1,0,0|null|block",
+        JSON.stringify(ud(bone.material)));
+  check("...and a child tagged null the block's own twin, not its parent's colour",
+        ud(child.material).secondaryLit === true
+        && ud(child.material).lightColour === undefined,
+        JSON.stringify(ud(child.material)));
+  const cam = new PerspectiveCamera();
+  cam.updateMatrixWorld();
+  (lights as unknown as { refreshColoured(c: unknown): void })
+    .refreshColoured({ camera: cam });
+  const set = (lights as unknown as {
+    coloured: Map<string, { color: { value: { r: number } } }> })
+    .coloured.get("block1|1,0,0|null|block");
+  const lin = (c: number) =>
+    c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  check("...whose diffuse is block 1's ambient 0.4, not block 0's 0.5",
+        !!set && Math.abs(set.color.value.r - lin(0.4 * DIFFUSE_SCALE)) < 1e-6,
+        JSON.stringify(set?.color.value));
+
+  // The hook's models on the nodes: a single-primitive bone whose arm draws
+  // two cels in place of its model, and a multi-primitive one that draws its
+  // model and a cel.
+  ResetGameGlobals();
+  const a = makeActor(BOSS_AT, SpawnClass.Boss5, 0x4b, "boss5");
+  if (a.cls !== SpawnClass.Boss5) throw new Error("not class 0x32");
+  const b11 = new Mesh(new PlaneGeometry(1, 1), new MeshBasicMaterial());
+  const b15 = new Group();
+  const own15 = new Mesh(new PlaneGeometry(1, 1), new MeshBasicMaterial());
+  b15.add(own15);
+  b11.add(b15);                       // a child bone under a mesh bone
+  const inst = {
+    at: BOSS_AT, a, root: new Obj3D(), pivot: new Group(),
+    type: { bones: [{ bone: 11, slot: 0x4ef }, { bone: 15, slot: 0x44a }] },
+    bones: new Map<number, InstanceType<typeof Obj3D>>([[11, b11], [15, b15]]),
+    gore: new Map(),
+  } as unknown as Parameters<typeof syncBoss5NodeDraws>[0];
+  const cloned: number[] = [];
+  const clone = (slot: number) => {
+    cloned.push(slot);
+    const o = new Obj3D();
+    o.userData.slot = slot;
+    return o;
+  };
+  a.boss5.nodeDraws = {
+    "11": [{ slot: 0x4f4, light: null }, { slot: 0x51c, light: [1, 0, 0] }],
+    "15": [{ slot: 0x44a, light: null }, { slot: 0x450, light: null }],
+  };
+  a.boss5.drawDir = [0, -1, 0];
+  syncBoss5NodeDraws(inst, clone);
+  const holders = (n: InstanceType<typeof Obj3D>) =>
+    n.children.filter((c) => c.name === BOSS5_DRAW_HOLDER);
+  check("a node whose arm replaces its model hides its own mesh and hangs "
+        + "both cels, the second under its light",
+        !b11.layers.isEnabled(0) && holders(b11).length === 2
+        && holders(b11).map((h) => h.userData.slot).join() === "1268,1308"
+        && (holders(b11)[1].userData.hod2_light_set as LightSetTag).rgb?.join()
+          === "1,0,0"
+        && b15.parent === b11,
+        `${b11.layers.isEnabled(0)} ${cloned.join()}`);
+  check("...a node that draws its own slot shows it, with one cel beside it",
+        own15.layers.isEnabled(0) && holders(b15).length === 1
+        && holders(b15)[0].userData.slot === 0x450
+        && (own15.userData.hod2_light_set as LightSetTag).rgb === null);
+  check("...every model under the direction the draw's LightsUseSecondarySet "
+        + "installed, and block 1's own ambient",
+        [holders(b11)[0], holders(b11)[1], own15].every((o) => {
+          const l = o.userData.hod2_light_set as LightSetTag;
+          return l.dir?.join() === "0,-1,0" && l.ambient === null;
+        }));
+  a.boss5.nodeDraws = {};
+  syncBoss5NodeDraws(inst, clone);
+  check("...and a frame the walk drew nothing shows nothing",
+        !b11.layers.isEnabled(0) && !own15.layers.isEnabled(0)
+        && holders(b11).length === 0 && holders(b15).length === 0);
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

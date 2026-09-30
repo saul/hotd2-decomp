@@ -542,6 +542,17 @@ export interface CharacterPlacement {
    */
   class45?: { subtype: number } | null;
   /**
+   * Class 0x2D's tail, `obj+0x1390`: `subtype` (`+0x01`, s8) -- 0 stage 5's
+   * cameo, 1 the stage-6 fight -- `clip` (`+0x02`), `counter` (`+0x04`),
+   * `kill_path` and `kill_frame` (`+0x06`, `+0x08`: the cameo's exit),
+   * `fight_hp`, `round2_hp` and `round3_hp` (`+0x0A`, `+0x0C`, `+0x0E`),
+   * each a `s16`. See `game/class2D/` and `docs/re/boss-emperor.md`.
+   */
+  class2d?: {
+    subtype: number; clip: number; counter: number; kill_path: number;
+    kill_frame: number; fight_hp: number; round2_hp: number; round3_hp: number;
+  } | null;
+  /**
    * Class 0x40's descriptor: `desc+0x25`, the selector. See
    * `game/class40/state.ts`.
    */
@@ -706,6 +717,36 @@ export interface CharacterPlacement {
      */
     pos: [number, number, number];
     angles: [number, number, number];
+  } | null;
+  /**
+   * Class 0x32's tail — the stage-5 boss, as its routines read it through
+   * `obj+0x1390`: `Class32Init` (`FUN_0047F5F0`) takes the character type
+   * (`+0x00`, s8) and the state it starts in (`+0x02`, s8);
+   * `Class32ChargeShotBone` (`FUN_0047CE10`) the damage a hit does (`+0x04`,
+   * s8); `Class32SpawnProjectile` (`FUN_0047EE30`) a projectile's hit points
+   * (`+0x10`), its trail interval (`+0x12`) and a held one's (`+0x1A`), all
+   * s8; `Class32ProjectileStateGather` its size-to-radius factor (`+0x14`,
+   * f32); states 6, 8 and 10 the afterimage interval (`+0x19`, s8);
+   * `Class32ProjectileStateBurst` the burst's frames and its end brightness
+   * (`+0x1C`, `+0x20`, i32); `Class32StateDeathRetire`'s unreachable sub 1
+   * its speed (`+0x28`, f32); and `Class32StateDeathSequence` its frames and
+   * the bursts' interval (`+0x2C`, `+0x34`, i32). Nothing else of the tail is
+   * read.
+   */
+  class32?: {
+    char_type: number;
+    state: number;
+    damage: number;
+    projectile_hp: number;
+    trail_interval: number;
+    projectile_radius: number;
+    afterimage_interval: number;
+    held_trail_interval: number;
+    burst_frames: number;
+    burst_bright: number;
+    retire_speed: number;
+    death_frames: number;
+    death_burst_interval: number;
   } | null;
   /**
    * Class 0x33 **selector 1's** tail — the object `g_carrier_object` points
@@ -1100,6 +1141,28 @@ export interface Class14Json {
 }
 
 /**
+ * Class 0x32's `.rdata` — the stage-5 boss. Every table is read by an
+ * instruction of the class, by the boss's rank (0..16) where it has
+ * seventeen rows; `web/src/hod2lib/class32.ts` has the addresses.
+ */
+export interface Class32Json {
+  /** `g_class32_phases` — `[state, floor]` per phase row. */
+  phases: [number, number][];
+  /** `g_class32_hop_offsets` — four offsets from the eye. */
+  hop_offsets: [number, number, number][];
+  /** `g_class32_hop_frames` — by rank. */
+  hop_frames: number[];
+  /** `g_class32_circle_offsets` — four offsets from the eye. */
+  circle_offsets: [number, number, number][];
+  /** `g_class32_rank_rows` — `[circle_frames, circle_hold, circle_laps, lunge_frames]` by rank. */
+  rank_rows: [number, number, number, number][];
+  /** `g_class32_projectile_frames` — by rank. */
+  projectile_frames: number[];
+  /** `g_class32_barrage_rows` — `[scatter_base, scatter_spread, max_live, aimed_count]` by rank. */
+  barrage_rows: [number, number, number, number][];
+}
+
+/**
  * One row of `g_actor_attachment_records` — `0x004EC4C0`, 81 of them.
  *
  * `bone` is `-1` for a row whose pointer does not resolve; the row is kept so
@@ -1196,6 +1259,11 @@ export interface CharactersJson {
   class31?: Class31Json;
   /** Class 0x14's own tables — see {@link Class14Json}. */
   class14?: Class14Json | Record<string, never>;
+  /**
+   * Class 0x32's own tables — see {@link Class32Json}. Empty when the bundle
+   * was written without an executable.
+   */
+  class32?: Class32Json | Record<string, never>;
   /**
    * Class 0x42's own tables — see {@link Class42Json}. Written only for a
    * stage that spawns the class, which is stage 2.

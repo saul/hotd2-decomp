@@ -27,7 +27,7 @@ import { HIT_SLOT_CLAIMED } from "../../src/game/hit_slots";
 import { ZombiePushOutOfWorldAndActors } from "../../src/game/class30/ground";
 import { SpawnClass } from "../../src/game/spawn_class";
 import { vec3 } from "../../src/game/vec";
-import { SpawnSlotActors } from "../../src/game/director";
+import { RunPendingInits, SpawnSlotActors } from "../../src/game/director";
 import {
   check, TYPE, CHARS, SCENE_MAJOR_PLAYING, spawnZombie, EnterPlay,
 } from "./harness";
@@ -989,7 +989,7 @@ console.log("\nclass 0x33 selector 4: the scenery an actor shoves aside:");
     const events = new Events();
     const listed = [{ at: CHAIR_AT, class: SpawnClass.ScriptedScenery,
                       pos: [22.83, 6.5, -16.74] as [number, number, number] }];
-    SpawnSlotActors(listed, rng);
+    SpawnSlotActors(listed);
     const c = G.g_object_list.find((o) => o.at === CHAIR_AT);
     check("a placement carrying only `class33_push` is spawned -- the gate "
           + "takes either block, not just the carrier's",
@@ -1096,7 +1096,9 @@ console.log("\nclass 0x33 selector 5: the effect a camera frame sets off:");
   };
   const build = (rng: Rng) => {
     SpawnSlotActors([{ at: CUE_AT, class: SpawnClass.ScriptedScenery,
-                       pos: [...POS] as [number, number, number] }], rng);
+                       pos: [...POS] as [number, number, number] }]);
+    // The `Init` is the frame walk's (`SpawnFromDescriptor`).
+    RunPendingInits(rng);
     return G.g_object_list.find((o) => o.at === CUE_AT);
   };
   const dokans = () => G.g_sprite_effects.filter(

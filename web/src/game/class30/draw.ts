@@ -107,6 +107,49 @@ export function ZombieDrawBonePart(obj: Actor, bone: number, slot: number,
   obj.nodeDrawAlpha[bone] = ZombieSubmitSlotByLighting(obj);
 }
 
+/** `CMP word ptr [node+0x14], 2` -- the one bone ROTTEN MEAT enlarges. */
+export const ENLARGED_HEAD_BONE = 2;
+/** `MatrixScale(2.0, 2.0, 2.0)`, and `(1.8, 1.8, 1.0)` for character type 0xE. */
+export const ENLARGED_HEAD_SCALE: [number, number, number] = [2.0, 2.0, 2.0];
+export const ENLARGED_HEAD_SCALE_0E: [number, number, number] =
+  [Math.fround(1.8), Math.fround(1.8), 1.0];
+/** `CMP word ptr [g_cur_actor + 0x1F4], 0xE` -- the type with its own scale. */
+export const ENLARGED_HEAD_CHAR_TYPE_0E = 0xe;
+
+/**
+ * `ZombieDrawWithEnlargedHead` — `FUN_00453B50`. The `obj+0x12EC` hook
+ * `EnemyZombieInit` installs in Original Mode while ROTTEN MEAT's
+ * `g_original_item_big_head` is 1.
+ *
+ * ```c
+ * if (g_original_item_big_head != 1) return;          // draws nothing at all
+ * if (node->bone == 2) {
+ *     MatrixStackPush(0);
+ *     type == 0xE ? MatrixScale(1.8, 1.8, 1.0) : MatrixScale(2, 2, 2);
+ *     NoOpStub(scale);
+ *     ZombieDrawBonePart(node);
+ *     MatrixStackPop(1);
+ * } else ZombieDrawBonePart(node);
+ * ```
+ *
+ * The scale is recorded in {@link Actor.nodeDrawScale} for the renderer,
+ * which applies it to bone 2's own draw under the head's turn: the turn is
+ * `ZombieDrawBonePart`'s, inside the push. The flag cannot fall while a
+ * zombie holding this hook lives -- only `ResetOriginalModeLoadout` clears
+ * it, as a run starts -- so the first arm is the engine's and unreachable.
+ */
+export function ZombieDrawWithEnlargedHead(obj: Actor, bone: number,
+                                           slot: number, f: ClassFrame): void {
+  if (G.g_original_item_big_head !== 1) return;
+  if (bone === ENLARGED_HEAD_BONE) {
+    obj.nodeDrawScale[bone] = obj.charType === ENLARGED_HEAD_CHAR_TYPE_0E
+      ? ENLARGED_HEAD_SCALE_0E : ENLARGED_HEAD_SCALE;
+    ZombieDrawBonePart(obj, bone, slot, f);
+    return;
+  }
+  ZombieDrawBonePart(obj, bone, slot, f);
+}
+
 /**
  * `ZombieDrawBonePart`'s `0x1C6C` arm, `0x00453665..0x00453703`:
  *

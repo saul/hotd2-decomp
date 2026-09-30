@@ -172,8 +172,8 @@ for (const [name, stage, block, step, cls, wanted, entry, minTravel,
       reqs.push({ at: s.at, motion: pl.motion ?? 0,
                   pos: { x: pos[0], y: pos[1], z: pos[2] } });
     }
-    SpawnScriptedCharacters(reqs, rng);
-    SpawnSlotActors(walker.spawns, rng);
+    SpawnScriptedCharacters(reqs);
+    SpawnSlotActors(walker.spawns);
   };
   let seated = false;
   // The kill: who was marked, who has gone since, and the rings made after.

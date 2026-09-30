@@ -14,8 +14,10 @@ import { authoredFrameOfTicks, ticksOfSeconds } from "../core/play_cursor";
 import type { Actor } from "./actor";
 import type { SetPieceParams } from "./class24";
 import type { CiviliansJson } from "../bundle/scene";
-import type { Boss4TablesJson, ChapterCardJson, GameOverJson, OptionsJson,
-  ResultCardJson } from "../bundle/stage";
+import type {
+  Boss4TablesJson, ChapterCardJson, Class2DTablesJson, GameOverJson,
+  OptionsJson, OriginalModeJson, ResultCardJson,
+} from "../bundle/stage";
 import type { HumanoidProgram } from "./class25";
 import { G } from "./globals";
 import { TURN_CURVE_DEFAULT, TURN_RATE_UNTRACKED } from "./camera/constants";
@@ -71,11 +73,24 @@ export const T = {
    */
   options: null as OptionsJson | null,
   /**
+   * Original Mode's `.rdata`: the weapon records the carried items load, the
+   * fire and ammo-readout rows their fire mode picks, and the trunk's tables.
+   * One block for the whole game. Null in a bundle written before it, which
+   * arms every item as the bare gun and opens an empty trunk.
+   */
+  originalMode: null as OriginalModeJson | null,
+  /**
    * Class 0x19's `.rdata` -- the stage-4 boss's seven tables. One block for
    * the whole game, read by `game/class19/`. Null in a bundle written before
    * format 13, and the boss then has no arena to fight in.
    */
   boss4: null as Boss4TablesJson | null,
+  /**
+   * Class 0x2D's `.rdata` -- the stage-6 boss's tables. One block for the
+   * whole game, read by `game/class2D/`. Null in a bundle written before it,
+   * and the boss then has no waypoints to fight from.
+   */
+  class2d: null as Class2DTablesJson | null,
   /**
    * `g_carrier2_door_yaw` (`0x005926D0`) -- the swing class 0x13's carrier
    * routine 2 steps its two doors through. Empty in a pre-13 bundle.
@@ -120,9 +135,19 @@ export function SetBoss4Tables(json: Boss4TablesJson | undefined,
   T.carrierDoorYaw = doorYaw ?? [];
 }
 
+/** `[port-only]` -- class 0x2D's block, from the same `script.json`. */
+export function SetClass2DTables(json: Class2DTablesJson | undefined): void {
+  T.class2d = json ?? null;
+}
+
 /** `[port-only]` -- the options block, from the same `script.json`. */
 export function SetOptionsTables(json: OptionsJson | undefined): void {
   T.options = json ?? null;
+}
+
+/** `[port-only]` -- the Original Mode block, from the same `script.json`. */
+export function SetOriginalModeTables(json: OriginalModeJson | undefined): void {
+  T.originalMode = json ?? null;
 }
 
 /** `[port-only]` -- the result card's block, from the same `script.json`. */

@@ -57,3 +57,26 @@ export function DrawSlotInView(slot: number, x: number, y: number, z: number,
                                scale: number, yaw = 0): void {
   G.g_view_slot_draws.push({ slot, x, y, z, scale, yaw });
 }
+
+/**
+ * One `AssetDrawSlot` under a matrix built from the stack's base -- the view
+ * -- by `MatrixTranslate`/`MatrixRotate*`: a model placed in the **world**.
+ *
+ * `[port-only]` as a record. `m` is what the routine built on top of the
+ * view, in the matrix stack's own row-vector layout (`game/matrix.ts`), which
+ * is three.js's `Matrix4.elements` as it stands.
+ */
+export interface WorldSlotDraw {
+  slot: number;
+  m: number[];
+}
+
+/**
+ * `AssetDrawSlot` (`FUN_00418560`) on a world matrix, recorded for
+ * `render/view_slots.ts`. `[port-only]` as a function, as
+ * {@link DrawSlotInView} is. The trunk's two models are its callers
+ * (`ItemSelectUpdate`, `FUN_00488820`).
+ */
+export function DrawSlotInWorld(slot: number, m: readonly number[]): void {
+  G.g_world_slot_draws.push({ slot, m: [...m] });
+}

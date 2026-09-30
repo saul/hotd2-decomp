@@ -15,6 +15,7 @@ import { HIT_SLOT_NONE } from "./globals";
 import { ActorModelScale } from "./root_motion";
 import type { CivilianState } from "./class10/state";
 import type { Boss4Block } from "./class19/state";
+import type { ItemSelectBlock } from "./class6e/state";
 import { SpawnClass } from "./spawn_class";
 import { vec3, type Vec3 } from "./vec";
 import { makeHumanoidTail, type HumanoidTail } from "./class25/state";
@@ -23,6 +24,7 @@ import { makeOneHitTargetTail, type OneHitTargetTail }
 import { makeRescueTargetTail, type RescueTargetTail }
   from "./class21/state";
 import { makeBoss2Tail, type Boss2Tail } from "./class14/state";
+import { makeClass2DTail, type Class2DTail } from "./class2D/state";
 import type { SkeletonModel } from "./skeleton";
 import type { ShotRay } from "./host";
 import { makeJudgmentTail, type JudgmentTail } from "./class22/state";
@@ -38,6 +40,7 @@ import { makePathRidingPropTail, type PathRidingPropTail }
   from "./class28/state";
 import { makeBatTail, type BatTail } from "./class46/state";
 import { makeBoss3Tail, type Boss3Tail } from "./class45/state";
+import { makeBoss5Tail, type Boss5Tail } from "./class32/state";
 import { makeHordeTail, type HordeTail } from "./class40/state";
 import { makeWormTail, type WormTail } from "./class42/state";
 import { makeFishTail, type FishTail } from "./class51/state";
@@ -139,6 +142,23 @@ export enum MotionFlag {
  * every clip change; class 0x30's hiding states clear and restore the first.
  */
 export const MOTION_FLAGS_INIT = 3;
+
+/**
+ * `obj+0x12EC`, the node draw hook a class's `Init` installs, named by which
+ * of the class's hooks it is rather than held as a pointer. `[port-only]` in
+ * encoding.
+ */
+export enum NodeDrawHookId {
+  /** The class's own: `ZombieDrawBonePart`, `ThrowerDrawBonePart`. */
+  Class = 0,
+  /**
+   * ROTTEN MEAT's, installed in Original Mode with `g_original_item_big_head`
+   * up: `ZombieDrawWithEnlargedHead` (`FUN_00453B50`) or
+   * `ThrowerDrawWithEnlargedHead` (`FUN_0044A300`), the class's own hook with
+   * bone 2 drawn under a scale.
+   */
+  EnlargedHead = 1,
+}
 
 /** `obj+0x34` — the object's flag word. Only the bits the port reads. */
 export enum ActorFlag {
@@ -1368,6 +1388,22 @@ export interface ActorBase {
    */
   cls: SpawnClass;
   /**
+   * `obj+0x00` **still names the class's handler** -- the object is linked
+   * and its `Init` has not run.
+   *
+   * `SpawnFromDescriptor` (`FUN_00408A20`) is `ActorAlloc(g_class_handlers
+   * [class], 0x13F4)` and the descriptor's fields, and nothing else: the
+   * handler it stores at `obj+0x00` **is** the `Init`, and `TaskRunTree`
+   * (`FUN_004A71A0`) calls it when the walk reaches the object -- which, for
+   * an object the script made, is at the tail of the scene list, after the
+   * camera actor and the scene state's hook have run for the frame. The
+   * `Init` then writes the class's update over `obj+0x00` (`EnemyZombieInit`
+   * at `0x00452FB5`). The port keeps the class in {@link Actor.cls}, so this
+   * is the one bit of the pointer the port needs: which of the two it holds.
+   * See `game/spawn.ts`, and `SceneTaskWalk` for the frame it runs on.
+   */
+  initPending: boolean;
+  /**
    * `obj+0x1F4` — the character type, **s16**, and the head's real type tag.
    *
    * It lives inside the embedded model record: `ActorSetMotion`
@@ -1843,6 +1879,14 @@ export interface ActorBase {
    */
   class45: CharacterPlacement["class45"];
   /**
+   * Class 0x2D's descriptor tail, `obj+0x1390` -- the sub-type, the first
+   * clip and counter, the cameo's despawning camera path and frame, and the
+   * fight's three hit-point marks, which `Class2DClassHandler`
+   * (`FUN_00426A70`) and the states read through the pointer. Its own field
+   * because `class2d` is the class's running words (`class2D/state.ts`).
+   */
+  class2dSpawn: CharacterPlacement["class2d"];
+  /**
    * Class 0x40's one descriptor byte that anything reads: `desc+0x25`, the
    * selector `PlaceHorde` (`FUN_0043BD30`) switches on — a horde, or the prop
    * it pushes up. Only the placer carries it; a member is built with none.
@@ -2161,6 +2205,12 @@ export interface ActorBase {
    * reason L3 is L3. See `class19/state.ts`.
    */
   boss4: Boss4Block | null;                              // +0x1310
+  /**
+   * Class 0x6E's words, `obj+0x1310..obj+0x136C` and the four hold counters
+   * at `+0x11C..+0x121` -- the trunk. A fourth thing `+0x1310` starts, and
+   * like {@link Actor.boss4} a block of its own. See `class6e/state.ts`.
+   */
+  itemSelect: ItemSelectBlock | null;                    // +0x1310
   /**
    * `obj+0x1394` — **the object this actor was built for**, by spawn address.
    *
@@ -2485,6 +2535,18 @@ export interface ActorBase {
    */
   nodeDrawAlpha: (number | null)[];
   /**
+   * The `MatrixScale` a class's node draw hook wrapped each bone's draw in
+   * this frame, by bone number, `null` for none: ROTTEN MEAT's hooks scale
+   * bone 2's -- see {@link NodeDrawHookId.EnlargedHead}.
+   *
+   * [port-only] as a field, for the reason {@link Actor.nodeDrawAlpha} is
+   * one. `render/characters/head_aim.ts` applies it to the bone's own draw,
+   * under the head's turn, which is the order the hook pushes it in.
+   */
+  nodeDrawScale: ([number, number, number] | null)[];
+  /** `obj+0x12EC` — which node draw hook `Init` installed. */
+  nodeDrawHook: NodeDrawHookId;
+  /**
    * The attachment list — `model+0x1170`, ids into
    * `g_actor_attachment_records` (`0x004EC4C0`).
    *
@@ -2569,6 +2631,8 @@ export type Actor =
                    pathProp: PathRidingPropTail })
   | (ActorBase & { cls: SpawnClass.Bat; bat: BatTail })
   | (ActorBase & { cls: SpawnClass.Boss3; boss3: Boss3Tail })
+  | (ActorBase & { cls: SpawnClass.Emperor; class2d: Class2DTail })
+  | (ActorBase & { cls: SpawnClass.Boss5; boss5: Boss5Tail })
   | (ActorBase & { cls: SpawnClass.HordeSpawner; horde: HordeTail })
   | (ActorBase & { cls: SpawnClass.Worm; worm: WormTail })
   | (ActorBase & { cls: SpawnClass.ScriptedScenery;
@@ -2582,7 +2646,7 @@ export type Actor =
       | SpawnClass.Boss2 | SpawnClass.Judgment | SpawnClass.JudgmentCompanion
       | SpawnClass.Mouse | SpawnClass.SkinnedNpc | SpawnClass.WaterEnemy
       | SpawnClass.Frog | SpawnClass.FlyingEnemy | SpawnClass.Bat
-      | SpawnClass.Boss3
+      | SpawnClass.Boss3 | SpawnClass.Emperor | SpawnClass.Boss5
       | SpawnClass.ScriptedProp | SpawnClass.FlagStripProp
       | SpawnClass.CarriedZombie
       | SpawnClass.ScriptedScenery | SpawnClass.Vehicle
@@ -2626,6 +2690,11 @@ export type BatActor = Extract<Actor, { cls: SpawnClass.Bat }>;
 
 /** An actor already narrowed to class 0x45, the stage-3 boss. */
 export type Boss3Actor = Extract<Actor, { cls: SpawnClass.Boss3 }>;
+
+/** An actor already narrowed to class 0x2D, for that class's own routines. */
+export type EmperorActor = Extract<Actor, { cls: SpawnClass.Emperor }>;
+/** An actor already narrowed to class 0x32, the stage-5 boss or one of its projectiles. */
+export type Boss5Actor = Extract<Actor, { cls: SpawnClass.Boss5 }>;
 
 /** An actor already narrowed to class 0x11, for that class's own routines. */
 export type FrogActor = Extract<Actor, { cls: SpawnClass.Frog }>;
@@ -2750,6 +2819,7 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     class43: null,
     class46: null,
     class45: null,
+    class2dSpawn: null,
     class40: null,
     class42: null,
     class51: null,
@@ -2779,6 +2849,7 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     shotRays: [null, null],
     killedBy: -1,
     despawned: false,
+    initPending: false,
     radius: 0,
     bodyRadius: 0,
     pushedBy: -1,
@@ -2788,6 +2859,7 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     shotCentre: vec3(),
     civ: null,
     boss4: null,
+    itemSelect: null,
     targetAt: -1,
     script: null,
     alpha: 1,
@@ -2820,6 +2892,8 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     boneCentre: {},
     suppressedBones: 0,
     nodeDrawAlpha: [],
+    nodeDrawScale: [],
+    nodeDrawHook: NodeDrawHookId.Class,
     attachments: [],
   };
   // One `return` per arm. TypeScript narrows `cls` inside each branch, so the
@@ -2885,6 +2959,12 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
   }
   if (cls === SpawnClass.Boss3) {
     return { ...head, cls, boss3: makeBoss3Tail() };
+  }
+  if (cls === SpawnClass.Emperor) {
+    return { ...head, cls, class2d: makeClass2DTail() };
+  }
+  if (cls === SpawnClass.Boss5) {
+    return { ...head, cls, boss5: makeBoss5Tail() };
   }
   if (cls === SpawnClass.HordeSpawner) {
     return { ...head, cls, horde: makeHordeTail() };

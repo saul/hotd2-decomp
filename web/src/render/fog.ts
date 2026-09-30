@@ -96,6 +96,8 @@ import {
   type Material, type Mesh,
 } from "three";
 import type { Context, System } from "../core/system";
+import { G } from "../game/globals";
+import { CH_FOG_FAR, CH_FOG_NEAR, CH_FOG_R } from "../game/light_block";
 
 export type FogMode = "off" | "planar" | "radial";
 
@@ -188,10 +190,10 @@ export const FOG_RANGE_SCALE = 2;
  * The projection's far plane, from `docs/formats/cam.md`: 41.100° vertical,
  * 4:3, near 0.8, **far 8000**.
  *
- * The port's own guard and not the engine's: `script/state/channels.ts`'s
- * `defaultChannels()` stands in for the range `FUN_00460250` seeds before any
- * script runs, and a 65000..65001 range must not paint the background with a
- * fog colour nothing is ever near enough to see.
+ * The port's own guard and not the engine's: `LightBlockInit`'s
+ * 65535..65536 range (`game/light_block.ts`), the block's before any script
+ * sets fog, must not paint the background with a fog colour nothing is ever
+ * near enough to see.
  */
 const CAMERA_FAR_PLANE = 8000;
 
@@ -301,7 +303,9 @@ export class SceneFog implements System {
   }
 
   /**
-   * Push the walker's fog state into the scene.
+   * Push light block 0's fog into the scene -- `PushSceneFogFromLightBlock`
+   * (`FUN_0040C320`) over `g_scene_light_block0`'s `+0x30`/`+0x34` and
+   * `PushSceneFogColour`'s `+0x24..+0x2C`, both `G`'s.
    *
    * The script ramps fog over frames rather than switching it, so this runs
    * every tick and no-ops on the key when nothing actually moved. It is also
@@ -311,7 +315,10 @@ export class SceneFog implements System {
   update(ctx: Context): void {
     const w = ctx.walker;
     if (!w) return;
-    const { near, far, rgb } = w.fog;
+    const c = G.g_scene_light_block0.channels;
+    const near = c[CH_FOG_NEAR];
+    const far = c[CH_FOG_FAR];
+    const rgb = [c[CH_FOG_R], c[CH_FOG_R + 1], c[CH_FOG_R + 2]];
     const active = w.fogSet;
     const key = `${this.mode}|${active}|${near}|${far}|${rgb.join(",")}`;
     // near/far arrive as the script set them; the doubling happens below.

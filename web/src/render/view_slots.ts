@@ -23,6 +23,8 @@ export interface ViewSlotHost {
   node(key: string, slot: number, parent: Group): Object3D | null;
   /** Camera-space effects. */
   view: Group;
+  /** World-space effects. */
+  world: Group;
 }
 
 /** Every record of this frame's list, as keys into `seen`. */
@@ -36,5 +38,25 @@ export function drawViewSlots(h: ViewSlotHost, seen: Set<string>): void {
     node.position.set(d.x, d.y, d.z);
     node.rotation.set(0, d.yaw * BAMS_TO_RAD, 0);
     node.scale.setScalar(d.scale);
+  });
+}
+
+/**
+ * The asset slots a routine drew in the world this frame --
+ * `G.g_world_slot_draws`, `DrawSlotInWorld` -- each at the matrix it built.
+ * The matrix stack's layout is three.js's `Matrix4.elements` as it stands
+ * (`game/matrix.ts`), so the node takes it whole. Original Mode's trunk is
+ * the list's writer (`game/class6e/`).
+ */
+export function drawWorldSlots(h: ViewSlotHost, seen: Set<string>): void {
+  G.g_world_slot_draws.forEach((d, i) => {
+    if (d.slot === 0) return;
+    const key = `ws${i}`;
+    const node = h.node(key, d.slot, h.world);
+    if (!node) return;
+    seen.add(key);
+    node.matrixAutoUpdate = false;
+    node.matrix.fromArray(d.m);
+    node.matrixWorldNeedsUpdate = true;
   });
 }

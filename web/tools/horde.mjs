@@ -121,8 +121,8 @@ for (const [name, stage, block, step, forceFlag] of CASES) {
       reqs.push({ at: s.at, motion: pl.motion,
                   pos: { x: pos[0], y: pos[1], z: pos[2] } });
     }
-    SpawnScriptedCharacters(reqs, rng);
-    SpawnSlotActors(here(), rng);
+    SpawnScriptedCharacters(reqs);
+    SpawnSlotActors(here());
   };
   const states = new Set();
   let seated = false;

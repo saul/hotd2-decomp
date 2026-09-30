@@ -1419,7 +1419,7 @@ console.log("\nclass 0x41 type 75: the writer of stage 4's flag 20:");
           String(PROP75_SLOT));
   }
 
-  // --- and therefore: the gate stops being excused -------------------------
+  // --- and therefore: the gate is one the bundle can open ------------------
   {
     propScene(rng, GameMode.Original);
     const spawnOp = (at: number) => ({

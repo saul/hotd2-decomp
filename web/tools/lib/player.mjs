@@ -79,6 +79,29 @@ export async function serve(port) {
 }
 
 /**
+ * Close a Chrome this process launched, without waiting for it to exit (L104).
+ *
+ * **The installed Chrome takes five seconds to exit** after `Browser.close`
+ * -- measured at 5.2 to 5.4 s on this machine for a blank page, with or
+ * without the player in it, headless, whatever the flags; Playwright's own
+ * Chromium takes none -- and a driver that awaited it paid those seconds at
+ * the end of every run, which in verify's browser lane is one after another.
+ * Nothing a check reads is written then: the profile is a temporary one.
+ *
+ * So the close is asked for and given half a second. A driver then leaves
+ * with `process.exit`, and Playwright's exit handler kills the browser and
+ * removes its profile on the way out; one that goes on to launch another
+ * leaves the first finishing beside it. `ctx` may be a Browser or a
+ * persistent BrowserContext -- both close the same way.
+ */
+export async function closeBrowser(ctx) {
+  await Promise.race([
+    ctx.close().catch(() => undefined),   // not-a-loss: it is being thrown away
+    new Promise((ok) => setTimeout(ok, 500)),
+  ]);
+}
+
+/**
  * A running player on its own server, and the page it is on.
  *
  * `faults` counts what the page complained about — a console error or a throw
@@ -219,7 +242,7 @@ export async function openPlayer({ url = "", size = "1600x1000",
   if (!quiet) console.log(`gpu: ${gpu}`);
 
   const close = async () => {
-    await browser.close();
+    await closeBrowser(browser);
     vite?.kill("SIGTERM");
   };
   return { page, browser, port, state, close };
@@ -231,11 +254,37 @@ export async function openPlayer({ url = "", size = "1600x1000",
  * The bundle and the stage are fetched after the first paint, so this is the
  * whole of the timing: no fixed wait anywhere, because a fixed wait is a race
  * with a pass rate.
+ *
+ * **A load that failed says so at once.** The overlay stays up with its text
+ * marked `.err` -- a bundle exported against an older schema, a stage that
+ * would not fetch -- and waiting for it to go waited out the whole minute and
+ * then reported a timeout: every check in verify's browser lane, one after
+ * another, a minute each, over a stale bundle whose message was on the
+ * screen from the third second.
  */
 export async function waitForLoad(page, selector) {
-  await page.waitForSelector(selector ?? "#loading", {
-    state: selector ? "attached" : "detached", timeout: 60_000,
-  });
+  if (selector) {
+    await page.waitForSelector(selector, { state: "attached", timeout: 60_000 });
+    return;
+  }
+  let settled = false;
+  const failed = page.waitForSelector("#loading-text.err",
+                                      { state: "attached", timeout: 60_000 })
+    .then(async (h) => {
+      if (settled) return;
+      const text = (await h.textContent().catch(() => null)) ?? "";
+      throw new Error(`the page did not load: ${text.trim()}`);
+    // Never settles otherwise: loaded, timed out or the page went away, the
+    // wait for the overlay to go is the one that answers.
+    }, () => new Promise(() => undefined));
+  try {
+    await Promise.race([
+      page.waitForSelector("#loading", { state: "detached", timeout: 60_000 }),
+      failed,
+    ]);
+  } finally {
+    settled = true;
+  }
 }
 
 // `enableShooting` was here, and every driver called it first. Shooting was a

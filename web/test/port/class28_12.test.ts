@@ -10,7 +10,9 @@ import { ActorFlag } from "../../src/game/actor";
 import { type ClassFrame } from "../../src/game/registry";
 import { SpawnClass } from "../../src/game/spawn_class";
 import { vec3, type Vec3 } from "../../src/game/vec";
-import { SpawnSlotActor, SpawnSlotActors } from "../../src/game/director";
+import {
+  RunPendingInits, SpawnSlotActor, SpawnSlotActors,
+} from "../../src/game/director";
 import type { ScriptedProp12Tail } from "../../src/game/class12/state";
 import { ScriptedProp12DrawSlots } from "../../src/game/class12/state";
 import { check, CHARS, spawnZombie, scene, EnterPlay } from "./harness";
@@ -59,7 +61,7 @@ console.log("\nclass 0x28 -- held on its route until cp 0x2F, thrown once, "
   const frame = (cam: number, f: number) => {
     G.g_active_cam_path = cam;
     G.g_cam_path_frame = f;
-    for (const sp of listed) SpawnSlotActor(sp, rng);
+    for (const sp of listed) SpawnSlotActor(sp);
     GameUpdate(1 / 60, host, rng);
   };
 
@@ -189,7 +191,9 @@ console.log("\nclass 0x12, the door the bin captor bursts out of:");
   SpawnSlotActors([
     { at: DOOR, class: SpawnClass.FlagStripProp, pos: [0, 0, 0] },
     { at: NEVER, class: SpawnClass.FlagStripProp, pos: [0, 0, 0] },
-  ], rng);
+  ]);
+  // The `Init`s are the frame walk's (`SpawnFromDescriptor`); run them here.
+  RunPendingInits(rng);
   const door = G.g_object_list.find((o) => o.at === DOOR);
   const t = () => (door as { prop12: ScriptedProp12Tail }).prop12;
   check("stage 1's class-0x12 spawn builds an object",
@@ -334,7 +338,9 @@ console.log("\nShotTestMesh: the boards stop the shot:");
   T.coli = { files: ["coli0.bin", "coli1.bin"],
              blobs: { [MESH]: BOARDS } } as never;
   SpawnSlotActors([{ at: DOOR, class: SpawnClass.FlagStripProp,
-                     pos: [0, 0, 0] }], rng);
+                     pos: [0, 0, 0] }]);
+  // The `Init`s are the frame walk's (`SpawnFromDescriptor`); run them here.
+  RunPendingInits(rng);
   const door = G.g_object_list.find((o) => o.at === DOOR)!;
   // The captor: head (bone 2) a sphere of 3 at `HEAD`, the broad phase round
   // the same point, nothing else with a sphere.

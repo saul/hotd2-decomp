@@ -30,10 +30,25 @@
  * {@link LANE_BROWSER}); `-j 1` runs them one at a time in table order. A line
  * is printed as each check finishes, the output of every failure after them
  * all, in table order, and the run prints its own wall time.
+ *
+ * **What makes it fast is not starting too much at once.** Measured on the
+ * shared machine, `tsc` took 13 s alone and 240 s inside a run, and
+ * `test:net-codec` 36 s alone and 434 s inside one: ten checks at once on top
+ * of the peers' own runs is a machine paging and switching, not working. So:
+ *
+ * * **the pool holds back while the machine is busy** -- a check starts only
+ *   while the one-minute load, less the checks this run already has going, is
+ *   under the core count, and never fewer than two run ({@link loadBudget});
+ * * **the longest checks start first**, by the times the last run recorded
+ *   ({@link TIMES}), so the run does not end on one long check started last;
+ * * **the browser lane shares one vite**, started before its first check and
+ *   named to each through `HOTD2_VITE_PORT` (`tools/lib/player.mjs`), so every
+ *   check after the first finds the app's modules already transformed.
  */
-import { spawn } from "node:child_process";
-import { accessSync, constants, statSync } from "node:fs";
-import { availableParallelism } from "node:os";
+import { spawn, type ChildProcess } from "node:child_process";
+import { accessSync, constants, readFileSync, statSync, writeFileSync } from "node:fs";
+import { createServer } from "node:net";
+import { availableParallelism, loadavg, tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 
 import { repoRoot } from "./lib/bundle_root";
@@ -662,9 +677,88 @@ function which(cmd: string): string | null {
   return null;
 }
 
+/**
+ * Each check's last wall time, machine-wide -- every worktree's run reads and
+ * writes the one file -- for the longest-first order. A missing or unreadable
+ * file is no times at all, and the table order stands.
+ */
+export const TIMES = join(tmpdir(), "hod2-verify-times.json");
+
+function readTimes(): Record<string, number> {
+  try {
+    return JSON.parse(readFileSync(TIMES, "utf8")) as Record<string, number>;
+  } catch {
+    return {};       // not-a-loss: no times yet is the table order
+  }
+}
+
+function writeTimes(times: Record<string, number>): void {
+  try {
+    writeFileSync(TIMES, JSON.stringify(times));
+  } catch {
+    // not-a-loss: the times only order the next run
+  }
+}
+
+/**
+ * How many pool checks may run now: the cores the machine's one-minute load
+ * leaves free, counting this run's own `running` as its own, and never fewer
+ * than two -- a run that waited for an idle machine would wait for ever
+ * beside the peers'.
+ */
+export function loadBudget(jobs: number, running: number): number {
+  const cores = availableParallelism();
+  const others = Math.max(0, loadavg()[0]! - running);
+  return Math.max(2, Math.min(jobs, Math.floor(cores - others)));
+}
+
+/** A port nothing is listening on. */
+function freePort(): Promise<number> {
+  return new Promise((ok, fail) => {
+    const srv = createServer();
+    srv.once("error", fail);
+    srv.listen(0, "127.0.0.1", () => {
+      const a = srv.address();
+      const port = typeof a === "object" && a ? a.port : 0;
+      srv.close(() => ok(port));
+    });
+  });
+}
+
+/**
+ * One vite for the browser lane, as `tools/lib/player.mjs`'s `serve` starts
+ * one per check; null when it will not start, and each check then starts its
+ * own.
+ */
+async function startSharedVite(): Promise<{ port: number; proc: ChildProcess } | null> {
+  const port = await freePort();
+  const proc = spawn("npx", ["vite", "--host", "127.0.0.1", "--port", String(port),
+                             "--strictPort"], { cwd: WEB, stdio: ["ignore", "pipe", "pipe"] });
+  // Read, or a full pipe stops the server mid-write.
+  proc.stderr?.on("data", () => undefined);
+  const up = await new Promise<boolean>((ok) => {
+    const timer = setTimeout(() => ok(false), 60_000);
+    proc.stdout?.on("data", (b: Buffer) => {
+      const t = String(b);
+      if (t.includes("ready in") || t.includes("Local:")) {
+        clearTimeout(timer);
+        ok(true);
+      }
+    });
+    proc.on("exit", () => { clearTimeout(timer); ok(false); });
+  });
+  if (!up) {
+    proc.kill("SIGTERM");
+    return null;
+  }
+  return { port, proc };
+}
+
 /** Returns `[outcome, output, seconds]`. Exit 3 means it asserted nothing. */
 export async function runOne(c: Check, gameDir: string | null, timeout: number,
-                             quick = false): Promise<[Outcome, string, number]> {
+                             quick = false,
+                             env: NodeJS.ProcessEnv = process.env):
+    Promise<[Outcome, string, number]> {
   if (quick && c.lane === LANE_BROWSER) return ["skip", "--quick leaves the browser lane out", 0];
   if (quick && c.needs === NEEDS_GAME) {
     return ["skip", "--quick leaves the checks against the game out", 0];
@@ -675,7 +769,7 @@ export async function runOne(c: Check, gameDir: string | null, timeout: number,
   const t0 = performance.now();
   const seconds = (): number => (performance.now() - t0) / 1000;
   return new Promise((done) => {
-    const p = spawn(cmd[0]!, cmd.slice(1), { cwd: WEB, stdio: ["inherit", "pipe", "pipe"] });
+    const p = spawn(cmd[0]!, cmd.slice(1), { cwd: WEB, env, stdio: ["inherit", "pipe", "pipe"] });
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];
     p.stdout.on("data", (b: Buffer) => stdout.push(b));
@@ -720,19 +814,29 @@ export async function runAll(checks: readonly Check[], gameDir: string | null, t
     Promise<[Check, Outcome, string, number][]> {
   const w = Math.max(...checks.map((c) => c.name.length));
   const done = new Map<string, [Outcome, string, number]>();
+  const times = readTimes();
 
-  const one = async (c: Check): Promise<void> => {
-    const r = await runOne(c, gameDir, timeout, quick);
+  const one = async (c: Check, env?: NodeJS.ProcessEnv): Promise<void> => {
+    const r = await runOne(c, gameDir, timeout, quick, env);
     done.set(c.name, r);
+    // A check that ran, not one skipped before it started, is a time to keep.
+    if (r[2] > 0) times[c.name] = r[2];
     console.log(`  ${c.name.padEnd(w)}  ... ${r[0].toUpperCase().padEnd(4)} `
                 + `${r[2].toFixed(1).padStart(5)}s`);
   };
-  const lane = async (members: readonly Check[]): Promise<void> => {
-    for (const c of members) await one(c);
+  const lane = async (name: string, members: readonly Check[]): Promise<void> => {
+    // The browser lane's one vite, when any of its checks will run.
+    const vite = name === LANE_BROWSER && !quick ? await startSharedVite() : null;
+    const env = vite ? { ...process.env, HOTD2_VITE_PORT: String(vite.port) } : undefined;
+    try {
+      for (const c of members) await one(c, env);
+    } finally {
+      vite?.proc.kill("SIGTERM");
+    }
   };
 
   if (jobs <= 1) {
-    await lane(checks);
+    for (const c of checks) await one(c);
   } else {
     const lanes = new Map<string, Check[]>();
     const pool: Check[] = [];
@@ -740,18 +844,36 @@ export async function runAll(checks: readonly Check[], gameDir: string | null, t
       if (c.lane) lanes.set(c.lane, [...(lanes.get(c.lane) ?? []), c]);
       else pool.push(c);
     }
-    // The lanes first: they are the long pole, and a slot taken by a lane is
-    // not a slot a pool check waits for.
-    const tasks: (() => Promise<void>)[] = [
-      ...[...lanes.values()].map((m) => () => lane(m)),
-      ...pool.map((c) => () => one(c)),
-    ];
+    // The longest first, by the last run's times; a check with no time yet
+    // keeps its table place among the rest. The sort is stable.
+    const order = [...pool].sort((a, b) => (times[b.name] ?? 0) - (times[a.name] ?? 0));
+    // The lanes start at once: they are the long pole. The pool is fed while
+    // the machine has room -- see `loadBudget` -- and looked at again every
+    // two seconds, because the load moves as the peers' runs start and stop.
+    const lanesDone = Promise.all([...lanes].map(([n, m]) => lane(n, m)));
+    let running = 0;
     let next = 0;
-    const worker = async (): Promise<void> => {
-      while (next < tasks.length) await tasks[next++]!();
-    };
-    await Promise.all(Array.from({ length: Math.min(jobs + lanes.size, tasks.length) }, worker));
+    await new Promise<void>((finished) => {
+      const tick = setInterval(() => pump(), 2000);
+      const pump = (): void => {
+        while (next < order.length && running < loadBudget(jobs, running)) {
+          const c = order[next++]!;
+          running += 1;
+          void one(c).finally(() => {
+            running -= 1;
+            pump();
+          });
+        }
+        if (next >= order.length && running === 0) {
+          clearInterval(tick);
+          finished();
+        }
+      };
+      pump();
+    });
+    await lanesDone;
   }
+  writeTimes(times);
   return checks.map((c) => [c, ...done.get(c.name)!]);
 }
 
@@ -782,8 +904,9 @@ options:
   --quick               the inner loop: leave out the browser lane and the checks
                         against the installed game, and say so -- they are
                         skipped, never passed
-  --jobs, -j JOBS       checks run at once outside the browser lane (default: one
-                        per core; 1 runs them in table order)`;
+  --jobs, -j JOBS       checks run at once outside the browser lane, at most
+                        (default: one per core, fewer while the machine's load
+                        leaves less; 1 runs them in table order)`;
 
 function usageError(msg: string): never {
   console.error(`${USAGE}\nverify_all.ts: error: ${msg}`);

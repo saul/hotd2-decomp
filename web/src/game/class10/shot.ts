@@ -13,7 +13,10 @@ import { ScoreAddForPlayer } from "../combat/score";
 import type { Events } from "../../core/events";
 import { G } from "../globals";
 import type { ClassFrame } from "../registry";
-import { CivilianTarget, CivilianWait } from "./ops";
+import { GameMode } from "../game_mode";
+import { vec3 } from "../vec";
+import { SpawnCivilianHitMarker } from "./hit_marker";
+import { CivilianHeadMode, CivilianTarget, CivilianWait } from "./ops";
 import { CivilianRunScript } from "./script";
 
 /** What a shot costs — `ScoreAddForPlayer`'s operand. */
@@ -77,48 +80,101 @@ export function CivilianCheckShot(obj: Actor, f: ClassFrame): void {
     obj.pendingHit = null;
     return;
   }
-  const killed = (obj.flags & ActorFlag.Dead) !== 0;
-  const hit = killed || (obj.flags & 8) !== 0 || obj.pendingHit !== null;
-  if (!hit) return;
-
-  let player: number;
-  if (killed) {
-    // A killing shot costs **both** players 100 — the engine calls
-    // `ScoreAddForPlayer` twice with no test at all.
-    player = -1;
+  // **Killed by her captors**: `obj+0x34` bit `0x4000000` is already up
+  // (`TEST ECX, 0x4000000; JZ` at `0x0048AADF`) -- the maul raised it, not a
+  // shot -- and the arm at `0x0048AAEB` takes her on-shot script and fines
+  // both players.
+  if ((obj.flags & ActorFlag.Dead) !== 0) {
+    obj.pendingHit = null;
+    obj.dead = true;
+    CivilianShotCommonStops(sub);
+    f.events?.emit("civilian.shot", { at: obj.at, player: -1 });
+    CivilianRunScript(obj, sub.onShotScript, 0, f);
+    sub.onShot = 0;
+    sub.onShotScript = -1;
+    sub.resume = 0;
+    sub.resumeScript = -1;
+    // `TEST dword ptr [EAX], 0x8000000` at `0x0048AB38`, **after** the new
+    // script's first block has loaded its word -- whose `Uncounted` bit the
+    // VM keeps from the old one as well.
     if (!(sub.wait & CivilianWait.Uncounted)) {
       ScoreAddForPlayer(0, SHOT_PENALTY, f.events);
       ScoreAddForPlayer(1, SHOT_PENALTY, f.events);
     }
-  } else {
-    // `obj+0x34` bits 1 and 2 name the shooter; neither means "either".
-    const two = obj.flags & 6;
-    player = two === 2 ? 0 : two === 4 ? 1 : (f.rng.next() < 0.5 ? 0 : 1);
-    // `[open]` The engine call behind this has not been found: `CivilianUpdate`
-    // (`FUN_0048A920`) makes no damage call, and `PlayerTakeDamageTimed` has
-    // no caller in the image. Kept on it, with its default arguments.
-    PlayerTakeDamageTimed(player, 1, 0, 0, -1, f.events, obj);
-    ScoreAddForPlayer(player, SHOT_PENALTY, f.events);
-    G.g_head_combo_bonus[player] = 0;
-    G.g_player_hit_count[player] += 1;
-    obj.flags |= ActorFlag.Dead;
+    CivilianShotCommonTail(obj, f);
+    return;
   }
+  // **Shot**: `TEST CL, 0x8; JZ` at `0x0048AB8F`.
+  if ((obj.flags & 8) === 0 && obj.pendingHit === null) return;
+  // Where the marker goes: bone `sub+0xAC`'s record point in the world --
+  // `MatrixMultiply(model + 0xA0 + bone*0x90)` onto the camera block and
+  // its translation, `0x0048AB99`..`0x0048AC09`. The records are the
+  // renderer's pose here (`GameHost.boneWorld`); a host that cannot pose
+  // her has no point, and the marker is only a draw, so it is not made.
+  const posed = f.host.boneWorld(obj.at, sub.hitBone, _hit);
+  // `obj+0x34` bits 1 and 2 name the shooter; neither, or both, is `rand() %
+  // 2` (`0x0048AC1F`..`0x0048AC32`).
+  const two = obj.flags & 6;
+  const player = two === 2 ? 0 : two === 4 ? 1 : f.rng.int(2);
+  // `PUSH -1; PUSH 1; PUSH EBX; PUSH EBX; PUSH EDI` with `EBX = 0` at
+  // `0x0048AC3E`: no overlay, through the invulnerability window, and the
+  // window left alone. The port passed `(p, 1, 0, 0, -1)`, which raised the
+  // damage overlay and let an invulnerable player shoot her for nothing.
+  PlayerTakeDamageTimed(player, 0, 0, 1, -1, f.events, obj);
+  ScoreAddForPlayer(player, SHOT_PENALTY, f.events);
+  G.g_head_combo_bonus[player] = 0;
+  G.g_player_hit_count[player] += 1;
+  if (posed) SpawnCivilianHitMarker(player, _hit);
+  obj.flags |= ActorFlag.Dead;
   obj.pendingHit = null;
   obj.dead = true;
-  sub.timer = -1;
-  sub.targetMode = CivilianTarget.None;
-  sub.sounds = [];
-  sub.soundDelay = 0;
-
-  // The killed branch takes `onShotAlt` when there is one; the survivable one
-  // always takes `onShot`.
-  const to = !killed && sub.onShotAltScript >= 0
-    ? sub.onShotAltScript : sub.onShotScript;
+  CivilianShotCommonStops(sub);
+  f.events?.emit("civilian.shot", { at: obj.at, player });
+  // `sub+0x50` when there is one, else `sub+0x4C` (`0x0048ACB2`) -- and the
+  // two words are cleared only **after** the script runs (`0x0048ACCE`), so
+  // an on-shot script that names a new one of either loses it. The port
+  // cleared them first and ran the voice before the script, whose op 0x2A
+  // picks the voice.
+  const to = sub.onShotAltScript >= 0 ? sub.onShotAltScript
+    : sub.onShotScript;
+  CivilianRunScript(obj, to, 0, f);
   sub.onShot = 0;
   sub.onShotScript = -1;
   sub.resume = 0;
   sub.resumeScript = -1;
-  f.events?.emit("civilian.shot", { at: obj.at, player });
+  CivilianShotCommonTail(obj, f);
+}
+
+const _hit = vec3();
+
+/**
+ * The four stores both arms make before their script: the timer, the target
+ * mode, the sound list and the queued sound's delay (`0x0048AAEB`..
+ * `0x0048AB08` and `0x0048AC89`..`0x0048ACA6`).
+ *
+ * `[port-only]` as a function: the engine writes them out twice, the same
+ * four instructions in each arm.
+ */
+function CivilianShotCommonStops(sub: NonNullable<Actor["civ"]>): void {
+  sub.timer = -1;
+  sub.targetMode = CivilianTarget.None;
+  sub.sounds = [];
+  sub.soundDelay = 0;
+}
+
+/**
+ * Both arms' tail: the death voice, the head sent back to rest if it was
+ * looking at anything (`CMP [EAX+0x8C], EBX; JZ; MOV [EAX+0x8C], 6`), and
+ * Training's `g_training_out` (`0x009A2234`).
+ *
+ * `[port-only]` as a function, for the same reason.
+ */
+function CivilianShotCommonTail(obj: Actor, f: ClassFrame): void {
+  const sub = obj.civ;
+  if (!sub) return;
   CivilianPlayDeathVoice(obj, f.events);
-  CivilianRunScript(obj, to, 0, f);
+  if (sub.headMode !== CivilianHeadMode.None) {
+    sub.headMode = CivilianHeadMode.Rest;
+  }
+  if (G.g_GameMode === GameMode.Training) G.g_training_out = 1;
 }

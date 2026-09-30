@@ -15,7 +15,7 @@
 import { ActorFlag, MotionFlag, type Actor } from "../actor";
 import type { Rng } from "../../core/rng";
 import { ScoreAddForPlayer } from "../combat/score";
-import { G } from "../globals";
+import { AppState, G } from "../globals";
 import { RecordRescue } from "../rescue";
 import type { ClassFrame } from "../registry";
 import { NULL_HOST, type GameHost } from "../host";
@@ -23,8 +23,9 @@ import { CivilianAddHeldItem, CivilianAddPickedItem, CivilianPickHeldItem }
   from "./items";
 import { CivilianCallHookInstall } from "./hooks";
 import { ActorStorePlayCursor } from "../motion";
-import { AsFloat, CivilianFrameHook, CivilianHookInstall, CivilianOp,
-         CivilianWait, CmdAt } from "./ops";
+import { AsFloat, CivilianFrameHook, CivilianHeadMode, CivilianHookInstall,
+         CivilianOp, CivilianWait, CmdAt } from "./ops";
+import { GameMode } from "../game_mode";
 import { CivilianApplyMotionPose } from "./pose";
 
 /** What a rescue pays — `ScoreAddForPlayer`'s operand. */
@@ -131,9 +132,16 @@ export function CivilianRunScript(obj: Actor, script: number, pc: number,
         break;
       case CivilianOp.SetSkipCount: sub.skipCount = a[0]; break;
       case CivilianOp.SetRemoveDelay: sub.removeDelay = a[0]; break;
+      // `MOV [EAX+0x78], ECX` (the target's bits), then `FLD [EAX+0x78];
+      // FSUB [EDI+0x128]; FIDIV dword ptr [ESI-0x4]; FSTP [EAX+0x7C]` at
+      // `0x0048BE42`..`0x0048BE4E`: from the radius she has **now**, over an
+      // integer count of frames. The port started from 1 whatever the radius
+      // was, and read the count's dword as a float's bits -- a denormal, so
+      // stage 2's thirty-frame grow to 5 landed in one.
       case CivilianOp.SetRadiusRamp:
-        sub.scaleTarget = c.radius ?? 1;
-        sub.scaleStep = a[1] ? (sub.scaleTarget - 1) / AsFloat(a[1]) : 0;
+        sub.scaleTarget = AsFloat(a[0]);
+        sub.scaleStep = Math.fround((sub.scaleTarget - obj.bodyRadius)
+                                    / (a[1] | 0));
         break;
       case CivilianOp.SetSphereCentreMode:
         // `MOV DL, byte ptr [ESI+0x4]`: a byte, and the switch reads it back
@@ -169,23 +177,40 @@ export function CivilianRunScript(obj: Actor, script: number, pc: number,
         // groups, so a civilian's line goes through the player's own subtitle
         // and voice path rather than out as a bare sound id.
         //
-        // The engine gates it on the removal countdown, so a civilian already
-        // walking off stays quiet.
-        if (sub.removeDelay === 0) {
+        // `CMP [0x009a2230], EBP; JZ; TEST dword ptr [EAX], 0x20000000; JNZ
+        // say; CMP word ptr [EAX+0x2a], BP; JNZ skip` at `0x0048BF36`: a
+        // civilian already walking off stays quiet, unless a skip is under
+        // way and her word keeps her through it.
+        if ((G.g_cutscene_skipping !== 0
+             && (sub.wait & CivilianWait.StayThroughSkip) !== 0)
+            || sub.removeDelay === 0) {
           f?.events?.emit("civilian.dialogue", { at: obj.at, group: a[0] });
         }
         break;
       case CivilianOp.SetResume:
         sub.resume = a[0]; sub.resumeScript = c.scripts?.[0] ?? -1; break;
-      case CivilianOp.SetResumeByMode:
-        // `DAT_009A2226` picks the second stream. `[open]` — nothing else
-        // read writes it, so this always takes the first, as a one-player
-        // arcade run does.
-        sub.resume = a[0]; sub.resumeScript = c.scripts?.[0] ?? -1; break;
+      // `CMP word ptr [0x009a2226], DX` with `DX = 1` from the loop's head
+      // (`0x0048BA0A`): the title menu's cursor on the ORIGINAL row takes the
+      // second stream. Rows 0..3 are the `g_GameMode` values its confirm
+      // writes, so the row is the mode's own number. The port always took the
+      // first, and Original Mode's civilians never gave their items.
+      case CivilianOp.SetResumeByMode: {
+        const k = G.g_title_menu_cursor === GameMode.Original ? 1 : 0;
+        sub.resume = a[k];
+        sub.resumeScript = c.scripts?.[k] ?? -1;
+        break;
+      }
       case CivilianOp.SetFlagIndex: sub.flagIndex = a[0]; break;
       case CivilianOp.QueueSound:
         sub.soundId = a[0]; sub.soundDelay = a[1]; break;
+      // `0x0048BFBD`: a null pointer is `MOV [EAX+0x58], 0` and nothing more,
+      // so a sound op 0x21 already queued still plays. The port cleared the
+      // queued id and delay as well, and 14 of the 33 shipped uses are null.
       case CivilianOp.QueueSoundList: {
+        if (a[0] === 0) {
+          sub.sounds = [];
+          break;
+        }
         const list = (c.sounds ?? []).map((s) => [s[0], s[1]] as
                                           [number, number]);
         const head = list.shift();
@@ -194,7 +219,35 @@ export function CivilianRunScript(obj: Actor, script: number, pc: number,
         sub.sounds = list;
         break;
       }
-      case CivilianOp.SetCameraBone: sub.cameraBone = a[0]; break;
+      // `0x0048C044`: the mode, and for 2 the first child while there is one
+      // -- `*(sub+0x60)` into `sub+0x90` -- or the mode straight back to 0.
+      case CivilianOp.SetHeadLook:
+        sub.headMode = a[0];
+        if (sub.headMode === CivilianHeadMode.Child) {
+          if (sub.childCount !== 0) {
+            sub.headTargetAt = sub.children[0] ?? -1;
+            sub.headTargetPoint = null;
+            break;
+          }
+          sub.headMode = CivilianHeadMode.None;
+        }
+        break;
+      // `0x0048C08C`: the mode and the pointer, as they are. The pointer is
+      // three floats for modes 4 and 5, which is all the shipped streams use.
+      case CivilianOp.SetHeadLookAt:
+        sub.headMode = a[0];
+        sub.headTargetAt = -1;
+        sub.headTargetPoint = c.point
+          ? { x: c.point[0], y: c.point[1], z: c.point[2] } : null;
+        break;
+      // `0x0048C0B0`: frames, table, and the cursor back to the start.
+      case CivilianOp.SetMouth:
+        sub.mouthFrames = a[0];
+        sub.mouthTable = a[1];
+        sub.mouthCursor = 0;
+        break;
+      // `MOV DX, word ptr [ESI + 0x4]; MOV word ptr [EAX + 0xac], DX`.
+      case CivilianOp.SetHitBone: sub.hitBone = (a[0] << 16) >> 16; break;
       case CivilianOp.SetActorFlags: obj.flags |= a[0]; break;
       case CivilianOp.SetDeathVoice: sub.deathVoice = a[0] & 0xff; break;
       case CivilianOp.MoveOverFrames:
@@ -250,21 +303,6 @@ export function CivilianRunScript(obj: Actor, script: number, pc: number,
           G.g_bHudShutterState = a[0] & 0xff;
         }
         break;
-      // Unread. Named so the stream stays legible and so a later reading has
-      // somewhere to land; deliberately no behaviour.
-      //
-      // **These three used to fall through into `SetScale`'s body** and write
-      // its operand into `obj.scale`, which is `model+0x116C` and the factor
-      // `SkeletonApplyRootMotion` (`FUN_00410C50`) multiplies the root delta
-      // by. Their operands are small integers -- 1, 2, 5, 200 -- and
-      // {@link AsFloat} reinterprets a dword's bits, so the scale came out a
-      // denormal around 1e-45 and every step the clip authored was multiplied
-      // to nothing. 125 commands in the shipped streams run one of the four
-      // this case used to hold.
-      case CivilianOp.SetAttachMode:
-      case CivilianOp.SetAttachTarget:
-      case CivilianOp.SetPairA:
-        break;
       // `MOV dword ptr [g_cur_actor_model + 0x116c], param_2[1]` -- the
       // operand is stored **verbatim** into a float field, so it is a float
       // bit pattern and `AsFloat` is the store. One command in the whole game
@@ -273,7 +311,15 @@ export function CivilianRunScript(obj: Actor, script: number, pc: number,
       case CivilianOp.SetScale:
         obj.scale = AsFloat(a[0]);
         break;
+      // `0x0048C202`: in play, the s16 and a pointer into this command --
+      // the port's is the command's index. Nothing reads either; see
+      // {@link CivilianOp.InPlayOnly}. Both shipped uses carry 0 at `cmd+8`,
+      // the one value that moves the cursor on.
       case CivilianOp.InPlayOnly:
+        if (G.g_app_state === AppState.InPlay) {
+          sub.inPlayCountdown = (a[0] << 16) >> 16;
+          sub.inPlayCursor = pc;
+        }
         break;
       default:
         break;

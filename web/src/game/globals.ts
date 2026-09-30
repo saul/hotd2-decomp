@@ -39,6 +39,7 @@ import type { St2Car } from "./class21/car";
 import type { Actor } from "./actor";
 import type { OriginalItemBanner } from "./class41/item_banner";
 import type { LifeGrantedMarker } from "./class10/life_marker";
+import type { CivilianHitMarker } from "./class10/hit_marker";
 import type { BreakableProp, PropFinalDraw } from "./class41/prop_state";
 import type { PropShatter } from "./class41/shatter";
 import type { ShotRequest } from "./combat/shot";
@@ -2576,6 +2577,36 @@ export const G = {
    */
   g_GameMode: GameMode.Arcade as GameMode,
   /**
+   * `g_title_menu_cursor` — 0x009A2226, s16. The title menu's highlighted
+   * row, 0..7: rows 0..3 are the {@link GameMode} values and its confirm arm
+   * writes `g_GameMode = g_title_menu_cursor` for them
+   * (`TitleMenuUpdateAndSelect`, `FUN_00496960`).
+   *
+   * `[proved]` from all 19 references (an operand search and a byte search
+   * for `26229a00` agree): the boot reset (`FUN_0040A920`) and the attract
+   * screen's hand-over to the title (`FUN_004043C0`) zero it, the menu moves
+   * it, and nothing else writes it -- so through a game it stays on the row
+   * the player confirmed. Its one gameplay reader is class 0x10's op 0x1F,
+   * which takes Original Mode's stream on row 1. The port stands the confirm
+   * in with `PlayerStartGameFromTitle`, which writes it.
+   */
+  g_title_menu_cursor: 0,
+  /**
+   * `g_cutscene_skipping` — 0x009A2230. Up for **one task walk** after a
+   * cut scene is skipped: `CheckCutsceneSkipRequest` (`FUN_00435F40`) raises
+   * it with `g_nEvtSkipFlag` and installs `FinishCutsceneSkip`
+   * (`FUN_00435FA0`), which drops it on its next update and ends the task;
+   * `EvtOpSetSkippableRegion2C` (`FUN_0045FD90`) drops it when a region
+   * opens. `[proved]`, the three writers of 15 references.
+   *
+   * The port's watcher is the walker's `requestSkip`, which does the watch
+   * task's work when START is pressed, between two frames; it raises this,
+   * and `FinishCutsceneSkip` drops it at the end of the next scene task walk,
+   * so every actor's update sees it exactly once, as each does in the engine
+   * (`game/cutscene_skip.ts`).
+   */
+  g_cutscene_skipping: 0,
+  /**
    * `g_training_lesson` — 0x009C9118. Which level of the chosen training
    * course is being played, 0..4; the course is {@link g_training_course}.
    *
@@ -2713,6 +2744,13 @@ export const G = {
    * engine. See `game/class10/life_marker.ts`.
    */
   g_life_granted_markers: [] as LifeGrantedMarker[],
+  /**
+   * The markers `SpawnCivilianHitMarker` (`FUN_0048E080`) allocates when a
+   * civilian is shot, in allocation order: every one that drew this frame.
+   * [port-only] as a list: each is a 0x1314-byte task in the engine. See
+   * `game/class10/hit_marker.ts`.
+   */
+  g_civilian_hit_markers: [] as CivilianHitMarker[],
   /**
    * `g_chain_segments` — 0x007DCD18, `[group * 0x14 + segment]`.
    *
@@ -3212,6 +3250,8 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   G.g_original_item_banners = [];
   // ...and the life markers, which are tasks on the same list.
   G.g_life_granted_markers = [];
+  // ...and the markers a shot civilian leaves (`SpawnCivilianHitMarker`).
+  G.g_civilian_hit_markers = [];
   G.g_chain_segments = [];
   G.g_scene_index = 0;
   G.g_camera_block_eye = vec3();

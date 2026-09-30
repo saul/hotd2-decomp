@@ -11,7 +11,8 @@
  * side. The fields the port does not use yet are still named and still carry
  * their offset: an unnamed gap is where the next wrong reading goes.
  */
-import { CivilianFrameHook, CivilianSphereMode } from "./ops";
+import { CIVILIAN_MOUTH_NONE, CivilianFrameHook, CivilianHeadMode,
+         CivilianSphereMode } from "./ops";
 
 /** One 8-byte entry of the held-item array at `sub+0x70`. */
 export interface CivilianHeldItem {
@@ -170,11 +171,71 @@ export interface CivilianState {
   /** +0x84 / +0x88 the sound queued to play, and the frames left before it. */
   soundId: number;
   soundDelay: number;
-  /** +0xAC op 0x28 — the bone the camera point rides. */
-  cameraBone: number;
+  /**
+   * +0x8C — **what the head looks at**, ops 0x23 and 0x24: 0 nothing, 1 the
+   * gameplay eye, 2 a child's head, 3 the camera's look-at, 4 a point, 5 a
+   * point in her own frame, 6 back to rest. `CivilianDrawBonePart`
+   * (`FUN_0048D1F0`) reads it on bone 2 and writes 0 when the turn has
+   * wound back to nothing and 6 when a child it watched is gone; the shot
+   * arm of `CivilianUpdate` writes 6. See {@link CivilianHeadMode}.
+   */
+  headMode: number;
+  /**
+   * +0x90 — the mode's target, a **pointer** in the engine: a child actor for
+   * mode 2 (op 0x23, or the hook's own retarget to the first survivor), a
+   * three-float point for modes 4 and 5 (op 0x24). One word, two meanings,
+   * so two fields here, and every writer writes both (`L79`): the child by
+   * spawn address or -1, the point or null.
+   */
+  headTargetAt: number;
+  headTargetPoint: { x: number; y: number; z: number } | null;
+  /**
+   * +0x94 / +0x98 / +0x9C — the head's turn on top of the pose, pitch, yaw
+   * and roll in BAMS, each stepped by `AngleApproachInPlace`
+   * (`FUN_0048D9B0`) at most `0x100` a draw. Unwrapped ints, as the engine
+   * keeps them. `CivilianInit` zeroes all three.
+   */
+  headPitch: number;
+  headYaw: number;
+  headRoll: number;
+  /**
+   * +0xA0 / +0xA4 / +0xA8 — **the mouth**, op 0x25: the cursor into the
+   * table, the frames it still steps for, and which of
+   * `g_civilian_mouth_tables`' six it reads -- 6 is none, which is what
+   * `CivilianInit` writes.
+   */
+  mouthCursor: number;
+  mouthFrames: number;
+  mouthTable: number;
+  /**
+   * +0xAC op 0x28 — **the bone the shot marker is placed at**: the shot arm
+   * of `CivilianUpdate` takes that bone's record point for
+   * `SpawnCivilianHitMarker` (`FUN_0048E080`). `CivilianInit` writes 2. It
+   * was `cameraBone`, which nothing reads it as.
+   */
+  hitBone: number;
   /** +0xAE / +0xB0..+0xB8 op 0x26's move: frames left, and where to. */
   moveFrames: number;
   moveTo: { x: number; y: number; z: number };
+  /**
+   * +0xBC / +0xC0 — op 0x2B's s16 and the command it points back into.
+   * `CivilianUpdate` counts the first down once a frame (`0x0048AD97`) and
+   * **nothing reads either** -- see {@link CivilianOp.InPlayOnly} for the
+   * sweep. Kept because the engine keeps them.
+   */
+  inPlayCountdown: number;
+  inPlayCursor: number;
+  /**
+   * `[port-only]` What this frame's `CivilianDrawBonePart` decided about the
+   * draw, for `render/characters/civilian_head.ts`: whether it rebuilt bone
+   * 2's matrix (the three angles above are then the turn), the offset it
+   * added to bone 2's slot (the mouth), and whether it took the Original
+   * Mode scale arm. The draw's own outputs, reset before each walk, as
+   * `ResultCardTail.partScale` is.
+   */
+  headTurned: boolean;
+  mouthOffset: number;
+  partScale: boolean;
   /**
    * Not the engine's. `CivilianRunScript` is entered with a **pointer**; the
    * port carries the index of the stream it is in, because the exported
@@ -203,8 +264,14 @@ export function makeCivilianState(): CivilianState {
     items: [], heldDrawn: [], pickedItem: -1, attachSet: 5,
     scaleTarget: 1, scaleStep: 0, sphereCentreMode: CivilianSphereMode.Bone1,
     deathVoice: 0xff,
-    soundId: 0, soundDelay: 0, cameraBone: 2,
+    soundId: 0, soundDelay: 0,
+    headMode: CivilianHeadMode.None, headTargetAt: -1, headTargetPoint: null,
+    headPitch: 0, headYaw: 0, headRoll: 0,
+    mouthCursor: 0, mouthFrames: 0, mouthTable: CIVILIAN_MOUTH_NONE,
+    hitBone: 2,
     moveFrames: 0, moveTo: { x: 0, y: 0, z: 0 },
+    inPlayCountdown: 0, inPlayCursor: -1,
+    headTurned: false, mouthOffset: 0, partScale: false,
     script: -1, pc: 0, onShotScript: -1, onShotAltScript: -1,
     resumeScript: -1,
   };

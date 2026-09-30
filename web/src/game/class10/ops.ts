@@ -103,7 +103,13 @@ export enum CivilianOp {
   AddPickedItem = 0x14,
   /** Pick a record from a weighted table and preload it. */
   PickHeldItem = 0x15,
-  /** Ramp `obj+0x128` to a new radius over N frames. */
+  /**
+   * Ramp `obj+0x128` to a new radius over N frames: `sub+0x78 = cmd[1]` (a
+   * float's bits) and `sub+0x7C = (sub+0x78 - obj+0x128) / cmd[2]`, the
+   * divide an `FIDIV` of the dword -- an integer frame count -- from the
+   * radius the actor has **now** (`0x0048BE42`..`0x0048BE4E`).
+   * `PoseHookGrowAndPushOutOfWorld` steps it. `[proved]`
+   */
   SetRadiusRamp = 0x16,
   /**
    * Which point `CivilianUpdate`'s switch writes into `obj+0x12C`, the
@@ -172,24 +178,66 @@ export enum CivilianOp {
   SetHudShutterState = 0x1B,
   /** Raise one `g_script_flags` byte. */
   SetScriptFlag = 0x1C,
-  /** `EvtOpPlayDialogue2D` — the civilian's voice line. */
+  /**
+   * `EvtOpPlayDialogue2D` — the civilian's voice line, when
+   * `(g_cutscene_skipping && word & 0x20000000) || sub+0x2A == 0`
+   * (`0x0048BF36`..`0x0048BF4A`): not while she is walking off, unless a skip
+   * is under way and her word says she stays for it. `[proved]`
+   */
   PlayDialogue = 0x1D,
   /** Resume into this script instead of the cursor, next time. */
   SetResume = 0x1E,
-  /** The same, choosing between two by `DAT_009A2226`. */
+  /**
+   * The same, choosing between two streams by **the title menu's row**:
+   *
+   * ```
+   * 0048ba0a  MOV  EDX, 0x1                          ; at the loop's head
+   * 0048bf79  CMP  word ptr [0x009a2226], DX         ; g_title_menu_cursor
+   * 0048bf80  JNZ  0x0048bf95                        ; -> sub+0x54 = cmd[1]
+   * 0048bf82  MOV  EDX, dword ptr [ESI + 0x8]        ; -> sub+0x54 = cmd[2]
+   * ```
+   *
+   * The cursor is the row the player confirmed, and rows 0..3 are the
+   * `g_GameMode` the confirm writes, so the second stream is Original Mode's
+   * -- see `g_title_menu_cursor` in `game/globals.ts`. Its three uses are
+   * the last block of stage 2's `0x8510`, of the stream stage 2's `0x1158C`
+   * and `0x12098` resume into, and of stage 4's `0x23F8`, and each second
+   * stream is where that civilian picks (op 0x15) and gives (op 0x14) an
+   * Original Mode item. `[proved]`
+   */
   SetResumeByMode = 0x1F,
   /** Which `g_script_flags` byte wait bit 0x2000 reads. */
   SetFlagIndex = 0x20,
   /** Queue one sound: `(id, delay in frames)`. */
   QueueSound = 0x21,
-  /** Queue a list of `(id, delay)` pairs. */
+  /**
+   * Queue a list of `(id, delay)` pairs: the first into `sub+0x84/0x88` and
+   * the rest's pointer into `sub+0x58`, 0 when the next id is `-1`. **A null
+   * operand writes `sub+0x58 = 0` and nothing else** (`0x0048BFBD`), so a
+   * sound already queued by op 0x21 still plays. `[proved]`
+   */
   QueueSoundList = 0x22,
-  /** A child-attachment mode. `[open]` — only `2` is read, and it latches. */
-  SetAttachMode = 0x23,
-  /** The same with an explicit target. `[open]`. */
-  SetAttachTarget = 0x24,
-  /** `[open]` — writes `sub+0xA4` / `sub+0xA8`, which nothing read reads. */
-  SetPairA = 0x25,
+  /**
+   * **What the head looks at**: `sub+0x8C = cmd[1]` -- a
+   * {@link CivilianHeadMode} -- and for mode 2, the first child into
+   * `sub+0x90` while there is one, else the mode goes straight back to 0
+   * (`0x0048C044`..`0x0048C08A`). `CivilianDrawBonePart` (`FUN_0048D1F0`) is
+   * the reader, on bone 2, every draw. `[proved]`
+   */
+  SetHeadLook = 0x23,
+  /**
+   * The same with the target named: `sub+0x8C = cmd[1]`, `sub+0x90 =
+   * cmd[2]`, a pointer to three floats for modes 4 and 5. Both shipped uses
+   * are mode 5, a point in her own frame. `[proved]`
+   */
+  SetHeadLookAt = 0x24,
+  /**
+   * **The mouth**: `sub+0xA4 = cmd[1]` (frames), `sub+0xA8 = cmd[2]` (which
+   * of `g_civilian_mouth_tables`), `sub+0xA0 = 0` (`0x0048C08C`). The same
+   * hook steps the cursor and adds the table's byte to bone 2's slot, which
+   * is how a civilian's face moves while she speaks. `[proved]`
+   */
+  SetMouth = 0x25,
   /** Move to a point over N frames; a point below 1 means the camera. */
   MoveOverFrames = 0x26,
   /**
@@ -201,8 +249,15 @@ export enum CivilianOp {
    * smaller character takes smaller steps.
    */
   SetScale = 0x27,
-  /** Which bone the camera point rides. Drawing only. */
-  SetCameraBone = 0x28,
+  /**
+   * **Which bone the shot marker goes to**: the s16 at `cmd+4` into
+   * `sub+0xAC` (`0x0048C1C5`). `CivilianUpdate`'s shot arm takes that bone's
+   * record point in the world (`MOVSX EAX, word ptr [EAX + 0xac]` at
+   * `0x0048ABCB`) for `SpawnCivilianHitMarker` (`FUN_0048E080`). It was
+   * `SetCameraBone`, which nothing reads it as. One shipped use, bone 9.
+   * `[proved]`
+   */
+  SetHitBone = 0x28,
   /** OR bits into `obj+0x34`. */
   SetActorFlags = 0x29,
   /** Which death voice to use, or `0xFF` to pick one by character type. */
@@ -223,9 +278,24 @@ export enum CivilianOp {
    * 0048C21F  8981c0000000    MOV dword ptr [ECX + 0xc0], EAX
    * ```
    *
-   * So it writes the s16 at `cmd+4` into the script context's `+0xBC` and a
-   * **pointer back into the stream**, at `cmd+8`, into its `+0xC0`. What those
-   * two fields are is `[open]`, and the port does nothing with the op.
+   * So it writes the s16 at `cmd+4` into `sub+0xBC` and a **pointer back
+   * into the stream**, at `cmd+8`, into `sub+0xC0` (`ECX` is
+   * `g_cur_civilian`, `0x007DD0A0`). Then `CMP dword ptr [ESI + 0x8], EBP;
+   * JNZ` at `0x0048C22A`: only a zero `cmd[2]` moves the cursor on, by six
+   * dwords -- any other value leaves it on this command and the loop runs it
+   * again for ever. Both shipped uses carry 0 there (stage 1's stream 13 and
+   * stream 39: `(1, 0, 5, 0x1E, 0x14)` and `(5, 0, 3, 0x1E, 0x14)`).
+   *
+   * **Nothing reads what it writes.** `sub+0xBC` has three other references
+   * in the image: `CivilianInit`'s zero (`0x0048A592`) and `CivilianUpdate`'s
+   * countdown, which reads it only to decrement it while it is non-zero
+   * (`0x0048AD97`..`0x0048ADA4`). `sub+0xC0` has none. The sweep: every
+   * instruction whose operand is `[reg + 0xbc]` or `[reg + 0xc0]` (fifteen and
+   * fourteen, the rest stack frames and other structures), and a byte search
+   * for `?? ?? C0 00 00 00` whose every `.text` hit outside those is a jump
+   * displacement, an immediate or data. So the op has no effect a player can
+   * see; the port keeps the two words and the countdown because the engine
+   * does (`CivilianState.inPlayCountdown`). `[proved]`
    */
   InPlayOnly = 0x2B,
   /** Load the wait word and suspend. See {@link CivilianWait}. */
@@ -383,11 +453,54 @@ export enum CivilianWait {
    * frame one.
    */
   InPlay = 0x40000000,
+  /**
+   * **She stays through a skipped cut scene.** Bit `0x20000000`, read in two
+   * places and nowhere else (every `TEST` of the mask in the image):
+   * `CivilianUpdate`'s removal (`0x0048AFA0`), where a skip starts her
+   * one-frame removal countdown unless the word carries it, and op 0x1D
+   * (`0x0048BF3E`), where it lets her line through a skip -- to an
+   * `EvtOpPlayDialogue2D` that then says nothing, because it returns on the
+   * same flag. Three shipped words carry it: `0x20000080` and two
+   * `0x28200000`. `[proved]`
+   */
+  StayThroughSkip = 0x20000000,
   /** The bits that make the loop worth entering at all. */
   Any = 0x40003fff,
   /** Either of these parks the script whatever else the word says. */
   Blocked = 0x14000000,
 }
+
+/**
+ * `sub+0x8C`, which ops {@link CivilianOp.SetHeadLook} and
+ * {@link CivilianOp.SetHeadLookAt} write and `CivilianDrawBonePart`
+ * (`FUN_0048D1F0`) switches on for bone 2: `DEC ECX; CMP ECX, 4; JA; JMP
+ * [ECX*4 + 0x0048D994]` at `0x0048D2C6`, five cells, `0x0048D2D7`,
+ * `0x0048D2FC`, `0x0048D3B8`, `0x0048D3DA`, `0x0048D3F5`. The shipped
+ * streams use 1, 2, 3, 5 and 6. `[proved]`
+ */
+export enum CivilianHeadMode {
+  /** The hook leaves the head alone -- and writes this once the turn is gone. */
+  None = 0,
+  /** `g_camera_eye` plus 15 up: the gameplay eye, which is the player. */
+  Eye = 1,
+  /** A child's head: `sub+0x90`'s bone-2 record, in the world. */
+  Child = 2,
+  /** `g_camera_lookat_target`, the point the camera wants to look at. */
+  LookAt = 3,
+  /** A point, `*(float3 *)sub+0x90`. No shipped use. */
+  Point = 4,
+  /** A point in her own frame -- `T(pos) Rx Rz Ry` -- op 0x24's two uses. */
+  LocalPoint = 5,
+  /**
+   * Back to rest: the target is the pose's own angles, so the turn winds down
+   * to nothing and the hook then writes {@link None}. The shot arm writes it,
+   * and so does the hook when a watched child is gone.
+   */
+  Rest = 6,
+}
+
+/** `CMP ESI, EDI` with `EDI = 6` at `0x0048D7E6`: `sub+0xA8`'s "no mouth". */
+export const CIVILIAN_MOUTH_NONE = 6;
 
 /** Op {@link CivilianOp.SetTarget}'s first operand, when it is not a pointer. */
 export enum CivilianTarget {

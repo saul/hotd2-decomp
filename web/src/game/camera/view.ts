@@ -85,7 +85,7 @@ const _q = vec3();
  * matrix stack keeps row vectors, so its `+X` image is row 0 where `Rot3`'s is
  * column 0. `[port-only]`.
  */
-function RotationOf(m: ArrayLike<number>): Rot3 {
+export function RotationOf(m: ArrayLike<number>): Rot3 {
   return [m[0], m[4], m[8], m[1], m[5], m[9], m[2], m[6], m[10]];
 }
 

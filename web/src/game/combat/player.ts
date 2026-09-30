@@ -189,12 +189,14 @@ function PlayerFloorLivesOffPath(player: number): void {
  * the attract demo, and it does not refuse player -1 before calling
  * `CheckPlayerCanBeHit`, which refuses it anyway.
  *
- * `[open]` **Nothing in the image calls it** -- no `CALL 0x00415430` exists.
- * The port's two callers, the class-0x31 thrown weapon and class 0x10's shot,
- * were attributed to it before that was checked; the weapon's engine routine,
- * `ThrownWeaponFlyToTarget` (`FUN_0044FD40`), calls `PlayerTakeDamage`
- * (`player, 1, 6`), and now does so here too. Class 0x10's engine call has not
- * been found and is left on this routine with its default arguments.
+ * **One caller, class 0x10's shot**: `CivilianUpdate` at `0x0048AC45`
+ * (`e8e6a7f8ff`), `PUSH -1; PUSH 1; PUSH EBX; PUSH EBX; PUSH EDI` with
+ * `EBX = 0` -- `(player, 0, 0, 1, -1)`: no overlay, **through** the
+ * invulnerability window, and the window left as it is. `[proved]` This said
+ * nothing called it, from a search that predates the database's flow repair
+ * (L89); the class-0x31 weapon once attributed to it calls `PlayerTakeDamage`
+ * (`player, 1, 6`) from `ThrownWeaponFlyToTarget` (`FUN_0044FD40`), as it
+ * does here.
  */
 export function PlayerTakeDamageTimed(player: number, latch: number,
                                       overlayKind: number, ignoreInvuln = 0,
@@ -216,7 +218,7 @@ export function PlayerTakeDamageTimed(player: number, latch: number,
   if (invulnFrames !== -1) G.g_player_invuln_frames[player] = invulnFrames;
   PlayerFloorLivesOffPath(player);
   events?.emit("player.damaged", {
-    source: "thrown",
+    source: "civilian",
     at: src?.at ?? -1,
     who: src?.name ?? "—",
     attack: -1,

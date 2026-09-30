@@ -1428,7 +1428,20 @@ deletion invisible. Five of the 130 slots the rule drew are authored in world
 space -- stage 4's `st4_09.bin[0]` and `[2]` span x -657..685, z -2261..-1567
 -- so the rule had been drawing them in place, in the right shape, as the only
 thing on screen standing in for class 0x13 carrier selectors 4, 5, 7 and 8,
-which the port has not read. Delete the rule and those two models are gone
-from stage 4's blocks 23 to 29, walls and all. **Judge a stand-in's reach from each model's
+which the port had not read -- delete the rule alone and those two models
+are gone from stage 4's blocks 23 to 29, walls and all, so the routines were
+ported in the same change. **Judge a stand-in's reach from each model's
 bounding box, not from where it is "put"**, and take the before picture where
 that box is on screen.
+
+**L97 -- A seek replays a block's ops, not its frames, so an object whose
+state is built over frames arrives in its first one.** Stage 4's set model
+(`CarrierPropRoutine4`) rises along `op_` path `0x176` while camera path 180
+plays and parks at the origin; driven from its spawn it sits there for the rest
+of block 23. Seeked to op 55, 67 or 80 of the same block, the replay spawned it
+and ran no frames, so its first update was state 1 at *that* camera path's
+frame -- the model sunk 120 to 180 units into the floor under its
+camera-facing strip, on a shot that never shows it so. A picture taken at a seek address is a picture
+of the seek unless every object in it is stateless or was spawned after the
+address; **to see a state machine's later state, drive frames from its
+spawn**, and read the pool (`G.g_object_list`) before trusting the frame.

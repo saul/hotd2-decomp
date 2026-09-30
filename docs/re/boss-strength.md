@@ -768,6 +768,25 @@ rides `op_` path `0x175` by `PropSeatOnObjectPath` over camera frames 190..360
 `g_carrier2_door_yaw` (`0x005926D0`, 59 s16); selector 9 (blocks 27/29) seats
 it at frame 360 already open.
 
+**The set round the entrances.** The same four blocks spawn a second
+class-0x13 prop at `(0, 0, 0)`: evt `0x8CF0` (block 23, selector 4) and
+`0xA7E4` (block 27, selector 7) drawing `st4_09.bin[0]` (slot `0x954`), and
+`0x9D40` (block 25, selector 5) and `0xAC7C` (block 29, selector 8) drawing
+`st4_09.bin[2]` (slot `0x956`). `CarrierPropRoutine4` (`FUN_00440C20`) and
+`CarrierPropRoutine5` (`FUN_00441000`) `[proved]` ride `op_` paths `0x176` and
+`0x177` over camera frames 0..240 -- the model rises out of the arena floor
+under a screen shake and a camera-facing strip of `eff_colo.bin` cels -- and
+the literals they take off the path put its last key on the origin, where the
+model is authored; selectors 7 and 8 arrive there. Each then waits for a
+camera frame on path `0xB9` (`0xC1`) and plays effect `0x15` (`0x18`) twice,
+on motions `0x1CD` and `0x1CC` of `komono_colo.bin`, at literal world points.
+Each block loads its slot with opcode `0x50` before the spawn, and all four
+unload `0x954` with `0x51` later in the block (op 75 in 23 and 25, op 82 in 27
+and 29) -- blocks 25 and 29 unload the slot they did not load, and leave
+`0x956` resident. `AssetDrawSlot` draws nothing unloaded, so block 23's model
+leaves the screen at op 75 though the prop's own despawn cue (camera path 184
+frame 320) is thirty ops on. `game/class13/routine4.ts`, `routine5.ts`.
+
 ### 8.2 State 4 — `Boss4StateApproachCamera` `FUN_00493DC0` `[proved]`
 
 ```

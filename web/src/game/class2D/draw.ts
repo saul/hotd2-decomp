@@ -265,6 +265,7 @@ export function Class2DDraw(obj: EmperorActor, f: ClassFrame): void {
     }
   }
   DrawSkinnedModelAndShadow(obj);
+  obj.class2d.drawLight = Class2DBossLight(obj);
   ActorRunNodeDrawHooks(obj, (o, bone, slot, ff) =>
     Class2DNodeDrawHook(o as EmperorActor, bone, slot, ff), f);
 }

@@ -61,7 +61,7 @@ export function Class2DSpawnSatellite(boss: EmperorActor, index: number,
                                       rng?: Rng, events?: Events): void {
   const tail: Class2DTail = {
     routine: Class2DRoutine.SatelliteInit, boss: null,
-    sat: makeClass2DSatelliteWords(index), child: null,
+    sat: makeClass2DSatelliteWords(index), child: null, drawLight: null,
   };
   ActorSpawn(Class2DChildAt(boss.at, CLASS2D_AT_SATELLITE0 + index),
              SpawnClass.Emperor, -1, `satellite ${index}`,

@@ -242,12 +242,20 @@ export interface Class2DTail {
   boss: Class2DBossWords | null;
   sat: Class2DSatelliteWords | null;
   child: Class2DChildWords | null;
+  /**
+   * `[port-only]` -- the light set the object's last
+   * `DrawSkinnedModelAndShadow` was made under (`Class2DDraw`,
+   * `Class2DChildDraw`, `Class2DChildKind0Draw` for the child and its wing),
+   * for `render/` to light the parts the walk draws with. `null` for an
+   * object whose skeleton has not been drawn.
+   */
+  drawLight: Class2DLight | null;
 }
 
 /** `[port-only]` A fresh tail, on the handler. */
 export function makeClass2DTail(): Class2DTail {
   return { routine: Class2DRoutine.ClassHandler, boss: null, sat: null,
-           child: null };
+           child: null, drawLight: null };
 }
 
 /** `[port-only]` A boss block as `ActorAlloc` leaves it -- zeroed. */
@@ -395,6 +403,15 @@ export const CLASS2D_WING_CHAR_TYPE = 0x4e;
 /** The kinds' first clips: `0x40C`, `0x33`, `0x3B`, `0x79`; the wing's `0xF`. */
 export const CLASS2D_CHILD_CLIPS: readonly number[] = [0x40c, 0x33, 0x3b, 0x79];
 export const CLASS2D_WING_CLIP = 0xf;
+
+/**
+ * `DrawCharacterPartSlot`'s pair table at `0x004EDA50`, second words: the
+ * shell `boss6.bin`'s type-0x4C arm (`0x00419C82`) draws after each of parts
+ * 0..5, under the part's own matrix. For the exporter to put on the type's
+ * template, and for `render/` to hang on the parts.
+ */
+export const CLASS2D_PART_SHELLS: readonly number[] =
+  [0x7cf, 0x7df, 0x7d1, 0x7d0, 0x7e1, 0x7e0];
 
 /**
  * Every clip the boss's routines name -- all of `boss6.bin`'s bank, 0x95 to

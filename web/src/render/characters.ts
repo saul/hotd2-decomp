@@ -579,7 +579,8 @@ export class CharacterLayer implements System {
         this._up.x = this._v2w[4];
         this._up.y = this._v2w[5];
         this._up.z = this._v2w[6];
-        if (PoseFromModelBlock(inst, this._up)) continue;
+        if (PoseFromModelBlock(inst, this._up, this._w2v,
+                               (slot) => this.cloneSlot(slot))) continue;
       }
       if (poseBoss3(inst)) {
         // Class 0x45 composes its own matrices; this places them. See

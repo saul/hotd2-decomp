@@ -88,7 +88,8 @@ import { CLASS23_MOTIONS } from "../game/class23/records";
 import { CAT_CLIPS } from "../game/class53/records";
 import {
   CLASS2D_AT_KIND0, CLASS2D_AT_WING, CLASS2D_CHILD_CHAR_TYPES,
-  CLASS2D_CHILD_CLIPS, CLASS2D_CLIPS, CLASS2D_WING_CHAR_TYPE,
+  CLASS2D_CHILD_CLIPS, CLASS2D_CLIPS, CLASS2D_PART_SHELLS,
+  CLASS2D_WING_CHAR_TYPE,
   CLASS2D_WING_CLIP, Class2DChildAt,
 } from "../game/class2D/state";
 
@@ -2111,6 +2112,10 @@ export async function resolveForStage(
     // The stage-6 boss's whole bank, `boss6.bin`'s 0x95..0xB0 -- see
     // `CLASS2D_CLIPS`.
     if (cls === 0x2d) entryClips.push(...CLASS2D_CLIPS);
+    // ...and the shells `DrawCharacterPartSlot`'s type-0x4C arm draws after
+    // parts 0..5, which no node names: on the type's template, for the
+    // character layer to hang on the parts' draw bones.
+    if (cls === 0x2d) for (const s of CLASS2D_PART_SHELLS) c.heldSlots.add(s);
     // The emerge clip, the submerged pose it holds first, and the two clips
     // the delayed leap plays. An unbaked entrance is an actor standing in the
     // water.

@@ -130,7 +130,7 @@ export function Class2DSpawnChild(parent: EmperorActor, kind: number,
              {
                class2d: {
                  routine: ChildInit(kind), boss: null, sat: null,
-                 child: makeClass2DChildWords(kind),
+                 child: makeClass2DChildWords(kind), drawLight: null,
                },
                targetAt: parent.at, flags: 1, visible: true,
                pos: vec3(pos.x, pos.y, pos.z), pitch, yaw, roll: 0,
@@ -203,7 +203,7 @@ export function Class2DChildKind0Init(obj: EmperorActor, f: ClassFrame): void {
                           {
                             class2d: {
                               routine: Class2DRoutine.Wing, boss: null,
-                              sat: null, child: null,
+                              sat: null, child: null, drawLight: null,
                             },
                             targetAt: obj.at, flags: 0, visible: true,
                           }, f.rng, f.events) as EmperorActor;
@@ -439,6 +439,7 @@ export function Class2DChildKind0Draw(obj: EmperorActor, f: ClassFrame): void {
   const light = Class2DCameraLight();
   G.g_cur_actor = obj.at;
   DrawSkinnedModelAndShadow(obj);
+  obj.class2d.drawLight = light;
   RunChildHook(obj, false, light, f);
   if (c.shown !== 0) {
     const wing = ActorByAt(c.wingAt);
@@ -451,6 +452,7 @@ export function Class2DChildKind0Draw(obj: EmperorActor, f: ClassFrame): void {
       wing.roll = e.rz;
       G.g_cur_actor = wing.at;
       DrawSkinnedModelAndShadow(wing);
+      wing.class2d.drawLight = light;
       if (c.animate !== 0 && wing.skel) wing.skel.counter += 1;
     }
   }
@@ -1097,5 +1099,6 @@ export function Class2DChildDraw(obj: EmperorActor, f: ClassFrame): void {
   const light = Class2DCameraLight();
   if (obj.partVisible.length > 0) obj.partVisible[0] = c.shown === 1 ? 1 : 0;
   DrawSkinnedModelAndShadow(obj);
+  obj.class2d.drawLight = light;
   RunChildHook(obj, c.kind === 2, light, f);
 }

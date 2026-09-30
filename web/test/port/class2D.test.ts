@@ -18,6 +18,7 @@ import { NULL_HOST, type GameHost } from "../../src/game/host";
 import { SetClass2DTables, SetGameTables } from "../../src/game/tables";
 import { ActorFlag, type EmperorActor } from "../../src/game/actor";
 import { SpawnClass } from "../../src/game/spawn_class";
+import { g_class_handlers } from "../../src/game/registry";
 import { GameMode } from "../../src/game/game_mode";
 import { vec3, type Vec3 } from "../../src/game/vec";
 import {
@@ -429,6 +430,33 @@ console.log("\nclass 0x2D: the stage-6 boss -- handler, satellites, children, de
     G.g_cam_path_frame = 0;
     tick(1);
     check("...and is gone the frame camera path 0xCC plays", b.despawned === true);
+  }
+
+  // -- a replay's answers ------------------------------------------------------
+  {
+    ResetGameGlobals();
+    SetGameTables({ ...CHARS2D, placements: [
+      { at: 0xf0c, class: 0x2d, char_type: 0x4c, motion: 0xa0, hp: 0,
+        class2d: { subtype: 0, clip: 0xa0, counter: 0, kill_path: 0xcc,
+                   kill_frame: 0, fight_hp: -1, round2_hp: 0, round3_hp: 0 } },
+      { at: AT, class: 0x2d, char_type: 0x4c, motion: 0xa1, hp: 400,
+        class2d: FIGHT_TAIL },
+    ] } as unknown as CharactersJson);
+    const h = g_class_handlers[SpawnClass.Emperor]!;
+    const cameo = { class: 0x2d, hp: 0, at: 0xf0c, block: 0 };
+    const fight = { class: 0x2d, hp: 400, at: AT, block: 12 };
+    G.g_active_cam_path = 0xcb;
+    G.g_cam_path_frame = 200;
+    check("a replay keeps the cameo while its camera path has not played",
+          h.outlivedByReplay?.(cameo) === false);
+    G.g_active_cam_path = 0xcc;
+    G.g_cam_path_frame = 0;
+    check("...and retires it from camera path 0xCC frame 0, its own test",
+          h.outlivedByReplay?.(cameo) === true
+            && h.outlivedByReplay?.(fight) === false);
+    check("the fight counts for the enemy gate it holds; the cameo does not",
+          h.countsForEnemyGate?.(fight) === true
+            && h.countsForEnemyGate?.(cameo) === false);
   }
 
   // -- the profile ------------------------------------------------------------

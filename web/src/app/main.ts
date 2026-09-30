@@ -734,6 +734,10 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     this.lighting.addRoot(this.waterSurfaces.group);
     this.scene.add(this.effects.group);
     this.scene.add(this.effects.viewGroup);
+    this.scene.add(this.effects.litGroup);
+    this.scene.add(this.effects.litViewGroup);
+    this.lighting.addRoot(this.effects.litGroup);
+    this.lighting.addRoot(this.effects.litViewGroup);
 
     this.ctx = {
       scene: this.scene,

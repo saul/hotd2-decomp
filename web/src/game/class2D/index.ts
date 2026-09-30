@@ -33,7 +33,9 @@ import type { Actor, EmperorActor } from "../actor";
 import { G } from "../globals";
 import {
   registerClass, type ActorDebug, type ClassFrame, type ClassHandler,
+  type ReplaySpawnRecord, type SpawnRecord,
 } from "../registry";
+import { T } from "../tables";
 import { SpawnClass } from "../spawn_class";
 import {
   Class2DClassHandler, Class2DSubtype0Update, Class2DUpdate,
@@ -102,6 +104,42 @@ function Class2DAllocate(obj: Actor): void {
   b.round3Hp = d.round3_hp;
 }
 
+/** `[port-only]` -- the record's descriptor tail, from its placement. */
+function Class2DRecordTail(rec: SpawnRecord) {
+  const p = (T.chars?.placements ?? []).find((x) => x.at === rec.at);
+  return p?.class2d ?? null;
+}
+
+/**
+ * `[port-only]` -- whether this record's object moves the enemy counters,
+ * for a replay stepping over the gate it holds (`ClassHandler.
+ * countsForEnemyGate`): sub-type 1, the fight, whose `Class2DState2` counts it
+ * into both and whose `Class2DState6` takes it out. Past block 12's (and
+ * block 14's) `wait_enemies_alive 0` the fight is in its death, and a
+ * landing there must not rebuild the intro -- which loses the death's last
+ * frames at a landing inside them, the one window this answers early. The
+ * cameo never counts.
+ */
+function Class2DCountsForEnemyGate(rec: SpawnRecord): boolean {
+  return ((Class2DRecordTail(rec)?.subtype ?? 0) << 24 >> 24) === 1;
+}
+
+/**
+ * `[port-only]` -- a replay's question, `ClassHandler.outlivedByReplay`: the
+ * cameo's one way out is `Class2DSubtype0Update`'s own test,
+ * `g_active_cam_path == tail+6 && g_cam_path_frame >= tail+8` -- stage 5's
+ * camera path 0xCC from frame 0, the first shot of play. A replay jumps
+ * frames where play steps them, so "at or past" is the frame play would have
+ * passed. Without it a landing anywhere later in stage 5 rebuilt the cameo on
+ * a camera path that never plays again, standing in the stage for good.
+ */
+function Class2DOutlivedByReplay(rec: ReplaySpawnRecord): boolean {
+  const d = Class2DRecordTail(rec);
+  if (!d || ((d.subtype << 24) >> 24) !== 0) return false;
+  return G.g_active_cam_path === ((d.kill_path << 16) >> 16)
+    && ((d.kill_frame << 16) >> 16) <= G.g_cam_path_frame;
+}
+
 /** The sidebar's line. */
 function Class2DDebug(obj: Actor): ActorDebug {
   if (obj.cls !== SpawnClass.Emperor) return { summary: "emperor" };
@@ -153,6 +191,8 @@ export const Class2DHandler: ClassHandler = {
   ownsShotResult: true,
   // `Class2DState1` raises flag 50 (`MOV byte ptr [0x009C7232], AL`).
   raisesScriptFlag: FLAG_INTRO_DONE,
+  countsForEnemyGate: Class2DCountsForEnemyGate,
+  outlivedByReplay: Class2DOutlivedByReplay,
   // Every routine that can be shot registers itself:
   // `ActorRegisterCameraPoint` in the boss's states 3-5 and the children's
   // tails, `Class2DSatelliteRegisterShot` for the satellites.

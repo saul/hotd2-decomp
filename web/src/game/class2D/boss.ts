@@ -1471,8 +1471,8 @@ const KILL_COUNT_CAP = 0x63;
  * `MOV AL, byte ptr [0x009C90D8]` -- `g_original_items_taken` (`0x009C90C0`)
  * `+ 0x18`, and its copy at `g_profile_original_items` (`0x009C9F3D`) `+
  * 0x18`: the boss's kills are counted in the item tally's entry 24, with
- * the same cap a pickup has. Whether any item also counts into entry 24 is
- * `[open]`.
+ * the same cap a pickup has (L102). Whether any item also counts into entry
+ * 24 is `[open]`.
  */
 const ORIGINAL_ITEM_BOSS6 = 0x18;
 /** `OR DL, 1` into `g_option_unlocks`. */

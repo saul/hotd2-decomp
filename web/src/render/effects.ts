@@ -38,6 +38,7 @@ import { releaseAssetDrawAlpha } from "./draw_order";
 import { drawBatSplashes } from "./bat_splash";
 import { drawLifeMarkers } from "./life_markers";
 import { drawViewSlots } from "./view_slots";
+import { drawClass2DDraws } from "./class2d_draws";
 import { drawCreatureEffects } from "./creature_effects";
 import { drawWaterRings } from "./water_rings";
 import { BAMS_TO_RAD } from "../core/bams";
@@ -130,6 +131,14 @@ export class EffectLayer implements System<RenderContext> {
   readonly group = new Group();
   /** Camera-space effects: the muzzle flash and the Original Mode record. */
   readonly viewGroup = new Group();
+  /**
+   * Class 0x2D's hand-drawn models (`render/class2d_draws.ts`), which are
+   * lit -- each under the set its routine installed -- so they hang in two
+   * groups of their own that `render/lighting.ts` walks: the world's, and
+   * the camera's.
+   */
+  readonly litGroup = new Group();
+  readonly litViewGroup = new Group();
 
   /** Set from `app/`, the way `CharacterLayer.breakables` is. */
   bones: BoneSphereSource | null = null;
@@ -166,6 +175,9 @@ export class EffectLayer implements System<RenderContext> {
     // The camera's own matrix, written once a frame from `ctx.camera`. Its
     // children are then in camera space, which is where the engine keeps them.
     this.viewGroup.matrixAutoUpdate = false;
+    this.litGroup.name = "effects-lit";
+    this.litViewGroup.name = "effects-lit-view";
+    this.litViewGroup.matrixAutoUpdate = false;
   }
 
   /** Adopt the hidden templates, exactly as `SlotModelLayer` does. */
@@ -211,6 +223,8 @@ export class EffectLayer implements System<RenderContext> {
     this.enabled = v;
     this.group.visible = v;
     this.viewGroup.visible = v;
+    this.litGroup.visible = v;
+    this.litViewGroup.visible = v;
   }
 
   /**
@@ -245,8 +259,11 @@ export class EffectLayer implements System<RenderContext> {
   update(ctx: RenderContext): void {
     this.group.visible = this.enabled;
     this.viewGroup.visible = this.enabled;
+    this.litGroup.visible = this.enabled;
+    this.litViewGroup.visible = this.enabled;
     if (!this.enabled) return;
     this.viewGroup.matrix.copy(ctx.camera.matrixWorld);
+    this.litViewGroup.matrix.copy(ctx.camera.matrixWorld);
     const seen = new Set<string>();
 
     this.drawSpriteEffects(seen);
@@ -291,6 +308,13 @@ export class EffectLayer implements System<RenderContext> {
         },
       }, seen);
     }
+
+    // Class 0x2D's: `render/class2d_draws.ts`.
+    this._view.copy(ctx.camera.matrixWorldInverse);
+    drawClass2DDraws({
+      node: (key, slot, parent) => this.node(key, slot, parent),
+      world: this.litGroup, view: this.litViewGroup, viewMatrix: this._view,
+    }, seen);
 
     for (const [key, l] of this.nodes) {
       if (seen.has(key)) continue;

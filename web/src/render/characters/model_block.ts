@@ -1,6 +1,8 @@
 /**
  * Drawing an actor that carries the engine's own model block
- * (`Actor.skel`, `game/skeleton.ts`) -- class 0x14 today.
+ * (`Actor.skel`, `game/skeleton.ts`) -- class 0x14, and class 0x2D's
+ * skeletons (`render/characters/emperor.ts`), which are drawn on the block's
+ * own matrices as they stand.
  *
  * Nothing is posed here. The game has already posed the model the way the
  * engine does, inside the class's own update, and left every bone's world
@@ -36,6 +38,7 @@ import { MotionFlag } from "../../game/actor";
 import { SpawnClass } from "../../game/spawn_class";
 import { BAMS_TO_RAD } from "../../core/bams";
 import type { Instance } from "./instance";
+import { drawEmperor, EmperorDrawMatrices } from "./emperor";
 
 /** `0x4106E979` / `0x41183958` — the thigh and the shin. */
 const THIGH = Math.fround(8.432);
@@ -113,21 +116,29 @@ const _mats = new Map<number, Matrix4>();
 
 /**
  * Put every bone node of `inst` where the engine's draw puts it. `up` is the
- * camera's +y in world space (`g_camera_blocks[cam]`'s row 1). Returns false
- * when the actor is not one this draws, so the caller poses it the ordinary
- * way.
+ * camera's +y in world space (`g_camera_blocks[cam]`'s row 1), `w2v` the
+ * camera's world-to-view matrix, and `cloneSlot` the layer's template clone
+ * for a model the skeleton does not name. Returns false when the actor is not
+ * one this draws, so the caller poses it the ordinary way.
  *
  * Each node's local matrix is its parent's inverse times the wanted world
  * one, so the hierarchy the glTF built -- and the skin's joints hanging off
  * bones 1 and 9 -- stays intact and simply lands on the engine's numbers.
  */
 export function PoseFromModelBlock(inst: Instance,
-                                   up: { x: number; y: number; z: number }):
+                                   up: { x: number; y: number; z: number },
+                                   w2v: ArrayLike<number>,
+                                   cloneSlot: (slot: number) => Object3D | null):
     boolean {
   const a = inst.a;
   const skel = a.skel;
   if (!skel) return false;
-  if (!Boss2DrawMatrices(a, up, _mats)) return false;
+  const emperor = a.cls === SpawnClass.Emperor;
+  if (emperor) {
+    if (!EmperorDrawMatrices(a, _mats)) return false;
+  } else if (!Boss2DrawMatrices(a, up, _mats)) {
+    return false;
+  }
   // `if (char+0x64 & 1)` -- the whole draw, skeleton and parts -- on top of
   // whatever the layer already decided about showing the actor at all.
   inst.root.visible = inst.root.visible
@@ -143,6 +154,10 @@ export function PoseFromModelBlock(inst: Instance,
     const node = inst.bones.get(b.bone);
     const m = _mats.get(b.bone);
     if (node && m) PlaceWorld(node, m);
+  }
+  if (emperor) {
+    drawEmperor(inst, w2v, cloneSlot);
+    return true;
   }
   const part0 = inst.part0 ?? FindPart0(inst);
   if (part0) part0.visible = (a.partVisible[0] ?? 1) !== 0;

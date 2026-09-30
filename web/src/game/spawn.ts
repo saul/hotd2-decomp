@@ -238,5 +238,5 @@ export function ActorBuildSkinnedModel(obj: Actor): void {
  * was one nobody had read.
  */
 export function ActorInitFlags(obj: Actor, spawnFlags: number): void {
-  obj.flags = spawnFlags | 1;
+  obj.flags = spawnFlags | ActorFlag.Live;
 }

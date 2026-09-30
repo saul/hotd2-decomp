@@ -8,7 +8,10 @@
  * is what the actor does, the sweep is the port's backstop for the actors that
  * arrive at one by a route the engine does not have.
  */
-import type { Actor } from "./actor";
+import { ActorFlag, type Actor } from "./actor";
+
+/** `OR EAX, 0x80018000` at `0x00409CCB`. Bit 31 has no reader in the port. */
+const DESPAWN_FLAGS = 0x80018000 | 0;
 import { ReleaseAttackSlot } from "./combat/permits";
 import {
   ReleaseEnemyAliveCount, ReleaseEnemyPresentCount,
@@ -25,6 +28,9 @@ import { ActorIsEnemy, DeadSweep, g_class_handlers } from "./registry";
  * has to stay addressable for the one frame the renderer needs to notice.
  */
 export function ActorDespawn(obj: Actor): void {
+  // `0x00409CC6`..`0x00409CD0`, the routine's first store: the live bit down
+  // and `0x80018000` up -- `NoShotTest`, `NoCameraTrack` and bit 31.
+  obj.flags = (obj.flags & ~ActorFlag.Live) | DESPAWN_FLAGS;
   obj.despawned = true;
   obj.visible = false;
   obj.action = null;

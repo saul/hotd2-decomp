@@ -1277,6 +1277,10 @@ async function effectDefJson(stage: Stage, effect: number, motion: number,
  * and not a `BreakableProp`: it is registered for the shot test by
  * `RegisterForShotTest` with a radius at `obj+0x124`, not by a bounding box.
  */
+/** `0x1A78 + ftol(obj+0x1370) % 0x32` -- `water.bin` 13..62. */
+const ATTACHED_EFFECT_SLOTS: number[] =
+  Array.from({ length: 0x32 }, (_, i) => 0x1a78 + i);
+
 export const ACTOR_SLOTS: Record<number, number[]> = {
   // `fish.bin` 3..22 -- the twenty-frame swim strip class 0x51 flips through
   // -- then entries 0, 1 and 2: the flung corpse, the sunk one, and the ripple
@@ -1328,6 +1332,13 @@ export const ACTOR_SLOTS: Record<number, number[]> = {
   // 0x40's slots: the ripple `0x1A38` and the strip `0x15E4..0x1601`.
   0x42: [...Array.from({ length: 0x88f - 0x85a + 1 }, (_, i) => 0x85a + i),
          0x1a38, ...Array.from({ length: 30 }, (_, i) => 0x15e4 + i)],
+  // Classes 0x30 and 0x18 (whose update is `EnemyZombieUpdate` too): the
+  // wake `ActorCheckWaterEntry` (`FUN_00456920`) leaves on an actor that
+  // wades in -- `AttachedEffectThink` (`FUN_004083D0`) draws
+  // `AssetDrawSlotWithAlpha(0x1A78 + n % 0x32)`, `water.bin` 13..62, a
+  // fifty-cel cycle. See `game/effects/attached_effect.ts`.
+  0x30: ATTACHED_EFFECT_SLOTS,
+  0x18: ATTACHED_EFFECT_SLOTS,
 };
 
 /**
@@ -1749,7 +1760,8 @@ export async function actorSlotEntry(
     name: "slots_actor",
     routine: "asset-slot actor draws (classes 0x13, 0x14, 0x40, 0x42, 0x43, "
       + "0x51, 0x52; class 0x25 variant 3; class 0x26 subtypes 6 and 7; "
-      + "class 0x33 selector 4; class 0x41 type 1's water tiles)",
+      + "class 0x33 selector 4; class 0x41 type 1's water tiles; the wake "
+      + "classes 0x30 and 0x18 leave in the water)",
     worldSpace: false,
     parts: parts.map(([p]) => p),
     note: "actor models drawn by asset slot; hidden, cloned per live actor",

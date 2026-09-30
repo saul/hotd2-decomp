@@ -422,15 +422,14 @@ export function ZombieStateDeath6(obj: ZombieActor, rng: Rng, host?: GameHost,
  * above only leaves once it has reached `play_length - 1`, so this is what
  * keeps the corpse a frame short of the wrap rather than one past it.
  *
- * `obj+0x34 &= ~1` is transcribed as a comment and not as a write, on the same
- * terms as `ThrowerLeave`: bit 0 of the flag word is what
- * `RankEnemiesByDistance` (`FUN_004090B0`) tests before it writes a rank, and
- * the port's `RegisterForDistanceRank` stands in for it with `!dead`, which a
- * corpse already fails. `[proved]` for the test, `[open]` for the bit's name.
+ * `obj+0x34 &= ~1` is {@link ActorFlag.Live}: `RankEnemiesByDistance`
+ * (`FUN_004090B0`) tests it before it writes a rank, and the wake
+ * `AttachedEffectThink` (`FUN_004083D0`) draws dies the frame it goes. It used
+ * to be transcribed as a comment only, while nothing in the port read it.
  */
 export function ZombieEnterCorpseState(obj: ZombieActor): void {
   obj.flags2 &= ~(ZombieFlag2.CollideWorld | ZombieFlag2.CollideActors);
-  obj.flags = (obj.flags & ~ActorFlag.Airborne)
+  obj.flags = (obj.flags & ~(ActorFlag.Airborne | ActorFlag.Live))
             | ActorFlag.PoseFrozen | CORPSE_UNREAD_BIT;
   if (!(obj.flags38 & CountFlag.KeepCounted)) ReleaseEnemyPresentCount(obj);
   obj.playTicks -= 1;
@@ -477,24 +476,58 @@ function ZombieCorpseLeave(obj: ZombieActor): void {
   ActorDespawn(obj);
 }
 
+/** `rand() % 17 >> 4` -- 1 once in seventeen, 0 otherwise. */
+const CORPSE_POSE_SPREAD = 17;
+const CORPSE_POSE_SHIFT = 4;
 /**
- * The pose pin both corpse states call every frame — `ZombieCorpsePoseFrame`
- * (`FUN_00454E00`).
- *
- * [diverges] Not ported, and it needs an exporter change rather than a
- * reading. The routine writes `obj+0x194` from a table chosen by the clip:
- * `DAT_0059301C` covers the eight directional deaths 0x3D9..0x3E0 and five
- * special cases sit at `DAT_0059305C` (0x3F8), `DAT_00593064` (0x1DF),
- * `DAT_0059306C` (0x41A), `DAT_00593074` (0x404) and `DAT_0059307C` (0x3F7),
- * each a pair picked with `rand() % 17 >> 4` — the same once-in-seventeen
- * idiom `ThrowerCorpsePoseFrame` uses against class 0x31's own table at
- * `0x00592AC0`. **None of the class-0x30 table is exported** yet.
- *
- * What it costs is only *which* frame of the death clip the body holds:
- * `ZombieEnterCorpseState` raises {@link ActorFlag.PoseFrozen}, so the corpse
- * is frozen either way, on the clip's last frame here rather than on the
- * authored one.
+ * `ZombieCorpsePoseFrame`'s switch: the clip, and the word of the counter
+ * table (`hod2lib/combat.ts`'s `CORPSE_POSE_COUNTERS`, the bundle's
+ * `deaths.corpse`) its pair starts at. The directional deaths are the
+ * `LEA ECX, [EDX + EAX*2 - 0x7B2]` arm and are worked out below.
  */
+const CORPSE_POSE_PAIRS: Readonly<Record<number, number>> = {
+  0x3f8: 16,   // 0x0059305C
+  0x1df: 18,   // 0x00593064
+  0x41a: 20,   // 0x0059306C
+  0x404: 22,   // 0x00593074
+  0x3f7: 24,   // 0x0059307C
+};
+const CORPSE_DIRECTIONAL_LO = 0x3d9;
+const CORPSE_DIRECTIONAL_HI = 0x3e0;
+
+/**
+ * `ZombieCorpsePoseFrame` — `FUN_00454E00`. The frame a corpse lies on.
+ *
+ * ```
+ * m = obj+0x1B4
+ * 0x3D9..0x3E0: obj+0x194 = [0x0059301C][2 * (m - 0x3D9) + (rand()%17 >> 4)]
+ * 0x3F8: [0x0059305C][..]   0x1DF: [0x00593064][..]   0x41A: [0x0059306C][..]
+ * 0x404: [0x00593074][..]   0x3F7: [0x0059307C][..]   anything else: nothing
+ * ```
+ *
+ * `[proved]` from the disassembly. It writes the track's **counter**, which
+ * the corpse's {@link ActorFlag.PoseFrozen} keeps the class from stepping, so
+ * the draw poses `counter % (play + 1)`: the table's frame, and once in
+ * seventeen frames the pair's other one -- the same once-in-seventeen idiom
+ * `ThrowerCorpsePoseFrame` uses against class 0x31's table. Both corpse
+ * states call it on every frame but their last. A clip with no row -- the
+ * kill-move deaths, `0x3F9` -- keeps the counter the death left, and draws no
+ * `rand()`.
+ *
+ * This used to be unported, declared a divergence, because the table was not
+ * in the bundle: every corpse lay on its clip's last frame.
+ */
+export function ZombieCorpsePoseFrame(obj: ZombieActor, rng: Rng): void {
+  const m = obj.motion;
+  const base = m >= CORPSE_DIRECTIONAL_LO && m <= CORPSE_DIRECTIONAL_HI
+    ? 2 * (m - CORPSE_DIRECTIONAL_LO) : CORPSE_POSE_PAIRS[m];
+  if (base === undefined) return;
+  const table = T.chars?.deaths?.corpse;
+  if (!table?.length) return;               // an older bundle: no table
+  const word = table[base + (rng.int(CORPSE_POSE_SPREAD) >> CORPSE_POSE_SHIFT)];
+  if (word === undefined) return;
+  obj.playTicks = word;
+}
 
 /**
  * `ZombieStateCorpseSink` — `FUN_00454F20`, class 0x30 state 7.
@@ -504,14 +537,18 @@ function ZombieCorpseLeave(obj: ZombieActor): void {
  * `ZombiePushOutOfWorldAndActors` skips its ground snap on — without it the
  * floor would put the body back every frame.
  */
-export function ZombieStateCorpseSink(obj: ZombieActor, dt: number): void {
+export function ZombieStateCorpseSink(obj: ZombieActor, dt: number,
+                                      rng: Rng): void {
   if (obj.sub === 0) ZombieCorpseBegin(obj);
   else if (obj.sub !== 1) return;
 
   const frames = dt * GAME_HZ;
   obj.zom.corpseTimer -= frames;
   obj.pos.y -= CORPSE_SINK * frames;
+  // `TEST EAX, EAX; JG 0x00454FC2`: the pose on every frame the count is
+  // still up, the leaving on the one it is not.
   if (obj.zom.corpseTimer < 1) ZombieCorpseLeave(obj);
+  else ZombieCorpsePoseFrame(obj, rng);
 }
 
 /**
@@ -543,7 +580,8 @@ export function ZombieStateCorpseSink(obj: ZombieActor, dt: number): void {
  * that alpha and `obj+0x136C` bit 2 for its hook to draw at — so the two are
  * not the same answer to one routine.
  */
-export function ZombieStateCorpseBlink(obj: ZombieActor, dt: number): void {
+export function ZombieStateCorpseBlink(obj: ZombieActor, dt: number,
+                                       rng: Rng): void {
   if (obj.sub === 0) ZombieCorpseBegin(obj);
   else if (obj.sub !== 1) return;
 
@@ -556,7 +594,11 @@ export function ZombieStateCorpseBlink(obj: ZombieActor, dt: number): void {
 
   const frames = dt * GAME_HZ;
   obj.zom.corpseTimer -= frames;
-  if (obj.zom.corpseTimer >= 1) return;
+  // `JG 0x004550CB`, the pose, as the sink has it.
+  if (obj.zom.corpseTimer >= 1) {
+    ZombieCorpsePoseFrame(obj, rng);
+    return;
+  }
   obj.motionFlags &= ~MotionFlag.Drawn;
   ActorSetPartVisibility(obj, 0);
   ZombieCorpseLeave(obj);

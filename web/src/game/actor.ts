@@ -142,6 +142,22 @@ export const MOTION_FLAGS_INIT = 3;
 /** `obj+0x34` — the object's flag word. Only the bits the port reads. */
 export enum ActorFlag {
   /**
+   * Bit `0x1` — **the object is live.** `ActorInitFlags` (`FUN_00408970`)
+   * raises it on every spawn (`OR ECX, 0x1` at `0x00408978`); `ActorDespawn`
+   * (`FUN_00409CC0`) drops it (`AND AL, 0xFE` at `0x00409CC9`), and in class
+   * 0x30 so does `ZombieEnterCorpseState` (`AND EAX, 0xFFFDFFFE` at
+   * `0x00456759`) -- the only class-0x30 instruction that does, by a sweep of
+   * every `AND` in the class's code with bit 0 clear in its immediate.
+   *
+   * Readers: `RankEnemiesByDistance` and `RegisterForDistanceRank`, which
+   * skip an object without it (the port stands in for that there -- see
+   * `combat/rank.ts`), and `AttachedEffectThink` (`FUN_004083D0`), whose wake
+   * dies the frame its actor loses it. The other classes' own clears are not
+   * transcribed, so the port's bit is the engine's on class 0x30 and at every
+   * despawn, and not yet on a dead actor of another class.
+   */
+  Live = 0x1,
+  /**
    * `obj+0x34` bit `0x2000000`. Its only readers are the two strike connects,
    * `ActorStrikeConnect` (`FUN_00456490`) and `ThrowerStrikeConnect`
    * (`FUN_0044CE60`): with it up the strike lands **without** the hit latch

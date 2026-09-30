@@ -8,8 +8,13 @@ import type { CharactersJson } from "../../src/bundle";
 import { Rng } from "../../src/core/rng";
 import { Events } from "../../src/core/events";
 import { NULL_HOST } from "../../src/game/host";
-import { G, ResetGameGlobals } from "../../src/game/globals";
-import { MotionPlayFrame, SetGameTables } from "../../src/game/tables";
+import { G, HIT_SLOT_NONE, ResetGameGlobals } from "../../src/game/globals";
+import { MotionPlayFrame, SetGameTables, T } from "../../src/game/tables";
+import {
+  ATTACHED_EFFECT_FIRST_SLOT, ATTACHED_EFFECT_KIND1, AttachedEffectsTick,
+  SND_ATTACHED_EFFECT_SPLASH,
+} from "../../src/game/effects/attached_effect";
+import { ZombieEnterCorpseState } from "../../src/game/class30/death";
 import { ZombieState } from "../../src/game/class30/states";
 import { Zombie1368Flag } from "../../src/game/class30/state";
 import { EnemyZombieUpdate } from "../../src/game/class30";
@@ -20,7 +25,8 @@ import {
 import { ActorAdvanceMotion } from "../../src/game/motion";
 import { HitResultCode } from "../../src/game/combat/resolve_hit";
 import {
-  check, CHARS, motion, SCENE_MAJOR_PLAYING, spawnZombie, EnterPlay, TYPE,
+  check, CHARS, coliQuad, motion, SCENE_MAJOR_PLAYING, spawnZombie, EnterPlay,
+  TYPE,
 } from "./harness";
 
 /** A class-0x30 actor, spawned through its `Init` against `tables`. */
@@ -411,4 +417,155 @@ console.log("\nthe directional death's remaps, obj+0x136C bits 1, 2 and 4:");
   check("bit 4 re-draws the side death 0x3E0 from the 0x8000 table",
         z.motion === expect && z.fadeInto?.motion === 0x3e0,
         `0x${z.motion.toString(16)} ${JSON.stringify(z.fadeInto)}`);
+}
+
+console.log("\nthe frame a corpse lies on (ZombieCorpsePoseFrame):");
+{
+  // The shipped 26 words at `0x0059301C`, as the bundle carries them.
+  const CORPSE = [104, 98, 96, 84, 76, 75, 160, 152, 83, 80, 83, 82, 94, 91,
+                  73, 70, 68, 65, 149, 153, 43, 41, 64, 62, 65, 72];
+  const tables = deathTables();
+  (tables.deaths as { corpse?: number[] }).corpse = CORPSE;
+  const corpse = (clip: number) => {
+    const z = zombie(ZombieState.NoOp, {}, 1, tables);
+    z.motion = clip;
+    z.playTicks = 7;
+    z.flags |= ActorFlag.PoseFrozen;
+    z.state = ZombieState.CorpseSink;
+    z.sub = 0;
+    return z;
+  };
+  // 0x3DB is the third directional death: words 4 and 5, 76 and 75.
+  const z = corpse(0x3db);
+  const rng = new Rng(12);
+  const seen = new Map<number, number>();
+  let frames = 0;
+  while (!z.despawned && frames < 200) {
+    EnemyZombieUpdate(z, frame(rng));
+    frames++;
+    if (!z.despawned) seen.set(z.playTicks, (seen.get(z.playTicks) ?? 0) + 1);
+  }
+  check("a corpse on clip 0x3DB holds counter 76, and 75 once in seventeen",
+        seen.size === 2 && (seen.get(76) ?? 0) > (seen.get(75) ?? 0)
+        && (seen.get(75) ?? 0) > 0,
+        JSON.stringify([...seen]));
+  const ref = new Rng(12);
+  for (let i = 0; i < 0x77; i++) ref.int(17);
+  check("...one rand() a frame, on every frame but the last of 0x78",
+        frames === 0x78 && rng.next() === ref.next(), `${frames} frames`);
+  // A clip with no row keeps what the death left, and draws nothing.
+  const k = corpse(0x1ac);
+  const krng = new Rng(12);
+  EnemyZombieUpdate(k, frame(krng));
+  check("a kill-move corpse (0x1AC) keeps its counter and draws no rand()",
+        k.playTicks === 7 && krng.next() === new Rng(12).next(),
+        `${k.playTicks}`);
+}
+
+console.log("\nthe wake a zombie leaves in the water (ActorCheckWaterEntry):");
+{
+  // A water surface (`coli` surface 5) at y = 10 over the whole scene.
+  const WATER = coliQuad([0, 1, 0, -10], 1,
+                         [-200, 10, 200, 200, 10, 200, 200, 10, -200,
+                          -200, 10, -200], 5);
+  const HIPS = 15;
+  const tables = {
+    ...CHARS,
+    types: { "1": { ...TYPE, motions: {
+      ...TYPE.motions,
+      // A clip whose root stands `HIPS` up, for the hip test.
+      "30": { bank: "t", frames: 4, fps: 30, rot: [],
+              root: [0, HIPS, 0, 0, HIPS, 0, 0, HIPS, 0, 0, HIPS, 0] },
+    } } },
+  } as unknown as CharactersJson;
+  const wader = (condition: number, y: number) => {
+    const z = zombie(ZombieState.NoOp, { condition }, 1, tables);
+    T.coli = { files: ["test"], blobs: { water: WATER } } as typeof T.coli;
+    G.g_coli_full_set = ["water"];
+    // No floor quad: the ground push's miss falls back to the fixed eye
+    // height, which is where the actor is put, so it stays at `y`.
+    G.g_camera_fixed_eye_y = y;
+    z.pos = vec3(4, y, 40);
+    z.yaw = 0x4000;
+    z.motion = 30;
+    return z;
+  };
+  const events = new Events();
+  const heard: number[] = [];
+  events.on("sound.play", ({ id }) => heard.push(id));
+  const step = (z: ZombieActor) => {
+    EnemyZombieUpdate(z, { ...frame(), events });
+    AttachedEffectsTick(events);
+  };
+
+  let z = wader(6, 0);
+  step(z);
+  const [a, b] = G.g_attached_effects;
+  check("a wading actor under the surface spawns the pair, once",
+        G.g_attached_effects.length === 2 && a!.flags === 0
+        && b!.flags === ATTACHED_EFFECT_KIND1
+        && (z.zom.flags1368 & Zombie1368Flag.InWater) !== 0,
+        `${G.g_attached_effects.length}`);
+  check("...each at the surface's height, each holding a hit slot",
+        a!.height === 10 && b!.height === 10
+        && a!.hitSlot !== HIT_SLOT_NONE && b!.hitSlot !== HIT_SLOT_NONE
+        && G.g_hit_slots[a!.hitSlot] === a!.at,
+        `${a!.height} ${a!.hitSlot} ${b!.hitSlot}`);
+  // Kind 0 follows while `BackingOff` is down, faced half round; still, it
+  // fades from its 0.05 by 0.015. It stands 2.0 ahead on its own z.
+  const d = a!.drawn!;
+  check("kind 0 follows, faced 0x8000 round, 2 ahead: (4 - 2, 10, 40)",
+        a!.mode === 0 && a!.yaw === 0xc000 && Math.abs(d.x - 2) < 1e-4
+        && d.y === 10 && Math.abs(d.z - 40) < 1e-4
+        && d.alpha === Math.fround(Math.fround(0.05) - Math.fround(0.015))
+        && d.slot === ATTACHED_EFFECT_FIRST_SLOT,
+        JSON.stringify(d));
+  check("kind 1 lets go where the actor stands", b!.mode === 1
+        && b!.x === 4 && b!.z === 40, `${b!.mode} ${b!.x} ${b!.z}`);
+  // Moving, kind 0 grows and its cel counter runs a whole cel a frame.
+  for (let i = 0; i < 3; i++) { z.pos.z -= 1; step(z); }
+  check("moving, kind 0 grows in and steps its cel",
+        a!.alpha > d.alpha && a!.drawn!.slot === ATTACHED_EFFECT_FIRST_SLOT + 3,
+        `${a!.alpha} 0x${a!.drawn?.slot.toString(16)}`);
+  check("...and the wading actor makes no footfall",
+        !heard.some((id) => id === 0x2616a9 || id === 0x2916a9));
+  // `Committed` rising is the splash, once per task.
+  z.flags |= ActorFlag.Committed;
+  step(z);
+  check("the actor's commit rising plays COMMON\\SIBUKI8_16 once a task",
+        heard.filter((id) => id === SND_ATTACHED_EFFECT_SPLASH).length === 2,
+        heard.map((x) => x.toString(16)).join(","));
+  const slots = [a!.hitSlot, b!.hitSlot];
+  z.state = ZombieState.DeathKnockbackArc;
+  step(z);
+  check("state 9 ends both, and gives their hit slots back",
+        G.g_attached_effects.length === 0
+        && slots.every((s) => G.g_hit_slots[s] === HIT_SLOT_NONE),
+        `${G.g_attached_effects.length}`);
+
+  // Any other body condition needs its hips above the surface.
+  z = wader(0, 0);
+  step(z);
+  check("a standing actor whose root is above the surface spawns it",
+        G.g_attached_effects.length === 2, `${G.g_attached_effects.length}`);
+  // At y = -5 the root is level with the surface, `FCOMP` says not above;
+  // the trace starts at y + 20 = 15, above the water, and finds it.
+  z = wader(0, -5);
+  step(z);
+  check("...and one whose root is under it does not",
+        G.g_attached_effects.length === 0
+        && (z.zom.flags1368 & Zombie1368Flag.InWater) === 0,
+        `${G.g_attached_effects.length}`);
+  z = wader(6, 12);
+  step(z);
+  check("an actor above the surface spawns nothing",
+        G.g_attached_effects.length === 0, `${G.g_attached_effects.length}`);
+  // A corpse is not live: `ZombieEnterCorpseState` drops bit 0.
+  z = wader(6, 0);
+  step(z);
+  ZombieEnterCorpseState(z);
+  AttachedEffectsTick(events);
+  check("the actor becoming a corpse ends the pair",
+        G.g_attached_effects.length === 0 && (z.flags & ActorFlag.Live) === 0,
+        `${G.g_attached_effects.length}`);
 }

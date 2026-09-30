@@ -12,6 +12,7 @@
  */
 import { ZombieStateCarryProp } from "./carry_prop";
 import { ZombiePlayMotionFrameSe } from "./motion_se";
+import { ActorCheckWaterEntry } from "./splash";
 import { Zombie1368Flag } from "./state";
 import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
@@ -152,6 +153,9 @@ export function EnemyZombieUpdate(obj: ZombieActor, f: ClassFrame): void {
   // camera point lifted by 4 and the actor filed as a candidate. A death
   // chain's `0x10000` is what keeps a corpse off the list, not a test here.
   ActorRegisterCameraPoint(obj, host, ZOMBIE_CAMERA_RISE);
+  // `PUSH ESI; CALL dword ptr [0x00592BC0]` at `0x00453480`:
+  // `g_class30_states[0x36]`, `ActorCheckWaterEntry`, the wake.
+  ActorCheckWaterEntry(obj);
   // `MOV AL, byte ptr [ESI + 0x1368]` / `TEST AL, 0x2` / `JNZ` at
   // `0x00453486`, then `CALL 0x00452A10`: the footfalls and swishes, unless
   // the actor has gone into the water.
@@ -208,8 +212,8 @@ function ZombieRunState(obj: ZombieActor, dt: number, rng: Rng,
       return ZombieStateDeathKnockbackArc(obj, dt, rng, host, events);
     case ZombieState.DeathFallAndBounce:
       return ZombieStateDeathFallAndBounce(obj, dt, rng, host, events);
-    case ZombieState.CorpseSink:  return ZombieStateCorpseSink(obj, dt);
-    case ZombieState.CorpseBlink: return ZombieStateCorpseBlink(obj, dt);
+    case ZombieState.CorpseSink:  return ZombieStateCorpseSink(obj, dt, rng);
+    case ZombieState.CorpseBlink: return ZombieStateCorpseBlink(obj, dt, rng);
 
     // The stationary thrower. It is the only class-0x30 state that never
     // moves the actor at all, which is exactly why folding it into

@@ -50,6 +50,7 @@ import { BatSplashesTick } from "./class46/splash";
 import { FishEffectsTick } from "./effects/fish";
 import { OwlEffectsTick } from "./effects/owl";
 import { RingEffectsTick } from "./effects/ring_effect";
+import { AttachedEffectsTick } from "./effects/attached_effect";
 import { ScreenSpriteQueueFlush, ScreenSpriteQueueReset } from "./screen_sprite";
 import { CreditBlinkTick, InputReadFrameCounters } from "./credit_prompt";
 import { SeveredHeadsTick } from "./effects/severed_head";
@@ -990,6 +991,11 @@ function SceneTaskWalk(dt: number, host: GameHost,
   OwlEffectsTick(rng);
   FishEffectsTick();
   RingEffectsTick();
+  // The wakes a class-0x30 actor leaves in the water (`SpawnAttachedEffect`,
+  // `FUN_00408770`, from `ActorCheckWaterEntry`): after the actors, so the
+  // pair is stepped, and drawn, on the frame it is made. See
+  // `game/effects/attached_effect.ts`.
+  AttachedEffectsTick(events);
   // The splashes a falling bat allocates (`SpawnBatSplash`, `FUN_0042F980`):
   // after the bats, so the first is drawn on the frame it is made. See
   // `game/class46/splash.ts`.

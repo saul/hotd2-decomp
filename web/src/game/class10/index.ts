@@ -62,10 +62,12 @@
  * ends with a wait word carrying `0x10000000` — which is where
  * `CivilianRunScript` pays **+400**, to that player or to both.
  *
- * Shooting the civilian instead costs the shooter a **life** and **-100**, and
- * a killing shot costs *both* players 100. That asymmetry is in the code, not
- * a reading of it: the survivable branch calls `ScoreAddForPlayer` once with
- * the player the hit flags name, and the killed branch calls it twice.
+ * Shooting the civilian instead costs the shooter a **life** -- through the
+ * invulnerability window -- and **-100**, and leaves a marker where she was
+ * hit (`hit_marker.ts`); a civilian her **captors** kill costs *both* players
+ * 100. That asymmetry is in the code, not a reading of it: the shot arm calls
+ * `ScoreAddForPlayer` once with the player the hit flags name, and the arm for
+ * a civilian already dead -- the maul raised the bit -- calls it twice.
  *
  * ## What this does not do
  *
@@ -98,10 +100,9 @@
  * with nothing to raise the bit it could not be taken, and stage 3's block-0
  * boat moors and never reaches it.
  *
- * [open] `SpawnCivilianBloodPool` (`FUN_0048E080`) builds a ground decal at the
- * shot point, scaled by how far below the camera plane it is. It is a whole
- * object of its own class with an unread update, and the renderer's impact
- * sprite already marks the hit.
+ * **The node hook is ported** (`draw.ts`): the head that turns to look at the
+ * player, a captor or a point, and the mouth that moves while she speaks --
+ * ops 0x23, 0x24 and 0x25, which the port once ran as no-ops.
  *
  * ## Where each routine lives
  *
@@ -116,6 +117,8 @@
  * | `pose.ts`     | `CivilianApplyMotionPose` `FUN_0048C310`                   |
  * | `items.ts`    | `CivilianAddHeldItem` `FUN_0048CAE0`, `CivilianAddPickedItem` `FUN_0048CB60`, `CivilianPickHeldItem` `FUN_0048CBF0`, `CivilianDrawHeldItems` `FUN_0048CD10` (its game half), `CivilianHeldItemGrantLife` `FUN_0048DCC0`, `CivilianHeldItemGrantOriginalItem` `FUN_0048DD60` |
  * | `life_marker.ts` | `SpawnLifeGrantedMarker` `FUN_0048DF10`, `LifeGrantedMarkerUpdate` `FUN_0048DFE0` |
+ * | `hit_marker.ts` | `SpawnCivilianHitMarker` `FUN_0048E080`, `CivilianHitMarkerUpdate` `FUN_0048E190` |
+ * | `draw.ts`     | `CivilianDrawBonePart` `FUN_0048D1F0` (its game half), `AngleApproachInPlace` `FUN_0048D9B0` |
  * | `step.ts`     | `CivilianStepScript` `FUN_0048B1E0`                        |
  * | `turn.ts`     | `CivilianStepTurnToTarget` `FUN_0048C850`, `ActorTurnTowardPoint` `FUN_0048C990` |
  * | `children.ts` | `CivilianPruneDeadChildren` `FUN_0048CA60`, `CivilianHookRideChildrenStep` `FUN_0048DAB0` |

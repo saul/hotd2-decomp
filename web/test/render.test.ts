@@ -5615,5 +5615,73 @@ console.log("\nScriptedHumanoidBoneDrawHook's extra models:");
         !!node && !node.visible);
 }
 
+console.log("\nCivilianDrawBonePart's head, drawn:");
+{
+  const { applyCivilianHead } = await import("../src/render/characters/civilian_head");
+  const { CivilianHeadPoseAngles, CivilianHeadTurnedMatrix }
+    = await import("../src/game/class10/draw");
+  const { makeCivilianState } = await import("../src/game/class10/state");
+  const a = makeActor(0x4000, SpawnClass.Civilian, 1, "civ");
+  const civ = makeCivilianState();
+  a.civ = civ;
+  // Bone 1 turned, moved and scaled under a moved root; bone 2 five up it
+  // with a turn of its own -- nothing at the identity, so an order or a
+  // space mixed up shows.
+  const root = new Obj3D();
+  root.position.set(40, -3, 12);
+  root.rotation.set(0, 0.7, 0);
+  const b1 = new Obj3D();
+  b1.position.set(1, 2, 3);
+  b1.rotation.set(0.2, -0.4, 0.1);
+  b1.scale.setScalar(1.25);
+  const b2 = new Obj3D();
+  b2.position.set(0, 5, 0);
+  b2.rotation.set(0.15, 0.3, 0);
+  root.add(b1);
+  b1.add(b2);
+  root.updateWorldMatrix(true, true);
+  const w1 = [...b1.matrixWorld.elements];
+  const w2 = [...b2.matrixWorld.elements];
+  const inst = { a, bones: new Map([[1, b1], [2, b2]]) } as unknown as
+    Parameters<typeof applyCivilianHead>[0];
+
+  civ.headTurned = false;
+  applyCivilianHead(inst, new Map());
+  root.updateWorldMatrix(true, true);
+  check("an unturned head is left as the pose put it, and the pose is kept",
+        b2.matrixWorld.elements.every((v, i) => Math.abs(v - w2[i]) < 1e-9)
+        && (inst as { civHeadPose?: number[] }).civHeadPose
+          ?.every((v, i) => Math.abs(v - w2[i]) < 1e-9) === true);
+
+  civ.headTurned = true;
+  civ.headPitch = -0x200;
+  civ.headYaw = 0x800;
+  civ.headRoll = 0;
+  applyCivilianHead(inst, new Map());
+  root.updateWorldMatrix(true, true);
+  const want = CivilianHeadTurnedMatrix(w1, w2, { pitch: -0x200, yaw: 0x800,
+                                                  roll: 0 }, new Array(16));
+  const got = [...b2.matrixWorld.elements];
+  check("a turned head's node carries the hook's own matrix",
+        got.every((v, i) => Math.abs(v - want[i]) < 1e-4),
+        got.map((v) => v.toFixed(4)).join(","));
+  // The rebuild is `RotY RotX RotZ` of the pose's own angles plus the turn,
+  // and `MatrixGetAngles` reads that order back: so read relative to bone 1
+  // the node's angles are the pose's plus exactly the turn, and its point
+  // has not moved.
+  const before = CivilianHeadPoseAngles(w1, w2);
+  const after = CivilianHeadPoseAngles(w1, got);
+  check("...which is the pose's angles plus the turn, at the same point",
+        Math.abs(after.y - (before.y + 0x800)) <= 1
+        && Math.abs(after.x - (before.x - 0x200)) <= 1
+        && Math.abs(after.z - before.z) <= 1
+        && Math.abs(got[12] - w2[12]) < 1e-4 && Math.abs(got[13] - w2[13]) < 1e-4
+        && Math.abs(got[14] - w2[14]) < 1e-4,
+        `${JSON.stringify(before)} -> ${JSON.stringify(after)}`);
+  check("...and the pose it was measured from is what bonePoseMatrix answers",
+        (inst as { civHeadPose?: number[] }).civHeadPose
+          ?.every((v, i) => Math.abs(v - w2[i]) < 1e-9) === true);
+}
+
 console.log(failures ? `\n${failures} failed` : "\nall passed");
 process.exit(failures ? 1 : 0);

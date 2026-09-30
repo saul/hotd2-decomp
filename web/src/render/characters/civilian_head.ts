@@ -27,6 +27,17 @@
  * `hod2lib/actorscript.ts` -- and the record itself is not written, so this
  * swaps what the node shows without touching `a.boneSlot`.
  *
+ * ## Not drawn: the Original Mode scale
+ *
+ * `civ.partScale` -- the hook's `MatrixScale(1.5, 1, 1.5)` on bone 2 and
+ * `(2, 2, 2)` on bones 5, 8, 12 and 15 while `g_original_item_part_scale` is
+ * up -- is decided and not drawn here. That flag's one writer
+ * (`FUN_00416240`) is unported, so no frame of the port raises it; and the
+ * scale is on the stack top after the record is stored, so drawing it means
+ * scaling the node's own model and its hit sphere but not the hair and items
+ * hung from the record, which is its own piece of work when the flag has a
+ * writer.
+ *
  * Render bookkeeping only: the pose recorded for `GameHost.bonePoseMatrix`,
  * and which slot the node shows. Everything the draw depends on is the
  * actor's, so a snapshot fully determines it.

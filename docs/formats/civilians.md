@@ -96,8 +96,10 @@ and `0x20000000` (3) also appear in the shipped words. `0x00040000` is the
 `if ((word & 0x40000) == 0) obj+0x34 |= 0x10000; else obj+0x34 &= ~0x10000`,
 and `obj+0x34` bit `0x10000` is *excluded from `RegisterForCameraTracking`* —
 so the wait bit set means tracked. `0x01000000` is the world push and
-`0x20000000` gates op 0x1D's dialogue on `DAT_009A2230`. The counts are of the
-596 `Wait` commands in the 136 shipped streams.
+`0x20000000` keeps her through a skipped cut scene: its only two readers
+(every `TEST` of the mask) are the removal's skip arm (`0x0048AFA0`, see *How
+a civilian leaves*) and op 0x1D's gate on `g_cutscene_skipping` (`0x0048BF3E`).
+The counts are of the 596 `Wait` commands in the 136 shipped streams.
 
 **The camera-track bit is how the room waits for her.** `[proved]`
 `CivilianUpdate` (`FUN_0048A920`) ends every path that does not despawn at
@@ -321,28 +323,28 @@ Two consequences worth knowing, both the engine's:
 | `0x13` | `AddHeldItem` | item record, the wait-word bits its routine gives on (`0x800000` in every stream) |
 | `0x14` | `AddPickedItem` | the same bits; the record is op 0x15's pick |
 | `0x15` | `PickHeldItem` | weighted table |
-| `0x16` | `SetRadiusRamp` | target radius, frames |
+| `0x16` | `SetRadiusRamp` | target radius (a float's bits), frames. `sub+0x7C = (sub+0x78 - obj+0x128) / cmd[2]` with an `FIDIV` of the dword (`0x0048BE42`): from the radius she has now, over whole frames. In the Init's first block `obj+0x128` is still 0 -- the Init writes 1.0 after the script. `[proved]` |
 | `0x17` | `SetSphereCentreMode` | **[proved]** the low byte of `cmd[1]` to `sub+0x80` (`0x0048BE5B`), which picks the collision-sphere centre `CivilianUpdate` writes to `obj+0x12C` -- see *The collision sphere* below. It was `SetCameraPointMode`; the camera's point is `obj+0x100` and this never reaches it |
 | `0x18` | `SetPose` | pointer to six dwords, copied: three floats into `obj+0x40..0x48`, three BAMS **integers** into `obj+0x64..0x6C`. The five shipped yaws are `0xC000`, `0x2D00`, `0x4000`, `0x6000`, `0x7000` |
 | `0x19` | `SetRouteBranch` | **[proved]** `g_script_branch_var = (s16)cmd[1]` — the selector `EvtAdvanceStepOrRoute` indexes a route record's `next[]` with, so **this is how the game decides which way a branching stage goes**. Eleven streams run it, all eleven pass 1, and all eleven put it after the `SetOnShot 0` that makes the civilian safe. See [evt.md](evt.md#how-a-branch-is-decided) |
 | `0x1A` | `SetChildCue` | applied only while children survive |
-| `0x1B` | `SetGlobalB` | `DAT_009CA0F4`. `[open]` |
+| `0x1B` | `SetHudShutterState` | the low byte into `g_bHudShutterState` (`0x009CA0F4`) unless `g_app_state` is 10 (`0x0048BF0A`) -- the letterbox, and with it the firing gate. `[proved]` |
 | `0x1C` | `SetScriptFlag` | **[proved]** `g_script_flags[cmd[1]] = 1` (`0x0048BF2A`) — the *same* 0x100-byte array at `0x009C7200` that the evt's `set_script_flag` (0x48) writes and `wait_script_flag` (0x45) reads. **This is how a hostage tells the stage script she is done**, and it is the only way most of them can: across the six shipped scripts every `wait_script_flag` gate but two names a flag no `set_script_flag` in that stage ever raises. Twenty-eight commands in the 136 streams, on flags 0..7, 18, 29, 30, 35, 36, 53 and 54. See *The rescue* below |
-| `0x1D` | `PlayDialogue` | group — `EvtOpPlayDialogue2D` |
+| `0x1D` | `PlayDialogue` | group — `EvtOpPlayDialogue2D`, when `(g_cutscene_skipping && word & 0x20000000) || sub+0x2A == 0` (`0x0048BF36`): not while she is walking off. The skip half reaches an `EvtOpPlayDialogue2D` that returns on the same flag, so it says nothing either way. `[proved]` |
 | `0x1E` | `SetResume` | script pointer |
-| `0x1F` | `SetResumeByMode` | two script pointers |
+| `0x1F` | `SetResumeByMode` | two script pointers: the second when `g_title_menu_cursor` (`0x009A2226`) is 1 -- `CMP word ptr [0x009a2226], DX` with `DX = 1` from the loop's head (`0x0048BF79`, `0x0048BA0A`). The cursor is the title menu row the player confirmed, and rows 0..3 are the `g_GameMode` values, so the second stream is Original Mode's. `[proved]` |
 | `0x20` | `SetFlagIndex` | |
 | `0x21` | `QueueSound` | id, delay |
-| `0x22` | `QueueSoundList` | pointer to `(id, delay)` pairs, `0xFFFFFFFF`-terminated |
-| `0x23` | `SetAttachMode` | `[open]` |
-| `0x24` | `SetAttachTarget` | `[open]` |
-| `0x25` | `SetPairA` | `[open]` |
+| `0x22` | `QueueSoundList` | pointer to `(id, delay)` pairs, `0xFFFFFFFF`-terminated. A null pointer writes `sub+0x58 = 0` and nothing else (`0x0048BFBD`): a sound op 0x21 queued still plays. 14 of the 33 are null. `[proved]` |
+| `0x23` | `SetHeadLook` | the head's mode into `sub+0x8C`; mode 2 takes the first child into `sub+0x90` while there is one, else the mode is 0 (`0x0048C044`). See *The head and the mouth* |
+| `0x24` | `SetHeadLookAt` | mode into `sub+0x8C`, and a pointer to three floats into `sub+0x90` (`0x0048C08C`). Both shipped uses are mode 5 |
+| `0x25` | `SetMouth` | frames into `sub+0xA4`, a mouth table into `sub+0xA8`, `sub+0xA0 = 0` (`0x0048C0B0`) |
 | `0x26` | `MoveOverFrames` | point (or `< 1` for the camera), frames |
 | `0x27` | `SetScale` | `model+0x116C` |
-| `0x28` | `SetCameraBone` | |
+| `0x28` | `SetHitBone` | the s16 into `sub+0xAC` (the Init's 2): the bone whose record point the shot arm puts `SpawnCivilianHitMarker` at (`0x0048ABCB`). One use, bone 9. `[proved]` |
 | `0x29` | `SetActorFlags` | OR'd into `obj+0x34` |
 | `0x2A` | `SetDeathVoice` | or `0xFF` to pick by character type |
-| `0x2B` | `InPlayOnly` | taken only while `g_app_state == 6`, which is **in play** — so this is the ordinary path, not a debug one. Writes `cmd+4` (s16) to the script context's `+0xBC` and `&cmd[8]` to its `+0xC0`; what those are is `[open]` |
+| `0x2B` | `InPlayOnly` | taken only while `g_app_state == 6`, which is **in play** — so this is the ordinary path, not a debug one. Writes `cmd+4` (s16) to `sub+0xBC` and `&cmd[8]` to `sub+0xC0`, and moves on six dwords only when `cmd[2]` is 0 -- any other value runs the command again for ever; both shipped uses carry 0. **Nothing reads either word**: `sub+0xBC` has the Init's zero and `CivilianUpdate`'s countdown (`0x0048AD97`, which reads it only to decrement it), `sub+0xC0` nothing -- every `[reg + 0xbc]` and `[reg + 0xc0]` operand in the image, and a byte search whose other `.text` hits are all jump displacements, immediates or data. `[proved]` |
 | `0x2C` | `Wait` | the wait word |
 | `0x2D` | `End` | |
 
@@ -695,9 +697,12 @@ preloads the record's slots and the kind's texbank.
 
 Four of the thirteen Original Mode items (stage 2 `0x8510`, `0x1158C`,
 `0x12098`, stage 4 `0x23F8`) are only reached through the second arm of an op
-0x1F, which `CivilianRunScript` takes when `DAT_009A2226` equals the switch's
-`DX` (`0x0048BF79`). `[open]`; the port takes the first arm, and those four
-leave without their item.
+0x1F, which `CivilianRunScript` takes when `g_title_menu_cursor` is 1 -- the
+ORIGINAL row (`0x0048BF79`). `[proved]` The cursor's only writers are the boot
+reset and the attract screen's hand-over to the title (both 0) and the menu
+itself, so through a game it holds the row the player confirmed. The port
+long took the first arm whatever the mode, and those four left without their
+item; `PlayerStartGameFromTitle` now leaves the cursor on the confirmed row.
 
 ### Being shot
 
@@ -708,6 +713,63 @@ units** for every civilian type — and descends into `ShotTestSkeleton` only
 when `obj+0x34` bit `0x80` is set. No class-0x10 script ever sets it. What
 lands is `MarkActorShot` (`FUN_00404DB0`): `obj+0x34 |= (1 << (player + 1)) |
 8`, and `CivilianUpdate` reads those bits back on its next frame.
+
+The shot arm (`0x0048AB8F`) then, in this order: the world point of bone
+`sub+0xAC` (op 0x28); the shooter from bits 1 and 2, or `rand() % 2`;
+`PlayerTakeDamageTimed(p, 0, 0, 1, -1)` (`0x0048AC45`) -- a life **through**
+the invulnerability window, and no damage overlay; `-100`; the head combo and
+the hit count; `SpawnCivilianHitMarker(p, point)`; `obj+0x34 |= 0x4000000`;
+the timer, the target mode, the sound list and the queued delay cleared; the
+on-shot script (`sub+0x50` if set, else `sub+0x4C`) run, and **only then**
+`sub+0x4C` and `sub+0x54` cleared -- so a resume the on-shot script names is
+lost -- then the death voice, which op 0x2A in that script can have chosen;
+`sub+0x8C = 6` if the head was looking at anything; `g_training_out` in
+Training. `[proved]` A civilian her captors killed (the bit already up) takes
+the arm at `0x0048AAEB` instead: her `sub+0x4C` script, both players fined
+unless the word the script loaded is uncounted, the same tail.
+
+**The marker** `SpawnCivilianHitMarker` (`FUN_0048E080`) makes is a task of
+its own, `CivilianHitMarkerUpdate` (`FUN_0048E190`): slot `0x132D` for player
+0 and `0x132E` for player 1 (`common.bin` 305 and 306), drawn for `0x3C`
+frames at the point in each frame's view lifted 2 and brought 5 nearer, the
+last five fading by sixths. Its scale is fixed at the spawn from the point's
+depth `z`: `z * -0.02` beyond 50, 1 from 50 to 20, `z * -0.05` nearer.
+`[proved]` It used to be called `SpawnCivilianBloodPool`, "a ground decal",
+from what it was guessed to be before its update was read.
+
+## The head and the mouth
+
+`CivilianInit` writes `0x0048D1F0` into `model+0x1158` (`0x0048A60B`):
+`CivilianDrawBonePart`, the node hook `SkeletonEmitNode` calls on every node
+it draws after storing the node's posed matrix in its record. It switches on
+the bone through the byte map at `0x0048D984`: bones 5, 8, 12 and 15 take the
+Original Mode `MatrixScale(2, 2, 2)` when `g_original_item_part_scale` is up,
+every other bone but 2 draws its slot, and **bone 2 runs two arms**. `[proved]`
+
+**The head** runs while `sub+0x8C` (ops 0x23 and 0x24) is non-zero. It takes
+the head's world point `P` and a target `T` by mode -- 1 the gameplay eye 15
+up, 2 a child's head (retargeted to the first survivor when the one it had
+has died, and mode 6 when the child's `obj+0x34` bit 0 is clear), 3
+`g_camera_lookat_target`, 4 a point, 5 a point in her own frame -- and the
+head's own angles off the pose, `MatrixGetAngles(rec2 * inv(rec1))`. The want
+is those angles for mode 6, else `VecToAngles` of `inv(bone 1's rotation) *
+(T - P)` less 1.5 in y; the pitch is clamped to `-0x2000..0x1800` and the yaw
+to `+-0x3800`. The three words at `sub+0x94..0x9C` step toward want minus the
+pose by `0x100` a draw (`AngleApproachInPlace`, `FUN_0048D9B0`), and when all
+three are 0 the mode goes back to 0 -- so a head winding back across straight
+ahead stops there. Otherwise the node is rebuilt as bone 1's rotation at the
+head's point, `RotY RotX RotZ` of the pose's angles plus the three, and
+**stored over the node's record** -- no push, so the hit sphere and the hair
+turn with it.
+
+**The mouth** runs while `sub+0xA8` (op 0x25) is not 6: the draw adds
+`g_civilian_mouth_tables[sub+0xA8][sub+0xA0 % count]` (`0x0056B950`, six runs
+of 21, 38, 34, 13, 20 and 56 signed bytes, values 0..9) to bone 2's slot --
+another model of the face's file -- and steps the cursor while `sub+0xA4`
+counts down; at zero table 2 hands over to table 3 and every other table
+parks on its last byte. The port draws both halves in
+`render/characters/civilian_head.ts`, and the exporter carries the tables and,
+for each civilian whose streams name one, the face's slot plus every byte.
 
 ## The collision sphere
 
@@ -766,8 +828,11 @@ Every despawn frees the hit slot, runs `ActorReleasePartList`, leaves
 op 0x1E/0x1F), 87 end on a `0x2000000` word, and `goto_scene_state` taking the
 major to 1 after a room is the first moment that arm can fire. The port had
 the countdown and the cue only; the off-camera arm is in
-`game/class10/update.ts` now and the skip arm is `[open]` (no
-`g_cutscene_skipping` in `G`).
+`game/class10/update.ts` now, and the skip arm with it:
+`g_cutscene_skipping` is up for one walk of the task list after a skip
+(`CheckCutsceneSkipRequest` raises it, `FinishCutsceneSkip` drops it), so
+every civilian whose word lacks `0x20000000` leaves on the next frame unless
+she still holds captors.
 
 **A seek has to reproduce this**, because it replays the evt with no actor
 running and would otherwise rebuild every earlier civilian at her first

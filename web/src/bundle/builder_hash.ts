@@ -21,15 +21,15 @@
 
 /** The per-file digests, so a stale bundle can name what moved. */
 export const BUILDER_FILES: Readonly<Record<string, string>> = {
-  "actorscript.ts": "bdb28fb46c32fa5ae163a66121c912eb4e1a46152b0bf71129ae41ec2a39df93",
+  "actorscript.ts": "60dabd769ff3e8d3436448e54d3eb1072a16b601ef025e9db6a94af46e0e61a4",
   "approach.ts": "f2458fca4f4f943e775d2f73237eef7bf925b37dc38ba653bc89f80d3e800443",
   "arcscript.ts": "7c64fa78e89264425a0032c0918c846f8972905d848251d517112cd307722b35",
   "bams.ts": "f03b1290866a63ab2ae764d49bd15c57bd53c6b1a03794f7a0357e8dd842eb8f",
-  "bundle.ts": "ee73f946d0e82259b48c14451cd4df5f210653593eba17b73acbd8807d59d355",
+  "bundle.ts": "491f145807c172949175dccfcd15944b7f6b9f8b94f7a55f55af3b06c663c43b",
   "bytes.ts": "59b2f363e98da56e88ada59458239032e40cad3a27342659e213d849c0967168",
   "cam.ts": "fe50200cb57c6578681a121766e7a5f4ed2425d91996169f83a82e8375dd63c3",
   "campaths.ts": "fbe28df3265d37b60a006e937a926eca8546609aa29cc5d80e7f1fc9afd639be",
-  "characters.ts": "cac021d0099522b6d5d5fd0116f1dccf286c53a13e4f240f31ec23850f00ffbc",
+  "characters.ts": "f59d7c60cd84101cc3113f72f79e5e6bab194e3b35347a1e1c3c15e0b67a46c1",
   "charbuild.ts": "6c3b70d9e317b1831c287c5b119f60f56aaa78552c47257c51acc833377ea485",
   "charmotion.ts": "ff8ee2ae3fe5c9f0c41c6c389b8c864660e99cf79e741d46f7041852a476b825",
   "class14.ts": "e143aab15d3067812e27d18bdd8b35b4b6fc45d6091948c7b8920bf4350a512a",
@@ -40,7 +40,7 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
   "container.ts": "11b185957d66a5123097e51aadb5ae66760d11f8c9f69a1c128c58c4045e3e40",
   "degraded.ts": "f53ceffd81c8182f0c5edde7e6f0c1bc7f62da1851ca23e351eda62a87fb9f2e",
   "evt.ts": "3115a01280203f2d46314f679856c06f57193e4084eb6e71410faf6611c6ea58",
-  "exetab.ts": "b2b9bb72af6eb0acfd6dbf7a0e0e370eaaa87023564353df9cf562bfc5e9efb9",
+  "exetab.ts": "95868eeb0b27a120eed3d3599639485a991ef69649a0cbc3daf219e3a03e322a",
   "game/boss_banner_records.ts": "1be8c2fe41dd39e9c2b638bbe4cb4e274fad9426261014bb358159d09300aaa5",
   "game/class12/state.ts": "6de91256d9e69c4b07d8969720517733a13c90a1f25f5bf4a8c929bd55df1c2d",
   "game/class13/state.ts": "661726e666e3415a1280e2aafee4d58ccf2cb1598ea6b5d1db21499a12aa076e",
@@ -78,4 +78,4 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
 };
 
 /** One digest over {@link BUILDER_FILES}, in filename order. */
-export const BUILDER_HASH = "4af3b9a3288f0b05338f3b1b2c333c5a1b64f66475a191e903f4459b38a9908f";
+export const BUILDER_HASH = "dcb34fe6a29fc48770c5ba049535f726959950fe031e34849ea2f5f9fb7e6a0d";

@@ -100,6 +100,7 @@ export function PlaceType17Props(at: number, x: number, y: number,
     p.z = Math.fround(z + s * TYPE17_OFFSET_XZ);
     p.vy = TYPE17_START_VY;
     p.hitRadius = TYPE17_RADIUS;
+    p.slot = 0;                                   // +0x28C, never written
     p.flags = 0x80000000 | BreakableFlag.Live;
     // `ActorClearGameFields` (`FUN_004A73D0`) zeroed the rest.
     p.storyItem = 0;

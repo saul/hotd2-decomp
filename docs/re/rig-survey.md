@@ -225,7 +225,7 @@ unless the source column says otherwise.
 | `0x004522A0` | `0x153` | literal | `FUN_00452320` | **yes** (same rig); `St2CarHeldUpdate`, ported |
 | `0x004525C0` | `0x00565EF4[obj+0x4D4]` | table | `FUN_00451FF0` | no |
 | `0x00452930` | same table | table | `FUN_00452320` | **yes** (same rig) |
-| `0x004659D0` / `0x00465BC0` | `0xFD`/`0xFE`/`0xFF` | literals | **nothing** | n/a — a 0x88-byte invisible controller that uses the path only to derive a texture/material scroll rate |
+| `Type3UvScrollInit` / `Type3UvScrollUpdate` (`0x004659D0` / `0x00465BC0`) | `0xFD`/`0xFE`/`0xFF` | literals | **nothing** | n/a — class 0x41 constructor 3's 0x88-byte task: it draws nothing, and uses the path only to scroll the UVs of the stage-1 vehicle's `0x157E`/`0x157D`/`0x157B` (see `docs/formats/spawns.md`) |
 | `0x0047F5F0` | `0x180` | literal, `g_GameMode == 3` | `FUN_0047FE40` | no — class `0x32` |
 | `0x00480050` | `0x180` | state 0 of `0x00596738` | same object | no |
 | `0x004842A0` | `0x156`–`0x15C` | script opcode `0x0B` → `obj+0x135C` | `FUN_00484FF0` | small — class `0x25` |

@@ -16,8 +16,8 @@
  * The 79 constructors are a grab-bag: the retail stages reach 74 of them, and
  * exactly one — type 0, `PlaceBreakableGroup` — is the container mechanism the
  * class is named for. Fifty are `PlaceGenericProp`, five are `NoOpStub`, and
- * of the other twenty-four the ones below are ported; the thirteen that are
- * not, with the spawns that place each, are listed in `docs/formats/spawns.md`
+ * of the other twenty-four the ones below are ported; the ones that are not,
+ * with the spawns that place each, are listed in `docs/formats/spawns.md`
  * (*Class 0x41's constructors: which are ported*). An unported type keeps its
  * slot in the table and does nothing, because an unimplemented type that
  * silently ran the *wrong* constructor is the same bug that had the cat

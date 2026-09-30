@@ -77,6 +77,7 @@ export function PlaceTable29Props(at: number,
     // and the rest at zero.
     p.flags = 0;
     p.hitRadius = 0;
+    p.slot = 0;
     p.storyItem = 0;
     p.removeFlag = 0;
     return p;

@@ -11,7 +11,8 @@ import { G } from "../../src/game/globals";
 import { SetGameTables } from "../../src/game/tables";
 import { GameMode } from "../../src/game/game_mode";
 import {
-  BreakableFlag, g_class41_constructors, PropContainerType, PropFamily, type BreakableProp,
+  BreakableFlag, g_class41_constructors, PlaceGenericProp, PropContainerType,
+  PropFamily, type BreakableProp,
 } from "../../src/game/class41";
 import { BreakablePropPoolUpdate } from "../../src/game/class41/pool";
 import { MsvcRand } from "../../src/game/class41/group";
@@ -461,4 +462,26 @@ console.log("\nclass 0x41 constructor 37 in Original Mode with item 0x1E:");
         && PropWords(made[0], { o194: 0 }).o194 === 1,
         JSON.stringify(released));
   G.g_original_item_life_drops = 0;
+}
+
+console.log("\nclass 0x41 type 43 reads g_original_item_life_drops too:");
+{
+  // `0x00462371`: `CMP g_GameMode, 1; ... MOV AL, [0x009C88AA]; TEST; JZ;
+  // MOV byte [ESI+0x194], 1`. The byte is the one constructor 37 reads.
+  const build = (mode: GameMode, drops: number) => {
+    const rng = new Rng(43);
+    scene(rng, [], mode);
+    G.g_original_item_life_drops = drops;
+    const p = PlaceGenericProp({
+      at: 0xc000, container: "generic", type: 43, slot: 2,
+      lifetime_evt_steps: 2, field_1f4: 2, pos: [10, 20, 30],
+      pitch: 0, yaw: 0x4000, roll: 3,
+    }, rng);
+    G.g_original_item_life_drops = 0;
+    return PropWords(p, { o194: 0 }).o194;
+  };
+  check("Original Mode with item 0x1E held turns set 2 into the life",
+        build(GameMode.Original, 1) === 1);
+  check("...not without the item", build(GameMode.Original, 0) === 2);
+  check("...and not outside Original Mode", build(GameMode.Arcade, 1) === 2);
 }

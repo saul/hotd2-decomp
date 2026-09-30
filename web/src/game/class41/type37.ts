@@ -5,8 +5,10 @@
  * out the pair's item.
  *
  * Three descriptors in stage 2, both modes: evt `0x24DC` (blocks 4 and 30,
- * item set 1 of one), `0x812C` (block 14, set 2 of two) and `0x1296C` (blocks
- * 25, 26 and 27, set 2 of one). `komono_1.bin[114]` is the model class 0x41
+ * item set 6 of one, a score pickup), `0x812C` (block 14, set 3 of two, the
+ * golden frog) and `0x1296C` (blocks 25, 26 and 27, set 1 of one, the extra
+ * life) -- the set is `desc+0x24`, the size `desc`'s first orientation word.
+ * `komono_1.bin[114]` is the model class 0x41
  * type 4 kind 2 draws, and effect 7 on motion `0x1D5` the break that kind
  * plays -- `[likely]` a crate, from that, and the port names nothing for it.
  *

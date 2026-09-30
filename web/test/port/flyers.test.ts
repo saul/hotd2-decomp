@@ -32,7 +32,7 @@ import { NULL_HOST, type GameHost } from "../../src/game/host";
 import {
   MatIdentity, MatrixRotateX, MatrixRotateY, MatrixRotateZ,
 } from "../../src/game/matrix";
-import { FishUpdate } from "../../src/game/class51";
+import { FISH_SWIM_AWAY_FRAMES, FishUpdate } from "../../src/game/class51";
 import { FishFlag, FishState, type FishTail } from "../../src/game/class51/state";
 import {
   FROG_LEAP_RECOVER_CURSOR, FrogMotion, FrogReadNextScriptCommand,
@@ -176,6 +176,44 @@ import {
     check("...and the fifth retires from both counters and swims off",
           last.swimAway && last.slot === -1,
           `${last.swimAway} slot ${last.slot}`);
+
+    // **And it goes.** `FishSwimAwayTick` (`FUN_00439C20`), past the
+    // `MatrixStackPop` the decompiler stops at: the strip steps, `sub+0x64`
+    // counts, and from `sub+0x7C` frames on `sub+0x28` loses 0.01f a frame
+    // (`FSUB [0x004C4CC0]`) until it is `<= 0.0` and the fish despawns. The
+    // count is worked from the two floats in the image, `0x3ECCCCCD` and
+    // `0x3C23D70A`: the size is stored as a float and compared before it is.
+    let size = Math.fround(0.4);
+    let shrinks = 0;
+    for (;;) {
+      shrinks += 1;
+      const left = size - Math.fround(0.01);
+      size = Math.fround(left);
+      if (!(left > 0)) break;
+    }
+    const leaver = rest[3];
+    const score0 = G.g_player_score[0];
+    const strip0 = last.frame;
+    leaver.flags |= ActorFlag.Hit | ActorFlag.HitByPlayer0;
+    ShotTestListReset();
+    FishUpdate(leaver, frame(rng));
+    check("a fish swimming away is not `FishUpdate` any more: a pull on it "
+          + "scores nothing and it files itself for no shot",
+          G.g_player_score[0] === score0 && last.state === FishState.Bob
+          && !G.g_shot_test_list.some((e) => e.at === leaver.at),
+          `score ${G.g_player_score[0] - score0} state ${last.state}`);
+    check("...its strip runs on, the frame it drew written down",
+          last.drawnFrame === strip0 && last.frame !== strip0,
+          `${strip0.toString(16)} drew ${last.drawnFrame.toString(16)} `
+          + `now ${last.frame.toString(16)}`);
+    let n = 1;
+    while (!leaver.despawned && n < 1000) {
+      FishUpdate(leaver, frame(rng));
+      n += 1;
+    }
+    check(`...and it despawns ${FISH_SWIM_AWAY_FRAMES - 1} + ${shrinks} `
+          + "updates after it turned away", leaver.despawned
+          && n === FISH_SWIM_AWAY_FRAMES - 1 + shrinks, `after ${n}`);
   }
 
   {
@@ -213,6 +251,30 @@ import {
           `${FishState[below.ft.state]} sinkY=${below.ft.sinkY}`);
     check("...each paying 80", G.g_player_score[0] - score === 160,
           `${G.g_player_score[0] - score}`);
+
+    // `FishProjectToScreen` (`FUN_00439B50`) files states 0 to 3 alone
+    // (`0x00439B58`..`0x00439B77`), so a corpse is never a candidate.
+    ShotTestListReset();
+    FishUpdate(above.f, frame(rng));
+    FishUpdate(below.f, frame(rng));
+    check("neither corpse is ever in the shot test -- flung or sinking",
+          above.ft.state === FishState.Flung && below.ft.state === FishState.Sink
+          && !G.g_shot_test_list.some((e) => e.at === above.f.at
+                                         || e.at === below.f.at),
+          JSON.stringify(G.g_shot_test_list.map((e) => e.at)));
+    const live = mk(0x9202, false);
+    live.f.flags &= ~(ActorFlag.Hit | ActorFlag.HitByPlayer0);
+    ShotTestListReset();
+    FishUpdate(live.f, frame(rng));
+    check("...while a fish still rising files itself, at its own point",
+          live.ft.state === FishState.Rise
+          && G.g_shot_test_list.some((e) => e.at === live.f.at)
+          && live.f.shotCentre.x === live.f.pos.x
+          && live.f.shotCentre.y === live.f.pos.y,
+          JSON.stringify(G.g_shot_test_list.map((e) => e.at)));
+    check("...and the class is picked only through that list",
+          g_class_handlers[SpawnClass.WaterEnemy]?.registersForShotTest
+            === true);
   }
 
   // -- class 0x11, the frog ------------------------------------------------

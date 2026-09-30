@@ -65,7 +65,7 @@
 import type { Actor } from "../actor";
 import { ActorFlag, ZombieAux } from "../actor";
 import { ActorSetMotionBlended } from "../class30/motion_cue";
-import { RegisterForShotTest } from "../combat/shot_test";
+import { ActorRegisterOriginInViewSpace } from "../combat/shot_test";
 import { ActorDespawn } from "../despawn";
 import { GameMode } from "../game_mode";
 import { G } from "../globals";
@@ -329,36 +329,6 @@ export function CatBranchTriggerUpdate(obj: Actor, host: GameHost): void {
 }
 
 /**
- * `ActorRegisterOriginInViewSpace` — `FUN_0043F950`. The actor's own
- * position, through `g_camera_world_to_view[g_camera_index]`, into
- * `obj+0x70..0x78`, and then `RegisterForShotTest`.
- *
- * Ghidra's body ends at the `MatrixStackPop`, which it believes does not
- * return, so the pseudocode stops one call short (`L35`). The bytes carry on:
- *
- * ```
- * 0043F9B3  MOV [ESI+0x70],ECX / [ESI+0x74],EDX / [ESI+0x78],EAX
- * 0043F9BC  CALL MatrixStackPop(1)
- * 0043F9C1  PUSH ESI
- * 0043F9C2  CALL 0x00405160                  ; RegisterForShotTest(obj)
- * ```
- *
- * So the trigger is tested as one sphere of `obj+0x124` about its **feet** —
- * not about a bone, and not lifted — and it is the only caller.
- *
- * The port keeps `obj+0x70..0x78` in world space ({@link Actor.shotCentre})
- * and `RegisterForShotTest` takes the depth itself, so the transform is the
- * identity here.
- */
-export function ActorRegisterOriginInViewSpace(obj: Actor,
-                                                 host: GameHost): void {
-  obj.shotCentre.x = obj.pos.x;
-  obj.shotCentre.y = obj.pos.y;
-  obj.shotCentre.z = obj.pos.z;
-  RegisterForShotTest(obj, host);
-}
-
-/**
  * [port-only] The engine installs `CatMotionListUpdate` or
  * `CatBranchTriggerUpdate` in `*obj` once, in `CatInit`, and never swaps it;
  * this is that choice written as a test on the sub-type, which is what
@@ -404,7 +374,8 @@ export const CatHandler: ClassHandler = {
   // The class reads `obj+0x34` bit 3 itself and has no hit points.
   ownsShotResult: true,
   // `CatBranchTriggerUpdate` registers itself through
-  // `ActorRegisterOriginInViewSpace`, and `CatMotionListUpdate` never does:
+  // `ActorRegisterOriginInViewSpace` (`FUN_0043F950`, in
+  // `combat/shot_test.ts`), and `CatMotionListUpdate` never does:
   // the cat that plays its list is not in the shot test at all.
   registersForShotTest: true,
   debug: CatDebug,

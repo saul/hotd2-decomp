@@ -44,6 +44,7 @@ import {
 import { SpawnClass } from "../../game/spawn_class";
 import type { Actor, HumanoidActor } from "../../game/actor";
 import type { Instance } from "./instance";
+import { OneHitTargetHookDraws } from "./class20_hook";
 
 /** One extra model the hook draws this frame. */
 export interface HookDraw {
@@ -134,8 +135,12 @@ export function syncHumanoidHookDraws(
     inst: Instance, clone: (slot: number) => Object3D | null): void {
   const a = inst.a;
   const have = inst.hookDraws ?? (inst.hookDraws = new Map());
+  // Class 0x20's hook hangs its second models the same way -- see
+  // `class20_hook.ts`.
   const want = a.cls === SpawnClass.ScriptedHumanoid
-    ? HumanoidHookDraws(a, (a as HumanoidActor).hum.playCursor) : [];
+    ? HumanoidHookDraws(a, (a as HumanoidActor).hum.playCursor)
+    : a.cls === SpawnClass.OneHitTarget ? OneHitTargetHookDraws(inst.type)
+      : [];
   const seen = new Set<string>();
   for (const d of want) {
     const bone = inst.bones.get(d.bone);

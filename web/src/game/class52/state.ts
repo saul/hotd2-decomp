@@ -43,6 +43,13 @@ export interface MouseTail {
   vz: number;             // +0x08
   /** `sub+0x0C` — 0.4, and the only speed the class has. */
   speed: number;          // +0x0C
+  /**
+   * `sub+0x10` — the mouse's height on the frame the trigger was shot,
+   * stored by `MouseBranchTriggerUpdate` at `0x0043F7A9` and read by nothing
+   * in the class `[likely]` (no other instruction of either routine names
+   * `sub+0x10`); carried because the routine writes it.
+   */
+  hitY: number;           // +0x10
   /** `sub+0x18`. */
   state: MouseState;      // +0x18
   /** `sub+0x1C` — frames lived. A wanderer despawns past 600. */
@@ -64,7 +71,7 @@ export interface MouseTail {
  */
 export function makeMouseTail(): MouseTail {
   return {
-    vx: 0, vz: 0, speed: 0, state: MouseState.Run, life: 0, paused: 0,
+    vx: 0, vz: 0, speed: 0, hitY: 0, state: MouseState.Run, life: 0, paused: 0,
     frame: 0, lastFrame: 0, firstFrame: 0, subtype: 0,
   };
 }

@@ -7,6 +7,9 @@ import { MOTION_FLAGS_INIT, MotionFlag } from "../../src/game/actor";
 import { G, HIT_SLOT_NONE, ResetGameGlobals } from "../../src/game/globals";
 import { NULL_HOST, type GameHost } from "../../src/game/host";
 import { MarkActorShot } from "../../src/game/combat/shot";
+import {
+  ShotTestListReset, ShotTestPickedHere,
+} from "../../src/game/combat/shot_test";
 import { SetGameTables, T } from "../../src/game/tables";
 import { ActorFlag, type Actor } from "../../src/game/actor";
 import { ENEMY_CLASSES, g_class_handlers } from "../../src/game/registry";
@@ -284,6 +287,109 @@ console.log("\nclass 0x21, the rescue target and stage 2's first fork:");
     check("...and is abandoned, not freed",
           (a.rescue.state as RescueTargetState) === RescueTargetState.Abandoned,
           String(a.rescue.state));
+  }
+
+  // **Only the held state is in the shot test.** `RescueTargetHeldState`'s
+  // tail, `0x00451C8D`..`0x00451D08`: `obj+0x70 = view(obj+0x100)`, bit 3
+  // cleared, `RegisterForShotTest` -- and a scan of the class's code for a
+  // call to any of the three registration routines finds that one site and
+  // nothing else. So the ride-in and the abandoned target are never
+  // candidates, and a bullet passes through them. The port's pick found
+  // every living class-0x21 actor by its bones.
+  {
+    const { a, events, rng } = rescueScene();
+    const listed = (): boolean =>
+      G.g_shot_test_list.some((e) => e.at === a.at);
+    check("the class is picked through the shot-test list",
+          g_class_handlers[SpawnClass.RankScaledEnemy]?.registersForShotTest
+            === true && ShotTestPickedHere(a));
+    G.g_cam_path_frame = 0x20;
+    ShotTestListReset();
+    rFrame(a, events, rng);
+    check("riding in, it is not in the shot test",
+          a.rescue.state === RescueTargetState.RideIn && !listed(),
+          `${RescueTargetState[a.rescue.state]} listed ${listed()}`);
+    G.g_cam_path_frame = 0xc0;
+    rFrame(a, events, rng);               // sub 0 -> 1
+    ShotTestListReset();
+    rFrame(a, events, rng);
+    check("...nor on the frame it hands over",
+          (a.rescue.state as RescueTargetState) === RescueTargetState.Held
+          && !listed(), `listed ${listed()}`);
+    ShotTestListReset();
+    rFrame(a, events, rng);
+    check("held, it files itself every frame", listed());
+    G.g_cam_path_frame = 0x122;
+    ShotTestListReset();
+    rFrame(a, events, rng);
+    check("...and not on the frame the camera abandons it",
+          (a.rescue.state as RescueTargetState) === RescueTargetState.Abandoned
+          && !listed(), `listed ${listed()}`);
+    ShotTestListReset();
+    rFrame(a, events, rng);
+    check("...nor ever after", !listed());
+  }
+
+  // **Each part it is hit on has its own feedback**, before any score:
+  // `ActorPlayHitVoice(obj, 0)` at `0x00451A03` (`PUSH EBX`, zeroed at
+  // `0x004519D9`) and `SpawnBoneHitSprite(obj, part)` at `0x00451A18`. The
+  // fixture's voice table gives the hurt line an id nothing else here plays.
+  {
+    const { a, events, rng } = rescueScene();
+    SetGameTables({
+      ...RESCUE_CHARS,
+      combat: {
+        impact: [{ id: 1, file: "" }], head_impact: [{ id: 2, file: "" }],
+        voice: { hurt: [{ id: 10, file: "" }, { id: 11, file: "" }],
+                 kill: [{ id: 20, file: "" }, { id: 21, file: "" }],
+                 head: [{ id: 30, file: "" }, { id: 31, file: "" }] },
+        voice_set_a_types: [0, 2, 5, 6, 9, 0x0e, 0x0f, 0x10, 0x11],
+        ricochet: {},
+      },
+    } as unknown as CharactersJson, undefined, undefined, undefined);
+    a.rescue.state = RescueTargetState.Held;
+    G.g_cam_path_frame = 0xc0;
+    const heard: number[] = [];
+    events.on("sound.play", (e) => heard.push(e.id));
+    const sprays = G.g_blood_sprays.length;
+    MarkActorShot(a, 0, 4);
+    rFrame(a, events, rng);
+    check("a part hit that is not the rescue plays the hurt voice -- an "
+          + "impact and set B's hurt line, type 7 being set B",
+          a.hp === 1 && heard.length === 2 && heard[0] === 1 && heard[1] === 11,
+          `hp ${a.hp} heard ${JSON.stringify(heard)}`);
+    const spray = G.g_blood_sprays.slice(sprays);
+    check("...and throws the hit sprite on that part",
+          spray.length === 1 && spray[0].at === a.at && spray[0].bone === 4,
+          JSON.stringify(spray));
+    check("...and the shot's bit 3 is cleared at the tail, on its way into "
+          + "the shot test", (a.flags & ActorFlag.Hit) === 0
+          && G.g_shot_test_list.some((e) => e.at === a.at));
+  }
+
+  // `RescueTargetInit`'s shot sphere and its big head. `MOV EAX,
+  // [EDX*4 + 0x4C4D28]; MOV [ESI+0x124], EAX` at `0x00451780`; and from
+  // `0x0045179C`, bytes Ghidra decodes on the wrong boundary, `CMP byte ptr
+  // [0x009C88A8], AL; JNZ; FLD [EDI+0x210]; FADD ST0,ST0; FSTP [EDI+0x210]`
+  // in Original Mode -- bone 2's radius, doubled.
+  {
+    const plain = rescueScene();
+    check("the Init writes the character's shot radius",
+          plain.a.hitRadius === TYPE.actor_radius && plain.a.cameraSlot === -1,
+          `r ${plain.a.hitRadius} slot ${plain.a.cameraSlot}`);
+    const head = plain.a.boneRadius["2"];
+    ResetGameGlobals();
+    EnterPlay();
+    SetGameTables(RESCUE_CHARS, undefined, undefined, undefined);
+    G.g_GameMode = GameMode.Original;
+    G.g_original_item_big_head = 1;
+    const big = ActorSpawn(0x7d4, SpawnClass.RankScaledEnemy, 7, "rescue",
+                           undefined, new Rng(3));
+    G.g_original_item_big_head = 0;
+    G.g_GameMode = GameMode.Arcade;
+    check("...and doubles the head's sphere under the big-head item",
+          head > 0 && big.boneRadius["2"] === Math.fround(head * 2),
+          `${head} -> ${big.boneRadius["2"]}`);
   }
 }
 
@@ -1070,18 +1176,18 @@ console.log("\nclasses 0x52 and 0x53, the two shootable triggers:");
     a.pos = vec3(-500, 0, 0);
     a.yaw = 0x4000;                    // -x in the port's world convention
     MarkActorShot(a, 0, 0);
-    MouseBranchTriggerUpdate(a);
+    MouseBranchTriggerUpdate(a, NULL_HOST);
     check("the shot writes the route and starts the flight",
           G.g_script_branch_var === 1 && a.mouse.state === MouseState.Pause,
           `var ${G.g_script_branch_var} state ${a.mouse.state}`);
-    MouseBranchTriggerUpdate(a);
+    MouseBranchTriggerUpdate(a, NULL_HOST);
     check("...which resolves to subtype 3's own arm",
           a.mouse.state === MouseState.FleeSubtype3, String(a.mouse.state));
     const x0 = a.pos.x;
-    MouseBranchTriggerUpdate(a);
+    MouseBranchTriggerUpdate(a, NULL_HOST);
     check("...and it moves", a.pos.x !== x0, `${x0} -> ${a.pos.x}`);
     a.pos.x = -80;                     // past subtype 3's bound of -87
-    MouseBranchTriggerUpdate(a);
+    MouseBranchTriggerUpdate(a, NULL_HOST);
     check("...until it passes its bound, and then stops",
           a.mouse.state === MouseState.Stopped, String(a.mouse.state));
   }
@@ -1090,12 +1196,53 @@ console.log("\nclasses 0x52 and 0x53, the two shootable triggers:");
   {
     const a = triggerScene(SpawnClass.Mouse, { class52: { subtype: 4 } });
     G.g_script_flags[0x22] = 1;
-    MouseBranchTriggerUpdate(a);
+    MouseBranchTriggerUpdate(a, NULL_HOST);
     check("subtype 4's own script flag takes it away", a.despawned);
     const b = triggerScene(SpawnClass.Mouse, { class52: { subtype: 4 } });
     G.g_script_flags[0x21] = 1;        // subtype 3's, not this one's
-    MouseBranchTriggerUpdate(b);
+    MouseBranchTriggerUpdate(b, NULL_HOST);
     check("...and another subtype's does not", !b.despawned);
+  }
+
+  // **Only the trigger is ever in the shot test.** `MouseBranchTriggerUpdate`
+  // ends in `ActorRegisterOriginInViewSpace` (`FUN_0043F950`) at
+  // `0x0043F909`, every frame it does not despawn, and a scan of the class's
+  // code for calls to the three registration routines finds nothing else:
+  // `MouseWanderUpdate` never registers. The port's pick found a running
+  // mouse by its drawn node, and a shot at one stopped there.
+  {
+    const listed = (a: Actor): boolean =>
+      G.g_shot_test_list.some((e) => e.at === a.at);
+    const wander = triggerScene(SpawnClass.Mouse, { class52: { subtype: 1 } });
+    ShotTestListReset();
+    for (let i = 0; i < 5; i++) tick(wander);
+    check("a wandering mouse is never in the shot test",
+          !wander.despawned && !listed(wander),
+          `despawned ${wander.despawned} listed ${listed(wander)}`);
+    check("...and the class is picked only through that list",
+          g_class_handlers[SpawnClass.Mouse]?.registersForShotTest === true
+          && ShotTestPickedHere(wander));
+    const trig = triggerScene(SpawnClass.Mouse, { class52: { subtype: 3 } });
+    if (trig.cls !== SpawnClass.Mouse) throw new Error("not class 0x52");
+    trig.pos = vec3(-500, 2, 7);
+    ShotTestListReset();
+    tick(trig);
+    check("a trigger files itself, at its own feet",
+          listed(trig) && trig.shotCentre.x === -500
+          && trig.shotCentre.y === 2 && trig.shotCentre.z === 7,
+          `${listed(trig)} ${JSON.stringify(trig.shotCentre)}`);
+    MarkActorShot(trig, 0, 0);
+    ShotTestListReset();
+    tick(trig);
+    check("...and on the frame it is shot, which stores its height at "
+          + "sub+0x10", listed(trig) && trig.mouse.hitY === 2
+          && trig.mouse.state === MouseState.Pause,
+          `${listed(trig)} y ${trig.mouse.hitY} state ${trig.mouse.state}`);
+    trig.mouse.state = MouseState.Stopped;
+    ShotTestListReset();
+    tick(trig);
+    check("...and still once it has stopped, which no arm handles",
+          listed(trig));
   }
 
   // The cat answers in block 8 and nowhere else, and it is the only writer in

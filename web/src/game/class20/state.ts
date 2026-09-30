@@ -80,3 +80,26 @@ export interface OneHitTargetTail {
 export function makeOneHitTargetTail(): OneHitTargetTail {
   return { state: OneHitTargetState.Alive };
 }
+
+/**
+ * The bones `OneHitTargetInit` (`FUN_00448ED0`) takes off the skeleton's own
+ * draw: slot and hit radius both zeroed, `MOV [ESI + n], EBP` with
+ * `ESI = obj+0x194` and `EBP = 0` at `0x00448F8E`..`0x00448FB8` -- `obj+0x4DC`
+ * and `+0x554` are bone 5's record `+0x00` and `+0x78`, `+0x68C`/`+0x704`
+ * bone 8's, `+0x8CC`/`+0x944` bone 12's, `+0xA7C`/`+0xAF4` bone 15's
+ * (`obj+0x20C + bone*0x90`). `[proved]`
+ */
+export const CLASS20_CARRIED_BONES: readonly number[] = [5, 8, 12, 15];
+
+/**
+ * The bones `OneHitTargetBoneDrawHook` (`FUN_00449530`) draws a second model
+ * on: the byte map at `0x00449610`, indexed by `bone - 2`, gives 4, 7, 11 and
+ * 14 entry 1 of the jump table at `0x00449604` -- the arm at `0x00449566`
+ * (bone 2 gets entry 0, the big-head arm, and the rest entry 2, the plain
+ * draw) -- which draws the record's slot, then `Push; Translate(child+0x04, +0x08, +0x0C);
+ * AssetDrawSlot(child+0x00); Pop` with `child = node+0x18` -- the skeleton
+ * node's first child, whose record the Init zeroed. Each of these is the
+ * parent of the bone at the same index of {@link CLASS20_CARRIED_BONES}.
+ * `[proved]`
+ */
+export const CLASS20_CARRYING_BONES: readonly number[] = [4, 7, 11, 14];

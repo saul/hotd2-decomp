@@ -487,6 +487,18 @@ export const G = {
    */
   g_original_item_part_scale: 0,
   /**
+   * `g_original_item_big_head` — 0x009C88A8, u8. Original Mode item `0x15`
+   * sets it (`FUN_00416240`'s `case 0x15`, `MOV byte ptr [0x009c88a8], BL`
+   * at `0x004160E7`; unported, like the item arms above) and
+   * `ResetOriginalModeLoadout` (`FUN_0048A0D0`) zeroes it at `0x0048A0E0`.
+   * Read only beside `g_GameMode == 1`: the `Init`s of classes 0x20
+   * (`0x00448FCD`), 0x21 (`0x0045179C`), 0x30 and 0x31 widen bone 2's hit
+   * radius while it is up (`FADD ST0,ST0` on `obj+0x3A4`, class 0x30's type
+   * 0xE a `FMUL` instead), and their bone hooks draw bone 2 at twice its
+   * size. Nothing in the port fills an item slot, so it stays 0.
+   */
+  g_original_item_big_head: 0,
+  /**
    * The four auto-fire bytes at `+0x10..+0x13` of `g_original_item_slots`
    * (`0x009A2250 + player*0x14`), which `OriginalWeaponLoadFireParams`
    * (`FUN_00416420`) loads and `PlayerFireOriginalModeWeapon` counts down:

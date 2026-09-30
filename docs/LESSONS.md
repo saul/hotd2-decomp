@@ -301,6 +301,25 @@ every `evt/` table for it before calling it unread**, and subtract the
 occurrences the opcodes explain: what is left is a descriptor, and the
 descriptor's class says who reads it.
 
+**LXX -- A repair of the database is not a re-reading of what was written from
+it, and a negative is what the cut pseudocode wrote best.** `L89` put back the
+bodies 1,085 flow overrides had cut, and every row, comment and `[open]`
+written from the cut pseudocode stayed as it was. `FishBeginSwimAway`'s row
+said "NOTHING EVER REMOVES THE OBJECT: the frame count is never read",
+`FishSwimAwayTick`'s "No despawn", and the port had built on both: a fish that
+found the four attack slots taken swam off at the surface for ever, still
+shootable, because the countdown and the `ActorDespawn` sit after the
+`MatrixStackPop` the old database stopped at -- and today's pseudocode prints
+them. A positive reading made from a cut body is short; a claim that something
+*never* happens was made entirely of the missing bytes. The same sweep found
+`MouseInit`'s row naming `FUN_00409270` (the hit-slot claim) for the call at
+`0x0043F557`, which is `RegisterEnemySlot`, and `RescueTargetInit`'s Original
+Mode big-head test behind an instruction boundary Ghidra still decodes wrong
+(`TEST AL,0x88` at `0x0045179E`; the instruction starts at `0x0045179C`).
+**When a row or a comment says a routine never does something, re-decompile
+the routine before building on the claim**, and read the bytes of any body
+that crosses a call `L89` names or a stretch the listing shows as nonsense.
+
 
 ## Transcribing behaviour into the port
 

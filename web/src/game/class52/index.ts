@@ -43,6 +43,17 @@
  * writing 1 and 2. The two alternates and the two mice line up with nothing
  * left over.
  *
+ * ## Only the trigger is ever in the shot test
+ *
+ * `MouseBranchTriggerUpdate` ends every frame it does not despawn in
+ * `ActorRegisterOriginInViewSpace` (`FUN_0043F950`, `0x0043F909`): one sphere
+ * of `obj+0x124` about its feet. `MouseWanderUpdate` calls nothing that
+ * registers `[proved]` -- a scan of `0x0043F4C0`..`0x0043F950` for `E8` calls
+ * to it, `RegisterForShotTest` (`FUN_00405160`) and `ActorRegisterCameraPoint`
+ * (`FUN_00409B70`) finds only the trigger's -- so a running mouse is never a
+ * candidate and a shot at it goes on to what is behind. The port's pick used
+ * to find it anyway, by its drawn node.
+ *
  * ## What is not ported
  *
  * The draw itself, which is `render/slotmodels.ts`'s. Subtype 1's
@@ -54,6 +65,8 @@ import { RegisterEnemySlot } from "../camera/slots";
 import type { Actor } from "../actor";
 import { ActorFlag } from "../actor";
 import { ActorDespawn } from "../despawn";
+import { ActorRegisterOriginInViewSpace } from "../combat/shot_test";
+import type { GameHost } from "../host";
 import { GameMode } from "../game_mode";
 import { G } from "../globals";
 import {
@@ -175,7 +188,7 @@ function MouseAdvanceStrip(sub: MouseTail): void {
  * sub->velocity = (sin yaw, _, cos yaw) * 0.4;
  * sub->+0x24 = 0x1385;  sub->+0x22 = 0x138E;
  * sub->+0x20 = 0x1385 + rand() % 10;
- * FUN_00409270(obj);                          // claim a slot at 0x009C88C0
+ * RegisterEnemySlot(obj);                     // 0x00408E80, at 0x0043F557
  * if (sub->+0x26 < 2)       { ...rebuild the velocity...; *obj = MouseWanderUpdate; }
  * else if (g_GameMode == 1) { sub->velocity = 0; sub->+0x20 = 0x1385;
  *                             *obj = MouseBranchTriggerUpdate; }
@@ -292,6 +305,7 @@ export function MouseWanderUpdate(obj: Actor, f: ClassFrame): void {
  *         g_script_branch_var = *(s8 *)(0x00564442 + subtype);
  *         sub->+0x18 = 1;
  *         sub->+0x20 = sub->+0x24;
+ *         sub->+0x10 = obj->y;
  *     }
  *     obj->+0x34 &= ~8;
  *     break;
@@ -301,6 +315,7 @@ export function MouseWanderUpdate(obj: Actor, f: ClassFrame): void {
  *   case 4:  ...if (obj->x < -184.0) sub->+0x18 = 10;
  *   case 11: ActorDespawn(obj);
  * }
+ * ...draw...;  ActorRegisterOriginInViewSpace(obj);     // 0x0043F909
  * ```
  *
  * **The hit bit is cleared whether or not the gate passed**, which is what
@@ -314,7 +329,7 @@ export function MouseWanderUpdate(obj: Actor, f: ClassFrame): void {
  * and keeps drawing where it stopped; that is transcribed as written rather
  * than turned into the despawn it looks like it ought to be.
  */
-export function MouseBranchTriggerUpdate(obj: Actor): void {
+export function MouseBranchTriggerUpdate(obj: Actor, host: GameHost): void {
   const sub = Tail(obj);
   if (!sub) return;
   const remove = MOUSE_REMOVE_FLAG[sub.subtype];
@@ -330,6 +345,8 @@ export function MouseBranchTriggerUpdate(obj: Actor): void {
         if (value !== undefined) G.g_script_branch_var = value;
         sub.state = MouseState.Pause;
         sub.frame = sub.firstFrame;
+        // `MOV EDX, [EDI+0x44]; MOV [ESI+0x10], EDX` at `0x0043F7A9`.
+        sub.hitY = obj.pos.y;
       }
       obj.flags &= ~ActorFlag.Hit;
       obj.pendingHit = null;
@@ -359,10 +376,13 @@ export function MouseBranchTriggerUpdate(obj: Actor): void {
     }
     case MouseState.Leave:
       ActorDespawn(obj);
-      break;
+      return;
     default:
       break;
   }
+  // The draw is `render/slotmodels.ts`'s; then, on every frame the routine
+  // did not despawn, `CALL 0x0043F950` at `0x0043F909`.
+  ActorRegisterOriginInViewSpace(obj, host);
 }
 
 /**
@@ -374,7 +394,7 @@ export function MouseUpdate(obj: Actor, f: ClassFrame): void {
   const sub = Tail(obj);
   if (!sub) return;
   if (sub.subtype < MOUSE_FIRST_TRIGGER_SUBTYPE) MouseWanderUpdate(obj, f);
-  else MouseBranchTriggerUpdate(obj);
+  else MouseBranchTriggerUpdate(obj, f.host);
 }
 
 function MouseDebug(obj: Actor): ActorDebug {
@@ -399,6 +419,9 @@ export const MouseHandler: ClassHandler = {
   // The class reads `obj+0x34` bit 3 itself and has no hit points at all —
   // `ResolveHit` would look up a damage row it has no entry in.
   ownsShotResult: true,
+  // Only the trigger registers, through `ActorRegisterOriginInViewSpace`;
+  // the wanderer is never in the shot test. See the file comment.
+  registersForShotTest: true,
   debug: MouseDebug,
 };
 

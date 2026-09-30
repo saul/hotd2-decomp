@@ -40,6 +40,8 @@ import { build, goreEntry, rigEntry } from "./charbuild";
 import { Boss4SwapSlots } from "../game/class19/slots";
 // Data only, as `class25/state.ts` is for `bundle.ts`: the hook's slots.
 import { HumanoidHookDrawSlots } from "../game/class25/state";
+// ...and class 0x20's carrying bones, for the same reason.
+import { CLASS20_CARRYING_BONES } from "../game/class20/state";
 import type { Character } from "./charbuild";
 import { BODY_CREATURE_HOST_CLIPS, CLASS20_DEATH_MOTION,
          CLASS20_IDLE_MOTIONS, CLASS21_FREED_MOTION, CLASS30_DEATH_CLIPS,
@@ -2117,6 +2119,15 @@ export async function resolveForStage(
     // the clip `OneHitTargetUpdate` cues the frame the actor is shot.
     if (cls === 0x20) {
       entryClips.push(...CLASS20_IDLE_MOTIONS, CLASS20_DEATH_MOTION);
+      // ...and the four models `OneHitTargetBoneDrawHook` (`FUN_00449530`)
+      // draws on bones 4, 7, 11 and 14: each one's first skeleton child's
+      // own slot, whose node `OneHitTargetInit` stops drawing. The skeleton
+      // names them as bones, not by slot, and the hook's draw clones by slot.
+      for (const bone of CLASS20_CARRYING_BONES) {
+        const i = c.bones.findIndex((b) => b.bone === bone);
+        const child = i < 0 ? undefined : c.bones.find((b) => b.parent === i);
+        if (child && child.slot) c.heldSlots.add(child.slot);
+      }
     }
     // Class 0x21's freed clip. The idle comes from `MOTION_RULES`; this is the
     // one `RescueTargetHeldState` swaps to when the target is rescued.

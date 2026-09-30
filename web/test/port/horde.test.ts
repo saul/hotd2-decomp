@@ -385,6 +385,10 @@ console.log("\nznjoe's creature:");
     const sounds: number[] = [];
     events.on("sound.play", (e) => sounds.push(e.id));
     const score = G.g_player_score[0];
+    // `obj+0x70` is last frame's copy of the camera-space position, and the
+    // kill is taken before the flight moves it: the position as it stands,
+    // not put through the host's camera a second time (which negates z).
+    const hitAt = vec3(c.pos.x, c.pos.y, c.pos.z);
     MarkBodyCreatureShot(c, 0);
     BodyCreatureUpdate(c, rng, JOE_HOST, events);
     check("a shot creature pays 0x50",
@@ -392,9 +396,13 @@ console.log("\nznjoe's creature:");
           `${score} -> ${G.g_player_score[0]}`);
     check("...plays COMMON\\MEET02_22.WAV", sounds.includes(0x3b16a9),
           `sounds ${sounds.map((x) => x.toString(16)).join(",")}`);
-    check("...leaves blood at the point it was hit",
-          G.g_point_blood_sprays.length === 1,
-          `${G.g_point_blood_sprays.length} sprays`);
+    const spray = G.g_point_blood_sprays[0]?.pos;
+    check("...leaves blood at the point it was hit, in camera space",
+          G.g_point_blood_sprays.length === 1 && !!spray
+          && spray.x === hitAt.x && spray.y === hitAt.y && spray.z === hitAt.z
+          && hitAt.z !== 0,
+          `${G.g_point_blood_sprays.length} sprays at ${JSON.stringify(spray)}`
+          + ` want ${JSON.stringify(hitAt)}`);
     check("...and falls the other way",
           c.state === BodyCreatureState.FallShot && c.flight.fallSpin > 0,
           `state ${BodyCreatureState[c.state]} spin ${c.flight.fallSpin}`);
@@ -967,6 +975,49 @@ console.log("\nclass 0x40, the horde:");
             return !t || t.kind === HordeKind.EmergeProp;
           }),
           G.g_object_list.map((o) => o.name).join(","));
+  }
+
+  {
+    // **The blood is at the member's view-space point.** `0x0043C4AD` hands
+    // `SpawnBloodSprayAtPoint` `obj + 0x40`, which reads `obj+0x70`: the
+    // member's position through the camera, as last frame's tail left it. A
+    // camera that turns a quarter about y and moves (L48), so the world
+    // position handed over as it stands lands somewhere else.
+    const view = (p: Vec3, out: Vec3) => {
+      out.x = p.z + 5; out.y = p.y - 3; out.z = -p.x - 20;
+    };
+    const host: GameHost = {
+      ...NULL_HOST,
+      viewSpaceOfPoint: (p, out) => { view(p, out); return true; },
+    };
+    const viewStep = (rng: Rng) => {
+      G.g_frame_counter += 1;
+      for (const o of [...G.g_object_list]) {
+        if (!o.despawned) HordeUpdate(o, { dt: 1 / 60, rng, host });
+      }
+      G.g_object_list = G.g_object_list.filter((o) => !o.despawned);
+    };
+    const rng = new Rng(432);
+    room(0, 3, rng);
+    place(0x2b94, 1, vec3(-70, -10, -520), rng);
+    for (let i = 0; i < 3; i += 1) viewStep(rng);
+    const m0 = members()[0];
+    check("the member to shoot has come up",
+          horde(m0).state === HordeState.Enter, HordeState[horde(m0).state]);
+    const want = vec3();
+    view(m0.pos, want);
+    const blood = G.g_point_blood_sprays.length;
+    m0.flags |= ActorFlag.Hit | ActorFlag.HitByPlayer0;
+    viewStep(rng);
+    const got = G.g_point_blood_sprays[blood]?.pos;
+    check("a shot member bleeds at its view-space point, not its position",
+          horde(m0).state === HordeState.Dead
+          && G.g_point_blood_sprays.length === blood + 1 && !!got
+          && Math.abs(got.x - want.x) < 1e-9
+          && Math.abs(got.y - want.y) < 1e-9
+          && Math.abs(got.z - want.z) < 1e-9,
+          `${HordeState[horde(m0).state]} want ${JSON.stringify(want)} `
+          + `got ${JSON.stringify(got)}`);
   }
 
   {

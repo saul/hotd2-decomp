@@ -35,10 +35,12 @@
  *
  * Also callers, and not actors this module can answer for:
  * `BodyCreatureUpdate` (`FUN_0043E880`, `znjoe`'s released creatures, a pool of
- * their own) and `ScorePickupUpdate` (`FUN_004724A0`, a class-0x41 pickup).
+ * their own), `ScorePickupUpdate` (`FUN_004724A0`, a class-0x41 pickup) and
+ * `LoneHordeMemberUpdate47` (`FUN_0043D800`, class 0x47, which no shipped
+ * descriptor places and the port does not have).
  * `[open]` The remaining callers are unnamed routines
  * (`FUN_004021D0`, `FUN_00415120`, `FUN_00420550`, `FUN_00420820`,
- * `FUN_00423050`, `FUN_004231C0`, `FUN_0043D800`,
+ * `FUN_00423050`, `FUN_004231C0`,
  * `FUN_004729E0`, `FUN_0047FE40`, `FUN_00483A40`, `FUN_00483B40`,
  * `FUN_00483CE0`, `FUN_0049A210`,
  * `FUN_0049A470`, `FUN_0049A680`, `FUN_0049A7F0`, `FUN_0049AFB0`); which

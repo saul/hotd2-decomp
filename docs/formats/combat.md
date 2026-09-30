@@ -1443,6 +1443,19 @@ Four things follow.
 left out. `ResolveHit` fires one beside the severed head, and
 `OneHitTargetUpdate` fires one per hit bone.
 
+The creatures that are shot whole bleed from a **fixed point** instead:
+`SpawnBloodSprayAtPoint` (`FUN_00430C50`) starts a task that draws the same
+twenty-five cels (`eff+0x54` from `0x3A`) under `MatrixLoadIdentity` at three
+floats it copies from `arg + 0x30` (`MOV EDX, [ECX + 0x30]` at `0x00430C66`).
+Every one of its eight callers passes its own `obj + 0x40`, so the point is
+**`obj+0x70..0x78`, the view-space shot point** the actor's own last
+`RegisterForShotTest` published, and not its position `[proved]`. Each
+caller takes the kill before it moves, so that is last frame's point: the
+view of `(x, y + 1, z)` for the three bat routines, of the position for the
+horde member and class 0x47's `LoneHordeMemberUpdate47` (`FUN_0043D800`),
+and for `BodyCreatureUpdate` the position itself, which is already camera
+space.
+
 ### What leaves the gun — `PlayerShotEffectSpawn`
 
 Every trigger pull, hit or miss, fills one slot of **three** six-deep rings per

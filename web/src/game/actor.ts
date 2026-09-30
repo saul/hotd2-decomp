@@ -177,7 +177,10 @@ export enum ActorFlag {
    * result to 5, so a downed thrower only ricochets — a real invulnerability
    * window, counted down by `obj+0x133C`. `ThrowerStateDelayedPounce`
    * (`FUN_0044E830`) holds it up for the whole of its wait instead
-   * (`OR CH, 0x1` at `0x0044E884`, `AND CH, 0xfe` at `0x0044E8BD`).
+   * (`OR CH, 0x1` at `0x0044E884`, `AND CH, 0xfe` at `0x0044E8BD`), and
+   * `ThrowerStateGrabPlayer` (`FUN_0044EF90`) from its spawn to the first
+   * solid frame of its hold (`OR AH, 0x41` at `0x0044EFBB`, `AND AH, 0xfe` at
+   * `0x0044F1ED`).
    */
   ShotImmune = 0x100,
   /**
@@ -205,6 +208,11 @@ export enum ActorFlag {
    * `ThrowerStateRearm`'s exit, and `ActorPlayHitReaction`'s own alt arm
    * (`004545F5 OR CH, 0x20`), which `ZombieTickAltHitReaction`
    * (`FUN_004547C0`) takes back down when that reaction has played out.
+   * `ThrowerStateGrabPlayer` (`FUN_0044EF90`) raises it as its rider lands on
+   * the car (`0044F127 OR DH, 0x20`) and never lowers it, because its way out
+   * is `ThrowerLeave` (`FUN_0044AD60`): shot, the rider bleeds and finishes
+   * its grab. The port did not raise it, and stage 5's riders tumbled off
+   * into the hub and held the car on the bridge.
    *
    * **It was called `ArcSpent`**, after the one consequence class 0x31's fall
    * states get from it — the second knockdown of a life finds it already up

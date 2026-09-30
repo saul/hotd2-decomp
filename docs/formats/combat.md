@@ -894,7 +894,9 @@ something else owns the body, and each clears it on the way out —
 `ZombieStateMotionCue21`'s exit, `ZombieApplyScriptMode`'s `0x2400`,
 `ThrowerStateFallToSurface`, `ThrowerStateRearm`'s exit, and this routine's own
 alt arm at `004545F5`, which `ZombieTickAltHitReaction` (`FUN_004547C0`) takes
-back down.
+back down. The one writer that never lowers it is `ThrowerStateGrabPlayer`
+(`FUN_0044EF90`), whose rider raises it as it lands on the car
+(`0044F127 OR DH, 0x20`) and leaves by `ThrowerLeave`, out of the pool.
 
 `ThrowerOnShot` (`00449A95 f6c420 TEST AH, 0x20`) is the only other reader, and
 it skips the stumble, the knockdown and the tumble. **Two readers, both
@@ -2551,7 +2553,7 @@ makes its fall and its knock-back physical.
 | 24 | `ThrowerStateCloseAndStrike` | `zskamere`'s standing swing |
 | **25** | `ThrowerStateWithdraw` | back off, then stand |
 | 26 | `ThrowerStatePathFollow` | a route walked before fighting |
-| 27 | `ThrowerStateGrabPlayer` | a camera-relative grab — stage 5's four `zslman` |
+| 27 | `ThrowerStateGrabPlayer` | a camera-relative grab — stage 5's four `zslman`; never knocked off it (below) |
 | 28 | `ThrowerStateWaitForCue` | wait on a timer, a path frame or a flag |
 | 29, 30 | `ThrowerStateRearm` / `ThrowerStateRestoreBothHands` | the weapon goes back |
 | 31 | `ThrowerStateThrow` | see §10 |
@@ -3207,6 +3209,34 @@ is load-bearing: a result-1 hit on **bone 2** that swaps the head model to
 the only thing in the class that routes states 1 and 2 into **state 17**. So a
 thrower plays its get-up exactly when you have taken its head off and it has
 survived it.
+
+### The car's riders are never knocked off — `ThrowerStateGrabPlayer`
+
+Stage 5's four `zslman` in state 27 (block 2 step 4, `0x1E04`/`0x1E40`, and
+block 5 step 1, `0x2E80`/`0x2EBC`) hang off the camera, drop onto the car on a
+path frame, hold, grab a player and throw themselves off. The state keeps both
+of `ThrowerOnShot`'s vetoes up in turn `[proved]` (`FUN_0044EF90`, disassembled
+past every call):
+
+| where | instruction | effect |
+|---|---|---|
+| sub 0 | `0044EFBB OR AH,0x41` | `0x100` shot-immune, `0x4000` the ride clip's clock held |
+| the cue | `0044F092 AND AH,0xBF` | the clip runs; still shot-immune through the drop |
+| landing | `0044F127 OR DH,0x20` | `0x2000` no hit reaction, never lowered |
+| the hold's first 15 frames | `0044F1A5`/`0044F1BF OR AH,0x1` | shot-immune while it blinks |
+| every solid frame after | `0044F1ED AND AH,0xFE` | it can be hurt |
+
+So a rider ricochets from its spawn to its sixteenth frame on the car; from then
+on a shot takes hit points and, if it kills, sends it to state 2 like any other
+death — but never to state 33, whose way out is the hub. A shot still releases
+the permit (`ThrowerOnShot` calls `ThrowerReleaseAttackPermit` before either
+test), and sub 4 damages only on `obj+0x19C == 30` with `obj+0x121` held
+(`0x0044F309`), so shooting the rider in its grab is what saves the player.
+Unshot, it finishes the throw-away and `ThrowerLeave`s, which is what lets the
+`wait_enemies_alive` at block 2 step 4 op 30 open and the car cross the bridge.
+
+The landing also gives the attack cry, `ActorPlayHitVoice(obj, 3)` at
+`0x0044F157`, between the thump `0x2916A9` and the sword `0x1F23A9`.
 
 ### How far a knockdown carries a thrower
 

@@ -827,6 +827,22 @@ one the shortcut nobody wrote down. It is `L86` from the other side: there two
 inline copies were merged without comparing them, here two ports of one
 routine were kept apart without comparing them.
 
+**L99 -- A bit a state writes and never reads is read by whatever interrupts
+the state, and the state's own tests never interrupt it.**
+`ThrowerStateGrabPlayer` was ported down to its sounds and its camera ride,
+and its four writes to `obj+0x34` -- `0x4100` at spawn, `0x4000` off on the
+cue, `0x2000` on landing, `0x100` toggled through the hold -- were left out,
+because nothing in the state tests them. `ThrowerOnShot` does, before the
+state runs: `0x100` refuses the shot and `0x2000` the reaction. Without them
+stage 5's riders took a shot as a `zslman`'s tumble, whose way out is the hub,
+and a hub on a moving car never ends -- the car stopped on the bridge behind
+`wait_enemies_alive`. Every existing test of the state played it unshot, so
+all of them passed. The pseudocode showed the writes plainly; they read as
+bookkeeping. **When you transcribe a state, every store to a flag word is
+behaviour: find the reader of each bit** (a `TEST` of its mask, L32's two
+forms) **before leaving one out, and test the state with the thing that reads
+it happening** -- here a shot on every sub.
+
 ---
 
 ## Running the tools

@@ -49,6 +49,18 @@ import { WATER_SURFACE_ALSO_DRAWS } from "../game/class41/water_slots";
 import { SLIDE_SECOND_DRAW_SLOT, SLIDE_SECOND_SLOT }
   from "../game/class44/slide_slots";
 import { TYPE47_CONSTRUCTOR, TYPE47_SLOT } from "../game/class41/type47_slots";
+// ...and constructors 16, 17, 29 and 37: their models, and where their tables
+// are (`class41_rows.ts` reads them).
+import { TYPE16_CONSTRUCTOR, Type16DrawSlots }
+  from "../game/class41/type16_slots";
+import { TYPE17_CONSTRUCTOR, TYPE17_FIRST_SLOT, TYPE17_OBJECTS }
+  from "../game/class41/type17_slots";
+import { TYPE29_CONSTRUCTOR, Type29DrawSlots }
+  from "../game/class41/type29_slots";
+import {
+  TYPE37_CONSTRUCTOR, TYPE37_EFFECT, TYPE37_MOTION, Type37DrawSlots,
+} from "../game/class41/type37_slots";
+import { type16Rows, type29Rows, type37Hull } from "./class41_rows";
 // Same argument again: `hud_sprites.ts` is the id list `hud_readout.ts` draws
 // from, as data, and the exporter must put exactly those textures in.
 // The continue screen's and the credit line's are in the same file.
@@ -642,6 +654,37 @@ export function containerPlacements(tables: ExeTables, evt: evtlib.EvtFile,
           lifetime_evt_steps: 0,
           pos: [...rec.pos],
         });
+      } else if (ctor === TYPE16_CONSTRUCTOR || ctor === TYPE29_CONSTRUCTOR) {
+        // `PlaceTable16Props` and `PlaceTable29Props`: every object's point
+        // is a row of a table in the image (`breakables.type16_xz`,
+        // `type29_xyz`), so the descriptor contributes only `+0x11C`, the
+        // step lifetime each object copies.
+        out.push({
+          at: rec.offset, container: `table${ctor}`,
+          lifetime_evt_steps: rec.hp,
+        });
+      } else if (ctor === TYPE17_CONSTRUCTOR) {
+        // `PlaceType17Props` -- three objects about the placer's point, and
+        // nothing else of the descriptor. They have no lifetime word.
+        out.push({
+          at: rec.offset, container: "type17",
+          lifetime_evt_steps: 0,
+          pos: [...rec.pos],
+        });
+      } else if (ctor === TYPE37_CONSTRUCTOR) {
+        // `PlaceType37PropPair` -- two objects at the placer's point, turned by
+        // its `+0x68`; `+0x1F4` (the s8 at `desc+0x24`) is their item set and
+        // `+0x64` the set's size, `+0x11C` the lifetime. The effect and motion
+        // their break draws are literals in the constructor, named here so
+        // the effect's tree and clip travel (`scriptFlagEffectsJson`).
+        out.push({
+          at: rec.offset, container: "type37",
+          lifetime_evt_steps: rec.hp,
+          field_1f4: s8(rec.offset + 0x24),
+          set_size: rec.orient[0],
+          effect: TYPE37_EFFECT, motion: TYPE37_MOTION,
+          pos: [...rec.pos], yaw: rec.orient[1],
+        });
       } else if (ctor === 24) {
         // `PlaceChainSegments` -- twenty segments, each carrying the placer's
         // `+0x1F4` as a chain group. Group 1 is a **route-branch trigger**.
@@ -1012,6 +1055,11 @@ export function breakablesJson(tables: ExeTables,
     hull: tables.breakableHullPoints().map((p) => [...p]),
     falling_hull: tables.fallingHullPoints().map((p) => [...p]),
     fragment_hull: tables.fragmentHullPoints().map((p) => [...p]),
+    // Class 0x41 constructors 16, 29 and 37's tables, raw: the routines'
+    // own multiplies are in `game/class41/`.
+    type16_xz: type16Rows(tables),
+    type29_xyz: type29Rows(tables),
+    type37_hull: type37Hull(tables),
     shatter: tables.shatterPieces(),
     kinds: tables.propKindParams(),
     placements,
@@ -1168,7 +1216,8 @@ export async function scriptFlagEffectsJson(
   const out: Record<string, unknown> = {};
   for (const pl of placements) {
     // Every placement that names an effect and a motion: class 0x44 selector
-    // 0's window halves, and class 0x41 type 44's two breakable chairs.
+    // 0's window halves, class 0x41 type 44's two breakable chairs, and
+    // constructor 37's pair, whose break is effect 7 on motion 0x1D5.
     if (pl.effect === undefined || pl.motion === undefined) continue;
     const effect = pl.effect as number;
     const motion = pl.motion as number;
@@ -1990,6 +2039,14 @@ export async function breakableSlotEntry(
       slots.push(SLIDE_SECOND_SLOT);
     }
     if (pl.container === "type47") slots.push(TYPE47_SLOT);
+    // Constructors 16, 17, 29 and 37 draw literals: their models, 16's drop
+    // strip and 37's landing strip. 37's break effect travels as an effect.
+    if (pl.container === "table16") slots.push(...Type16DrawSlots());
+    if (pl.container === "type17") {
+      for (let i = 0; i < TYPE17_OBJECTS; i++) slots.push(TYPE17_FIRST_SLOT + i);
+    }
+    if (pl.container === "table29") slots.push(...Type29DrawSlots());
+    if (pl.container === "type37") slots.push(...Type37DrawSlots());
     for (const slot of slots) {
       if (slot && !want.includes(slot)) want.push(slot);
     }

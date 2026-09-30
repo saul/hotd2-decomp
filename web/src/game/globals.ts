@@ -487,6 +487,14 @@ export const G = {
    */
   g_original_item_part_scale: 0,
   /**
+   * `g_original_item_life_drops` — 0x009C88AA, u8. Original Mode item `0x1E`
+   * sets it (`FUN_00416240` and `FUN_00415FE0`, unported: nothing in the port
+   * fills an item slot) and `ResetOriginalModeLoadout` clears it. While it is
+   * set in Original Mode the containers that read it release the extra life
+   * in place of their item set -- `PropUpdateType37` among them.
+   */
+  g_original_item_life_drops: 0,
+  /**
    * The four auto-fire bytes at `+0x10..+0x13` of `g_original_item_slots`
    * (`0x009A2250 + player*0x14`), which `OriginalWeaponLoadFireParams`
    * (`FUN_00416420`) loads and `PlayerFireOriginalModeWeapon` counts down:
@@ -2019,6 +2027,20 @@ export const G = {
    */
   g_prop67_by_index: [0, 0, 0] as number[],
   /**
+   * `g_type37_pair` — `0x007DCDC4`, two object pointers: the pair
+   * `PlaceType37PropPair` last built, as prop ids (0 for none). Each object's
+   * `PropUpdateType37` writes itself back into its own entry every frame, and
+   * reaches the other through `[1]`. One pair of entries for every pair the
+   * scripts place.
+   */
+  g_type37_pair: [0, 0] as number[],
+  /**
+   * `g_type37_hits_left` — `0x007DCD05`, s8. `PlaceType37PropPair` writes 2
+   * and each object's first hit takes one off: at 2 a hit on object 0 knocks
+   * object 1 down, and the hit that reaches 0 lets the pair's item out.
+   */
+  g_type37_hits_left: 0,
+  /**
    * `[port-only]` in shape — what `PropUpdateType45` (`FUN_0046DAB0`) has
    * done to the four banner models it bends in place (`TYPE45_WAVE_SLOTS`):
    * the wave clock each was last bent at, `-1` for one still as authored.
@@ -3196,6 +3218,8 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   G.g_prop_shatters = [];
   G.g_prop_final_draws = [];
   G.g_prop67_by_index = [0, 0, 0];
+  G.g_type37_pair = [0, 0];
+  G.g_type37_hits_left = 0;
   G.g_prop45_wave_clock = [-1, -1, -1, -1];
   G.g_prop45_wave_clock_drawn = [-1, -1, -1, -1];
   G.g_prop_shatter_seq = 1;

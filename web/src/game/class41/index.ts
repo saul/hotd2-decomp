@@ -44,6 +44,10 @@ import { PlaceType47Prop } from "./type47";
 import { PROP75_SCRIPT_FLAG, PROP75_TYPE } from "./flag_prop";
 import { FLICKER_LIGHT_TYPE, PlaceFlickerLightProp48 } from "./type48";
 import { PlaceWaterSurface } from "./water";
+import { PlaceTable16Props } from "./type16";
+import { PlaceType17Props } from "./type17";
+import { PlaceTable29Props } from "./type29";
+import { PlaceType37PropPair } from "./type37";
 
 /**
  * `obj+0x130C` for this class — the constructor index, **not** the body
@@ -112,6 +116,26 @@ export enum PropContainerType {
    * descriptor's point. Stage 2's one spawn. See `class41/type47.ts`.
    */
   Type47Prop = 47,
+  /**
+   * `PlaceTable16Props` (`FUN_00462FE0`) -- six `dolam.bin` objects in stage
+   * 2's warehouse water, from `g_type16_prop_xz`. See `class41/type16.ts`.
+   */
+  Table16Props = 16,
+  /**
+   * `PlaceType17Props` (`FUN_004630B0`) -- three `bridge.bin` pieces falling
+   * from the placer's point. See `class41/type17.ts`.
+   */
+  Type17Props = 17,
+  /**
+   * `PlaceTable29Props` (`FUN_00463270`) -- nine `tokei_gear.bin` models from
+   * `g_type29_prop_xyz`, seven drawn. See `class41/type29.ts`.
+   */
+  Table29Props = 29,
+  /**
+   * `PlaceType37PropPair` (`FUN_004632F0`) -- two objects, one on the other,
+   * sharing an item set. See `class41/type37.ts`.
+   */
+  Type37PropPair = 37,
 }
 
 /** What one class-0x41 constructor does. `undefined` where none is ported. */
@@ -182,6 +206,25 @@ export const g_class41_constructors:
   [PropContainerType.Table66Props]: (obj) => {
     G.g_breakable_props.push(
       ...PlaceTable66Props(obj.at, obj.charType, obj.hp));
+  },
+  // Constructors 16 and 29 build from image tables the bundle carries and
+  // read only the placer's `+0x11C`; 17 reads its point; 37 its point, its
+  // `+0x68`, `+0x64`, `+0x1F4` and `+0x11C`, which the placement carries.
+  [PropContainerType.Table16Props]: (obj, f) => {
+    G.g_breakable_props.push(...PlaceTable16Props(obj.at, obj.hp, f.rng));
+  },
+  [PropContainerType.Type17Props]: (obj) => {
+    G.g_breakable_props.push(
+      ...PlaceType17Props(obj.at, obj.pos.x, obj.pos.y, obj.pos.z));
+  },
+  [PropContainerType.Table29Props]: (obj) => {
+    G.g_breakable_props.push(...PlaceTable29Props(obj.at, obj.hp));
+  },
+  [PropContainerType.Type37PropPair]: (obj, f) => {
+    const pl = T.breakables?.placements?.find(
+      (q) => q.at === obj.at && q.container === "type37");
+    if (!pl) return;
+    G.g_breakable_props.push(...PlaceType37PropPair(pl, f.rng));
   },
   // The canal water. `+0x1F4` is a table index and `+0x11C` a lifetime in
   // step changes; the position is never read.
@@ -326,6 +369,8 @@ export function ResetPropContainers(): void {
   G.g_breakable_next_id = 1;
   G.g_prop_final_draws = [];
   G.g_prop67_by_index = [0, 0, 0];
+  G.g_type37_pair = [0, 0];
+  G.g_type37_hits_left = 0;
   G.g_object_list = G.g_object_list.filter(
     (o) => o.cls !== SpawnClass.PropContainerPlacer);
 }
@@ -356,6 +401,10 @@ export * from "./type72";
 export * from "./type74";
 export * from "./type76";
 export * from "./type77";
+export * from "./type16";
+export * from "./type17";
+export * from "./type29";
+export * from "./type37";
 export {
   BreakableGroupMembers, BreakableMemberSlot, BreakablePropAt,
   BreakableGroupFloor, MsvcRand, PROP_TARGET_SETS, MEMBERS_PER_GROUP,

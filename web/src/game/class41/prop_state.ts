@@ -208,6 +208,24 @@ export enum PropFamily {
    */
   DrawOnlySelector14 = 27,
   /**
+   * `PropUpdateType16` (`FUN_00468640`) -- the six objects
+   * `PlaceTable16Props` builds in stage 2's warehouse water, which crack,
+   * fly and float. See `class41/type16.ts`.
+   *
+   * These four are numbered 200 past their constructor's type, so that no
+   * two branches adding families at once land on one number.
+   */
+  Type16 = 216,
+  /** `PropUpdateType17` (`FUN_00468D10`) -- constructor 17's three pieces. */
+  Type17 = 217,
+  /** `PropUpdateType29` (`FUN_0046A030`) -- constructor 29's nine models. */
+  Type29 = 229,
+  /**
+   * `PropUpdateType37` (`FUN_0046B5F0`) -- constructor 37's pair, one on the
+   * other. See `class41/type37.ts`.
+   */
+  Type37 = 237,
+  /**
    * `OriginalItemDropUpdate` (`FUN_00466BE0`) — the Original Mode item
    * `SpawnOriginalItemDrop` (`FUN_00466B40`) releases, which
    * `PropUpdateType7`'s first hit does. See `class41/type07.ts`.
@@ -222,6 +240,11 @@ export enum PropFamily {
    * matrix. See `class41/type08.ts`.
    */
   Type8Piece = 108,
+  /**
+   * `Type16DropStripUpdate` (`FUN_00468CA0`) -- the strip
+   * `SpawnType16DropStrip` leaves where a constructor-16 object comes down.
+   */
+  Type16DropStrip = 116,
   /**
    * `Type67MountedPartUpdate` (`FUN_004702E0`) — one of the three objects
    * `PlaceGenericProp` case 0x43 allocates beside a type-67 prop, drawn the
@@ -540,7 +563,9 @@ export interface BreakableProp {
    * `BreakablePropUpdate`'s three draw blocks: the model matrix of the prop as
    * it was last drawn, rattle included, in `g_MatrixStackTop`'s layout.
    * `BreakablePropSpawnShatter` (`FUN_00465170`) places its fifteen pieces
-   * off it. Empty until the first draw, and only the group family writes it.
+   * off it. Empty until the first draw, and only the group family writes it
+   * -- and {@link PropFamily.Type37}, whose pivot stores the matrix it turns
+   * about a hull corner here and draws through it.
    *
    * **World space here; the engine's has the camera's world-to-view on it**,
    * because the draw composes onto the live stack. That half is
@@ -822,7 +847,8 @@ export interface BreakableProp {
   /**
    * `obj+0x192` for the two generic routines that keep a small state machine
    * there: {@link PropFamily.Type13}'s drop (`Type13Phase`) and type 35's
-   * door rattle (`Type35Phase`).
+   * door rattle (`Type35Phase`) -- and {@link PropFamily.Type37}'s fall,
+   * pivot and break (`Type37Phase`), which is its own constructor's.
    *
    * The fifth port field for that one engine word, and separate for the same
    * reason {@link BreakableProp.cuePhase} is (`L3`): each routine's `1` means

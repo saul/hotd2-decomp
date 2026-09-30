@@ -223,12 +223,22 @@ export interface BreakablePlacement {
    * `slot` is the tile, already looked up in `g_water_surface_slots`
    * (`0x00593DA4`) by `field_1f4`, and `lifetime_evt_steps` is the
    * descriptor's `+0x11C`. See `game/class41/water.ts`.
+   *
+   * `table16`, `type17`, `table29` and `type37` are constructors 16, 17, 29
+   * and 37 (`PlaceTable16Props`, `PlaceType17Props`, `PlaceTable29Props`,
+   * `PlaceType37PropPair`). The two table constructors read only the step
+   * lifetime of the descriptor, and their rows ride in
+   * {@link BreakablesJson.type16_xz} and {@link BreakablesJson.type29_xyz};
+   * `type17` reads the point; `type37` the point, `yaw`, `set_size`,
+   * `field_1f4` (the item set) and the lifetime, and names the effect and
+   * motion its break draws. See `game/class41/type16.ts` and its siblings.
    */
   container: "group" | "kinded" | "falling" | "generic"
     | "chain" | "fragment" | "story_switch" | "script_flag_effect"
     | "rising_door" | "rise_to_height" | "slide_on_flag" | "flag_lifted"
     | "flicker_light" | "table38" | "table39" | "table44" | "table50"
     | "table66" | "water_surface" | "type47"
+    | "table16" | "type17" | "table29" | "type37"
     | "draw_only_14";
   /** How many evt blocks it lives for. */
   lifetime_evt_steps: number;
@@ -448,6 +458,22 @@ export interface BreakablesJson {
    * container's two pieces settle against, already scaled by 0.001.
    */
   fragment_hull: [number, number, number][];
+  /**
+   * `g_type16_prop_xz` (`0x00593D20`) -- six raw `[s16 x, s16 z]` rows, the
+   * points class 0x41 constructor 16 places its objects at, in tenths.
+   */
+  type16_xz?: [number, number][];
+  /**
+   * `g_type29_prop_xyz` (`0x00593D38`) -- nine `[x, y, z]` f32 rows, one per
+   * object class 0x41 constructor 29 builds.
+   */
+  type29_xyz?: [number, number, number][];
+  /**
+   * `g_type37_hull_points` (`0x00593E40`) -- eight raw `[s16 x, y, z]`
+   * corners, in thousandths, that constructor 37's objects fall onto and
+   * pivot on.
+   */
+  type37_hull?: [number, number, number][];
   /** What a stacked group prop's fifteen shatter pieces are made of. */
   shatter: ShatterPiecesJson;
   /** `g_prop_kind_params`, indexed by kind. */

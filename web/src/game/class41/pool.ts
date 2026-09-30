@@ -52,6 +52,10 @@ import { PropUpdateType40 } from "./type40";
 import { PropUpdateType44 } from "./type44";
 import { PropUpdateType66 } from "./type66";
 import { PropDrawOnlyType12 } from "./type12";
+import { PropUpdateType16, Type16DropStripUpdate } from "./type16";
+import { PropUpdateType17 } from "./type17";
+import { PropUpdateType29 } from "./type29";
+import { PropUpdateType37 } from "./type37";
 
 /**
  * Every live container, once a frame.
@@ -149,6 +153,15 @@ export function BreakablePropPoolUpdate(rng: Rng, events?: Events,
       // routine runs and nothing of the generic arm's lookup does. See
       // `class41/type50.ts`.
       case PropFamily.DrawOnlyType12: PropDrawOnlyType12(p, rng, events); break;
+      // Constructors 16, 17, 29 and 37 hand `ActorAlloc` their own routines,
+      // each with its own head and tail; 16's landing allocates the strip,
+      // which steps this frame for the reason the falling container's pieces
+      // do. See `class41/type16.ts` and its siblings.
+      case PropFamily.Type16: PropUpdateType16(p, rng, events); break;
+      case PropFamily.Type16DropStrip: Type16DropStripUpdate(p); break;
+      case PropFamily.Type17: PropUpdateType17(p, rng, events); break;
+      case PropFamily.Type29: PropUpdateType29(p); break;
+      case PropFamily.Type37: PropUpdateType37(p, rng, events); break;
       default: BreakablePropUpdate(p, rng, events, cam); break;
     }
   }

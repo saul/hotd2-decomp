@@ -11,7 +11,7 @@
  *
  * ## The routine `[proved]`
  *
- * `PlaceType52VanDoors` (`FUN_00463D20`), `g_class41_constructors[52]`, read
+ * `PlaceType52VanDoors` at `0x00463D20`, `g_class41_constructors[52]`, read
  * in the disassembly (`0x00463D20`..`0x00463E44`):
  *
  * ```c

@@ -59,7 +59,10 @@ export const HINGE_CURVES_XYZ_SELECTORS = [0, 2, 3];
 /**
  * The two rear doors selector 2 builds, from `PropBuildVanDoors`
  * (`FUN_00472C90`). The offsets are literals in the code and the slots are
- * `0x1794 + i`; only the van uses it.
+ * `0x1794 + i`; only the van uses it. Class 0x41 constructor 52
+ * (`PlaceType52VanDoors`, `FUN_00463D20`) places the same two slots at the
+ * same offsets as draw-only objects -- a separate routine, the doors shut
+ * (`game/class41/type52.ts`).
  */
 export const VAN_DOOR_SLOT = 0x1794;
 export const VAN_DOOR_OFFSETS: Vec3[] =

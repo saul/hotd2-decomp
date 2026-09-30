@@ -4,16 +4,19 @@
  *
  * One spawn in the game: stage 2 block 35 step 1 op 52 (evt `0x14968`), both
  * modes, the step the stage-2 boss is fought in. The descriptor stands at the
- * origin and nothing of it is read. Slot `0x1823` is `komono_boss2.bin[7]`
- * -- a model of the boss arena's file, which is all that says what it is:
- * `[open]` beyond that.
+ * origin and nothing of it is read. Slot `0x1823` is `komono_boss2.bin[7]`,
+ * a model of the boss arena's file authored in world space: x -1392..-1248,
+ * y -69.6..-25.9, z -2128..-1978, all of it just under the water plane class
+ * 0x16 lays at y -25.5. Drawn with the water taken away, it is the footing of
+ * the arena's stone piers, which otherwise end at the waterline -- `[likely]`,
+ * from the picture; nothing in the code names it.
  *
  * ## The two routines `[proved]`
  *
  * Neither was a Ghidra function until named here; both were read in the
  * disassembly, and each is short enough to give whole.
  *
- * `PlaceType42Prop` (`FUN_004639D0`), `g_class41_constructors[42]`:
+ * `PlaceType42Prop` at `0x004639D0`, `g_class41_constructors[42]`:
  *
  * ```
  * 004639D1  PUSH 0x48 ; PUSH 0x46CE80 ; CALL ActorAlloc
@@ -22,7 +25,7 @@
  * 004639ED  RET
  * ```
  *
- * `PropDrawOnlyType42` (`FUN_0046CE80`), `g_class41_updates[42]` and the
+ * `PropDrawOnlyType42` at `0x0046CE80`, `g_class41_updates[42]` and the
  * routine the constructor hands `ActorAlloc`:
  *
  * ```

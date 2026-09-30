@@ -27,6 +27,10 @@ export interface PropContainerTail {
   routine: PropContainerRoutine;
 }
 
+/**
+ * `[port-only]` A fresh tail: every class-0x41 spawn is a placer until a
+ * constructor says otherwise.
+ */
 export function makePropContainerTail(): PropContainerTail {
   return { routine: PropContainerRoutine.Placer };
 }

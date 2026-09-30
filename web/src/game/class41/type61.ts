@@ -11,7 +11,7 @@
  *
  * ## The constructor `[proved]`
  *
- * `PlaceType61Figures` (`FUN_004641F0`), `g_class41_constructors[61]`, read in
+ * `PlaceType61Figures` at `0x004641F0`, `g_class41_constructors[61]`, read in
  * the disassembly (`0x004641F0`..`0x00464359`):
  *
  * ```c
@@ -53,7 +53,7 @@
  *
  * ## The update `[proved]`
  *
- * `Type61FigureUpdate` (`FUN_004729E0`), read in the disassembly
+ * `Type61FigureUpdate` at `0x004729E0`, read in the disassembly
  * (`0x004729E0`..`0x00472A4D`):
  *
  * ```c

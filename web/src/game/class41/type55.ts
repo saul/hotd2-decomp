@@ -9,7 +9,7 @@
  *
  * ## The constructor `[proved]`
  *
- * `PlaceType55Particles` (`FUN_00463FE0`), `g_class41_constructors[55]`, read
+ * `PlaceType55Particles` at `0x00463FE0`, `g_class41_constructors[55]`, read
  * in the disassembly (`0x00463FE0`..`0x004641E5`):
  *
  * ```c
@@ -40,7 +40,7 @@
  *
  * ## The update `[proved]`
  *
- * `PropUpdateType55Particles` (`FUN_0046EEB0`), not a Ghidra function until
+ * `PropUpdateType55Particles` at `0x0046EEB0`, not a Ghidra function until
  * named here:
  *
  * ```c
@@ -87,20 +87,20 @@ import { TYPE55_ROWS, TYPE55_SLOT, TYPE55_SLOT_SPAN } from "./ctor_literals";
 /** `CMP EAX, 0x320` at `0x004641D3` — the pieces the task carries. */
 export const TYPE55_PARTICLES = 800;
 /** `MOV ECX, 0x29` at `0x0046405C` — the scale's spread. */
-const TYPE55_SCALE_SPREAD = 0x29;
+export const TYPE55_SCALE_SPREAD = 0x29;
 /** `FMUL [0x004D5464]` (0.01) and `FADD [0x004C4CC8]` (0.1). */
-const TYPE55_SCALE_STEP = Math.fround(0.01);
-const TYPE55_SCALE_BASE = Math.fround(0.1);
+export const TYPE55_SCALE_STEP = Math.fround(0.01);
+export const TYPE55_SCALE_BASE = Math.fround(0.1);
 /** `FMUL [0x0055D2B0]` — the table's s16s are thousandths. */
-const TYPE55_TABLE_UNIT = Math.fround(0.001);
+export const TYPE55_TABLE_UNIT = Math.fround(0.001);
 /** `FADD [0x0056901C]` — every piece starts this far above the placer. */
 export const TYPE55_RISE = 10.5;
 /** `MOV ECX, 0x65` at `0x004640E7` — the outward speed's spread. */
-const TYPE55_SPEED_SPREAD = 0x65;
+export const TYPE55_SPEED_SPREAD = 0x65;
 /** `MOV ECX, 0x12D` at `0x00464153`, `FMUL [0x004D5464]`, `FADD [0x004C4380]`. */
-const TYPE55_LIFT_SPREAD = 0x12d;
-const TYPE55_LIFT_STEP = Math.fround(0.01);
-const TYPE55_LIFT_BASE = 1.0;
+export const TYPE55_LIFT_SPREAD = 0x12d;
+export const TYPE55_LIFT_STEP = Math.fround(0.01);
+export const TYPE55_LIFT_BASE = 1.0;
 /** `MOV ECX, 0x601; IDIV; SUB EDX, 0x300` — a spin rate, both ways. */
 export const TYPE55_SPIN_SPREAD = 0x601;
 export const TYPE55_SPIN_HALF = 0x300;
@@ -116,9 +116,9 @@ export const TYPE55_GRAVITY = Math.fround(0.05444);
 /** `FCOMP [0x00569114]` (`0x452DE171`) — the floor the pieces bounce on. */
 export const TYPE55_FLOOR_Y = Math.fround(2782.09);
 /** `MOV ECX, 0x15`, `FMUL [0x004D5464]`, `FADD [0x004C4D10]` — the bounce. */
-const TYPE55_BOUNCE_SPREAD = 0x15;
-const TYPE55_BOUNCE_STEP = Math.fround(0.01);
-const TYPE55_BOUNCE_BASE = Math.fround(0.3);
+export const TYPE55_BOUNCE_SPREAD = 0x15;
+export const TYPE55_BOUNCE_STEP = Math.fround(0.01);
+export const TYPE55_BOUNCE_BASE = Math.fround(0.3);
 /** `PUSH 0x3F000000` into `AssetDrawSlotWithAlpha`. */
 export const TYPE55_ALPHA = 0.5;
 

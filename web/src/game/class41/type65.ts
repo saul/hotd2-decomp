@@ -12,7 +12,7 @@
  *
  * ## The constructor `[proved]`
  *
- * `PlaceType65Particles` (`FUN_00464360`), `g_class41_constructors[65]`, read
+ * `PlaceType65Particles` at `0x00464360`, `g_class41_constructors[65]`, read
  * in the disassembly (`0x00464360`..`0x004644F3`):
  *
  * ```c
@@ -32,7 +32,7 @@
  *
  * ## The update `[proved]`
  *
- * `PropUpdateType65Particles` (`FUN_0046FCC0`):
+ * `PropUpdateType65Particles` at `0x0046FCC0`:
  *
  * ```c
  * if (obj->+0x1A0++ > 300) { ActorKill(); return; }
@@ -68,26 +68,26 @@ import { TYPE65_SLOT, TYPE65_SLOT_SPAN } from "./ctor_literals";
 /** `MOV EBP, 0x12C` at `0x00464391` and `CMP EBX, 0x12C` at `0x0046FDE0`. */
 export const TYPE65_PARTICLES = 300;
 /** `MOV ECX, 0xB` — each coordinate's spread. */
-const TYPE65_SPREAD = 0xb;
+export const TYPE65_SPREAD = 0xb;
 /** `FADD [0x00569030]`, `FADD [0x0056902C]`, `FSUB [0x00569028]`. */
 export const TYPE65_ORIGIN_X = 580.0;
 export const TYPE65_ORIGIN_Y = 2200.0;
 export const TYPE65_ORIGIN_Z = -9149.0;
 /** `FSUB [0x0055D2B4]` — taken off all three, which centres the spread. */
-const TYPE65_HALF = 5.0;
+export const TYPE65_HALF = 5.0;
 /** `MOV ECX, 0x51`, `FMUL [0x004D5464]`, `FSUB [0x0055D1A0]` — `vx`. */
-const TYPE65_VX_SPREAD = 0x51;
-const TYPE65_STEP = Math.fround(0.01);
-const TYPE65_VX_BASE = Math.fround(0.4);
+export const TYPE65_VX_SPREAD = 0x51;
+export const TYPE65_STEP = Math.fround(0.01);
+export const TYPE65_VX_BASE = Math.fround(0.4);
 /** `MOV ECX, 0x65` and `FSUB double [0x0055D7D0]` — `vy`, a double 1.5. */
-const TYPE65_VY_SPREAD = 0x65;
-const TYPE65_VY_BASE = 1.5;
+export const TYPE65_VY_SPREAD = 0x65;
+export const TYPE65_VY_BASE = 1.5;
 /** `MOV ECX, 0x65` and `FADD [0x004C43AC]` — `vz`. */
-const TYPE65_VZ_SPREAD = 0x65;
-const TYPE65_VZ_BASE = 0.5;
+export const TYPE65_VZ_SPREAD = 0x65;
+export const TYPE65_VZ_BASE = 0.5;
 /** `MOV ECX, 0x601; IDIV; SUB EDX, 0x300` — a spin rate, both ways. */
-const TYPE65_SPIN_SPREAD = 0x601;
-const TYPE65_SPIN_HALF = 0x300;
+export const TYPE65_SPIN_SPREAD = 0x601;
+export const TYPE65_SPIN_HALF = 0x300;
 /** `MOV dword ptr [EBX - 4], 0x3FC00000` at `0x004644E2`. */
 export const TYPE65_SCALE = 1.5;
 /** `CMP EAX, 0x12C` at `0x0046FCCB` — the task's last frame, pre-increment. */
@@ -95,7 +95,7 @@ export const TYPE65_LAST_FRAME = 300;
 /** `FSUB [0x00569134]` (`0x3DDEFC7A`) — gravity, a frame. */
 export const TYPE65_GRAVITY = Math.fround(0.10888);
 /** `FMUL [0x004C43A8]` — the z scale is four fifths of the others. */
-const TYPE65_Z_SCALE = Math.fround(0.8);
+export const TYPE65_Z_SCALE = Math.fround(0.8);
 
 /** The task's words beyond its pieces. */
 export interface Type65Words {

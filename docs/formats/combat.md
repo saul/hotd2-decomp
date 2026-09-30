@@ -2542,7 +2542,7 @@ makes its fall and its knock-back physical.
 | 11 | `ThrowerStateFallToSurface` | fall until the ground catches — how a wall-crawler comes down |
 | **14, 15, 16** | `ThrowerStateLeapToSurface` | **onto the far wall, the near wall, the ceiling** |
 | 17 | `ThrowerStateGetUp` | motion `0x127`, and **only after a decapitation** |
-| **18** | `ThrowerStateWalkDistance` | walk the descriptor's own distance — class 0x30's state 15 is the same routine on the same `f32` at tail `+0x04` |
+| **18** | `ThrowerStateWalkDistance` | walk the descriptor's own distance on the pair's walk by `obj+0x34` bit 27, not flinching (`obj+0x34` bit `0x2000` until it arrives) — the shape of class 0x30's state 15, on the same `f32` at tail `+0x04` |
 | **19** | `ThrowerStateEntranceClip` | play the descriptor's own clip |
 | 20 | `ThrowerStateLeapToPoint` | the scripted drop |
 | 21 | `ThrowerStateRideObjectPath` | object path `0x14F` for 0xC4 frames — **cut content** |

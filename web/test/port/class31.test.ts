@@ -458,6 +458,137 @@ console.log("class 0x31, ThrowerStateWalkDistance:");
         z.state === ThrowerState.StandAndDecide, `state ${z.state}`);
 }
 
+/**
+ * `ThrowerStateWalkDistance` (`FUN_0044E2A0`) as the exe runs it: the walk
+ * pair by `obj+0x34` bit 27, the training course's own table, the two flags
+ * raised for the walk and dropped at its end, `obj+0x1370`/`+0x1374`, and
+ * nothing done in a sub-state past 1.
+ *
+ * The fixture's set gives the pair two different clips, as stage 4's set 2
+ * does (443 and 438), and the spawn carries the bit, as four of stage 4's
+ * six state-18 `zskamere` do.
+ */
+console.log("class 0x31, ThrowerStateWalkDistance as the exe runs it:");
+{
+  const WALK = 313;
+  const WALK_ALT = 318;
+  const chars = {
+    ...CHARS31,
+    types: { ...CHARS31.types,
+             "25": { ...TYPE31, motions: {
+               ...TYPE31.motions,
+               [String(WALK_ALT)]: motion(13, 1.5),
+               // Training course 5's clips: 0x13C, 0x13B and 0x13A, and
+               // 0x139, which is 313, the set's first walk.
+               "316": motion(13, 1), "315": motion(13, 1),
+               "314": motion(13, 1),
+             } } },
+    class31: { ...CLASS31, sets: [{ ...CLASS31.sets[0],
+      motions: [295, 295, WALK, WALK_ALT, 283, 934] }] },
+  } as unknown as CharactersJson;
+  const spawn = (flags: number) => {
+    ResetGameGlobals();
+    SetGameTables(chars);
+    G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    G.g_scene_state_major = SCENE_MAJOR_PLAYING;
+    EnterPlay();
+    G.g_camera_yaw_bams = 0;
+    const a = ActorSpawn(0x9000, SpawnClass.Thrower, 0x19, "zstin", {
+      initialState: ThrowerState.WalkDistance, condition: 0,
+      walkDistance: 15, flags,
+    });
+    if (a.cls !== SpawnClass.Thrower) throw new Error("not class 0x31");
+    a.visible = true;
+    a.hp = a.maxHp = 100;
+    a.pos = vec3(0, 0, 80);
+    a.yaw = 0x4000;                       // a quarter turn: x, not z (L48)
+    return a;
+  };
+  const rng = new Rng(17);
+  const events = new Events();
+
+  // Bit 27 up: the second of the pair, and the hub after it takes the same.
+  const z = spawn(0x8000000);
+  GameUpdate(1 / 60, CAM_HOST, rng, events);
+  check("bit 27 walks on the second clip of the pair",
+        z.state === ThrowerState.WalkDistance && z.motion === WALK_ALT,
+        `state ${z.state}, motion ${z.motion}`);
+  check("...with obj+0x136C bit 0x1000 and obj+0x34 bit 0x2000 up, and "
+        + "the descriptor's distance latched into obj+0x1370",
+        (z.flags2 & ThrowerFlag.Walking) !== 0
+        && (z.flags & ActorFlag.NoHitReaction) !== 0
+        && z.thr.walkTarget === 15,
+        `flags2 ${z.flags2.toString(16)}, flags ${z.flags.toString(16)}, `
+        + `target ${z.thr.walkTarget}`);
+
+  // A shot on the walk: `ThrowerOnShot` returns on `NoHitReaction` before it
+  // picks a reaction, so the walk goes on.
+  ResolveHit(z, 4, CAM_HOST, rng);
+  GameUpdate(1 / 60, CAM_HOST, rng, events);
+  check("a shot mid-walk does not stop it",
+        z.state === ThrowerState.WalkDistance && z.hp < 100,
+        `state ${z.state}, hp ${z.hp}`);
+
+  // `ShotImmune` is not this state's to raise, but the exit takes it down.
+  z.flags |= ActorFlag.ShotImmune;
+  const from = { ...z.arcFrom };
+  let travelledOk = true;
+  let n = 0;
+  while (z.state === ThrowerState.WalkDistance && n++ < 600) {
+    GameUpdate(1 / 60, CAM_HOST, rng, events);
+    const want = Math.hypot(from.x - z.pos.x, from.z - z.pos.z);
+    travelledOk &&= Math.abs(z.thr.walkTravelled - want) < 1e-9;
+  }
+  check("obj+0x1374 is the distance on x and z every frame, and the walk "
+        + "ends at obj+0x1370",
+        travelledOk && z.thr.walkTravelled >= 15
+        && z.thr.walkTravelled < 15 + 1.5,
+        `travelled ${z.thr.walkTravelled.toFixed(3)}`);
+  check("the way out drops bit 0x1000 and obj+0x34 0x2100, and records "
+        + "where it stopped in obj+0x13D8",
+        z.state === ThrowerState.StandAndDecide
+        && (z.flags2 & ThrowerFlag.Walking) === 0
+        && (z.flags & (ActorFlag.NoHitReaction | ActorFlag.ShotImmune)) === 0
+        && z.strikeStart.x === z.pos.x && z.strikeStart.z === z.pos.z,
+        `state ${z.state}, flags2 ${z.flags2.toString(16)}, `
+        + `flags ${z.flags.toString(16)}`);
+  GameUpdate(1 / 60, CAM_HOST, rng, events);
+  check("...and the hub's own walk is the same one of the pair (0x0044B19C)",
+        z.motion === WALK_ALT, `motion ${z.motion}`);
+
+  // Bit 27 down: the first.
+  const plain = spawn(0);
+  GameUpdate(1 / 60, CAM_HOST, rng, events);
+  check("without the bit, the first clip", plain.motion === WALK,
+        `motion ${plain.motion}`);
+
+  // A sub-state past 1 is `POP / RET` at `0x0044E31E`: nothing, not even the
+  // distance test, however far it has come.
+  plain.sub = 2;
+  plain.pos.x += 100;
+  GameUpdate(1 / 60, CAM_HOST, rng, events);
+  check("a sub-state past 1 does nothing",
+        plain.state === ThrowerState.WalkDistance && plain.sub === 2,
+        `state ${plain.state}, sub ${plain.sub}`);
+
+  // Training course 5 walks on its own clip by level, whatever the set says;
+  // any other course walks on the set's.
+  const trained = (course: number, lesson: number) => {
+    const a = spawn(0x8000000);
+    G.g_GameMode = GameMode.Training;
+    G.g_training_course = course;
+    G.g_training_lesson = lesson;
+    GameUpdate(1 / 60, CAM_HOST, rng, events);
+    return a.motion;
+  };
+  check("training course 5 walks on {0x13C,0x13B,0x13A,0x13A,0x139} by level",
+        trained(5, 0) === 0x13c && trained(5, 1) === 0x13b
+        && trained(5, 3) === 0x13a && trained(5, 4) === 0x139,
+        `${trained(5, 0)} ${trained(5, 1)} ${trained(5, 3)} ${trained(5, 4)}`);
+  check("...and course 4 on the set's",
+        trained(4, 1) === WALK_ALT, `${trained(4, 1)}`);
+}
+
 console.log("class 0x31, the climb:");
 {
   const rng = new Rng(3);
@@ -1674,6 +1805,81 @@ console.log("class 0x31, how far a knocked-down zsass goes:");
         + `react ${s.react?.motion}`);
   check("...and is over when the loop underneath reaches its end: 9 frames, "
         + "not the stumble clip's 34", frames === 9, `${frames} frames`);
+}
+
+/**
+ * `ThrowerStateHitReaction` (`FUN_0044A360`)'s other arm. A bone of 9 or more
+ * (`CMP [ESI+0x1368], 9; JGE` at `0x0044A3B0`) is `ActorSetMotion` on
+ * **track 0** (`0x0044A3DB`): the reaction replaces the loop, nothing plays
+ * over it, and the wait at `0x0044A3EA` -- `g_motion_play_length[obj+0x1B4] -
+ * 1 <= obj+0x19C` -- is then the reaction's own play length less one. The
+ * port also put it on its one-shot channel and waited for that clip's baked
+ * length. With `obj+0x136C` bit `0x4000000` up the way out is state `0x11`,
+ * not the router.
+ *
+ * `g_bone_reaction_group` (`0x004C84A8`) in full: bone 10 is group 6, and
+ * set 0's group 6 is `0x3A2`, given a play length of 37 here.
+ */
+console.log("class 0x31, a leg shot stumbles on track 0:");
+{
+  const LEG_CLIP = 0x3a2;
+  const PLAY = 37;
+  const chars = {
+    ...CHARS31,
+    reaction_groups: [0, 2, 1, 3, 3, 3, 4, 4, 4, 5, 6, 6, 6, 7, 7, 7],
+    types: { ...CHARS31.types, "25": { ...TYPE31, motions: {
+      ...TYPE31.motions, [String(LEG_CLIP)]: motion(20, 0, PLAY) } } },
+  } as unknown as CharactersJson;
+  const rng = new Rng(29);
+  const events = new Events();
+  const stumble = (knockedDown: boolean) => {
+    ResetGameGlobals();
+    SetGameTables(chars);
+    G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    G.g_scene_state_major = SCENE_MAJOR_PLAYING;
+    EnterPlay();
+    G.g_camera_yaw_bams = 0;
+    const a = ActorSpawn(0x9000, SpawnClass.Thrower, 0x19, "zstin", {
+      initialState: ThrowerState.StandAndDecide, condition: 0,
+    });
+    if (a.cls !== SpawnClass.Thrower) throw new Error("not class 0x31");
+    a.visible = true;
+    a.hp = a.maxHp = 100;
+    a.pos = vec3(0, 0, 45);
+    a.sub = 1;
+    a.motion = 295;
+    a.playTicks = 50;
+    if (knockedDown) a.flags2 |= ThrowerFlag.KnockedDown;
+    ResolveHit(a, 10, CAM_HOST, rng);
+    let frames = 0;
+    let onTrack0 = true;
+    do {
+      GameUpdate(1 / 60, CAM_HOST, rng, events);
+      frames += 1;
+      if (a.state === ThrowerState.HitReaction) {
+        onTrack0 &&= a.motion === LEG_CLIP && a.react === null
+                  && a.action === null;
+      }
+    } while (a.state === ThrowerState.HitReaction && frames < 120);
+    return { a, frames, onTrack0 };
+  };
+
+  const up = stumble(false);
+  check("a leg shot puts the reaction on track 0, with nothing over it",
+        up.onTrack0, `motion ${up.a.motion}, react ${up.a.react?.motion}, `
+        + `action ${up.a.action?.motion}`);
+  check("...and is over at the reaction's play length less one: 37 frames",
+        up.frames === PLAY, `${up.frames} frames`);
+  check("...clearing obj+0x34 0x40000000 and obj+0x136C 0x400000",
+        up.a.state !== ThrowerState.HitReaction
+        && up.a.state !== ThrowerState.GetUp
+        && (up.a.flags & ActorFlag.Reacting) === 0
+        && (up.a.flags2 & ThrowerFlag.ReactReentry) === 0,
+        `state ${up.a.state}, flags ${up.a.flags.toString(16)}`);
+  const down = stumble(true);
+  check("a knocked-down thrower gets up after it instead (state 0x11)",
+        down.a.state === ThrowerState.GetUp && down.a.sub === 0
+        && down.frames === PLAY, `state ${down.a.state}, ${down.frames} frames`);
 }
 
 /**

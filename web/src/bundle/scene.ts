@@ -226,8 +226,9 @@ export interface BreakablePlacement {
    */
   container: "group" | "kinded" | "falling" | "generic"
     | "chain" | "fragment" | "story_switch" | "script_flag_effect"
-    | "rising_door" | "rise_to_height" | "flicker_light" | "table38"
-    | "table39" | "table44" | "table50" | "table66" | "water_surface";
+    | "rising_door" | "rise_to_height" | "slide_on_flag" | "flag_lifted"
+    | "flicker_light" | "table38" | "table39" | "table44" | "table50"
+    | "table66" | "water_surface" | "type47";
   /** How many evt blocks it lives for. */
   lifetime_evt_steps: number;
   /** `group` only — the row of `g_breakable_group_ptrs` to build. */
@@ -259,6 +260,18 @@ export interface BreakablePlacement {
    * the shot test. `-1` in every shipped spawn.
    */
   coli?: number;
+  /**
+   * `slide_on_flag` only — class 0x44 selector 12, `SlideOnFlagUpdate`
+   * (`FUN_004755B0`). `speed` is the i32 at tail `+0x10` the constructor
+   * `FIMUL`s into the per-frame slide, `travel` the i32 at `+0x14` it `FILD`s
+   * into the slide's length, and `slot_word` the DWORD at `+0x04` its
+   * elevator-door test compares (`slot` is the same word's low half, which the
+   * draw reads). `coli`, `open_flag` and `remove_flag` as for
+   * `rise_to_height`.
+   */
+  speed?: number;
+  travel?: number;
+  slot_word?: number;
   /**
    * `generic` — the class-0x41 constructor type, and the spawn descriptor's
    * `+0x11C`.

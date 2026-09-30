@@ -431,6 +431,16 @@ export const CHECKS: readonly Check[] = [
      + "are the update's own, that no shipped spawn carries the collision "
      + "blob the port's prop pool cannot shoot, and, with a bundle, that "
      + "every spawn is placed with exactly that tail and its model travels"),
+  game("flag_props",
+       "that class 0x44 selectors 9 and 12 -- stage 3's lift and stage 6's "
+     + "sliding doors -- and class 0x41 constructor 47, stage 2's faded disc, "
+     + "are the table entries the port builds, that the exporter reads their "
+     + "tails at the offsets and widths the constructors load them and the "
+     + "port's constants are the routines' own, that no selector-12 spawn "
+     + "names the one slot whose second draw relights the scene, and, with a "
+     + "bundle, that every spawn is placed with exactly its tail and its "
+     + "model travels -- the stage no longer draws a loaded model on its own, "
+     + "so a misread here is an object that is simply missing"),
   game("branches",
        "that every value a branch trigger can write into `g_script_branch_var`"
      + " names a route slot its own block actually fills -- the one check that"

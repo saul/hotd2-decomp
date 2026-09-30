@@ -35,6 +35,8 @@ import { T } from "../tables";
 import { PlaceFallingContainer } from "./container";
 import { PropBuildRisingDoor } from "./rising_door";
 import { PropBuildRiseToHeight } from "./rise_to_height";
+import { PropBuildSlideOnFlag } from "./slide_on_flag";
+import { PropBuildFlagLiftedProp } from "./flag_lifted";
 import { PropBuildScriptFlagEffect } from "./script_flag_effect";
 import { PlaceStoryModeSwitch } from "../class41/triggers";
 
@@ -59,7 +61,17 @@ export enum Class44Selector {
    * hinges, and `script/state/shutter.ts` is the letterbox. This one is
    * scenery that translates. See `class44/rising_door.ts`.
    */
+  /**
+   * `PropBuildFlagLiftedProp` (`FUN_00473300`) — one slot that rises to y 10
+   * on a script flag. Stage 3's one. See `class44/flag_lifted.ts`.
+   */
+  FlagLifted = 9,
   RisingDoor = 11,
+  /**
+   * `PropBuildSlideOnFlag` (`FUN_004734A0`) — an object that slides a set
+   * distance on a script flag. Stage 6's doors. See `class44/slide_on_flag.ts`.
+   */
+  SlideOnFlag = 12,
   /**
    * `PropBuildRiseToHeight` (`FUN_00473640`) — an object that rises a unit a
    * frame on a script flag to a whole-number height above its spawn. Stage
@@ -122,6 +134,20 @@ export const g_class44_subtypes: Partial<Record<number, Class44Builder>> = {
     if (!pl) return;
     G.g_breakable_props.push(PropBuildRiseToHeight(pl));
   },
+  [Class44Selector.SlideOnFlag]: (obj, f) => {
+    void f;
+    const pl = T.breakables?.placements?.find(
+      (q) => q.at === obj.at && q.container === "slide_on_flag");
+    if (!pl) return;
+    G.g_breakable_props.push(PropBuildSlideOnFlag(pl));
+  },
+  [Class44Selector.FlagLifted]: (obj, f) => {
+    void f;
+    const pl = T.breakables?.placements?.find(
+      (q) => q.at === obj.at && q.container === "flag_lifted");
+    if (!pl) return;
+    G.g_breakable_props.push(PropBuildFlagLiftedProp(pl));
+  },
   [Class44Selector.FallingContainer]: (obj, f) => {
     const pl = T.breakables?.placements?.find(
       (q) => q.at === obj.at && q.container === "falling");
@@ -164,6 +190,8 @@ export const Class44PlacerHandler: ClassHandler = {
 export * from "./container";
 export * from "./rising_door";
 export * from "./rise_to_height";
+export * from "./slide_on_flag";
+export * from "./flag_lifted";
 export * from "./script_flag_effect";
 
 /**

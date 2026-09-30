@@ -19,6 +19,9 @@ import type { GameHost } from "../host";
 import { PropShattersTick, type ShatterCamera } from "./shatter";
 import { RisingDoorUpdate } from "../class44/rising_door";
 import { RiseToHeightUpdate } from "../class44/rise_to_height";
+import { SlideOnFlagUpdate } from "../class44/slide_on_flag";
+import { FlagLiftedPropUpdate } from "../class44/flag_lifted";
+import { PropUpdateType47 } from "./type47";
 import { ScriptFlagEffectUpdate } from "../class44/script_flag_effect";
 import {
   ChainSegmentUpdate, StoryModeSwitchUpdate,
@@ -98,6 +101,11 @@ export function BreakablePropPoolUpdate(rng: Rng, events?: Events,
       // Nor around selector 13's: its remove flag and a camera cue are its
       // lifetime, and its shot-test call is its own, behind `obj+0x14C`.
       case PropFamily.RiseToHeight: RiseToHeightUpdate(p); break;
+      // ...and selectors 12 and 9: each its own remove flag and no prologue.
+      case PropFamily.SlideOnFlag: SlideOnFlagUpdate(p); break;
+      case PropFamily.FlagLifted: FlagLiftedPropUpdate(p); break;
+      // Constructor 47's task: a flag and a step index are its lifetime.
+      case PropFamily.Type47: PropUpdateType47(p); break;
       // Neither of these calls `PropExpireByStepLifetime` — 53 inlines its
       // own variant of it and 54 has no lifetime at all — so neither can ride
       // the generic arm, which runs that prologue before it dispatches.

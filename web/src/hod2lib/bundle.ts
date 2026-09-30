@@ -42,6 +42,11 @@ import { Boss4EffectSlots } from "../game/class19/slots";
 // ...and `class41/water_slots.ts` for the tiles the canal water task pairs
 // and swaps -- immediates in its routine, which the geometry has to contain.
 import { WATER_SURFACE_ALSO_DRAWS } from "../game/class41/water_slots";
+// ...and the immediates class 0x44 selector 12 and class 0x41 constructor 47
+// draw, which the geometry has to contain.
+import { SLIDE_SECOND_DRAW_SLOT, SLIDE_SECOND_SLOT }
+  from "../game/class44/slide_slots";
+import { TYPE47_CONSTRUCTOR, TYPE47_SLOT } from "../game/class41/type47_slots";
 // Same argument again: `hud_sprites.ts` is the id list `hud_readout.ts` draws
 // from, as data, and the exporter must put exactly those textures in.
 // The continue screen's and the credit line's are in the same file.
@@ -626,6 +631,15 @@ export function containerPlacements(tables: ExeTables, evt: evtlib.EvtFile,
           pos: [...rec.pos],
           pitch: rec.orient[0], yaw: rec.orient[1], roll: rec.orient[2],
         });
+      } else if (ctor === TYPE47_CONSTRUCTOR) {
+        // `PlaceType47Prop` (`FUN_00463AE0`) -- a 0x48-byte task that draws
+        // one faded disc at the descriptor's position and reads nothing else
+        // of it. No lifetime: a script flag and a step index end it.
+        out.push({
+          at: rec.offset, container: "type47",
+          lifetime_evt_steps: 0,
+          pos: [...rec.pos],
+        });
       } else if (ctor === 24) {
         // `PlaceChainSegments` -- twenty segments, each carrying the placer's
         // `+0x1F4` as a chain group. Group 1 is a **route-branch trigger**.
@@ -775,6 +789,38 @@ export function containerPlacements(tables: ExeTables, evt: evtlib.EvtFile,
         remove_flag: rec.param(0x21, "i8") ?? -1,
         lifetime_evt_steps: 0,
         pos: [...rec.pos], yaw: rec.orient[1],
+      });
+    } else if (rec.hp === 12) {              // class 0x44 selector 12
+      // `PropBuildSlideOnFlag` (`FUN_004734A0`) -- an object that slides a
+      // set distance on a script flag. The tail at the offsets and widths the
+      // constructor loads it: the u16 at `+0x04` is the slot and the same
+      // DWORD is what the elevator-door test compares (`MOV EAX,[EDI+0x4];
+      // CMP EAX, 0xAFC`), the i32 at `+0x08` goes to `obj+0x14C`, the i32 at
+      // `+0x10` is `FIMUL`ed into the per-frame slide and the i32 at `+0x14`
+      // `FILD`ed into its length; the two signed bytes are the flags.
+      out.push({
+        at: rec.offset, container: "slide_on_flag",
+        slot: rec.param(0x04, "u16") || 0,
+        slot_word: rec.param(0x04, "u32") ?? 0,
+        coli: rec.param(0x08, "i32") ?? -1,
+        speed: rec.param(0x10, "i32") ?? 0,
+        travel: rec.param(0x14, "i32") ?? 0,
+        open_flag: rec.param(0x20, "i8") ?? 0,
+        remove_flag: rec.param(0x21, "i8") ?? -1,
+        lifetime_evt_steps: 0,
+        pos: [...rec.pos], yaw: rec.orient[1],
+      });
+    } else if (rec.hp === 9) {               // class 0x44 selector 9
+      // `PropBuildFlagLiftedProp` (`FUN_00473300`) -- one slot that rises to
+      // y 10 on a flag. The u16 at `+0x04` and the two signed bytes; the
+      // constructor reads nothing else, not even the yaw.
+      out.push({
+        at: rec.offset, container: "flag_lifted",
+        slot: rec.param(0x04, "u16") || 0,
+        open_flag: rec.param(0x20, "i8") ?? 0,
+        remove_flag: rec.param(0x21, "i8") ?? -1,
+        lifetime_evt_steps: 0,
+        pos: [...rec.pos],
       });
     } else if (rec.hp === 16) {              // class 0x44 selector 16
       const tail = rec.offset + 0x24;
@@ -1830,12 +1876,24 @@ export async function breakableSlotEntry(
   // ...and selector 13 the same: `RiseToHeightUpdate` draws its descriptor's
   // slot, once, and names no other. Stage 5's `0x1892` and twelve of stage
   // 6's are only ever drawn through it.
+  // ...and every other object that draws its descriptor's slot and nothing
+  // else: selectors 9 and 12, and the story-mode switch -- whose model never
+  // travelled, so the stage's copy at the world's origin was the only one
+  // (stage 3's `0x1853`). Selector 12 draws a second model only for slot
+  // `0x189C`, which no shipped spawn names; constructor 47 draws a literal.
   for (const pl of placements) {
-    if (pl.container !== "rising_door" && pl.container !== "rise_to_height") {
-      continue;
+    const own = pl.container === "rising_door"
+      || pl.container === "rise_to_height" || pl.container === "flag_lifted"
+      || pl.container === "slide_on_flag" || pl.container === "story_switch";
+    const slots = own ? [pl.slot as number] : [];
+    if (pl.container === "slide_on_flag"
+        && pl.slot === SLIDE_SECOND_DRAW_SLOT) {
+      slots.push(SLIDE_SECOND_SLOT);
     }
-    const slot = pl.slot as number;
-    if (slot && !want.includes(slot)) want.push(slot);
+    if (pl.container === "type47") slots.push(TYPE47_SLOT);
+    for (const slot of slots) {
+      if (slot && !want.includes(slot)) want.push(slot);
+    }
   }
   // Class 0x44 selector 0 draws an effect tree, so the slots it needs are the
   // tree's nodes and **not** the descriptor's `obj+0x28C`, which that family

@@ -36,7 +36,7 @@ run, from the title's new-game arm (`CALL` at `0x0045FF48`).
 written **only through the block base** (`(&g_original_fire_mode)[p*0x14]`
 with the constant in an index register), so a search for `WRITE` xrefs to
 the field's own address finds only the reset: that is how the port once
-concluded the damage scale was always 1.0 (`L101`).
+concluded the damage scale was always 1.0 (`L103`).
 
 Five more bytes are global, not per player: `g_original_item_big_head`
 (`0x009C88A8`, ROTTEN MEAT), `g_original_quarter_life` (`0x009C88A9`, LIFE

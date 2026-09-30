@@ -301,6 +301,48 @@ every `evt/` table for it before calling it unread**, and subtract the
 occurrences the opcodes explain: what is left is a descriptor, and the
 descriptor's class says who reads it.
 
+**L101 -- A character type is its nodes' slots, and a slot names its own
+file.** The exporter asked for *the* pol file of a character type
+(`ExeTables.characterAssetFile`), which answers only when every node's slot
+names the same one, and the rig builder indexed each node's slot into that
+file's models. Character type `0x4B`, the stage-5 boss, has fifteen nodes
+over **two** files -- eleven in `boss5.bin`, four in `boss5b.bin` -- so it had
+no file, its spawn resolved to nothing and the boss was never in any bundle;
+and had it been given the first file, four nodes would have been built from
+whatever that file held at their indices. `AssetDrawSlot` resolves each slot
+through the slot table on its own, and so must anything that builds what it
+draws (`ExeTables.characterAssetFiles`, `charbuild.rigEntry`). **Resolve a
+model by its slot, never by the file its neighbour came from.**
+
+**L102 -- An absolute address can be an element of an array named somewhere
+else; check the ranges before naming it.** `Class2DState5`'s kill arm writes
+`0x009C90D8` and `0x009C9F55` as bare operands, and the first reading named
+them `g_original_boss6_kills` and `g_profile_original_boss6_kills` -- two new
+globals, with a port field each. They are entry 24 of
+`g_original_items_taken` (`0x009C90C0`, 33 bytes) and of
+`g_profile_original_items` (`0x009C9F3D`), which the item pickups, the save
+and the profile copy already read and write as arrays: the port would have
+kept the boss's kill count where nothing that saves the tally could see it.
+The same mistake was already in the port the other way round --
+`ProfileFactoryReset`'s `0x009C9F40`, `44` and `4D` had been read as "three
+bytes set to 1" when they are items 3, 7 and 16 of the array it had just
+zeroed, and the port zeroed them. **Before giving an absolute operand a name
+of its own, look for a named table whose extent covers it** (the TSVs are
+sorted by address, so the row above says), and write the element.
+
+**L103 -- A store through a block's base is a DATA reference, not a WRITE; a
+list of writers built from WRITE xrefs is a list of some writers.** Original
+Mode's per-player block (`0x009A2240`, stride `0x14`) is written as
+`(&field)[p * 0x14]`: the field's address is the displacement of an indexed
+store, and Ghidra types that reference DATA. A note in `class22/shot.ts`
+counted "exactly three writers" of the damage scale from the WRITE xrefs,
+found all three storing 1.0, and made the scale a constant -- so JUDGMENT
+ignored every item for as long as the note stood, while `OriginalItemsApply`
+wrote the scale at `0x0041602A`, `39` and `55`, all DATA. The same search had
+the sound kind "written by no instruction". **Before recording who writes a
+field, take every reference to it, DATA included, and read each
+instruction.**
+
 
 ## Transcribing behaviour into the port
 
@@ -826,6 +868,39 @@ trusting the brief one**; the full one is usually the reading, and the brief
 one the shortcut nobody wrote down. It is `L86` from the other side: there two
 inline copies were merged without comparing them, here two ports of one
 routine were kept apart without comparing them.
+
+**L99 -- A bit a state writes and never reads is read by whatever interrupts
+the state, and the state's own tests never interrupt it.**
+`ThrowerStateGrabPlayer` was ported down to its sounds and its camera ride,
+and its four writes to `obj+0x34` -- `0x4100` at spawn, `0x4000` off on the
+cue, `0x2000` on landing, `0x100` toggled through the hold -- were left out,
+because nothing in the state tests them. `ThrowerOnShot` does, before the
+state runs: `0x100` refuses the shot and `0x2000` the reaction. Without them
+stage 5's riders took a shot as a `zslman`'s tumble, whose way out is the hub,
+and a hub on a moving car never ends -- the car stopped on the bridge behind
+`wait_enemies_alive`. Every existing test of the state played it unshot, so
+all of them passed. The pseudocode showed the writes plainly; they read as
+bookkeeping. **When you transcribe a state, every store to a flag word is
+behaviour: find the reader of each bit** (a `TEST` of its mask, L32's two
+forms) **before leaving one out, and test the state with the thing that reads
+it happening** -- here a shot on every sub.
+
+**L100 -- The one-shot channel ends itself; the engine's track wraps. A clip a
+state holds longer than its play length belongs on the base track.** The
+engine has one motion track, and `ActorSetMotionBlended` puts every clip on it;
+`obj.action`, the port's one-shot channel, is a port construct that empties
+when its clip's authored frames run out and hands the body back to whatever
+the base track holds. Two fixes of `ThrowerStateGrabPlayer` were written in
+parallel, one moving its clips onto the one-shot channel and one onto the base
+track, and both passed their tests -- because neither test looked at the clip
+past the ride clip's end. The shipped holds are 45 and 75 frames and
+`zslman`'s ride clip `0x1E9` has a play length of 39: on the one-shot channel
+the rider dropped back into its spawn clip for the rest of the long hold. The
+same shape as `L94`'s stumble, from the other end: there the channel held a
+clip too long, here it lets one go too soon. **Before putting a clip on the
+one-shot channel, find what ends it in the exe -- a state change, or nothing,
+in which case the track wraps -- and test for as long as the shipped data
+holds it.**
 
 ---
 

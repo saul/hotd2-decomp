@@ -55,6 +55,10 @@ import type {
 import type { ScreenSpriteAnim } from "./game_over";
 import type { ViewSlotDraw, WorldSlotDraw } from "./view_slot";
 import type { Boss4HitMark } from "./class19/hit_mark";
+import {
+  makeClass2DSatelliteRecords, type Class2DSlotDraw, type Class2DTask,
+} from "./class2D/state";
+import type { Class32Task } from "./class32/state";
 import type { BatSplash } from "./class46/splash";
 import type { PlayerBody } from "./player_body";
 import type { RouteFigure, RouteMapState, RouteMark } from "./route_map";
@@ -630,6 +634,46 @@ export const G = {
   /** `[port-only]` -- the next hit mark's identity, for the renderer. */
   g_boss4_hit_mark_seq: 0,
   /**
+   * `g_class2d_satellite_records` — `0x009A5F40`, 8 x 0x14: one record per
+   * class-0x2D satellite -- its index, whether it is out on a move, its place
+   * in the order (or a pair's handshake), a point a child's bone or a pair
+   * partner leaves in it, and its view depth. Only class 0x2D touches it.
+   */
+  g_class2d_satellite_records: makeClass2DSatelliteRecords(),
+  /**
+   * `g_class2d_satellite_order` — `0x009C8D60`: `Class2DSortSatelliteRecords`
+   * (`FUN_00429680`)'s copy of the records, nearest the eye first.
+   */
+  g_class2d_satellite_order: makeClass2DSatelliteRecords(),
+  /**
+   * `g_class2d_child_busy` — `0x009A2448`, u8: 1 from the moment
+   * `Class2DState4` allocates a child until the child's last sub clears it.
+   */
+  g_class2d_child_busy: 0,
+  /**
+   * `[port-only]` as a pool: class 0x2D's small tasks -- the sparks, the
+   * satellites' trails, the intro flipbook and the death burst. See
+   * `game/class2D/tasks.ts`.
+   */
+  g_class2d_tasks: [] as Class2DTask[],
+  /** `[port-only]` -- the next task's identity, for the renderer. */
+  g_class2d_task_seq: 0,
+  /**
+   * `[port-only]` -- every `AssetDrawSlot` class 0x2D made this frame, under
+   * the matrix its routine built, for `render/` to draw. Emptied at the head
+   * of each frame's walk; what the frame drew, not state the next frame
+   * reads. See `Class2DSlotDraw`.
+   */
+  g_class2d_draws: [] as Class2DSlotDraw[],
+  /**
+   * `[port-only]` -- how many times `Class2DScrollBurstModelUVs`
+   * (`FUN_00429C90`) has run over slot `0x16B6`'s resident model: the engine
+   * lowers each full vertex's `+0x1C` by 0.005 in the loaded model itself, so
+   * the scroll accumulates for as long as the model stays loaded. The port's
+   * model is the renderer's, so the count is kept here and applied there.
+   */
+  g_class2d_burst_uv_scroll: 0,
+  /**
    * `g_shot_hit_records` — `0x009A2C40`, stride 0x1C, one per player: the
    * hit `SpawnWorldImpact` (`FUN_00405260`) last resolved for that player's
    * shot -- the point at `+0x00`, the collision surface at `+0x0C` and the
@@ -738,6 +782,28 @@ export const G = {
   g_boss3_splashes: [] as Boss3Splash[],
   g_boss3_mesh_bulges: [] as Boss3MeshBulge[],
   g_boss3_path_effects: [] as Boss3PathEffect[],
+  /**
+   * `[port-only]` as a pool: the draw-only tasks class 0x32 allocates, in
+   * creation order -- `Class32AfterimageTick`, `Class32BodyLoopEffectTick`,
+   * `Class32HandsEffectTick`, `Class32ProjectileTrailTick`,
+   * `Class32DeathBurstTick` and `Class32ExitEffectTick`. Plain records for
+   * the same reason as `g_severed_heads`; see `game/class32/tasks.ts`.
+   */
+  g_class32_tasks: [] as Class32Task[],
+  /** `[port-only]` The next `Class32Task.id`. */
+  g_class32_task_seq: 0,
+  /**
+   * `[port-only]` The next class-0x32 projectile's spawn address -- see
+   * `Class32ProjectileAt`. In `G` so a snapshot restores it.
+   */
+  g_class32_actor_seq: 0,
+  /**
+   * `g_shot_bone` — `0x009A2D88`, per player: the bone the player's shot hit,
+   * as a shot handler copies it out of `obj+0x190 + player` before it
+   * charges the hit. `Class32ResolvePlayerShots` writes it and
+   * `Class32ChargeShotBone` switches on it.
+   */
+  g_shot_bone: [0, 0] as number[],
   /**
    * `g_camera_driver_held` — `0x009CA094`. While it is 1,
    * `CameraDriverSelectMode` (`FUN_00402650`) forces camera mode 6, the hook
@@ -897,6 +963,14 @@ export const G = {
    * stays 0 unless a saved profile brings bits in.
    */
   g_option_unlocks: 0,
+  /**
+   * `g_profile_original_boss6_beaten` — `0x009C9F5F`, u8, in the profile
+   * block after the saved items and the unlocks: 1 from `Class2DState5`'s
+   * kill arm in Original Mode (which counts the kill itself in entry 24 of
+   * {@link g_original_items_taken}), 0 from `ProfileFactoryReset`
+   * (`FUN_00401060`). No reader in the image.
+   */
+  g_profile_original_boss6_beaten: 0,
   /**
    * `+0x00` of each player's record at `g_player_input_bindings`
    * (`0x009C9F60` + player*0x7C), s8 0..3: the options' **Sight Graphic**
@@ -2662,17 +2736,33 @@ export const G = {
    */
   g_GameMode: GameMode.Arcade as GameMode,
   /**
-   * `g_training_lesson` — 0x009C9118. Which training lesson is being played.
+   * `g_training_lesson` — 0x009C9118. Which level of the chosen training
+   * course is being played, 0..4; the course is {@link g_training_course}.
    *
-   * It was `g_prop_target_set` here and in the TSV, named from the one use
-   * the port has for it: `PlaceBreakableGroup` turns the members it selects
-   * into one-shot targets while `g_GameMode` is 2. Mode 2 is **Training**,
-   * and the byte is read in exactly two places, both behind that test — the
-   * other is `PreloadScreenAssetList` (`FUN_00412FD0`), which indexes a
-   * per-lesson asset list with it at training block 3. So the four "member
-   * sets" are the four lessons, which is what the old name could not say.
+   * One writer, the Training select screen (`FUN_00496DE0`, `0x00497254`),
+   * from its second cursor: seeded from the course's grade byte (a 5 stored
+   * as 4) and stepped by input, never past 4. `[proved]` 32 of its 33
+   * references are reads -- `PlaceBreakableGroup` turns the members it
+   * selects into one-shot targets while `g_GameMode` is 2 (Training),
+   * `PreloadScreenAssetList` (`FUN_00412FD0`) indexes a per-lesson asset list
+   * with it at training block 3, and `ThrowerStateWalkDistance` picks its
+   * walk clip by it on course 5. This comment used to say it was read in
+   * exactly two places, which nobody had enumerated. It was
+   * `g_prop_target_set` before mode 2 was known to be Training.
    */
   g_training_lesson: 0,
+  /**
+   * `g_training_course` — 0x009C8FB1. Which training course the Training
+   * select screen picked, 0..9.
+   *
+   * `[proved]` One writer, `FUN_00496DE0` at `0x00497248`, which stores its
+   * course cursor there together with the course's event block and the level
+   * in {@link g_training_lesson}. Class 0x31 reads it once:
+   * `ThrowerStateWalkDistance` walks on a per-level clip on course 5. Nothing
+   * in the port plays Training, so it keeps its reset value, and which course
+   * is which is `[open]`.
+   */
+  g_training_course: 0,
   /**
    * `g_scene_index` — 0x009A1A08. Which scene is loaded, zero-based:
    * `ColiLoadForScene` indexes its file list with it, so scene 1 is stage 2.
@@ -3134,6 +3224,14 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   G.g_boss_hp_bars = [];
   G.g_boss_banners = [];
   G.g_boss4_hit_marks = [];
+  // Class 0x2D's tasks go with the task list; its satellite records and the
+  // child latch are the image's zeroes until the next fight writes them.
+  G.g_class2d_tasks = [];
+  G.g_class2d_draws = [];
+  G.g_class2d_satellite_records = makeClass2DSatelliteRecords();
+  G.g_class2d_satellite_order = makeClass2DSatelliteRecords();
+  G.g_class2d_child_busy = 0;
+  G.g_class2d_burst_uv_scroll = 0;
   // Class 0x45's tasks go with the task list; its data-segment words are
   // re-seeded by `Boss3ClassHandler` on the next spawn, and are put back to
   // the image's zeroes here so a seek from a cold start and one from mid-fight
@@ -3143,6 +3241,10 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   G.g_boss3_splashes = [];
   G.g_boss3_mesh_bulges = [];
   G.g_boss3_path_effects = [];
+  // ...and class 0x32's, the same way.
+  G.g_class32_tasks = [];
+  G.g_class32_task_seq = 0;
+  G.g_class32_actor_seq = 0;
   G.g_boss3_heads_attacking = 0;
   G.g_boss3_variant = 0;
   G.g_boss3_heads = [-1, -1, -1, -1, -1];

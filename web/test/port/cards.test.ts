@@ -188,25 +188,19 @@ console.log("\n`wait_script_flag` holds for the actor that raises the flag:");
   check("...having run the instruction behind it into the same array",
         (G.g_script_flags[7] ?? 0) === 1, `${G.g_script_flags[7]}`);
 
-  // The escape hatch, pinned. **`[diverges]`**: a gate on a flag nothing this
-  // port runs can raise passes, because a faithful one would park the stage on
-  // it for ever. The boundary is *derived*, so this is a check on the
-  // derivation and not on a list of numbers: the same fixture, one flag
-  // nothing in it can raise.
+  // The escape hatch is gone. A gate on a flag nothing this port runs could
+  // raise used to pass, under a declared divergence, rather than park the
+  // stage for ever; with class 0x32 ported every shipped gate has a writer
+  // the port runs (`tools/flag_gates.ts`), and the wait blocks as the
+  // engine's does. The derivation stays, as that tool's measurement: the
+  // same fixture, one flag nothing in it can raise.
   //
-  // The example is still **flag 20**, but the reason it is unraisable here has
-  // changed and is now a sharper one. It used to be that class 0x41's
-  // `FUN_004710C0` had no module at all; `class41/flag_prop.ts` ports it, and
-  // the block above watches it raise the flag three different ways. What
-  // makes it unraisable *in this bundle* is that this script places no
-  // class-0x41 record at the type-75 placement — which is exactly the
-  // per-record declaration `ClassHandler.raisesScriptFlag` was widened for. A
-  // class-wide number would have put 20 in this set the moment any prop
-  // appeared, and this assertion is what would have caught that.
-  //
-  // (248 expired as an example when `game/class60/` was written. The flags
-  // with no port left are class 0x14's, 0x19's and 0x22's, and class 0x32's
-  // 30 — which is `RESCUE_FLAG` in this fixture, so it cannot stand in here.)
+  // The example is **flag 20**: class 0x41's `FUN_004710C0` is ported
+  // (`class41/flag_prop.ts`, and the block above watches it raise the flag
+  // three different ways), but this script places no class-0x41 record at
+  // the type-75 placement -- exactly the per-record declaration
+  // `ClassHandler.raisesScriptFlag` was widened for. A class-wide number would
+  // have put 20 in this set the moment any prop appeared.
   const canRaise = ScriptFlagsThisBundleCanRaise(script);
   check("the coverage set is the civilian's own flag and the script's own",
         canRaise.has(RESCUE_FLAG) && canRaise.has(7) && !canRaise.has(20),
@@ -223,8 +217,9 @@ console.log("\n`wait_script_flag` holds for the actor that raises the flag:");
     } as unknown as ScriptJson;
     const w3 = new Walker(unraisable, host);
     for (let i = 0; i < 10; i++) w3.tick(1 / 60);
-    check("...and a gate on a flag nothing in the bundle raises does not park",
-          w3.wait === null && !(w3.step === 0 && w3.opIndex === 0),
+    check("...and a gate on a flag nothing in the bundle raises parks, as "
+          + "EvtOpWaitScriptFlag45 does",
+          w3.wait?.op.op === 0x45 && w3.step === 0 && w3.opIndex === 0,
           `at ${w3.block}/${w3.step}/${w3.opIndex} wait ${w3.wait?.op.op}`);
   }
 

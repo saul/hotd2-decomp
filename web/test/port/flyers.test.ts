@@ -1958,6 +1958,64 @@ import {
   }
 
   {
+    // **The blood is at the bat's view-space point, not at its position.**
+    // All three routines call `SpawnBloodSprayAtPoint(obj + 0x40)`, which
+    // reads `obj+0x70`: the view of `(x, y + 1, z)` each tail registered last
+    // frame. A camera that turns a quarter about y and moves (L48), so a world
+    // point handed over as it stands, or the position without its lift, lands
+    // somewhere else.
+    const view = (p: Vec3, out: Vec3) => {
+      out.x = p.z + 5; out.y = p.y - 3; out.z = -p.x - 20;
+    };
+    const host: GameHost = {
+      ...HOST,
+      viewSpaceOfPoint: (p, out) => { view(p, out); return true; },
+    };
+    const fr = (rng: Rng): ClassFrame => ({ ...frame(rng), host });
+    const shoot = (o: Actor, rng: Rng, label: string) => {
+      // The point the last update registered, taken from the position the
+      // update left and not from the port's own field.
+      const want = vec3();
+      view(vec3(o.pos.x, o.pos.y + 1, o.pos.z), want);
+      const blood = G.g_point_blood_sprays.length;
+      o.flags |= ActorFlag.Hit | ActorFlag.HitByPlayer0;
+      BatUpdate(o, fr(rng));
+      const got = G.g_point_blood_sprays[blood]?.pos;
+      check(`a shot ${label} bat bleeds at its view-space point, lifted by one`,
+            bat(o).state === BatState.Dead
+            && G.g_point_blood_sprays.length === blood + 1 && !!got
+            && Math.abs(got.x - want.x) < 1e-9
+            && Math.abs(got.y - want.y) < 1e-9
+            && Math.abs(got.z - want.z) < 1e-9,
+            `${BatState[bat(o).state]} want ${JSON.stringify(want)} `
+            + `got ${JSON.stringify(got)}`);
+    };
+
+    const rng = new Rng(101);
+    scene(0, rng);
+    G.g_players_in_play = 1;
+    const dive = mkBat(0xa140, 0, 0, 0, rng);
+    for (let i = 0; i < 12; i += 1) BatUpdate(dive, fr(rng));
+    shoot(dive, rng, "diving");
+
+    mkBat(0xa180, 2, 0, 0, rng, vec3(30, 5, -60));
+    const swarm = G.g_object_list.find(
+      (a) => a.cls === SpawnClass.Bat && !a.despawned && !bat(a).isWing
+        && bat(a).subtype === 2)!;
+    for (let i = 0; i < 3; i += 1) BatUpdate(swarm, fr(rng));
+    shoot(swarm, rng, "swarm");
+
+    mkBat(0xa1c0, 1, 0, 0, rng, vec3(-407, -10, -3688));
+    const scatter = G.g_object_list.find(
+      (a) => a.cls === SpawnClass.Bat && !a.despawned && !bat(a).isWing
+        && bat(a).subtype === 1)!;
+    for (let i = 0; i < 4; i += 1) BatUpdate(scatter, fr(rng));
+    check("...the scatter member is flying, the one arm that registers",
+          bat(scatter).state === BatState.Fly, BatState[bat(scatter).state]);
+    shoot(scatter, rng, "scattering");
+  }
+
+  {
     // The wings are a **second actor**, and `g_bat_members` is the whole of
     // how they find their body and how they learn it has gone.
     const rng = new Rng(89);

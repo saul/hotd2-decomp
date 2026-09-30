@@ -70,6 +70,7 @@ import {
 }
   from "../game/class13/state";
 import type { VehicleTail } from "../game/class26/state";
+import { Class32Routine } from "../game/class32/state";
 import { setAssetDrawAlpha } from "./draw_order";
 
 /**
@@ -134,6 +135,9 @@ function setDrawAlpha(c: Object3D, alpha: number | null): void {
  * one, and `render/owl.ts` is its chain.
  */
 const CHAIN = -1;
+
+/** `SetDrawLayerNibble(8)`, the world's layer: `renderOrder` 0. */
+const WORLD_LAYER = 8;
 
 /** Templates come from the hidden `slots_actor` rig the exporter emits. */
 const SLOT_PART = /_slot_([0-9a-f]{4})$/;
@@ -557,6 +561,7 @@ export class SlotModelLayer implements System<RenderContext> {
     this.drawPropStrips(seen);
     this.drawBoss2Flipbooks(ctx, seen);
     this.drawLandingRings(seen);
+    this.drawBoss5Draws(seen);
 
     for (const [key, l] of this.extras) {
       if (seen.has(key)) continue;
@@ -578,10 +583,15 @@ export class SlotModelLayer implements System<RenderContext> {
   /**
    * A node for one of a routine's extra draws, re-cloned when its slot moves
    * on, and placed by the matrix the routine composed. `alpha` is
-   * `AssetDrawSlotWithAlpha`'s, and absent for `AssetDrawSlot`.
+   * `AssetDrawSlotWithAlpha`'s, and absent for `AssetDrawSlot`; `light` is
+   * the colour `SetRenderLightColour` gave the draw, which
+   * `render/lighting.ts` reads off the node; `layer` is the
+   * `SetDrawLayerNibble` it was made in, the world's own 8 when absent.
    */
   private extra(key: string, slot: number, m: Matrix4,
-                seen: Set<number | string>, alpha: number | null = null): void {
+                seen: Set<number | string>, alpha: number | null = null,
+                light: readonly number[] | null = null,
+                layer: number | null = null): void {
     if (this.residency && !this.residency.slotResident(slot)) return;
     let live = this.extras.get(key);
     if (!live || live.slot !== slot) {
@@ -596,7 +606,47 @@ export class SlotModelLayer implements System<RenderContext> {
     live.node.matrix.copy(m);
     live.node.visible = true;
     setDrawAlpha(live.node, alpha);
+    if (light) live.node.userData.hod2_light_colour = [...light];
+    else delete live.node.userData.hod2_light_colour;
+    // The port spells a layer as `renderOrder`, the world's 8 being 0 --
+    // `render/draw_order.ts`. A draw in the world's own layer keeps the
+    // template's, and a key is always the same routine's draw.
+    if (layer !== null) live.node.renderOrder = layer - WORLD_LAYER;
     seen.add(key);
+  }
+
+  /**
+   * Class 0x32's draws that are not its skeleton: each projectile's, and
+   * each task's, on the frames the port says they drew -- the slot, the
+   * world matrix, the light colour, the alpha and the layer the routine
+   * recorded (`game/class32/projectile.ts`, `game/class32/tasks.ts`).
+   *
+   * * **projectile** (`Class32ProjectileDispatchAndDraw`, `FUN_0047EFA0`):
+   *   `T RotZ RotY RotX Scale(p+0x118)` and `SetRenderLightColour(1, v, v)`.
+   * * **afterimage**, **trail**, **hands**: `T RotZ RotY RotX`, the trail
+   *   scaled, each under its own colour.
+   * * **body loop**: the boss's own matrix raised 15, at `a * 0.5`, in
+   *   layer 9.
+   * * **death burst** and **exit effect**: no colour of their own. They draw
+   *   under the scene's light here; the engine draws them under whatever
+   *   colour the draw before them left, which the port does not follow
+   *   across routines -- `render/lighting.ts` keeps the light blocks.
+   */
+  private drawBoss5Draws(seen: Set<number | string>): void {
+    for (const a of G.g_object_list) {
+      if (a.despawned || a.cls !== SpawnClass.Boss5) continue;
+      const t = a.boss5;
+      if (t.routine !== Class32Routine.Projectile || !t.draw) continue;
+      _m.fromArray(t.draw.m);
+      this.extra(`c32p:${a.at}`, t.slot, _m, seen, null, t.draw.light);
+    }
+    for (const task of G.g_class32_tasks) {
+      const d = task.draw;
+      if (task.killed || !d) continue;
+      _m.fromArray(d.m);
+      this.extra(`c32t:${task.id}`, d.slot, _m, seen, d.alpha, d.light,
+                 d.layer);
+    }
   }
 
   /**

@@ -158,8 +158,8 @@ import { RequestAppState } from "../game/app_state";
 import { ProfileBoot } from "../game/profile";
 import { readProfile, writeProfile } from "./profile_store";
 import { OptionsPad, OptionsTap } from "../game/options/list";
-import { SetBoss4Tables, SetGameOverTables, SetGameTables, SetOptionsTables,
-         SetOriginalModeTables, SetResultCardTables }
+import { SetBoss4Tables, SetClass2DTables, SetGameOverTables, SetGameTables,
+         SetOptionsTables, SetOriginalModeTables, SetResultCardTables }
   from "../game/tables";
 import { PressKind, type Press } from "../core/net/protocol";
 import { NetSession, type NetRole } from "./net/session";
@@ -751,6 +751,10 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     this.lighting.addRoot(this.waterSurfaces.group);
     this.scene.add(this.effects.group);
     this.scene.add(this.effects.viewGroup);
+    this.scene.add(this.effects.litGroup);
+    this.scene.add(this.effects.litViewGroup);
+    this.lighting.addRoot(this.effects.litGroup);
+    this.lighting.addRoot(this.effects.litViewGroup);
 
     this.ctx = {
       scene: this.scene,
@@ -1224,6 +1228,7 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     SetOptionsTables(script.options);
     SetOriginalModeTables(script.original_mode);
     SetBoss4Tables(script.boss4, script.carrier_door_yaw);
+    SetClass2DTables(script.class2d);
     SetResultCardTables(script.result_card);
   }
 

@@ -24,6 +24,7 @@ import { makeOneHitTargetTail, type OneHitTargetTail }
 import { makeRescueTargetTail, type RescueTargetTail }
   from "./class21/state";
 import { makeBoss2Tail, type Boss2Tail } from "./class14/state";
+import { makeClass2DTail, type Class2DTail } from "./class2D/state";
 import type { SkeletonModel } from "./skeleton";
 import type { ShotRay } from "./host";
 import { makeJudgmentTail, type JudgmentTail } from "./class22/state";
@@ -39,6 +40,7 @@ import { makePathRidingPropTail, type PathRidingPropTail }
   from "./class28/state";
 import { makeBatTail, type BatTail } from "./class46/state";
 import { makeBoss3Tail, type Boss3Tail } from "./class45/state";
+import { makeBoss5Tail, type Boss5Tail } from "./class32/state";
 import { makeHordeTail, type HordeTail } from "./class40/state";
 import { makeWormTail, type WormTail } from "./class42/state";
 import { makeFishTail, type FishTail } from "./class51/state";
@@ -195,7 +197,10 @@ export enum ActorFlag {
    * result to 5, so a downed thrower only ricochets — a real invulnerability
    * window, counted down by `obj+0x133C`. `ThrowerStateDelayedPounce`
    * (`FUN_0044E830`) holds it up for the whole of its wait instead
-   * (`OR CH, 0x1` at `0x0044E884`, `AND CH, 0xfe` at `0x0044E8BD`).
+   * (`OR CH, 0x1` at `0x0044E884`, `AND CH, 0xfe` at `0x0044E8BD`), and
+   * `ThrowerStateGrabPlayer` (`FUN_0044EF90`) from its spawn to the first
+   * solid frame of its hold (`OR AH, 0x41` at `0x0044EFBB`, `AND AH, 0xfe` at
+   * `0x0044F1ED`).
    */
   ShotImmune = 0x100,
   /**
@@ -223,6 +228,11 @@ export enum ActorFlag {
    * `ThrowerStateRearm`'s exit, and `ActorPlayHitReaction`'s own alt arm
    * (`004545F5 OR CH, 0x20`), which `ZombieTickAltHitReaction`
    * (`FUN_004547C0`) takes back down when that reaction has played out.
+   * `ThrowerStateGrabPlayer` (`FUN_0044EF90`) raises it as its rider lands on
+   * the car (`0044F127 OR DH, 0x20`) and never lowers it, because its way out
+   * is `ThrowerLeave` (`FUN_0044AD60`): shot, the rider bleeds and finishes
+   * its grab. The port did not raise it, and stage 5's riders tumbled off
+   * into the hub and held the car on the bridge.
    *
    * **It was called `ArcSpent`**, after the one consequence class 0x31's fall
    * states get from it — the second knockdown of a life finds it already up
@@ -1733,7 +1743,9 @@ export interface ActorBase {
    * `ThrowerStateWalkDistance`'s target, from the descriptor — and
    * `ZombieStateWalkDistance`'s, which reads the same float at **`desc+0x04`**:
    * `*(float *)(obj+0x1390 + 4)`, four bytes into the descriptor parameter tail
-   * `SpawnFromDescriptor` (`FUN_00408A20`) hangs at `obj+0x1390`.
+   * `SpawnFromDescriptor` (`FUN_00408A20`) hangs at `obj+0x1390`. Each state
+   * latches it into its own class's `obj+0x1370` in its sub 0 and compares
+   * against that word, not this one.
    *
    * The comment here used to say "tail `+0x04`", which reads as `obj+0x04` —
    * and `obj+0x04` is inside the task control block `ActorAlloc`
@@ -1849,6 +1861,14 @@ export interface ActorBase {
    * stage-3 boss's six inits this actor runs.
    */
   class45: CharacterPlacement["class45"];
+  /**
+   * Class 0x2D's descriptor tail, `obj+0x1390` -- the sub-type, the first
+   * clip and counter, the cameo's despawning camera path and frame, and the
+   * fight's three hit-point marks, which `Class2DClassHandler`
+   * (`FUN_00426A70`) and the states read through the pointer. Its own field
+   * because `class2d` is the class's running words (`class2D/state.ts`).
+   */
+  class2dSpawn: CharacterPlacement["class2d"];
   /**
    * Class 0x40's one descriptor byte that anything reads: `desc+0x25`, the
    * selector `PlaceHorde` (`FUN_0043BD30`) switches on — a horde, or the prop
@@ -2594,6 +2614,8 @@ export type Actor =
                    pathProp: PathRidingPropTail })
   | (ActorBase & { cls: SpawnClass.Bat; bat: BatTail })
   | (ActorBase & { cls: SpawnClass.Boss3; boss3: Boss3Tail })
+  | (ActorBase & { cls: SpawnClass.Emperor; class2d: Class2DTail })
+  | (ActorBase & { cls: SpawnClass.Boss5; boss5: Boss5Tail })
   | (ActorBase & { cls: SpawnClass.HordeSpawner; horde: HordeTail })
   | (ActorBase & { cls: SpawnClass.Worm; worm: WormTail })
   | (ActorBase & { cls: SpawnClass.ScriptedScenery;
@@ -2606,7 +2628,7 @@ export type Actor =
       | SpawnClass.Boss2 | SpawnClass.Judgment | SpawnClass.JudgmentCompanion
       | SpawnClass.Mouse | SpawnClass.SkinnedNpc | SpawnClass.WaterEnemy
       | SpawnClass.Frog | SpawnClass.FlyingEnemy | SpawnClass.Bat
-      | SpawnClass.Boss3
+      | SpawnClass.Boss3 | SpawnClass.Emperor | SpawnClass.Boss5
       | SpawnClass.ScriptedProp | SpawnClass.FlagStripProp
       | SpawnClass.CarriedZombie
       | SpawnClass.ScriptedScenery | SpawnClass.Vehicle
@@ -2649,6 +2671,11 @@ export type BatActor = Extract<Actor, { cls: SpawnClass.Bat }>;
 
 /** An actor already narrowed to class 0x45, the stage-3 boss. */
 export type Boss3Actor = Extract<Actor, { cls: SpawnClass.Boss3 }>;
+
+/** An actor already narrowed to class 0x2D, for that class's own routines. */
+export type EmperorActor = Extract<Actor, { cls: SpawnClass.Emperor }>;
+/** An actor already narrowed to class 0x32, the stage-5 boss or one of its projectiles. */
+export type Boss5Actor = Extract<Actor, { cls: SpawnClass.Boss5 }>;
 
 /** An actor already narrowed to class 0x11, for that class's own routines. */
 export type FrogActor = Extract<Actor, { cls: SpawnClass.Frog }>;
@@ -2770,6 +2797,7 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     class43: null,
     class46: null,
     class45: null,
+    class2dSpawn: null,
     class40: null,
     class42: null,
     class51: null,
@@ -2908,6 +2936,12 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
   }
   if (cls === SpawnClass.Boss3) {
     return { ...head, cls, boss3: makeBoss3Tail() };
+  }
+  if (cls === SpawnClass.Emperor) {
+    return { ...head, cls, class2d: makeClass2DTail() };
+  }
+  if (cls === SpawnClass.Boss5) {
+    return { ...head, cls, boss5: makeBoss5Tail() };
   }
   if (cls === SpawnClass.HordeSpawner) {
     return { ...head, cls, horde: makeHordeTail() };

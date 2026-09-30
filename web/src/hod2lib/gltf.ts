@@ -275,7 +275,9 @@ export const DRAW_ORDER: Doc = {
     + "primitive carries in its extras hod2_pass, hod2_chain_index, "
     + "hod2_model (which of the glTF mesh's NL1 models it belongs to: one "
     + "draw command each) and hod2_sphere (the mesh header's centroid and "
-    + "radius, +0x10 and +0x1C, in model space).",
+    + "radius, +0x10 and +0x1C, in model space); and hod2_env_uv on a mesh "
+    + "whose UVs ModelUVsFromViewNormals rewrites from its normals when its "
+    + "slot is drawn after AssetSlotUVsFromViewNormals.",
 };
 
 /**
@@ -288,13 +290,15 @@ export const DRAW_ORDER: Doc = {
  * frustum and transforms for the sort depth -- the header's own sphere, which
  * for one mesh in ten is not the centre of the vertices' bounding box.
  */
-function drawOrderExtras(mesh: Mesh, chainIndex: number, model = 0): Doc {
+function drawOrderExtras(mesh: Mesh, chainIndex: number, model = 0,
+                         envUv = false): Doc {
   return {
     hod2_pass: mesh.opaquePass ? "opaque" : "translucent",
     hod2_chain_index: chainIndex,
     hod2_model: model,
     hod2_sphere: [mesh.centroid[0], mesh.centroid[1], mesh.centroid[2],
                   mesh.radius],
+    ...(envUv ? { hod2_env_uv: true } : {}),
   };
 }
 
@@ -652,7 +656,8 @@ export async function exportLevel(
           indices: buf.indices(idx),
           material: await getMaterial(partName, bank, mesh),
           mode: TRIANGLES,
-          extras: drawOrderExtras(mesh, prims.length),
+          extras: drawOrderExtras(mesh, prims.length, 0,
+                                  nl1.envUvRewritten(model, mesh)),
         });
       }
 
@@ -764,7 +769,8 @@ export async function exportLevel(
               indices: buf.indices(idx),
               material: await getMaterial(label, bank, mesh),
               mode: TRIANGLES,
-              extras: drawOrderExtras(mesh, prims.length, k),
+              extras: drawOrderExtras(mesh, prims.length, k,
+                                      nl1.envUvRewritten(model, mesh)),
             });
           }
         }

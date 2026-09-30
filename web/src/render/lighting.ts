@@ -98,6 +98,7 @@ import {
   Group,
   Mesh,
   MeshBasicMaterial,
+  Matrix4,
   MeshLambertMaterial,
   Object3D,
   Scene,
@@ -204,10 +205,30 @@ const SECONDARY_LIGHTS = (() => {
  * engine's 0..1, and every mesh under it is drawn with a twin whose uniforms
  * are this set's. The twin's program is block 1's (`secondarylit`): the
  * shader is the same one light and one ambient from uniforms, and only the
- * values differ.
+ * values differ. A tag of `null` is the block's own colour again, for a node
+ * whose parent carries a colour it does not share -- class 0x32's bones,
+ * each drawn under the colour its own draw was made with.
+ *
+ * **Under block 1 when the actor is.** A draw between `LightsUseSecondarySet`
+ * and `LightsRestoreScene` that changes the colour keeps block 1's ambient
+ * and direction -- `Class32DrawNodeSlot` (`FUN_0047FC50`)'s flash and warm
+ * light -- so a set is keyed by its block as well as its colour.
+ *
+ * `LightsUseCustomSet` (`FUN_0041DC10`) changes the other two terms as well:
+ * `SetRenderAmbient(ambient)` and the direction from its own pitch and yaw,
+ * through the same `SetLightingDefaultSingle`. A node carries that as
+ * `userData.hod2_light_set`, {@link LightSet}, and is lit the same way with
+ * the set's ambient and direction where it names them and its block's where
+ * it does not.
  */
 interface ColouredLight {
   rgb: [number, number, number];
+  /** Block 1's ambient and direction rather than block 0's. */
+  secondary: boolean;
+  /** `SetRenderAmbient`'s scalar, or null for the block's. */
+  ambientScalar: number | null;
+  /** BAMS pitch and yaw, or null for the block's direction. */
+  dirBams: [number, number] | null;
   ambient: { value: Color };
   color: { value: Color };
   dirView: { value: Vector3 };
@@ -225,6 +246,19 @@ interface ColouredLight {
  * {@link SceneLighting.viewMaterial} what to put back and this module leaves a
  * gun-lit mesh alone.
  */
+
+/**
+ * One draw's whole light set, as `LightsUseCustomSet` (`FUN_0041DC10`) takes
+ * it: the ambient scalar, the direction's BAMS pitch and yaw (`null` for
+ * block 0's own), and the colour in the engine's 0..1. See `ColouredLight`.
+ */
+export interface LightSet {
+  /** `SetRenderAmbient`'s scalar, or `null` for block 0's. */
+  ambient: number | null;
+  pitch: number | null;
+  yaw: number | null;
+  rgb: readonly number[];
+}
 
 export interface SceneLightState {
   /** Light colour, 0..1 per component, from tween channels 6/7/8. */
@@ -351,18 +385,33 @@ export class SceneLighting implements System<RenderContext> {
    * with the colour swapped.
    */
   private refreshColoured(ctx: RenderContext): void {
-    const a = this.state.ambient;
+    this.viewInverse.copy(ctx.camera.matrixWorldInverse);
+    for (const set of this.coloured.values()) this.fillColoured(set);
+  }
+
+  /** The camera's world-to-view matrix as the last update saw it. */
+  private readonly viewInverse = new Matrix4();
+
+  /**
+   * One set's uniforms, from its own terms and its block's for the ones it
+   * does not name. Run for every set each tick, and at once for a set made
+   * or re-aimed on the frame it is drawn, so no draw goes out with the
+   * zeroes a fresh set starts at.
+   */
+  private fillColoured(set: ColouredLight): void {
+    const l = set.secondary ? this.source.light() ?? DEFAULT_LIGHT : this.state;
+    const a = set.ambientScalar ?? l.ambient;
     const amb = a + LIGHT_AMBIENT_SCALE;
-    for (const set of this.coloured.values()) {
-      const [r, g, b] = set.rgb;
-      set.color.value.setRGB(r * a * DIFFUSE_SCALE, g * a * DIFFUSE_SCALE,
-                             b * a * DIFFUSE_SCALE, SRGBColorSpace)
-        .multiplyScalar(this.intensity);
-      set.ambient.value.setRGB(r * amb, g * amb, b * amb, SRGBColorSpace)
-        .multiplyScalar(this.intensity);
-      lightDirection(this.state.pitchDeg, this.state.yawDeg, set.dirView.value)
-        .transformDirection(ctx.camera.matrixWorldInverse);
-    }
+    const [r, g, b] = set.rgb;
+    set.color.value.setRGB(r * a * DIFFUSE_SCALE, g * a * DIFFUSE_SCALE,
+                           b * a * DIFFUSE_SCALE, SRGBColorSpace)
+      .multiplyScalar(this.intensity);
+    set.ambient.value.setRGB(r * amb, g * amb, b * amb, SRGBColorSpace)
+      .multiplyScalar(this.intensity);
+    const pitchDeg = set.dirBams ? set.dirBams[0] * 360 / 65536 : l.pitchDeg;
+    const yawDeg = set.dirBams ? set.dirBams[1] * 360 / 65536 : l.yawDeg;
+    lightDirection(pitchDeg, yawDeg, set.dirView.value)
+      .transformDirection(this.viewInverse);
   }
 
   /**
@@ -503,13 +552,21 @@ export class SceneLighting implements System<RenderContext> {
   private applyMaterials(visibleOnly = false): void {
     if (!this.root) return;
     const visit = (o: Object3D, at: number | null,
-                   light: readonly number[] | null): void => {
+                   light: LightSet | null): void => {
       if (visibleOnly && !o.visible) return;
       const x = o.userData as { hod2_spawn_at?: number; hod2_actor_at?: number;
-                                hod2_light_colour?: number[] };
+                                hod2_light_colour?: number[] | null;
+                                hod2_light_set?: LightSet };
       const own = x?.hod2_actor_at ?? x?.hod2_spawn_at;
       const here = own !== undefined ? own : at;
-      const lit = x?.hod2_light_colour ?? light;
+      // A light set is the whole of a draw's light. A colour tag of `null`
+      // is the block's own colour, not "inherit".
+      const colour = x?.hod2_light_colour;
+      const lit = x?.hod2_light_set
+        ?? (colour !== undefined
+          ? (colour ? { ambient: null, pitch: null, yaw: null, rgb: colour }
+            : null)
+          : light);
       const mesh = o as Mesh;
       if (mesh.isMesh && mesh.material) {
         const second = this.mode === "scene" && here !== null
@@ -520,7 +577,7 @@ export class SceneLighting implements System<RenderContext> {
           if (m.userData?.gunLit) return m;
           const base = this.baseOf(m);
           if (this.mode !== "scene") return base;
-          if (lit) return this.colouredTwinOf(base, lit);
+          if (lit) return this.colouredTwinOf(base, lit, second);
           return second ? this.secondaryTwinOf(base) : this.twinOf(base);
         };
         // Under any fade the draw has put on it, which stays on top: see
@@ -552,19 +609,36 @@ export class SceneLighting implements System<RenderContext> {
    * Built like the block-1 twin, on the block-1 program, with the colour
    * set's own uniform objects, which three.js keeps per material.
    */
-  private colouredTwinOf(m: Material, rgb: readonly number[]): Material {
+  private colouredTwinOf(m: Material, spec: LightSet,
+                         secondary: boolean): Material {
     if (!(m instanceof MeshBasicMaterial)) return m;
-    const key = `${rgb[0]},${rgb[1]},${rgb[2]}`;
+    const rgb = spec.rgb;
+    const amb = spec.ambient;
+    const dir: [number, number] | null =
+      spec.pitch !== null && spec.yaw !== null ? [spec.pitch, spec.yaw] : null;
+    // A set that names its own direction is keyed on having one, not on its
+    // value: the one caller that names it hands the camera block's, which
+    // moves with the camera, and a set per angle would be a material per
+    // frame. The set takes the angle it was last asked for.
+    const key = `${secondary ? "block1|" : ""}${rgb[0]},${rgb[1]},${rgb[2]}`
+      + `|${amb}|${dir ? "dir" : "block"}`;
     let set = this.coloured.get(key);
+    if (set && dir && (!set.dirBams || set.dirBams[0] !== dir[0]
+                       || set.dirBams[1] !== dir[1])) {
+      set.dirBams = dir;
+      this.fillColoured(set);
+    }
     if (!set) {
       set = {
-        rgb: [rgb[0], rgb[1], rgb[2]],
+        rgb: [rgb[0]!, rgb[1]!, rgb[2]!], secondary, ambientScalar: amb,
+        dirBams: dir,
         ambient: { value: new Color(0, 0, 0) },
         color: { value: new Color(0, 0, 0) },
         dirView: { value: new Vector3(0, 0, 1) },
         twins: new Map(),
       };
       this.coloured.set(key, set);
+      this.fillColoured(set);
     }
     let twin = set.twins.get(m);
     if (!twin) {

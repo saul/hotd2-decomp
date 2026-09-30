@@ -363,7 +363,7 @@ console.log("\nclasses 0x22/0x23: JUDGMENT, the flier and the walker:");
  * The class under test is a stand-in shaped like the bosses: its `Init`
  * writes `obj+0x124` and runs the skeleton build, and its update ends in
  * `ActorRegisterCameraPoint` the way `Class14Update` (`0x0047621E`) and
- * `Boss4Update` (`0x00491A49`) do. Class 0x2D has no module, so its row is
+ * `Boss4Update` (`0x00491A49`) do. Class 0x29 has no module, so its row is
  * free to borrow; the real bosses' modules are other workstreams'.
  *
  * Every assertion reads what only a shot can write -- `obj+0x190 + player`,
@@ -377,8 +377,8 @@ console.log("\nthe shot test, for a class that registers the engine's way:");
 {
   const rng = new Rng(29);
   const events = scene(0, rng);
-  const CLS = SpawnClass.LargeCreature;
-  if (g_class_handlers[CLS]) throw new Error("class 0x2D is ported now");
+  const CLS = SpawnClass.SceneryBatch;
+  if (g_class_handlers[CLS]) throw new Error("class 0x29 is ported now");
   // A root at the actor and two children beside it: bone 2 four units to the
   // side, inside a twelve-unit `obj+0x124`, and bone 3 twenty units out,
   // beyond it. Parents are indices into this list, as the exporter writes

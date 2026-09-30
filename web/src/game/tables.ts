@@ -15,7 +15,8 @@ import type { Actor } from "./actor";
 import type { SetPieceParams } from "./class24";
 import type { CiviliansJson } from "../bundle/scene";
 import type {
-  Boss4TablesJson, GameOverJson, OptionsJson, OriginalModeJson, ResultCardJson,
+  Boss4TablesJson, Class2DTablesJson, GameOverJson, OptionsJson,
+  OriginalModeJson, ResultCardJson,
 } from "../bundle/stage";
 import type { HumanoidProgram } from "./class25";
 import { G } from "./globals";
@@ -85,6 +86,12 @@ export const T = {
    */
   boss4: null as Boss4TablesJson | null,
   /**
+   * Class 0x2D's `.rdata` -- the stage-6 boss's tables. One block for the
+   * whole game, read by `game/class2D/`. Null in a bundle written before it,
+   * and the boss then has no waypoints to fight from.
+   */
+  class2d: null as Class2DTablesJson | null,
+  /**
    * `g_carrier2_door_yaw` (`0x005926D0`) -- the swing class 0x13's carrier
    * routine 2 steps its two doors through. Empty in a pre-13 bundle.
    */
@@ -120,6 +127,11 @@ export function SetBoss4Tables(json: Boss4TablesJson | undefined,
                                doorYaw: number[] | undefined): void {
   T.boss4 = json ?? null;
   T.carrierDoorYaw = doorYaw ?? [];
+}
+
+/** `[port-only]` -- class 0x2D's block, from the same `script.json`. */
+export function SetClass2DTables(json: Class2DTablesJson | undefined): void {
+  T.class2d = json ?? null;
 }
 
 /** `[port-only]` -- the options block, from the same `script.json`. */

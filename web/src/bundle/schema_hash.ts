@@ -20,13 +20,13 @@
 /** The per-file digests, so a mismatch can name the block that moved. */
 export const SCHEMA_FILES: Readonly<Record<string, string>> = {
   "cameras.ts": "e711fd29f97441deae96406d95600d68fc9b5e9ccb1c170b46f23120cd8d67ce",
-  "characters.ts": "7df8d8e7b5aafb437f5475b6b7323a42cb7b22e89bfd47157e039b4cfebd2b87",
+  "characters.ts": "a32a9b7ba1ec40efd2a361e55807c231054ff39de48145afcf605e5d678536f7",
   "manifest.ts": "37c3e33623221efd0aee11e8cb4df1437155c73c1055bec6a7a6818cf8d962bb",
   "scene.ts": "08861dadc34793c127cbc8dc6939078a3036fa0538c44a9487e2065ccbe0a4d1",
   "script.ts": "24322ec31dd1b8cbd71e8f6dc257df656e433149663182b70722aaf69330357f",
   "sound.ts": "69f5c5cdf7a96b4ef01e41cbee9805c81e709f15a396ed2456b017389b3cefd8",
-  "stage.ts": "5feb5a654754b7d120398ee259d2086fc9be1e74038c36df65cc157c7525bdba",
+  "stage.ts": "93089f1750ebc26556b80365111fe57e583fc8a0363a728549f832a130ee211b",
 };
 
 /** One digest over {@link SCHEMA_FILES}, in filename order. */
-export const SCHEMA_HASH = "45e1bde7c1b5e47f546550e0f708758701019a85cc309d9c6183df94b1823545";
+export const SCHEMA_HASH = "cd334bcd8b78e9be21cb5f45426952532e1aa427419226a9df19d8170d780d1c";

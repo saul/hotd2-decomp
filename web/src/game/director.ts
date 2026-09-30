@@ -46,6 +46,8 @@ import { BossBannersTick } from "./boss_banner";
 import { WaterWaveSourcesTick } from "./class17";
 import { Boss4HitMarksTick } from "./class19/hit_mark";
 import { Boss3TasksTick } from "./class45/tasks";
+import { Class2DTasksTick } from "./class2D/tasks";
+import { Class32TasksTick } from "./class32/tasks";
 import { BatSplashesTick } from "./class46/splash";
 import { FishEffectsTick } from "./effects/fish";
 import { OwlEffectsTick } from "./effects/owl";
@@ -858,6 +860,9 @@ function SceneTaskWalk(dt: number, host: GameHost,
   // tasks ahead of the boss that samples them -- see `WaterWaveSourcesTick`.
   WaterWaveSourcesTick();
 
+  // Class 0x2D's draws are made inside its routines, as the engine's are;
+  // the list is this frame's (`class2D/draw.ts`).
+  G.g_class2d_draws = [];
   const f = { dt, rng, host, events };
   for (const obj of G.g_object_list) {
     // Every actor's clips run, handler or not: a class with no behaviour still
@@ -998,6 +1003,13 @@ function SceneTaskWalk(dt: number, host: GameHost,
   // Class 0x45's own tasks -- its intro card, the sparks and splashes, the
   // bulge and the wake -- allocated by its actors above, so after them.
   Boss3TasksTick(events);
+  // ...and class 0x2D's: the sparks, the satellites' trails, the intro
+  // flipbook and the death burst. See `game/class2D/tasks.ts`.
+  Class2DTasksTick(host, events);
+  // ...and class 0x32's draw-only tasks -- the afterimages, the body loop and
+  // hands effects, the projectiles' trails, the death bursts and the exit
+  // effect -- the same way. Its projectiles are actors and ran above.
+  Class32TasksTick(events);
   // The layered queue is flushed by `GameUpdate`, after the run phase.
   return { lookAt: G.g_camera_block_target };
 }

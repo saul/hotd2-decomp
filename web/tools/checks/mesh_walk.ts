@@ -71,6 +71,12 @@ interface Stats {
   unalignedSize: number;
   pcwBit0Meshes: number;
   envMapStrips: number;
+  /**
+   * Meshes with some bit-8 strips and some without. `ModelUVsFromViewNormals`
+   * tests each strip, and the exporter marks the primitive
+   * (`nl1.envUvRewritten`), which is the same thing only while this is 0.
+   */
+  mixedEnvMeshes: number;
 }
 
 /** `ModelFlipStripCullingParity`'s walk, with every invariant it implies. */
@@ -90,13 +96,15 @@ function walkModel(b: Uint8Array, s: Stats): void {
     const end = pos + MESH_HEADER + (size & ~3);
     if (end > b.length) throw new Desync(`mesh at 0x${pos.toString(16)} runs past the model`);
     let p = pos + MESH_HEADER;
+    let env = 0;
+    let plain = 0;
     while (p < end) {
       if (p + 8 > end) throw new Desync(`strip header straddles the mesh end at 0x${p.toString(16)}`);
       const flags = u32(b, p);
       const count = u32(b, p + 4);
       if (flags & 0x80000000) throw new Desync(`mesh header inside geometry at 0x${p.toString(16)}`);
       s.strips++;
-      if (flags & 0x100) s.envMapStrips++;
+      if (flags & 0x100) { s.envMapStrips++; env++; } else plain++;
       const n = flags & 8 ? count * 3 : count;
       p += 8;
       for (let i = 0; i < n; i++) {
@@ -115,6 +123,7 @@ function walkModel(b: Uint8Array, s: Stats): void {
     if (p !== end) {
       throw new Desync(`geometry walk ended at 0x${p.toString(16)}, mesh declares 0x${end.toString(16)}`);
     }
+    if (env && plain) s.mixedEnvMeshes++;
     pos = end;
   }
 }
@@ -125,7 +134,8 @@ async function main(): Promise<void> {
   const c = new Checker("mesh_walk");
 
   const s: Stats = { meshes: 0, strips: 0, vertices: 0, backRefs: 0, heuristicMisses: 0,
-                     unalignedSize: 0, pcwBit0Meshes: 0, envMapStrips: 0 };
+                     unalignedSize: 0, pcwBit0Meshes: 0, envMapStrips: 0,
+                     mixedEnvMeshes: 0 };
   const desyncs: string[] = [];
   let models = 0;
   for (const name of await polFiles(source)) {
@@ -167,6 +177,7 @@ async function main(): Promise<void> {
   count(c, s.unalignedSize, 0, "meshes whose mesh_data_size has its low bits set");
   count(c, s.pcwBit0Meshes, EXPECT.pcwBit0Meshes, "meshes with parameter_control bit 0");
   count(c, s.envMapStrips, EXPECT.envMapStrips, "strips with bit 8 (environment mapping)");
+  count(c, s.mixedEnvMeshes, 0, "meshes mixing bit-8 strips with others");
 
   c.finish();
 }

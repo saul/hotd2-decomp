@@ -540,7 +540,8 @@ export class ExeTables {
    * A scene off the stage chain -- training, the attract screens, the ending
    * -- has no predecessor here and reports block 0. That is not a claim about
    * how those scenes are entered: `RunAttractDemo` names its own block and
-   * `ResetGameOnStart` names `g_training_lesson`'s.
+   * `ResetGameOnStart` takes Training's from `0x009A2BBC`, which the select
+   * screen sets by `g_training_course`.
    */
   sceneEntryBlocks(scene: number): number[] {
     return this.cached(`entries:${scene}`, () => {
@@ -1361,6 +1362,25 @@ export class ExeTables {
     return files.size === 1 ? [...files][0] : null;
   }
 
+  /**
+   * Every pol file a character type's parts live in, in skeleton order --
+   * the root node's first. One file for every type but `0x4B`: the stage-5
+   * boss's fifteen nodes are eleven `boss5.bin` models and four
+   * `boss5b.bin` ones (bones 3, 4, 10 and 11), and stage 5's script loads
+   * both files (`asset_load_polfile` 208 and 25) before it spawns class
+   * 0x32. A character whose parts disagree is still one character: each
+   * node draws its own slot, which the slot table resolves to its own file.
+   */
+  characterAssetFiles(charType: number): string[] {
+    const slots = this.assetSlots();
+    const files: string[] = [];
+    for (const n of this.characterSkeleton(charType)) {
+      const rec = slots.get(n.slot);
+      if (rec && !files.includes(rec[0])) files.push(rec[0]);
+    }
+    return files;
+  }
+
   /** `{sound id: filename}` for every category-0 sound in the game. */
   soundRecords(): Map<number, string> {
     return this.cached("soundRecords", () => {
@@ -1557,6 +1577,52 @@ export class ExeTables {
                                    (_u, i) => s16(0x005709a0 + i * 2)),
       approach_picks: Array.from({ length: 16 }, (_r, rank) =>
         Array.from({ length: 9 }, (_u, i) => s8(0x005709b4 + rank * 9 + i))),
+    };
+  }
+
+  /**
+   * Class 0x2D's `.rdata` -- the stage-6 boss's tables, for `script.json`'s
+   * `class2d` block. Each is `[proved]` from the routine named in its
+   * `ghidra/annotations/globals.tsv` row, and every length is the reader's
+   * own bound (an index's range, or the next table's start), not a search
+   * for the table's end (L6). See `docs/re/boss-emperor.md`.
+   */
+  class2dTables(): Record<string, unknown> {
+    const s16 = (va: number): number => {
+      const v = this.ru16(va) ?? 0;
+      return v >= 0x8000 ? v - 0x10000 : v;
+    };
+    const u8 = (va: number): number => {
+      const r = this.v2r(va);
+      return r === null ? 0 : this.data[r];
+    };
+    const f = (va: number): number => this.rf32(va) ?? 0;
+    const i32 = (va: number): number => this.ri32(va) ?? 0;
+    const vec = (va: number): number[] => [f(va), f(va + 4), f(va + 8)];
+    const run = <T>(n: number, g: (i: number) => T): T[] =>
+      Array.from({ length: n }, (_u, i) => g(i));
+    return {
+      charge_arrive_dist: f(0x0055ccd4),
+      hit_damage: run(3, (i) => s16(0x0055ccd6 + i * 2)),
+      waypoints: run(5, (i) => vec(0x0055cce0 + i * 12)),
+      attack_picks: run(16, (r) => run(10, (i) => i32(0x0055cd1c + (r * 10 + i) * 4))),
+      stagger_hits: run(3, (i) => s16(0x0055cf9a + i * 2)),
+      charge_steps: run(16, (i) => s16(0x0055cfa0 + i * 2)),
+      child_kind_picks: run(4, (r) => run(10, (i) => i32(0x0055cfc0 + (r * 10 + i) * 4))),
+      path_segments: run(8, (i) => {
+        const b = 0x0055d060 + i * 0x18;
+        return { step: f(b), advance: f(b + 4), strike: f(b + 8), end: f(b + 0xc),
+                 words: run(4, (k) => s16(b + 0x10 + k * 2)) };
+      }),
+      child_offsets: run(5, (i) => vec(0x0055d120 + i * 12)),
+      launch_gap: run(16, (i) => s16(0x0055d1b8 + i * 2)),
+      flight_frames: run(16, (i) => s16(0x0055d1d8 + i * 2)),
+      pair_flight_frames: run(16, (i) => s16(0x0055d1f8 + i * 2)),
+      child0_path_start: run(2, (i) => s16(0x0055d234 + i * 2)),
+      child_bone_satellite: run(16, (i) => u8(0x0055d238 + i)),
+      child2_approach: run(16, (i) => s16(0x0055d248 + i * 2)),
+      child2_bone_satellite: run(28, (i) => u8(0x0055d268 + i)),
+      child3_approach: run(16, (i) => s16(0x0055d284 + i * 2)),
     };
   }
 

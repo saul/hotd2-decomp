@@ -96,6 +96,7 @@ const boneSuffix = (part: string) => `_${part}`;
 import type { Instance } from "./characters/instance";
 import { Poser } from "./characters/pose";
 import { PoseFromModelBlock } from "./characters/model_block";
+import { clearBoss5NodeDraws, syncBoss5NodeDraws } from "./characters/boss5";
 import { placeHordeRoot, poseHordeJaw, syncHordeMirror }
   from "./characters/horde";
 import { clearBoneCels, syncBoneCels } from "./characters/cels";
@@ -581,7 +582,13 @@ export class CharacterLayer implements System {
         this._up.x = this._v2w[4];
         this._up.y = this._v2w[5];
         this._up.z = this._v2w[6];
-        if (PoseFromModelBlock(inst, this._up)) continue;
+        if (PoseFromModelBlock(inst, this._up, this._w2v,
+                               (slot) => this.cloneSlot(slot))) {
+          // Class 0x32's node hook draws every model its nodes show: see
+          // `render/characters/boss5.ts`.
+          syncBoss5NodeDraws(inst, (slot) => this.cloneSlot(slot));
+          continue;
+        }
       }
       if (poseBoss3(inst)) {
         // Class 0x45 composes its own matrices; this places them. See
@@ -830,7 +837,8 @@ export class CharacterLayer implements System {
               && t < bestT) {
             bestT = t;
             best = { kind: "actor", at: inst.at, bone: 0, whole: true,
-                     point: { x: this._c.x, y: this._c.y, z: this._c.z } };
+                     point: { x: this._c.x, y: this._c.y, z: this._c.z },
+                     radius: r };
           }
         }
         continue;
@@ -861,7 +869,8 @@ export class CharacterLayer implements System {
         if (t < bestT) {
           bestT = t;
           best = { kind: "actor", at: inst.at, bone: b.bone,
-                   point: { x: this._c.x, y: this._c.y, z: this._c.z } };
+                   point: { x: this._c.x, y: this._c.y, z: this._c.z },
+                   radius: r };
         }
       }
     }
@@ -883,7 +892,8 @@ export class CharacterLayer implements System {
     if (slot && slot.t < bestT) {
       bestT = slot.t;
       best = { kind: "actor", at: slot.at, bone: 0, whole: true,
-               point: { x: slot.point.x, y: slot.point.y, z: slot.point.z } };
+               point: { x: slot.point.x, y: slot.point.y, z: slot.point.z },
+               radius: slot.radius };
     }
     // ...and the creatures `znjoe` releases, which are the third pool in this
     // one candidate list. The engine walks **one** list for all of them —
@@ -898,7 +908,8 @@ export class CharacterLayer implements System {
       bestT = creature.t;
       best = { kind: "creature", creatureId: creature.id,
                point: { x: creature.point.x, y: creature.point.y,
-                        z: creature.point.z } };
+                        z: creature.point.z },
+               radius: creature.radius };
     }
     // ...and the props state-37 zombies carry and throw, the fourth pool in
     // the same list: a drum in front of the zombie holding it takes the shot.
@@ -907,7 +918,8 @@ export class CharacterLayer implements System {
       bestT = carried.t;
       best = { kind: "carried", carriedId: carried.id,
                point: { x: carried.point.x, y: carried.point.y,
-                        z: carried.point.z } };
+                        z: carried.point.z },
+               radius: carried.radius };
     }
     // Say so rather than doing nothing quietly: a bundle exported before the
     // reaction tables were added has no `reaction_groups`, and a silent no-op
@@ -1054,6 +1066,7 @@ export class CharacterLayer implements System {
     inst.mouthShown = undefined;
     clearHeldItems(inst);
     clearHumanoidHookDraws(inst);
+    clearBoss5NodeDraws(inst);
     for (const node of inst.bones.values()) {
       node.visible = true;
       for (const c of node.children) c.visible = true;

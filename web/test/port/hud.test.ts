@@ -50,8 +50,9 @@ import {
 } from "../../src/game/hud_shutter";
 import { CamPath } from "../../src/game/camera/curve";
 import {
-  check, scene, SeatCamera, EnterPlay, RunOutInvulnerability,
+  check, scene, SeatCamera, EnterPlay, RunOutInvulnerability, ORIGINAL_MODE,
 } from "./harness";
+import { SetOriginalModeTables } from "../../src/game/tables";
 
 console.log("\nthe damage overlay:");
 {
@@ -755,7 +756,9 @@ console.log("\nthe gun: the magazine, the reload, and the HUD readouts:");
   step();
   check("two lives, two lamps", lamps().length === 2, `${lamps().length}`);
 
-  // Original Mode: the magazine is the weapon's.
+  // Original Mode: the magazine is the weapon's, and the fire and readout
+  // rows are the bundle's `original_mode` block.
+  SetOriginalModeTables(ORIGINAL_MODE);
   G.g_GameMode = GameMode.Original;
   G.g_player_magazine_size[0] = 9;
   reload();
@@ -799,7 +802,9 @@ console.log("\nthe gun: the magazine, the reload, and the HUD readouts:");
   G.g_GameMode = GameMode.Arcade;
 
   check("every sprite the readouts drew is one the exporter ships",
-        G.g_screen_sprite_draws.every((s) => HUD_READOUT_SPRITES.includes(s.id)));
+        G.g_screen_sprite_draws.every((s) => HUD_READOUT_SPRITES.includes(s.id)
+          || ORIGINAL_MODE.ammo_hud_rows.some((r) => r.sprite === s.id)),
+        G.g_screen_sprite_draws.map((s) => s.id.toString(16)).join(","));
   check("the frame's sprites are plain data a snapshot can copy",
         JSON.stringify(JSON.parse(JSON.stringify(G.g_screen_sprite_draws)))
         === JSON.stringify(G.g_screen_sprite_draws));

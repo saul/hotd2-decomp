@@ -1,17 +1,18 @@
 /**
- * Which `wait_script_flag` gates each shipped bundle can open, and which it
- * still has to excuse.
+ * Which `wait_script_flag` gates each shipped bundle can open -- all of them.
  *
  *     cd web && node tools/run_ts.mjs tools/flag_gates.ts
  *     HOTD2_BUNDLE=/path/to/export node tools/run_ts.mjs tools/flag_gates.ts
  *
- * `script/waits/flag.ts` declares a standing `[diverges]`: a gate on a flag
- * nothing this port runs can raise passes instead of parking the stage for
- * ever. The set it passes on is *derived*, so the only way to know how big the
- * divergence is — and whether it has quietly grown — is to run the derivation
- * over the twelve real bundles. That is this.
+ * `script/waits/flag.ts`'s `waitScriptFlag` blocks as the engine's does, which
+ * is only a stage that completes while every gate's writer is ported: a gate on
+ * a flag nothing this port runs can raise parks the stage for ever. The set of
+ * flags the port can raise is *derived*, so the only way to know that none is
+ * missing is to run the derivation over the twelve real bundles. That is this,
+ * and it fails on any gate outside the set ("excused" below): stage 5's flag
+ * 30 was the last, until class 0x32 was ported.
  *
- * It exits non-zero on the one thing that would make the derivation a lie
+ * It also exits non-zero on the one thing that would make the derivation a lie
  * rather than merely incomplete: a stage claiming it can raise a flag when
  * nothing it places actually can. The case that matters today is class 0x41,
  * because `raisesScriptFlag` used to be a number per *class* and 441 of the six
@@ -96,6 +97,8 @@ if (names.length === 0) skipNoBundle("flag_gates");
 
 let failed = 0;
 const raisesFlag20 = new Map<string, boolean>();
+/** Each bundle's gates on a flag nothing the port runs can raise. */
+const excusedBy = new Map<string, number[]>();
 
 /**
  * One `wait_script_flag` gate no `set_script_flag` on the route to it can
@@ -267,6 +270,7 @@ for (const name of names) {
   const excused = [...gates].filter((g) => !canRaise.has(g)).sort(asc);
   console.log(`${name.padEnd(17)} ${gates.size} gates: `
     + `held {${held.join(",")}}  excused {${excused.join(",")}}`);
+  excusedBy.set(name, excused);
 
   // ...and the route pass. `entries` is every block the previous stage can
   // hand this one; stage 3 and stage 4 have two each and every other stage
@@ -354,6 +358,12 @@ const check = (what: string, ok: boolean, detail = ""): void => {
 };
 
 console.log("");
+// `waitScriptFlag` blocks, as the engine's does: a gate outside the derived
+// set would park its stage for ever.
+for (const [name, excused] of excusedBy) {
+  check(`${name}: every wait_script_flag gate has a writer the port runs`,
+        excused.length === 0, `excused {${excused.join(",")}}`);
+}
 for (const suffix of ["", "_original"]) {
   const yes = STAGE_WITH_TYPE_75 + suffix;
   const no = STAGE_WITHOUT_TYPE_75 + suffix;

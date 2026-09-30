@@ -48,10 +48,10 @@ export enum FishState {
  * `[port-only]` — `sub+0x62` never takes this value.
  *
  * `FishBeginSwimAway` (`FUN_00439BF0`) leaves the state where it was and
- * writes `*obj = FishSwimAwayUpdate` instead, which is a thing a
+ * writes `*obj = FishSwimAwayTick` instead, which is a thing a
  * {@link ClassHandler} with one `update` cannot do. This flag stands in for
- * that write and nothing else: it is the only field in the block the engine
- * has no room for.
+ * that write and nothing else. It and the two swim-away draw records are the
+ * only fields in the block the engine has no room for.
  */
 
 /** `sub+0x6A` — the three bits the class keeps there. */
@@ -152,10 +152,20 @@ export interface FishTail {
   /** `sub+0x80` — sub-type 2's sideways swing, ±2, drawn once per lunge. */
   swing: number;            // +0x80
   /**
-   * `[port-only]` — `FishBeginSwimAway` has installed `FishSwimAwayUpdate`.
+   * `[port-only]` — `FishBeginSwimAway` has installed `FishSwimAwayTick`.
    * See the note above {@link FishTail}.
    */
   swimAway: boolean;
+  /**
+   * `[port-only]` — the strip frame and the silhouette scale
+   * `FishSwimAwayTick` (`FUN_00439C20`) drew with, before it stepped both.
+   * The engine draws inside the tick, between the move and the steps; the
+   * port's draw is `render/fish.ts`, after the tick, so the tick writes down
+   * what its draw read -- the arrangement `game/class42/`'s `drawnBody`
+   * has for the same reason.
+   */
+  swimDrawFrame: number;
+  swimDrawScale: number;
 }
 
 /**
@@ -175,6 +185,6 @@ export function makeFishTail(): FishTail {
     state: FishState.Rise, timer: 0, bobPhase: 0, flags: 0, subtype: 0,
     frame: 0, lastFrame: 0, firstFrame: 0, lungeStep: 0, slot: -1,
     bobCycles: 0, bobCycle: 0, riseFrames: 0, lungeFrames: 0, swing: 0,
-    swimAway: false,
+    swimAway: false, swimDrawFrame: 0, swimDrawScale: 0,
   };
 }

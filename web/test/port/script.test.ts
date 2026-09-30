@@ -582,7 +582,7 @@ console.log("\na stashed path is played by a hook that steps first:");
             camera_state: "play_stashed_path" },
           // The fight: a wait long enough for the rail to be watched. (The
           // block's own is `wait_script_flag 32`, which a bundle with no
-          // class-0x19 spawn excuses.)
+          // class-0x19 spawn could never open.)
           { i: 2, at: 2, op: 0x42, name: "wait_frames", cat: "wait",
             arg: 1000, blocks_on: "arg frames elapsed" },
         ] }],

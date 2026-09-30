@@ -71,18 +71,14 @@ let cache: {
 
 /**
  * The flags **something this port runs can actually raise**, for one bundle.
- * `[port-only]`: the derivation behind the divergence `waitScriptFlag`
- * declares at the line where the wait passes instead of blocking.
+ * `[port-only]`: a measurement, not a rule the walker applies.
  *
  * The engine needs no such set: every writer of `g_script_flags` is code it is
- * running. This port runs some of them and not others, and that difference is
- * the whole of the divergence — a gate on a flag whose writer is not ported
- * is a gate nothing can ever open, and a faithful `0x45` parks the stage on it
- * for good. So this is the rule `WAIT_NOTES` already states for every other
- * opcode — *a wait this client cannot evaluate does not block* — made precise
- * instead of blanket. It is **derived**, not hand-listed, so it shrinks by
- * itself as writers are ported and there is not a single flag number in this
- * file.
+ * running. The port runs a writer once its routine is ported, and a
+ * `wait_script_flag` on a flag whose writer is not ported is a gate the stage
+ * would park on for ever. So `web/tools/flag_gates.ts` runs this over the
+ * twelve bundles and fails on any gate outside it. It is **derived**, not
+ * hand-listed, and there is not a single flag number in this file.
  *
  * ## What it is derived from
  *
@@ -98,35 +94,23 @@ let cache: {
  *   flag belongs to one of its 79 constructors, so a class-wide answer would
  *   claim it for all 441 of the six stages' class-0x41 spawns.
  *
- * ## What is still excused, and what it needs
+ * ## Nothing is excused
  *
- * `web/tools/flag_gates.ts` is the measurement: it runs this derivation over
- * the twelve bundles and prints, per stage, the flags whose gates are held and
- * the ones excused. Nothing is quoted from it here but what it names, because
- * a count in prose rots (`L16`) -- this docstring said fourteen gates for as
- * long as it took classes 0x19 and 0x22 to be ported, and gave the bosses'
- * being out of scope as the reason for two rows that no longer existed.
+ * `waitScriptFlag` used to pass, under a declared divergence of its own, on
+ * any gate outside this set, so that a stage whose flag writer had no module
+ * went on rather than parking. The last such gate was stage 5's
+ * `wait_script_flag 30` at step 4 of blocks 7 and 9, whose writer is class
+ * 0x32's state 4 (`Class32StateRaiseFlagAndLeave`, `FUN_00480470`, the write
+ * at `0x00480590`); with the class ported every shipped gate has a writer the
+ * port runs, and the wait blocks as the engine's does. Every other gate --
+ * the two cards', classes 0x14, 0x19, 0x22 and 0x32's, class 0x41's type 75,
+ * the civilians' op 0x1C and the captors' state 36 -- was honoured already.
  *
- * What it names is **one flag, in one stage**: stage 5's `wait_script_flag
- * 30`, the gate at step 4 of block 7 and of block 9, in both mode sets. Its
- * writer is an enemy the port does not run:
- *
- * | flag | stage | writer |
- * |---|---|---|
- * | 30 | 5 | **class 0x32** (`FUN_0047F5F0`), state 4 at `0x00480590` |
- *
- * Class 0x32 is not small: it is an enemy with thirteen states, and
- * declaring its flag without the actor would turn a stage that completes into
- * one that hangs. Every other shipped gate
- * -- the two cards', classes 0x14, 0x19 and 0x22's, class 0x41's type 75, the
- * civilians' op 0x1C and the captors' state 36 -- has a writer the port runs,
- * and is honoured.
- *
- * The row this table once carried for class 0x14 said "stage 2's blocks 35-41
- * **and stage 4's 23-29**", and the second half was wrong: stage 4 has no
- * class-0x14 spawn at all, and its four blocks gate on 31 and 32, both of
- * which class 0x19 writes. Flag 31 has two writers and the stage decides which
- * one is in the room.
+ * The row this file's table once carried for class 0x14 said "stage 2's
+ * blocks 35-41 **and stage 4's 23-29**", and the second half was wrong: stage
+ * 4 has no class-0x14 spawn at all, and its four blocks gate on 31 and 32,
+ * both of which class 0x19 writes. Flag 31 has two writers and the stage
+ * decides which one is in the room.
  *
  * The five reports that opened this line of work asked for "one spawn opcode
  * and two cue props"; the sweep that was written to check it says otherwise,
@@ -138,19 +122,12 @@ let cache: {
  * ## Class 0x19's writes
  *
  * The stage-4 boss (`game/class19/`) declares `raisesScriptFlag` for both of
- * its flags now, **31** and **32**: the port runs the whole of the first
- * chain -- `set_script_flag 30` -> the boss's intro banner ->
- * `g_bHudShutterState = 1` -> `g_script_flags[31]` -- and, with the arena
- * progression ported, the second as far as `Boss4StateDeath`. A class that
- * raises two flags and can reach only one of them declares one; this one
- * used to, and was excused on 32 for as long as that was true.
- *
- * The survey this file used to carry named `0x0049390C` and `0x004958C7` as
- * class 0x19's two writes. There are **three**: `0x00493B99` is the second
- * entrance routine's own copy of the flag-31 write, and without it blocks 25
- * and 29 would have had no writer at all. Found by searching the bare `9c72`
- * over the class's range (L32), which is the same search that produced this
- * table in the first place.
+ * its flags, **31** and **32**. The survey this file used to carry named
+ * `0x0049390C` and `0x004958C7` as class 0x19's two writes. There are
+ * **three**: `0x00493B99` is the second entrance routine's own copy of the
+ * flag-31 write, and without it blocks 25 and 29 would have had no writer at
+ * all. Found by searching the bare `9c72` over the class's range (L32), which
+ * is the same search that produced this table in the first place.
  */
 export function ScriptFlagsThisBundleCanRaise(
     script: ScriptJson): ReadonlySet<number> {
@@ -268,19 +245,9 @@ export const waitScriptFlag: WaitRule = {
     // `if (g_evt_yield == 0) { g_evt_yield = 1; return; }`: the flag is not
     // read on the frame the wait is reached, raised already or not.
     if (raised === null) return YieldBecause(op);
-    if (raised) return { kind: "flag", index };
-    // The engine blocks here until the byte comes up, and it always does,
-    // because every writer of `g_script_flags` is code the engine is running.
-    // This port runs some of those writers and not others, so a gate whose
-    // writer has no module is one it could only park on for ever; it passes
-    // instead, and says so in the feed. See
-    // {@link ScriptFlagsThisBundleCanRaise} for the derivation and for the
-    // class that would retire it. [diverges]
-    if (!ScriptFlagsThisBundleCanRaise(ctx.script).has(index)) {
-      return { kind: "yield",
-               why: "nothing this port runs raises "
-                  + `g_script_flags[${index}]` };
-    }
+    // The engine blocks here until the byte comes up. Every shipped gate's
+    // writer is ported -- `tools/flag_gates.ts` holds the twelve bundles to
+    // {@link ScriptFlagsThisBundleCanRaise} -- so the port blocks too.
     return { kind: "flag", index };
   },
   satisfied(policy: WaitPolicy, op: OpJson, ctx: WaitContext): boolean {

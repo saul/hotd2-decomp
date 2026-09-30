@@ -47,7 +47,7 @@ import { CarrierTransformPoint } from "../../src/game/carrier";
 import { GameMode } from "../../src/game/game_mode";
 import { vec3, type Vec3 } from "../../src/game/vec";
 import { EffectCode, ResolveHit } from "../../src/game/combat/resolve_hit";
-import { SpawnSlotActor } from "../../src/game/director";
+import { RunPendingInits, SpawnSlotActor } from "../../src/game/director";
 import {
   check, motion, CHARS, SCENE_MAJOR_PLAYING, spawnZombie, openShutter, scene,
   EnterPlay, JoinPlayerTwo, run, coliQuad,
@@ -606,6 +606,8 @@ console.log("stage 3's boats -- the one the player rides and the one that "
     syncSpawns: () => [],
   };
   syncCharacterSpawns(pool, listed);
+  // The `Init`s are the frame walk's (`SpawnFromDescriptor`); run them here.
+  RunPendingInits(rng);
   const rider = G.g_object_list.find((o) => o.at === 2780);
   const boatObj = G.g_object_list.find((o) => o.at === 3184);
   check("the boat and its rider are both made",
@@ -1274,6 +1276,8 @@ console.log("\nclass 0x40, the horde:");
     syncSpawns: (_s, made) => { order.push(...made.map((a) => a.at)); return []; },
   };
   syncCharacterSpawns(pool, listed);
+  // The `Init`s are the frame walk's (`SpawnFromDescriptor`); run them here.
+  RunPendingInits(rng);
   const child = G.g_object_list.find((o) => o.at === 0xa174);
   check("a civilian's class-0x18 child is made although no spawn lists it",
         !!child, order.map((x) => x.toString(16)).join());
@@ -1762,7 +1766,10 @@ console.log("\nclass 0x42, the worm:");
           && !WormCountsForEnemyGate({ at: LONE_AT, class: 0x42, hp: 1 }));
     // ...and the script's spawn reaches `PlaceWormBatch` through the
     // director, which runs the members from the next frame's task walk.
-    SpawnSlotActor({ at: COG_AT, class: 0x42, pos: [-924, 74.8, -1336] }, rng);
+    SpawnSlotActor({ at: COG_AT, class: 0x42, pos: [-924, 74.8, -1336] });
+    // The placer's `Init` is the frame walk's; run it ahead of the frame so
+    // the member it builds can be read before its first update.
+    RunPendingInits(rng);
     const m = member(COG_AT, 1);
     const before = m ? worm(m).orbit : 0;
     run(1, rng, new Events());

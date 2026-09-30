@@ -37,7 +37,8 @@ import { drawBoss3Effects } from "./boss3_effects";
 import { releaseAssetDrawAlpha } from "./draw_order";
 import { drawBatSplashes } from "./bat_splash";
 import { drawCivilianHitMarkers, drawLifeMarkers } from "./life_markers";
-import { drawViewSlots } from "./view_slots";
+import { drawViewSlots, drawWorldSlots } from "./view_slots";
+import { drawClass2DDraws } from "./class2d_draws";
 import { drawCreatureEffects } from "./creature_effects";
 import { drawWaterRings } from "./water_rings";
 import { BAMS_TO_RAD } from "../core/bams";
@@ -84,9 +85,11 @@ export interface CreatureSphereSource {
    * The nearest creature the ray meets, its `id` and the along-ray `t`, or
    * null. See `EffectLayer.pickCreature`.
    */
-  pickCreature(ray: Ray): { id: number; t: number; point: Vector3 } | null;
+  pickCreature(ray: Ray):
+    { id: number; t: number; point: Vector3; radius: number } | null;
   /** The same for the carried props. See `EffectLayer.pickCarried`. */
-  pickCarried(ray: Ray): { id: number; t: number; point: Vector3 } | null;
+  pickCarried(ray: Ray):
+    { id: number; t: number; point: Vector3; radius: number } | null;
 }
 
 export interface BoneSphereSource {
@@ -130,6 +133,14 @@ export class EffectLayer implements System<RenderContext> {
   readonly group = new Group();
   /** Camera-space effects: the muzzle flash and the Original Mode record. */
   readonly viewGroup = new Group();
+  /**
+   * Class 0x2D's hand-drawn models (`render/class2d_draws.ts`), which are
+   * lit -- each under the set its routine installed -- so they hang in two
+   * groups of their own that `render/lighting.ts` walks: the world's, and
+   * the camera's.
+   */
+  readonly litGroup = new Group();
+  readonly litViewGroup = new Group();
 
   /** Set from `app/`, the way `CharacterLayer.breakables` is. */
   bones: BoneSphereSource | null = null;
@@ -166,6 +177,9 @@ export class EffectLayer implements System<RenderContext> {
     // The camera's own matrix, written once a frame from `ctx.camera`. Its
     // children are then in camera space, which is where the engine keeps them.
     this.viewGroup.matrixAutoUpdate = false;
+    this.litGroup.name = "effects-lit";
+    this.litViewGroup.name = "effects-lit-view";
+    this.litViewGroup.matrixAutoUpdate = false;
   }
 
   /** Adopt the hidden templates, exactly as `SlotModelLayer` does. */
@@ -211,6 +225,8 @@ export class EffectLayer implements System<RenderContext> {
     this.enabled = v;
     this.group.visible = v;
     this.viewGroup.visible = v;
+    this.litGroup.visible = v;
+    this.litViewGroup.visible = v;
   }
 
   /**
@@ -245,8 +261,11 @@ export class EffectLayer implements System<RenderContext> {
   update(ctx: RenderContext): void {
     this.group.visible = this.enabled;
     this.viewGroup.visible = this.enabled;
+    this.litGroup.visible = this.enabled;
+    this.litViewGroup.visible = this.enabled;
     if (!this.enabled) return;
     this.viewGroup.matrix.copy(ctx.camera.matrixWorld);
+    this.litViewGroup.matrix.copy(ctx.camera.matrixWorld);
     const seen = new Set<string>();
 
     this.drawSpriteEffects(seen);
@@ -281,7 +300,10 @@ export class EffectLayer implements System<RenderContext> {
     // The result card's glyphs, and anything else drawn under
     // `MatrixLoadIdentity` by slot: `render/view_slots.ts`.
     drawViewSlots({ node: (key, slot, parent) => this.node(key, slot, parent),
-                    view: this.viewGroup }, seen);
+                    view: this.viewGroup, world: this.group }, seen);
+    // ...and the ones drawn in the world under a matrix: the trunk.
+    drawWorldSlots({ node: (key, slot, parent) => this.node(key, slot, parent),
+                     view: this.viewGroup, world: this.group }, seen);
     if (this.bones) {
       const bones = this.bones;
       this._view.copy(ctx.camera.matrixWorldInverse);
@@ -296,6 +318,13 @@ export class EffectLayer implements System<RenderContext> {
         },
       }, seen);
     }
+
+    // Class 0x2D's: `render/class2d_draws.ts`.
+    this._view.copy(ctx.camera.matrixWorldInverse);
+    drawClass2DDraws({
+      node: (key, slot, parent) => this.node(key, slot, parent),
+      world: this.litGroup, view: this.litViewGroup, viewMatrix: this._view,
+    }, seen);
 
     for (const [key, l] of this.nodes) {
       if (seen.has(key)) continue;
@@ -474,8 +503,10 @@ export class EffectLayer implements System<RenderContext> {
    * `t` is the along-ray parameter, the same number `CharacterLayer.pickShot`
    * sorts on, so a creature in front of a zombie takes the bullet.
    */
-  pickCreature(ray: Ray): { id: number; t: number; point: Vector3 } | null {
-    let best: { id: number; t: number; point: Vector3 } | null = null;
+  pickCreature(ray: Ray):
+      { id: number; t: number; point: Vector3; radius: number } | null {
+    let best: { id: number; t: number; point: Vector3; radius: number }
+      | null = null;
     for (const c of G.g_body_creatures) {
       this._c.set(c.pos.x, c.pos.y, c.pos.z)
         .applyMatrix4(this.viewGroup.matrix);
@@ -484,7 +515,7 @@ export class EffectLayer implements System<RenderContext> {
       if (t <= 0) continue;
       if (ray.distanceSqToPoint(this._c) > c.radius * c.radius) continue;
       if (!best || t < best.t) {
-        best = { id: c.id, t, point: this._c.clone() };
+        best = { id: c.id, t, point: this._c.clone(), radius: c.radius };
       }
     }
     return best;
@@ -561,8 +592,10 @@ export class EffectLayer implements System<RenderContext> {
    * with radius `obj+0x124`, for every prop `RegisterForShotTest` took this
    * frame.
    */
-  pickCarried(ray: Ray): { id: number; t: number; point: Vector3 } | null {
-    let best: { id: number; t: number; point: Vector3 } | null = null;
+  pickCarried(ray: Ray):
+      { id: number; t: number; point: Vector3; radius: number } | null {
+    let best: { id: number; t: number; point: Vector3; radius: number }
+      | null = null;
     for (const c of G.g_carried_props) {
       if (!c.shootable) continue;
       this._c.set(c.shotPoint.x, c.shotPoint.y, c.shotPoint.z)
@@ -571,7 +604,9 @@ export class EffectLayer implements System<RenderContext> {
       const t = this._v.sub(ray.origin).dot(ray.direction);
       if (t <= 0) continue;
       if (ray.distanceSqToPoint(this._c) > c.radius * c.radius) continue;
-      if (!best || t < best.t) best = { id: c.id, t, point: this._c.clone() };
+      if (!best || t < best.t) {
+        best = { id: c.id, t, point: this._c.clone(), radius: c.radius };
+      }
     }
     return best;
   }
@@ -581,7 +616,7 @@ export class EffectLayer implements System<RenderContext> {
     ctx.camera.matrixWorld.decompose(this._cp, this._cq, this._cs);
     for (let i = 0; i < SHOT_EFFECT_RING * 2; i++) {
       const f = G.g_shot_flash_ring[i];
-      if (this.muzzle && f?.live && f.kind !== OriginalWeaponKind.Silent) {
+      if (this.muzzle && f?.live && f.kind !== OriginalWeaponKind.Grenade) {
         const base = MUZZLE_FLASH_SLOTS[f.player] ?? MUZZLE_FLASH_SLOTS[0];
         const key = `f${i}`;
         const node = this.node(key, base + f.frame, this.viewGroup);
@@ -603,7 +638,7 @@ export class EffectLayer implements System<RenderContext> {
           n2.position.set(f.pos.x, f.pos.y, f.pos.z);
           n2.rotation.set(f.pitch * BAMS_TO_RAD, f.yaw * BAMS_TO_RAD, 0,
                           "YXZ");
-          n2.scale.setScalar(f.kind === OriginalWeaponKind.Heavy
+          n2.scale.setScalar(f.kind === OriginalWeaponKind.BulletBlow
             ? FLASH_SMOKE_SCALE_KIND4 : FLASH_SMOKE_SCALE);
         }
       }
@@ -616,7 +651,7 @@ export class EffectLayer implements System<RenderContext> {
       // spin)` in world axes, a quad facing world +Z wherever the camera
       // looked.
       const t = G.g_shot_tracer_ring[i];
-      if (t?.live && t.kind !== OriginalWeaponKind.Slow) {
+      if (t?.live && t.kind !== OriginalWeaponKind.BassLure) {
         const smoke = MUZZLE_SMOKE_SLOTS[t.player] ?? MUZZLE_SMOKE_SLOTS[0];
         const key = `t${i}`;
         const node = this.node(key, smoke + TRACER_SLOT_OFFSET, this.group);
@@ -658,7 +693,7 @@ export class EffectLayer implements System<RenderContext> {
       }
 
       const w = G.g_shot_weapon_ring[i];
-      if (this.muzzle && w?.live && w.kind === OriginalWeaponKind.Heavy) {
+      if (this.muzzle && w?.live && w.kind === OriginalWeaponKind.BulletBlow) {
         const key = `w${i}`;
         const node = this.node(key, WEAPON_FIRST_SLOT + w.frame,
                                this.viewGroup);

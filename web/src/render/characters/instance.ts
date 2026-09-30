@@ -193,4 +193,11 @@ export interface Instance {
   resultLife?: Object3D | null;
   /** The figure's scaled nodes' meshes carry their push and pop. */
   resultScaleHooked?: boolean;
+  /**
+   * The models `Class32DrawBonePart` (`FUN_0047F780`) draws on a class-0x32
+   * node besides the node's own, by `"<bone>:<index in the node's draws>"`,
+   * with the slot each was cloned for. Render bookkeeping, rebuilt from
+   * `Boss5Tail.nodeDraws` every frame. See `render/characters/boss5.ts`.
+   */
+  boss5Draws?: Map<string, { node: Object3D; slot: number }>;
 }

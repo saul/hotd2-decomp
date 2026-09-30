@@ -32,6 +32,10 @@ import { EvtGotoSceneState, EvtQueueAction,
 import { CameraReplayFor, CameraReplaySettle, CameraReplayUntil }
   from "../game/camera/actor";
 import { SpawnClass } from "../game/spawn_class";
+import { ITEM_SELECT_RESUME_STEP } from "../game/class6e/state";
+
+/** `wait_enemies_present` -- `EvtOpWaitEnemiesPresent43`. */
+const WAIT_ENEMIES_PRESENT_OP = 0x43;
 import { g_class_handlers } from "../game/registry";
 import type { BlockJson, OpJson, ScriptJson, SpawnJson } from "../bundle";
 import type { OpStatus } from "./opstatus";
@@ -42,15 +46,11 @@ import {
   CivilianEndsRemovable, CivilianHasChildren, CivilianRemoveCue,
   type CivilianLife,
 } from "./civilian_life";
-import {
-  ChannelBlock, type ChannelTween, type FogState, type LightState,
-} from "./state/channels";
+import { ApplyLightChannelOp } from "./state/channels";
 import { Shutter } from "./state/shutter";
-
-export type { ChannelTween, FogState, LightState };
-export {
-  CH_AMBIENT, CH_FOG_FAR, CH_FOG_NEAR, CH_FOG_R, CH_LIGHT_R, CHANNEL_COUNT,
-} from "./state/channels";
+import {
+  LightBlockInit, LightBlockSetDirection, makeLightTweens,
+} from "../game/light_block";
 
 
 /**
@@ -158,6 +158,12 @@ export interface PendingWait {
   op: OpJson;
   blocksOn: string;
   policy: WaitPolicy;
+  /**
+   * `g_evt_block_index`, `g_evt_step_index` and `g_evt_ip` when the wait was
+   * entered: the instruction the interpreter will run again next frame. Plain
+   * numbers, so a snapshot keeps them.
+   */
+  addr: [number, number, number];
 }
 
 export interface BranchChoice {
@@ -407,8 +413,7 @@ export const WALKER_RESTORED_KEYS = [
   "captionGroup", "captionFrames", "firingGate",
   "skippable", "skipRequested", "rain", "gunLights", "sceneLighting",
   "sceneAmbient",
-  "branchChoice", "parked", "channels", "tweens", "fogSet", "lightDir",
-  "lightSet", "light1", "checkpointBlock", "branchPreview",
+  "branchChoice", "parked", "fogSet", "checkpointBlock", "branchPreview",
   "spawns", "simpleSpawns", "shot",
   "finished", "nextEntryBlock", "bgmTrack", "lastSound", "loopingSe",
   "seq",
@@ -462,7 +467,15 @@ export class Walker {
    */
   get step(): number { return G.g_evt_step_index; }
   set step(v: number) { G.g_evt_step_index = v; }
-  opIndex = 0;
+  /**
+   * The instruction cursor, and it is `g_evt_ip` -- 0x009C7108 -- as the port
+   * encodes it, an index into the step's instructions. An accessor over `G`
+   * for the reason {@link step} is: the VM is not its only writer.
+   * `ItemSelectFinish` (`FUN_004895C0`) points it at step 1 while the script
+   * is holding on the trunk's `wait_enemies_present`.
+   */
+  get opIndex(): number { return G.g_evt_ip; }
+  set opIndex(v: number) { G.g_evt_ip = v; }
 
   region = -1;
   /** `g_cam_roll_enabled` (0x35), which is `G`'s. */
@@ -593,87 +606,16 @@ export class Walker {
   /** `halt` (0x4E) parks the interpreter; it does not end the scene. */
   parked = false;
   /**
-   * Scene fog. Starts effectively off -- the far plane is 8000, so a range
-   * beyond it draws nothing, which is what the scripts themselves use
-   * (65000/65001) to disable fog.
+   * `[port-only]` -- true once the script has set one of light block 0's fog
+   * channels (0..5). `render/fog.ts` draws no fog before, whatever the block
+   * holds; the block itself -- fog, colour, ambient, direction -- is `G`'s
+   * (`g_scene_light_block0`, `game/light_block.ts`).
    */
-  /**
-   * The light block. See `script/state/channels.ts`.
-   *
-   * The five fields below are accessors onto it rather than storage: forty
-   * call sites and a snapshot key list already speak in `channels`, `tweens`,
-   * `fogSet`, `lightSet` and `lightDir`, and renaming them all would be churn
-   * that the round-trip test could not tell from a mistake.
-   */
-  readonly lightBlock = new ChannelBlock();
+  fogSet = false;
 
-  get channels(): number[] { return this.lightBlock.channels; }
-  set channels(v: number[]) { this.lightBlock.channels = v; }
-  get tweens(): (ChannelTween | null)[] { return this.lightBlock.tweens; }
-  set tweens(v: (ChannelTween | null)[]) { this.lightBlock.tweens = v; }
-  get fogSet(): boolean { return this.lightBlock.fogSet; }
-  set fogSet(v: boolean) { this.lightBlock.fogSet = v; }
-  get lightSet(): boolean { return this.lightBlock.lightSet; }
-  set lightSet(v: boolean) { this.lightBlock.lightSet = v; }
-  get lightDir(): { pitchDeg: number; yawDeg: number } {
-    return this.lightBlock.lightDir;
-  }
-  set lightDir(v: { pitchDeg: number; yawDeg: number }) {
-    this.lightBlock.lightDir = v;
-  }
-
-  /** Fog, derived from channels 0-4. */
-  get fog(): FogState { return this.lightBlock.fog; }
-
-  /** The directional light, derived from channels 6-8 and 10 plus `0x18`. */
-  get light(): LightState { return this.lightBlock.light; }
-  /**
-   * **Light block 1** — `g_scene_light_block1`, `0x009A59E0`, the same layout
-   * as block 0. Opcodes `0x19` (direction) and `0x24`/`0x25`/`0x27` (the
-   * channels) write it, and `LightsUseSecondarySet` (`FUN_0041DC70`) installs
-   * its colour, ambient and direction for every character's draw, then
-   * `LightsRestoreScene` (`FUN_0041DCC0`) puts block 0's back. It used to be
-   * "pushed only at scene init and never reaches the renderer"; it reaches
-   * every zombie. Only its light half is read; its fog channels are written
-   * and nothing draws with them.
-   */
-  readonly lightBlock1 = new ChannelBlock();
-  get light1(): { channels: number[]; tweens: (ChannelTween | null)[];
-                  lightDir: { pitchDeg: number; yawDeg: number } } {
-    return {
-      channels: [...this.lightBlock1.channels],
-      tweens: this.lightBlock1.tweens.map((t) => t && { ...t }),
-      lightDir: { ...this.lightBlock1.lightDir },
-    };
-  }
-  set light1(v: { channels: number[]; tweens: (ChannelTween | null)[];
-                  lightDir: { pitchDeg: number; yawDeg: number } }) {
-    this.lightBlock1.channels = [...v.channels];
-    this.lightBlock1.tweens = v.tweens.map((t) => t && { ...t });
-    this.lightBlock1.lightDir = { ...v.lightDir };
-  }
-  /** Block 1's directional light, for the characters. */
-  get lightSecondary(): LightState { return this.lightBlock1.light; }
-
-  /**
-   * The scene light block, as 11 channels -- the same numbering the tween
-   * handlers use. Keeping the raw channels (rather than separate fog and
-   * light structs) is what lets one stepper animate all of them, which is
-   * how the game does it.
-   *
-   *   0 fog near   1 fog far   2,3,4 fog RGB (0-255)   5 = 2,3,4 together
-   *   6,7,8 light RGB (0..1)   9 = 6,7,8 together      10 ambient
-   */
-  /**
-   * The scene light: colour from tween channels 6/7/8, ambient from 10, and
-   * the direction from opcodes 0x18/0x19 (and 0x17's slerp target, taken
-   * immediately). Fed to `SetLightingDefaultSingle`'s single directional
-   * light in the game.
-   */
-
-  /** True while any channel is still animating. */
+  /** True while any channel of light block 0 is still animating. */
   get tweening(): boolean {
-    return this.tweens.some((t) => t !== null);
+    return G.g_light_tween_block0.some((t) => t !== null);
   }
   /**
    * `g_scene_state_major` / `g_scene_state_minor` (0x009C6F0C / 0x009C6F14),
@@ -884,8 +826,11 @@ export class Walker {
     this.block = script.entry_block;
     // The step cursor is `G.g_evt_step_index`, so it outlives the object that
     // was driving it. Claim it here, or a freshly built walker starts at
-    // whatever step the previous one stopped on.
+    // whatever step the previous one stopped on -- and the instruction
+    // cursor, `G.g_evt_ip`, for the same reason: a walker built after another
+    // had stopped at instruction 29 opened at 29.
     this.step = 0;
+    this.opIndex = 0;
   }
 
   // -- addressing --------------------------------------------------------
@@ -939,10 +884,11 @@ export class Walker {
     // FUN_0045EBC0 picks the first step by game mode: 1 for normal Arcade
     // play, 5 for Original Mode on scene 0, 0 only on the continue and
     // checkpoint paths. The exporter resolves that rule; the walker just
-    // honours it.
-    const entry = this.script.entry_step ?? 1;
-    const n = this.blockAt(entryBlock)?.steps?.length ?? 0;
-    this.step = n > entry ? entry : 0;
+    // honours it -- by index, as `EvtGetStep` does. It used to fall back to
+    // step 0 when the block had fewer steps than that, and since the bundle
+    // stopped stage 1 block 0 at the `-1` in front of step 5, Original Mode
+    // opened on the checkpoint stream and never met the trunk.
+    this.step = this.script.entry_step ?? 1;
     this.opIndex = 0;
     this.region = -1;
     this.groundY = null;
@@ -960,8 +906,14 @@ export class Walker {
     this.branchChoice = 0;
     this.parked = false;
     this.branchPreview = null;
-    this.lightBlock.reset();
-    this.lightBlock1.reset();
+    // The port's scene entry: `CameraBlocksReset`'s `LightBlockInit` of both
+    // blocks, and the tween blocks `SceneLightTaskCreate` (`FUN_0040AE60`)
+    // seeds with every slot off.
+    this.fogSet = false;
+    LightBlockInit(G.g_scene_light_block0);
+    LightBlockInit(G.g_scene_light_block1);
+    G.g_light_tween_block0 = makeLightTweens();
+    G.g_light_tween_block1 = makeLightTweens();
     // `entryBlock` rather than `this.script.entry_block`: a stage no longer
     // chooses where it starts.
     this.checkpointBlock = entryBlock;
@@ -1007,9 +959,9 @@ export class Walker {
       gunLights: this.gunLights, sceneLighting: this.sceneLighting,
       sceneAmbient: this.sceneAmbient,
       branchChoice: this.branchChoice, parked: this.parked,
-      channels: [...this.channels], tweens: this.tweens.map((t) => t && {...t}),
-      fogSet: this.fogSet, lightDir: { ...this.lightDir },
-      lightSet: this.lightSet, light1: this.light1,
+      // The light blocks are not here: they are `G`'s, and the game slice of
+      // the same snapshot carries them.
+      fogSet: this.fogSet,
       checkpointBlock: this.checkpointBlock,
       branchPreview: this.branchPreview,
       spawns: this.spawns.map((s) => ({ ...s })),
@@ -1144,6 +1096,24 @@ export class Walker {
    */
   stepOverWait(): void {
     if (!this.wait) return;
+    // **The trunk's gate is never passed.** Original Mode's stage 1 spawns
+    // the trunk (class 0x6E) and waits on `wait_enemies_present 0`, which the
+    // trunk holds with `g_enemies_present = 1` from its first frame; once both
+    // players are done, `ItemSelectFinish` (`FUN_004895C0`) points the script
+    // at step 1, instruction 0, and the gate, the step's `advance_step` and
+    // the `-1` behind it are never run. A replay runs no frames for the trunk
+    // to finish in, so stepping over its gate leaves the script where the
+    // trunk does -- without this every seek in stage 1's opening ran off the
+    // end of block 0.
+    const trunk = this.simpleSpawns.findIndex(
+      (s) => s.class === SpawnClass.ItemSelect);
+    if (trunk >= 0 && this.wait.op.op === WAIT_ENEMIES_PRESENT_OP) {
+      this.simpleSpawns.splice(trunk, 1);
+      this.wait = null;
+      this.step = ITEM_SELECT_RESUME_STEP;
+      this.opIndex = 0;
+      return;
+    }
     // A yield is a wait whose condition already held on its first visit, and
     // stepping over it is the same claim as stepping over any other: the game
     // is past the instruction, with the world it leaves. So it takes the
@@ -1450,10 +1420,9 @@ export class Walker {
     // before this term must not leave last frame's answer standing.
     this.gameplayLiveNow = (this.host.gameplayLive?.() ?? null) !== false;
 
-    // Light and fog animate on the same 60 Hz clock as everything else.
-    this.lightBlock.step(dt * fps);
-    // `PushSceneLightStateToDevice` steps both blocks' channel tweens.
-    this.lightBlock1.step(dt * fps);
+    // No light step: `PushSceneLightStateToDevice` is the scene list's second
+    // task, after this one, and runs in `SceneTaskWalk` -- see
+    // `game/light_sets.ts`.
 
     // No shutter step: `HudDrawShutterState` is a task of the scene's own and
     // runs in `SceneTaskWalk`, after the players -- see `game/hud_shutter.ts`.
@@ -1465,6 +1434,20 @@ export class Walker {
       if (this.captionFrames === 0) this.captionGroup = -1;
     }
 
+    // A wait in this VM is only the instruction at `g_evt_ip`, run again
+    // every frame until it passes. If gameplay has moved the cursor since
+    // -- the trunk's `ItemSelectFinish` sends it to step 1 while the script
+    // waits on `g_enemies_present` -- the instruction that was waiting is not
+    // the one the interpreter runs next, and there is no wait to pass. The
+    // test is on the address the wait was entered at, not on the op found
+    // there now: it compared the op once, and a gate a test hands the walker
+    // directly (`applyWait`) was thrown away on its first frame.
+    if (this.wait) {
+      const [b, st, ip] = this.wait.addr;
+      if (b !== this.block || st !== this.step || ip !== this.opIndex) {
+        this.wait = null;
+      }
+    }
     if (this.wait) {
       const w = this.wait.policy;
       if (w.kind === "frames") {
@@ -1698,16 +1681,28 @@ export class Walker {
    */
   private static readonly OPS: Record<number, OpImpl> = OPS_TABLE;
 
-  /** 0x17 and 0x18 differ only in that one of them is a slerp. */
-  static setLightDir(w: Walker, op: OpJson): string | undefined {
+  /**
+   * `EvtOpSetLight0Direction18` (`FUN_0045F240`) and
+   * `EvtOpSetLight1Direction19` (`FUN_0045F270`):
+   * `LightBlockSetDirection(block, operand 1, operand 2)`. `0x17`,
+   * `EvtOpSlerpLight0Direction17` (`FUN_0045F2A0`), allocates a task that
+   * swings block 0's angles there over the operand's frames; the port takes
+   * the target at once. The exporter hands the BAMS words over as degrees,
+   * `word * 360 / 65536`, which the product below undoes exactly.
+   */
+  static setLightDir(_w: Walker, op: OpJson): string | undefined {
+    const b = op.op === 0x19 ? G.g_scene_light_block1 : G.g_scene_light_block0;
     if (op.pitch_deg !== undefined) {
-      w.lightDir = {
-        pitchDeg: op.pitch_deg,
-        yawDeg: op.yaw_deg ?? w.lightDir.yawDeg,
-      };
-      w.lightSet = true;
+      LightBlockSetDirection(b, Walker.degBams(op.pitch_deg),
+                             op.yaw_deg == null ? b.yaw
+                               : Walker.degBams(op.yaw_deg));
     }
     return op.op === 0x17 ? "slerp target taken immediately" : undefined;
+  }
+
+  /** `[port-only]` The exporter's degrees back to the BAMS word. */
+  private static degBams(deg: number): number {
+    return Math.round(deg * 65536 / 360);
   }
 
   static playSe(w: Walker, op: OpJson, quiet: boolean): string | undefined {
@@ -1841,7 +1836,12 @@ export class Walker {
    */
   /** One of the light-block opcodes. See `script/state/channels.ts`. */
   applyLightChannel(op: OpJson): string | undefined {
-    return (op.light_block === 1 ? this.lightBlock1 : this.lightBlock).apply(op);
+    const one = op.light_block === 1;
+    const r = ApplyLightChannelOp(
+      one ? G.g_scene_light_block1 : G.g_scene_light_block0,
+      one ? G.g_light_tween_block1 : G.g_light_tween_block0, op);
+    if (r.touched && !one && (op.channel ?? 99) <= 5) this.fogSet = true;
+    return r.note;
   }
 
   /**
@@ -1971,10 +1971,12 @@ export class Walker {
       // past a gate whose condition is false.
       if (policy.kind === "passed") return `${blocksOn} -- ${policy.why}`;
       // ...and a yield still costs the frame it is reached on.
-      this.wait = { op, blocksOn, policy };
+      this.wait = { op, blocksOn, policy,
+                  addr: [this.block, this.step, this.opIndex] };
       return `${blocksOn} -- ${policy.why}`;
     }
-    this.wait = { op, blocksOn, policy };
+    this.wait = { op, blocksOn, policy,
+                  addr: [this.block, this.step, this.opIndex] };
     return blocksOn;
   }
 
@@ -2027,7 +2029,12 @@ export class Walker {
     this.step += 1;
     this.opIndex = 0;
     const blk = this.currentBlock;
-    if (blk?.steps && this.step < blk.steps.length) {
+    // `EvtGetStep(...) == -1` is "the steps ran out": the end of the list, or
+    // a `-1` the bundle carries because a later step is entered by index
+    // (`StepJson.end`) -- stage 1 block 0's step 4, in front of Original
+    // Mode's step 5.
+    if (blk?.steps && this.step < blk.steps.length
+        && !blk.steps[this.step].end) {
       // The tail of `EvtAdvanceStepOrRoute`, on the path where the step list
       // had another step in it. See point 3 above.
       this.branchChoice = 0;

@@ -137,6 +137,8 @@ export interface PlayerCommands {
   restartRun(stage: number): void;
   /** The menu's Options. See the `openOptions` command. */
   openOptions(): void;
+  /** Debug: every Original Mode item saved, or a fresh profile's three. */
+  originalItems(action: "giveAll" | "reset"): void;
   /** A stage the menu chose, loaded and -- once started -- running. */
   loadAndPlay(): void;
   poseFromSlot(slot: number, frame: number): void;
@@ -240,6 +242,7 @@ export function runCommand(p: PlayerCommands, c: UiCommand): void {
     case "restartStage": p.restartRun(p.state.stage); return;
     case "restartFromStageOne": p.restartRun(1); return;
     case "openOptions": p.openOptions(); return;
+    case "originalItems": p.originalItems(c.action); return;
     case "branchHover":
       p.branchHover = c.over;
       return;

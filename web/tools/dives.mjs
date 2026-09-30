@@ -143,8 +143,8 @@ for (const [name, stage, block, step, subtype, entry] of CASES) {
       reqs.push({ at: s.at, motion: pl.motion ?? 0,
                   pos: { x: pos[0], y: pos[1], z: pos[2] } });
     }
-    SpawnScriptedCharacters(reqs, ctx.rng);
-    SpawnSlotActors(walker.spawns, ctx.rng);
+    SpawnScriptedCharacters(reqs);
+    SpawnSlotActors(walker.spawns);
   };
   seat();
 

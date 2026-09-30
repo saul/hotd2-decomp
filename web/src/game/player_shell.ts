@@ -65,6 +65,7 @@ import { CreditCount, CreditTrySpend, CreditsAvailable, ModeStartCounterValue,
   SetBothPlayerCounters } from "./credits";
 import { GameMode } from "./game_mode";
 import { AppState, G, RestoreGameGlobals } from "./globals";
+import { OriginalItemsApplyOnJoin } from "./original_mode";
 import { PlayerState, PlayerTask, RunPhase } from "./player_state";
 import { GameOverPlaceBody, PlayerBodySetMotion,
          PlayerHookDrawBodyUntilMotionEnd } from "./player_body";
@@ -196,12 +197,13 @@ export function PlayerTasksCreate(): void {
 /**
  * `PlayerEnterPlay` — `FUN_00414770`. Put a player into play by row `mode`.
  *
- * `[diverges]` Two of its Original Mode arms are left out: `FUN_00416420`
- * copies the carried weapon's magazine table into the player's block, and
- * modes 1 and 3 take the lives from the Original Mode life stock at
- * `0x009A2244` (`FUN_00416340`, `FUN_004163D0`) -- a per-item count the port
- * has no model of. The ammo half of each is transcribed. Arcade, which is every
- * mode but Original, is whole.
+ * In Original Mode the magazine comes from the block the items wrote
+ * (`OriginalWeaponLoadFireParams` loads the fire mode's latches), and rows 1,
+ * 2 and 3 -- the continue, the next scene and a join -- each end in their own
+ * routine: `PlayerEnterPlayOriginalContinue` (`FUN_00416340`, the lives from
+ * the block's stock), `PlayerEnterPlayOriginalNextScene` (`FUN_00416390`) and
+ * `PlayerEnterPlayOriginalJoin` (`FUN_004163D0`, which takes the items' weapon
+ * and lives back first). Every other mode writes the Arcade loadout.
  */
 export function PlayerEnterPlay(player: number, mode: number,
                                 f: PlayerFrame): void {
@@ -248,22 +250,64 @@ export function PlayerEnterPlay(player: number, mode: number,
     G.g_player_ammo[player] = ARCADE_AMMO;
   }
   if (G.g_GameMode === GameMode.Original) {
-    // `FUN_00416340` / `FUN_00416390` / `FUN_004163D0`: ammo from the
-    // magazine size, 6 when it is -1. See the divergence above for lives.
-    if (mode >= 1 && mode <= 3) {
-      const m = G.g_player_magazine_size[player];
-      G.g_player_ammo[player] = m !== -1 ? m : ARCADE_AMMO;
-    }
+    if (mode === 1) PlayerEnterPlayOriginalContinue(player);
+    else if (mode === 2) PlayerEnterPlayOriginalNextScene(player);
+    else if (mode === 3) PlayerEnterPlayOriginalJoin(player);
   } else {
-    // `0x009A2247 = 0` and the dword `0x3000006` over `+0x08..+0x0B`: magazine
-    // 6, weapon kind 0, sound kind 0, `+0x0B` 3; `+0x0C` 1.0.
-    G.g_player_magazine_size[player] = ARCADE_AMMO;
-    G.g_original_weapon_kind[player] = 0;
+    // `MOV [EAX + 0x7], BL` (0) at `0x00414905`, then row 0 of the weapon
+    // records, as `ResetOriginalModeLoadout` writes it: the dword
+    // `[0x004EC928]` over `+0x08..+0x0B` (magazine 6, kind 0, sound kind 0,
+    // `+0x0B` 3) and `[0x004EC92C]` into `+0x0C`, 1.0.
     G.g_original_fire_mode[player] = 0;
+    const row0 = T.originalMode?.weapon_records[0];
+    if (row0) {
+      G.g_player_magazine_size[player] = row0.magazine;
+      G.g_original_weapon_kind[player] = row0.kind;
+      G.g_original_weapon_sound_kind[player] = row0.sound;
+      G.g_original_weapon_flags[player] = row0.flags;
+      G.g_original_weapon_damage_scale[player] = row0.damage;
+    }
   }
   PlayerSetState(row.state, 0, player);
   G.g_player_task[player] = PlayerTask.InPlay;
   PlayerUpdateInPlay(player, f);
+}
+
+/**
+ * `PlayerEnterPlayOriginalContinue` — `FUN_00416340`, row 1 in Original
+ * Mode: the lives back to the block's stock -- `g_original_start_lives`, what
+ * the player's LIFE item set -- and the magazine full, 6 when it is the
+ * unlimited -1.
+ */
+export function PlayerEnterPlayOriginalContinue(player: number): void {
+  G.g_player_lives[player] = G.g_original_start_lives[player];
+  G.g_player_lives_shown[player] = G.g_original_start_lives[player];
+  const m = G.g_player_magazine_size[player];
+  G.g_player_ammo[player] = m !== -1 ? m : ARCADE_AMMO;
+}
+
+/**
+ * `PlayerEnterPlayOriginalNextScene` — `FUN_00416390`, row 2 in Original
+ * Mode: the magazine full, 6 when it is -1.
+ */
+export function PlayerEnterPlayOriginalNextScene(player: number): void {
+  const m = G.g_player_magazine_size[player];
+  G.g_player_ammo[player] = m !== -1 ? m : ARCADE_AMMO;
+}
+
+/**
+ * `PlayerEnterPlayOriginalJoin` — `FUN_004163D0`, row 3 in Original Mode:
+ * `OriginalItemsApplyOnJoin` (`FUN_00416240`) takes back the weapon and the
+ * lives the items gave, then the lives and the magazine as a continue sets
+ * them -- the same lines as `PlayerEnterPlayOriginalContinue`, written out
+ * again rather than called.
+ */
+export function PlayerEnterPlayOriginalJoin(player: number): void {
+  OriginalItemsApplyOnJoin(player);
+  G.g_player_lives[player] = G.g_original_start_lives[player];
+  G.g_player_lives_shown[player] = G.g_original_start_lives[player];
+  const m = G.g_player_magazine_size[player];
+  G.g_player_ammo[player] = m !== -1 ? m : ARCADE_AMMO;
 }
 
 /**
@@ -702,6 +746,7 @@ export function PlayerTaskRun(player: number, f: PlayerFrame): void {
 export function PlayerTasksRun(f: PlayerFrame): void {
   G.g_screen_sprite_draws = [];
   G.g_view_slot_draws = [];
+  G.g_world_slot_draws = [];
   G.g_crosshair_drawn = [0, 0];
   G.g_crosshair_sprite = [-1, -1];
   const offscreen = [false, false];
@@ -952,6 +997,16 @@ const PLAYER_BLOCK_FIELDS = [
   "g_player_magazine_empty", "g_player_reload_prompt_timer", "g_hud_ammo_slide",
   "g_player_input_is_gun", "g_player_pad_kind", "g_player_infinite_ammo",
   "g_original_fire_mode", "g_original_fire_latches",
+  // The rest of the Original Mode block and its flag bytes: only
+  // `ResetOriginalModeLoadout`, once a run, and the trunk's two item routines
+  // write them, so what the trunk chose at stage 1 is still in effect at 6.
+  "g_original_item_slots", "g_original_character",
+  "g_original_score_multiplier", "g_original_start_lives",
+  "g_original_life_cap", "g_original_bonus_credits",
+  "g_original_weapon_sound_kind", "g_original_weapon_flags",
+  "g_original_weapon_damage_scale", "g_original_item_part_scale",
+  "g_original_item_big_head", "g_original_quarter_life", "g_original_first_aid",
+  "g_original_ufo_item",
   // The rank is the run's, not the scene's: only `ResetDamageRank` resets it.
   "g_damage_rank", "g_damage_rank_pending", "g_rank_clock", "g_rank_clock_on",
   "g_rank_players_seen", "g_rank_attackers_seen",

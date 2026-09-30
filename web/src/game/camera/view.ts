@@ -57,6 +57,8 @@
  * the two-player blocks no shipped script uses.
  */
 import { AppState, G } from "../globals";
+import { BuildSceneLightDirection } from "../light_block";
+import { SetRenderLightDirection } from "../light_sets";
 import { MatrixGetAngles, type Rot3 } from "../carrier";
 import { MatIdentity, MatCopy, MatrixGetTranslation, MatrixLoadIdentity,
          MatrixRotateX, MatrixRotateY, MatrixRotateZ, MatrixTransformPoint,
@@ -161,11 +163,17 @@ export function CameraBlockPitch(i: number): number {
 }
 
 /**
- * The camera half of `UpdateSceneViewAndLight` — `FUN_00401F40`, for the two
- * camera blocks the port keeps, in the loop's order (`ESI` from `0x009A60D4`
- * by `0x1A4`: block 0 first, block 2 third). See the head of this file. The
- * light half -- the scene light's direction pushed through the view -- is the
- * walker's light blocks and `render/`'s.
+ * `UpdateSceneViewAndLight` — `FUN_00401F40`, for the two camera blocks the
+ * port keeps, in the loop's order (`ESI` from `0x009A60D4` by `0x1A4`: block 0
+ * first, block 2 third). See the head of this file. Then the light
+ * (`0x00402147`..`0x00402168`):
+ *
+ * ```
+ * BuildSceneLightDirection(g_scene_light_pitch_bams, g_scene_light_yaw_bams,
+ *                          &g_scene_light_block0, &g_scene_light_dir_view)
+ * SetRenderLightDirection(&g_scene_light_dir_view)
+ * FUN_0040E160(&g_scene_light_block0)        ; the shadow's copy, not carried
+ * ```
  */
 export function UpdateSceneViewAndLight(): void {
   // `CMP EBP, [0x009c6f00]; JNZ` at `0x00401F4E`: the nod, on the block
@@ -176,6 +184,9 @@ export function UpdateSceneViewAndLight(): void {
     CameraNodBlock(CameraPoseBlock.Block2);
   }
   CameraBlock2BuildView();
+  const b0 = G.g_scene_light_block0;
+  BuildSceneLightDirection(b0.pitch, b0.yaw, b0.dir);
+  SetRenderLightDirection(b0.dir);
   // The stamp every unstamped scene-state entry waits for.
   G.g_scene_state_major_entered = G.g_scene_state_major;
   G.g_scene_state_minor_entered = G.g_scene_state_minor;

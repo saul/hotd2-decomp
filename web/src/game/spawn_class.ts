@@ -37,6 +37,16 @@ export enum SpawnClass {
    * stage 4 and the only writer of `g_script_flags[32]` in the game.
    */
   Boss4 = 0x19,
+  /**
+   * `Class32Init` (`FUN_0047F5F0`) — **the stage-5 boss**, character type
+   * `0x4B` (`boss5.bin` with four `boss5b.bin` nodes, fifteen in all), 450
+   * hit points. One descriptor, spawned by stage 5's blocks 7 and 9 (block 9
+   * is the Boss Mode entry). It increments both enemy counters, throws
+   * projectiles that are actors of its own, and raises `g_script_flags[24]`
+   * and `[30]` on its way out -- the gate stage 5's two
+   * `wait_script_flag 30`s wait on. Ported (`game/class32/`).
+   */
+  Boss5 = 0x32,
   /** `FUN_00441750` — row spawner for floating props. */
   FloatingPropRow = 0x15,
   /**
@@ -96,8 +106,12 @@ export enum SpawnClass {
   DeadClass = 0x2a,
   /** `FUN_00438060` — scripted dynamic light source. */
   DynamicLight = 0x2b,
-  /** `FUN_00426A70` — large multi-part creature. */
-  LargeCreature = 0x2d,
+  /**
+   * `Class2DClassHandler` (`FUN_00426A70`) — the stage-6 boss, `boss6.bin`.
+   * Named for its own banner: `g_class2d_banner_record`'s first name sprite
+   * (`0xBF`) reads EMPEROR. Ported (`game/class2D/`).
+   */
+  Emperor = 0x2d,
   /** `EnemyZombieInit` (`FUN_00452DA0`) — the zombie. Ported. */
   Zombie = 0x30,
   /** `EnemyThrowerInit` (`FUN_00449620`) — humanoid enemy, four subtypes. Ported. */
@@ -217,4 +231,13 @@ export enum SpawnClass {
    * watcher; writes no script flag.
    */
   CutsceneSkipWatcher = 0x63,
+  /**
+   * `ItemSelectUpdate` (`FUN_00488820`) — **Original Mode's trunk**, where
+   * each player takes up to two of the items they have collected. The last
+   * row of `g_class_handler_pairs` (`0x00593358`, `{0x6E, 0x00488820}`), and
+   * spawned once in the game: `spawn_simple` at `st1evtbl.bin` `0x9D4`, in
+   * block 0 step 5, which `EvtLoadBlockProgram` (`FUN_0045EBC0`) enters in
+   * Original Mode only. Its name is the track it plays, `ITEM_SELECT.wav`.
+   */
+  ItemSelect = 0x6e,
 }

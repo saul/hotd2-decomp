@@ -48,6 +48,7 @@ import { BODY_CREATURE_HOST_CLIPS, CLASS20_DEATH_MOTION,
          BOSS3_CLIPS, BOSS4_CLIPS, FROG_CLIPS } from "./charmotion";
 import { class31MotionIds, class31Tables } from "./class31";
 import { class14Tables } from "./class14";
+import { CLASS32_MOTIONS, class32Tables, class32Tail } from "./class32";
 import { boneEffectSlot, boneZones, combatTables, DEATH_LEFT, DEATH_RIGHT,
          deathMotions, difficultyTables, HIT_STEPS,
          PART_SPHERE_FALLBACK_TYPES, partSphereRows, PLAYER_HAND_VARIANTS,
@@ -87,6 +88,12 @@ import {
 import { CLASS23_MOTIONS } from "../game/class23/records";
 // Data only, for the same reason: every clip the cat's two routines play.
 import { CAT_CLIPS } from "../game/class53/records";
+import {
+  CLASS2D_AT_KIND0, CLASS2D_AT_WING, CLASS2D_CHILD_CHAR_TYPES,
+  CLASS2D_CHILD_CLIPS, CLASS2D_CLIPS, CLASS2D_PART_SHELLS,
+  CLASS2D_WING_CHAR_TYPE,
+  CLASS2D_WING_CLIP, Class2DChildAt,
+} from "../game/class2D/state";
 
 const finite = (v: number | null | undefined): v is number =>
   v !== null && v !== undefined && Number.isFinite(v);
@@ -994,6 +1001,25 @@ export function class45Tail(rec: Spawn): Record<string, unknown> {
   return { subtype: b && at < b.length ? (b[at] << 24) >> 24 : 0 };
 }
 
+/**
+ * Class 0x2D's tail, `obj+0x1390`: `+0x01` the sub-type (s8) --
+ * `Class2DClassHandler` (`FUN_00426A70`) installs `Class2DSubtype0Update` for
+ * 0 (stage 5's cameo) and `Class2DUpdate` for 1 (the stage-6 fight) -- then
+ * seven `s16`: `+0x02` the clip, `+0x04` the counter, `+0x06`/`+0x08` the
+ * camera path and frame the cameo goes on, `+0x0A` the fight's hit points,
+ * `+0x0C`/`+0x0E` the marks that end rounds 1 and 2. A field past the evt's
+ * end reads 0; the cameo's tail is twelve bytes and nothing reads its last
+ * two words. See `game/class2D/`.
+ */
+export function class2dTail(rec: Spawn): Record<string, unknown> {
+  const w = (at: number): number => rec.param(at, "i16") ?? 0;
+  return {
+    subtype: rec.param(0x01, "i8") ?? 0, clip: w(0x02), counter: w(0x04),
+    kill_path: w(0x06), kill_frame: w(0x08), fight_hp: w(0x0a),
+    round2_hp: w(0x0c), round3_hp: w(0x0e),
+  };
+}
+
 export function class11Tail(rec: Spawn): Record<string, unknown> {
   const args: Record<number, number> = { 0: 3, 3: 1 };
   const commands: { op: number; args: number[] }[] = [];
@@ -1461,6 +1487,49 @@ async function class22SubActorPlacement(stage: Stage, tables: ExeTables,
 }
 
 /**
+ * The synthetic rows the stage-6 boss's children are drawn from: kinds 0..3
+ * on their first clips (`0x40C`, `0x33`, `0x3B`, `0x79`) at
+ * `Class2DChildAt(boss, 8 + kind)`, and kind 0's wing (`0x4E` on `0xF`) at
+ * `Class2DChildAt(boss, 12)`, each parented to the fight's row. A type or a
+ * clip that will not build is left out, and that child draws nothing.
+ */
+async function class2dChildPlacements(stage: Stage, tables: ExeTables,
+                                      boss: Placement,
+                                      chars: Map<number, Character>):
+    Promise<Placement[]> {
+  const want: [number, number, number][] = CLASS2D_CHILD_CHAR_TYPES.map(
+    (ct, k) => [ct, CLASS2D_CHILD_CLIPS[k]!, CLASS2D_AT_KIND0 + k]);
+  want.push([CLASS2D_WING_CHAR_TYPE, CLASS2D_WING_CLIP, CLASS2D_AT_WING]);
+  const out: Placement[] = [];
+  for (const [ct, clip, code] of want) {
+    if (!chars.has(ct)) {
+      const file = tables.characterAssetFile(ct);
+      if (!file) continue;
+      const built = build(tables, ct, file);
+      if (built === null) continue;
+      chars.set(ct, built);
+    }
+    const c = chars.get(ct)!;
+    if (!c.motions.has(clip)) {
+      const baked = await bake(stage.source, tables, clip, c.boneCount);
+      if (baked !== null) c.motions.set(clip, baked);
+    }
+    if (!c.motions.has(clip)) continue;
+    const w = new Placement();
+    w.at = Class2DChildAt(boss.at, code);
+    w.cls = 0x2d;
+    w.char_type = ct;
+    w.motion = clip;
+    w.hp = 0;
+    w.spawn = { ...boss.spawn, at: w.at };
+    w.parent_at = boss.at;
+    w.synthetic = true;
+    out.push(w);
+  }
+  return out;
+}
+
+/**
  * The asset slots a class-0x25 program's `op 9` and `op 16` can write into a
  * bone's draw record, resolved as `ScriptedHumanoidUpdate` (`FUN_004842A0`)
  * resolves them.
@@ -1819,7 +1888,9 @@ export async function resolveForStage(
       : null;
     const class22 = cls === CLASS22 ? class22Tail(rec) : null;
     const class23 = cls === CLASS23 ? class23Tail(rec) : null;
+    const class32 = cls === 0x32 ? class32Tail(rec) : null;
     const class45 = cls === 0x45 ? class45Tail(rec) : null;
+    const class2d = cls === 0x2d ? class2dTail(rec) : null;
     // **Gated on the selector, not on the class.** Class 0x33 is eleven
     // objects behind one id and these three blocks are three of them reading
     // the same bytes; emitting two for one spawn, or any for a sub-handler
@@ -1933,12 +2004,14 @@ export async function resolveForStage(
     p.class17 = class17;
     p.class22 = class22;
     p.class23 = class23;
+    p.class32 = class32;
     // The walker: made by its flier's class, never by the script.
     if (sp.nested_in !== undefined) {
       p.parent_at = sp.nested_in as number;
       p.synthetic = true;
     }
     p.class45 = class45;
+    p.class2d = class2d;
     p.class33 = class33;
     p.class33_push = class33Push;
     p.class33_cue = class33Cue;
@@ -2037,9 +2110,18 @@ export async function resolveForStage(
     // clocks, so a missing one is a state that never ends.
     if (cls === CLASS22) entryClips.push(...CLASS22_MOTIONS);
     if (cls === CLASS23) entryClips.push(...CLASS23_MOTIONS);
+    // The stage-5 boss's clips -- see `CLASS32_MOTIONS`.
+    if (cls === 0x32) entryClips.push(...CLASS32_MOTIONS);
     // The stage-3 boss's clips, all three of its skeletons' -- see
     // `BOSS3_CLIPS`.
     if (cls === 0x45) entryClips.push(...BOSS3_CLIPS);
+    // The stage-6 boss's whole bank, `boss6.bin`'s 0x95..0xB0 -- see
+    // `CLASS2D_CLIPS`.
+    if (cls === 0x2d) entryClips.push(...CLASS2D_CLIPS);
+    // ...and the shells `DrawCharacterPartSlot`'s type-0x4C arm draws after
+    // parts 0..5, which no node names: on the type's template, for the
+    // character layer to hang on the parts' draw bones.
+    if (cls === 0x2d) for (const s of CLASS2D_PART_SHELLS) c.heldSlots.add(s);
     // The emerge clip, the submerged pose it holds first, and the two clips
     // the delayed leap plays. An unbaked entrance is an actor standing in the
     // water.
@@ -2238,6 +2320,25 @@ export async function resolveForStage(
     }
   }
 
+  // -- the stage-6 boss's children ---------------------------------------------
+  //
+  // `Class2DState4` allocates one child at a time from `ActorAlloc` -- kinds
+  // 0..3, character types 0x4D, 0x4F, 0x50 and 0x51 -- and kind 0 builds a
+  // wing (0x4E) in a block of its own. None has a descriptor, so each gets a
+  // synthetic row at the address the port gives it (`Class2DChildAt`),
+  // parented to the fight's descriptor, carrying the geometry the character
+  // layer adopts the object into; nothing spawns from them.
+  for (const p of [...placements]) {
+    if (p.cls !== 0x2d || p.synthetic || p.motion === null) continue;
+    if (((p.class2d?.subtype as number | undefined) ?? 0) !== 1) continue;
+    for (const row of await class2dChildPlacements(stage, tables, p, chars)) {
+      placements.push(row);
+      let clist = perType.get(row.char_type);
+      if (!clist) { clist = []; perType.set(row.char_type, clist); }
+      clist.push({ ...p.spawn, at: row.at, class: 0x2d, hp: 0 } as SpawnJson);
+    }
+  }
+
   // -- `znele`'s twin ---------------------------------------------------------
   //
   // `EnemyZombieInitByCharType` (`FUN_00452FD0`)'s type-0x12 arm allocates a
@@ -2372,6 +2473,9 @@ export function charactersJson(chars: Map<number, Character>,
     // Class 0x14's `.rdata` -- the stage-2 boss's cue, cone, window and
     // round tables. See `class14.ts`.
     class14: tables !== null ? class14Tables(tables) : {},
+    // Class 0x32's -- the stage-5 boss's phase ladder and rank tables. See
+    // `class32.ts`.
+    class32: tables !== null ? class32Tables(tables) : {},
     // `g_actor_attachment_records` -- one table for the whole game, indexed
     // by the ids in a placement's `attachments`.
     attachments: tables !== null ? tables.attachmentRecords() : [],

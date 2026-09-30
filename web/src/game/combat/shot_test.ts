@@ -178,6 +178,12 @@ export interface ShotCandidate {
    */
   mesh?: { surface: number; normal: Vec3 };
   /**
+   * The sphere's radius for a sphere candidate, whose {@link point} is its
+   * centre: `obj+0x124` hit whole, `rec+0x78` for a bone. `MarkActorShot`
+   * reads it back for GRENADE's blast. Absent for a collision-mesh hit.
+   */
+  radius?: number;
+  /**
    * `[port-only]` The distance along the shot to {@link point}. The engine
    * has one list and needs no second measure; the port merges this list's
    * winner with the classes `render/` still picks the old way, and that pick
@@ -494,7 +500,8 @@ function ShotTestSphere(obj: Actor, shot: ShotTest, out: ShotCandidate[]):
   }
   const p = obj.shotCentre;
   out.push({ key: ShotCandidateKey(_c.z), at: obj.at, bone: 0, whole: true,
-             point: { x: p.x, y: p.y, z: p.z }, t: alongShot(shot.ray, p) });
+             point: { x: p.x, y: p.y, z: p.z }, t: alongShot(shot.ray, p),
+             radius: obj.hitRadius });
 }
 
 /**
@@ -520,7 +527,7 @@ function ShotTestSphereThrownWeapon(id: number, shot: ShotTest,
   const p = w.pos;
   out.push({ key: ShotCandidateKey(c.z), at: w.from, bone: 0, whole: true,
              point: { x: p.x, y: p.y, z: p.z }, t: alongShot(shot.ray, p),
-             thrown: w.id });
+             thrown: w.id, radius: w.hitRadius });
 }
 
 /**
@@ -838,5 +845,5 @@ function ShotTestBoneSphere(obj: Actor, node: CharacterBone, shot: ShotTest,
   }
   out.push({ key: ShotCandidateKey(_c.z), at: obj.at, bone: node.bone,
              whole: false, point: { x: _w.x, y: _w.y, z: _w.z },
-             t: alongShot(shot.ray, _w) });
+             t: alongShot(shot.ray, _w), radius: r });
 }

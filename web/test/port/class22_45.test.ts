@@ -24,6 +24,7 @@ import { BossHpBarsTick } from "../../src/game/boss_hp_bar";
 import { BossBannersTick } from "../../src/game/boss_banner";
 import { vec3, type Vec3 } from "../../src/game/vec";
 import { Class22SubActorAt } from "../../src/game/class22/records";
+import { Class22ChargeShots } from "../../src/game/class22/shot";
 import { Class22Relative } from "../../src/game/class22/state";
 import { Class23State } from "../../src/game/class23/state";
 import { CLASS23_BLEND_WALK, Class23BlendStart }
@@ -329,6 +330,28 @@ console.log("\nclasses 0x22/0x23: JUDGMENT, the flier and the walker:");
           `stage ${w23.companion.hpStage} want ${want} motion ${w23.motion} `
           + `counter ${w23.playTicks} cursor ${MotionPlayFrame(w23)}`);
   }
+
+  // Original Mode: `Class22ChargeShots` charges each player's hit by that
+  // player's `g_original_weapon_damage_scale`, doubling for BULLET BLOW's
+  // -1.0. It read a constant 1.0 once, on the belief that nothing but 1.0 is
+  // ever written there.
+  {
+    const charge = (scale: number): number => {
+      const j = spawnFlier(1, 0) as Actor & { judgment: unknown };
+      G.g_GameMode = GameMode.Original;
+      G.g_original_weapon_damage_scale[0] = scale;
+      G.g_original_weapon_damage_scale[1] = 1;
+      const hp = j.hp;
+      j.flags |= 1 << 1;
+      j.shotBones[0] = 1;
+      Class22ChargeShots(j as Parameters<typeof Class22ChargeShots>[0], jf);
+      return hp - j.hp;
+    };
+    check("Original Mode: a GRENADE's 4.0 charges JUDGMENT 120 for a 30-point "
+          + "hit, BULLET BLOW's -1.0 60, the bare gun 30",
+          charge(4) === 120 && charge(-1) === 60 && charge(1) === 30,
+          `${charge(4)} ${charge(-1)} ${charge(1)}`);
+  }
 }
 
 // -- the shot test the engine's way: registration, the sphere, the fork -----
@@ -340,7 +363,7 @@ console.log("\nclasses 0x22/0x23: JUDGMENT, the flier and the walker:");
  * The class under test is a stand-in shaped like the bosses: its `Init`
  * writes `obj+0x124` and runs the skeleton build, and its update ends in
  * `ActorRegisterCameraPoint` the way `Class14Update` (`0x0047621E`) and
- * `Boss4Update` (`0x00491A49`) do. Class 0x2D has no module, so its row is
+ * `Boss4Update` (`0x00491A49`) do. Class 0x29 has no module, so its row is
  * free to borrow; the real bosses' modules are other workstreams'.
  *
  * Every assertion reads what only a shot can write -- `obj+0x190 + player`,
@@ -354,8 +377,8 @@ console.log("\nthe shot test, for a class that registers the engine's way:");
 {
   const rng = new Rng(29);
   const events = scene(0, rng);
-  const CLS = SpawnClass.LargeCreature;
-  if (g_class_handlers[CLS]) throw new Error("class 0x2D is ported now");
+  const CLS = SpawnClass.SceneryBatch;
+  if (g_class_handlers[CLS]) throw new Error("class 0x29 is ported now");
   // A root at the actor and two children beside it: bone 2 four units to the
   // side, inside a twelve-unit `obj+0x124`, and bone 3 twenty units out,
   // beyond it. Parents are indices into this list, as the exporter writes

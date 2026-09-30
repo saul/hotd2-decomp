@@ -57,6 +57,7 @@ import { BOSS_HP_BAR_SPRITES, CONTINUE_SCREEN_SPRITES, HUD_READOUT_SPRITES }
 // ...and the boss-name banner's, whose record table is data in the same way.
 import { BOSS3_CARD_SPRITES, BOSS3_EFFECT_SLOTS }
   from "../game/class45/tables";
+import { CLASS2D_EFFECT_SLOTS } from "../game/class2D/state";
 import { BOSS_BANNER_SPRITES, bannerCardSlots }
   from "../game/boss_banner_records";
 // And the game-over screen's: its logo sprites are immediates in
@@ -71,12 +72,18 @@ import { OPTIONS_SCREEN_SPRITES, SCREEN_IDLE_DIM_SLOT }
 // immediates in `ResultCardInstall`.
 import { RESULT_CARD_SPRITES, RESULT_GLYPH_SLOTS }
   from "../game/class61/state";
+// The trunk's sprites and models: class 0x6E's immediates.
+import { ITEM_SELECT_SLOTS, ITEM_SELECT_SPRITES } from "../game/class6e/state";
+import { SpawnClass } from "../game/spawn_class";
 import { f32, i16, i32, u32 } from "./bytes";
 import * as C from "./container";
 import { encodeRgba } from "./png";
 import * as texbank from "./texbank";
-import { BODY_CREATURE_SLOTS, CARRIED_PROP_BREAK, CARRIED_PROP_SLOTS }
-  from "./combat";
+import { BODY_CREATURE_SLOTS, CARRIED_PROP_BREAK, CARRIED_PROP_SLOTS,
+         IMPACT_SPRITE_BY_MATERIAL } from "./combat";
+import { WEAPON_FIRST_SLOT, WEAPON_LAST_FRAME }
+  from "../game/effects/shot_effects";
+import { SpriteEffectKind } from "../game/effects/sprite";
 import { charactersJson, resolveForStage as resolveCharacters,
          stagePlacesResultCard } from "./characters";
 import * as charmotion from "./charmotion";
@@ -132,6 +139,11 @@ export const BREAKABLE_SLOTS = [
   0x19e8, 0x19e6, 0x1a0f, 0x10d0,          // BreakablePropUpdate
   0x17a9, 0x17aa, 0x17ab, 0x10d1,          // KindedPropUpdate
   0x0a50, 0x0a51, 0x0a55,                  // FallingContainerUpdate
+  // ExtraLifePickupUpdate, which any of the three can release: the heart,
+  // the two players' tags and their pickup strips (frames 1..0x31 each).
+  0x10c3, 0x1256, 0x1257,
+  ...Array.from({ length: 49 }, (_, i) => 0x116a + i),
+  ...Array.from({ length: 49 }, (_, i) => 0x119c + i),
 ];
 
 /**
@@ -1328,6 +1340,26 @@ export const ACTOR_SLOTS: Record<number, number[]> = {
   // 0x40's slots: the ripple `0x1A38` and the strip `0x15E4..0x1601`.
   0x42: [...Array.from({ length: 0x88f - 0x85a + 1 }, (_, i) => 0x85a + i),
          0x1a38, ...Array.from({ length: 30 }, (_, i) => 0x15e4 + i)],
+  // Class 0x32, the stage-5 boss: every model its projectiles and its tasks
+  // draw, in the world and under a light colour of their own, which
+  // `render/slotmodels.ts` draws. The afterimage (`Class32AfterimageTick`,
+  // `FUN_0047DC30`) draws `boss5.bin` 206, slot `0x5E5`; the rest are
+  // `eff_boss5.bin`, which the fight's steps load: the body loop's twenty
+  // cels `0xB4..0xC7` (`Class32BodyLoopEffectTick`, `FUN_0047E130`), the
+  // hands effect's `0x127A..0x1299` (`Class32HandsEffectTick`,
+  // `FUN_0047E2B0`), the projectile's `0xB02..0xB33`
+  // (`Class32ProjectileDispatchAndDraw`, `FUN_0047EFA0`, and its trail), the
+  // death burst's `0xC54..0xC68` (`Class32DeathBurstTick`, `FUN_00480700`)
+  // and the exit effect's `0x7EF..0x815` (`Class32ExitEffectTick`,
+  // `FUN_00480810`). The boss's own nodes ride the character path.
+  0x32: [
+    0x5e5,
+    ...Array.from({ length: 0xc7 - 0xb4 + 1 }, (_, i) => 0xb4 + i),
+    ...Array.from({ length: 0x1299 - 0x127a + 1 }, (_, i) => 0x127a + i),
+    ...Array.from({ length: 0xb33 - 0xb02 + 1 }, (_, i) => 0xb02 + i),
+    ...Array.from({ length: 0xc68 - 0xc54 + 1 }, (_, i) => 0xc54 + i),
+    ...Array.from({ length: 0x815 - 0x7ef + 1 }, (_, i) => 0x7ef + i),
+  ],
 };
 
 /**
@@ -1372,6 +1404,10 @@ export const EFFECT_SLOTS_BY_CLASS: Record<number, number[]> = {
   // sparks, splashes, bite flashes, wake, path effects, the civilian's
   // shadow and the water mound. See `game/class45/tables.ts`.
   0x45: [...BOSS3_EFFECT_SLOTS],
+  // The stage-6 boss's: every slot its routines draw by hand -- its own
+  // nodes and shells, the satellites, the children's nodes, the flares and
+  // the tasks. See `CLASS2D_EFFECT_SLOTS` in `game/class2D/state.ts`.
+  0x2d: [...CLASS2D_EFFECT_SLOTS],
   // The owl's three tasks (`game/effects/owl.ts`): the feather
   // (`OwlFeatherDriftAndDraw`, `FUN_00448A80`: `owl.bin` 51), the ground
   // impact ring and its strip (`OwlGroundImpactRingPulse`, `FUN_00448CE0`:
@@ -1411,6 +1447,13 @@ export const EFFECT_SLOTS_BY_CLASS: Record<number, number[]> = {
   0x33: [
     ...Array.from({ length: 0x1031 - 0xfd4 + 1 }, (_, i) => 0xfd4 + i),
     ...Array.from({ length: 0x1785 - 0x174a + 1 }, (_, i) => 0x174a + i),
+  ],
+  // Class 0x32, the stage-5 boss: sprite kind 0x50, `0x23A..0x248`, the
+  // spark `Class32ChargeShotBone` (`FUN_0047CE10`) throws off a damaging hit.
+  // Its other kind, 0x35, is the shot path's `0xE25` run. The models its
+  // projectiles and tasks draw are {@link ACTOR_SLOTS}'.
+  0x32: [
+    ...Array.from({ length: 0x248 - 0x23a + 1 }, (_, i) => 0x23a + i),
   ],
 };
 
@@ -1750,8 +1793,8 @@ export async function actorSlotEntry(
   if (!parts.length) return null;
   const rig: Rig = {
     name: "slots_actor",
-    routine: "asset-slot actor draws (classes 0x13, 0x14, 0x40, 0x42, 0x43, "
-      + "0x51, 0x52; class 0x25 variant 3; class 0x26 subtypes 6 and 7; "
+    routine: "asset-slot actor draws (classes 0x13, 0x14, 0x32, 0x40, 0x42, "
+      + "0x43, 0x51, 0x52; class 0x25 variant 3; class 0x26 subtypes 6 and 7; "
       + "class 0x33 selector 4; class 0x41 type 1's water tiles)",
     worldSpace: false,
     parts: parts.map(([p]) => p),
@@ -1828,14 +1871,51 @@ export const EFFECT_SLOT_RANGES: ReadonlyArray<readonly [number, number]> = [
  * bundle's effect templates, which is where `render/effects.ts` draws the
  * ring from; it used to reach the page only as the rig `obj_416b00`, which
  * the player drew from stage load at `op_` 0x194's own pose -- in front of
- * Goldman's desk. The kind-4 record's run from 0xA6F is not here: nothing the
- * port can equip arms it, and this is only the slot whose rig was wrong.
+ * Goldman's desk.
  */
 export const ORIGINAL_WEAPON5_ROUND_SLOT = 0x109d;
 
-/** {@link ORIGINAL_WEAPON5_ROUND_SLOT}, for a stage that is Original Mode. */
-export function originalWeaponRoundSlots(original: boolean): number[] {
-  return original ? [ORIGINAL_WEAPON5_ROUND_SLOT] : [];
+/**
+ * Whether this stage's script spawns the trunk, class 0x6E: `spawn_simple`
+ * `{0x6E, 0}` at `st1evtbl.bin` `0x9EC`, in the step Original Mode enters
+ * stage 1 at. Asked of the program, not of the stage number, so the answer
+ * is the script's.
+ */
+export function stageSpawnsItemSelect(prog: Program): boolean {
+  for (const b of prog.liveBlocks()) {
+    for (const st of b.steps) {
+      for (const o of st.ops) {
+        const simple = (o.detail.simple as { class: number }[]) ?? [];
+        if (simple.some((r) => r.class === SpawnClass.ItemSelect)) return true;
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * The models Original Mode's weapons draw, for a stage that is Original Mode:
+ *
+ * * {@link ORIGINAL_WEAPON5_ROUND_SLOT}, BASS LURE's round;
+ * * GRENADE's blast, sprite effect 0x53's flipbook, which `MarkActorShot`
+ *   (`FUN_00404DB0`) throws on every hit with weapon kind 3;
+ * * BULLET BLOW's ring, `AssetDrawSlot(frame + 0xA6F)` for frames 0 to 0x17
+ *   of a kind-4 `g_shot_weapon_ring` record (`PlayerShotEffectsThink`,
+ *   `FUN_00416B00`).
+ *
+ * The exe makes the last two resident only for the weapon a player carries
+ * -- `PolFileQueueLoad(0x3D)` for kind 3 and `(0x41)` for kind 4, in
+ * `FUN_0048A140` as a stage loads. A bundle is exported before any loadout
+ * exists, so it carries both. Before the trunk was ported nothing could equip
+ * either, and neither was here.
+ */
+export function originalWeaponEffectSlots(original: boolean): number[] {
+  if (!original) return [];
+  const out = [ORIGINAL_WEAPON5_ROUND_SLOT];
+  const [lo, hi] = IMPACT_SPRITE_BY_MATERIAL[SpriteEffectKind.OriginalBlast];
+  for (let slot = lo; slot <= hi; slot++) out.push(slot);
+  for (let f = 0; f <= WEAPON_LAST_FRAME; f++) out.push(WEAPON_FIRST_SLOT + f);
+  return out;
 }
 
 /**
@@ -2223,6 +2303,9 @@ export async function buildStage(stage: Stage, sink: BundleSink,
   // need a `Program`. They are identical by construction and each costs a
   // full evt walk, so this builds one and hands it round.
   const prog = await Program.create(stage);
+  // The trunk (class 0x6E) is spawned by one step in the game, stage 1's
+  // Original entry; the stage that has it gets its sprites and models.
+  const trunk = stageSpawnsItemSelect(prog);
   const evt = prog.evt;
   const spawnRecords = evt ? evtlib.spawns(evt) : [];
 
@@ -2321,14 +2404,18 @@ export async function buildStage(stage: Stage, sink: BundleSink,
     ...Boss4EffectSlots(spawnRecords.map((r) => r.cls)),
     // ...and the sprite effects a class draws off the shot path.
     ...classEffectSlots(spawnRecords.map((r) => r.cls)),
-    // ...and Original Mode's weapon-5 round, on the tracer ring.
-    ...originalWeaponRoundSlots(stage.original),
+    // ...and Original Mode's weapons: the weapon-5 round on the tracer
+    // ring, the grenade's blast and BULLET BLOW's ring.
+    ...originalWeaponEffectSlots(stage.original),
     // ...and the shell screens' idle dimmer, which the options screen draws
     // over itself after five minutes of nothing held.
     SCREEN_IDLE_DIM_SLOT,
     // ...and the result card's `result.bin` glyphs, drawn in view space by
     // `render/view_slots.ts`, for a stage that places the card.
     ...(prog && stagePlacesResultCard(prog) ? RESULT_GLYPH_SLOTS : []),
+    // ...and the trunk and its lid, `car_org.bin` 1 and 2, drawn in the world
+    // by `render/view_slots.ts`, where the trunk is spawned.
+    ...(trunk ? ITEM_SELECT_SLOTS : []),
   ]);
   // Which materials draw blood, so the client can offer the colour the game's
   // own option offers. See `bloodTexturePredicate`.
@@ -2397,6 +2484,10 @@ export async function buildStage(stage: Stage, sink: BundleSink,
   // the stage's, and a few kilobytes is not worth a per-stage decision.
   scriptJson.boss4 = tables.boss4Tables();
   scriptJson.carrier_door_yaw = tables.carrierDoorYaw();
+  // Class 0x2D's `.rdata`, on the same terms: the stage-6 boss's waypoints,
+  // picks, per-rank timings, path segments and child maps. Stage 5's cameo
+  // reads none of it; stage 6's fight reads all of it.
+  scriptJson.class2d = tables.class2dTables();
   // The result card's `.rdata`, one block for the whole game as `game_over`
   // is: the figures' records and lists, their attachment lists, the glyph
   // strings, the life bonus and the accuracy bonus.
@@ -2407,6 +2498,12 @@ export async function buildStage(stage: Stage, sink: BundleSink,
   // `game_over` is, and the sprites its tables name beside its immediates.
   const options = tables.optionsTables();
   scriptJson.options = options;
+  // Original Mode's `.rdata`, one block for the whole game as `options` is:
+  // the weapon records, the fire and ammo-readout rows, the trunk's tables.
+  const originalMode = tables.originalModeTables() as {
+    ammo_hud_rows: { sprite: number }[]; list_sprites: number[];
+  };
+  scriptJson.original_mode = originalMode;
   const optionTableSprites = [
     ...(options.glyphs as number[]), ...(options.crosshair_sprites as number[]),
     ...(options.sight_speed_sprites as number[]),
@@ -2422,7 +2519,13 @@ export async function buildStage(stage: Stage, sink: BundleSink,
      ...originalItemSprites(originalItemsJson(tables, placements,
                                               stage.scene)),
      // The result card's frame, for a stage that places the card.
-     ...(prog && stagePlacesResultCard(prog) ? RESULT_CARD_SPRITES : [])]);
+     ...(prog && stagePlacesResultCard(prog) ? RESULT_CARD_SPRITES : []),
+     // Original Mode's bullets, `HudDrawAmmoAndReloadPrompt`'s row by fire
+     // mode, for an Original stage.
+     ...(stage.original
+       ? originalMode.ammo_hud_rows.map((r) => r.sprite) : []),
+     // ...and the trunk's screen, where it is spawned.
+     ...(trunk ? [...ITEM_SELECT_SPRITES, ...originalMode.list_sprites] : [])]);
   await sink.write(`${outDir}/${name}.script.json`, bundleJson(scriptJson));
 
   let nSpawns = 0;

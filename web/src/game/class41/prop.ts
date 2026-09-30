@@ -32,10 +32,12 @@ import { BAMS } from "../vec";
 import {
   BreakableGroupMembers, BreakablePropAt, MsvcRand, SetBreakableMemberSlot,
 } from "./group";
-import { HiddenItemCopy, ReleaseHiddenItem } from "./items";
 import {
-  BreakableFlag, BreakableSlot, BreakableState, HIT_FLAG_MASK, PropFamily,
-  type BreakableProp,
+  HiddenItemCopy, ReleaseHiddenItem, SpawnExtraLifePickup,
+} from "./items";
+import {
+  BreakableFlag, BreakableSlot, BreakableState, HIT_FLAG_MASK, ItemSet,
+  PropFamily, type BreakableProp,
 } from "./prop_state";
 import { BreakablePropSpawnShatter, type ShatterCamera } from "./shatter";
 import {
@@ -453,6 +455,15 @@ function BreakDestroy(p: BreakableProp, level: number, rng: Rng,
   p.effectPrevFrame = 0;
   p.family = PropFamily.Effect;
   p.hp = p.lifetime;
+  // Original Mode's FIRST AID KIT, in front of the release switch
+  // (`0x004648CA`..`0x004648F2`): with `g_original_first_aid` up the prop's
+  // item set is the extra life's (`+0x195 = 1`) and the life comes out at
+  // once, whatever the set and its countdown said.
+  if (G.g_GameMode === GameMode.Original && G.g_original_first_aid !== 0) {
+    p.itemSet = ItemSet.ExtraLife;
+    SpawnExtraLifePickup(p, events);
+    return false;
+  }
   ReleaseHiddenItem(p, rng, events, HiddenItemCopy.Group);
   return false;
 }

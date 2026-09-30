@@ -354,10 +354,11 @@ export function PlaceGenericPropType43(p: BreakableProp,
   p.roll = 0;
   p.restHeight = T.breakables?.kinds?.[TYPE43_RISE_ROW]?.y_offset ?? 0;
   // `if (g_GameMode == 1 && byte [0x009C88AA] != 0) obj+0x194 = 1` at
-  // `0x00462371`. [diverges] `G` has no such byte and nothing in the port
-  // writes one, so the override never fires -- as it would not in a game
-  // with the byte clear. What sets it is the question `ReleaseHiddenItem`
-  // (`class41/items.ts`) asks.
+  // `0x00462371`: Original Mode's FIRST AID KIT makes every one of these a
+  // heart.
+  if (G.g_GameMode === GameMode.Original && G.g_original_first_aid !== 0) {
+    w.o194 = Type43ItemSet.ExtraLife;
+  }
 }
 
 /**

@@ -24,6 +24,7 @@
  */
 import type { Events } from "../core/events";
 import { G } from "./globals";
+import { OriginalItem } from "./original_mode";
 import {
   GUN_CALIBRATION_FACTORY, INPUT_BINDINGS_DEFAULT, OPTION_9F28_FACTORY,
   OPTIONS_FACTORY, SIGHT_SPEED_FACTORY, START_LIVES_BY_OPTION,
@@ -91,21 +92,30 @@ export function OptionsFactoryReset(): void {
 }
 
 /**
- * `ProfileFactoryReset` — `FUN_00401060`, the whole profile: `0x009C9F5F`
- * and the rankings reset (`FUN_0041C490(0)`); the Training and Boss Mode
- * grades zeroed; the blood colour 1; three bytes nothing reads
- * (`0x009C9F23` 1, `0x009C9F24` 0, `0x009C9F26` 0, `0x009C9F27` 1); the
- * saved Original items zeroed; `0x009C9F40`, `44`, `4D` to 1; the unlocks
- * zeroed; `0x009CA058..5E`; and per player no damage, infinite ammo and
- * `+0x7A` zeroed. Then `OptionsFactoryReset`. `[proved]`
+ * `ProfileFactoryReset` — `FUN_00401060`, the whole profile:
+ * `g_profile_original_boss6_beaten` (`0x009C9F5F`) and the rankings reset
+ * (`FUN_0041C490(0)`); the Training and Boss Mode grades zeroed; the blood
+ * colour 1; three bytes nothing reads (`0x009C9F23` 1, `0x009C9F24` 0,
+ * `0x009C9F26` 0, `0x009C9F27` 1); the 33 saved Original items zeroed
+ * (eight dwords and a byte from `0x009C9F3D`) and then three of them,
+ * `0x009C9F40`, `44` and `4D` -- entries 3, 7 and 16, POWER UP 1.2,
+ * CHAMBER +2 and CREDIT +2, what a first game's trunk holds -- set to 1;
+ * the unlocks zeroed; `0x009CA058..5E`; and per player no damage, infinite
+ * ammo and `+0x7A` zeroed. Then `OptionsFactoryReset`. `[proved]`
  *
- * Of those, `G` holds the blood colour, the saved items, the unlocks and the
- * two per-player flags; the rest are state of screens and modes the port
- * does not have.
+ * Of those, `G` holds the stage-6 boss's beaten byte, the blood colour, the
+ * saved items, the unlocks and the two per-player flags; the rest are state
+ * of screens and modes the port does not have. The three items were once
+ * read as bytes of their own, and the port zeroed them with the rest.
  */
 export function ProfileFactoryReset(): void {
+  G.g_profile_original_boss6_beaten = 0;
   G.g_option_blood_color = 1;
   G.g_profile_original_items = new Array(33).fill(0);
+  // `MOV byte ptr [0x9c9f40], DL` and `[0x9c9f44]`, `[0x9c9f4d]`, DL = 1.
+  G.g_profile_original_items[OriginalItem.PowerUp12] = 1;
+  G.g_profile_original_items[OriginalItem.Chamber2] = 1;
+  G.g_profile_original_items[OriginalItem.CreditPlus2] = 1;
   G.g_option_unlocks = 0;
   G.g_player_no_damage = [0, 0];
   G.g_player_infinite_ammo = [0, 0];

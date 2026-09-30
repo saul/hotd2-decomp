@@ -2,11 +2,13 @@
  * `EnemyZombieUpdate` — `FUN_004533F0`. Class 0x30's per-frame dispatch.
  *
  * The engine's own order, which matters: the state runs, *then* the position
- * integrates, then the motion advances. Anything not ported goes through
- * `ZombieGiveUpAttack` rather than a fallthrough, so no unmodelled state can
- * sit on a permit. That used to name `ActorAbortAttackAndLeave` as what the
- * fallback stood for; the routine at `0x0045D9F0` is `ZombieSplitInTwo` and
- * has nothing to do with it.
+ * integrates, then the motion advances, then the two hooks after the draw --
+ * `g_class30_states[0x36]` and the footstep cue.
+ *
+ * The dispatch has an arm for every entry of `g_class30_states` and no
+ * `default`. It used to send anything it did not recognise -- state 0
+ * included, which is the engine's no-op -- to `ZombieGiveUpAttack`, which
+ * released the permit and put the actor back in the attack loop.
  */
 import { ZombieStateCarryProp } from "./carry_prop";
 import type { Events } from "../../core/events";
@@ -27,7 +29,6 @@ import { ZombieStateApproach } from "./approach";
 import { ZombieStateAttackRun } from "./attack_run";
 import { ZombieStateBackOff } from "./backoff";
 import { ZombieAttackRefusal, ZombieStateHoldAtRange } from "./hold";
-import { ZombieGiveUpAttack } from "./leave";
 import { ZombieStateStrike } from "./strike";
 import { ZombieStateLeapStrike } from "./leap_strike";
 import { ZombieStateWaitTurn } from "./wait_turn";
@@ -305,7 +306,28 @@ function ZombieRunState(obj: ZombieActor, dt: number, rng: Rng,
     case ZombieState.LeapOffCarrierAtMark:
       return ZombieStateLeapOffCarrierAtMark(obj, dt, host, events);
 
-    default:                      return ZombieGiveUpAttack(obj);
+    // `g_class30_states[0]` and `[0x31]` are `NoOpStub` (`FUN_0041EBB0`), a
+    // bare `RET`: the engine's actor in either stands where it is for ever.
+    // State 0 used to fall to a `default` arm that released the permit and
+    // sent the actor to `WaitTurn`, back into the attack loop -- the port's
+    // invention, and the only thing an actor whose descriptor hands over to
+    // an attack state of 0 would ever have met.
+    case ZombieState.NoOp:
+    case ZombieState.OrderDie:
+      return;
+
+    // The five entries the port carries no body for, each because nothing
+    // the shipped game runs can put an actor in it: no literal store of the
+    // index in the image, and no descriptor, civilian order or camera cue that
+    // names it -- `web/tools/checks/split_unreachable.ts` asserts every half
+    // of that, beside a positive control for each search. An actor here does
+    // nothing, which is not the routine's body; it is also not reachable.
+    case ZombieState.RunPastPoint:        // `ZombieStateRunPastPoint`
+    case ZombieState.DelayedPounce:       // `ZombieStateDelayedPounce`
+    case ZombieState.SplitLaunch:         // `ZombieStateSplitLaunch`
+    case ZombieState.SplitHalfCollapse:   // `ZombieStateSplitHalfCollapse`
+    case ZombieState.CollapseToCondition4:
+      return;
   }
 }
 
@@ -365,59 +387,17 @@ export function EnemyZombieInit(obj: ZombieActor, _rng?: Rng,
   // one of them is the whole of what makes stage 3's two axe men stand still
   // instead of walking away.
   EnemyZombieInitByCharType(obj, events);
-  obj.state = ZombieEntryState(obj.initialState);
+  // `MOVSX DX, byte ptr [EBX + 0x2]` / `MOV word ptr [ESI + 0x1310], DX` at
+  // `0x00452F36`, then the sub to 0: the descriptor's own byte, as it stands.
+  // This used to pass through `ZombieEntryState`, a list of the states the
+  // port had read that sent anything else to `AttackRun`; every initial state
+  // a shipped descriptor names has an arm now, so the list only ever changed
+  // the twin's 0 -- a state the twin never dispatches -- and it is gone.
+  obj.state = obj.initialState;
   // ...and the actor counts itself in, which is the engine's own last act
   // here. The two exclusions are the interesting part -- see `CountEnemyZombieIn`.
   CountEnemyZombieIn(obj);
 }
-
-/**
- * Which state to actually start in.
- *
- * **Every entrance state the game ships is now ported**, so this passes the
- * descriptor's own byte straight through and the fallback below is reached
- * only by a state no spawn record names.
- *
- * It used to be a list of exceptions, and the list was the bug. Seventeen of
- * the 54 states were read; the other 37 fell through to `AttackRun`, on the
- * reasoning that every entrance ends by setting state 1 anyway. That is true
- * of *some* of them and it is not the point — the entrance is what puts the
- * actor where the level wants it before the attack run starts. Sending state
- * 15 to `AttackRun` skipped a scripted walk-in and sent zombies through a
- * wall; sending state 27 there left them standing under water; sending state
- * 23 there turned a set-piece drowning into a jog across the room. The twelve
- * added here are 133 spawns, and states 17 and 18 alone are 75 of them.
- *
- * The check is kept, rather than deleted, because it is the thing that says
- * what happens to a state that is genuinely unmodelled: `ZombieGiveUpAttack`
- * through the dispatch's default, which releases the permit rather than
- * silently holding one.
- */
-export function ZombieEntryState(initial: number): ZombieState {
-  return ZOMBIE_ENTRY_STATES.has(initial) ? initial : ZombieState.AttackRun;
-}
-
-/**
- * The states an actor may legitimately *start* in — every state the dispatch
- * above handles, minus the ones only another state can route to.
- *
- * A spawn record naming anything else is a record the port has not read, and
- * `AttackRun` is the honest fallback: it is what an entrance hands over to.
- */
-const ZOMBIE_ENTRY_STATES: ReadonlySet<number> = new Set<number>([
-  ZombieState.AttackRun, ZombieState.HoldAtRange, ZombieState.Approach,
-  // The twelve added here.
-  ZombieState.SurfaceOnCameraCue, ZombieState.RunInPlaceTimed,
-  ZombieState.HoldClipThenBranch, ZombieState.WaitCameraFrameThenBranch,
-  ZombieState.WaitForCameraFrame, ZombieState.WaitScriptFlagThenBranch,
-  ZombieState.ScriptedGrabAndDespawn, ZombieState.LeapToPoint,
-  ZombieState.RideCarrier, ZombieState.ArcScriptedEntrance,
-  ZombieState.WaitScriptFlagThenEnter, ZombieState.DelayedStrikeInPlace,
-  // ...and the ones that were already read.
-  ZombieState.WalkDistance, ZombieState.MotionCue, ZombieState.DelayedLeap,
-  ZombieState.Emerge, ZombieState.StandAndThrow, ZombieState.FallToGround,
-  ...TARGET_STATES,
-]);
 
 /**
  * The zombie, for the debug sidebar.

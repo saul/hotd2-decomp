@@ -30,6 +30,7 @@ import {
 } from "../../src/game/actor";
 import { type ClassFrame } from "../../src/game/registry";
 import { SpawnClass } from "../../src/game/spawn_class";
+import { ZombieState } from "../../src/game/class30/states";
 import { GameMode } from "../../src/game/game_mode";
 import { vec3, type Vec3 } from "../../src/game/vec";
 import { EffectCode } from "../../src/game/combat/resolve_hit";
@@ -320,10 +321,17 @@ export const DRAW_FRAME: ClassFrame = {
  * states has to establish the class rather than assert it. The `throw` is
  * unreachable, and that is the point — a cast here would be the one place the
  * union could be lied to.
+ *
+ * **A fixture that names no start state means the attack run**, descriptor
+ * byte +2 = 1, the commonest the shipped spawns carry. `EnemyZombieInit`
+ * stores the byte as it stands (`0x00452F36`), so a missing one would be 0 --
+ * `NoOpStub`, an actor that never moves -- and a router in the port used to
+ * turn that 0 into 1, which every fixture here that names none leaned on.
  */
 export function spawnZombie(at: number, charType: number, name: string,
                      desc?: Partial<Actor>, rng?: Rng): ZombieActor {
-  const a = ActorSpawn(at, SpawnClass.Zombie, charType, name, desc, rng);
+  const a = ActorSpawn(at, SpawnClass.Zombie, charType, name,
+                       { initialState: ZombieState.AttackRun, ...desc }, rng);
   if (a.cls !== SpawnClass.Zombie) throw new Error("not class 0x30");
   return a;
 }

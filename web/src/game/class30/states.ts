@@ -21,7 +21,14 @@
 
 import type { Actor } from "../actor";
 export enum ZombieState {
-  /** `g_class30_states[0]` is the engine's no-op. */
+  /**
+   * `g_class30_states[0]` is `NoOpStub` (`FUN_0041EBB0`), a bare `RET`: an
+   * actor in state 0 does nothing for ever. `[proved]` by the table, whose
+   * `[0x31]` is the same word. Only the twin (character type 9) is ever given
+   * it, from a descriptor byte, and the twin never runs this table -- see
+   * `ZombieTaskUpdate`. 173 class-0x30 descriptors name 0 as their *attack*
+   * state, and no state they can reach hands over to it.
+   */
   NoOp = 0,
   /** `ZombieStateAttackRun` (`FUN_004554D0`). */
   AttackRun = 1,
@@ -104,6 +111,18 @@ export enum ZombieState {
   /** `ZombieStateWalkDistance` (`FUN_00457220`). */
   WalkDistance = 15,
   /**
+   * `ZombieStateRunPastPoint` (`FUN_00457360`) -- **nothing reaches it.**
+   * Runs (`row[2 + bit 27]`) and turns toward the descriptor tail's point at
+   * `+0x04`, and hands over to {@link AttackRun} once its bearing from the
+   * point has swung more than a quarter turn from where it started.
+   *
+   * `[proved]` unreachable: no `MOV word [reg + 0x1310], 0x10` in the image,
+   * and no class-0x30 descriptor, civilian order or camera cue names 16 --
+   * `web/tools/checks/split_unreachable.ts` holds all of it. The port carries
+   * no body for it; see the dispatch in `class30/index.ts`.
+   */
+  RunPastPoint = 16,
+  /**
    * `ZombieStateHoldClipThenBranch` (`FUN_004574D0`). Plays one clip for a
    * fixed count, then branches to the state the descriptor names. **Thirty-
    * eight spawns — the commonest entrance in the game after the attack run.**
@@ -162,6 +181,15 @@ export enum ZombieState {
    * Eighteen spawns.
    */
   Emerge = 27,
+  /**
+   * `ZombieStateDelayedPounce` (`FUN_004586E0`) -- **nothing reaches it.**
+   * Hidden or crouched on clip `0x10F` for `tail+0x04` frames, then an arc
+   * through `g_class30_pounce_arc_script` onto the player or `tail+0x08`,
+   * one hit of damage on the landing clip `0x162`, and state 1.
+   *
+   * `[proved]` unreachable, as {@link RunPastPoint} is and by the same check.
+   */
+  DelayedPounce = 28,
   /**
    * `ZombieStateRideCarrier` (`FUN_00458960`). A passenger: its position is
    * its own spawn offset plus `g_carrier_object`'s, every frame. Six spawns,
@@ -238,6 +266,10 @@ export enum ZombieState {
   /**
    * The order `ZombieStateAwaitCivilianOrder` reads as "die" rather than as a
    * state to enter — class 0x10's op 0x1A writes it to `sub+0x2C`.
+   *
+   * As a state it is `g_class30_states[0x31]`, `NoOpStub` again, the filler
+   * between the captor family and the half-body one. Nothing stores it into
+   * `obj+0x1310`: the order is read and never entered.
    */
   OrderDie = 0x31,
 
@@ -250,13 +282,13 @@ export enum ZombieState {
   /**
    * `ZombieStateSplitLaunch` (`FUN_0045E010`). The actor `ZombieSplitInTwo`
    * leaves holding root 0, thrown at the camera, bounced, and sent back into
-   * the run. **No `case` in the dispatch, on purpose**: its only writer is
+   * the run. **No body in the dispatch, on purpose**: its only writer is
    * `ZombieSplitUpdateSelf` at `0x0045DA76`, and nothing reaches that.
    */
   SplitLaunch = 0x32,
   /**
    * `ZombieStateSplitHalfCollapse` (`FUN_0045DED0`). The second actor a split
-   * makes, holding root 1: two clips, a pause, a death. No `case`, for the
+   * makes, holding root 1: two clips, a pause, a death. No body, for the
    * same reason as {@link SplitLaunch}.
    */
   SplitHalfCollapse = 0x33,
@@ -270,7 +302,7 @@ export enum ZombieState {
   LeapStrike = 0x34,
   /**
    * `ZombieStateCollapseToCondition4` (`FUN_0045E660`). Falls, gets up as a
-   * condition-4 actor with {@link ZombieFlag2.SplitArmed} raised. No `case`:
+   * condition-4 actor with {@link ZombieFlag2.SplitArmed} raised. No body:
    * no instruction writes 0x35 as a state and no shipped data names it.
    */
   CollapseToCondition4 = 0x35,
@@ -346,8 +378,8 @@ export enum MotionRow {
  *
  * `[port-only]` — one expression out of `ZombieStateAttackRun`
  * (`FUN_004554D0`), named because four states index the pair the same way:
- * that one, `ZombieStateRunInPlaceTimed`, `ZombieStateWalkDistance` and state
- * 16's routine at `0x00457360`, which the port does not have.
+ * that one, `ZombieStateRunInPlaceTimed`, `ZombieStateWalkDistance` and
+ * `ZombieStateRunPastPoint` (`FUN_00457360`), which nothing reaches.
  *
  * **No fallback, because the engine has none.** It used to drop to the first
  * baked entry of the row when this one was missing, on the belief that a row

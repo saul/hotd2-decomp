@@ -43,7 +43,7 @@ import { ThrowerTryEnterState } from "../../src/game/class31/router";
 import {
   ThrowerStateBlinkInThreeHops, ThrowerStateRideObjectPath,
 } from "../../src/game/class31/scripted";
-import { EnemyZombieUpdate, ZombieEntryState } from "../../src/game/class30";
+import { EnemyZombieUpdate } from "../../src/game/class30";
 import { ZombieOnShot } from "../../src/game/class30/on_shot";
 import { HIT_SLOT_CLAIMED } from "../../src/game/hit_slots";
 import { ZombiePushOutOfWorldAndActors } from "../../src/game/class30/ground";
@@ -157,13 +157,9 @@ console.log("\nclass 0x30 state 26: the arc alone moves the leap:");
 console.log("\nclass 0x30 state 33: the stationary thrower:");
 {
   // `ZombieStateStandAndThrow` is the only class-0x30 state that never moves
-  // the actor. The port had no state 33, so `ZombieEntryState` folded it into
-  // `AttackRun` and stage 1's axe man -- character type 0x13, whose asset file
-  // is `tutorial.bin` -- charged the camera.
-  check("a state-33 spawn starts in StandAndThrow, not AttackRun",
-        ZombieEntryState(ZombieState.StandAndThrow)
-          === ZombieState.StandAndThrow,
-        String(ZombieEntryState(ZombieState.StandAndThrow)));
+  // the actor. The port had no state 33, so an entry router since deleted
+  // folded it into `AttackRun` and stage 1's axe man -- character type 0x13,
+  // whose asset file is `tutorial.bin` -- charged the camera.
 
   /** `obj+0x34` bit 0x20000 — see `ActorInitFlags` and `class30/ground.ts`. */
   const GROUND_SNAP_EXEMPT = 0x20000;
@@ -185,6 +181,10 @@ console.log("\nclass 0x30 state 33: the stationary thrower:");
     z.pos = vec3(0, 0, 60);
     return z;
   };
+
+  check("a state-33 spawn starts in StandAndThrow, not AttackRun",
+        thrower().state === ZombieState.StandAndThrow,
+        String(thrower().state));
 
   {
     const z = thrower();

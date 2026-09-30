@@ -16,8 +16,17 @@ import { CameraBlockEye } from "../camera/view";
 import { COLLECTIBLE_WORDS_ZERO, PickOriginalModeItem } from "./original_item";
 import { PropWords } from "./words";
 import {
-  BreakableState, ItemSet, makeBreakableProp, PropFamily, type BreakableProp,
+  BreakableFlag, BreakableState, ItemSet, makeBreakableProp, PropFamily,
+  type BreakableProp,
 } from "./prop_state";
+import { MatrixRotateY, MatrixScale, MatrixTranslate } from "../matrix";
+import {
+  PropDrawBegin, PropDrawSlot, PropDrawSlotWithAlpha, PropMatrixClearRotation,
+  PropMatrixPush,
+} from "./prop_draw";
+import { PropExpireByStepLifetime } from "./lifetime";
+import { ActorDespawnProp, BreakablePropAwardHit } from "./prop";
+import { PropRegisterForShotTest } from "./shot_test";
 
 /**
  * The character type `SpawnGoldenFrog` gives its actor. All eighteen of its
@@ -61,19 +70,163 @@ export function GrantExtraLife(player: number, events?: Events): boolean {
 }
 
 /**
- * `SpawnExtraLifePickup` — `FUN_00471BD0`. Item set 1: the extra life, placed
- * one unit above the prop and turned to face the camera.
+ * `SpawnExtraLifePickup` — `FUN_00471BD0`. Item set 1: the extra life, an
+ * object of its own running {@link ExtraLifePickupUpdate}.
  *
- * [diverges] The pickup is released as an event rather than as a second pool.
- * `ExtraLifePickupUpdate` (`FUN_00471CC0`) is a shootable object with its own
- * fade-out, and porting it means a second object type with no reader yet; what
- * `game/` owes the rest of the port is *that the item came out, and which*.
+ * ```c
+ * q = ActorAlloc(ExtraLifePickupUpdate, 0x378);  ActorClearGameFields(q);
+ * q+0x34 = 0x80000001;  q+0x19C = x;  q+0x1A0 = y + 1.0;  q+0x1A4 = z;
+ * q+0x1D0 = (s16)ftol(atan2(x - eye.x, z - eye.z) * 32768/pi) + 0x8000;
+ * if (g_scene_index == 5) q+0x1D0 = 0x8000;
+ * q+0x197 = p+0x197;  q+0x196 = p+0x196;  q+0x11C = p+0x11C;
+ * q+0x2A0 = 0;  q+0x124 = 4.0;
+ * ```
+ *
+ * It inherits the prop's step counters and its `+0x11C`, so it ages on the
+ * prop's clock, and plays nothing: the life's sound is its own, when it is
+ * shot. `ActorAlloc` appends it to the task list the prop is on, so it runs
+ * on the frame it is made. It has no `g_class41_updates` entry, so the port
+ * files it as a generic prop of {@link EXTRA_LIFE_ROUTINE_TYPE} and the pool
+ * runs it through that row (`class41/generic_routines.ts`).
+ *
+ * The `item.released` event is the port's own notice for its feed.
  */
 export function SpawnExtraLifePickup(p: BreakableProp, events?: Events): void {
+  const q = makeBreakableProp(G.g_breakable_next_id++, 0, 0);
+  q.family = PropFamily.Generic;
+  q.kind = EXTRA_LIFE_ROUTINE_TYPE;
+  q.flags = EXTRA_LIFE_FLAGS;
+  q.state = BreakableState.Standing;
+  q.x = p.x;
+  q.y = Math.fround(p.y + EXTRA_LIFE_RISE);
+  q.z = p.z;
+  // `FPATAN; FMUL g_rad_to_bams; __ftol; MOVSX; ADD 0x8000`, off the eye of
+  // the camera block `g_camera_index` names.
+  const eye = CameraBlockEye(G.g_camera_index);
+  const b = Math.trunc(Math.atan2(p.x - eye.x, p.z - eye.z)
+                       * STORY_ITEM_RAD_TO_BAMS);
+  q.yaw = ((b << 16) >> 16) + 0x8000;
+  if (G.g_scene_index === EXTRA_LIFE_FIXED_YAW_SCENE) q.yaw = 0x8000;
+  q.stepsElapsed = p.stepsElapsed;
+  q.lastStepIndex = p.lastStepIndex;
+  q.lifetime = PropWord11C(p);
+  q.storyItem = 0;
+  q.hitRadius = EXTRA_LIFE_RADIUS;
+  G.g_breakable_props.push(q);
   events?.emit("item.released", {
-    set: ItemSet.ExtraLife, from: p.id,
-    x: p.x, y: p.y + EXTRA_LIFE_RISE, z: p.z, sound: SFX_EXTRA_LIFE,
+    set: ItemSet.ExtraLife, from: p.id, x: q.x, y: q.y, z: q.z,
   });
+}
+
+/**
+ * `[port-only]` -- the routine number the port files the pickup under: the
+ * engine's object carries `ExtraLifePickupUpdate` itself, and the routine is
+ * in no `g_class41_updates` slot (that table's 79 entries end at
+ * `0x00471BA0`).
+ */
+export const EXTRA_LIFE_ROUTINE_TYPE = 0x100;
+/** `MOV dword ptr [EAX + 0x34], 0x80000001` — live, and bit 31. */
+const EXTRA_LIFE_FLAGS = 0x80000001;
+/** `MOV dword ptr [EAX + 0x124], 0x40800000` — its sphere, 4.0. */
+const EXTRA_LIFE_RADIUS = 4.0;
+/** `CMP [g_scene_index], 5` — stage 6, where it faces a fixed way. */
+const EXTRA_LIFE_FIXED_YAW_SCENE = 5;
+
+/** `obj+0x34` bit 30 — taken: the life has been paid. */
+const EXTRA_LIFE_TAKEN = 0x40000000;
+/** `AssetDrawSlot(0x10C3)` — the heart, drawn three times its size. */
+export const EXTRA_LIFE_HEART_SLOT = 0x10c3;
+const EXTRA_LIFE_HEART_RISE = 1.5;
+const EXTRA_LIFE_HEART_SCALE = 3.0;
+/** Drawn plainly for this many frames of `+0x2A0`, then fading by 0.02 a frame. */
+const EXTRA_LIFE_FADE_FROM = 0x19;
+const EXTRA_LIFE_FADE_STEP = 0.02;
+/** `+0x2A0 > 0x31`: the pickup strip has played, and the object goes. */
+const EXTRA_LIFE_LAST_FRAME = 0x31;
+/** The two players' pickup strips, `0x116A + 50 * player`, and tags `0x1256 + player`. */
+export const EXTRA_LIFE_STRIP_SLOT = 0x116a;
+export const EXTRA_LIFE_STRIP_STRIDE = 0x32;
+export const EXTRA_LIFE_TAG_SLOT = 0x1256;
+/** The tag rises 0.05 a frame (`obj+0x2C0`) from four units above, at half the heart's scale. */
+const EXTRA_LIFE_TAG_RISE = 4.0;
+const EXTRA_LIFE_TAG_CLIMB = 0.05;
+const EXTRA_LIFE_TAG_SCALE = 1.5;
+/** `obj+0x70..0x78`: the shot sphere's centre, three units above. */
+const EXTRA_LIFE_SHOT_RISE = 3.0;
+
+/**
+ * `ExtraLifePickupUpdate` — `FUN_00471CC0`. The extra life: the heart turning
+ * to the camera until it is shot or its prop's lifetime runs out.
+ *
+ * Shot (`obj+0x34` bit 3, not yet taken): no points (`BreakablePropAwardHit`
+ * with 0), the taken bit, `0x3616A9`, and `GrantExtraLife` for whoever fired
+ * -- player 0 if its bit alone is set, player 1 if its alone, `rand() % 2`
+ * if both -- with that player's strip and tag. Then `+0x2A0` counts the
+ * pickup: the heart is drawn faded from frame `0x19`, the tag rises above
+ * it, the strip plays beside it, and past frame `0x31` the object goes.
+ *
+ * The hit bit is not cleared and the sphere is registered every frame; the
+ * taken bit is what stops a second life.
+ */
+export function ExtraLifePickupUpdate(p: BreakableProp, rng: Rng,
+                                      events?: Events): void {
+  PropDrawBegin(p);
+  if (PropExpireByStepLifetime(p)) return;
+  const f = p.flags;
+  if ((f & EXTRA_LIFE_TAKEN) === 0 && (f & BreakableFlag.Hit) !== 0) {
+    BreakablePropAwardHit(f, false, rng);
+    p.flags |= EXTRA_LIFE_TAKEN;
+    events?.emit("sound.play", { id: SFX_EXTRA_LIFE });
+    p.storyItem = 1;
+    const p0 = (p.flags & BreakableFlag.HitByPlayer0) !== 0;
+    if (!p0 || (p.flags & BreakableFlag.HitByPlayer1) === 0) {
+      const who = p0 ? 0 : 1;
+      GrantExtraLife(who, events);
+      p.slot = EXTRA_LIFE_STRIP_SLOT + EXTRA_LIFE_STRIP_STRIDE * who;
+      p.removeFlag = EXTRA_LIFE_TAG_SLOT + who;
+    } else {
+      // `rand() & 0x80000001`, sign-corrected: `rand() % 2`.
+      const who = rng.int(2);
+      GrantExtraLife(who, events);
+      p.removeFlag = EXTRA_LIFE_TAG_SLOT + who;
+      p.slot = EXTRA_LIFE_STRIP_SLOT + EXTRA_LIFE_STRIP_STRIDE * who;
+    }
+  }
+  if (p.storyItem > 0) {
+    p.storyItem += 1;
+    if (p.storyItem > EXTRA_LIFE_LAST_FRAME) {
+      ActorDespawnProp(p);
+      return;
+    }
+  }
+  let m = PropMatrixPush();
+  MatrixTranslate(m, p.x, Math.fround(p.y + EXTRA_LIFE_HEART_RISE), p.z);
+  MatrixRotateY(m, p.yaw);
+  MatrixScale(m, EXTRA_LIFE_HEART_SCALE, EXTRA_LIFE_HEART_SCALE,
+              EXTRA_LIFE_HEART_SCALE);
+  // `NoOpStub(3.0)` here does nothing.
+  if (p.storyItem < EXTRA_LIFE_FADE_FROM) {
+    PropDrawSlot(p, m, EXTRA_LIFE_HEART_SLOT);
+  } else {
+    PropDrawSlotWithAlpha(p, m, EXTRA_LIFE_HEART_SLOT,
+                          Math.fround(1.0 - p.storyItem * EXTRA_LIFE_FADE_STEP));
+  }
+  if (p.storyItem > 0) {
+    p.shake = Math.fround(p.shake + EXTRA_LIFE_TAG_CLIMB);
+    m = PropMatrixPush();
+    MatrixTranslate(m, p.x, Math.fround(p.shake + p.y + EXTRA_LIFE_TAG_RISE),
+                    p.z);
+    PropMatrixClearRotation(m);
+    MatrixScale(m, EXTRA_LIFE_TAG_SCALE, EXTRA_LIFE_TAG_SCALE,
+                EXTRA_LIFE_TAG_SCALE);
+    PropDrawSlot(p, m, p.removeFlag);
+    m = PropMatrixPush();
+    MatrixTranslate(m, p.x, p.y, p.z);
+    MatrixRotateY(m, p.yaw);
+    PropDrawSlot(p, m, ((p.slot << 16) >> 16) - 1 + p.storyItem);
+  }
+  PropRegisterForShotTest(p, p.x, Math.fround(p.y + EXTRA_LIFE_SHOT_RISE),
+                          p.z);
 }
 
 /**
@@ -249,9 +402,8 @@ export function ReleaseHiddenItem(p: BreakableProp, rng: Rng,
                                   events: Events | undefined,
                                   copy: HiddenItemCopy,
                                   rise = 0, storyRise = rise): void {
-  // [open] `g_GameMode == 1 && DAT_009C88AA != 0` forces `itemSet = 1` on
-  // every prop, so each one drops an extra life. What sets that flag has not
-  // been read, so the port does not reproduce it.
+  // FIRST AID KIT's arm sits in front of this in each caller: it is not
+  // part of the switch.
   if (p.itemSet <= ItemSet.None) return;
 
   const left = (G.g_item_set_countdown[p.itemSet] ?? 0) - 1;

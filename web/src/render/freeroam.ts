@@ -186,7 +186,9 @@ export class FreeRoam implements System<RenderContext> {
       if (v) { x += v[0]; y += v[1]; z += v[2]; }
     }
     if (x || y || z) {
-      const boost = this.keys.has("ShiftLeft") || this.keys.has("ShiftRight")
+      // Left Shift alone: Right Shift is the game's A (`KeyboardReadAsPad`,
+      // `FUN_0041F1A0`), and one key has one owner.
+      const boost = this.keys.has("ShiftLeft")
         ? 6
         : this.keys.has("AltLeft") ? 0.2 : 1;
       const dist = this.speed * boost * dt;
@@ -288,7 +290,7 @@ export class FreeRoam implements System<RenderContext> {
   private onKeyDown = (e: KeyboardEvent) => {
     if (ownsKey(e.target, e.code)) return;
     this.keys.add(e.code);
-    if (this.on && (MOVE_KEYS[e.code] || e.code.startsWith("Shift"))) {
+    if (this.on && (MOVE_KEYS[e.code] || e.code === "ShiftLeft")) {
       e.preventDefault();
     }
   };

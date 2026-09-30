@@ -188,8 +188,8 @@ function play(bundle, at) {
       reqs.push({ at: pl.at, motion: pl.motion ?? 0, parentAt: parent,
                   pos: { x: pos[0], y: pos[1], z: pos[2] } });
     }
-    SpawnScriptedCharacters(reqs, ctx.rng);
-    SpawnSlotActors(walker.spawns, ctx.rng);
+    SpawnScriptedCharacters(reqs);
+    SpawnSlotActors(walker.spawns);
   };
 
   const r = { block, step, rescue: -1, give: -1, heldFrom: -1, record: -1,

@@ -1,7 +1,10 @@
 import type { CharactersJson, CharacterType } from "../../src/bundle";
 import { Rng } from "../../src/core/rng";
 import { Events } from "../../src/core/events";
-import { ActorSpawn, GameUpdate } from "../../src/game/director";
+import {
+  ActorSpawn, GameUpdate, SpawnScriptedCharacters,
+} from "../../src/game/director";
+import { CameraUpdateHook } from "../../src/game/camera/driver";
 import { CameraHoldEyeTick } from "../../src/game/camera/hooks";
 import { G, ResetGameGlobals } from "../../src/game/globals";
 import { NULL_HOST, type GameHost } from "../../src/game/host";
@@ -1013,6 +1016,60 @@ console.log("\nthe head aim (0x00453BE0): bone 2 follows the camera");
           + "frame's",
           z.zom.headRecord.x === 0 && z.zom.headRecord.y === 0
           && z.zom.headRecord.z === 50, JSON.stringify(z.zom.headRecord));
+  }
+
+  // **Stage 2's canal, block 16 step 7**, with its own numbers: the script
+  // spawns the two water zombies (40456, 40496) in the frame it hands the
+  // camera from cut-scene path 22 to path 23. The frame begins with the
+  // cut-scene's gameplay eye, 34 up and to the zombie's +x; `CameraUpdateTick`
+  // then publishes path 23's first pose. `SpawnFromDescriptor` (`FUN_00408A20`)
+  // only links the object, and `TaskRunTree` (`FUN_004A71A0`) reaches it at
+  // the tail of the scene list, after the camera tasks -- so `EnemyZombieInit`
+  // seeds the head at the eye the hook has just written. The port ran the
+  // `Init` in the script phase, seeded it at the cut-scene's, and the heads
+  // started up to 140 degrees off and took two and a half seconds to come
+  // round.
+  {
+    const AT = 40456;
+    const pos = vec3(-1241.5, -34.5, -1338.9);
+    ResetGameGlobals();
+    SetGameTables({
+      ...CHARS,
+      placements: [{
+        at: AT, class: 0x30, char_type: 15, motion: 956, hp: 90,
+        body_condition: 0, initial_state: 0, attack_state: 0, ring_set: 0,
+        yaw: 0x4000,
+      }],
+    } as unknown as CharactersJson);
+    EnterPlay();
+    const before = vec3(-1228.07, -0.28, -1341.71);
+    G.g_camera_eye.x = before.x; G.g_camera_eye.y = before.y;
+    G.g_camera_eye.z = before.z;
+    // This frame's hook, `CameraHoldEyeTick`: the pose less fifteen.
+    G.g_camera_update_hook = CameraUpdateHook.HoldEye;
+    G.g_cam_path_eye.x = -1271.42; G.g_cam_path_eye.y = -22.45;
+    G.g_cam_path_eye.z = -1343.09;
+    const [a] = SpawnScriptedCharacters([{ at: AT, motion: 956, pos }]);
+    if (!a || a.cls !== SpawnClass.Zombie) throw new Error("no zombie");
+    check("the script's spawn links the zombie and leaves its Init to the walk",
+          a.initPending && a.zom.headYaw === 0 && G.g_enemies_alive === 0,
+          `${a.initPending} ${a.zom.headYaw} ${G.g_enemies_alive}`);
+    GameUpdate(1 / 60, { ...NULL_HOST }, new Rng(1), new Events());
+    const after = G.g_camera_eye;
+    const seed = (e: { x: number; y: number; z: number }) =>
+      FtolS16(VecToAngles(Math.fround(e.x - pos.x),
+                          Math.fround((e.y + 15) - pos.y),
+                          Math.fround(e.z - pos.z)).yaw) & 0xffff;
+    check("...whose Init, after the camera tasks, seeds the head at the eye "
+          + "this frame's hook wrote",
+          !a.initPending && after.x === -1271.42 && G.g_enemies_alive === 1
+          && a.zom.headYaw === seed(after) && a.zom.headYaw !== seed(before),
+          `head ${a.zom.headYaw} want ${seed(after)}, not ${seed(before)}`);
+    check("...which is inside a quarter turn of straight ahead, so it looks "
+          + "at the camera from the first frame",
+          AngleWithinTolerance(a.zom.headYaw, (a.yaw - 0x8000) & 0xffff,
+                               0x4000),
+          `head ${a.zom.headYaw} body ${a.yaw}`);
   }
 
   // Class 0x31: the same routine, behind the hook's own surface test. A

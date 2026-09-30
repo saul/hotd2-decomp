@@ -49,6 +49,8 @@ import {
   MatrixRotateZ, MatrixScale, MatrixToEulerZYX, MatrixTransformPoint,
   MatrixTranslate, type Mat,
 } from "./matrix";
+import { DrawRecordSlot } from "./model_draw";
+import { SkeletonNodeDrawSuppressed } from "./parts";
 import { CharacterTypeOf, MotionOf, MotionPlayLength } from "./tables";
 import type { Vec3 } from "./vec";
 
@@ -126,6 +128,15 @@ export interface SkeletonModel {
   order: number;
   /** `+0x1160..+0x1168` — the root-motion baseline. */
   baseline: number[];
+  /**
+   * `+0x1158` — the node draw hook, as the address the class's `Init`
+   * stores there (`obj+0x12EC`): `NoOpStub` (`0x0041EBB0`) for class 0x14,
+   * whose draw is its own routine's, and `Class32DrawBonePart`
+   * (`0x0047F780`) for class 0x32. {@link SkeletonEmitNode} calls the one
+   * {@link RegisterSkeletonNodeHook} filed under that address. A number, so
+   * the block survives a snapshot.
+   */
+  hook: number;
   /** The bone records, indexed by bone. */
   bones: SkeletonBone[];
   /**
@@ -144,13 +155,29 @@ export function MakeSkeletonModel(bones: number, order: number): SkeletonModel {
     counter: 0, cursor: 0, prevFrame: 0, frame: 0, motion: 0,
     weightOrigin: 0, weightDiv: 0, flags: 0,
     rootA: [0, 0, 0], rootB: [0, 0, 0], rootCur: [0, 0, 0],
-    order, baseline: [0, 0, 0],
+    order, baseline: [0, 0, 0], hook: 0,
     bones: Array.from({ length: bones }, () => ({
       a: [0, 0, 0], sa: [0, 0, 0], sb: [0, 0, 0], mat: MatIdentity(),
       hit: [0, 0, 0],
     })),
     rootMat: MatIdentity(),
   };
+}
+
+/**
+ * `[port-only]` The node draw hooks a class installs at `model+0x1158`, by
+ * the address it stores. The engine calls through the pointer; the port
+ * keeps the address in the block and looks the routine up here, which the
+ * class's own module fills (so this file imports no class).
+ */
+const NODE_HOOKS = new Map<number, (obj: Actor, bone: number,
+                                    slot: number) => void>();
+
+/** `[port-only]` File a class's node draw hook under the address its `Init` stores. */
+export function RegisterSkeletonNodeHook(
+    address: number, hook: (obj: Actor, bone: number, slot: number) => void):
+    void {
+  NODE_HOOKS.set(address, hook);
 }
 
 /** The skeleton tree of the actor's type, from the bundle's bone table. */
@@ -584,6 +611,17 @@ function SkeletonEmitNode(obj: Actor, skel: SkeletonModel, tree: SkeletonTree,
   MatrixRotateX(top, a[0]);
   R.a = a;
   MatCopy(R.mat, top);
+  // `CALL dword ptr [EDX + 0x1158]` at `0x00411523` -- the node draw hook,
+  // while the record has a slot, the model is drawn and
+  // `SkeletonNodeDrawSuppressed` does not veto it. **Before** this node's own
+  // hit centre and camera point below: a hook that reads a record's `+0x68`
+  // reads this frame's for the nodes the walk has already passed and the
+  // last frame's for this node and the ones after it.
+  const slot = DrawRecordSlot(obj, bone);
+  if (slot !== 0 && (obj.motionFlags & MotionFlag.Drawn)
+      && !SkeletonNodeDrawSuppressed(obj, bone, slot)) {
+    NODE_HOOKS.get(skel.hook)?.(obj, bone, slot);
+  }
   // `CMP [R], 0` (the record has a slot) `&& model+0x64 & 1` (drawn): the
   // tracked bone's world translation into `obj+0x100`, then the hit centre.
   // Bone 1 for a type outside 0..0x14; the humanoid rules for 2 and 9 do not

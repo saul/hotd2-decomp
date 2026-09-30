@@ -250,6 +250,12 @@ export interface ScreenSpriteView {
    * (`SubmitScreenSpriteQuad`, flags bit `0x2000`) -- or absent for white.
    */
   tint?: number;
+  /**
+   * The quad's turn about its anchor, BAMS, counter-clockwise on the screen
+   * (`DrawSpriteQuadCommand`: `x + dx*cos + dy*sin`, `y - dx*sin + dy*cos`
+   * with y down); absent for 0.
+   */
+  rot?: number;
 }
 
 /** One sprite's image: the texture's size and a URL for it. */
@@ -377,7 +383,7 @@ export class Hud {
     const near = sprites.filter((s) => s.depth <= 1);
     for (const s of near) {
       key += `${s.id},${s.x},${s.y},${s.sx},${s.sy},${s.alpha},${s.flags},`
-        + `${s.tint ?? ""};`;
+        + `${s.tint ?? ""},${s.rot ?? 0};`;
     }
     if (key === this.screenDrawn) return;
     ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
@@ -400,8 +406,22 @@ export class Hud {
       ctx.globalAlpha = Math.max(0, Math.min(1, s.alpha));
       const src2 = s.tint === undefined || s.tint === 0xffffff
         ? img : this.tinted(img, src.url, s.tint);
-      ctx.drawImage(src2, s.x + (1 - ax) * w / 2, s.y + (1 - ay) * h / 2,
-                    w, h);
+      // Flags `0x10` and `0x20` swap the quad's U and V (the texture mirrored
+      // in its own quad); the turn is about the anchor, which is `(x, y)`.
+      const flipU = (s.flags & 0x10) !== 0;
+      const flipV = (s.flags & 0x20) !== 0;
+      if (!s.rot && !flipU && !flipV) {
+        ctx.drawImage(src2, s.x + (1 - ax) * w / 2, s.y + (1 - ay) * h / 2,
+                      w, h);
+        continue;
+      }
+      ctx.save();
+      ctx.translate(s.x, s.y);
+      if (s.rot) ctx.rotate(-s.rot * Math.PI * 2 / 65536);
+      ctx.translate((1 - ax) * w / 2 + w / 2, (1 - ay) * h / 2 + h / 2);
+      ctx.scale(flipU ? -1 : 1, flipV ? -1 : 1);
+      ctx.drawImage(src2, -w / 2, -h / 2, w, h);
+      ctx.restore();
     }
     ctx.globalAlpha = 1;
     this.screenDrawn = complete ? key : "";

@@ -192,7 +192,7 @@ vertex count is `count * 3`. Otherwise `count` is the vertex count directly.
 | 5 | super-index format — back-references may appear |
 | 6 | Gouraud — selects `D3DRENDERSTATE_SHADEMODE`, **per strip** |
 | 7 | reuse previous global parameters — see below |
-| 8 | environment mapping — **never tested by this port** |
+| 8 | environment mapping — the strips `ModelUVsFromViewNormals` rewrites |
 
 Measured frequencies and the exact semantics the binary gives each bit are in
 *Strip control word* below.
@@ -411,7 +411,29 @@ what the game submits.
 | 5 | super index | 153,889 (55.2%) | back-references may appear |
 | 6 | Gouraud | — | drives `D3DRENDERSTATE_SHADEMODE`, **per strip** |
 | 7 | reuse previous global parameters | 225,744 (81.0%) | see below |
-| 8 | environment mapping | 2,976 strips | **never tested by this port** |
+| 8 | environment mapping | 2,976 strips | the UVs rewritten from the normals -- see below |
+
+**Bit 8 — environment mapping.** `AssetSlotUVsFromViewNormals`
+(`FUN_00418660`) hands a resident slot's model to `ModelUVsFromViewNormals`
+(`FUN_004AA400`), which returns at once when the model's flag word (`+0x04`)
+has `0x10` set and otherwise walks the strips: every full vertex of a strip
+with bit 8 set gets
+
+```
+u = (1 - (nx*M[0] + ny*M[4] + nz*M[8])) * 0.5
+v = (1 + (nx*M[1] + ny*M[5] + nz*M[9])) * 0.5
+```
+
+with `M` the top of the matrix stack -- the normal taken through the
+modelview, its camera-space x and y mapped onto the texture -- written over
+the vertex's own UVs in the loaded model. Nothing restores them, so a model
+drawn once this way keeps the last UVs it was given. **[measured]** Every
+mesh with a bit-8 strip has bit 8 on every strip, so the exporter marks the
+primitive (`hod2_env_uv` in its extras) rather than the strip; the renderer
+rewrites a marked primitive's UVs on the draws that call the routine. The
+callers are class 0x2D's draws (`web/src/game/class2D/`) and
+`DrawCharacterPartSlot`'s arms for character types 0x4C..0x4F, 0x51 and
+0x52; class 0x30's twin (`game/class30/twin.ts`) is another.
 
 **Bit 7 — reuse previous global parameters.** When set, `WalkMeshChainAndDraw`
 skips the state block entirely: it neither reads the strip's own culling and

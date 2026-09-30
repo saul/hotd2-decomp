@@ -79,10 +79,14 @@ export const BANK_PALETTE_INDEX: ReadonlyMap<number, number> =
  * jump-table entry 2, `MOV EAX, 0x14` at `0x0041CA88`: the Original Mode
  * item pictures `OriginalItemBannerUpdate` (`FUN_00475D00`) draws, one bank
  * per `g_original_item_records[id].sprite` (`0x5BD..0x5DE`).
+ *
+ * And palette 0x1B for `0x1B5`, `scr_item_all`, jump-table entry 18 (byte
+ * `0x0041CBFE`), `MOV EAX, 0x1B` at `0x0041CA8E`: the trunk's list of item
+ * names, `g_original_item_list_sprites` (`0x5F9..0x61A`).
  */
 export const BANK_PALETTE_CONST: ReadonlyMap<number, number> = new Map([
   [0x177, 10], [0x186, 10], [0x187, 10], [0x188, 10], [0x189, 10],
-  [0x18a, 10], [0x18b, 10], [0x156, 0x14],
+  [0x18a, 10], [0x18b, 10], [0x156, 0x14], [0x1b5, 0x1b],
   ...Array.from({ length: 0x1b5 - 0x193 },
                 (_, i): [number, number] => [0x193 + i, 0x14]),
 ]);
@@ -1358,6 +1362,25 @@ export class ExeTables {
     return files.size === 1 ? [...files][0] : null;
   }
 
+  /**
+   * Every pol file a character type's parts live in, in skeleton order --
+   * the root node's first. One file for every type but `0x4B`: the stage-5
+   * boss's fifteen nodes are eleven `boss5.bin` models and four
+   * `boss5b.bin` ones (bones 3, 4, 10 and 11), and stage 5's script loads
+   * both files (`asset_load_polfile` 208 and 25) before it spawns class
+   * 0x32. A character whose parts disagree is still one character: each
+   * node draws its own slot, which the slot table resolves to its own file.
+   */
+  characterAssetFiles(charType: number): string[] {
+    const slots = this.assetSlots();
+    const files: string[] = [];
+    for (const n of this.characterSkeleton(charType)) {
+      const rec = slots.get(n.slot);
+      if (rec && !files.includes(rec[0])) files.push(rec[0]);
+    }
+    return files;
+  }
+
   /** `{sound id: filename}` for every category-0 sound in the game. */
   soundRecords(): Map<number, string> {
     return this.cached("soundRecords", () => {
@@ -1558,6 +1581,52 @@ export class ExeTables {
   }
 
   /**
+   * Class 0x2D's `.rdata` -- the stage-6 boss's tables, for `script.json`'s
+   * `class2d` block. Each is `[proved]` from the routine named in its
+   * `ghidra/annotations/globals.tsv` row, and every length is the reader's
+   * own bound (an index's range, or the next table's start), not a search
+   * for the table's end (L6). See `docs/re/boss-emperor.md`.
+   */
+  class2dTables(): Record<string, unknown> {
+    const s16 = (va: number): number => {
+      const v = this.ru16(va) ?? 0;
+      return v >= 0x8000 ? v - 0x10000 : v;
+    };
+    const u8 = (va: number): number => {
+      const r = this.v2r(va);
+      return r === null ? 0 : this.data[r];
+    };
+    const f = (va: number): number => this.rf32(va) ?? 0;
+    const i32 = (va: number): number => this.ri32(va) ?? 0;
+    const vec = (va: number): number[] => [f(va), f(va + 4), f(va + 8)];
+    const run = <T>(n: number, g: (i: number) => T): T[] =>
+      Array.from({ length: n }, (_u, i) => g(i));
+    return {
+      charge_arrive_dist: f(0x0055ccd4),
+      hit_damage: run(3, (i) => s16(0x0055ccd6 + i * 2)),
+      waypoints: run(5, (i) => vec(0x0055cce0 + i * 12)),
+      attack_picks: run(16, (r) => run(10, (i) => i32(0x0055cd1c + (r * 10 + i) * 4))),
+      stagger_hits: run(3, (i) => s16(0x0055cf9a + i * 2)),
+      charge_steps: run(16, (i) => s16(0x0055cfa0 + i * 2)),
+      child_kind_picks: run(4, (r) => run(10, (i) => i32(0x0055cfc0 + (r * 10 + i) * 4))),
+      path_segments: run(8, (i) => {
+        const b = 0x0055d060 + i * 0x18;
+        return { step: f(b), advance: f(b + 4), strike: f(b + 8), end: f(b + 0xc),
+                 words: run(4, (k) => s16(b + 0x10 + k * 2)) };
+      }),
+      child_offsets: run(5, (i) => vec(0x0055d120 + i * 12)),
+      launch_gap: run(16, (i) => s16(0x0055d1b8 + i * 2)),
+      flight_frames: run(16, (i) => s16(0x0055d1d8 + i * 2)),
+      pair_flight_frames: run(16, (i) => s16(0x0055d1f8 + i * 2)),
+      child0_path_start: run(2, (i) => s16(0x0055d234 + i * 2)),
+      child_bone_satellite: run(16, (i) => u8(0x0055d238 + i)),
+      child2_approach: run(16, (i) => s16(0x0055d248 + i * 2)),
+      child2_bone_satellite: run(28, (i) => u8(0x0055d268 + i)),
+      child3_approach: run(16, (i) => s16(0x0055d284 + i * 2)),
+    };
+  }
+
+  /**
    * `g_carrier2_door_yaw` -- `0x005926D0`, s16[59]: the angle
    * `CarrierPropRoutine2` (`FUN_004408A0`) swings its two doors through, one
    * entry a frame, `door0 = 0xC000 + t[i]`, `door1 = 0xC000 - t[i]`. Entry 58
@@ -1679,6 +1748,77 @@ export class ExeTables {
         (_u, i) => this.ru32(0x005970c4 + i * 4) ?? 0),
       sight_speed_sprites: Array.from({ length: 4 },
         (_u, i) => s16(0x0056afe0 + i * 2)),
+    };
+  }
+
+  /**
+   * Original Mode's `.rdata`: the weapon records the carried items load, the
+   * fire and ammo-readout rows their fire mode picks, and the trunk's four
+   * tables. One block for the whole game, as `optionsTables` is. `[proved]`
+   * readers, and the rows each one can reach:
+   *
+   * * `g_original_weapon_records` `0x004EC928`, 8 bytes a row, row
+   *   `item + 1` (row 0 the bare gun): `OriginalItemsApply` (`FUN_00415FE0`)
+   *   for items 0..0xD, so fifteen rows. The block's `+0x08` dword and
+   *   `+0x0C` float come out of it; `ResetOriginalModeLoadout` writes row 0's
+   *   values as immediates. Bounded by `g_original_weapon_gunshot_ids` at
+   *   `0x004EC9A0`.
+   * * `g_original_fire_params` `0x00579ED8` and `g_original_ammo_hud_rows`
+   *   `0x004ECA20`, by `g_original_fire_mode`, whose writers store 0..3, 0xC
+   *   and 0xD (`OriginalItemsApply`'s three `MOV byte ptr [ESI + 0x7]`), so
+   *   fourteen rows each.
+   * * `g_original_item_category` `0x0056AFF0` (33 s8) and
+   *   `g_original_item_compat` `0x0056B014` (13 x 13), read together by
+   *   `ItemSelectUpdate` (`FUN_00488820`) as `compat[cat[new] * 13 +
+   *   cat[held]]`; the categories run 0..12.
+   * * `g_item_select_cursor_colours` `0x0056B0C0`, one light colour a player
+   *   (`ItemSelectDrawPanels`, `FUN_00489830`, `[EAX + 0x56b0c0]` with
+   *   `EAX = player * 12`).
+   * * `g_original_item_list_sprites` `0x0059721C`, 33 s16 by item id, the
+   *   trunk list's label and a carried item's.
+   */
+  originalModeTables(): Record<string, unknown> {
+    const s8 = (va: number) => {
+      const r = this.v2r(va);
+      if (r === null) return 0;
+      const v = this.data[r];
+      return v >= 0x80 ? v - 0x100 : v;
+    };
+    const u8 = (va: number) => {
+      const r = this.v2r(va);
+      return r === null ? 0 : this.data[r];
+    };
+    const s16 = (va: number) => {
+      const v = this.ru16(va) ?? 0;
+      return v >= 0x8000 ? v - 0x10000 : v;
+    };
+    return {
+      weapon_records: Array.from({ length: 15 }, (_u, i) => {
+        const a = 0x004ec928 + i * 8;
+        return { magazine: s8(a), kind: s8(a + 1), sound: s8(a + 2),
+                 flags: s8(a + 3), damage: this.rf32(a + 4) ?? 0 };
+      }),
+      fire_params: Array.from({ length: 14 }, (_u, i) =>
+        Array.from({ length: 8 }, (_v, k) => u8(0x00579ed8 + i * 8 + k))),
+      ammo_hud_rows: Array.from({ length: 14 }, (_u, i) => {
+        const a = 0x004eca20 + i * 12;
+        return { sprite: s16(a), spacing: this.rf32(a + 4) ?? 0,
+                 dy: this.rf32(a + 8) ?? 0 };
+      }),
+      item_category: Array.from({ length: 33 }, (_u, i) => s8(0x0056aff0 + i)),
+      item_compat: Array.from({ length: 13 * 13 },
+        (_u, i) => u8(0x0056b014 + i)),
+      cursor_colours: Array.from({ length: 2 }, (_u, p) =>
+        [0, 1, 2].map((k) => this.rf32(0x0056b0c0 + p * 12 + k * 4) ?? 0)),
+      list_sprites: Array.from({ length: 33 },
+        (_u, i) => s16(0x0059721c + i * 2)),
+      // `g_original_weapon_gunshot_ids` / `_reload_ids`, eight u32 each,
+      // by `g_original_weapon_sound_kind` (0..7): contiguous, so each is
+      // bounded by the next.
+      gunshot_ids: Array.from({ length: 8 },
+        (_u, i) => this.ru32(0x004ec9a0 + i * 4) ?? 0),
+      reload_ids: Array.from({ length: 8 },
+        (_u, i) => this.ru32(0x004ec9c0 + i * 4) ?? 0),
     };
   }
 

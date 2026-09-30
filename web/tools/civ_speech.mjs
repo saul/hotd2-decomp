@@ -152,8 +152,8 @@ function play([name, bundle, block, step, killAt, frames]) {
       reqs.push({ at: pl.at, motion: pl.motion ?? 0, parentAt: parent,
                   pos: { x: pos[0], y: pos[1], z: pos[2] } });
     }
-    SpawnScriptedCharacters(reqs, ctx.rng);
-    SpawnSlotActors(walker.spawns, ctx.rng);
+    SpawnScriptedCharacters(reqs);
+    SpawnSlotActors(walker.spawns);
   };
 
   const t = { rescue: -1, dialogue: -1, dialogueEnd: -1, untracked: -1,

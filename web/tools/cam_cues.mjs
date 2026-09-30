@@ -157,8 +157,7 @@ for (let stage = 1; stage <= 6; stage++) {
       // The character layer's job, minus the renderer: the port only updates
       // an actor something has turned on.
       SpawnScriptedCharacters([{ at, motion: 0,
-        pos: { x: where.sp.pos[0], y: where.sp.pos[1], z: where.sp.pos[2] } }],
-        ctx.rng);
+        pos: { x: where.sp.pos[0], y: where.sp.pos[1], z: where.sp.pos[2] } }]);
       if (G.g_cam_path_frame === w.cue) published = true;
       world.update(ctx, LIVE);
       const a = G.g_object_list.find((o) => o.at === at);

@@ -37,7 +37,7 @@
  * `PlayerShotEffectSpawn` writes the flash and the tracer at the current
  * cursor, **then** advances it, and only then writes the Original Mode record
  * — into the next slot, which is the one the previous shot used. Transcribed
- * as written; it is only reachable with a weapon the port cannot equip.
+ * as written: it is what BULLET BLOW (weapon kind 4) draws.
  */
 import type { GameHost } from "../host";
 import { G } from "../globals";
@@ -100,17 +100,30 @@ export const TRACER_WEAPON5_SLOT = 0x109d;
 
 /**
  * `g_original_weapon_kind` — 0x009A2249. Zero in arcade, and every arm that
- * reads it is behind `g_GameMode == 1`.
+ * reads it is behind `g_GameMode == 1`. The members are the items that set
+ * each value in `OriginalItemsApply` (`FUN_00415FE0`) -- 1..3 from the three
+ * guns' weapon records, 4 and 5 by immediates -- named by their labels in the
+ * trunk (`original_mode.list_sprites`). They were `Silent`, `Heavy` and
+ * `Slow` while no routine that sets them was read.
  */
 export enum OriginalWeaponKind {
-  /** The arcade gun, and the only one the port can equip. */
+  /** The arcade gun: `ResetOriginalModeLoadout`'s row 0. */
   Standard = 0,
-  /** Draws no muzzle flash at all. */
-  Silent = 3,
-  /** Widens the flash's second draw and arms the third ring. */
-  Heavy = 4,
-  /** Sends the tracer down the object-path arm at half speed. */
-  Slow = 5,
+  /**
+   * SHOTGUN, item 0. `[likely]` nothing tests for 1 or 2: the readers of
+   * `0x009A2249` are `MarkActorShot` (`CMP ..., 3`) and
+   * `PlayerShotEffectSpawn`, which copies it into the rings, whose draw tests
+   * 3, 4 and 5.
+   */
+  Shotgun = 1,
+  /** MACHINE GUN, item 1. */
+  MachineGun = 2,
+  /** GRENADE, item 2. Draws no muzzle flash, and a hit adds the 0x53 blast. */
+  Grenade = 3,
+  /** BULLET BLOW, item 6. Widens the flash's second draw, arms the third ring. */
+  BulletBlow = 4,
+  /** BASS LURE, item 0xD. The tracer rides the object-path arm at half speed. */
+  BassLure = 5,
 }
 
 /** One slot of the muzzle-flash ring — `g_shot_flash_ring`, 0x009A2960. */
@@ -211,8 +224,7 @@ function MuzzlePointInView(ray: ShotRay, host: GameHost): Vec3 | null {
 /**
  * `PlayerShotEffectSpawn` — `FUN_00416F70`.
  *
- * `rand` is only reached by Original Mode weapon kind 4, which the port cannot
- * equip; it is taken as an argument rather than left out so the arm is whole.
+ * `rand` is only reached by Original Mode weapon kind 4, BULLET BLOW.
  */
 export function PlayerShotEffectSpawn(player: number, ray: ShotRay,
                                       host: GameHost,
@@ -236,10 +248,10 @@ export function PlayerShotEffectSpawn(player: number, ray: ShotRay,
     // back down the barrel rather than away along the shot.
     f.yaw = a.yaw + 0x8000;
     f.pitch = -a.pitch;
-    f.kind = kind === OriginalWeaponKind.Silent
-      ? OriginalWeaponKind.Silent
-      : kind === OriginalWeaponKind.Heavy
-        ? OriginalWeaponKind.Heavy : OriginalWeaponKind.Standard;
+    f.kind = kind === OriginalWeaponKind.Grenade
+      ? OriginalWeaponKind.Grenade
+      : kind === OriginalWeaponKind.BulletBlow
+        ? OriginalWeaponKind.BulletBlow : OriginalWeaponKind.Standard;
   }
 
   // -- the tracer, in the world ----------------------------------------
@@ -254,9 +266,9 @@ export function PlayerShotEffectSpawn(player: number, ray: ShotRay,
     let dx = t.pos.x - eye.x, dy = t.pos.y - eye.y, dz = t.pos.z - eye.z;
     const n = Math.hypot(dx, dy, dz) || 1;
     dx /= n; dy /= n; dz /= n;
-    const slow = G.g_GameMode === 1 && kind === OriginalWeaponKind.Slow;
+    const slow = G.g_GameMode === 1 && kind === OriginalWeaponKind.BassLure;
     const speed = slow ? TRACER_SPEED_WEAPON5 : TRACER_SPEED;
-    t.kind = slow ? OriginalWeaponKind.Slow : 0;
+    t.kind = slow ? OriginalWeaponKind.BassLure : 0;
     t.vel.x = dx * speed; t.vel.y = dy * speed; t.vel.z = dz * speed;
     t.spin = 0;
     // The engine's first pass over this record, which the port's tick has
@@ -282,7 +294,7 @@ export function PlayerShotEffectSpawn(player: number, ray: ShotRay,
   w.live = true;
   w.frame = 0;
   w.kind = kind;
-  if (kind === OriginalWeaponKind.Heavy) {
+  if (kind === OriginalWeaponKind.BulletBlow) {
     w.pos.x = view.x; w.pos.y = view.y; w.pos.z = view.z;
     const a = AnglesToward(view.x, view.y, view.z);
     w.yaw = a.yaw + 0x8000;
@@ -302,7 +314,7 @@ function TracerAdvance(t: ShotTracer): void {
   t.pos.x += t.vel.x;
   t.pos.y += t.vel.y;
   t.pos.z += t.vel.z;
-  if (t.kind !== OriginalWeaponKind.Slow) t.spin += TRACER_SPIN;
+  if (t.kind !== OriginalWeaponKind.BassLure) t.spin += TRACER_SPIN;
 }
 
 /**
@@ -349,7 +361,7 @@ export function PlayerShotEffectsTick(): void {
       const w = G.g_shot_weapon_ring[i];
       if (w) {
         w.frame += 1;
-        if (w.kind === OriginalWeaponKind.Heavy
+        if (w.kind === OriginalWeaponKind.BulletBlow
             && w.frame > WEAPON_LAST_FRAME) {
           w.live = false;
         }

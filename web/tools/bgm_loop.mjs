@@ -258,7 +258,7 @@ await scenario("?stage=1&mode=play", "from the top", async (page) => {
 });
 
 // -- 2. by a deep link past the se_play ---------------------------------------
-await scenario("?stage=1&mode=play&block=0&step=2&op=40", "deep link", async (page) => {
+await scenario("?stage=1&mode=play&block=0&step=3&op=40", "deep link", async (page) => {
   const ok = await waitFor(page, () => window.__bgm.starts.some((s) => s.channels === 2), 20_000);
   check("deep link: the seek puts the script's track back", ok,
         "no buffer started in 20 s");

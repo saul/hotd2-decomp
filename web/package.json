@@ -53,6 +53,8 @@
     "horde": "node tools/run_test.mjs tools/horde.mjs",
     "dives": "node tools/run_test.mjs tools/dives.mjs",
     "boss4_fight": "node tools/run_test.mjs tools/boss4_fight.mjs",
+    "boss6_fight": "node tools/run_test.mjs tools/boss6_fight.mjs",
+    "boss5_fight": "node tools/run_test.mjs tools/boss5_fight.mjs",
     "handback": "node tools/run_test.mjs tools/handback.mjs",
     "civ_speech": "node tools/run_test.mjs tools/civ_speech.mjs",
     "civilians": "node tools/run_test.mjs tools/civilians.mjs",

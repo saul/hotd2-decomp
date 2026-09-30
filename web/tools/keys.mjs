@@ -43,71 +43,83 @@ const read = () => page.evaluate(() => ({
   focus: document.activeElement?.tagName ?? null,
   menu: !!document.querySelector("#menu"),
 }));
+/**
+ * `read()`, once it shows `want` -- or as it stands after three seconds, for
+ * the check to fail on. A press lands in the page's next render, which is not
+ * a fixed number of milliseconds away; the fixed sleeps this replaced were
+ * ten seconds of a nineteen-second check. Where the claim is that something
+ * did **not** happen, the wait stays a sleep: there is no event to wait for.
+ */
+const until = async (want, ms = 3000) => {
+  const t0 = Date.now();
+  for (;;) {
+    const s = await read();
+    if (want(s) || Date.now() - t0 > ms) return s;
+    await page.waitForTimeout(25);
+  }
+};
 
 try {
   await waitForLoad(page);
   await page.click(".start-btn");
-  await page.waitForTimeout(1500);
-  let s = await read();
+  let s = await until((x) => x.paused === null);
   check("playing after Start", s.paused === null, JSON.stringify(s));
 
   // -- the ? dialog ------------------------------------------------------------
   await page.keyboard.press("Shift+Slash");
-  await page.waitForTimeout(300);
-  s = await read();
+  s = await until((x) => x.dialog && x.paused !== null);
   check("? opens the list of keys", s.dialog, JSON.stringify(s));
   check("...holds the game", s.paused?.includes("is-paused") === true, s.paused);
   check("...and says the actor boxes are off", s.boxes === "off", s.boxes);
   await page.keyboard.press("KeyB");
-  await page.waitForTimeout(200);
-  s = await read();
+  s = await until((x) => x.boxes === "on" && x.toast === "Boxes on");
   check("B turns the boxes on, and the list says so", s.boxes === "on",
         JSON.stringify(s));
   check("...with a toast over the game", s.toast === "Boxes on", s.toast);
   await page.keyboard.press("Escape");
-  await page.waitForTimeout(300);
-  s = await read();
+  s = await until((x) => !x.dialog && x.paused === null);
   check("Escape closes it", !s.dialog);
   check("...and lets go of the game", s.paused === null, s.paused);
   await page.keyboard.press("Slash");
-  await page.waitForTimeout(200);
-  check("a plain / opens it too", (await read()).dialog);
+  check("a plain / opens it too", (await until((x) => x.dialog)).dialog);
   await page.mouse.click(20, 880);
-  await page.waitForTimeout(300);
-  s = await read();
+  s = await until((x) => !x.dialog);
   check("a press on the dim round it closes it", !s.dialog);
   check("...and is not a shot at the game on the way", s.paused === null);
 
   // -- the menu holds the game, as the list does -------------------------------
   await page.click(".crumb-trail");
-  await page.waitForTimeout(300);
-  s = await read();
+  s = await until((x) => x.menu && x.paused?.includes("is-paused") === true);
   check("opening the menu holds the game",
         s.menu && s.paused?.includes("is-paused") === true, JSON.stringify(s));
   await page.keyboard.press("Escape");
-  await page.waitForTimeout(300);
-  s = await read();
+  s = await until((x) => !x.menu && x.paused === null);
   check("...and shutting it lets go", !s.menu && s.paused === null,
         JSON.stringify(s));
 
   // -- the page's other keys ---------------------------------------------------
   const before = (await read()).sound;
   await page.keyboard.press("KeyM");
-  await page.waitForTimeout(200);
-  s = await read();
+  s = await until((x) => x.sound !== before);
   check("M flips the sound", s.sound !== before, `${before} -> ${s.sound}`);
   await page.keyboard.press("KeyF");
-  await page.waitForTimeout(500);
-  const fsOn = (await read()).fs;
+  const fsOn = (await until((x) => x.fs)).fs;
   await page.keyboard.press("KeyF");
-  await page.waitForTimeout(500);
-  const fsOff = (await read()).fs;
+  const fsOff = (await until((x) => !x.fs)).fs;
   check("F goes fullscreen and back", fsOn && !fsOff, `${fsOn} ${fsOff}`);
   await page.keyboard.press("KeyG");
-  await page.waitForTimeout(200);
-  check("G says All regions on", (await read()).toast === "All regions on");
+  check("G says All regions on",
+        (await until((x) => x.toast === "All regions on")).toast === "All regions on");
+  // The toast is React's at once; the switch it flipped reaches the store
+  // with the page's next published frame, and a G pressed before that reads
+  // the switch as still off. Two frames, not a guess at milliseconds.
+  await page.evaluate(() => new Promise((ok) =>
+    requestAnimationFrame(() => requestAnimationFrame(ok))));
   await page.keyboard.press("KeyG");
   await page.keyboard.press("Meta+KeyB");
+  // G's toast first, which comes whatever Cmd-B does; then the sleep, for a
+  // Boxes toast that must not come after it.
+  await until((x) => x.toast === "All regions off");
   await page.waitForTimeout(200);
   s = await read();
   check("a chord is the browser's: Cmd-B does not flip the boxes",
@@ -116,18 +128,16 @@ try {
   // -- a click over the game gives the keys back -------------------------------
   const muted = (await read()).sound;
   await page.click("#sound");
-  await page.waitForTimeout(200);
-  s = await read();
+  s = await until((x) => x.focus === "BODY" && x.sound !== muted);
   check("a click on the speaker leaves the focus with the page",
         s.focus === "BODY", s.focus);
   await page.keyboard.press("Space");
-  await page.waitForTimeout(300);
-  s = await read();
+  s = await until((x) => x.paused?.includes("is-paused") === true);
   check("...so Space pauses the game, not the speaker pressed again",
         s.paused?.includes("is-paused") === true && s.sound !== muted,
         JSON.stringify(s));
   await page.keyboard.press("Space");
-  await page.waitForTimeout(300);
+  await until((x) => x.paused === null);
   await page.click(".crumb-trail");
   await page.click(".crumb-trail");
   await page.waitForTimeout(200);
@@ -139,11 +149,10 @@ try {
 
   // -- typing is typing --------------------------------------------------------
   await page.keyboard.press("Backquote");
-  await page.waitForTimeout(400);
   await page.click('.tabs [data-tab="script"]');
   await page.click('input[type="search"]');
   // Past the toast from the last overlay key, so a new one would be news.
-  await page.waitForTimeout(1600);
+  await until((x) => x.toast === null);
   await page.keyboard.type("bgm");
   await page.waitForTimeout(200);
   s = await read();
@@ -154,7 +163,7 @@ try {
     const d = document.querySelector("#panel-actors");
     if (d) d.open = true;
   });
-  await page.waitForTimeout(300);
+  await page.waitForSelector(".key-hint", { timeout: 3000 }).catch(() => null);
   const hints = await page.evaluate(() =>
     [...document.querySelectorAll(".key-hint")].map((k) => k.textContent));
   check("the sidebar's overlay switches show their keys", hints.includes("B"),

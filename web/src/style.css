@@ -211,6 +211,11 @@ kbd {
   color: var(--dim); cursor: pointer; font-size: 12px;
 }
 .menu-check input { margin: 0; }
+.menu-items {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  margin-top: 6px; font-size: 12px;
+}
+.menu-items button { padding: 4px 8px; }
 .menu-actions { display: flex; flex-direction: column; gap: 4px; }
 .menu-actions button {
   display: flex; align-items: center; gap: 9px; width: 100%;

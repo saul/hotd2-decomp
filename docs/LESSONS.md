@@ -301,6 +301,48 @@ every `evt/` table for it before calling it unread**, and subtract the
 occurrences the opcodes explain: what is left is a descriptor, and the
 descriptor's class says who reads it.
 
+**L101 -- A character type is its nodes' slots, and a slot names its own
+file.** The exporter asked for *the* pol file of a character type
+(`ExeTables.characterAssetFile`), which answers only when every node's slot
+names the same one, and the rig builder indexed each node's slot into that
+file's models. Character type `0x4B`, the stage-5 boss, has fifteen nodes
+over **two** files -- eleven in `boss5.bin`, four in `boss5b.bin` -- so it had
+no file, its spawn resolved to nothing and the boss was never in any bundle;
+and had it been given the first file, four nodes would have been built from
+whatever that file held at their indices. `AssetDrawSlot` resolves each slot
+through the slot table on its own, and so must anything that builds what it
+draws (`ExeTables.characterAssetFiles`, `charbuild.rigEntry`). **Resolve a
+model by its slot, never by the file its neighbour came from.**
+
+**L102 -- An absolute address can be an element of an array named somewhere
+else; check the ranges before naming it.** `Class2DState5`'s kill arm writes
+`0x009C90D8` and `0x009C9F55` as bare operands, and the first reading named
+them `g_original_boss6_kills` and `g_profile_original_boss6_kills` -- two new
+globals, with a port field each. They are entry 24 of
+`g_original_items_taken` (`0x009C90C0`, 33 bytes) and of
+`g_profile_original_items` (`0x009C9F3D`), which the item pickups, the save
+and the profile copy already read and write as arrays: the port would have
+kept the boss's kill count where nothing that saves the tally could see it.
+The same mistake was already in the port the other way round --
+`ProfileFactoryReset`'s `0x009C9F40`, `44` and `4D` had been read as "three
+bytes set to 1" when they are items 3, 7 and 16 of the array it had just
+zeroed, and the port zeroed them. **Before giving an absolute operand a name
+of its own, look for a named table whose extent covers it** (the TSVs are
+sorted by address, so the row above says), and write the element.
+
+**L103 -- A store through a block's base is a DATA reference, not a WRITE; a
+list of writers built from WRITE xrefs is a list of some writers.** Original
+Mode's per-player block (`0x009A2240`, stride `0x14`) is written as
+`(&field)[p * 0x14]`: the field's address is the displacement of an indexed
+store, and Ghidra types that reference DATA. A note in `class22/shot.ts`
+counted "exactly three writers" of the damage scale from the WRITE xrefs,
+found all three storing 1.0, and made the scale a constant -- so JUDGMENT
+ignored every item for as long as the note stood, while `OriginalItemsApply`
+wrote the scale at `0x0041602A`, `39` and `55`, all DATA. The same search had
+the sound kind "written by no instruction". **Before recording who writes a
+field, take every reference to it, DATA included, and read each
+instruction.**
+
 **LXX -- An update routine runs for every `ActorAlloc` handed its address,
 not for the table that names it.** `PropDrawOnlyType31` (`FUN_0046A1C0`)'s
 scene-2 block-11 strip was written up `[proved]` unreachable: every class-0x41
@@ -873,6 +915,25 @@ one-shot channel, find what ends it in the exe -- a state change, or nothing,
 in which case the track wraps -- and test for as long as the shipped data
 holds it.**
 
+**L104 -- An `Init` runs where the walk reaches its object, not where the
+opcode that made it ran.** `SpawnFromDescriptor` (`FUN_00408A20`) is
+`ActorAlloc(g_class_handlers[class])` and a copy of the descriptor: the
+handler it stores at `obj+0x00` *is* the `Init`, and `TaskRunTree` calls it
+when the walk gets there -- for a script's spawn, the tail of the scene list,
+after the camera actor and the scene state's hook. The port ran every `Init`
+inside the script phase, before those tasks, and the note beside the call
+even said "exactly as `SpawnFromDescriptor`'s does". Nothing showed until a
+spawn landed in the frame the script handed the camera from one path to
+another: stage 2's canal zombies (block 16 step 7) seeded their heads at the
+cut-scene's eye, 34 up and to one side, and turned them round at `0xC0` a
+frame for two and a half seconds -- a head 140 degrees off its body, reported
+as "facing the wrong way", in a head aim that had been transcribed
+instruction for instruction. The same order put every slot actor's
+`visible`, and the mouse's and class 0x33's `pos`, on *after* their `Init`s. **When an `Init` reads a global,
+find which task writes it and whether that task runs before or after the
+object's first call**, and a test of what an `Init` does is a test of the
+frame, not of the spawn.
+
 ---
 
 ## Running the tools
@@ -1193,6 +1254,22 @@ first two-tab netplay run (`web/tools/net_pair.mjs`) paired with nobody and
 reported every figure at zero, which read as a transport that did not work.
 Pages that must see each other take one `browser.newContext()` and call
 `context.newPage()` twice.
+
+**L104 -- A driven page's wall time is its vsyncs, and the installed Chrome
+takes five seconds to leave.** `tools/boss5_page.mjs` took 56 s alone and
+572 s in a loaded verify for an 8,000-frame fight the page simulates in about
+four: it booked two frames per `advance` and read the state back after each,
+2,523 rAFs, and a driven rAF is a vsync the page cannot hurry
+(`--disable-frame-rate-limit` and `--disable-gpu-vsync` change nothing
+headless). Booking the whole run with a stop condition (`advance(n, until)`,
+`app/harness.ts`) and stopping only where the driver has to act -- a pull, or
+a thing first drawn, read back after its render -- made it 66 stops and 4 s,
+and the per-frame watcher sees more than the sampling did. Separately,
+`Browser.close` on the installed Chrome returns after 5.2 to 5.4 s even for a
+blank page, so every browser check paid that on the way out;
+`closeBrowser` (`tools/lib/player.mjs`) gives it half a second and lets
+`process.exit` kill the rest. **Count a harness's round trips and vsyncs, and
+time its teardown, before blaming the machine.**
 
 ---
 

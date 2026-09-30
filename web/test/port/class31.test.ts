@@ -39,13 +39,24 @@ import {
   check, motion, SCENE_MAJOR_PLAYING, EYE, HoldCameraAt, EnterPlay,
   RunOutInvulnerability, ARC, DROP_SCRIPT, PATH_STYLE0, PATH_STYLE1, TYPE31,
   CLASS31, TYPE31_ZSASS, TYPE31_ZSLMAN, CHARS31, CAM_HOST, WALL_BLOB,
-  FLOOR_BLOB, thrower,
+  FLOOR_BLOB, thrower, openShutter,
 } from "./harness";
+import {
+  QueueOffscreenPull, QueueShotRequest,
+} from "../../src/game/combat/shot";
+import type { ShotPick } from "../../src/game/host";
 import { KNOCKDOWN_BODY } from "../../src/game/class31/death";
 import { SND_GET_UP } from "../../src/game/class31/react";
 import {
   rootDelta, TrackFrameAtCursor, TrackRootAtCursor,
 } from "../../src/game/root_motion";
+import { ThrowerBand } from "../../src/game/class31/states";
+import { ThrowerStateStandAndDecide } from "../../src/game/class31/stand";
+import { ThrowerPickNextState } from "../../src/game/class31/router";
+import { SND_ENTRANCE_DONE } from "../../src/game/class31/entrance";
+import { ActorSetMotionBlended } from "../../src/game/class30/motion_cue";
+import { coliQuad } from "./harness";
+import { ActorLocalPoint, ActorPlayMotion } from "../../src/game/class31/arc";
 
 console.log("\nEnemyThrowerInit: zslman is born NoDismember");
 // `EnemyThrowerInit` (`FUN_00449620`) is the fourth writer of the flag, and
@@ -2186,6 +2197,16 @@ console.log("class 0x31, ThrowerStateGrabPlayer's sound cues:");
     },
   });
   z.pos = vec3(0, 60, 0);
+  // An attack pair for the cry the landing gives: `ActorPlayHitVoice(obj, 3)`
+  // (`FUN_0040A6F0`) at `0x0044F157`, between the thump and the sword. Type
+  // 0x19 is in no set-A list here, so it cries out of set B, 50 or 51.
+  SetGameTables({ ...CHARS31, combat: {
+    impact: [], head_impact: [],
+    voice: { hurt: [], kill: [], head: [],
+             attack: [[{ id: 40, file: "" }, { id: 41, file: "" }],
+                      [{ id: 50, file: "" }, { id: 51, file: "" }]] },
+    voice_set_a_types: [], ricochet: {},
+  } } as unknown as CharactersJson);
   G.g_cam_path_frame = 0;
   for (let i = 0; i < 5; i++) GameUpdate(1 / 60, CAM_HOST, rng, events);
   check("no sound while it hangs off the camera waiting for the cue",
@@ -2195,8 +2216,10 @@ console.log("class 0x31, ThrowerStateGrabPlayer's sound cues:");
   check("the cue frame plays one step -- COMMON\\ENE_WALK2_11",
         heard.join() === String(0x2516a9), heard.map((h) => h.toString(16)).join());
   for (let i = 0; i < 10; i++) GameUpdate(1 / 60, CAM_HOST, rng, events);
-  check("landing plays the thump, then ignites the looping laser sword",
-        heard.join() === [0x2516a9, 0x2916a9, 0x1f23a9].join(),
+  check("landing plays the thump, the attack cry, then ignites the looping "
+        + "laser sword",
+        heard.length === 4 && heard[0] === 0x2516a9 && heard[1] === 0x2916a9
+        && (heard[2] === 50 || heard[2] === 51) && heard[3] === 0x1f23a9,
         heard.map((h) => h.toString(16)).join());
   // It blinks for the *first* fifteen frames of the hold and is solid for the
   // rest, and the `_OFF` stopper sits in the `else` arm of that per-frame
@@ -2229,4 +2252,501 @@ console.log("class 0x31, ThrowerStateGrabPlayer's sound cues:");
   check("a zslman whose cue is 0 drops at once, on block 2's frame "
         + "(`0x0044F078`)", heard.includes(0x2516a9),
         heard.map((h) => h.toString(16)).join());
+}
+
+// -- the class 0x31 gaps: states 7, 19, 27 and 35, and the router's close range
+
+/**
+ * The tables these read that CHARS31 does not carry: a `zskamere`, the stage-2
+ * entrance clip, `zslman`'s four grab clips, and an attack-cry pair per voice
+ * set. The entrance clip pins a play length that is not `2n - 2`, so a wait on
+ * the baked frame count shows.
+ */
+const GAPS = {
+  ...CHARS31,
+  types: {
+    ...CHARS31.types,
+    "23": { ...TYPE31, type: 0x17, name: "zskamere", file: "zskamere.bin" },
+    "24": {
+      ...TYPE31_ZSLMAN,
+      motions: {
+        ...TYPE31_ZSLMAN.motions,
+        // 0x1E9 the ride, 0x1E7 and 0x1E5 the two grabs, 0x1E8 the finish,
+        // at zslman.bin's own frame counts and play lengths.
+        "489": motion(21, 0, 39), "487": motion(31, 0, 59),
+        "485": motion(36, 0, 70), "488": motion(23, 0, 44),
+      },
+    },
+    "25": { ...TYPE31, motions: { ...TYPE31.motions, "296": motion(22, 0, 40) } },
+  },
+  combat: {
+    impact: [], head_impact: [],
+    voice: { hurt: [], kill: [], head: [],
+             attack: [[{ id: 40, file: "" }, { id: 41, file: "" }],
+                      [{ id: 50, file: "" }, { id: 51, file: "" }]] },
+    voice_set_a_types: [], ricochet: {},
+  },
+} as unknown as CharactersJson;
+
+/** `thrower()` on those tables, as any of the four character types. */
+function c31(type: number, state: number, extra: Record<string, unknown> = {}) {
+  ResetGameGlobals();
+  SetGameTables(GAPS);
+  G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+  G.g_scene_state_major = SCENE_MAJOR_PLAYING;
+  EnterPlay();
+  G.g_camera_yaw_bams = 0;
+  const a = ActorSpawn(0x9000, SpawnClass.Thrower, type, "t", {
+    initialState: state, condition: 0, ...extra,
+  });
+  if (a.cls !== SpawnClass.Thrower) throw new Error("not class 0x31");
+  a.visible = true;
+  a.hp = 100;
+  a.motion = 313;
+  a.pos = vec3(0, 0, 80);
+  a.yaw = 0;
+  return a;
+}
+
+console.log("class 0x31, state 19 -- ThrowerStateEntranceClip:");
+{
+  const rng = new Rng(71);
+  const events = new Events();
+  const heard: number[] = [];
+  events.on("sound.play", (e: { id: number }) => heard.push(e.id));
+  const z = c31(0x19, ThrowerState.EntranceClip, { entranceMotion: 296 });
+  check("a spawn in state 19 starts there",
+        z.state === ThrowerState.EntranceClip, `state ${z.state}`);
+  check("...born colliding with the world (`OR EAX, 0x180000`, 0x00449769)",
+        (z.flags2 & ThrowerFlag.CollideWorld) !== 0,
+        `flags2 ${z.flags2.toString(16)}`);
+  GameUpdate(1 / 60, CAM_HOST, rng, events);
+  check("sub 0 takes world collision down and raises ShotImmune "
+        + "(`0x0044E42F`, `0x0044E434`)",
+        (z.flags2 & ThrowerFlag.CollideWorld) === 0
+        && (z.flags & ActorFlag.ShotImmune) !== 0,
+        `flags2 ${z.flags2.toString(16)}, flags ${z.flags.toString(16)}`);
+  check("...and cuts to the descriptor's clip on the base track "
+        + "(`ActorSetMotion`, `0x0044E451`)",
+        z.motion === 296 && z.action === null && z.fadeFrom === null,
+        `motion ${z.motion}, action ${JSON.stringify(z.action)}`);
+  let update = 1;
+  let immuneThroughout = true;
+  while (z.state === ThrowerState.EntranceClip && update < 200) {
+    immuneThroughout &&= (z.flags & ActorFlag.ShotImmune) !== 0;
+    GameUpdate(1 / 60, CAM_HOST, rng, events);
+    update++;
+  }
+  // Update k sees cursor k - 1, and the play length is 40 (not 2 * 22 - 2):
+  // the state leaves on the update whose cursor reaches 38.
+  check("it leaves on the update the cursor reaches g_motion_play_length - 2",
+        update === 39 && z.state === ThrowerState.StandAndDecide,
+        `update ${update}, state ${z.state}`);
+  check("...shot-immune the whole way", immuneThroughout);
+  check("...landing on its step, 0x2916A9 (`0x0044E47B`)",
+        heard.join() === String(SND_ENTRANCE_DONE),
+        heard.map((h) => h.toString(16)).join());
+  check("...with ShotImmune down and world collision back (`0x0044E491`)",
+        (z.flags & ActorFlag.ShotImmune) === 0
+        && (z.flags2 & ThrowerFlag.CollideWorld) !== 0,
+        `flags ${z.flags.toString(16)}, flags2 ${z.flags2.toString(16)}`);
+}
+
+console.log("class 0x31, states 0 and 35 -- the table's two no-ops:");
+{
+  const rng = new Rng(72);
+  const events = new Events();
+  const z = c31(0x19, ThrowerState.Idle35);
+  check("a spawn in state 35 starts in it: EnemyThrowerInit stores desc+2 "
+        + "as it stands", z.state === ThrowerState.Idle35, `state ${z.state}`);
+  z.motion = 295;
+  z.yaw = 0x4000;
+  for (let i = 0; i < 60; i++) GameUpdate(1 / 60, CAM_HOST, rng, events);
+  check("...and does nothing there: entry 35 is 0x0041EBB0, as entry 0 is",
+        z.state === ThrowerState.Idle35 && z.sub === 0 && z.yaw === 0x4000,
+        `state ${z.state}, sub ${z.sub}, yaw ${z.yaw.toString(16)}`);
+  const w = c31(0x19, ThrowerState.WaitForPermit);
+  check("a spawn in a state that is not an entrance starts in it too",
+        w.state === ThrowerState.WaitForPermit, `state ${w.state}`);
+}
+
+console.log("class 0x31, ActorSetMotionBlended has no same-clip test:");
+{
+  const z = c31(0x19, ThrowerState.Idle);
+  z.motion = 313;
+  z.playTicks = 10;
+  z.fadeFrom = null;
+  z.fade = 0;
+  ActorSetMotionBlended(z, 313, 0, 5);
+  // Read back through the declared type: the assignment above narrowed it.
+  const from = z.fadeFrom as { motion: number; ticks: number } | null;
+  check("a clip set over itself fades from where it was to its new start "
+        + "(`FUN_004119A0`)",
+        z.motion === 313 && z.playTicks === 0 && from?.motion === 313
+        && from.ticks === 10 && z.fade === 5,
+        `ticks ${z.playTicks}, from ${JSON.stringify(from)}, fade ${z.fade}`);
+}
+
+console.log("class 0x31, state 7 -- the hub's arms fall into each other:");
+{
+  const events = new Events();
+  /** The short way from `0x4000` to where the actor now faces. */
+  const turned = (yaw: number) => Math.abs(((yaw - 0x4000 + 0x8000) & 0xffff)
+                                           - 0x8000);
+  /** A hub actor a quarter turn off the camera, whose router asks nothing. */
+  const hub = (type: number, sub: number, yaw: number) => {
+    const z = c31(type, ThrowerState.StandAndDecide);
+    z.motion = 295;
+    z.sub = sub;
+    z.yaw = yaw;
+    z.flags2 |= ThrowerFlag.BandLatched;
+    z.thr.moveBand = ThrowerBand.Far;
+    return z;
+  };
+  // The camera is at the origin and the actor at +80 on z, where it faces
+  // the camera at yaw 0 (see `thrower()`).
+  const rng = new Rng(73);
+  const a = hub(0x19, 0, 0x4000);
+  ThrowerStateStandAndDecide(a, 1 / 60, rng, CAM_HOST, events);
+  check("zstin turns twice in a frame, 0x200 in sub 1's arm and again in "
+        + "sub 2's (`0x0044B309`, `0x0044B355`)",
+        turned(a.yaw) === 0x400, `turned ${turned(a.yaw).toString(16)}`);
+  check("...and, not yet round, drops back to sub 0 (`0x0044B362`)",
+        a.sub === 0, `sub ${a.sub}`);
+  const b = hub(0x19, 1, 0x4000);
+  ThrowerStateStandAndDecide(b, 1 / 60, rng, CAM_HOST, events);
+  check("a frame that begins in sub 1 turns twice as well",
+        turned(b.yaw) === 0x400 && b.sub === 0,
+        `turned ${turned(b.yaw).toString(16)}, sub ${b.sub}`);
+
+  const c = hub(0x19, 2, 0);
+  const before = rng.state;
+  ThrowerStateStandAndDecide(c, 1 / 60, rng, CAM_HOST, events);
+  const ref = new Rng();
+  ref.state = before;
+  ref.int(10);
+  check("rand() % 10 is drawn every frame, before the dispatch (`0x0044B1A0`)",
+        rng.state === ref.state && c.sub === 2, `sub ${c.sub}`);
+
+  const d = hub(0x17, 1, 0x4000);
+  ThrowerStateStandAndDecide(d, 1 / 60, rng, CAM_HOST, events);
+  check("zskamere turns once, and stays in sub 1",
+        turned(d.yaw) === 0x200 && d.sub === 1,
+        `turned ${turned(d.yaw).toString(16)}, sub ${d.sub}`);
+  const e = hub(0x17, 2, 0x4000);
+  ThrowerStateStandAndDecide(e, 1 / 60, rng, CAM_HOST, events);
+  check("...and in sub 2 does not turn or drop back: sub 2's arm is types "
+        + "0x16, 0x18 and 0x19 (`0x0044B323`..`0x0044B330`)",
+        e.yaw === 0x4000 && e.sub === 2,
+        `yaw ${e.yaw.toString(16)}, sub ${e.sub}`);
+
+  // Standing on surface 0x35, zskamere does not turn at all.
+  const floorVerts = [-200, 0, 200, 200, 0, 200, 200, 0, -200, -200, 0, -200];
+  const f = hub(0x17, 1, 0x4000);
+  T.coli = { files: ["test"],
+             blobs: { floor: coliQuad([0, 1, 0, 0], 1, floorVerts, 0x35) } };
+  G.g_coli_full_set = ["floor"];
+  ThrowerStateStandAndDecide(f, 1 / 60, rng, CAM_HOST, events);
+  check("zskamere on surface 0x35 does not turn (`CMP EAX, 0x35` at "
+        + "`0x0044B2E0`)", f.yaw === 0x4000 && f.sub === 1,
+        `yaw ${f.yaw.toString(16)}, sub ${f.sub}`);
+  const g = hub(0x19, 1, 0x4000);
+  T.coli = { files: ["test"],
+             blobs: { floor: coliQuad([0, 1, 0, 0], 1, floorVerts, 0x35) } };
+  G.g_coli_full_set = ["floor"];
+  ThrowerStateStandAndDecide(g, 1 / 60, rng, CAM_HOST, events);
+  check("...and zstin on the same floor still does", turned(g.yaw) === 0x400,
+        `turned ${turned(g.yaw).toString(16)}`);
+  T.coli = null;
+  G.g_coli_full_set = [];
+}
+
+console.log("class 0x31, ThrowerPickNextState's close range by surface:");
+{
+  const rng = new Rng(74);
+  const floorVerts = [-200, 0, 200, 200, 0, 200, 200, 0, -200, -200, 0, -200];
+  const at = (type: number, d: number, surface: number) => {
+    const z = c31(type, ThrowerState.StandAndDecide);
+    T.coli = { files: ["test"],
+               blobs: { floor: coliQuad([0, 1, 0, 0], 1, floorVerts,
+                                        surface) } };
+    G.g_coli_full_set = ["floor"];
+    z.pos = vec3(G.g_camera_eye.x, 0, G.g_camera_eye.z + d);
+    // Latched on the far band, so a frame outside the close range changes
+    // nothing and the only way out of state 7 is the close-range test.
+    z.flags2 |= ThrowerFlag.BandLatched;
+    z.thr.moveBand = ThrowerBand.Far;
+    ThrowerPickNextState(z, rng, CAM_HOST);
+    return z.state;
+  };
+  check("zskamere on surface 0x35 waits for a permit at 15.0 "
+        + "(`[0x004C4398]`, `0x0044AE97`)",
+        at(0x17, 15, 0x35) === ThrowerState.WaitForPermit);
+  check("...and not at 20", at(0x17, 20, 0x35) === ThrowerState.StandAndDecide);
+  check("on any other surface its close range is 30.0 (`[0x0055CCD4]`)",
+        at(0x17, 20, 52) === ThrowerState.WaitForPermit);
+  check("...and every other type's is 30.0 on 0x35 too",
+        at(0x19, 20, 0x35) === ThrowerState.WaitForPermit);
+  T.coli = null;
+  G.g_coli_full_set = [];
+}
+
+console.log("class 0x31, state 27 -- ThrowerStateGrabPlayer's ride, drop, "
+            + "hold and grab:");
+{
+  const rng = new Rng(75);
+  const events = new Events();
+  const heard: number[] = [];
+  events.on("sound.play", (e: { id: number }) => heard.push(e.id));
+  // Stage 5's zslman: sixty over the eye, down to forty under it in ten
+  // frames, a 25-frame hold.
+  const z = c31(0x18, ThrowerState.GrabPlayer, {
+    grab: {
+      offset: [0, -40, 0], cue_frame: 20, drop_frames: 10, hold_frames: 25,
+      player: 0,
+    },
+  });
+  const hits: number[] = [];
+  events.on("player.damaged", () => hits.push(ActorPlayCursor(z)));
+  z.pos = vec3(0, 60, 0);
+  const rel = () => z.pos.y - G.g_camera_eye.y;
+  G.g_cam_path_frame = 0;
+  GameUpdate(1 / 60, CAM_HOST, rng, events);
+  check("sub 0 raises obj+0x34 0x4100 -- a frozen pose and no shot",
+        (z.flags & (ActorFlag.PoseFrozen | ActorFlag.ShotImmune))
+        === (ActorFlag.PoseFrozen | ActorFlag.ShotImmune),
+        `flags ${z.flags.toString(16)}`);
+  check("...and blends the ride clip, 0x1E9, in rather than cutting to it",
+        z.motion === 0x1e9 && z.fadeFrom?.motion === 313,
+        `motion ${z.motion}, from ${JSON.stringify(z.fadeFrom)}`);
+  check("it hangs sixty over the eye while it waits", Math.abs(rel() - 60) < 1e-9,
+        `${rel()}`);
+
+  G.g_cam_path_frame = 20;
+  GameUpdate(1 / 60, CAM_HOST, rng, events);
+  check("the cue drops the frozen pose and keeps the shot immunity",
+        (z.flags & ActorFlag.PoseFrozen) === 0
+        && (z.flags & ActorFlag.ShotImmune) !== 0,
+        `flags ${z.flags.toString(16)}`);
+  // obj+0x50 = (-40 - 60) / 10, and EnemyThrowerUpdate integrates it after
+  // the state on the cue frame itself.
+  check("...and the drop moves on the cue frame: 60 + (-40 - 60) / 10",
+        Math.abs(rel() - 50) < 1e-9, `${rel()}`);
+  for (let i = 0; i < 4; i++) GameUpdate(1 / 60, CAM_HOST, rng, events);
+  check("it comes down ten units a frame", Math.abs(rel() - 10) < 1e-9,
+        `${rel()}`);
+
+  const from = heard.length;
+  let n = 0;
+  while (!(z.flags & ActorFlag.NoHitReaction) && n < 20) {
+    GameUpdate(1 / 60, CAM_HOST, rng, events);
+    n++;
+  }
+  check("it lands on the drop's tenth frame, forty under the eye",
+        n === 5 && Math.abs(rel() + 40) < 1e-9, `${n} ${rel()}`);
+  const landing = heard.slice(from);
+  check("...with the thump, set B's attack cry (`ActorPlayHitVoice(obj, 3)`), "
+        + "then the sword",
+        landing.length === 3 && landing[0] === 0x2916a9
+        && (landing[1] === 50 || landing[1] === 51) && landing[2] === 0x1f23a9,
+        landing.map((h) => h.toString(16)).join());
+  check("...raising NoHitReaction and blending the ride clip over itself",
+        (z.flags & ActorFlag.NoHitReaction) !== 0 && z.motion === 0x1e9
+        && z.fadeFrom?.motion === 0x1e9,
+        `flags ${z.flags.toString(16)}, from ${JSON.stringify(z.fadeFrom)}`);
+
+  // The landing frame is the first of the hold's fifteen blinking ones.
+  let immune = true;
+  for (let i = 0; i < 14; i++) {
+    GameUpdate(1 / 60, CAM_HOST, rng, events);
+    immune &&= (z.flags & ActorFlag.ShotImmune) !== 0;
+  }
+  check("it cannot be shot for the first fifteen frames of the hold", immune);
+  GameUpdate(1 / 60, CAM_HOST, rng, events);
+  check("...and can for the rest", (z.flags & ActorFlag.ShotImmune) === 0
+        && (z.flags & ActorFlag.NoHitReaction) !== 0,
+        `flags ${z.flags.toString(16)}`);
+  ResolveHit(z, 4, CAM_HOST, rng);
+  GameUpdate(1 / 60, CAM_HOST, rng, events);
+  check("a shot in the hold costs hit points and does not knock it off",
+        z.state === ThrowerState.GrabPlayer && z.hp < 100,
+        `state ${z.state}, hp ${z.hp}`);
+
+  let grabbed = false;
+  let finished = false;
+  for (let i = 0; i < 400 && !z.despawned; i++) {
+    GameUpdate(1 / 60, CAM_HOST, rng, events);
+    grabbed ||= z.motion === 0x1e7 || z.motion === 0x1e5;
+    finished ||= z.motion === 0x1e8;
+  }
+  check("it takes the permit, grabs, and hurts once, on cursor 30",
+        grabbed && hits.join() === "30", `${grabbed} ${hits.join()}`);
+  check("...then plays the finish, 0x1E8, and leaves", finished && z.despawned,
+        `${finished} ${z.despawned}`);
+}
+
+{
+  // The tail rides the camera's turned offset only for `1 < sub < 5`: sub 1
+  // hangs at the eye plus the offset as it stands, and the turn -- the camera's
+  // yaw half round -- starts on the cue frame, which is sub 2 by the tail.
+  const rng = new Rng(76);
+  const events = new Events();
+  // Stage 5 block 2 step 4's hold, 75 frames, and its 20-frame drop.
+  const z = c31(0x18, ThrowerState.GrabPlayer, {
+    grab: {
+      offset: [0, -40, 0], cue_frame: 20, drop_frames: 20, hold_frames: 75,
+      player: 0,
+    },
+  });
+  z.pos = vec3(10, 60, 0);
+  G.g_cam_path_frame = 0;
+  for (let i = 0; i < 3; i++) GameUpdate(1 / 60, CAM_HOST, rng, events);
+  const waiting = z.pos.x - G.g_camera_eye.x;
+  G.g_cam_path_frame = 20;
+  GameUpdate(1 / 60, CAM_HOST, rng, events);
+  const turned = ActorLocalPoint(G.g_camera_eye, G.g_camera_yaw_bams + 0x8000,
+                                 10, 60, 0, vec3(0, 0, 0));
+  check("it waits at the eye plus its offset, unturned (sub 1 is not ridden)",
+        Math.abs(waiting - 10) < 1e-9, `${waiting}`);
+  check("...and from the cue frame hangs off the camera's yaw half round",
+        Math.abs(z.pos.x - turned.x) < 1e-9 && Math.abs(z.pos.z - turned.z) < 1e-9
+        && Math.abs(turned.x - G.g_camera_eye.x - 10) > 1,
+        `(${z.pos.x}, ${z.pos.z}) against (${turned.x}, ${turned.z})`);
+  // One track, which wraps: the ride clip is 0x1E9 for the whole hold, though
+  // the hold is nearly twice its play length of 39.
+  let held = 0;
+  let onRide = true;
+  for (let i = 0; i < 200 && z.sub <= 3; i++) {
+    GameUpdate(1 / 60, CAM_HOST, rng, events);
+    if (z.sub === 3) { held++; onRide &&= ActorPlayMotion(z) === 0x1e9; }
+  }
+  check("the ride clip stays on through a 75-frame hold",
+        held === 74 && onRide, `${held} frames, on the ride ${onRide}`);
+}
+
+console.log("class 0x31, ThrowerStateGrabPlayer is shot without reacting:");
+{
+  // Stage 5 block 2 step 4's `0x1E04`, the rider that drops onto the car on
+  // the bridge: its descriptor as shipped, and the four grab clips at their
+  // shipped lengths -- `g_motion_play_length` 70, 59, 44 and 39.
+  //
+  // `ThrowerStateGrabPlayer` (`FUN_0044EF90`) writes the actor's flag word
+  // four times: `OR AH,0x41` in sub 0 (`0x0044EFBB`, 0x100 and 0x4000),
+  // `AND AH,0xbf` on the cue (`0x0044F092`), `OR DH,0x20` on landing
+  // (`0x0044F127`, 0x2000), and in the hold `OR AH,0x1` on every blinking frame
+  // (`0x0044F1A5`, `0x0044F1BF`) and `AND AH,0xfe` on every solid one
+  // (`0x0044F1ED`). `ThrowerOnShot` (`FUN_004499A0`) reacts only with both
+  // 0x100 and 0x2000 clear, and a `zslman`'s reaction is state 0x21, whose
+  // way out is state 7 -- the hub, which on a moving car never ends. The port
+  // wrote none of the four, so a rider shot on the car tumbled off its grab
+  // into the hub and held `wait_enemies_alive` at step 4 op 30 for ever.
+  const TYPE_GRAB = {
+    ...TYPE31_ZSLMAN,
+    motions: { ...TYPE31_ZSLMAN.motions, "485": motion(36, 0, 70),
+               "487": motion(31, 0, 59), "488": motion(23, 0, 44),
+               "489": motion(21, 0, 39) },
+  } as unknown as CharacterType;
+  ResetGameGlobals();
+  SetGameTables({ ...CHARS31, types: { ...CHARS31.types, "24": TYPE_GRAB } } as
+                unknown as CharactersJson);
+  G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+  G.g_scene_state_major = SCENE_MAJOR_PLAYING;
+  EnterPlay();
+  openShutter();
+  G.g_camera_yaw_bams = 0;
+  const z = ActorSpawn(0x1e04, SpawnClass.Thrower, 0x18, "zslman", {
+    initialState: ThrowerState.GrabPlayer, condition: 0,
+    grab: { offset: [0, 0, -10], cue_frame: 680, drop_frames: 20,
+            hold_frames: 75, player: 0 },
+  });
+  if (z.cls !== SpawnClass.Thrower) throw new Error("not class 0x31");
+  z.visible = true;
+  z.hp = z.maxHp = 130;
+  z.pos = vec3(-3, 30, -10);
+  check("`EnemyThrowerInit` counts the rider in, alive and present",
+        G.g_enemies_alive === 1 && G.g_enemies_present === 1,
+        `alive ${G.g_enemies_alive}, present ${G.g_enemies_present}`);
+
+  const rng = new Rng(71);
+  const events = new Events();
+  const RAY = { origin: vec3(0, 0, 0), dir: vec3(0, 0, 1) };
+  // Bone 1, the torso, which carries this fixture's damage row -- so a shot
+  // the engine lets through moves the hit points, unmistakably.
+  const host = { ...CAM_HOST,
+    pickShot: () => ({ kind: "actor", at: z.at, bone: 1,
+                       point: vec3() }) as ShotPick };
+  const reacted = new Set<number>();
+  // Every round that left the gun: a check that a shot "only ricochets" is
+  // worth nothing if the gun was empty.
+  let fired = 0;
+  const step = (fire: boolean): void => {
+    if (fire) {
+      // A gun holds six, and the one way it reloads is a pull off the screen
+      // (`PlayerFireAndReloadUpdate`), made on the same frame ahead of the
+      // round.
+      QueueOffscreenPull(0);
+      QueueShotRequest(0, RAY);
+    }
+    const before = G.g_player_shot_count[0];
+    GameUpdate(1 / 60, host, rng, events);
+    fired += G.g_player_shot_count[0] - before;
+    if (!z.despawned && z.state !== ThrowerState.GrabPlayer) {
+      reacted.add(z.state);
+    }
+  };
+
+  G.g_cam_path_frame = 600;
+  step(false);
+  check("sub 0 raises 0x100 and 0x4000: shot-immune, and the ride clip held",
+        (z.flags & ActorFlag.ShotImmune) !== 0
+        && (z.flags & ActorFlag.PoseFrozen) !== 0,
+        `flags 0x${(z.flags >>> 0).toString(16)}`);
+  for (let i = 0; i < 5; i++) step(true);
+  check("shot while it hangs off the camera, it only ricochets",
+        fired === 5 && z.hp === 130 && z.state === ThrowerState.GrabPlayer,
+        `${fired} rounds, hp ${z.hp}, state ${z.state}/${z.sub}`);
+
+  // The cue: the drop is `drop_frames` frames counting the cue's own, and it
+  // lands on the twentieth.
+  G.g_cam_path_frame = 680;
+  step(true);
+  check("the cue lets the clip go (0x4000 down) and keeps the shot off",
+        (z.flags & ActorFlag.PoseFrozen) === 0
+        && (z.flags & ActorFlag.ShotImmune) !== 0 && z.sub === 2,
+        `flags 0x${(z.flags >>> 0).toString(16)}, sub ${z.sub}`);
+  for (let i = 1; i < 19; i++) step(true);
+  check("...through the whole drop", fired === 24 && z.sub === 2
+        && z.hp === 130, `${fired} rounds, sub ${z.sub}, hp ${z.hp}`);
+  step(true);
+  check("it lands on the drop's twentieth frame with 0x2000 up: no reaction "
+        + "from here on", z.sub === 3
+        && (z.flags & ActorFlag.NoHitReaction) !== 0,
+        `sub ${z.sub}, flags 0x${(z.flags >>> 0).toString(16)}`);
+
+  // The hold blinks, shot-immune, while `hold_frames - 15 < timer`: the
+  // landing frame and fourteen more. The fifteenth after it is solid.
+  for (let i = 1; i < 15; i++) step(true);
+  check("the first fifteen frames of the hold blink and ricochet",
+        fired === 39 && (z.flags & ActorFlag.ShotImmune) !== 0
+        && z.hp === 130,
+        `${fired} rounds, flags 0x${(z.flags >>> 0).toString(16)}, `
+        + `hp ${z.hp}`);
+  step(false);
+  check("...and the sixteenth is solid: 0x100 comes down",
+        (z.flags & ActorFlag.ShotImmune) === 0 && z.sub === 3,
+        `flags 0x${(z.flags >>> 0).toString(16)}, sub ${z.sub}`);
+  step(true);
+  step(false);
+  check("a shot now hurts it", fired === 40 && z.hp < 130 && !z.dead,
+        `${fired} rounds, hp ${z.hp}`);
+  check("...and it goes on with the grab rather than tumbling (no state 0x21, "
+        + "no hub)", reacted.size === 0 && z.state === ThrowerState.GrabPlayer,
+        `left 27 for ${[...reacted].join()}; now ${z.state}/${z.sub}`);
+
+  for (let i = 0; i < 600 && !z.despawned; i++) step(false);
+  check("it finishes its throw-away and leaves the pool", z.despawned,
+        `state ${z.state}/${z.sub}`);
+  check("...and both counts, so the car's `wait_enemies_alive` can open",
+        G.g_enemies_alive === 0 && G.g_enemies_present === 0,
+        `alive ${G.g_enemies_alive}, present ${G.g_enemies_present}`);
 }

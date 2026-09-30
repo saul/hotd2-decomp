@@ -663,10 +663,21 @@ console.log("\nclass 0x30's placement: the ground snap and the two entrances:");
     const frames: number[] = [];
     let held = true;
     let fadeFrames = 0;
+    // How far the frames that end still inside the fade move it, and how far
+    // the one that ends the fade does.
+    let movedHeld = 0;
+    let lastStep = 0;
     while (z.fadeFrom && fadeFrames < 40) {
       frames.push(authoredFrameOfTicks(z.fadeFrom.ticks, em.fps, em.frames));
       if (MotionPlayFrame(z) !== startCursor) held = false;
+      const before = { ...z.pos };
       step();
+      if (z.fadeFrom) {
+        movedHeld = Math.max(movedHeld,
+                             Math.hypot(z.pos.x - at.x, z.pos.z - at.z));
+      } else {
+        lastStep = Math.hypot(z.pos.x - before.x, z.pos.z - before.z);
+      }
       fadeFrames += 1;
     }
     check("...dissolving from the clip's last pose on every frame of it, "
@@ -676,11 +687,21 @@ console.log("\nclass 0x30's placement: the ground snap and the two entrances:");
     check("...while the run is held on its start frame, as the engine holds "
           + "it", held && fadeFrames === 11, `held ${held} for ${fadeFrames}`);
     check("...and nothing walks the actor until the fade is over",
-          Math.hypot(z.pos.x - at.x, z.pos.z - at.z) < 1e-9,
-          `moved ${Math.hypot(z.pos.x - at.x, z.pos.z - at.z).toFixed(3)}`);
+          movedHeld < 1e-9, `moved ${movedHeld.toFixed(3)}`);
     check("...after which the run moves on from the frame after it",
           MotionPlayFrame(z) === startCursor + 1,
           `${MotionPlayFrame(z)} after ${startCursor}`);
+    // That cursor is odd, and `SkeletonAdvancePlayCursor` (`FUN_004111A0`)
+    // poses an odd cursor between its two authored frames at one half: the
+    // frame the fade ends steps the actor half of the run's first frame, not
+    // nothing and not all of it.
+    const run = MotionOf(z, 12)!;
+    const half = Math.hypot(run.root[3] - run.root[0],
+                            run.root[5] - run.root[2]) / 2;
+    check("...and the frame the fade ends steps half an authored frame of it",
+          startCursor % 2 === 0 && half > 0
+          && Math.abs(lastStep - half * z.scale) < 1e-9,
+          `stepped ${lastStep.toFixed(4)}, half a frame ${half.toFixed(4)}`);
   }
 
   // **A zombie in its emerge animation does not stagger when it is shot.**

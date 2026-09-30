@@ -228,7 +228,7 @@ export function ThrowerStateGrabPlayer(obj: ThrowerActor, dt: number,
 
   if (obj.sub === GrabSub.Anchor) {
     obj.action = { motion: GRAB_RIDE, ticks: 0 };
-    obj.rootActionFrame = -1;
+    obj.rootActionCursor = -1;
     // The spawn position *is* the camera-relative offset, kept for ever.
     obj.arcFrom = { x: obj.pos.x, y: obj.pos.y, z: obj.pos.z };
     obj.arcTo = { x: g.offset[0], y: g.offset[1], z: g.offset[2] };
@@ -258,7 +258,7 @@ export function ThrowerStateGrabPlayer(obj: ThrowerActor, dt: number,
     obj.pos.y = eye.y + obj.arcTo.y;
     events?.emit("sound.play", { id: GRAB_LAND });
     obj.action = { motion: GRAB_RIDE, ticks: 0 };
-    obj.rootActionFrame = -1;
+    obj.rootActionCursor = -1;
     obj.slideTimer = g.hold_frames;
     events?.emit("sound.play", { id: GRAB_SWORD_ON });
     obj.sub = GrabSub.Hold;
@@ -297,7 +297,7 @@ export function ThrowerStateGrabPlayer(obj: ThrowerActor, dt: number,
     }
     obj.strikeStart = { x: eye.x, y: eye.y, z: eye.z };
     obj.action = { motion: GRAB_FINISH, ticks: 0 };
-    obj.rootActionFrame = -1;
+    obj.rootActionCursor = -1;
     obj.sub = GrabSub.ThrowAway;
   }
 
@@ -349,7 +349,7 @@ function ThrowerGrabTakePermit(obj: ThrowerActor, named: number,
   if (p !== -1) {
     G.g_attack_permits[p] = obj.at;
     obj.action = { motion: rng.int(2) === 0 ? GRAB_B : GRAB_A, ticks: 0 };
-    obj.rootActionFrame = -1;
+    obj.rootActionCursor = -1;
     obj.struck = false;
   }
   obj.attackPermit = p;
@@ -387,7 +387,7 @@ export function ThrowerStateWaitForCue(obj: ThrowerActor, dt: number,
       // cursor, not an authored frame to double.
       obj.action = { motion: c.motion,
                      ticks: rng.int(MotionPlayLength(obj, c.motion)) };
-      obj.rootActionFrame = -1;
+      obj.rootActionCursor = -1;
     }
     obj.slideTimer = 0;
     obj.sub = 1;
@@ -452,7 +452,7 @@ export function ThrowerStateBlinkInThreeHops(obj: ThrowerActor, dt: number,
     const m = BLINK_IDLE_BY_STANCE[stance & 3] ?? BLINK_IDLE_BY_STANCE[0];
     if (MotionOf(obj, m)) {
       obj.action = { motion: m, ticks: 0 };
-      obj.rootActionFrame = -1;
+      obj.rootActionCursor = -1;
     }
     obj.arcFrom = { x: obj.pos.x, y: obj.pos.y, z: obj.pos.z };
     obj.slideTimer = obj.backAwayDelay;

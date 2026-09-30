@@ -42,6 +42,10 @@ import {
   FLOOR_BLOB, thrower,
 } from "./harness";
 import { KNOCKDOWN_BODY } from "../../src/game/class31/death";
+import { SND_GET_UP } from "../../src/game/class31/react";
+import {
+  rootDelta, TrackFrameAtCursor, TrackRootAtCursor,
+} from "../../src/game/root_motion";
 
 console.log("\nEnemyThrowerInit: zslman is born NoDismember");
 // `EnemyThrowerInit` (`FUN_00449620`) is the fourth writer of the flag, and
@@ -1670,6 +1674,250 @@ console.log("class 0x31, how far a knocked-down zsass goes:");
         + `react ${s.react?.motion}`);
   check("...and is over when the loop underneath reaches its end: 9 frames, "
         + "not the stumble clip's 34", frames === 9, `${frames} frames`);
+}
+
+/**
+ * **Track 0 samples its root between two frames on an odd cursor.**
+ *
+ * `SkeletonAdvancePlayCursor` (`FUN_004111A0`) takes `c = counter %
+ * (play_length + 1)`; on an odd `c` that is not the play length it loads
+ * frames `c / 2` and `c / 2 + 1` into slots 1 and 2 and sets the weight
+ * origin one counter back over a divisor of 2, so `SkeletonPoseRootFrame`
+ * (`FUN_00410920`) hands `SkeletonApplyRootMotion` (`FUN_00410C50`) their
+ * midpoint. A clip authored at 30 Hz therefore moves its actor on **every**
+ * 60 Hz frame by half a frame's travel. And the loop's wrap is damped:
+ * `|model+0x10 - model+0x18| > play_length / 4` sets the baseline to
+ * `root + (root - baseline) / play_length`, a step of `(baseline - root) /
+ * play_length` -- for a straight walk, the same half frame again.
+ *
+ * The port stepped the root by whole authored frames, `c / 2` rounded down:
+ * nothing on every odd tick, a whole frame on every even one, and nothing at
+ * the wrap. A walk of 2.08 a frame, `play_length` 24, at a quarter turn (L48).
+ */
+console.log("root motion, sampled at the engine's play cursor:");
+{
+  const WALK = 313;
+  const PER_FRAME = 2.08;
+  const t = thrower(ThrowerState.StandAndDecide);
+  // State 0, the engine's shared no-op: nothing but the clip moves it.
+  t.state = ThrowerState.Idle;
+  t.sub = 0;
+  t.yaw = 0x4000;
+  t.pos = vec3(10, 0, 60);
+  t.motion = WALK;
+  t.playTicks = 0;
+  t.rootCursor = 0;
+  const rng = new Rng(61);
+  const events = new Events();
+  const steps: number[] = [];
+  let offAxis = 0;
+  for (let i = 0; i < 30; i++) {
+    const was = { ...t.pos };
+    GameUpdate(1 / 60, NULL_HOST, rng, events);
+    steps.push(Math.hypot(t.pos.x - was.x, t.pos.z - was.z));
+    offAxis = Math.max(offAxis, Math.abs(t.pos.z - was.z));
+  }
+  const half = PER_FRAME / 2;
+  check("a walking clip steps its actor half a frame on every tick, the "
+        + "loop's wrap included", steps.every((d) => Math.abs(d - half) < 1e-9),
+        steps.map((d) => d.toFixed(3)).join(","));
+  check("...along the yaw's own forward, at a quarter turn x and not z",
+        offAxis < 1e-6, `z moved ${offAxis}`);
+  // The two readings the sampler is made of, on a clip with an odd play
+  // length (`2n - 3`): the midpoint, the play length's own frame, the wrap.
+  const m = { bank: "t", frames: 4, fps: 30, rot: [], play: 5,
+              root: [0, 0, 0, 0, 0, -2, 0, 0, -6, 0, 0, -12] };
+  const at = (c: number): number => {
+    const o = vec3();
+    TrackRootAtCursor(m, 5, c, o);
+    return o.z;
+  };
+  check("an odd cursor is the midpoint of its two frames",
+        at(1) === -1 && at(3) === -4, `${at(1)} ${at(3)}`);
+  check("...except the play length itself, which is the frame after",
+        at(5) === -12 && TrackFrameAtCursor(5, 5) === 3,
+        `${at(5)} ${TrackFrameAtCursor(5, 5)}`);
+  const wrap = rootDelta(m, 5, 5, 0);
+  check("...and the wrap steps (baseline - root) / play_length",
+        Math.abs(wrap.z - (-12 - 0) / 5) < 1e-12, `${wrap.z}`);
+}
+
+/**
+ * **The get-up** -- `ThrowerStateGetUp` (`FUN_0044C2E0`): the clip over a
+ * five-frame fade, the groan `0x1C17A9` once, and the way out at
+ * `g_motion_play_length - 1`. Motion `0x127` given a play length of 50
+ * against its 31 authored frames, so the play length and the baked length
+ * cannot be mistaken for each other: the fade holds the cursor on 0 for six
+ * frames, it then climbs one a frame, and the state leaves on the update that
+ * reads 49 -- the 55th. The baked length would hold it to the 62nd.
+ */
+console.log("class 0x31, the get-up after a decapitation:");
+{
+  const GETUP_PLAY = 50;
+  const TYPE_UP: CharacterType = {
+    ...TYPE31_ZSASS,
+    motions: { ...TYPE31_ZSASS.motions, "295": motion(31, 0, GETUP_PLAY) },
+  };
+  ResetGameGlobals();
+  SetGameTables(({ ...CHARS31, types: { ...CHARS31.types, "22": TYPE_UP } }) as
+                unknown as CharactersJson);
+  G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+  G.g_scene_state_major = SCENE_MAJOR_PLAYING;
+  EnterPlay();
+  G.g_camera_yaw_bams = 0;
+  const z = ActorSpawn(0x9200, SpawnClass.Thrower, 0x16, "zsass",
+                       { initialState: ThrowerState.StandAndDecide,
+                         condition: 0 });
+  if (z.cls !== SpawnClass.Thrower) throw new Error("not class 0x31");
+  z.visible = true;
+  z.hp = 60;
+  z.pos = vec3(0, 0, 45);
+  z.motion = 313;
+  z.state = ThrowerState.GetUp;
+  z.sub = 0;
+  z.flags2 |= ThrowerFlag.KnockedDown;
+  const rng = new Rng(62);
+  const events = new Events();
+  const sounds: number[] = [];
+  events.on("sound.play", (e) => sounds.push(e.id));
+  let updates = 0;
+  let immuneThroughout = true;
+  let faded = false;
+  while (z.state === ThrowerState.GetUp && updates < 200) {
+    GameUpdate(1 / 60, CAM_HOST, rng, events);
+    updates += 1;
+    if (updates === 1) faded = z.fadeFrom?.motion === 313 && !!z.action?.held;
+    if (z.state === ThrowerState.GetUp
+        && !(z.flags & ActorFlag.ShotImmune)) immuneThroughout = false;
+  }
+  check("the get-up fades in from the clip it was on",
+        faded, JSON.stringify(z.fadeFrom));
+  check("...groans once, `COMMON2\\ZOMBIE_046_16`",
+        sounds.filter((s) => s === SND_GET_UP).length === 1,
+        sounds.map((s) => s.toString(16)).join(","));
+  check("...is shot-immune until it leaves, on the play length less one",
+        immuneThroughout && updates === 55
+        && (z.flags & ActorFlag.ShotImmune) === 0
+        && (z.flags2 & ThrowerFlag.KnockedDown) === 0,
+        `${updates} updates, flags ${z.flags.toString(16)}`);
+}
+
+/**
+ * **`zsass`'s own death clip** -- `ThrowerStateDeathClip` (`FUN_0044A930`):
+ * `ActorSetMotion(0x11E)`, a cut, and the corpse when
+ * `g_motion_play_length - 1 <= obj+0x19C`. With a play length of 70 against
+ * 39 authored frames the corpse state starts on the 70th update, not the 78th.
+ */
+console.log("class 0x31, zsass's death clip:");
+{
+  const TYPE_DIE: CharacterType = {
+    ...TYPE31_ZSASS,
+    motions: { ...TYPE31_ZSASS.motions, "286": motion(39, 0, 70) },
+  };
+  ResetGameGlobals();
+  SetGameTables(({ ...CHARS31, types: { ...CHARS31.types, "22": TYPE_DIE } }) as
+                unknown as CharactersJson);
+  G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+  G.g_scene_state_major = SCENE_MAJOR_PLAYING;
+  EnterPlay();
+  const z = ActorSpawn(0x9201, SpawnClass.Thrower, 0x16, "zsass",
+                       { initialState: ThrowerState.StandAndDecide,
+                         condition: 0 });
+  if (z.cls !== SpawnClass.Thrower) throw new Error("not class 0x31");
+  z.visible = true;
+  z.pos = vec3(0, 0, 45);
+  z.hp = 0;
+  z.dead = true;
+  z.flags |= ActorFlag.Dead;
+  z.state = ThrowerState.Death;
+  z.sub = 0;
+  const rng = new Rng(63);
+  const events = new Events();
+  let updates = 0;
+  let cut = false;
+  while (z.state === ThrowerState.Death && updates < 200) {
+    GameUpdate(1 / 60, CAM_HOST, rng, events);
+    updates += 1;
+    if (updates === 1) cut = z.action?.motion === 0x11e && !z.action.held;
+  }
+  check("the death clip is a cut, and the corpse comes at the play length "
+        + "less one", cut && updates === 70
+        && z.state === ThrowerState.Corpse, `cut ${cut}, ${updates} updates, `
+        + `state ${z.state}`);
+}
+
+/**
+ * **`zslman`'s tumble flies the engine's arc** -- `ThrowerStateKnockedTumbling`
+ * (`FUN_00450E40`) calls `ActorArcVelocity(obj+0x1354)` (`FUN_00450F5F`'s
+ * `CALL 0x0044de80`), and on the floor that is arm 0: the flat x and z of
+ * `(dst - src) / T` and the parabola `-g2 (t + 1) + (T*T*g2 + 2 dy) / 2T` on
+ * y, `g2` = `[0x00565E1C]` = 0.027222222. So the body rises and comes down
+ * again over the arc's fifteen frames, ending `T * g2 / 2` under where it
+ * would have with no curve -- `EnemyThrowerUpdate` integrates each velocity
+ * the frame it is written. The port flew it flat.
+ */
+console.log("class 0x31, zslman's tumble on the engine's arc:");
+{
+  const G2 = 0.027222222;
+  const TYPE_TUMBLE: CharacterType = {
+    ...TYPE31_ZSLMAN,
+    motions: { ...TYPE31_ZSLMAN.motions, "533": motion(40, 0, 78),
+               "534": motion(20, 0, 38) },
+  };
+  ResetGameGlobals();
+  SetGameTables(({ ...CHARS31, types: { ...CHARS31.types, "24": TYPE_TUMBLE } }) as
+                unknown as CharactersJson);
+  G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+  G.g_scene_state_major = SCENE_MAJOR_PLAYING;
+  EnterPlay();
+  G.g_camera_yaw_bams = 0;
+  G.g_player_no_damage[0] = 1;
+  const z = ActorSpawn(0x9202, SpawnClass.Thrower, 0x18, "zslman",
+                       { initialState: ThrowerState.StandAndDecide,
+                         condition: 0 });
+  if (z.cls !== SpawnClass.Thrower) throw new Error("not class 0x31");
+  z.visible = true;
+  z.hp = 400;
+  z.pos = vec3(12, 0, 45);
+  z.yaw = 0x4000;
+  z.state = ThrowerState.WaitForPermit;
+  z.sub = 0;
+  const rng = new Rng(64);
+  const events = new Events();
+  ResolveHit(z, 1, CAM_HOST, rng);
+  GameUpdate(1 / 60, CAM_HOST, rng, events);
+  const from = { ...z.arcFrom };
+  const to = { ...z.arcTo };
+  const T = z.arcTotal;
+  const dy = to.y - from.y;
+  // Where the closed form puts the body after `k` frames of the arc.
+  const yAt = (k: number): number => {
+    let y = from.y;
+    for (let n = 1; n <= k; n++) {
+      y += n * -G2 + (T * T * G2 + dy + dy) / (T * 2);
+    }
+    return y;
+  };
+  const ys: number[] = [z.pos.y];
+  const zs: number[] = [z.pos.z];
+  while (z.state === ThrowerState.KnockedTumbling && z.sub === 1
+         && ys.length <= T) {
+    GameUpdate(1 / 60, CAM_HOST, rng, events);
+    ys.push(z.pos.y);
+    zs.push(z.pos.z);
+  }
+  const worst = Math.max(...Array.from({ length: T }, (_, i) =>
+    Math.abs(ys[i] - yAt(i + 1))));
+  check("a shot zslman tumbles, on an arc of `ActorArcBeginToAtSpeed`'s "
+        + "fifteen frames", z.state === ThrowerState.KnockedTumbling
+        && T === 15 && to.z > from.z, `state ${z.state} T ${T}`);
+  check("...rising and falling on arm 0's parabola, frame by frame",
+        ys.length > T && worst < 1e-6 && Math.max(...ys) > from.y + 0.5,
+        `worst ${worst.toExponential(2)}, peak ${Math.max(...ys).toFixed(3)}`);
+  check("...and reaching the arc's depth on its last frame, flat",
+        Math.abs(zs[T - 1] - to.z) < 1e-9
+        && Math.abs(zs[0] - (from.z + (to.z - from.z) / T)) < 1e-9,
+        `${zs[T - 1]} vs ${to.z}`);
 }
 
 console.log("class 0x31, the scripted entrances:");

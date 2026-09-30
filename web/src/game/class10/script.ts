@@ -351,7 +351,7 @@ function CivilianApplyWaitWord(obj: Actor, word: number,
  * bit `0x00100000` of `sub.wait` -- see {@link CivilianWait.RootMotion} for the
  * decompiled arm. The engine writes it **before** the pose call, so the pose
  * call sees the new gate; the root-motion baseline goes with the blend, which
- * resets it (`Actor.rootFrame = -1`), so the delta taken on the frame a gate
+ * resets it (`Actor.rootCursor = -1`), so the delta taken on the frame a gate
  * re-opens never spans the frames it was shut.
  *
  * `[port-only]` as a function: the two ops' shared arm, inline in the engine.

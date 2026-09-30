@@ -27,7 +27,6 @@ import { MatIdentity, MatrixRotateX, MatrixRotateY, MatrixRotateZ,
 import { PLAYER_BODY_AT } from "./player_body_data";
 import { ActorModelScale, rootDelta } from "./root_motion";
 import { T } from "./tables";
-import { authoredFrameHeld } from "../core/play_cursor";
 import { vec3, type Vec3 } from "./vec";
 
 /** One player's body actor -- the fields of it the fly-over reads. */
@@ -53,7 +52,7 @@ export interface PlayerBody {
   /** `model+0x116C`, from the character type alone. */
   scale: number;
   /**
-   * `[port-only]` -- the authored frame the last draw posed, so the next one
+   * `[port-only]` -- the play cursor the last draw posed, so the next one
    * can take the root delta `SkeletonApplyRootMotion` (`FUN_00410C50`) takes
    * from inside the draw. -1: nothing drawn since `ActorSetMotion`.
    */
@@ -190,9 +189,14 @@ export function PlayerHookDrawBodyUntilMotionEnd(player: number): boolean {
 function PlayerBodyDraw(b: PlayerBody): void {
   const m = T.types[String(b.charType)]?.motions[String(b.motion)];
   if (m && m.frames > 0) {
-    const f = authoredFrameHeld(b.playTicks, m.fps, m.frames);
+    // The play cursor, `counter % (play_length + 1)`: the body's counter
+    // stops a frame short of the play length (`PlayerBodyAdvance`), so it is
+    // the counter itself, and the root is sampled there -- between two
+    // authored frames on an odd one.
+    const play = m.play ?? Math.max(1, m.frames * 2 - 2);
+    const f = b.playTicks % (play + 1);
     if ((b.motionFlags & MotionFlag.RootMotion) !== 0) {
-      const d = rootDelta(m, b.lastFrame, f);
+      const d = rootDelta(m, play, b.lastFrame, f);
       if (d.x !== 0 || d.z !== 0) {
         const a = b.yaw * ((Math.PI * 2) / 65536);
         const s = Math.sin(a);

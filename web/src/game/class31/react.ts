@@ -15,22 +15,23 @@ import { ActorFlag, ThrowerFlag, type ThrowerActor } from "../actor";
 import { ThrowerReleaseSlotOnDeath } from "../combat/counts";
 import { G } from "../globals";
 import type { GameHost } from "../host";
+import type { Events } from "../../core/events";
 import { MotionOf, MotionPlayLength, T } from "../tables";
 import { MotionCrossFadeTo } from "../motion";
-import { ActorSetMotion } from "../class30/motion_cue";
-import { GAME_HZ } from "../class30/states";
+import { ActorSetMotion, ActorSetOneShotBlended } from "../class30/motion_cue";
+import { GAME_HZ, MotionFade } from "../class30/states";
 import {
-  ActorClipFrame, ActorClipLength, ActorPlayCursor, ActorPlayMotion,
+  ActorArcVelocity, ActorPlayCursor, ActorPlayMotion,
   ClearCurrentActorVelocityAndAccel,
 } from "./arc";
 import { ThrowerPickNextState } from "./router";
 import { ThrowerState } from "./states";
 import { Class31SetOf, ThrowerStanceOf } from "./tables";
 import {
-  ThrowerEnterCorpseState, FALL_GRAVITY, KNOCKDOWN_BODY, SURFACE_KILL,
+  FALL_GRAVITY, KNOCKDOWN_BODY, SND_BOUNCE, SURFACE_KILL,
+  ThrowerBeginKnockbackArc, ThrowerEnterCorpseState, ThrowerFallIntegrate,
 } from "./death";
-import { vec3 } from "../vec";
-import { ThrowerBeginKnockbackArc } from "./death";
+import { vec3, type Vec3 } from "../vec";
 import { TraceActorSurfaceContactPoint } from "./surface";
 
 /**
@@ -49,6 +50,11 @@ const REACT_FADE_IN = 1;
 const REACT_OVERLAY_BONE = 1;
 /** `ThrowerStateGetUp`'s clip — a `szom.bin` one, for every character type. */
 const GET_UP_CLIP = 0x127;
+/**
+ * `PUSH 0x1c17a9; CALL PlaySoundId` in `ThrowerStateGetUp`'s sub 0 --
+ * `COMMON2\ZOMBIE_046_16`.
+ */
+export const SND_GET_UP = 0x1c17a9;
 /** The knock and get-up clips state 33 picks by stance. */
 const TUMBLE_BY_STANCE = [0x215, 0x1fe, 0x1f4, 0x206];
 const TUMBLE_UP_BY_STANCE = [0x216, 0x1ff, 0x1f5, 0x207];
@@ -70,7 +76,7 @@ function playOnce(obj: ThrowerActor, motion: number): void {
   if (!MotionOf(obj, motion)) return;
   obj.react = null;
   obj.action = { motion, ticks: 0 };
-  obj.rootActionFrame = -1;
+  obj.rootActionCursor = -1;
 }
 
 /**
@@ -157,6 +163,24 @@ export function ThrowerStateHitReaction(obj: ThrowerActor, rng: Rng,
  * of the clip, which is a real invulnerability window — shots ricochet off a
  * thrower that is getting up.
  *
+ * ```
+ * sub 0  obj+0x34 |= 0x100
+ *        SetCurrentActorMotionBlended(obj+0x194, 0x127, 0, 5)  ; 0x0044C30F
+ *        PlaySoundId(0x1C17A9)
+ *        sub = 1, and on
+ * sub 1  if (g_motion_play_length[obj+0x1B4] - 1 <= obj+0x19C) {
+ *          obj+0x34 &= ~0x100; obj+0x136C &= ~0x4000000
+ *          ThrowerPickNextState(obj)
+ *        }
+ * ```
+ *
+ * `[proved]`. The clip fades in over five frames, the groan
+ * (`COMMON2\ZOMBIE_046_16`, the id class 0x45's heads die with) plays once as
+ * it starts, and the state leaves on the play length, not the clip's baked
+ * length. Any other sub returns. The port used to cut to the clip, play no
+ * sound, and hold the state to the baked length -- two or three frames past
+ * the engine's.
+ *
  * [open] Motion `0x127` is a `szom.bin` clip and the routine has no
  * character-type branch, so `zskamere` — the one type on `kame.bin`'s
  * skeleton, and one that can reach this state — asks here for a clip its own
@@ -164,14 +188,19 @@ export function ThrowerStateHitReaction(obj: ThrowerActor, rng: Rng,
  * ends immediately, which is the least-wrong reading of an engine bug.
  */
 export function ThrowerStateGetUp(obj: ThrowerActor, rng: Rng,
-                                  host: GameHost): void {
+                                  host: GameHost, events?: Events): void {
   if (obj.sub === 0) {
     obj.flags |= ActorFlag.ShotImmune;
-    playOnce(obj, GET_UP_CLIP);
+    if (MotionOf(obj, GET_UP_CLIP)) {
+      ActorSetOneShotBlended(obj, GET_UP_CLIP, 0, MotionFade.Quick);
+    }
+    events?.emit("sound.play", { id: SND_GET_UP });
     obj.sub = 1;
+  } else if (obj.sub !== 1) {
+    return;
   }
-  const len = ActorClipLength(obj, obj.action?.motion ?? 0);
-  if (obj.action && ActorClipFrame(obj) < len - 1) return;
+  if (ActorPlayCursor(obj)
+      < MotionPlayLength(obj, ActorPlayMotion(obj)) - 1) return;
   obj.flags &= ~ActorFlag.ShotImmune;
   obj.flags2 &= ~ThrowerFlag.KnockedDown;
   ThrowerPickNextState(obj, rng, host);
@@ -210,12 +239,25 @@ export function SelectActorGravityAxis(obj: ThrowerActor): ThrowerArcKind {
           ThrowerArcKind.WallMinusZ, ThrowerArcKind.WallMinusX][side];
 }
 
-/** Which position component and sign each arc kind bounces on. */
-const AXIS_OF: Record<number, "x" | "y" | "z"> = {
-  [ThrowerArcKind.Floor]: "y", [ThrowerArcKind.Ceiling]: "y",
-  [ThrowerArcKind.WallPlusX]: "x", [ThrowerArcKind.WallMinusX]: "x",
-  [ThrowerArcKind.WallMinusZ]: "z", [ThrowerArcKind.WallPlusZ]: "z",
+/**
+ * Per arc kind, the axis the body falls and bounces along, the sign of the
+ * pull on it -- the acceleration each arm of the landing switch writes,
+ * `0x3d5f0123` (+0.0544) or `0xbd5f0123` (-0.0544), into `obj+0x58`,
+ * `obj+0x5C` or `obj+0x60` -- and the standoff a wall arm moves its contact
+ * point by (`FSUB`/`FADD` 4.5).
+ */
+const FALL_OF: Record<number, { axis: "x" | "y" | "z"; pull: number;
+                                standoff: number }> = {
+  [ThrowerArcKind.Floor]: { axis: "y", pull: -1, standoff: 0 },
+  [ThrowerArcKind.Ceiling]: { axis: "y", pull: 1, standoff: 0 },
+  [ThrowerArcKind.WallPlusX]: { axis: "x", pull: 1, standoff: -4.5 },
+  [ThrowerArcKind.WallMinusX]: { axis: "x", pull: -1, standoff: 4.5 },
+  [ThrowerArcKind.WallMinusZ]: { axis: "z", pull: -1, standoff: 4.5 },
+  [ThrowerArcKind.WallPlusZ]: { axis: "z", pull: 1, standoff: -4.5 },
 };
+
+/** Both freezes in the tumble: `CMP dword ptr [ESI + 0x19c], 0x2a; JLE`. */
+const TUMBLE_FREEZE_CURSOR = 0x2a;
 
 /**
  * `ThrowerStateKnockedTumbling` — `FUN_00450E40`, class 0x31 state 33.
@@ -224,18 +266,43 @@ const AXIS_OF: Record<number, "x" | "y" | "z"> = {
  * is thrown off whatever it was standing on and **bounces along the axis its
  * stance names** — off the floor, off the ceiling, off either wall — halving
  * the two tangential components and reversing the normal one each time, until
- * the speed on that axis drops below 0.15 or two seconds pass.
+ * the speed on that axis is down to 0.15 or two seconds pass.
  *
- * The re-entry is what makes shooting it repeatedly feel different from
- * shooting anything else: a second hit while it is still tumbling hard-cuts
- * the clip and spends one of its two knockback arcs.
+ * ```
+ * sub 0  obj+0x136C |= 0x180000; obj+0x34 = obj+0x34 & ~0x4000 | 0x200000
+ *        clip by stance: 0x215 / 0x1FE / 0x1F4 / 0x206
+ *        first hit:  ClearCurrentActorVelocityAndAccel; blended, fade 5
+ *        a re-entry: ActorSetMotion (a cut); obj+0x1328 += 1
+ *        ThrowerBeginKnockbackArc unless 0x2000 is up or two arcs are spent
+ *        ThrowerReleaseSlotOnDeath; obj+0x1354 = SelectActorGravityAxis
+ * sub 1  freeze past cursor 0x2A; ActorArcVelocity(obj+0x1354) until spent
+ * sub 2  freeze past 0x2A; obj+0x1338 += 1; the contact point; the surface;
+ *        the axis's own gravity; land when pos + vel reaches the contact or
+ *        0x78 frames pass; bounce again while the axis speed is over 0.15;
+ *        settle: velocity and gravity cleared, obj+0x34 & ~0x2000 | 0x100,
+ *        a (rand() % 10 + 1) * 3 frame lie
+ * sub 3  alive: the lie, then the get-up clip by stance, blended, fade 5
+ *        dead or on 0x5A: wait for the clip's end, then a corpse
+ * sub 4  at the play length less two: back to state 7, immune, 0x14 frames
+ * ```
  *
- * The surface it bounces off comes from `TraceActorSurfaceContactPoint`, the
- * engine's own probe, against the game's own `coli/` quads — so a wall bounce
- * finds the wall rather than settling on the frame cap.
+ * `[proved]`, each sub falling through into the next as the switch does.
+ * Like the fall it moves nothing itself: `EnemyThrowerUpdate` integrates
+ * `vel += acc; pos += vel` after it, which is why each test reads `pos +
+ * vel` -- last frame's velocity -- and the step comes after
+ * (`ThrowerFallIntegrate`).
+ *
+ * It used to fly the arc at a constant velocity with the destination's height
+ * pinned to the start's, which is neither arm of `ActorArcVelocity`: off the
+ * floor the body now rises and falls on the parabola to the point
+ * `ThrowerBeginKnockbackArc` chose, and off a wall the curve is on the wall's
+ * own axis. It also played both clips as cuts, integrated before it tested,
+ * cleared the pose freeze on the settle and on every bounce where the engine
+ * leaves it, and waited out a baked clip length.
  */
 export function ThrowerStateKnockedTumbling(obj: ThrowerActor, host: GameHost,
-                                            dt: number, rng: Rng): void {
+                                            dt: number, rng: Rng,
+                                            events?: Events): void {
   const frames = dt * GAME_HZ;
   const stance = ThrowerStanceOf(obj) & 3;
 
@@ -247,94 +314,107 @@ export function ThrowerStateKnockedTumbling(obj: ThrowerActor, host: GameHost,
     obj.flags = (obj.flags & ~ActorFlag.PoseFrozen) | KNOCKDOWN_BODY;
     const clip = TUMBLE_BY_STANCE[stance] ?? TUMBLE_BY_STANCE[0];
     if (!reentry) {
-      obj.vel.x = obj.vel.y = obj.vel.z = 0;
-      obj.accY = 0;
+      ClearCurrentActorVelocityAndAccel(obj);
+      if (MotionOf(obj, clip)) {
+        ActorSetOneShotBlended(obj, clip, 0, MotionFade.Quick);
+      }
       obj.thr.knockCount = 0;
     } else {
+      playOnce(obj, clip);
       obj.thr.knockCount += 1;
     }
-    playOnce(obj, clip);
     if (!(obj.flags & ActorFlag.NoHitReaction) && obj.thr.knockCount < 2) {
-      ThrowerBeginTumbleArc(obj, host);
+      ThrowerBeginKnockbackArc(obj, host);
     } else {
       obj.flags |= ActorFlag.NoHitReaction;
     }
-    obj.thr.arcKind = SelectActorGravityAxis(obj);
     // As `ThrowerStateFallAndLand`'s own sub 0: the alive count falls when the
     // actor is knocked off its feet, not when the body settles.
     ThrowerReleaseSlotOnDeath(obj);
-    obj.thr.sinceLanding = 0;
+    obj.thr.arcKind = SelectActorGravityAxis(obj);
     obj.sub = 1;
   }
 
   if (obj.sub === 1) {
-    if (ActorClipFrame(obj) >= 0x2b) obj.flags |= ActorFlag.PoseFrozen;
-    if (obj.arcFrames < obj.arcTotal) {
-      obj.arcFrames += frames;
-      obj.pos.x += obj.vel.x * frames;
-      obj.pos.y += obj.vel.y * frames;
-      obj.pos.z += obj.vel.z * frames;
+    if (ActorPlayCursor(obj) > TUMBLE_FREEZE_CURSOR) {
+      obj.flags |= ActorFlag.PoseFrozen;
+    }
+    if (ActorArcVelocity(obj, obj.thr.arcKind, frames)) {
+      ThrowerFallIntegrate(obj, frames);
       return;
     }
     obj.thr.sinceLanding = 0;
-    obj.flags &= ~ActorFlag.PoseFrozen;
     obj.sub = 2;
+    obj.flags &= ~ActorFlag.PoseFrozen;
   }
 
   if (obj.sub === 2) {
-    if (ActorClipFrame(obj) >= 0x2b) obj.flags |= ActorFlag.PoseFrozen;
-    obj.thr.sinceLanding += frames;
-    const axis = AXIS_OF[obj.thr.arcKind] ?? "y";
-    const pull = obj.thr.arcKind === ThrowerArcKind.Ceiling
-              || obj.thr.arcKind === ThrowerArcKind.WallPlusX
-              || obj.thr.arcKind === ThrowerArcKind.WallPlusZ
-      ? -FALL_GRAVITY : FALL_GRAVITY;
-    obj.vel[axis] += pull * frames;
-    obj.pos.x += obj.vel.x * frames;
-    obj.pos.y += obj.vel.y * frames;
-    obj.pos.z += obj.vel.z * frames;
-
-    const contact = ThrowerTumbleContact(obj, axis);
-    const past = pull < 0 ? obj.pos[axis] <= contact : obj.pos[axis] >= contact;
-    if (!past && obj.thr.sinceLanding < TUMBLE_FRAME_CAP) return;
-
-    obj.pos[axis] = contact;
-    obj.thr.landSurface = G.g_coli_hit_surface;
-    for (const k of ["x", "y", "z"] as const) {
-      obj.vel[k] *= k === axis ? -0.5 : 0.5;
+    if (ActorPlayCursor(obj) > TUMBLE_FREEZE_CURSOR) {
+      obj.flags |= ActorFlag.PoseFrozen;
     }
-    if (Math.abs(obj.vel[axis]) > SETTLE_SPEED
-        && obj.thr.sinceLanding < TUMBLE_FRAME_CAP) {
-      obj.flags &= ~ActorFlag.PoseFrozen;
+    obj.thr.sinceLanding += frames;
+    const contact = ThrowerTumbleContact(obj);
+    obj.thr.landSurface = G.g_coli_hit_surface;
+    // A kind outside the six lands nowhere: the switch's `JA` skips to the
+    // routine's end.
+    const fall = FALL_OF[obj.thr.arcKind];
+    if (!fall) return;
+    const g = fall.pull * -FALL_GRAVITY;
+    if (fall.axis === "x") obj.accX = g;
+    else if (fall.axis === "y") obj.accY = g;
+    else obj.accZ = g;
+    const target = contact[fall.axis] + fall.standoff;
+    const next = obj.pos[fall.axis] + obj.vel[fall.axis];
+    const short = fall.pull < 0 ? target < next : next < target;
+    if (short && obj.thr.sinceLanding < TUMBLE_FRAME_CAP) {
+      ThrowerFallIntegrate(obj, frames);
       return;
     }
-    obj.vel.x = obj.vel.y = obj.vel.z = 0;
-    obj.accY = 0;
-    obj.flags = (obj.flags & ~(ActorFlag.NoHitReaction | ActorFlag.PoseFrozen))
-              | ActorFlag.ShotImmune;
+    obj.pos[fall.axis] = target;
+    for (const k of ["x", "y", "z"] as const) {
+      obj.vel[k] *= k === fall.axis ? -0.5 : 0.5;
+    }
+    events?.emit("sound.play", { id: SND_BOUNCE });
+    if (Math.abs(obj.vel[fall.axis]) > SETTLE_SPEED
+        && obj.thr.sinceLanding < TUMBLE_FRAME_CAP) {
+      ThrowerFallIntegrate(obj, frames);
+      return;
+    }
+    // `LAB_004512E2`.
+    ClearCurrentActorVelocityAndAccel(obj);
     // `AND CH, 0xbf` (`80e5bf`) on `obj+0x136C` at 0x004512F3, in the same
     // breath as `AND DH, 0xdf` / `OR DH, 0x1` on `obj+0x34`: the body has
-    // settled, so the next landing may puff again.
+    // settled, so the next landing may puff again. The pose freeze stays.
     obj.flags2 &= ~ThrowerFlag.LandingDustEmitted;
+    obj.flags = (obj.flags & ~ActorFlag.NoHitReaction) | ActorFlag.ShotImmune;
     obj.slideTimer = (rng.int(10) + 1) * 3;
     obj.sub = 3;
   }
 
   if (obj.sub === 3) {
-    if (obj.dead || obj.thr.landSurface === SURFACE_KILL) {
-      if (obj.action) return;               // wait the tumble clip out
+    if ((obj.flags & ActorFlag.Dead) || obj.thr.landSurface === SURFACE_KILL) {
+      // `obj+0x1F1`: nothing until the clip on the track has reached its
+      // play length.
+      if (ActorPlayCursor(obj)
+          < MotionPlayLength(obj, ActorPlayMotion(obj))) return;
+      if (obj.thr.landSurface === SURFACE_KILL) {
+        obj.flags = (obj.flags & ~ActorFlag.PoseFrozen) | ActorFlag.Dead;
+        ThrowerReleaseSlotOnDeath(obj);
+      }
       ThrowerEnterCorpseState(obj);
       return;
     }
     obj.slideTimer -= frames;
     if (obj.slideTimer > 0) return;
-    playOnce(obj, TUMBLE_UP_BY_STANCE[stance] ?? TUMBLE_UP_BY_STANCE[0]);
-    obj.flags &= ~ActorFlag.PoseFrozen;
+    const up = TUMBLE_UP_BY_STANCE[stance] ?? TUMBLE_UP_BY_STANCE[0];
+    if (MotionOf(obj, up)) ActorSetOneShotBlended(obj, up, 0, MotionFade.Quick);
     obj.sub = 4;
+    obj.flags &= ~ActorFlag.PoseFrozen;
   }
 
-  const len = ActorClipLength(obj, obj.action?.motion ?? 0);
-  if (obj.action && ActorClipFrame(obj) < len - 2) return;
+  if (obj.sub !== 4) return;
+  if (ActorPlayCursor(obj)
+      < MotionPlayLength(obj, ActorPlayMotion(obj)) - 2) return;
   obj.flags2 &= ~(ThrowerFlag.ReactReentry | ThrowerFlag.BandLatched);
   obj.flags = (obj.flags & ~(ActorFlag.Reacting | KNOCKDOWN_BODY))
             | ActorFlag.ShotImmune;
@@ -344,42 +424,26 @@ export function ThrowerStateKnockedTumbling(obj: ThrowerActor, host: GameHost,
 }
 
 /**
- * The tumble's launch, which is the **same routine** the fall uses:
- * `ThrowerStateKnockedTumbling` and `FUN_0044A450` are the only two callers of
- * `ThrowerBeginKnockbackArc` (`FUN_0044D120`). This was a second copy of the
- * formula, so it carried the same inverted direction; now it is the one
- * function plus the velocity this state steps the arc with, which the fall
- * derives another way.
- */
-function ThrowerBeginTumbleArc(obj: ThrowerActor, host: GameHost): void {
-  ThrowerBeginKnockbackArc(obj, host);
-  // The tumble keeps its own height and steps the arc from a velocity rather
-  // than through `ActorArcVelocity`.
-  obj.arcTo.y = obj.pos.y;
-  obj.vel.x = (obj.arcTo.x - obj.arcFrom.x) / obj.arcTotal;
-  obj.vel.z = (obj.arcTo.z - obj.arcFrom.z) / obj.arcTotal;
-  obj.vel.y = 0;
-}
-
-/**
- * Where the surface the tumble bounces off is, on the axis it bounces on.
+ * Where the surface the tumble bounces off is: `TraceActorSurfaceContactPoint`
+ * (`FUN_0044C370`) into the locals the landing switch reads.
  *
- * `TraceActorSurfaceContactPoint` answers for all four attachments — the
- * floor, either wall and the ceiling — so this is the engine's own query and
- * not a floor special case any more. The `4.5` standoff is the engine's, and
- * its sign follows the axis the arc kind names.
+ * The probe answers for all four attachments. When a clinging body's probe
+ * misses, the engine's routine leaves its output alone and the switch reads
+ * whatever those stack words held, which nothing can reproduce; the port
+ * answers a point 4.5 units on along the body's own velocity on that axis,
+ * as it always has.
  */
-function ThrowerTumbleContact(obj: ThrowerActor,
-                              axis: "x" | "y" | "z"): number {
+function ThrowerTumbleContact(obj: ThrowerActor): Vec3 {
   if (!TraceActorSurfaceContactPoint(obj, _contact)) {
-    return obj.pos[axis] + (obj.vel[axis] >= 0 ? TUMBLE_STANDOFF
-                                               : -TUMBLE_STANDOFF);
+    const fall = FALL_OF[obj.thr.arcKind];
+    _contact.x = obj.pos.x; _contact.y = obj.pos.y; _contact.z = obj.pos.z;
+    if (fall) {
+      _contact[fall.axis] += (obj.vel[fall.axis] >= 0 ? TUMBLE_STANDOFF
+                                                      : -TUMBLE_STANDOFF)
+                           - fall.standoff;
+    }
   }
-  if (axis === "y") return _contact.y;
-  // A wall's contact point stands off by 4.5 the way the actor came at it.
-  const away = obj.thr.arcKind === ThrowerArcKind.WallPlusX
-            || obj.thr.arcKind === ThrowerArcKind.WallPlusZ;
-  return _contact[axis] + (away ? -TUMBLE_STANDOFF : TUMBLE_STANDOFF);
+  return _contact;
 }
 
 const _contact = vec3();

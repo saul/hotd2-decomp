@@ -83,7 +83,7 @@ function playOnce(obj: ThrowerActor, motion: number, from = 0): void {
   const m = MotionOf(obj, motion);
   if (!m) return;
   obj.action = { motion, ticks: from };
-  obj.rootActionFrame = -1;
+  obj.rootActionCursor = -1;
 }
 
 /**

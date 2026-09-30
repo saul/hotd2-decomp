@@ -217,9 +217,9 @@ function ZombieTwinCopyHost(obj: ZombieActor, host: Actor): void {
   }
   obj.motion = host.motion;
   obj.playTicks = host.playTicks;
-  obj.rootFrame = host.rootFrame;
+  obj.rootCursor = host.rootCursor;
   obj.action = host.action ? { ...host.action } : null;
-  obj.rootActionFrame = host.rootActionFrame;
+  obj.rootActionCursor = host.rootActionCursor;
   obj.fadeFrom = null;
   obj.fade = 0;
 }

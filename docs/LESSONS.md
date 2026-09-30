@@ -793,6 +793,23 @@ the `CMP` in front of each one; `web/tools/checks/split_unreachable.ts` does it
 for 0x32, 0x34 and 0x35. A one-line census of the field the branch tests would
 have turned "no stage-2 spawn" into "twenty".
 
+**L95 -- A faithful transcription beside an approximate one of the same
+routine means the approximation is the port's, not the engine's.**
+`game/skeleton.ts` has carried `SkeletonAdvancePlayCursor` and
+`SkeletonApplyRootMotion` instruction for instruction since class 0x14 needed
+the engine's model block: an odd play cursor posed between two authored
+frames at one half, the wrap damped by `(baseline - root) / play_length`.
+Every other actor's root motion went through `game/motion.ts`, which rounded
+the cursor down to a whole frame, so a 30 Hz clip moved its actor a whole
+frame on every other tick and not at all on the rest, and a loop's wrap took
+no step. Nobody compared the two, because the faithful one was "only class
+0x14's". **When a routine is ported twice -- once in full for one caller,
+once in brief for everyone else -- diff the two on the same input before
+trusting the brief one**; the full one is usually the reading, and the brief
+one the shortcut nobody wrote down. It is `L86` from the other side: there two
+inline copies were merged without comparing them, here two ports of one
+routine were kept apart without comparing them.
+
 ---
 
 ## Running the tools

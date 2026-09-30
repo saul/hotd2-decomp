@@ -573,7 +573,7 @@ function ThrowerRunState(obj: ThrowerActor, dt: number, rng: Rng,
     case ThrowerState.FallToSurface:
       return ThrowerStateFallToSurface(obj, dt);
     case ThrowerState.GetUp:
-      return ThrowerStateGetUp(obj, rng, host);
+      return ThrowerStateGetUp(obj, rng, host, events);
     case ThrowerState.RideObjectPath:
       return ThrowerStateRideObjectPath(obj, dt, rng, host);
     case ThrowerState.LeapStrike:
@@ -591,7 +591,7 @@ function ThrowerRunState(obj: ThrowerActor, dt: number, rng: Rng,
     case ThrowerState.StrikeOnTheSpot:
       return ThrowerStateStrikeOnTheSpot(obj, dt, rng, host, events);
     case ThrowerState.KnockedTumbling:
-      return ThrowerStateKnockedTumbling(obj, host, dt, rng);
+      return ThrowerStateKnockedTumbling(obj, host, dt, rng, events);
     case ThrowerState.BlinkIn:
       return ThrowerStateBlinkInThreeHops(obj, dt, stance);
     case ThrowerState.StandAndDecide:

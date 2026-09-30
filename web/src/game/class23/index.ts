@@ -75,7 +75,7 @@ export function Class23Init(obj: Actor, rng?: Rng, events?: Events): void {
   obj.fadeFrom = null;
   obj.fade = 0;
   obj.fadeLen = 0;
-  obj.rootFrame = -1;
+  obj.rootCursor = -1;
   obj.motionFlags |= MOTION_FLAG_4;
   obj.hitRadius = CLASS23_RADIUS;
   obj.radius = CLASS23_RADIUS;

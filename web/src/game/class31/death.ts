@@ -33,7 +33,7 @@ import { MotionOf, MotionPlayLength, T } from "../tables";
 import { ActorSetOneShotBlended } from "../class30/motion_cue";
 import { GAME_HZ, MotionFade } from "../class30/states";
 import {
-  ActorArcBeginToAtSpeed, ActorArcVelocityY, ActorClipFrame, ActorClipLength,
+  ActorArcBeginToAtSpeed, ActorArcVelocityY,
   ActorPlayCursor, ActorPlayMotion, ClearCurrentActorVelocityAndAccel,
 } from "./arc";
 import { GroundDustCode, ThrowerEmitGroundDust } from "./ground_dust";
@@ -136,7 +136,7 @@ function playOnce(obj: ThrowerActor, motion: number): void {
   if (!MotionOf(obj, motion)) return;
   obj.react = null;
   obj.action = { motion, ticks: 0 };
-  obj.rootActionFrame = -1;
+  obj.rootActionCursor = -1;
 }
 
 /**
@@ -213,14 +213,15 @@ export function ThrowerBeginKnockbackArc(obj: ThrowerActor,
  *
  * `[port-only]` as a function: the port runs that step inside the class-0x31
  * states that move by velocity rather than in `EnemyThrowerUpdate`, as it has
- * since the class was ported. The fall runs it once on each of its paths that
+ * since the class was ported -- the fall here and the tumble,
+ * `ThrowerStateKnockedTumbling`. Each runs it once on each of its paths that
  * leaves a velocity or an acceleration standing, **after** the state's own
  * tests, which is the engine's order: sub 2's ground test reads `pos.y +
  * vel.y` with the velocity the last frame left, and only then does gravity
  * go in. On every other path both are zero -- sub 0 clears them, the landing
  * clears them -- and the step would move nothing.
  */
-function ThrowerFallIntegrate(obj: ThrowerActor, frames: number): void {
+export function ThrowerFallIntegrate(obj: ThrowerActor, frames: number): void {
   obj.vel.x += obj.accX * frames;
   obj.vel.y += obj.accY * frames;
   obj.vel.z += obj.accZ * frames;
@@ -491,6 +492,7 @@ function ThrowerDie(obj: ThrowerActor): void {
  */
 export function ThrowerStateDeathClip(obj: ThrowerActor): void {
   if (obj.sub === 0) {
+    // `ActorSetMotion(obj+0x194, clip)`: a cut, by character type.
     playOnce(obj, DEATH_CLIP[obj.charType] ?? DEATH_CLIP[0x19]);
     // `ThrowerReleaseAttackPermit` then `ThrowerReleaseSlotOnDeath`, in the
     // engine's order (0x0044A983 then 0x0044A989). Clearing the permit array
@@ -499,9 +501,14 @@ export function ThrowerStateDeathClip(obj: ThrowerActor): void {
     ThrowerReleaseSlotOnDeath(obj);
     obj.dead = true;
     obj.sub = 1;
+  } else if (obj.sub !== 1) {
+    return;
   }
-  const len = ActorClipLength(obj, obj.action?.motion ?? 0);
-  if (obj.action && ActorClipFrame(obj) < len - 1) return;
+  // `g_motion_play_length[obj+0x1B4] - 1 <= obj+0x19C`, the play length and
+  // not the baked clip's: it used to wait `2 * frames - 1` ticks where the
+  // engine waits `play_length - 1`, two or three frames longer.
+  if (ActorPlayCursor(obj)
+      < MotionPlayLength(obj, ActorPlayMotion(obj)) - 1) return;
   ThrowerEnterCorpseState(obj);
 }
 

@@ -1529,6 +1529,11 @@ export class Walker {
     if (G.g_cam_path_end_frame !== G.g_cam_path_cursor) {
       G.g_cam_path_end_frame = G.g_cam_path_cursor;
     }
+    // `MOV [0x009a2230], EAX` with `EAX = 1` at `0x00435F7C`, beside the skip
+    // flag: `g_cutscene_skipping`, up for one walk of the task list --
+    // `FinishCutsceneSkip` takes it down (`game/cutscene_skip.ts`). A skipped
+    // cut scene's civilians leave on it.
+    G.g_cutscene_skipping = 1;
 
     // DrawDialogueSubtitleTask tests the flag every frame and ends the task,
     // so a line already on screen goes at once rather than playing out.

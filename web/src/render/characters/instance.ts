@@ -107,6 +107,19 @@ export interface Instance {
    */
   headTurn?: HeadTurn;
   /**
+   * A civilian's bone 2 as the pose left it this frame, before
+   * `CivilianDrawBonePart`'s turn went on the node -- what
+   * `GameHost.bonePoseMatrix` answers. Render bookkeeping, rewritten every
+   * frame. See `render/characters/civilian_head.ts`.
+   */
+  civHeadPose?: number[];
+  /**
+   * The slot a civilian's bone 2 shows for the mouth, when it is not the
+   * record's own: `undefined` once a swap or a restore has put the record's
+   * slot back on the node. Render bookkeeping.
+   */
+  mouthShown?: number;
+  /**
    * The exporter's `part<i>_<slot>` nodes — the vertex-blended parts, which
    * are not bones — by part index. Found once by name; render bookkeeping.
    */

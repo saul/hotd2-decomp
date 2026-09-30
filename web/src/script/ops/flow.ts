@@ -26,6 +26,9 @@ export const OPS: Record<number, OpImpl> = {
         w.skippable = op.open ?? (op.raw?.length
           ? Number.parseInt(op.raw[0], 16) !== 0 : false);
         if (!w.skippable) w.skipRequested = false;
+        // `MOV [0x009a2230], EAX` at `0x0045FD9D`, the opening arm's zero:
+        // a region that opens drops `g_cutscene_skipping`.
+        else G.g_cutscene_skipping = 0;
         return op.means;
       },
     },

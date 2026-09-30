@@ -594,6 +594,18 @@ export class ExeTables {
   static readonly CIVILIAN_ITEM_BYTES = 0x7c;
 
   /**
+   * `g_civilian_mouth_tables` -- six `{u8 *bytes, s32 count}` records that
+   * `CivilianDrawBonePart` (`FUN_0048D1F0`) indexes by `sub+0xA8`: `MOV EAX,
+   * [ESI*8 + 0x56b950]` and `IDIV dword ptr [ESI*8 + 0x56b954]` at
+   * `0x0048D7F4`..`0x0048D7FE`, each byte `MOVSX`ed and added to bone 2's
+   * slot. Six because op 0x25 and the hook's own `2 -> 3` hand-over name
+   * nothing past 5, and 6 is the "none" the hook tests for; the word after the
+   * sixth record is the first civilian script (L6).
+   */
+  static readonly CIVILIAN_MOUTH_TABLES = 0x0056b950;
+  static readonly CIVILIAN_MOUTH_TABLE_COUNT = 6;
+
+  /**
    * `g_original_item_bank_sprite` -- `{s16 texbank, s16 banner sprite}` per
    * Original Mode item id, which a held-item record's kind is:
    * `MOVSX EAX, word ptr [EDX*4 + 0x56b0f6]` into `SpawnOriginalItemBanner`
@@ -637,7 +649,7 @@ export class ExeTables {
    * opcodes go out of range within a command or two.
    */
   civilianScripts(): { entries: number[]; scripts: CivCommand[][];
-                       items: CivItem[] } {
+                       items: CivItem[]; mouthTables: number[][] } {
     return this.cached("civilianScripts", () => {
       const tab = ExeTables.CIVILIAN_SCRIPT_TABLE;
       const entryVa: number[] = [];
@@ -709,6 +721,11 @@ export class ExeTables {
           } else if (op === 6) {
             d.point = this.civPoint(args[0]);
           }
+          // Op 0x24's second operand is the head's target: three floats for
+          // modes 4 and 5, which are the only ones its two uses name.
+          if (op === 0x24 && (args[1] ?? 0) > 0) {
+            d.point = this.civPoint(args[1]);
+          }
           if (op === 5) d.radius = asFloatBits(args[1]);
           if (op === 0x16) d.radius = asFloatBits(args[0]);
           // Op 0x18 copies six **dwords** -- `MOV EDX,[EAX]; MOV [ECX],EDX`
@@ -743,8 +760,30 @@ export class ExeTables {
         scripts.push(out);
       }
       return { entries: entryVa.map((v) => index.get(v)!), scripts,
-               items: this.civItems };
+               items: this.civItems,
+               mouthTables: this.civilianMouthTables() };
     });
+  }
+
+  /**
+   * `g_civilian_mouth_tables`, each record's bytes read as the signed offsets
+   * the hook adds -- see {@link ExeTables.CIVILIAN_MOUTH_TABLES}.
+   */
+  civilianMouthTables(): number[][] {
+    const out: number[][] = [];
+    for (let i = 0; i < ExeTables.CIVILIAN_MOUTH_TABLE_COUNT; i++) {
+      const rec = ExeTables.CIVILIAN_MOUTH_TABLES + i * 8;
+      const va = this.ru32(rec);
+      const n = this.ri32(rec + 4);
+      const r = va === null ? null : this.v2r(va);
+      if (r === null || n === null || n <= 0 || r + n > this.data.length) {
+        throw new Error(`civilian mouth table ${i} at ${hex(rec)} is unreadable`);
+      }
+      const row: number[] = [];
+      for (let k = 0; k < n; k++) row.push((this.data[r + k] << 24) >> 24);
+      out.push(row);
+    }
+    return out;
   }
 
   /** Decode one held-item record, memoised; returns its index. */

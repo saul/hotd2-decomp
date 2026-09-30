@@ -31,7 +31,8 @@
 import {
   arcScript, CLASS30_ARC_SCRIPTS, CLASS30_ENTRANCE_ARC_SCRIPTS,
 } from "./arcscript";
-import { civilianItemSlots, civilianMotionIds, civilianOrderedStates,
+import { civilianItemSlots, civilianMotionIds, civilianMouthOffsets,
+         civilianOrderedStates,
          TARGET_SCRIPT_SHAPE, targetScript,
          targetScriptMotions } from "./actorscript";
 import type { CivBlock, TargetScript } from "./actorscript";
@@ -2127,6 +2128,21 @@ export async function resolveForStage(
       const which = rec.param(0x01, "i8") || 0;
       entryClips.push(...civilianMotionIds(civscripts, which));
       for (const s of civilianItemSlots(civscripts, which)) c.heldSlots.add(s);
+      // ...and the head's mouth frames: `CivilianDrawBonePart` draws bone 2's
+      // record slot plus a table's byte, and the record slot is the face this
+      // spawn's attachment list binds, or the skeleton's own.
+      const offsets = civilianMouthOffsets(civscripts, which);
+      if (offsets.size) {
+        let head = c.bones.find((b) => b.bone === 2)?.slot ?? 0;
+        for (const id of p.attachments) {
+          const arec = attachRecords[id];
+          if (id < ExeTablesClass.ATTACHMENT_REPLACES_BELOW && arec
+              && arec.bone === 2 && arec.slot) {
+            head = arec.slot;
+          }
+        }
+        if (head) for (const k of offsets) c.heldSlots.add(head + k);
+      }
     }
     // The models the stage-4 boss swaps onto its bones -- the hand that holds
     // a prop, the blade `Boss4Init` seats, and the nine heads

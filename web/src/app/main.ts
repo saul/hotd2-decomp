@@ -890,6 +890,10 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     const playDialogue = (d: { group: number }): void => {
       const v = this.dialogue?.messages?.[String(d.group)]?.[0] ?? null;
       if (!v || !this.walker) return;
+      // `EvtOpPlayDialogue2D` (`FUN_00435B80`) says nothing while a skip is
+      // under way: `g_nEvtSkipFlag` (the walker's `skipRequested`) or
+      // `g_cutscene_skipping` returns before the voice (`0x00435BC0`).
+      if (this.walker.skipRequested || G.g_cutscene_skipping !== 0) return;
       if (v.voice) this.bgm.play(v.voice);
       // Onto the walker, not into the layer: a caption is script state, and
       // the one raised by a civilian is no less so than the one raised by

@@ -42,6 +42,8 @@ import { RunPhaseDispatch } from "./run_phase";
 import { ShotEffectsTick } from "./effects/tick";
 import { BossHpBarsTick } from "./boss_hp_bar";
 import { LifeGrantedMarkersTick } from "./class10/life_marker";
+import { CivilianHitMarkersTick } from "./class10/hit_marker";
+import { FinishCutsceneSkip } from "./cutscene_skip";
 import { BossBannersTick } from "./boss_banner";
 import { WaterWaveSourcesTick } from "./class17";
 import { Boss4HitMarksTick } from "./class19/hit_mark";
@@ -980,6 +982,10 @@ function SceneTaskWalk(dt: number, host: GameHost,
   // the first is drawn on the frame the life is paid. See
   // `game/class10/life_marker.ts`.
   LifeGrantedMarkersTick();
+  // ...and the markers a shot civilian leaves (`SpawnCivilianHitMarker`,
+  // `FUN_0048E080`), allocated by her update's shot arm the same way. See
+  // `game/class10/hit_marker.ts`.
+  CivilianHitMarkersTick();
   // ...and the marks the stage-4 boss's flesh hits leave, which
   // `Boss4SpawnBoneHitMark` (`FUN_004920C0`) allocates during the fight --
   // after the bar, so after it in the walk.
@@ -998,6 +1004,12 @@ function SceneTaskWalk(dt: number, host: GameHost,
   // Class 0x45's own tasks -- its intro card, the sparks and splashes, the
   // bulge and the wake -- allocated by its actors above, so after them.
   Boss3TasksTick(events);
+  // `[port-only]` placement: the skip watcher's second routine. The walker
+  // raises `g_cutscene_skipping` where the watcher would, between two
+  // frames, so its next update -- `FinishCutsceneSkip` -- comes after this
+  // walk's actors, each of which has seen it once. See
+  // `game/cutscene_skip.ts`.
+  if (G.g_cutscene_skipping !== 0) FinishCutsceneSkip();
   // The layered queue is flushed by `GameUpdate`, after the run phase.
   return { lookAt: G.g_camera_block_target };
 }

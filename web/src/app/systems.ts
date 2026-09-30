@@ -40,6 +40,8 @@ export interface HostBackend {
   boneWorld(at: number, bone: number, out: Vec3): boolean;
   /** One bone's world matrix, `Matrix4.elements`. See `GameHost.boneMatrix`. */
   boneMatrix?(at: number, bone: number, out: number[]): boolean;
+  /** The same as posed, before a node hook turned it. See `GameHost.bonePoseMatrix`. */
+  bonePoseMatrix?(at: number, bone: number, out: number[]): boolean;
   /** One bone's hit sphere in world space. See `GameHost.boneSphere`. */
   boneSphereWorld?(at: number, bone: number, out: Vec3): number | null;
   setBoneSlot(at: number, bone: number, slot: number): void;
@@ -96,6 +98,8 @@ export class GameSystem implements System {
       this.backend?.boneWorld(at, bone, out) ?? false,
     boneMatrix: (at, bone, out) =>
       this.backend?.boneMatrix?.(at, bone, out) ?? false,
+    bonePoseMatrix: (at, bone, out) =>
+      this.backend?.bonePoseMatrix?.(at, bone, out) ?? false,
     boneSphere: (at, bone, out) =>
       this.backend?.boneSphereWorld?.(at, bone, out) ?? null,
     // The two matrices of the camera block `g_camera_index` names, as

@@ -140,6 +140,8 @@ import type { CivilianState } from "./state";
 export * from "./ops";
 export * from "./items";
 export * from "./life_marker";
+export * from "./hit_marker";
+export * from "./draw";
 export * from "./turn";
 export * from "./children";
 export * from "./hooks";

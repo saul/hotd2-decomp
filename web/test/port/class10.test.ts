@@ -7,7 +7,9 @@ import { ActorAdvanceMotion } from "../../src/game/motion";
 import { UpdateSceneViewAndLight } from "../../src/game/camera/view";
 import { MotionFlag } from "../../src/game/actor";
 import { ScoreAddForPlayer } from "../../src/game/combat/score";
-import { G, HIT_SLOT_NONE, ResetGameGlobals } from "../../src/game/globals";
+import {
+  AppState, G, HIT_SLOT_NONE, ResetGameGlobals,
+} from "../../src/game/globals";
 import { NULL_HOST } from "../../src/game/host";
 import { SetGameTables } from "../../src/game/tables";
 import { QueryGroundHeightAt } from "../../src/game/coli";
@@ -19,9 +21,17 @@ import { ActorDespawn } from "../../src/game/despawn";
 import { HIT_SLOT_CLAIMED } from "../../src/game/hit_slots";
 import { SpawnClass } from "../../src/game/spawn_class";
 import {
-  CivilianAttachSet, CivilianOp, CivilianReapplyWaitCommand, CivilianRunScript,
-  CivilianTarget, CivilianUpdate, CivilianWait, LifeGrantedMarkersTick,
+  AngleApproachInPlace, CivilianAttachSet, CivilianHitMarkersTick, CivilianOp,
+  CivilianReapplyWaitCommand, CivilianRunScript, CivilianTarget, CivilianUpdate,
+  CivilianWait, LifeGrantedMarkersTick,
 } from "../../src/game/class10";
+import { FinishCutsceneSkip } from "../../src/game/cutscene_skip";
+import { GameMode } from "../../src/game/game_mode";
+import { PlayerTasksRun } from "../../src/game/player_shell";
+import {
+  MatCopy, MatIdentity, MatrixRotateY, MatrixTranslate,
+} from "../../src/game/matrix";
+import type { GameHost } from "../../src/game/host";
 import { CivilianLeaveField } from "../../src/game/class10/update";
 import type { CivilianCmdJson, CivilianItemJson } from "../../src/bundle/scene";
 import { vec3, type Vec3 } from "../../src/game/vec";
@@ -1358,26 +1368,25 @@ console.log("\nclass 0x10, the civilian and the rescue:");
           `gate ${gate} dz ${d.dz.toFixed(3)} dx ${d.dx.toFixed(3)}`);
   }
   // **The bug this pair was written for.** `SetHudShutterState`,
-  // `SetAttachMode`, `SetAttachTarget` and `SetPairA` all used to fall through
+  // `SetHeadLook`, `SetHeadLookAt` and `SetMouth` all used to fall through
   // into `SetScale`'s body — so their operands, small integers, were
   // reinterpreted as float bit patterns into `obj.scale`.
   // `AsFloat(2)` is 2.8e-45, `SkeletonApplyRootMotion` multiplies the root
   // delta by it, and the civilian stopped moving while her legs kept walking.
-  // 125 commands in the shipped streams run one of those four. The first has
-  // a body of its own now — see the shutter block below — and the other three
-  // are still unread; neither writes `model+0x116C`.
+  // 125 commands in the shipped streams run one of those four. Each has a body
+  // of its own now, and none of them writes `model+0x116C`.
   {
     const { a, events } = civScene([[
       cmd(CivilianOp.Wait, CivilianWait.RootMotion),
-      cmd(CivilianOp.SetPairA, 1, 2),
-      cmd(CivilianOp.SetAttachMode, 2),
+      cmd(CivilianOp.SetMouth, 1, 2),
+      cmd(CivilianOp.SetHeadLook, 2),
       cmd(CivilianOp.SetHudShutterState, 1),
       cmd(CivilianOp.SetMotion, 12, -1),
       cmd(CivilianOp.Wait, 0),
       cmd(CivilianOp.End),
     ]]);
     const d = cWalk(a, events, 120);
-    check("the unread opcodes leave `model+0x116C` alone, so she still walks",
+    check("the head and mouth opcodes leave `model+0x116C` alone, so she still walks",
           a.scale === 1 && d.dz < -10,
           `scale ${a.scale} dz ${d.dz.toFixed(3)}`);
   }
@@ -1683,5 +1692,401 @@ console.log("\nclass 0x10's resume stores the cursor, not the clock:");
           a.motion === 704 && (G.g_script_flags[7] ?? 0) === 0
           && G.g_script_flags[8] === 1,
           `flags 7:${G.g_script_flags[7]} 8:${G.g_script_flags[8]}`);
+  }
+}
+
+// -------------------------------------------------------------------------
+// The audit's gaps in class 0x10's VM: ops 0x16, 0x1D, 0x1F, 0x22..0x25,
+// 0x28 and 0x2B, the node hook at 0x0048D1F0, the shot arm and its marker,
+// and the cut-scene skip. Every number below is the exe's -- an immediate or
+// a `.rdata` byte named beside it -- and every setup starts from
+// `ResetGameGlobals`.
+console.log("\nclass 0x10's head, mouth, hit marker, skip and the audit's ops:");
+{
+  const rng = new Rng(5);
+  /**
+   * `g_civilian_mouth_tables` (`0x0056B950`), the six runs of bytes the
+   * hook reads, as `read_memory` gives them from `0x0056B88C`.
+   */
+  const MOUTH_TABLES = [
+    [1, 2, 3, 3, 2, 1, 0, 0, 1, 2, 2, 1, 2, 3, 4, 4, 3, 2, 1, 0, 0],
+    [1, 1, 2, 2, 3, 3, 3, 3, 2, 2, 1, 1, 1, 1, 2, 2, 2, 2, 1, 1, 2, 2, 3, 3,
+     4, 4, 4, 4, 3, 3, 2, 2, 1, 1, 0, 0, 0, 0],
+    [1, 1, 1, 2, 2, 2, 3, 3, 3, 3, 2, 2, 2, 1, 1, 1, 1, 2, 2, 2, 2, 1, 1, 1,
+     2, 2, 2, 3, 3, 3, 4, 4, 4, 4],
+    [5, 5, 5, 6, 6, 6, 7, 7, 7, 8, 8, 8, 9],
+    [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [1, 1, 2, 2, 3, 3, 3, 3, 2, 2, 1, 1, 1, 1, 2, 2, 2, 2, 1, 1, 0, 0, 0, 0,
+     1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 7, 7, 6, 6, 5, 5, 4, 4, 3, 3,
+     2, 2, 1, 1, 0, 0, 0, 0],
+  ];
+  /**
+   * The pose the renderer would hand over: bone 1 at the origin turned by
+   * `bone1Yaw`, bone 2 five units up it with no turn of its own, and every
+   * other bone at `(10 * bone, 0, -100)` so a marker says which one it was
+   * put at.
+   */
+  let bone1Yaw = 0x8000;
+  const bone1 = (): number[] => {
+    const m = MatIdentity();
+    MatrixRotateY(m, bone1Yaw);
+    return m;
+  };
+  const poseHost: GameHost = {
+    ...NULL_HOST,
+    boneMatrix: (_at, bone, out) => {
+      if (bone !== 1) return false;
+      MatCopy(out, bone1());
+      return true;
+    },
+    bonePoseMatrix: (_at, bone, out) => {
+      if (bone !== 2) return false;
+      const m = bone1();
+      MatrixTranslate(m, 0, 5, 0);
+      MatCopy(out, m);
+      return true;
+    },
+    boneWorld: (_at, bone, out) => {
+      out.x = 10 * bone; out.y = 0; out.z = -100;
+      return true;
+    },
+  };
+  const scene = (cmds: CivilianCmdJson[][],
+                 opts: { mode?: GameMode; invulnerable?: boolean } = {}) => {
+    G.g_GameMode = opts.mode ?? GameMode.Arcade;
+    ResetGameGlobals();
+    if (opts.invulnerable) {
+      // `PlayerEnterPlay` opens the window; nothing here runs it out.
+      PlayerTasksRun({ host: NULL_HOST, rng: new Rng(1) });
+    } else {
+      EnterPlay();
+    }
+    G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    G.g_scene_state_major = SCENE_MAJOR_PLAYING;
+    SetGameTables(CHARS, undefined, undefined, undefined, undefined, {
+      entries: [0], scripts: cmds, items: [], mouthTables: MOUTH_TABLES,
+      // A removal cue on a path that never plays: -1 would match the reset's
+      // `g_active_cam_path` and count down on the first frame.
+      spawns: {
+        "16384": {
+          charType: 1, script: 0, removePath: 99, removeFrame: 0,
+          removeDelay: 0, children: [],
+        },
+      },
+    });
+    const a = ActorSpawn(0x4000, SpawnClass.Civilian, 1, "civilian",
+                         undefined, rng);
+    a.visible = true;
+    a.pos = vec3(0, 0, 0);
+    G.g_GameMode = GameMode.Arcade;
+    return { a, events: new Events() };
+  };
+  const step = (a: ReturnType<typeof ActorSpawn>, events: Events,
+                host: GameHost = poseHost) =>
+    CivilianUpdate(a, { dt: 1 / 60, rng, host, events });
+  const cmd = (op: CivilianOp, ...args: number[]): CivilianCmdJson =>
+    ({ op, args });
+
+  // -- AngleApproachInPlace (0x0048D9B0) ---------------------------------
+  check("AngleApproachInPlace steps by the cap, the short way, unwrapped",
+        AngleApproachInPlace(0, 0x8001, 0x100) === -0x100
+        && AngleApproachInPlace(0x10, 0x20, 0x100) === 0x20
+        && AngleApproachInPlace(0xfff0, 0x10, 0x100) === 0x10010
+        && AngleApproachInPlace(-0x300, 0, 0x100) === -0x200,
+        `${AngleApproachInPlace(0, 0x8001, 0x100)} `
+        + `${AngleApproachInPlace(0xfff0, 0x10, 0x100)}`);
+
+  // -- op 0x16: from the radius she has, over whole frames ----------------
+  // `FSUB [EDI+0x128]; FIDIV dword ptr [ESI-0x4]`. In the Init's first block
+  // `obj+0x128` is still `ActorClearGameFields`' zero -- the Init writes 1.0
+  // after the script -- so a 30-frame grow to 5 steps 5/30 a frame from 1.
+  {
+    const { a, events } = scene([[
+      cmd(CivilianOp.Wait, 0),
+      cmd(CivilianOp.SetRadiusRamp, 0x40a00000, 30),
+      cmd(CivilianOp.End),
+    ]]);
+    const s = Math.fround(5 / 30);
+    check("op 0x16 in the Init measures from obj+0x128's zero",
+          a.civ?.scaleStep === s && a.bodyRadius === 1,
+          `step ${a.civ?.scaleStep} radius ${a.bodyRadius}`);
+    step(a, events, NULL_HOST);
+    check("...and PoseHookGrowAndPushOutOfWorld takes one step of it",
+          a.bodyRadius === 1 + s, `radius ${a.bodyRadius}`);
+  }
+  {
+    const { a, events } = scene([[
+      cmd(CivilianOp.Wait, CivilianWait.Free),
+      cmd(CivilianOp.Wait, 0),
+      cmd(CivilianOp.SetRadiusRamp, 0x40a00000, 4),
+      cmd(CivilianOp.End),
+    ]]);
+    step(a, events, NULL_HOST);           // her second block: (5 - 1) / 4
+    step(a, events, NULL_HOST);
+    check("op 0x16 later on ramps from the radius she has",
+          a.civ?.scaleStep === 1 && a.bodyRadius === 2,
+          `step ${a.civ?.scaleStep} radius ${a.bodyRadius}`);
+  }
+
+  // -- op 0x22's null pointer keeps the sound op 0x21 queued --------------
+  {
+    const { a, events } = scene([[
+      cmd(CivilianOp.Wait, 0),
+      cmd(CivilianOp.QueueSound, 0x20000014, 3),
+      cmd(CivilianOp.QueueSoundList, 0),
+      cmd(CivilianOp.End),
+    ]]);
+    const heard: number[] = [];
+    events.on("sound.play", (d) => heard.push(d.id));
+    for (let i = 0; i < 3; i++) step(a, events, NULL_HOST);
+    check("a null op 0x22 leaves op 0x21's sound to play",
+          heard.includes(0x20000014), `heard ${heard.map((x) => x.toString(16))}`);
+  }
+  // ...and the queue holds while `g_app_state` is 10 (`0x0048AD26`).
+  {
+    const { a, events } = scene([[
+      cmd(CivilianOp.Wait, 0),
+      cmd(CivilianOp.QueueSound, 0x20000014, 2),
+      cmd(CivilianOp.End),
+    ]]);
+    G.g_app_state = 10;
+    step(a, events, NULL_HOST);
+    step(a, events, NULL_HOST);
+    check("the sound queue holds while g_app_state is 10",
+          a.civ?.soundDelay === 2, `delay ${a.civ?.soundDelay}`);
+    G.g_app_state = AppState.InPlay;
+  }
+
+  // -- op 0x1F: the title menu's row picks the stream ---------------------
+  for (const mode of [GameMode.Arcade, GameMode.Original]) {
+    const { a } = scene([[
+      cmd(CivilianOp.Wait, 0),
+      { op: CivilianOp.SetResumeByMode, args: [0x1000, 0x2000],
+        scripts: [1, 2] },
+      cmd(CivilianOp.End),
+    ], [cmd(CivilianOp.Wait, 0), cmd(CivilianOp.End)],
+       [cmd(CivilianOp.Wait, 0), cmd(CivilianOp.End)]], { mode });
+    const want = mode === GameMode.Original ? 2 : 1;
+    check(`op 0x1F takes stream ${want} when the game was confirmed as mode `
+          + `${mode}`,
+          G.g_title_menu_cursor === mode && a.civ?.resumeScript === want,
+          `cursor ${G.g_title_menu_cursor} resume ${a.civ?.resumeScript}`);
+  }
+
+  // -- op 0x2B: the countdown nothing reads, stepped ----------------------
+  {
+    const { a, events } = scene([[
+      cmd(CivilianOp.Wait, 0),
+      cmd(CivilianOp.InPlayOnly, 5, 0, 3, 0x1e, 0x14),
+      cmd(CivilianOp.End),
+    ]]);
+    step(a, events, NULL_HOST);
+    step(a, events, NULL_HOST);
+    check("op 0x2B's s16 is counted down once a frame",
+          a.civ?.inPlayCountdown === 3, `count ${a.civ?.inPlayCountdown}`);
+  }
+
+  // -- the head: modes, the pose's own angles, the cap and the clamp -------
+  // Op 0x24 mode 5: a point in her own frame, `(100, 6.5, 0)`, and her head
+  // at `(0, 5, 0)` -- `inv(R1) (T - P)` is `(100, 1.5, 0)` turned by bone 1's
+  // inverse, and 1.5 comes off y (`0x004C4CB8`), so the pitch is 0 and the
+  // yaw is `atan2(dx, dz)`: with bone 1 turned half round `dx` is -100, a
+  // quarter turn the other way, clamped to `-0x3800` (`0x0048D642`).
+  {
+    bone1Yaw = 0x8000;
+    const { a, events } = scene([[
+      cmd(CivilianOp.Wait, 0),
+      { op: CivilianOp.SetHeadLookAt, args: [5, 0x56e028],
+        point: [100, 6.5, 0] },
+      cmd(CivilianOp.End),
+    ]]);
+    step(a, events);
+    check("the head turns 0x100 a frame toward its target",
+          a.civ?.headYaw === -0x100 && a.civ?.headPitch === 0
+          && a.civ?.headTurned === true,
+          `yaw ${a.civ?.headYaw} pitch ${a.civ?.headPitch}`);
+    for (let i = 0; i < 70; i++) step(a, events);
+    check("...measured in bone 1's own axes, and clamped at 0x3800",
+          a.civ?.headYaw === -0x3800 && a.civ?.headMode === 5,
+          `yaw ${a.civ?.headYaw}`);
+    // With bone 1 unturned the same point is a quarter turn the other way,
+    // `+0x3800`, and the turn winds back toward it -- through zero, where all
+    // three angles are 0 and the hook drops the mode (`0x0048D6E4`): 0x3800
+    // is 56 steps of 0x100, and the head stops there.
+    bone1Yaw = 0;
+    for (let i = 0; i < 55; i++) step(a, events);
+    const before = a.civ?.headYaw;
+    step(a, events);
+    for (let i = 0; i < 20; i++) step(a, events);
+    check("...and winding back through zero ends the turn and the mode",
+          before === -0x100 && a.civ?.headYaw === 0 && a.civ?.headMode === 0
+          && a.civ?.headTurned === false,
+          `yaw ${before} -> ${a.civ?.headYaw} mode ${a.civ?.headMode}`);
+  }
+  // Bone 1 a quarter turn round (`MatrixRotateY(0x4000)` takes its +Z to the
+  // world's +X): the same point is straight ahead of it, `inv(R1) (T - P)` is
+  // `(0, 1.5, 100)`, so there is nothing to turn -- all three angles stay 0
+  // and the first draw drops the mode. Without the inverse it would be
+  // straight behind, and clamped.
+  {
+    bone1Yaw = 0x4000;
+    const { a, events } = scene([[
+      cmd(CivilianOp.Wait, 0),
+      { op: CivilianOp.SetHeadLookAt, args: [5, 0x56e028],
+        point: [100, 6.5, 0] },
+      cmd(CivilianOp.End),
+    ]]);
+    step(a, events);
+    check("a target straight ahead of bone 1 turns nothing, and ends the mode",
+          a.civ?.headYaw === 0 && a.civ?.headPitch === 0
+          && a.civ?.headMode === 0 && a.civ?.headTurned === false,
+          `yaw ${a.civ?.headYaw} mode ${a.civ?.headMode}`);
+    bone1Yaw = 0x8000;
+  }
+  // Op 0x23 mode 2 with no children goes straight back to 0 (`0x0048C06A`).
+  {
+    const { a } = scene([[
+      cmd(CivilianOp.Wait, 0),
+      cmd(CivilianOp.SetHeadLook, 2),
+      cmd(CivilianOp.End),
+    ]]);
+    check("op 0x23 mode 2 with no child to watch is mode 0",
+          a.civ?.headMode === 0, `mode ${a.civ?.headMode}`);
+  }
+
+  // -- the mouth ----------------------------------------------------------
+  {
+    const { a, events } = scene([[
+      cmd(CivilianOp.Wait, 0),
+      cmd(CivilianOp.SetMouth, 5, 0),
+      cmd(CivilianOp.End),
+    ]]);
+    const seen: number[] = [];
+    for (let i = 0; i < 7; i++) {
+      step(a, events, NULL_HOST);
+      seen.push(a.civ?.mouthOffset ?? -1);
+    }
+    // Five frames of table 0 -- 1, 2, 3, 3, 2 -- then parked on its last
+    // byte, 0 (`sub+0xA0 = count - 1`).
+    check("op 0x25's mouth steps table 0 and parks on its last byte",
+          seen.join() === "1,2,3,3,2,0,0", `offsets ${seen}`);
+  }
+  {
+    const { a, events } = scene([[
+      cmd(CivilianOp.Wait, 0),
+      cmd(CivilianOp.SetMouth, 2, 2),
+      cmd(CivilianOp.End),
+    ]]);
+    for (let i = 0; i < 3; i++) step(a, events, NULL_HOST);
+    check("...and table 2 hands over to table 3 when its count runs out",
+          a.civ?.mouthTable === 3 && a.civ?.mouthOffset === 5
+          && a.civ?.mouthFrames === 12,
+          `table ${a.civ?.mouthTable} off ${a.civ?.mouthOffset} `
+          + `frames ${a.civ?.mouthFrames}`);
+  }
+
+  // -- the shot arm ---------------------------------------------------------
+  // Shot while the player is still invulnerable from entering play:
+  // `PlayerTakeDamageTimed(p, 0, 0, 1, -1)` takes the life through the window
+  // and raises no overlay. Her on-shot script picks the voice (op 0x2A) and
+  // names a resume, and the arm runs the voice after the script and clears
+  // the resume after it.
+  {
+    bone1Yaw = 0x8000;
+    const { a, events } = scene([
+      [cmd(CivilianOp.Wait, 0),
+       { op: CivilianOp.SetOnShot, args: [0x1000], scripts: [1] },
+       cmd(CivilianOp.SetHeadLook, 1),
+       cmd(CivilianOp.SetHitBone, 9),
+       cmd(CivilianOp.End)],
+      [cmd(CivilianOp.Wait, 0),
+       cmd(CivilianOp.SetDeathVoice, 0),
+       { op: CivilianOp.SetResume, args: [0x2000], scripts: [2] },
+       cmd(CivilianOp.End)],
+      [cmd(CivilianOp.Wait, 0), cmd(CivilianOp.End)],
+    ], { invulnerable: true });
+    const lives = G.g_player_lives[0];
+    const heard: number[] = [];
+    events.on("sound.play", (d) => heard.push(d.id));
+    check("the player is still in the window a shot has to get through",
+          G.g_player_invuln_frames[0] > 0,
+          `invuln ${G.g_player_invuln_frames[0]}`);
+    a.flags |= ActorFlag.Hit | 2;
+    step(a, events);
+    check("shooting her costs a life through the invulnerability window",
+          G.g_player_lives[0] === lives - 1 && G.g_player_was_hit[0] === 0,
+          `lives ${lives} -> ${G.g_player_lives[0]} hit ${G.g_player_was_hit[0]}`);
+    check("...with the voice her on-shot script chose, after it ran",
+          heard.includes(0x2000001a) && !heard.includes(0x20000012),
+          `heard ${heard.map((x) => x.toString(16))}`);
+    check("...and the resume it named cleared behind it",
+          a.civ?.resumeScript === -1, `resume ${a.civ?.resumeScript}`);
+    check("...and the head sent back to rest",
+          a.civ?.headMode === 6, `mode ${a.civ?.headMode}`);
+    // `SpawnCivilianHitMarker` at bone 9's point -- op 0x28 -- and at a depth
+    // of 100 the scale is `z * -0.02` (`0x0056B188`, `0x0056B184`).
+    const m = G.g_civilian_hit_markers[0];
+    check("...and a marker at the bone op 0x28 named, player 0's slot",
+          G.g_civilian_hit_markers.length === 1 && m.pos.x === 90
+          && m.slot === 0x132d
+          && m.scale === Math.fround(-100 * Math.fround(-0.02)),
+          `markers ${G.g_civilian_hit_markers.length} x ${m?.pos.x} `
+          + `slot ${m?.slot.toString(16)} scale ${m?.scale}`);
+    CivilianHitMarkersTick();
+    check("its draw is lifted 2 and brought 5 nearer in the view",
+          m.drawnAt.y === 2 && m.drawnAt.z === -95 && m.frames === 0x3b
+          && m.drawnAlpha === null,
+          `at ${m.drawnAt.y},${m.drawnAt.z} frames ${m.frames}`);
+    for (let i = 0; i < 0x3b; i++) CivilianHitMarkersTick();
+    check("...fades over its last five frames and is gone after sixty",
+          m.drawnAlpha === Math.fround(1 * Math.fround(1 / 6))
+          && G.g_civilian_hit_markers.length === 1,
+          `alpha ${m.drawnAlpha} left ${G.g_civilian_hit_markers.length}`);
+    CivilianHitMarkersTick();
+    check("...and leaves the list on the next tick",
+          G.g_civilian_hit_markers.length === 0);
+  }
+
+  // -- the cut-scene skip -------------------------------------------------
+  // The walker's `requestSkip` raises `g_cutscene_skipping` where
+  // `CheckCutsceneSkipRequest` does (`0x00435F7C`); here it is raised the
+  // same way by hand, and taken down by `FinishCutsceneSkip`.
+  for (const stays of [false, true]) {
+    const word = stays ? CivilianWait.StayThroughSkip : 0;
+    const { a, events } = scene([[
+      cmd(CivilianOp.Wait, word),
+      cmd(CivilianOp.End),
+    ]]);
+    G.g_cutscene_skipping = 1;
+    step(a, events, NULL_HOST);
+    FinishCutsceneSkip();
+    const delay = a.civ?.removeDelay;
+    step(a, events, NULL_HOST);
+    check(stays
+      ? "a skip leaves a civilian whose word carries 0x20000000"
+      : "a skip gives a civilian one frame, and she leaves on the next",
+          stays ? delay === 0 && !a.despawned
+                : delay === 1 && a.despawned,
+          `delay ${delay} despawned ${a.despawned}`);
+  }
+  // Op 0x1D's gate: walking off, she says nothing -- unless a skip is under
+  // way and her word keeps her through it (`0x0048BF36`).
+  for (const [skipping, stays, says] of [[0, true, false], [1, true, true],
+                                         [1, false, false]] as const) {
+    const { a, events } = scene([[
+      cmd(CivilianOp.Wait, CivilianWait.Free),
+      cmd(CivilianOp.Wait, stays ? CivilianWait.StayThroughSkip : 0),
+      cmd(CivilianOp.PlayDialogue, 0x3b),
+      cmd(CivilianOp.End),
+    ]]);
+    let said = false;
+    events.on("civilian.dialogue", () => { said = true; });
+    if (a.civ) a.civ.removeDelay = 40;
+    G.g_cutscene_skipping = skipping;
+    CivilianRunScript(a, 0, 1, { dt: 1 / 60, rng, host: NULL_HOST, events });
+    G.g_cutscene_skipping = 0;
+    check(`op 0x1D with the countdown running, skip ${skipping}, `
+          + `bit ${stays ? "set" : "clear"}: ${says ? "says it" : "silent"}`,
+          said === says, `said ${said}`);
   }
 }

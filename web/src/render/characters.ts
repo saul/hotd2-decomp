@@ -103,6 +103,8 @@ import { alphaGatesWholeActor, applyDrawGates }
   from "./characters/draw_gates";
 import { applyHeadAim } from "./characters/head_aim";
 import { clearHeldItems, syncHeldItems } from "./characters/held_items";
+import { applyCivilianHead } from "./characters/civilian_head";
+import { CIVILIAN_HEAD_BONE } from "../game/class10/draw";
 import {
   clearHumanoidHookDraws, syncHumanoidHookDraws,
 } from "./characters/humanoid_hook";
@@ -624,6 +626,9 @@ export class CharacterLayer implements System {
       // `char_adv02`'s midriff once its torso is shot; see
       // `game/class30/bonecels.ts` for why no table names the models.
       syncBoneCels(this.goreParts, inst);
+      // `CivilianDrawBonePart` (`FUN_0048D1F0`)'s head: the turn and the
+      // mouth, after the swaps above -- see `render/characters/civilian_head.ts`.
+      if (inst.a.civ) applyCivilianHead(inst, this.goreParts);
       this.syncAttachments(inst);
       // `CivilianDrawHeldItems` (`FUN_0048CD10`)'s draw -- see
       // `render/characters/held_items.ts`.
@@ -1046,6 +1051,7 @@ export class CharacterLayer implements System {
     clearBoneCels(inst);
     inst.hidden = 0;
     inst.slots = undefined;
+    inst.mouthShown = undefined;
     clearHeldItems(inst);
     clearHumanoidHookDraws(inst);
     for (const node of inst.bones.values()) {
@@ -1122,6 +1128,9 @@ export class CharacterLayer implements System {
       if (inst.slots?.[k] === slot) continue;
       swapGore(this.goreParts, inst, Number(k), slot);
       (inst.slots ??= {})[k] = slot;
+      // The node shows the record's slot again; a mouth frame is laid back
+      // on by `applyCivilianHead`.
+      if (Number(k) === CIVILIAN_HEAD_BONE) inst.mouthShown = undefined;
     }
   }
 
@@ -1232,6 +1241,20 @@ export class CharacterLayer implements System {
     node.updateWorldMatrix(true, false);
     for (let i = 0; i < 16; i++) out[i] = node.matrixWorld.elements[i];
     return true;
+  }
+
+  /**
+   * One bone's world matrix as the pose left it, for
+   * `GameHost.bonePoseMatrix`: a civilian's bone 2 before the turn
+   * `applyCivilianHead` put on it, and every other node as it stands.
+   */
+  bonePoseMatrix(at: number, bone: number, out: number[]): boolean {
+    const inst = this.instances.find((i) => i.at === at);
+    if (inst?.civHeadPose && bone === CIVILIAN_HEAD_BONE) {
+      for (let i = 0; i < 16; i++) out[i] = inst.civHeadPose[i];
+      return true;
+    }
+    return this.boneMatrix(at, bone, out);
   }
 
   /** Swap one bone's drawn model — the thrower's hand going bare and back. */

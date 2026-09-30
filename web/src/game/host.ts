@@ -183,6 +183,16 @@ export interface GameHost {
    */
   boneMatrix?(at: number, bone: number, out: number[]): boolean;
   /**
+   * One bone's **world** matrix as the pose left it, before a class's node
+   * hook turned it. `SkeletonEmitNode` (`FUN_004114C0`) stores the posed
+   * node in the record's `+0x28` and then calls the hook, and class 0x10's
+   * (`CivilianDrawBonePart`) reads that matrix before it rebuilds bone 2 over
+   * it -- so the turn is measured from the pose, not from last frame's turn.
+   * For every node no hook turns it is {@link boneMatrix}. Optional and false
+   * when not posed.
+   */
+  bonePoseMatrix?(at: number, bone: number, out: number[]): boolean;
+  /**
    * The two matrices of the camera block `g_camera_index` names:
    * `g_camera_world_to_view` (`0x009A6000`, the block's `+0x00`) and its
    * inverse `g_camera_blocks` (`0x009A6040`, `+0x40`), each `+ index *

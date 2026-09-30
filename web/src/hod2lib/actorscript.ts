@@ -146,6 +146,7 @@ export interface CivBlock {
   entries: number[];
   scripts: CivCommand[][];
   items: CivItem[];
+  mouthTables?: number[][];
 }
 
 /**
@@ -208,6 +209,37 @@ export function civilianMotionIds(block: CivBlock | null,
     }
   }
   return [...new Set(out)].sort((a, b) => a - b);
+}
+
+/**
+ * Every offset `CivilianDrawBonePart` (`FUN_0048D1F0`) can add to bone 2's
+ * slot for class 0x10's script *entry*: the bytes of each mouth table an op
+ * 0x25 in the streams it reaches names, and of table 3 when it names table 2,
+ * which the hook hands over to. Empty when nothing names one -- the mouth is
+ * then table 6, none, and the head draws its own slot.
+ */
+export function civilianMouthOffsets(block: CivBlock | null,
+                                     entry: number): Set<number> {
+  const scripts = block?.scripts ?? [];
+  const entries = block?.entries ?? [];
+  const tables = block?.mouthTables ?? [];
+  const out = new Set<number>();
+  if (!(entry >= 0 && entry < entries.length)) return out;
+  const named = new Set<number>();
+  const seen = new Set<number>();
+  const pending = [entries[entry]];
+  while (pending.length) {
+    const i = pending.pop()!;
+    if (seen.has(i) || !(i >= 0 && i < scripts.length)) continue;
+    seen.add(i);
+    for (const c of scripts[i]) {
+      if (c.op === 0x25 && c.args.length > 1) named.add(c.args[1] as number);
+      for (const j of c.scripts ?? []) if (j >= 0) pending.push(j);
+    }
+  }
+  if (named.has(2)) named.add(3);
+  for (const t of named) for (const v of tables[t] ?? []) out.add(v);
+  return out;
 }
 
 /**

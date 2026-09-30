@@ -7,8 +7,25 @@
  *
  * The bundle's glTF holds every region's models at once, because that is what
  * lets free roam show the whole level. Which of them are *drawn* is decided
- * here, from `region_enter` (`0x29`) and the asset-slot opcodes, exactly as
- * `RegionDrawResidentSet` decides it in the game.
+ * here, from `region_enter` (`0x29`), exactly as `RegionDrawResidentSet`
+ * decides it in the game.
+ *
+ * ## What the stage does not draw
+ *
+ * A model the script streams in with opcode `0x50` and no region lists is
+ * **not drawn by the stage** (`L54`): the opcode makes a slot resident, and
+ * the model reaches the screen only where a routine calls `AssetDrawSlot` on
+ * it, under that routine's own matrix -- a door, a hinge, an item, a boss's
+ * prop, the sky. Those are drawn by the layers that run those routines, from
+ * their own templates or (the sky) by taking the stage's node. This used to
+ * draw every such model where its own coordinates put it, the world's
+ * origin, whenever the script had loaded it: stage 5's shutter stood across
+ * the tunnel it has nothing to do with, and the gate behind JUDGMENT was
+ * nowhere near JUDGMENT. `docs/formats/pipeline.md` lists every model that
+ * rule drew and what really draws each.
+ *
+ * The one exception is class 0x41's canal water, whose task draws the
+ * stage's own tile while it is resident -- see {@link setWaterSlots}.
  */
 
 import {
@@ -56,9 +73,6 @@ export class StageScene {
   private readonly byRegion = new Map<number, ModelInfo[]>();
   /** asset slot -> its model, for the `0x50`/`0x51` streaming opcodes. */
   private readonly bySlot = new Map<number, ModelInfo>();
-  /** Models no region lists: script-loaded props, keyed by slot instead. */
-  private readonly unregioned: ModelInfo[] = [];
-
   private mode: Visibility = "region";
   private currentRegion = -1;
   private loadedSlots = new Set<number>();
@@ -69,11 +83,6 @@ export class StageScene {
    */
   private waterOwned: ReadonlySet<number> = new Set();
   private waterDrawn: ReadonlySet<number> = new Set();
-  /**
-   * Slots a ported routine draws at a matrix of its own, by the layer that
-   * poses it -- see {@link claimSlots}.
-   */
-  private readonly claimed = new Map<string, ReadonlySet<number>>();
 
   /**
    * The stage, parsed from its glTF's bytes -- which the loader has already
@@ -129,7 +138,6 @@ export class StageScene {
         list.push(info);
       }
       if (slot !== null) this.bySlot.set(slot, info);
-      if (regions.length === 0) this.unregioned.push(info);
     });
 
     // Regions the script names but the geometry set has nothing for still get
@@ -167,11 +175,8 @@ export class StageScene {
    *
    * A task-drawn tile shows while the player has it resident: loaded with
    * opcode 0x50, or named by the region the walker is in -- the draw is
-   * `AssetDrawSlot`, which draws nothing that is not loaded. And a tile the
-   * task owns is taken **out** of the unregioned rule below: that rule stands
-   * in for "something draws what the script streams in", and for these the
-   * something is now here. Left in, it drew stage 2's two death-water tiles
-   * one on top of the other and stage 3's before their task existed.
+   * `AssetDrawSlot`, which draws nothing that is not loaded. `owned` is
+   * every tile the task can draw, and is kept for the debug readout.
    */
   setWaterSlots(owned: ReadonlySet<number>, drawn: ReadonlySet<number>): void {
     if (sameSet(owned, this.waterOwned) && sameSet(drawn, this.waterDrawn)) {
@@ -210,37 +215,9 @@ export class StageScene {
   }
 
   /**
-   * Take *slots* out of the "loaded, so drawn" rule in {@link refresh}: a
-   * layer that runs the routine which really draws a slot claims it, under
-   * its own name, so the stage does not draw a second copy.
-   *
-   * That rule has no routine behind it (`L54`): opcode `0x50` makes a slot
-   * resident and draws nothing, and the stage's copy of an unregioned model
-   * sits at the model's own origin -- the world's `(0, 0, 0)`. For a door
-   * that is a door standing in the wrong place. Stage 5's tunnel held
-   * `0x189A`, the roller shutter `RisingDoorUpdate` (`FUN_004753F0`) draws in
-   * a garage three hundred units away, and `0x1899`, the gate `HingeUpdate`
-   * (`FUN_00473CF0`) swings open at the tunnel's mouth; and block 1's
-   * `0x1892`, which `RiseToHeightUpdate` (`FUN_004757F0`) draws behind
-   * JUDGMENT, was drawn nowhere else at all. No instruction in the image
-   * names any of the three -- they reach `AssetDrawSlot` only through the
-   * descriptor tail those routines copy into `obj+0x28C`.
-   *
-   * A claim is replaced whole on a second call from the same owner, and
-   * lives as long as this stage.
+   * `asset_load_slot` (`0x50`) / `asset_unload_slot` (`0x51`): residency,
+   * which the water task's draw tests and nothing else here reads.
    */
-  claimSlots(owner: string, slots: Iterable<number>): void {
-    this.claimed.set(owner, new Set(slots));
-    this.refresh();
-  }
-
-  /** Whether some layer has claimed *slot* -- see {@link claimSlots}. */
-  isClaimed(slot: number): boolean {
-    for (const s of this.claimed.values()) if (s.has(slot)) return true;
-    return false;
-  }
-
-  /** `asset_load_slot` (`0x50`) / `asset_unload_slot` (`0x51`). */
   loadSlot(slot: number): void {
     this.loadedSlots.add(slot);
     this.refresh();
@@ -264,14 +241,10 @@ export class StageScene {
     for (const m of this.byRegion.get(this.currentRegion) ?? []) {
       m.node.visible = true;
     }
-    // Props the script streamed in with 0x50 are not region members; they stay
-    // drawn until 0x51 takes them away -- unless a layer runs the routine that
-    // really draws them, and has claimed the slot (see `claimSlots`).
-    for (const m of this.unregioned) {
-      if (m.slot === null || this.waterOwned.has(m.slot)) continue;
-      if (this.isClaimed(m.slot)) continue;
-      if (this.loadedSlots.has(m.slot)) m.node.visible = true;
-    }
+    // A model no region lists is drawn by whatever routine draws its slot, in
+    // that routine's layer -- never here, loaded or not (see the file comment).
+    // The water task's tiles are the one case where that routine draws the
+    // stage's own node.
     for (const slot of this.waterDrawn) {
       const m = this.bySlot.get(slot);
       if (!m) continue;

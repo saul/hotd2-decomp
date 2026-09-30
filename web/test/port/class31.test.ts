@@ -39,8 +39,12 @@ import {
   check, motion, SCENE_MAJOR_PLAYING, EYE, HoldCameraAt, EnterPlay,
   RunOutInvulnerability, ARC, DROP_SCRIPT, PATH_STYLE0, PATH_STYLE1, TYPE31,
   CLASS31, TYPE31_ZSASS, TYPE31_ZSLMAN, CHARS31, CAM_HOST, WALL_BLOB,
-  FLOOR_BLOB, thrower,
+  FLOOR_BLOB, thrower, openShutter,
 } from "./harness";
+import {
+  QueueOffscreenPull, QueueShotRequest,
+} from "../../src/game/combat/shot";
+import type { ShotPick } from "../../src/game/host";
 import { KNOCKDOWN_BODY } from "../../src/game/class31/death";
 import { SND_GET_UP } from "../../src/game/class31/react";
 import {
@@ -52,6 +56,7 @@ import { ThrowerPickNextState } from "../../src/game/class31/router";
 import { SND_ENTRANCE_DONE } from "../../src/game/class31/entrance";
 import { ActorSetMotionBlended } from "../../src/game/class30/motion_cue";
 import { coliQuad } from "./harness";
+import { ActorLocalPoint, ActorPlayMotion } from "../../src/game/class31/arc";
 
 console.log("\nEnemyThrowerInit: zslman is born NoDismember");
 // `EnemyThrowerInit` (`FUN_00449620`) is the fourth writer of the flag, and
@@ -2192,6 +2197,16 @@ console.log("class 0x31, ThrowerStateGrabPlayer's sound cues:");
     },
   });
   z.pos = vec3(0, 60, 0);
+  // An attack pair for the cry the landing gives: `ActorPlayHitVoice(obj, 3)`
+  // (`FUN_0040A6F0`) at `0x0044F157`, between the thump and the sword. Type
+  // 0x19 is in no set-A list here, so it cries out of set B, 50 or 51.
+  SetGameTables({ ...CHARS31, combat: {
+    impact: [], head_impact: [],
+    voice: { hurt: [], kill: [], head: [],
+             attack: [[{ id: 40, file: "" }, { id: 41, file: "" }],
+                      [{ id: 50, file: "" }, { id: 51, file: "" }]] },
+    voice_set_a_types: [], ricochet: {},
+  } } as unknown as CharactersJson);
   G.g_cam_path_frame = 0;
   for (let i = 0; i < 5; i++) GameUpdate(1 / 60, CAM_HOST, rng, events);
   check("no sound while it hangs off the camera waiting for the cue",
@@ -2201,8 +2216,10 @@ console.log("class 0x31, ThrowerStateGrabPlayer's sound cues:");
   check("the cue frame plays one step -- COMMON\\ENE_WALK2_11",
         heard.join() === String(0x2516a9), heard.map((h) => h.toString(16)).join());
   for (let i = 0; i < 10; i++) GameUpdate(1 / 60, CAM_HOST, rng, events);
-  check("landing plays the thump, then ignites the looping laser sword",
-        heard.join() === [0x2516a9, 0x2916a9, 0x1f23a9].join(),
+  check("landing plays the thump, the attack cry, then ignites the looping "
+        + "laser sword",
+        heard.length === 4 && heard[0] === 0x2516a9 && heard[1] === 0x2916a9
+        && (heard[2] === 50 || heard[2] === 51) && heard[3] === 0x1f23a9,
         heard.map((h) => h.toString(16)).join());
   // It blinks for the *first* fifteen frames of the hold and is solid for the
   // rest, and the `_OFF` stopper sits in the `else` arm of that per-frame
@@ -2254,9 +2271,10 @@ const GAPS = {
       ...TYPE31_ZSLMAN,
       motions: {
         ...TYPE31_ZSLMAN.motions,
-        // 0x1E9 the ride, 0x1E7 and 0x1E5 the two grabs, 0x1E8 the finish.
-        "489": motion(20), "487": motion(40), "485": motion(40),
-        "488": motion(30, 0, 50),
+        // 0x1E9 the ride, 0x1E7 and 0x1E5 the two grabs, 0x1E8 the finish,
+        // at zslman.bin's own frame counts and play lengths.
+        "489": motion(21, 0, 39), "487": motion(31, 0, 59),
+        "485": motion(36, 0, 70), "488": motion(23, 0, 44),
       },
     },
     "25": { ...TYPE31, motions: { ...TYPE31.motions, "296": motion(22, 0, 40) } },
@@ -2565,4 +2583,170 @@ console.log("class 0x31, state 27 -- ThrowerStateGrabPlayer's ride, drop, "
         grabbed && hits.join() === "30", `${grabbed} ${hits.join()}`);
   check("...then plays the finish, 0x1E8, and leaves", finished && z.despawned,
         `${finished} ${z.despawned}`);
+}
+
+{
+  // The tail rides the camera's turned offset only for `1 < sub < 5`: sub 1
+  // hangs at the eye plus the offset as it stands, and the turn -- the camera's
+  // yaw half round -- starts on the cue frame, which is sub 2 by the tail.
+  const rng = new Rng(76);
+  const events = new Events();
+  // Stage 5 block 2 step 4's hold, 75 frames, and its 20-frame drop.
+  const z = c31(0x18, ThrowerState.GrabPlayer, {
+    grab: {
+      offset: [0, -40, 0], cue_frame: 20, drop_frames: 20, hold_frames: 75,
+      player: 0,
+    },
+  });
+  z.pos = vec3(10, 60, 0);
+  G.g_cam_path_frame = 0;
+  for (let i = 0; i < 3; i++) GameUpdate(1 / 60, CAM_HOST, rng, events);
+  const waiting = z.pos.x - G.g_camera_eye.x;
+  G.g_cam_path_frame = 20;
+  GameUpdate(1 / 60, CAM_HOST, rng, events);
+  const turned = ActorLocalPoint(G.g_camera_eye, G.g_camera_yaw_bams + 0x8000,
+                                 10, 60, 0, vec3(0, 0, 0));
+  check("it waits at the eye plus its offset, unturned (sub 1 is not ridden)",
+        Math.abs(waiting - 10) < 1e-9, `${waiting}`);
+  check("...and from the cue frame hangs off the camera's yaw half round",
+        Math.abs(z.pos.x - turned.x) < 1e-9 && Math.abs(z.pos.z - turned.z) < 1e-9
+        && Math.abs(turned.x - G.g_camera_eye.x - 10) > 1,
+        `(${z.pos.x}, ${z.pos.z}) against (${turned.x}, ${turned.z})`);
+  // One track, which wraps: the ride clip is 0x1E9 for the whole hold, though
+  // the hold is nearly twice its play length of 39.
+  let held = 0;
+  let onRide = true;
+  for (let i = 0; i < 200 && z.sub <= 3; i++) {
+    GameUpdate(1 / 60, CAM_HOST, rng, events);
+    if (z.sub === 3) { held++; onRide &&= ActorPlayMotion(z) === 0x1e9; }
+  }
+  check("the ride clip stays on through a 75-frame hold",
+        held === 74 && onRide, `${held} frames, on the ride ${onRide}`);
+}
+
+console.log("class 0x31, ThrowerStateGrabPlayer is shot without reacting:");
+{
+  // Stage 5 block 2 step 4's `0x1E04`, the rider that drops onto the car on
+  // the bridge: its descriptor as shipped, and the four grab clips at their
+  // shipped lengths -- `g_motion_play_length` 70, 59, 44 and 39.
+  //
+  // `ThrowerStateGrabPlayer` (`FUN_0044EF90`) writes the actor's flag word
+  // four times: `OR AH,0x41` in sub 0 (`0x0044EFBB`, 0x100 and 0x4000),
+  // `AND AH,0xbf` on the cue (`0x0044F092`), `OR DH,0x20` on landing
+  // (`0x0044F127`, 0x2000), and in the hold `OR AH,0x1` on every blinking frame
+  // (`0x0044F1A5`, `0x0044F1BF`) and `AND AH,0xfe` on every solid one
+  // (`0x0044F1ED`). `ThrowerOnShot` (`FUN_004499A0`) reacts only with both
+  // 0x100 and 0x2000 clear, and a `zslman`'s reaction is state 0x21, whose
+  // way out is state 7 -- the hub, which on a moving car never ends. The port
+  // wrote none of the four, so a rider shot on the car tumbled off its grab
+  // into the hub and held `wait_enemies_alive` at step 4 op 30 for ever.
+  const TYPE_GRAB = {
+    ...TYPE31_ZSLMAN,
+    motions: { ...TYPE31_ZSLMAN.motions, "485": motion(36, 0, 70),
+               "487": motion(31, 0, 59), "488": motion(23, 0, 44),
+               "489": motion(21, 0, 39) },
+  } as unknown as CharacterType;
+  ResetGameGlobals();
+  SetGameTables({ ...CHARS31, types: { ...CHARS31.types, "24": TYPE_GRAB } } as
+                unknown as CharactersJson);
+  G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+  G.g_scene_state_major = SCENE_MAJOR_PLAYING;
+  EnterPlay();
+  openShutter();
+  G.g_camera_yaw_bams = 0;
+  const z = ActorSpawn(0x1e04, SpawnClass.Thrower, 0x18, "zslman", {
+    initialState: ThrowerState.GrabPlayer, condition: 0,
+    grab: { offset: [0, 0, -10], cue_frame: 680, drop_frames: 20,
+            hold_frames: 75, player: 0 },
+  });
+  if (z.cls !== SpawnClass.Thrower) throw new Error("not class 0x31");
+  z.visible = true;
+  z.hp = z.maxHp = 130;
+  z.pos = vec3(-3, 30, -10);
+  check("`EnemyThrowerInit` counts the rider in, alive and present",
+        G.g_enemies_alive === 1 && G.g_enemies_present === 1,
+        `alive ${G.g_enemies_alive}, present ${G.g_enemies_present}`);
+
+  const rng = new Rng(71);
+  const events = new Events();
+  const RAY = { origin: vec3(0, 0, 0), dir: vec3(0, 0, 1) };
+  // Bone 1, the torso, which carries this fixture's damage row -- so a shot
+  // the engine lets through moves the hit points, unmistakably.
+  const host = { ...CAM_HOST,
+    pickShot: () => ({ kind: "actor", at: z.at, bone: 1,
+                       point: vec3() }) as ShotPick };
+  const reacted = new Set<number>();
+  // Every round that left the gun: a check that a shot "only ricochets" is
+  // worth nothing if the gun was empty.
+  let fired = 0;
+  const step = (fire: boolean): void => {
+    if (fire) {
+      // A gun holds six, and the one way it reloads is a pull off the screen
+      // (`PlayerFireAndReloadUpdate`), made on the same frame ahead of the
+      // round.
+      QueueOffscreenPull(0);
+      QueueShotRequest(0, RAY);
+    }
+    const before = G.g_player_shot_count[0];
+    GameUpdate(1 / 60, host, rng, events);
+    fired += G.g_player_shot_count[0] - before;
+    if (!z.despawned && z.state !== ThrowerState.GrabPlayer) {
+      reacted.add(z.state);
+    }
+  };
+
+  G.g_cam_path_frame = 600;
+  step(false);
+  check("sub 0 raises 0x100 and 0x4000: shot-immune, and the ride clip held",
+        (z.flags & ActorFlag.ShotImmune) !== 0
+        && (z.flags & ActorFlag.PoseFrozen) !== 0,
+        `flags 0x${(z.flags >>> 0).toString(16)}`);
+  for (let i = 0; i < 5; i++) step(true);
+  check("shot while it hangs off the camera, it only ricochets",
+        fired === 5 && z.hp === 130 && z.state === ThrowerState.GrabPlayer,
+        `${fired} rounds, hp ${z.hp}, state ${z.state}/${z.sub}`);
+
+  // The cue: the drop is `drop_frames` frames counting the cue's own, and it
+  // lands on the twentieth.
+  G.g_cam_path_frame = 680;
+  step(true);
+  check("the cue lets the clip go (0x4000 down) and keeps the shot off",
+        (z.flags & ActorFlag.PoseFrozen) === 0
+        && (z.flags & ActorFlag.ShotImmune) !== 0 && z.sub === 2,
+        `flags 0x${(z.flags >>> 0).toString(16)}, sub ${z.sub}`);
+  for (let i = 1; i < 19; i++) step(true);
+  check("...through the whole drop", fired === 24 && z.sub === 2
+        && z.hp === 130, `${fired} rounds, sub ${z.sub}, hp ${z.hp}`);
+  step(true);
+  check("it lands on the drop's twentieth frame with 0x2000 up: no reaction "
+        + "from here on", z.sub === 3
+        && (z.flags & ActorFlag.NoHitReaction) !== 0,
+        `sub ${z.sub}, flags 0x${(z.flags >>> 0).toString(16)}`);
+
+  // The hold blinks, shot-immune, while `hold_frames - 15 < timer`: the
+  // landing frame and fourteen more. The fifteenth after it is solid.
+  for (let i = 1; i < 15; i++) step(true);
+  check("the first fifteen frames of the hold blink and ricochet",
+        fired === 39 && (z.flags & ActorFlag.ShotImmune) !== 0
+        && z.hp === 130,
+        `${fired} rounds, flags 0x${(z.flags >>> 0).toString(16)}, `
+        + `hp ${z.hp}`);
+  step(false);
+  check("...and the sixteenth is solid: 0x100 comes down",
+        (z.flags & ActorFlag.ShotImmune) === 0 && z.sub === 3,
+        `flags 0x${(z.flags >>> 0).toString(16)}, sub ${z.sub}`);
+  step(true);
+  step(false);
+  check("a shot now hurts it", fired === 40 && z.hp < 130 && !z.dead,
+        `${fired} rounds, hp ${z.hp}`);
+  check("...and it goes on with the grab rather than tumbling (no state 0x21, "
+        + "no hub)", reacted.size === 0 && z.state === ThrowerState.GrabPlayer,
+        `left 27 for ${[...reacted].join()}; now ${z.state}/${z.sub}`);
+
+  for (let i = 0; i < 600 && !z.despawned; i++) step(false);
+  check("it finishes its throw-away and leaves the pool", z.despawned,
+        `state ${z.state}/${z.sub}`);
+  check("...and both counts, so the car's `wait_enemies_alive` can open",
+        G.g_enemies_alive === 0 && G.g_enemies_present === 0,
+        `alive ${G.g_enemies_alive}, present ${G.g_enemies_present}`);
 }

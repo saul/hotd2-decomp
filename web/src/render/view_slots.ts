@@ -3,14 +3,18 @@
  * `G.g_view_slot_draws`, `game/view_slot.ts` -- drawn.
  *
  * Each record is one `MatrixLoadIdentity; MatrixTranslate(x, y, z);
- * MatrixScale(s); AssetDrawSlot(slot)`, so the node hangs off the view group
- * with no turn of its own, as the life marker's does. The result card's
- * glyphs are the list's one writer today (`game/class61/`). A record whose
+ * MatrixScale(s); AssetDrawSlot(slot)`, so the node hangs off the view group,
+ * as the life marker's does -- turned about y by the record's `yaw` where the
+ * site calls `MatrixRotateY` between the translate and the scale (the chapter
+ * card's scene-5 model), which three.js's `T R S` composes in that order. The
+ * result card's glyphs and the chapter card are the list's writers today
+ * (`game/class61/`, `game/class60/`). A record whose
  * slot this stage's bundle does not carry -- slot 0, which the card's first
  * string draws for its space -- has no node, as `AssetDrawSlot` draws
  * nothing for it. Nothing here is state.
  */
 import type { Group, Object3D } from "three";
+import { BAMS_TO_RAD } from "../core/bams";
 import { G } from "../game/globals";
 
 /** What this needs of the effect layer. */
@@ -30,7 +34,7 @@ export function drawViewSlots(h: ViewSlotHost, seen: Set<string>): void {
     if (!node) return;
     seen.add(key);
     node.position.set(d.x, d.y, d.z);
-    node.quaternion.identity();
+    node.rotation.set(0, d.yaw * BAMS_TO_RAD, 0);
     node.scale.setScalar(d.scale);
   });
 }

@@ -115,6 +115,8 @@ export class GameSystem implements System {
     // A `cp_` path by global slot, for the port's own `CamEvalPath7` calls --
     // the game-over fly-over's. The curves are the camera bundle's.
     camPath: (slot) => this.paths?.paths.get(slot) ?? null,
+    // `GetTickCount`, for Boss Mode's clock: milliseconds, a `DWORD`.
+    tickCount: () => Math.floor(performance.now()) >>> 0,
     // The camera looks down its own local -Z, which is where the player is.
     aimPoint: (ahead, out) => {
       _p.x = 0; _p.y = 0; _p.z = -ahead;

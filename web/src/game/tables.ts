@@ -14,8 +14,8 @@ import { authoredFrameOfTicks, ticksOfSeconds } from "../core/play_cursor";
 import type { Actor } from "./actor";
 import type { SetPieceParams } from "./class24";
 import type { CiviliansJson } from "../bundle/scene";
-import type { Boss4TablesJson, GameOverJson, OptionsJson, ResultCardJson }
-  from "../bundle/stage";
+import type { Boss4TablesJson, ChapterCardJson, GameOverJson, OptionsJson,
+  ResultCardJson } from "../bundle/stage";
 import type { HumanoidProgram } from "./class25";
 import { G } from "./globals";
 import { TURN_CURVE_DEFAULT, TURN_RATE_UNTRACKED } from "./camera/constants";
@@ -89,6 +89,12 @@ export const T = {
    */
   resultCard: null as ResultCardJson | null,
   /**
+   * The chapter card's `.rdata`: the Boss Mode backdrop and its flags, and
+   * app state 0x0B's frames. Null in a bundle written before it. Read by
+   * `game/class60/boss_mode.ts` and `attract.ts`.
+   */
+  chapterCard: null as ChapterCardJson | null,
+  /**
    * The turn-rate curves and the approach radii — the two `.rdata` tables the
    * camera director reads. The immediates that used to sit beside them in this
    * block are in `game/camera/constants.ts` now; see `docs/formats/bundle.md`.
@@ -122,6 +128,11 @@ export function SetOptionsTables(json: OptionsJson | undefined): void {
 /** `[port-only]` -- the result card's block, from the same `script.json`. */
 export function SetResultCardTables(json: ResultCardJson | undefined): void {
   T.resultCard = json ?? null;
+}
+
+/** `[port-only]` -- the chapter card's block, from the same `script.json`. */
+export function SetChapterCardTables(json: ChapterCardJson | undefined): void {
+  T.chapterCard = json ?? null;
 }
 
 /** `[port-only]` -- the game-over block, from the same `script.json`. */

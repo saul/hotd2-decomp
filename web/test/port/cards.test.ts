@@ -3,10 +3,12 @@ import { Rng } from "../../src/core/rng";
 import { Events } from "../../src/core/events";
 import { ActorSpawn } from "../../src/game/director";
 import {
-  ActorByAt, G, ResetGameGlobals, ScreenFurniture,
+  ActorByAt, AppState, G, ResetGameGlobals, ScreenFurniture,
 } from "../../src/game/globals";
 import { NULL_HOST } from "../../src/game/host";
-import { SetGameTables, SetResultCardTables, T } from "../../src/game/tables";
+import {
+  SetChapterCardTables, SetGameTables, SetResultCardTables, T,
+} from "../../src/game/tables";
 import { ActorFlag } from "../../src/game/actor";
 import { type ClassFrame, g_class_handlers } from "../../src/game/registry";
 import { SpawnClass } from "../../src/game/spawn_class";
@@ -23,9 +25,8 @@ import { Walker } from "../../src/script/walker";
 import { seekTo } from "../../src/script/seek";
 import { ScriptFlagsThisBundleCanRaise }
   from "../../src/script/waits/flag";
-import {
-  CHAPTER_CARD_FLAG, CHAPTER_CARD_FRAMES, ChapterCardSkipRequested,
-} from "../../src/game/class60";
+import { CHAPTER_CARD_FLAG } from "../../src/game/class60";
+import { ChapterCardRoutine } from "../../src/game/class60/state";
 import { RESULT_CARD_FLAG, RESULT_CARD_FRAMES }
   from "../../src/game/class61";
 import { ResultCardRoutine } from "../../src/game/class61/state";
@@ -34,7 +35,7 @@ import { ResultCardDrawAccuracy, ResultCardDrawScore }
 import { EvtOpAwardAccuracyBonus2B, EvtOpSuppressAccuracyStats2F }
   from "../../src/game/combat/accuracy";
 import type { ResultCardActor } from "../../src/game/actor";
-import type { ResultCardJson } from "../../src/bundle/stage";
+import type { ChapterCardJson, ResultCardJson } from "../../src/bundle/stage";
 import { ProfileBoot } from "../../src/game/profile";
 import {
   check, motion, TYPE, CHARS, EYE, spawnZombie, EnterPlay,
@@ -375,119 +376,101 @@ console.log("\n`spawn_simple` builds the cards, and the cards open the gate:");
   };
 
   // The chapter card: `MOV word ptr [ESI+0x11c], 0xb4` at `0x004345AB`, then
-  // the skip test at `0x00434802`. The engine would hold 180 frames; by the
-  // user's decision the port takes the pad's unconditional
-  // skip arm on every card, so the flag is up after **one** update — not a
-  // three-second dead pause at the top of every stage.
+  // the countdown at `0x00434802`. With nothing pressed it holds its gate for
+  // the engine's whole dwell -- it draws its title over those three seconds
+  // now. (It was cut on its first update while the port drew no card, which
+  // is what these assertions used to pin.)
   {
+    G.g_pad_state = 0;
     const { frames, card, w } = runCard(SpawnClass.ChapterCard,
-                                     CHAPTER_CARD_FLAG, CHAPTER_CARD_FRAMES);
-    check(`the chapter card is skipped: it raises `
-          + `g_script_flags[${CHAPTER_CARD_FLAG}] on its first update, not `
-          + `after ${CHAPTER_CARD_FRAMES}`,
-          frames === 1 && G.g_script_flags[CHAPTER_CARD_FLAG] === 1,
+                                     CHAPTER_CARD_FLAG, 0xb4);
+    check(`the chapter card holds 0xB4 updates, then raises `
+          + `g_script_flags[${CHAPTER_CARD_FLAG}]`,
+          frames === 0xb4 && G.g_script_flags[CHAPTER_CARD_FLAG] === 1,
           `${frames} frames, flag ${G.g_script_flags[CHAPTER_CARD_FLAG]}`);
-    check("...still through sub 0's latch, and kills itself on the same frame",
+    check("...through sub 0's latch, and kills itself on that update",
           card?.dead === true && card?.sub === 1 && card?.hp === 0,
           `dead ${card?.dead} sub ${card?.sub} hp ${card?.hp}`);
-    check("...via the pad's own no-dwell skip bit",
-          (ChapterCardSkipRequested() & 0x20000) !== 0,
-          `pad 0x${ChapterCardSkipRequested().toString(16)}`);
     check("...and the gate behind it is open on the next walker tick",
           w.wait === null && (G.g_script_flags[9] ?? 0) === 1,
           `at ${w.block}/${w.step}/${w.opIndex} wait ${w.wait?.op.op}`);
   }
 
-  /**
-   * Every value written to `g_screen_furniture_flags` while `run` runs, each
-   * with `g_script_flags[flag]` as it stood at that write.
-   *
-   * A skipped chapter card raises its bit and drops it inside one call, so
-   * the word before and after that call is the same whether the card wrote
-   * it twice or never touched it. Only the writes themselves can tell.
-   */
-  const furnitureWrites = (flag: number, run: () => void) => {
-    let word = G.g_screen_furniture_flags;
-    const writes: { word: number; flag: number }[] = [];
-    Object.defineProperty(G, "g_screen_furniture_flags", {
-      configurable: true, enumerable: true,
-      get: () => word,
-      set: (v: number) => {
-        word = v;
-        writes.push({ word: v, flag: G.g_script_flags[flag] ?? 0 });
-      },
-    });
-    try {
-      run();
-    } finally {
-      Object.defineProperty(G, "g_screen_furniture_flags", {
-        configurable: true, enumerable: true, writable: true, value: word,
-      });
-    }
-    return writes;
+  /** A fresh game with a chapter card built by the opcode, and its frame. */
+  const chapterCard = () => {
+    ResetGameGlobals();
+    EnterPlay();
+    SetGameTables(CHARS);
+    const w = new Walker(cardScript(SpawnClass.ChapterCard, CHAPTER_CARD_FLAG),
+                         cardHost);
+    w.tick(1 / 60);
+    const card = G.g_object_list.find((o) => o.cls === SpawnClass.ChapterCard);
+    const f = { dt: 1 / 60, rng: new Rng(3), host: NULL_HOST };
+    const update = () => {
+      if (card) g_class_handlers[SpawnClass.ChapterCard]?.update(card, f);
+    };
+    return { card, update };
   };
   /** What a card must leave alone: start bits 0 and 1, and the other card. */
   const OTHER_FURNITURE = 0x3;
 
   // The chapter card's bit: `OR AL, 0x20` at `0x0043436B` first thing in
-  // sub 0, and `AND AL, 0xDF` at `0x004348C7` straight after flag 248 goes
-  // up at `0x004348C1`. The skip runs both in the one
-  // update, which is the exe's own skip path -- so the bit is up for exactly
-  // the stretch of that call between sub 0's head and the flag, and down
-  // again before any other routine runs.
+  // sub 0, and `AND AL, 0xDF` at `0x004348C7` straight after flag 248 goes up
+  // at `0x004348C1`. So the bit is up across the whole dwell -- which is what
+  // takes the level off the screen (`RegionDrawResidentSet`) and the
+  // shutter's bars away -- and down on the update that opens the gate.
   {
-    ResetGameGlobals();
-    EnterPlay();
-    SetGameTables(CHARS);
-    const w = new Walker(cardScript(SpawnClass.ChapterCard, CHAPTER_CARD_FLAG),
-                         cardHost);
-    w.tick(1 / 60);
-    const card = G.g_object_list.find((o) => o.cls === SpawnClass.ChapterCard);
-    const f = { dt: 1 / 60, rng: new Rng(3), host: NULL_HOST };
+    const { card, update } = chapterCard();
+    G.g_pad_state = 0;
     const before = OTHER_FURNITURE | ScreenFurniture.ResultCard;
     G.g_screen_furniture_flags = before;
-    const writes = furnitureWrites(CHAPTER_CARD_FLAG, () => {
-      if (card) g_class_handlers[SpawnClass.ChapterCard]?.update(card, f);
-    });
-    const shown = writes.map((x) => `0x${x.word.toString(16)}@${x.flag}`);
-    check("the chapter card raises g_screen_furniture_flags bit 0x20 before "
-          + "flag 248 and drops it after, both in its one skipped update",
-          writes.length === 2
-          && writes[0].word === (before | ScreenFurniture.ChapterCard)
-          && writes[0].flag === 0
-          && writes[1].word === before && writes[1].flag === 1
-          && card?.dead === true,
-          `${shown.join(" ")} dead ${card?.dead}`);
-    check("...so the update ends with the bit down and every other bit as "
-          + "it found them",
-          G.g_screen_furniture_flags === before,
-          `0x${G.g_screen_furniture_flags.toString(16)}`);
+    let updates = 0;
+    let upThroughout = true;
+    while (updates < 0xb4 + 60
+           && (G.g_script_flags[CHAPTER_CARD_FLAG] ?? 0) === 0) {
+      update();
+      updates += 1;
+      if ((G.g_script_flags[CHAPTER_CARD_FLAG] ?? 0) === 0
+          && (G.g_screen_furniture_flags & ScreenFurniture.ChapterCard) === 0) {
+        upThroughout = false;
+      }
+    }
+    check("the chapter card holds g_screen_furniture_flags bit 0x20 up on "
+          + "every update of its dwell",
+          upThroughout && updates === 0xb4,
+          `up ${upThroughout} updates ${updates}`);
+    check("...and drops it on the update that raises flag 248, every other "
+          + "bit as it found them",
+          G.g_screen_furniture_flags === before && card?.dead === true,
+          `0x${G.g_screen_furniture_flags.toString(16)} dead ${card?.dead}`);
   }
 
-  // The installer's two arms raise the same bit before they hand over:
-  // `OR EDX, 0x20` at `0x004342F6` (Boss Mode) and `0x00434324` (app state
-  // 0x0B). The clears are in the variants, which the port does not run, so
-  // neither the flag nor the drop comes.
+  // The skip test at `0x00434802`, read before the decrement: player 0's B
+  // (`TEST AL, 0x2` at `0x0043481B`) only while the dwell is below `0xA0`
+  // (`CMP word ptr [ESI+0x11c], 0xa0; JGE`) -- update k reads 0xB4 - (k - 1),
+  // so update 21 reads 0xA0 and update 22 0x9F -- and player 1's B (`TEST
+  // EAX, 0x20000`) on any update. A skip sets the dwell to 1, which that
+  // update's own decrement spends.
   {
-    ResetGameGlobals();
-    EnterPlay();
-    SetGameTables(CHARS);
-    const w = new Walker(cardScript(SpawnClass.ChapterCard, CHAPTER_CARD_FLAG),
-                         cardHost);
-    w.tick(1 / 60);
-    const card = G.g_object_list.find((o) => o.cls === SpawnClass.ChapterCard);
-    const f = { dt: 1 / 60, rng: new Rng(3), host: NULL_HOST };
-    G.g_GameMode = GameMode.Boss;
-    G.g_screen_furniture_flags = OTHER_FURNITURE;
-    if (card) g_class_handlers[SpawnClass.ChapterCard]?.update(card, f);
-    check("in Boss Mode the installer raises bit 0x20 and hands over, with "
-          + "no latch, no flag and no kill of its own",
-          G.g_screen_furniture_flags
-            === (OTHER_FURNITURE | ScreenFurniture.ChapterCard)
-          && (G.g_script_flags[CHAPTER_CARD_FLAG] ?? 0) === 0
-          && card?.sub === 0 && card?.dead === false,
-          `0x${G.g_screen_furniture_flags.toString(16)} `
-          + `flag ${G.g_script_flags[CHAPTER_CARD_FLAG]} sub ${card?.sub}`);
+    const cutOn = (bit: number, onUpdate: number): number => {
+      const { update } = chapterCard();
+      for (let k = 1; k <= 0xb4 + 60; k++) {
+        G.g_pad_state = k === onUpdate ? bit : 0;
+        update();
+        if ((G.g_script_flags[CHAPTER_CARD_FLAG] ?? 0) !== 0) return k;
+      }
+      return -1;
+    };
+    const at21 = cutOn(0x2, 21);
+    const at22 = cutOn(0x2, 22);
+    const p1 = cutOn(0x20000, 1);
+    G.g_pad_state = 0;
+    check("player 0's B on the update that reads dwell 0xA0 does not cut "
+          + "the card", at21 === 0xb4, `flag on update ${at21}`);
+    check("...on the next, which reads 0x9F, it does -- on that update",
+          at22 === 22, `flag on update ${at22}`);
+    check("player 1's B cuts it on its very first update", p1 === 1,
+          `flag on update ${p1}`);
   }
 
   // The result card: 420 frames, and it drops the trigger on its first.
@@ -603,6 +586,339 @@ console.log("\n`spawn_simple` builds the cards, and the cards open the gate:");
     check("one instruction with two records makes two objects",
           made.length === 2 && made[0].at !== made[1].at,
           `${made.map((o) => o.at).join(",")}`);
+  }
+}
+
+
+/**
+ * The chapter card's picture and its two variant arms -- `ChapterCardInstall`
+ * (`FUN_004342E0`), `ChapterTitleReset` (`FUN_00436A30`), `ChapterTitleDraw`
+ * (`FUN_00436AD0`), `BossModeChapterCardUpdate` (`FUN_00434920`) and
+ * `AttractScene11ChapterCardUpdate` (`FUN_00434DA0`).
+ *
+ * Every expected number is the exe's: the sprite ids and anchor points are
+ * the routine's immediates, the steps are its `.rdata` floats written here as
+ * their bit patterns, and the arithmetic on them is the x87's -- `float`
+ * operands, one rounding to `float` on the store -- worked here rather than
+ * read back from the port (L65). `CHAPTER_RDATA` is what
+ * `hod2lib/exetab.ts`'s `chapterCardTables()` reads out of `Hod2.exe`;
+ * `web/tools/checks/chapter_card.ts` holds the bundle's copy to the exe.
+ */
+console.log("\nclass 0x60: the chapter card's title, stage 6's model, "
+            + "Boss Mode and app state 0x0B:");
+{
+  const bits = (b: number): number => {
+    const d = new DataView(new ArrayBuffer(4));
+    d.setUint32(0, b, true);
+    return d.getFloat32(0, true);
+  };
+  const fr = Math.fround;
+  /** `[0x0055DD0C]`, `[0x0055E1BC]`, `[0x004D1CE4]`, `[0x0055E1B8]`. */
+  const THIRTIETH = bits(0x3d088889);
+  const ECHO0 = bits(0x3e6eeeef);
+  const FIFTEENTH = bits(0x3d888889);
+  const ECHO1 = bits(0x3eaaaaab);
+  const CHAPTER_RDATA: ChapterCardJson = {
+    boss_mode_backdrop_sprites: [0x98e, 0x9a2, 0x9b6, 0x9ca, 0x9de, 0x9f2],
+    boss_mode_backdrop_flags: [0x02, 0x09, 0x01, 0x1e, 0x16, 0x32],
+    attract11_frames: [0x441, 0x48c, 0x4d7, 0x522, 0x56d],
+    attract11_flash_frames: [0x56d, 0x48c, 0x522, 0x56d, 0x48c],
+  };
+  let clockMs = 0;
+  const host = { ...NULL_HOST, tickCount: () => clockMs };
+  /** What a card must leave alone: start bits 0 and 1. */
+  const OTHER_FURNITURE_60 = 0x3;
+  const f: ClassFrame = { dt: 1 / 60, rng: new Rng(5), host };
+
+  /** A fresh game in `scene`, and a card as `SpawnSimpleActors` makes it. */
+  const card = (scene: number) => {
+    ResetGameGlobals();
+    EnterPlay();
+    SetGameTables(CHARS);
+    SetChapterCardTables(CHAPTER_RDATA);
+    // Neither is reset with the game: the mode is the bundle's, the state
+    // the shell's. An arcade stage in play, unless a block says otherwise.
+    G.g_GameMode = GameMode.Arcade;
+    G.g_app_state = AppState.InPlay;
+    G.g_scene_index = scene;
+    G.g_pad_state = 0;
+    const c = ActorSpawn(-0x5e8c, SpawnClass.ChapterCard, -1, "simple 0x60",
+                         { hp: 0 });
+    c.visible = true;
+    return c;
+  };
+  /** One update, on this frame's cleared draw lists. */
+  const step = (c: ReturnType<typeof card>) => {
+    G.g_screen_sprite_draws = [];
+    G.g_view_slot_draws = [];
+    g_class_handlers[SpawnClass.ChapterCard]?.update(c, f);
+  };
+  /** Updates up to and including update `k` (1-based). */
+  const upTo = (c: ReturnType<typeof card>, k: number) => {
+    for (let i = 0; i < k; i++) step(c);
+  };
+  const shown = () => G.g_screen_sprite_draws.map((s) =>
+    `0x${s.id.toString(16)}@${s.x},${s.y}`).join(" ");
+
+  // Scene 0, update 1 -- sub 0 falls into sub 1, so the title's frame 0 is
+  // drawn at once: `ChapterTitleReset`'s 1.5 / 4.5 / 2 / 6, each less one
+  // step, s0 = 0x1FB at (190, 80) and (200, 90), s1 = 0x1FC at (400, 350) and
+  // (410, 360) -- `PUSH 0x433e0000`, `0x42a00000`, `0x43c80000`,
+  // `0x43af0000` and `[0x004C43A4]` = 10.
+  {
+    const c = card(0);
+    step(c);
+    const d = G.g_screen_sprite_draws;
+    const want = [
+      [0x1fb, 190, 80, fr(1.5 - THIRTIETH)],
+      [0x1fb, 200, 90, fr(4.5 - ECHO0)],
+      [0x1fc, 400, 350, fr(2 - FIFTEENTH)],
+      [0x1fc, 410, 360, fr(6 - ECHO1)],
+    ];
+    check("scene 0's first update draws the title's frame 0: four sprites, "
+          + "each at its record's first shrink",
+          d.length === 4 && want.every(([id, x, y, s], i) =>
+            d[i].id === id && d[i].x === x && d[i].y === y && d[i].sx === s
+            && d[i].sy === s && d[i].alpha === 1 && d[i].depth === 1),
+          `${shown()} sx ${d.map((s) => s.sx).join(",")}`);
+    // `ScreenSpriteDraw` (`FUN_00499F00`) writes flags 10: centre-anchored.
+    check("...each centred on its point (ScreenSpriteDraw's flags 10)",
+          d.every((s) => s.flags === 10), d.map((s) => s.flags).join(","));
+    check("...and the card raises no flag and holds 0xB3 frames",
+          c.hp === 0xb3 && (G.g_script_flags[0xf8] ?? 0) === 0,
+          `hp ${c.hp}`);
+    // Frame 14 is the last shrink (`CMP AX, 0xE`); 15 draws them unshrunk.
+    upTo(c, 14);
+    let s0 = 1.5;
+    for (let i = 0; i < 15; i++) s0 = fr(s0 - THIRTIETH);
+    check("...fifteen shrinks by 1/30, the last on frame 14, and phase 1 "
+          + "from there",
+          G.g_screen_sprite_draws[0]?.sx === s0
+          && G.g_chapter_title_parts[0].phase === 1,
+          `sx ${G.g_screen_sprite_draws[0]?.sx} want ${s0} phase `
+          + `${G.g_chapter_title_parts[0].phase}`);
+  }
+
+  // Scene 1's fourth sprite is `0x22A`, not `0x206`: `MOV word ptr
+  // [0x007dcba6], 0x22a` at `0x00434432`. Frame 51 is the second cut
+  // (`CMP AX, 0x33` .. `0x37`): s5 at (x0, y0 + 20), s2 at (x1, 325) --
+  // `PUSH 0x43a28000` -- s6 at (x0 + 30, y0 + 40), s3 at (x1 + 20, y1 - 5).
+  {
+    const c = card(1);
+    upTo(c, 52);
+    check("scene 1, frame 51: the second cut, with s3 = 0x22A",
+          shown() === "0x207@320,100 0x205@320,325 0x208@350,120 0x22a@340,345",
+          shown());
+  }
+
+  // Scene 2, frame 46: the first cut's s4 is placed from the **first**
+  // point's y -- `FLD float ptr [ESP + 0x1C]` at `0x00436FCC`, the second
+  // argument -- at (x1 + 50, y0 - 30) = (240, 50), where every other s4 is
+  // placed from y1.
+  {
+    const c = card(2);
+    upTo(c, 47);
+    const s4 = G.g_screen_sprite_draws.find((s) => s.id === 0x20e);
+    check("scene 2, frame 46: s4 at (x1 + 50, y0 - 30), the routine's own "
+          + "choice of y",
+          s4 !== undefined && s4.x === 240 && s4.y === 50, shown());
+  }
+
+  // Frames 86..115 are phase 3, which draws nothing; the title's last draw
+  // is frame 170 (`CMP AX, 0xAA`), and the dwell runs to frame 179.
+  {
+    const c = card(3);
+    let restDrawn = 0;
+    let lateDrawn = 0;
+    let lastDrawn = -1;
+    for (let frame = 0; frame < 0xb4; frame++) {
+      step(c);
+      const n = G.g_screen_sprite_draws.length;
+      if (frame >= 86 && frame <= 115) restDrawn += n;
+      if (frame > 170) lateDrawn += n;
+      if (n > 0) lastDrawn = frame;
+    }
+    check("the title draws nothing in frames 86..115 or after 170, and its "
+          + "last draw is frame 170",
+          restDrawn === 0 && lateDrawn === 0 && lastDrawn === 170,
+          `rest ${restDrawn} late ${lateDrawn} last ${lastDrawn}`);
+    check("...and the card's 180th update raises flag 248",
+          (G.g_script_flags[0xf8] ?? 0) === 1 && c.dead, `dead ${c.dead}`);
+  }
+
+  // Stage 6 (scene 5): the model, every frame, under `MatrixLoadIdentity;
+  // MatrixTranslate(0, 0, -30); MatrixRotateY(0x8000); MatrixScale(2, 2, 2);
+  // AssetDrawSlot(0x1730)`, and its title from 0x222 about (350, 80) and
+  // (222, 350) -- `PUSH 0x435e0000`.
+  {
+    const c = card(5);
+    step(c);
+    const v = G.g_view_slot_draws;
+    check("scene 5 draws slot 0x1730 30 ahead of the eye, half a turn "
+          + "about, at twice its size",
+          v.length === 1 && v[0].slot === 0x1730 && v[0].x === 0
+          && v[0].y === 0 && v[0].z === -30 && v[0].yaw === 0x8000
+          && v[0].scale === 2,
+          JSON.stringify(v));
+    check("...and its title's frame 0 from 0x222 and 0x223",
+          shown() === "0x222@350,80 0x222@360,90 0x223@222,350 0x223@232,360",
+          shown());
+    upTo(c, 0xb3);
+    check("...on the card's last update too", G.g_view_slot_draws.length === 1
+          && (G.g_script_flags[0xf8] ?? 0) === 1, `${c.hp}`);
+  }
+
+  // `g_wCaptionMode` is 2 in this build, so no scene's arm ever draws its
+  // caption sprite 0x42B + scene.
+  {
+    let captions = 0;
+    for (let scene = 0; scene < 6; scene++) {
+      const c = card(scene);
+      for (let k = 0; k < 0xb4; k++) {
+        step(c);
+        captions += G.g_screen_sprite_draws
+          .filter((s) => s.id >= 0x42b && s.id <= 0x430).length;
+      }
+    }
+    check("no scene draws a caption sprite", captions === 0, `${captions}`);
+  }
+
+  // A scene with no arm (`CMP EAX, 0x5; JA`) draws nothing and writes no
+  // sprite, and still counts its dwell out.
+  {
+    const c = card(6);
+    let drawn = 0;
+    for (let k = 0; k < 0xb4; k++) {
+      step(c);
+      drawn += G.g_screen_sprite_draws.length + G.g_view_slot_draws.length;
+    }
+    check("scene 6 draws nothing and still raises flag 248 after 0xB4",
+          drawn === 0 && (G.g_script_flags[0xf8] ?? 0) === 1
+          && G.g_chapter_title_sprites.every((s) => s === 0),
+          `drawn ${drawn}`);
+  }
+
+  // **Boss Mode.** The installer raises bit 0x20 (`OR EDX, 0x20` at
+  // `0x004342F6`), runs `BossModeChapterCardUpdate` once and installs it. Its
+  // sub 0 seeds the rank -- `g_initial_damage_rank[g_boss_mode_difficulty]`
+  // (the fixture's `[0, 0, 2, 0, 0]`, index 2) plus four for the player in
+  // play -- and falls into sub 1, the scene's twenty backdrop sprites from
+  // `0x0055DD50`'s entry, two units deep; the backdrop holds until
+  // `g_script_flags[0x0055DD5C[scene]]` is 1 -- scene 1's is 9.
+  {
+    const c = card(1);
+    G.g_GameMode = GameMode.Boss;
+    G.g_boss_mode_difficulty = 2;
+    G.g_screen_furniture_flags = OTHER_FURNITURE_60;
+    step(c);
+    const d = G.g_screen_sprite_draws;
+    const cells = d.every((s, i) => s.id === 0x9a2 + i
+      && s.x === (i % 5) * 128 && s.y === Math.trunc(i / 5) * 128
+      && s.depth === 2);
+    check("in Boss Mode the first update raises bit 0x20, installs the "
+          + "Boss Mode routine and draws the backdrop, 5 x 4 cells from 0x9A2",
+          G.g_screen_furniture_flags
+            === (OTHER_FURNITURE_60 | ScreenFurniture.ChapterCard)
+          && c.cls === SpawnClass.ChapterCard
+          && c.chapter.routine === ChapterCardRoutine.BossMode
+          && c.sub === 1 && d.length === 20 && cells,
+          `0x${G.g_screen_furniture_flags.toString(16)} sub ${c.sub} `
+          + `${d.length} ${shown()}`);
+    check("...and seeds the damage rank at 2 + 4 x players in play",
+          G.g_damage_rank === 2 + 4 * G.g_players_in_play
+          && G.g_rank_clock === 1 && G.g_rank_clock_on === 1
+          && G.g_players_in_play === 1,
+          `rank ${G.g_damage_rank} players ${G.g_players_in_play}`);
+    step(c);
+    const held = c.sub === 1;
+    G.g_script_flags[9] = 1;
+    step(c);
+    step(c);
+    check("...holds the backdrop until flag 9, then drops bit 0x20 without "
+          + "raising flag 248 or dying",
+          held && c.sub === 3
+          && (G.g_screen_furniture_flags & ScreenFurniture.ChapterCard) === 0
+          && (G.g_script_flags[0xf8] ?? 0) === 0 && !c.dead,
+          `held ${held} sub ${c.sub}`);
+    // The boss joins: the clock starts at `GetTickCount()` and reads
+    // `ftol(ms * [0x00570F58] + 0.5)`; 1000 ms is 60 sixtieths, 0:01:00.
+    // Sub 3 falls into sub 4 (no jump at `0x00434D32`), so the frame the
+    // clock starts is also a read of it: a stale time is overwritten at once.
+    clockMs = 5000;
+    G.g_boss_engaged = 1;
+    G.g_boss_mode_time = 0x1234;
+    step(c);
+    check("...starts the clock the frame the boss is engaged, and reads it "
+          + "on that frame too",
+          c.sub === 4 && G.g_boss_mode_clock_start === 5000
+          && G.g_boss_mode_time === 0,
+          `sub ${c.sub} start ${G.g_boss_mode_clock_start} `
+          + `time ${G.g_boss_mode_time}`);
+    clockMs = 6000;
+    step(c);
+    const clock = G.g_screen_sprite_draws.map((s) => s.id - 0xacf);
+    check("...runs the clock while the boss is engaged, drawn as mm:ss:hh "
+          + "in 0xACF + digit, the minutes' tens left out at 0",
+          c.sub === 4 && G.g_boss_mode_time === 60
+          && clock.join(",") === [0, 0x63b - 0xacf, 0, 1, 0x643 - 0xacf, 0, 0]
+            .join(",")
+          && G.g_screen_sprite_draws[0].x === 248
+          && G.g_screen_sprite_draws[0].y === 420,
+          `sub ${c.sub} time ${G.g_boss_mode_time} ${shown()}`);
+    G.g_boss_engaged = 0;
+    step(c);
+    let blinks = 0;
+    let updates = 0;
+    while (c.sub === 5 && updates < 400) {
+      step(c);
+      updates += 1;
+      if (G.g_screen_sprite_draws.length > 0) blinks += 1;
+    }
+    // Sub 5 counts `obj+0x1330` and leaves once it read above 0x78: 122
+    // updates. It draws while the count, after this update's step, is under
+    // 20 modulo 30.
+    check("...and blinks the final time for 122 updates once the boss falls",
+          c.sub === 6 && updates === 122 && G.g_boss_mode_time === 60
+          && blinks === 82,
+          `sub ${c.sub} updates ${updates} blinks ${blinks}`);
+  }
+
+  // **App state 0x0B.** `AttractScene11ChapterCardUpdate`: 200 frames, and
+  // sub 1 draws fifteen rows of five 128x32 tiles from the frame
+  // `g_attract11_card_frames[(g_frame_counter % 10) >> 1]` names -- the flash
+  // table's while the dwell is 60..72 -- then flag 248, texbank 0x192, bit
+  // 0x20 down, `ActorKill`.
+  {
+    const c = card(0);
+    // `RunAttractScene11`'s phase 0 sets `g_GameMode = 0` itself.
+    G.g_app_state = AppState.AttractScene11;
+    G.g_frame_counter = 7;
+    step(c);
+    const d = G.g_screen_sprite_draws;
+    check("in app state 0x0B the first update installs the attract routine "
+          + "and draws 75 tiles of frame (7 % 10) >> 1 = 3, from 0x522",
+          c.cls === SpawnClass.ChapterCard
+          && c.chapter.routine === ChapterCardRoutine.AttractScene11
+          && d.length === 75 && d[0].id === 0x522 && d[74].id === 0x522 + 74
+          && d[74].x === 512 && d[74].y === 448 && d[0].depth === 2
+          && c.hp === 199
+          && (G.g_screen_furniture_flags & ScreenFurniture.ChapterCard) !== 0,
+          `${d.length} first 0x${d[0]?.id.toString(16)} hp ${c.hp}`);
+    // Update k draws on dwell 201 - k: 72 is update 129.
+    let flash = 0;
+    let plain = 0;
+    for (let k = 2; k <= 200; k++) {
+      step(c);
+      if (G.g_screen_sprite_draws[0]?.id === 0x56d) flash += 1;
+      else if (G.g_screen_sprite_draws.length) plain += 1;
+      if (c.dead) break;
+    }
+    check("...draws the flash table's frame on the 13 updates of dwell "
+          + "72..60, and at 200 raises flag 248 and dies with the bit down",
+          flash === 13 && plain === 186 && c.dead
+          && (G.g_script_flags[0xf8] ?? 0) === 1
+          && (G.g_screen_furniture_flags & ScreenFurniture.ChapterCard) === 0,
+          `flash ${flash} plain ${plain} dead ${c.dead}`);
   }
 }
 

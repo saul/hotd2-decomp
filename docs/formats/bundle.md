@@ -91,6 +91,18 @@ whatever a list's overflow records name) and `common.bin[199]` on the type's
 template. The renderer clones a template for each figure the card allocates;
 `web/tools/checks/result_card.ts` holds the block to the EXE.
 
+`script.json` also carries a `chapter_card` block -- the chapter card's
+`.rdata`, read by `ExeTables.chapterCardTables`: the four tables its two
+variant arms index, each as long as its index reaches --
+`boss_mode_backdrop_sprites` (`0x0055DD50`, s16 a scene),
+`boss_mode_backdrop_flags` (`0x0055DD5C`, u8 a scene), `attract11_frames` and
+`attract11_flash_frames` (`0x0055DD64`, `0x0055DD70`, s16[5]). The story card
+reads no table. Every stage places the card, and carries its scene's eight
+title sprites (`scr_chapter_st1..6`, palette `0xB`) in `screen_sprites`;
+stage 6 carries slot `0x1730` as an effect slot. The ids and the slot are
+`.text` immediates in `web/src/game/class60/state.ts`, which the exporter
+imports; `web/tools/checks/chapter_card.ts` holds all of it to the EXE.
+
 A stage that spawns class 0x42 -- the worm, stage 2 -- carries
 `characters.class42`: the class's `.rdata`, each table cut at the extent its
 reader's index reaches (`web/src/hod2lib/class42.ts`) -- the member offsets

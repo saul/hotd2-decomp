@@ -140,8 +140,8 @@ import { RequestAppState } from "../game/app_state";
 import { ProfileBoot } from "../game/profile";
 import { readProfile, writeProfile } from "./profile_store";
 import { OptionsPad, OptionsTap } from "../game/options/list";
-import { SetBoss4Tables, SetGameOverTables, SetGameTables, SetOptionsTables,
-         SetResultCardTables }
+import { SetBoss4Tables, SetChapterCardTables, SetGameOverTables,
+         SetGameTables, SetOptionsTables, SetResultCardTables }
   from "../game/tables";
 import { PressKind, type Press } from "../core/net/protocol";
 import { NetSession, type NetRole } from "./net/session";
@@ -1206,6 +1206,7 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     SetOptionsTables(script.options);
     SetBoss4Tables(script.boss4, script.carrier_door_yaw);
     SetResultCardTables(script.result_card);
+    SetChapterCardTables(script.chapter_card);
   }
 
   /**
@@ -1774,6 +1775,11 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
         }
         return;
       case PressKind.Offscreen:
+        // The reload is also B in the pad word -- the mouse's right button
+        // (`MouseReadButtons`, `FUN_0041F370`) and Right Ctrl
+        // (`KeyboardReadAsPad`, `FUN_0041F1A0`) are `0x2` -- which is the bit
+        // the chapter card's skip tests (`TEST AL, 0x2` at `0x0043481B`).
+        this.padLatch |= 0x2 * shift;
         if (this.gameRunning && !this.frozen) QueueOffscreenPull(player);
         return;
       case PressKind.Start:
@@ -2495,6 +2501,10 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     if (this.loading) return this.publishUi();
     // The result card boxes the frame, and the game raises and drops it.
     if (this.boxed !== this.boxedApplied) this.resize();
+    // The chapter card takes the level off the screen while it is up:
+    // `RegionDrawResidentSet` returns on `g_screen_furniture_flags & 0x20`.
+    this.scene3d?.setChapterCardUp(
+      (G.g_screen_furniture_flags & ScreenFurniture.ChapterCard) !== 0);
     if (this.perfMeter.enabled) return this.endFrameMeasured();
     this.drawOrder.beginFrame();
     this.lighting.beforeRender();

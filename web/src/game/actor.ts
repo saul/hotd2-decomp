@@ -50,6 +50,7 @@ import { makeSetPiecePropTail, type SetPiecePropTail }
 import { makeThrowerTail, type ThrowerTail } from "./class31/state";
 import { makeZombieTail, type ZombieTail } from "./class30/state";
 import { makeResultCardTail, type ResultCardTail } from "./class61/state";
+import { makeChapterCardTail, type ChapterCardTail } from "./class60/state";
 
 /**
  * `model+0x64` — the **motion block's** flag word, which is `obj+0x1F8`.
@@ -2565,6 +2566,7 @@ export type Actor =
   | (ActorBase & { cls: SpawnClass.ScriptedScenery;
                    scenery: ScriptedSceneryTail })
   | (ActorBase & { cls: SpawnClass.ResultCard; card: ResultCardTail })
+  | (ActorBase & { cls: SpawnClass.ChapterCard; chapter: ChapterCardTail })
   | (ActorBase & { cls: Exclude<SpawnClass,
       SpawnClass.ScriptedHumanoid | SpawnClass.SetPieceProp
       | SpawnClass.Thrower | SpawnClass.Zombie
@@ -2577,7 +2579,8 @@ export type Actor =
       | SpawnClass.CarriedZombie
       | SpawnClass.ScriptedScenery | SpawnClass.Vehicle
       | SpawnClass.PathRidingProp | SpawnClass.HordeSpawner
-      | SpawnClass.Worm | SpawnClass.ResultCard> });
+      | SpawnClass.Worm | SpawnClass.ResultCard
+      | SpawnClass.ChapterCard> });
 
 /** An actor already narrowed to class 0x25, for that class's own routines. */
 export type HumanoidActor = Extract<Actor,
@@ -2624,6 +2627,9 @@ export type FishActor = Extract<Actor, { cls: SpawnClass.WaterEnemy }>;
 
 /** An actor already narrowed to class 0x61: the result card or a figure. */
 export type ResultCardActor = Extract<Actor, { cls: SpawnClass.ResultCard }>;
+
+/** An actor already narrowed to class 0x60, the chapter card. */
+export type ChapterCardActor = Extract<Actor, { cls: SpawnClass.ChapterCard }>;
 
 /** An actor already narrowed to class 0x33, for that class's own routines. */
 export type ScriptedSceneryActor = Extract<Actor,
@@ -2883,6 +2889,9 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
   }
   if (cls === SpawnClass.ResultCard) {
     return { ...head, cls, card: makeResultCardTail() };
+  }
+  if (cls === SpawnClass.ChapterCard) {
+    return { ...head, cls, chapter: makeChapterCardTail() };
   }
   return { ...head, cls };
 }

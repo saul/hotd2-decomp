@@ -83,6 +83,8 @@ export class StageScene {
    */
   private waterOwned: ReadonlySet<number> = new Set();
   private waterDrawn: ReadonlySet<number> = new Set();
+  /** Whether the chapter card holds the screen. See {@link setChapterCardUp}. */
+  private chapterCardUp = false;
 
   /**
    * The stage, parsed from its glTF's bytes -- which the loader has already
@@ -195,6 +197,22 @@ export class StageScene {
     return box.getBoundingSphere(out);
   }
 
+  /**
+   * `RegionDrawResidentSet` (`FUN_00401260`)'s first test: `MOV AL,
+   * [0x009a5900]; TEST AL, 0x20; JNZ 0x00401460` -- the routine returns before
+   * it draws a region while the chapter card holds the screen
+   * (`g_screen_furniture_flags` bit `0x20`, `ScreenFurniture.ChapterCard`),
+   * so the card's title is drawn over no level. The routines that draw a slot
+   * of their own -- the water task's tiles here, props, characters -- have
+   * their own tests or none. `app/` sets it from `G` every frame; free roam's
+   * "all" draws every region whatever it says.
+   */
+  setChapterCardUp(up: boolean): void {
+    if (up === this.chapterCardUp) return;
+    this.chapterCardUp = up;
+    this.refresh();
+  }
+
   setVisibility(mode: Visibility): void {
     this.mode = mode;
     this.refresh();
@@ -254,8 +272,10 @@ export class StageScene {
     const all = this.mode === "all";
     for (const m of this.models) m.node.visible = all;
     if (all) return;
-    for (const m of this.byRegion.get(this.currentRegion) ?? []) {
-      m.node.visible = true;
+    if (!this.chapterCardUp) {
+      for (const m of this.byRegion.get(this.currentRegion) ?? []) {
+        m.node.visible = true;
+      }
     }
     // A model no region lists is drawn by whatever routine draws its slot, in
     // that routine's layer -- never here, loaded or not (see the file comment).

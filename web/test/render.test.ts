@@ -5294,6 +5294,71 @@ console.log("\nthe stage's loaded models: loaded is not drawn (L54)");
         scene.slotResident(0x0100) && scene.slotResident(0x7777));
 }
 
+console.log("\nthe chapter card takes the level off the screen:");
+
+{
+  // `RegionDrawResidentSet` (`FUN_00401260`) opens `MOV AL, [0x009a5900];
+  // TEST AL, 0x20; JNZ 0x00401460` -- the routine's epilogue -- so while the
+  // chapter card holds `g_screen_furniture_flags` bit 0x20 no region model is
+  // drawn. The water task's tile is its own draw and keeps its own rule.
+  const { StageScene } = await import("../src/render/stagescene");
+  const model = (slot: number, regions: number[] = []) => {
+    const m = new Group();
+    m.userData = { hod2_regions: regions, hod2_slot: slot, hod2_draw_mode: 0 };
+    m.add(new Mesh(new PlaneGeometry(1, 1), new MeshBasicMaterial()));
+    return m;
+  };
+  const tree = new Group();
+  const wall = model(0x0100, [1]);
+  const tile = model(0x13a0);
+  tree.add(wall, tile);
+  const scene = StageScene.fromScene(tree, { regions: [0, 1] } as never);
+  scene.enterRegion(1);
+  scene.loadSlot(0x13a0);
+  scene.setWaterSlots(new Set([0x13a0]), new Set([0x13a0]));
+  const before = wall.visible && tile.visible;
+  scene.setChapterCardUp(true);
+  check("with the chapter card up the region's model is not drawn",
+        before && !wall.visible, `before ${before} wall ${wall.visible}`);
+  check("...while the water task's resident tile still is", tile.visible);
+  scene.enterRegion(0);
+  scene.enterRegion(1);
+  check("...and a region entered under the card is not drawn either",
+        !wall.visible);
+  scene.setChapterCardUp(false);
+  check("...and the level is back the frame the card drops its bit",
+        wall.visible);
+  scene.setChapterCardUp(true);
+  scene.setVisibility("all");
+  check("free roam's all-regions view shows the level whatever the card says",
+        wall.visible);
+}
+
+console.log("\nthe chapter card's model: half a turn about, in the eye's space:");
+
+{
+  // `MatrixLoadIdentity; MatrixTranslate(0, 0, -30); MatrixRotateY(0x8000);
+  // MatrixScale(2, 2, 2); AssetDrawSlot(0x1730)` -- the turn between the
+  // translate and the scale is the node's own rotation, and a half turn about
+  // y sends the model's +z to -z and its +x to -x.
+  const { drawViewSlots } = await import("../src/render/view_slots");
+  const { DrawSlotInView } = await import("../src/game/view_slot");
+  const view = new Group();
+  const node = new Obj3D();
+  ResetGameGlobals();
+  G.g_view_slot_draws = [];
+  DrawSlotInView(0x1730, 0, 0, -30, 2, 0x8000);
+  const seen = new Set<string>();
+  drawViewSlots({ node: () => { view.add(node); return node; }, view }, seen);
+  node.updateMatrixWorld(true);
+  const p = new Vector3(1, 0, 1).applyMatrix4(node.matrixWorld);
+  check("the model's (1, 0, 1) lands at (-2, 0, -32): turned, scaled, then "
+        + "moved 30 ahead",
+        Math.abs(p.x + 2) < 1e-6 && Math.abs(p.y) < 1e-6
+        && Math.abs(p.z + 32) < 1e-6 && seen.size === 1,
+        `${p.x.toFixed(3)} ${p.y.toFixed(3)} ${p.z.toFixed(3)}`);
+}
+
 console.log("\nrigs: a part drawn behind a camera-path test");
 {
   // `FUN_0048F560`, stage 6's lift car: `AssetDrawSlot(0xAFE/0xAFF)` only

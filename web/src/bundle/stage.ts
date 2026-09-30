@@ -104,6 +104,12 @@ export interface ScriptJson {
    * and awards no life.
    */
   result_card?: ResultCardJson;
+  /**
+   * The chapter card's `.rdata` -- see `ExeTables.chapterCardTables` in the
+   * exporter. Absent in a bundle written before it, in which Boss Mode's card
+   * draws no backdrop and holds, and app state 0x0B's draws nothing.
+   */
+  chapter_card?: ChapterCardJson;
   rain?: RainJson;
   /** The `coli/` blobs this scene loads — see {@link ColiJson}. */
   coli?: ColiJson;
@@ -168,6 +174,34 @@ export interface ResultCardJson {
   lists: number[];
   /** `g_accuracy_bonus_table`, `0x00567990`: s16[11]. */
   accuracy_bonus: number[];
+}
+
+/**
+ * The chapter card's `.rdata`: the four tables its two variant arms index,
+ * one block for the whole game, as `result_card` is. The story card itself
+ * reads no table -- its sprite ids and anchor points are immediates.
+ */
+export interface ChapterCardJson {
+  /**
+   * `g_boss_mode_backdrop_sprites`, `0x0055DD50`, s16[6]: per scene, the
+   * first of `BossModeChapterCardUpdate`'s twenty backdrop sprites.
+   */
+  boss_mode_backdrop_sprites: number[];
+  /**
+   * `g_boss_mode_backdrop_flags`, `0x0055DD5C`, u8[6]: per scene, the
+   * `g_script_flags` index the backdrop holds until.
+   */
+  boss_mode_backdrop_flags: number[];
+  /**
+   * `g_attract11_card_frames`, `0x0055DD64`, s16[5]: the first sprite of each
+   * of `AttractScene11ChapterCardUpdate`'s five 5x15-tile frames.
+   */
+  attract11_frames: number[];
+  /**
+   * `g_attract11_card_flash_frames`, `0x0055DD70`, s16[5]: the frames it
+   * draws instead while its dwell is 60..72.
+   */
+  attract11_flash_frames: number[];
 }
 
 export interface Boss4TablesJson {

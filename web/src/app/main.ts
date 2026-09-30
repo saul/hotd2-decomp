@@ -112,6 +112,7 @@ import { TextureFilter, type TextureFilterMode } from "../render/texfilter";
 import { type LightingMode, SceneLighting } from "../render/lighting";
 import { GunLights } from "../render/gunlights";
 import { ActorDrawsUnderSecondaryLights } from "../game/light_sets";
+import { RunPendingInits } from "../game/director";
 import { applyToggle, runCommand, type PlayerCommands } from "./commands";
 import { entryBlockFor, loadStageInto } from "./stage_load";
 import { Events } from "../core/events";
@@ -2148,7 +2149,12 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
   idleTick(t: Tick): void {
     if (!this.walker) return;
     // A replica's script phase is the host's: nothing of it runs here.
-    if (!this.asReplica) this.pushPortGlobals();
+    if (!this.asReplica) {
+      this.pushPortGlobals();
+      // No walk runs on a stopped clock, so the `Init`s the spawns above left
+      // due run here -- see `RunPendingInits`.
+      RunPendingInits(this.rng, this.events);
+    }
     this.cam.scripted = this.state.mode !== "free";
     this.world.update(this.ctx, t);
   }
@@ -2738,10 +2744,11 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     // the layer that noticed: `render/` may notice that a spawn is placeable,
     // it does not get to decide that an object exists or that a lifetime has
     // ended. `web/tools/repo/layers.ts` is what keeps that honest, and
-    // `syncCharacterSpawns` is where the three layers meet.
-    // ...with `events`, because one class's `Init` makes a sound: character
-    // types 2 and 3 start the looping chainsaw or laser sword.
-    syncCharacterSpawns(this.chars, this.walker.spawns, this.events);
+    // `syncCharacterSpawns` is where the three layers meet. The character
+    // spawns' `Init`s are not run here but by the task walk, after the
+    // scene's own tasks, as `SpawnFromDescriptor` leaves them in the engine
+    // -- see `game/spawn.ts`.
+    syncCharacterSpawns(this.chars, this.walker.spawns);
   }
 
   /**

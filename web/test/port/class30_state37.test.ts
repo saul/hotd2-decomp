@@ -48,7 +48,7 @@ import {
   PlaceFlickerLightProp48, PropUpdateType48FlickerLight, SFX_FLICKER_BREAK,
 } from "../../src/game/class41/type48";
 import { ZombieAux } from "../../src/game/actor";
-import { SpawnSlotActors } from "../../src/game/director";
+import { RunPendingInits, SpawnSlotActors } from "../../src/game/director";
 import {
   check, motion, TYPE, CHARS, SCENE_MAJOR_PLAYING, spawnZombie, scene,
   EnterPlay,
@@ -1070,8 +1070,9 @@ console.log("stage 3 block 0's boat, and the riders it carries to the wall:");
     }],
   } as unknown as CharactersJson);
   SpawnSlotActors([{ at: BOAT, class: SpawnClass.ScriptedProp,
-                     pos: [-1055, -26.25, -1620] as [number, number, number] }],
-                  rng);
+                     pos: [-1055, -26.25, -1620] as [number, number, number] }]);
+  // The `Init`s are the frame walk's (`SpawnFromDescriptor`); run them here.
+  RunPendingInits(rng);
   const boat = ActorByAt(BOAT);
   if (!boat) throw new Error("no boat");
   check("stage 3's boat is built with its record's flags word: 0x8000 | 1",

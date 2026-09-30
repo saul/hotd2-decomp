@@ -195,7 +195,7 @@ for (let f = 0; f < FRAMES; f += 1) {
   if (walker.branch) walker.takeBranch(walker.branch.targets[0]);
   syncPortGlobals(walker, false, ctx.view.eye);
   seat();
-  syncCharacterSpawns(pool, walker.spawns, ctx.events);
+  syncCharacterSpawns(pool, walker.spawns);
   const all = G.g_object_list.filter((o) => o.cls === EMPEROR && !o.despawned);
   const boss = all.find((o) => o.class2d?.boss && o.class2d.boss.subtype === 1);
   if (boss) seen.boss = boss;

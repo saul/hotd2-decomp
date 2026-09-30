@@ -62,6 +62,7 @@ import { ScriptedScenerySelector } from "../game/class33/state";
 import { OwlBodyChain, type OwlPart } from "./owl";
 import { deformHordeSheet, HordeDrawParts, type HordePart } from "./horde";
 import { WormDrawParts, type WormPart } from "./worm";
+import { FishDrawParts, type FishPart } from "./fish";
 import { SpawnClass } from "../game/spawn_class";
 import { BAMS_TO_RAD } from "../core/bams";
 import {
@@ -163,11 +164,11 @@ function DrawSlotFor(a: Actor): number | null {
       // and the arm below places one model per entry. `-1` says so.
       return -1;
     case SpawnClass.WaterEnemy:
-      // `sub+0x6E` — `fish.bin`'s twenty-frame swim strip while it is alive,
-      // and entry 0 or 1 once it is a corpse. `FishDraw` (`FUN_00439860`)
-      // also draws a **flattened silhouette** on the water when the fish is
-      // below it and `sub+0x6A` bit 2 is set; that second draw is not here.
-      return a.fish.frame || null;
+      // A chain too: `FishDraw` (`FUN_00439860`) draws `sub+0x6E` -- the swim
+      // strip, or a corpse -- under the sub-block's own angles, and a
+      // **flattened silhouette** of it on the water when it is drawn solid
+      // and below the surface. `render/fish.ts` composes both.
+      return CHAIN;
     case SpawnClass.ScriptedProp:
       // `obj+0x1F4`, straight off the descriptor tail. One slot, drawn under
       // `Translate; RotX; RotZ; RotY` and an optional uniform scale --
@@ -245,18 +246,6 @@ function DrawScaleFor(a: Actor): number {
       // The same test on `sub+0x10` at `0x0043FB2F` (`FCOMP 1.0`), and the
       // same call at `0x0043FB43`. All three shipped descriptors carry 1.0.
       return a.prop12.scale || 1;
-    case SpawnClass.WaterEnemy:
-      // `MatrixScale(0.3, 0.3, 0.3)` at `0x00439AC9`, and again at
-      // `0x00439CF8` in `FishSwimAwayTick` (`FUN_00439C20`). A fish drawn at
-      // one is three and a third times the size of the one in the game, which
-      // is what it looked like.
-      //
-      // The **other** two scale calls in the class are the flattened
-      // silhouette on the water — `(0.4, 0.01, 0.4)` at `0x0043994F` and
-      // `0x00439A4A` — and that is a second draw of the same model at a
-      // different place, which this layer has no way to express. It is
-      // declared in `game/class51/`.
-      return 0.3;
     default:
       return 1;
   }
@@ -380,6 +369,8 @@ export class SlotModelLayer implements System<RenderContext> {
   private readonly _hordeParts: HordePart[] = [];
   /** Scratch for class 0x42's chain. */
   private readonly _wormParts: WormPart[] = [];
+  /** Scratch for {@link FishDrawParts}. */
+  private readonly _fishParts: FishPart[] = [];
   /** Scratch for class 0x26's chain. */
   private readonly _vehicleParts: VehiclePart[] = [];
   private enabled = true;
@@ -534,9 +525,11 @@ export class SlotModelLayer implements System<RenderContext> {
                                a.roll * BAMS_TO_RAD, "XZY");
       } else if (a.cls === SpawnClass.HordeSpawner
                  || a.cls === SpawnClass.Worm
-                 || a.cls === SpawnClass.Vehicle) {
-        // `render/horde.ts` and `render/worm.ts` hand back world-space
-        // matrices, and class 0x26's routines recorded them.
+                 || a.cls === SpawnClass.Vehicle
+                 || a.cls === SpawnClass.WaterEnemy) {
+        // `render/horde.ts`, `render/worm.ts` and `render/fish.ts` hand back
+        // world-space matrices, scale included, and class 0x26's routines
+        // recorded them.
         live.node.visible = true;
         live.node.position.set(0, 0, 0);
         live.node.rotation.set(0, 0, 0);
@@ -801,14 +794,16 @@ export class SlotModelLayer implements System<RenderContext> {
    * the matrices are rewritten every frame either way, because the angles do.
    */
   private chain(a: Actor, live: Live | undefined): Live | null {
-    const parts: (OwlPart | HordePart | WormPart | VehiclePart)[] =
+    const resident = (slot: number): boolean =>
+      !this.residency || this.residency.slotResident(slot);
+    const parts: (OwlPart | HordePart | WormPart | VehiclePart | FishPart)[] =
       a.cls === SpawnClass.HordeSpawner
         ? HordeDrawParts(a, this._hordeParts)
         : a.cls === SpawnClass.Worm ? WormDrawParts(a, this._wormParts)
+          : a.cls === SpawnClass.WaterEnemy
+            ? FishDrawParts(a, this._fishParts, resident)
           : a.cls === SpawnClass.Vehicle
-            ? VehicleDrawParts(a, this._vehicleParts,
-                               (slot) => !this.residency
-                                 || this.residency.slotResident(slot))
+            ? VehicleDrawParts(a, this._vehicleParts, resident)
             : OwlBodyChain(a, this._parts);
     if (!parts.length) {
       // Nothing drawn this frame -- a member that is not drawing its shadow.

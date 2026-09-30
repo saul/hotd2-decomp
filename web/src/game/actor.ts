@@ -1387,6 +1387,22 @@ export interface ActorBase {
    */
   cls: SpawnClass;
   /**
+   * `obj+0x00` **still names the class's handler** -- the object is linked
+   * and its `Init` has not run.
+   *
+   * `SpawnFromDescriptor` (`FUN_00408A20`) is `ActorAlloc(g_class_handlers
+   * [class], 0x13F4)` and the descriptor's fields, and nothing else: the
+   * handler it stores at `obj+0x00` **is** the `Init`, and `TaskRunTree`
+   * (`FUN_004A71A0`) calls it when the walk reaches the object -- which, for
+   * an object the script made, is at the tail of the scene list, after the
+   * camera actor and the scene state's hook have run for the frame. The
+   * `Init` then writes the class's update over `obj+0x00` (`EnemyZombieInit`
+   * at `0x00452FB5`). The port keeps the class in {@link Actor.cls}, so this
+   * is the one bit of the pointer the port needs: which of the two it holds.
+   * See `game/spawn.ts`, and `SceneTaskWalk` for the frame it runs on.
+   */
+  initPending: boolean;
+  /**
    * `obj+0x1F4` — the character type, **s16**, and the head's real type tag.
    *
    * It lives inside the embedded model record: `ActorSetMotion`
@@ -2827,6 +2843,7 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     shotRays: [null, null],
     killedBy: -1,
     despawned: false,
+    initPending: false,
     radius: 0,
     bodyRadius: 0,
     pushedBy: -1,

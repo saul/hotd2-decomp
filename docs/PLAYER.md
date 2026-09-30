@@ -289,6 +289,16 @@ What it is used for:
 a system is one `world.add(...)`. A layer ticked by hand is a layer outside
 `save`/`load`/`resync`.
 
+**A script's spawn is linked in the script phase and initialised in the
+walk.** `SpawnFromDescriptor` (`game/spawn.ts`) puts the object in the pool
+with `initPending` set and runs no `Init`; `SceneTaskWalk` runs it when the
+loop reaches the object, after the scene's own tasks -- the camera actor and
+the scene state's hook among them -- as `TaskRunTree` reaches an object the
+interpreter allocated at the tail of the scene list. So an `Init` reads the
+camera this frame publishes. `ActorSpawn` (link and `Init` at once) is for
+the objects a class makes itself and for tests; `RunPendingInits` is the
+paused frame's, which walks no tasks (`L104`).
+
 **One clock, one fixed tick, never skipped.** The simulation advances in whole
 60 Hz ticks — the walker and the port together, by exactly one. A drawn frame
 runs however many ticks the accumulator owes: one on a 60 Hz display, often

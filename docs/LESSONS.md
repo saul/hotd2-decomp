@@ -902,6 +902,25 @@ one-shot channel, find what ends it in the exe -- a state change, or nothing,
 in which case the track wraps -- and test for as long as the shipped data
 holds it.**
 
+**L104 -- An `Init` runs where the walk reaches its object, not where the
+opcode that made it ran.** `SpawnFromDescriptor` (`FUN_00408A20`) is
+`ActorAlloc(g_class_handlers[class])` and a copy of the descriptor: the
+handler it stores at `obj+0x00` *is* the `Init`, and `TaskRunTree` calls it
+when the walk gets there -- for a script's spawn, the tail of the scene list,
+after the camera actor and the scene state's hook. The port ran every `Init`
+inside the script phase, before those tasks, and the note beside the call
+even said "exactly as `SpawnFromDescriptor`'s does". Nothing showed until a
+spawn landed in the frame the script handed the camera from one path to
+another: stage 2's canal zombies (block 16 step 7) seeded their heads at the
+cut-scene's eye, 34 up and to one side, and turned them round at `0xC0` a
+frame for two and a half seconds -- a head 140 degrees off its body, reported
+as "facing the wrong way", in a head aim that had been transcribed
+instruction for instruction. The same order put every slot actor's
+`visible`, and the mouse's and class 0x33's `pos`, on *after* their `Init`s. **When an `Init` reads a global,
+find which task writes it and whether that task runs before or after the
+object's first call**, and a test of what an `Init` does is a test of the
+frame, not of the spawn.
+
 ---
 
 ## Running the tools

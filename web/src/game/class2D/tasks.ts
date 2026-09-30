@@ -11,6 +11,7 @@
  */
 import type { Events } from "../../core/events";
 import { ActorByAt, G } from "../globals";
+import { LightsRestoreScene } from "../light_sets";
 import type { EmperorActor } from "../actor";
 import { CameraBlockWorldToView } from "../camera/view";
 import { PlaySoundId } from "../class45/rand";
@@ -291,6 +292,7 @@ function Class2DDeathBurstUpdate(t: Class2DTask, host: GameHost,
     }
     Class2DPushDraw(BURST_STRIP_FIRST + n, base, true, alpha, false, light);
   }
+  LightsRestoreScene();
   t.curveFrame = Math.fround(t.curveFrame + BURST_STEP);
   t.frame = Math.trunc(t.curveFrame);
   if (t.frame > BURST_LAST) t.killed = true;
@@ -419,6 +421,7 @@ function Class2DSatelliteTrailUpdate(t: Class2DTask): void {
     t.points[i].y = t.points[i - 1].y;
     t.points[i].z = t.points[i - 1].z;
   }
+  LightsRestoreScene();
 }
 
 /**

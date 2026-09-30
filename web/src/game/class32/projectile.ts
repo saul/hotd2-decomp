@@ -28,6 +28,7 @@ import { IsPlayerAttackable, PlayerTakeDamage } from "../combat/player";
 import { RegisterForShotTest } from "../combat/shot_test";
 import { ActorDespawn } from "../despawn";
 import { G } from "../globals";
+import { SetRenderLightColour } from "../screen_sprite";
 import { ActorClaimHitSlot } from "../hit_slots";
 import type { GameHost } from "../host";
 import {
@@ -247,6 +248,7 @@ export function Class32ProjectileDispatchAndDraw(p: Boss5Actor, rng: Rng,
   MatrixScale(m, t.size, t.size, t.size);
   const v = Math.fround(1.0 / Math.trunc(0xff / t.bright));
   p.alpha = v;
+  SetRenderLightColour(1.0, v, v);
   t.draw = { m, light: [1.0, v, v] };
   MatrixTransformPoint(CameraBlockWorldToView(G.g_camera_index), p.pos,
                        t.view);

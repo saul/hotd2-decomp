@@ -24,7 +24,7 @@ bones 1 and 9 `[proved]` (the type's `g_pCharacterExtraParts` row).
 **The name.** The banner its `Init` spawns, record `0x00596AC0`, draws the
 name cards `0xBE` and `0xCC`, which read **MAGICIAN** and **Type 0** on
 screen `[proved]` (the record, `game/boss_banner_records.ts`; the page,
-`tools/boss5_page.mjs`'s `boss5-banner.png`). The repo's other documents
+`tools/boss5_page.mjs --shots`'s `boss5-banner.png`). The repo's other documents
 already call it that.
 
 **Where it spawns** `[proved]`: stage 5 block 7 (the route's end block) and
@@ -151,12 +151,25 @@ draw. It switches on the node's slot `[proved]`:
 Each model goes through `Class32DrawNodeSlot` (`0x0047FC50`) `[proved]`: in
 state 9, and in state 10 past sub 3, it aims the scene light from the node
 toward bone 8's point -- `g_scene_light_pitch_bams`/`_yaw_bams` and block 1's
-pair through `BuildSceneLightDirection` -- and sets the warm colour (1.0,
-0.781, 0.565); while the flash is up it sets `(odd ? 1 : 0, 0, 0)`. The light
-colour is global state, so a node draws under what the last node set, and
+pair (`0x009A59F8`/`0x009A59FC`), each block's vectors rebuilt through
+`BuildSceneLightDirection` -- and sets the warm colour (1.0, 0.781, 0.565);
+while the flash is up it sets `(odd ? 1 : 0, 0, 0)`. The light colour is
+global state, so a node draws under what the last node set, and
 `SkeletonDrawWalk` (`0x004110D0`) draws the vertex-blended part **after**
 every node, under whatever the last node left (`DrawCharacterPartSlot` sets
 none for this type).
+
+The aim makes **no** `SetRenderLightDirection` `[proved]`, so it does not
+light the draw in progress: that keeps the direction its
+`LightsUseSecondarySet` built from block 1's angles at the draw's head -- the
+last node's aim of the frame before. What the aim reaches is everything after
+it: the draw's own `LightsRestoreScene` installs block 0's rebuilt view vector
+(`g_scene_light_dir_view`), so the rest of the frame is lit from it; the next
+frame's `UpdateSceneViewAndLight` rebuilds block 0 from the new angles for the
+world (`RegionDrawResidentSet` is the list's tenth task, before any actor);
+and the next `LightsUseSecondarySet` lights every character from block 1's.
+Nothing restores the scene's own angles: they hold the boss's last aim until
+the script next writes them (evt `0x17`/`0x18`/`0x19`).
 
 ## 5. The projectiles
 
@@ -193,19 +206,38 @@ Draw-only objects `ActorAlloc` links after their maker `[proved]`:
 | `Class32SpawnExitEffect` `0x004807B0` | `Class32ExitEffectTick` `0x00480810` | `0x7F4` shrinking for 33 frames, 15 frames' wait, then hides the boss and runs `0x7EF..0x815` one cel every three frames |
 
 The death burst and the exit effect set no light colour of their own
-`[proved]`; they draw under whatever the draw before them left, which in
-the pool's order is `[likely]` the body loop's orange for the bursts.
+`[proved]`; they draw under whatever `SetRenderLightColour` the walk made last
+before them. `ActorAlloc` appends, so that is the last colour-setting task
+allocated before them that is still alive, or the boss's own
+`LightsRestoreScene` (block 0's colour) when none is. From the final barrage
+on it is `[likely]` the body loop's orange: state 10 allocates the loop and
+raises `obj+0x136C` bit 5, and the class's one clear of the bit is
+`Class32StateRaiseFlagAndLeave`'s, as it makes the exit effect.
 
-## 7. What the port does not follow
+## 7. The light, in the port
 
-Both are the same missing piece: the scene's two light blocks (direction,
-colour, ambient) live on the script's `Walker` (`script/state/channels.ts`),
-which `game/` cannot reach.
+The two light blocks are `G`'s -- `g_scene_light_block0` (`0x009A3540`),
+`g_scene_light_block1` (`0x009A59E0`) and their tween blocks
+(`game/light_block.ts`) -- and so are the device's light words
+`SetRenderAmbient`, `SetRenderLightDirection` and `SetRenderLightColour` write
+(`g_render_ambient`, `g_render_light_dir`, `g_render_light_colour`;
+`game/light_sets.ts`). `Class32DrawAndAdvance` makes the
+`LightsUseSecondarySet`/`LightsRestoreScene` pair, `Class32DrawNodeSlot`
+writes both blocks, every task that sets a colour sets it through
+`SetRenderLightColour`, and each draw records the light it was made under:
+`Boss5Tail.drawDir` for the boss's direction, each task's colour off the
+register.
 
-* `Class32DrawNodeSlot`'s light **direction** write is computed
-  (`Boss5Tail.lightAngles`) and not made, so in states 9 and 10 the warm
-  light shines from block 1's own direction.
-* The light **colour register** is followed within the boss's own draw and
-  per task draw, but not across routines: the two tasks with no colour of
-  their own draw under the scene's colour rather than the one the previous
-  draw left.
+What is left `[likely]`: the port walks class 0x32's tasks after every actor
+(`Class32TasksTick`), where the engine interleaves them with the actors by
+allocation. A projectile allocated after the body loop stands between it and
+a burst in the engine and not in the port, so on a frame one is still
+bursting the engine's burst takes the projectile's `(1, v, v)` where the
+port's takes the loop's orange.
+
+The renderer draws once, after the tick, and lights the world from block 0's
+angles as the tick left them (`render/lighting.ts`). In states 9 and 10 that
+is this frame's last aim, where the engine's world -- drawn by the tenth task,
+before the boss -- takes the frame before's: the world's light leads the
+engine's by one frame while the boss aims it. The boss itself does not: its
+direction is the one recorded at its draw's head (`drawDir`).

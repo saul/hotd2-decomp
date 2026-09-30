@@ -104,9 +104,9 @@ function ScreenSpriteRecord(id: number, x: number, y: number, depth: number,
 /**
  * `SetRenderLightColour` — `FUN_004AA0A0`. The light colour the next lit
  * draw takes -- `g_render_light_colour_r`, `g`, `b` -- and the light
- * generation up one. The port records it for the 2D quads that read it
- * ({@link SCREEN_SPRITE_LIT}); the 3D draws that call it are the renderer's,
- * which has its own copy of the scene light (`render/lighting.ts`).
+ * generation up one. The 2D quads read it ({@link SCREEN_SPRITE_LIT}), and
+ * a 3D draw that sets no light of its own records it (`light_sets.ts`,
+ * `RenderLightSet`).
  */
 export function SetRenderLightColour(r: number, g: number, b: number): void {
   G.g_render_light_colour = [r, g, b];

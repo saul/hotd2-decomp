@@ -46,15 +46,11 @@ import {
   CivilianEndsRemovable, CivilianHasChildren, CivilianRemoveCue,
   type CivilianLife,
 } from "./civilian_life";
-import {
-  ChannelBlock, type ChannelTween, type FogState, type LightState,
-} from "./state/channels";
+import { ApplyLightChannelOp } from "./state/channels";
 import { Shutter } from "./state/shutter";
-
-export type { ChannelTween, FogState, LightState };
-export {
-  CH_AMBIENT, CH_FOG_FAR, CH_FOG_NEAR, CH_FOG_R, CH_LIGHT_R, CHANNEL_COUNT,
-} from "./state/channels";
+import {
+  LightBlockInit, LightBlockSetDirection, makeLightTweens,
+} from "../game/light_block";
 
 
 /**
@@ -417,8 +413,7 @@ export const WALKER_RESTORED_KEYS = [
   "captionGroup", "captionFrames", "firingGate",
   "skippable", "skipRequested", "rain", "gunLights", "sceneLighting",
   "sceneAmbient",
-  "branchChoice", "parked", "channels", "tweens", "fogSet", "lightDir",
-  "lightSet", "light1", "checkpointBlock", "branchPreview",
+  "branchChoice", "parked", "fogSet", "checkpointBlock", "branchPreview",
   "spawns", "simpleSpawns", "shot",
   "finished", "nextEntryBlock", "bgmTrack", "lastSound", "loopingSe",
   "seq",
@@ -611,87 +606,16 @@ export class Walker {
   /** `halt` (0x4E) parks the interpreter; it does not end the scene. */
   parked = false;
   /**
-   * Scene fog. Starts effectively off -- the far plane is 8000, so a range
-   * beyond it draws nothing, which is what the scripts themselves use
-   * (65000/65001) to disable fog.
+   * `[port-only]` -- true once the script has set one of light block 0's fog
+   * channels (0..5). `render/fog.ts` draws no fog before, whatever the block
+   * holds; the block itself -- fog, colour, ambient, direction -- is `G`'s
+   * (`g_scene_light_block0`, `game/light_block.ts`).
    */
-  /**
-   * The light block. See `script/state/channels.ts`.
-   *
-   * The five fields below are accessors onto it rather than storage: forty
-   * call sites and a snapshot key list already speak in `channels`, `tweens`,
-   * `fogSet`, `lightSet` and `lightDir`, and renaming them all would be churn
-   * that the round-trip test could not tell from a mistake.
-   */
-  readonly lightBlock = new ChannelBlock();
+  fogSet = false;
 
-  get channels(): number[] { return this.lightBlock.channels; }
-  set channels(v: number[]) { this.lightBlock.channels = v; }
-  get tweens(): (ChannelTween | null)[] { return this.lightBlock.tweens; }
-  set tweens(v: (ChannelTween | null)[]) { this.lightBlock.tweens = v; }
-  get fogSet(): boolean { return this.lightBlock.fogSet; }
-  set fogSet(v: boolean) { this.lightBlock.fogSet = v; }
-  get lightSet(): boolean { return this.lightBlock.lightSet; }
-  set lightSet(v: boolean) { this.lightBlock.lightSet = v; }
-  get lightDir(): { pitchDeg: number; yawDeg: number } {
-    return this.lightBlock.lightDir;
-  }
-  set lightDir(v: { pitchDeg: number; yawDeg: number }) {
-    this.lightBlock.lightDir = v;
-  }
-
-  /** Fog, derived from channels 0-4. */
-  get fog(): FogState { return this.lightBlock.fog; }
-
-  /** The directional light, derived from channels 6-8 and 10 plus `0x18`. */
-  get light(): LightState { return this.lightBlock.light; }
-  /**
-   * **Light block 1** — `g_scene_light_block1`, `0x009A59E0`, the same layout
-   * as block 0. Opcodes `0x19` (direction) and `0x24`/`0x25`/`0x27` (the
-   * channels) write it, and `LightsUseSecondarySet` (`FUN_0041DC70`) installs
-   * its colour, ambient and direction for every character's draw, then
-   * `LightsRestoreScene` (`FUN_0041DCC0`) puts block 0's back. It used to be
-   * "pushed only at scene init and never reaches the renderer"; it reaches
-   * every zombie. Only its light half is read; its fog channels are written
-   * and nothing draws with them.
-   */
-  readonly lightBlock1 = new ChannelBlock();
-  get light1(): { channels: number[]; tweens: (ChannelTween | null)[];
-                  lightDir: { pitchDeg: number; yawDeg: number } } {
-    return {
-      channels: [...this.lightBlock1.channels],
-      tweens: this.lightBlock1.tweens.map((t) => t && { ...t }),
-      lightDir: { ...this.lightBlock1.lightDir },
-    };
-  }
-  set light1(v: { channels: number[]; tweens: (ChannelTween | null)[];
-                  lightDir: { pitchDeg: number; yawDeg: number } }) {
-    this.lightBlock1.channels = [...v.channels];
-    this.lightBlock1.tweens = v.tweens.map((t) => t && { ...t });
-    this.lightBlock1.lightDir = { ...v.lightDir };
-  }
-  /** Block 1's directional light, for the characters. */
-  get lightSecondary(): LightState { return this.lightBlock1.light; }
-
-  /**
-   * The scene light block, as 11 channels -- the same numbering the tween
-   * handlers use. Keeping the raw channels (rather than separate fog and
-   * light structs) is what lets one stepper animate all of them, which is
-   * how the game does it.
-   *
-   *   0 fog near   1 fog far   2,3,4 fog RGB (0-255)   5 = 2,3,4 together
-   *   6,7,8 light RGB (0..1)   9 = 6,7,8 together      10 ambient
-   */
-  /**
-   * The scene light: colour from tween channels 6/7/8, ambient from 10, and
-   * the direction from opcodes 0x18/0x19 (and 0x17's slerp target, taken
-   * immediately). Fed to `SetLightingDefaultSingle`'s single directional
-   * light in the game.
-   */
-
-  /** True while any channel is still animating. */
+  /** True while any channel of light block 0 is still animating. */
   get tweening(): boolean {
-    return this.tweens.some((t) => t !== null);
+    return G.g_light_tween_block0.some((t) => t !== null);
   }
   /**
    * `g_scene_state_major` / `g_scene_state_minor` (0x009C6F0C / 0x009C6F14),
@@ -982,8 +906,14 @@ export class Walker {
     this.branchChoice = 0;
     this.parked = false;
     this.branchPreview = null;
-    this.lightBlock.reset();
-    this.lightBlock1.reset();
+    // The port's scene entry: `CameraBlocksReset`'s `LightBlockInit` of both
+    // blocks, and the tween blocks `SceneLightTaskCreate` (`FUN_0040AE60`)
+    // seeds with every slot off.
+    this.fogSet = false;
+    LightBlockInit(G.g_scene_light_block0);
+    LightBlockInit(G.g_scene_light_block1);
+    G.g_light_tween_block0 = makeLightTweens();
+    G.g_light_tween_block1 = makeLightTweens();
     // `entryBlock` rather than `this.script.entry_block`: a stage no longer
     // chooses where it starts.
     this.checkpointBlock = entryBlock;
@@ -1029,9 +959,9 @@ export class Walker {
       gunLights: this.gunLights, sceneLighting: this.sceneLighting,
       sceneAmbient: this.sceneAmbient,
       branchChoice: this.branchChoice, parked: this.parked,
-      channels: [...this.channels], tweens: this.tweens.map((t) => t && {...t}),
-      fogSet: this.fogSet, lightDir: { ...this.lightDir },
-      lightSet: this.lightSet, light1: this.light1,
+      // The light blocks are not here: they are `G`'s, and the game slice of
+      // the same snapshot carries them.
+      fogSet: this.fogSet,
       checkpointBlock: this.checkpointBlock,
       branchPreview: this.branchPreview,
       spawns: this.spawns.map((s) => ({ ...s })),
@@ -1490,14 +1420,9 @@ export class Walker {
     // before this term must not leave last frame's answer standing.
     this.gameplayLiveNow = (this.host.gameplayLive?.() ?? null) !== false;
 
-    // Light and fog animate on the same 60 Hz clock as everything else.
-    this.lightBlock.step(dt * fps);
-    // `PushSceneLightStateToDevice` steps both blocks' channel tweens.
-    this.lightBlock1.step(dt * fps);
-    // `[port-only]` -- block 0's colour channels (`light_r/g/b`, 6..8) where
-    // gameplay reads them as `g_scene_light_colour_r..b`, `0x009A3780`.
-    const ch = this.lightBlock.channels;
-    G.g_scene_light_colour = [ch[6], ch[7], ch[8]];
+    // No light step: `PushSceneLightStateToDevice` is the scene list's second
+    // task, after this one, and runs in `SceneTaskWalk` -- see
+    // `game/light_sets.ts`.
 
     // No shutter step: `HudDrawShutterState` is a task of the scene's own and
     // runs in `SceneTaskWalk`, after the players -- see `game/hud_shutter.ts`.
@@ -1751,16 +1676,28 @@ export class Walker {
    */
   private static readonly OPS: Record<number, OpImpl> = OPS_TABLE;
 
-  /** 0x17 and 0x18 differ only in that one of them is a slerp. */
-  static setLightDir(w: Walker, op: OpJson): string | undefined {
+  /**
+   * `EvtOpSetLight0Direction18` (`FUN_0045F240`) and
+   * `EvtOpSetLight1Direction19` (`FUN_0045F270`):
+   * `LightBlockSetDirection(block, operand 1, operand 2)`. `0x17`,
+   * `EvtOpSlerpLight0Direction17` (`FUN_0045F2A0`), allocates a task that
+   * swings block 0's angles there over the operand's frames; the port takes
+   * the target at once. The exporter hands the BAMS words over as degrees,
+   * `word * 360 / 65536`, which the product below undoes exactly.
+   */
+  static setLightDir(_w: Walker, op: OpJson): string | undefined {
+    const b = op.op === 0x19 ? G.g_scene_light_block1 : G.g_scene_light_block0;
     if (op.pitch_deg !== undefined) {
-      w.lightDir = {
-        pitchDeg: op.pitch_deg,
-        yawDeg: op.yaw_deg ?? w.lightDir.yawDeg,
-      };
-      w.lightSet = true;
+      LightBlockSetDirection(b, Walker.degBams(op.pitch_deg),
+                             op.yaw_deg == null ? b.yaw
+                               : Walker.degBams(op.yaw_deg));
     }
     return op.op === 0x17 ? "slerp target taken immediately" : undefined;
+  }
+
+  /** `[port-only]` The exporter's degrees back to the BAMS word. */
+  private static degBams(deg: number): number {
+    return Math.round(deg * 65536 / 360);
   }
 
   static playSe(w: Walker, op: OpJson, quiet: boolean): string | undefined {
@@ -1894,7 +1831,12 @@ export class Walker {
    */
   /** One of the light-block opcodes. See `script/state/channels.ts`. */
   applyLightChannel(op: OpJson): string | undefined {
-    return (op.light_block === 1 ? this.lightBlock1 : this.lightBlock).apply(op);
+    const one = op.light_block === 1;
+    const r = ApplyLightChannelOp(
+      one ? G.g_scene_light_block1 : G.g_scene_light_block0,
+      one ? G.g_light_tween_block1 : G.g_light_tween_block0, op);
+    if (r.touched && !one && (op.channel ?? 99) <= 5) this.fogSet = true;
+    return r.note;
   }
 
   /**

@@ -16,12 +16,14 @@
  * origin -- the hook draws under the node's matrix with nothing pushed. A
  * node the hook drew nothing on -- the walk skipped it -- shows nothing.
  *
- * **The light.** A draw's colour is `SetRenderLightColour`'s, made between
- * the draw's `LightsUseSecondarySet` and `LightsRestoreScene`, so it is block
- * 1's ambient and direction under that colour: the hit flash's red or black
- * and the warm light of states 9 and 10. It goes on the model as
- * `userData.hod2_light_colour`, which `render/lighting.ts` reads; `null` is
- * block 1's own colour.
+ * **The light.** Every model is drawn between the draw's
+ * `LightsUseSecondarySet` and `LightsRestoreScene`: block 1's ambient, the
+ * direction the first of them installed (`Boss5Tail.drawDir` -- the node
+ * draws re-aim the blocks in states 9 and 10 but not the draw in progress),
+ * and the colour `SetRenderLightColour` last set -- the hit flash's red or
+ * black, the warm light of states 9 and 10, or `null` for block 1's own. It
+ * goes on the model as `userData.hod2_light_set`, which `render/lighting.ts`
+ * reads.
  *
  * Nothing here is state. The nodes are rebuilt from the tail every frame, so
  * `resync` needs no help.
@@ -42,12 +44,15 @@ function ownSlot(inst: Instance, bone: number): number {
 }
 
 /**
- * Tag a model with its draw's light colour. `null` is set, not left off: a
- * bone's child bones hang under it, and an untagged child would take its
- * parent's colour (`render/lighting.ts` inherits a tag down the tree).
+ * Tag a model with its draw's light: the draw's direction, and its colour or
+ * `null` for the block's. Every model is tagged: a bone's child bones hang
+ * under it, and an untagged child would take its parent's set
+ * (`render/lighting.ts` inherits a tag down the tree).
  */
-function light(o: Object3D, rgb: Class32NodeDraw["light"]): void {
-  o.userData.hod2_light_colour = rgb ? [...rgb] : null;
+function light(o: Object3D, rgb: Class32NodeDraw["light"],
+               dir: readonly number[]): void {
+  o.userData.hod2_light_set = { ambient: null, dir: [...dir],
+                                rgb: rgb ? [...rgb] : null };
 }
 
 /**
@@ -88,7 +93,7 @@ export function syncBoss5NodeDraws(
                              && c.name !== BOSS5_DRAW_HOLDER);
     for (const p of prims) {
       drawn(p, self !== undefined);
-      light(p, self?.light ?? null);
+      light(p, self?.light ?? null, t.drawDir);
     }
     list.forEach((d, i) => {
       if (d.slot === own) return;
@@ -104,7 +109,7 @@ export function syncBoss5NodeDraws(
         have.set(key, h);
       }
       if (h.node.parent !== node) node.add(h.node);
-      light(h.node, d.light);
+      light(h.node, d.light, t.drawDir);
     });
   }
   for (const [key, h] of have) {
@@ -113,7 +118,7 @@ export function syncBoss5NodeDraws(
     have.delete(key);
   }
   // The part loop, after every node, under what the last node left.
-  if (inst.part0) light(inst.part0, t.partLight);
+  if (inst.part0) light(inst.part0, t.partLight, t.drawDir);
   return true;
 }
 
@@ -128,7 +133,7 @@ export function clearBoss5NodeDraws(inst: Instance): void {
       : node.children.filter((c) => !bones.has(c));
     for (const p of prims) {
       drawn(p, true);
-      delete p.userData.hod2_light_colour;
+      delete p.userData.hod2_light_set;
     }
   }
 }

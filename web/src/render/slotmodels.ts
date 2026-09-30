@@ -620,10 +620,8 @@ export class SlotModelLayer implements System<RenderContext> {
    *   scaled, each under its own colour.
    * * **body loop**: the boss's own matrix raised 15, at `a * 0.5`, in
    *   layer 9.
-   * * **death burst** and **exit effect**: no colour of their own. They draw
-   *   under the scene's light here; the engine draws them under whatever
-   *   colour the draw before them left, which the port does not follow
-   *   across routines -- `render/lighting.ts` keeps the light blocks.
+   * * **death burst** and **exit effect**: no colour of their own; the
+   *   record carries the one the draw before them left in the register.
    */
   private drawBoss5Draws(seen: Set<number | string>): void {
     for (const a of G.g_object_list) {

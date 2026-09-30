@@ -33,6 +33,7 @@ import { CAMERA_INDEX_VIEW_ANGLES, CameraBlockEye } from "../camera/view";
 import { PlaySoundId } from "../class45/rand";
 import { CreditsAddToBoth, CreditsSetFreePlay } from "../credits";
 import { G, ResetFragmentSubkind1Intact } from "../globals";
+import { CH_LIGHT_R } from "../light_block";
 import { MatIdentity, MatrixRotateX, MatrixRotateY, MatrixTranslate }
   from "../matrix";
 import { OriginalItemsApply, ResetOriginalModeLoadout } from "../original_mode";
@@ -567,8 +568,8 @@ export function ItemSelectDrawPanels(obj: Actor): void {
  * draw's last line. `[port-only]` as a function.
  */
 function RestoreSceneLightColour(): void {
-  const c = G.g_scene_light_colour;
-  SetRenderLightColour(c[0], c[1], c[2]);
+  const c = G.g_scene_light_block0.channels;
+  SetRenderLightColour(c[CH_LIGHT_R], c[CH_LIGHT_R + 1], c[CH_LIGHT_R + 2]);
 }
 
 /**

@@ -49,6 +49,7 @@ import { WaterWaveSourcesTick } from "./class17";
 import { Boss4HitMarksTick } from "./class19/hit_mark";
 import { Boss3TasksTick } from "./class45/tasks";
 import { Class2DTasksTick } from "./class2D/tasks";
+import { PushSceneLightStateToDevice } from "./light_sets";
 import { Class32TasksTick } from "./class32/tasks";
 import { BatSplashesTick } from "./class46/splash";
 import { FishEffectsTick } from "./effects/fish";
@@ -810,6 +811,7 @@ export function GameUpdate(dt: number, host: GameHost, rng: Rng,
  * `camera/actor.ts` for the list):
  *
  * 1. the interpreter -- the walker's `tick`, run by the app before this;
+ * 2. `PushSceneLightStateToDevice`: both light blocks' tweens stepped;
  * 3. `CameraActorTick`: the queued action's handler, then the view;
  * 5. `CameraUpdateTick`: the scene state's hook -- the gameplay eye, the rail;
  * 6. the two player tasks and `SelectAttackablePlayer`;
@@ -826,6 +828,7 @@ export function GameUpdate(dt: number, host: GameHost, rng: Rng,
 function SceneTaskWalk(dt: number, host: GameHost,
                        rng: Rng, events?: Events): FrameResult {
   // The layered queue was emptied at the head of the frame, in `GameUpdate`.
+  PushSceneLightStateToDevice(dt * GAME_HZ);
   CameraActorTick();
   CameraUpdateTick();
   PlayerTasksRun({ host, rng, events });

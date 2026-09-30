@@ -384,7 +384,7 @@ drives the queue with a stubbed `pickShot`.
 | **The VM** — program counter over block/step/op, dispatch, `executeOne`, `advanceStepOrRoute`, `goToBlock`, the branch | `walker.ts` |
 | **The opcodes**, each with its `status` (what the script panel shows) | `ops/*.ts`, one module per group, merged by `ops/index.ts` |
 | **Resumption** — the wait policies, the enemy gates, the skip request | `waits/*.ts`, one file per policy |
-| **Script-driven state** — channel tweens, the shutter's accessors | `state/channels.ts`, `state/shutter.ts` |
+| **Script-driven state** — the light-block opcodes' operands (the blocks themselves are `G`'s, `game/light_block.ts`), the shutter's accessors | `state/channels.ts`, `state/shutter.ts` |
 | **Seek** — a planner that drives the VM to a target, as a debugger does | `seek.ts` |
 
 The queued events and the camera actions are the engine's and live in `G`
@@ -883,7 +883,11 @@ to the disc. The `bundle:*` checks there read an exported bundle.
 `ghidra_db`) live in `web/tools/repo/`; the source ones read the TypeScript
 through the compiler API. **Browser checks** (`net_pair`, `loops`, `keys`, `continue_page`,
 `result_card`, `options_page`, `crosshair_page`, ...) drive the real page in
-headless Chrome through `web/tools/lib/player.mjs`, one at a time.
+headless Chrome through `web/tools/lib/player.mjs`, one at a time. Under
+`?drive=1` every rAF is a vsync, so a driver books its frames in one
+`advance(n, until)` and stops only where it has to act -- a pull, a
+screenshot, a read of the layout -- with `until` watching every frame in the
+page, rather than stepping a frame or two per round trip (`L104`).
 
 **Headless harnesses** in `web/tools/` drive the real port against a real
 bundle with no browser, through `node tools/run_test.mjs tools/<name>.mjs` —

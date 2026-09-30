@@ -452,7 +452,7 @@ console.log("\nclass 0x41 constructor 37 in Original Mode with item 0x1E:");
   events.on("item.released", (e) => released.push(e.set));
   const made = PlaceType37PropPair({ ...PAIR, field_1f4: 2 }, rng);
   G.g_breakable_props.push(...made);
-  G.g_original_item_life_drops = 1;
+  G.g_original_first_aid = 1;
   shootProp(made[1]);
   BreakablePropPoolUpdate(rng, events);
   shootProp(made[0]);
@@ -461,23 +461,23 @@ console.log("\nclass 0x41 constructor 37 in Original Mode with item 0x1E:");
         released.length === 1 && released[0] === 1
         && PropWords(made[0], { o194: 0 }).o194 === 1,
         JSON.stringify(released));
-  G.g_original_item_life_drops = 0;
+  G.g_original_first_aid = 0;
 }
 
-console.log("\nclass 0x41 type 43 reads g_original_item_life_drops too:");
+console.log("\nclass 0x41 type 43 reads g_original_first_aid too:");
 {
   // `0x00462371`: `CMP g_GameMode, 1; ... MOV AL, [0x009C88AA]; TEST; JZ;
   // MOV byte [ESI+0x194], 1`. The byte is the one constructor 37 reads.
   const build = (mode: GameMode, drops: number) => {
     const rng = new Rng(43);
     scene(rng, [], mode);
-    G.g_original_item_life_drops = drops;
+    G.g_original_first_aid = drops;
     const p = PlaceGenericProp({
       at: 0xc000, container: "generic", type: 43, slot: 2,
       lifetime_evt_steps: 2, field_1f4: 2, pos: [10, 20, 30],
       pitch: 0, yaw: 0x4000, roll: 3,
     }, rng);
-    G.g_original_item_life_drops = 0;
+    G.g_original_first_aid = 0;
     return PropWords(p, { o194: 0 }).o194;
   };
   check("Original Mode with item 0x1E held turns set 2 into the life",

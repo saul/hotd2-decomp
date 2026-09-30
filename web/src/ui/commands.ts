@@ -115,7 +115,12 @@ export type UiCommand =
   /** Leave the session, whichever end this is. */
   | { kind: "netLeave" }
   /** Ask the host for a keyframe: the overlay's repair button. */
-  | { kind: "netResync" };
+  | { kind: "netResync" }
+  /**
+   * `[port-only]` debug: Original Mode's saved items -- every one of the 33,
+   * or back to the three a fresh profile holds -- saved at once.
+   */
+  | { kind: "originalItems"; action: "giveAll" | "reset" };
 
 /** What a panel is handed to talk back with. */
 export type Dispatch = (c: UiCommand) => void;

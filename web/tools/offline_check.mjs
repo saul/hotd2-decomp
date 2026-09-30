@@ -64,7 +64,10 @@ page.on("pageerror", (e) => errors.push(String(e)));
 /** A load, to the stage up: the new document's loading screen gone, no failure on it. */
 async function loaded() {
   await page.waitForFunction(() => document.readyState !== "loading");
-  await page.waitForSelector("#loading", { state: "detached", timeout: 300_000 });
+  // Gone, or failed: a failed load keeps the overlay up with its text marked
+  // `.err`, and waiting for it to go waited out the whole five minutes.
+  await page.waitForFunction(() => !document.querySelector("#loading")
+    || document.querySelector("#loading-text.err"), null, { timeout: 300_000 });
   return !(await page.$("#loading-text.err")) && !!(await page.$("canvas"));
 }
 const reload = async () => {

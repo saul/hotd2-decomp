@@ -62,7 +62,7 @@ import {
   registerClass, DeadSweep, type ActorDebug, type ClassFrame,
   type ClassHandler,
 } from "../registry";
-import { ActorSpawn } from "../spawn";
+import { ActorSpawn, SpawnFromDescriptor } from "../spawn";
 import { SpawnClass } from "../spawn_class";
 import { vec3 } from "../vec";
 import { HordeEmergePropUpdate, SpawnHordeEmergeProp } from "./emerge_prop";
@@ -438,8 +438,8 @@ export function SpawnHordePlacers(
                        pos?: [number, number, number] }[],
     placements: readonly { at: number; pitch?: number; yaw?: number;
                            roll?: number;
-                           class40?: { selector: number } | null }[],
-    rng: Rng): void {
+                           class40?: { selector: number } | null }[])
+    : void {
   const listed = new Map<number, number>();
   for (const s of spawns) {
     if (s.class !== SpawnClass.HordeSpawner) continue;
@@ -456,13 +456,14 @@ export function SpawnHordePlacers(
     const s = spawns.find((x) => x.at === at);
     if (!pl?.class40 || !s) continue;
     for (let k = done; k < n; k += 1) {
-      // `ActorSpawn` runs `PlaceHorde` as the Init, and it despawns itself.
-      ActorSpawn(at, SpawnClass.HordeSpawner, -1, "horde placer",
-                 { class40: { ...pl.class40 }, ...PlacementOrientation(pl),
-                   pos: vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0,
-                             s.pos?.[2] ?? 0),
-                   visible: true },
-                 rng);
+      // `PlaceHorde` is the placer's `Init`, which the frame's walk runs
+      // (`SpawnFromDescriptor`), and it despawns itself.
+      SpawnFromDescriptor(at, SpawnClass.HordeSpawner, -1, "horde placer",
+                          { class40: { ...pl.class40 },
+                            ...PlacementOrientation(pl),
+                            pos: vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0,
+                                      s.pos?.[2] ?? 0),
+                            visible: true });
     }
   }
 }

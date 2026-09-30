@@ -282,6 +282,14 @@ export const CHECKS: readonly Check[] = [
       + "events at the class, which the render pick used to find through a "
       + "wall and `ResolveHit` then killed for ninety points",
         NEEDS_BUNDLE, LANE_BROWSER),
+  check("boss5_page", ["node", "tools/boss5_page.mjs", "--headless"],
+        "that the stage-5 boss is fought to its end in the page -- live pulls "
+      + "aimed through the page's camera at the four bones that take damage, "
+      + "its projectiles and lunges striking the player, every one of its six "
+      + "task routines and its lit node draws reaching the render, and the "
+      + "script on past flag 30 -- the only check that fires real pointer "
+      + "events at class 0x32 and draws it",
+        NEEDS_BUNDLE, LANE_BROWSER),
   check("crosshair", ["node", "tools/crosshair_page.mjs", "--headless"],
         "that real pointer events reach HudDrawCrosshair as the exe's devices "
       + "-- a mouse move is input mode 6 and the reticle is the Sight Graphic's"
@@ -334,6 +342,21 @@ export const CHECKS: readonly Check[] = [
       + "and camera paths -- the only check that plays a boss's phases, its "
       + "camera cues and the (2,6) rail they move, since the playthrough stops "
       + "on entering the end block the fight is in",
+        NEEDS_BUNDLE),
+  check("boss6_fight", ["npm", "run", "--silent", "boss6_fight"],
+        "that the stage-6 boss's fight runs from block 12's intro cut through "
+      + "its three rounds, a child and its death to past the block's "
+      + "`wait_enemies_alive 0`, against the stage's own script and paths -- "
+      + "the only check that plays class 0x2D, whose block the playthrough "
+      + "stops on entering",
+        NEEDS_BUNDLE),
+  check("boss5_fight", ["npm", "run", "--silent", "boss5_fight"],
+        "that the stage-5 boss's fight runs from its ride in to "
+      + "`g_script_flags[30]` against the stage's own script and camera and "
+      + "object paths, through all five phase rows, its casts, lunges and "
+      + "barrage, its death and exit, and the walker on past "
+      + "`wait_script_flag 30` to the block's end -- the only check that "
+      + "plays class 0x32 and the gate stage 5 ends on",
         NEEDS_BUNDLE),
   check("handback", ["npm", "run", "--silent", "handback"],
         "that a room waits for the camera to turn back onto its rail after the "
@@ -548,6 +571,14 @@ export const CHECKS: readonly Check[] = [
      + "Blood Color is dead in this build, and that the options screen's "
      + "factory tables, sprite ids, positions and glyph table are the EXE's, "
      + "with the bundle's `options` block when there is one"),
+  game("original_mode",
+       "that Original Mode's `.rdata` block has the extents its neighbours and "
+     + "its writers give it, that the port tests' fixture is the EXE's, that "
+     + "the trunk's class row, track, camera path, lid and models are the "
+     + "immediates in `ItemSelectUpdate`, that a failed profile load seeds "
+     + "items 3, 7 and 0x10, that stage 1 block 0 is indexed with its step-5 "
+     + "entry past a -1, and, with a bundle, that the Original stage 1 "
+     + "carries all of it"),
   game("result_card",
        "that every constant the result card's port transcribes is the "
      + "immediate at its instruction; that the `.rdata` span the card reads "

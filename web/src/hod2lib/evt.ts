@@ -458,6 +458,40 @@ export class EvtFile {
     }
   }
 
+  /**
+   * Step `j` of `blk` **as the engine indexes it**: `EvtGetStep`
+   * (`FUN_0045EB90`) is `table[j]` and nothing more, so the answer does not
+   * depend on where {@link parseBlock}'s walk stopped.
+   *
+   * * `"end"` -- the word is `-1`. `EvtAdvanceStepOrRoute` (`FUN_0045F000`)
+   *   takes that as "the steps ran out" and follows the route.
+   * * `"stream"` -- a pointer, resolved into this file or, below its base, the
+   *   shared `comevtbl` buffer ({@link resolve}), with its program.
+   * * `null` -- the word is neither: the table has no step `j`.
+   *
+   * Two things make the difference matter, both in `st1evtbl.bin` block 0,
+   * whose table is `[com 0x54, 0x68, 0x6C, 0x394, -1, 0x954, -1]`: step 0 is
+   * the com stream, so a walk that only counts this file's streams numbers
+   * every later step one low; and step 5 lies past the `-1` that ends the
+   * walk. `EvtLoadBlockProgram` (`FUN_0045EBC0`) enters exactly there in
+   * Original Mode at scene 0 -- the trunk's stream, `spawn_simple` class 0x6E
+   * -- and no walk ever reaches it.
+   */
+  stepEntry(blk: Block, j: number):
+      { kind: "end" }
+      | { kind: "stream"; file: EvtFile; offset: number; program: Instr[] }
+      | null {
+    if (blk.offset < 0) return null;
+    const at = blk.offset + j * 4;
+    if (at + 4 > this.raw.length) return null;
+    const word = this.w(at);
+    if (word === TERM) return { kind: "end" };
+    const hit = this.resolve(word);
+    if (!hit) return null;
+    const [file, offset] = hit;
+    return { kind: "stream", file, offset, program: file.disasm(offset) };
+  }
+
   /** Decode one bytecode stream, stopping at halt/advance_step. */
   disasm(off: number, limit = 20000): Instr[] {
     const start = off;

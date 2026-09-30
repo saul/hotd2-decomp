@@ -43,7 +43,7 @@
  * stays registered for the shot test through its break effect. Nothing in it
  * touches `g_enemies_alive` or `g_enemies_present`.
  *
- * The item arm reads `g_original_item_life_drops` (`0x009C88AA`), which only
+ * The item arm reads `g_original_first_aid` (`0x009C88AA`), which only
  * an Original Mode item raises; the port fills no item slot, so it stays 0.
  */
 import type { Events } from "../../core/events";
@@ -254,7 +254,7 @@ export function PropUpdateType37(p: BreakableProp, rng: Rng,
     G.g_type37_hits_left = s8(G.g_type37_hits_left - 1);
     if (G.g_type37_hits_left === 0) {
       if (G.g_GameMode === GameMode.Original
-          && G.g_original_item_life_drops !== 0) {
+          && G.g_original_first_aid !== 0) {
         w.o194 = ItemSet.ExtraLife;
         SpawnExtraLifePickup(p, events);
       } else if (s8(w.o194) > 0) {

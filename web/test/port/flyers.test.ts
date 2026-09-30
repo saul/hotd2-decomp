@@ -176,6 +176,39 @@ import {
     check("...and the fifth retires from both counters and swims off",
           last.swimAway && last.slot === -1,
           `${last.swimAway} slot ${last.slot}`);
+
+    // `FishSwimAwayTick` (`FUN_00439C20`) is the whole of its update from
+    // here: a shot is not checked, and past `sub+0x7C` (0x3C) frames the
+    // silhouette scale `sub+0x28` shrinks 0.01 a frame from 0.4 and the fish
+    // despawns when it reaches zero -- `0x00439D23`..`0x00439D61`. Float32
+    // leaves 0.4 - 40 * 0.01 at +1e-8, so the 41st shrink is the one: tick
+    // 100. This said nothing ever removed it.
+    const swimmer = rest[3];
+    const score = G.g_player_score[0];
+    swimmer.flags |= ActorFlag.Hit | ActorFlag.HitByPlayer0;
+    const strip0 = last.frame;
+    let gone = -1;
+    for (let tick = 1; tick <= 120 && gone < 0; tick += 1) {
+      FishUpdate(swimmer, frame(rng));
+      if (tick === 1) {
+        check("a fish swimming off is not shot: nothing scores",
+              G.g_player_score[0] === score && last.swimAway,
+              `${G.g_player_score[0] - score}`);
+        check("...and its tick draws the strip frame it then steps",
+              last.swimDrawFrame === strip0 && last.frame !== strip0
+              && last.swimDrawScale === Math.fround(0.4),
+              `${last.swimDrawFrame.toString(16)} ${last.frame.toString(16)}`);
+      }
+      if (tick === 60) {
+        check("...its silhouette starts to shrink on the frame the count "
+              + "reaches 0x3C",
+              last.dx === Math.fround(Math.fround(0.4) - Math.fround(0.01)),
+              `${last.dx}`);
+      }
+      if (swimmer.despawned) gone = tick;
+    }
+    check("...and it is gone when the scale reaches zero, on tick 100",
+          gone === 100, `tick ${gone}`);
   }
 
   {

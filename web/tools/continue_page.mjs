@@ -6,14 +6,18 @@
  * `PlayerTakeDamage` (`FUN_00415300`) on the path camera, and drives the
  * frames `RunPhaseContinueCountdown` (`FUN_00460530`) runs. Every claim is
  * read back out of the page -- `G`, the HUD canvas's own pixels, the DOM --
- * never echoed from this script (`L44`, `L47`). Screenshots of three digits
- * and of the continue taken go to `web/shots/`.
+ * never echoed from this script (`L44`, `L47`). With `--shots`, screenshots
+ * of three digits and of the continue taken go to `web/shots/`.
+ *
+ * The waits -- for the path camera, for a digit -- are the harness's stop
+ * condition (`advance(n, until)`), asked in the page after every frame, so a
+ * wait of a thousand frames is sixteen rAFs rather than a thousand (L104).
  *
  * START is the corner button by default -- **Continue**, with the game's digit
  * on it, the one START a phone has -- and Enter with `--enter`. Both are
  * `Player.pressStart`, and both are worth pressing for real.
  *
- *   node tools/continue_page.mjs --headless [--enter]
+ *   node tools/continue_page.mjs --headless [--enter] [--shots]
  */
 import { join } from "node:path";
 import { openPlayer, requireBundle, waitForLoad, SHOTS } from "./lib/player.mjs";
@@ -41,6 +45,31 @@ const check = (ok, what, detail = "") => {
 };
 const advance = (n) =>
   page.evaluate((k) => globalThis.__hotd2Drive.advance(k), n);
+/**
+ * Run up to `n` frames, stopping on the first after which `test` -- the name
+ * of one of the page-side tests `install` puts up, given `arg` -- holds.
+ * Resolves with whether it did.
+ */
+const advanceUntil = (n, test, arg) => page.evaluate(async ([k, t, a]) => {
+  const tests = globalThis.__continueTests;
+  let hit = false;
+  await globalThis.__hotd2Drive.advance(k, () => (hit = tests[t](a)));
+  return hit;
+}, [n, test, arg]);
+/** The stop conditions, in the page, reading its `G` synchronously. */
+const install = () => page.evaluate(async () => {
+  const { G } = await import("/src/game/globals.ts");
+  globalThis.__continueTests = {
+    // The path camera, where the last life can go.
+    pathCamera: () => G.g_scene_state_major === 2
+      || G.g_scene_state_major_entered === 2,
+    // The countdown, drawing digit `d`: `digitOf`, on `BIG_DIGIT0`.
+    digit: (d) => G.g_nRunPhase === 4 && G.g_screen_sprite_draws.find(
+      (x) => x.id >= 0x4f && x.id <= 0x4f + 9)?.id === 0x4f + d,
+  };
+});
+const shot = (name) => flag("shots")
+  && page.screenshot({ path: join(SHOTS, `continue-${name}.png`) });
 const state = () => page.evaluate(async () => {
   const { G } = await import("/src/game/globals.ts");
   return {
@@ -94,7 +123,8 @@ const digitOf = (s) => {
 // The last life only goes on the path camera (`PlayerFloorLivesOffPath`), so
 // play on until the scene is there, then strike.
 async function killPlayer() {
-  for (let i = 0; i < 4000; i += 5) {
+  for (let i = 0; i < 20; i++) {
+    await advanceUntil(4000, "pathCamera");
     const struck = await page.evaluate(async () => {
       const { G } = await import("/src/game/globals.ts");
       const { PlayerTakeDamage } = await import("/src/game/combat/player.ts");
@@ -107,7 +137,6 @@ async function killPlayer() {
       return G.g_player_lives[0] === 0;
     });
     if (struck) return;
-    await advance(5);
   }
   throw new Error("never reached the path camera: " +
                   JSON.stringify(await state()));
@@ -120,20 +149,16 @@ async function killPlayer() {
  * frame that can draw it.
  */
 async function untilDigit(d) {
-  for (let i = 0; i < 1200; i++) {
-    const s = await state();
-    if (s.phase === 4 && digitOf(s) === d) {
-      await page.waitForTimeout(100);
-      await advance(2);
-      return state();
-    }
-    await advance(1);
+  if (await advanceUntil(1200, "digit", d)) {
+    await page.waitForTimeout(100);
+    await advance(2);
   }
   return state();
 }
 
 try {
   await waitForLoad(page);
+  await install();
   // The port starts in free play (`g_option_credits` -1), where a continue
   // spends nothing and the credit line has no count. This check is of the
   // counted continue, so it puts the factory options' credits back the way
@@ -182,7 +207,7 @@ try {
   check(s.live === 0 && s.crosshair[0] === 0 && (await crosshairShown()) === false,
         "no crosshair, and the script's gate shut");
   const address = s.address;
-  await page.screenshot({ path: join(SHOTS, "continue-9.png") });
+  await shot("9");
 
   s = await untilDigit(6);
   check(digitOf(s) === 6 && (await inked(482, 188, 64, 128)) > 800,
@@ -194,13 +219,13 @@ try {
   check(at6?.cls === "continue" && at6.text === "Continue 6" && !at6.disabled,
         "the corner button is Continue, with the game's digit on it",
         JSON.stringify(at6));
-  await page.screenshot({ path: join(SHOTS, "continue-6.png") });
+  await shot("6");
   s = await untilDigit(3);
   check(digitOf(s) === 3, "counting down: the 3",
         `timer ${s.timer.toString(16)}`);
   const line = s.draws.filter((d) => d.id === PRESS_START || d.id === CREDITS);
   console.log("credit line:", JSON.stringify(line));
-  await page.screenshot({ path: join(SHOTS, "continue-3.png") });
+  await shot("3");
 
   // START (`g_pad_state` bit 8) with a credit: the corner button, or Enter.
   const credits = s.credits[0];
@@ -222,7 +247,7 @@ try {
                              null, { timeout: 5000 }).catch(() => {});
   check(!(await page.$("#skipbar.continue")), "...and so is the button");
   await advance(30);
-  await page.screenshot({ path: join(SHOTS, "continue-taken.png") });
+  await shot("taken");
 } catch (e) {
   failures.push(String(e));
   console.log(String(e));

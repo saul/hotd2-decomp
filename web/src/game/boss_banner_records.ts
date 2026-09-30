@@ -117,7 +117,7 @@ export const BOSS_INTRO_BANNERS: Readonly<Record<number, BossIntroBannerRecord>>
             { sprite: 0xcd, x: 526, y: 84, depth: 1 }],
   },
   // `1600 d400 2c01 aa18 1f856bbe ...` -- `Class32Init`'s, `PUSH 0x596ac0` at
-  // `0x0047F762`. Likewise carried, not used by this work.
+  // `0x0047F762`: the stage-5 boss's, whose name cards read MAGICIAN.
   0x00596ac0: {
     flag: 22, camPath: 212, endFrame: 300, cardSlot: 0x18aa,
     x: Math.fround(-0.23), y: Math.fround(-0.07), z: -1,

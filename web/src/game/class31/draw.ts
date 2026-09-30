@@ -20,6 +20,7 @@ import {
   ActorAimHeadAtCamera, HEAD_AIM_BONE, ThrowerHeadAims,
 } from "../class30/head_aim";
 import { G } from "../globals";
+import { ENLARGED_HEAD_BONE, ENLARGED_HEAD_SCALE } from "../class30/draw";
 import type { ClassFrame } from "../registry";
 import { SpawnClass } from "../spawn_class";
 
@@ -71,6 +72,25 @@ const PULSE_STEP = Math.fround(1 / 60);
  * `0x204A`, drawing `0x2017 + n % 0x32` and `0x204B + n % 0x32`. Solid.
  */
 const CYCLE_SLOTS: readonly number[] = [0x2016, 0x204a];
+
+/**
+ * `ThrowerDrawWithEnlargedHead` — `FUN_0044A300`. The `obj+0x12EC` hook
+ * `EnemyThrowerInit` installs in Original Mode while ROTTEN MEAT's
+ * `g_original_item_big_head` is 1: {@link ThrowerDrawBonePart}, with bone 2's
+ * draw under `MatrixScale(2, 2, 2)` -- one scale for every type, where the
+ * zombie's twin (`ZombieDrawWithEnlargedHead`) has its own for type 0xE --
+ * and nothing drawn at all while the flag is clear.
+ */
+export function ThrowerDrawWithEnlargedHead(obj: Actor, bone: number,
+                                            slot: number, f: ClassFrame): void {
+  if (G.g_original_item_big_head !== 1) return;
+  if (bone === ENLARGED_HEAD_BONE) {
+    obj.nodeDrawScale[bone] = ENLARGED_HEAD_SCALE;
+    ThrowerDrawBonePart(obj, bone, slot, f);
+    return;
+  }
+  ThrowerDrawBonePart(obj, bone, slot, f);
+}
 
 /**
  * `ThrowerDrawBonePart` — `FUN_00449F90`. One node of a thrower's skeleton,

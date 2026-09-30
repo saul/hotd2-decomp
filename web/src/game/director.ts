@@ -10,8 +10,10 @@
 import type { Events } from "../core/events";
 import type { Rng } from "../core/rng";
 import type { Actor } from "./actor";
-import { ActorSpawn } from "./spawn";
-export { ActorInitFlags, ActorSpawn } from "./spawn";
+import { ActorRunInit, ActorSpawn, SpawnFromDescriptor } from "./spawn";
+export {
+  ActorInitFlags, ActorRunInit, ActorSpawn, SpawnFromDescriptor,
+} from "./spawn";
 import { ActorDeadSweep, ActorDespawn } from "./despawn";
 import { RegisterForCameraTracking, UpdateCameraEnemySlots }
   from "./camera/slots";
@@ -46,6 +48,9 @@ import { BossBannersTick } from "./boss_banner";
 import { WaterWaveSourcesTick } from "./class17";
 import { Boss4HitMarksTick } from "./class19/hit_mark";
 import { Boss3TasksTick } from "./class45/tasks";
+import { Class2DTasksTick } from "./class2D/tasks";
+import { PushSceneLightStateToDevice } from "./light_sets";
+import { Class32TasksTick } from "./class32/tasks";
 import { BatSplashesTick } from "./class46/splash";
 import { FishEffectsTick } from "./effects/fish";
 import { OwlEffectsTick } from "./effects/owl";
@@ -184,7 +189,9 @@ export function ActorInitHitPoints(p: CharacterPlacement | undefined,
  *
  * `SpawnFromDescriptor` (`FUN_00408A20`), for the classes that have a
  * skeleton. In the exe an actor comes into existence here — when opcode
- * 0x0B/0x0C/0x0D runs — and its class `Init` runs there and once.
+ * 0x0B/0x0C/0x0D runs — and its class `Init` runs once, **later in the
+ * frame**: when `SceneTaskWalk` reaches the object, after the scene's own
+ * tasks. See `game/spawn.ts`.
  *
  * **Everything the record carries goes in before `Init` runs**, which is the
  * order the engine has: it fills the object from the record and only then
@@ -207,8 +214,7 @@ export function ActorInitHitPoints(p: CharacterPlacement | undefined,
  * the game.
  */
 export function SpawnScriptedCharacters(
-    reqs: readonly CharacterSpawnRequest[], rng?: Rng,
-    events?: Events): Actor[] {
+    reqs: readonly CharacterSpawnRequest[]): Actor[] {
   const made: Actor[] = [];
   const placements = T.chars?.placements ?? [];
   for (const req of reqs) {
@@ -223,19 +229,36 @@ export function SpawnScriptedCharacters(
     if (p?.synthetic) continue;
     const type = T.types[String(p?.char_type ?? 0)];
     const hp = ActorInitHitPoints(p, p?.class);
-    made.push(ActorSpawn(req.at, (p?.class ?? 0) as SpawnClass,
-                         type?.type ?? 0, type?.name ?? `spawn ${req.at}`,
-                         { ...DescriptorFromPlacement(p),
-                           motion: req.motion,
-                           hp, maxHp: hp,
-                           // All three words of the record's orientation,
-                           // `obj+0x64`/`+0x68`/`+0x6C`, as
-                           // `SpawnFromDescriptor` copies them.
-                           ...PlacementOrientation(p), pos: { ...req.pos },
-                           visible: true },
-                         rng, events));
+    made.push(SpawnFromDescriptor(
+      req.at, (p?.class ?? 0) as SpawnClass,
+      type?.type ?? 0, type?.name ?? `spawn ${req.at}`,
+      { ...DescriptorFromPlacement(p),
+        motion: req.motion,
+        hp, maxHp: hp,
+        // All three words of the record's orientation, `obj+0x64`/`+0x68`/
+        // `+0x6C`, as `SpawnFromDescriptor` copies them.
+        ...PlacementOrientation(p), pos: { ...req.pos },
+        visible: true }));
   }
   return made;
+}
+
+/**
+ * [port-only] Run every `Init` the walk has not reached yet, now.
+ *
+ * A stopped clock walks no tasks, and a seek lands stopped: the script phase
+ * of a paused frame still makes the objects its spawn list names, and
+ * without this they would stand in the pool as bare descriptors -- no
+ * counts, no state, no hit slot -- until the transport started. The engine
+ * has no such frame (it never runs its interpreter without walking the
+ * list), so this is the app's seam and is called from nowhere else: the
+ * `Init` runs where the port ran every `Init` before, at the spawn, reading
+ * the camera as the paused frame holds it.
+ */
+export function RunPendingInits(rng?: Rng, events?: Events): void {
+  for (const obj of G.g_object_list) {
+    if (obj.initPending) ActorRunInit(obj, rng, events);
+  }
 }
 
 /**
@@ -281,8 +304,7 @@ export function SpawnScriptedCharacters(
  * the descriptor tail comes from `characters.placements`, which carries it
  * for these classes even though the renderer skips them. One source each.
  */
-export function SpawnSlotActors(spawns: readonly ScriptSpawn[],
-                                rng: Rng): void {
+export function SpawnSlotActors(spawns: readonly ScriptSpawn[]): void {
   const placements = T.chars?.placements;
   if (!placements?.length) return;
   // `[port-only]` — **build each listed spawn once**, and forget it when the
@@ -300,8 +322,8 @@ export function SpawnSlotActors(spawns: readonly ScriptSpawn[],
   SlotActorsForgetUnlisted(spawns);
   // Class 0x40 counts instructions rather than addresses: see
   // `SpawnHordePlacers`.
-  SpawnHordePlacers(spawns, placements, rng);
-  for (const s of spawns) SpawnSlotActor(s, rng);
+  SpawnHordePlacers(spawns, placements);
+  for (const s of spawns) SpawnSlotActor(s);
 }
 
 /**
@@ -322,9 +344,9 @@ export function SlotActorsForgetUnlisted(spawns: readonly ScriptSpawn[]): void {
  * what the previous one left behind (`g_civilian_carrier`) sees exactly that.
  * `[port-only]`, as {@link SpawnSlotActors} is.
  */
-export function SpawnSlotActor(s: ScriptSpawn, rng: Rng): void {
+export function SpawnSlotActor(s: ScriptSpawn): void {
   if (s.class === SpawnClassValue.PathRidingProp) {
-    SpawnPathRidingProp(s, rng);
+    SpawnPathRidingProp(s);
     return;
   }
   const placements = T.chars?.placements;
@@ -336,12 +358,12 @@ export function SpawnSlotActor(s: ScriptSpawn, rng: Rng): void {
     if (!pl) return;
     if (s.class === SpawnClassValue.Mouse) {
       G.g_slot_actors_built.push(s.at);
-      const a = ActorSpawn(s.at, SpawnClassValue.Mouse, -1, "mouse",
-                           { class52: pl.class52 ?? null,
-                             ...PlacementOrientation(pl) },
-                           rng);
-      a.pos = vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0, s.pos?.[2] ?? 0);
-      a.visible = true;
+      SpawnFromDescriptor(s.at, SpawnClassValue.Mouse, -1, "mouse",
+                          { class52: pl.class52 ?? null,
+                            ...PlacementOrientation(pl),
+                            pos: vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0,
+                                      s.pos?.[2] ?? 0),
+                            visible: true });
       return;
     }
     // Class 0x43 -- the owl. Its handler is a placer that builds a 0x2A0-byte
@@ -371,25 +393,23 @@ export function SpawnSlotActor(s: ScriptSpawn, rng: Rng): void {
     if (s.class === SpawnClassValue.FlagStripProp) {
       if (!pl.class12) return;
       G.g_slot_actors_built.push(s.at);
-      const a = ActorSpawn(s.at, SpawnClassValue.FlagStripProp, -1, "strip",
-                           { class12: pl.class12, ...PlacementOrientation(pl),
-                             flags: pl.init_flags ?? 0,
-                             pos: vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0,
-                                       s.pos?.[2] ?? 0) },
-                           rng);
-      a.visible = true;
+      SpawnFromDescriptor(s.at, SpawnClassValue.FlagStripProp, -1, "strip",
+                          { class12: pl.class12, ...PlacementOrientation(pl),
+                            flags: pl.init_flags ?? 0,
+                            pos: vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0,
+                                      s.pos?.[2] ?? 0),
+                            visible: true });
       return;
     }
     if (s.class === SpawnClassValue.ScriptedProp) {
       if (!pl.class13) return;
       G.g_slot_actors_built.push(s.at);
-      const a = ActorSpawn(s.at, SpawnClassValue.ScriptedProp, -1, "prop",
-                           { class13: pl.class13, ...PlacementOrientation(pl),
-                             flags: pl.init_flags ?? 0,
-                             pos: vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0,
-                                       s.pos?.[2] ?? 0) },
-                           rng);
-      a.visible = true;
+      SpawnFromDescriptor(s.at, SpawnClassValue.ScriptedProp, -1, "prop",
+                          { class13: pl.class13, ...PlacementOrientation(pl),
+                            flags: pl.init_flags ?? 0,
+                            pos: vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0,
+                                      s.pos?.[2] ?? 0),
+                            visible: true });
       return;
     }
     // Class 0x26 subtypes 2, 6 and 7 -- stage 3's boat and stage 6 block 12's
@@ -400,26 +420,24 @@ export function SpawnSlotActor(s: ScriptSpawn, rng: Rng): void {
     if (s.class === SpawnClassValue.Vehicle) {
       if (!pl.class26) return;
       G.g_slot_actors_built.push(s.at);
-      const a = ActorSpawn(s.at, SpawnClassValue.Vehicle, -1,
-                           pl.hp === 2 ? "boat" : `class 0x26 subtype ${pl.hp}`,
-                           { class26: pl.class26, hp: pl.hp, maxHp: pl.hp,
-                             ...PlacementOrientation(pl),
-                             flags: pl.init_flags ?? 0,
-                             pos: vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0,
-                                       s.pos?.[2] ?? 0) },
-                           rng);
-      a.visible = true;
+      SpawnFromDescriptor(s.at, SpawnClassValue.Vehicle, -1,
+                          pl.hp === 2 ? "boat" : `class 0x26 subtype ${pl.hp}`,
+                          { class26: pl.class26, hp: pl.hp, maxHp: pl.hp,
+                            ...PlacementOrientation(pl),
+                            flags: pl.init_flags ?? 0,
+                            pos: vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0,
+                                      s.pos?.[2] ?? 0),
+                            visible: true });
       return;
     }
     if (s.class === SpawnClassValue.FlyingEnemy) {
       if (!pl.class43) return;
       G.g_slot_actors_built.push(s.at);
-      const a = ActorSpawn(s.at, SpawnClassValue.FlyingEnemy, -1, "owl",
-                           { class43: pl.class43, ...PlacementOrientation(pl),
-                             pos: vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0,
-                                       s.pos?.[2] ?? 0) },
-                           rng);
-      a.visible = true;
+      SpawnFromDescriptor(s.at, SpawnClassValue.FlyingEnemy, -1, "owl",
+                          { class43: pl.class43, ...PlacementOrientation(pl),
+                            pos: vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0,
+                                      s.pos?.[2] ?? 0),
+                            visible: true });
       return;
     }
     // Class 0x42 -- the worm's placer. No character type: every draw of the
@@ -430,12 +448,11 @@ export function SpawnSlotActor(s: ScriptSpawn, rng: Rng): void {
     if (s.class === SpawnClassValue.Worm) {
       if (!pl.class42) return;
       G.g_slot_actors_built.push(s.at);
-      ActorSpawn(s.at, SpawnClassValue.Worm, -1, "worm placer",
-                 { class42: pl.class42, ...PlacementOrientation(pl),
-                   pos: vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0,
-                             s.pos?.[2] ?? 0),
-                   visible: true },
-                 rng);
+      SpawnFromDescriptor(s.at, SpawnClassValue.Worm, -1, "worm placer",
+                          { class42: pl.class42, ...PlacementOrientation(pl),
+                            pos: vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0,
+                                      s.pos?.[2] ?? 0),
+                            visible: true });
       return;
     }
     // Classes 0x16 and 0x17 -- the stage-2 boss arena's wave field and its
@@ -446,27 +463,25 @@ export function SpawnSlotActor(s: ScriptSpawn, rng: Rng): void {
     if (s.class === SpawnClassValue.WaterWaveField) {
       if (!pl.class16) return;
       G.g_slot_actors_built.push(s.at);
-      const a = ActorSpawn(s.at, SpawnClassValue.WaterWaveField, -1,
-                           "wave field",
-                           { class16: pl.class16, ...PlacementOrientation(pl),
-                             pos: vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0,
-                                       s.pos?.[2] ?? 0) },
-                           rng);
-      a.visible = true;
+      SpawnFromDescriptor(s.at, SpawnClassValue.WaterWaveField, -1,
+                          "wave field",
+                          { class16: pl.class16, ...PlacementOrientation(pl),
+                            pos: vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0,
+                                      s.pos?.[2] ?? 0),
+                            visible: true });
       return;
     }
     if (s.class === SpawnClassValue.WaterWaveSource) {
       if (!pl.class17) return;
       G.g_slot_actors_built.push(s.at);
-      const a = ActorSpawn(s.at, SpawnClassValue.WaterWaveSource, -1,
-                           "wave source",
-                           { class17: pl.class17, hp: pl.hp, maxHp: pl.hp,
-                             yaw: pl.yaw ?? 0, pitch: pl.class17.pitch,
-                             roll: pl.class17.roll,
-                             pos: vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0,
-                                       s.pos?.[2] ?? 0) },
-                           rng);
-      a.visible = true;
+      SpawnFromDescriptor(s.at, SpawnClassValue.WaterWaveSource, -1,
+                          "wave source",
+                          { class17: pl.class17, hp: pl.hp, maxHp: pl.hp,
+                            yaw: pl.yaw ?? 0, pitch: pl.class17.pitch,
+                            roll: pl.class17.roll,
+                            pos: vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0,
+                                      s.pos?.[2] ?? 0),
+                            visible: true });
       return;
     }
     // Class 0x51 -- the fish. Drawn by asset slot from `fish.bin`, so it has
@@ -479,12 +494,11 @@ export function SpawnSlotActor(s: ScriptSpawn, rng: Rng): void {
       // The position goes in the **descriptor**, not after the spawn: it is
       // the one class here whose `Init` reads it, into `sub+0x00..0x08`.
       G.g_slot_actors_built.push(s.at);
-      const a = ActorSpawn(s.at, SpawnClassValue.WaterEnemy, -1, "fish",
-                           { class51: pl.class51, ...PlacementOrientation(pl),
-                             pos: vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0,
-                                       s.pos?.[2] ?? 0) },
-                           rng);
-      a.visible = true;
+      SpawnFromDescriptor(s.at, SpawnClassValue.WaterEnemy, -1, "fish",
+                          { class51: pl.class51, ...PlacementOrientation(pl),
+                            pos: vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0,
+                                      s.pos?.[2] ?? 0),
+                            visible: true });
       return;
     }
     // Class 0x33 -- `hp` is the **selector**, not hit points:
@@ -500,21 +514,22 @@ export function SpawnSlotActor(s: ScriptSpawn, rng: Rng): void {
     if (s.class === SpawnClassValue.ScriptedScenery) {
       if (!pl.class33 && !pl.class33_push && !pl.class33_cue) return;
       G.g_slot_actors_built.push(s.at);
-      const a = ActorSpawn(s.at, SpawnClassValue.ScriptedScenery, -1,
-                           `scenery ${pl.hp}`,
-                           { class33: pl.class33, class33Push: pl.class33_push,
-                             class33Cue: pl.class33_cue,
-                             hp: pl.hp, maxHp: pl.hp,
-                             ...PlacementOrientation(pl),
-                             // `ActorInitFlags` (`FUN_00408970`) makes the
-                             // descriptor's own flags word `obj+0x34` before
-                             // any `Init` runs, and selector 4's two spawns
-                             // carry `0x8000` there -- which is the very bit
-                             // their `push_flag` clears. Dropping it would
-                             // hand the port a chair pushable from frame one.
-                             flags: pl.init_flags ?? 0 });
-      a.pos = vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0, s.pos?.[2] ?? 0);
-      a.visible = true;
+      SpawnFromDescriptor(s.at, SpawnClassValue.ScriptedScenery, -1,
+                          `scenery ${pl.hp}`,
+                          { class33: pl.class33, class33Push: pl.class33_push,
+                            class33Cue: pl.class33_cue,
+                            hp: pl.hp, maxHp: pl.hp,
+                            ...PlacementOrientation(pl),
+                            // `ActorInitFlags` (`FUN_00408970`) makes the
+                            // descriptor's own flags word `obj+0x34` before
+                            // any `Init` runs, and selector 4's two spawns
+                            // carry `0x8000` there -- which is the very bit
+                            // their `push_flag` clears. Dropping it would
+                            // hand the port a chair pushable from frame one.
+                            flags: pl.init_flags ?? 0,
+                            pos: vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0,
+                                      s.pos?.[2] ?? 0),
+                            visible: true });
       return;
     }
   }
@@ -536,20 +551,19 @@ export function SpawnSlotActor(s: ScriptSpawn, rng: Rng): void {
  * Before this arm the spawn built nothing, and the object's draw ran in
  * `render/rigs.ts` off the rig table with no object behind it.
  */
-function SpawnPathRidingProp(s: ScriptSpawn, rng: Rng): void {
+function SpawnPathRidingProp(s: ScriptSpawn): void {
   if (G.g_slot_actors_built.includes(s.at)) return;
   if (ActorByAt(s.at)) return;
   G.g_slot_actors_built.push(s.at);
-  const a = ActorSpawn(s.at, SpawnClassValue.PathRidingProp, -1,
-                       `path prop ${s.hp ?? 0}`,
-                       { hp: s.hp ?? 0, maxHp: s.hp ?? 0,
-                         flags: s.flags ?? 0,
-                         pitch: s.orient?.[0] ?? 0, yaw: s.orient?.[1] ?? 0,
-                         roll: s.orient?.[2] ?? 0,
-                         pos: vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0,
-                                   s.pos?.[2] ?? 0) },
-                       rng);
-  a.visible = true;
+  SpawnFromDescriptor(s.at, SpawnClassValue.PathRidingProp, -1,
+                      `path prop ${s.hp ?? 0}`,
+                      { hp: s.hp ?? 0, maxHp: s.hp ?? 0,
+                        flags: s.flags ?? 0,
+                        pitch: s.orient?.[0] ?? 0, yaw: s.orient?.[1] ?? 0,
+                        roll: s.orient?.[2] ?? 0,
+                        pos: vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0,
+                                  s.pos?.[2] ?? 0),
+                        visible: true });
 }
 
 /**
@@ -803,6 +817,7 @@ export function GameUpdate(dt: number, host: GameHost, rng: Rng,
  * `camera/actor.ts` for the list):
  *
  * 1. the interpreter -- the walker's `tick`, run by the app before this;
+ * 2. `PushSceneLightStateToDevice`: both light blocks' tweens stepped;
  * 3. `CameraActorTick`: the queued action's handler, then the view;
  * 5. `CameraUpdateTick`: the scene state's hook -- the gameplay eye, the rail;
  * 6. the two player tasks and `SelectAttackablePlayer`;
@@ -819,6 +834,7 @@ export function GameUpdate(dt: number, host: GameHost, rng: Rng,
 function SceneTaskWalk(dt: number, host: GameHost,
                        rng: Rng, events?: Events): FrameResult {
   // The layered queue was emptied at the head of the frame, in `GameUpdate`.
+  PushSceneLightStateToDevice(dt * GAME_HZ);
   CameraActorTick();
   CameraUpdateTick();
   PlayerTasksRun({ host, rng, events });
@@ -864,8 +880,30 @@ function SceneTaskWalk(dt: number, host: GameHost,
   // tasks ahead of the boss that samples them -- see `WaterWaveSourcesTick`.
   WaterWaveSourcesTick();
 
+  // Class 0x2D's draws are made inside its routines, as the engine's are;
+  // the list is this frame's (`class2D/draw.ts`).
+  G.g_class2d_draws = [];
   const f = { dt, rng, host, events };
   for (const obj of G.g_object_list) {
+    // `TaskRunTree` (`FUN_004A71A0`) calling `obj+0x00` while it is still the
+    // handler `SpawnFromDescriptor` stored: the class's `Init`, here, after
+    // the scene's own tasks -- so it reads the camera this frame's hook wrote.
+    // An object an `Init` links is pushed behind this one and reached below,
+    // on this frame, as `TaskRunTree`'s next-pointer read reaches it.
+    //
+    // The port then runs the frame's update as well, as it did when every
+    // `Init` ran at the spawn. The engine does not always: `EnemyZombieInit`
+    // writes `EnemyZombieUpdate` over `obj+0x00` and returns (`0x00452FB5`),
+    // so a zombie's update starts on the next walk, while class 0x28's
+    // handler seats itself on its first call and `Class22Init` runs its
+    // update from inside -- the port's split of each handler into `init` and
+    // `update` answers that class by class, and moving it is not this change.
+    if (obj.initPending) {
+      ActorRunInit(obj, rng, events);
+      // An `Init` that kills its object (`PlaceWormBatch`, a fish group
+      // header) longjmps out of the walk: nothing else of it runs.
+      if (obj.despawned) continue;
+    }
     // Every actor's clips run, handler or not: a class with no behaviour still
     // loops the motion the script gave it.
     if (obj.visible) {
@@ -1004,6 +1042,13 @@ function SceneTaskWalk(dt: number, host: GameHost,
   // Class 0x45's own tasks -- its intro card, the sparks and splashes, the
   // bulge and the wake -- allocated by its actors above, so after them.
   Boss3TasksTick(events);
+  // ...and class 0x2D's: the sparks, the satellites' trails, the intro
+  // flipbook and the death burst. See `game/class2D/tasks.ts`.
+  Class2DTasksTick(host, events);
+  // ...and class 0x32's draw-only tasks -- the afterimages, the body loop and
+  // hands effects, the projectiles' trails, the death bursts and the exit
+  // effect -- the same way. Its projectiles are actors and ran above.
+  Class32TasksTick(events);
   // The layered queue is flushed by `GameUpdate`, after the run phase.
   return { lookAt: G.g_camera_block_target };
 }

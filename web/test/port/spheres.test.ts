@@ -86,7 +86,7 @@ console.log("\na spawn record's three angles reach every slot actor:");
     at(0x7130, SpawnClass.ScriptedProp),
     at(0x7152, SpawnClass.Mouse),
     at(0x7116, SpawnClass.WaterWaveField),
-  ], rng);
+  ]);
   const props = shipped.map(([a]) => G.g_object_list.find((o) => o.at === a));
   const angles = (o: Actor | undefined) =>
     o ? `${o.pitch.toString(16)}/${o.yaw.toString(16)}/${o.roll.toString(16)}`

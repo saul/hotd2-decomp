@@ -188,6 +188,7 @@ export function OptionsRunPhase(events?: Events): void {
   // draws immediate-mode, and this screen's tasks are what draw them.
   G.g_screen_sprite_draws = [];
   G.g_view_slot_draws = [];
+  G.g_world_slot_draws = [];
   switch (G.g_nRunPhase) {
     case OptionsPhase.Arm:
       SoundStopAll(events);

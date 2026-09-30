@@ -257,11 +257,26 @@ export class Op {
 export class Step {
   ops: Op[] = [];
 
-  constructor(readonly index: number, readonly offset: number) {}
+  /**
+   * `index` is the engine's step number, `EvtGetStep`'s `j`; `offset` is the
+   * stream's offset in its file -- in `comevtbl.bin` when `com` is set -- or
+   * -1 for an end marker.
+   *
+   * `end` is a table word of `-1`: `EvtAdvanceStepOrRoute` (`FUN_0045F000`)
+   * follows the route when it lands on one. The walk never carries one, so a
+   * block's list ends with one only when a later step is still reachable by
+   * index -- Original Mode's entry into `st1evtbl.bin` block 0 at step 5.
+   */
+  constructor(readonly index: number, readonly offset: number,
+              readonly com = false, readonly end = false) {}
 
   toJson(): Record<string, unknown> {
-    return { index: this.index, at: this.offset,
-             ops: this.ops.map((o) => o.toJson()) };
+    const out: Record<string, unknown> = {
+      index: this.index, at: this.offset, ops: this.ops.map((o) => o.toJson()),
+    };
+    if (this.com) out.com = true;
+    if (this.end) out.end = true;
+    return out;
   }
 }
 
@@ -341,20 +356,56 @@ export class Program {
 
   // -- construction ------------------------------------------------------
 
+  /**
+   * Each block's steps **by the engine's step number**, which is not the
+   * order of this file's streams: `EvtGetStep` (`FUN_0045EB90`) reads
+   * `table[j]`, so a step that lives in `comevtbl.bin` is step `j` all the
+   * same, and a step past the `-1` that ends the walk is reachable by index.
+   * See {@link evt.EvtFile.stepEntry}.
+   *
+   * The walk runs to the first `-1`, as `EvtAdvanceStepOrRoute` does. An
+   * entry block goes on to {@link entryStep} when that lies past it, with an
+   * end marker for each `-1` on the way, because `EvtLoadBlockProgram`
+   * (`FUN_0045EBC0`) indexes the table there directly.
+   */
   private build(): void {
     const campaths = this.campathsRef;
-    for (const b of this.evt!.blocks) {
+    const ev = this.evt!;
+    const entries = new Set(this.entries());
+    const entryStep = this.entryStep();
+    for (const b of ev.blocks) {
       const route: [number, number, number, number] =
         b.index < this.routes.length ? this.routes[b.index] : [0, -1, -1, -1];
       const blk = new ScriptBlock(b.index, b.offset, [...b.externalSteps],
                                   route);
       if (!blk.isHole) {
-        b.programs.forEach((prog, si) => {
-          const step = new Step(si, si < b.steps.length ? b.steps[si] : -1);
-          prog.forEach((ins, oi) => step.ops.push(
+        const upTo = entries.has(b.index) ? entryStep : 0;
+        let walking = true;
+        for (let j = 0; j < 4096; j++) {
+          let e: ReturnType<typeof ev.stepEntry>;
+          try {
+            e = ev.stepEntry(b, j);
+          } catch (exc) {
+            if (!(exc instanceof evt.EvtError)) throw exc;
+            // As the walk does: the step is kept, its program empty.
+            this.warnings.push(exc.message);
+            blk.steps.push(new Step(j, -1));
+            continue;
+          }
+          if (e === null) break;
+          if (e.kind === "end") {
+            walking = false;
+            if (j >= upTo) break;
+            blk.steps.push(new Step(j, -1, false, true));
+            continue;
+          }
+          if (!walking && j > upTo) break;
+          const step = new Step(j, e.offset, e.file !== ev);
+          e.program.forEach((ins, oi) => step.ops.push(
             this.decode(oi, ins, campaths)));
           blk.steps.push(step);
-        });
+          if (!walking && j >= upTo) break;
+        }
       }
       this.blocks.push(blk);
     }

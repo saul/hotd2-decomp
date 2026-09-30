@@ -103,12 +103,51 @@ effect-layout frames `MotionFrameRecord` (`FUN_00412FB0`) reads, sixty each,
 (`0x85A..0x88F`). `web/tools/checks/worm.ts` holds the port's scalars to the
 EXE; see [`docs/re/worm.md`](../re/worm.md).
 
+Every stage carries `characters.class32` -- class 0x32's `.rdata`, read by
+`web/src/hod2lib/class32.ts` where the stage-5 boss's routines index it:
+`phases` (`g_class32_phases`, six `[state, floor]` rows), `hop_offsets` and
+`circle_offsets` (four eye offsets each), and the seventeen-row rank tables
+`hop_frames`, `rank_rows`, `projectile_frames` and `barrage_rows`. Each
+class-0x32 placement carries `class32`, every descriptor-tail field a routine
+reads through `obj+0x1390` (`CharacterPlacement.class32` names which). The
+boss is character type `0x4B`, whose fifteen nodes are **two pol files'**
+models -- eleven `boss5.bin`, four `boss5b.bin` -- which the exporter
+resolves per node through the slot table (`ExeTables.characterAssetFiles`,
+`charbuild.rigEntry`) rather than taking one file for the type; its gore rig
+carries every model the node hook `Class32DrawBonePart` can draw
+(`game/class32/bone_parts.ts`, `boss5*.bin` `0x44A..0x72A`), the
+`slots_actor` rig every model its projectiles and tasks draw
+(`ACTOR_SLOTS[0x32]`: `boss5.bin` 206 and `eff_boss5.bin`'s runs), and
+`slots_effect` its sprite kind 0x50 (`EFFECT_SLOTS_BY_CLASS[0x32]`). See
+[`docs/re/boss-magician.md`](../re/boss-magician.md).
+
 `screen_sprites` also carries the continue screen's sprites -- CONTINUE?, the
 64x128 countdown digits, the credit line's words and the small GAME OVER --
 from `CONTINUE_SCREEN_SPRITES` in `web/src/game/hud_sprites.ts` (see
 `texbank.md`). A new key in an existing map, not a new field: no format bump,
 and a bundle built before it reads fine and draws no continue screen until it
 is re-exported, which the builder hash says.
+
+`script.json` carries a `class2d` block -- class 0x2D's `.rdata`, the stage-6
+boss's tables, read by `ExeTables.class2dTables` (`Class2DTablesJson`): the
+hit damage and stagger hits by `g_players_in_play`, the five waypoints, the
+attack and child-kind picks, the charge steps, the eight round-3 path
+segments, the child offsets, the satellites' launch gap and flight frames,
+kind 0's path starts, the children's approach frames and the two
+bone-to-satellite maps, each at its address and extent. Every class-0x2D
+placement carries `class2d`, the descriptor tail `obj+0x1390` --
+`{subtype, clip, counter, kill_path, kill_frame, fight_hp, round2_hp,
+round3_hp}` (`class2dTail`). Optional fields: the schema digest moved and no
+format bump. See [`docs/re/boss-emperor.md`](../re/boss-emperor.md). A class-0x2D placement is posed
+on its tail's clip with the whole of `boss6.bin`'s bank (`0x95..0xB0`), and
+the fight's (sub-type 1) carries five **synthetic** rows at
+`Class2DChildAt(boss, code)` -- `0x01000000 | code << 20 | boss & 0xFFFFF`
+-- for the children `Class2DState4` allocates and kind 0's wing: types 0x4D,
+0x4F, 0x50 and 0x51 on `0x40C`, `0x33`, `0x3B` and `0x79` (codes 8..11) and
+0x4E on `0xF` (code 12), each parented to the fight's row. The effect rig
+carries every slot the class draws by hand (`CLASS2D_EFFECT_SLOTS`), and
+every primitive whose UVs `ModelUVsFromViewNormals` rewrites carries
+`hod2_env_uv` in its extras (`nl1.md`).
 
 `script.json` carries an `options` block -- the options screen's `.rdata`, read
 by `ExeTables.optionsTables` (`OptionsJson`): the eleven rows

@@ -2,7 +2,7 @@ import type { CharactersJson, CharacterType } from "../../src/bundle";
 import { Rng } from "../../src/core/rng";
 import { Events } from "../../src/core/events";
 import {
-  ActorSpawn, GameUpdate, SpawnScriptedCharacters,
+  ActorSpawn, GameUpdate, RunPendingInits, SpawnScriptedCharacters,
 } from "../../src/game/director";
 import { ActorAdvanceMotion } from "../../src/game/motion";
 import { MOTION_FLAGS_INIT, MotionFlag } from "../../src/game/actor";
@@ -1534,6 +1534,8 @@ console.log("class 0x31, state 23 -- the wall-climbers climb down the wall:");
   G.g_max_attackers = 1;
   const [a] = SpawnScriptedCharacters(
     [{ at: AT, motion: 936, pos: vec3(-830.3, 163.9, -1289.8) }]);
+  // The `Init`s are the frame walk's (`SpawnFromDescriptor`); run them here.
+  RunPendingInits();
   check("the spawn carries all three words of the record's orientation",
         !!a && a.pitch === 0 && a.yaw === 0xc000 && a.roll === 0xc000,
         a ? `${a.pitch}/${a.yaw}/${a.roll}` : "no actor");

@@ -34,8 +34,8 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { chromium } from "playwright-core";
-import { WEB, SHOTS, freePort, openPlayer, requireBundle, serve,
-         waitForLoad } from "./lib/player.mjs";
+import { WEB, SHOTS, closeBrowser, freePort, openPlayer, requireBundle,
+         serve, waitForLoad } from "./lib/player.mjs";
 
 requireBundle("crosshair_page");
 
@@ -364,7 +364,7 @@ if (flag("net")) {
     failures.push(String(e));
     console.log(`  FAIL  ${e}`);
   } finally {
-    await browser.close();
+    await closeBrowser(browser);
     vite.kill("SIGTERM");
   }
   check(faults.length === 0, `nothing threw or logged an error (${faults.length})`,

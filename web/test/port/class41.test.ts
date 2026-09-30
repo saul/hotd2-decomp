@@ -31,6 +31,10 @@ import {
 } from "../../src/game/class41/shatter";
 import { MsvcRand } from "../../src/game/class41/group";
 import {
+  EXTRA_LIFE_HEART_SLOT, EXTRA_LIFE_ROUTINE_TYPE, EXTRA_LIFE_STRIP_SLOT,
+  EXTRA_LIFE_TAG_SLOT, ExtraLifePickupUpdate,
+} from "../../src/game/class41/items";
+import {
   FallingContainerGroundContact, FALLING_REMOVE_CAM_FRAME,
   FALLING_REMOVE_CAM_PATH, FALLING_SLOT_FRAGMENT,
 } from "../../src/game/class44/container";
@@ -426,6 +430,71 @@ console.log("\nclass 0x41, the extra life:");
   G.g_GameMode = GameMode.Arcade;
   G.g_original_life_cap[0] = 5;
   ProfileBoot(null);
+}
+
+console.log("\nclass 0x41, the extra life is an object you shoot (ExtraLifePickupUpdate):");
+{
+  const rng = new Rng(13);
+  const events = propScene(rng, GameMode.Arcade);
+  ProfileBoot(null);
+  const sounds: number[] = [];
+  events.on("sound.play", (e) => sounds.push(e.id));
+  const props = PlaceBreakableGroup(2, 4, rng);
+  const from = props[0];
+  shoot(from, 2, rng, events);
+  const life = G.g_breakable_props.find(
+    (q) => q.kind === EXTRA_LIFE_ROUTINE_TYPE && !q.dead);
+  check("the item-set-1 prop's break leaves a pickup in the pool: one unit "
+        + "above it, a sphere of 4.0, on the prop's own step clock",
+        !!life && life.y === Math.fround(from.y + 1.0) && life.hitRadius === 4
+        && life.lifetime === from.hp && life.storyItem === 0,
+        life ? `${life.y} ${life.hitRadius} ${life.lifetime}` : "none");
+  if (life) {
+    ExtraLifePickupUpdate(life, rng, events);
+    check("...drawing the heart three times its size, 1.5 up, and "
+          + "registering its sphere, unshot",
+          life.draws?.length === 1 && life.draws[0].slot === EXTRA_LIFE_HEART_SLOT
+          && life.draws[0].m[0] !== 0 && !life.dead);
+    G.g_player_lives[0] = 2;
+    sounds.length = 0;
+    BreakablePropTakeShot(life, 0);
+    ExtraLifePickupUpdate(life, rng, events);
+    check("shot by player 1: a life, 0x3616A9, player 1's strip and tag",
+          G.g_player_lives[0] === 3 && sounds.includes(0x3616a9)
+          && life.slot === EXTRA_LIFE_STRIP_SLOT
+          && life.removeFlag === EXTRA_LIFE_TAG_SLOT && life.storyItem === 2,
+          `${G.g_player_lives[0]} ${life.slot.toString(16)} ${life.storyItem}`);
+    ExtraLifePickupUpdate(life, rng, events);
+    check("...and only one: the taken bit stops a second",
+          G.g_player_lives[0] === 3);
+    check("...the tag rising over the heart and the strip beside it",
+          life.draws?.length === 3
+          && life.draws[1].slot === EXTRA_LIFE_TAG_SLOT
+          && life.draws[2].slot === EXTRA_LIFE_STRIP_SLOT - 1 + life.storyItem);
+    while (!life.dead && life.storyItem < 0x40) {
+      ExtraLifePickupUpdate(life, rng, events);
+    }
+    check("it fades from frame 0x19 and is gone after 0x31",
+          life.dead, `frame ${life.storyItem}`);
+  }
+}
+
+console.log("\nclass 0x41, FIRST AID KIT (g_original_first_aid):");
+{
+  const lifeAfterBreak = (firstAid: number): boolean => {
+    const rng = new Rng(29);
+    const events = propScene(rng);
+    G.g_original_first_aid = firstAid;
+    // Group 1's members all hide set 2, a score pickup, behind a countdown.
+    const props = PlaceBreakableGroup(1, 2, rng);
+    if (props[0]?.itemSet !== ItemSet.Score2) return false;
+    shoot(props[0], 2, rng, events);
+    return G.g_breakable_props.some((q) => q.kind === EXTRA_LIFE_ROUTINE_TYPE);
+  };
+  check("a prop hiding a score pickup gives no life without it",
+        !lifeAfterBreak(0));
+  check("...and an extra life with it, in place of its set and its countdown",
+        lifeAfterBreak(1));
 }
 
 console.log("\nclass 0x41, the script spawns reach the pool:");

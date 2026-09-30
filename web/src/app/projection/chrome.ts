@@ -9,11 +9,12 @@
  */
 import type { Player } from "../main";
 import type {
-  BranchProjection, ContinueProjection, JoinProjection, GameOverProjection, SkipProjection,
-  SoundProjection, TransportProjection,
+  BranchProjection, ContinueProjection, JoinProjection, GameOverProjection,
+  SkipProjection, SoundProjection, TransportProjection,
 } from "../../ui/projection";
 import { AppState, G, PlayerState, RunPhase } from "../../game/globals";
 import { CreditsAvailable } from "../../game/credits";
+import { SpawnClass } from "../../game/spawn_class";
 
 /**
  * The skip bar, shown under the game's own condition.
@@ -216,5 +217,34 @@ export function gameOverProjection(): GameOverProjection | null {
     phase: over ? G.g_nRunPhase : -1,
     label: over ? (GAME_OVER_LABELS[G.g_nRunPhase] ?? "game over")
                 : "game over",
+  };
+}
+
+/**
+ * `[port-only]` -- whether Original Mode's trunk (class 0x6E) is open: a
+ * live one in the pool. The screen reads the pad, not the gun.
+ */
+export function ItemSelectOpen(): boolean {
+  return G.g_object_list.some((o) => o.cls === SpawnClass.ItemSelect && !o.dead);
+}
+
+/**
+ * `[port-only]` -- whether a screen the game drives with the pad rather than
+ * the gun is up: the options (app state 0x0C) or Original Mode's trunk. The
+ * page's arrows, Right Shift and a tap mean the pad there.
+ */
+export function padScreenUp(): boolean {
+  return G.g_app_state === AppState.Options
+    || (G.g_app_state === AppState.InPlay && ItemSelectOpen());
+}
+
+/** The saved Original Mode items, for the menu, in Original Mode only. */
+export function originalItemsProjection(original: boolean):
+    { count: number; kinds: number } | null {
+  if (!original) return null;
+  const items = G.g_profile_original_items;
+  return {
+    count: items.reduce((a, n) => a + Math.max(0, n), 0),
+    kinds: items.filter((n) => n > 0).length,
   };
 }

@@ -151,7 +151,7 @@ import {
 import { ActorBuildSkinnedModel, ActorSpawn } from "../spawn";
 import { SpawnClass } from "../spawn_class";
 import { CharacterTypeOf, MotionAuthoredFrame, MotionOf, T } from "../tables";
-import type { Vec3 } from "../vec";
+import { vec3, type Vec3 } from "../vec";
 import { SpawnBatSplash } from "./splash";
 import { BatState, BatSubtype, type BatTail } from "./state";
 
@@ -504,11 +504,25 @@ function BatLeaveMemberSlot(obj: Actor, sub: BatTail): void {
 }
 
 /**
- * The score and the sound every death pays, identical in all three routines.
+ * The score, the sound and the blood every death pays, identical in all three
+ * routines.
  *
  * `rand() & 1` picks between the two `KOUMORI` records. The player is bit 2 of
  * `obj+0x34` — set means player 0, clear means player 1 — and a coin when both
  * are set.
+ *
+ * The blood is `SpawnBloodSprayAtPoint(obj + 0x40)`, which reads `0x30` past
+ * its argument (`MOV EDX, [ECX + 0x30]` at `0x00430C66`): **`obj+0x70`, the
+ * view-space point**, not the position. The pointer is `EDI` at `0x0042E34F`
+ * and `0x0042EE69` (`LEA EDI, [ESI + 0x40]` at `0x0042E26B` and `0x0042ED8C`)
+ * and `EBX` at `0x0042EB9F` (`LEA EBX, [ESI + 0x40]` at `0x0042EA0C`), each
+ * loaded before the draw and untouched until the call. Each routine writes
+ * `obj+0x70` once, at its tail before `RegisterForShotTest` -- the view of
+ * `(x, y + 1, z)`, {@link BatRegisterForShotTest} -- and the kill is taken
+ * before the bat moves, so it is last frame's registration. The port holds
+ * that point in world space as {@link Actor.shotCentre}, and this is it
+ * through the camera. It used to hand the spray the world position, which
+ * `render/effects.ts` then drew in the camera's frame.
  */
 function BatPayForKill(obj: Actor, f: ClassFrame): void {
   play(f.events, f.rng.int(2) === 0 ? SND_BAT_KILLED_B : SND_BAT_KILLED_A);
@@ -517,7 +531,9 @@ function BatPayForKill(obj: Actor, f: ClassFrame): void {
   const who = byP0 && byP1 ? f.rng.int(2) : byP0 ? 0 : 1;
   ScoreAddForPlayer(who, BAT_SCORE, f.events);
   G.g_player_hit_count[who] = (G.g_player_hit_count[who] ?? 0) + 1;
-  SpawnBloodSprayAtPoint(obj.pos);
+  const at = vec3();
+  f.host.viewSpaceOfPoint?.(obj.shotCentre, at);
+  SpawnBloodSprayAtPoint(at);
 }
 
 /**

@@ -304,11 +304,17 @@ And on that path `EvtAdvanceStepOrRoute` does one more thing, at `0x0045F0DA`:
 
 ```c
 MarkSceneOver();                                   /* FUN_0045ED90 */
-if (g_GameMode == 2) g_evt_block_index = g_training_lesson;
+if (g_GameMode == 2) g_evt_block_index = DAT_009A2BBC;
 else g_evt_block_index =
     *(s16 *)(g_scene_routes[scene] + g_evt_block_index * 8 - 6);
 pc = EvtGetStep(7, 0, 0);       /* the inter-stage stub inside comevtbl */
 ```
+
+**[proved]** In Training the next block is `DAT_009A2BBC` (`MOV DX, word ptr
+[0x009a2bbc]` at `0x0045F0B5`), which the Training select screen
+(`FUN_00496DE0`) sets to the course's block, the word at `0x00570A78` indexed
+by `g_training_course` (`0x0049722C`). This line used to read
+`g_training_lesson`, which the routine does not touch.
 
 `block * 8 - 6` is record `block - 1` at `+0x02` — `next[0]` of the record the
 walk just left, which for a terminal record is the record itself. So:

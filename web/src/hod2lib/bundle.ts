@@ -139,6 +139,11 @@ export const BREAKABLE_SLOTS = [
   0x19e8, 0x19e6, 0x1a0f, 0x10d0,          // BreakablePropUpdate
   0x17a9, 0x17aa, 0x17ab, 0x10d1,          // KindedPropUpdate
   0x0a50, 0x0a51, 0x0a55,                  // FallingContainerUpdate
+  // ExtraLifePickupUpdate, which any of the three can release: the heart,
+  // the two players' tags and their pickup strips (frames 1..0x31 each).
+  0x10c3, 0x1256, 0x1257,
+  ...Array.from({ length: 49 }, (_, i) => 0x116a + i),
+  ...Array.from({ length: 49 }, (_, i) => 0x119c + i),
 ];
 
 /**

@@ -154,10 +154,10 @@ the browser.
 
 ## 5. What the port does not have yet
 
-* **The extra-life pickup.** `SpawnExtraLifePickup` is an event, not
-  `ExtraLifePickupUpdate` (`FUN_00471CC0`), so neither Arcade's hidden
-  extra lives nor FIRST AID KIT's can be shot. FIRST AID KIT's five arms
-  wait on it.
+* **`PropUpdateType37`'s** FIRST AID arm: the prop type itself is not
+  ported. The other four are, and so is the extra life they release
+  (`ExtraLifePickupUpdate`, `FUN_00471CC0`), which Arcade's hidden lives
+  use too.
 * **The ending's save.** The port has no run phase 8.
 * **The costumes' bodies** and PRIMITIVE MEAT's draws.
 * **Training's reward**: the port exports no Training bundle.

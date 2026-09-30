@@ -25,7 +25,7 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
   "approach.ts": "f2458fca4f4f943e775d2f73237eef7bf925b37dc38ba653bc89f80d3e800443",
   "arcscript.ts": "7c64fa78e89264425a0032c0918c846f8972905d848251d517112cd307722b35",
   "bams.ts": "f03b1290866a63ab2ae764d49bd15c57bd53c6b1a03794f7a0357e8dd842eb8f",
-  "bundle.ts": "0b52110e74ed05eb90b9993085dc25f127167f32b646d5f64b199f7d5f5135ab",
+  "bundle.ts": "75d2290530a8ce22682573c9d3e5e855847c168bac6d447b34bead168cd506d7",
   "bytes.ts": "59b2f363e98da56e88ada59458239032e40cad3a27342659e213d849c0967168",
   "cam.ts": "fe50200cb57c6578681a121766e7a5f4ed2425d91996169f83a82e8375dd63c3",
   "campaths.ts": "fbe28df3265d37b60a006e937a926eca8546609aa29cc5d80e7f1fc9afd639be",
@@ -101,10 +101,10 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
   "game/class40/submodel.ts": "b6dfac762802387c64d5d6692fef7ed6f3f1b15933643f57a75108f72d21a785",
   "game/class41/group.ts": "aa66aedbc0ecec00cd9413ab396bcdc6796d7e253c429f2ef647af81f48ce034",
   "game/class41/item_banner.ts": "a2edaa4694130dcde6e9fd01c1a28b2b5e68d4d8ca01cd8694fdb4c08744ba4c",
-  "game/class41/items.ts": "c9f5b0cac5d2a4c1818934c07e4e52b7ef592c1724beab6c1ee96c017ef616e6",
+  "game/class41/items.ts": "e30d74161034ca662519c21cc9e10d68c3d447011ea2c02eb66d82cd6a1364f2",
   "game/class41/lifetime.ts": "8c21e506bc97a15e060d76c1e94e238451c8a2ac54cb444707091b46fce93b77",
   "game/class41/original_item.ts": "62be303b53aaf67a85df310a9b299eb93ce423eab3d4610064afb47d88fa522e",
-  "game/class41/prop.ts": "cfcb4c1be1a3226402f590198115431dd4c48b073eb06d13ec272221b6413cdc",
+  "game/class41/prop.ts": "b3802e09abfd54509c80ca79b7db559b97e50382e10fd4e334e3a0e2ae82dd89",
   "game/class41/prop_draw.ts": "d481e24996907bc4762d078d12acde1f7e51050892cfb4589e6160629df6b28d",
   "game/class41/prop_state.ts": "b357a62d60d14c7dcb667ceaaa94f7171b0ecac25bfa2853f09ed88381914bc4",
   "game/class41/shatter.ts": "186a01803f5c803808d0d4d7ef92c61feea772a340bc69c0a4daa5353bf40cf2",
@@ -195,4 +195,4 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
 };
 
 /** One digest over {@link BUILDER_FILES}, in filename order. */
-export const BUILDER_HASH = "5a3ac39694c8d5f4288cd980464f97b83ed8cf8713e7b957f058b1673588ac34";
+export const BUILDER_HASH = "5f9eb3bbf01625b49fab49538433da147493775b76548abd121a87dfbb26cc93";

@@ -11,6 +11,8 @@
  * released the permit and put the actor back in the attack loop.
  */
 import { ZombieStateCarryProp } from "./carry_prop";
+import { ZombiePlayMotionFrameSe } from "./motion_se";
+import { Zombie1368Flag } from "./state";
 import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
 import type { ZombieActor } from "../actor";
@@ -150,6 +152,12 @@ export function EnemyZombieUpdate(obj: ZombieActor, f: ClassFrame): void {
   // camera point lifted by 4 and the actor filed as a candidate. A death
   // chain's `0x10000` is what keeps a corpse off the list, not a test here.
   ActorRegisterCameraPoint(obj, host, ZOMBIE_CAMERA_RISE);
+  // `MOV AL, byte ptr [ESI + 0x1368]` / `TEST AL, 0x2` / `JNZ` at
+  // `0x00453486`, then `CALL 0x00452A10`: the footfalls and swishes, unless
+  // the actor has gone into the water.
+  if (!(obj.zom.flags1368 & Zombie1368Flag.InWater)) {
+    ZombiePlayMotionFrameSe(obj, events);
+  }
 }
 
 /** `PUSH 0x40800000` at `0x00453475`: `ActorRegisterCameraPoint`'s 4.0. */

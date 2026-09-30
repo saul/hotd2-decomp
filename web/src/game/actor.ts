@@ -2188,7 +2188,7 @@ export interface ActorBase {
    *   itself on a `0x1FB9` node;
    * * `ZombieSubmitSlotByLighting` (`FUN_00453AE0`) draws every class-0x30
    *   bone at it while `obj+0x1368` bit `0x20` is up
-   *   (`zom.fadeDraw`), which `EnemyZombieInitByCharType`
+   *   (`Zombie1368Flag.FadeDraw`), which `EnemyZombieInitByCharType`
    *   (`FUN_00452FD0`) raises for character types 9 and 0x12 with the alpha
    *   at 0.25 and 0, and `ZombieDrawBonePart` (`FUN_004534A0`) steps it --
    *   down to 0 on the twin's `0x1C7C` node, up to 1 on `znele`'s `0x1C6C`.

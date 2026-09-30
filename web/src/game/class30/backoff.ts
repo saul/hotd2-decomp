@@ -10,6 +10,7 @@
  * than to the approach is what makes the next zombie's turn come round
  * promptly instead of after a fresh walk-in.
  */
+import { Zombie1368Flag } from "./state";
 import type { Rng } from "../../core/rng";
 import { ActorFlag, ZombieFlag2, type ZombieActor } from "../actor";
 import { TurnActorAwayFromPoint } from "../actor_turn";
@@ -142,7 +143,7 @@ export function ZombieStateBackOff(obj: ZombieActor, dt: number,
     // `00455d96 f6866813000001` — and **only** when the cooldown latch is
     // down. A state-19 attacker keeps its counter across the retreat; zeroing
     // it here unconditionally is the other half of what disarmed that loop.
-    if (!obj.zom.hasCooldown) obj.cooldown = 0;
+    if (!(obj.zom.flags1368 & Zombie1368Flag.Cooldown)) obj.cooldown = 0;
     obj.flags &= ~ActorFlag.BackingOff;
     ReleaseAttackSlot(obj);          // only now is the next enemy free
     obj.state = ZombieState.HoldAtRange;

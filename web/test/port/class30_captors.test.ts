@@ -1,3 +1,4 @@
+import { Zombie1368Flag } from "../../src/game/class30/state";
 import { Rng } from "../../src/core/rng";
 import { Events } from "../../src/core/events";
 import { authoredFrameOfTicks } from "../../src/core/play_cursor";
@@ -1827,8 +1828,8 @@ console.log("\nclass 0x30's twelve entrance states — do the waits end?");
           z.state === ZombieState.Strike && z.attackPermit >= 0,
           `${z.state}/${z.attackPermit}`);
     check("...arming the cooldown, which no other class-0x30 state does",
-          z.zom.hasCooldown && z.cooldown === 90,
-          `${z.zom.hasCooldown}/${z.cooldown}`);
+          (z.zom.flags1368 & Zombie1368Flag.Cooldown) !== 0 && z.cooldown === 90,
+          `${z.zom.flags1368}/${z.cooldown}`);
   }
   {
     // A failed claim is not an error — the actor takes the descriptor's branch.
@@ -1838,8 +1839,8 @@ console.log("\nclass 0x30's twelve entrance states — do the waits end?");
     G.g_cam_path_frame = 10;
     run(z, 3);
     check("...and a state-19 spawn that does not claim just branches",
-          z.state === ZombieState.AttackRun && !z.zom.hasCooldown,
-          `${z.state}/${z.zom.hasCooldown}`);
+          z.state === ZombieState.AttackRun && !(z.zom.flags1368 & Zombie1368Flag.Cooldown),
+          `${z.state}/${z.zom.flags1368}`);
   }
 
   // -- state 31: it counts itself into the game ---------------------------

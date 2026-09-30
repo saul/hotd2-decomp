@@ -301,6 +301,19 @@ every `evt/` table for it before calling it unread**, and subtract the
 occurrences the opcodes explain: what is left is a descriptor, and the
 descriptor's class says who reads it.
 
+**L101 -- A character type is its nodes' slots, and a slot names its own
+file.** The exporter asked for *the* pol file of a character type
+(`ExeTables.characterAssetFile`), which answers only when every node's slot
+names the same one, and the rig builder indexed each node's slot into that
+file's models. Character type `0x4B`, the stage-5 boss, has fifteen nodes
+over **two** files -- eleven in `boss5.bin`, four in `boss5b.bin` -- so it had
+no file, its spawn resolved to nothing and the boss was never in any bundle;
+and had it been given the first file, four nodes would have been built from
+whatever that file held at their indices. `AssetDrawSlot` resolves each slot
+through the slot table on its own, and so must anything that builds what it
+draws (`ExeTables.characterAssetFiles`, `charbuild.rigEntry`). **Resolve a
+model by its slot, never by the file its neighbour came from.**
+
 **L102 -- An absolute address can be an element of an array named somewhere
 else; check the ranges before naming it.** `Class2DState5`'s kill arm writes
 `0x009C90D8` and `0x009C9F55` as bare operands, and the first reading named

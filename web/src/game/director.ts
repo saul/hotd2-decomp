@@ -47,6 +47,7 @@ import { WaterWaveSourcesTick } from "./class17";
 import { Boss4HitMarksTick } from "./class19/hit_mark";
 import { Boss3TasksTick } from "./class45/tasks";
 import { Class2DTasksTick } from "./class2D/tasks";
+import { Class32TasksTick } from "./class32/tasks";
 import { BatSplashesTick } from "./class46/splash";
 import { FishEffectsTick } from "./effects/fish";
 import { OwlEffectsTick } from "./effects/owl";
@@ -1005,6 +1006,10 @@ function SceneTaskWalk(dt: number, host: GameHost,
   // ...and class 0x2D's: the sparks, the satellites' trails, the intro
   // flipbook and the death burst. See `game/class2D/tasks.ts`.
   Class2DTasksTick(host, events);
+  // ...and class 0x32's draw-only tasks -- the afterimages, the body loop and
+  // hands effects, the projectiles' trails, the death bursts and the exit
+  // effect -- the same way. Its projectiles are actors and ran above.
+  Class32TasksTick(events);
   // The layered queue is flushed by `GameUpdate`, after the run phase.
   return { lookAt: G.g_camera_block_target };
 }

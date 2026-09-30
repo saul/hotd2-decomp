@@ -176,6 +176,11 @@ export function resolveSpawn(tables: ExeTables, spawn: Spawn): ResolvedSpawn {
     return new ResolvedSpawn(spawn, ct, null, 0,
       `type 0x${ct.toString(16).padStart(2, "0")} has no skeleton`);
   }
-  return new ResolvedSpawn(spawn, ct, tables.characterAssetFile(ct),
+  // The root's file names the character; a type whose nodes span two files
+  // (`0x4B`, the stage-5 boss -- see `ExeTables.characterAssetFiles`) is
+  // identified all the same, and each node's model is found through its own
+  // slot when the rig is built (`charbuild.rigEntry`).
+  return new ResolvedSpawn(spawn, ct,
+                           tables.characterAssetFiles(ct)[0] ?? null,
                            skel.length);
 }

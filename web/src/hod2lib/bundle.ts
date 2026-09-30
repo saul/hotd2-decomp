@@ -1329,6 +1329,26 @@ export const ACTOR_SLOTS: Record<number, number[]> = {
   // 0x40's slots: the ripple `0x1A38` and the strip `0x15E4..0x1601`.
   0x42: [...Array.from({ length: 0x88f - 0x85a + 1 }, (_, i) => 0x85a + i),
          0x1a38, ...Array.from({ length: 30 }, (_, i) => 0x15e4 + i)],
+  // Class 0x32, the stage-5 boss: every model its projectiles and its tasks
+  // draw, in the world and under a light colour of their own, which
+  // `render/slotmodels.ts` draws. The afterimage (`Class32AfterimageTick`,
+  // `FUN_0047DC30`) draws `boss5.bin` 206, slot `0x5E5`; the rest are
+  // `eff_boss5.bin`, which the fight's steps load: the body loop's twenty
+  // cels `0xB4..0xC7` (`Class32BodyLoopEffectTick`, `FUN_0047E130`), the
+  // hands effect's `0x127A..0x1299` (`Class32HandsEffectTick`,
+  // `FUN_0047E2B0`), the projectile's `0xB02..0xB33`
+  // (`Class32ProjectileDispatchAndDraw`, `FUN_0047EFA0`, and its trail), the
+  // death burst's `0xC54..0xC68` (`Class32DeathBurstTick`, `FUN_00480700`)
+  // and the exit effect's `0x7EF..0x815` (`Class32ExitEffectTick`,
+  // `FUN_00480810`). The boss's own nodes ride the character path.
+  0x32: [
+    0x5e5,
+    ...Array.from({ length: 0xc7 - 0xb4 + 1 }, (_, i) => 0xb4 + i),
+    ...Array.from({ length: 0x1299 - 0x127a + 1 }, (_, i) => 0x127a + i),
+    ...Array.from({ length: 0xb33 - 0xb02 + 1 }, (_, i) => 0xb02 + i),
+    ...Array.from({ length: 0xc68 - 0xc54 + 1 }, (_, i) => 0xc54 + i),
+    ...Array.from({ length: 0x815 - 0x7ef + 1 }, (_, i) => 0x7ef + i),
+  ],
 };
 
 /**
@@ -1413,6 +1433,13 @@ export const EFFECT_SLOTS_BY_CLASS: Record<number, number[]> = {
   0x33: [
     ...Array.from({ length: 0x1031 - 0xfd4 + 1 }, (_, i) => 0xfd4 + i),
     ...Array.from({ length: 0x1785 - 0x174a + 1 }, (_, i) => 0x174a + i),
+  ],
+  // Class 0x32, the stage-5 boss: sprite kind 0x50, `0x23A..0x248`, the
+  // spark `Class32ChargeShotBone` (`FUN_0047CE10`) throws off a damaging hit.
+  // Its other kind, 0x35, is the shot path's `0xE25` run. The models its
+  // projectiles and tasks draw are {@link ACTOR_SLOTS}'.
+  0x32: [
+    ...Array.from({ length: 0x248 - 0x23a + 1 }, (_, i) => 0x23a + i),
   ],
 };
 
@@ -1752,8 +1779,8 @@ export async function actorSlotEntry(
   if (!parts.length) return null;
   const rig: Rig = {
     name: "slots_actor",
-    routine: "asset-slot actor draws (classes 0x13, 0x14, 0x40, 0x42, 0x43, "
-      + "0x51, 0x52; class 0x25 variant 3; class 0x26 subtypes 6 and 7; "
+    routine: "asset-slot actor draws (classes 0x13, 0x14, 0x32, 0x40, 0x42, "
+      + "0x43, 0x51, 0x52; class 0x25 variant 3; class 0x26 subtypes 6 and 7; "
       + "class 0x33 selector 4; class 0x41 type 1's water tiles)",
     worldSpace: false,
     parts: parts.map(([p]) => p),

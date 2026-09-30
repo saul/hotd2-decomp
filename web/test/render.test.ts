@@ -5615,5 +5615,100 @@ console.log("\nScriptedHumanoidBoneDrawHook's extra models:");
         !!node && !node.visible);
 }
 
+console.log("\nclass 0x32: the node hook's draws, and the light each was made under:");
+{
+  const { syncBoss5NodeDraws, BOSS5_DRAW_HOLDER }
+    = await import("../src/render/characters/boss5");
+  // A draw's own colour between `LightsUseSecondarySet` and
+  // `LightsRestoreScene` keeps block 1's ambient and direction; a tag of null
+  // is the block's own colour, not the parent's.
+  const BOSS_AT = 0x3d84;
+  const root = new Obj3D();
+  root.userData = { hod2_spawn_at: BOSS_AT };
+  const bone = new Mesh(new PlaneGeometry(1, 1), new MeshBasicMaterial());
+  bone.userData = { hod2_light_colour: [1, 0, 0] };
+  const child = new Mesh(new PlaneGeometry(1, 1), new MeshBasicMaterial());
+  child.userData = { hod2_light_colour: null };
+  bone.add(child);
+  root.add(bone);
+  const lights = new SceneLighting(new Scene());
+  lights.set({ rgb: [1, 1, 1], ambient: 0.5, pitchDeg: 0, yawDeg: 0 });
+  lights.source = {
+    light: () => ({ rgb: [1, 1, 1], ambient: 0.4, pitchDeg: 0, yawDeg: 0 }),
+    secondary: (at: number) => at === BOSS_AT,
+  };
+  lights.build(root);
+  lights.beforeRender();
+  const ud = (m: unknown) => (m as { userData: Record<string, unknown> }).userData;
+  check("a coloured draw of a block-1 actor gets a twin keyed on block 1",
+        ud(bone.material).lightColour === "block1|1,0,0",
+        JSON.stringify(ud(bone.material)));
+  check("...and a child tagged null the block's own twin, not its parent's colour",
+        ud(child.material).secondaryLit === true
+        && ud(child.material).lightColour === undefined,
+        JSON.stringify(ud(child.material)));
+  const cam = new PerspectiveCamera();
+  cam.updateMatrixWorld();
+  (lights as unknown as { refreshColoured(c: unknown): void })
+    .refreshColoured({ camera: cam });
+  const set = (lights as unknown as {
+    coloured: Map<string, { color: { value: { r: number } } }> })
+    .coloured.get("block1|1,0,0");
+  const lin = (c: number) =>
+    c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  check("...whose diffuse is block 1's ambient 0.4, not block 0's 0.5",
+        !!set && Math.abs(set.color.value.r - lin(0.4 * DIFFUSE_SCALE)) < 1e-6,
+        JSON.stringify(set?.color.value));
+
+  // The hook's models on the nodes: a single-primitive bone whose arm draws
+  // two cels in place of its model, and a multi-primitive one that draws its
+  // model and a cel.
+  ResetGameGlobals();
+  const a = makeActor(BOSS_AT, SpawnClass.Boss5, 0x4b, "boss5");
+  if (a.cls !== SpawnClass.Boss5) throw new Error("not class 0x32");
+  const b11 = new Mesh(new PlaneGeometry(1, 1), new MeshBasicMaterial());
+  const b15 = new Group();
+  const own15 = new Mesh(new PlaneGeometry(1, 1), new MeshBasicMaterial());
+  b15.add(own15);
+  b11.add(b15);                       // a child bone under a mesh bone
+  const inst = {
+    at: BOSS_AT, a, root: new Obj3D(), pivot: new Group(),
+    type: { bones: [{ bone: 11, slot: 0x4ef }, { bone: 15, slot: 0x44a }] },
+    bones: new Map<number, InstanceType<typeof Obj3D>>([[11, b11], [15, b15]]),
+    gore: new Map(),
+  } as unknown as Parameters<typeof syncBoss5NodeDraws>[0];
+  const cloned: number[] = [];
+  const clone = (slot: number) => {
+    cloned.push(slot);
+    const o = new Obj3D();
+    o.userData.slot = slot;
+    return o;
+  };
+  a.boss5.nodeDraws = {
+    "11": [{ slot: 0x4f4, light: null }, { slot: 0x51c, light: [1, 0, 0] }],
+    "15": [{ slot: 0x44a, light: null }, { slot: 0x450, light: null }],
+  };
+  syncBoss5NodeDraws(inst, clone);
+  const holders = (n: InstanceType<typeof Obj3D>) =>
+    n.children.filter((c) => c.name === BOSS5_DRAW_HOLDER);
+  check("a node whose arm replaces its model hides its own mesh and hangs "
+        + "both cels, the second under its light",
+        !b11.layers.isEnabled(0) && holders(b11).length === 2
+        && holders(b11).map((h) => h.userData.slot).join() === "1268,1308"
+        && (holders(b11)[1].userData.hod2_light_colour as number[]).join()
+          === "1,0,0"
+        && b15.parent === b11,
+        `${b11.layers.isEnabled(0)} ${cloned.join()}`);
+  check("...a node that draws its own slot shows it, with one cel beside it",
+        own15.layers.isEnabled(0) && holders(b15).length === 1
+        && holders(b15)[0].userData.slot === 0x450
+        && own15.userData.hod2_light_colour === null);
+  a.boss5.nodeDraws = {};
+  syncBoss5NodeDraws(inst, clone);
+  check("...and a frame the walk drew nothing shows nothing",
+        !b11.layers.isEnabled(0) && !own15.layers.isEnabled(0)
+        && holders(b11).length === 0 && holders(b15).length === 0);
+}
+
 console.log(failures ? `\n${failures} failed` : "\nall passed");
 process.exit(failures ? 1 : 0);

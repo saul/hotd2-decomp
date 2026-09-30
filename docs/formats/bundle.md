@@ -103,6 +103,24 @@ effect-layout frames `MotionFrameRecord` (`FUN_00412FB0`) reads, sixty each,
 (`0x85A..0x88F`). `web/tools/checks/worm.ts` holds the port's scalars to the
 EXE; see [`docs/re/worm.md`](../re/worm.md).
 
+Every stage carries `characters.class32` -- class 0x32's `.rdata`, read by
+`web/src/hod2lib/class32.ts` where the stage-5 boss's routines index it:
+`phases` (`g_class32_phases`, six `[state, floor]` rows), `hop_offsets` and
+`circle_offsets` (four eye offsets each), and the seventeen-row rank tables
+`hop_frames`, `rank_rows`, `projectile_frames` and `barrage_rows`. Each
+class-0x32 placement carries `class32`, every descriptor-tail field a routine
+reads through `obj+0x1390` (`CharacterPlacement.class32` names which). The
+boss is character type `0x4B`, whose fifteen nodes are **two pol files'**
+models -- eleven `boss5.bin`, four `boss5b.bin` -- which the exporter
+resolves per node through the slot table (`ExeTables.characterAssetFiles`,
+`charbuild.rigEntry`) rather than taking one file for the type; its gore rig
+carries every model the node hook `Class32DrawBonePart` can draw
+(`game/class32/bone_parts.ts`, `boss5*.bin` `0x44A..0x72A`), the
+`slots_actor` rig every model its projectiles and tasks draw
+(`ACTOR_SLOTS[0x32]`: `boss5.bin` 206 and `eff_boss5.bin`'s runs), and
+`slots_effect` its sprite kind 0x50 (`EFFECT_SLOTS_BY_CLASS[0x32]`). See
+[`docs/re/boss-magician.md`](../re/boss-magician.md).
+
 `screen_sprites` also carries the continue screen's sprites -- CONTINUE?, the
 64x128 countdown digits, the credit line's words and the small GAME OVER --
 from `CONTINUE_SCREEN_SPRITES` in `web/src/game/hud_sprites.ts` (see

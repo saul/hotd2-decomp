@@ -120,7 +120,7 @@ bone-to-satellite maps, each at its address and extent. Every class-0x2D
 placement carries `class2d`, the descriptor tail `obj+0x1390` --
 `{subtype, clip, counter, kill_path, kill_frame, fight_hp, round2_hp,
 round3_hp}` (`class2dTail`). Optional fields: the schema digest moved and no
-format bump. See `web/src/game/class2D/`. A class-0x2D placement is posed
+format bump. See [`docs/re/boss-emperor.md`](../re/boss-emperor.md). A class-0x2D placement is posed
 on its tail's clip with the whole of `boss6.bin`'s bank (`0x95..0xB0`), and
 the fight's (sub-type 1) carries five **synthetic** rows at
 `Class2DChildAt(boss, code)` -- `0x01000000 | code << 20 | boss & 0xFFFFF`

@@ -335,6 +335,13 @@ export const CHECKS: readonly Check[] = [
       + "camera cues and the (2,6) rail they move, since the playthrough stops "
       + "on entering the end block the fight is in",
         NEEDS_BUNDLE),
+  check("boss6_fight", ["npm", "run", "--silent", "boss6_fight"],
+        "that the stage-6 boss's fight runs from block 12's intro cut through "
+      + "its three rounds, a child and its death to past the block's "
+      + "`wait_enemies_alive 0`, against the stage's own script and paths -- "
+      + "the only check that plays class 0x2D, whose block the playthrough "
+      + "stops on entering",
+        NEEDS_BUNDLE),
   check("handback", ["npm", "run", "--silent", "handback"],
         "that a room waits for the camera to turn back onto its rail after the "
       + "last enemy dies and not merely for the counter -- the only check that "

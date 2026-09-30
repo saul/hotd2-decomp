@@ -301,6 +301,22 @@ every `evt/` table for it before calling it unread**, and subtract the
 occurrences the opcodes explain: what is left is a descriptor, and the
 descriptor's class says who reads it.
 
+**L102 -- An absolute address can be an element of an array named somewhere
+else; check the ranges before naming it.** `Class2DState5`'s kill arm writes
+`0x009C90D8` and `0x009C9F55` as bare operands, and the first reading named
+them `g_original_boss6_kills` and `g_profile_original_boss6_kills` -- two new
+globals, with a port field each. They are entry 24 of
+`g_original_items_taken` (`0x009C90C0`, 33 bytes) and of
+`g_profile_original_items` (`0x009C9F3D`), which the item pickups, the save
+and the profile copy already read and write as arrays: the port would have
+kept the boss's kill count where nothing that saves the tally could see it.
+The same mistake was already in the port the other way round --
+`ProfileFactoryReset`'s `0x009C9F40`, `44` and `4D` had been read as "three
+bytes set to 1" when they are items 3, 7 and 16 of the array it had just
+zeroed, and the port zeroed them. **Before giving an absolute operand a name
+of its own, look for a named table whose extent covers it** (the TSVs are
+sorted by address, so the row above says), and write the element.
+
 
 ## Transcribing behaviour into the port
 

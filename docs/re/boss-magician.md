@@ -24,7 +24,7 @@ bones 1 and 9 `[proved]` (the type's `g_pCharacterExtraParts` row).
 **The name.** The banner its `Init` spawns, record `0x00596AC0`, draws the
 name cards `0xBE` and `0xCC`, which read **MAGICIAN** and **Type 0** on
 screen `[proved]` (the record, `game/boss_banner_records.ts`; the page,
-`tools/boss5_page.mjs`'s `boss5-banner.png`). The repo's other documents
+`tools/boss5_page.mjs --shots`'s `boss5-banner.png`). The repo's other documents
 already call it that.
 
 **Where it spawns** `[proved]`: stage 5 block 7 (the route's end block) and

@@ -12,9 +12,10 @@
  * scene.
  *
  * So it taps `window.Audio` before the app boots, records every element the
- * page makes, and samples `loop`, `paused` and `currentTime` once a second. A
- * loop that never starts, never wraps, or stops early is visible in the
- * cursor.
+ * page makes, and samples `loop`, `paused` and `currentTime` four times a
+ * second. A loop that never starts, never wraps, or stops early is visible in
+ * the cursor. Each run stops sampling once what it asks has been seen -- the
+ * wrap, the element -- and otherwise samples for as long as it always did.
  *
  * Two runs, because the difference between them *was* the bug: the same stage
  * from the top and from a deep link past the instruction that starts the loop.
@@ -50,8 +51,11 @@ const check = (name, ok, detail = "") => {
   console.log(`  ${ok ? "ok  " : "FAIL"}  ${name}${ok || !detail ? "" : ` -- ${detail}`}`);
 };
 
-async function run(label, url, seconds) {
-  const { page, browser } = await openPlayer({
+/** Samples a second: the rain's loop is under a second long. */
+const RATE = 4;
+
+async function run(label, url, seconds, seen) {
+  const { page, close } = await openPlayer({
     url, size: "1280x800", headless: !process.argv.includes("--head"),
     quiet: true, init: TAP,
   });
@@ -63,8 +67,8 @@ async function run(label, url, seconds) {
     await page.locator("button.sound").click();
     await page.evaluate(() => document.activeElement?.blur?.());
     await page.keyboard.press("Space");
-    for (let s = 0; s < seconds; s++) {
-      await page.waitForTimeout(1000);
+    for (let s = 0; s < seconds * RATE && !seen(cursors); s++) {
+      await page.waitForTimeout(1000 / RATE);
       const snap = await page.evaluate(() => window.__snap());
       // Lowercased: `audio/bgm.ts`'s `soundUrl` asks for every file that way.
       const el = snap.find((e) => e.loop
@@ -72,7 +76,7 @@ async function run(label, url, seconds) {
       cursors.push(el ? { t: el.t, paused: el.paused } : null);
     }
   } finally {
-    await browser.close();
+    await close();
   }
   console.log(`\n  ${label}: ${cursors.map((c) => (c ? c.t : "-")).join(" ")}`);
   return cursors;
@@ -80,7 +84,11 @@ async function run(label, url, seconds) {
 
 // From the top: the loop starts, and the cursor **goes backwards** at least
 // once, which is the only direct evidence that it wrapped rather than stopped.
-const top = await run("from the top", FROM_TOP, 6);
+const wrapped = (cs) => {
+  const t = cs.filter((c) => c !== null).map((c) => c.t);
+  return t.some((x, i) => i > 0 && x < t[i - 1]);
+};
+const top = await run("from the top", FROM_TOP, 6, wrapped);
 check("playing from the top starts the loop",
       top.some((c) => c !== null), "no looping element for the ambience");
 const live = top.filter((c) => c !== null).map((c) => c.t);
@@ -89,7 +97,8 @@ check("...and it wraps rather than running out",
 
 // The deep link: the `se_play` is stepped over by the replay, so this is the
 // one the walker's record has to reconstitute.
-const deep = await run("by a deep link", DEEP_LINK, 3);
+const deep = await run("by a deep link", DEEP_LINK, 3,
+                       (cs) => cs.some((c) => c !== null));
 check("a deep link past the `se_play` still has the loop",
       deep.some((c) => c !== null),
       "the seek replayed the instruction silently and told the mixer nothing");

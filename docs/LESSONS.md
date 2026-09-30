@@ -1223,6 +1223,22 @@ reported every figure at zero, which read as a transport that did not work.
 Pages that must see each other take one `browser.newContext()` and call
 `context.newPage()` twice.
 
+**L104 -- A driven page's wall time is its vsyncs, and the installed Chrome
+takes five seconds to leave.** `tools/boss5_page.mjs` took 56 s alone and
+572 s in a loaded verify for an 8,000-frame fight the page simulates in about
+four: it booked two frames per `advance` and read the state back after each,
+2,523 rAFs, and a driven rAF is a vsync the page cannot hurry
+(`--disable-frame-rate-limit` and `--disable-gpu-vsync` change nothing
+headless). Booking the whole run with a stop condition (`advance(n, until)`,
+`app/harness.ts`) and stopping only where the driver has to act -- a pull, or
+a thing first drawn, read back after its render -- made it 66 stops and 4 s,
+and the per-frame watcher sees more than the sampling did. Separately,
+`Browser.close` on the installed Chrome returns after 5.2 to 5.4 s even for a
+blank page, so every browser check paid that on the way out;
+`closeBrowser` (`tools/lib/player.mjs`) gives it half a second and lets
+`process.exit` kill the rest. **Count a harness's round trips and vsyncs, and
+time its teardown, before blaming the machine.**
+
 ---
 
 **L90 -- A merge that lets one side win is only as good as the writer that

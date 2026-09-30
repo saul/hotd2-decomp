@@ -135,7 +135,7 @@ for (const entry of JSON.parse(readFileSync(manifest, "utf8")).stages) {
   const chars = JSON.parse(readFileSync(script, "utf8")).characters;
   const byType = chars.types;
   // The directional set, read out of the bundle rather than out of the EXE:
-  // it is what the port's `ChooseDeathMotionDirectional` indexes, and asking
+  // it is what the port's `DeathArcMotion` indexes, and asking
   // the bundle is what makes this a check on the bundle.
   const directional: number[] = [
     ...chars.deaths.front.map(Number), ...chars.deaths.back.map(Number), 991, 992,

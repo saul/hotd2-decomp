@@ -89,6 +89,7 @@ export function ActorSetMotion(obj: Actor, motion: number): void {
   obj.motion = motion;
   obj.playTicks = 0;
   obj.fadeFrom = null;
+  obj.fadeInto = null;
   obj.fade = 0;
   obj.fadeLen = 0;
   obj.rootCursor = -1;
@@ -372,6 +373,7 @@ export function ActorStartFade(obj: Actor, fromMotion: number,
                                fromTicks: number, frames: number): void {
   if (frames <= 0 || !MotionOf(obj, fromMotion)) {
     obj.fadeFrom = null;
+    obj.fadeInto = null;
     obj.fade = 0;
     return;
   }
@@ -398,9 +400,12 @@ export function ActorStartFade(obj: Actor, fromMotion: number,
  * the engine holds it.
  *
  * The mid-fade restart keeps the snapshot it already has -- the pose the
- * outgoing fade was dissolving from -- and only rearms the counter.
+ * outgoing fade was dissolving from -- and only rearms the counter. Either
+ * way slot B is loaded afresh, from the clip the caller is about to write, so
+ * a slot B left by a store under the old fade goes ({@link Actor.fadeInto}).
  */
 function ActorRestartFade(obj: Actor, frames: number): void {
   obj.fade = frames;
   obj.fadeLen = frames + 1;
+  obj.fadeInto = null;
 }

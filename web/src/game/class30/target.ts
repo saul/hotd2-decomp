@@ -51,7 +51,12 @@ import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
 import type { TargetScriptEntry, TargetScriptJson }
   from "../../bundle/characters";
-import { ActorFlag, MotionFlag, type Actor, type ZombieActor } from "../actor";
+import {
+  ActorFlag, MotionFlag, ZombieFlag2, type Actor, type ZombieActor,
+} from "../actor";
+import { QueryGroundHeightAt } from "../coli";
+import { ActorPlayHitVoice, ActorVoice } from "../combat/voice";
+import { Zombie1368Flag } from "./state";
 import type { GameHost } from "../host";
 import { ActorPointIsAhead, TurnActorAwayFromPoint, TurnAngleTowardFrames }
   from "../actor_turn";
@@ -77,6 +82,13 @@ import { WADE_MOTION, ZombieWadeSplash } from "./splash";
  */
 const SCRIPT_SPLASH_MOTION = 0xb2;
 const SCRIPT_SPLASH_FRAME = 0x16;
+
+/** `FMUL double ptr [0x004C4370]` -- BAMS to radians, the engine's double. */
+const SCRIPT_BAMS_RAD = 9.587379924285257e-05;
+/** `FMUL float ptr [0x004E30E8]` -- 25.0, how far ahead the arc target is. */
+const SCRIPT_ARC_AHEAD = 25.0;
+/** `FADD float ptr [0x004C43B0]` -- 100.0, where that point's trace starts. */
+const SCRIPT_ARC_PROBE_RISE = 100.0;
 
 /** `ZombieStateWalkToTarget`'s turn rate, and every other walk's — `0x1A0`. */
 const TARGET_TURN_RATE = 0x1a0;
@@ -398,6 +410,51 @@ function reblendSoft(obj: ZombieActor): void {
   ActorSetMotionBlended(obj, obj.zom.scriptMotion, 0, 10);
 }
 
+/**
+ * The arm both of `ZombieStateTargetMotionScript`'s entry subs take for clip
+ * `0xB2` or `0xB7`, and the two copies are the same instructions --
+ * `0x0045ADEE`..`0x0045AE5D` and `0x0045AF33`..`0x0045AFA2`, compared one for
+ * one (`L86`):
+ *
+ * ```
+ * obj+0x136C |= 0x100002                        ; Carried, DeathPairToFirst
+ * obj+0x13CC = sin(yaw * 9.587e-05) * 25.0 + x  ; [0x004E30E8] = 25.0
+ * obj+0x13D0 = QueryGroundHeightAt(x, y + 100.0, z)
+ * obj+0x13D4 = cos(yaw * 9.587e-05) * 25.0 + z
+ * ```
+ *
+ * `[proved]`. A point on the ground twenty-five units along the facing, in
+ * the arc record's target -- and `Carried` is one of the bits that sends a
+ * shot to `ZombieStateDeathKnockbackArc` rather than to state 6, so a captor
+ * killed in this maul is thrown. `[port-only]` as a function: the engine has
+ * it inline twice.
+ */
+function ScriptClipB2Arm(obj: ZombieActor): void {
+  obj.flags2 |= ZombieFlag2.Carried | ZombieFlag2.DeathPairToFirst;
+  const a = obj.yaw * SCRIPT_BAMS_RAD;
+  obj.arcTo.x = Math.fround(Math.sin(a) * SCRIPT_ARC_AHEAD + obj.pos.x);
+  obj.arcTo.y = Math.fround(QueryGroundHeightAt(
+    obj.pos.x, Math.fround(obj.pos.y + SCRIPT_ARC_PROBE_RISE), obj.pos.z));
+  obj.arcTo.z = Math.fround(Math.cos(a) * SCRIPT_ARC_AHEAD + obj.pos.z);
+}
+
+/**
+ * The mode's tail both entry subs end with: a negative mode lowers
+ * `ActorFlag.Committed`, any other raises it **and** voices the attack --
+ * `PUSH 0x3; PUSH ESI; CALL 0x0040A6F0` (`ActorPlayHitVoice`, kind 3) at
+ * `0x0045AE81` and `0x0045AFED`. `[proved]`; `[port-only]` as a function, for
+ * the reason {@link ScriptClipB2Arm} is.
+ */
+function ScriptEntryModeTail(obj: ZombieActor, rng: Rng, events?: Events): void {
+  if (obj.zom.targetCue < 0) {
+    obj.flags &= ~ActorFlag.Committed;
+    return;
+  }
+  ActorPlayHitVoice(obj, ActorVoice.Attack, rng,
+                    (id) => events?.emit("sound.play", { id }));
+  obj.flags |= ActorFlag.Committed;
+}
+
 /** Take one entry off the list into the actor's fields. */
 function loadEntry(obj: ZombieActor, e: TargetScriptEntry, blend: number): void {
   ZombieApplyScriptMode(obj, e.mode);
@@ -469,12 +526,40 @@ export function ZombieStateTargetMotionScript(obj: ZombieActor, rng: Rng,
     // `psVar6 = ZombieScriptForState(...)` — the only sub that picks a blob.
     const s = ZombieScriptForState(obj);
     const e = s?.entries[0];
-    if (e) { aimCursor(obj, blobForState(obj), 0); loadEntry(obj, e, 0); }
+    if (e) {
+      aimCursor(obj, blobForState(obj), 0);
+      loadEntry(obj, e, 0);
+      // `0x0045AF07`: a compare chain on the clip just set -- `CMP EAX,
+      // 0x1A7`, then 0xB2, 0xB7, 0x1A3, and past 0x1A7 `SUB 0x1AB`, `SUB
+      // 0x89` (0x234), `SUB 0x43` (0x277).
+      switch (obj.motion) {
+        case 0xb2: case 0xb7: ScriptClipB2Arm(obj); break;
+        case 0x1a3: case 0x1a7:
+          obj.zom.flags1368 |= Zombie1368Flag.DeathClip1A5; break;
+        case 0x1ab: obj.zom.flags1368 |= Zombie1368Flag.DeathClip1AC; break;
+        case 0x234: obj.zom.flags1368 |= Zombie1368Flag.DeathClip229; break;
+        case 0x277: obj.zom.flags1368 |= Zombie1368Flag.DeathClip279; break;
+      }
+      ScriptEntryModeTail(obj, rng, events);
+    }
     obj.sub = 2;
   } else if (obj.sub === 1) {
     // `psVar6 = *(short **)(obj+0x1398)` — the cursor, not the state.
     const e = entryAt(cursorScript(obj), obj.zom.scriptPc);
-    if (e) loadEntry(obj, e, 10);
+    if (e) {
+      loadEntry(obj, e, 10);
+      // `0x0045ADCC`: a jump table on `obj+0x1B4 - 0xB2` (`0x0045B078`, its
+      // bytes at `0x0045B088`, read out of memory): 0xB2 and 0xB7, 0x1A3 and
+      // 0x1A7, 0x1AB. **Not** 0x234 or 0x277 -- this sub has three cases and
+      // sub 0 five.
+      switch (obj.motion) {
+        case 0xb2: case 0xb7: ScriptClipB2Arm(obj); break;
+        case 0x1a3: case 0x1a7:
+          obj.zom.flags1368 |= Zombie1368Flag.DeathClip1A5; break;
+        case 0x1ab: obj.zom.flags1368 |= Zombie1368Flag.DeathClip1AC; break;
+      }
+      ScriptEntryModeTail(obj, rng, events);
+    }
     obj.sub += 1;
   } else if (obj.sub === 2) {
     const s = cursorScript(obj);
@@ -487,6 +572,12 @@ export function ZombieStateTargetMotionScript(obj: ZombieActor, rng: Rng,
     const reacting = DEAD_REACTION_MOTIONS.includes(obj.motion);
     if (!reacting || !ZombieTargetIsDead(obj)) {
       if (atLastFrame(obj)) {
+        // `AND [ESI+0x136C], 0xFFEFFFFF` at `0x0045AB63`, the clip's end,
+        // before the target test: the carry `ScriptClipB2Arm` raised comes
+        // down.
+        if (obj.motion === 0xb2 || obj.motion === 0xb7) {
+          obj.flags2 &= ~ZombieFlag2.Carried;
+        }
         if (!ZombieTargetIsDead(obj)) {
           obj.zom.targetLoops -= 1;
           if (obj.zom.targetLoops === 0) {
@@ -930,9 +1021,8 @@ function DragTargetCopyPose(obj: ZombieActor, t: Actor | null): void {
  *   the new clip would put it in. `game/` has no skeleton — that is the
  *   `GameHost` seam — so the actor lands a bone-offset away from where the
  *   engine puts it. `[diverges]`
- * * sub 0's `obj+0x1368 |= 0x10` (`0x0045C0ED`) is a kill-move death-clip
- *   selector, and the port models only bit 0 of that word. See
- *   `ZombieSubState.hasCooldown`.
+ * * (sub 0's `obj+0x1368 |= 0x10`, `0x0045C0ED`, the kill-move death
+ *   selector, used to be listed here as unported; it is written now.)
  */
 export function ZombieStateDragTarget(obj: ZombieActor, dt: number): void {
   const t = targetOf(obj);
@@ -960,6 +1050,9 @@ export function ZombieStateDragTarget(obj: ZombieActor, dt: number): void {
     // not also carry the actor. Sub 2 puts it back.
     obj.motionFlags &= ~MotionFlag.RootMotion;
     obj.zom.targetLoops = s?.head.loops ?? 0;
+    // `OR EDX, 0x10` at `0x0045C0ED`, stored at `0x0045C10A`: a captor killed
+    // while it drags dies on clip `0x1A5` (see `ChooseDeathMotion`).
+    obj.zom.flags1368 |= Zombie1368Flag.DeathClip1A5;
     obj.zom.targetCue = s?.head.cue ?? 0;
     obj.flags |= 0x10000000;
     obj.sub += 1;

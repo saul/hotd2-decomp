@@ -5,7 +5,7 @@ import { ActorSpawn, GameUpdate } from "../../src/game/director";
 import { ActorAdvanceMotion } from "../../src/game/motion";
 import { CameraActorTick, CameraUpdateTick } from "../../src/game/camera/actor";
 import { EvtEnterSceneState } from "../../src/game/camera/hooks";
-import { ChooseDeathMotionDirectional } from "../../src/game/combat/resolve_hit";
+import { DeathArcMotion } from "../../src/game/combat/resolve_hit";
 import {
   ActorByAt, AppState, G, ResetGameGlobals,
 } from "../../src/game/globals";
@@ -647,7 +647,7 @@ console.log("class 0x31 state 24, zskamere's standing swing, as the exe has it:"
         `index ${G.g_camera_index} block2 ${G.g_camera_block2_yaw_bams} `
         + `block0 ${G.g_camera_block_yaw_bams}`);
   z.yaw = 0x8000;
-  const m = ChooseDeathMotionDirectional(z, new Rng(5));
+  const m = DeathArcMotion(z, new Rng(5));
   check("a body facing the drawn camera falls back (0x8000 table), not by "
         + "block 0's quarter turn (0x3DF)", m === 901, String(m));
 }

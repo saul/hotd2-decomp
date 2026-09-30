@@ -822,15 +822,34 @@ read, so the two are independent.
 | `obj+0x130C == 4` | 0x404 or 0x41A at random, or 0x3DA |
 | `obj+0x130C` 5 or 6, and `!(obj+0x136C & 7)` | 0x3DB |
 | `obj->flags & 0x1000000` | 0x3F9 |
-| `obj+0x1368 & 0x08` | 428 |
-| `obj+0x1368 & 0x10` | 421 |
-| `obj+0x1368 & 0x40` | 633 |
-| `obj+0x1368 & 0x80` | 553 |
+| `obj+0x1368 & 0x08` | 428 (0x1AC) |
+| `obj+0x1368 & 0x10` | 421 (0x1A5) |
+| `obj+0x1368 & 0x40` | 633 (0x279) |
+| `obj+0x1368 & 0x80` | 553 (0x229) |
+| character type 10 with `obj+0x136C & 0x8000` | none: it keeps its clip |
+| character types 0xF..0x11 with `obj+0x136C & 0x100000` | 0x3DB |
 | otherwise | the directional pick above |
 
 `obj+0x1368` is **not** the destroyed-zone mask — that is `obj+0x1318`, a
-different field 0x50 bytes earlier. What sets `obj+0x1368`'s bits 3, 4, 6 and 7
-is `[open]`.
+different field 0x50 bytes earlier. Its bits 3, 4, 6 and 7 are the
+**kill-move deaths**: `ZombieStateTargetMotionScript` (`FUN_0045AAA0`) raises
+one as a maul entry starts, by the clip it just set -- in sub 0 (the first
+entry) `0x1AB` -> 8, `0x1A3`/`0x1A7` -> 0x10, `0x234` -> 0x80, `0x277` ->
+0x40; in sub 1 (every later entry) only the first three -- and
+`ZombieStateDragTarget` raises 0x10 as the drag starts (`0x0045C0ED`).
+Nothing lowers them, so a captor keeps the death of the first kill-move it
+began. `[proved]`
+
+The directional pick is not the end of the routine either. After the arc's
+`ActorSetMotionBlended`, `FUN_00456220` rewrites `obj+0x1B4` by
+`obj+0x136C`'s low three bits (the descriptor's `+0x20` word): bit 4 re-draws a
+side death (0x3DF/0x3E0) from the `0x8000` table with a second `rand()`; bit 1
+maps 0x3D9/0x3DA/0x3DE to 0x3DB/0x3DC/0x3DD; bit 2 maps them back, applied
+after bit 1. They are stores, not sets: the fade dissolves into the arc's clip
+(slot B was loaded from it) and the remapped one plays from cursor 1. The
+maul on clip 0xB2 or 0xB7 raises bit 2 with `0x100000`, and sets the arc
+record's target 25 units along the facing on the ground, so a captor shot in
+it is thrown by state 9. `[proved]`
 
 ## 7. Reacting — the stumble
 

@@ -65,6 +65,8 @@
  *   spheres           spawn angles and the hit spheres' writers
  *   class28_12        class 0x28, the bin captor's door, `ShotTestMesh`
  *   options           the options screen and the input devices
+ *   class32           the stage-5 boss: its shot, its node hook, its
+ *                     projectiles' burst and the flags it raises
  *
  * Run with `npm run test:port` (`node tools/run_test.mjs test/port/index.ts`).
  */
@@ -100,6 +102,7 @@ import "./rings.test";
 import "./spheres.test";
 import "./class28_12.test";
 import "./options.test";
+import "./class32.test";
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");
 process.exit(failures ? 1 : 0);

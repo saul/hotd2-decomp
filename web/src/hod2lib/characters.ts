@@ -47,6 +47,7 @@ import { BODY_CREATURE_HOST_CLIPS, CLASS20_DEATH_MOTION,
          BOSS3_CLIPS, BOSS4_CLIPS, FROG_CLIPS } from "./charmotion";
 import { class31MotionIds, class31Tables } from "./class31";
 import { class14Tables } from "./class14";
+import { CLASS32_MOTIONS, class32Tables, class32Tail } from "./class32";
 import { boneEffectSlot, boneZones, combatTables, DEATH_LEFT, DEATH_RIGHT,
          deathMotions, difficultyTables, HIT_STEPS,
          PART_SPHERE_FALLBACK_TYPES, partSphereRows, PLAYER_HAND_VARIANTS,
@@ -1818,6 +1819,7 @@ export async function resolveForStage(
       : null;
     const class22 = cls === CLASS22 ? class22Tail(rec) : null;
     const class23 = cls === CLASS23 ? class23Tail(rec) : null;
+    const class32 = cls === 0x32 ? class32Tail(rec) : null;
     const class45 = cls === 0x45 ? class45Tail(rec) : null;
     // **Gated on the selector, not on the class.** Class 0x33 is eleven
     // objects behind one id and these three blocks are three of them reading
@@ -1932,6 +1934,7 @@ export async function resolveForStage(
     p.class17 = class17;
     p.class22 = class22;
     p.class23 = class23;
+    p.class32 = class32;
     // The walker: made by its flier's class, never by the script.
     if (sp.nested_in !== undefined) {
       p.parent_at = sp.nested_in as number;
@@ -2036,6 +2039,8 @@ export async function resolveForStage(
     // clocks, so a missing one is a state that never ends.
     if (cls === CLASS22) entryClips.push(...CLASS22_MOTIONS);
     if (cls === CLASS23) entryClips.push(...CLASS23_MOTIONS);
+    // The stage-5 boss's clips -- see `CLASS32_MOTIONS`.
+    if (cls === 0x32) entryClips.push(...CLASS32_MOTIONS);
     // The stage-3 boss's clips, all three of its skeletons' -- see
     // `BOSS3_CLIPS`.
     if (cls === 0x45) entryClips.push(...BOSS3_CLIPS);
@@ -2356,6 +2361,9 @@ export function charactersJson(chars: Map<number, Character>,
     // Class 0x14's `.rdata` -- the stage-2 boss's cue, cone, window and
     // round tables. See `class14.ts`.
     class14: tables !== null ? class14Tables(tables) : {},
+    // Class 0x32's -- the stage-5 boss's phase ladder and rank tables. See
+    // `class32.ts`.
+    class32: tables !== null ? class32Tables(tables) : {},
     // `g_actor_attachment_records` -- one table for the whole game, indexed
     // by the ids in a placement's `attachments`.
     attachments: tables !== null ? tables.attachmentRecords() : [],

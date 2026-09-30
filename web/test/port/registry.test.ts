@@ -544,6 +544,7 @@ console.log("\n`g_class_handlers`, filled by the classes themselves:");
     [SpawnClass.ScriptedHumanoid, "0x25 scripted humanoid"],
     [SpawnClass.Zombie, "0x30 zombie"],
     [SpawnClass.Thrower, "0x31 thrower"],
+    [SpawnClass.Boss5, "0x32 stage-5 boss"],
     [SpawnClass.ScriptedScenery, "0x33 scripted scenery / the carrier"],
     [SpawnClass.PropContainerPlacer, "0x41 prop container placer"],
     [SpawnClass.FlyingEnemy, "0x43 owl"],

@@ -267,6 +267,11 @@ export const MOTION_RULES: Record<number, MotionRule> = {
   0x22: ["param", 0x02, "i16"],
   // `Class23Init` (`FUN_0048FD90`) seats the literal 0x38D at `0x0048FDDF`.
   0x23: ["literal", 0x38d],
+  // `Class32Init` (`FUN_0047F5F0`): `MOV dword ptr [ESI + 0x1b4], 0x8e`
+  // (`c786b40100008e000000`) at `0x0047F606`, before the build. Without this
+  // row the stage-5 boss resolves to a character with no motion and is
+  // emitted as a marker.
+  0x32: ["literal", 0x8e],
   // `RescueTargetInit` (`FUN_00451720`) seats the clip as a literal, the same
   // shape as class 0x19's: `MOV dword ptr [EDI + 0x20], 0x3E6`
   // (`c74720e6030000`) at `0x00451747` with `EDI = obj+0x194`, so

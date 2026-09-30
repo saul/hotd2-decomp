@@ -55,6 +55,7 @@ import type {
 import type { ScreenSpriteAnim } from "./game_over";
 import type { ViewSlotDraw } from "./view_slot";
 import type { Boss4HitMark } from "./class19/hit_mark";
+import type { Class32Task } from "./class32/state";
 import type { BatSplash } from "./class46/splash";
 import type { PlayerBody } from "./player_body";
 import type { RouteFigure, RouteMapState, RouteMark } from "./route_map";
@@ -659,6 +660,28 @@ export const G = {
   g_boss3_splashes: [] as Boss3Splash[],
   g_boss3_mesh_bulges: [] as Boss3MeshBulge[],
   g_boss3_path_effects: [] as Boss3PathEffect[],
+  /**
+   * `[port-only]` as a pool: the draw-only tasks class 0x32 allocates, in
+   * creation order -- `Class32AfterimageTick`, `Class32BodyLoopEffectTick`,
+   * `Class32HandsEffectTick`, `Class32ProjectileTrailTick`,
+   * `Class32DeathBurstTick` and `Class32ExitEffectTick`. Plain records for
+   * the same reason as `g_severed_heads`; see `game/class32/tasks.ts`.
+   */
+  g_class32_tasks: [] as Class32Task[],
+  /** `[port-only]` The next `Class32Task.id`. */
+  g_class32_task_seq: 0,
+  /**
+   * `[port-only]` The next class-0x32 projectile's spawn address -- see
+   * `Class32ProjectileAt`. In `G` so a snapshot restores it.
+   */
+  g_class32_actor_seq: 0,
+  /**
+   * `g_shot_bone` — `0x009A2D88`, per player: the bone the player's shot hit,
+   * as a shot handler copies it out of `obj+0x190 + player` before it
+   * charges the hit. `Class32ResolvePlayerShots` writes it and
+   * `Class32ChargeShotBone` switches on it.
+   */
+  g_shot_bone: [0, 0] as number[],
   /**
    * `g_camera_driver_held` — `0x009CA094`. While it is 1,
    * `CameraDriverSelectMode` (`FUN_00402650`) forces camera mode 6, the hook
@@ -3040,6 +3063,10 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   G.g_boss3_splashes = [];
   G.g_boss3_mesh_bulges = [];
   G.g_boss3_path_effects = [];
+  // ...and class 0x32's, the same way.
+  G.g_class32_tasks = [];
+  G.g_class32_task_seq = 0;
+  G.g_class32_actor_seq = 0;
   G.g_boss3_heads_attacking = 0;
   G.g_boss3_variant = 0;
   G.g_boss3_heads = [-1, -1, -1, -1, -1];

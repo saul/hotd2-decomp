@@ -1357,6 +1357,25 @@ export class ExeTables {
     return files.size === 1 ? [...files][0] : null;
   }
 
+  /**
+   * Every pol file a character type's parts live in, in skeleton order --
+   * the root node's first. One file for every type but `0x4B`: the stage-5
+   * boss's fifteen nodes are eleven `boss5.bin` models and four
+   * `boss5b.bin` ones (bones 3, 4, 10 and 11), and stage 5's script loads
+   * both files (`asset_load_polfile` 208 and 25) before it spawns class
+   * 0x32. A character whose parts disagree is still one character: each
+   * node draws its own slot, which the slot table resolves to its own file.
+   */
+  characterAssetFiles(charType: number): string[] {
+    const slots = this.assetSlots();
+    const files: string[] = [];
+    for (const n of this.characterSkeleton(charType)) {
+      const rec = slots.get(n.slot);
+      if (rec && !files.includes(rec[0])) files.push(rec[0]);
+    }
+    return files;
+  }
+
   /** `{sound id: filename}` for every category-0 sound in the game. */
   soundRecords(): Map<number, string> {
     return this.cached("soundRecords", () => {

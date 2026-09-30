@@ -61,8 +61,8 @@ export function CheckPlayerCanBeHit(player: number): number {
  * state now, which `game/player_shell.ts` keeps: `PlayerEnterPlay`
  * (`FUN_00414770`) puts a player at 5 and the continue takes them out.
  *
- * **Its call sites.** Eight functions in the engine call it; the port has
- * modules for four of them and all four now do:
+ * **Its call sites.** Nine functions in the engine call it
+ * (`get_xrefs_to 0x00409DC0`, nineteen calls), and the port has all nine:
  *
  * | engine | port |
  * |---|---|
@@ -73,8 +73,9 @@ export function CheckPlayerCanBeHit(player: number): number {
  * | `ThrowerStateGrabPlayer` ×3 | ✅ `class31/scripted.ts` |
  * | `ThrowerStateLeapStrike` | — the port has the state, and no shipped spawn
  *   can reach it |
- * | `FUN_0047FE90`, and two calls at 0x0047DAB3/0x0047DAD3 | — unread, in
- *   classes the port has no module for |
+ * | `Class32TryClaimAttackPermit` (`FUN_0047FE90`),
+ *   `Class32StateLungeAtCamera` (`FUN_0047D890`) ×2 at `0x0047DAB3`/`0x0047DAD3`,
+ *   `Class32ProjectileStrikePlayer` (`FUN_0047F320`) ×4 | ✅ `class32/` |
  *
  * The `player >= 0` guard is the port's own. The engine is called with -1 by
  * `TryClaimAttackSlot` and the scripted attackers, reads `g_player_state`

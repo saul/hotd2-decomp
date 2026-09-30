@@ -20,6 +20,7 @@
 import { composeBams, rotMatrix } from "./bams";
 import { g_class30_bone_cels } from "../game/class30/bonecels";
 import { CHAR_ZNKAGER, HALVED_STUMP_SLOT } from "../game/class30/halved";
+import { Class32BonePartSlots } from "../game/class32/bone_parts";
 import { u32 } from "./bytes";
 import { MOTION_ROW_BACKOFF, actorRadius, attackPicks, attackTables,
          damageRankRow, goreParts, hitReactions, hitSphere, hitSteps,
@@ -407,6 +408,30 @@ export async function rigEntry(stage: Stage, tables: ExeTables,
   }
 
   const parts: PartModels[] = [];
+  // A slot's model, from this character's own file -- or, for a type whose
+  // nodes span two files (`0x4B`, `boss5.bin` and `boss5b.bin`; see
+  // `ExeTables.characterAssetFiles`), from the file the slot table names for
+  // that slot. A slot in the character's own file resolves exactly as it
+  // always did.
+  const modelFor = async (slot: number):
+      Promise<[Model, Bank | null, string] | null> => {
+    const rec = slots.get(slot);
+    const own = char.ownSlots?.get(slot);
+    if (own !== undefined || !rec) {
+      const idx = own ?? null;
+      return idx !== null && idx < models.length
+        ? [models[idx], bank as Bank | null, char.name] : null;
+    }
+    const stem = rec[0].endsWith(".bin") ? rec[0].slice(0, -4) : rec[0];
+    if (stem === char.name) {
+      return rec[1] < models.length
+        ? [models[rec[1]], bank as Bank | null, char.name] : null;
+    }
+    const [m2, b2] = await cache.get(
+      "hod2lib.charbuild.rig_entry", stem, "character asset",
+      `slot 0x${slot.toString(16).padStart(4, "0")} of ${char.name} draws nothing`);
+    return rec[1] < m2.length ? [m2[rec[1]], b2 as Bank | null, stem] : null;
+  };
   for (const b of char.bones) {
     let offset = [...b.offset];
     let rot: Vec3 = pose ? pose.get(b.bone) ?? [0, 0, 0] : [0, 0, 0];
@@ -427,10 +452,8 @@ export async function rigEntry(stage: Stage, tables: ExeTables,
       note: `bone ${b.bone} of character type `
         + `0x${char.charType.toString(16).padStart(2, "0")}`,
     };
-    const rec = slots.get(b.slot);
-    const idx = char.ownSlots?.get(b.slot) ?? (rec ? rec[1] : null);
-    const model = idx !== null && idx < models.length ? models[idx] : null;
-    parts.push([part, model ? [[model, bank as Bank | null, char.name]] : []]);
+    const found = await modelFor(b.slot);
+    parts.push([part, found ? [found] : []]);
   }
 
   // The parts the skeleton does not name, **skinned**.
@@ -563,6 +586,14 @@ export async function goreEntry(stage: Stage, tables: ExeTables,
   // effect table and on no skeleton node, so nothing above could find it, and
   // the swap would have cloned nothing.
   if (char.charType === CHAR_ZNKAGER) want.add(HALVED_STUMP_SLOT);
+  // **And every model the stage-5 boss's node hook draws.**
+  // `Class32DrawBonePart` (`FUN_0047F780`) draws two models for thirteen of
+  // `boss5`'s fifteen nodes -- a forty-cel run beside the bone's own part,
+  // or two runs in its place -- and computes the slots arithmetically, so no
+  // table names them; filtered by the slots this character's bones hold.
+  for (const s of Class32BonePartSlots(char.bones.map((b) => b.slot))) {
+    want.add(s);
+  }
   for (const slot of [...want].sort((a, b) => a - b)) {
     // A slot this character's own file loads comes from that file, as the
     // bones do -- see `Character.ownSlots`.

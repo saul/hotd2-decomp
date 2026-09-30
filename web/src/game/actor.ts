@@ -38,6 +38,7 @@ import { makePathRidingPropTail, type PathRidingPropTail }
   from "./class28/state";
 import { makeBatTail, type BatTail } from "./class46/state";
 import { makeBoss3Tail, type Boss3Tail } from "./class45/state";
+import { makeBoss5Tail, type Boss5Tail } from "./class32/state";
 import { makeHordeTail, type HordeTail } from "./class40/state";
 import { makeWormTail, type WormTail } from "./class42/state";
 import { makeFishTail, type FishTail } from "./class51/state";
@@ -2558,6 +2559,7 @@ export type Actor =
                    pathProp: PathRidingPropTail })
   | (ActorBase & { cls: SpawnClass.Bat; bat: BatTail })
   | (ActorBase & { cls: SpawnClass.Boss3; boss3: Boss3Tail })
+  | (ActorBase & { cls: SpawnClass.Boss5; boss5: Boss5Tail })
   | (ActorBase & { cls: SpawnClass.HordeSpawner; horde: HordeTail })
   | (ActorBase & { cls: SpawnClass.Worm; worm: WormTail })
   | (ActorBase & { cls: SpawnClass.ScriptedScenery;
@@ -2570,7 +2572,7 @@ export type Actor =
       | SpawnClass.Boss2 | SpawnClass.Judgment | SpawnClass.JudgmentCompanion
       | SpawnClass.Mouse | SpawnClass.SkinnedNpc | SpawnClass.WaterEnemy
       | SpawnClass.Frog | SpawnClass.FlyingEnemy | SpawnClass.Bat
-      | SpawnClass.Boss3
+      | SpawnClass.Boss3 | SpawnClass.Boss5
       | SpawnClass.ScriptedProp | SpawnClass.FlagStripProp
       | SpawnClass.CarriedZombie
       | SpawnClass.ScriptedScenery | SpawnClass.Vehicle
@@ -2613,6 +2615,9 @@ export type BatActor = Extract<Actor, { cls: SpawnClass.Bat }>;
 
 /** An actor already narrowed to class 0x45, the stage-3 boss. */
 export type Boss3Actor = Extract<Actor, { cls: SpawnClass.Boss3 }>;
+
+/** An actor already narrowed to class 0x32, the stage-5 boss or one of its projectiles. */
+export type Boss5Actor = Extract<Actor, { cls: SpawnClass.Boss5 }>;
 
 /** An actor already narrowed to class 0x11, for that class's own routines. */
 export type FrogActor = Extract<Actor, { cls: SpawnClass.Frog }>;
@@ -2869,6 +2874,9 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
   }
   if (cls === SpawnClass.Boss3) {
     return { ...head, cls, boss3: makeBoss3Tail() };
+  }
+  if (cls === SpawnClass.Boss5) {
+    return { ...head, cls, boss5: makeBoss5Tail() };
   }
   if (cls === SpawnClass.HordeSpawner) {
     return { ...head, cls, horde: makeHordeTail() };

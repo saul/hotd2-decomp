@@ -96,6 +96,7 @@ const boneSuffix = (part: string) => `_${part}`;
 import type { Instance } from "./characters/instance";
 import { Poser } from "./characters/pose";
 import { PoseFromModelBlock } from "./characters/model_block";
+import { clearBoss5NodeDraws, syncBoss5NodeDraws } from "./characters/boss5";
 import { placeHordeRoot, poseHordeJaw, syncHordeMirror }
   from "./characters/horde";
 import { clearBoneCels, syncBoneCels } from "./characters/cels";
@@ -579,7 +580,12 @@ export class CharacterLayer implements System {
         this._up.x = this._v2w[4];
         this._up.y = this._v2w[5];
         this._up.z = this._v2w[6];
-        if (PoseFromModelBlock(inst, this._up)) continue;
+        if (PoseFromModelBlock(inst, this._up)) {
+          // Class 0x32's node hook draws every model its nodes show: see
+          // `render/characters/boss5.ts`.
+          syncBoss5NodeDraws(inst, (slot) => this.cloneSlot(slot));
+          continue;
+        }
       }
       if (poseBoss3(inst)) {
         // Class 0x45 composes its own matrices; this places them. See
@@ -1048,6 +1054,7 @@ export class CharacterLayer implements System {
     inst.slots = undefined;
     clearHeldItems(inst);
     clearHumanoidHookDraws(inst);
+    clearBoss5NodeDraws(inst);
     for (const node of inst.bones.values()) {
       node.visible = true;
       for (const c of node.children) c.visible = true;

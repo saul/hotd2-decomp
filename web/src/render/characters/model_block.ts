@@ -1,6 +1,6 @@
 /**
  * Drawing an actor that carries the engine's own model block
- * (`Actor.skel`, `game/skeleton.ts`) -- class 0x14 today.
+ * (`Actor.skel`, `game/skeleton.ts`) -- classes 0x14 and 0x32.
  *
  * Nothing is posed here. The game has already posed the model the way the
  * engine does, inside the class's own update, and left every bone's world
@@ -29,6 +29,13 @@
  * The part the skeleton walk draws (`boss2.bin`'s vertex-blended waist,
  * part 0) follows bones 1 and 9 through its skin; its draw byte is
  * `Actor.partVisible[0]`.
+ *
+ * Class 0x32's draw, `Class32DrawAndAdvance` (`FUN_0047FE40`), is
+ * `DrawSkinnedModelAndShadow` and nothing around it: every node is drawn
+ * under the matrix `SkeletonEmitNode` stored in its record, as the record
+ * holds it. What each node draws is the node hook's
+ * (`render/characters/boss5.ts`); its part 0 (`boss5.bin`'s `0x4C5`, over
+ * bones 1 and 9) is `Actor.partVisible[0]`'s, which the exit effect clears.
  */
 import { Matrix4, Vector3, type Object3D } from "three";
 import type { Actor } from "../../game/actor";
@@ -109,6 +116,21 @@ function Boss2DrawMatrices(a: Actor, up: { x: number; y: number; z: number },
   return true;
 }
 
+/**
+ * Class 0x32's matrices: each node's record, untouched -- the plain walk,
+ * `Class32DrawAndAdvance` (`FUN_0047FE40`) adds no draw of its own.
+ */
+function Boss5DrawMatrices(a: Actor, out: Map<number, Matrix4>): boolean {
+  const skel = a.skel;
+  if (!skel || a.cls !== SpawnClass.Boss5) return false;
+  skel.bones.forEach((r, b) => {
+    if (!r) return;
+    const m = out.get(b) ?? new Matrix4();
+    out.set(b, m.fromArray(r.mat));
+  });
+  return true;
+}
+
 const _mats = new Map<number, Matrix4>();
 
 /**
@@ -127,11 +149,17 @@ export function PoseFromModelBlock(inst: Instance,
   const a = inst.a;
   const skel = a.skel;
   if (!skel) return false;
-  if (!Boss2DrawMatrices(a, up, _mats)) return false;
-  // `if (char+0x64 & 1)` -- the whole draw, skeleton and parts -- on top of
-  // whatever the layer already decided about showing the actor at all.
-  inst.root.visible = inst.root.visible
-    && (a.motionFlags & MotionFlag.Drawn) !== 0;
+  const boss2 = Boss2DrawMatrices(a, up, _mats);
+  if (!boss2 && !Boss5DrawMatrices(a, _mats)) return false;
+  // Class 0x14: `if (char+0x64 & 1)` -- the whole draw, skeleton and parts --
+  // on top of whatever the layer already decided about showing the actor at
+  // all. Class 0x32's walk gates only the nodes on it, which its hook's
+  // draws already say (`render/characters/boss5.ts`); the part loop is gated
+  // by the part's own byte alone.
+  if (boss2) {
+    inst.root.visible = inst.root.visible
+      && (a.motionFlags & MotionFlag.Drawn) !== 0;
+  }
   // The root carries nothing: the matrices are world ones already.
   inst.root.position.set(0, 0, 0);
   inst.root.quaternion.identity();

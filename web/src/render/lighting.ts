@@ -204,10 +204,19 @@ const SECONDARY_LIGHTS = (() => {
  * engine's 0..1, and every mesh under it is drawn with a twin whose uniforms
  * are this set's. The twin's program is block 1's (`secondarylit`): the
  * shader is the same one light and one ambient from uniforms, and only the
- * values differ.
+ * values differ. A tag of `null` is the block's own colour again, for a node
+ * whose parent carries a colour it does not share -- class 0x32's bones,
+ * each drawn under the colour its own draw was made with.
+ *
+ * **Under block 1 when the actor is.** A draw between `LightsUseSecondarySet`
+ * and `LightsRestoreScene` that changes the colour keeps block 1's ambient
+ * and direction -- `Class32DrawNodeSlot` (`FUN_0047FC50`)'s flash and warm
+ * light -- so a set is keyed by its block as well as its colour.
  */
 interface ColouredLight {
   rgb: [number, number, number];
+  /** Block 1's ambient and direction rather than block 0's. */
+  secondary: boolean;
   ambient: { value: Color };
   color: { value: Color };
   dirView: { value: Vector3 };
@@ -351,16 +360,18 @@ export class SceneLighting implements System<RenderContext> {
    * with the colour swapped.
    */
   private refreshColoured(ctx: RenderContext): void {
-    const a = this.state.ambient;
-    const amb = a + LIGHT_AMBIENT_SCALE;
+    const block1 = this.source.light() ?? DEFAULT_LIGHT;
     for (const set of this.coloured.values()) {
+      const l = set.secondary ? block1 : this.state;
+      const a = l.ambient;
+      const amb = a + LIGHT_AMBIENT_SCALE;
       const [r, g, b] = set.rgb;
       set.color.value.setRGB(r * a * DIFFUSE_SCALE, g * a * DIFFUSE_SCALE,
                              b * a * DIFFUSE_SCALE, SRGBColorSpace)
         .multiplyScalar(this.intensity);
       set.ambient.value.setRGB(r * amb, g * amb, b * amb, SRGBColorSpace)
         .multiplyScalar(this.intensity);
-      lightDirection(this.state.pitchDeg, this.state.yawDeg, set.dirView.value)
+      lightDirection(l.pitchDeg, l.yawDeg, set.dirView.value)
         .transformDirection(ctx.camera.matrixWorldInverse);
     }
   }
@@ -506,10 +517,12 @@ export class SceneLighting implements System<RenderContext> {
                    light: readonly number[] | null): void => {
       if (visibleOnly && !o.visible) return;
       const x = o.userData as { hod2_spawn_at?: number; hod2_actor_at?: number;
-                                hod2_light_colour?: number[] };
+                                hod2_light_colour?: number[] | null };
       const own = x?.hod2_actor_at ?? x?.hod2_spawn_at;
       const here = own !== undefined ? own : at;
-      const lit = x?.hod2_light_colour ?? light;
+      // A tag of `null` is the block's own colour, not "inherit".
+      const lit = x?.hod2_light_colour !== undefined
+        ? x.hod2_light_colour : light;
       const mesh = o as Mesh;
       if (mesh.isMesh && mesh.material) {
         const second = this.mode === "scene" && here !== null
@@ -520,7 +533,7 @@ export class SceneLighting implements System<RenderContext> {
           if (m.userData?.gunLit) return m;
           const base = this.baseOf(m);
           if (this.mode !== "scene") return base;
-          if (lit) return this.colouredTwinOf(base, lit);
+          if (lit) return this.colouredTwinOf(base, lit, second);
           return second ? this.secondaryTwinOf(base) : this.twinOf(base);
         };
         // Under any fade the draw has put on it, which stays on top: see
@@ -552,13 +565,14 @@ export class SceneLighting implements System<RenderContext> {
    * Built like the block-1 twin, on the block-1 program, with the colour
    * set's own uniform objects, which three.js keeps per material.
    */
-  private colouredTwinOf(m: Material, rgb: readonly number[]): Material {
+  private colouredTwinOf(m: Material, rgb: readonly number[],
+                         secondary: boolean): Material {
     if (!(m instanceof MeshBasicMaterial)) return m;
-    const key = `${rgb[0]},${rgb[1]},${rgb[2]}`;
+    const key = `${secondary ? "block1|" : ""}${rgb[0]},${rgb[1]},${rgb[2]}`;
     let set = this.coloured.get(key);
     if (!set) {
       set = {
-        rgb: [rgb[0], rgb[1], rgb[2]],
+        rgb: [rgb[0], rgb[1], rgb[2]], secondary,
         ambient: { value: new Color(0, 0, 0) },
         color: { value: new Color(0, 0, 0) },
         dirView: { value: new Vector3(0, 0, 1) },

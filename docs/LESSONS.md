@@ -843,7 +843,7 @@ behaviour: find the reader of each bit** (a `TEST` of its mask, L32's two
 forms) **before leaving one out, and test the state with the thing that reads
 it happening** -- here a shot on every sub.
 
-**LXX -- The one-shot channel ends itself; the engine's track wraps. A clip a
+**L100 -- The one-shot channel ends itself; the engine's track wraps. A clip a
 state holds longer than its play length belongs on the base track.** The
 engine has one motion track, and `ActorSetMotionBlended` puts every clip on it;
 `obj.action`, the port's one-shot channel, is a port construct that empties

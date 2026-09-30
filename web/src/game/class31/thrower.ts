@@ -1,7 +1,7 @@
 /**
  * Class 0x31 — the wall-crawler and the thrower.
  *
- * Four character types share one 35-state machine and four **behaviour sets**,
+ * Four character types share one 36-state machine and four **behaviour sets**,
  * and which set a spawn gets is a byte in its own descriptor. `zsass` (set 1)
  * stands out of reach and throws; `zstin` (set 0) is the one that moves —
  * it walks in, circles onto the walls and the ceiling at middle range, and
@@ -549,8 +549,9 @@ export function EnemyThrowerUpdate(obj: ThrowerActor, f: ClassFrame): void {
 export const THROWER_CAMERA_RISE = 0.0;
 
 /**
- * The state table, dispatched. `g_class31_states` (0x00592960) is 35 entries
- * and every one has an arm here.
+ * The state table, dispatched. `g_class31_states` (0x00592960) is 36 entries
+ * and every one has an arm here -- entries 0 and 35 are both the shared
+ * no-op, `0x0041EBB0`.
  */
 function ThrowerRunState(obj: ThrowerActor, dt: number, rng: Rng,
                          host: GameHost, events?: Events): void {
@@ -612,7 +613,7 @@ function ThrowerRunState(obj: ThrowerActor, dt: number, rng: Rng,
     case ThrowerState.WalkDistance:
       return ThrowerStateWalkDistance(obj, rng);
     case ThrowerState.EntranceClip:
-      return ThrowerStateEntranceClip(obj);
+      return ThrowerStateEntranceClip(obj, events);
     case ThrowerState.DelayedPounce:
       return ThrowerStateDelayedPounce(obj, dt, rng, host, events);
     case ThrowerState.Withdraw:
@@ -632,15 +633,19 @@ function ThrowerRunState(obj: ThrowerActor, dt: number, rng: Rng,
     // an ease from before any of this was read.
     case ThrowerState.Throw:
       return ThrowerStateThrow(obj, host, rng, events);
-    // State 0 is the engine's shared no-op: an actor placed in it does nothing
-    // for ever, which is what the engine does too.
+    // States 0 and 35 are the engine's shared no-op: an actor placed in either
+    // does nothing for ever, which is what the engine does too. The port used
+    // to send 35 to the hub, reading the table as 35 entries long.
     case ThrowerState.Idle:
+    case ThrowerState.Idle35:
       return;
     default:
-      // Every one of the 35 states now has an arm, so this is only reachable
-      // through a descriptor byte outside 0..34.
-      obj.state = ThrowerState.StandAndDecide;
-      obj.sub = 0;
+      // `CALL dword ptr [EAX*0x4 + 0x592960]` has no bound: a state past 35
+      // calls through `g_class31_motion_sets`' pointers, which are data. No
+      // shipped descriptor starts past 34 (the twelve stage bundles'
+      // class-0x31 spawns start in 18, 19, 20, 23, 26, 27 and 34, the
+      // training stage's six in 28) and nothing writes one, so there is
+      // nothing to follow; the port does nothing.
       return;
   }
 }
@@ -801,9 +806,17 @@ export function EnemyThrowerInit(obj: ThrowerActor): void {
 /**
  * Which state to actually start in.
  *
- * All seven entrances the shipped data uses are ported — 18, 19, 20, 23, 26,
- * 27 and 34 — and so are the two, 21 and 22, that no descriptor names.
- * Anything else resolves to the hub, which is where every entrance ends.
+ * `EnemyThrowerInit` stores the descriptor's byte `+2` as it stands --
+ * `*(short *)(obj+0x1310) = (short)desc[2]` -- and so does this, for every
+ * state the table has: 0 and 35 idle, 7 is the hub, and the eight entrances
+ * the shipped data uses (18, 19, 20, 23, 26, 27 and 34 on the stages, 28 on
+ * the training stage) are all ported, as are the two, 21 and 22, that no
+ * descriptor names. It used to send every state it did not list to the hub.
+ *
+ * `[port-only]` The arms that fall back to the hub are the port's: they cover
+ * a bundle that did not decode the tail the state reads, which the engine
+ * reads through `obj+0x1390` whatever it holds. Every shipped spawn in those
+ * states has its tail.
  */
 export function ThrowerEntryState(obj: ThrowerActor): ThrowerState {
   switch (obj.initialState) {
@@ -831,7 +844,7 @@ export function ThrowerEntryState(obj: ThrowerActor): ThrowerState {
     case ThrowerState.PathFollow:
       return obj.path ? ThrowerState.PathFollow : ThrowerState.StandAndDecide;
     default:
-      return ThrowerState.StandAndDecide;
+      return obj.initialState;
   }
 }
 

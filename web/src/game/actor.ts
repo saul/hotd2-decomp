@@ -1723,7 +1723,9 @@ export interface ActorBase {
    * `ThrowerStateWalkDistance`'s target, from the descriptor — and
    * `ZombieStateWalkDistance`'s, which reads the same float at **`desc+0x04`**:
    * `*(float *)(obj+0x1390 + 4)`, four bytes into the descriptor parameter tail
-   * `SpawnFromDescriptor` (`FUN_00408A20`) hangs at `obj+0x1390`.
+   * `SpawnFromDescriptor` (`FUN_00408A20`) hangs at `obj+0x1390`. Each state
+   * latches it into its own class's `obj+0x1370` in its sub 0 and compares
+   * against that word, not this one.
    *
    * The comment here used to say "tail `+0x04`", which reads as `obj+0x04` —
    * and `obj+0x04` is inside the task control block `ActorAlloc`

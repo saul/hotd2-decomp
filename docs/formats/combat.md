@@ -1445,6 +1445,19 @@ Four things follow.
 left out. `ResolveHit` fires one beside the severed head, and
 `OneHitTargetUpdate` fires one per hit bone.
 
+The creatures that are shot whole bleed from a **fixed point** instead:
+`SpawnBloodSprayAtPoint` (`FUN_00430C50`) starts a task that draws the same
+twenty-five cels (`eff+0x54` from `0x3A`) under `MatrixLoadIdentity` at three
+floats it copies from `arg + 0x30` (`MOV EDX, [ECX + 0x30]` at `0x00430C66`).
+Every one of its eight callers passes its own `obj + 0x40`, so the point is
+**`obj+0x70..0x78`, the view-space shot point** the actor's own last
+`RegisterForShotTest` published, and not its position `[proved]`. Each
+caller takes the kill before it moves, so that is last frame's point: the
+view of `(x, y + 1, z)` for the three bat routines, of the position for the
+horde member and class 0x47's `LoneHordeMemberUpdate47` (`FUN_0043D800`),
+and for `BodyCreatureUpdate` the position itself, which is already camera
+space.
+
 ### What leaves the gun — `PlayerShotEffectSpawn`
 
 Every trigger pull, hit or miss, fills one slot of **three** six-deep rings per
@@ -2544,7 +2557,7 @@ makes its fall and its knock-back physical.
 | 11 | `ThrowerStateFallToSurface` | fall until the ground catches — how a wall-crawler comes down |
 | **14, 15, 16** | `ThrowerStateLeapToSurface` | **onto the far wall, the near wall, the ceiling** |
 | 17 | `ThrowerStateGetUp` | motion `0x127`, and **only after a decapitation** |
-| **18** | `ThrowerStateWalkDistance` | walk the descriptor's own distance — class 0x30's state 15 is the same routine on the same `f32` at tail `+0x04` |
+| **18** | `ThrowerStateWalkDistance` | walk the descriptor's own distance on the pair's walk by `obj+0x34` bit 27, not flinching (`obj+0x34` bit `0x2000` until it arrives) — the shape of class 0x30's state 15, on the same `f32` at tail `+0x04` |
 | **19** | `ThrowerStateEntranceClip` | play the descriptor's own clip |
 | 20 | `ThrowerStateLeapToPoint` | the scripted drop |
 | 21 | `ThrowerStateRideObjectPath` | object path `0x14F` for 0xC4 frames — **cut content** |

@@ -718,7 +718,15 @@ export function HordeResolveShot(obj: Actor, f: ClassFrame): boolean {
       && (HORDE_SHOT_DELAY[t.formation * 10 + t.idx] ?? 0) > t.counter) {
     return false;
   }
-  SpawnBloodSprayAtPoint(obj.pos);
+  // `LEA EBP, [ESI + 0x40]; PUSH EBP; CALL SpawnBloodSprayAtPoint` at
+  // `0x0043C4AD`, which reads `0x30` past its argument: `obj+0x70`, the
+  // member's position through the camera as the tail left it last frame
+  // (`0x0043D40A`..`0x0043D422`, the one store to it in the routine). It is
+  // {@link Actor.shotCentre} through the host's camera, not the world
+  // position this used to pass.
+  const at = vec3();
+  f.host.viewSpaceOfPoint?.(obj.shotCentre, at);
+  SpawnBloodSprayAtPoint(at);
   SubModelBlendToMotion(t.sub, HORDE_CLIP_DEATH, 0, HORDE_BLEND_FRAMES);
   ReleaseEnemyAliveCount(obj);
   ReleaseEnemyPresentCount(obj);

@@ -68,6 +68,8 @@ import { makeCameraSlots, type CameraCandidate } from "./camera/slot_table";
 import { CameraActorInit } from "./camera/actions";
 import { MatIdentity } from "./matrix";
 import { makeEntityLights } from "./entity_light";
+import { LightBlockSetDirection, makeLightBlock, makeLightTweens }
+  from "./light_block";
 import { PlayerState, PlayerTask, RunPhase } from "./player_state";
 import { AdvanceToNextScene, PlayerBlockBoot, PlayerBlockRestore,
   PlayerStartGameFromTitle, PlayerTasksCreate, PlayerTasksRunFirstTurn,
@@ -1127,13 +1129,34 @@ export const G = {
    */
   g_render_light_colour: [1, 1, 1] as number[],
   /**
-   * `g_scene_light_colour_r` — 0x009A3780, and `g`, `b` beside it: light
-   * block 0's colour, channels 6..8 (`+0x240`), which `LightsRestoreScene`
-   * and `ItemSelectDrawPanels` hand back to `SetRenderLightColour`.
-   * `[port-only]` as a copy: the block is the walker's (`ChannelBlock`), and
-   * the walker writes these three here each frame after it steps it.
+   * `g_render_ambient` — 0x007E79A4: the ambient scalar `SetRenderAmbient`
+   * (`FUN_004AA070`) last set, which `SetLightingDefaultSingle` multiplies
+   * into the next draw's light. See `light_sets.ts`.
    */
-  g_scene_light_colour: [1, 1, 1] as number[],
+  g_render_ambient: 0.7,
+  /**
+   * `g_render_light_dir_x` — 0x007E79A8, and `y`, `z` beside it: the
+   * direction `SetRenderLightDirection` (`FUN_004AA0E0`) last set. The engine
+   * stores a view-space vector, negated; the port keeps the **world** vector
+   * the caller built it from, un-negated -- the direction the light comes
+   * from -- and the view transform is the renderer's.
+   */
+  g_render_light_dir: vec3(0, 0, 1),
+  /**
+   * `g_scene_light_block0` — 0x009A3540: the scene's light block, direction,
+   * fog, colour (`g_scene_light_colour_r` at `+0x240`) and ambient
+   * (`g_scene_light_ambient` at `+0x24C`). See `light_block.ts`.
+   */
+  g_scene_light_block0: makeLightBlock(),
+  /**
+   * `g_scene_light_block1` — 0x009A59E0: the characters' light block, the
+   * one `LightsUseSecondarySet` (`FUN_0041DC70`) installs.
+   */
+  g_scene_light_block1: makeLightBlock(),
+  /** `g_light_tween_block0` — 0x009C89E0: block 0's channel tweens. */
+  g_light_tween_block0: makeLightTweens(),
+  /** `g_light_tween_block1` — 0x009C8920: block 1's. */
+  g_light_tween_block1: makeLightTweens(),
   /** `g_credits_per_player` — 0x009C8E74. 0: one shared count. */
   g_credits_per_player: 0,
   /**
@@ -3044,7 +3067,8 @@ export type Globals = typeof G;
  * | `g_backdrop_mode = 0` | ❌ the global does not exist |
  * | `g_rain_enabled = 0` (`0x0045EE78`) | ✅ |
  * | `g_nFiringGate = 0` | ✅ |
- * | the scene light block, via `LightBlockSetDirection` (`FUN_0040E140`) | ❌ |
+ * | light block 0's direction to `(0, 0)`, via `LightBlockSetDirection`
+ *   (`FUN_0040E140`, pushed at `0x0045EE1E`) | ✅ |
  * | `ColiLoadForScene`, `AssetDrainAllJobs` and three loader calls | ❌ the
  *   port loads collision and assets from the bundle, not from here |
  * | `g_scene_tick_counter` (`0x009A2BAC`, at `0x0045EE23`) | ✅ |
@@ -3113,6 +3137,9 @@ export function ResetSceneOnEnter(): void {
   // `MOV [0x009ca098], EBX` at `0x0045EE7E`: the stashed rail obeys its gate
   // again in a new scene.
   G.g_force_rail_advance = 0;
+  // `LightBlockSetDirection(&g_scene_light_block0, 0, 0)`: the angles only,
+  // which the next `UpdateSceneViewAndLight` builds the vector from.
+  LightBlockSetDirection(G.g_scene_light_block0, 0, 0);
 }
 
 /**

@@ -374,7 +374,7 @@ drives the queue with a stubbed `pickShot`.
 | **The VM** — program counter over block/step/op, dispatch, `executeOne`, `advanceStepOrRoute`, `goToBlock`, the branch | `walker.ts` |
 | **The opcodes**, each with its `status` (what the script panel shows) | `ops/*.ts`, one module per group, merged by `ops/index.ts` |
 | **Resumption** — the wait policies, the enemy gates, the skip request | `waits/*.ts`, one file per policy |
-| **Script-driven state** — channel tweens, the shutter's accessors | `state/channels.ts`, `state/shutter.ts` |
+| **Script-driven state** — the light-block opcodes' operands (the blocks themselves are `G`'s, `game/light_block.ts`), the shutter's accessors | `state/channels.ts`, `state/shutter.ts` |
 | **Seek** — a planner that drives the VM to a target, as a debugger does | `seek.ts` |
 
 The queued events and the camera actions are the engine's and live in `G`

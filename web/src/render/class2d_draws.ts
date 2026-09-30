@@ -81,12 +81,12 @@ function place(node: Object3D, m: ArrayLike<number>): void {
 }
 
 export function setLight(node: Object3D,
-                  l: { ambient: number; pitch: number | null;
-                       yaw: number | null; rgb: readonly number[] } | null):
+                  l: { ambient: number; dir: readonly number[];
+                       rgb: readonly number[] } | null):
     void {
   if (l) {
-    node.userData.hod2_light_set = { ambient: l.ambient, pitch: l.pitch,
-                                     yaw: l.yaw, rgb: [...l.rgb] };
+    node.userData.hod2_light_set = { ambient: l.ambient, dir: [...l.dir],
+                                     rgb: [...l.rgb] };
   } else {
     delete node.userData.hod2_light_set;
   }

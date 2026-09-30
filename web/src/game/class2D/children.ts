@@ -27,6 +27,7 @@ import { ActorRegisterCameraPoint } from "../camera/track";
 import { CrtRand, PlaySoundId } from "../class45/rand";
 import { ActorDespawn } from "../despawn";
 import { ActorByAt, G, HIT_SLOT_NONE } from "../globals";
+import { LightsRestoreScene } from "../light_sets";
 import type { GameHost } from "../host";
 import {
   MatCopy, MatIdentity, MatrixClearRotation, MatrixGetTranslation,
@@ -456,6 +457,7 @@ export function Class2DChildKind0Draw(obj: EmperorActor, f: ClassFrame): void {
       if (c.animate !== 0 && wing.skel) wing.skel.counter += 1;
     }
   }
+  LightsRestoreScene();
   G.g_cur_actor = obj.at;
 }
 
@@ -1101,4 +1103,5 @@ export function Class2DChildDraw(obj: EmperorActor, f: ClassFrame): void {
   DrawSkinnedModelAndShadow(obj);
   obj.class2d.drawLight = light;
   RunChildHook(obj, c.kind === 2, light, f);
+  LightsRestoreScene();
 }

@@ -209,12 +209,14 @@ export interface Boss5Tail {
    */
   partLight: [number, number, number] | null;
   /**
-   * `[port-only]` The pitch and yaw `Class32DrawNodeSlot` computed for the
-   * scene light on its last lit draw -- what the engine writes into
-   * `g_scene_light_pitch_bams`/`_yaw_bams` and block 1's pair. Kept, and read
-   * by nothing: see that routine.
+   * `[port-only]` The light direction the draw was made under -- what
+   * `LightsUseSecondarySet` installed at its head (`G.g_render_light_dir`,
+   * the world vector the light comes from). No node sets a direction, so it
+   * holds for every model the draw makes, and it is block 1's **as it stood
+   * then**: the aim `Class32DrawNodeSlot` writes into the blocks reaches this
+   * draw on the next frame. The renderer reads it.
    */
-  lightAngles: [number, number] | null;
+  drawDir: [number, number, number];
 
   // -- a projectile -----------------------------------------------------------
 
@@ -281,7 +283,7 @@ export function makeBoss5Tail(): Boss5Tail {
     launches: 0, castMode: 0, timer: 0, flash: 0, circleWord: 0,
     afterimageCount: 0, liveProjectiles: 0, hop: 0, hopStep: 0, laps: 0,
     volley: 0, phase: 0, hitsToReact: 0, clock: 0, dest: vec3(),
-    nodeDraws: {}, drawLight: null, partLight: null, lightAngles: null,
+    nodeDraws: {}, drawLight: null, partLight: null, drawDir: [0, 0, 1],
     parent: -1, kind: 0, aimed: 0, castVolley: 0, growDelay: 0, place: 0,
     growCap: 0, growStep: 0, size: 0, bright: 0, trailCount: 0,
     trailEvery: 0, flight: 0, trailDelay: 0, fadeStep: 0, fadeEnd: 0,
@@ -358,11 +360,16 @@ export interface Class32Task {
   killed: boolean;
 }
 
-/** `[port-only]` One task's draw, for the renderer. */
+/**
+ * `[port-only]` One task's draw, for the renderer: `light` is the colour the
+ * light register held at the `AssetDrawSlot` -- the task's own, or for the
+ * two that set none (the death burst, the exit effect) whatever the draw
+ * before them left.
+ */
 export interface Class32TaskDraw {
   slot: number;
   m: number[];
-  light: [number, number, number] | null;
+  light: [number, number, number];
   alpha: number | null;
   layer: number | null;
 }

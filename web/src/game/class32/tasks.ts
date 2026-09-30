@@ -11,7 +11,10 @@
  * one `AssetDrawSlot` a frame under a matrix built on the spot; the routine
  * leaves that draw on the record (`Class32Task.draw`) -- the matrix in world
  * space, the engine's being the same product on top of the camera's -- and
- * `render/class32.ts` hangs a clone of the slot's model there.
+ * the light colour the register held for it, and `render/slotmodels.ts`
+ * hangs a clone of the slot's model there. Each routine that sets a colour
+ * sets it through `SetRenderLightColour`, so a routine that sets none -- the
+ * death burst, the exit effect -- draws under what the walk left.
  *
  * `ActorKill` (`FUN_004A7040`) and `ActorDespawn` (`FUN_00409CC0`) both end
  * the routine where they are called: a frame a task kills itself draws
@@ -27,6 +30,7 @@ import {
   MatrixTransformPoint, MatrixTranslate, type Mat,
 } from "../matrix";
 import { ActorSetPartVisibility } from "../model_draw";
+import { SetRenderLightColour } from "../screen_sprite";
 import { SpawnClass } from "../spawn_class";
 import { vec3, type Vec3 } from "../vec";
 import {
@@ -150,12 +154,16 @@ function TaskMatrix(t: Class32Task): Mat {
   return m;
 }
 
-/** `[port-only]` The draw record: `AssetDrawSlot(slot)` under `m`. */
+/**
+ * `[port-only]` The draw record: `AssetDrawSlot(slot)` under `m`, lit by the
+ * colour `SetRenderLightColour` last set.
+ */
 function TaskDraw(t: Class32Task, m: Mat, slot: number,
-                  light: [number, number, number] | null,
                   alpha: number | null = null,
                   layer: number | null = null): void {
-  const d: Class32TaskDraw = { slot, m, light, alpha, layer };
+  const c = G.g_render_light_colour;
+  const d: Class32TaskDraw = { slot, m, light: [c[0], c[1], c[2]], alpha,
+                               layer };
   t.draw = d;
 }
 
@@ -243,9 +251,10 @@ export function Class32AfterimageTick(t: Class32Task): void {
   let k = boss ? boss.boss5.attack : 0;
   if (boss && boss.boss5.rank >= AFTERIMAGE_WHITE_RANK) k = 3;
   const dim = Math.fround(v * AFTERIMAGE_DIM);
-  const light: [number, number, number] = k === 0 ? [0, dim, v]
-    : k === 1 ? [v, dim, 0] : [v, v, v];
-  TaskDraw(t, m, t.slot, light);
+  if (k === 0) SetRenderLightColour(0, dim, v);
+  else if (k === 1) SetRenderLightColour(v, dim, 0);
+  else SetRenderLightColour(v, v, v);
+  TaskDraw(t, m, t.slot);
 }
 
 /**
@@ -305,8 +314,8 @@ export function Class32BodyLoopEffectTick(t: Class32Task): void {
   let a = Math.fround(t.light + BODY_LOOP_FADE_IN);
   if (a > BODY_LOOP_FULL) a = BODY_LOOP_FULL;
   t.light = a;
-  TaskDraw(t, m, t.cel, [a, Math.fround(a * BODY_LOOP_GREEN), 0],
-           Math.fround(a * BODY_LOOP_ALPHA), BODY_LOOP_LAYER);
+  SetRenderLightColour(a, Math.fround(a * BODY_LOOP_GREEN), 0);
+  TaskDraw(t, m, t.cel, Math.fround(a * BODY_LOOP_ALPHA), BODY_LOOP_LAYER);
 }
 
 /**
@@ -363,7 +372,8 @@ export function Class32HandsEffectTick(t: Class32Task): void {
   MatrixRotateZ(m, t.roll);
   MatrixRotateY(m, 0);
   MatrixRotateX(m, 0);
-  TaskDraw(t, m, t.cel, [...HANDS_LIGHT]);
+  SetRenderLightColour(HANDS_LIGHT[0], HANDS_LIGHT[1], HANDS_LIGHT[2]);
+  TaskDraw(t, m, t.cel);
 }
 
 /**
@@ -431,10 +441,13 @@ export function Class32ProjectileTrailTick(t: Class32Task): void {
   MatrixScale(m, t.size, t.size, t.size);
   const v = Math.fround(1.0 / Math.trunc(0xff / t.bright));
   t.light = v;
-  const light: [number, number, number] = t.attack === TRAIL_BARRAGE_ATTACK
-    ? [v, Math.fround(v * TRAIL_BARRAGE_GREEN), Math.fround(v * TRAIL_BARRAGE_BLUE)]
-    : [Math.fround(v + TRAIL_RED_LIFT), v, v];
-  TaskDraw(t, m, t.slot, light);
+  if (t.attack === TRAIL_BARRAGE_ATTACK) {
+    SetRenderLightColour(v, Math.fround(v * TRAIL_BARRAGE_GREEN),
+                         Math.fround(v * TRAIL_BARRAGE_BLUE));
+  } else {
+    SetRenderLightColour(Math.fround(v + TRAIL_RED_LIFT), v, v);
+  }
+  TaskDraw(t, m, t.slot);
 }
 
 /**
@@ -480,6 +493,17 @@ export function Class32SpawnDeathBurst(boss: Boss5Actor, rng: Rng,
  * Bit 3 is the one `MarkActorShot` raises, and `Class32OnShot` reads it the
  * next frame: with no shooter's bit beside it, `Class32ResolvePlayerShots`
  * charges nothing and clears it.
+ *
+ * It sets no light colour `[proved]`, so it draws under whatever
+ * `SetRenderLightColour` the walk last made: the last task before it in the
+ * pool that set one, or the boss's own `LightsRestoreScene` -- block 0's
+ * colour -- when none stands between. `[likely]` the body loop is such a
+ * task once the fight has reached the final barrage: state 10 allocates it
+ * and raises `obj+0x136C` bit 5, and the one clear of that bit the class's
+ * transcription has is `Class32StateRaiseFlagAndLeave`'s, as it makes the
+ * exit effect -- so the bursts of a boss killed from then on draw under its
+ * orange unless a later colour-setting task (an afterimage, a trail) is still
+ * alive behind it.
  */
 export function Class32DeathBurstTick(t: Class32Task): void {
   t.draw = null;
@@ -495,7 +519,8 @@ export function Class32DeathBurstTick(t: Class32Task): void {
   }
   const m = TaskMatrix(t);
   MatrixScale(m, t.size, t.size, t.size);
-  TaskDraw(t, m, t.slot, null);
+  // No colour of its own: the register's, as the walk left it.
+  TaskDraw(t, m, t.slot);
 }
 
 /**
@@ -586,12 +611,16 @@ export function Class32ExitEffectTick(t: Class32Task, events?: Events): void {
   ExitEffectDraw(t);
 }
 
-/** `[port-only]` The exit effect's draw: `T(t+0x40) Scale(t+0x118)`. */
+/**
+ * `[port-only]` The exit effect's draw: `T(t+0x40) Scale(t+0x118)`, under
+ * the register's colour -- it sets none `[proved]`, as the death burst does
+ * not.
+ */
 function ExitEffectDraw(t: Class32Task): void {
   const m = MatIdentity();
   MatrixTranslate(m, t.pos.x, t.pos.y, t.pos.z);
   MatrixScale(m, t.size, t.size, t.size);
-  TaskDraw(t, m, t.slot, null);
+  TaskDraw(t, m, t.slot);
 }
 
 /**

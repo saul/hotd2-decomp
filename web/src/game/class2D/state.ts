@@ -16,6 +16,7 @@
  * flipbook, the death burst) are records in `G.g_class2d_tasks`
  * (`class2D/tasks.ts`).
  */
+import type { LightSetRecord } from "../light_block";
 import type { Mat } from "../matrix";
 import { vec3, type Vec3 } from "../vec";
 
@@ -305,21 +306,12 @@ export function makeClass2DSatelliteRecords(): Class2DSatelliteRecord[] {
 }
 
 /**
- * `LightsUseCustomSet` (`FUN_0041DC10`)'s six arguments -- the light a draw
- * is made under, recorded with it. `null` on a draw is the scene's own.
- *
- * `pitch` and `yaw` are BAMS, or `null` for `g_scene_light_pitch_bams` and
- * `g_scene_light_yaw_bams` (`0x009A3558`, `0x009A355C`) -- light block 0's
- * direction, which the port keeps in the walker's light blocks rather than in
- * `G`, and which `render/lighting.ts` already holds; `Class2DDraw` hands the
- * routine those two words and `render/` reads the same two.
+ * The light a draw is made under, recorded with it: what
+ * `LightsUseCustomSet` (`FUN_0041DC10`) installed -- its ambient, the
+ * direction it built from its pitch and yaw, and its colour. `null` on a
+ * draw is the scene's own. See `LightSetRecord`.
  */
-export interface Class2DLight {
-  ambient: number;
-  pitch: number | null;
-  yaw: number | null;
-  rgb: [number, number, number];
-}
+export type Class2DLight = LightSetRecord;
 
 /**
  * `[port-only]` One `AssetDrawSlot` / `AssetDrawSlotWithAlpha` the class

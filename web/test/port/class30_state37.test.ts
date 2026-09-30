@@ -42,7 +42,9 @@ import {
   GUN_LIGHT_FIRST, RenderLightType, SceneLightArrayUpdate, SetPlayerAimFromPointer,
 } from "../../src/game/scene_lights";
 import { VecToAngles } from "../../src/game/vec";
-import { ActorDrawsUnderSecondaryLights } from "../../src/game/light_sets";
+import {
+  ActorDrawsUnderSecondaryLights, PushSceneLightStateToDevice,
+} from "../../src/game/light_sets";
 import {
   EntityLightReleaseSlot, FLICKER_BROKEN, FLICKER_DEBRIS_COUNT, FLICKER_FADE_FRAMES,
   PlaceFlickerLightProp48, PropUpdateType48FlickerLight, SFX_FLICKER_BREAK,
@@ -703,8 +705,8 @@ console.log("\nclass 0x30 state 37, release 5 — stage 2's rolling barrels, the
 // -- light block 1: LightsUseSecondarySet --------------------------------------
 //
 // `LightsUseSecondarySet` (`FUN_0041DC70`) lights every character with light
-// block 1, which evt 0x19 and 0x24/0x25/0x27 write. The walker used to drop
-// those as no-ops.
+// block 1, which evt 0x19 and 0x24/0x25/0x27 write -- into `G`'s
+// `g_scene_light_block1`, where the engine keeps it.
 console.log("\nlight block 1 (the characters' light):");
 {
   ResetGameGlobals();
@@ -738,24 +740,30 @@ console.log("\nlight block 1 (the characters' light):");
     scriptFlagRaised: () => null,
     showMessage: () => null, endDialogue: () => undefined,
   });
-  check("both blocks start at LightBlockInit's ambient, 0.7",
-        w.light.ambient === 0.7 && w.lightSecondary.ambient === 0.7);
+  const B0 = G.g_scene_light_block0;
+  const B1 = G.g_scene_light_block1;
+  check("both blocks start at LightBlockInit's ambient, 0.7f",
+        B0.channels[10] === Math.fround(0.7) && B1.channels[10] === Math.fround(0.7));
   w.tick(1 / 60);
   check("...and 0x27 leaves block 1's ambient tweening, not set",
-        w.lightBlock1.tweens[10]?.to === 0.3 && w.lightSecondary.ambient === 0.7);
-  // The script ends after the four instructions, and a finished walker runs
-  // no more frames; step the block the way `PushSceneLightStateToDevice`
-  // would for the four frames the tween asks for.
-  w.lightBlock1.step(4);
-  const b1 = w.lightSecondary;
-  check("evt 0x19 sets block 1's direction, not block 0's",
-        b1.pitchDeg === 270 && w.light.pitchDeg === 0,
-        `b1 ${b1.pitchDeg} b0 ${w.light.pitchDeg}`);
+        G.g_light_tween_block1[10]?.to === 0.3
+        && B1.channels[10] === Math.fround(0.7));
+  // The script ends after the four instructions; `PushSceneLightStateToDevice`
+  // is the scene list's own task and steps the tween whatever the script is
+  // doing -- four frames of it.
+  for (let i = 0; i < 4; i++) PushSceneLightStateToDevice(1);
+  check("evt 0x19 sets block 1's direction -- 270 degrees, 0xC000 BAMS -- "
+        + "not block 0's",
+        B1.pitch === 0xc000 && B0.pitch === 0, `b1 ${B1.pitch} b0 ${B0.pitch}`);
   check("evt 0x24 sets block 1's colour, 0x20 block 0's",
-        b1.rgb[0] === 0.8 && w.light.rgb[0] === 0.5,
-        `b1 ${b1.rgb[0]} b0 ${w.light.rgb[0]}`);
+        B1.channels[6] === 0.8 && B0.channels[6] === 0.5,
+        `b1 ${B1.channels[6]} b0 ${B0.channels[6]}`);
   check("evt 0x27 tweens block 1's ambient to its target",
-        Math.abs(b1.ambient - 0.3) < 1e-9, `${b1.ambient}`);
+        Math.abs(B1.channels[10] - 0.3) < 1e-9, `${B1.channels[10]}`);
+  check("...and the push leaves block 0's colour and ambient on the device",
+        G.g_render_light_colour[0] === 0.5
+        && G.g_render_ambient === Math.fround(0.7),
+        `${G.g_render_light_colour} ${G.g_render_ambient}`);
   const z = spawnZombie(0x3000, 1, "z");
   check("a zombie draws under block 1 (ZombieAdvanceMotion's first call)",
         ActorDrawsUnderSecondaryLights(z));

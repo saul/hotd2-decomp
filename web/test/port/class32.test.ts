@@ -23,7 +23,12 @@ import { Class32OnShot } from "../../src/game/class32/shot";
 import {
   CLASS32_NODE_HOOK, Class32DrawAndAdvance, Class32DrawBonePart,
 } from "../../src/game/class32/draw";
-import { Class32TasksTick } from "../../src/game/class32/tasks";
+import {
+  Class32SpawnBodyLoopEffect, Class32SpawnDeathBurst, Class32SpawnExitEffect,
+  Class32TasksTick,
+} from "../../src/game/class32/tasks";
+import { FtolS16 } from "../../src/game/matrix";
+import { VecToAngles } from "../../src/game/vec";
 import {
   Class32ProjectileDispatchAndDraw, Class32SpawnProjectile,
 } from "../../src/game/class32/projectile";
@@ -259,6 +264,100 @@ console.log("\nclass 0x32, the stage-5 boss:");
     Class32DrawAndAdvance(boss);
     check("...and with model+0x64 bit 0 clear the hook draws nothing",
           Object.keys(t.nodeDraws).length === 0);
+  }
+
+  // -- the light: the aim into both blocks, and the register --------------
+  //
+  // `Class32DrawNodeSlot` (`FUN_0047FC50`) writes `g_scene_light_pitch_bams`
+  // / `_yaw_bams` and block 1's pair and builds both vectors, but makes no
+  // `SetRenderLightDirection`: the draw in progress keeps what its
+  // `LightsUseSecondarySet` installed, and its `LightsRestoreScene` puts the
+  // new block-0 vector on the device. `BuildSceneLightDirection`
+  // (`FUN_0040E0B0`) is `RotY(yaw) RotX(pitch) * (0, 0, 1)` =
+  // `(cos p sin y, -sin p, cos p cos y)`.
+  {
+    const built = (p: number, y: number): number[] => {
+      const r = (b: number) => b * Math.PI * 2 / 65536;
+      return [Math.cos(r(p)) * Math.sin(r(y)), -Math.sin(r(p)),
+              Math.cos(r(p)) * Math.cos(r(y))];
+    };
+    const same = (a: ArrayLike<number>, b: ArrayLike<number>) =>
+      [0, 1, 2].every((i) => Math.abs(a[i] - b[i]) < 1e-6);
+    const xyz = (v: { x: number; y: number; z: number }) => [v.x, v.y, v.z];
+    const { boss } = setup(8);
+    const t = boss.boss5;
+    const B0 = G.g_scene_light_block0;
+    const B1 = G.g_scene_light_block1;
+    boss.state = Class32State.HopNearCamera;
+    Class32DrawAndAdvance(boss);             // poses the bones; no aim
+    check("outside states 9 and 10 the draw leaves both blocks' angles alone",
+          B0.pitch === 0 && B0.yaw === 0 && B1.pitch === 0 && B1.yaw === 0);
+    boss.state = Class32State.LungeAtCamera;
+    t.nodeDraws = {};
+    Class32DrawBonePart(boss, 9, 0x5e1);
+    const a9 = boss.skel!.bones[9]!.hit;
+    const a8 = boss.skel!.bones[8]!.hit;
+    const ang = VecToAngles(a8[0] - a9[0], a8[1] - a9[1], a8[2] - a9[2]);
+    const p = FtolS16(ang.pitch);
+    const y = FtolS16(ang.yaw);
+    check("state 9 aims block 0 and block 1 from the node toward bone 8's point",
+          (p !== 0 || y !== 0) && B0.pitch === p && B0.yaw === y
+          && B1.pitch === p && B1.yaw === y,
+          `want ${p},${y} b0 ${B0.pitch},${B0.yaw} b1 ${B1.pitch},${B1.yaw}`);
+    check("...and builds both blocks' vectors from the angles",
+          same(xyz(B0.dir), built(p, y)) && same(xyz(B1.dir), built(p, y)),
+          `${xyz(B0.dir)} want ${built(p, y)}`);
+    // A whole draw: block 1 holds a non-identity aim at its head.
+    B1.pitch = 0x1000;
+    B1.yaw = 0x2000;
+    Class32DrawAndAdvance(boss);
+    check("...a draw is lit from block 1's direction as its head installed it",
+          same(t.drawDir, built(0x1000, 0x2000)),
+          `${t.drawDir} want ${built(0x1000, 0x2000)}`);
+    check("...its nodes re-aim block 1 for the next draw, not this one",
+          B1.pitch !== 0x1000 || B1.yaw !== 0x2000);
+    check("...and its LightsRestoreScene puts block 0's new vector on the device",
+          same(xyz(G.g_render_light_dir), xyz(B0.dir))
+          && same(xyz(B0.dir), built(B0.pitch, B0.yaw)),
+          `${xyz(G.g_render_light_dir)} vs ${xyz(B0.dir)}`);
+  }
+
+  // The death burst and the exit effect set no light colour (`[proved]`):
+  // they draw under the register as the walk left it.
+  {
+    const { rng, boss } = setup(9);
+    const c0 = G.g_scene_light_block0.channels;
+    c0[6] = 0.5; c0[7] = 0.25; c0[8] = 0.125;
+    Class32SpawnDeathBurst(boss, rng);
+    Class32DrawAndAdvance(boss);             // ends in LightsRestoreScene
+    Class32TasksTick();
+    const burst = G.g_class32_tasks.find((x) =>
+      x.routine === Class32TaskRoutine.DeathBurst);
+    check("a death burst with nothing before it draws under block 0's colour, "
+          + "which the boss's LightsRestoreScene left",
+          burst?.draw?.light.join() === "0.5,0.25,0.125",
+          JSON.stringify(burst?.draw?.light));
+  }
+  {
+    const { rng, boss } = setup(10);
+    boss.flags2 |= Class32Flag2.BodyLoop;
+    Class32SpawnBodyLoopEffect(boss);
+    Class32SpawnDeathBurst(boss, rng);
+    Class32SpawnExitEffect(boss);
+    Class32DrawAndAdvance(boss);
+    Class32TasksTick();
+    const of = (r: Class32TaskRoutine) => G.g_class32_tasks.find((x) =>
+      x.routine === r)?.draw?.light.join();
+    // The body loop's first frame: `a = 0 + 0.05f`, `(a, a * 0.25, 0)`.
+    const a = Math.fround(0.05);
+    const orange = [a, Math.fround(a * 0.25), 0].join();
+    check("...and behind the body loop, under its orange -- the burst and "
+          + "the exit effect both",
+          of(Class32TaskRoutine.BodyLoop) === orange
+          && of(Class32TaskRoutine.DeathBurst) === orange
+          && of(Class32TaskRoutine.ExitEffect) === orange,
+          `${of(Class32TaskRoutine.BodyLoop)} ${of(Class32TaskRoutine.DeathBurst)} `
+          + `${of(Class32TaskRoutine.ExitEffect)}`);
   }
 
   // -- a projectile's burst ---------------------------------------------

@@ -720,10 +720,9 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     this.texFilter.setRenderer(this.renderer);
     this.lighting = new SceneLighting(this.scene);
     this.gunLights = new GunLights(this.scene, this.lighting);
-    // The two light sets -- see `SecondaryLightSource`. Block 1 is the
-    // walker's; which actors draw under it is the port's.
+    // The two light sets -- see `SecondaryLightSource`. Both blocks are
+    // `G`'s; which actors draw under block 1 is the port's.
     this.lighting.source = {
-      light: () => this.walker?.lightSecondary ?? null,
       secondary: (at) => {
         const obj = ActorByAt(at);
         return !!obj && ActorDrawsUnderSecondaryLights(obj);

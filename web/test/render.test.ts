@@ -243,9 +243,13 @@ console.log("\nthe fog colour is the game's colour");
   // `describe` is the hook: `getHexString()` defaults to `SRGBColorSpace`, so
   // it converts back out of the working space and reports what a screenshot
   // would show. Round-tripping through it is exactly the assertion.
-  const walkerWith = (rgb: [number, number, number], near = 21, far = 507) =>
-    ({ walker: { fog: { near, far, rgb }, fogSet: true } }) as unknown as
+  // Light block 0's fog words, which are `G`'s; `fogSet` is the walker's.
+  const walkerWith = (rgb: [number, number, number], near = 21, far = 507) => {
+    const c = G.g_scene_light_block0.channels;
+    c[0] = near; c[1] = far; c[2] = rgb[0]; c[3] = rgb[1]; c[4] = rgb[2];
+    return ({ walker: { fogSet: true } }) as unknown as
       Parameters<InstanceType<typeof SceneFog>["update"]>[0];
+  };
 
   const fog = new SceneFog(new Scene());
 
@@ -298,8 +302,9 @@ console.log("\nthe fog range is `SetFogRange`'s pair, in either order");
   const scene = new Scene();
   const fog = new SceneFog(scene);
   const drive = (near: number, far: number) => {
-    fog.update(({ walker: { fog: { near, far, rgb: [10, 10, 20] },
-                            fogSet: true } }) as unknown as
+    const c = G.g_scene_light_block0.channels;
+    c[0] = near; c[1] = far; c[2] = 10; c[3] = 10; c[4] = 20;
+    fog.update(({ walker: { fogSet: true } }) as unknown as
       Parameters<InstanceType<typeof SceneFog>["update"]>[0]);
     return scene.fog as { near: number; far: number } | null;
   };
@@ -413,7 +418,7 @@ console.log("\nthe scene light is the light SetLightingDefaultSingle builds");
   // `FUN_00460250` seeds the scene light colour to exactly this.
   const rgb: [number, number, number] = [1.0, 0.2, 0.1];
   const a = 0.5;
-  lights.set({ rgb, ambient: a, pitchDeg: 0, yawDeg: 0 });
+  lights.set({ rgb, ambient: a, pitch: 0, yaw: 0 });
 
   const wantDir = rgb.map((c) => srgbToLinear(c * a * DIFFUSE_SCALE));
   check("diffuse is colour * ambient * 1.4, through the sRGB transfer",
@@ -438,7 +443,7 @@ console.log("\nthe scene light is the light SetLightingDefaultSingle builds");
   // Turning the master brightness down must dim the directional light with
   // it -- the property the port was missing entirely.
   const wasR = dir.color.r;
-  lights.set({ rgb, ambient: a / 2, pitchDeg: 0, yawDeg: 0 });
+  lights.set({ rgb, ambient: a / 2, pitch: 0, yaw: 0 });
   check("the ambient channel is a master brightness and dims the light too",
         dir.color.r < wasR * 0.5,
         `${wasR.toFixed(4)} -> ${dir.color.r.toFixed(4)}`);
@@ -446,11 +451,11 @@ console.log("\nthe scene light is the light SetLightingDefaultSingle builds");
   // `BuildSceneLightDirection` (`0x0040E0B0`): rotate (0,0,1) by Y then X,
   // giving (cos p · sin y, −sin p, cos p · cos y), the direction the light
   // comes *from*.
-  const d = lightDirection(0, 90);
+  const d = lightDirection(0, 0x4000);
   check("the direction is the rotated unit Z, and +90 deg yaw faces +X",
         near(d.x, 1) && near(d.y, 0) && Math.abs(d.z) < 1e-4,
         `${d.x.toFixed(3)},${d.y.toFixed(3)},${d.z.toFixed(3)}`);
-  const dp = lightDirection(90, 0);
+  const dp = lightDirection(0x4000, 0);
   check("...and a +90 deg pitch points straight down",
         near(dp.y, -1), `${dp.y.toFixed(3)}`);
 }
@@ -5484,7 +5489,7 @@ console.log("\nclass 0x26 subtypes 6/7: the recorded draws, where they were reco
   // The light colour reaches the material: a twin on block 0's ambient and
   // direction with the draw's colour in place of the block's.
   const lights = new SceneLighting(new Scene());
-  lights.set({ rgb: [1, 1, 1], ambient: 0.5, pitchDeg: 0, yawDeg: 0 });
+  lights.set({ rgb: [1, 1, 1], ambient: 0.5, pitch: 0, yaw: 0 });
   lights.build(new Obj3D());
   lights.addRoot(layer.group);
   lights.beforeRender();
@@ -5504,7 +5509,7 @@ console.log("\nclass 0x26 subtypes 6/7: the recorded draws, where they were reco
         `${plain?.type} ${JSON.stringify(plain?.userData)}`);
   check("...and the lit one a twin keyed on its own colour",
         lit?.type === "MeshLambertMaterial"
-        && lit.userData.lightColour === "0.05,0.01,0",
+        && lit.userData.lightColour === "0.05,0.01,0|null|block",
         `${lit?.type} ${JSON.stringify(lit?.userData)}`);
   // Its terms are `SetLightingDefaultSingle`'s with the colour swapped: the
   // block's ambient 0.5, so diffuse `C * 0.5 * 1.4` and ambient
@@ -5516,7 +5521,7 @@ console.log("\nclass 0x26 subtypes 6/7: the recorded draws, where they were reco
   const set = (lights as unknown as {
     coloured: Map<string, { color: { value: { r: number; g: number } };
                             ambient: { value: { r: number; g: number } } }> })
-    .coloured.get("0.05,0.01,0");
+    .coloured.get("0.05,0.01,0|null|block");
   const lin = (c: number) =>
     c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
   check("...on block 0's ambient with the draw's colour in place of the block's",
@@ -5625,6 +5630,8 @@ console.log("\nclass 0x32: the node hook's draws, and the light each was made un
 {
   const { syncBoss5NodeDraws, BOSS5_DRAW_HOLDER }
     = await import("../src/render/characters/boss5");
+  type LightSetTag = { ambient: number | null; dir: number[] | null;
+                       rgb: number[] | null };
   // A draw's own colour between `LightsUseSecondarySet` and
   // `LightsRestoreScene` keeps block 1's ambient and direction; a tag of null
   // is the block's own colour, not the parent's.
@@ -5638,16 +5645,16 @@ console.log("\nclass 0x32: the node hook's draws, and the light each was made un
   bone.add(child);
   root.add(bone);
   const lights = new SceneLighting(new Scene());
-  lights.set({ rgb: [1, 1, 1], ambient: 0.5, pitchDeg: 0, yawDeg: 0 });
-  lights.source = {
-    light: () => ({ rgb: [1, 1, 1], ambient: 0.4, pitchDeg: 0, yawDeg: 0 }),
-    secondary: (at: number) => at === BOSS_AT,
-  };
+  lights.set({ rgb: [1, 1, 1], ambient: 0.5, pitch: 0, yaw: 0 });
+  // Block 1 is `G`'s: its ambient 0.4.
+  ResetGameGlobals();
+  G.g_scene_light_block1.channels[10] = 0.4;
+  lights.source = { secondary: (at: number) => at === BOSS_AT };
   lights.build(root);
   lights.beforeRender();
   const ud = (m: unknown) => (m as { userData: Record<string, unknown> }).userData;
   check("a coloured draw of a block-1 actor gets a twin keyed on block 1",
-        ud(bone.material).lightColour === "block1|1,0,0",
+        ud(bone.material).lightColour === "block1|1,0,0|null|block",
         JSON.stringify(ud(bone.material)));
   check("...and a child tagged null the block's own twin, not its parent's colour",
         ud(child.material).secondaryLit === true
@@ -5659,7 +5666,7 @@ console.log("\nclass 0x32: the node hook's draws, and the light each was made un
     .refreshColoured({ camera: cam });
   const set = (lights as unknown as {
     coloured: Map<string, { color: { value: { r: number } } }> })
-    .coloured.get("block1|1,0,0");
+    .coloured.get("block1|1,0,0|null|block");
   const lin = (c: number) =>
     c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
   check("...whose diffuse is block 1's ambient 0.4, not block 0's 0.5",
@@ -5694,6 +5701,7 @@ console.log("\nclass 0x32: the node hook's draws, and the light each was made un
     "11": [{ slot: 0x4f4, light: null }, { slot: 0x51c, light: [1, 0, 0] }],
     "15": [{ slot: 0x44a, light: null }, { slot: 0x450, light: null }],
   };
+  a.boss5.drawDir = [0, -1, 0];
   syncBoss5NodeDraws(inst, clone);
   const holders = (n: InstanceType<typeof Obj3D>) =>
     n.children.filter((c) => c.name === BOSS5_DRAW_HOLDER);
@@ -5701,14 +5709,20 @@ console.log("\nclass 0x32: the node hook's draws, and the light each was made un
         + "both cels, the second under its light",
         !b11.layers.isEnabled(0) && holders(b11).length === 2
         && holders(b11).map((h) => h.userData.slot).join() === "1268,1308"
-        && (holders(b11)[1].userData.hod2_light_colour as number[]).join()
+        && (holders(b11)[1].userData.hod2_light_set as LightSetTag).rgb?.join()
           === "1,0,0"
         && b15.parent === b11,
         `${b11.layers.isEnabled(0)} ${cloned.join()}`);
   check("...a node that draws its own slot shows it, with one cel beside it",
         own15.layers.isEnabled(0) && holders(b15).length === 1
         && holders(b15)[0].userData.slot === 0x450
-        && own15.userData.hod2_light_colour === null);
+        && (own15.userData.hod2_light_set as LightSetTag).rgb === null);
+  check("...every model under the direction the draw's LightsUseSecondarySet "
+        + "installed, and block 1's own ambient",
+        [holders(b11)[0], holders(b11)[1], own15].every((o) => {
+          const l = o.userData.hod2_light_set as LightSetTag;
+          return l.dir?.join() === "0,-1,0" && l.ambient === null;
+        }));
   a.boss5.nodeDraws = {};
   syncBoss5NodeDraws(inst, clone);
   check("...and a frame the walk drew nothing shows nothing",

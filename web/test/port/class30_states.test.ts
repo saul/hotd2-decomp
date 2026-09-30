@@ -718,6 +718,14 @@ console.log("\nActorBodyConditionFromHands:");
   const TYPE_AXE = {
     ...TYPE,
     type: 0x14, name: "znonoopa", file: "znonoopa.bin",
+    // The hands' draw records start on the props the kit names, as the
+    // shipped skeleton's do (bone 5 `0x1EF9`, bone 8 `0x1EF5`): the body
+    // condition routines read the records, not the kit.
+    bones: [...TYPE.bones.filter((b) => b.bone !== 5),
+            { bone: 5, part: "r_hand", slot: 7929, offset: [0, 0, 0],
+              parent: 0, damage_rank: [], steps: [] },
+            { bone: 8, part: "l_hand", slot: 7925, offset: [0, 0, 0],
+              parent: null, damage_rank: [], steps: [] }],
     attacks: { ...TYPE.attacks, "1": MELEE, "2": MELEE },
     attack_picks: { ...TYPE.attack_picks,
                     "1": new Array(80).fill(0), "2": new Array(80).fill(0) },
@@ -829,6 +837,16 @@ console.log("\nActorBodyConditionFromHands:");
     ActorBodyConditionFromHands(empty);
     check("a thrown right hand takes it to zero", empty.condition === 0,
           String(empty.condition));
+
+    // A severed arm takes the hand's record to 0 -- `RemoveBoneSubtree`
+    // (`FUN_00409AF0`) zeroes every record under it -- and the port keeps that
+    // as `removed`, not as a slot. The routine read an absent slot as the
+    // kit's held prop, so a hand cut off with its arm still counted.
+    const severed = axeman(8);
+    severed.removed.push(5);
+    ActorBodyConditionFromHands(severed);
+    check("a hand severed with its arm counts as empty", severed.condition === 0,
+          String(severed.condition));
 
     // Character type 1 has no 1-or-2 row, so the routine only ever writes 0.
     ResetGameGlobals();

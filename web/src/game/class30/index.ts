@@ -104,7 +104,7 @@ export function EnemyZombieUpdate(obj: ZombieActor, f: ClassFrame): void {
   // state, at 0x0045340E: the shot that killed this actor puts it in a death
   // state on the same frame that state first runs. Without this call class
   // 0x30 had no edge into `ZombieState.Death` at all.
-  ZombieOnShot(obj);
+  ZombieOnShot(obj, events);
   // `0045341C  TEST EAX, 0x10000000` / `00453424  CALL ZombieAttachToCarrier`,
   // and it is **before** the state dispatch at `0x00453434`. A passenger's
   // position and yaw are recomputed from `g_carrier_object` every frame, so

@@ -84,8 +84,13 @@ export const TYPE: CharacterType = {
       damage_rank: [], hit_radius: 2, hit_slot: 4,
       steps: [[0x11, EffectCode.Escalate, 3], [0x12, EffectCode.Escalate + 1, 3],
               [0x13, EffectCode.Escalate + 2, 3], [0x14, EffectCode.Sever, 3]] },
-    { bone: 5, part: "r_forearm", slot: 5, offset: [0, 0, 0], parent: 0,
-      damage_rank: [], hit_radius: 2, hit_slot: 5, steps: [] },
+    // Bone 5's slot is `znassb.bin`'s right-hand prop, `0x1BA9`: this type is
+    // number 1, and `ActorUpdateBodyCondition` (`FUN_00454270`) reads a type-1
+    // actor's bone 5 against that literal on every damaging shot and drops
+    // it to condition 0 when neither hand holds its prop. A made-up slot here
+    // disarmed every fixture zombie on its first hit.
+    { bone: 5, part: "r_forearm", slot: 0x1ba9, offset: [0, 0, 0], parent: 0,
+      damage_rank: [], hit_radius: 2, hit_slot: 0x1ba9, steps: [] },
     { bone: 1, part: "torso", slot: 1, offset: [0, 0, 0], parent: null,
       damage_rank: [], hit_radius: 3, hit_slot: 1,
       steps: [[0x21, EffectCode.Last, 3]] },

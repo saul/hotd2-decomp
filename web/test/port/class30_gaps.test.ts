@@ -14,21 +14,24 @@ import { ZombieState } from "../../src/game/class30/states";
 import { Zombie1368Flag } from "../../src/game/class30/state";
 import { EnemyZombieUpdate } from "../../src/game/class30";
 import { vec3 } from "../../src/game/vec";
-import type { ZombieActor } from "../../src/game/actor";
+import { DamageZone, type ZombieActor } from "../../src/game/actor";
+import { HitResultCode } from "../../src/game/combat/resolve_hit";
 import {
   check, CHARS, motion, SCENE_MAJOR_PLAYING, spawnZombie, EnterPlay, TYPE,
 } from "./harness";
 
-/** A class-0x30 actor of the fixture's type 1, spawned through its `Init`. */
-function zombie(init: number, desc: Record<string, unknown> = {}): ZombieActor {
+/** A class-0x30 actor, spawned through its `Init` against `tables`. */
+function zombie(init: number, desc: Record<string, unknown> = {},
+                charType = 1, tables: CharactersJson = CHARS): ZombieActor {
   ResetGameGlobals();
   EnterPlay();
-  SetGameTables(CHARS);
+  SetGameTables(tables);
   G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
   G.g_scene_state_major = SCENE_MAJOR_PLAYING;
   G.g_camera_fixed_eye_y = 0;
   G.g_players_in_play = 1;
-  const z = spawnZombie(0x7a00, 1, "gaps", { initialState: init, ...desc });
+  const z = spawnZombie(0x7a00, charType, "gaps",
+                        { initialState: init, ...desc });
   z.visible = true;
   z.hp = z.maxHp = 100;
   z.pos = vec3(0, 0, 40);
@@ -138,4 +141,76 @@ console.log("\nclass 0x30's footfalls and swishes, on exact play cursors:");
   tick();
   check("...and out of it, cursor 1 sounds", heard.length === 4,
         String(heard.length));
+}
+
+console.log("\nthe body condition a landed shot leaves (ActorUpdateBodyCondition):");
+{
+  // `znchain.bin`, character type 2: its hand props are `0x1BD2` on bone 5
+  // and `0x1BCC` on bone 8, and the bone-zone table gives bones 5 and 8 the
+  // two arm zones, as the shipped one does.
+  const hand = (bone: number, slot: number) => ({
+    bone, part: `hand ${bone}`, slot, offset: [0, 0, 0], parent: null,
+    damage_rank: [], steps: [],
+  });
+  const tables = {
+    ...CHARS,
+    bone_zones: [0xff, 0xff, 0, 0xff, 1, 1, 2, 2, 2],
+    types: {
+      ...CHARS.types,
+      "2": { ...TYPE, type: 2, name: "znchain",
+             bones: [...TYPE.bones.filter((b) => b.bone !== 5),
+                     hand(5, 0x1bd2), hand(8, 0x1bcc)] },
+    },
+  } as unknown as CharactersJson;
+  const events = new Events();
+  const heard: number[] = [];
+  events.on("sound.play", ({ id }) => heard.push(id));
+  const z = zombie(ZombieState.NoOp, { condition: 2 }, 2, tables);
+  check("a znchain takes the chainsaw loop in its Init",
+        G.g_weapon_loop_holders === 1 && z.weaponLoopHeld === 1,
+        `${G.g_weapon_loop_holders}/${z.weaponLoopHeld}`);
+  const shoot = (bone: number, result: number) => {
+    z.pendingHit = { bone, result, player: 0 };
+    EnemyZombieUpdate(z, { ...frame(), events });
+  };
+  // Result 1 with the saw's right hand swapped out: one armed hand left.
+  z.boneSlot["5"] = 0x1bd3;
+  shoot(5, HitResultCode.Damaged);
+  check("a damaging shot that takes one hand leaves condition 1",
+        z.condition === 1, String(z.condition));
+  // Result 2 does not reach it (`0x004541FC` skips the call).
+  z.boneSlot["8"] = 0x1bcd;
+  shoot(8, HitResultCode.Plain);
+  check("a plain hit does not recompute it, whatever the hands hold",
+        z.condition === 1 && G.g_weapon_loop_holders === 1,
+        `${z.condition} holders ${G.g_weapon_loop_holders}`);
+  shoot(8, HitResultCode.Severed);
+  check("the shot that finds neither hand armed leaves condition 0",
+        z.condition === 0, String(z.condition));
+  check("...and stops the chainsaw: CHAIN_SAW_22_OFF (0x4E17A9), the last "
+        + "holder released",
+        heard.includes(0x4e17a9) && G.g_weapon_loop_holders === 0
+        && z.weaponLoopHeld === 0,
+        `${heard.map((x) => x.toString(16))} holders `
+        + `${G.g_weapon_loop_holders}`);
+}
+{
+  // The tail every type reaches: `obj+0x136C` bit 0x40 with condition 0 and
+  // both arm zones destroyed is condition 5, once. Type 1 is `znassb`'s arm,
+  // and a bone 5 taken off by `RemoveBoneSubtree` holds no prop.
+  const tables = {
+    ...CHARS, bone_zones: [0xff, 0xff, 0, 0xff, 1, 1, 2, 2, 2],
+  } as unknown as CharactersJson;
+  const z = zombie(ZombieState.NoOp, { condition: 1, descFlags: 0x40 }, 1,
+                   tables);
+  check("the descriptor's +0x20 bit 0x40 reaches obj+0x136C",
+        (z.flags2 & 0x40) !== 0, (z.flags2 >>> 0).toString(16));
+  z.removed.push(5);
+  z.zones |= DamageZone.RightArm | DamageZone.LeftArm;
+  z.pendingHit = { bone: 5, result: HitResultCode.Damaged, player: 0 };
+  EnemyZombieUpdate(z, frame());
+  check("an empty-handed actor with both arm zones gone and bit 0x40 up "
+        + "takes condition 5",
+        z.condition === 5 && (z.flags2 & 0x40) === 0,
+        `${z.condition} ${(z.flags2 >>> 0).toString(16)}`);
 }

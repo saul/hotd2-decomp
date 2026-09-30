@@ -50,6 +50,8 @@ import { makeSetPiecePropTail, type SetPiecePropTail }
 import { makeThrowerTail, type ThrowerTail } from "./class31/state";
 import { makeZombieTail, type ZombieTail } from "./class30/state";
 import { makeResultCardTail, type ResultCardTail } from "./class61/state";
+import { makePropContainerTail, type PropContainerTail }
+  from "./class41/placer_state";
 
 /**
  * `model+0x64` — the **motion block's** flag word, which is `obj+0x1F8`.
@@ -415,9 +417,12 @@ export enum ActorFlag {
    * the bit. It runs once, from `ActorBuildSkinnedModel` (`FUN_00410440`),
    * which every skinned class's `Init` calls after pointing `g_cur_actor` at
    * itself -- so a civilian, a zombie, a thrower and every boss carry it.
-   * Six builders clear it again with `AND 0x7F` straight after: `PlaceBats`,
-   * `SpawnBatWings`, `CatInit`, `SpawnGoldenFrog` and two class-0x41 builders
-   * (`0x00463E50`, `0x004641F0`). `ActorBuildSkinnedModel` in `spawn.ts` is
+   * Four builders clear it again with `AND 0x7F` straight after: `PlaceBats`,
+   * `SpawnBatWings`, `CatInit` and `SpawnGoldenFrog`. Class 0x41's two
+   * skinned constructors (`0x00463E50`, `PlaceType61Figures`) make the same
+   * `AND` on the **placer's** word, not their actors': the frog loses the bit
+   * to a later `MOV [ESI+0x34], 1` and constructor 61's figures keep it (see
+   * `docs/formats/combat.md`). `ActorBuildSkinnedModel` in `spawn.ts` is
    * where the port raises it.
    */
   ShootPerBone = 0x80,
@@ -2565,6 +2570,8 @@ export type Actor =
   | (ActorBase & { cls: SpawnClass.ScriptedScenery;
                    scenery: ScriptedSceneryTail })
   | (ActorBase & { cls: SpawnClass.ResultCard; card: ResultCardTail })
+  | (ActorBase & { cls: SpawnClass.PropContainerPlacer;
+                   placer: PropContainerTail })
   | (ActorBase & { cls: Exclude<SpawnClass,
       SpawnClass.ScriptedHumanoid | SpawnClass.SetPieceProp
       | SpawnClass.Thrower | SpawnClass.Zombie
@@ -2577,7 +2584,8 @@ export type Actor =
       | SpawnClass.CarriedZombie
       | SpawnClass.ScriptedScenery | SpawnClass.Vehicle
       | SpawnClass.PathRidingProp | SpawnClass.HordeSpawner
-      | SpawnClass.Worm | SpawnClass.ResultCard> });
+      | SpawnClass.Worm | SpawnClass.ResultCard
+      | SpawnClass.PropContainerPlacer> });
 
 /** An actor already narrowed to class 0x25, for that class's own routines. */
 export type HumanoidActor = Extract<Actor,
@@ -2628,6 +2636,10 @@ export type ResultCardActor = Extract<Actor, { cls: SpawnClass.ResultCard }>;
 /** An actor already narrowed to class 0x33, for that class's own routines. */
 export type ScriptedSceneryActor = Extract<Actor,
   { cls: SpawnClass.ScriptedScenery }>;
+
+/** An actor already narrowed to class 0x41: a placer or a constructor-61 figure. */
+export type PropContainerActor = Extract<Actor,
+  { cls: SpawnClass.PropContainerPlacer }>;
 
 /** A fresh object. Everything the engine leaves zeroed is zero here. */
 /** `ActorUpdateBoundingSphere`'s two lifts — `FUN_00454AC0`'s own literals. */
@@ -2883,6 +2895,9 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
   }
   if (cls === SpawnClass.ResultCard) {
     return { ...head, cls, card: makeResultCardTail() };
+  }
+  if (cls === SpawnClass.PropContainerPlacer) {
+    return { ...head, cls, placer: makePropContainerTail() };
   }
   return { ...head, cls };
 }

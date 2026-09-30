@@ -135,6 +135,8 @@ function programKind(mesh: Mesh, m: Material): string {
 }
 
 /** 2*pi / 65536 — the constant both matrix rotators multiply by. */
+/** A BAMS angle in the degrees `lightDirection` takes. */
+const BAMS_TO_DEG = 360 / 65536;
 
 /** `SetLightingDefaultSingle`'s two scalings of the scene light colour. */
 export const DIFFUSE_SCALE = 1.4;
@@ -163,6 +165,13 @@ export interface SecondaryLightSource {
   light(): SceneLightState | null;
   /** Is the actor at this spawn address drawn under block 1? */
   secondary(at: number): boolean;
+  /**
+   * The direction the actor at this address sets on the device over block
+   * 1's, as the BAMS pair `BuildSceneLightDirection` was given -- or null for
+   * block 1's own. The port's answer (`ActorDrawLightDirection`); see
+   * {@link DirectedLight} for what the renderer makes of it.
+   */
+  direction?(at: number): { pitch: number; yaw: number } | null;
 }
 
 /** Block 1's three terms, shared by every secondary-lit program. */
@@ -210,6 +219,23 @@ interface ColouredLight {
   rgb: [number, number, number];
   ambient: { value: Color };
   color: { value: Color };
+  dirView: { value: Vector3 };
+  /** Twin by base material, and base by twin. */
+  twins: Map<Material, Material>;
+}
+
+/**
+ * Block 1 under a direction of the draw's own -- `SetRenderLightDirection`
+ * (`FUN_004AA0E0`) between `LightsUseSecondarySet` and the draw, as
+ * `Type61FigureUpdate` (`FUN_004729E0`) makes it with the **world** vector
+ * `BuildSceneLightDirection` built. The device takes whatever it is handed as
+ * a view-space direction (the scene's own update hands it the view vector for
+ * that reason), so the world vector is used here as it is, with no camera
+ * transform: a light fixed to the screen. Block 1's colour and ambient are
+ * unchanged, so those two uniforms are shared with the block-1 twins; only
+ * the direction is this set's own.
+ */
+interface DirectedLight {
   dirView: { value: Vector3 };
   /** Twin by base material, and base by twin. */
   twins: Map<Material, Material>;
@@ -277,6 +303,8 @@ export class SceneLighting implements System<RenderContext> {
   private readonly litSecondary = new Map<Material, Material>();
   /** Twins under a draw's own light colour, by colour -- see `ColouredLight`. */
   private readonly coloured = new Map<string, ColouredLight>();
+  /** Block-1 twins under a draw's own direction, by BAMS pair -- see `DirectedLight`. */
+  private readonly directed = new Map<string, DirectedLight>();
   /** The layers whose meshes are not under the stage root. */
   private readonly extraRoots: Object3D[] = [];
   source: SecondaryLightSource = { light: () => null, secondary: () => false };
@@ -296,6 +324,7 @@ export class SceneLighting implements System<RenderContext> {
     this.lit.clear();
     this.litSecondary.clear();
     this.coloured.clear();
+    this.directed.clear();
     if (this.mode === "scene") this.applyMaterials();
   }
 
@@ -514,6 +543,8 @@ export class SceneLighting implements System<RenderContext> {
       if (mesh.isMesh && mesh.material) {
         const second = this.mode === "scene" && here !== null
           && this.source.secondary(here);
+        const dir = second && here !== null
+          ? this.source.direction?.(here) ?? null : null;
         const swap = (m: Material): Material => {
           // A mesh the gun light holds keeps its gun-lit twin; the rig puts
           // back whatever this view wants when the light goes out.
@@ -521,6 +552,7 @@ export class SceneLighting implements System<RenderContext> {
           const base = this.baseOf(m);
           if (this.mode !== "scene") return base;
           if (lit) return this.colouredTwinOf(base, lit);
+          if (dir) return this.directedTwinOf(base, dir);
           return second ? this.secondaryTwinOf(base) : this.twinOf(base);
         };
         // Under any fade the draw has put on it, which stays on top: see
@@ -540,6 +572,12 @@ export class SceneLighting implements System<RenderContext> {
     let back = this.lit.get(m) ?? this.litSecondary.get(m);
     if (!back) {
       for (const set of this.coloured.values()) {
+        back = set.twins.get(m);
+        if (back) break;
+      }
+    }
+    if (!back) {
+      for (const set of this.directed.values()) {
         back = set.twins.get(m);
         if (back) break;
       }
@@ -578,6 +616,52 @@ export class SceneLighting implements System<RenderContext> {
         inner?.call(m, shader, renderer);
         shader.uniforms.secAmbient = u.ambient;
         shader.uniforms.secColor = u.color;
+        shader.uniforms.secDirView = u.dirView;
+        shader.fragmentShader = shader.fragmentShader
+          .replace("#include <common>", "#include <common>\nuniform vec3 "
+                   + "secAmbient;\nuniform vec3 secColor;\nuniform vec3 secDirView;")
+          .replace("#include <lights_fragment_begin>", SECONDARY_LIGHTS);
+      };
+      t.customProgramCacheKey = () => "secondarylit";
+      twin = t;
+      set.twins.set(m, twin);
+      set.twins.set(twin, m);
+    }
+    return twin;
+  }
+
+  /**
+   * The twin a block-1 draw under its own direction takes -- see
+   * `DirectedLight`. The block-1 program, block 1's colour and ambient, and
+   * this set's direction, which is fixed: `lightDirection` of the pair, in
+   * view space as handed.
+   */
+  private directedTwinOf(m: Material,
+                         dir: { pitch: number; yaw: number }): Material {
+    if (!(m instanceof MeshBasicMaterial)) return m;
+    const key = `${dir.pitch},${dir.yaw}`;
+    let set = this.directed.get(key);
+    if (!set) {
+      set = {
+        dirView: {
+          value: lightDirection(dir.pitch * BAMS_TO_DEG, dir.yaw * BAMS_TO_DEG),
+        },
+        twins: new Map(),
+      };
+      this.directed.set(key, set);
+    }
+    let twin = set.twins.get(m);
+    if (!twin) {
+      const w = this.twinOf(m) as MeshLambertMaterial;
+      const t = w.clone();
+      t.userData = { ...m.userData, secondaryLit: true, lightDir: key };
+      const inner = m.onBeforeCompile;
+      const u = set;
+      t.onBeforeCompile = (shader: WebGLProgramParametersWithUniforms,
+                           renderer: WebGLRenderer) => {
+        inner?.call(m, shader, renderer);
+        shader.uniforms.secAmbient = secAmbient;
+        shader.uniforms.secColor = secColor;
         shader.uniforms.secDirView = u.dirView;
         shader.fragmentShader = shader.fragmentShader
           .replace("#include <common>", "#include <common>\nuniform vec3 "

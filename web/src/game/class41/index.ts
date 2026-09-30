@@ -16,8 +16,8 @@
  * The 79 constructors are a grab-bag: the retail stages reach 74 of them, and
  * exactly one — type 0, `PlaceBreakableGroup` — is the container mechanism the
  * class is named for. Fifty are `PlaceGenericProp`, five are `NoOpStub`, and
- * of the other twenty-four the ones below are ported; the thirteen that are
- * not, with the spawns that place each, are listed in `docs/formats/spawns.md`
+ * of the other twenty-four the ones below are ported; the ones that are not,
+ * with the spawns that place each, are listed in `docs/formats/spawns.md`
  * (*Class 0x41's constructors: which are ported*). An unported type keeps its
  * slot in the table and does nothing, because an unimplemented type that
  * silently ran the *wrong* constructor is the same bug that had the cat
@@ -44,6 +44,12 @@ import { PlaceType47Prop } from "./type47";
 import { PROP75_SCRIPT_FLAG, PROP75_TYPE } from "./flag_prop";
 import { FLICKER_LIGHT_TYPE, PlaceFlickerLightProp48 } from "./type48";
 import { PlaceWaterSurface } from "./water";
+import { PropContainerRoutine } from "./placer_state";
+import { PlaceType42Prop } from "./type42";
+import { PlaceType52VanDoors } from "./type52";
+import { PlaceType55Particles } from "./type55";
+import { PlaceType61Figures, Type61FigureUpdate } from "./type61";
+import { PlaceType65Particles } from "./type65";
 
 /**
  * `obj+0x130C` for this class — the constructor index, **not** the body
@@ -112,6 +118,32 @@ export enum PropContainerType {
    * descriptor's point. Stage 2's one spawn. See `class41/type47.ts`.
    */
   Type47Prop = 47,
+  /**
+   * `PlaceType42Prop` (`FUN_004639D0`) — one model at its own coordinates
+   * until the step index is 2. Stage 2's one spawn. See `class41/type42.ts`.
+   */
+  Type42Prop = 42,
+  /**
+   * `PlaceType52VanDoors` (`FUN_00463D20`) — the van's two rear doors, drawn
+   * shut by type 12's routine. See `class41/type52.ts`.
+   */
+  Type52VanDoors = 52,
+  /**
+   * `PlaceType55Particles` (`FUN_00463FE0`) — eight hundred pieces released
+   * by script flag 0x31. Stage 6's one spawn. See `class41/type55.ts`.
+   */
+  Type55Particles = 55,
+  /**
+   * `PlaceType61Figures` (`FUN_004641F0`) — nine skinned figures standing
+   * until script flag 0. Stage 6's one spawn. See `class41/type61.ts`.
+   */
+  Type61Figures = 61,
+  /**
+   * `PlaceType65Particles` (`FUN_00464360`) — three hundred `garasu.bin`
+   * pieces falling for 300 frames. Stage 5's one spawn. See
+   * `class41/type65.ts`.
+   */
+  Type65Particles = 65,
 }
 
 /** What one class-0x41 constructor does. `undefined` where none is ported. */
@@ -187,6 +219,36 @@ export const g_class41_constructors:
   // step changes; the position is never read.
   [PropContainerType.WaterSurface]: (obj) => {
     PlaceWaterSurface(obj);
+  },
+  // `PlaceType42Prop` reads nothing of the placer.
+  [PropContainerType.Type42Prop]: (obj) => {
+    G.g_breakable_props.push(PlaceType42Prop(obj.at));
+  },
+  // `PlaceType52VanDoors` reads the placer's position, yaw and `+0x11C`.
+  [PropContainerType.Type52VanDoors]: (obj) => {
+    G.g_breakable_props.push(
+      ...PlaceType52VanDoors(obj.at, obj.pos, obj.yaw, obj.hp));
+  },
+  // `PlaceType55Particles` reads the placer's position, and a table of the
+  // image's that travels on the placement.
+  [PropContainerType.Type55Particles]: (obj, f) => {
+    const pl = T.breakables?.placements?.find(
+      (q) => q.at === obj.at && q.container === "type55");
+    if (!pl?.offsets) return;
+    G.g_breakable_props.push(
+      PlaceType55Particles(obj.at, obj.pos, pl.offsets, f.rng));
+  },
+  // `PlaceType61Figures` builds actors, not props: nine skinned figures in the
+  // object pool, their types a table of the image's on the placement.
+  [PropContainerType.Type61Figures]: (obj, f) => {
+    const pl = T.breakables?.placements?.find(
+      (q) => q.at === obj.at && q.container === "type61");
+    if (!pl?.char_types) return;
+    PlaceType61Figures(obj, pl.char_types, f);
+  },
+  // `PlaceType65Particles` copies the placer's position and never reads it.
+  [PropContainerType.Type65Particles]: (obj, f) => {
+    G.g_breakable_props.push(PlaceType65Particles(obj.at, obj.pos, f.rng));
   },
   [PropContainerType.KindedProp]: (obj, f) => {
     const pl = T.breakables?.placements?.find(
@@ -303,9 +365,32 @@ export function PropContainerCountsForEnemyGate(rec: SpawnRecord): boolean {
   return pl?.type !== undefined && GENERIC_ENEMY_COUNTING_TYPES.has(pl.type);
 }
 
+/**
+ * `[port-only]` — the task walk's call through `obj+0x00`, for the two
+ * routines a class-0x41 actor can be on: the placer's own, or the one
+ * `PlaceType61Figures` (`FUN_004641F0`) hands each of its figures. See
+ * `class41/placer_state.ts`.
+ */
+export function PropContainerRun(obj: Actor, f: ClassFrame): void {
+  if (obj.cls !== SpawnClass.PropContainerPlacer) return;
+  switch (obj.placer.routine) {
+    case PropContainerRoutine.Placer: PropContainerPlacerUpdate(obj, f); break;
+    case PropContainerRoutine.Type61Figure: Type61FigureUpdate(obj); break;
+  }
+}
+
 export const PropContainerPlacerHandler: ClassHandler = {
   init: PropContainerPlacerInit,
-  update: PropContainerPlacerUpdate,
+  update: PropContainerRun,
+  // A placer has no model and dies on its first frame; a constructor-61
+  // figure never steps `obj+0x194` (`Type61FigureUpdate` has no `INC` of
+  // it), so it holds frame 0 of its clip. Neither is the director's to step.
+  advancesOwnMotion: true,
+  // Neither routine calls `RegisterForShotTest` (`FUN_00405160`): the placer
+  // is gone before a shot can reach it, and a figure is drawn and never
+  // filed, so no shot finds one. The props the constructors build are not
+  // actors and register through the prop pool (`class41/shot_test.ts`).
+  registersForShotTest: true,
   raisesScriptFlag: PropContainerRaisesScriptFlag,
   countsForEnemyGate: PropContainerCountsForEnemyGate,
 };
@@ -356,6 +441,13 @@ export * from "./type72";
 export * from "./type74";
 export * from "./type76";
 export * from "./type77";
+export * from "./ctor_literals";
+export * from "./placer_state";
+export * from "./type42";
+export * from "./type52";
+export * from "./type55";
+export * from "./type61";
+export * from "./type65";
 export {
   BreakableGroupMembers, BreakableMemberSlot, BreakablePropAt,
   BreakableGroupFloor, MsvcRand, PROP_TARGET_SETS, MEMBERS_PER_GROUP,

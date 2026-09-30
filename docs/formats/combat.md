@@ -134,9 +134,15 @@ registered sends a per-bone actor to the whole arm.
 `+0x34` when the character's skeleton has root nodes (`0x004105CC`..
 `0x004105E2`). A linear sweep of `.text` finds no other instruction that sets
 the bit. Every skinned class's `Init` points `g_cur_actor` at itself before it
-builds, so civilians, zombies, throwers and every boss carry it. Six builders
+builds, so civilians, zombies, throwers and every boss carry it. Four builders
 clear it again with `AND 0x7F` straight after: `PlaceBats`, `SpawnBatWings`,
-`CatInit`, `SpawnGoldenFrog`, and `0x00463E50` / `0x004641F0` (class 0x41).
+`CatInit` and `SpawnGoldenFrog`. Class 0x41's two skinned constructors do
+**not**: their `AND DL,0x7F; OR EDX,0x80080000` is on the *placer's* `+0x34`
+(`EBX`/`EAX` loaded from the argument at `0x00463E8F` and `0x004642FD`), which
+dies the same frame. Constructor 68 (`0x00463E50`) takes the bit off its frog
+all the same, by writing `MOV [ESI+0x34], 1` over the word at `0x00463F43`;
+`PlaceType61Figures` (`0x004641F0`) writes nothing after the build, so its nine
+figures keep it -- and register for no shot test to use it in.
 
 ### Per bone — `FUN_00404700` → `FUN_00404750` → `FUN_004047D0`
 

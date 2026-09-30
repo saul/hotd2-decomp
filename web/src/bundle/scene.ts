@@ -223,13 +223,21 @@ export interface BreakablePlacement {
    * `slot` is the tile, already looked up in `g_water_surface_slots`
    * (`0x00593DA4`) by `field_1f4`, and `lifetime_evt_steps` is the
    * descriptor's `+0x11C`. See `game/class41/water.ts`.
+   *
+   * `type42`, `type52`, `type55`, `type61` and `type65` are constructors 42,
+   * 52, 55, 61 and 65 (`PlaceType42Prop`, `PlaceType52VanDoors`,
+   * `PlaceType55Particles`, `PlaceType61Figures`, `PlaceType65Particles`):
+   * `pos`, `yaw` and `lifetime_evt_steps` are the descriptor's own, and 55
+   * and 61 carry the table of the image each reads, {@link offsets} and
+   * {@link char_types}. See `game/class41/type42.ts` and its neighbours.
    */
   container: "group" | "kinded" | "falling" | "generic"
     | "chain" | "fragment" | "story_switch" | "script_flag_effect"
     | "rising_door" | "rise_to_height" | "slide_on_flag" | "flag_lifted"
     | "flicker_light" | "table38" | "table39" | "table44" | "table50"
     | "table66" | "water_surface" | "type47"
-    | "draw_only_14";
+    | "draw_only_14"
+    | "type42" | "type52" | "type55" | "type61" | "type65";
   /** How many evt blocks it lives for. */
   lifetime_evt_steps: number;
   /** `group` only — the row of `g_breakable_group_ptrs` to build. */
@@ -373,6 +381,20 @@ export interface BreakablePlacement {
    * draws, so `web/tools/checks/prop_slots.ts` can hold the bundle to them.
    */
   slots?: number[];
+  /**
+   * `type55` only -- `g_type55_particle_offsets` (`0x00594F2A`), all
+   * forty-eight rows, each `[x, y, z]` as the image's s16s:
+   * `PlaceType55Particles` (`FUN_00463FE0`) scales them by 0.001 into each
+   * piece's start and speed.
+   */
+  offsets?: [number, number, number][];
+  /**
+   * `type61` only -- `g_type61_figure_types` (`0x0059504C`), the nine s8
+   * character types `PlaceType61Figures` (`FUN_004641F0`) gives its figures,
+   * in order. Each figure's own row in `characters.placements` is synthetic
+   * and carries the same type.
+   */
+  char_types?: number[];
 }
 
 /**

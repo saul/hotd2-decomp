@@ -322,6 +322,8 @@
 00594ef0	g_prop_table50_scale_z	PlaceTable50Props: f32 per row, written to obj+0x1B0 (the z scale) only for table 5, whose count reads five: 0.6, 1.0, 0.5, 0.715, 0.715. A sixth float (0.67) precedes g_prop_table50_ptrs and is never read by this routine.
 00594f08	g_prop_table50_ptrs	PlaceTable50Props: six pointers, g_prop_table50_0 .. g_prop_table50_5, indexed by (s16)placer+0x1F4.
 00594f20	g_prop_table50_counts	PlaceTable50Props: six s8 row counts, 7, 11, 4, 5, 6, 5, indexed by (s16)placer+0x1F4.
+00594f2a	g_type55_particle_offsets	48 rows of s16 x, y, z; PlaceType55Particles takes row i for particle i < 0x30 and row rand() % 0x30 after, scaling each by 0.001 into an offset from the placer and into the velocity. Ends at 0x0059504A. [proved]
+0059504c	g_type61_figure_types	Nine s8 character types, one per PlaceType61Figures actor: 0x13, 0x0B, 0x19, 0x0A, 0x07, 0x0D, 0x10, 0x16, 0x12. [proved]
 00595058	g_item_pickup_slot	Per item kind, stride 0xC: the u16 asset slot the pickup is drawn with. g_item_score_table is the s16 two bytes further into the same record.
 0059505a	g_item_score_table	per-kind pickup score, stride 0xC
 00595060	g_item_pickup_y_offset	Per item kind, stride 0xC: the float height the pickup is released at above the prop that hid it.
@@ -402,6 +404,7 @@
 007c2118	g_backdrop_preset_last
 007c2120	g_hud_ammo_slide	f32 per player: HudDrawAmmoAndReloadPrompt's own counter while the shutter opens (state 1). The readout is drawn at scale (40 - n) * 0.0125 + 1 -- 1.5 falling to 1.0 -- and n += 1 per call; any other shutter state zeroes it. [proved]
 007c21a8	g_screen_sprite_queue	The layered sprite queue: four 0x40-byte header cells (layers 0..3, chained through +0x3C) followed by the record cells ScreenSpriteQueuePush fills up to 0x007C29A8; the cursor is 0x007C21A4. Reset by ScreenSpriteQueueReset, drawn by ScreenSpriteQueueFlush. [proved]
+007da628	g_task_list_saved	Written by TaskListSaveCurrent, read by TaskListCurrentIgnoringSaved, whose callee ignores it; the only two references (byte search 28a67d00). [proved]
 007db7c8	g_mouse_gun_offscreen_pull	u32 per maple port: InputMapDevicesToMaple sets it from the mouse's RIGHT button in modes 5/6, and MouseGunResolvePull turns it into a shot at (0xFFFF, 0xFFFF), off the screen. [proved]
 007dbc28	g_keyboard_state	The 256-byte DirectInput keyboard state, indexed by DIK code; KeyboardReadAsPad reads it. [proved]
 007dc120	g_gun_trigger_pull	u32 per maple port: the gun's trigger this frame -- the mouse's left button in modes 5/6, the light gun's trigger edge. MouseGunResolvePull consumes it. [proved]
@@ -485,6 +488,7 @@
 007de5c8	g_d3du_unused_projection
 007debd0	g_texture_formats	DDPIXELFORMAT[8] (0x20 each, to 0x007DECD0), filled by EnumTextureFormatsCallback: 0 PAL4, 1 PAL8, 2 R5G6B5, 3 X1R5G5B5, 4 24-bit RGB, 5 A1R5G5B5, 6 the 16-bit 0F00/00F0/000F format, 7 X8R8G8B8/A8R8G8B8. CreateSurfaceInTextureFormat copies one whole into a surface desc. [proved]
 007decd0	g_bound_texture	The texture BindTextureStage last handed to SetTexture; the call is skipped when asked for it again. [proved]
+007df8b0	g_task_list_current	The task list ActorAlloc links into: TaskListBuild sets it to its fresh list (0x004A6F55) and returns it, TaskListWalk makes the list it is given current. [proved]
 007e78bc	g_draw_layer_nibble	The draw layer RenderEnqueueCommand ORs into a queued command's key (& 0xF), which RenderCommandCompare sorts on first. SetDrawLayerNibble writes it; RenderInitStates sets 8, the world's layer; RegionDrawResidentSet uses 7 for a draw-mode-2 region entry, the effects 0xA/0xC/0xE, each restoring 8. [proved]
 007e7938	g_render_sort_depth	The command being walked's sort depth: WalkMeshChainAndDraw seeds it from cmd+4 (the modelview _43) and lowers it to each skipped mesh's eye z; RenderEnqueueCommand copies it back to the queued command's +4. Eye z, negative in front. [proved]
 007e7940	g_render_single_pass	Non-zero collapses WalkMeshChainAndDraw's two passes into one (every mesh drawn at submission). Written only by FUN_004A79E0, which only TitleMenuUpdateAndSelect calls; in play it is 0. [proved]

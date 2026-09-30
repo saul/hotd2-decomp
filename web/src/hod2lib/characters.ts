@@ -86,6 +86,12 @@ import {
 import { CLASS23_MOTIONS } from "../game/class23/records";
 // Data only, for the same reason: every clip the cat's two routines play.
 import { CAT_CLIPS } from "../game/class53/records";
+// Data only, for the same reason: class 0x41 constructor 61's clips and the
+// address each of its figures is known by.
+import {
+  TYPE61_CONSTRUCTOR, Type61FigureAt, Type61FigureClip,
+} from "../game/class41/ctor_literals";
+import { type61FigureTypes } from "./class41_ctors";
 
 const finite = (v: number | null | undefined): v is number =>
   v !== null && v !== undefined && Number.isFinite(v);
@@ -831,6 +837,71 @@ async function hordeMemberPlacements(stage: Stage, tables: ExeTables,
     m.parent_at = sp.at as number;
     m.synthetic = true;
     out.push(m);
+  }
+  return out;
+}
+
+/** Class 0x41, whose constructor 61 builds skinned figures. */
+const CLASS41 = 0x41;
+/** `desc+0x25` -- the s8 a class-0x41 placer's `+0x130C`, its constructor. */
+const CLASS41_CTOR_BYTE = 0x25;
+
+/**
+ * The synthetic placements class 0x41 constructor 61's nine figures are
+ * drawn from: one per figure of every placer whose descriptor names
+ * constructor 61, at `Type61FigureAt`, of the character type
+ * `g_type61_figure_types` gives it and on the clip `Type61FigureClip` says,
+ * parented to the placer.
+ *
+ * The same arrangement as the horde's members: `PlaceType61Figures`
+ * (`FUN_004641F0`) makes the objects with no descriptor, and the client binds
+ * a drawable hierarchy to each by address. The rows are never spawned from,
+ * and they take the placer's own spawn dict -- the figure's place is the
+ * constructor's to decide, in `game/class41/type61.ts`, and the character
+ * layer poses the root from the actor. A figure whose type or clip will not
+ * build is left out, which leaves it undrawn rather than drawn wrong.
+ */
+async function type61FigurePlacements(stage: Stage, tables: ExeTables,
+                                      recs: Iterable<Spawn>,
+                                      byAt: Map<number, SpawnJson>,
+                                      chars: Map<number, Character>):
+    Promise<Placement[]> {
+  const out: Placement[] = [];
+  for (const rec of recs) {
+    if (rec.cls !== CLASS41 || !rec.evt) continue;
+    const at = rec.offset + CLASS41_CTOR_BYTE;
+    if (at >= rec.evt.raw.length) continue;
+    if (((rec.evt.raw[at] << 24) >> 24) !== TYPE61_CONSTRUCTOR) continue;
+    const sp = byAt.get(rec.offset);
+    const types = type61FigureTypes(tables);
+    if (!sp || !types) continue;
+    for (let i = 0; i < types.length; i++) {
+      const ct = types[i];
+      const clip = Type61FigureClip(ct);
+      if (!chars.has(ct)) {
+        const file = tables.characterAssetFile(ct);
+        if (!file) continue;
+        const built = build(tables, ct, file);
+        if (built === null) continue;
+        chars.set(ct, built);
+      }
+      const c = chars.get(ct)!;
+      if (!c.motions.has(clip)) {
+        const baked = await bake(stage.source, tables, clip, c.boneCount);
+        if (baked === null) continue;
+        c.motions.set(clip, baked);
+      }
+      const f = new Placement();
+      f.at = Type61FigureAt(rec.offset, i);
+      f.cls = CLASS41;
+      f.char_type = ct;
+      f.motion = clip;
+      f.hp = 0;
+      f.spawn = { ...sp, at: f.at };
+      f.parent_at = rec.offset;
+      f.synthetic = true;
+      out.push(f);
+    }
   }
   return out;
 }
@@ -2237,6 +2308,18 @@ export async function resolveForStage(
     let tlist = perType.get(ZOMBIE_TWIN_CHAR_TYPE);
     if (!tlist) { tlist = []; perType.set(ZOMBIE_TWIN_CHAR_TYPE, tlist); }
     tlist.push(tw.spawn);
+  }
+
+  // -- class 0x41 constructor 61's figures ---------------------------------
+  //
+  // Nine skinned actors `PlaceType61Figures` allocates with no descriptor;
+  // see `type61FigurePlacements`.
+  for (const f of await type61FigurePlacements(stage, tables, recs.values(),
+                                               byAt, chars)) {
+    placements.push(f);
+    let flist = perType.get(f.char_type);
+    if (!flist) { flist = []; perType.set(f.char_type, flist); }
+    flist.push(f.spawn);
   }
 
   // -- the players' bodies ---------------------------------------------------

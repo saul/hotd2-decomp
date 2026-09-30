@@ -5615,5 +5615,53 @@ console.log("\nScriptedHumanoidBoneDrawHook's extra models:");
         !!node && !node.visible);
 }
 
+console.log("\nType61FigureUpdate's light: block 1 under a direction of its own:");
+{
+  // `BuildSceneLightDirection(0, 0x4000, &world, &view)` then
+  // `SetRenderLightDirection(&world)`: the world vector handed to the
+  // device, which reads it as view space -- so the light is fixed to the
+  // screen, from +X, whatever the camera does.
+  const lights = new SceneLighting(new Scene());
+  const root = new Obj3D();
+  const mk = (at: number) => {
+    const n = new Obj3D();
+    n.userData.hod2_spawn_at = at;
+    const m = new Mesh(new PlaneGeometry(1, 1), new MeshBasicMaterial());
+    n.add(m);
+    root.add(n);
+    return m;
+  };
+  const figure = mk(0x18002058);
+  const civilian = mk(0x1234);
+  lights.source = {
+    light: () => ({ rgb: [1, 1, 1], ambient: 0.5, pitchDeg: 30, yawDeg: 45 }),
+    secondary: (at) => at === 0x18002058 || at === 0x1234,
+    direction: (at) => at === 0x18002058 ? { pitch: 0, yaw: 0x4000 } : null,
+  };
+  lights.build(root);
+  lights.beforeRender();
+  const fm = figure.material as unknown as { userData: Record<string, unknown> };
+  const cm = civilian.material as unknown as { userData: Record<string, unknown> };
+  check("the figure takes a block-1 twin keyed on its direction",
+        fm.userData.secondaryLit === true && fm.userData.lightDir === "0,16384",
+        JSON.stringify(fm.userData));
+  check("...and another block-1 actor the block's own",
+        cm.userData.secondaryLit === true && cm.userData.lightDir === undefined,
+        JSON.stringify(cm.userData));
+  const cam = new PerspectiveCamera();
+  cam.rotation.set(0.3, 1.1, 0.2);
+  cam.updateMatrixWorld();
+  (lights as unknown as { refreshSecondary(c: unknown): void })
+    .refreshSecondary({ camera: cam });
+  const set = (lights as unknown as {
+    directed: Map<string, { dirView: { value: InstanceType<typeof Vector3> } }> })
+    .directed.get("0,16384");
+  const v = set?.dirView.value;
+  check("its view-space direction is (1, 0, 0) with the camera turned",
+        !!v && Math.abs(v.x - 1) < 1e-9 && Math.abs(v.y) < 1e-9
+        && Math.abs(v.z) < 1e-9,
+        v ? v.toArray().join(",") : "no set");
+}
+
 console.log(failures ? `\n${failures} failed` : "\nall passed");
 process.exit(failures ? 1 : 0);

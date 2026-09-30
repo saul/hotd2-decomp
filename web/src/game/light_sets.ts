@@ -32,6 +32,7 @@
  * | `FishDraw` (`FUN_00439860`), `FishSwimAwayTick` (`FUN_00439C20`) | 0x51 |
  * | `CatBranchTriggerUpdate` (`FUN_00431430`) and `CatMotionListUpdate` (`FUN_00431340`) | 0x53 |
  * | `ResultCardFigureUpdate` (`FUN_00435760`) | 0x61's figures, not the card |
+ * | `Type61FigureUpdate` (`FUN_004729E0`), and a direction of its own | 0x41's figures, not the placer |
  *
  * Also callers, and not actors this module can answer for:
  * `BodyCreatureUpdate` (`FUN_0043E880`, `znjoe`'s released creatures, a pool of
@@ -41,7 +42,7 @@
  * `[open]` The remaining callers are unnamed routines
  * (`FUN_004021D0`, `FUN_00415120`, `FUN_00420550`, `FUN_00420820`,
  * `FUN_00423050`, `FUN_004231C0`,
- * `FUN_004729E0`, `FUN_0047FE40`, `FUN_00483A40`, `FUN_00483B40`,
+ * `FUN_0047FE40`, `FUN_00483A40`, `FUN_00483B40`,
  * `FUN_00483CE0`, `FUN_0049A210`,
  * `FUN_0049A470`, `FUN_0049A680`, `FUN_0049A7F0`, `FUN_0049AFB0`); which
  * classes they draw has not been read, so no class is listed for them.
@@ -50,6 +51,7 @@ import type { Actor } from "./actor";
 import { SpawnClass } from "./spawn_class";
 import { OwlState } from "./class43/state";
 import { ResultCardRoutine } from "./class61/state";
+import { PropContainerRoutine } from "./class41/placer_state";
 import { WormBodyDraw } from "./class42/state";
 
 /** The classes whose every draw is under block 1. */
@@ -75,6 +77,10 @@ export function ActorDrawsUnderSecondaryLights(obj: Actor): boolean {
   if (obj.cls === SpawnClass.ResultCard) {
     return obj.card.routine !== ResultCardRoutine.Card;
   }
+  // So do class 0x41 constructor 61's; the placer draws nothing.
+  if (obj.cls === SpawnClass.PropContainerPlacer) {
+    return obj.placer.routine === PropContainerRoutine.Type61Figure;
+  }
   // The owl's live update does not make the call; `OwlCorpseFallAndSettle`,
   // the update it is swapped for on death, does.
   // The worm's member routine brackets its body and shadow with the pair;
@@ -84,4 +90,41 @@ export function ActorDrawsUnderSecondaryLights(obj: Actor): boolean {
     return obj.worm.drawnBody === WormBodyDraw.Member;
   }
   return obj.cls === SpawnClass.FlyingEnemy && obj.owl.state === OwlState.Dead;
+}
+
+/**
+ * A light direction one actor's draw puts on the device in place of block
+ * 1's, as the `(pitch, yaw)` BAMS pair `BuildSceneLightDirection`
+ * (`FUN_0040E0B0`) was given -- and **handed over in world form**: the
+ * caller passes `SetRenderLightDirection` (`FUN_004AA0E0`) the *world*
+ * vector, where `UpdateSceneViewAndLight` (`FUN_00401F40`) hands it the view
+ * one, so the device reads a world vector as a view-space direction and the
+ * light stays fixed to the screen whichever way the camera turns.
+ */
+export interface ActorLightDirection {
+  pitch: number;
+  yaw: number;
+}
+
+/**
+ * `Type61FigureUpdate` (`FUN_004729E0`): `PUSH 0x4000; PUSH 0x0` into
+ * `BuildSceneLightDirection` at `0x00472A1C`, then `LEA EDX, [ESP+0x18]` --
+ * the first output, the world vector -- into `SetRenderLightDirection`.
+ */
+export const TYPE61_FIGURE_LIGHT: ActorLightDirection = { pitch: 0, yaw: 0x4000 };
+
+/**
+ * The direction this actor's draw sets between `LightsUseSecondarySet` and
+ * `LightsRestoreScene` over block 1's own, or null where it keeps block 1's.
+ * See {@link ActorLightDirection}.
+ *
+ * [port-only] as a function, as {@link ActorDrawsUnderSecondaryLights} is:
+ * the engine makes the call inside the routine.
+ */
+export function ActorDrawLightDirection(obj: Actor): ActorLightDirection | null {
+  if (obj.cls === SpawnClass.PropContainerPlacer
+      && obj.placer.routine === PropContainerRoutine.Type61Figure) {
+    return TYPE61_FIGURE_LIGHT;
+  }
+  return null;
 }

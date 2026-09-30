@@ -38,6 +38,7 @@
  *                     triggers, and every branch writer
  *   class41_stages    stage props: the church, the lift, the doors, the
  *                     collectibles, Training's targets
+ *   class41_ctors     class 0x41 constructors 42, 52, 55, 61 and 65
  *   class31           the thrower's states, arcs and root motion
  *   class31_throw     the thrower's eye, its weapons and its throw; `coli/`
  *   class10           the civilian and the rescue
@@ -76,6 +77,7 @@ import "./class25.test";
 import "./class20_24.test";
 import "./routes.test";
 import "./class41_stages.test";
+import "./class41_ctors.test";
 import "./class31.test";
 import "./class31_throw.test";
 import "./class10.test";

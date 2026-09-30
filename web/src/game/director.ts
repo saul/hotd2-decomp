@@ -664,12 +664,20 @@ export function SpawnPropContainers(spawns: readonly ScriptSpawn[]): void {
       : pl.container === "table66" ? PropContainerType.Table66Props
       : pl.container === "water_surface" ? PropContainerType.WaterSurface
       : pl.container === "type47" ? PropContainerType.Type47Prop
+      : pl.container === "type42" ? PropContainerType.Type42Prop
+      : pl.container === "type52" ? PropContainerType.Type52VanDoors
+      : pl.container === "type55" ? PropContainerType.Type55Particles
+      : pl.container === "type61" ? PropContainerType.Type61Figures
+      : pl.container === "type65" ? PropContainerType.Type65Particles
       : PropContainerType.BreakableGroup;
     // The three table constructors read the placer's `+0x11C` as the step
     // lifetime they copy into every object, so that is what goes in `hp` for
     // them; for a group it is the group id.
     const table = pl.container === "table38" || pl.container === "table39"
-      || pl.container === "table44";
+      || pl.container === "table44"
+      // ...and constructors 52 and 61 copy it into what they build: 52's
+      // doors as their step lifetime, 61's figures as a word nothing reads.
+      || pl.container === "type52" || pl.container === "type61";
     // The water task and constructors 50 and 66 read both descriptor fields
     // as themselves: `+0x1F4` the table index, `+0x11C` the lifetime.
     const bothFields = pl.container === "water_surface"

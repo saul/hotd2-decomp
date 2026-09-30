@@ -54,6 +54,7 @@ import {
   FLICKER_SLOT_WHOLE, FLICKER_WHOLE_RISE, FLICKER_WHOLE_SCALE,
 } from "../game/class41/type48";
 import { SpawnClass } from "../game/spawn_class";
+import { PropContainerRoutine } from "../game/class41/placer_state";
 import { BAMS_TO_RAD } from "../core/bams";
 import { Rng } from "../core/rng";
 import { COMPOSITE_FAMILIES, PropParts, type PropPart } from "./prop_parts";
@@ -721,9 +722,12 @@ export class BreakableLayer implements System<RenderContext> {
       // The placers are counted rather than the props, because that is the
       // distinction: "the script has not placed any here" and "press play"
       // want different responses from whoever is reading the panel.
+      // A class-0x41 actor is a placer unless it is one of constructor 61's
+      // figures, which is a skinned actor that stays.
       const waiting = G.g_object_list.filter((o) =>
         !o.despawned && !o.dead
-        && (o.cls === SpawnClass.PropContainerPlacer
+        && ((o.cls === SpawnClass.PropContainerPlacer
+             && o.placer.routine === PropContainerRoutine.Placer)
             || o.cls === SpawnClass.PropPlacer)).length;
       return waiting
         ? `none built yet — ${waiting} placer${waiting === 1 ? "" : "s"}`

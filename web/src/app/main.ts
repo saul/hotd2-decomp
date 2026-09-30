@@ -93,7 +93,9 @@ import { SceneFog } from "../render/fog";
 import { TextureFilter, type TextureFilterMode } from "../render/texfilter";
 import { type LightingMode, SceneLighting } from "../render/lighting";
 import { GunLights } from "../render/gunlights";
-import { ActorDrawsUnderSecondaryLights } from "../game/light_sets";
+import {
+  ActorDrawLightDirection, ActorDrawsUnderSecondaryLights,
+} from "../game/light_sets";
 import { applyToggle, runCommand, type PlayerCommands } from "./commands";
 import { entryBlockFor, loadStageInto } from "./stage_load";
 import { Events } from "../core/events";
@@ -709,6 +711,10 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
       secondary: (at) => {
         const obj = ActorByAt(at);
         return !!obj && ActorDrawsUnderSecondaryLights(obj);
+      },
+      direction: (at) => {
+        const obj = ActorByAt(at);
+        return obj ? ActorDrawLightDirection(obj) : null;
       },
     };
     // The port's two answers, handed across as questions -- see

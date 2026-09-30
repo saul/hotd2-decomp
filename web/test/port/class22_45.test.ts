@@ -24,6 +24,7 @@ import { BossHpBarsTick } from "../../src/game/boss_hp_bar";
 import { BossBannersTick } from "../../src/game/boss_banner";
 import { vec3, type Vec3 } from "../../src/game/vec";
 import { Class22SubActorAt } from "../../src/game/class22/records";
+import { Class22ChargeShots } from "../../src/game/class22/shot";
 import { Class22Relative } from "../../src/game/class22/state";
 import { Class23State } from "../../src/game/class23/state";
 import { CLASS23_BLEND_WALK, Class23BlendStart }
@@ -328,6 +329,28 @@ console.log("\nclasses 0x22/0x23: JUDGMENT, the flier and the walker:");
           && MotionPlayFrame(w23) === want,
           `stage ${w23.companion.hpStage} want ${want} motion ${w23.motion} `
           + `counter ${w23.playTicks} cursor ${MotionPlayFrame(w23)}`);
+  }
+
+  // Original Mode: `Class22ChargeShots` charges each player's hit by that
+  // player's `g_original_weapon_damage_scale`, doubling for BULLET BLOW's
+  // -1.0. It read a constant 1.0 once, on the belief that nothing but 1.0 is
+  // ever written there.
+  {
+    const charge = (scale: number): number => {
+      const j = spawnFlier(1, 0) as Actor & { judgment: unknown };
+      G.g_GameMode = GameMode.Original;
+      G.g_original_weapon_damage_scale[0] = scale;
+      G.g_original_weapon_damage_scale[1] = 1;
+      const hp = j.hp;
+      j.flags |= 1 << 1;
+      j.shotBones[0] = 1;
+      Class22ChargeShots(j as Parameters<typeof Class22ChargeShots>[0], jf);
+      return hp - j.hp;
+    };
+    check("Original Mode: a GRENADE's 4.0 charges JUDGMENT 120 for a 30-point "
+          + "hit, BULLET BLOW's -1.0 60, the bare gun 30",
+          charge(4) === 120 && charge(-1) === 60 && charge(1) === 30,
+          `${charge(4)} ${charge(-1)} ${charge(1)}`);
   }
 }
 

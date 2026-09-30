@@ -53,7 +53,7 @@ import type {
   Boss3Splash,
 } from "./class45/state";
 import type { ScreenSpriteAnim } from "./game_over";
-import type { ViewSlotDraw } from "./view_slot";
+import type { ViewSlotDraw, WorldSlotDraw } from "./view_slot";
 import type { Boss4HitMark } from "./class19/hit_mark";
 import type { BatSplash } from "./class46/splash";
 import type { PlayerBody } from "./player_body";
@@ -70,6 +70,7 @@ import { AdvanceToNextScene, PlayerBlockBoot, PlayerBlockRestore,
   type PlayerBlock }
   from "./player_shell";
 import { HudShutterTaskCreate, type ShutterBar } from "./hud_shutter";
+import { ResetOriginalModeLoadout } from "./original_mode";
 import { GUN_CALIBRATION_FACTORY, INPUT_BINDINGS_DEFAULT, OPTION_9F28_FACTORY,
   OPTIONS_FACTORY, SIGHT_SPEED_FACTORY, START_LIVES_BY_OPTION }
   from "./options_data";
@@ -458,34 +459,107 @@ export const G = {
    */
   g_input_mode: [6, 6] as number[],
   /**
-   * `g_original_fire_mode` — 0x009A2247 + player*0x14: how the Original Mode
-   * weapon fires (1 bursts, 2 reloads only when empty). 0 in Arcade and in
-   * every loadout the port can reach.
+   * `g_original_fire_mode` — 0x009A2247 + player*0x14, `+0x07` of the
+   * Original Mode block: which row of `original_mode.fire_params` and
+   * `.ammo_hud_rows` the weapon takes. `ResetOriginalModeLoadout`
+   * (`FUN_0048A0D0`), `PlayerEnterPlay`'s Arcade arm and
+   * `OriginalItemsApplyOnJoin` (`FUN_00416240`) store 0; `OriginalItemsApply`
+   * (`FUN_00415FE0`) stores `item + 1` for the three guns (1 the shotgun, 2
+   * the machine gun, 3 the grenade launcher), 0xC for the custom air gun and
+   * 0xD for the toy gun. 1 bursts with a recoil spread; 2 reloads only empty.
    */
   g_original_fire_mode: [0, 0] as number[],
   /**
    * `g_original_character` — 0x009A2242 + player*0x14, `+0x02` of the same
    * Original Mode block: the character a player plays in Original Mode. Its
    * readers decode 0..7 as character types 0x39..0x40, 8 as 0x21 and 9 as
-   * 0x34, and take `3*c` as a row of `g_player_hand_slots` -- class 0x25's
-   * Init and its `op 9` among them, both only while `g_GameMode` is 1.
+   * 0x34, take `3*c` as a row of `g_player_hand_slots`, and load pol file
+   * `0xBE + c` (`0xA6` for 8, `0xB9` for 9) -- class 0x25's Init and its
+   * `op 9` among them, all only while `g_GameMode` is 1.
    *
-   * Seeded as `ResetOriginalModeLoadout` (`FUN_0048A0D0`) leaves it -- the
-   * player index, `puVar1[-5] = cVar2` -- like the rest of this block, whose
-   * reset is part of the stage load the port has already done
-   * (`ResetGameOnStart`). Every instruction that names `0x009A2242` or
-   * `0x009A2256` as a literal reads it; that reset is the one writer found.
+   * `ResetOriginalModeLoadout` and `OriginalItemsApplyOnJoin` store the
+   * player index; `OriginalItemsApply` stores `item - 0x14` for the six
+   * costumes 0x16..0x1B (2..7) and 8 or 9 at random for the civilian's, 0x1C.
    */
   g_original_character: [0, 1] as number[],
   /**
-   * `g_original_item_part_scale` — 0x009C88AC, u8. Original Mode items
-   * `0x0C` and `0x14` set it (`FUN_00416240`, unported: nothing in the port
-   * fills an item slot), and while it is set in Original Mode a character's
-   * bone 2 is drawn `(1.5, 1, 1.5)` and bones 5, 8, 12, 15 `(2, 1, 2)` --
-   * `ActorDrawAttachedParts`, `Boss3BystanderPoseHook`,
-   * `ResultCardFigureDrawNode`.
+   * `g_original_score_multiplier` — 0x009A2243 + player*0x14, `+0x03`, s8.
+   * `ScoreAddForPlayer` (`FUN_004156C0`) doubles the points while it is 2 in
+   * Original Mode, its one reader. 1 from `ResetOriginalModeLoadout`, 2 from
+   * DOUBLE SCORE (item 0x20) in both item routines.
+   */
+  g_original_score_multiplier: [1, 1] as number[],
+  /**
+   * `g_original_start_lives` — 0x009A2244 + player*0x14, `+0x04`, s8: the
+   * lives an Original Mode player enters play with -- `ItemSelectApplyToPlayers`
+   * (`FUN_0048A140`) and `PlayerEnterPlayOriginalContinue` (`FUN_00416340`)
+   * copy it into `g_player_lives`. 3 from `ResetOriginalModeLoadout` and
+   * `OriginalItemsApplyOnJoin`, 5 from LIFE +2 (0x0E), 8 from LIFE +5 (0x0F).
+   */
+  g_original_start_lives: [3, 3] as number[],
+  /**
+   * `g_original_bonus_credits` — 0x009A2246 + player*0x14, `+0x06`, s8: the
+   * credits the player's items add, which `ItemSelectApplyToPlayers` adds to
+   * both counters -- or, when either player's is -1, free play. 0 from
+   * `ResetOriginalModeLoadout`; 2, 5, 10 or -1 from CREDIT +2/+5/+10/∞
+   * (0x10..0x13), and 5 from the TOY GUN, to which a credit item then adds.
+   */
+  g_original_bonus_credits: [0, 0] as number[],
+  /**
+   * `g_original_weapon_sound_kind` — 0x009A224A + player*0x14, `+0x0A`: which
+   * row of `g_original_weapon_gunshot_ids` and `_reload_ids`
+   * `PlayerFireOriginalModeWeapon` and `PlayerReloadOriginalModeWeapon`
+   * play. Written as part of `original_mode.weapon_records`' dword (the three
+   * guns, 0 elsewhere) and alone for BULLET BLOW (4), the air gun (5), the toy
+   * gun (6) and the bass lure (7), by `OriginalItemsApply`.
+   */
+  g_original_weapon_sound_kind: [0, 0] as number[],
+  /**
+   * `+0x0B` of the Original Mode block, 0x009A224B + player*0x14:
+   * `original_mode.weapon_records[row].flags`, written with the rest of the
+   * row's dword. `[open]`: no instruction reads it back -- every read of
+   * `+0x08` is a byte read -- so what it would select is unknown.
+   */
+  g_original_weapon_flags: [3, 3] as number[],
+  /**
+   * `g_original_item_part_scale` — 0x009C88AC, u8. PRIMITIVE MEAT (0x14)
+   * and the TOY GUN (0x0C) set it in `OriginalItemsApply` and
+   * `OriginalItemsApplyOnJoin`; `ResetOriginalModeLoadout` clears it. While
+   * it is set in Original Mode a character's bone 2 is drawn `(1.5, 1, 1.5)`
+   * and bones 5, 8, 12, 15 `(2, 1, 2)` -- `ActorDrawAttachedParts`,
+   * `Boss3BystanderPoseHook`, `ResultCardFigureDrawNode` and the players'
+   * own node hook `FUN_00416570`.
    */
   g_original_item_part_scale: 0,
+  /**
+   * `g_original_item_big_head` — 0x009C88A8, u8: ROTTEN MEAT (0x15). Both item
+   * routines set it and `ResetOriginalModeLoadout` clears it. While it is 1
+   * in Original Mode the inits of classes 0x20, 0x21, 0x30 and 0x31 double
+   * bone 2's hit radius (class 0x30's type 0xE by 1.8) and their bone hooks
+   * draw the head bigger -- `EnemyZombieInit` and `EnemyThrowerInit` with
+   * `ZombieDrawWithEnlargedHead` and `ThrowerDrawWithEnlargedHead` are
+   * ported; `SpawnSeveredHead` and `ScriptedHumanoidBoneDrawHook` read it
+   * too.
+   */
+  g_original_item_big_head: 0,
+  /**
+   * `g_original_quarter_life` — 0x009C88A9, u8: LIFE 1/4 (0x1D). Its one
+   * reader is `ResolveHit` (`0x00409506`), which multiplies a shot's damage
+   * by 4.0 while it is set, unless the damage scale is the -1.0 one-shot.
+   */
+  g_original_quarter_life: 0,
+  /**
+   * `g_original_first_aid` — 0x009C88AA, u8: FIRST AID KIT (0x1E). Read by
+   * five breakable-prop routines, which release an extra-life pickup while
+   * it is set.
+   */
+  g_original_first_aid: 0,
+  /**
+   * `g_original_ufo_item` — 0x009C88AB, u8: set by UFO?? (0x1F) and cleared
+   * by `ResetOriginalModeLoadout`, and read by nothing -- the flying bonus
+   * asks `PlayerHoldsOriginalItem(0x1F)` instead (`PropUpdateType77`).
+   */
+  g_original_ufo_item: 0,
   /**
    * The four auto-fire bytes at `+0x10..+0x13` of `g_original_item_slots`
    * (`0x009A2250 + player*0x14`), which `OriginalWeaponLoadFireParams`
@@ -516,6 +590,12 @@ export const G = {
    * Cleared where {@link g_screen_sprite_draws} is, for the same reason.
    */
   g_view_slot_draws: [] as ViewSlotDraw[],
+  /**
+   * `[port-only]` -- the asset slots this frame drew in the world, under a
+   * matrix a routine built: see `game/view_slot.ts`. Cleared where
+   * {@link g_view_slot_draws} is.
+   */
+  g_world_slot_draws: [] as WorldSlotDraw[],
   /**
    * `g_screen_sprite_queue` — `0x007C21A8`. The layered sprite queue
    * `DrawScreenSpriteLayered` (`FUN_0041C800`) fills and
@@ -566,17 +646,16 @@ export const G = {
   /**
    * `g_original_weapon_damage_scale` — `0x009A224C`, f32, stride 0x14 (the
    * `+0x0C` of each player's `g_original_item_slots` record). The Original
-   * Mode damage factor the boss shot routines read: `-1.0` doubles, anything
-   * else multiplies (`Boss4ResolveShot` at `0x00491E3E`, `ResolveHit`,
-   * `Class14ApplyBoneDamage` and the other bosses).
+   * Mode damage factor: the boss shot routines double on `-1.0` and multiply
+   * by anything else (`Boss4ResolveShot` at `0x00491E3E`,
+   * `Class14ApplyBoneDamage` and the other bosses); `ResolveHit` takes `-1.0`
+   * as "the target's remaining hit points", one shot one kill.
    *
-   * **Every writer stores the same constant**, `[0x004EC92C]` = 1.0f:
-   * `PlayerEnterPlay` at `0x00414917`, `ResetOriginalModeLoadout` at
-   * `0x0048A117` and `FUN_00416240`'s two item arms at `0x0041627F` and
-   * `0x00416297`. `[proved]` from the four stores and the one read of the
-   * constant each makes; so the factor is 1.0 wherever a player can shoot,
-   * and the doubling arm is never taken. Seeded here with that value rather
-   * than written from the four sites, which would write it again.
+   * 1.0 -- row 0 of `original_mode.weapon_records` -- from
+   * `ResetOriginalModeLoadout`, `PlayerEnterPlay`'s Arcade arm and
+   * `OriginalItemsApplyOnJoin`; from `OriginalItemsApply`, the row of the
+   * item carried: 1.0 for the shotgun and machine gun, 4.0 the grenade
+   * launcher, 1.2 / 1.5 / 2.0 the POWER UPs and -1.0 BULLET BLOW.
    */
   g_original_weapon_damage_scale: [1, 1] as number[],
   /**
@@ -739,12 +818,10 @@ export const G = {
   /**
    * `g_original_life_cap` — 0x009A2245 + player*0x14, `+0x05` of the
    * Original Mode block at `g_original_item_slots`, s8: `GrantExtraLife`'s
-   * cap while `g_GameMode` is 1. The two writers that name the address both
-   * store 5 -- `ResetOriginalModeLoadout` at `0x0048A125` and `FUN_00416240`
-   * at `0x004162A6` -- so it is seeded with that and not written again, the
-   * way {@link g_original_weapon_damage_scale} is. `[likely]` that no other
-   * store reaches it: one through the block's base with no constant address
-   * would not be listed.
+   * cap while `g_GameMode` is 1. 5 from `ResetOriginalModeLoadout` and
+   * `OriginalItemsApplyOnJoin`; 8 from LIFE +5 (0x0F), `OriginalItemsApply`
+   * at `0x004160C9` -- a store through the block's base, which a search for
+   * the address alone does not find.
    */
   g_original_life_cap: [5, 5] as number[],
   /**
@@ -975,6 +1052,14 @@ export const G = {
    * keeps it for the 2D quads that are lit (`SCREEN_SPRITE_LIT`).
    */
   g_render_light_colour: [1, 1, 1] as number[],
+  /**
+   * `g_scene_light_colour_r` — 0x009A3780, and `g`, `b` beside it: light
+   * block 0's colour, channels 6..8 (`+0x240`), which `LightsRestoreScene`
+   * and `ItemSelectDrawPanels` hand back to `SetRenderLightColour`.
+   * `[port-only]` as a copy: the block is the walker's (`ChannelBlock`), and
+   * the walker writes these three here each frame after it steps it.
+   */
+  g_scene_light_colour: [1, 1, 1] as number[],
   /** `g_credits_per_player` — 0x009C8E74. 0: one shared count. */
   g_credits_per_player: 0,
   /**
@@ -1371,9 +1456,10 @@ export const G = {
   g_shot_hit_something: [0, 0] as number[],
   /**
    * `g_original_weapon_kind` — 0x009A2249, +0x09 of the per-player Original
-   * Mode block. `ResetOriginalModeLoadout` (`FUN_0048A0D0`) seeds it with 0
-   * and the port has no pickup that changes it, so every arm behind it is
-   * transcribed and unreached. See {@link OriginalWeaponKind}.
+   * Mode block. 0 from `ResetOriginalModeLoadout` (`FUN_0048A0D0`); from
+   * `OriginalItemsApply`, the three guns' own (1, 2, 3 -- part of their
+   * weapon record's dword), 4 for BULLET BLOW and 5 for the BASS LURE. See
+   * {@link OriginalWeaponKind}.
    */
   g_original_weapon_kind: [0, 0] as number[],
 
@@ -2611,6 +2697,18 @@ export const G = {
    */
   g_evt_step_index: 0,
   /**
+   * `g_evt_ip` — 0x009C7108, the event VM's instruction pointer. The engine
+   * keeps an address; the port keeps its index among the instructions of step
+   * {@link g_evt_step_index}, which is what `EvtGetStep`'s pointer plus the
+   * handlers' own `+= 8`s come to. `Walker.opIndex` is an accessor over it.
+   *
+   * In `G` because the VM is not its only writer: `ItemSelectFinish`
+   * (`FUN_004895C0`) points it at step 1 of the block and the interpreter
+   * carries on from there, abandoning the wait it was holding at -- a wait in
+   * this VM is only the instruction at `g_evt_ip`, run again every frame.
+   */
+  g_evt_ip: 0,
+  /**
    * `g_evt_block_index` — 0x009A2BC0, s16. Which event block is running.
    *
    * `Walker.block` is an accessor over this, the same arrangement
@@ -2649,27 +2747,32 @@ export const G = {
    * reads it, and three branch triggers only open their route while the
    * player is carrying the right id.
    *
-   * [diverges] **Nothing in the port ever fills it.** Shooting a collectible
-   * does not: `OriginalItemPropUpdate` counts the id into
-   * {@link g_original_items_taken} and raises a banner
-   * (`SpawnOriginalItemBanner`, `FUN_00475E40`), and neither writes here. The
-   * writer of the ids is not ported, so every slot stays at -1 and the three
-   * key-gated routes are unreachable — as they would be for a player who had
-   * not found the key. That is the honest state, not a stub: the alternative
-   * is to pretend the player is carrying something.
+   * The trunk fills it, and nothing else does: `ItemSelectUpdate`
+   * (`FUN_00488820`) takes an item out of {@link g_original_items_taken} into
+   * a slot and puts one back; `ResetOriginalModeLoadout` (`FUN_0048A0D0`)
+   * empties both at the start of every run. Shooting a collectible does not
+   * write here -- `OriginalItemPropUpdate` counts the id into
+   * {@link g_original_items_taken} for the next run's trunk.
    */
   g_original_item_slots: [[-1, -1], [-1, -1]] as number[][],
   /**
    * `g_original_items_taken` — 0x009C90C0, one byte per Original Mode item
-   * id, 33 of them. `OriginalItemPropUpdate` and `PropUpdateType72` count a
-   * pickup in, capped at 0x63.
+   * id, 33 of them: how many of each the player has to take out of the
+   * trunk. The pickups count one in, capped at 0x63; the trunk takes one out
+   * for each it puts in a slot and gives it back when the slot is emptied.
    *
-   * **Persistent, not per game**: `FUN_0040AB50` copies all 33 in from the
-   * options block at `0x009C9F3D` with the lives and difficulty settings, and
-   * nothing in a game's reset clears it. The port has no save block, so it
-   * starts at zero with the page and survives every reset.
+   * **Persistent, not per game**: `ProfileApplyToRun` (`FUN_0040AB50`) and
+   * the trunk's first frame copy all 33 in from `g_profile_original_items`,
+   * and the Original Mode game over and the ending copy them back out before
+   * the profile is saved. Nothing in a game's reset clears it.
    */
   g_original_items_taken: new Array(33).fill(0) as number[],
+  /**
+   * `g_item_select_list` — 0x007DD068, 33 s8: the trunk's list, the ids with
+   * a count above 0 in id order and -1 after them. `ItemSelectBuildList`
+   * (`FUN_004896B0`) rebuilds it on every take and put-back.
+   */
+  g_item_select_list: new Array(33).fill(-1) as number[],
   /**
    * `g_original_item_pickup_blocked` — 0x007DCD14. While non-zero,
    * `OriginalItemPropUpdate` skips its whole pick-up arm. `PlaceGenericProp`
@@ -3082,9 +3185,9 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   G.g_shot_weapon_ring = makeShotWeaponRing();
   G.g_shot_effect_cursor = [0, 0];
   G.g_shot_hit_something = [0, 0];
-  G.g_original_weapon_kind = [0, 0];
   G.g_screen_sprite_draws = [];
   G.g_view_slot_draws = [];
+  G.g_world_slot_draws = [];
   G.g_camera_is_tracking = 0;
   G.g_camera_lookat_target = vec3();
   G.g_camera_block_target = vec3();
@@ -3184,13 +3287,16 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   G.g_prop45_wave_clock_drawn = [-1, -1, -1, -1];
   G.g_prop_shatter_seq = 1;
   G.g_evt_step_index = 0;
+  G.g_evt_ip = 0;
   G.g_evt_block_index = 0;
   G.g_script_branch_var = 0;
   G.g_branch_prop_shot_count = 0;
   ResetFragmentSubkind1Intact();
-  G.g_original_item_slots = [[-1, -1], [-1, -1]];
-  // `g_original_items_taken` is not here on purpose: it is the options
-  // block's, and a game's reset leaves it alone.
+  // The Original Mode block is not here: `ResetOriginalModeLoadout` resets it
+  // once a run -- below, with the rest of `ResetGameOnStart`'s new-game half
+  // -- and a scene load carries it (`PLAYER_BLOCK_FIELDS`).
+  // `g_original_items_taken` is not here on purpose either: it is the
+  // profile's, and a game's reset leaves it alone.
   G.g_original_item_pickup_blocked = 0;
   G.g_original_item_banner_count = 0;
   G.g_original_item_banners = [];
@@ -3252,6 +3358,10 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
     G.g_civilians_rescued_total = 0;
     G.g_civilians_rescued_by_scene = [0, 0, 0, 0, 0, 0];
     G.g_rescued_char_types = new Array<number>(60).fill(0);
+    // ...and its loadout half, `CALL ResetOriginalModeLoadout` at
+    // `0x0045FF48`: in every mode, before the player task enters play and
+    // reads the magazine (`PlayerEnterPlay`).
+    ResetOriginalModeLoadout();
     PlayerStartGameFromTitle(G.g_GameMode);
   }
   // The player turn taken above is the port's sequencing, not a frame the
@@ -3260,6 +3370,7 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   // on screen for as long as a freshly loaded stage sits paused.
   G.g_screen_sprite_draws = [];
   G.g_view_slot_draws = [];
+  G.g_world_slot_draws = [];
 }
 
 /**

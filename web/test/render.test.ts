@@ -1581,7 +1581,7 @@ console.log("\nthe weapon-5 round and the tracer face the camera");
   // slot only from a live kind-5 `g_shot_tracer_ring` record, at the record
   // plus the path, after `MatrixClearRotation`.
   const { RIGS } = await import("../src/hod2lib/rigs_data");
-  const { originalWeaponRoundSlots } = await import("../src/hod2lib/bundle");
+  const { originalWeaponEffectSlots } = await import("../src/hod2lib/bundle");
   const { OriginalWeaponKind, TRACER_WEAPON5_SLOT }
     = await import("../src/game/effects/shot_effects");
   const { Euler, Quaternion } = await import("three");
@@ -1589,8 +1589,14 @@ console.log("\nthe weapon-5 round and the tracer face the camera");
   check("obj_416b00 is not a rig the exporter places",
         !!RIGS.find((r) => r.name === "obj_416b00")?.placementBlocked);
   check("...and its slot rides the effect templates, in Original Mode only",
-        originalWeaponRoundSlots(true).includes(0x109d)
-        && originalWeaponRoundSlots(false).length === 0);
+        originalWeaponEffectSlots(true).includes(0x109d)
+        && originalWeaponEffectSlots(false).length === 0);
+  // ...with the grenade's blast (sprite effect 0x53, 0x125..0x13D) and
+  // BULLET BLOW's ring (0xA6F + frames 0..0x17), which the trunk can equip.
+  check("...and the grenade's blast and BULLET BLOW's ring ride with it",
+        [0x125, 0x13d, 0xa6f, 0xa86].every(
+          (s) => originalWeaponEffectSlots(true).includes(s))
+        && !originalWeaponEffectSlots(true).includes(0xa87));
 
   const root = new Obj3D();
   for (const slot of [TRACER_WEAPON5_SLOT, 0xb78]) {
@@ -1618,7 +1624,7 @@ console.log("\nthe weapon-5 round and the tracer face the camera");
   check("no record, no round", layer.group.children.length === 0);
 
   const t = G.g_shot_tracer_ring[0]!;
-  t.live = true; t.player = 0; t.kind = OriginalWeaponKind.Slow;
+  t.live = true; t.player = 0; t.kind = OriginalWeaponKind.BassLure;
   t.pos = { x: 1, y: 2, z: 3 }; t.frame = 30;
   layer.update(ctx);
   const n = layer.group.children[0];

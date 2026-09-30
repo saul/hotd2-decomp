@@ -558,6 +558,7 @@ console.log("\n`g_class_handlers`, filled by the classes themselves:");
     [SpawnClass.ChapterCard, "0x60 chapter card"],
     [SpawnClass.ResultCard, "0x61 result card"],
     [SpawnClass.ResultCardTally, "0x62 result card loader"],
+    [SpawnClass.ItemSelect, "0x6e trunk"],
   ];
   for (const [cls, name] of want) {
     check(`${name} registered itself`,

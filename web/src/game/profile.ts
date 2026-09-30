@@ -24,6 +24,7 @@
  */
 import type { Events } from "../core/events";
 import { G } from "./globals";
+import { OriginalItem } from "./original_mode";
 import {
   GUN_CALIBRATION_FACTORY, INPUT_BINDINGS_DEFAULT, OPTION_9F28_FACTORY,
   OPTIONS_FACTORY, SIGHT_SPEED_FACTORY, START_LIVES_BY_OPTION,
@@ -95,9 +96,12 @@ export function OptionsFactoryReset(): void {
  * and the rankings reset (`FUN_0041C490(0)`); the Training and Boss Mode
  * grades zeroed; the blood colour 1; three bytes nothing reads
  * (`0x009C9F23` 1, `0x009C9F24` 0, `0x009C9F26` 0, `0x009C9F27` 1); the
- * saved Original items zeroed; `0x009C9F40`, `44`, `4D` to 1; the unlocks
- * zeroed; `0x009CA058..5E`; and per player no damage, infinite ammo and
- * `+0x7A` zeroed. Then `OptionsFactoryReset`. `[proved]`
+ * saved Original items zeroed (`REP STOSD` of eight dwords and a `STOSB` at
+ * `0x009C9F3D`) and **three of them set to 1** -- `0x009C9F40`, `44` and
+ * `4D` (`MOV [...], DL` at `0x004010C7/CD/D3`, `DL = 1`), items 3, 7 and
+ * 0x10: POWER UP 1.2, CHAMBER +2 and CREDIT +2, what a first game's trunk
+ * holds; the unlocks zeroed; `0x009CA058..5E`; and per player no damage,
+ * infinite ammo and `+0x7A` zeroed. Then `OptionsFactoryReset`. `[proved]`
  *
  * Of those, `G` holds the blood colour, the saved items, the unlocks and the
  * two per-player flags; the rest are state of screens and modes the port
@@ -106,6 +110,9 @@ export function OptionsFactoryReset(): void {
 export function ProfileFactoryReset(): void {
   G.g_option_blood_color = 1;
   G.g_profile_original_items = new Array(33).fill(0);
+  G.g_profile_original_items[OriginalItem.PowerUp12] = 1;
+  G.g_profile_original_items[OriginalItem.Chamber2] = 1;
+  G.g_profile_original_items[OriginalItem.CreditPlus2] = 1;
   G.g_option_unlocks = 0;
   G.g_player_no_damage = [0, 0];
   G.g_player_infinite_ammo = [0, 0];

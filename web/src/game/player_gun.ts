@@ -54,12 +54,14 @@
  */
 import type { Events } from "../core/events";
 import {
-  FireShotRequest, TakeDueShotRequests, g_gunshot_sound_ids, type ShotRequest,
+  BuildShotRay, FireShotRequest, TakeDueShotRequests, g_gunshot_sound_ids,
+  type ShotRequest,
 } from "./combat/shot";
 import { GameMode } from "./game_mode";
 import { AppState, G } from "./globals";
 import type { GameHost } from "./host";
 import type { Rng } from "../core/rng";
+import { T } from "./tables";
 
 /** The arcade magazine: `PlayerRefillMagazine`'s literal 6. */
 export const ARCADE_MAGAZINE = 6;
@@ -90,40 +92,6 @@ export enum InputBindingSet {
   /** `MapleDeviceKind` 2. */
   PadKind2 = 3,
 }
-
-/**
- * `g_original_fire_params` — `0x00579ED8`, eight bytes per
- * `g_original_fire_mode`. `OriginalWeaponLoadFireParams` copies bytes 0..3
- * into the auto-fire latches; `PlayerFireOriginalModeWeapon` reads 1, 5, 6
- * and 7. Rows 4..7 are zero.
- */
-export const ORIGINAL_FIRE_PARAMS: readonly (readonly number[])[] = [
-  [0, 0, 0, 0, 0, 0, 0, 0],
-  [0, 0, 3, 0, 0, 1, 3, 2],
-  [0, 0, 0, 0, 0, 1, 0, 2],
-  [0, 0, 0, 0, 0, 0, 0, 4],
-];
-
-/**
- * `g_original_weapon_gunshot_ids` — `0x004EC9A0` and
- * `g_original_weapon_reload_ids` — `0x004EC9C0`, eight u32 each, indexed by
- * `g_original_weapon_sound_kind` (`0x009A224A`).
- */
-const ORIGINAL_GUNSHOT_IDS: readonly number[] = [
-  0, 0x001600a9, 0x000e00a9, 0x000b00a9, 0x000d00a9, 0x000900a9, 0x000600a9,
-  0x001500a9,
-];
-const ORIGINAL_RELOAD_IDS: readonly number[] = [
-  0, 0, 0, 0x000c00a9, 0, 0x000a00a9, 0, 0,
-];
-
-/**
- * `g_original_weapon_sound_kind` (`0x009A224A`). Not a field of `G`: the
- * only instruction that writes it is `ResetOriginalModeLoadout`'s store of
- * the dword `0x03000006`, which makes it 0, and nothing references the byte
- * to write anything else (see its row in `globals.tsv`).
- */
-const ORIGINAL_WEAPON_SOUND_KIND = 0;
 
 /** The magazine a refill fills to, and the count a reload compares against. */
 function FullMagazine(player: number): number {
@@ -231,11 +199,13 @@ function PlayerTriggerPull(player: number, req: ShotRequest,
 
 /**
  * `OriginalWeaponLoadFireParams` — `FUN_00416420`. Bytes 0..3 of the fire
- * mode's `ORIGINAL_FIRE_PARAMS` row into the player's four auto-fire latches.
+ * mode's row of `g_original_fire_params` (`0x00579ED8`, the bundle's
+ * `original_mode.fire_params`) into the player's four auto-fire latches. A
+ * bundle written before the block has no rows and leaves them.
  */
 export function OriginalWeaponLoadFireParams(player: number): void {
-  const row = ORIGINAL_FIRE_PARAMS[G.g_original_fire_mode[player]]
-    ?? ORIGINAL_FIRE_PARAMS[0];
+  const row = T.originalMode?.fire_params[G.g_original_fire_mode[player]];
+  if (!row) return;
   const l = G.g_original_fire_latches[player];
   for (let i = 0; i < 4; i++) l[i] = row[i];
 }
@@ -255,7 +225,8 @@ export function PlayerReloadOriginalModeWeapon(player: number,
   G.g_player_ammo[player] = G.g_player_magazine_size[player];
   G.g_player_magazine_empty[player] = 0;
   if (G.g_nFiringGate === 0) return;
-  const id = ORIGINAL_RELOAD_IDS[ORIGINAL_WEAPON_SOUND_KIND] ?? 0;
+  const id = T.originalMode?.reload_ids[G.g_original_weapon_sound_kind[player]]
+    ?? 0;
   events?.emit("sound.play", { id: id !== 0 ? id : RELOAD_SOUND });
 }
 
@@ -265,27 +236,39 @@ export function PlayerReloadOriginalModeWeapon(player: number,
  * burst machine in the four latches, and `PlayerReloadOriginalModeWeapon`
  * for both reloads.
  *
- * The latches: `[3]` counts down once a frame, floored at 0, and while it is
- * above 0 the trigger is not read; `[1] == 1` fires a round with no pull at
- * all. Fire mode 1 reloads `[1]` and `[3]` from row 1 on every shot and takes
- * a round only every `[2]`-th; any other mode reloads them from its own row.
+ * The latches, `+0x10..+0x13` of the block (`g_original_fire_params`' first
+ * four bytes on every load): `[3]` counts down once a frame, floored at 0,
+ * and while it is above 0 nothing fires; `[1] == 1` fires a round with no
+ * pull at all. Each round reloads `[1]` and `[3]` from bytes 5 and 7 of the
+ * fire mode's row, so the MACHINE GUN (mode 2: 1 and 2) empties itself a
+ * round every other frame off one pull, and the GRENADE (mode 3: 0 and 4)
+ * waits four frames between rounds. The SHOTGUN (mode 1) also counts `[2]`
+ * down from row 1's byte 6, 3: its pull fires three rounds, two frames apart,
+ * and only the third takes a shell -- and the second and third are thrown
+ * off the crosshair by `rand() % 0x40` across and `rand() % 0x30` down, each
+ * signed by a `rand() % 2`, in that order.
  *
- * `[diverges]` Two arms, both unreachable in the port -- they need
- * `g_original_fire_mode` 1, and no routine the port runs writes anything but
- * 0 there, because no weapon pickup is ported:
- * * the round owed with no pull is fired along the last pull's ray
- *   (`G.g_crosshair_ray`), where the engine calls `BuildShotRay` on the
- *   crosshair as it stands -- the port has a ray only when a pull brings one;
- * * the recoil spread, `rand() % 0x40` across and `% 0x30` down in pixels
- *   before the ray is built, is not applied: the ray arrives built.
+ * Every round's ray is `BuildShotRay` of the crosshair as it stands. A pull
+ * brings the page's, which is that ray; an owed round and a thrown pellet
+ * build it here.
+ *
+ * `[diverges]` The spread is not written into `g_crosshair_x/y`. The engine
+ * writes it there, and the frame after, `FUN_00415710` copies the aim record
+ * back over it; the port's crosshair is the pointer's own, written only when
+ * the pointer moves, so a write here would stay until it did -- and the next
+ * pellet would be thrown from where the last one landed. The shot is the
+ * same; what differs is the crosshair sprite, which in the engine jumps with
+ * the pellet for that one frame.
  */
 export function PlayerFireOriginalModeWeapon(player: number,
                                              f: GunFrame): void {
   const l = G.g_original_fire_latches[player];
-  l[3] -= 1;
+  l[3] = s8(l[3] - 1);
   if (l[3] < 1) l[3] = 0;
   const pulls = TakeDueShotRequests(player);
-  const owed = l[1] === 1 && !pulls.length ? G.g_crosshair_ray[player] : null;
+  // The round owed with no pull, built where the engine builds every one.
+  const owed = l[1] === 1 && !pulls.length
+    ? BuildShotRay(G.g_crosshair_x[player], G.g_crosshair_y[player]) : null;
   const polls: ShotRequest[] = owed
     ? [{ player, frame: Math.round(G.g_frame), ray: owed,
          onScreen: G.g_aim_on_screen[player] }]
@@ -300,6 +283,9 @@ export function PlayerFireOriginalModeWeapon(player: number,
     PlayerReloadOriginalModeWeapon(player, f.events);
   }
 }
+
+/** `(s8)`, as the latch bytes are counted. */
+const s8 = (v: number): number => ((v & 0xff) << 24) >> 24;
 
 /**
  * The trigger block of `PlayerFireOriginalModeWeapon`, for one pull.
@@ -316,26 +302,31 @@ function PlayerOriginalTriggerPull(player: number, req: ShotRequest,
     return;
   }
   if (G.g_nFiringGate === 0) return;
+  const rows = T.originalMode?.fire_params;
   if (G.g_app_state !== AppState.Attract
       && G.g_player_infinite_ammo[player] === 0
       && G.g_player_magazine_size[player] !== -1) {
     const mode = G.g_original_fire_mode[player];
     let take = true;
     if (mode === 1) {
-      const row = ORIGINAL_FIRE_PARAMS[1];
-      l[1] = row[5];
-      l[3] = row[7];
-      l[2] -= 1;
+      const row = rows?.[1];
+      if (row) {
+        l[1] = row[5];
+        l[3] = row[7];
+      }
+      l[2] = s8(l[2] - 1);
       if (l[2] > 0) {
         take = false;
-      } else {
+      } else if (row) {
         l[1] = row[1];
         l[2] = row[6];
       }
     } else {
-      const row = ORIGINAL_FIRE_PARAMS[mode] ?? ORIGINAL_FIRE_PARAMS[0];
-      l[1] = row[5];
-      l[3] = row[7];
+      const row = rows?.[mode];
+      if (row) {
+        l[1] = row[5];
+        l[3] = row[7];
+      }
     }
     if (take) G.g_player_ammo[player] -= 1;
   }
@@ -344,8 +335,21 @@ function PlayerOriginalTriggerPull(player: number, req: ShotRequest,
     G.g_player_magazine_empty[player] = 1;
     G.g_player_reload_prompt_timer[player] = 0;
   }
-  const own = ORIGINAL_GUNSHOT_IDS[ORIGINAL_WEAPON_SOUND_KIND] ?? 0;
-  FireShotRequest(req, f.host, f.rng, f.events,
+  let shot = req;
+  if (G.g_original_fire_mode[player] === 1 && l[2] !== 2) {
+    // `rand() % 2`, `rand() % 0x40`, `rand() % 2`, `rand() % 0x30`, in that
+    // order (`0x00414CE0..0x00414D3F`): each offset signed `1 - 2 * coin`.
+    const sx = f.rng.int(2);
+    const mx = f.rng.int(0x40);
+    const sy = f.rng.int(2);
+    const my = f.rng.int(0x30);
+    const x = (sx * -2 + 1) * mx + G.g_crosshair_x[player];
+    const y = (sy * -2 + 1) * my + G.g_crosshair_y[player];
+    shot = { ...req, ray: BuildShotRay(x, y) };
+  }
+  const own =
+    T.originalMode?.gunshot_ids[G.g_original_weapon_sound_kind[player]] ?? 0;
+  FireShotRequest(shot, f.host, f.rng, f.events,
                   own !== 0 ? own : g_gunshot_sound_ids[player] ?? 0);
 }
 

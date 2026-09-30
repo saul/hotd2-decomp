@@ -141,6 +141,7 @@ function projection(): UiProjection {
     gameOver: { phase: 3, label: "GAME OVER" },
     net: null,
     netPeer: null,
+    originalItems: null,
   };
 }
 

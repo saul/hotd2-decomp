@@ -47,21 +47,6 @@ const DAMAGE_BOTH = 25;
  */
 const BOTH_PLAYERS = 2;
 
-/**
- * The float at `0x009A224C + player * 0x14` — `g_original_item_slots + 0x0C`
- * — that Original Mode multiplies each hit by, `-1.0` meaning "double".
- *
- * **It is 1.0 in every state the game can reach**, and that is why it is a
- * constant here rather than a field. It has exactly three writers and all
- * three store `0x3F800000`: `ResetOriginalModeLoadout` (`FUN_0048A0F0`, the
- * `*(puVar1 + 5) = 0x3f800000` of its per-player loop), `PlayerEnterPlay`
- * (`0x00414917`, from the constant at `0x004EC92C`) and `FUN_00416240`'s
- * item cases 0..0xD (`0x0041627F`, `0x00416297`) `[proved]` by the
- * cross-references to `0x009A224C` and `0x009A2260`. So `f * 1.0` and the
- * `-1.0` test are both taken exactly as the engine takes them.
- */
-export const ORIGINAL_WEAPON_SCALE: number = 1.0;
-
 /** `PlaySoundId` — the class's sounds go out as the port's `sound.play`. `[port-only]` as a function. */
 export function Class22PlaySound(f: ClassFrame, id: number): void {
   f.events?.emit("sound.play", { id });
@@ -136,8 +121,11 @@ export function Class22ChargeShots(obj: JudgmentActor, f: ClassFrame): number {
       SpawnBoneHitSprite(obj.at, part);
       let dmg = G.g_active_player !== BOTH_PLAYERS ? DAMAGE_ONE : DAMAGE_BOTH;
       if (G.g_GameMode === GameMode.Original) {
-        // `FILD; FCOMP [rec] == -1.0 ? FADD ST0,ST0 : FMUL [rec]; __ftol`.
-        const scale = ORIGINAL_WEAPON_SCALE;
+        // `FILD; FCOMP [rec] == -1.0 ? FADD ST0,ST0 : FMUL [rec]; __ftol`,
+        // `rec` the player's `g_original_weapon_damage_scale` (`0x009A224C`,
+        // stepped by `0x14`): BULLET BLOW's -1.0 doubles, a POWER UP or a
+        // gun's own multiplies.
+        const scale = Math.fround(G.g_original_weapon_damage_scale[p] ?? 1);
         dmg = Math.trunc(scale === -1.0 ? dmg + dmg : dmg * scale);
       }
       obj.hp = ((obj.hp - dmg) << 16) >> 16;

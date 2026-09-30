@@ -217,4 +217,13 @@ export enum SpawnClass {
    * watcher; writes no script flag.
    */
   CutsceneSkipWatcher = 0x63,
+  /**
+   * `ItemSelectUpdate` (`FUN_00488820`) — **Original Mode's trunk**, where
+   * each player takes up to two of the items they have collected. The last
+   * row of `g_class_handler_pairs` (`0x00593358`, `{0x6E, 0x00488820}`), and
+   * spawned once in the game: `spawn_simple` at `st1evtbl.bin` `0x9D4`, in
+   * block 0 step 5, which `EvtLoadBlockProgram` (`FUN_0045EBC0`) enters in
+   * Original Mode only. Its name is the track it plays, `ITEM_SELECT.wav`.
+   */
+  ItemSelect = 0x6e,
 }

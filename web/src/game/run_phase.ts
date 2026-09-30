@@ -141,12 +141,13 @@ export function ResetDamageRank(): void {
 /**
  * `ResetGameOnStart` — `FUN_0045FEF0`, run phase 0, the rank half.
  *
- * `[diverges]` The rest of the routine -- the scene and block index, the
- * Original Mode loadout, the civilian and route tallies, `LoadSceneAndReset`
- * -- is the app's stage load, which the port has already done by the time the
- * first frame runs. The engine spends this frame on the load and runs the
- * tasks on the next; the port runs phase 2 on the same frame, so a game's
- * first frame is the one it always was.
+ * `[diverges]` The rest of the routine -- the scene and block index,
+ * `LoadSceneAndReset` -- is the app's stage load, which the port has already
+ * done by the time the first frame runs; the Original Mode loadout and the
+ * civilian and route tallies are `ResetGameGlobals`' new-game arm, because
+ * the player enters play there. The engine spends this frame on the load and
+ * runs the tasks on the next; the port runs phase 2 on the same frame, so a
+ * game's first frame is the one it always was.
  */
 export function ResetGameOnStart(walk: () => void): void {
   ResetDamageRank();

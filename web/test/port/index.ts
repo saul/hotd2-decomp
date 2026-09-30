@@ -65,6 +65,8 @@
  *   spheres           spawn angles and the hit spheres' writers
  *   class28_12        class 0x28, the bin captor's door, `ShotTestMesh`
  *   options           the options screen and the input devices
+ *   original          Original Mode: the profile's items, the trunk, the items'
+ *                     effects, the guns they arm, the script's entry at step 5
  *
  * Run with `npm run test:port` (`node tools/run_test.mjs test/port/index.ts`).
  */
@@ -100,6 +102,7 @@ import "./rings.test";
 import "./spheres.test";
 import "./class28_12.test";
 import "./options.test";
+import "./original.test";
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");
 process.exit(failures ? 1 : 0);

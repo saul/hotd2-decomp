@@ -71,12 +71,18 @@ import { OPTIONS_SCREEN_SPRITES, SCREEN_IDLE_DIM_SLOT }
 // immediates in `ResultCardInstall`.
 import { RESULT_CARD_SPRITES, RESULT_GLYPH_SLOTS }
   from "../game/class61/state";
+// The trunk's sprites and models: class 0x6E's immediates.
+import { ITEM_SELECT_SLOTS, ITEM_SELECT_SPRITES } from "../game/class6e/state";
+import { SpawnClass } from "../game/spawn_class";
 import { f32, i16, i32, u32 } from "./bytes";
 import * as C from "./container";
 import { encodeRgba } from "./png";
 import * as texbank from "./texbank";
-import { BODY_CREATURE_SLOTS, CARRIED_PROP_BREAK, CARRIED_PROP_SLOTS }
-  from "./combat";
+import { BODY_CREATURE_SLOTS, CARRIED_PROP_BREAK, CARRIED_PROP_SLOTS,
+         IMPACT_SPRITE_BY_MATERIAL } from "./combat";
+import { WEAPON_FIRST_SLOT, WEAPON_LAST_FRAME }
+  from "../game/effects/shot_effects";
+import { SpriteEffectKind } from "../game/effects/sprite";
 import { charactersJson, resolveForStage as resolveCharacters,
          stagePlacesResultCard } from "./characters";
 import * as charmotion from "./charmotion";
@@ -1825,14 +1831,51 @@ export const EFFECT_SLOT_RANGES: ReadonlyArray<readonly [number, number]> = [
  * bundle's effect templates, which is where `render/effects.ts` draws the
  * ring from; it used to reach the page only as the rig `obj_416b00`, which
  * the player drew from stage load at `op_` 0x194's own pose -- in front of
- * Goldman's desk. The kind-4 record's run from 0xA6F is not here: nothing the
- * port can equip arms it, and this is only the slot whose rig was wrong.
+ * Goldman's desk.
  */
 export const ORIGINAL_WEAPON5_ROUND_SLOT = 0x109d;
 
-/** {@link ORIGINAL_WEAPON5_ROUND_SLOT}, for a stage that is Original Mode. */
-export function originalWeaponRoundSlots(original: boolean): number[] {
-  return original ? [ORIGINAL_WEAPON5_ROUND_SLOT] : [];
+/**
+ * Whether this stage's script spawns the trunk, class 0x6E: `spawn_simple`
+ * `{0x6E, 0}` at `st1evtbl.bin` `0x9EC`, in the step Original Mode enters
+ * stage 1 at. Asked of the program, not of the stage number, so the answer
+ * is the script's.
+ */
+export function stageSpawnsItemSelect(prog: Program): boolean {
+  for (const b of prog.liveBlocks()) {
+    for (const st of b.steps) {
+      for (const o of st.ops) {
+        const simple = (o.detail.simple as { class: number }[]) ?? [];
+        if (simple.some((r) => r.class === SpawnClass.ItemSelect)) return true;
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * The models Original Mode's weapons draw, for a stage that is Original Mode:
+ *
+ * * {@link ORIGINAL_WEAPON5_ROUND_SLOT}, BASS LURE's round;
+ * * GRENADE's blast, sprite effect 0x53's flipbook, which `MarkActorShot`
+ *   (`FUN_00404DB0`) throws on every hit with weapon kind 3;
+ * * BULLET BLOW's ring, `AssetDrawSlot(frame + 0xA6F)` for frames 0 to 0x17
+ *   of a kind-4 `g_shot_weapon_ring` record (`PlayerShotEffectsThink`,
+ *   `FUN_00416B00`).
+ *
+ * The exe makes the last two resident only for the weapon a player carries
+ * -- `PolFileQueueLoad(0x3D)` for kind 3 and `(0x41)` for kind 4, in
+ * `FUN_0048A140` as a stage loads. A bundle is exported before any loadout
+ * exists, so it carries both. Before the trunk was ported nothing could equip
+ * either, and neither was here.
+ */
+export function originalWeaponEffectSlots(original: boolean): number[] {
+  if (!original) return [];
+  const out = [ORIGINAL_WEAPON5_ROUND_SLOT];
+  const [lo, hi] = IMPACT_SPRITE_BY_MATERIAL[SpriteEffectKind.OriginalBlast];
+  for (let slot = lo; slot <= hi; slot++) out.push(slot);
+  for (let f = 0; f <= WEAPON_LAST_FRAME; f++) out.push(WEAPON_FIRST_SLOT + f);
+  return out;
 }
 
 /**
@@ -2220,6 +2263,9 @@ export async function buildStage(stage: Stage, sink: BundleSink,
   // need a `Program`. They are identical by construction and each costs a
   // full evt walk, so this builds one and hands it round.
   const prog = await Program.create(stage);
+  // The trunk (class 0x6E) is spawned by one step in the game, stage 1's
+  // Original entry; the stage that has it gets its sprites and models.
+  const trunk = stageSpawnsItemSelect(prog);
   const evt = prog.evt;
   const spawnRecords = evt ? evtlib.spawns(evt) : [];
 
@@ -2318,14 +2364,18 @@ export async function buildStage(stage: Stage, sink: BundleSink,
     ...Boss4EffectSlots(spawnRecords.map((r) => r.cls)),
     // ...and the sprite effects a class draws off the shot path.
     ...classEffectSlots(spawnRecords.map((r) => r.cls)),
-    // ...and Original Mode's weapon-5 round, on the tracer ring.
-    ...originalWeaponRoundSlots(stage.original),
+    // ...and Original Mode's weapons: the weapon-5 round on the tracer
+    // ring, the grenade's blast and BULLET BLOW's ring.
+    ...originalWeaponEffectSlots(stage.original),
     // ...and the shell screens' idle dimmer, which the options screen draws
     // over itself after five minutes of nothing held.
     SCREEN_IDLE_DIM_SLOT,
     // ...and the result card's `result.bin` glyphs, drawn in view space by
     // `render/view_slots.ts`, for a stage that places the card.
     ...(prog && stagePlacesResultCard(prog) ? RESULT_GLYPH_SLOTS : []),
+    // ...and the trunk and its lid, `car_org.bin` 1 and 2, drawn in the world
+    // by `render/view_slots.ts`, where the trunk is spawned.
+    ...(trunk ? ITEM_SELECT_SLOTS : []),
   ]);
   // Which materials draw blood, so the client can offer the colour the game's
   // own option offers. See `bloodTexturePredicate`.
@@ -2404,6 +2454,12 @@ export async function buildStage(stage: Stage, sink: BundleSink,
   // `game_over` is, and the sprites its tables name beside its immediates.
   const options = tables.optionsTables();
   scriptJson.options = options;
+  // Original Mode's `.rdata`, one block for the whole game as `options` is:
+  // the weapon records, the fire and ammo-readout rows, the trunk's tables.
+  const originalMode = tables.originalModeTables() as {
+    ammo_hud_rows: { sprite: number }[]; list_sprites: number[];
+  };
+  scriptJson.original_mode = originalMode;
   const optionTableSprites = [
     ...(options.glyphs as number[]), ...(options.crosshair_sprites as number[]),
     ...(options.sight_speed_sprites as number[]),
@@ -2419,7 +2475,13 @@ export async function buildStage(stage: Stage, sink: BundleSink,
      ...originalItemSprites(originalItemsJson(tables, placements,
                                               stage.scene)),
      // The result card's frame, for a stage that places the card.
-     ...(prog && stagePlacesResultCard(prog) ? RESULT_CARD_SPRITES : [])]);
+     ...(prog && stagePlacesResultCard(prog) ? RESULT_CARD_SPRITES : []),
+     // Original Mode's bullets, `HudDrawAmmoAndReloadPrompt`'s row by fire
+     // mode, for an Original stage.
+     ...(stage.original
+       ? originalMode.ammo_hud_rows.map((r) => r.sprite) : []),
+     // ...and the trunk's screen, where it is spawned.
+     ...(trunk ? [...ITEM_SELECT_SPRITES, ...originalMode.list_sprites] : [])]);
   await sink.write(`${outDir}/${name}.script.json`, bundleJson(scriptJson));
 
   let nSpawns = 0;

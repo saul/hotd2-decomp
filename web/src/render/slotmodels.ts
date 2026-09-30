@@ -840,9 +840,11 @@ export class SlotModelLayer implements System<RenderContext> {
    *
    * Returns the nearest hit along the ray, or `null`.
    */
-  pickSphere(ray: Ray): { at: number; point: Vector3; t: number } | null {
+  pickSphere(ray: Ray):
+      { at: number; point: Vector3; t: number; radius: number } | null {
     if (!this.enabled) return null;
-    let best: { at: number; point: Vector3; t: number } | null = null;
+    let best: { at: number; point: Vector3; t: number; radius: number }
+      | null = null;
     for (const a of G.g_object_list) {
       if (a.dead || a.hitRadius <= 0) continue;
       // A class that registers the engine's way is `game/`'s to test.
@@ -856,7 +858,7 @@ export class SlotModelLayer implements System<RenderContext> {
       if (t <= 0) continue;                      // behind the muzzle
       if (ray.distanceSqToPoint(this._c) > a.hitRadius * a.hitRadius) continue;
       if (!best || t < best.t) {
-        best = { at: a.at, point: this._c.clone(), t };
+        best = { at: a.at, point: this._c.clone(), t, radius: a.hitRadius };
       }
     }
     return best;

@@ -462,7 +462,15 @@ export class Walker {
    */
   get step(): number { return G.g_evt_step_index; }
   set step(v: number) { G.g_evt_step_index = v; }
-  opIndex = 0;
+  /**
+   * The instruction cursor, and it is `g_evt_ip` -- 0x009C7108 -- as the port
+   * encodes it, an index into the step's instructions. An accessor over `G`
+   * for the reason {@link step} is: the VM is not its only writer.
+   * `ItemSelectFinish` (`FUN_004895C0`) points it at step 1 while the script
+   * is holding on the trunk's `wait_enemies_present`.
+   */
+  get opIndex(): number { return G.g_evt_ip; }
+  set opIndex(v: number) { G.g_evt_ip = v; }
 
   region = -1;
   /** `g_cam_roll_enabled` (0x35), which is `G`'s. */
@@ -939,10 +947,11 @@ export class Walker {
     // FUN_0045EBC0 picks the first step by game mode: 1 for normal Arcade
     // play, 5 for Original Mode on scene 0, 0 only on the continue and
     // checkpoint paths. The exporter resolves that rule; the walker just
-    // honours it.
-    const entry = this.script.entry_step ?? 1;
-    const n = this.blockAt(entryBlock)?.steps?.length ?? 0;
-    this.step = n > entry ? entry : 0;
+    // honours it -- by index, as `EvtGetStep` does. It used to fall back to
+    // step 0 when the block had fewer steps than that, and since the bundle
+    // stopped stage 1 block 0 at the `-1` in front of step 5, Original Mode
+    // opened on the checkpoint stream and never met the trunk.
+    this.step = this.script.entry_step ?? 1;
     this.opIndex = 0;
     this.region = -1;
     this.groundY = null;
@@ -1454,6 +1463,10 @@ export class Walker {
     this.lightBlock.step(dt * fps);
     // `PushSceneLightStateToDevice` steps both blocks' channel tweens.
     this.lightBlock1.step(dt * fps);
+    // `[port-only]` -- block 0's colour channels (`light_r/g/b`, 6..8) where
+    // gameplay reads them as `g_scene_light_colour_r..b`, `0x009A3780`.
+    const ch = this.lightBlock.channels;
+    G.g_scene_light_colour = [ch[6], ch[7], ch[8]];
 
     // No shutter step: `HudDrawShutterState` is a task of the scene's own and
     // runs in `SceneTaskWalk`, after the players -- see `game/hud_shutter.ts`.
@@ -1465,6 +1478,19 @@ export class Walker {
       if (this.captionFrames === 0) this.captionGroup = -1;
     }
 
+    // A wait in this VM is only the instruction at `g_evt_ip`, run again
+    // every frame until it passes. If gameplay has pointed `g_evt_ip`
+    // elsewhere -- the trunk's `ItemSelectFinish` sends it to step 1 while
+    // the script waits on `g_enemies_present` -- the instruction that was
+    // waiting is not the one the interpreter runs next, and there is no wait
+    // to pass. The op is known by its offset and opcode, which survive a
+    // snapshot where the object does not.
+    if (this.wait) {
+      const cur = this.currentOp;
+      if (!cur || cur.at !== this.wait.op.at || cur.op !== this.wait.op.op) {
+        this.wait = null;
+      }
+    }
     if (this.wait) {
       const w = this.wait.policy;
       if (w.kind === "frames") {
@@ -2022,7 +2048,12 @@ export class Walker {
     this.step += 1;
     this.opIndex = 0;
     const blk = this.currentBlock;
-    if (blk?.steps && this.step < blk.steps.length) {
+    // `EvtGetStep(...) == -1` is "the steps ran out": the end of the list, or
+    // a `-1` the bundle carries because a later step is entered by index
+    // (`StepJson.end`) -- stage 1 block 0's step 4, in front of Original
+    // Mode's step 5.
+    if (blk?.steps && this.step < blk.steps.length
+        && !blk.steps[this.step].end) {
       // The tail of `EvtAdvanceStepOrRoute`, on the path where the step list
       // had another step in it. See point 3 above.
       this.branchChoice = 0;

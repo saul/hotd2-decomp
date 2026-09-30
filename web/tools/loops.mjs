@@ -26,7 +26,7 @@ requireBundle("loops");
 /** Stage 1's rain: `se_play STAGE1_SE\RAIN3ST_44.wav` at block 0 step 1 op 42. */
 const LOOP_FILE = "RAIN3ST_44.wav";
 const FROM_TOP = "?stage=1&mode=play";
-const DEEP_LINK = "?stage=1&mode=play&block=0&step=2&op=10";
+const DEEP_LINK = "?stage=1&mode=play&block=0&step=3&op=10";
 
 const TAP = () => {
   const seen = [];

@@ -283,6 +283,8 @@ export const CHARS = {
  * say so itself; leaving it at 0 is a scripted cutscene, in which nothing
  * attacks.
  */
+export { ORIGINAL_MODE } from "./original_mode_fixture";
+
 export const SCENE_MAJOR_PLAYING = 2;
 
 export const EYE = vec3(0, 0, 0);

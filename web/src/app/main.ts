@@ -86,9 +86,27 @@ import { buildProjection, type PlayerView } from "./projection/player";
 import { groupRows, hudInputs, hudRows } from "./projection/hud";
 import type { DebugGroupName, StripRow } from "../ui/projection";
 import {
-  branchProjection, continueProjection, joinProjection, skipProjection, soundProjection,
-  transportProjection,
+  branchProjection, continueProjection, ItemSelectOpen, joinProjection,
+  padScreenUp, skipProjection, soundProjection, transportProjection,
 } from "./projection/chrome";
+import { ItemSelectBuildList, ItemSelectTap } from "../game/class6e";
+import { OriginalItem } from "../game/original_mode";
+import { ProfileSave } from "../game/profile";
+
+/** The count a pickup caps an item at, `CMP AL, 0x63` (the debug's give-all). */
+const ORIGINAL_ITEM_CAP = 0x63;
+
+/**
+ * `[port-only]` -- the items a fresh profile holds, as `ProfileFactoryReset`
+ * leaves them: POWER UP 1.2, CHAMBER +2 and CREDIT +2, one each.
+ */
+function FreshProfileItems(): number[] {
+  const items = new Array(33).fill(0);
+  items[OriginalItem.PowerUp12] = 1;
+  items[OriginalItem.Chamber2] = 1;
+  items[OriginalItem.CreditPlus2] = 1;
+  return items;
+}
 import { SceneFog } from "../render/fog";
 import { TextureFilter, type TextureFilterMode } from "../render/texfilter";
 import { type LightingMode, SceneLighting } from "../render/lighting";
@@ -141,7 +159,7 @@ import { ProfileBoot } from "../game/profile";
 import { readProfile, writeProfile } from "./profile_store";
 import { OptionsPad, OptionsTap } from "../game/options/list";
 import { SetBoss4Tables, SetGameOverTables, SetGameTables, SetOptionsTables,
-         SetResultCardTables }
+         SetOriginalModeTables, SetResultCardTables }
   from "../game/tables";
 import { PressKind, type Press } from "../core/net/protocol";
 import { NetSession, type NetRole } from "./net/session";
@@ -1204,6 +1222,7 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
                   script.humanoids, script.coli, script.civilians);
     SetGameOverTables(script.game_over);
     SetOptionsTables(script.options);
+    SetOriginalModeTables(script.original_mode);
     SetBoss4Tables(script.boss4, script.carrier_door_yaw);
     SetResultCardTables(script.result_card);
   }
@@ -1442,10 +1461,17 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
         : e.code === "ArrowDown" ? OptionsPad.Down
           : e.code === "ArrowLeft" ? OptionsPad.Left
             : e.code === "ArrowRight" ? OptionsPad.Right : 0;
-      if (dir !== 0 && G.g_app_state === AppState.Options && !this.asReplica) {
+      if (dir !== 0 && padScreenUp() && !this.asReplica) {
         e.preventDefault();
         if (!e.repeat) this.padLatch |= dir;
         this.padHeld |= dir;
+        return;
+      }
+      // A, on a screen that reads the pad: Right Shift, the keyboard's A in
+      // `KeyboardReadAsPad` (`FUN_0041F1A0`).
+      if (e.code === "ShiftRight" && padScreenUp() && !this.asReplica) {
+        e.preventDefault();
+        if (!e.repeat) this.padLatch |= OptionsPad.A;
         return;
       }
       if (e.code === "Space") { e.preventDefault(); this.togglePlay(); }
@@ -1770,6 +1796,22 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
           this.padLatch |= (tap ? OptionsTap(240 - this.localAim.y, this.events)
             : OptionsPad.A) * shift;
         } else if (ray && this.gameRunning && !this.frozen) {
+          // On the trunk the mouse's left button is also A: input mode 6
+          // ORs it into the pad word (`0x4`), which the trunk takes items
+          // with at the cursor the arrows move. It is still the trigger --
+          // the firing gate is shut. Neither a finger nor a mouse held
+          // without the keyboard has the arrows, so on this page's own screen
+          // a pull is on what it points at instead (`ItemSelectTap`): a row
+          // is taken, a held item put back, END pressed, a scroll mark
+          // scrolled. The keyboard's arrows and Right Shift are still the
+          // exe's pad. A mouse sent A here once, and a click on a scroll mark
+          // took the item under the cursor.
+          if (ItemSelectOpen()) {
+            const tap = player === 0 && !this.asReplica;
+            this.padLatch |= tap
+              ? ItemSelectTap(320 + this.localAim.x, 240 - this.localAim.y)
+              : OptionsPad.A * shift;
+          }
           QueueShotRequest(player, ray);
         }
         return;
@@ -2779,8 +2821,9 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     if (!this.gameStopped) {
       G.g_pad_state = this.padLatch;
       this.padLatch = 0;
-      // The directions held on the options screen; nothing else is fed.
-      if (G.g_app_state !== AppState.Options) this.padHeld = 0;
+      // The directions held on a screen that reads the pad -- the options,
+      // the trunk; nothing else is fed.
+      if (!padScreenUp()) this.padHeld = 0;
       G.g_pad_held = this.padHeld;
     }
     this.world.update(this.ctx,
@@ -2871,6 +2914,27 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     if (this.state.mode !== "play") this.setMode("play");
     RequestAppState(AppState.Options);
     this.startGame();
+  }
+
+  /**
+   * `[port-only]` debug -- Original Mode's saved items. `giveAll` puts every
+   * one of the 33 in the profile at the count a pickup caps at (0x63), so the
+   * trunk offers everything; `reset` puts back what a fresh profile holds
+   * (`ProfileFactoryReset`'s POWER UP 1.2, CHAMBER +2 and CREDIT +2). Either
+   * is saved at once, as the game saves at a game over (`ProfileSave`), and
+   * copied into the run's counts as `ProfileApplyToRun` does -- and when the
+   * trunk is open its list is rebuilt, so the change shows without a restart.
+   */
+  originalItems(action: "giveAll" | "reset"): void {
+    if (this.asReplica) return;
+    const items = action === "giveAll"
+      ? new Array(33).fill(ORIGINAL_ITEM_CAP)
+      : FreshProfileItems();
+    G.g_profile_original_items = items;
+    G.g_original_items_taken = [...items];
+    if (ItemSelectOpen()) ItemSelectBuildList();
+    ProfileSave(this.events);
+    this.pacer.wake();
   }
 
   restartRun(stage: number): void {

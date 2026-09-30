@@ -55,6 +55,7 @@ import "./class53";
 import "./class60";
 import "./class61";
 import "./class62";
+import "./class6e";
 
 /**
  * The classes with a ported behaviour, for the UI and `web/tools/repo/port.ts`.

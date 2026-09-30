@@ -825,7 +825,8 @@ export class CharacterLayer implements System {
               && t < bestT) {
             bestT = t;
             best = { kind: "actor", at: inst.at, bone: 0, whole: true,
-                     point: { x: this._c.x, y: this._c.y, z: this._c.z } };
+                     point: { x: this._c.x, y: this._c.y, z: this._c.z },
+                     radius: r };
           }
         }
         continue;
@@ -856,7 +857,8 @@ export class CharacterLayer implements System {
         if (t < bestT) {
           bestT = t;
           best = { kind: "actor", at: inst.at, bone: b.bone,
-                   point: { x: this._c.x, y: this._c.y, z: this._c.z } };
+                   point: { x: this._c.x, y: this._c.y, z: this._c.z },
+                   radius: r };
         }
       }
     }
@@ -878,7 +880,8 @@ export class CharacterLayer implements System {
     if (slot && slot.t < bestT) {
       bestT = slot.t;
       best = { kind: "actor", at: slot.at, bone: 0, whole: true,
-               point: { x: slot.point.x, y: slot.point.y, z: slot.point.z } };
+               point: { x: slot.point.x, y: slot.point.y, z: slot.point.z },
+               radius: slot.radius };
     }
     // ...and the creatures `znjoe` releases, which are the third pool in this
     // one candidate list. The engine walks **one** list for all of them —
@@ -893,7 +896,8 @@ export class CharacterLayer implements System {
       bestT = creature.t;
       best = { kind: "creature", creatureId: creature.id,
                point: { x: creature.point.x, y: creature.point.y,
-                        z: creature.point.z } };
+                        z: creature.point.z },
+               radius: creature.radius };
     }
     // ...and the props state-37 zombies carry and throw, the fourth pool in
     // the same list: a drum in front of the zombie holding it takes the shot.
@@ -902,7 +906,8 @@ export class CharacterLayer implements System {
       bestT = carried.t;
       best = { kind: "carried", carriedId: carried.id,
                point: { x: carried.point.x, y: carried.point.y,
-                        z: carried.point.z } };
+                        z: carried.point.z },
+               radius: carried.radius };
     }
     // Say so rather than doing nothing quietly: a bundle exported before the
     // reaction tables were added has no `reaction_groups`, and a silent no-op

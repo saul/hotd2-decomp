@@ -15,6 +15,7 @@ import { HIT_SLOT_NONE } from "./globals";
 import { ActorModelScale } from "./root_motion";
 import type { CivilianState } from "./class10/state";
 import type { Boss4Block } from "./class19/state";
+import type { ItemSelectBlock } from "./class6e/state";
 import { SpawnClass } from "./spawn_class";
 import { vec3, type Vec3 } from "./vec";
 import { makeHumanoidTail, type HumanoidTail } from "./class25/state";
@@ -138,6 +139,23 @@ export enum MotionFlag {
  * every clip change; class 0x30's hiding states clear and restore the first.
  */
 export const MOTION_FLAGS_INIT = 3;
+
+/**
+ * `obj+0x12EC`, the node draw hook a class's `Init` installs, named by which
+ * of the class's hooks it is rather than held as a pointer. `[port-only]` in
+ * encoding.
+ */
+export enum NodeDrawHookId {
+  /** The class's own: `ZombieDrawBonePart`, `ThrowerDrawBonePart`. */
+  Class = 0,
+  /**
+   * ROTTEN MEAT's, installed in Original Mode with `g_original_item_big_head`
+   * up: `ZombieDrawWithEnlargedHead` (`FUN_00453B50`) or
+   * `ThrowerDrawWithEnlargedHead` (`FUN_0044A300`), the class's own hook with
+   * bone 2 drawn under a scale.
+   */
+  EnlargedHead = 1,
+}
 
 /** `obj+0x34` — the object's flag word. Only the bits the port reads. */
 export enum ActorFlag {
@@ -2151,6 +2169,12 @@ export interface ActorBase {
    */
   boss4: Boss4Block | null;                              // +0x1310
   /**
+   * Class 0x6E's words, `obj+0x1310..obj+0x136C` and the four hold counters
+   * at `+0x11C..+0x121` -- the trunk. A fourth thing `+0x1310` starts, and
+   * like {@link Actor.boss4} a block of its own. See `class6e/state.ts`.
+   */
+  itemSelect: ItemSelectBlock | null;                    // +0x1310
+  /**
    * `obj+0x1394` — **the object this actor was built for**, by spawn address.
    *
    * An {@link ActorRef}, and the *other* kind of thing this offset holds.
@@ -2474,6 +2498,18 @@ export interface ActorBase {
    */
   nodeDrawAlpha: (number | null)[];
   /**
+   * The `MatrixScale` a class's node draw hook wrapped each bone's draw in
+   * this frame, by bone number, `null` for none: ROTTEN MEAT's hooks scale
+   * bone 2's -- see {@link NodeDrawHookId.EnlargedHead}.
+   *
+   * [port-only] as a field, for the reason {@link Actor.nodeDrawAlpha} is
+   * one. `render/characters/head_aim.ts` applies it to the bone's own draw,
+   * under the head's turn, which is the order the hook pushes it in.
+   */
+  nodeDrawScale: ([number, number, number] | null)[];
+  /** `obj+0x12EC` — which node draw hook `Init` installed. */
+  nodeDrawHook: NodeDrawHookId;
+  /**
    * The attachment list — `model+0x1170`, ids into
    * `g_actor_attachment_records` (`0x004EC4C0`).
    *
@@ -2772,6 +2808,7 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     shotCentre: vec3(),
     civ: null,
     boss4: null,
+    itemSelect: null,
     targetAt: -1,
     script: null,
     alpha: 1,
@@ -2804,6 +2841,8 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     boneCentre: {},
     suppressedBones: 0,
     nodeDrawAlpha: [],
+    nodeDrawScale: [],
+    nodeDrawHook: NodeDrawHookId.Class,
     attachments: [],
   };
   // One `return` per arm. TypeScript narrows `cls` inside each branch, so the

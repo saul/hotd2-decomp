@@ -22,7 +22,8 @@ import type {
 } from "../../ui/projection";
 import type { DebugGroupName } from "../../ui/projection";
 import { stabilise } from "./stable";
-import { crosshairProjection, gameOverProjection } from "./chrome";
+import { crosshairProjection, gameOverProjection, originalItemsProjection }
+  from "./chrome";
 import { actorsProjection, waitProjection } from "./sidebar";
 
 /**
@@ -157,6 +158,7 @@ export function buildProjection(v: PlayerView,
     fps: v.fps,
     branch: v.branch,
     gameOver: gameOverProjection(),
+    originalItems: originalItemsProjection(v.original),
     net: v.netView,
     netPeer: v.netPeer,
   });

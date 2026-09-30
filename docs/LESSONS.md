@@ -860,6 +860,23 @@ one-shot channel, find what ends it in the exe -- a state change, or nothing,
 in which case the track wraps -- and test for as long as the shipped data
 holds it.**
 
+**LXX -- A fixture's type number is a real character type to every routine
+that switches on one.** The port tests' generic zombie is character type 1,
+and its hand bone drew slot 5, a number made up for the sever cascade. Type 1
+is `znassb`, and `ActorUpdateBodyCondition` (`FUN_00454270`), once ported,
+compares a type-1 actor's bone-5 slot with `znassb`'s prop, `0x1BA9`, on every
+damaging shot and drops it to body condition 0 when neither hand holds one --
+so every fixture zombie shot with result 1 lost its condition, and a
+condition-5 knockback test died through state 6. Nothing was wrong with the
+port; the fixture had been a `znassb` with no weapons all along, and no routine
+had asked until then. The same week the fixture's dispatch leaned on the other
+side of the same habit: tests that named no start state got `AttackRun` from a
+router the port had invented, where the engine's byte 0 is `NoOpStub`.
+**Give a fixture's type-specific fields the values the shipped type has --
+`bones[].slot` against the real skeleton, a start state against the real
+descriptor -- or pick a type number no routine switches on**, and when a new
+port breaks old fixtures, check the fixture against the data before the port.
+
 ---
 
 ## Running the tools

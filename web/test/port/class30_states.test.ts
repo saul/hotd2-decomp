@@ -137,6 +137,28 @@ console.log("\nclass 0x30 state 26: the arc alone moves the leap:");
           `motion ${z.motion}`);
   }
   {
+    // `0x004583EF`: the landing gives the ground snap back only to an actor
+    // not riding the carrier. With no carrier in the scene the seat moves
+    // nothing, so the leap is the same leap.
+    const run = (seated: boolean) => {
+      const z = leaper();
+      if (seated) z.flags2 |= ZombieFlag2.AttachedToCarrier;
+      const rng = new Rng(5);
+      for (let f = 0; f < 400 && z.sub < 4; f++) {
+        EnemyZombieUpdate(z, { dt: 1 / 60, rng, host: NULL_HOST });
+        ActorAdvanceMotion(z, 1 / 60);
+      }
+      return z;
+    };
+    const free = run(false);
+    const seated = run(true);
+    check("the landing clears Airborne, except under a carrier seat",
+          free.sub >= 4 && (free.flags & ActorFlag.Airborne) === 0
+          && seated.sub >= 4 && (seated.flags & ActorFlag.Airborne) !== 0,
+          `free ${free.sub}/${free.flags & ActorFlag.Airborne} seated `
+          + `${seated.sub}/${seated.flags & ActorFlag.Airborne}`);
+  }
+  {
     // Shot out of the air: the limp is exactly what it is for.
     const z = leaper();
     const rng = new Rng(5);

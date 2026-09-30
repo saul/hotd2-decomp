@@ -15,6 +15,7 @@ import {
   SND_ATTACHED_EFFECT_SPLASH,
 } from "../../src/game/effects/attached_effect";
 import { ZombieEnterCorpseState } from "../../src/game/class30/death";
+import { ZombieStrikeFrameSplash } from "../../src/game/class30/splash";
 import { ZombieState } from "../../src/game/class30/states";
 import { Zombie1368Flag } from "../../src/game/class30/state";
 import { EnemyZombieUpdate } from "../../src/game/class30";
@@ -568,4 +569,19 @@ console.log("\nthe wake a zombie leaves in the water (ActorCheckWaterEntry):");
   check("the actor becoming a corpse ends the pair",
         G.g_attached_effects.length === 0 && (z.flags & ActorFlag.Live) === 0,
         `${G.g_attached_effects.length}`);
+
+  // `ZombieStrikeFrameSplash` (`0x00456D35`) compares `obj+0x19C` -- the
+  // cursor, which wraps -- with the play length less 0x14. On the base track
+  // a counter one loop on is still that cursor.
+  z = wader(6, 0);
+  (T.chars!.types["1"]!.motions as Record<string, unknown>)["31"] =
+    motion(24, 0, 47);
+  z.motion = 31;
+  z.playTicks = 48 + 47 - 0x14;
+  const before = heard.length;
+  ZombieStrikeFrameSplash(z, new Rng(2), NULL_HOST, events);
+  check("the strike's frame splash reads the wrapped cursor, not the counter",
+        heard.slice(before).includes(0x4116a9)
+        && (z.flags2 & ZombieFlag2.OneShotFired) !== 0,
+        heard.slice(before).map((x) => x.toString(16)).join(","));
 }

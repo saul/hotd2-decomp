@@ -144,7 +144,10 @@ export function ZombieStrikeFrameSplash(obj: ZombieActor, rng: Rng,
   if (obj.flags2 & ZombieFlag2.OneShotFired) return;
   if (obj.condition !== COND_WADING) return;
   const motion = obj.action ? obj.action.motion : obj.motion;
-  const cursor = obj.action ? obj.action.ticks : obj.playTicks;
+  // The base track's cursor is the counter modulo the play length + 1, as the
+  // sampler computes it; this read the bare counter, which is the cursor only
+  // until the clip first wraps.
+  const cursor = obj.action ? obj.action.ticks : MotionPlayFrame(obj);
   if (cursor !== MotionPlayLength(obj, motion) - STRIKE_FRAME_SPLASH_LEAD) {
     return;
   }

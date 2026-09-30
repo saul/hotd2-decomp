@@ -25,7 +25,7 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
   "approach.ts": "f2458fca4f4f943e775d2f73237eef7bf925b37dc38ba653bc89f80d3e800443",
   "arcscript.ts": "7c64fa78e89264425a0032c0918c846f8972905d848251d517112cd307722b35",
   "bams.ts": "f03b1290866a63ab2ae764d49bd15c57bd53c6b1a03794f7a0357e8dd842eb8f",
-  "bundle.ts": "d34a0903346381590a72166e8499cbe693722b3cc9a045b6214b6613697a9871",
+  "bundle.ts": "5b9067bf0ae8ab184b4353242b27ce8e2cbcc97af3456eaa15aac3f6f81f1359",
   "bytes.ts": "59b2f363e98da56e88ada59458239032e40cad3a27342659e213d849c0967168",
   "cam.ts": "fe50200cb57c6578681a121766e7a5f4ed2425d91996169f83a82e8375dd63c3",
   "campaths.ts": "fbe28df3265d37b60a006e937a926eca8546609aa29cc5d80e7f1fc9afd639be",
@@ -50,7 +50,9 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
   "game/class25/state.ts": "79e67a054d39c02a5e946f0e2f96e9c36d6f07d12c062fb5a0373dd1b532f68c",
   "game/class30/bonecels.ts": "3392ad3933ddf0e5951773cc492c850af53eeb62e5af592fe28bec2bdd7508b0",
   "game/class30/halved.ts": "6ded7bbc1e9fc4e3378988e25635d58323d8c3172ddcea6d1e6869e4c57a075c",
+  "game/class41/type47_slots.ts": "9d9a50f252f86cf02a74475bfc3f0f7040219cf25cb4b27ed9e9aa4a6b549648",
   "game/class41/water_slots.ts": "654c7b121971e16e7ecbca8fb3f2c265948c1fe82abd2ef009510b02ddec5235",
+  "game/class44/slide_slots.ts": "737ace82df0382eadf0d8c51517928724a6261efc7abd8337c97e25e9f509996",
   "game/class45/tables.ts": "9c4cc0760b37ba37b4f88255ceb6c07d3540753b766400416f2624ec0bb2585c",
   "game/class53/records.ts": "b6800eb8234f8a37c11908ce38316f82b17387ae41e753aeb67089fae09192d0",
   "game/class61/state.ts": "10295909bed89c5b3fd208e8b7165eadd95c73fd5d14c14ad1519fa6f9527f6b",
@@ -75,4 +77,4 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
 };
 
 /** One digest over {@link BUILDER_FILES}, in filename order. */
-export const BUILDER_HASH = "45c4c5b01f2f812f633b0567a3a70fc8d2bbdb86d8eb295502e6c6f4c02b86a4";
+export const BUILDER_HASH = "2069b8388170fe0689358bac51250c3fd9cea5790a6ab0b0d31e57cae8d2d58d";

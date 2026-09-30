@@ -1419,3 +1419,16 @@ the reported input first, measure before and after at the reported address,
 and say which part of the complaint is the engine's own.** And a port channel
 standing in for a motion track is a claim about which track: `obj.action` is
 not track 1, and a state's cursor test reads track 0 whatever else is playing.
+
+**L96 -- "Drawn at the origin" means drawn at the model's own coordinates, and
+a model authored in world space lands where it belongs.** Retiring
+`StageScene`'s "loaded, so drawn" rule, the before-and-after hunt looked where
+the world's origin is on screen, found no change, and nearly called the
+deletion invisible. Five of the 130 slots the rule drew are authored in world
+space -- stage 4's `st4_09.bin[0]` and `[2]` span x -657..685, z -2261..-1567
+-- so the rule had been drawing them in place, in the right shape, as the only
+thing on screen standing in for class 0x13 carrier selectors 4, 5, 7 and 8,
+which the port has not read. Delete the rule and those two models are gone
+from stage 4's blocks 23 to 29, walls and all. **Judge a stand-in's reach from each model's
+bounding box, not from where it is "put"**, and take the before picture where
+that box is on screen.

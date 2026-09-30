@@ -432,9 +432,9 @@ export const CHECKS: readonly Check[] = [
      + "blob the port's prop pool cannot shoot, and, with a bundle, that "
      + "every spawn is placed with exactly that tail and its model travels"),
   game("flag_props",
-       "that class 0x44 selectors 9 and 12 -- stage 3's lift and stage 6's "
-     + "sliding doors -- and class 0x41 constructor 47, stage 2's faded disc, "
-     + "are the table entries the port builds, that the exporter reads their "
+       "that class 0x44 selectors 9 and 12 -- the stage-3 model that rises "
+     + "on a flag and the eight stage-6 leaves that slide on one -- and class "
+     + "0x41 constructor 47, stage 2's flat disc, are the table entries the port builds, that the exporter reads their "
      + "tails at the offsets and widths the constructors load them and the "
      + "port's constants are the routines' own, that no selector-12 spawn "
      + "names the one slot whose second draw relights the scene, and, with a "

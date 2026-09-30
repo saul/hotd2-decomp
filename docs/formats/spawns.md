@@ -134,9 +134,9 @@ holding paths like `COM\220_Y_M.WAV`, which is decisive.
 
 | Class | Handler | Spawns | What it is | Confidence |
 |---|---|---|---|---|
-| `0x41` | `PropContainerPlacerUpdate` (`FUN_00461CD0`) | 441 | **Breakable-prop / item-container placer.** A transient stub: dispatches on `obj+0x130C` through `g_class41_constructors`, 79 entries at `0x00593580`, builds child actors, then `ActorKill`s itself. Never drawn, never damaged. Type 0 is the breakable group (8 spawns) and is **ported**; **type 1** (`PlaceWaterSurface`, `FUN_00462F70`, 15 spawns) is not a prop at all but the task that draws and ripples a canal water tile, `WaterSurfaceUpdate` (`FUN_0046E3A0`) -- the tile is `g_water_surface_slots[+0x1F4]` (`0x00593DA4`) and `+0x11C` a step lifetime -- and is **ported**, see `docs/formats/water.md` §2; type 4 (`PlaceKindedProp`, 70 spawns) and **type 43** (`PropUpdateType43`, 7) both read `obj+0x6C` as an object kind; type 32 is the **lift** (`LiftUpdate`) and is ported; type 13 (`PropUpdateType13`, `FUN_00467F50`) is the part that drops out of stage 2's clock tower on script flag `0x6D`, and type 35 (`PropUpdateType35`, `FUN_0046B320`) the double door stage 2's block-5 civilian stands behind, drawn at **literal world coordinates** whatever its placement -- both ported. Types **38, 39 and 44** (`PlaceTable38Props`, `PlaceTable39Stacks`, `PlaceTable44Props`) and **40** (`PlaceFragmentProps` / `PropUpdateType40`, all twenty sub-kinds) build their objects from tables in the image and are ported whole — see *Stage 1's church* below — as are **50** (`PlaceTable50Props`, six tables of scenery: stage 1's bin-scene crate, stage 2 block 17's furniture) and **66** (`PlaceTable66Props` / `PropUpdateType66`, the `komono_kanban.bin` signs), see *Class 0x41 constructors 50 and 66*. **Thirteen constructors are unported**, each with the spawns that place it, in *Class 0x41's constructors: which are ported*. The 44 types `PlaceGenericProp` serves share one constructor and a jump table — `g_place_generic_prop_arm_index` at `0x00462978` and `g_place_generic_prop_arms` at `0x004628D4`, indexed `type - 6` — so which arm sets what is read and not guessed. The retail stages reach 74 of the 79. See *The generic props' `+0x11C`* below. | `[proved]` |
+| `0x41` | `PropContainerPlacerUpdate` (`FUN_00461CD0`) | 441 | **Breakable-prop / item-container placer.** A transient stub: dispatches on `obj+0x130C` through `g_class41_constructors`, 79 entries at `0x00593580`, builds child actors, then `ActorKill`s itself. Never drawn, never damaged. Type 0 is the breakable group (8 spawns) and is **ported**; **type 1** (`PlaceWaterSurface`, `FUN_00462F70`, 15 spawns) is not a prop at all but the task that draws and ripples a canal water tile, `WaterSurfaceUpdate` (`FUN_0046E3A0`) -- the tile is `g_water_surface_slots[+0x1F4]` (`0x00593DA4`) and `+0x11C` a step lifetime -- and is **ported**, see `docs/formats/water.md` §2; type 4 (`PlaceKindedProp`, 70 spawns) and **type 43** (`PropUpdateType43`, 7) both read `obj+0x6C` as an object kind; type 32 is the **lift** (`LiftUpdate`) and is ported; type 13 (`PropUpdateType13`, `FUN_00467F50`) is the part that drops out of stage 2's clock tower on script flag `0x6D`, and type 35 (`PropUpdateType35`, `FUN_0046B320`) the double door stage 2's block-5 civilian stands behind, drawn at **literal world coordinates** whatever its placement -- both ported. Types **38, 39 and 44** (`PlaceTable38Props`, `PlaceTable39Stacks`, `PlaceTable44Props`) and **40** (`PlaceFragmentProps` / `PropUpdateType40`, all twenty sub-kinds) build their objects from tables in the image and are ported whole — see *Stage 1's church* below — as are **50** (`PlaceTable50Props`, six tables of scenery: stage 1's bin-scene crate, stage 2 block 17's furniture) and **66** (`PlaceTable66Props` / `PropUpdateType66`, the `komono_kanban.bin` signs), see *Class 0x41 constructors 50 and 66*; **47** (`PlaceType47Prop` / `PropUpdateType47`) is stage 2's faded disc, see *Class 0x44 selectors 9 and 12*. **Twelve constructors are unported**, each with the spawns that place it, in *Class 0x41's constructors: which are ported*. The 44 types `PlaceGenericProp` serves share one constructor and a jump table — `g_place_generic_prop_arm_index` at `0x00462978` and `g_place_generic_prop_arms` at `0x004628D4`, indexed `type - 6` — so which arm sets what is read and not guessed. The retail stages reach 74 of the 79. See *The generic props' `+0x11C`* below. | `[proved]` |
 | `0x30` | `FUN_00452DA0` | 288 | **The zombie.** HP, per-body-part damage zones, 80 points on kill / 10 per hit / 120 + combo on a head hit, a 54-state machine at `0x00592AE8`. Increments `g_enemies_alive`. State 2 (`FUN_00455720`) plays `COMMON2\ZOMBIE_041_16.wav`; the type-2 setup plays `CHAIN_SAW_22.wav` and a later state `KNIFE1_44.wav`. State 37, `ZombieStateCarryProp`, carries a **classless prop** (`CarriedPropInit`, `FUN_00442740`) typed by its script's `+0x00` out of `g_carried_prop_types` and throws it through `g_prop_behaviours` 1/3/4/5 -- stage 3's drums and stage 1's barrel; see `game/carried_prop.ts`. | `[proved]`, by the game's own sound record **Eleven of the 54 states never look at the camera**: they work on `obj+0x1394`, the object the actor was built for, and for 55 of the 70 spawns that reach one that is the class-0x10 civilian whose `CivilianInit` built them. See docs/formats/civilians.md. |
-| `0x44` | `PropPlacerDispatch44` (`FUN_00472B10`) | 204 | **Prop placer.** Same shape as 0x41: dispatches on `obj+0x11C` through `g_class44_subtypes`, 18 entries at `0x00595AB8`, builds a child, `ActorKill`s. Selectors 0 (`PropBuildScriptFlagEffect`), 11 (`PropBuildRisingDoor`), 13 (`PropBuildRiseToHeight`, `0x00473640` -- stage 5's gate behind JUDGMENT, see below), 16 (`PlaceFallingContainer`) and 17 (`PlaceStoryModeSwitch`) are read and ported; 1, 2 and 4 are the hinges (`HingeUpdate`); 9 (`PropBuildFlagLiftedProp`, `0x00473300` — one asset slot that rises 0.8 a frame to y 10 on one script flag and is killed by another; no collision) is read and unported; 15 is `PropBuildKindedProp`; the rest are unread. | `[proved]` |
+| `0x44` | `PropPlacerDispatch44` (`FUN_00472B10`) | 204 | **Prop placer.** Same shape as 0x41: dispatches on `obj+0x11C` through `g_class44_subtypes`, 18 entries at `0x00595AB8`, builds a child, `ActorKill`s. Selectors 0 (`PropBuildScriptFlagEffect`), 11 (`PropBuildRisingDoor`), 13 (`PropBuildRiseToHeight`, `0x00473640` -- stage 5's gate behind JUDGMENT, see below), 16 (`PlaceFallingContainer`) and 17 (`PlaceStoryModeSwitch`) are read and ported; 1, 2 and 4 are the hinges (`HingeUpdate`); 9 (`PropBuildFlagLiftedProp`, `0x00473300`, one stage-3 spawn that rises on a flag) and 12 (`PropBuildSlideOnFlag`, `0x004734A0`, eight stage-6 spawns that slide on a flag) are read and ported, see *Class 0x44 selectors 9 and 12*; 15 is `PropBuildKindedProp`; the rest are unread. | `[proved]` |
 | `0x25` | `ScriptedHumanoidInit` (`FUN_004840D0`) | 142 | **Script-driven humanoid actor.** A bytecode VM (`FUN_004842A0`) drives a skinned character. Not an enemy, not damageable, awards nothing, and never filed for the shot test, so no shot reaches it (it holds a hit slot, from the model build, as every skinned actor does) — see [combat.md](combat.md), *A class that never registers*. **It is also how the game draws the player's own body in a cut scene** — see *`op 10` is an `if`* below. | `[proved]` |
 | `0x10` | `CivilianInit` | 51 | **Civilian / rescuable victim. Ported** (`game/class10/`) — a bytecode VM whose 136 command streams are compiled into the **exe**, not the evt. Each civilian is held by class-0x30 captors its own Init builds from descriptors nothing in the script points at; killing them all pays **+400**. Shooting the civilian costs a **life** and −100 twice. Proved by voice records: `COM\220_Y_M.WAV`, `COM\209_M.WAV`, `COM\190_Y_W.WAV`, `COM\207_OLD_W.WAV`, `COM\200_C.WAV` — young man, man, young woman, old woman, child. Its face and its hair are an **attachment list** at the spawn tail's `+0x08`, not part of its skeleton — 52 of the 65 spawns carry one. See docs/formats/civilians.md. | `[proved]` |
 | `0x31` | `EnemyThrowerInit` (`0x00449620`) | 49 | **The wall-crawler**, four character types (`0x16`-`0x19`) over one 35-state machine and four **behaviour sets**, the set taken from the descriptor's byte +1 rather than from the model. Set 1 (`zsass`) stands out of reach and throws; set 0 (`zstin`) climbs the walls and the ceiling at 40-50 units and **arcs onto the camera with a knife** inside 30, connecting on a frame of the leap clip rather than on any range test, then leaps back out to one side. The whole repertoire is a pick table, `g_class31_action_picks`. **Ported.** See [`combat.md` §12](combat.md). Ricochet SFX by subtype: `BULLET_WOD1_16.WAV` (wood) for `0x17`, `BULLET_MET2_16.WAV` (metal) for `0x19`. | `[proved]` |
@@ -503,10 +503,10 @@ image, and `web/tools/checks/prop_slots.ts` holds each bundle to the port's rows
 are `PlaceGenericProp` (`FUN_00461CF0`), which is ported with a routine for
 every type it serves (`GENERIC_ROUTINES` and `GENERIC_FAMILY` in
 `game/class41/`). Five — 2, 15, 22, 23 and 46 — are `NoOpStub`
-(`0x0041EBB0`) and no script places them. Of the other twenty-four, eleven are
-ported: 0, 1, 4, 24, 38, 39, 40, 44, 48, 50 and 66.
+(`0x0041EBB0`) and no script places them. Of the other twenty-four, twelve are
+ported: 0, 1, 4, 24, 38, 39, 40, 44, 47, 48, 50 and 66.
 
-**Thirteen constructors are unported**, and every one of them is placed by a
+**Twelve constructors are unported**, and every one of them is placed by a
 script. What each allocates is `[proved]` from its decompile; nothing past
 that has been read, and nothing here is named.
 
@@ -519,7 +519,6 @@ that has been read, and nothing here is named.
 | 29 | `FUN_00463270` | nine `0x378` objects running `FUN_0046A030` from xyz rows at `0x00593D38` | stage 2 block 21 step 3 (`0xECE4`) |
 | 37 | `FUN_004632F0` | two `0x378` objects running `FUN_0046B5F0` (into `0x007DCDC4`), slot `0x17A9`, radius 6.0, effect 7 on motion `0x1D5`, an item set from `+0x1F4` | stage 2 blocks 4 and 30 (`0x24DC`), 14 (`0x812C`), 25, 26 and 27 (`0x1296C`) |
 | 42 | `0x004639D0` | `[open]` — Ghidra has no function there | stage 2 block 35 step 1 (`0x14968`) |
-| 47 | `FUN_00463AE0` | one `0x48`-byte object running `0x0046DD40` at the placer's point | stage 2 block 35 step 1 (`0x14990`) |
 | 52 | `FUN_00463D20` | two `PropDrawOnlyType12` objects, slots `0x1794` and `0x1795`, at `T(pos) . Ry(yaw)` of `(−9.29, 11.5, 22.68)` and `(9.29, 11.5, 22.68)`, the second turned half round | stage 1 block 14 step 1 (`0x68AC`); stage 5 block 0 step 2 (`0x0DD4`) |
 | 55 | `FUN_00463FE0` | one `0x8500`-byte object running `0x0046EEB0`, 800 particles off s16 xyz rows from `0x00594F2A` × 0.001 | stage 6 block 12 step 1 (`0x4780`) |
 | 61 | `FUN_004641F0` | nine `0x13F4` skinned actors running `FUN_004729E0`, character types from `0x0059504C` | stage 6 block 2 step 1 (`0x2058`) |
@@ -782,6 +781,52 @@ search and a byte search for each; the only hits are the `st5.bin` slot list
 at `0x004E76EE`): all three reach `AssetDrawSlot` only through the descriptor
 tails of selector 13, the hinge and selector 11. `web/tools/checks/
 rise_to_height.ts` holds the tail layout, the constants and every shipped spawn.
+
+### Class 0x44 selectors 9 and 12, and class 0x41 constructor 47
+
+The three objects the stage's old "loaded, so drawn" rule stood in for
+(`L54`, `L96`), each read whole and ported one routine to one function.
+`web/tools/checks/flag_props.ts` holds the table entries, every tail load
+byte for byte, the constants and every shipped spawn.
+
+**[proved] Selector 12**, `PropBuildSlideOnFlag` (`0x004734A0`) and
+`SlideOnFlagUpdate` (`0x004755B0`), `game/class44/slide_on_flag.ts`. Eight
+spawns, all stage 6, in pairs that part:
+
+```
+tail+0x04  u16  -> obj+0x28C   the slot (the DWORD is what the car test reads)
+tail+0x08  i32  -> obj+0x14C   a coli blob, or -1
+tail+0x10  i32  FIMUL by sin/cos(PI/2) -> vx, vz (f32)   the slide per frame
+tail+0x14  i32  FILD -> obj+0x1A8                         the slide length
+tail+0x20  s8   the flag that slides it; tail+0x21 s8 the flag that removes it
+```
+
+The running distance is summed before it is tested, so a 21-unit leaf at one
+unit a frame moves twenty times. Slots `0xAFC`..`0xAFF` are parts the
+`FUN_0048F560` rig also draws (`[likely]` the lift car's doors): their descriptors are in the car's frame, and the constructor carries
+them to where block 0, or any later block, parks the car --
+`T(557.5, -57.8 or 2492.2, -9880.2) . Ry(0x7555)` -- and slides them along the
+car's x. Only `0x0B00` and `0x0B48` carry a blob; the port's prop pool has no
+mesh shot test, so theirs is a sphere of radius 0 (as the story switch's is).
+The model patch the update makes once (strip-control bit 30) is `[open]`, and
+the second draw for slot `0x189C` (`0x1730` under the scene light) is taken by
+no spawn.
+
+**[proved] Selector 9**, `PropBuildFlagLiftedProp` (`0x00473300`) and
+`FlagLiftedPropUpdate` (`0x00474EA0`), `game/class44/flag_lifted.ts`. One
+spawn, stage 3 evt `0x0D24`: slot `0x1986`, 81 by 57, which the page shows
+filling the arch block 0's camera path ends at (`[likely]` a gate, on the model
+and where it stands). It rises `0.8f` a frame while
+flag 5 is up and `y < 10.0`, so from `-25.4` it takes 45 frames and stops at
+10.6; flag 10 kills it. No collision, no yaw. Block 1 step 2 raises flag 10
+and block 3 step 2 raises flag 5.
+
+**[proved] Constructor 47**, `PlaceType47Prop` (`0x00463AE0`) and
+`PropUpdateType47` (`0x0046DD40`), `game/class41/type47.ts`. One spawn, stage 2
+evt `0x14990`: slot `0x1384`, a 134-unit flat disc, drawn lying flat at 0.4
+scale through `AssetDrawSlotWithAlpha` at `sin(obj+0x44) * 0.2 + 0.8`, and
+killed by script flag `0x11` or step index 2. `[likely]` the alpha is the
+constant 0.8: nothing found writes `obj+0x44`.
 
 ### Class 0x24's parameter tail
 

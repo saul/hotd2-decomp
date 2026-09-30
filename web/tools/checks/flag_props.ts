@@ -7,20 +7,21 @@
  *     HOTD2_BUNDLE=/path/to/export node tools/run_ts.mjs tools/checks/flag_props.ts --game-dir ...
  *
  * The three objects the stage's old "loaded, so drawn" rule was drawing at
- * the world's origin in their place (`L54`, `L93`): stage 6's sliding doors
- * (`PropBuildSlideOnFlag` / `SlideOnFlagUpdate`), stage 3's lift
- * (`PropBuildFlagLiftedProp` / `FlagLiftedPropUpdate`) and stage 2's faded
- * disc (`PlaceType47Prop` / `PropUpdateType47`). With the rule gone a wrong
+ * the world's origin in their place (`L54`, `L93`): stage 6's eight leaves
+ * that slide on a flag (`PropBuildSlideOnFlag` / `SlideOnFlagUpdate`), stage
+ * 3's one model that rises on a flag (`PropBuildFlagLiftedProp` /
+ * `FlagLiftedPropUpdate`) and stage 2's flat disc drawn at 0.8 alpha
+ * (`PlaceType47Prop` / `PropUpdateType47`). With the rule gone a wrong
  * reading here is an object that is simply not there, and nothing else says
  * so. Four things are held:
  *
  *  * **The tables still point at the routines**: `g_class44_subtypes[9]` and
  *    `[12]`, `g_class41_constructors[47]` and `g_class41_updates[47]`.
  *  * **The exporter reads the tails at the right place and width**: every
- *    instruction in the two constructors that loads a tail field, byte for
+ *    instruction in the constructors that loads a tail field, byte for
  *    byte, which fixes the displacement and the width together.
  *  * **The port's constants are the routines' own**: the headings, the parked
- *    car's pose, the kill cues, the lift's ceiling and step, the disc's slot,
+ *    car's pose, the kill cues, selector 9's ceiling and step, the disc's slot,
  *    pitch, scale and kill flag -- read out of the image and compared with
  *    what the port exports.
  *  * **Every shipped spawn is placed with exactly its tail, and its model is

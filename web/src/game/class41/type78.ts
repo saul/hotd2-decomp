@@ -23,8 +23,9 @@
  * carries is resident from the stage's load — so the request is read and
  * dropped, the stance `class44/script_flag_effect.ts` takes on the engine's
  * other residency test. It is deliberately **not** handed to the walker's
- * `asset_load_slot` bookkeeping: that set is what `render/stagescene.ts`
- * draws unregioned models from, and a load is not a draw (`L54`).
+ * `asset_load_slot` bookkeeping: that set is the stage's residency, which
+ * only the canal water task's draw test reads, and a load is not a draw
+ * (`L54`).
  */
 import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";

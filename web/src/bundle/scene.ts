@@ -444,8 +444,11 @@ export interface BreakablesJson {
   kinds: PropKindParams[];
   placements: BreakablePlacement[];
   /**
-   * Keyed by effect id — only the ones this stage's class-0x44 selector-0
-   * spawns name, which is nothing at all outside stage 1.
+   * Keyed by effect id — the ones this stage's class-0x44 selector-0 spawns,
+   * generic props and carried props name, one motion per id — and by
+   * `"<effect>@<motion>"` for the class-0x13 carriers, whose one ride block
+   * plays two motions through one effect id (`game/effect_draw.ts`'s
+   * `EffectDefFor` reads both).
    */
   effects: Record<string, EffectDefJson>;
   /** 7.540296 — one stack level, in world units. */

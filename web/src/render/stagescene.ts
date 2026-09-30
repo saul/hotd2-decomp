@@ -215,8 +215,24 @@ export class StageScene {
   }
 
   /**
+   * Whether `AssetDrawSlot` (`FUN_00418560`) would find *slot* resident, as
+   * far as the stage can say. It draws only a slot whose record has `0x8000`
+   * and `1` set; the one traffic the player tracks is opcodes `0x50` and
+   * `0x51`, and a slot this stage holds a model for and no region lists is
+   * one the script streams that way -- resident while loaded, and not before
+   * or after. Any other slot is taken as resident: a region's models are
+   * this class's own business, and whole-file loads (`0x52`) are not
+   * tracked.
+   */
+  slotResident(slot: number): boolean {
+    const m = this.bySlot.get(slot);
+    if (!m || m.regions.length) return true;
+    return this.loadedSlots.has(slot);
+  }
+
+  /**
    * `asset_load_slot` (`0x50`) / `asset_unload_slot` (`0x51`): residency,
-   * which the water task's draw tests and nothing else here reads.
+   * which the water task's draw and {@link slotResident} read.
    */
   loadSlot(slot: number): void {
     this.loadedSlots.add(slot);

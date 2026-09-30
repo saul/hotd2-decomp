@@ -217,6 +217,7 @@ export async function loadStageInto(p: Player): Promise<void> {
   // `chars` owns the ray; this layer owns the spheres `ShotTestSphere`
   // measures against.
   p.slotModels.adopt(p.scene3d.root);
+  p.slotModels.residency = p.scene3d;
   p.chars.slotModels = p.slotModels;
   // ...and the canal water, which draws the stage's own tiles where it has
   // them and clones the rest from the same rig.

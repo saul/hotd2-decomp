@@ -440,7 +440,16 @@ export const CHECKS: readonly Check[] = [
      + "names the one slot whose second draw relights the scene, and, with a "
      + "bundle, that every spawn is placed with exactly its tail and its "
      + "model travels -- the stage no longer draws a loaded model on its own, "
-     + "so a misread here is an object that is simply missing"),
+     + "so a misread here is an object that is simply missing -- and that the "
+     + "lift car's rig draws its two pairs of doors on the camera paths "
+     + "`FUN_0048F560` tests, and no others"),
+  game("carrier_routines",
+       "that class 0x13's carrier selectors 4, 5, 7 and 8 install "
+     + "`CarrierPropRoutine4` and `5`, that the port's paths, offsets, cues, "
+     + "anchors, sounds and clip lengths are the routines' own bytes and "
+     + "`.data`, and, with a bundle, that stage 4 places all four spawns and "
+     + "ships both motions of both effects and every slot the two draw -- "
+     + "the set models round the boss's entrances, which nothing else draws"),
   game("branches",
        "that every value a branch trigger can write into `g_script_branch_var`"
      + " names a route slot its own block actually fills -- the one check that"

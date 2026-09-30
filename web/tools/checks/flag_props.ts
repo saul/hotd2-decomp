@@ -50,6 +50,7 @@ import {
 } from "../../src/game/class41/type47";
 import { TYPE47_CONSTRUCTOR, TYPE47_SLOT }
   from "../../src/game/class41/type47_slots";
+import { RIGS } from "../../src/hod2lib/rigs_data";
 
 const CLASS44_SUBTYPES = 0x00595ab8;
 const CLASS41_CONSTRUCTORS = 0x00593580;
@@ -100,6 +101,14 @@ const BYTES: [number, string, string][] = [
   [0x0046ddaa, "d80d241d4d00", "FMUL float [0x004D1D24], the swing"],
   [0x0046ddb0, "d805a8434c00", "FADD float [0x004C43A8], the middle"],
   [0x0046ddb9, "6884130000", "PUSH 0x1384 into AssetDrawSlotWithAlpha"],
+  // FUN_0048F560, the lift car the elevator leaves ride in: which of its two
+  // pairs of doors it draws on which camera path.
+  [0x0048f691, "3dda000000", "CMP g_active_cam_path, 0xDA: the far pair"],
+  [0x0048f6ae, "68fe0a0000", "...AssetDrawSlot(0xAFE)"],
+  [0x0048f5f5, "bf82010000", "EDI = 0x182 in the 0xDB arm alone"],
+  [0x0048f6cc, "663bfd", "CMP DI, BP: the near pair on 0xDB..."],
+  [0x0048f6d1, "813d782d9a00ec000000", "...or on 0xEC"],
+  [0x0048f6f3, "68fc0a0000", "...AssetDrawSlot(0xAFC)"],
 ];
 
 type Kind = "u16" | "u32" | "i32" | "i8";
@@ -191,6 +200,14 @@ async function main(): Promise<void> {
   c.eq(exe.ru32(0x0046dd7f), f32Bits(TYPE47_SCALE), "TYPE47_SCALE is the PUSH");
   c.eq(0x9c7200 + TYPE47_KILL_FLAG, 0x009c7211, "TYPE47_KILL_FLAG is g_script_flags[0x11]");
   c.eq(TYPE47_KILL_STEP, 2, "TYPE47_KILL_STEP is the compare's 2");
+
+  // -- the lift car's door parts ------------------------------------------------
+  const car = RIGS.find((r) => r.routine === "FUN_0048F560");
+  const doors = (slot: number) =>
+    car?.parts?.find((p) => p.slots[0] === slot)?.drawnOnCamPaths?.join() ?? "";
+  c.ok(doors(0xafe) === "218" && doors(0xafc) === "219,236",
+       `the car rig draws 0xAFE/0xAFF on 0xDA and 0xAFC/0xAFD on 0xDB and `
+       + `0xEC (${doors(0xafe)} / ${doors(0xafc)})`);
 
   // -- every shipped spawn -------------------------------------------------------
   const manifestPath = join(BUNDLE_ROOT, "manifest.json");

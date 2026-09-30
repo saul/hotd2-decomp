@@ -5279,6 +5279,67 @@ console.log("\nthe stage's loaded models: loaded is not drawn (L54)");
   scene.setVisibility("all");
   check("free roam's all-regions view still shows every model",
         gate.visible && shutter.visible && far.visible && wall.visible);
+
+  // `AssetDrawSlot` draws nothing that is not resident, and the stage is
+  // what knows which of the streamed slots are: stage 4's `0x954` is
+  // unloaded at block 23 op 75 while the class-0x13 prop that draws it lives
+  // until op 105.
+  scene.setVisibility("region");
+  check("a streamed slot is resident while loaded",
+        scene.slotResident(0x1899));
+  scene.unloadSlot(0x1899);
+  check("...and not once it is unloaded", !scene.slotResident(0x1899));
+  check("a region's model, and a slot the stage holds no model for, are "
+        + "taken as resident",
+        scene.slotResident(0x0100) && scene.slotResident(0x7777));
+}
+
+console.log("\nrigs: a part drawn behind a camera-path test");
+{
+  // `FUN_0048F560`, stage 6's lift car: `AssetDrawSlot(0xAFE/0xAFF)` only
+  // when `g_active_cam_path == 0xDA` (`0x0048F691`), `0xAFC/0xAFD` only on
+  // 0xDB or 0xEC (`0x0048F6CC`, `0x0048F6D1`), and the body always. The
+  // condition used to be prose on the rig part, and the renderer drew both
+  // pairs of doors shut on every path -- across the doorway the class-0x44
+  // leaves slide open in.
+  ResetGameGlobals();
+  const RIGS = {
+    rigs: [{ name: "obj_48f560", routine: "FUN_0048F560", note: "",
+             routes: [] }],
+    blocked: [], note: "",
+  };
+  const part = (slot: number, paths: number[] | null) => {
+    const g = new Group();
+    g.userData = { hod2_kind: "rig_part", hod2_rig: "obj_48f560",
+                   hod2_slots: [`0x${slot.toString(16).padStart(4, "0")}`],
+                   ...(paths ? { hod2_drawn_on_cam_paths: paths } : {}) };
+    return g;
+  };
+  const body = part(0x1913, null);
+  const back = part(0xafe, [0xda]);
+  const front = part(0xafc, [0xdb, 0xec]);
+  const car = new Group();
+  car.userData = { hod2_kind: "rig", hod2_rig: "obj_48f560",
+                   hod2_routine: "FUN_0048F560" };
+  car.add(body, back, front);
+  const root = new Group();
+  root.add(car);
+  const rigs = new RigLayer();
+  rigs.build(root, RIGS as never,
+             new CamPaths({ fps: 60, paths: {}, object_paths: {} } as never));
+  const on = (slot: number) => rigs.update(
+    { walker: { cam: { slot, frame: 30 } } } as unknown as
+      Parameters<typeof rigs.update>[0]);
+  on(0xda);
+  check("on 0xDA only the far pair is drawn", car.visible && body.visible
+        && back.visible && !front.visible);
+  on(0xdb);
+  check("on 0xDB only the near pair", back.visible === false && front.visible);
+  on(0xdc);
+  check("on 0xDC neither -- the class-0x44 leaves are the doors -- and the "
+        + "body still", !back.visible && !front.visible && body.visible);
+  on(0xec);
+  check("on 0xEC the near pair again", !back.visible && front.visible);
 }
 
 // Class 0x42's draws, composed by three.js, against the same calls made on

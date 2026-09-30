@@ -33,7 +33,7 @@ import { SCHEMA_FILES, SCHEMA_HASH } from "../bundle/schema_hash";
 import { HumanoidDrawVariant, HUMANOID_VARIANT3_SLOT }
   from "../game/class25/state";
 // Same argument: `class13/state.ts` is data only, `class13/index.ts` registers.
-import { CARRIER_SELECTORS_PORTED, CarrierDrawSlots }
+import { CARRIER_SELECTORS_PORTED, CarrierDrawSlots, CarrierEffects }
   from "../game/class13/state";
 // ...and `class12/state.ts` for the slot strip class 0x12 steps through.
 import { ScriptedProp12DrawSlots } from "../game/class12/state";
@@ -1556,8 +1556,9 @@ export function scriptedPropDrawSlots(
     // Only a prop whose behaviour the port runs: `g_prop_behaviours[0]` is
     // `NoOpStub`, a static model, and `[8]` is a carrier whose selector must
     // be one of {@link CARRIER_SELECTORS_PORTED}. Stage 4's seven carriers take
-    // selectors 2..9 and would otherwise stand at their descriptors while the
-    // game drives them -- right geometry, wrong behaviour, which is the reason
+    // selectors 2..9; selector 3's (`0x00440AD0`, slot `0x966`) would
+    // otherwise stand at its descriptor while the game drives it -- right
+    // geometry, wrong behaviour, which is the reason
     // `GENERIC_DESCRIPTOR_SLOT` holds its unported types back too.
     const t = p.class13;
     const ported = t?.behaviour === 0
@@ -1573,6 +1574,64 @@ export function scriptedPropDrawSlots(
       for (const s of CarrierDrawSlots(t.selector ?? -1)) {
         if (!out.includes(s)) out.push(s);
       }
+    }
+  }
+  return out;
+}
+
+/**
+ * The parts of every effect a ported class-0x13 carrier hands
+ * `EffectDrawUnlit` (`FUN_0040DD90`) -- selectors 4 and 7's effect `0x15`,
+ * 5 and 8's `0x18` -- which `render/slotmodels.ts` clones from `slots_actor`
+ * with the rest of the carrier's draws. A node with slot 0 is a pure
+ * transform.
+ */
+export function carrierEffectDrawSlots(
+    tables: ExeTables,
+    placements: readonly {
+      class13?: { behaviour?: number; selector?: number } | null;
+    }[],
+): number[] {
+  const out: number[] = [];
+  for (const p of placements) {
+    const t = p.class13;
+    if (t?.behaviour !== 8 || !CARRIER_SELECTORS_PORTED.has(t.selector ?? -1)) {
+      continue;
+    }
+    for (const [effect] of CarrierEffects(t.selector ?? -1)) {
+      for (const n of propslib.effectTree(tables, effect)) {
+        if (n.slot && !out.includes(n.slot)) out.push(n.slot);
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * The effect trees class 0x13's carriers play, one record per effect **and
+ * motion**, keyed `"<effect>@<motion>"`: a carrier's ride block plays motion
+ * `0x1CD` and then `0x1CC` through one effect id (or the reverse), which the
+ * by-id keys {@link scriptFlagEffectsJson} and the others write cannot hold.
+ * `game/effect_draw.ts`'s `EffectDefFor` reads either shape. No sound cues:
+ * the carriers play their own.
+ */
+export async function carrierEffectsJson(
+    stage: Stage,
+    placements: readonly {
+      class13?: { behaviour?: number; selector?: number } | null;
+    }[]): Promise<Record<string, unknown>> {
+  const out: Record<string, unknown> = {};
+  for (const p of placements) {
+    const t = p.class13;
+    if (t?.behaviour !== 8 || !CARRIER_SELECTORS_PORTED.has(t.selector ?? -1)) {
+      continue;
+    }
+    for (const [effect, motion] of CarrierEffects(t.selector ?? -1)) {
+      const key = `${effect}@${motion}`;
+      if (out[key] !== undefined) continue;
+      const def = await effectDefJson(stage, effect, motion,
+                                      "hod2lib.bundle.carrier_effects", []);
+      if (def) out[key] = def;
     }
   }
   return out;
@@ -2195,6 +2254,7 @@ export async function buildStage(stage: Stage, sink: BundleSink,
     stage, spawnRecords.map((r) => r.cls),
     [...humanoidDrawSlots(humanoids), ...sceneryDrawSlots(charPlaces),
      ...scriptedPropDrawSlots(charPlaces),
+     ...carrierEffectDrawSlots(tables, charPlaces),
      ...flagStripPropDrawSlots(charPlaces),
      ...waterSurfaceDrawSlots(placements)],
     cache);
@@ -2273,8 +2333,13 @@ export async function buildStage(stage: Stage, sink: BundleSink,
       await class42Tables(stage);
   }
   scriptJson.props = propslib.propsJson(tables, hinges, statics);
-  scriptJson.breakables = breakablesJson(tables, placements, effectDefs,
-                                         stage.scene);
+  // The carriers' effects ride in the same map, and after
+  // `breakableSlotEntry` has taken its node slots: theirs travel in
+  // `slots_actor`, which is what draws them.
+  scriptJson.breakables = breakablesJson(
+    tables, placements,
+    { ...effectDefs, ...(await carrierEffectsJson(stage, charPlaces)) },
+    stage.scene);
   scriptJson.set_pieces = evt ? setPiecesJson(evt, spawnRecords) : {};
   scriptJson.humanoids = humanoids;
   scriptJson.civilians = evt ? civiliansJson(tables, evt, spawnRecords) : {};

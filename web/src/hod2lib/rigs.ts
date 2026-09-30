@@ -179,6 +179,12 @@ export interface RigPart {
    * flag is set, which is false whenever the route is parked or has run out.
    */
   hiddenUnless?: string;
+  /**
+   * Machine-readable form of a `condition` that is a camera-path test: the
+   * routine draws the part only while `g_active_cam_path` is one of these.
+   * Absent means the part is drawn whatever the path.
+   */
+  drawnOnCamPaths?: number[];
   /** A rotation driven from a path channel rather than baked. */
   pathRotation?: PathRotation | null;
   /**

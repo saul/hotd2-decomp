@@ -153,6 +153,11 @@ interface Part {
   baked: Quaternion;
   /** `"moving"`: drawn only while the object's moving flag is set. */
   hiddenUnless: string;
+  /**
+   * Drawn only while the camera is on one of these paths; empty for a part
+   * the routine draws whatever the path (`RigPart.drawnOnCamPaths`).
+   */
+  drawnOnCamPaths: number[];
   pathRotation: PathRotationRule | null;
 }
 
@@ -469,13 +474,16 @@ export class RigLayer implements System {
         const px = c.userData as {
           hod2_kind?: string; hod2_hidden_unless?: string;
           hod2_path_rotation?: PathRotationRule;
+          hod2_drawn_on_cam_paths?: number[];
         };
         if (px?.hod2_kind !== "rig_part") return;
-        if (!px.hod2_hidden_unless && !px.hod2_path_rotation) return;
+        if (!px.hod2_hidden_unless && !px.hod2_path_rotation
+            && !px.hod2_drawn_on_cam_paths?.length) return;
         parts.push({
           node: c,
           baked: c.quaternion.clone(),
           hiddenUnless: px.hod2_hidden_unless ?? "",
+          drawnOnCamPaths: px.hod2_drawn_on_cam_paths ?? [],
           pathRotation: px.hod2_path_rotation ?? null,
         });
       });
@@ -621,6 +629,7 @@ export class RigLayer implements System {
         inst.root.visible = this.enabled && inst === show;
       }
       actor.showing = show;
+      if (this.enabled && show) this.applyCamPathParts(show, camSlot);
       if (!this.enabled || !show || !show.route) continue;
 
       // A selected route re-samples; a held one keeps the frame it stopped at.
@@ -831,6 +840,21 @@ export class RigLayer implements System {
     }
     for (const actor of this.actors) actor.showing = null;
     this.update(ctx);
+  }
+
+  /**
+   * The parts a routine draws behind a camera-path test, on every instance
+   * that shows -- a fixed-pose root as much as a routed one. Stage 6's lift
+   * car (`FUN_0048F560`) draws its two pairs of doors only on the paths that
+   * have them shut (`RigPart.drawnOnCamPaths`); on the others the class-0x44
+   * selector-12 leaves are the doors.
+   */
+  private applyCamPathParts(inst: Instance, camSlot: number | null): void {
+    for (const part of inst.parts) {
+      if (!part.drawnOnCamPaths.length) continue;
+      part.node.visible = camSlot !== null
+        && part.drawnOnCamPaths.includes(camSlot);
+    }
   }
 
   /**

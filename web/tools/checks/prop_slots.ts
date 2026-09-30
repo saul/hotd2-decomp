@@ -60,8 +60,24 @@ import { join } from "node:path";
 
 import { BUNDLE_ROOT, EXIT_SKIPPED, repoRoot } from "../lib/bundle_root";
 import { Checker, argValue } from "../lib/exe_check";
+import { SLIDE_SECOND_DRAW_SLOT, SLIDE_SECOND_SLOT }
+  from "../../src/game/class44/slide_slots";
+import { TYPE47_SLOT } from "../../src/game/class41/type47_slots";
 
 type Json = any;
+
+/**
+ * The placements that carry the one slot their update draws, and the update
+ * that draws it. The stage draws none of these on its own (`L54`), so a slot
+ * missing here is an object that is simply not there.
+ */
+const SLOT_DOORS: Readonly<Record<string, string>> = {
+  rising_door: "RisingDoorUpdate",
+  rise_to_height: "RiseToHeightUpdate",
+  slide_on_flag: "SlideOnFlagUpdate",
+  flag_lifted: "FlagLiftedPropUpdate",
+  story_switch: "StoryModeSwitchUpdate",
+};
 
 const ROOT = repoRoot();
 
@@ -479,13 +495,17 @@ for (const entry of JSON.parse(readFileSync(manifest, "utf8")).stages) {
       // PropUpdateType48FlickerLight draws, carried on the placement.
       for (const slot of pl.slots || []) want.push([slot, "a model PropUpdateType48FlickerLight draws"]);
     }
-    if (kind === "rising_door" || kind === "rise_to_height") {
+    if (Object.hasOwn(SLOT_DOORS, kind)) {
       const slot = pl.slot || 0;
       if (slot) {
-        const routine = kind === "rising_door" ? "RisingDoorUpdate" : "RiseToHeightUpdate";
-        want.push([slot, `the model ${routine} draws`]);
+        want.push([slot, `the model ${SLOT_DOORS[kind]} draws`]);
         doors++;
       }
+      if (kind === "slide_on_flag" && slot === SLIDE_SECOND_DRAW_SLOT) {
+        want.push([SLIDE_SECOND_SLOT, "the second model SlideOnFlagUpdate draws for 0x189C"]);
+      }
+    } else if (kind === "type47") {
+      want.push([TYPE47_SLOT, "the model PropUpdateType47 draws"]);
     } else if (kind === "generic") {
       const ty = pl.type;
       if (wantTypes.has(ty)) {

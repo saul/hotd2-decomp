@@ -393,12 +393,18 @@ export const RIGS: readonly Rig[] = [
         slots: [2814, 2815],
         translation: [0.0, 6.5, 15.5],
         condition: "drawn only while g_active_cam_path == 0xDA",
+        // `CMP EAX, 0xDA; JNZ` at `0x0048F691`.
+        drawnOnCamPaths: [0xda],
       },
       {
         name: "part_afc_afd",
         slots: [2812, 2813],
         translation: [0.0, 6.5, -11.3],
         condition: "drawn only while g_active_cam_path is 0xDB or 0xEC",
+        // `CMP DI, BP; JNZ` at `0x0048F6CC` -- DI is 0x182 only in the 0xDB
+        // arm (`0x0048F5F5`) and 0 in every other -- then `CMP
+        // [0x009a2d78], 0xEC; JNZ` at `0x0048F6D1`.
+        drawnOnCamPaths: [0xdb, 0xec],
       },
       {
         name: "part_digit_hi_a",

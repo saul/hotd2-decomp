@@ -1,3 +1,5 @@
+import type { EffectDraw, EffectState } from "../effect_draw";
+
 /**
  * Class 0x13's two state blocks, at the offsets the engine keeps them.
  *
@@ -70,6 +72,36 @@ export enum CarrierRoutine2State {
 }
 
 /**
+ * `sub+0x0C` as `CarrierPropRoutine4` (`FUN_00440C20`) and
+ * `CarrierPropRoutine5` (`FUN_00441000`) switch on it -- a fourth reading of
+ * the word (`L3`), the same seven states in both: jump tables `0x00440FD8`
+ * and `0x0044139C`, seven entries each; anything past 6 runs nothing.
+ */
+export enum CarrierRoutine4State {
+  /**
+   * `0x00440C44` / `0x00441024` -- allocate the 0x58-byte ride block;
+   * selectors 7 and 8 seat at their path's end and go to `Wait`, 4 and 5
+   * play a sound and fall into `Ride`.
+   */
+  Begin = 0,
+  /**
+   * `0x00440CC4` / `0x00441097` -- ride the `op_` path at the camera's frame
+   * until its length, shaking the screen and drawing the camera-facing strip.
+   */
+  Ride = 1,
+  /** `0x00440E4B` / `0x00441210` -- wait for one camera path's frame. */
+  Wait = 2,
+  /** `0x00440E70` / `0x00441240` -- wait for the frame that starts clip one. */
+  CueA = 3,
+  /** `0x00440E97` / `0x00441267` -- the effect plays its first motion. */
+  PlayA = 4,
+  /** `0x00440F33` / `0x00441309` -- wait for the frame that starts clip two. */
+  CueB = 5,
+  /** `0x00440F5A` / `0x00441330` -- the effect plays its second motion. */
+  PlayB = 6,
+}
+
+/**
  * The `CarrierPropSelectRoutine` (`FUN_00440190`) selectors this port runs —
  * the keys of `g_carrier_prop_routines` in `class13/index.ts`, which
  * `test/port/` holds equal to this.
@@ -81,7 +113,49 @@ export enum CarrierRoutine2State {
  * than have it arrive doing the wrong thing.
  */
 export const CARRIER_SELECTORS_PORTED: ReadonlySet<number> =
-  new Set([0, 1, 2, 6, 9]);
+  new Set([0, 1, 2, 4, 5, 6, 7, 8, 9]);
+
+/**
+ * `CarrierPropRoutine4` (selectors 4 and 7) and `CarrierPropRoutine5` (5
+ * and 8): the effect each ride block plays and the two motions it plays in
+ * turn -- `ride+0x00` and `ride+0x04` at `0x00440C53`/`0x00440C59` and
+ * `0x00441033`/`0x00441039`, then `MOV [ESI+4]` at `0x00440F15` and
+ * `0x004412F4`. Effect `0x15`'s eighteen parts are `eff_colo.bin[18..35]`
+ * (slots `0x968..0x979`), `0x18`'s are `eff_colo.bin[0..17]` (slots
+ * `0x19..0x2A`); both clips are `komono_colo.bin`'s, 100 frames of play
+ * each.
+ */
+export const CARRIER4_EFFECT = 0x15;
+export const CARRIER5_EFFECT = 0x18;
+export const CARRIER_FX_MOTION_A = 0x1cd;
+export const CARRIER_FX_MOTION_B = 0x1cc;
+
+/**
+ * `[port-only]` -- every `(effect, motion)` pair a ported carrier routine can
+ * hand `EffectDrawUnlit`, for the exporter to bake.
+ */
+export function CarrierEffects(selector: number): [number, number][] {
+  switch (selector) {
+    case 4:
+    case 7:
+      return [[CARRIER4_EFFECT, CARRIER_FX_MOTION_A],
+              [CARRIER4_EFFECT, CARRIER_FX_MOTION_B]];
+    case 5:
+    case 8:
+      return [[CARRIER5_EFFECT, CARRIER_FX_MOTION_B],
+              [CARRIER5_EFFECT, CARRIER_FX_MOTION_A]];
+    default:
+      return [];
+  }
+}
+
+/**
+ * The camera-facing strip selectors 4 and 5 draw while they ride,
+ * `ride+0x54` from `0x1AF0` to `0x1AF9` and round again --
+ * `eff_colo.bin[36..45]`.
+ */
+export const CARRIER4_SPRITE_FIRST = 0x1af0;
+export const CARRIER4_SPRITE_LAST = 0x1af9;
 
 /**
  * The per-routine literals of the two ground-wake routines' draws, which is
@@ -153,6 +227,10 @@ export function CarrierDrawSlots(selector: number): number[] {
     case 2:
     case 9:
       return [...CARRIER2_DOOR_SLOTS];
+    case 4:
+    case 5:
+      // Selectors 7 and 8 start past `Ride`, the only state that draws it.
+      return span(CARRIER4_SPRITE_FIRST, CARRIER4_SPRITE_LAST);
     case 1:
     case 6:
       return [...span(CARRIER_WAKE_FIRST,
@@ -174,9 +252,10 @@ export interface ScriptedPropTail {
    * `sub+0x0C` — the behaviour's own state word, and whose it is depends on
    * the selector: {@link CarrierState} for 1 and 6,
    * {@link CarrierRoutine0State} for 0, {@link CarrierRoutine2State} for 2
-   * and 9.
+   * and 9, {@link CarrierRoutine4State} for 4, 5, 7 and 8.
    */
-  state: CarrierState | CarrierRoutine0State | CarrierRoutine2State;
+  state: CarrierState | CarrierRoutine0State | CarrierRoutine2State
+    | CarrierRoutine4State;
   /** `sub+0x0E` — the camera path that despawns the prop. */
   camPath: number;
   /** `sub+0x10` — ...and the frame on it. */
@@ -239,6 +318,23 @@ export interface ScriptedPropTail {
   door1Yaw: number;
   /** `ride+0x08` -- the index into `g_carrier2_door_yaw`, 0..0x3B. */
   doorStep: number;
+
+  // -- `CarrierPropRoutine4`'s and `5`'s 0x58-byte ride block (`L3`) --------
+  /**
+   * `ride+0x00..0x0C` -- the four words `EffectDrawUnlit` (`FUN_0040DD90`)
+   * is handed: effect id, motion, play frame, the frame last drawn.
+   */
+  fx: EffectState;
+  /** `ride+0x54` -- the camera-facing strip's cel, `0x1AF0`..`0x1AF9`. */
+  spriteCel: number;
+  /**
+   * `[port-only]` -- the `AssetDrawSlot` calls routines 4 and 5 made this
+   * frame besides the prop's own, each under the matrix it was made with, in
+   * world space. Their matrices are built from literals and the camera's
+   * yaw, so they are computed where the routine computes them and the
+   * renderer draws what it is handed.
+   */
+  draws: EffectDraw[];
 }
 
 /** `[port-only]` — the two blocks `ActorAllocSub` zeroes, as one object. */
@@ -250,5 +346,7 @@ export function makeScriptedPropTail(): ScriptedPropTail {
     stripCel: 0, splashCel: 0, wakeGroundY: 0, wakeYaw: 0,
     wakeDrawn: 0, splashDrawn: 0, stripDrawn: 0,
     door0Yaw: 0, door1Yaw: 0, doorStep: 0,
+    fx: { effect: 0, motion: 0, frame: 0, prev: 0 }, spriteCel: 0,
+    draws: [],
   };
 }

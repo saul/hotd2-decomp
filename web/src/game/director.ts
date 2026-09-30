@@ -622,6 +622,8 @@ export function SpawnPropContainers(spawns: readonly ScriptSpawn[]): void {
       script_flag_effect: Class44Selector.ScriptFlagEffect,
       rising_door: Class44Selector.RisingDoor,
       rise_to_height: Class44Selector.RiseToHeight,
+      slide_on_flag: Class44Selector.SlideOnFlag,
+      flag_lifted: Class44Selector.FlagLifted,
       draw_only_14: Class44Selector.DrawOnly,
     };
     const sel = CLASS44_SELECTOR[pl.container];
@@ -634,7 +636,9 @@ export function SpawnPropContainers(spawns: readonly ScriptSpawn[]): void {
                                : pl.container === "rising_door"
                                  ? `rising door, flag ${pl.open_flag}`
                                  : pl.container === "rise_to_height"
-                                   ? `rise to height, flag ${pl.open_flag}`
+                                   || pl.container === "slide_on_flag"
+                                   || pl.container === "flag_lifted"
+                                   ? `${pl.container}, flag ${pl.open_flag}`
                                    : pl.container === "draw_only_14"
                                      ? `slot 0x${(pl.slot ?? 0).toString(16)}`
                                      : `container kind ${pl.kind}`,
@@ -659,6 +663,7 @@ export function SpawnPropContainers(spawns: readonly ScriptSpawn[]): void {
       : pl.container === "table50" ? PropContainerType.Table50Props
       : pl.container === "table66" ? PropContainerType.Table66Props
       : pl.container === "water_surface" ? PropContainerType.WaterSurface
+      : pl.container === "type47" ? PropContainerType.Type47Prop
       : PropContainerType.BreakableGroup;
     // The three table constructors read the placer's `+0x11C` as the step
     // lifetime they copy into every object, so that is what goes in `hp` for

@@ -800,6 +800,10 @@ export async function exportLevel(
           // this one rather than only showing it.
           ex.hod2_hidden_unless = part.hiddenUnless;
         }
+        if (part.drawnOnCamPaths?.length) {
+          // ...and the camera-path test, the other half the client acts on.
+          ex.hod2_drawn_on_cam_paths = [...part.drawnOnCamPaths];
+        }
         if (part.pathRotation !== undefined && part.pathRotation !== null) {
           const pr = part.pathRotation;
           ex.hod2_path_rotation = {

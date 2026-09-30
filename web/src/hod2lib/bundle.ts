@@ -33,7 +33,7 @@ import { SCHEMA_FILES, SCHEMA_HASH } from "../bundle/schema_hash";
 import { HumanoidDrawVariant, HUMANOID_VARIANT3_SLOT }
   from "../game/class25/state";
 // Same argument: `class13/state.ts` is data only, `class13/index.ts` registers.
-import { CARRIER_SELECTORS_PORTED, CarrierDrawSlots }
+import { CARRIER_SELECTORS_PORTED, CarrierDrawSlots, CarrierEffects }
   from "../game/class13/state";
 // ...and `class12/state.ts` for the slot strip class 0x12 steps through.
 import { ScriptedProp12DrawSlots } from "../game/class12/state";
@@ -44,6 +44,11 @@ import { Boss4EffectSlots } from "../game/class19/slots";
 // ...and `class41/water_slots.ts` for the tiles the canal water task pairs
 // and swaps -- immediates in its routine, which the geometry has to contain.
 import { WATER_SURFACE_ALSO_DRAWS } from "../game/class41/water_slots";
+// ...and the immediates class 0x44 selector 12 and class 0x41 constructor 47
+// draw, which the geometry has to contain.
+import { SLIDE_SECOND_DRAW_SLOT, SLIDE_SECOND_SLOT }
+  from "../game/class44/slide_slots";
+import { TYPE47_CONSTRUCTOR, TYPE47_SLOT } from "../game/class41/type47_slots";
 // Same argument again: `hud_sprites.ts` is the id list `hud_readout.ts` draws
 // from, as data, and the exporter must put exactly those textures in.
 // The continue screen's and the credit line's are in the same file.
@@ -628,6 +633,15 @@ export function containerPlacements(tables: ExeTables, evt: evtlib.EvtFile,
           pos: [...rec.pos],
           pitch: rec.orient[0], yaw: rec.orient[1], roll: rec.orient[2],
         });
+      } else if (ctor === TYPE47_CONSTRUCTOR) {
+        // `PlaceType47Prop` (`FUN_00463AE0`) -- a 0x48-byte task that draws
+        // one faded disc at the descriptor's position and reads nothing else
+        // of it. No lifetime: a script flag and a step index end it.
+        out.push({
+          at: rec.offset, container: "type47",
+          lifetime_evt_steps: 0,
+          pos: [...rec.pos],
+        });
       } else if (ctor === 24) {
         // `PlaceChainSegments` -- twenty segments, each carrying the placer's
         // `+0x1F4` as a chain group. Group 1 is a **route-branch trigger**.
@@ -777,6 +791,38 @@ export function containerPlacements(tables: ExeTables, evt: evtlib.EvtFile,
         remove_flag: rec.param(0x21, "i8") ?? -1,
         lifetime_evt_steps: 0,
         pos: [...rec.pos], yaw: rec.orient[1],
+      });
+    } else if (rec.hp === 12) {              // class 0x44 selector 12
+      // `PropBuildSlideOnFlag` (`FUN_004734A0`) -- an object that slides a
+      // set distance on a script flag. The tail at the offsets and widths the
+      // constructor loads it: the u16 at `+0x04` is the slot and the same
+      // DWORD is what the elevator-door test compares (`MOV EAX,[EDI+0x4];
+      // CMP EAX, 0xAFC`), the i32 at `+0x08` goes to `obj+0x14C`, the i32 at
+      // `+0x10` is `FIMUL`ed into the per-frame slide and the i32 at `+0x14`
+      // `FILD`ed into its length; the two signed bytes are the flags.
+      out.push({
+        at: rec.offset, container: "slide_on_flag",
+        slot: rec.param(0x04, "u16") || 0,
+        slot_word: rec.param(0x04, "u32") ?? 0,
+        coli: rec.param(0x08, "i32") ?? -1,
+        speed: rec.param(0x10, "i32") ?? 0,
+        travel: rec.param(0x14, "i32") ?? 0,
+        open_flag: rec.param(0x20, "i8") ?? 0,
+        remove_flag: rec.param(0x21, "i8") ?? -1,
+        lifetime_evt_steps: 0,
+        pos: [...rec.pos], yaw: rec.orient[1],
+      });
+    } else if (rec.hp === 9) {               // class 0x44 selector 9
+      // `PropBuildFlagLiftedProp` (`FUN_00473300`) -- one slot that rises to
+      // y 10 on a flag. The u16 at `+0x04` and the two signed bytes; the
+      // constructor reads nothing else, not even the yaw.
+      out.push({
+        at: rec.offset, container: "flag_lifted",
+        slot: rec.param(0x04, "u16") || 0,
+        open_flag: rec.param(0x20, "i8") ?? 0,
+        remove_flag: rec.param(0x21, "i8") ?? -1,
+        lifetime_evt_steps: 0,
+        pos: [...rec.pos],
       });
     } else if (rec.hp === 14) {              // class 0x44 selector 14
       // `PropBuildDrawOnlySelector14` (`FUN_004736D0`) -- a model at the
@@ -1528,8 +1574,9 @@ export function scriptedPropDrawSlots(
     // Only a prop whose behaviour the port runs: `g_prop_behaviours[0]` is
     // `NoOpStub`, a static model, and `[8]` is a carrier whose selector must
     // be one of {@link CARRIER_SELECTORS_PORTED}. Stage 4's seven carriers take
-    // selectors 2..9 and would otherwise stand at their descriptors while the
-    // game drives them -- right geometry, wrong behaviour, which is the reason
+    // selectors 2..9; selector 3's (`0x00440AD0`, slot `0x966`) would
+    // otherwise stand at its descriptor while the game drives it -- right
+    // geometry, wrong behaviour, which is the reason
     // `GENERIC_DESCRIPTOR_SLOT` holds its unported types back too.
     const t = p.class13;
     const ported = t?.behaviour === 0
@@ -1545,6 +1592,64 @@ export function scriptedPropDrawSlots(
       for (const s of CarrierDrawSlots(t.selector ?? -1)) {
         if (!out.includes(s)) out.push(s);
       }
+    }
+  }
+  return out;
+}
+
+/**
+ * The parts of every effect a ported class-0x13 carrier hands
+ * `EffectDrawUnlit` (`FUN_0040DD90`) -- selectors 4 and 7's effect `0x15`,
+ * 5 and 8's `0x18` -- which `render/slotmodels.ts` clones from `slots_actor`
+ * with the rest of the carrier's draws. A node with slot 0 is a pure
+ * transform.
+ */
+export function carrierEffectDrawSlots(
+    tables: ExeTables,
+    placements: readonly {
+      class13?: { behaviour?: number; selector?: number } | null;
+    }[],
+): number[] {
+  const out: number[] = [];
+  for (const p of placements) {
+    const t = p.class13;
+    if (t?.behaviour !== 8 || !CARRIER_SELECTORS_PORTED.has(t.selector ?? -1)) {
+      continue;
+    }
+    for (const [effect] of CarrierEffects(t.selector ?? -1)) {
+      for (const n of propslib.effectTree(tables, effect)) {
+        if (n.slot && !out.includes(n.slot)) out.push(n.slot);
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * The effect trees class 0x13's carriers play, one record per effect **and
+ * motion**, keyed `"<effect>@<motion>"`: a carrier's ride block plays motion
+ * `0x1CD` and then `0x1CC` through one effect id (or the reverse), which the
+ * by-id keys {@link scriptFlagEffectsJson} and the others write cannot hold.
+ * `game/effect_draw.ts`'s `EffectDefFor` reads either shape. No sound cues:
+ * the carriers play their own.
+ */
+export async function carrierEffectsJson(
+    stage: Stage,
+    placements: readonly {
+      class13?: { behaviour?: number; selector?: number } | null;
+    }[]): Promise<Record<string, unknown>> {
+  const out: Record<string, unknown> = {};
+  for (const p of placements) {
+    const t = p.class13;
+    if (t?.behaviour !== 8 || !CARRIER_SELECTORS_PORTED.has(t.selector ?? -1)) {
+      continue;
+    }
+    for (const [effect, motion] of CarrierEffects(t.selector ?? -1)) {
+      const key = `${effect}@${motion}`;
+      if (out[key] !== undefined) continue;
+      const def = await effectDefJson(stage, effect, motion,
+                                      "hod2lib.bundle.carrier_effects", []);
+      if (def) out[key] = def;
     }
   }
   return out;
@@ -1869,13 +1974,25 @@ export async function breakableSlotEntry(
   // 6's are only ever drawn through it. And selector 14's
   // `PropDrawOnlySelector14` (`FUN_004758E0`), whose `0x10AE` in stages 3
   // and 4 no instruction names.
+  // ...and every other object that draws its descriptor's slot and nothing
+  // else: selectors 9 and 12, and the story-mode switch -- whose model never
+  // travelled, so the stage's copy at the world's origin was the only one
+  // (stage 3's `0x1853`). Selector 12 draws a second model only for slot
+  // `0x189C`, which no shipped spawn names; constructor 47 draws a literal.
   for (const pl of placements) {
-    if (pl.container !== "rising_door" && pl.container !== "rise_to_height"
-        && pl.container !== "draw_only_14") {
-      continue;
+    const own = pl.container === "rising_door"
+      || pl.container === "rise_to_height" || pl.container === "flag_lifted"
+      || pl.container === "slide_on_flag" || pl.container === "story_switch"
+      || pl.container === "draw_only_14";
+    const slots = own ? [pl.slot as number] : [];
+    if (pl.container === "slide_on_flag"
+        && pl.slot === SLIDE_SECOND_DRAW_SLOT) {
+      slots.push(SLIDE_SECOND_SLOT);
     }
-    const slot = pl.slot as number;
-    if (slot && !want.includes(slot)) want.push(slot);
+    if (pl.container === "type47") slots.push(TYPE47_SLOT);
+    for (const slot of slots) {
+      if (slot && !want.includes(slot)) want.push(slot);
+    }
   }
   // Class 0x44 selector 0 draws an effect tree, so the slots it needs are the
   // tree's nodes and **not** the descriptor's `obj+0x28C`, which that family
@@ -2177,6 +2294,7 @@ export async function buildStage(stage: Stage, sink: BundleSink,
     stage, spawnRecords.map((r) => r.cls),
     [...humanoidDrawSlots(humanoids), ...sceneryDrawSlots(charPlaces),
      ...scriptedPropDrawSlots(charPlaces),
+     ...carrierEffectDrawSlots(tables, charPlaces),
      ...flagStripPropDrawSlots(charPlaces),
      ...waterSurfaceDrawSlots(placements),
      ...vehicleDrawSlots(spawnRecords)],
@@ -2256,8 +2374,13 @@ export async function buildStage(stage: Stage, sink: BundleSink,
       await class42Tables(stage);
   }
   scriptJson.props = propslib.propsJson(tables, hinges, statics);
-  scriptJson.breakables = breakablesJson(tables, placements, effectDefs,
-                                         stage.scene);
+  // The carriers' effects ride in the same map, and after
+  // `breakableSlotEntry` has taken its node slots: theirs travel in
+  // `slots_actor`, which is what draws them.
+  scriptJson.breakables = breakablesJson(
+    tables, placements,
+    { ...effectDefs, ...(await carrierEffectsJson(stage, charPlaces)) },
+    stage.scene);
   scriptJson.set_pieces = evt ? setPiecesJson(evt, spawnRecords) : {};
   scriptJson.humanoids = humanoids;
   scriptJson.civilians = evt ? civiliansJson(tables, evt, spawnRecords) : {};

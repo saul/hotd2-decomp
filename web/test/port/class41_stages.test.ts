@@ -78,7 +78,13 @@ import {
   Class44Selector, PropBuildRiseToHeight, RiseToHeightUpdate,
   PropDrawOnlySelector14,
   RISE_TO_HEIGHT_KILL_FRAME, RISE_TO_HEIGHT_KILL_PATH,
+  PropBuildSlideOnFlag, SlideOnFlagUpdate, SLIDE_CAR_X, SLIDE_CAR_Y_BLOCK0,
+  SLIDE_CAR_Z, PropBuildFlagLiftedProp, FlagLiftedPropUpdate,
 } from "../../src/game/class44";
+import {
+  PlaceType47Prop, PropUpdateType47, TYPE47_KILL_FLAG,
+} from "../../src/game/class41/type47";
+import { TYPE47_SLOT } from "../../src/game/class41/type47_slots";
 import { SpawnPropContainers } from "../../src/game/director";
 import { CamPaths } from "../../src/game/camera/curve";
 import { SetCameraPaths } from "../../src/game/tables";
@@ -1277,6 +1283,177 @@ console.log("\nclass 0x44 selector 14, a model at its descriptor's pose and scal
   PropDrawOnlySelector14(bar);
   check("the fifth retires it before it draws",
         !!bar.dead && !bar.draws?.length);
+}
+
+console.log("\nclass 0x44 selector 12, stage 6's sliding doors:");
+{
+  // Driven the way the level drives it: a placement, the spawn list,
+  // `SpawnPropContainers` and a frame of `GameUpdate`. Stage 6 block 0 step 2
+  // op 13's pair, exactly: evt 0x0B00 and 0x0B48, slots 0x189B/0x189D, speeds
+  // -1 and +1, 21 units, flag 5 -- and the only two with a blob.
+  const rng = new Rng(67);
+  const events = propScene(rng, GameMode.Arcade);
+  const L: BreakablePlacement = {
+    at: 0x0b00, container: "slide_on_flag", slot: 0x189b, slot_word: 0x189b,
+    coli: 0x0cecf000, speed: -1, travel: 21, open_flag: 5, remove_flag: 24,
+    lifetime_evt_steps: 0, pos: [560, -51.3, -9158.6], yaw: 0 };
+  const R: BreakablePlacement = { ...L, at: 0x0b48, slot: 0x189d,
+    slot_word: 0x189d, coli: 0x0cecf068, speed: 1, pos: [600, -51.3, -9158.6] };
+  SetGameTables(CHARS, { ...BREAKABLES,
+                         placements: [...(BREAKABLES.placements ?? []), L, R] });
+  SpawnPropContainers([0x0b00, 0x0b48].map(
+    (at) => ({ at, class: SpawnClass.PropPlacer })));
+  GameUpdate(1 / 60, NULL_HOST, rng, events);
+  const left = G.g_breakable_props.find((q) => q.at === 0x0b00);
+  const right = G.g_breakable_props.find((q) => q.at === 0x0b48);
+  check("selector 12 builds both leaves from their placements",
+        left?.family === PropFamily.SlideOnFlag
+        && right?.family === PropFamily.SlideOnFlag);
+  if (!left || !right) throw new Error("no doors");
+  // `FSIN(PI/2) * -1` and `FCOS(PI/2) * -1`, each stored as an f32.
+  check("the slide is sin/cos of PI/2 times the tail's integer speed",
+        left.vx === -1 && right.vx === 1
+        && left.vz === Math.fround(Math.cos(Math.PI / 2) * -1),
+        `${left.vx} ${left.vz}`);
+  for (let i = 0; i < 60; i++) { SlideOnFlagUpdate(left); SlideOnFlagUpdate(right); }
+  check("shut until the flag: each draws its slot where it was placed, in "
+        + "draw layer 9",
+        left.x === 560 && right.x === 600 && left.draws?.length === 1
+        && left.draws[0].slot === 0x189b && left.draws[0].layer === 9
+        && left.draws[0].m[12] === 560);
+  G.g_script_flags[5] = 1;
+  const xs: number[] = [];
+  for (let i = 0; i < 40; i++) { SlideOnFlagUpdate(left); SlideOnFlagUpdate(right); xs.push(left.x); }
+  // The sum is taken before the test: steps 1..20 are short of 21, the 21st
+  // is not, so the leaf moves twenty times and stops a unit short.
+  check("the flag parts them a unit a frame: the running total is added "
+        + "before it is tested, so a 21-unit door moves 20 times",
+        left.x === 540 && right.x === 620 && xs[19] === 540 && xs[18] === 541,
+        `${left.x} ${right.x} ${xs.slice(17, 22).join()}`);
+  check("...and both carry blobs, so both file for the shot test",
+        left.shotRegistered && right.shotRegistered);
+  G.g_script_flags[24] = 1;
+  SlideOnFlagUpdate(left);
+  check("the remove flag takes a leaf with a blob by ActorDespawn",
+        left.dead && ((left.flags & 0x80018000) >>> 0) === 0x80018000);
+}
+
+console.log("\nclass 0x44 selector 12, the elevator car's doors are in its frame:");
+{
+  // Stage 6 block 0 step 2 op 15: evt 0x0C20, slot 0xAFC, placed at (0, 6.5,
+  // -11.3) -- the car's own frame -- and moved by the constructor to where the
+  // car parks in block 0, (557.5, -57.8, -9880.2) turned 0x7555.
+  const rng = new Rng(68);
+  propScene(rng, GameMode.Arcade);
+  G.g_evt_block_index = 0;
+  const door = PropBuildSlideOnFlag({
+    at: 0x0c20, container: "slide_on_flag", slot: 0xafc, slot_word: 0xafc,
+    coli: -1, speed: 1, travel: 6, open_flag: 3, remove_flag: 22,
+    lifetime_evt_steps: 0, pos: [0, 6.5, -11.3], yaw: 0 });
+  // RotY(0x7555) takes +X to (c, 0, -s) and +Z to (s, 0, c), so the local
+  // (0, 6.5, -11.3) lands at (557.5 - 11.3 s, -51.3, -9880.2 - 11.3 c).
+  const a = 0x7555 * 2 * Math.PI / 65536;
+  const c = Math.cos(a), sn = Math.sin(a);
+  check("the constructor carries the descriptor into the parked car's frame",
+        Math.abs(door.x - (SLIDE_CAR_X - 11.3 * sn)) < 1e-3
+        && Math.abs(door.y - (SLIDE_CAR_Y_BLOCK0 + 6.5)) < 1e-3
+        && Math.abs(door.z - (SLIDE_CAR_Z - 11.3 * c)) < 1e-3
+        && door.yaw === 0x7555,
+        `${door.x} ${door.y} ${door.z}`);
+  check("...where block 0 parks it: 554.6, -51.3, -9869.3",
+        Math.abs(door.x - 554.575) < 1e-2 && Math.abs(door.z - -9869.285) < 1e-2);
+  check("...and slides along the car's own x, not the world's",
+        Math.abs(door.vx - c) < 1e-6 && Math.abs(door.vz - -sn) < 1e-6,
+        `${door.vx} ${door.vz}`);
+  G.g_evt_block_index = 3;
+  const high = PropBuildSlideOnFlag({
+    at: 0x1838, container: "slide_on_flag", slot: 0xafc, slot_word: 0xafc,
+    coli: -1, speed: 1, travel: 6, open_flag: 4, remove_flag: 23,
+    lifetime_evt_steps: 0, pos: [0, 6.5, 15.5], yaw: 0 });
+  check("in any other block the car is parked at the top, y 2492.2",
+        Math.abs(high.y - (Math.fround(2492.2) + 6.5)) < 1e-3, String(high.y));
+  G.g_script_flags[3] = 1;
+  const x0 = door.x;
+  for (let i = 0; i < 20; i++) SlideOnFlagUpdate(door);
+  // The step is measured from the two f32 components, whose length is
+  // 0.99999998 and not 1: six steps sum to 5.9999999, still short of 6, so
+  // the car's door moves six times where the straight doors above move a
+  // whole unit fewer than their length.
+  check("a 6-unit car door moves six times: its f32 step is a hair under 1",
+        Math.abs((door.x - x0) - 6 * door.vx) < 1e-3,
+        `${door.x - x0}`);
+  check("...and never files for the shot test without a blob",
+        !door.shotRegistered);
+}
+
+console.log("\nclass 0x44 selector 9, stage 3's lift to y 10:");
+{
+  const rng = new Rng(69);
+  propScene(rng, GameMode.Arcade);
+  // Stage 3 block 0 step 4 op 7: evt 0x0D24, slot 0x1986, flags 5 and 10.
+  const p = PropBuildFlagLiftedProp({
+    at: 0x0d24, container: "flag_lifted", slot: 0x1986, open_flag: 5,
+    remove_flag: 10, lifetime_evt_steps: 0,
+    pos: [-1079.9, -25.4, -3018.5] });
+  check("it is built with no flag word and no yaw",
+        p.family === PropFamily.FlagLifted && p.flags === 0 && p.yaw === 0);
+  FlagLiftedPropUpdate(p);
+  check("shut, it draws its slot at its descriptor, unturned",
+        p.draws?.length === 1 && p.draws[0].slot === 0x1986
+        && p.draws[0].m[12] === Math.fround(-1079.9)
+        && p.draws[0].m[13] === Math.fround(-25.4)
+        && p.draws[0].m[0] === 1 && p.draws[0].m[2] === 0);
+  G.g_script_flags[5] = 1;
+  let n = 0;
+  while (p.y < 10 && n < 1000) { FlagLiftedPropUpdate(p); n++; }
+  // 0.8f a frame from (f32)-25.4 against the double 10.0: 45 steps, and it
+  // stops on the first y past 10 -- 10.6, not 10.
+  check("the flag lifts it 0.8 a frame to the first y at or past 10",
+        n === 45 && p.y === Math.fround(10.599995613098145),
+        `${n} ${p.y}`);
+  for (let i = 0; i < 10; i++) FlagLiftedPropUpdate(p);
+  check("...and it holds there", p.y === Math.fround(10.599995613098145));
+  G.g_script_flags[10] = 1;
+  FlagLiftedPropUpdate(p);
+  check("the remove flag kills it, by ActorKill", p.dead && p.flags === 0);
+}
+
+console.log("\nclass 0x41 constructor 47, stage 2's faded disc:");
+{
+  const rng = new Rng(70);
+  const events = propScene(rng, GameMode.Arcade);
+  // Stage 2 block 35 step 1 op 52: evt 0x14990, constructor 47.
+  const pl: BreakablePlacement = {
+    at: 0x14990, container: "type47", lifetime_evt_steps: 0,
+    pos: [-1355, -28, -2020] };
+  SetGameTables(CHARS, { ...BREAKABLES,
+                         placements: [...(BREAKABLES.placements ?? []), pl] });
+  SpawnPropContainers([{ at: 0x14990, class: SpawnClass.PropContainerPlacer }]);
+  const placer = G.g_object_list.find((o) => o.at === 0x14990);
+  check("the placer carries constructor 47 in +0x130C",
+        placer?.condition === 47, String(placer?.condition));
+  G.g_evt_step_index = 1;
+  GameUpdate(1 / 60, NULL_HOST, rng, events);
+  const disc = G.g_breakable_props.find((q) => q.at === 0x14990);
+  check("one frame builds it", disc?.family === PropFamily.Type47);
+  if (!disc) throw new Error("no disc");
+  PropUpdateType47(disc);
+  const d = disc.draws?.[0];
+  // RotX(0xC000) then Scale(0.4): row 1 is (0, 0, -1) * 0.4 and row 2 is
+  // (0, 1, 0) * 0.4 -- lying flat, 54 units across.
+  check("it draws 0x1384 flat at 0.4 scale at its descriptor, faded to 0.8",
+        d?.slot === TYPE47_SLOT && d.alpha === Math.fround(0.8)
+        && d.m[12] === -1355 && d.m[13] === -28 && d.m[14] === -2020
+        && Math.abs(d.m[6] - -0.4) < 1e-6 && Math.abs(d.m[9] - 0.4) < 1e-6,
+        JSON.stringify(d));
+  G.g_evt_step_index = 2;
+  PropUpdateType47(disc);
+  check("step index 2 kills it", disc.dead);
+  const again = PlaceType47Prop(pl);
+  G.g_evt_step_index = 1;
+  G.g_script_flags[TYPE47_KILL_FLAG] = 1;
+  PropUpdateType47(again);
+  check("...and so does script flag 0x11", again.dead);
 }
 
 console.log("\nclass 0x44 selector 11, stage 5's door takes the other arm:");

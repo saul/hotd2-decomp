@@ -226,8 +226,9 @@ export interface BreakablePlacement {
    */
   container: "group" | "kinded" | "falling" | "generic"
     | "chain" | "fragment" | "story_switch" | "script_flag_effect"
-    | "rising_door" | "rise_to_height" | "flicker_light" | "table38"
-    | "table39" | "table44" | "table50" | "table66" | "water_surface"
+    | "rising_door" | "rise_to_height" | "slide_on_flag" | "flag_lifted"
+    | "flicker_light" | "table38" | "table39" | "table44" | "table50"
+    | "table66" | "water_surface" | "type47"
     | "draw_only_14";
   /** How many evt blocks it lives for. */
   lifetime_evt_steps: number;
@@ -260,6 +261,18 @@ export interface BreakablePlacement {
    * the shot test. `-1` in every shipped spawn.
    */
   coli?: number;
+  /**
+   * `slide_on_flag` only — class 0x44 selector 12, `SlideOnFlagUpdate`
+   * (`FUN_004755B0`). `speed` is the i32 at tail `+0x10` the constructor
+   * `FIMUL`s into the per-frame slide, `travel` the i32 at `+0x14` it `FILD`s
+   * into the slide's length, and `slot_word` the DWORD at `+0x04` its
+   * elevator-door test compares (`slot` is the same word's low half, which the
+   * draw reads). `coli`, `open_flag` and `remove_flag` as for
+   * `rise_to_height`.
+   */
+  speed?: number;
+  travel?: number;
+  slot_word?: number;
   /**
    * `generic` — the class-0x41 constructor type, and the spawn descriptor's
    * `+0x11C`.
@@ -441,8 +454,11 @@ export interface BreakablesJson {
   kinds: PropKindParams[];
   placements: BreakablePlacement[];
   /**
-   * Keyed by effect id — only the ones this stage's class-0x44 selector-0
-   * spawns name, which is nothing at all outside stage 1.
+   * Keyed by effect id — the ones this stage's class-0x44 selector-0 spawns,
+   * generic props and carried props name, one motion per id — and by
+   * `"<effect>@<motion>"` for the class-0x13 carriers, whose one ride block
+   * plays two motions through one effect id (`game/effect_draw.ts`'s
+   * `EffectDefFor` reads both).
    */
   effects: Record<string, EffectDefJson>;
   /** 7.540296 — one stack level, in world units. */

@@ -486,9 +486,42 @@ a slot resident and draws nothing (`L54`): a slot no region lists is on screen
 only where some routine calls `AssetDrawSlot` on it, under that routine's own
 matrix. Stage 5 loads `st5.bin[1]`, `[8]` and `[9]` this way, and they are
 drawn by class 0x44 selector 13, a hinge and selector 11 at their descriptors'
-points. The player's `StageScene` still draws every other unregioned slot the
-script has loaded at the model's own origin, which is a stand-in; a layer that
-runs the real drawer claims its slots out of it (`StageScene.claimSlots`).
+points. The player's `StageScene` draws the current region's models, the
+backdrop's and the canal water task's, and nothing else: its old stand-in,
+"loaded and in no region, so drawn at the model's own coordinates", is gone
+(`L54`, `L93`, `L96`).
+
+#### What the stand-in was drawing, and who draws it instead
+
+130 distinct slots over the twelve bundles, each with the routine that really
+draws it. A slot drawn by a ported routine was on screen twice before, once
+where its routine puts it and once where the model's own coordinates do.
+
+| Disposition | Slots |
+|---|---|
+| **Backdrop** -- `render/backdrop.ts` sets these stage nodes itself, every frame (9) | `0x17A0`, `0x17A1`, `0x18A3`, `0x18A5`..`0x18A8`, `0x1AFF`, `0x1B00` |
+| **Canal water** -- class 0x41 type 1's task, through `StageScene.setWaterSlots` (6) | `0x13A0`, `0x13AD`, `0x13AE`, `0x13B0`, `0x13B2`, `0x183C` |
+| **Ported with this change** (6) | `0x189B`, `0x189D` (class 0x44 selector 12, `SlideOnFlagUpdate`); `0x1986` (selector 9, `FlagLiftedPropUpdate`); `0x1384` (class 0x41 constructor 47, `PropUpdateType47`); `0x0954`, `0x0956` (class 0x13's own draw of its slot, posed by carrier selectors 4/7, `CarrierPropRoutine4`, and 5/8, `CarrierPropRoutine5`, stage 4 blocks 23/25/27/29) |
+| **Ported before; its model now travels** (1) | `0x1853` (class 0x44 selector 17, `StoryModeSwitchUpdate`) |
+| **Original Mode and civilian items** -- the item draws, from `slots_breakable` (40) | `0x107C`..`0x1084`, `0x1086`..`0x1088`, `0x108A`..`0x1092`, `0x1094`, `0x1096`..`0x109C`, `0x109E`, `0x109F`, `0x10A3`..`0x10AB` |
+| **Civilian attachments** -- the character layer (20) | `0x0F94`, `0x11CE`, `0x11CF`, `0x11D0`, `0x11D1`, `0x11D3`, `0x11D7`, `0x11DC`, `0x11DE`, `0x11DF`, `0x11E5`, `0x11E7`, `0x11E8`, `0x11EB`, `0x11EE`, `0x11F2`, `0x11F3`, `0x11F6`, `0x11F9`, `0x11FB` |
+| **Hinges** -- `HingeUpdate`, in `render/props.ts` (6) | `0x01DC`, `0x07E7`, `0x1856`, `0x1866`, `0x186C`, `0x1899` |
+| **Class 0x44 doors** -- selectors 11 and 13 (5) | `0x0A58`, `0x0D21`, `0x0D22`, `0x1892`, `0x189A` |
+| **Generic and breakable props** -- class 0x41 (13) | `0x0A64`, `0x0A67`, `0x0A68`, `0x0A6B`, `0x0A6D`, `0x1852`, `0x185C`, `0x185D`, `0x189C`, `0x189E`..`0x18A1` |
+| **Rigs** (4) | `0x185B` (`obj_48f050`), `0x1871` (`obj_470b70`), `0x1913` (`obj_48f560`), `0x1A37` (`obj_484ff0_props`) |
+| **Actor and effect slots** (8) | `0x07ED`, `0x07EE` (the boss banner); `0x094F`, `0x0952`, `0x0953` (class 0x13 carrier selectors 2/9); `0x1383`, `0x13A2` (`slots_actor`); `0x1850` (`slots_effect`) |
+| **Drawn by a routine the port has not read** (7) | `0x07E9`, `0x07EB`, `0x0D36`, `0x190C`, `0x1914`, `0x1915` -- class 0x26 subtypes 6/7 (`0x0048F930` into `0x0048FB40` / `0x0048FD00`), stage 6 block 12. `0x10E3` -- `ScriptedHumanoidBoneDrawHook` (`0x00485260`) |
+| **Nothing draws it on its own** (3) | `0x1085`, `0x11ED`, `0x1730` (the chapter card's, and the selector-12 arm for slot `0x189C` that no spawn takes) |
+| **`[open]`** (2) | `0x10AE` (`st1_1.bin[2]`, stages 3 and 4), `0x18AD` (`st5_01b.bin[8]`, stage 6 block 12): no instruction names either as an immediate, and the only other occurrence of either word in the image is its pol file's slot list |
+
+`0x0954` and `0x0956` are authored in world space (x -657..685, z
+-2261..-1567), so the stand-in drew them in place, and deleting it took them
+off the screen in stage 4's boss blocks until carrier selectors 4, 5, 7 and 8
+were ported with it (`L96`). The routines put the model's last pose on the
+origin, so they stand where the stand-in had them once they have risen; the
+slot model layer honours the `0x50`/`0x51` residency the stage tracks, as
+`AssetDrawSlot` does, so the models also leave the screen where the script
+unloads them.
 
 **[measured]** Spawn positions checked against the bounding box of the geometry
 set, per stage:

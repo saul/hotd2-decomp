@@ -65,6 +65,8 @@ import {
 import { SpawnClass } from "../spawn_class";
 import { CarrierPropRoutine0 } from "./routine0";
 import { CarrierPropRoutine2 } from "./routine2";
+import { CarrierPropRoutine4 } from "./routine4";
+import { CarrierPropRoutine5 } from "./routine5";
 import { QueryGroundHeightAt } from "../coli";
 import { CARRIER_RIDERS_DONE_BIT, CarrierTransformPoint } from "../carrier";
 import {
@@ -568,7 +570,13 @@ export const g_carrier_prop_routines: Partial<Record<number,
   [CARRIER_ROUTINE_PORTED]: CarrierPropRoutine1,
   // `FUN_004408A0` is installed for both: 9 is 2 arriving parked.
   2: CarrierPropRoutine2,
+  // `FUN_00440C20` for 4 and 7, `FUN_00441000` for 5 and 8: 7 and 8 are 4
+  // and 5 arriving already seated.
+  4: CarrierPropRoutine4,
+  5: CarrierPropRoutine5,
   6: CarrierPropRoutine6,
+  7: CarrierPropRoutine4,
+  8: CarrierPropRoutine5,
   9: CarrierPropRoutine2,
 };
 

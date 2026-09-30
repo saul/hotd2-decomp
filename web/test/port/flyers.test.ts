@@ -7,9 +7,18 @@ import { MotionFlag } from "../../src/game/actor";
 import { ScriptedPropUpdate13, g_carrier_prop_routines, SFX_CARRIER_BOW }
   from "../../src/game/class13";
 import {
-  CARRIER_SELECTORS_PORTED, CarrierRoutine0State, CarrierState,
-  type ScriptedPropTail,
+  CARRIER4_SPRITE_FIRST, CARRIER4_SPRITE_LAST, CARRIER_SELECTORS_PORTED,
+  CarrierDrawSlots, CarrierEffects, CarrierRoutine0State,
+  CarrierRoutine4State, CarrierState, type ScriptedPropTail,
 } from "../../src/game/class13/state";
+import {
+  CARRIER4_FX_A_AT, CARRIER4_OFFSET_Z, SFX_CARRIER4_CUE,
+  SFX_CARRIER4_LAND_A, SFX_CARRIER4_LAND_B, SFX_CARRIER4_START,
+} from "../../src/game/class13/routine4";
+import {
+  CARRIER5_OFFSET_X, CARRIER5_OFFSET_Z,
+} from "../../src/game/class13/routine5";
+import type { EffectDefJson } from "../../src/bundle";
 import {
   CARRIER0_FRAME_STRIKE, CARRIER0_SPLASH_FIRST, CARRIER0_SPLASH_LAST,
   SFX_CARRIER0_STRIKE, g_carrier_routine0_ride_end,
@@ -69,6 +78,7 @@ import { SpawnClass } from "../../src/game/spawn_class";
 import { vec3, type Vec3 } from "../../src/game/vec";
 import {
   check, TYPE, CHARS, EYE, PublishCrowd, scene, RunOutInvulnerability,
+  BREAKABLES,
 } from "./harness";
 
 // -- 30. the three flying and swimming enemies -------------------------------
@@ -2388,6 +2398,212 @@ import {
     check("the splash strip ran to 0x1031 and switched itself off, once",
           t().splashCel === 0 && sounds.length === 1
           && CARRIER0_SPLASH_LAST - CARRIER0_SPLASH_FIRST === 93);
+  }
+
+  // -- class 0x13 selectors 4, 5, 7 and 8: stage 4's two set models ---------
+  {
+    // Stage 4 block 23's evt 0x8CF0: selector 4, despawn on camera path 184
+    // frame 320, at (0, 0, 0), with a stand-in slot so the routine's own
+    // write of 0x954 shows. Object path 0x176 here is the routine's three
+    // literals plus `(240 - frame, frame - 240, 0)`: a correct offset leaves
+    // exactly that, and the last frame leaves the origin, where the model is
+    // authored.
+    const rng = new Rng(131);
+    scene(0, rng);
+    // Effect 0x15 and 0x18, one record per motion as the exporter keys them:
+    // a two-part tree whose parts sit at (1, 2, 3), unturned.
+    const part = (motion: number): EffectDefJson => ({
+      nodes: [{ slot: 0, bone: 0, children: [1, 2] },
+              { slot: 0x968, bone: 1, children: [] },
+              { slot: 0x969, bone: 2, children: [] }],
+      interp: 0, motion, play_length: 100, frames: 100, bones: 2,
+      t: Array.from({ length: 600 }, (_u, i) => (i % 6 < 3 ? (i % 6) + 1 : 0)),
+      r: new Array(600).fill(0), cues: [],
+    });
+    SetGameTables(CHARS, {
+      ...BREAKABLES,
+      effects: { "21@461": part(0x1cd), "21@460": part(0x1cc),
+                 "24@460": part(0x1cc), "24@461": part(0x1cd) },
+    });
+    const events = new Events();
+    const sounds: number[] = [];
+    events.on("sound.play", (e) => sounds.push(e.id));
+    const X4 = Math.fround(301.89300537109375);
+    const Y4 = Math.fround(121.72100067138672);
+    const host: GameHost = {
+      ...HOST,
+      objectPath: (slot, frame) => slot === 0x176
+        ? { x: X4 + (240 - frame), y: Y4 + (frame - 240), z: -CARRIER4_OFFSET_Z,
+            pitch: 0, yaw: 0, roll: 0 }
+        : slot === 0x177
+          ? { x: -CARRIER5_OFFSET_X - frame, y: 7, z: -CARRIER5_OFFSET_Z,
+              pitch: 0, yaw: 0, roll: 0 }
+          : null,
+    };
+    const fr = (r: Rng): ClassFrame => ({ dt: 1 / 60, rng: r, host, events });
+    G.g_active_cam_path = 180;
+    G.g_cam_path_frame = 50;
+    G.g_screen_shake_frames = 0;
+    const set = ActorSpawn(0x8cf0, SpawnClass.ScriptedProp, -1, "set", {
+      class13: { slot: 0x111, cam_path: 184, cam_frame: 320, scale: 1,
+                 behaviour: 8, selector: 4 },
+      pos: vec3(0, 0, 0),
+    }, rng);
+    const t = () => (set as { prop13: ScriptedPropTail }).prop13;
+    ScriptedPropUpdate13(set, fr(rng));
+    check("selector 4 allocates its ride, plays 0x1A1BA9 and rides path "
+          + "0x176 at the camera's frame, less its three literals",
+          t().state === CarrierRoutine4State.Ride && t().riding
+          && sounds.join() === String(SFX_CARRIER4_START)
+          && set.pos.x === 190 && set.pos.y === -190 && set.pos.z === 0,
+          `${t().state} ${sounds} ${set.pos.x} ${set.pos.y} ${set.pos.z}`);
+    check("...shakes the screen while it rides",
+          G.g_screen_shake_frames === 0x28);
+    // Frame 50: s = 50 * 0.1f; `T(-25, 43, -1625) RotY(cam) T(0, 2s, 0)
+    // Scale(30, s, 1)` -- the turn is about y, so y carries 43 + 2s.
+    const d0 = t().draws[0];
+    const s50 = Math.fround(50 * Math.fround(0.1));
+    check("...and draws the camera-facing strip's first cel at "
+          + "(-25, 43 + 2s, -1625), s = frame * 0.1f, then steps it",
+          t().draws.length === 1 && d0.slot === CARRIER4_SPRITE_FIRST
+          && d0.m[12] === -25 && d0.m[14] === -1625
+          && d0.m[13] === 43 + Math.fround(s50 + s50)
+          && Math.abs(d0.m[5] - s50) < 1e-6
+          && t().spriteCel === CARRIER4_SPRITE_FIRST + 1,
+          JSON.stringify(d0));
+    for (let i = 0; i < 12; i++) ScriptedPropUpdate13(set, fr(rng));
+    check("the strip wraps from 0x1AF9 back to 0x1AF0",
+          t().spriteCel === CARRIER4_SPRITE_FIRST + 3
+          && CARRIER4_SPRITE_LAST - CARRIER4_SPRITE_FIRST === 9,
+          `${t().spriteCel.toString(16)}`);
+    G.g_cam_path_frame = 200;
+    ScriptedPropUpdate13(set, fr(rng));
+    // (240 - 200) / (240 - 150) * 7 + 3, stored single.
+    check("past frame 150 the strip shrinks, to 3 at the path's end",
+          Math.abs(t().draws[0].m[5] - Math.fround(40 / 90 * 7 + 3)) < 1e-6,
+          `${t().draws[0].m[5]}`);
+    sounds.length = 0;
+    G.g_cam_path_frame = 210;
+    ScriptedPropUpdate13(set, fr(rng));
+    check("thirty frames short of g_cam_path_length[0x176] it plays "
+          + "0x1B1BA9 and 0x1C1BA9",
+          sounds.join() === [SFX_CARRIER4_LAND_A, SFX_CARRIER4_LAND_B].join());
+    G.g_cam_path_frame = 240;
+    ScriptedPropUpdate13(set, fr(rng));
+    check("at frame 240 it stops, and the model stands where it was "
+          + "authored: the origin",
+          t().state === CarrierRoutine4State.Wait
+          && set.pos.x === 0 && set.pos.y === 0 && set.pos.z === 0,
+          `${t().state} ${set.pos.x} ${set.pos.y} ${set.pos.z}`);
+    G.g_active_cam_path = 0xb9;
+    G.g_cam_path_frame = 0xe6;
+    ScriptedPropUpdate13(set, fr(rng));
+    check("it waits for camera path 0xB9 at frame 0xE7, drawing nothing "
+          + "of its own", t().state === CarrierRoutine4State.Wait
+          && t().draws.length === 0);
+    G.g_cam_path_frame = 0xe7;
+    t().fx.frame = 9;
+    ScriptedPropUpdate13(set, fr(rng));
+    check("...then zeroes the clip and waits for its cue",
+          t().state === CarrierRoutine4State.CueA && t().fx.frame === 0
+          && t().fx.effect === 0x15 && t().fx.motion === 0x1cd);
+    sounds.length = 0;
+    G.g_screen_shake_frames = 0;
+    G.g_cam_path_frame = 0x1cc;
+    ScriptedPropUpdate13(set, fr(rng));
+    const fx = t().draws;
+    check("frame 0x1CC shakes, plays 0x1E1BA9 and falls into the clip: "
+          + "effect 0x15's parts at (303.346, 42.4852, -1685.53) plus "
+          + "their own offsets",
+          t().state === CarrierRoutine4State.PlayA
+          && G.g_screen_shake_frames === 0x28
+          && sounds.join() === String(SFX_CARRIER4_CUE)
+          && fx.length === 2 && fx[0].slot === 0x968 && fx[1].slot === 0x969
+          && fx[0].m[12] === CARRIER4_FX_A_AT[0] + 1
+          && fx[0].m[13] === CARRIER4_FX_A_AT[1] + 2,
+          JSON.stringify(fx.map((d) => [d.slot, d.m[12], d.m[13], d.m[14]])));
+    check("...and the clip does not step before frame 0x1D6",
+          t().fx.frame === 0 && t().fx.prev === 0);
+    G.g_cam_path_frame = 0x1d6;
+    for (let i = 0; i < 150; i++) ScriptedPropUpdate13(set, fr(rng));
+    check("from 0x1D6 it steps a frame a tick and holds two short of "
+          + "g_motion_play_length[0x1CD]",
+          t().fx.frame === 98 && t().fx.prev === 98, `${t().fx.frame}`);
+    G.g_cam_path_frame = 0x258;
+    ScriptedPropUpdate13(set, fr(rng));
+    check("from frame 0x258 the effect is not drawn",
+          t().draws.length === 0 && t().state === CarrierRoutine4State.PlayA);
+    G.g_cam_path_frame = 0x320;
+    ScriptedPropUpdate13(set, fr(rng));
+    check("at 0x320 it swaps to motion 0x1CC from frame 0",
+          t().state === CarrierRoutine4State.CueB && t().fx.motion === 0x1cc
+          && t().fx.frame === 0);
+    check("the slot is the descriptor's until frame 0x38E",
+          t().slot === 0x111);
+    G.g_cam_path_frame = 0x38e;
+    ScriptedPropUpdate13(set, fr(rng));
+    check("...which writes 0x954 into obj+0x1F4, in any state",
+          t().slot === 0x954);
+    G.g_cam_path_frame = 0x3c0;
+    ScriptedPropUpdate13(set, fr(rng));
+    check("frame 0x3C0 starts the second clip, at (326.789, 42.4852, "
+          + "-1982.95)", t().state === CarrierRoutine4State.PlayB
+          && t().draws[0].m[14] === Math.fround(-1982.946044921875) + 3);
+
+    // Selector 7: block 27's evt 0xA7E4, the same routine arriving seated.
+    sounds.length = 0;
+    G.g_active_cam_path = 181;
+    G.g_cam_path_frame = 0;
+    const parked = ActorSpawn(0xa7e4, SpawnClass.ScriptedProp, -1, "set 7", {
+      class13: { slot: 0x954, cam_path: 184, cam_frame: 320, scale: 1,
+                 behaviour: 8, selector: 7 },
+      pos: vec3(9, 9, 9),
+    }, rng);
+    const t7 = (parked as { prop13: ScriptedPropTail }).prop13;
+    ScriptedPropUpdate13(parked, fr(rng));
+    check("selector 7 seats at path 0x176's last frame and goes straight to "
+          + "the wait: no sound, no strip",
+          t7.state === CarrierRoutine4State.Wait && parked.pos.x === 0
+          && parked.pos.y === 0 && parked.pos.z === 0 && sounds.length === 0
+          && t7.draws.length === 0,
+          `${parked.pos.x} ${parked.pos.y} ${parked.pos.z}`);
+
+    // Selector 5: block 25's evt 0x9D40 on path 0x177, x and z added.
+    G.g_active_cam_path = 188;
+    G.g_cam_path_frame = 100;
+    const other = ActorSpawn(0x9d40, SpawnClass.ScriptedProp, -1, "set 5", {
+      class13: { slot: 0x956, cam_path: 78, cam_frame: 1200, scale: 1,
+                 behaviour: 8, selector: 5 },
+      pos: vec3(0, 0, 0),
+    }, rng);
+    const t5 = (other as { prop13: ScriptedPropTail }).prop13;
+    ScriptedPropUpdate13(other, fr(rng));
+    check("selector 5 rides path 0x177 with its own two literals, added, and "
+          + "leaves y as the path has it",
+          t5.state === CarrierRoutine4State.Ride && other.pos.x === -100
+          && other.pos.z === 0 && other.pos.y === 7
+          && t5.fx.effect === 0x18 && t5.fx.motion === 0x1cc,
+          `${other.pos.x} ${other.pos.y} ${other.pos.z}`);
+    check("...and its strip stands at x -355",
+          t5.draws[0].m[12] === -355 && t5.draws[0].m[14] === -1625);
+    t5.state = CarrierRoutine4State.CueA;
+    G.g_cam_path_frame = 0x208;
+    ScriptedPropUpdate13(other, fr(rng));
+    check("its effect is turned half round: row 0 is -x",
+          (t5.state as CarrierRoutine4State) === CarrierRoutine4State.PlayA
+          && Math.abs(t5.draws[0].m[0] + 1) < 1e-6
+          && Math.abs(t5.draws[0].m[12]
+                      - (Math.fround(-232.31199645996094) - 1)) < 1e-3,
+          JSON.stringify(t5.draws[0].m));
+
+    check("the exporter carries the strip for 4 and 5, not for 7 and 8, and "
+          + "both motions for every one",
+          CarrierDrawSlots(4).length === 10 && CarrierDrawSlots(5).length === 10
+          && CarrierDrawSlots(7).length === 0
+          && CarrierEffects(7).map((e) => e.join("@")).join()
+             === "21@461,21@460"
+          && CarrierEffects(8).map((e) => e.join("@")).join()
+             === "24@460,24@461");
   }
 }
 

@@ -431,6 +431,25 @@ export const CHECKS: readonly Check[] = [
      + "are the update's own, that no shipped spawn carries the collision "
      + "blob the port's prop pool cannot shoot, and, with a bundle, that "
      + "every spawn is placed with exactly that tail and its model travels"),
+  game("flag_props",
+       "that class 0x44 selectors 9 and 12 -- the stage-3 model that rises "
+     + "on a flag and the eight stage-6 leaves that slide on one -- and class "
+     + "0x41 constructor 47, stage 2's flat disc, are the table entries the port builds, that the exporter reads their "
+     + "tails at the offsets and widths the constructors load them and the "
+     + "port's constants are the routines' own, that no selector-12 spawn "
+     + "names the one slot whose second draw relights the scene, and, with a "
+     + "bundle, that every spawn is placed with exactly its tail and its "
+     + "model travels -- the stage no longer draws a loaded model on its own, "
+     + "so a misread here is an object that is simply missing -- and that the "
+     + "lift car's rig draws its two pairs of doors on the camera paths "
+     + "`FUN_0048F560` tests, and no others"),
+  game("carrier_routines",
+       "that class 0x13's carrier selectors 4, 5, 7 and 8 install "
+     + "`CarrierPropRoutine4` and `5`, that the port's paths, offsets, cues, "
+     + "anchors, sounds and clip lengths are the routines' own bytes and "
+     + "`.data`, and, with a bundle, that stage 4 places all four spawns and "
+     + "ships both motions of both effects and every slot the two draw -- "
+     + "the set models round the boss's entrances, which nothing else draws"),
   game("draw_only_14",
        "that class 0x44 selector 14 is `g_class44_subtypes[14]`, that the "
      + "exporter reads its tail -- lifetime, slot, three-float scale -- at the "

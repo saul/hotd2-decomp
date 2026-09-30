@@ -183,10 +183,28 @@ export enum PropFamily {
    */
   RiseToHeight = 23,
   /**
+   * `SlideOnFlagUpdate` (`FUN_004755B0`) — class 0x44 selector 12, an object
+   * that slides a set distance on a script flag. Stage 6's eight doors, two
+   * of them the elevator car's. See `class44/slide_on_flag.ts`.
+   */
+  SlideOnFlag = 24,
+  /**
+   * `FlagLiftedPropUpdate` (`FUN_00474EA0`) — class 0x44 selector 9, one slot
+   * that rises to y 10 on a script flag. Stage 3's one. See
+   * `class44/flag_lifted.ts`.
+   */
+  FlagLifted = 25,
+  /**
+   * `PropUpdateType47` (`FUN_0046DD40`) — class 0x41 constructor 47's task:
+   * a flat disc drawn faded until a flag or a step index. Stage 2's one. See
+   * `class41/type47.ts`.
+   */
+  Type47 = 26,
+  /**
    * `PropDrawOnlySelector14` (`FUN_004758E0`) — class 0x44 selector 14, a
    * model at the spawn's pose at the descriptor's scale, for a lifetime in
-   * steps: type 12's routine without its camera cue. Numbered past the
-   * families a sibling branch has taken. See `class44/draw_only.ts`.
+   * steps: type 12's routine without its camera cue. See
+   * `class44/draw_only.ts`.
    */
   DrawOnlySelector14 = 27,
   /**

@@ -442,6 +442,15 @@ export class SlotModelLayer implements System<RenderContext> {
   }
 
   /**
+   * The stage, for `AssetDrawSlot`'s residency test (`FUN_00418560` draws
+   * nothing that is not loaded): stage 4's `0x954` is unloaded by opcode
+   * `0x51` at block 23 op 75, thirty ops before the class-0x13 prop that
+   * draws it is despawned, and the engine draws nothing in between. Null
+   * draws everything, which is what a layer with no stage can say.
+   */
+  residency: { slotResident(slot: number): boolean } | null = null;
+
+  /**
    * One node per live actor, placed and turned.
    *
    * `update` and `resync` are the same call: the layer owns nothing a snapshot
@@ -456,6 +465,10 @@ export class SlotModelLayer implements System<RenderContext> {
       if (a.dead) continue;
       const slot = DrawSlotFor(a);
       if (slot === null) continue;
+      if (slot !== CHAIN && this.residency
+          && !this.residency.slotResident(slot)) {
+        continue;
+      }
       seen.add(a.at);
       let live = this.nodes.get(a.at);
       if (slot === CHAIN) {
@@ -564,6 +577,7 @@ export class SlotModelLayer implements System<RenderContext> {
    */
   private extra(key: string, slot: number, m: Matrix4,
                 seen: Set<number | string>, alpha: number | null = null): void {
+    if (this.residency && !this.residency.slotResident(slot)) return;
     let live = this.extras.get(key);
     if (!live || live.slot !== slot) {
       live?.node.removeFromParent();
@@ -589,6 +603,13 @@ export class SlotModelLayer implements System<RenderContext> {
       if (a.dead || a.despawned || a.cls !== SpawnClass.ScriptedProp) continue;
       const t = (a as { prop13?: ScriptedPropTail }).prop13;
       if (!t || t.behaviour !== 8) continue;
+      // `CarrierPropRoutine4` and `5` (`FUN_00440C20`, `FUN_00441000`) hand
+      // over their draws whole -- the camera-facing strip and the effect's
+      // parts, each under the matrix the routine built.
+      t.draws.forEach((d, i) => {
+        _m.fromArray(d.m);
+        this.extra(`c${i}:${a.at}`, d.slot, _m, seen);
+      });
       if (t.selector === 0) {
         if (t.wakeDrawn) {
           // `Push; Translate(pos); RotX; RotZ; RotY; Translate(0, 0, 27.5);

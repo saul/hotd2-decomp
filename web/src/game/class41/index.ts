@@ -40,6 +40,7 @@ import { PlaceTable39Stacks } from "./type39";
 import { PlaceTable44Props } from "./type44";
 import { PlaceTable50Props } from "./type50";
 import { PlaceTable66Props } from "./type66";
+import { PlaceType47Prop } from "./type47";
 import { PROP75_SCRIPT_FLAG, PROP75_TYPE } from "./flag_prop";
 import { FLICKER_LIGHT_TYPE, PlaceFlickerLightProp48 } from "./type48";
 import { PlaceWaterSurface } from "./water";
@@ -106,6 +107,11 @@ export enum PropContainerType {
    * `komono_kanban.bin` and `komono_uemiti.bin` models from one of two tables.
    */
   Table66Props = 66,
+  /**
+   * `PlaceType47Prop` (`FUN_00463AE0`) — a faded flat disc at the
+   * descriptor's point. Stage 2's one spawn. See `class41/type47.ts`.
+   */
+  Type47Prop = 47,
 }
 
 /** What one class-0x41 constructor does. `undefined` where none is ported. */
@@ -165,6 +171,13 @@ export const g_class41_constructors:
   [PropContainerType.Table50Props]: (obj) => {
     G.g_breakable_props.push(
       ...PlaceTable50Props(obj.at, obj.charType, obj.hp));
+  },
+  // `PlaceType47Prop` reads the position and nothing else.
+  [PropContainerType.Type47Prop]: (obj) => {
+    const pl = T.breakables?.placements?.find(
+      (q) => q.at === obj.at && q.container === "type47");
+    if (!pl) return;
+    G.g_breakable_props.push(PlaceType47Prop(pl));
   },
   [PropContainerType.Table66Props]: (obj) => {
     G.g_breakable_props.push(
@@ -328,6 +341,7 @@ export * from "./type40";
 export * from "./water";
 export * from "./water_slots";
 export * from "./type44";
+export * from "./type47";
 export * from "./type50";
 export * from "./type66";
 export * from "./prop_state";

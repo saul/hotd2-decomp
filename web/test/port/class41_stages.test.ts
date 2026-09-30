@@ -76,6 +76,7 @@ import {
   RisingDoorUpdate, RisingDoorRise, RisingDoorRattles, RISING_DOOR_CEILING,
   RISING_DOOR_CEILING_OTHER, RISING_DOOR_RATTLE_SLOT, RISING_DOOR_STEP_OTHER,
   Class44Selector, PropBuildRiseToHeight, RiseToHeightUpdate,
+  PropDrawOnlySelector14,
   RISE_TO_HEIGHT_KILL_FRAME, RISE_TO_HEIGHT_KILL_PATH,
 } from "../../src/game/class44";
 import { SpawnPropContainers } from "../../src/game/director";
@@ -1217,6 +1218,65 @@ console.log("\nclass 0x44 selector 13, the remove flag and the blob word:");
         blob.dead && ((blob.flags & 0x80018000) >>> 0) === 0x80018000
         && (blob.flags & 1) === 0,
         `0x${(blob.flags >>> 0).toString(16)}`);
+}
+
+console.log("\nclass 0x44 selector 14, a model at its descriptor's pose and scale:");
+{
+  // Stage 4's descriptor at 0x6588 exactly (block 10 step 2 op 2): slot
+  // 0x10AE = st1_1.bin[2], lifetime 4 steps, scale (3.4566, 1, 1), all three
+  // angles set. Before selector 14 was ported nothing was built, and 0x10AE
+  // -- which no instruction names -- was drawn only by the stage's own
+  // "loaded, so drawn" rule, at the world's origin.
+  const rng = new Rng(66);
+  const events = propScene(rng, GameMode.Arcade);
+  const BAR: BreakablePlacement = {
+    at: 0x6588, container: "draw_only_14", slot: 0x10ae,
+    lifetime_evt_steps: 4, scale: [3.4566, 1, 1],
+    pos: [-3.4, -53.6, -744.0], pitch: 16400, yaw: 8192, roll: 32768,
+  };
+  SetGameTables(CHARS, { ...BREAKABLES,
+                         placements: [...(BREAKABLES.placements ?? []), BAR] });
+  G.g_evt_step_index = 2;
+  SpawnPropContainers([{ at: 0x6588, class: SpawnClass.PropPlacer }]);
+  const placer = G.g_object_list.find((o) => o.at === 0x6588);
+  check("the placer is class 0x44 and dispatches on +0x11C = 14",
+        placer?.cls === SpawnClass.PropPlacer
+        && placer.hp === Class44Selector.DrawOnly && placer.hp === 14,
+        `${placer?.cls} ${placer?.hp}`);
+  GameUpdate(1 / 60, NULL_HOST, rng, events);
+  const bar = G.g_breakable_props.find((q) => q.at === 0x6588);
+  check("one frame builds the object and the placer dies",
+        !!bar && bar.family === PropFamily.DrawOnlySelector14 && !!placer?.dead);
+  if (!bar) throw new Error("no object");
+  PropDrawOnlySelector14(bar);
+  // T(x, y, z + 0) Rz(0x8000) Ry(0x2000) Rx(0x4010) S(3.4566, 1, 1). Row 0 --
+  // the image of +X -- is Rz's (-1, 0, 0), then `MatrixRotateY`'s `row0 =
+  // row0 * c - s * row2` with row 2 still (0, 0, 1): (-cos 45, 0, -sin 45),
+  // and the scale's 3.4566 on it alone. Worked by hand from the routine.
+  const m = bar.draws?.[0]?.m ?? [];
+  const r0 = Math.hypot(m[0], m[1], m[2]);
+  check("it draws its slot once, at its point, under Rz Ry Rx and its scale",
+        bar.draws?.length === 1 && bar.draws[0].slot === 0x10ae
+        && m[12] === Math.fround(-3.4) && m[13] === Math.fround(-53.6)
+        && m[14] === Math.fround(-744.0)
+        && Math.abs(r0 - Math.fround(3.4566)) < 1e-4
+        && Math.abs(Math.hypot(m[4], m[5], m[6]) - 1) < 1e-6
+        && Math.abs(m[0] - -Math.fround(3.4566) * Math.SQRT1_2) < 1e-3
+        && Math.abs(m[2] - -Math.fround(3.4566) * Math.SQRT1_2) < 1e-3,
+        JSON.stringify(m.map((v) => +v.toFixed(3))));
+  check("...and files nothing for the shot test",
+        !bar.shotRegistered && bar.hitRadius === 0);
+  // The lifetime: four step changes are allowed, the fifth retires it.
+  for (let k = 0; k < 4; k++) {
+    G.g_evt_step_index += 1;
+    PropDrawOnlySelector14(bar);
+  }
+  check("four step changes and it is still drawn",
+        !bar.dead && bar.draws?.length === 1);
+  G.g_evt_step_index += 1;
+  PropDrawOnlySelector14(bar);
+  check("the fifth retires it before it draws",
+        !!bar.dead && !bar.draws?.length);
 }
 
 console.log("\nclass 0x44 selector 11, stage 5's door takes the other arm:");

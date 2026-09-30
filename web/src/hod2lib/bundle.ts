@@ -778,6 +778,22 @@ export function containerPlacements(tables: ExeTables, evt: evtlib.EvtFile,
         lifetime_evt_steps: 0,
         pos: [...rec.pos], yaw: rec.orient[1],
       });
+    } else if (rec.hp === 14) {              // class 0x44 selector 14
+      // `PropBuildDrawOnlySelector14` (`FUN_004736D0`) -- a model at the
+      // spawn's pose at a scale, for a lifetime in steps. The tail as the
+      // constructor reads it: the u16 at `+0x00` to `obj+0x11C` (the
+      // lifetime `PropExpireByStepLifetime` counts), the u16 at `+0x04` to
+      // `obj+0x28C` (the slot), and three f32 at `+0x08`..`+0x10` to
+      // `obj+0x1A8`..`+0x1B0` (the scale). All three angles are the
+      // placer's own and real.
+      out.push({
+        at: rec.offset, container: "draw_only_14",
+        slot: rec.param(0x04, "u16") || 0,
+        lifetime_evt_steps: rec.param(0x00, "u16") ?? 0,
+        scale: [0x08, 0x0c, 0x10].map((o) => rec.param(o, "f32") ?? 0),
+        pos: [...rec.pos],
+        pitch: rec.orient[0], yaw: rec.orient[1], roll: rec.orient[2],
+      });
     } else if (rec.hp === 16) {              // class 0x44 selector 16
       const tail = rec.offset + 0x24;
       out.push({
@@ -1850,9 +1866,12 @@ export async function breakableSlotEntry(
   }
   // ...and selector 13 the same: `RiseToHeightUpdate` draws its descriptor's
   // slot, once, and names no other. Stage 5's `0x1892` and twelve of stage
-  // 6's are only ever drawn through it.
+  // 6's are only ever drawn through it. And selector 14's
+  // `PropDrawOnlySelector14` (`FUN_004758E0`), whose `0x10AE` in stages 3
+  // and 4 no instruction names.
   for (const pl of placements) {
-    if (pl.container !== "rising_door" && pl.container !== "rise_to_height") {
+    if (pl.container !== "rising_door" && pl.container !== "rise_to_height"
+        && pl.container !== "draw_only_14") {
       continue;
     }
     const slot = pl.slot as number;

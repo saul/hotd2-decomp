@@ -183,6 +183,13 @@ export enum PropFamily {
    */
   RiseToHeight = 23,
   /**
+   * `PropDrawOnlySelector14` (`FUN_004758E0`) — class 0x44 selector 14, a
+   * model at the spawn's pose at the descriptor's scale, for a lifetime in
+   * steps: type 12's routine without its camera cue. Numbered past the
+   * families a sibling branch has taken. See `class44/draw_only.ts`.
+   */
+  DrawOnlySelector14 = 27,
+  /**
    * `OriginalItemDropUpdate` (`FUN_00466BE0`) — the Original Mode item
    * `SpawnOriginalItemDrop` (`FUN_00466B40`) releases, which
    * `PropUpdateType7`'s first hit does. See `class41/type07.ts`.

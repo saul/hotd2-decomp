@@ -35,6 +35,7 @@ import { T } from "../tables";
 import { PlaceFallingContainer } from "./container";
 import { PropBuildRisingDoor } from "./rising_door";
 import { PropBuildRiseToHeight } from "./rise_to_height";
+import { PropBuildDrawOnlySelector14 } from "./draw_only";
 import { PropBuildScriptFlagEffect } from "./script_flag_effect";
 import { PlaceStoryModeSwitch } from "../class41/triggers";
 
@@ -67,6 +68,12 @@ export enum Class44Selector {
    * `class44/rise_to_height.ts`.
    */
   RiseToHeight = 13,
+  /**
+   * `PropBuildDrawOnlySelector14` (`FUN_004736D0`) — a model its descriptor
+   * names at the spawn's pose and the descriptor's scale, for a lifetime in
+   * steps. Twelve spawns over stages 2, 3 and 4. See `class44/draw_only.ts`.
+   */
+  DrawOnly = 14,
   /** `PlaceFallingContainer` (`FUN_00473940`) — the item container. */
   FallingContainer = 16,
   /**
@@ -122,6 +129,13 @@ export const g_class44_subtypes: Partial<Record<number, Class44Builder>> = {
     if (!pl) return;
     G.g_breakable_props.push(PropBuildRiseToHeight(pl));
   },
+  [Class44Selector.DrawOnly]: (obj, f) => {
+    void f;
+    const pl = T.breakables?.placements?.find(
+      (q) => q.at === obj.at && q.container === "draw_only_14");
+    if (!pl) return;
+    G.g_breakable_props.push(PropBuildDrawOnlySelector14(pl));
+  },
   [Class44Selector.FallingContainer]: (obj, f) => {
     const pl = T.breakables?.placements?.find(
       (q) => q.at === obj.at && q.container === "falling");
@@ -164,6 +178,7 @@ export const Class44PlacerHandler: ClassHandler = {
 export * from "./container";
 export * from "./rising_door";
 export * from "./rise_to_height";
+export * from "./draw_only";
 export * from "./script_flag_effect";
 
 /**

@@ -227,7 +227,8 @@ export interface BreakablePlacement {
   container: "group" | "kinded" | "falling" | "generic"
     | "chain" | "fragment" | "story_switch" | "script_flag_effect"
     | "rising_door" | "rise_to_height" | "flicker_light" | "table38"
-    | "table39" | "table44" | "table50" | "table66" | "water_surface";
+    | "table39" | "table44" | "table50" | "table66" | "water_surface"
+    | "draw_only_14";
   /** How many evt blocks it lives for. */
   lifetime_evt_steps: number;
   /** `group` only — the row of `g_breakable_group_ptrs` to build. */
@@ -287,9 +288,18 @@ export interface BreakablePlacement {
    */
   field_1f4?: number;
   slot?: number;
-  /** `generic` — the other two orientation words, which really are angles. */
+  /**
+   * `generic` and `draw_only_14` — the other two orientation words, which
+   * really are angles.
+   */
   pitch?: number;
   roll?: number;
+  /**
+   * `draw_only_14` only — the tail's three f32 at `+0x08`, `+0x0C`, `+0x10`,
+   * which `PropBuildDrawOnlySelector14` (`FUN_004736D0`) copies to
+   * `obj+0x1A8`..`+0x1B0` and its update hands to `MatrixScale`.
+   */
+  scale?: [number, number, number];
   /** The item set it belongs to, 0 for none. */
   item_set?: number;
   /** How many props share that set; the countdown is seeded from it. */

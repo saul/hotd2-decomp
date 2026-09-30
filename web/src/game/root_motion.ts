@@ -193,42 +193,100 @@ export function ActorModelScale(charType: number): number {
 
 
 /**
- * The root translation between two frames of a clip, wrapping across the loop.
- *
- * `prev` is the frame the delta was last taken at, `-1` on the first call.
- * Returns the delta in the clip's own space, which {@link ApplyRootMotion}
- * turns by the actor's three angles.
- *
- * **The engine's baseline is a field, not a remembered frame index**, and the
- * difference is worth stating because it is what this port nearly got wrong.
- * `model+0x1160..0x1168` holds the root translation the last delta was taken
- * at, and `ActorSetMotion` (`FUN_00411930`) seeds it from the **new clip's
- * frame 0** whenever the gate is set (`TEST AL,2` at `0x00411966`), while
- * `ActorSetMotionBlended` (`FUN_004119A0`) leaves `track+0x37` in the state
- * that makes `SkeletonApplyRootMotion` reset it to the current root outright.
- * So neither a cut nor a fade ever turns a clip's **absolute** root into a
- * step, and `prev < 0` here — no delta on the first call — is that same
- * statement. `[proved]`
+ * `[port-only]` -- the authored frame track 0 reads at play cursor `c`, which
+ * `SkeletonAdvancePlayCursor` (`FUN_004111A0`) stores at `model+0x18`:
+ * `c / 2`, and on the one odd cursor that **is** the play length, the frame
+ * after it (`piVar1[6] = iVar3 + 1`). Every other odd cursor keeps `c / 2`
+ * here and blends it with the next -- see {@link TrackRootAtCursor}.
  */
-export function rootDelta(m: BakedMotion, prev: number, next: number):
-    { x: number; y: number; z: number } {
-  const n = m.frames;
-  if (n <= 1 || prev < 0 || prev === next) return { x: 0, y: 0, z: 0 };
-  const at = (f: number): [number, number, number] =>
-    [m.root[f * 3] ?? 0, m.root[f * 3 + 1] ?? 0, m.root[f * 3 + 2] ?? 0];
-  const [px, py, pz] = at(Math.min(prev, n - 1));
-  const [nx, ny, nz] = at(Math.min(next, n - 1));
-  if (next > prev) return { x: nx - px, y: ny - py, z: nz - pz };
-  // **The loop wrap is damped, not stitched.** `SkeletonApplyRootMotion` tests
-  // `|frame - previous| > play_length / 4` and, when it trips, resets the
-  // baseline to `root + (root - baseline) / play_length` instead of taking the
-  // delta — so the wrap frame contributes very nearly nothing and a looping
-  // walk does not lurch once a cycle. Summing "finish the cycle, then start
-  // the next" as this used to gives the wrap frame a whole clip's worth of
-  // translation in one tick.
-  const [sx, sy, sz] = at(0);
-  return { x: (nx - sx) / n, y: (ny - sy) / n, z: (nz - sz) / n };
+export function TrackFrameAtCursor(c: number, play: number): number {
+  const f = Math.trunc(c / 2);
+  return (c % 2 !== 0 && c === play) ? f + 1 : f;
 }
+
+/**
+ * `[port-only]` -- the root translation track 0 poses at play cursor `c`, the
+ * triple `SkeletonPoseRootFrame` (`FUN_00410920`) hands
+ * `SkeletonApplyRootMotion` (`FUN_00410C50`). The frame choice is
+ * `SkeletonAdvancePlayCursor`'s (`FUN_004111A0`):
+ *
+ * ```
+ * c = counter % (play + 1);  f = c / 2
+ * if (c odd && c != play) {                 ; between two authored frames
+ *   a = f;  b = f + 1
+ *   if (a < 0) a = play / 2;  if (play / 2 < b) b = 0
+ *   slot 1 = frame a;  slot 2 = frame b;  track+0x37 |= 0x20
+ *   track+0x28 = counter - 1;  track+0x30 = 2
+ * } else {
+ *   if (c odd) f += 1                        ; the play length itself
+ *   slot 0 = frame f
+ * }
+ * ```
+ *
+ * and `SkeletonPoseRootFrame` then lerps slot A to slot B by
+ * `g_motion_fade_weight`, which `SkeletonResolveTrackFrames` (`FUN_00410BD0`)
+ * computes as `(counter - track+0x28) / track+0x30` -- **one half** on an odd
+ * cursor. So a clip authored at 30 Hz moves its root every 60 Hz frame, by
+ * half a frame's travel on each, where a cursor rounded down to `c / 2`
+ * moved it every other frame by a whole frame's. It is the same sampler
+ * `game/skeleton.ts` runs for an actor carrying the engine's model block;
+ * this is its root half for every actor that does not.
+ */
+export function TrackRootAtCursor(m: BakedMotion, play: number, c: number,
+                                  out: Vec3): void {
+  const at = (f: number, k: number): number =>
+    m.root[Math.min(Math.max(f, 0), m.frames - 1) * 3 + k] ?? 0;
+  const half = Math.trunc(play / 2);
+  const f = Math.trunc(c / 2);
+  if (c % 2 !== 0 && c !== play) {
+    const fa = f < 0 ? half : f;
+    const fb = half < f + 1 ? 0 : f + 1;
+    out.x = at(fa, 0) + (at(fb, 0) - at(fa, 0)) * 0.5;
+    out.y = at(fa, 1) + (at(fb, 1) - at(fa, 1)) * 0.5;
+    out.z = at(fa, 2) + (at(fb, 2) - at(fa, 2)) * 0.5;
+    return;
+  }
+  const g = TrackFrameAtCursor(c, play);
+  out.x = at(g, 0); out.y = at(g, 1); out.z = at(g, 2);
+}
+
+/**
+ * The step `SkeletonApplyRootMotion` (`FUN_00410C50`) takes the object by,
+ * from play cursor `prev` to play cursor `next` of one clip, in the clip's own
+ * space -- {@link ApplyRootMotion} turns it by the actor's three angles.
+ *
+ * `[port-only]` as a function. The engine keeps a **baseline**, the root it
+ * last stepped from (`model+0x1160..0x1168`), and the frame it was at
+ * (`model+0x10`); while the gate is up the baseline is always the previous
+ * draw's root, so the port keeps the previous cursor instead
+ * (`Actor.rootCursor`) and resamples it. `prev < 0` is a baseline just
+ * re-seeded -- a clip set, a fade holding -- and steps nothing, which is
+ * what `ActorSetMotion` (`FUN_00411930`, seeding from the new clip's frame 0)
+ * and a fade (`track+0x37` bit 0 without 0x20: baseline = root, every frame)
+ * both come to. `[proved]`
+ *
+ * **A wrap is damped, not stitched.** When the frame jumps by more than a
+ * quarter of the play length -- `|model+0x10 - model+0x18| > play / 4` --
+ * the baseline is first set to `root + (root - baseline) / play`, so the step
+ * is `(baseline - root) / play`: one play-length's share of the jump,
+ * backwards, where a stitched loop would have taken a whole clip's travel in
+ * one frame.
+ */
+export function rootDelta(m: BakedMotion, play: number, prev: number,
+                          next: number): Vec3 {
+  if (m.frames <= 1 || prev < 0 || prev === next) return { x: 0, y: 0, z: 0 };
+  TrackRootAtCursor(m, play, prev, _was);
+  TrackRootAtCursor(m, play, next, _now);
+  const jump = Math.abs(TrackFrameAtCursor(prev, play)
+                        - TrackFrameAtCursor(next, play));
+  if (play > 0 && jump > Math.trunc(play / 4)) {
+    return { x: (_was.x - _now.x) / play, y: (_was.y - _now.y) / play,
+             z: (_was.z - _now.z) / play };
+  }
+  return { x: _now.x - _was.x, y: _now.y - _was.y, z: _now.z - _was.z };
+}
+const _was: Vec3 = { x: 0, y: 0, z: 0 };
+const _now: Vec3 = { x: 0, y: 0, z: 0 };
 
 /** The gated arm's matrix, rebuilt from identity on every call. */
 const _m: Mat = MatIdentity();

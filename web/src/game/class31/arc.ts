@@ -350,13 +350,66 @@ export function ActorArcInterpolate(obj: Actor, step: number): boolean {
 }
 
 /**
+ * `ActorArcVelocity` — `FUN_0044DE80`. One frame of the shared arc as a
+ * velocity, with the parabola on **the axis gravity pulls along** -- the
+ * argument is `obj+0x1354`, the kind `SelectActorGravityAxis` (`FUN_00450CF0`)
+ * chose, and the switch at `0x0044DEBB` (six arms, `CMP EDX, 0x5; JA`) puts
+ * the curve on y, on x or on z, signed by which way that axis falls:
+ *
+ * | kind | x | y | z |
+ * |---|---|---|---|
+ * | 0 floor | flat | `+p(dy)` | flat |
+ * | 1 ceiling | flat | `-p(dy)` | flat |
+ * | 2 | `-p(dx)` | flat | flat |
+ * | 3 | `+p(dx)` | flat | flat |
+ * | 4 | flat | flat | `-p(dz)` |
+ * | 5 | flat | flat | `+p(dz)` |
+ *
+ * with `flat = d / T` and `p(d) = -g2*(t+1) + (T*T*g2 + 2d) / (2T)`, `g2` the
+ * half-gravity at `[0x00565E1C]`. A kind past 5 writes no velocity and still
+ * answers true (`JA 0x0044e0f5`). Its one caller is
+ * `ThrowerStateKnockedTumbling` (`0x00450F5F`); `ActorArcVelocityY` below is
+ * arm 0 on its own. `[proved]`
+ */
+export function ActorArcVelocity(obj: Actor, kind: number,
+                                 step: number): boolean {
+  const t = obj.arcFrames;
+  obj.arcFrames = t + step;
+  const total = obj.arcTotal;
+  if (total <= t) return false;
+  const n = t + step;
+  const curve = (d: number): number =>
+    n * -ARC_GRAVITY_HALF + (total * total * ARC_GRAVITY_HALF + d + d)
+    / (total * 2);
+  const dx = obj.arcTo.x - obj.arcFrom.x;
+  const dy = obj.arcTo.y - obj.arcFrom.y;
+  const dz = obj.arcTo.z - obj.arcFrom.z;
+  switch (kind) {
+    case 0: obj.vel.x = dx / total; obj.vel.y = curve(dy);
+            obj.vel.z = dz / total; break;
+    case 1: obj.vel.x = dx / total; obj.vel.y = -curve(dy);
+            obj.vel.z = dz / total; break;
+    case 2: obj.vel.x = -curve(dx); obj.vel.y = dy / total;
+            obj.vel.z = dz / total; break;
+    case 3: obj.vel.x = curve(dx); obj.vel.y = dy / total;
+            obj.vel.z = dz / total; break;
+    case 4: obj.vel.x = dx / total; obj.vel.y = dy / total;
+            obj.vel.z = -curve(dz); break;
+    case 5: obj.vel.x = dx / total; obj.vel.y = dy / total;
+            obj.vel.z = curve(dz); break;
+    default: break;
+  }
+  return true;
+}
+
+/**
  * `ActorArcVelocityY` — `FUN_0044DDE0`. One frame of the shared arc, as a
  * velocity, with the parabola on **y**: the same arc as the interpolation
  * above, for the states that integrate rather than interpolate.
  *
  * `vel.y = -g2*n + (T*T*g2 + 2*dy) / (2*T)` is the derivative of that
- * routine's y term, which is why the two agree. It is `ActorArcVelocity`'s
- * (`FUN_0044DE80`) case 0 with the axis selector taken out -- the same closed
+ * routine's y term, which is why the two agree. It is arm 0 of the routine
+ * above, at `0x0044DE80`, with the axis selector taken out -- the same closed
  * form, the same `obj+0x1330` advance, the same `false` once `obj+0x1330` has
  * reached `obj+0x1334`. Its only two callers are `ThrowerStateFallAndLand`
  * (0x0044A561) and `ZombieStateDeathKnockbackArc` (0x0045534C); both classes
@@ -367,10 +420,10 @@ export function ActorArcInterpolate(obj: Actor, step: number): boolean {
  * Nothing integrates here: the class's update adds `vel` to `pos` after the
  * state runs, which is where the flight actually happens.
  *
- * The class-0x31 fall used to call a one-axis copy of `FUN_0044DE80` instead,
- * which read the velocity at `t` rather than `t + 1` and left the advance to
- * its caller: every knockback rode an arc one frame of gravity higher than the
- * engine's, and the copy had no caller once the fall was put right.
+ * The class-0x31 fall used to call a one-axis copy of `ActorArcVelocity`
+ * instead, which read the velocity at `t` rather than `t + 1` and left the
+ * advance to its caller: every knockback rode an arc one frame of gravity
+ * higher than the engine's.
  */
 export function ActorArcVelocityY(obj: Actor, step: number): boolean {
   const t = obj.arcFrames;

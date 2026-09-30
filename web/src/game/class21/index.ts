@@ -242,7 +242,7 @@ export function RescueTargetInit(obj: Actor, rng?: Rng): void {
   // up to nine frames in, so a row of these would not animate in lockstep.
   // The port drew the number and threw it away; the class steps its own
   // counter now (`advancesOwnMotion`), so the start is the engine's.
-  obj.rootFrame = -1;
+  obj.rootCursor = -1;
   obj.playTicks = rng ? rng.int(10) : 0;
   obj.hp = CLASS21_HP_BY_RANK[G.g_damage_rank] ?? 1;
   G.g_enemies_present += 1;

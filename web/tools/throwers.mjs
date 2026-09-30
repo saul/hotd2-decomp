@@ -147,7 +147,7 @@ for (let stage = 1; stage <= 6; stage++) {
       if (process.env.TRACE && String(p.at) === process.env.TRACE && i % 30 === 0) {
         console.log(`   f${i} ${ZombieState[a.state]}/${a.sub} `
           + `pos ${a.pos.x.toFixed(2)},${a.pos.z.toFixed(2)} motion=${a.motion} `
-          + `ticks=${a.playTicks} rootFrame=${a.rootFrame}`);
+          + `ticks=${a.playTicks} rootCursor=${a.rootCursor}`);
       }
       if (a.despawned && goneBy === null) goneBy = i;
       if (a.state === ZombieState.StandAndThrow) {

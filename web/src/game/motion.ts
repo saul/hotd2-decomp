@@ -13,11 +13,10 @@
 import { ActorFlag, type Actor, type OverlayTrack } from "./actor";
 import { ActorStartFade } from "./class30/motion_cue";
 import { MotionFade } from "./class30/states";
-import { authoredFrameHeld, ticksOfAuthoredFrame }
-  from "../core/play_cursor";
+import { ticksOfAuthoredFrame } from "../core/play_cursor";
 import { ApplyRootMotion, rootDelta } from "./root_motion";
-import { MotionAuthoredFrame, MotionOf, MotionPlayFrame, MotionPlayLength,
-         SecondsToTicks } from "./tables";
+import { MotionOf, MotionPlayFrame, MotionPlayLength, SecondsToTicks }
+  from "./tables";
 
 /** One actor's clocks, `dt` seconds of game time. */
 export function ActorAdvanceMotion(obj: Actor, dt: number): void {
@@ -76,7 +75,7 @@ export function ActorAdvanceMotion(obj: Actor, dt: number): void {
     return;
   }
   const base = MotionOf(obj, obj.motion);
-  const wasBase = obj.rootFrame;
+  const wasBase = obj.rootCursor;
   // **The play cursor counts frames, not seconds.** `obj+0x19C` is an integer
   // the engine increments once per frame; accumulating `dt` and flooring it
   // back out lost whole cursor values to float drift, and every `===` cue on
@@ -132,28 +131,31 @@ export function ActorAdvanceMotion(obj: Actor, dt: number): void {
   // Root motion: the clip's own translation is what walks the actor. Applied
   // only while no one-shot is running, because the one-shot owns the body.
   if (base && !obj.action) {
-    const f = MotionAuthoredFrame(obj, base);
+    // The cursor the draw computes, `counter % (play_length + 1)`, and the
+    // root sampled there -- between two authored frames on an odd cursor.
+    const f = MotionPlayFrame(obj);
     // `SkeletonApplyRootMotion` (`FUN_00410C50`) resets its baseline to the
     // current root whenever `track+0x37` has bit 0 up and bit 5 down
     // (`00410cf8`..`00410d29`), which is every frame of a fade: nothing moves
     // the actor until the clip is playing again, and the first step is from
     // the held start frame to the one after it.
-    const d = fading ? { x: 0, y: 0, z: 0 } : rootDelta(base, wasBase, f);
+    const d = fading ? { x: 0, y: 0, z: 0 }
+      : rootDelta(base, MotionPlayLength(obj, obj.motion), wasBase, f);
     ApplyRootMotion(obj, d.x, d.z, d.y);
-    obj.rootFrame = f;
+    obj.rootCursor = f;
   } else {
     // A one-shot owns the body, and the base clock keeps running underneath
     // it. Forgetting the base frame here is what stops the *next* base delta
     // spanning the whole strike -- which teleported a zombie eleven units into
     // the camera the frame its swing ended.
-    obj.rootFrame = -1;
+    obj.rootCursor = -1;
   }
 
   // A one-shot at full weight -- a swing, an arc stage, an entrance. It ends
   // itself, and the state machine reads the null as "the swing is over".
   const act = obj.action;
   if (act) {
-    const wasAct = obj.rootActionFrame;
+    const wasAct = obj.rootActionCursor;
     // A one-shot set through `ActorSetOneShotBlended` is the clip the fade is
     // into, so the fade holds **it** on its start frame -- the arc's stages,
     // whose thresholds are compared against exactly that cursor. See
@@ -170,10 +172,15 @@ export function ActorAdvanceMotion(obj: Actor, dt: number): void {
       // Suppressing it left the actor already at the ring when the swing
       // ended, so the retreat finished on its first frame and it bit again
       // immediately.
-      const f = authoredFrameHeld(act.ticks, am.fps, am.frames);
-      const d = rootDelta(am, wasAct, f);
+      // The one-shot's cursor is its counter until the play length, and the
+      // channel holds it there -- the channel's own end, a tick or two past
+      // the play length, is the port's (see `ActorClip`), and the engine's
+      // track would have wrapped to frame 0 instead.
+      const play = MotionPlayLength(obj, act.motion);
+      const f = Math.min(act.ticks, play);
+      const d = rootDelta(am, play, wasAct, f);
       ApplyRootMotion(obj, d.x, d.z, d.y);
-      obj.rootActionFrame = f;
+      obj.rootActionCursor = f;
       if (act.ticks >= ticksOfAuthoredFrame(am.frames, am.fps)) {
         // A one-shot ending is a transition like any other: the next state
         // will set its own clip, and it must fade out of the swing rather

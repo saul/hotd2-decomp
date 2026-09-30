@@ -2360,12 +2360,16 @@ export interface ActorBase {
    */
   fadeLen: number;
   /**
-   * The frame index the root-motion delta was last taken at, for the base
-   * motion and for `action`. Root translation is a difference between frames,
-   * so the previous one is state.
+   * The **play cursor** the root-motion step was last taken at, for the base
+   * motion and for `action`; `-1` when the baseline has just been re-seeded
+   * and the next step is nothing. It stands for `SkeletonApplyRootMotion`'s
+   * (`FUN_00410C50`) baseline, `model+0x1160..0x1168`, which is the previous
+   * draw's root whenever the gate is up -- see `rootDelta` in
+   * `game/root_motion.ts`. A cursor and not an authored frame, because the
+   * engine samples the root between two frames on every odd cursor.
    */
-  rootFrame: number;
-  rootActionFrame: number;
+  rootCursor: number;
+  rootActionCursor: number;
   /** A one-shot at full weight: a swing, an arc stage, an entrance. */
   action: ActorClip | null;
   /** The death clip, once. */
@@ -2785,8 +2789,8 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     fadeFrom: null,
     fade: 0,
     fadeLen: 0,
-    rootFrame: -1,
-    rootActionFrame: -1,
+    rootCursor: -1,
+    rootActionCursor: -1,
     action: null,
     death: null,
     react: null,

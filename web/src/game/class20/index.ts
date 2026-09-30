@@ -185,7 +185,7 @@ export function OneHitTargetInit(obj: Actor, rng?: Rng): void {
   const frames = m?.frames ?? 0;
   a.playTicks = (rng && frames > 0)
     ? ticksOfAuthoredFrame(rng.int(frames), m?.fps ?? 30) : 0;
-  a.rootFrame = -1;
+  a.rootCursor = -1;
   // `obj+0x1F8 |= 2`. Root motion's gate is bit 1 of that word and
   // `ActorBuildSkinnedModel` already sets it to 3 for every skeletal actor —
   // see `root_motion.ts` — so there is nothing for the port to do here.
@@ -262,7 +262,7 @@ export function OneHitTargetTakeShot(obj: OneHitTargetActor, rng: Rng): void {
 
   obj.motion = CLASS20_DEATH_MOTION;
   obj.playTicks = 0;
-  obj.rootFrame = -1;
+  obj.rootCursor = -1;
   obj.tgt.state = OneHitTargetState.Dying;
 }
 
@@ -431,7 +431,11 @@ function OneHitTargetPinLastFrame(obj: OneHitTargetActor): void {
   const m = MotionOf(obj, obj.motion);
   if (!m || m.frames <= 0) return;
   obj.playTicks = ticksOfAuthoredFrame(m.frames - 1, m.fps);
-  obj.rootFrame = m.frames - 1;
+  // A counter that never moves takes no root-motion step in the engine. The
+  // port's step was taken in `ActorAdvanceMotion` before this undid the
+  // counter, so the baseline is re-seeded instead: the next frame's advance
+  // then steps nothing, and this puts the counter back again.
+  obj.rootCursor = -1;
 }
 
 /**

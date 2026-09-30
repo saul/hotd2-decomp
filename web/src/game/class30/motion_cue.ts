@@ -82,7 +82,7 @@ export function ActorSetMotion(obj: Actor, motion: number): void {
   // The cut takes the swing with it — see {@link ActorEndOneShot}. This one
   // leaves nothing to blend from, so the swing is dropped rather than faded.
   obj.action = null;
-  obj.rootActionFrame = -1;
+  obj.rootActionCursor = -1;
   // `model+0x36 = 0; SkeletonAssignSubtreeTrack(0, 0)` (`0x00411950`..): the
   // whole skeleton back on track 0, so a stumble on the overlay ends here.
   obj.react = null;
@@ -91,7 +91,7 @@ export function ActorSetMotion(obj: Actor, motion: number): void {
   obj.fadeFrom = null;
   obj.fade = 0;
   obj.fadeLen = 0;
-  obj.rootFrame = -1;
+  obj.rootCursor = -1;
 }
 
 /**
@@ -137,7 +137,7 @@ function ActorEndOneShot(obj: Actor, fade: number): void {
   const act = obj.action;
   if (!act) return;
   obj.action = null;
-  obj.rootActionFrame = -1;
+  obj.rootActionCursor = -1;
   ActorStartFade(obj, act.motion, act.ticks, fade);
 }
 
@@ -244,7 +244,7 @@ function BlendBaseTrack(obj: Actor, motion: number, start: number,
   obj.motion = motion;
   obj.playTicks = start;                         // `track[2] = start`
   obj.cursorStore = null;                        // ...over any store to it
-  obj.rootFrame = -1;
+  obj.rootCursor = -1;
 }
 
 /**
@@ -316,7 +316,7 @@ export function ActorSetOneShotBlended(obj: Actor, motion: number,
   // the overlay as that one does.
   obj.react = null;
   obj.action = { motion, ticks: start, held: true };
-  obj.rootActionFrame = -1;
+  obj.rootActionCursor = -1;
 }
 
 /**

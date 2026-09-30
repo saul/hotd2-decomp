@@ -126,7 +126,7 @@ export function Class22Init(obj: Actor, rng?: Rng, events?: Events): void {
   obj.fadeFrom = null;
   obj.fade = 0;
   obj.fadeLen = 0;
-  obj.rootFrame = -1;
+  obj.rootCursor = -1;
   obj.motionFlags |= MOTION_FLAG_4;
   obj.playTicks = d.frame;
   obj.hitRadius = CLASS22_RADIUS;

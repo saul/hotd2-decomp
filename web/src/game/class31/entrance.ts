@@ -80,7 +80,7 @@ export function ThrowerStateEntranceClip(obj: ThrowerActor): void {
     const m = MotionOf(obj, obj.entranceMotion);
     if (!m) { obj.state = ThrowerState.StandAndDecide; return; }
     obj.action = { motion: obj.entranceMotion, ticks: 0 };
-    obj.rootActionFrame = -1;
+    obj.rootActionCursor = -1;
     obj.sub = 1;
   }
   const len = ActorClipLength(obj, obj.entranceMotion);

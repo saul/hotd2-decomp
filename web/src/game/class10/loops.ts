@@ -48,7 +48,7 @@ export function CivilianCountMotionLoops(obj: Actor): void {
     sub.loops -= 1;
     if (sub.loops !== 0) {
       obj.playTicks = 0;
-      obj.rootFrame = -1;
+      obj.rootCursor = -1;
       return;
     }
   }

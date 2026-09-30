@@ -233,7 +233,27 @@ model[6] = model[2] / 2;                                      /* the frame  */
   inclusive and then returns to zero;
 * `model[6]` is the authored frame, the cursor halved — and an odd cursor
   blends the two neighbouring frames on tracks 1 and 2, which is the
-  interpolation.
+  interpolation. `[proved]` in full: on an odd cursor that is not the play
+  length the sampler loads frames `c / 2` and `c / 2 + 1` (the second wrapping
+  to 0 past `play_length / 2`) into pose slots 1 and 2, raises `model+0x37`
+  bit `0x20`, and sets the weight origin one tick back over a divisor of 2,
+  so `SkeletonResolveTrackFrames` (`FUN_00410BD0`) weighs them at exactly one
+  half; on the one odd cursor that **is** the play length it takes frame
+  `c / 2 + 1` alone.
+
+That half-frame reaches the ground. `SkeletonPoseRootFrame` (`FUN_00410920`)
+lerps the root translation from the same two slots before
+`SkeletonApplyRootMotion` (`FUN_00410C50`) takes the step, so a clip authored
+at 30 Hz moves its actor on every 60 Hz frame by half a frame's travel, not by
+a whole frame on every other one. The step's baseline is the previous draw's
+root (`model+0x1160`); when the frame jumps by more than `play_length / 4` --
+a loop's wrap -- the baseline is first set to `root + (root - baseline) /
+play_length`, so the wrap steps `(baseline - root) / play_length`, which for
+a straight walk is the same half frame again. The port samples the root this
+way for every actor (`TrackRootAtCursor` and `rootDelta` in
+`game/root_motion.ts`) and `game/skeleton.ts` runs the whole sampler for an
+actor carrying the model block; what the renderer poses on an odd cursor is
+still the lower frame.
 
 Two consequences the port depends on. A class holds a clip on its last frame by
 simply **not incrementing `model[0]`** — there is no "stop" flag. And a cue

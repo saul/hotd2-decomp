@@ -89,7 +89,12 @@ export function ThrowerStateStandAndDecide(obj: ThrowerActor,
                                            events?: Events): void {
   const stance = ThrowerSurfaceStance(obj);
   if (obj.sub === 0) {
-    let motion = ThrowerMotionOf(obj, ThrowerMotion.Walk);
+    // `g_class31_motion_sets[set][2 + (obj+0x34 >> 27 & 1)]` at `0x0044B19C`:
+    // the walk pair, by the spawn's bit 27. This took the first of the pair
+    // for every spawn, and stage 4's `zskamere` with the bit walked on 443
+    // where the exe walks them on 438.
+    let motion = ThrowerMotionOf(obj,
+                                 ThrowerMotion.Walk + ((obj.flags >>> 27) & 1));
     // `rand() % 10`, the default start frame, drawn before the stance arm.
     let start = rng.int(10);
     if (stance > ThrowerStance.Ceiling) {

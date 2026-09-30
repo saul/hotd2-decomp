@@ -2576,17 +2576,33 @@ export const G = {
    */
   g_GameMode: GameMode.Arcade as GameMode,
   /**
-   * `g_training_lesson` — 0x009C9118. Which training lesson is being played.
+   * `g_training_lesson` — 0x009C9118. Which level of the chosen training
+   * course is being played, 0..4; the course is {@link g_training_course}.
    *
-   * It was `g_prop_target_set` here and in the TSV, named from the one use
-   * the port has for it: `PlaceBreakableGroup` turns the members it selects
-   * into one-shot targets while `g_GameMode` is 2. Mode 2 is **Training**,
-   * and the byte is read in exactly two places, both behind that test — the
-   * other is `PreloadScreenAssetList` (`FUN_00412FD0`), which indexes a
-   * per-lesson asset list with it at training block 3. So the four "member
-   * sets" are the four lessons, which is what the old name could not say.
+   * One writer, the Training select screen (`FUN_00496DE0`, `0x00497254`),
+   * from its second cursor: seeded from the course's grade byte (a 5 stored
+   * as 4) and stepped by input, never past 4. `[proved]` 32 of its 33
+   * references are reads -- `PlaceBreakableGroup` turns the members it
+   * selects into one-shot targets while `g_GameMode` is 2 (Training),
+   * `PreloadScreenAssetList` (`FUN_00412FD0`) indexes a per-lesson asset list
+   * with it at training block 3, and `ThrowerStateWalkDistance` picks its
+   * walk clip by it on course 5. This comment used to say it was read in
+   * exactly two places, which nobody had enumerated. It was
+   * `g_prop_target_set` before mode 2 was known to be Training.
    */
   g_training_lesson: 0,
+  /**
+   * `g_training_course` — 0x009C8FB1. Which training course the Training
+   * select screen picked, 0..9.
+   *
+   * `[proved]` One writer, `FUN_00496DE0` at `0x00497248`, which stores its
+   * course cursor there together with the course's event block and the level
+   * in {@link g_training_lesson}. Class 0x31 reads it once:
+   * `ThrowerStateWalkDistance` walks on a per-level clip on course 5. Nothing
+   * in the port plays Training, so it keeps its reset value, and which course
+   * is which is `[open]`.
+   */
+  g_training_course: 0,
   /**
    * `g_scene_index` — 0x009A1A08. Which scene is loaded, zero-based:
    * `ColiLoadForScene` indexes its file list with it, so scene 1 is stage 2.

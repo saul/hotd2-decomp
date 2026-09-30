@@ -57,7 +57,9 @@ export enum GameMode {
   ORIGINAL = 1,
   /**
    * Training. Menu row 2. `ResetGameOnStart` sends it to scene 6, which is
-   * `trnevtbl.bin`, and `g_training_lesson` (`0x009C9118`) selects the lesson.
+   * `trnevtbl.bin`, at the block the select screen stored for
+   * `g_training_course` (`0x009C8FB1`); `g_training_lesson` (`0x009C9118`)
+   * is the level within it.
    * No stage bundle is exported in this mode.
    */
   TRAINING = 2,

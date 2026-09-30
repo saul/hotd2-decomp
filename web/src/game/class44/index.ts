@@ -14,16 +14,16 @@
  * that is hit points for a combat actor and the *group id* for a class-0x41
  * placer. Three classes, three meanings, one offset.
  *
- * Eighteen builders. Five are read and ported here: selector 16, which hands
- * out items and is the only one that shares `g_item_set_countdown` with class
- * 0x41; selector 17, the branch writer; selector 0, the animated effect tree
- * stage 1's window is made of; selector 11, the door that slides up out of
- * the way of the zombies behind it; and selector 13, which rises on a flag to
- * a height its descriptor gives -- stage 5's gate behind JUDGMENT. The hinges
- * (1, 2 and 4) are posed by `render/props.ts`. The rest keep their slot and
- * do nothing,
- * for the same reason class 0x41's other 78 do — an unimplemented selector
- * running the wrong builder is the bug that had the cat walking at the player.
+ * Eighteen builders, and every one is read and ported: selector 0, the
+ * animated effect tree stage 1's window is made of; the hinges 1, 2 and 4,
+ * which swing on a flag through a baked curve (`hinge.ts`); 3 and 7, effect
+ * trees drawn as one slot (`slot_effect.ts`); 5, which plays an effect and
+ * hands itself to a hinge; 6, which swings and then breaks; 8, an effect that
+ * falls apart; 9, 11, 12 and 13, which lift or slide on a flag; 10, class
+ * 0x41 type 31's strip loop from a class-0x44 descriptor; 14, a model at a
+ * scale; 15, class 0x41 type 4's kinded prop with an Original Mode gate; 16,
+ * which hands out items and is the only one that shares
+ * `g_item_set_countdown` with class 0x41; and 17, the branch writer.
  */
 import type { Actor } from "../actor";
 import { G } from "../globals";
@@ -37,16 +37,24 @@ import { PropBuildRisingDoor } from "./rising_door";
 import { PropBuildRiseToHeight } from "./rise_to_height";
 import { PropBuildSlideOnFlag } from "./slide_on_flag";
 import { PropBuildFlagLiftedProp } from "./flag_lifted";
-import { PropBuildDrawOnlySelector14 } from "./draw_only";
+import { PropBuildDrawOnlySelector14, PropBuildSlotStripLoop }
+  from "./draw_only";
+import { PropBuildHinge, PropBuildHingeScaled, PropBuildVanDoors }
+  from "./hinge";
+import { PropBuildFlagSlotEffect, PropBuildScaledSlotEffect }
+  from "./slot_effect";
+import { PropBuildEffectHandoff } from "./effect_handoff";
+import { PropBuildSwingThenBreak } from "./swing_then_break";
+import { PropBuildEffectCollapse } from "./effect_collapse";
+import { PropBuildKindedProp } from "./kinded_prop";
+import type { BreakablePlacement } from "../../bundle";
 import { PropBuildScriptFlagEffect } from "./script_flag_effect";
 import { PlaceStoryModeSwitch } from "../class41/triggers";
 
 /**
  * `obj+0x11C` for this class — the builder index.
  *
- * Only the members with a port are named. A selector the stages place but that
- * has not been read is a bare number on purpose: naming it would claim a
- * reading that has not happened.
+ * Every member has a port, and each is named for what its builder builds.
  */
 export enum Class44Selector {
   /**
@@ -54,6 +62,37 @@ export enum Class44Selector {
    * that plays on a script flag. Two spawns, both stage 1's window halves.
    */
   ScriptFlagEffect = 0,
+  /** `PropBuildHinge` (`FUN_00472BD0`) — a hinge. See `class44/hinge.ts`. */
+  Hinge = 1,
+  /** `PropBuildVanDoors` (`FUN_00472C90`) — the van's two rear doors. */
+  VanDoors = 2,
+  /**
+   * `PropBuildFlagSlotEffect` (`FUN_00472E00`) — effect 0xB drawn as one
+   * slot. See `class44/slot_effect.ts`.
+   */
+  FlagSlotEffect = 3,
+  /** `PropBuildHingeScaled` (`FUN_00472EB0`) — a hinge with a scale. */
+  HingeScaled = 4,
+  /**
+   * `PropBuildEffectHandoff` (`FUN_00472F80`) — an effect on flag 0x62, then
+   * a hinge. See `class44/effect_handoff.ts`.
+   */
+  EffectHandoff = 5,
+  /**
+   * `PropBuildSwingThenBreak` (`FUN_00473060`). See
+   * `class44/swing_then_break.ts`.
+   */
+  SwingThenBreak = 6,
+  /**
+   * `PropBuildScaledSlotEffect` (`FUN_00473170`) — effect 0xF drawn as its
+   * descriptor's slot at a scale. See `class44/slot_effect.ts`.
+   */
+  ScaledSlotEffect = 7,
+  /**
+   * `PropBuildEffectCollapse` (`FUN_00473260`). See
+   * `class44/effect_collapse.ts`.
+   */
+  EffectCollapse = 8,
   /**
    * `PropBuildRisingDoor` (`FUN_00473410`) — a door that slides straight up on
    * a script flag. Two spawns: stage 3's roller shutter and stage 5's.
@@ -67,6 +106,11 @@ export enum Class44Selector {
    * on a script flag. Stage 3's one. See `class44/flag_lifted.ts`.
    */
   FlagLifted = 9,
+  /**
+   * `PropBuildSlotStripLoop` (`FUN_00473370`) — `PropDrawOnlyType31`'s object
+   * from a class-0x44 descriptor. See `class44/draw_only.ts`.
+   */
+  SlotStripLoop = 10,
   RisingDoor = 11,
   /**
    * `PropBuildSlideOnFlag` (`FUN_004734A0`) — an object that slides a set
@@ -86,6 +130,11 @@ export enum Class44Selector {
    * steps. Twelve spawns over stages 2, 3 and 4. See `class44/draw_only.ts`.
    */
   DrawOnly = 14,
+  /**
+   * `PropBuildKindedProp` (`FUN_00473770`) — a `KindedPropUpdate` object,
+   * five of nine built only in Original Mode. See `class44/kinded_prop.ts`.
+   */
+  KindedProp = 15,
   /** `PlaceFallingContainer` (`FUN_00473940`) — the item container. */
   FallingContainer = 16,
   /**
@@ -111,7 +160,58 @@ export type Class44Builder = (obj: Actor, f: ClassFrame) => void;
  * `const` that has not been initialised yet. That is the same cycle that left
  * `g_class_handlers[0x41]` empty and cost an hour; once is enough.
  */
+/**
+ * `[port-only]` This placer's placement under *container*, which the exporter
+ * decoded from the same descriptor the builder reads.
+ */
+function Class44Placement(obj: Actor, container: string):
+    BreakablePlacement | undefined {
+  return T.breakables?.placements?.find(
+    (q) => q.at === obj.at && q.container === container);
+}
+
 export const g_class44_subtypes: Partial<Record<number, Class44Builder>> = {
+  [Class44Selector.Hinge]: (obj) => {
+    const pl = Class44Placement(obj, "hinge");
+    if (pl) G.g_breakable_props.push(PropBuildHinge(pl));
+  },
+  [Class44Selector.VanDoors]: (obj) => {
+    const pl = Class44Placement(obj, "van_doors");
+    if (pl) G.g_breakable_props.push(...PropBuildVanDoors(pl));
+  },
+  [Class44Selector.FlagSlotEffect]: (obj) => {
+    const pl = Class44Placement(obj, "flag_slot_effect");
+    if (pl) G.g_breakable_props.push(PropBuildFlagSlotEffect(pl));
+  },
+  [Class44Selector.HingeScaled]: (obj) => {
+    const pl = Class44Placement(obj, "hinge_scaled");
+    if (pl) G.g_breakable_props.push(PropBuildHingeScaled(pl));
+  },
+  [Class44Selector.EffectHandoff]: (obj) => {
+    const pl = Class44Placement(obj, "effect_handoff");
+    if (pl) G.g_breakable_props.push(PropBuildEffectHandoff(pl));
+  },
+  [Class44Selector.SwingThenBreak]: (obj) => {
+    const pl = Class44Placement(obj, "swing_then_break");
+    if (pl) G.g_breakable_props.push(PropBuildSwingThenBreak(pl));
+  },
+  [Class44Selector.ScaledSlotEffect]: (obj) => {
+    const pl = Class44Placement(obj, "scaled_slot_effect");
+    if (pl) G.g_breakable_props.push(PropBuildScaledSlotEffect(pl));
+  },
+  [Class44Selector.EffectCollapse]: (obj) => {
+    const pl = Class44Placement(obj, "effect_collapse");
+    if (pl) G.g_breakable_props.push(PropBuildEffectCollapse(pl));
+  },
+  [Class44Selector.SlotStripLoop]: (obj) => {
+    const pl = Class44Placement(obj, "slot_strip_loop");
+    if (pl) G.g_breakable_props.push(PropBuildSlotStripLoop(pl));
+  },
+  [Class44Selector.KindedProp]: (obj, f) => {
+    const pl = Class44Placement(obj, "kinded_44");
+    const p = pl ? PropBuildKindedProp(pl, f.rng) : null;
+    if (p) G.g_breakable_props.push(p);
+  },
   [Class44Selector.ScriptFlagEffect]: (obj, f) => {
     void f;
     const pl = T.breakables?.placements?.find(
@@ -208,10 +308,15 @@ export * from "./slide_on_flag";
 export * from "./flag_lifted";
 export * from "./draw_only";
 export * from "./script_flag_effect";
+export * from "./hinge";
+export * from "./slot_effect";
+export * from "./effect_handoff";
+export * from "./swing_then_break";
+export * from "./effect_collapse";
+export * from "./kinded_prop";
 
 /**
- * The same shape: a placer that builds and dies. Five of the eighteen
- * selectors have a builder — see {@link g_class44_subtypes}; the rest run
- * nothing, which is what the sparse table is for.
+ * The same shape: a placer that builds and dies. All eighteen selectors have
+ * a builder — see {@link g_class44_subtypes}.
  */
 registerClass(SpawnClass.PropPlacer, Class44PlacerHandler);

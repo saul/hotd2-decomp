@@ -301,6 +301,19 @@ every `evt/` table for it before calling it unread**, and subtract the
 occurrences the opcodes explain: what is left is a descriptor, and the
 descriptor's class says who reads it.
 
+**LXX -- An update routine runs for every `ActorAlloc` handed its address,
+not for the table that names it.** `PropDrawOnlyType31` (`FUN_0046A1C0`)'s
+scene-2 block-11 strip was written up `[proved]` unreachable: every class-0x41
+type-31 spawn in stage 3 is placed in block 4, which never routes to 11. True
+of `g_class41_updates[31]`, and beside the point -- class 0x44 selector 10's
+`PropBuildSlotStripLoop` (`FUN_00473370`) does `PUSH 0x46A1C0` into
+`ActorAlloc` too, and all five of its stage-3 spawns are placed in block 11.
+The same shape hid which routine selector 5's hinge runs: its update allocates
+the object inline, and the shot-test table called it `[open]` until the
+`PUSH 0x473CF0` was read. **Before saying who reaches an arm, search the
+image for the routine's address as an immediate** (`68 <addr>`), and follow
+every allocation that pushes it.
+
 
 ## Transcribing behaviour into the port
 

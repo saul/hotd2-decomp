@@ -208,6 +208,48 @@ export enum PropFamily {
    */
   DrawOnlySelector14 = 27,
   /**
+   * `HingeUpdate` (`FUN_00473CF0`) — class 0x44 selectors 1, 2 and 4, the
+   * doors and shutters the script swings open, and the hinge selector 5's
+   * object hands over to. See `class44/hinge.ts`.
+   */
+  Hinge = 28,
+  /**
+   * `PropDrawOnlyType31` (`FUN_0046A1C0`) handed to `ActorAlloc` by class
+   * 0x44 selector 10's `PropBuildSlotStripLoop` (`FUN_00473370`) rather than
+   * by `PlaceGenericProp`. Its own family for the reason {@link
+   * DrawOnlyType12} is: the routine runs and the generic arm's lookup does
+   * not. See `class44/draw_only.ts`.
+   */
+  DrawOnlyType31 = 29,
+  /**
+   * `FlagSlotEffectUpdate` (`FUN_00474120`) — class 0x44 selector 3, an
+   * effect tree with every node drawn as one slot. See
+   * `class44/slot_effect.ts`.
+   */
+  FlagSlotEffect = 30,
+  /**
+   * `EffectHandoffUpdate` (`FUN_00474240`) — class 0x44 selector 5, which
+   * plays an effect on flag 0x62 and hands itself to a hinge. See
+   * `class44/effect_handoff.ts`.
+   */
+  EffectHandoff = 31,
+  /**
+   * `SwingThenBreakUpdate` (`FUN_00474470`) — class 0x44 selector 6. See
+   * `class44/swing_then_break.ts`.
+   */
+  SwingThenBreak = 32,
+  /**
+   * `ScaledSlotEffectUpdate` (`FUN_00474770`) — class 0x44 selector 7. See
+   * `class44/slot_effect.ts`.
+   */
+  ScaledSlotEffect = 33,
+  /**
+   * `EffectCollapseUpdate` (`FUN_004748C0`) — class 0x44 selector 8, a
+   * 0xD14-byte object whose effect tree falls apart. See
+   * `class44/effect_collapse.ts`.
+   */
+  EffectCollapse = 34,
+  /**
    * `OriginalItemDropUpdate` (`FUN_00466BE0`) — the Original Mode item
    * `SpawnOriginalItemDrop` (`FUN_00466B40`) releases, which
    * `PropUpdateType7`'s first hit does. See `class41/type07.ts`.
@@ -315,6 +357,13 @@ export interface BurstPiece {
   sx: number;             // +0xAC6 + 6i
   sy: number;             // +0xAC8 + 6i
   sz: number;             // +0xACA + 6i
+  /**
+   * `obj+0xC7C + 2i` -- the model piece *i* draws. Only
+   * `EffectCollapseUpdate` (`FUN_004748C0`, `class44/effect_collapse.ts`)
+   * keeps one, the slot its tree walk last drew for bone *i*; type 40's
+   * pieces draw `0xCA5 + i` and carry none.
+   */
+  slot?: number;          // +0xC7C + 2i
 }
 
 /** One of `PropUpdateType48FlickerLight`'s thirty debris pieces. */

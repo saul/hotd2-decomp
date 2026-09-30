@@ -23,13 +23,21 @@ import { SlideOnFlagUpdate } from "../class44/slide_on_flag";
 import { FlagLiftedPropUpdate } from "../class44/flag_lifted";
 import { PropUpdateType47 } from "./type47";
 import { PropDrawOnlySelector14 } from "../class44/draw_only";
+import { HingeUpdate } from "../class44/hinge";
+import {
+  FlagSlotEffectUpdate, ScaledSlotEffectUpdate,
+} from "../class44/slot_effect";
+import { EffectHandoffUpdate } from "../class44/effect_handoff";
+import { SwingThenBreakUpdate } from "../class44/swing_then_break";
+import { EffectCollapseUpdate } from "../class44/effect_collapse";
 import { ScriptFlagEffectUpdate } from "../class44/script_flag_effect";
 import {
   ChainSegmentUpdate, StoryModeSwitchUpdate,
   STORY_SWITCH_FLAG_AT, STORY_SWITCH_SCRIPT_FLAG,
 } from "./branch";
 import {
-  PropDrawOnlyType33, PropDrawOnlyType53, PropDrawOnlyType54,
+  PropDrawOnlyType31, PropDrawOnlyType33, PropDrawOnlyType53,
+  PropDrawOnlyType54,
 } from "./draw_only";
 import { GENERIC_ROUTINES } from "./generic_routines";
 import { OriginalItemBannersTick } from "./item_banner";
@@ -109,6 +117,17 @@ export function BreakablePropPoolUpdate(rng: Rng, events?: Events,
       case PropFamily.Type47: PropUpdateType47(p); break;
       // Selector 14 opens on the prologue itself and registers nothing.
       case PropFamily.DrawOnlySelector14: PropDrawOnlySelector14(p); break;
+      // The class-0x44 hinges and their neighbours: each its own remove flag
+      // and sweep, no prologue, and its own shot-test tail where it has one.
+      case PropFamily.Hinge: HingeUpdate(p, events); break;
+      case PropFamily.FlagSlotEffect: FlagSlotEffectUpdate(p, rng, events); break;
+      case PropFamily.EffectHandoff: EffectHandoffUpdate(p, rng); break;
+      case PropFamily.SwingThenBreak: SwingThenBreakUpdate(p, rng); break;
+      case PropFamily.ScaledSlotEffect: ScaledSlotEffectUpdate(p, rng); break;
+      case PropFamily.EffectCollapse: EffectCollapseUpdate(p, rng); break;
+      // Selector 10's object: `PropDrawOnlyType31` itself, with the step
+      // lifetime it opens on.
+      case PropFamily.DrawOnlyType31: PropDrawOnlyType31(p, rng, events); break;
       // Neither of these calls `PropExpireByStepLifetime` — 53 inlines its
       // own variant of it and 54 has no lifetime at all — so neither can ride
       // the generic arm, which runs that prologue before it dispatches.

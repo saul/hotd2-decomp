@@ -136,7 +136,7 @@ holding paths like `COM\220_Y_M.WAV`, which is decisive.
 |---|---|---|---|---|
 | `0x41` | `PropContainerPlacerUpdate` (`FUN_00461CD0`) | 441 | **Breakable-prop / item-container placer.** A transient stub: dispatches on `obj+0x130C` through `g_class41_constructors`, 79 entries at `0x00593580`, builds child actors, then `ActorKill`s itself. Never drawn, never damaged. Type 0 is the breakable group (8 spawns) and is **ported**; **type 1** (`PlaceWaterSurface`, `FUN_00462F70`, 15 spawns) is not a prop at all but the task that draws and ripples a canal water tile, `WaterSurfaceUpdate` (`FUN_0046E3A0`) -- the tile is `g_water_surface_slots[+0x1F4]` (`0x00593DA4`) and `+0x11C` a step lifetime -- and is **ported**, see `docs/formats/water.md` §2; type 4 (`PlaceKindedProp`, 70 spawns) and **type 43** (`PropUpdateType43`, 7) both read `obj+0x6C` as an object kind; type 32 is the **lift** (`LiftUpdate`) and is ported; type 13 (`PropUpdateType13`, `FUN_00467F50`) is the part that drops out of stage 2's clock tower on script flag `0x6D`, and type 35 (`PropUpdateType35`, `FUN_0046B320`) the double door stage 2's block-5 civilian stands behind, drawn at **literal world coordinates** whatever its placement -- both ported. Types **38, 39 and 44** (`PlaceTable38Props`, `PlaceTable39Stacks`, `PlaceTable44Props`) and **40** (`PlaceFragmentProps` / `PropUpdateType40`, all twenty sub-kinds) build their objects from tables in the image and are ported whole — see *Stage 1's church* below — as are **50** (`PlaceTable50Props`, six tables of scenery: stage 1's bin-scene crate, stage 2 block 17's furniture) and **66** (`PlaceTable66Props` / `PropUpdateType66`, the `komono_kanban.bin` signs), see *Class 0x41 constructors 50 and 66*; **47** (`PlaceType47Prop` / `PropUpdateType47`) is stage 2's faded disc, see *Class 0x44 selectors 9 and 12*. **Twelve constructors are unported**, each with the spawns that place it, in *Class 0x41's constructors: which are ported*. The 44 types `PlaceGenericProp` serves share one constructor and a jump table — `g_place_generic_prop_arm_index` at `0x00462978` and `g_place_generic_prop_arms` at `0x004628D4`, indexed `type - 6` — so which arm sets what is read and not guessed. The retail stages reach 74 of the 79. See *The generic props' `+0x11C`* below. | `[proved]` |
 | `0x30` | `FUN_00452DA0` | 288 | **The zombie.** HP, per-body-part damage zones, 80 points on kill / 10 per hit / 120 + combo on a head hit, a 54-state machine at `0x00592AE8`. Increments `g_enemies_alive`. State 2 (`FUN_00455720`) plays `COMMON2\ZOMBIE_041_16.wav`; the type-2 setup plays `CHAIN_SAW_22.wav` and a later state `KNIFE1_44.wav`. State 37, `ZombieStateCarryProp`, carries a **classless prop** (`CarriedPropInit`, `FUN_00442740`) typed by its script's `+0x00` out of `g_carried_prop_types` and throws it through `g_prop_behaviours` 1/3/4/5 -- stage 3's drums and stage 1's barrel; see `game/carried_prop.ts`. | `[proved]`, by the game's own sound record **Eleven of the 54 states never look at the camera**: they work on `obj+0x1394`, the object the actor was built for, and for 55 of the 70 spawns that reach one that is the class-0x10 civilian whose `CivilianInit` built them. See docs/formats/civilians.md. |
-| `0x44` | `PropPlacerDispatch44` (`FUN_00472B10`) | 204 | **Prop placer.** Same shape as 0x41: dispatches on `obj+0x11C` through `g_class44_subtypes`, 18 entries at `0x00595AB8`, builds a child, `ActorKill`s. Selectors 0 (`PropBuildScriptFlagEffect`), 11 (`PropBuildRisingDoor`), 13 (`PropBuildRiseToHeight`, `0x00473640` -- stage 5's gate behind JUDGMENT, see below), 16 (`PlaceFallingContainer`) and 17 (`PlaceStoryModeSwitch`) are read and ported; 1, 2 and 4 are the hinges (`HingeUpdate`); 9 (`PropBuildFlagLiftedProp`, `0x00473300`, one stage-3 spawn that rises on a flag) and 12 (`PropBuildSlideOnFlag`, `0x004734A0`, eight stage-6 spawns that slide on a flag) are read and ported, see *Class 0x44 selectors 9 and 12*; 14 (`PropBuildDrawOnlySelector14`, `0x004736D0`, twelve spawns over stages 2 to 4 -- a descriptor-named model at a descriptor scale) is read and ported, see *Class 0x44 selector 14*; 15 is `PropBuildKindedProp`; the rest are unread. | `[proved]` |
+| `0x44` | `PropPlacerDispatch44` (`FUN_00472B10`) | 204 | **Prop placer.** Same shape as 0x41: dispatches on `obj+0x11C` through `g_class44_subtypes`, 18 entries at `0x00595AB8`, builds a child, `ActorKill`s. **All eighteen are read and ported.** Selectors 0 (`PropBuildScriptFlagEffect`), 11 (`PropBuildRisingDoor`), 13 (`PropBuildRiseToHeight`, `0x00473640` -- stage 5's gate behind JUDGMENT, see below), 16 (`PlaceFallingContainer`) and 17 (`PlaceStoryModeSwitch`); 9 (`PropBuildFlagLiftedProp`, `0x00473300`, one stage-3 spawn that rises on a flag) and 12 (`PropBuildSlideOnFlag`, `0x004734A0`, eight stage-6 spawns that slide on a flag), see *Class 0x44 selectors 9 and 12*; 14 (`PropBuildDrawOnlySelector14`, `0x004736D0`, twelve spawns over stages 2 to 4 -- a descriptor-named model at a descriptor scale), see *Class 0x44 selector 14*; and the hinges 1, 2 and 4 (`HingeUpdate`) with 3, 5, 6, 7, 8, 10 and 15 round them, see *Class 0x44's hinges, and selectors 3 to 8, 10 and 15*. | `[proved]` |
 | `0x25` | `ScriptedHumanoidInit` (`FUN_004840D0`) | 142 | **Script-driven humanoid actor.** A bytecode VM (`FUN_004842A0`) drives a skinned character. Not an enemy, not damageable, awards nothing, and never filed for the shot test, so no shot reaches it (it holds a hit slot, from the model build, as every skinned actor does) — see [combat.md](combat.md), *A class that never registers*. **It is also how the game draws the player's own body in a cut scene** — see *`op 10` is an `if`* below. | `[proved]` |
 | `0x10` | `CivilianInit` | 51 | **Civilian / rescuable victim. Ported** (`game/class10/`) — a bytecode VM whose 136 command streams are compiled into the **exe**, not the evt. Each civilian is held by class-0x30 captors its own Init builds from descriptors nothing in the script points at; killing them all pays **+400**. Shooting the civilian costs a **life** and −100 twice. Proved by voice records: `COM\220_Y_M.WAV`, `COM\209_M.WAV`, `COM\190_Y_W.WAV`, `COM\207_OLD_W.WAV`, `COM\200_C.WAV` — young man, man, young woman, old woman, child. Its face and its hair are an **attachment list** at the spawn tail's `+0x08`, not part of its skeleton — 52 of the 65 spawns carry one. See docs/formats/civilians.md. | `[proved]` |
 | `0x31` | `EnemyThrowerInit` (`0x00449620`) | 49 | **The wall-crawler**, four character types (`0x16`-`0x19`) over one 35-state machine and four **behaviour sets**, the set taken from the descriptor's byte +1 rather than from the model. Set 1 (`zsass`) stands out of reach and throws; set 0 (`zstin`) climbs the walls and the ceiling at 40-50 units and **arcs onto the camera with a knife** inside 30, connecting on a frame of the leap clip rather than on any range test, then leaps back out to one side. The whole repertoire is a pick table, `g_class31_action_picks`. **Ported.** See [`combat.md` §12](combat.md). Ricochet SFX by subtype: `BULLET_WOD1_16.WAV` (wood) for `0x17`, `BULLET_MET2_16.WAV` (metal) for `0x19`. | `[proved]` |
@@ -855,6 +855,70 @@ evt `0x14990`: slot `0x1384`, a 134-unit flat disc, drawn lying flat at 0.4
 scale through `AssetDrawSlotWithAlpha` at `sin(obj+0x44) * 0.2 + 0.8`, and
 killed by script flag `0x11` or step index 2. `[likely]` the alpha is the
 constant 0.8: nothing found writes `obj+0x44`.
+
+### Class 0x44's hinges, and selectors 3 to 8, 10 and 15
+
+**[proved]** Every builder and routine, `game/class44/`, one exe function to
+one TS function; `web/tools/checks/class44_builders.ts` holds the table
+entries, each builder's allocation, the literals and every spawn's placement.
+Until these were ported, 1, 2 and 4 were posed by the renderer from a copy of
+the curves (`L16`) and the rest were never built (`L83`).
+
+```
+selector  builder                      routine                 tail (+0x24 on)                         spawns
+1         PropBuildHinge 0x00472BD0    HingeUpdate 0x00473CF0  +00 u16 curve  +04 u16 slot  +08 i32 coli  37 (stages 1, 2, 4, 5, 6)
+                                                               +10 i32 side  +14 i32 wobble phase
+                                                               +20 s8 open flag  +21 s8 remove flag
+2         PropBuildVanDoors 0x00472C90 HingeUpdate             +08, +14, +20, +21; two doors 0x1794+i    3 (stage 2, stage 5 x2)
+                                                               at (+/-9.29, 11.5, 22.68), sides -1/+1, curve 2
+4         PropBuildHingeScaled 0x00472EB0 HingeUpdate          +00 curve  +04 slot  +08 coli  +0C side    13 (stage 2)
+                                                               +10/+11 flags  +14..+1C f32 scale
+3         PropBuildFlagSlotEffect      FlagSlotEffectUpdate    +08 coli  +20/+21 flags; effect 0xB on      2
+          0x00472E00                   0x00474120              0x1D6, slot 0x17EE (scene 0) / 0x197C
+5         PropBuildEffectHandoff       EffectHandoffUpdate     selector 1's; effect 0xC on 0x1CE          1 (stage 2)
+          0x00472F80                   0x00474240
+6         PropBuildSwingThenBreak      SwingThenBreakUpdate    selector 4's, +12 s8; effects 0xD/0xE/0xF  1 (stage 2)
+          0x00473060                   0x00474470
+7         PropBuildScaledSlotEffect    ScaledSlotEffectUpdate  selector 4's, +12 s8; effect 0xF on 0x1CA  1 (stage 2)
+          0x00473170                   0x00474770
+8         PropBuildEffectCollapse      EffectCollapseUpdate    +10 s8 flag  +11 s8 lifetime  +14 scale    2 (stage 2)
+          0x00473260 (0xD14 bytes)     0x004748C0              effect 0x10 on 0x1D3
+10        PropBuildSlotStripLoop       PropDrawOnlyType31      +00 u16 lifetime  +04 u16 slot             5 (stage 3)
+          0x00473370                   0x0046A1C0              +14 scale; desc+0x6C the strip's last cursor
+15        PropBuildKindedProp          KindedPropUpdate        +00 u16 lifetime  +04 s8 item set          9
+          0x00473770                   0x00465FB0              +08 i32 story item; desc+0x6C kind, +0x64 set size
+```
+
+**The hinge** swings through `g_pHingeCurvesXYZ` (curves 0, 2, 3) or the
+yaw-only, zero-extended `g_pHingeCurvesYaw` (1, 4) while its open flag is up,
+60 frames or 130 on curve 4; `obj+0x1DC` is read for its sign by the swing and
+as the amplitude of the damped wobble a shot starts. Slot `0xA60` answers
+flags 0x36 and 0x23; slot `0x1866` in scene 3 blocks 1 and 7 plays
+`0x361BA9` once on flag 2 or 4; slots `0x1817`/`0x1816` are drawn at x scale
+1.05. Selector 5 draws `0x17D7` until flag 0x62, then plays its effect and
+allocates, once, a `HingeUpdate` object from its own words (not its wobble
+phase). Selector 6 swings on curve 1 until flag 0x63, then draws the strip
+`0x170`..`0x174` under effects 0xD and 0xE while its yaw spins down by 0.85f a
+frame, and on flag 0x64 restarts on effect 0xF. Selectors 3 and 7 draw every
+node of their effect tree as one slot (the override `EffectDrawWithCapture`
+and `EffectDrawWithSlot`, `0x0040E010`, set). Selector 8 plays effect 0x10 to
+frame 0x23 on its flag, then lets its 72 parts fall and bounce off
+`ftol((ground - y) + sy * 5.0)`, three `rand()`s a bounce -- and its physics
+runs before the flag too, from the origin, so the parts bounce and consume
+`rand()` while nothing is drawn. It copies 73 entries of an effect with 72
+bones, so its last part starts from the key's rotation shorts read as floats;
+the two keys travel raw on the placement (`collapse_keys`). Selector 10 is
+class 0x41 type 31's object from a class-0x44 descriptor, and its stage-3
+block-11 spawns are the ones that reach `PropDrawOnlyType31`'s scene-2
+block-11 strip. Selector 15 is `PlaceKindedProp` with the item set and the
+Original Mode story item from the tail, and builds nothing outside Original
+Mode in scene 1 block 0x15, scene 2 blocks 1, 4 and 8, and scene 5 block 1.
+
+What the port does not carry is the same for all of them: the mesh shot test
+their `obj+0x34 |= 0x51` and `obj+0x14C` send them to, which the prop pool
+has not got (the registration files a sphere of radius 0), and everything
+written only for it -- `MatrixStore(obj+0x150)`, selector 3's captured matrix
+and its `obj+0x64..0x6C`.
 
 ### Class 0x24's parameter tail
 

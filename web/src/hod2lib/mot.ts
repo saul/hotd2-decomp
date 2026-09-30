@@ -230,6 +230,39 @@ export class MotionBank {
     }
     return out;
   }
+
+  /**
+   * *entries* translations and rotations of key *key*, read at the addresses
+   * `EffectFrameTranslations` (`FUN_0040E040`) and `EffectFrameRotations`
+   * (`FUN_0040E070`) return **and past the node count** -- a caller that
+   * indexes further than `nodeCount - 1` reads whatever lies there: the
+   * rotation block, then the next key. `EffectCollapseUpdate`
+   * (`FUN_004748C0`) reads 73 entries of an effect with 72.
+   *
+   * The translations come back as their raw 32-bit patterns, because a read
+   * that lands on rotation shorts is not a number anyone authored and may be
+   * a NaN; the rotations as the signed shorts the routine loads. Null when a
+   * read would leave the bank.
+   */
+  effectKeyRaw(motionId: number, nodeCount: number, key: number,
+               entries: number): { t: number[]; r: number[] } | null {
+    const base = this.offsets.get(motionId);
+    if (base === undefined || nodeCount < 2) return null;
+    const stride = effectFrameStride(nodeCount);
+    const o = base + 4 + key * stride;
+    const ro = o + (nodeCount - 1) * 12;
+    if (o < 0 || o + entries * 12 > this.raw.length
+        || ro + entries * 6 > this.raw.length) {
+      return null;
+    }
+    const t: number[] = [];
+    const r: number[] = [];
+    for (let k = 0; k < entries; k++) {
+      for (let c = 0; c < 3; c++) t.push(u32(this.raw, o + k * 12 + c * 4));
+      for (let c = 0; c < 3; c++) r.push(i16(this.raw, ro + k * 6 + c * 2));
+    }
+    return { t, r };
+  }
 }
 
 /** Load one `mot/` bank and apply the header exactly as sub-step 2 does. */

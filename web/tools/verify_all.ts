@@ -458,6 +458,14 @@ export const CHECKS: readonly Check[] = [
      + "draw with no camera cue, and, with a bundle, that all twelve spawns "
      + "are placed with that tail and their models travel -- the one reader "
      + "of the descriptor word that is `0x10AE`'s only name"),
+  game("class44_builders",
+       "that class 0x44 selectors 1 to 8, 10 and 15 are the table's builders "
+     + "and each allocates its own routine, that the literals the port holds "
+     + "-- the van doors' offsets, the wobble's gains, the collapse's gravity, "
+     + "bounce, floor and alpha -- are the image's, and, with a bundle, that "
+     + "every one of their 74 spawns is placed with its builder's reading of "
+     + "the tail, with its models, its effect trees and the yaw curves -- the "
+     + "hinges the renderer used to pose, now run by the game"),
   game("class26",
        "that class 0x26 subtypes 6 and 7 -- stage 6 block 12's pair -- are "
      + "routed by the installer to `Class26Subtype67Update` and stored after "

@@ -625,6 +625,16 @@ export function SpawnPropContainers(spawns: readonly ScriptSpawn[]): void {
       slide_on_flag: Class44Selector.SlideOnFlag,
       flag_lifted: Class44Selector.FlagLifted,
       draw_only_14: Class44Selector.DrawOnly,
+      hinge: Class44Selector.Hinge,
+      van_doors: Class44Selector.VanDoors,
+      flag_slot_effect: Class44Selector.FlagSlotEffect,
+      hinge_scaled: Class44Selector.HingeScaled,
+      effect_handoff: Class44Selector.EffectHandoff,
+      swing_then_break: Class44Selector.SwingThenBreak,
+      scaled_slot_effect: Class44Selector.ScaledSlotEffect,
+      effect_collapse: Class44Selector.EffectCollapse,
+      slot_strip_loop: Class44Selector.SlotStripLoop,
+      kinded_44: Class44Selector.KindedProp,
     };
     const sel = CLASS44_SELECTOR[pl.container];
     if (s.class === SpawnClassValue.PropPlacer && sel !== undefined) {
@@ -641,7 +651,9 @@ export function SpawnPropContainers(spawns: readonly ScriptSpawn[]): void {
                                    ? `${pl.container}, flag ${pl.open_flag}`
                                    : pl.container === "draw_only_14"
                                      ? `slot 0x${(pl.slot ?? 0).toString(16)}`
-                                     : `container kind ${pl.kind}`,
+                                     : pl.container === "falling"
+                                       ? `container kind ${pl.kind}`
+                                       : pl.container,
                            { hp: sel });
       a.pos = vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0, s.pos?.[2] ?? 0);
       a.yaw = pl.yaw ?? 0;

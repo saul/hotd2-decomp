@@ -103,6 +103,9 @@ import { alphaGatesWholeActor, applyDrawGates }
   from "./characters/draw_gates";
 import { applyHeadAim } from "./characters/head_aim";
 import { clearHeldItems, syncHeldItems } from "./characters/held_items";
+import {
+  clearHumanoidHookDraws, syncHumanoidHookDraws,
+} from "./characters/humanoid_hook";
 import { syncResultFigure } from "./characters/result_figure";
 import { RESULT_FIGURE_AT_BIT, RESULT_FIGURE_TEMPLATE_BIT }
   from "../game/class61/state";
@@ -631,6 +634,9 @@ export class CharacterLayer implements System {
       // `ResultCardFigureDrawNode` (`FUN_004357F0`)'s own draws -- see
       // `render/characters/result_figure.ts`.
       syncResultFigure(inst, (slot) => this.cloneSlot(slot));
+      // `ScriptedHumanoidBoneDrawHook` (`FUN_00485260`)'s extra models -- see
+      // `render/characters/humanoid_hook.ts`.
+      syncHumanoidHookDraws(inst, (slot) => this.cloneSlot(slot));
       // Last, so that a cel or a gore piece hung on a bone this frame arrives
       // under the gate and an attachment made this frame is known to be one.
       applyDrawGates(inst);
@@ -1041,6 +1047,7 @@ export class CharacterLayer implements System {
     inst.hidden = 0;
     inst.slots = undefined;
     clearHeldItems(inst);
+    clearHumanoidHookDraws(inst);
     for (const node of inst.bones.values()) {
       node.visible = true;
       for (const c of node.children) c.visible = true;

@@ -151,6 +151,13 @@ export interface Instance {
   /** `attachSet:records` the nodes above were built for. */
   heldKey?: string;
   /**
+   * Class 0x25's extra models, `ScriptedHumanoidBoneDrawHook`'s
+   * (`FUN_00485260`), by `"<bone>:<slot>"`. Render bookkeeping: which arm
+   * draws is a function of the actor's type, motion and drawn cursor, all in
+   * the snapshot. See `render/characters/humanoid_hook.ts`.
+   */
+  hookDraws?: Map<string, Object3D>;
+  /**
    * The one clip and authored frame the last pose took every bone from, or
    * `null` when it mixed two (a cross-fade, a reaction). Render bookkeeping,
    * rewritten by every pose: it is what lets {@link Poser.drawnAngles} hand

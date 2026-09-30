@@ -5389,5 +5389,173 @@ console.log("\nthe worm's draws, against the engine's matrix stack:");
         `${JSON.stringify(at(halves[2]!.m, p.x, p.y, p.z))} vs ${JSON.stringify(h1)}`);
 }
 
+console.log("\nclass 0x26 subtypes 6/7: the recorded draws, where they were recorded:");
+{
+  // Two of the seven slots, as `slots_actor` names them.
+  const root = new Obj3D();
+  for (const slot of [0x1915, 0x9a8]) {
+    const part = new Obj3D();
+    part.name = `slots_actor_fixed000_slot_${slot.toString(16).padStart(4, "0")}`;
+    part.userData = { hod2_kind: "rig_part", hod2_rig: "slots_actor" };
+    part.add(new Mesh(new PlaneGeometry(1, 1), new MeshBasicMaterial()));
+    root.add(part);
+  }
+  ResetGameGlobals();
+  const layer = new SlotModelLayer();
+  layer.adopt(root);
+  const a = makeActor(0x46a8, SpawnClass.Vehicle, -1, "six");
+  if (a.cls !== SpawnClass.Vehicle) throw new Error("not class 0x26");
+  a.pos = { x: 5, y: 6, z: 7 };      // the chain ignores it: the draws say
+  const m1 = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 667.45, 2554.72, -9679.61, 1];
+  const m2 = [0.1, 0, 0, 0, 0, 0.427, 0, 0, 0, 0, 43.415, 0,
+              811.73, 2563.05, -9680.42, 1];
+  a.vehicle.draws = [{ slot: 0x1915, m: m1 },
+                     { slot: 0x9a8, m: m2, light: [0.05, 0.01, 0] }];
+  G.g_object_list.push(a);
+  const ctx = { paths: null } as unknown as Parameters<typeof layer.update>[0];
+  layer.update(ctx);
+  const g = layer.nodeFor(0x46a8);
+  const kids = g?.children ?? [];
+  g?.updateWorldMatrix(true, true);
+  const at = (o: InstanceType<typeof Obj3D>) =>
+    new Vector3().setFromMatrixPosition(o.matrixWorld);
+  check("each recorded draw is a node at its recorded world matrix",
+        kids.length === 2 && at(kids[0]!).distanceTo(new Vector3(667.45, 2554.72, -9679.61)) < 1e-3
+        && at(kids[1]!).distanceTo(new Vector3(811.73, 2563.05, -9680.42)) < 1e-3,
+        kids.map((k) => at(k).toArray().map((v) => v.toFixed(2)).join(",")).join(" | "));
+  check("...the scaled one keeps its scale",
+        kids.length === 2 && Math.abs(kids[1]!.matrix.elements[10] - 43.415) < 1e-4);
+  check("...and only the lit one carries its light colour",
+        kids.length === 2 && !kids[0]!.userData.hod2_light_colour
+        && (kids[1]!.userData.hod2_light_colour as number[] | undefined)?.join() === "0.05,0.01,0");
+
+  // The light colour reaches the material: a twin on block 0's ambient and
+  // direction with the draw's colour in place of the block's.
+  const lights = new SceneLighting(new Scene());
+  lights.set({ rgb: [1, 1, 1], ambient: 0.5, pitchDeg: 0, yawDeg: 0 });
+  lights.build(new Obj3D());
+  lights.addRoot(layer.group);
+  lights.beforeRender();
+  const matOf = (o: InstanceType<typeof Obj3D>) => {
+    let m: unknown = null;
+    o.traverse((c) => {
+      if ((c as { isMesh?: boolean }).isMesh) {
+        m = (c as unknown as { material: unknown }).material;
+      }
+    });
+    return m as { userData: Record<string, unknown>; type: string } | null;
+  };
+  const plain = matOf(kids[0]!);
+  const lit = matOf(kids[1]!);
+  check("the plain draw gets the scene's Lambert twin",
+        plain?.type === "MeshLambertMaterial" && !plain.userData.lightColour,
+        `${plain?.type} ${JSON.stringify(plain?.userData)}`);
+  check("...and the lit one a twin keyed on its own colour",
+        lit?.type === "MeshLambertMaterial"
+        && lit.userData.lightColour === "0.05,0.01,0",
+        `${lit?.type} ${JSON.stringify(lit?.userData)}`);
+  // Its terms are `SetLightingDefaultSingle`'s with the colour swapped: the
+  // block's ambient 0.5, so diffuse `C * 0.5 * 1.4` and ambient
+  // `C * (0.5 + 0.3)`, each through the sRGB transfer.
+  const cam = new PerspectiveCamera();
+  cam.updateMatrixWorld();
+  (lights as unknown as { refreshColoured(c: unknown): void })
+    .refreshColoured({ camera: cam });
+  const set = (lights as unknown as {
+    coloured: Map<string, { color: { value: { r: number; g: number } };
+                            ambient: { value: { r: number; g: number } } }> })
+    .coloured.get("0.05,0.01,0");
+  const lin = (c: number) =>
+    c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  check("...on block 0's ambient with the draw's colour in place of the block's",
+        !!set && Math.abs(set.color.value.r - lin(0.05 * 0.5 * DIFFUSE_SCALE)) < 1e-6
+        && Math.abs(set.color.value.g - lin(0.01 * 0.5 * DIFFUSE_SCALE)) < 1e-6
+        && Math.abs(set.ambient.value.r - lin(0.05 * (0.5 + LIGHT_AMBIENT_SCALE))) < 1e-6,
+        JSON.stringify(set && [set.color.value, set.ambient.value]));
+  a.vehicle.draws = [];
+  layer.update(ctx);
+  check("a frame that draws nothing leaves no node",
+        layer.nodeFor(0x46a8) === null);
+  G.g_object_list.length = 0;
+}
+
+console.log("\nScriptedHumanoidBoneDrawHook's extra models:");
+{
+  const { HumanoidHookDraws, syncHumanoidHookDraws }
+    = await import("../src/render/characters/humanoid_hook");
+  const near3 = (m: number[], x: number, y: number, z: number) =>
+    Math.abs(m[12] - x) < 1e-3 && Math.abs(m[13] - y) < 1e-3
+    && Math.abs(m[14] - z) < 1e-3;
+  const a = makeActor(0x9064, SpawnClass.ScriptedHumanoid, 0x39, "hum");
+  if (a.cls !== SpawnClass.ScriptedHumanoid) throw new Error("not class 0x25");
+  a.motion = 0x34c;
+  a.pos = { x: 100, y: 5, z: -30 };
+  a.yaw = 0x4000;
+  // Cursor 0x31, the world arm's last frame: the model's origin is
+  // T(pos) RotY(0x4000) applied to (-2.01, 14.033 + 0.0272, -4.169 - 0.2).
+  // Under the engine's RotY a quarter turn sends +X to -Z and +Z to +X, so
+  // that is pos + (-4.369, 14.0602, 2.01) -- worked by hand, not read back.
+  let d = HumanoidHookDraws(a, 0x31);
+  check("motion 0x34C before 0x32: one 0x10E3, in the world, off pos and yaw",
+        d.length === 1 && d[0]!.slot === 0x10e3 && d[0]!.world
+        && d[0]!.bone === 8 && near3(d[0]!.m, 95.631, 19.0602, -27.99),
+        JSON.stringify(d.map((x) => [x.slot, x.world, x.m.slice(12, 15)])));
+  d = HumanoidHookDraws(a, 0);
+  check("...and at cursor 0 it is (0x32) steps further out",
+        d.length === 1 && near3(d[0]!.m, 100 - 4.169 - 10, 5 + 14.033 + 50 * Math.fround(0.027222222), -30 + 2.01),
+        JSON.stringify(d[0]?.m.slice(12, 15)));
+  d = HumanoidHookDraws(a, 0x32);
+  check("from 0x32 it is on bone 8 at (0, -0.8, 0.1), a tenth the size",
+        d.length === 1 && !d[0]!.world && d[0]!.bone === 8
+        && near3(d[0]!.m, 0, -0.8, 0.1) && Math.abs(d[0]!.m[0] - 0.1) < 1e-6);
+  a.charType = 0x38;
+  check("type 0x38 is outside the second switch: nothing",
+        HumanoidHookDraws(a, 0x32).length === 0);
+  a.charType = 0x3a;
+  a.motion = 0x32a;
+  check("motion 0x32A draws 0x7ED on bone 5 from cursor 0x30, not before",
+        HumanoidHookDraws(a, 0x2f).length === 0
+        && HumanoidHookDraws(a, 0x30)[0]?.slot === 0x7ed
+        && HumanoidHookDraws(a, 0x30)[0]?.bone === 5
+        && near3(HumanoidHookDraws(a, 0x30)[0]!.m, 0.9, -1.4, 0.6));
+  a.charType = 0x3e;
+  a.motion = 0x14b;
+  check("type 0x3E on 0x14B draws 0x7ED on bone 8 for cursors 0..0x6B",
+        HumanoidHookDraws(a, 0x6b)[0]?.bone === 8
+        && HumanoidHookDraws(a, 0x6c).length === 0
+        && near3(HumanoidHookDraws(a, 0)[0]!.m, -0.3, -1.4, 0.6));
+
+  // Hung under its bone, the world arm lands at its world point whatever the
+  // bone's own transform is.
+  a.charType = 0x39;
+  a.motion = 0x34c;
+  a.hum.playCursor = 0x31;
+  const root = new Obj3D();
+  const bone = new Obj3D();
+  bone.position.set(3, -7, 11);
+  bone.rotation.set(0.3, 1.1, -0.4);
+  bone.scale.set(1.2, 1.2, 1.2);
+  root.add(bone);
+  const inst = { a, bones: new Map([[8, bone]]) } as unknown as
+    Parameters<typeof syncHumanoidHookDraws>[0];
+  syncHumanoidHookDraws(inst, () => new Obj3D());
+  root.updateWorldMatrix(true, true);
+  const node = (inst as { hookDraws?: Map<string, InstanceType<typeof Obj3D>> })
+    .hookDraws?.get("8:4323");
+  const p = node ? new Vector3().setFromMatrixPosition(node.matrixWorld) : null;
+  check("the world arm's node sits at its world point under a turned, scaled bone",
+        !!p && p.distanceTo(new Vector3(95.631, 19.0602, -27.99)) < 1e-3,
+        p ? p.toArray().map((v) => v.toFixed(3)).join(",") : "no node");
+  a.hum.playCursor = 0x32;
+  syncHumanoidHookDraws(inst, () => new Obj3D());
+  check("...and the same node takes the bone arm's matrix a frame later",
+        !!node && Math.abs(node.matrix.elements[13] - -0.8) < 1e-6
+        && node.parent === bone);
+  a.motion = 0x2f4;
+  syncHumanoidHookDraws(inst, () => new Obj3D());
+  check("...and is hidden once the motion no longer draws it",
+        !!node && !node.visible);
+}
+
 console.log(failures ? `\n${failures} failed` : "\nall passed");
 process.exit(failures ? 1 : 0);

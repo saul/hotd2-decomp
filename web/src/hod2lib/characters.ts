@@ -38,6 +38,8 @@ import type { CivBlock, TargetScript } from "./actorscript";
 import { approachTables, cameraTracking, RING_SET_FOR_CHAR0 } from "./approach";
 import { build, goreEntry, rigEntry } from "./charbuild";
 import { Boss4SwapSlots } from "../game/class19/slots";
+// Data only, as `class25/state.ts` is for `bundle.ts`: the hook's slots.
+import { HumanoidHookDrawSlots } from "../game/class25/state";
 import type { Character } from "./charbuild";
 import { BODY_CREATURE_HOST_CLIPS, CLASS20_DEATH_MOTION,
          CLASS20_IDLE_MOTIONS, CLASS21_FREED_MOTION, CLASS30_DEATH_CLIPS,
@@ -2100,6 +2102,13 @@ export async function resolveForStage(
     // wound -- and the swap clones by slot, so they ride the hidden template.
     if (cls === 0x25) {
       for (const s of humanoidModelSlots(tables, evt, rec, res.charType)) {
+        c.heldSlots.add(s);
+      }
+      // ...and the extra models `ScriptedHumanoidBoneDrawHook`
+      // (`FUN_00485260`) draws for this type and the clips this program
+      // plays -- immediates in the hook, which no table names.
+      for (const s of HumanoidHookDrawSlots(res.charType,
+                                            humanoidMotionIds(evt, rec))) {
         c.heldSlots.add(s);
       }
     }

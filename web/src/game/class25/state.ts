@@ -303,3 +303,113 @@ export function makeHumanoidTail(): HumanoidTail {
     fallFrames: 0,
   };
 }
+
+// -- the extra models ScriptedHumanoidBoneDrawHook draws ----------------------
+//
+// `ScriptedHumanoidBoneDrawHook` (`FUN_00485260`), the per-bone callback
+// `ScriptedHumanoidInit` installs at `obj+0x12EC`, draws each node's own model
+// and then, after the switch on the bone (`0x00485625`), up to one more model
+// for the node by two switches on the character type (`obj+0x1F4`) and the
+// motion (`obj+0x1B4`), gated on the play cursor (`obj+0x19C`). These are
+// those models' join keys and literals -- every one a `.text` immediate --
+// for the exporter to carry the slots and `render/characters/humanoid_hook.ts`
+// to draw them. `[proved]` from the disassembly, `0x00485625`..`0x00485AC5`.
+
+/**
+ * The first switch: `obj+0x1F4 - 0x3B` through `0x00485B64`, five arms --
+ * 0x3B and 0x3C to `0x004856FD`, 0x3D to none, 0x3E to `0x00485669`, 0x3F to
+ * `0x0048564C`.
+ */
+export const HOOK_TYPE_3E = 0x3e;
+export const HOOK_TYPE_3F = 0x3f;
+/**
+ * The second switch: `obj+0x1F4 - 0x21`, `CMP 0x1F; JA`, through the byte map
+ * at `0x00485B80` into `0x00485B78` -- arm 0 for types 0x21, 0x34 and
+ * 0x39..0x40, none for the rest.
+ */
+export const HOOK_SECOND_SWITCH_TYPES: readonly number[] =
+  [0x21, 0x34, 0x39, 0x3a, 0x3b, 0x3c, 0x3d, 0x3e, 0x3f, 0x40];
+
+/**
+ * Type 0x3E, motion `0x14B`, bone 8, cursor `0..0x6B` (`0x00485669`):
+ * `T(-0.3, -1.4, 0.6); RotY(0x4800); RotX(0x1000); Scale(0.15)` and
+ * `AssetDrawSlot(0x7ED)` -- `etc_2.bin[2]`.
+ */
+export const HOOK_14B = {
+  motion: 0x14b, bone: 8, from: 0, until: 0x6c, slot: 0x7ed,
+  at: [Math.fround(-0.3), Math.fround(-1.4), Math.fround(0.6)] as const,
+  rotY: 0x4800, rotX: 0x1000, scale: Math.fround(0.15),
+} as const;
+
+/**
+ * Type 0x3F, bone 1 (`0x0048564C`): `AssetDrawSlot(0x125D)` -- `logan.bin[4]`
+ * -- under the bone's own matrix. No class-0x25 program in the six stages
+ * has character type 0x3F, so no shipped spawn reaches it.
+ */
+export const HOOK_3F = { bone: 1, slot: 0x125d } as const;
+
+/**
+ * The second switch's motion `0x32A`, bone 5, cursor from `0x30`
+ * (`0x00485A47`): `T(0.9, -1.4, 0.6); RotZ(0x8000); RotY(0x1000);
+ * Scale(0.15)` and `AssetDrawSlot(0x7ED)`.
+ */
+export const HOOK_32A = {
+  motion: 0x32a, bone: 5, from: 0x30, slot: 0x7ed,
+  at: [Math.fround(0.9), Math.fround(-1.4), Math.fround(0.6)] as const,
+  rotZ: 0x8000, rotY: 0x1000, scale: Math.fround(0.15),
+} as const;
+
+/**
+ * The second switch's motion `0x34C`, bone 8 (`0x00485903`), drawing
+ * `AssetDrawSlot(0x10E3)` -- `etc_2.bin[10]` -- two ways, split at cursor
+ * `0x32` (`CMP EAX, 0x32; JL`):
+ *
+ * * **from `0x32`, on the bone**: `T(0, -0.8, 0.1); RotX(0x7000);
+ *   Scale(0.1)`;
+ * * **before it, in the world**: `MatrixStackSetTopFromArray` with
+ *   `g_camera_blocks[g_camera_index]`'s world-to-view (`0x009A6000 +
+ *   index * 0x1A4`), then `T(obj+0x40..+0x48); RotY(obj+0x68);
+ *   T(-2.01, 14.033, -4.169); T(0, (0x32 - f) * 0.027222222,
+ *   (0x32 - f) * -0.2); RotZ(0x61B0); RotY(0xF760); RotX(0x8B93);
+ *   Scale(0.1)` -- a point fixed to the actor's position and yaw, which the
+ *   model starts 10 units along z and 1.36 up from at cursor 0 and closes
+ *   on a step a frame; from `0x32` it is drawn on the bone instead.
+ *
+ * The two multipliers are `FMUL [0x00565E1C]` (`0x3CDF0123`) and `FMUL
+ * [0x00564700]` (`0xBE4CCCCD`). Stage 4 blocks 23 and 25 are its spawns: the
+ * type-0x39 and 0x3A programs at `0x9064`/`0x9210` and `0xA0B4`/`0xA260`.
+ */
+export const HOOK_34C = {
+  motion: 0x34c, bone: 8, split: 0x32, slot: 0x10e3,
+  onBone: {
+    at: [0, Math.fround(-0.8), Math.fround(0.1)] as const,
+    rotX: 0x7000, scale: Math.fround(0.1),
+  },
+  inWorld: {
+    at: [Math.fround(-2.01), Math.fround(14.033), Math.fround(-4.169)] as const,
+    stepY: Math.fround(0.027222222), stepZ: Math.fround(-0.2),
+    rotZ: 0x61b0, rotY: 0xf760, rotX: 0x8b93, scale: Math.fround(0.1),
+  },
+} as const;
+
+/**
+ * `[port-only]` The slots {@link HOOK_14B}, {@link HOOK_3F},
+ * {@link HOOK_32A} and {@link HOOK_34C} can draw for a program of character
+ * type `charType` that plays `motions`, for the exporter to put on the
+ * character's template. The two faded `0xE24` arms (motions `0x32D`/`0x355`
+ * and `0x35D`) are not among them: see `render/characters/humanoid_hook.ts`.
+ */
+export function HumanoidHookDrawSlots(charType: number,
+                                      motions: readonly number[]): number[] {
+  const out: number[] = [];
+  const add = (s: number) => { if (!out.includes(s)) out.push(s); };
+  if (charType === HOOK_TYPE_3E && motions.includes(HOOK_14B.motion)) {
+    add(HOOK_14B.slot);
+  }
+  if (charType === HOOK_TYPE_3F) add(HOOK_3F.slot);
+  if (HOOK_SECOND_SWITCH_TYPES.includes(charType)) {
+    if (motions.includes(HOOK_32A.motion)) add(HOOK_32A.slot);
+    if (motions.includes(HOOK_34C.motion)) add(HOOK_34C.slot);
+  }
+  return out;
+}

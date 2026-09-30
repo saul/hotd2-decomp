@@ -404,6 +404,40 @@ export const CLASS2D_WING_CLIP = 0xf;
 export const CLASS2D_CLIPS: readonly number[] =
   Array.from({ length: 0xb0 - 0x95 + 1 }, (_, i) => 0x95 + i);
 
+/** `[port-only]` -- `n` slots from `a`. */
+const run = (a: number, n: number): number[] =>
+  Array.from({ length: n }, (_, i) => a + i);
+
+/**
+ * Every slot an `AssetDrawSlot` of the class can name, for the exporter's
+ * `slots_effect` rig -- the class draws each one itself, under its own matrix
+ * (`class2D/draw.ts`), so each has to be a template `render/` can clone:
+ *
+ * * `boss6.bin`: the trail `0x72B`, the satellite `0x72C`, the pair beam's
+ *   `0x72D + n` (n to 0x28), the pair `0x754`, the glow `0x755 + n` (n to
+ *   0x3B), the core `0x791` and its thirty cels, and every node, part and
+ *   shell `0x7B2..0x7E6` (`Class2DNodeDrawHook`, `DrawCharacterPartSlot`'s
+ *   pair table at `0x004EDA50`);
+ * * the children's nodes, `b6boss1z` .. `b6boss4` `0xCE..0x114`
+ *   (`Class2DChildNodeDrawHook`, `Class2DChildKind2NodeDrawHook`);
+ * * `eff_boss3.bin` `0x199C..0x19BC`: the flares, the warning, the hidden
+ *   child and the satellites' appearance;
+ * * `eff_2.bin`: the beam `0x1633 + n % 24`, the intro flipbook `0x161B + n /
+ *   2` (n to 0x20), the satellites' sparks `0x17B0..0x17B4`, kind 2's flash
+ *   `0x97A + n % 39`;
+ * * `eff_boss6.bin`: the hit spark `0x276 + n` (n to 0x18) and the death
+ *   burst's `0x16B6`, `0xB00`, `0x18C4`, `0x18C5`; `st6_01.bin`'s strip
+ *   `0x190D + n` for the burst's n `0x1A..0x60`.
+ */
+export const CLASS2D_EFFECT_SLOTS: readonly number[] = [...new Set([
+  ...run(0x72b, 0x755 - 0x72b + 1), ...run(0x755, 0x3c), 0x791,
+  ...run(0x792, 0x1e), ...run(0x7b2, 0x7e6 - 0x7b2 + 1),
+  ...run(0xce, 0x114 - 0xce + 1), ...run(0x199c, 0x19bc - 0x199c + 1),
+  ...run(0x1633, 0x18), ...run(0x161b, 0x11), ...run(0x17b0, 5),
+  ...run(0x97a, 0x27), ...run(0x276, 0x19), 0x16b6, 0xb00, 0x18c4, 0x18c5,
+  ...run(0x190d + 0x1a, 0x60 - 0x1a + 1),
+])];
+
 /**
  * `[port-only]` -- the spawn address of an object the class allocates: bit
  * 24, which no evt offset and no other synthetic address sets, the object in

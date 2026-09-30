@@ -265,6 +265,10 @@ export const MOTION_RULES: Record<number, MotionRule> = {
   // [EDI + 0x20], ECX` at `0x0049B11C` -- the clip is `tail+0x02`, 0x415 for
   // the stage-1 cameo and 0x40B for both fights.
   0x22: ["param", 0x02, "i16"],
+  // `Class2DClassHandler` (`FUN_00426A70`): `MOVSX ECX, word ptr [EBP + 0x2];
+  // MOV [EDI + 0x20], ECX` at `0x00426AB9` -- the clip is `tail+0x02`, 0xA1
+  // for the stage-6 fight and 0xA0 for stage 5's cameo.
+  0x2d: ["param", 0x02, "i16"],
   // `Class23Init` (`FUN_0048FD90`) seats the literal 0x38D at `0x0048FDDF`.
   0x23: ["literal", 0x38d],
   // `RescueTargetInit` (`FUN_00451720`) seats the clip as a literal, the same

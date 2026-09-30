@@ -76,6 +76,19 @@ export function envMapped(s: Strip): boolean {
 }
 
 /**
+ * Whether `ModelUVsFromViewNormals` (`FUN_004AA400`) rewrites this mesh's
+ * UVs when a routine calls `AssetSlotUVsFromViewNormals` (`FUN_00418660`) on
+ * its slot: the model's flag word (`+0x04`) lacks `0x10`, and the strip sets
+ * bit 8. The routine tests each strip; no mesh in the game mixes bit-8 strips
+ * with others (all 2,976 sit in meshes whose every strip sets it), so a mesh
+ * answers for its strips. See `docs/formats/nl1.md`.
+ */
+export function envUvRewritten(model: Model, mesh: Mesh): boolean {
+  return (model.globalFlag & 0x10) === 0 && mesh.strips.length > 0
+    && mesh.strips.every(envMapped);
+}
+
+/**
  * One mesh of a model, with its PowerVR2 render state decoded.
  *
  * A class rather than a record because it is twenty-odd accessors over four

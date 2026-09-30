@@ -57,6 +57,7 @@ import { BOSS_HP_BAR_SPRITES, CONTINUE_SCREEN_SPRITES, HUD_READOUT_SPRITES }
 // ...and the boss-name banner's, whose record table is data in the same way.
 import { BOSS3_CARD_SPRITES, BOSS3_EFFECT_SLOTS }
   from "../game/class45/tables";
+import { CLASS2D_EFFECT_SLOTS } from "../game/class2D/state";
 import { BOSS_BANNER_SPRITES, bannerCardSlots }
   from "../game/boss_banner_records";
 // And the game-over screen's: its logo sprites are immediates in
@@ -1372,6 +1373,10 @@ export const EFFECT_SLOTS_BY_CLASS: Record<number, number[]> = {
   // sparks, splashes, bite flashes, wake, path effects, the civilian's
   // shadow and the water mound. See `game/class45/tables.ts`.
   0x45: [...BOSS3_EFFECT_SLOTS],
+  // The stage-6 boss's: every slot its routines draw by hand -- its own
+  // nodes and shells, the satellites, the children's nodes, the flares and
+  // the tasks. See `CLASS2D_EFFECT_SLOTS` in `game/class2D/state.ts`.
+  0x2d: [...CLASS2D_EFFECT_SLOTS],
   // The owl's three tasks (`game/effects/owl.ts`): the feather
   // (`OwlFeatherDriftAndDraw`, `FUN_00448A80`: `owl.bin` 51), the ground
   // impact ring and its strip (`OwlGroundImpactRingPulse`, `FUN_00448CE0`:

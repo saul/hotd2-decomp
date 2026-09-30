@@ -120,7 +120,16 @@ bone-to-satellite maps, each at its address and extent. Every class-0x2D
 placement carries `class2d`, the descriptor tail `obj+0x1390` --
 `{subtype, clip, counter, kill_path, kill_frame, fight_hp, round2_hp,
 round3_hp}` (`class2dTail`). Optional fields: the schema digest moved and no
-format bump. See `web/src/game/class2D/`.
+format bump. See `web/src/game/class2D/`. A class-0x2D placement is posed
+on its tail's clip with the whole of `boss6.bin`'s bank (`0x95..0xB0`), and
+the fight's (sub-type 1) carries five **synthetic** rows at
+`Class2DChildAt(boss, code)` -- `0x01000000 | code << 20 | boss & 0xFFFFF`
+-- for the children `Class2DState4` allocates and kind 0's wing: types 0x4D,
+0x4F, 0x50 and 0x51 on `0x40C`, `0x33`, `0x3B` and `0x79` (codes 8..11) and
+0x4E on `0xF` (code 12), each parented to the fight's row. The effect rig
+carries every slot the class draws by hand (`CLASS2D_EFFECT_SLOTS`), and
+every primitive whose UVs `ModelUVsFromViewNormals` rewrites carries
+`hod2_env_uv` in its extras (`nl1.md`).
 
 `script.json` carries an `options` block -- the options screen's `.rdata`, read
 by `ExeTables.optionsTables` (`OptionsJson`): the eleven rows

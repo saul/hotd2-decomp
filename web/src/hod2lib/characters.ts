@@ -86,6 +86,11 @@ import {
 import { CLASS23_MOTIONS } from "../game/class23/records";
 // Data only, for the same reason: every clip the cat's two routines play.
 import { CAT_CLIPS } from "../game/class53/records";
+import {
+  CLASS2D_AT_KIND0, CLASS2D_AT_WING, CLASS2D_CHILD_CHAR_TYPES,
+  CLASS2D_CHILD_CLIPS, CLASS2D_CLIPS, CLASS2D_WING_CHAR_TYPE,
+  CLASS2D_WING_CLIP, Class2DChildAt,
+} from "../game/class2D/state";
 
 const finite = (v: number | null | undefined): v is number =>
   v !== null && v !== undefined && Number.isFinite(v);
@@ -1479,6 +1484,49 @@ async function class22SubActorPlacement(stage: Stage, tables: ExeTables,
 }
 
 /**
+ * The synthetic rows the stage-6 boss's children are drawn from: kinds 0..3
+ * on their first clips (`0x40C`, `0x33`, `0x3B`, `0x79`) at
+ * `Class2DChildAt(boss, 8 + kind)`, and kind 0's wing (`0x4E` on `0xF`) at
+ * `Class2DChildAt(boss, 12)`, each parented to the fight's row. A type or a
+ * clip that will not build is left out, and that child draws nothing.
+ */
+async function class2dChildPlacements(stage: Stage, tables: ExeTables,
+                                      boss: Placement,
+                                      chars: Map<number, Character>):
+    Promise<Placement[]> {
+  const want: [number, number, number][] = CLASS2D_CHILD_CHAR_TYPES.map(
+    (ct, k) => [ct, CLASS2D_CHILD_CLIPS[k]!, CLASS2D_AT_KIND0 + k]);
+  want.push([CLASS2D_WING_CHAR_TYPE, CLASS2D_WING_CLIP, CLASS2D_AT_WING]);
+  const out: Placement[] = [];
+  for (const [ct, clip, code] of want) {
+    if (!chars.has(ct)) {
+      const file = tables.characterAssetFile(ct);
+      if (!file) continue;
+      const built = build(tables, ct, file);
+      if (built === null) continue;
+      chars.set(ct, built);
+    }
+    const c = chars.get(ct)!;
+    if (!c.motions.has(clip)) {
+      const baked = await bake(stage.source, tables, clip, c.boneCount);
+      if (baked !== null) c.motions.set(clip, baked);
+    }
+    if (!c.motions.has(clip)) continue;
+    const w = new Placement();
+    w.at = Class2DChildAt(boss.at, code);
+    w.cls = 0x2d;
+    w.char_type = ct;
+    w.motion = clip;
+    w.hp = 0;
+    w.spawn = { ...boss.spawn, at: w.at };
+    w.parent_at = boss.at;
+    w.synthetic = true;
+    out.push(w);
+  }
+  return out;
+}
+
+/**
  * The asset slots a class-0x25 program's `op 9` and `op 16` can write into a
  * bone's draw record, resolved as `ScriptedHumanoidUpdate` (`FUN_004842A0`)
  * resolves them.
@@ -2060,6 +2108,9 @@ export async function resolveForStage(
     // The stage-3 boss's clips, all three of its skeletons' -- see
     // `BOSS3_CLIPS`.
     if (cls === 0x45) entryClips.push(...BOSS3_CLIPS);
+    // The stage-6 boss's whole bank, `boss6.bin`'s 0x95..0xB0 -- see
+    // `CLASS2D_CLIPS`.
+    if (cls === 0x2d) entryClips.push(...CLASS2D_CLIPS);
     // The emerge clip, the submerged pose it holds first, and the two clips
     // the delayed leap plays. An unbaked entrance is an actor standing in the
     // water.
@@ -2240,6 +2291,25 @@ export async function resolveForStage(
       }
       c.heldSlots.add(CLASS22_NODE1_EXTRA_A);
       c.heldSlots.add(CLASS22_NODE1_EXTRA_B);
+    }
+  }
+
+  // -- the stage-6 boss's children ---------------------------------------------
+  //
+  // `Class2DState4` allocates one child at a time from `ActorAlloc` -- kinds
+  // 0..3, character types 0x4D, 0x4F, 0x50 and 0x51 -- and kind 0 builds a
+  // wing (0x4E) in a block of its own. None has a descriptor, so each gets a
+  // synthetic row at the address the port gives it (`Class2DChildAt`),
+  // parented to the fight's descriptor, carrying the geometry the character
+  // layer adopts the object into; nothing spawns from them.
+  for (const p of [...placements]) {
+    if (p.cls !== 0x2d || p.synthetic || p.motion === null) continue;
+    if (((p.class2d?.subtype as number | undefined) ?? 0) !== 1) continue;
+    for (const row of await class2dChildPlacements(stage, tables, p, chars)) {
+      placements.push(row);
+      let clist = perType.get(row.char_type);
+      if (!clist) { clist = []; perType.set(row.char_type, clist); }
+      clist.push({ ...p.spawn, at: row.at, class: 0x2d, hp: 0 } as SpawnJson);
     }
   }
 

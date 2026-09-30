@@ -542,10 +542,17 @@ and drew regardless would be a new departure. What would let both be
 transcribed: `asset_load_polfile`/`asset_free_polfile` (and the job queue
 that completes them) kept in the engine layer, with the slot-to-file map in
 the bundle; then `WaterSurfaceUpdate`'s own residency departure goes with
-them. Constructor 3 has a second gap: the exporter bakes each of its three
-slots into one mesh with its neighbour (`0x1579` with `0x157E`, `0x157C`
-with `0x157D`, `0x157A` with `0x157B`) in the `st1_vehicle` rig, so the
-renderer cannot address the slots the walk rewrites.
+them. The second thing both share with the water task: each frame's add is
+rounded to `float` per vertex and `v` gets bit 0 set (`OR EDX, 1` at
+`0x00469E06`; `OR EBP, 1` at `0x00465B22`), which the water port keeps as
+closed-form sums and declares as a departure -- faithful, it is every
+vertex's UVs in `G`. Constructor 3 has a third gap: the exporter bakes each of
+its three slots into one mesh with its neighbour (`0x1579` with `0x157E`,
+`0x157C` with `0x157D`, `0x157A` with `0x157B`) in the `st1_vehicle` rig, so
+the renderer cannot address the slots the walk rewrites (a primitive's extras
+could carry its slot). And its `+0x2C = 0.5` is the mesh header's base alpha
+(`WalkMeshChainAndDraw`'s `SetMaterial`), so the walk halves the opacity of
+the three models it scrolls as well.
 
 What each walk does, for when that lands:
 

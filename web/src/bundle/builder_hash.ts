@@ -125,7 +125,7 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
   "game/class53/records.ts": "b6800eb8234f8a37c11908ce38316f82b17387ae41e753aeb67089fae09192d0",
   "game/class53/state.ts": "6a40cb1760986fca2741bb278ff38048c49b6f74e8cdc0b15ae3c858a3785ad3",
   "game/class61/state.ts": "10295909bed89c5b3fd208e8b7165eadd95c73fd5d14c14ad1519fa6f9527f6b",
-  "game/class6e/state.ts": "e495e3a5779a7710e7e138ffaa252d12a826af21cc2b4cfdfcab013c2e06d3dc",
+  "game/class6e/state.ts": "c35e621259f337fe2576f567d0f567242470210adc99f72c19bbb8ed068b02da",
   "game/coli.ts": "21f227b4ac1c5a78694c47d4536a9ac41902033184caad59ab9c0c41c86c8d43",
   "game/combat/counts.ts": "30e8d40aed3c842ac1b1dba09659e84a85ac0a6ca14fcd722fb1b2cf9e3cb374",
   "game/combat/feedback.ts": "457fc9298166539d9109ab673adda9198a50a650930a7b2884674176969b758f",
@@ -195,4 +195,4 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
 };
 
 /** One digest over {@link BUILDER_FILES}, in filename order. */
-export const BUILDER_HASH = "de1bdc0ed7d2a152058f9de82337b1c27a4176a867b9e6bbc8953c21013133ae";
+export const BUILDER_HASH = "5a3ac39694c8d5f4288cd980464f97b83ed8cf8713e7b957f058b1673588ac34";

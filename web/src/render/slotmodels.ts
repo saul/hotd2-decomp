@@ -37,13 +37,15 @@
  * ```
  *
  * So an actor with no skeleton is hit as **one sphere, whole**, at radius
- * `obj+0x124`. {@link SlotModelLayer.pickSphere} is that else-arm, and it is
- * what makes the mouse shootable.
+ * `obj+0x124`. {@link SlotModelLayer.pickSphere} is that else-arm.
  *
  * The whole routine, broad phase and fork included, is
  * `game/combat/shot_test.ts`'s, for the classes that register the engine's
- * way. This layer tests the ones that do not; `CharacterLayer.pickShot` says
- * what that costs them.
+ * way -- among the slot models the mouse (only its trigger registers), the
+ * fish (only in states 0 to 3) and the owl, which is how a running mouse, a
+ * fish corpse and a fish swimming away came to be passed through as they are
+ * in the exe. This layer tests the ones that do not; `CharacterLayer.pickShot`
+ * says what that costs them.
  */
 import {
   Group, Matrix4, Object3D, Ray, Vector3, type Mesh,

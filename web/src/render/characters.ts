@@ -872,8 +872,9 @@ export class CharacterLayer implements System {
     // ...and so do the asset-slot actors, through the **sphere** the engine
     // tests them with. `ShotTestSphere` (`FUN_00404630`) descends into a bone
     // tree only for an actor with `obj+0x34` bit 7 and a skeleton; one with
-    // neither is a single sphere at `obj+0x124`, and that is the whole hit
-    // test for class 0x52. See `render/slotmodels.ts`.
+    // neither is a single sphere at `obj+0x124`. The classes that register
+    // the engine's way -- the mouse, the fish and the owl among the slot
+    // models -- are not here; see `render/slotmodels.ts`.
     const slot = this.slotModels?.pickSphere(this._ray) ?? null;
     if (slot && slot.t < bestT) {
       bestT = slot.t;

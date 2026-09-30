@@ -55,6 +55,7 @@
  *   class33           the carrier, the scenery it shoves, its effects
  *   flyers            classes 0x11, 0x43 and 0x51, and the bone cel runs
  *   horde             znjoe's creature, stage 3's boats, class 0x40
+ *   class26           class 0x26 subtypes 6 and 7, stage 6 block 12's pair
  *   class30_state37   the carried barrels and drums, the lights, the riders
  *   hud               the damage overlay, the shutter, the gun, the boss bar
  *                     and banner
@@ -90,6 +91,7 @@ import "./class19_14.test";
 import "./class33.test";
 import "./flyers.test";
 import "./horde.test";
+import "./class26.test";
 import "./class30_state37.test";
 import "./hud.test";
 import "./class22_45.test";

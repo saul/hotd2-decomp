@@ -37,6 +37,8 @@ import { CARRIER_SELECTORS_PORTED, CarrierDrawSlots }
   from "../game/class13/state";
 // ...and `class12/state.ts` for the slot strip class 0x12 steps through.
 import { ScriptedProp12DrawSlots } from "../game/class12/state";
+// ...and `class26/state.ts` for what class 0x26 subtypes 6 and 7 draw.
+import { Class26DrawSlots } from "../game/class26/state";
 // ...and `class19/slots.ts` for the stage-4 boss's prop and hit mark.
 import { Boss4EffectSlots } from "../game/class19/slots";
 // ...and `class41/water_slots.ts` for the tiles the canal water task pairs
@@ -1561,6 +1563,25 @@ export function flagStripPropDrawSlots(
 }
 
 /**
+ * The asset slots a stage's class-0x26 spawns draw through a routine the port
+ * runs: `Class26Subtype67Draw` (`FUN_0048FB40`) and
+ * `Class26Subtype67DrawOrKill` (`FUN_0048FD00`) name seven between them,
+ * `PUSH` immediates every one, and the renderer clones them from
+ * `slots_actor`. Keyed on the spawn's subtype, `obj+0x11C`, because that is
+ * what the installer switches on: stage 6's two are the only spawns that
+ * take those routines, and only its bundle carries the models.
+ */
+export function vehicleDrawSlots(
+    spawnRecords: readonly { cls: number; hp: number }[]): number[] {
+  const out: number[] = [];
+  for (const r of spawnRecords) {
+    if (r.cls !== 0x26) continue;
+    for (const s of Class26DrawSlots(r.hp)) if (!out.includes(s)) out.push(s);
+  }
+  return out;
+}
+
+/**
  * A hidden rig holding the models an **actor** class draws by asset slot.
  *
  * The counterpart of {@link breakableSlotEntry}, for the classes whose draw is
@@ -1606,8 +1627,8 @@ export async function actorSlotEntry(
   const rig: Rig = {
     name: "slots_actor",
     routine: "asset-slot actor draws (classes 0x13, 0x14, 0x40, 0x42, 0x43, "
-      + "0x51, 0x52; class 0x25 variant 3; class 0x33 selector 4; "
-      + "class 0x41 type 1's water tiles)",
+      + "0x51, 0x52; class 0x25 variant 3; class 0x26 subtypes 6 and 7; "
+      + "class 0x33 selector 4; class 0x41 type 1's water tiles)",
     worldSpace: false,
     parts: parts.map(([p]) => p),
     note: "actor models drawn by asset slot; hidden, cloned per live actor",
@@ -2138,7 +2159,8 @@ export async function buildStage(stage: Stage, sink: BundleSink,
     [...humanoidDrawSlots(humanoids), ...sceneryDrawSlots(charPlaces),
      ...scriptedPropDrawSlots(charPlaces),
      ...flagStripPropDrawSlots(charPlaces),
-     ...waterSurfaceDrawSlots(placements)],
+     ...waterSurfaceDrawSlots(placements),
+     ...vehicleDrawSlots(spawnRecords)],
     cache);
   const eff = await effectSlotEntry(stage, cache, [
     ...bodyCreatureDrawSlots(charDefs.keys()),

@@ -189,6 +189,32 @@ const SECONDARY_LIGHTS = (() => {
   }`;
 })();
 
+/**
+ * A light colour one draw is made under -- `SetRenderLightColour`
+ * (`FUN_004AA0A0`) just before an `AssetDrawSlot` and `LightsRestoreScene`
+ * (`FUN_0041DCC0`) just after it, as `Class26Subtype67Draw` (`FUN_0048FB40`)
+ * brackets `common.bin[135]`. The call changes the colour and nothing else,
+ * so the draw is lit by the scene's block 0 -- its ambient, its direction --
+ * through `SetLightingDefaultSingle` with that colour in place of the
+ * block's: the same three terms, `colour * ambient * 1.4` diffuse and
+ * `colour * (ambient + 0.3)` ambient, as {@link SceneLighting} computes for
+ * the block's own colour.
+ *
+ * A node carries it as `userData.hod2_light_colour`, `[r, g, b]` in the
+ * engine's 0..1, and every mesh under it is drawn with a twin whose uniforms
+ * are this set's. The twin's program is block 1's (`secondarylit`): the
+ * shader is the same one light and one ambient from uniforms, and only the
+ * values differ.
+ */
+interface ColouredLight {
+  rgb: [number, number, number];
+  ambient: { value: Color };
+  color: { value: Color };
+  dirView: { value: Vector3 };
+  /** Twin by base material, and base by twin. */
+  twins: Map<Material, Material>;
+}
+
 /*
  * The gun lights — `BuildEntitySpotlightArray` (`FUN_00480AC0`), evt `0x15`
  * under `0x14` — used to be two `SpotLight`s here, placed one unit in front of
@@ -249,6 +275,8 @@ export class SceneLighting implements System<RenderContext> {
   private readonly lit = new Map<Material, Material>();
   /** Block-1 twins, the same way. */
   private readonly litSecondary = new Map<Material, Material>();
+  /** Twins under a draw's own light colour, by colour -- see `ColouredLight`. */
+  private readonly coloured = new Map<string, ColouredLight>();
   /** The layers whose meshes are not under the stage root. */
   private readonly extraRoots: Object3D[] = [];
   source: SecondaryLightSource = { light: () => null, secondary: () => false };
@@ -267,6 +295,7 @@ export class SceneLighting implements System<RenderContext> {
     this.root = root;
     this.lit.clear();
     this.litSecondary.clear();
+    this.coloured.clear();
     if (this.mode === "scene") this.applyMaterials();
   }
 
@@ -313,6 +342,27 @@ export class SceneLighting implements System<RenderContext> {
     this.set(w.light);
     if (this.mode !== "scene") return;
     this.refreshSecondary(ctx);
+    this.refreshColoured(ctx);
+  }
+
+  /**
+   * Each draw-colour set's uniforms: block 0's ambient and direction with the
+   * draw's colour, by `SetLightingDefaultSingle`'s arithmetic -- `refresh`'s,
+   * with the colour swapped.
+   */
+  private refreshColoured(ctx: RenderContext): void {
+    const a = this.state.ambient;
+    const amb = a + LIGHT_AMBIENT_SCALE;
+    for (const set of this.coloured.values()) {
+      const [r, g, b] = set.rgb;
+      set.color.value.setRGB(r * a * DIFFUSE_SCALE, g * a * DIFFUSE_SCALE,
+                             b * a * DIFFUSE_SCALE, SRGBColorSpace)
+        .multiplyScalar(this.intensity);
+      set.ambient.value.setRGB(r * amb, g * amb, b * amb, SRGBColorSpace)
+        .multiplyScalar(this.intensity);
+      lightDirection(this.state.pitchDeg, this.state.yawDeg, set.dirView.value)
+        .transformDirection(ctx.camera.matrixWorldInverse);
+    }
   }
 
   /**
@@ -452,11 +502,14 @@ export class SceneLighting implements System<RenderContext> {
    */
   private applyMaterials(visibleOnly = false): void {
     if (!this.root) return;
-    const visit = (o: Object3D, at: number | null): void => {
+    const visit = (o: Object3D, at: number | null,
+                   light: readonly number[] | null): void => {
       if (visibleOnly && !o.visible) return;
-      const x = o.userData as { hod2_spawn_at?: number; hod2_actor_at?: number };
+      const x = o.userData as { hod2_spawn_at?: number; hod2_actor_at?: number;
+                                hod2_light_colour?: number[] };
       const own = x?.hod2_actor_at ?? x?.hod2_spawn_at;
       const here = own !== undefined ? own : at;
+      const lit = x?.hod2_light_colour ?? light;
       const mesh = o as Mesh;
       if (mesh.isMesh && mesh.material) {
         const second = this.mode === "scene" && here !== null
@@ -467,6 +520,7 @@ export class SceneLighting implements System<RenderContext> {
           if (m.userData?.gunLit) return m;
           const base = this.baseOf(m);
           if (this.mode !== "scene") return base;
+          if (lit) return this.colouredTwinOf(base, lit);
           return second ? this.secondaryTwinOf(base) : this.twinOf(base);
         };
         // Under any fade the draw has put on it, which stays on top: see
@@ -474,17 +528,68 @@ export class SceneLighting implements System<RenderContext> {
         const cur = unfadedMaterial(mesh);
         setUnfadedMaterial(mesh, Array.isArray(cur) ? cur.map(swap) : swap(cur));
       }
-      for (const c of o.children) visit(c, here);
+      for (const c of o.children) visit(c, here, lit);
     };
-    visit(this.root, null);
-    for (const r of this.extraRoots) visit(r, null);
+    visit(this.root, null, null);
+    for (const r of this.extraRoots) visit(r, null, null);
     this.refresh();
   }
 
   /** The exported unlit material behind either twin. */
   private baseOf(m: Material): Material {
-    const back = this.lit.get(m) ?? this.litSecondary.get(m);
+    let back = this.lit.get(m) ?? this.litSecondary.get(m);
+    if (!back) {
+      for (const set of this.coloured.values()) {
+        back = set.twins.get(m);
+        if (back) break;
+      }
+    }
     return back && back instanceof MeshBasicMaterial ? back : m;
+  }
+
+  /**
+   * The twin a draw under its own light colour takes -- see `ColouredLight`.
+   * Built like the block-1 twin, on the block-1 program, with the colour
+   * set's own uniform objects, which three.js keeps per material.
+   */
+  private colouredTwinOf(m: Material, rgb: readonly number[]): Material {
+    if (!(m instanceof MeshBasicMaterial)) return m;
+    const key = `${rgb[0]},${rgb[1]},${rgb[2]}`;
+    let set = this.coloured.get(key);
+    if (!set) {
+      set = {
+        rgb: [rgb[0], rgb[1], rgb[2]],
+        ambient: { value: new Color(0, 0, 0) },
+        color: { value: new Color(0, 0, 0) },
+        dirView: { value: new Vector3(0, 0, 1) },
+        twins: new Map(),
+      };
+      this.coloured.set(key, set);
+    }
+    let twin = set.twins.get(m);
+    if (!twin) {
+      const w = this.twinOf(m) as MeshLambertMaterial;
+      const t = w.clone();
+      t.userData = { ...m.userData, lightColour: key };
+      const inner = m.onBeforeCompile;
+      const u = set;
+      t.onBeforeCompile = (shader: WebGLProgramParametersWithUniforms,
+                           renderer: WebGLRenderer) => {
+        inner?.call(m, shader, renderer);
+        shader.uniforms.secAmbient = u.ambient;
+        shader.uniforms.secColor = u.color;
+        shader.uniforms.secDirView = u.dirView;
+        shader.fragmentShader = shader.fragmentShader
+          .replace("#include <common>", "#include <common>\nuniform vec3 "
+                   + "secAmbient;\nuniform vec3 secColor;\nuniform vec3 secDirView;")
+          .replace("#include <lights_fragment_begin>", SECONDARY_LIGHTS);
+      };
+      t.customProgramCacheKey = () => "secondarylit";
+      twin = t;
+      set.twins.set(m, twin);
+      set.twins.set(twin, m);
+    }
+    return twin;
   }
 
   /**

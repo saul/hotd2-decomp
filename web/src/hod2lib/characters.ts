@@ -280,8 +280,14 @@ export function class18Tail(rec: Spawn): Record<string, unknown> {
   };
 }
 
-/** Class 0x26's subtype, `obj+0x11C`, for the one routine this library reads. */
+/** Class 0x26's subtype, `obj+0x11C`, for the routines this library reads. */
 export const CLASS26_BOAT = 2;
+/**
+ * ...and the two `Class26Subtype67Update` (`FUN_0048F930`) takes -- stage 6
+ * block 12's pair. They read no descriptor tail; the placement is what makes
+ * the port build the actor at all.
+ */
+export const CLASS26_ON_PATH = [6, 7];
 
 /**
  * Class 0x26 subtype 2's descriptor tail, as `Class26Subtype2Update`
@@ -303,6 +309,10 @@ export const CLASS26_BOAT = 2;
 export function class26Tail(
     rec: Spawn,
     sets: [colilib.ColiFile, colilib.ColiFile] | null): Record<string, unknown> {
+  // Subtypes 6 and 7 read nothing past the descriptor's own 36 bytes, so
+  // there is no word to resolve: the next descriptor starts where a tail
+  // would be.
+  if (rec.hp !== CLASS26_BOAT) return { coli: null };
   const word = rec.param(0x00, "u32");
   const hit = word !== null && sets
     ? colilib.pointerToOffset(word, sets[0], sets[1]) : null;
@@ -1073,10 +1083,13 @@ export const CLASS33_EFFECT_CUE = 5;
  */
 export function slotDrawnSpawn(cls: number, rec: Spawn): boolean {
   // Class 0x26 is eight objects behind one id, switched on `obj+0x11C` by
-  // `Class26InstallSubtypeUpdate` (`FUN_0048E290`). Only subtype 2 is read --
-  // `Class26Subtype2Update` (`FUN_0048EAD0`), stage 3's boat -- and the rest
-  // are drawn by `render/rigs.ts` off the rig table with no actor behind them.
-  if (cls === 0x26) return rec.hp === CLASS26_BOAT;
+  // `Class26InstallSubtypeUpdate` (`FUN_0048E290`). Subtype 2 is read --
+  // `Class26Subtype2Update` (`FUN_0048EAD0`), stage 3's boat -- and 6 and 7,
+  // `Class26Subtype67Update` (`FUN_0048F930`); the rest are drawn by
+  // `render/rigs.ts` off the rig table with no actor behind them.
+  if (cls === 0x26) {
+    return rec.hp === CLASS26_BOAT || CLASS26_ON_PATH.includes(rec.hp);
+  }
   // Class 0x12 calls the behaviour its descriptor names every frame until its
   // strip starts, and the port runs entry 0 alone (`NoOpStub`), which every
   // shipped descriptor names. One that named another would arrive drawing

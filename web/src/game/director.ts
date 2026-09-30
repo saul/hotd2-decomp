@@ -392,14 +392,16 @@ export function SpawnSlotActor(s: ScriptSpawn, rng: Rng): void {
       a.visible = true;
       return;
     }
-    // Class 0x26 subtype 2 -- stage 3's boat. Drawn by asset slot and by
-    // `render/rigs.ts`, with no character type, so it comes through here; the
-    // bundle carries a placement for that subtype alone (`slotDrawnSpawn`).
-    // `hp` is the subtype, `obj+0x11C`, as `SpawnFromDescriptor` copies it.
+    // Class 0x26 subtypes 2, 6 and 7 -- stage 3's boat and stage 6 block 12's
+    // pair. Drawn by asset slot (and the boat by `render/rigs.ts`), with no
+    // character type, so they come through here; the bundle carries a
+    // placement for those subtypes alone (`slotDrawnSpawn`). `hp` is the
+    // subtype, `obj+0x11C`, as `SpawnFromDescriptor` copies it.
     if (s.class === SpawnClassValue.Vehicle) {
       if (!pl.class26) return;
       G.g_slot_actors_built.push(s.at);
-      const a = ActorSpawn(s.at, SpawnClassValue.Vehicle, -1, "boat",
+      const a = ActorSpawn(s.at, SpawnClassValue.Vehicle, -1,
+                           pl.hp === 2 ? "boat" : `class 0x26 subtype ${pl.hp}`,
                            { class26: pl.class26, hp: pl.hp, maxHp: pl.hp,
                              ...PlacementOrientation(pl),
                              flags: pl.init_flags ?? 0,

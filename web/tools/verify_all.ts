@@ -431,6 +431,13 @@ export const CHECKS: readonly Check[] = [
      + "are the update's own, that no shipped spawn carries the collision "
      + "blob the port's prop pool cannot shoot, and, with a bundle, that "
      + "every spawn is placed with exactly that tail and its model travels"),
+  game("class26",
+       "that class 0x26 subtypes 6 and 7 -- stage 6 block 12's pair -- are "
+     + "routed by the installer to `Class26Subtype67Update` and stored after "
+     + "the call, that every frame, height, offset, flag and slot the port "
+     + "holds for its three routines is the instruction's own word (the floats"
+     + " as bit patterns), and, with a bundle, that both spawns are placed and "
+     + "all seven models they draw travel as `slots_actor` templates"),
   game("branches",
        "that every value a branch trigger can write into `g_script_branch_var`"
      + " names a route slot its own block actually fills -- the one check that"

@@ -5,11 +5,13 @@
  * allocates the object with. On the object's first tick it switches on
  * `obj+0x11C` — the subtype, not hit points (`L3`) — calls one of eight
  * routines once and writes that routine into `obj+0x00`, so every later tick
- * goes straight to it. Only subtype 2 is ported: `Class26Subtype2Update`
+ * goes straight to it. Three subtypes are ported: 2, `Class26Subtype2Update`
  * (`FUN_0048EAD0`), the boat the player and their partner ride through stage
  * 3's canals, which is spawned at descriptor 3244 in eight of the stage's
- * blocks. The other seven subtypes — the stage-1 car among them — are still
- * drawn by `render/rigs.ts` off the rig table, with no actor behind them.
+ * blocks; and 6 and 7, `Class26Subtype67Update` (`FUN_0048F930`), stage 6
+ * block 12's pair, in `subtype67.ts`. Subtypes 1, 3, 4 and 5 — the stage-1
+ * car among them — are still drawn by `render/rigs.ts` off the rig table,
+ * with no actor behind them, and subtype 0 by nothing.
  *
  * ## Why the boat is an actor at all
  *
@@ -45,7 +47,13 @@ import {
 } from "../registry";
 import { SpawnClass } from "../spawn_class";
 import { BAMS_TO_RAD } from "../../core/bams";
-import { Class26Subtype, type VehicleTail } from "./state";
+import {
+  Class26Routine, Class26Subtype, type VehicleTail,
+} from "./state";
+import {
+  Class26Subtype67Draw, Class26Subtype67DrawOrKill, Class26Subtype67Update,
+  VehicleTailOf,
+} from "./subtype67";
 
 /**
  * `g_actor_kill_all` — `0x009C72E0`, which is `g_script_flags[0xE0]`: the
@@ -111,11 +119,6 @@ const BOAT_ROUTES: Readonly<Record<number, BoatRoute>> = {
   0xf8: { slot: 0x199, raise: [], drop: [] },
 };
 
-function Tail(obj: Actor): VehicleTail | null {
-  return obj.cls === SpawnClass.Vehicle
-    ? (obj as { vehicle: VehicleTail }).vehicle : null;
-}
-
 /**
  * `T · Rz · Ry · Rx`, the product the draw builds at `0x0048EDE6`..
  * `0x0048EE13` — `MatrixTranslate(obj+0x40)`, `MatrixRotateZ(obj+0x6C)`,
@@ -173,7 +176,7 @@ function Class26StoreWorldMatrix(obj: Actor): void {
  * the collision passes walk.
  */
 export function Class26Subtype2Update(obj: Actor, f: ClassFrame): void {
-  const v = Tail(obj);
+  const v = VehicleTailOf(obj);
   if (!v) return;
   if ((G.g_script_flags[ACTOR_KILL_ALL_FLAG] ?? 0) === 1) {
     ActorDespawn(obj);
@@ -218,36 +221,81 @@ export function Class26Subtype2Update(obj: Actor, f: ClassFrame): void {
 /**
  * `Class26InstallSubtypeUpdate` — `FUN_0048E290`. Class 0x26's handler.
  *
- * Runs the subtype's routine once and installs it. A subtype this port has
- * not read gets nothing, which is what an unported routine should look like:
- * the object is in the pool and does not move.
+ * Runs the subtype's routine once and installs it:
+ *
+ * ```
+ * 0048e319  CALL 0x0048f930                ; subtypes 6 and 7
+ * 0048e321  MOV  dword ptr [ESI], 0x48f930
+ * ```
+ *
+ * **The store comes after the call**, so whatever the routine installed on
+ * this first frame is overwritten with the routine itself: a subtype-6/7
+ * object whose first frame is in Boss Mode or on camera paths `0xE9`..`0xEB`
+ * runs `Class26Subtype67Update` again on its second frame, and that one's
+ * installation of the draw-or-kill is the one that stays. `[proved]`
+ *
+ * A subtype this port has not read gets nothing, which is what an unported
+ * routine should look like: the object is in the pool and does not move.
  */
 export function Class26InstallSubtypeUpdate(obj: Actor, f: ClassFrame): void {
-  const v = Tail(obj);
+  const v = VehicleTailOf(obj);
   if (!v) return;
-  if (obj.hp !== Class26Subtype.Boat) return;
-  Class26Subtype2Update(obj, f);
-  v.installed = true;
+  switch (obj.hp) {
+    case Class26Subtype.Boat:
+      Class26Subtype2Update(obj, f);
+      v.routine = Class26Routine.Subtype2Update;
+      return;
+    case Class26Subtype.OnPath183:
+    case Class26Subtype.OnPath184:
+      Class26Subtype67Update(obj, f);
+      v.routine = Class26Routine.Subtype67Update;
+      return;
+    default:
+      return;
+  }
 }
 
+/**
+ * `[port-only]` The walk's call through `obj+0x00`: whichever routine is
+ * installed there. It opens by clearing what the last frame drew (see
+ * `Class26DrawCall`): a routine that returns before it draws has drawn
+ * nothing this frame, which is what the engine's frame shows.
+ */
 function Class26Update(obj: Actor, f: ClassFrame): void {
-  const v = Tail(obj);
+  const v = VehicleTailOf(obj);
   if (!v) return;
-  if (!v.installed) {
-    Class26InstallSubtypeUpdate(obj, f);
-    return;
+  v.draws = [];
+  switch (v.routine) {
+    case Class26Routine.Install:
+      Class26InstallSubtypeUpdate(obj, f);
+      return;
+    case Class26Routine.Subtype2Update:
+      Class26Subtype2Update(obj, f);
+      return;
+    case Class26Routine.Subtype67Update:
+      Class26Subtype67Update(obj, f);
+      return;
+    case Class26Routine.Subtype67Draw:
+      Class26Subtype67Draw(obj);
+      return;
+    case Class26Routine.Subtype67DrawOrKill:
+      Class26Subtype67DrawOrKill(obj);
+      return;
   }
-  Class26Subtype2Update(obj, f);
 }
 
 function Class26Debug(obj: Actor): ActorDebug {
-  const v = Tail(obj);
+  const v = VehicleTailOf(obj);
   return {
-    summary: `subtype ${obj.hp}${v?.faceCamera ? " · facing camera" : ""}`,
+    summary: `subtype ${obj.hp} · ${Class26Routine[v?.routine ?? 0]}`
+      + `${v?.faceCamera ? " · facing camera" : ""}`
+      + `${v?.drawsOneModel ? " · one model" : ""}`,
     detail: [
       `blob ${obj.coliBlob ?? "none"}`,
       `at ${obj.pos.x.toFixed(1)},${obj.pos.y.toFixed(1)},`
       + `${obj.pos.z.toFixed(1)}`,
+      `draws ${(v?.draws ?? []).map((d) => `0x${d.slot.toString(16)}`)
+        .join(" ") || "none"}`,
     ],
     hot: obj.hp === Class26Subtype.Boat && !obj.coliBlob,
   };

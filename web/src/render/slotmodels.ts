@@ -69,6 +69,7 @@ import {
   CARRIER_WAKE_PAIR, type ScriptedPropTail,
 }
   from "../game/class13/state";
+import type { VehicleTail } from "../game/class26/state";
 import { setAssetDrawAlpha } from "./draw_order";
 
 /**
@@ -191,6 +192,13 @@ function DrawSlotFor(a: Actor): number | null {
       // A chain: the body and its shadow, the death strip, or two halves and
       // their cut -- `render/worm.ts` composes the matrices, in world space.
       return -1;
+    case SpawnClass.Vehicle:
+      // A chain too, and one the port composed: subtypes 6 and 7's routines
+      // record every `AssetDrawSlot` they make with its world matrix
+      // (`game/class26/subtype67.ts`). The boat records none -- its model is
+      // `render/rigs.ts`' -- so it is not this layer's.
+      return (a as { vehicle?: VehicleTail }).vehicle?.draws.length
+        ? CHAIN : null;
     case SpawnClass.ScriptedHumanoid:
       // Only the object-path arm. The three fixed-point arms draw at points
       // the routine hardcodes, so the rig writer already exports them as
@@ -309,6 +317,33 @@ function PlaceOnObjectPath(a: HumanoidActor, node: Object3D,
 /** Scratch for {@link PlaceOnObjectPath}; the layer is single-threaded. */
 const _pos = { x: 0, y: 0, z: 0 };
 
+/** One of class 0x26's recorded draws, as a chain part. */
+interface VehiclePart {
+  slot: number;
+  m: Matrix4;
+  /** `SetRenderLightColour`'s colour for this one draw, when it had one. */
+  light?: number[];
+}
+
+/**
+ * What class 0x26's routine drew this frame, as the chain arm wants it: the
+ * slot, the world matrix it recorded -- `game/matrix.ts`'s layout is
+ * `Matrix4.elements`' -- and the light colour. The draws are the port's;
+ * this reads them and decides nothing.
+ */
+function VehicleDrawParts(a: Actor, out: VehiclePart[]): VehiclePart[] {
+  const draws = (a as { vehicle?: VehicleTail }).vehicle?.draws ?? [];
+  out.length = draws.length;
+  for (let i = 0; i < draws.length; i++) {
+    const d = draws[i];
+    const p = out[i] ?? (out[i] = { slot: 0, m: new Matrix4() });
+    p.slot = d.slot;
+    p.m.fromArray(d.m);
+    p.light = d.light;
+  }
+  return out;
+}
+
 /** One live actor's node. */
 interface Live {
   node: Object3D;
@@ -336,6 +371,8 @@ export class SlotModelLayer implements System<RenderContext> {
   private readonly _hordeParts: HordePart[] = [];
   /** Scratch for class 0x42's chain. */
   private readonly _wormParts: WormPart[] = [];
+  /** Scratch for class 0x26's chain. */
+  private readonly _vehicleParts: VehiclePart[] = [];
   private enabled = true;
 
   constructor() {
@@ -474,9 +511,10 @@ export class SlotModelLayer implements System<RenderContext> {
         live.node.rotation.set(a.pitch * BAMS_TO_RAD, a.yaw * BAMS_TO_RAD,
                                a.roll * BAMS_TO_RAD, "XZY");
       } else if (a.cls === SpawnClass.HordeSpawner
-                 || a.cls === SpawnClass.Worm) {
+                 || a.cls === SpawnClass.Worm
+                 || a.cls === SpawnClass.Vehicle) {
         // `render/horde.ts` and `render/worm.ts` hand back world-space
-        // matrices.
+        // matrices, and class 0x26's routines recorded them.
         live.node.visible = true;
         live.node.position.set(0, 0, 0);
         live.node.rotation.set(0, 0, 0);
@@ -687,11 +725,13 @@ export class SlotModelLayer implements System<RenderContext> {
    * the matrices are rewritten every frame either way, because the angles do.
    */
   private chain(a: Actor, live: Live | undefined): Live | null {
-    const parts: (OwlPart | HordePart | WormPart)[] =
+    const parts: (OwlPart | HordePart | WormPart | VehiclePart)[] =
       a.cls === SpawnClass.HordeSpawner
         ? HordeDrawParts(a, this._hordeParts)
         : a.cls === SpawnClass.Worm ? WormDrawParts(a, this._wormParts)
-          : OwlBodyChain(a, this._parts);
+          : a.cls === SpawnClass.Vehicle
+            ? VehicleDrawParts(a, this._vehicleParts)
+            : OwlBodyChain(a, this._parts);
     if (!parts.length) {
       // Nothing drawn this frame -- a member that is not drawing its shadow.
       // Hide what the last frame drew rather than leave it standing.
@@ -739,6 +779,11 @@ export class SlotModelLayer implements System<RenderContext> {
       // chain, class 0x40's ripple and class 0x42's shadow. Every other part
       // is `AssetDrawSlot`.
       setDrawAlpha(c, (parts[i] as Partial<HordePart>).alpha ?? null);
+      // A draw its routine lit with a colour of its own, which
+      // `render/lighting.ts` reads off the node.
+      const light = (parts[i] as Partial<VehiclePart>).light;
+      if (light) c.userData.hod2_light_colour = light;
+      else delete c.userData.hod2_light_colour;
     }
     while (live.node.children.length > parts.length) {
       live.node.children.pop();

@@ -277,7 +277,8 @@ unless the source column says otherwise.
 at `obj+0x11C` (the descriptor's `+0x22`) and stores the subtype's routine at
 `obj+0x00`: 1 → `St1VehicleUpdate`, 2 → `Class26Subtype2Update` (`obj_48ead0`),
 3 → `FUN_0048F050` (`obj_48f050`), 4 → `FUN_0048F190` (after one call to
-`FUN_00475A50`), 5 → `FUN_0048F560`, 6/7 → `FUN_0048F930`. So each of those
+`FUN_00475A50`), 5 → `FUN_0048F560`, 6/7 → `Class26Subtype67Update`
+(`FUN_0048F930`, a port actor since 2026-09-30, not a rig). So each of those
 rigs **exists from the frame its spawn opcode runs**, and not before.
 `RIGS` records this as `spawnClass: 0x26, spawnSubtype: n`
 — one field, the only answer to "which spawn owns this rig". The bundle

@@ -329,18 +329,23 @@ interface VehiclePart {
  * What class 0x26's routine drew this frame, as the chain arm wants it: the
  * slot, the world matrix it recorded -- `game/matrix.ts`'s layout is
  * `Matrix4.elements`' -- and the light colour. The draws are the port's;
- * this reads them and decides nothing.
+ * this reads them and decides nothing but `AssetDrawSlot`'s own residency
+ * test (`resident`): a recorded draw of a slot the script has unloaded
+ * draws nothing, as in the engine.
  */
-function VehicleDrawParts(a: Actor, out: VehiclePart[]): VehiclePart[] {
+function VehicleDrawParts(a: Actor, out: VehiclePart[],
+                          resident: (slot: number) => boolean): VehiclePart[] {
   const draws = (a as { vehicle?: VehicleTail }).vehicle?.draws ?? [];
-  out.length = draws.length;
-  for (let i = 0; i < draws.length; i++) {
-    const d = draws[i];
-    const p = out[i] ?? (out[i] = { slot: 0, m: new Matrix4() });
+  let n = 0;
+  for (const d of draws) {
+    if (!resident(d.slot)) continue;
+    const p = out[n] ?? (out[n] = { slot: 0, m: new Matrix4() });
     p.slot = d.slot;
     p.m.fromArray(d.m);
     p.light = d.light;
+    n++;
   }
+  out.length = n;
   return out;
 }
 
@@ -751,7 +756,9 @@ export class SlotModelLayer implements System<RenderContext> {
         ? HordeDrawParts(a, this._hordeParts)
         : a.cls === SpawnClass.Worm ? WormDrawParts(a, this._wormParts)
           : a.cls === SpawnClass.Vehicle
-            ? VehicleDrawParts(a, this._vehicleParts)
+            ? VehicleDrawParts(a, this._vehicleParts,
+                               (slot) => !this.residency
+                                 || this.residency.slotResident(slot))
             : OwlBodyChain(a, this._parts);
     if (!parts.length) {
       // Nothing drawn this frame -- a member that is not drawing its shadow.

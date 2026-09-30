@@ -5518,6 +5518,18 @@ console.log("\nclass 0x26 subtypes 6/7: the recorded draws, where they were reco
         && Math.abs(set.color.value.g - lin(0.01 * 0.5 * DIFFUSE_SCALE)) < 1e-6
         && Math.abs(set.ambient.value.r - lin(0.05 * (0.5 + LIGHT_AMBIENT_SCALE))) < 1e-6,
         JSON.stringify(set && [set.color.value, set.ambient.value]));
+  // `AssetDrawSlot` (`FUN_00418560`) draws nothing that is not resident: a
+  // recorded draw of a slot the script has unloaded is dropped, the rest
+  // stay.
+  layer.residency = { slotResident: (s: number) => s !== 0x1915 };
+  layer.update(ctx);
+  const left = layer.nodeFor(0x46a8)?.children ?? [];
+  left[0]?.updateWorldMatrix(true, true);
+  check("a recorded draw of an unloaded slot draws nothing; the others do",
+        left.length === 1
+        && at(left[0]!).distanceTo(new Vector3(811.73, 2563.05, -9680.42)) < 1e-3,
+        left.map((k) => at(k).toArray().map((v) => v.toFixed(2)).join(",")).join(" | "));
+  layer.residency = null;
   a.vehicle.draws = [];
   layer.update(ctx);
   check("a frame that draws nothing leaves no node",

@@ -1129,6 +1129,13 @@ if (SkeletonNodeDrawSuppressed(node))              goto children;
 `model - 0x194` — at `0x00452E40`. Class 0x31's is `ThrowerDrawBonePart`,
 class 0x25's is `ScriptedHumanoidBoneDrawHook` (`FUN_00485260`) and class
 0x20's is `OneHitTargetBoneDrawHook`; the default hook is the one-slot draw.
+Class 0x25's draws, after the node's own model, one more for a few
+character types and clips -- `0x10E3` on clip `0x34C` (flying in the world
+off the actor's position and yaw until cursor `0x32`, then on bone 8),
+`0x7ED` on clips `0x14B` and `0x32A`, `0x125D` for type 0x3F -- and those
+arms are drawn by `render/characters/humanoid_hook.ts`; its two faded
+`0xE24` arms, which each spawn a `SpawnTumblingModelAtBone5` object, are
+not.
 
 `ZombieDrawBonePart` switches on `record[0]` — the slot the bone is *currently*
 drawing, so a gore swap changes the answer — and sixteen arms of that switch do

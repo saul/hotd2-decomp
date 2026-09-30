@@ -748,8 +748,9 @@ companion (x ≈ 584) this moves it to x = -1091 when the death orbit starts.
 | `Class23LandingRingUpdate` `0x00491700` | T(pos); `+0x68 += 8`; RotY; `CamEvalPath7(0x147, (float)+0x1320, …)` as scale and alpha; `MatrixScale`; `AssetDrawSlotWithAlpha(0x17C8 = boss1q.bin[94], 1 - a)`; `+0x1320++`; `ActorKill` after 0x50 |
 | `Class23TrainingEntrance` `0x00490EB0`, `Class23TrainingFightAlone` `0x00490FD0` | Training only; read from the decompilation, not re-verified against the bytes. The second writes `g_boss_hp_fraction` at `0x00491040` (0) and `0x004912CB` (hp/max) and the first calls `BossHpBarSpawn(320.0, 35.0)` |
 
-Not class 0x23: `FUN_0048FD00` belongs to `FUN_0048F930`'s family (its only
-reference is `0x0048FAFF`); `FUN_0049B050` is referenced only from data at
+Not class 0x23: `Class26Subtype67DrawOrKill` (`FUN_0048FD00`) belongs to
+class 0x26's `Class26Subtype67Update` (`FUN_0048F930`) (its only references
+are `0x0048FAFF` and the install at `0x0048FB07`); `FUN_0049B050` is referenced only from data at
 `0x00597BF4`; `0x0049DF00`/`0x0049DF20` are `BossModeClockStart/Read`.
 
 ---

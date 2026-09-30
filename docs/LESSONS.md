@@ -284,6 +284,23 @@ structure is not a use until something reads that field back. And a
 `[likely]` on a routine a renderer depends on is an unread routine the
 renderer is guessing about.
 
+**L98 -- An exhaustive search of the image is an exhaustive search of the
+image; the scripts are the other half of the program.** Slot `0x10AE`
+(`st1_1.bin[2]`) was classified as drawn by nothing found: no instruction
+names it, and the only other copy of the word in `Hod2.exe` is its pol file's
+slot list. Both true. L39 says to ask what computes a slot, and names "a
+descriptor tail word" among the answers -- but the search that ruled that out
+was run over the image, and descriptor tails live in `evt/`. A byte search of
+the eleven `evt/*.bin` files found the word five times more than the `0x50`
+and `0x51` operands account for, each at `desc+0x28` of a class-0x44 spawn
+with selector 14: tail `+0x04`, the slot `PropBuildDrawOnlySelector14`
+(`FUN_004736D0`) copies to `obj+0x28C`. The selector had no builder in the
+port, so its twelve spawns -- four other models besides -- had never existed
+(`L83`). **When a slot, a motion or a flag has no reader in the image, search
+every `evt/` table for it before calling it unread**, and subtract the
+occurrences the opcodes explain: what is left is a descriptor, and the
+descriptor's class says who reads it.
+
 
 ## Transcribing behaviour into the port
 

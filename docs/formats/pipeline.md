@@ -509,10 +509,25 @@ where its routine puts it and once where the model's own coordinates do.
 | **Class 0x44 doors** -- selectors 11 and 13 (5) | `0x0A58`, `0x0D21`, `0x0D22`, `0x1892`, `0x189A` |
 | **Generic and breakable props** -- class 0x41 (13) | `0x0A64`, `0x0A67`, `0x0A68`, `0x0A6B`, `0x0A6D`, `0x1852`, `0x185C`, `0x185D`, `0x189C`, `0x189E`..`0x18A1` |
 | **Rigs** (4) | `0x185B` (`obj_48f050`), `0x1871` (`obj_470b70`), `0x1913` (`obj_48f560`), `0x1A37` (`obj_484ff0_props`) |
-| **Actor and effect slots** (8) | `0x07ED`, `0x07EE` (the boss banner); `0x094F`, `0x0952`, `0x0953` (class 0x13 carrier selectors 2/9); `0x1383`, `0x13A2` (`slots_actor`); `0x1850` (`slots_effect`) |
-| **Drawn by a routine the port has not read** (7) | `0x07E9`, `0x07EB`, `0x0D36`, `0x190C`, `0x1914`, `0x1915` -- class 0x26 subtypes 6/7 (`0x0048F930` into `0x0048FB40` / `0x0048FD00`), stage 6 block 12. `0x10E3` -- `ScriptedHumanoidBoneDrawHook` (`0x00485260`) |
+| **Actor and effect slots** (8) | `0x07ED`, `0x07EE` (the boss banner; `0x07ED` is also `ScriptedHumanoidBoneDrawHook`'s clip-`0x14B` and clip-`0x32A` model, stage 1 block 1, which loads it itself at step 4 op 2); `0x094F`, `0x0952`, `0x0953` (class 0x13 carrier selectors 2/9); `0x1383`, `0x13A2` (`slots_actor`); `0x1850` (`slots_effect`) |
+| **Ported after the stand-in went** (8) | `0x07E9`, `0x07EB`, `0x0D36`, `0x190C`, `0x1914`, `0x1915` -- class 0x26 subtypes 6/7, `Class26Subtype67Update` (`0x0048F930`) into `Class26Subtype67Draw` (`0x0048FB40`) / `Class26Subtype67DrawOrKill` (`0x0048FD00`), stage 6 block 12, drawn from the recorded draws by `render/slotmodels.ts`. `0x10E3` -- `ScriptedHumanoidBoneDrawHook` (`0x00485260`)'s clip-`0x34C` arms, stage 4 blocks 23/25, `render/characters/humanoid_hook.ts`. `0x10AE` -- **class 0x44 selector 14**, `PropDrawOnlySelector14` (`0x004758E0`): the slot is the descriptor tail's `+0x04`, which is why no instruction names it; stage 3's three spawns and stage 4's two |
 | **Nothing draws it on its own** (3) | `0x1085`, `0x11ED`, `0x1730` (the chapter card's, and the selector-12 arm for slot `0x189C` that no spawn takes) |
-| **`[open]`** (2) | `0x10AE` (`st1_1.bin[2]`, stages 3 and 4), `0x18AD` (`st5_01b.bin[8]`, stage 6 block 12): no instruction names either as an immediate, and the only other occurrence of either word in the image is its pol file's slot list |
+| **`[open]`** (1) | `0x18AD` (`st5_01b.bin[8]`, stage 6 block 12, and `endevtbl.bin`'s three loads): see below |
+
+**`0x18AD` is drawn by nothing found.** Searched: every instruction
+immediate and every little-endian occurrence of the word in the image (the
+pol file's slot list at `0x004E7724` alone); every `evt/` table, where it is
+only ever the operand of an `0x50` load or an `0x51` unload; every word in
+`.text` from `0x1800` to `0x18AD` that could be a base plus an index (the one
+base that feeds `AssetDrawSlot` -- `LEA EDX, [ESI + 0x183E]` at `0x00424D6A`,
+`ESI` 0..9 -- does not reach it); and absolute references to its slot record at
+`0x009BF170`. What does sit beside it: every load of it is next to a load of
+`0x18A5`, `0x18A6` or `0x18A7` and a `set_backdrop_preset` of 9, 10 or 11,
+whose `slot_b` in `g_backdrop_preset_table` (`0x00579968`) is **`0x18AE`**,
+`st5_01b.bin[9]` -- a slot no `evt/` table loads at all. `[likely]` then,
+that the scripts load the entry before the one the table names and that
+`DrawBackdropDome`'s second draw (`0x0041345E`) finds nothing resident in
+the shipped game; `[open]` whether anything draws `0x18AD` itself.
 
 `0x0954` and `0x0956` are authored in world space (x -657..685, z
 -2261..-1567), so the stand-in drew them in place, and deleting it took them

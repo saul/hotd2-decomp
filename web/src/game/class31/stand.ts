@@ -30,6 +30,15 @@ import { ThrowerMotionOf } from "./tables";
 
 /** Character type 0x18 has its own clip for everything. */
 const CHAR_ZSLMAN = 0x18;
+/** The type table at `0x0044B3D0`: `ADD EAX, -0x16; CMP EAX, 0x3; JA`. */
+const CHAR_TYPE_FIRST = 0x16;
+const CHAR_TYPE_LAST = 0x19;
+/**
+ * `QueryGroundSurfaceAt(x, y + 4.5, z)` at `0x0044B2D8` -- `FADD
+ * [0x00565DE8]`, 4.5 -- which `zskamere` does not turn on when it is
+ * `PERCH_SURFACE`, 0x35.
+ */
+const SURFACE_PROBE_RISE = 4.5;
 
 /**
  * The character type whose ground arm stores its position instead of drawing a
@@ -78,25 +87,51 @@ const WAIT_DEFAULT = 0x127;
 /**
  * `ThrowerStateStandAndDecide` — `FUN_0044B180`, class 0x31 state 7.
  *
- * The sub-state is an aim latch, not a sequence: sub 1 waits for the turn to
- * arrive, and sub 2 drops back to 0 the moment it is lost again. An actor on a
- * wall or the ceiling skips the turn entirely — `obj+0x136C` bit 0x20 — which
- * is why a clinging thrower does not swing round to track you.
+ * The sub-state is an aim latch, and its arms **fall into each other**
+ * (`L53`): the dispatch at `0x0044B1B4` jumps to sub 0's arm, sub 1's or sub
+ * 2's, and each runs on into the next with no `RET` between.
+ *
+ * ```
+ *        walk = g_class31_motion_sets[set][2 + (obj+0x34 >> 27 & 1)]
+ *        start = rand() % 10                    ; 0x0044B1A0, every frame
+ * sub 0  the stance's clip (see below), SetCurrentActorMotionBlended(clip,
+ *        start, 5); sub 1, and on
+ * sub 1  by type (the table at 0x0044B3D0):
+ *          0x17: if QueryGroundSurfaceAt(x, y + 4.5, z) == 0x35, no turn
+ *          0x16, 0x17, 0x18, 0x19: unless OffGround,
+ *            TurnActorAwayFromPointTestArrival(eye, 0x200, 0x200) -> sub 2
+ *        and on
+ * sub 2  0x16, 0x18, 0x19 only: unless OffGround, the same turn again, and
+ *        if it has not arrived, sub 0
+ * all    the re-arm, else the router; ThrowerEmitGroundDust(0x5A)
+ * ```
+ *
+ * So a type-0x16, 0x18 or 0x19 thrower turns **twice** a frame, 0x400 BAMS,
+ * and while it is still coming round it goes back to sub 0 every frame and
+ * starts its idle over; a `zskamere` (0x17) turns once, never drops back, and
+ * standing on surface 0x35 does not turn at all. An actor on a wall or the
+ * ceiling skips every turn -- `obj+0x136C` bit 0x20 -- which is why a
+ * clinging thrower does not swing round to track you.
+ *
+ * The port turned once a frame, only in the sub the frame began in, had no
+ * type table, and drew the `rand() % 10` only in sub 0.
  */
 export function ThrowerStateStandAndDecide(obj: ThrowerActor,
                                            dt: number,
                                            rng: Rng, host: GameHost,
                                            events?: Events): void {
   const stance = ThrowerSurfaceStance(obj);
-  if (obj.sub === 0) {
-    // `g_class31_motion_sets[set][2 + (obj+0x34 >> 27 & 1)]` at `0x0044B19C`:
-    // the walk pair, by the spawn's bit 27. This took the first of the pair
-    // for every spawn, and stage 4's `zskamere` with the bit walked on 443
-    // where the exe walks them on 438.
-    let motion = ThrowerMotionOf(obj,
-                                 ThrowerMotion.Walk + ((obj.flags >>> 27) & 1));
-    // `rand() % 10`, the default start frame, drawn before the stance arm.
-    let start = rng.int(10);
+  // `g_class31_motion_sets[set][2 + (obj+0x34 >> 27 & 1)]` at `0x0044B19C`:
+  // the walk pair, by the spawn's bit 27. This took the first of the pair
+  // for every spawn, and stage 4's `zskamere` with the bit walked on 443
+  // where the exe walks them on 438.
+  let motion = ThrowerMotionOf(obj,
+                               ThrowerMotion.Walk + ((obj.flags >>> 27) & 1));
+  // `rand() % 10`, the default start frame -- drawn at `0x0044B1A0`, **before**
+  // the sub-state dispatch, so on every frame the hub runs.
+  let start = rng.int(10);
+  const entry = obj.sub;
+  if (entry === 0) {
     if (stance > ThrowerStance.Ceiling) {
       // `cmp eax, 3; ja 0x0044B293` — two surface bits at once sums past the
       // table, and the arm that skips it plays the set's own walk at the
@@ -133,11 +168,25 @@ export function ThrowerStateStandAndDecide(obj: ThrowerActor,
     obj.sub = 1;
   }
 
-  // The aim latch. Only an actor standing on the ground turns.
-  if (obj.sub === 1 && !(obj.flags2 & ThrowerFlag.OffGround)) {
-    if (TurnTowardCameraAndTest(obj, dt)) obj.sub = 2;
-  } else if (obj.sub === 2 && !(obj.flags2 & ThrowerFlag.OffGround)) {
-    if (!TurnTowardCameraAndTest(obj, dt)) obj.sub = 0;
+  // Sub 1's arm, entered from sub 0 or on its own (`0x0044B2AD`).
+  if ((entry === 0 || entry === 1) && obj.charType >= CHAR_TYPE_FIRST
+      && obj.charType <= CHAR_TYPE_LAST) {
+    const perched = obj.charType === CHAR_ZSKAMERE
+      && QueryGroundSurfaceAt(obj.pos.x, obj.pos.y + SURFACE_PROBE_RISE,
+                              obj.pos.z) === PERCH_SURFACE;
+    if (!perched && !(obj.flags2 & ThrowerFlag.OffGround)
+        && TurnTowardCameraAndTest(obj, dt)) {
+      obj.sub += 1;
+    }
+  }
+  // Sub 2's arm, entered from sub 1 or on its own (`0x0044B31C`): every type
+  // but 0x17 turns again, and drops back to sub 0 while it has not arrived.
+  if (entry >= 0 && entry <= 2
+      && (obj.charType === CHAR_TYPE_STANDS_ON_ITS_MARK
+          || (obj.charType > CHAR_ZSKAMERE && obj.charType <= CHAR_TYPE_LAST))
+      && !(obj.flags2 & ThrowerFlag.OffGround)
+      && !TurnTowardCameraAndTest(obj, dt)) {
+    obj.sub = 0;
   }
 
   // The re-arm comes first, and only from here: an actor that has thrown puts

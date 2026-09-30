@@ -1,10 +1,15 @@
 /**
- * Class 0x31's states — the 35-entry table `g_class31_states` (0x00592960).
+ * Class 0x31's states — the 36-entry table `g_class31_states` (0x00592960).
  *
  * Every entry is named here, whether or not it is ported, because the pick
  * tables name state ids directly and a bare number in a `switch` is how the
  * cat ended up running the zombie's machine. States 12 and 13 share state 9's
  * handler, and 14, 15 and 16 share one handler that branches on its own id.
+ *
+ * `[proved]` by `read_memory(0x00592960, 36 * 4)`: entry 0 and entry 35 are
+ * both `0x0041EBB0`, the engine's shared no-op, and the next word,
+ * `0x005929F0`, is `g_class31_motion_sets`' first pointer -- which is what
+ * says the table stops at 35 and not 34.
  */
 
 /** `g_class31_states` — 0x00592960. */
@@ -91,6 +96,14 @@ export enum ThrowerState {
    * from 90 units out, not the retreat an earlier reading called it.
    */
   BlinkIn = 34,
+  /**
+   * The table's last entry, `0x0041EBB0` again: the shared no-op, as state 0
+   * is. Nothing in the image writes 35 to `obj+0x1310` -- a byte search for
+   * `10 13 00 00 23 00` finds only class 0x30's -- and no shipped descriptor
+   * starts in it, so an actor is here only if its spawn record says so, and
+   * then it stands still for good.
+   */
+  Idle35 = 35,
 }
 
 /** `ThrowerStateThrow`'s sub-state, at `obj+0x1312`. */

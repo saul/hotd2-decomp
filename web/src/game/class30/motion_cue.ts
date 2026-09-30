@@ -235,12 +235,19 @@ function BlendBaseTrack(obj: Actor, motion: number, start: number,
   // One track: writing it ends whatever one-shot was on it. See
   // {@link ActorEndOneShot} — this is the edge B5 was missing.
   ActorEndOneShot(obj, fade);
-  if (obj.motion !== motion) {
-    if (obj.fadeFrom && obj.fade > 0) {
-      ActorRestartFade(obj, fade);
-    } else {
-      ActorStartFade(obj, obj.motion, obj.playTicks, fade);
-    }
+  // **No same-clip test.** `ActorSetMotionBlended` (`FUN_004119A0`) has none:
+  // it writes the start, the fade counters and the fade bit, and
+  // `MotionStartOnTrack` (`FUN_004119F0`) snapshots the drawn pose into slot
+  // A, whatever clip is on the track. A clip set over itself fades from where
+  // it is to its new start like any other. The same-clip tests are the
+  // callers' -- `ZombieSetMotionIfIdle` (`0x00454785`) and
+  // `ThrowerStateWaitForPermit` (`0x0044B4C8`) each make one. This had one of
+  // its own, so a clip re-set over itself jumped to the new start with no
+  // fade at all.
+  if (obj.fadeFrom && obj.fade > 0) {
+    ActorRestartFade(obj, fade);
+  } else {
+    ActorStartFade(obj, obj.motion, obj.playTicks, fade);
   }
   obj.motion = motion;
   obj.playTicks = start;                         // `track[2] = start`

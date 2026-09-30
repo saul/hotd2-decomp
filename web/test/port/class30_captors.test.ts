@@ -640,7 +640,7 @@ console.log("\nclass 0x30's placement: the ground snap and the two entrances:");
   {
     const z = scene30();
     // 700 rather than 12: the fixture's run *is* 12, and a run started over
-    // the clip already playing is no clip change at all.
+    // itself would fade out of the run, not out of the emerge clip.
     z.emerge = { delay: 0, motion: 700 };
     // Well out of the rings, so the run is still the run when its fade ends.
     z.pos = vec3(0, 0, 150);

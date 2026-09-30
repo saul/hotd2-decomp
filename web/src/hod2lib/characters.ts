@@ -993,6 +993,25 @@ export function class45Tail(rec: Spawn): Record<string, unknown> {
   return { subtype: b && at < b.length ? (b[at] << 24) >> 24 : 0 };
 }
 
+/**
+ * Class 0x2D's tail, `obj+0x1390`: `+0x01` the sub-type (s8) --
+ * `Class2DClassHandler` (`FUN_00426A70`) installs `Class2DSubtype0Update` for
+ * 0 (stage 5's cameo) and `Class2DUpdate` for 1 (the stage-6 fight) -- then
+ * seven `s16`: `+0x02` the clip, `+0x04` the counter, `+0x06`/`+0x08` the
+ * camera path and frame the cameo goes on, `+0x0A` the fight's hit points,
+ * `+0x0C`/`+0x0E` the marks that end rounds 1 and 2. A field past the evt's
+ * end reads 0; the cameo's tail is twelve bytes and nothing reads its last
+ * two words. See `game/class2D/`.
+ */
+export function class2dTail(rec: Spawn): Record<string, unknown> {
+  const w = (at: number): number => rec.param(at, "i16") ?? 0;
+  return {
+    subtype: rec.param(0x01, "i8") ?? 0, clip: w(0x02), counter: w(0x04),
+    kill_path: w(0x06), kill_frame: w(0x08), fight_hp: w(0x0a),
+    round2_hp: w(0x0c), round3_hp: w(0x0e),
+  };
+}
+
 export function class11Tail(rec: Spawn): Record<string, unknown> {
   const args: Record<number, number> = { 0: 3, 3: 1 };
   const commands: { op: number; args: number[] }[] = [];
@@ -1819,6 +1838,7 @@ export async function resolveForStage(
     const class22 = cls === CLASS22 ? class22Tail(rec) : null;
     const class23 = cls === CLASS23 ? class23Tail(rec) : null;
     const class45 = cls === 0x45 ? class45Tail(rec) : null;
+    const class2d = cls === 0x2d ? class2dTail(rec) : null;
     // **Gated on the selector, not on the class.** Class 0x33 is eleven
     // objects behind one id and these three blocks are three of them reading
     // the same bytes; emitting two for one spawn, or any for a sub-handler
@@ -1938,6 +1958,7 @@ export async function resolveForStage(
       p.synthetic = true;
     }
     p.class45 = class45;
+    p.class2d = class2d;
     p.class33 = class33;
     p.class33_push = class33Push;
     p.class33_cue = class33Cue;

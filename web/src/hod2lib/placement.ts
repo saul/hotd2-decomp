@@ -462,6 +462,13 @@ export class Placement {
    */
   class45: Record<string, unknown> | null = null;
   /**
+   * Class 0x2D's tail, `obj+0x1390` -- `{subtype, clip, counter, kill_path,
+   * kill_frame, fight_hp, round2_hp, round3_hp}`, which
+   * `Class2DClassHandler` (`FUN_00426A70`) and the stage-6 boss's states read
+   * through the pointer. See `class2dTail` and `game/class2D/`.
+   */
+  class2d: Record<string, unknown> | null = null;
+  /**
    * Class 0x33 **selector 1's** tail -- the draw slot, the `op_` path it
    * rides, and the four cues that raise its two `obj+0x34` bits and take it
    * off the field. Selector 1 only: the other ten sub-handlers read the same
@@ -571,6 +578,7 @@ export class Placement {
     if (this.class22) d.class22 = this.class22;
     if (this.class23) d.class23 = this.class23;
     if (this.class45) d.class45 = this.class45;
+    if (this.class2d) d.class2d = this.class2d;
     if (this.class33) d.class33 = this.class33;
     if (this.class33_push) d.class33_push = this.class33_push;
     if (this.class33_cue) d.class33_cue = this.class33_cue;

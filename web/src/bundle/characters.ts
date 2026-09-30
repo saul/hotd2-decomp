@@ -542,6 +542,17 @@ export interface CharacterPlacement {
    */
   class45?: { subtype: number } | null;
   /**
+   * Class 0x2D's tail, `obj+0x1390`: `subtype` (`+0x01`, s8) -- 0 stage 5's
+   * cameo, 1 the stage-6 fight -- `clip` (`+0x02`), `counter` (`+0x04`),
+   * `kill_path` and `kill_frame` (`+0x06`, `+0x08`: the cameo's exit),
+   * `fight_hp`, `round2_hp` and `round3_hp` (`+0x0A`, `+0x0C`, `+0x0E`),
+   * each a `s16`. See `game/class2D/` and `docs/re/boss-emperor.md`.
+   */
+  class2d?: {
+    subtype: number; clip: number; counter: number; kill_path: number;
+    kill_frame: number; fight_hp: number; round2_hp: number; round3_hp: number;
+  } | null;
+  /**
    * Class 0x40's descriptor: `desc+0x25`, the selector. See
    * `game/class40/state.ts`.
    */

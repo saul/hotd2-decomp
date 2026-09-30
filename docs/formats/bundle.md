@@ -110,6 +110,18 @@ from `CONTINUE_SCREEN_SPRITES` in `web/src/game/hud_sprites.ts` (see
 and a bundle built before it reads fine and draws no continue screen until it
 is re-exported, which the builder hash says.
 
+`script.json` carries a `class2d` block -- class 0x2D's `.rdata`, the stage-6
+boss's tables, read by `ExeTables.class2dTables` (`Class2DTablesJson`): the
+hit damage and stagger hits by `g_players_in_play`, the five waypoints, the
+attack and child-kind picks, the charge steps, the eight round-3 path
+segments, the child offsets, the satellites' launch gap and flight frames,
+kind 0's path starts, the children's approach frames and the two
+bone-to-satellite maps, each at its address and extent. Every class-0x2D
+placement carries `class2d`, the descriptor tail `obj+0x1390` --
+`{subtype, clip, counter, kill_path, kill_frame, fight_hp, round2_hp,
+round3_hp}` (`class2dTail`). Optional fields: the schema digest moved and no
+format bump. See `web/src/game/class2D/`.
+
 `script.json` carries an `options` block -- the options screen's `.rdata`, read
 by `ExeTables.optionsTables` (`OptionsJson`): the eleven rows
 through `g_options_rows`' pointers, the difficulty, digit and blood labels,

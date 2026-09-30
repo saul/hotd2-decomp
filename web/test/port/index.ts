@@ -60,6 +60,7 @@
  *   hud               the damage overlay, the shutter, the gun, the boss bar
  *                     and banner
  *   class22_45        JUDGMENT, the shot test, the stage-3 boss
+ *   class2D           the stage-6 boss, its satellites, children and death
  *   turning           the turn helpers and the head aim
  *   rings             every caller of the ring effects
  *   spheres           spawn angles and the hit spheres' writers
@@ -95,6 +96,7 @@ import "./class26.test";
 import "./class30_state37.test";
 import "./hud.test";
 import "./class22_45.test";
+import "./class2D.test";
 import "./turning.test";
 import "./rings.test";
 import "./spheres.test";

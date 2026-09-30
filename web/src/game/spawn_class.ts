@@ -96,8 +96,12 @@ export enum SpawnClass {
   DeadClass = 0x2a,
   /** `FUN_00438060` — scripted dynamic light source. */
   DynamicLight = 0x2b,
-  /** `FUN_00426A70` — large multi-part creature. */
-  LargeCreature = 0x2d,
+  /**
+   * `Class2DClassHandler` (`FUN_00426A70`) — the stage-6 boss, `boss6.bin`.
+   * Named for its own banner: `g_class2d_banner_record`'s first name sprite
+   * (`0xBF`) reads EMPEROR. Ported (`game/class2D/`).
+   */
+  Emperor = 0x2d,
   /** `EnemyZombieInit` (`FUN_00452DA0`) — the zombie. Ported. */
   Zombie = 0x30,
   /** `EnemyThrowerInit` (`FUN_00449620`) — humanoid enemy, four subtypes. Ported. */

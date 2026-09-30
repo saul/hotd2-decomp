@@ -2394,6 +2394,10 @@ export async function buildStage(stage: Stage, sink: BundleSink,
   // the stage's, and a few kilobytes is not worth a per-stage decision.
   scriptJson.boss4 = tables.boss4Tables();
   scriptJson.carrier_door_yaw = tables.carrierDoorYaw();
+  // Class 0x2D's `.rdata`, on the same terms: the stage-6 boss's waypoints,
+  // picks, per-rank timings, path segments and child maps. Stage 5's cameo
+  // reads none of it; stage 6's fight reads all of it.
+  scriptJson.class2d = tables.class2dTables();
   // The result card's `.rdata`, one block for the whole game as `game_over`
   // is: the figures' records and lists, their attachment lists, the glyph
   // strings, the life bonus and the accuracy bonus.

@@ -140,7 +140,8 @@ import { RequestAppState } from "../game/app_state";
 import { ProfileBoot } from "../game/profile";
 import { readProfile, writeProfile } from "./profile_store";
 import { OptionsPad, OptionsTap } from "../game/options/list";
-import { SetBoss4Tables, SetGameOverTables, SetGameTables, SetOptionsTables,
+import { SetBoss4Tables, SetClass2DTables, SetGameOverTables, SetGameTables,
+         SetOptionsTables,
          SetResultCardTables }
   from "../game/tables";
 import { PressKind, type Press } from "../core/net/protocol";
@@ -1205,6 +1206,7 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     SetGameOverTables(script.game_over);
     SetOptionsTables(script.options);
     SetBoss4Tables(script.boss4, script.carrier_door_yaw);
+    SetClass2DTables(script.class2d);
     SetResultCardTables(script.result_card);
   }
 

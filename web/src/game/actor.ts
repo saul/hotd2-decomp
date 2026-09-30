@@ -23,6 +23,7 @@ import { makeOneHitTargetTail, type OneHitTargetTail }
 import { makeRescueTargetTail, type RescueTargetTail }
   from "./class21/state";
 import { makeBoss2Tail, type Boss2Tail } from "./class14/state";
+import { makeClass2DTail, type Class2DTail } from "./class2D/state";
 import type { SkeletonModel } from "./skeleton";
 import type { ShotRay } from "./host";
 import { makeJudgmentTail, type JudgmentTail } from "./class22/state";
@@ -1832,6 +1833,14 @@ export interface ActorBase {
    */
   class45: CharacterPlacement["class45"];
   /**
+   * Class 0x2D's descriptor tail, `obj+0x1390` -- the sub-type, the first
+   * clip and counter, the cameo's despawning camera path and frame, and the
+   * fight's three hit-point marks, which `Class2DClassHandler`
+   * (`FUN_00426A70`) and the states read through the pointer. Its own field
+   * because `class2d` is the class's running words (`class2D/state.ts`).
+   */
+  class2dSpawn: CharacterPlacement["class2d"];
+  /**
    * Class 0x40's one descriptor byte that anything reads: `desc+0x25`, the
    * selector `PlaceHorde` (`FUN_0043BD30`) switches on — a horde, or the prop
    * it pushes up. Only the placer carries it; a member is built with none.
@@ -2558,6 +2567,7 @@ export type Actor =
                    pathProp: PathRidingPropTail })
   | (ActorBase & { cls: SpawnClass.Bat; bat: BatTail })
   | (ActorBase & { cls: SpawnClass.Boss3; boss3: Boss3Tail })
+  | (ActorBase & { cls: SpawnClass.Emperor; class2d: Class2DTail })
   | (ActorBase & { cls: SpawnClass.HordeSpawner; horde: HordeTail })
   | (ActorBase & { cls: SpawnClass.Worm; worm: WormTail })
   | (ActorBase & { cls: SpawnClass.ScriptedScenery;
@@ -2570,7 +2580,7 @@ export type Actor =
       | SpawnClass.Boss2 | SpawnClass.Judgment | SpawnClass.JudgmentCompanion
       | SpawnClass.Mouse | SpawnClass.SkinnedNpc | SpawnClass.WaterEnemy
       | SpawnClass.Frog | SpawnClass.FlyingEnemy | SpawnClass.Bat
-      | SpawnClass.Boss3
+      | SpawnClass.Boss3 | SpawnClass.Emperor
       | SpawnClass.ScriptedProp | SpawnClass.FlagStripProp
       | SpawnClass.CarriedZombie
       | SpawnClass.ScriptedScenery | SpawnClass.Vehicle
@@ -2613,6 +2623,9 @@ export type BatActor = Extract<Actor, { cls: SpawnClass.Bat }>;
 
 /** An actor already narrowed to class 0x45, the stage-3 boss. */
 export type Boss3Actor = Extract<Actor, { cls: SpawnClass.Boss3 }>;
+
+/** An actor already narrowed to class 0x2D, for that class's own routines. */
+export type EmperorActor = Extract<Actor, { cls: SpawnClass.Emperor }>;
 
 /** An actor already narrowed to class 0x11, for that class's own routines. */
 export type FrogActor = Extract<Actor, { cls: SpawnClass.Frog }>;
@@ -2734,6 +2747,7 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     class43: null,
     class46: null,
     class45: null,
+    class2dSpawn: null,
     class40: null,
     class42: null,
     class51: null,
@@ -2869,6 +2883,9 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
   }
   if (cls === SpawnClass.Boss3) {
     return { ...head, cls, boss3: makeBoss3Tail() };
+  }
+  if (cls === SpawnClass.Emperor) {
+    return { ...head, cls, class2d: makeClass2DTail() };
   }
   if (cls === SpawnClass.HordeSpawner) {
     return { ...head, cls, horde: makeHordeTail() };

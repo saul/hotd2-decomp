@@ -10,6 +10,8 @@
 import type { Events } from "../../core/events";
 import type { Actor } from "../actor";
 import { AppState, G, PlayerState } from "../globals";
+import { PROJECTION_DISTANCE_PX } from "../scene_lights";
+import type { Vec3 } from "../vec";
 import { ScoreAddForPlayer } from "./score";
 
 /**
@@ -224,4 +226,56 @@ export function PlayerTakeDamageTimed(player: number, latch: number,
     score: G.g_player_score[player],
   });
   return true;
+}
+
+/** `[0x004EC8DC]` -304, `[0x004EC8D8]` 304, `[0x004EC8D4]` -224, `[0x004EC8D0]` 224. */
+const ON_SCREEN_MIN_X = -304.0;
+const ON_SCREEN_MAX_X = 304.0;
+const ON_SCREEN_MIN_Y = -224.0;
+const ON_SCREEN_MAX_Y = 224.0;
+/** `PUSH -0x64` at `0x004155AD` -- the second hundred a hit from here costs. */
+const ON_SCREEN_HIT_SCORE = -0x64;
+
+/**
+ * `PlayerTakeDamageIfOnScreen` — `FUN_00415500`. `(view point, latch,
+ * motion)`, for a strike that is a thing flying at the screen rather than an
+ * enemy's arm:
+ *
+ * ```
+ * x = -(g_projection_distance_px * p.x / p.z)     ; both stored as floats
+ * y = -(g_projection_distance_px * p.y / p.z)
+ * if (-304 < x && x < 304 && -224 < y && y < 224) {
+ *   p = (g_players_in_play == 2) ? (x < 0 ? 0 : 1) : g_active_player
+ *   PlayerTakeDamage(p, latch, motion); ScoreAddForPlayer(p, -100); r = 1
+ * } else r = 0
+ * off the path camera, each player's lives at or below 0 become 1
+ * return r
+ * ```
+ *
+ * `[proved]`. With two players in play the half of the screen it lands in
+ * picks who pays; the hundred it takes is on top of the hundred
+ * `PlayerTakeDamage` takes itself, and is taken even when the window refused
+ * the damage. The floor is both players' (`0x009A5C66` and `0x009A5D96`), not
+ * the one hit. Class 0x2D's satellites are its callers here.
+ */
+export function PlayerTakeDamageIfOnScreen(p: Vec3, latch: number,
+                                           motion: number,
+                                           events?: Events): number {
+  const d = Math.fround(PROJECTION_DISTANCE_PX);
+  const x = Math.fround(-(d * p.x / p.z));
+  const y = Math.fround(-(d * p.y / p.z));
+  let r = 0;
+  if (ON_SCREEN_MIN_X < x && x < ON_SCREEN_MAX_X
+      && ON_SCREEN_MIN_Y < y && y < ON_SCREEN_MAX_Y) {
+    const who = G.g_players_in_play === 2 ? (x < 0 ? 0 : 1) : G.g_active_player;
+    PlayerTakeDamage(who, latch, motion, events);
+    ScoreAddForPlayer(who, ON_SCREEN_HIT_SCORE, events);
+    r = 1;
+  }
+  if (G.g_scene_state_major_entered !== SCENE_STATE_PATH_CAMERA
+      && G.g_scene_state_major !== SCENE_STATE_PATH_CAMERA) {
+    if (G.g_player_lives[0] <= 0) G.g_player_lives[0] = 1;
+    if (G.g_player_lives[1] <= 0) G.g_player_lives[1] = 1;
+  }
+  return r;
 }

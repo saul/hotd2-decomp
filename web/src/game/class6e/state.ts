@@ -138,6 +138,11 @@ export enum ItemSelectSound {
   Trunk = 0x001700a9,
 }
 
+/**
+ * `MOV word ptr [0x009A2BB0], 1` in `ItemSelectFinish`: the step the script
+ * resumes at, the arcade opening, at instruction 0.
+ */
+export const ITEM_SELECT_RESUME_STEP = 1;
 /** The camera path the lid opens under: `PUSH 0x36` into `CamEvalPath7`. */
 export const ITEM_SELECT_CAM_PATH = 0x36;
 /** `CMP [EBP + 0x133c], 0x8b` / the skip's `0x8c`: the path's last frame. */

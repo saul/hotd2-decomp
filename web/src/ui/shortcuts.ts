@@ -3,7 +3,7 @@
  *
  * Three layers listen for keys, and for good reasons: `app/main.ts` owns the
  * game's (Space, Enter, R, the arrows, the digits), `render/freeroam.ts`
- * owns flying (WASDQE and Shift, in free roam only), and `ui/App.tsx` owns the
+ * owns flying (WASDQE and Left Shift, in free roam only), and `ui/App.tsx` owns the
  * page's (the sidebar, this list, the overlays, mute, fullscreen). What none
  * of them had was one place that said what all of them do -- so the `?`
  * dialog is drawn from this, and `test:ui` reads the two other handlers'
@@ -58,8 +58,12 @@ const GAME: ShortcutGroup = {
     { codes: ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"],
       cap: "← ↑ ↓ →", by: "app",
       what: "Options screen: move between rows and change a setting (a held "
-        + "← or → runs the sound tests); click or Enter to choose. "
+        + "← or → runs the sound tests); click or Enter to choose. Original "
+        + "Mode's trunk: move between the list and your slots. "
         + "Elsewhere ← rewinds half a second of game time" },
+    { codes: ["ShiftRight"], cap: "Right Shift", by: "app",
+      what: "A, on a screen the game drives with the pad (the options, the "
+        + "trunk): take or put back the item under the cursor" },
     { codes: ["KeyM"], cap: "M", by: "ui", what: "Sound on / off" },
     { codes: ["KeyF"], cap: "F", by: "ui", what: "Fullscreen" },
   ],
@@ -83,7 +87,7 @@ const FREE_ROAM: ShortcutGroup = {
     { codes: ["KeyW", "KeyA", "KeyS", "KeyD"], cap: "W A S D", by: "freeRoam",
       what: "Fly forward, left, back, right" },
     { codes: ["KeyQ", "KeyE"], cap: "Q E", by: "freeRoam", what: "Down, up" },
-    { codes: ["ShiftLeft", "ShiftRight"], cap: "Shift", by: "freeRoam",
+    { codes: ["ShiftLeft"], cap: "Left Shift", by: "freeRoam",
       what: "Faster, held" },
     { codes: ["AltLeft"], cap: "Alt", by: "freeRoam", what: "Slower, held" },
     { codes: [], cap: "Click", by: "pointer",

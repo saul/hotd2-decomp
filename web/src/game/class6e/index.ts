@@ -52,7 +52,8 @@ import {
   ITEM_SELECT_BGM, ITEM_SELECT_BGM_STOP, ITEM_SELECT_CAM_LAST,
   ITEM_SELECT_CAM_PATH, ITEM_SELECT_LID_FRAME, ITEM_SELECT_LID_HINGE,
   ITEM_SELECT_LID_SLOT, ITEM_SELECT_LID_STEP, ITEM_SELECT_REFUSE_FRAMES,
-  ITEM_SELECT_REPEAT_DELAY, ITEM_SELECT_ROWS, ITEM_SELECT_SCROLL_MAX,
+  ITEM_SELECT_REPEAT_DELAY, ITEM_SELECT_RESUME_STEP, ITEM_SELECT_ROWS,
+  ITEM_SELECT_SCROLL_MAX,
   ITEM_SELECT_TRUNK_AT, ITEM_SELECT_TRUNK_SLOT, ITEM_SELECT_TRUNK_YAW,
   ItemSelectAux, ItemSelectPad, ItemSelectRoutine, ItemSelectSound,
   ItemSelectSprite, ItemSelectState, ORIGINAL_ITEM_IDS, makeItemSelectBlock,
@@ -589,7 +590,7 @@ export function ItemSelectFinish(obj: Actor, f: ClassFrame): void {
   OriginalItemsApply(0, f.rng);
   OriginalItemsApply(1, f.rng);
   ItemSelectApplyToPlayers();
-  G.g_evt_step_index = 1;
+  G.g_evt_step_index = ITEM_SELECT_RESUME_STEP;
   G.g_evt_ip = 0;
   // `ActorKill` (`FUN_004A7040`).
   obj.dead = true;

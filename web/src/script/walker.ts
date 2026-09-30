@@ -32,6 +32,10 @@ import { EvtGotoSceneState, EvtQueueAction,
 import { CameraReplayFor, CameraReplaySettle, CameraReplayUntil }
   from "../game/camera/actor";
 import { SpawnClass } from "../game/spawn_class";
+import { ITEM_SELECT_RESUME_STEP } from "../game/class6e/state";
+
+/** `wait_enemies_present` -- `EvtOpWaitEnemiesPresent43`. */
+const WAIT_ENEMIES_PRESENT_OP = 0x43;
 import { g_class_handlers } from "../game/registry";
 import type { BlockJson, OpJson, ScriptJson, SpawnJson } from "../bundle";
 import type { OpStatus } from "./opstatus";
@@ -158,6 +162,12 @@ export interface PendingWait {
   op: OpJson;
   blocksOn: string;
   policy: WaitPolicy;
+  /**
+   * `g_evt_block_index`, `g_evt_step_index` and `g_evt_ip` when the wait was
+   * entered: the instruction the interpreter will run again next frame. Plain
+   * numbers, so a snapshot keeps them.
+   */
+  addr: [number, number, number];
 }
 
 export interface BranchChoice {
@@ -892,8 +902,11 @@ export class Walker {
     this.block = script.entry_block;
     // The step cursor is `G.g_evt_step_index`, so it outlives the object that
     // was driving it. Claim it here, or a freshly built walker starts at
-    // whatever step the previous one stopped on.
+    // whatever step the previous one stopped on -- and the instruction
+    // cursor, `G.g_evt_ip`, for the same reason: a walker built after another
+    // had stopped at instruction 29 opened at 29.
     this.step = 0;
+    this.opIndex = 0;
   }
 
   // -- addressing --------------------------------------------------------
@@ -1153,6 +1166,24 @@ export class Walker {
    */
   stepOverWait(): void {
     if (!this.wait) return;
+    // **The trunk's gate is never passed.** Original Mode's stage 1 spawns
+    // the trunk (class 0x6E) and waits on `wait_enemies_present 0`, which the
+    // trunk holds with `g_enemies_present = 1` from its first frame; once both
+    // players are done, `ItemSelectFinish` (`FUN_004895C0`) points the script
+    // at step 1, instruction 0, and the gate, the step's `advance_step` and
+    // the `-1` behind it are never run. A replay runs no frames for the trunk
+    // to finish in, so stepping over its gate leaves the script where the
+    // trunk does -- without this every seek in stage 1's opening ran off the
+    // end of block 0.
+    const trunk = this.simpleSpawns.findIndex(
+      (s) => s.class === SpawnClass.ItemSelect);
+    if (trunk >= 0 && this.wait.op.op === WAIT_ENEMIES_PRESENT_OP) {
+      this.simpleSpawns.splice(trunk, 1);
+      this.wait = null;
+      this.step = ITEM_SELECT_RESUME_STEP;
+      this.opIndex = 0;
+      return;
+    }
     // A yield is a wait whose condition already held on its first visit, and
     // stepping over it is the same claim as stepping over any other: the game
     // is past the instruction, with the world it leaves. So it takes the
@@ -1479,15 +1510,16 @@ export class Walker {
     }
 
     // A wait in this VM is only the instruction at `g_evt_ip`, run again
-    // every frame until it passes. If gameplay has pointed `g_evt_ip`
-    // elsewhere -- the trunk's `ItemSelectFinish` sends it to step 1 while
-    // the script waits on `g_enemies_present` -- the instruction that was
-    // waiting is not the one the interpreter runs next, and there is no wait
-    // to pass. The op is known by its offset and opcode, which survive a
-    // snapshot where the object does not.
+    // every frame until it passes. If gameplay has moved the cursor since
+    // -- the trunk's `ItemSelectFinish` sends it to step 1 while the script
+    // waits on `g_enemies_present` -- the instruction that was waiting is not
+    // the one the interpreter runs next, and there is no wait to pass. The
+    // test is on the address the wait was entered at, not on the op found
+    // there now: it compared the op once, and a gate a test hands the walker
+    // directly (`applyWait`) was thrown away on its first frame.
     if (this.wait) {
-      const cur = this.currentOp;
-      if (!cur || cur.at !== this.wait.op.at || cur.op !== this.wait.op.op) {
+      const [b, st, ip] = this.wait.addr;
+      if (b !== this.block || st !== this.step || ip !== this.opIndex) {
         this.wait = null;
       }
     }
@@ -1992,10 +2024,12 @@ export class Walker {
       // past a gate whose condition is false.
       if (policy.kind === "passed") return `${blocksOn} -- ${policy.why}`;
       // ...and a yield still costs the frame it is reached on.
-      this.wait = { op, blocksOn, policy };
+      this.wait = { op, blocksOn, policy,
+                  addr: [this.block, this.step, this.opIndex] };
       return `${blocksOn} -- ${policy.why}`;
     }
-    this.wait = { op, blocksOn, policy };
+    this.wait = { op, blocksOn, policy,
+                  addr: [this.block, this.step, this.opIndex] };
     return blocksOn;
   }
 

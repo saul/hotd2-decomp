@@ -356,6 +356,12 @@ export default defineConfig({
   // trusts, which is the other way to give one a secure context and so the
   // service worker (`docs/PLAYER.md`, "Hosting"). Addresses and `localhost` it takes
   // anyway.
-  server: { port: 5173, open: false, https: httpsOptions(), allowedHosts: [".ts.net"] },
+  //
+  // `warmup`: the app's module graph, transformed as the server starts rather
+  // than on the first page load -- a headless check's Chrome launches
+  // meanwhile, and `npm run verify`'s shared server has it ready before its
+  // first check. One `server` key: a second one silently replaces the first.
+  server: { port: 5173, open: false, https: httpsOptions(), allowedHosts: [".ts.net"],
+            warmup: { clientFiles: ["./src/app/main.ts"] } },
   build: { target: "es2022", chunkSizeWarningLimit: 2000 },
 });

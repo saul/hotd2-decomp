@@ -80,7 +80,7 @@ two players, the bundle screen and the debug sidebar.
 | Key | Does |
 |---|---|
 | click | shoot |
-| right-click, `R` | reload (a pull off the screen) |
+| right-click, `R` | reload (a pull off the screen) -- also the pad's B, which cuts a stage's chapter card short once it has shown for a third of a second |
 | `Enter` | START: take a continue, skip a cutscene where the game allows it, start a new game |
 | `Space` | play / pause |
 | `←` | rewind half a second (on the options screen, the arrows are the pad) |

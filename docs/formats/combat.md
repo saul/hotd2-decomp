@@ -2533,12 +2533,19 @@ which is the clearest evidence that the set is descriptor data and not a
 property of the model. The same `zslman` climbs in stage 5 and stands in
 stage 6.
 
-### The 35-state table — `g_class31_states`, 0x00592960
+### The 36-state table — `g_class31_states`, 0x00592960
 
 `EnemyThrowerUpdate` (`FUN_00449910`) ticks a cooldown, runs the shot drain,
 dispatches on `obj+0x1310`, and *then* integrates `vel += acc; pos += vel` —
 class 0x31 integrates acceleration where class 0x30 does not, which is what
 makes its fall and its knock-back physical.
+
+The table is 36 words: entries 0 and 35 are both `0x0041EBB0`, and the word
+after entry 35, `0x005929F0`, is `g_class31_motion_sets`' first pointer. The
+dispatch, `CALL dword ptr [EAX*4 + 0x592960]`, has no bound, and
+`EnemyThrowerInit` stores the descriptor's byte `+2` into `obj+0x1310` as it
+stands, so a spawn starts in whatever state its record names -- 8 or 35 as
+readily as an entrance. `[proved]`
 
 | # | Routine | What it is |
 |---|---|---|
@@ -2548,7 +2555,7 @@ makes its fall and its knock-back physical.
 | 3 | `ThrowerStateDeathClip` | character 0x16's own death clip |
 | 4, 5 | `ThrowerStateCorpseSink` / `ThrowerStateCorpseBlink` | two seconds of corpse, sinking or flickering |
 | 6 | `ThrowerLeave` | release everything and despawn — **never entered as a state** |
-| **7** | `ThrowerStateStandAndDecide` | **the hub** |
+| **7** | `ThrowerStateStandAndDecide` | **the hub**: idle facing the camera, then the re-arm or the router. Its three sub-state arms fall into each other, so types 0x16, 0x18 and 0x19 turn twice a frame (0x400) and restart their idle every frame until they face the camera; `zskamere` turns once, and not at all on surface `0x35` |
 | **8** | `ThrowerStateWaitForPermit` | idle until a permit frees, then split by character |
 | **9, 12, 13** | `ThrowerStateLeapDown` | **the pounce**, one handler for three ids |
 | **10** | `ThrowerStateLeapAside` | the leap back out of your face |
@@ -2556,7 +2563,7 @@ makes its fall and its knock-back physical.
 | **14, 15, 16** | `ThrowerStateLeapToSurface` | **onto the far wall, the near wall, the ceiling** |
 | 17 | `ThrowerStateGetUp` | motion `0x127`, and **only after a decapitation** |
 | **18** | `ThrowerStateWalkDistance` | walk the descriptor's own distance on the pair's walk by `obj+0x34` bit 27, not flinching (`obj+0x34` bit `0x2000` until it arrives) — the shape of class 0x30's state 15, on the same `f32` at tail `+0x04` |
-| **19** | `ThrowerStateEntranceClip` | play the descriptor's own clip |
+| **19** | `ThrowerStateEntranceClip` | cut to the descriptor's own clip and play it to `g_motion_play_length - 2`, shot-immune (`0x100`) and out of world collision (`obj+0x136C` `0x80000`) the whole way; the landing step `0x2916A9` puts both back |
 | 20 | `ThrowerStateLeapToPoint` | the scripted drop |
 | 21 | `ThrowerStateRideObjectPath` | object path `0x14F` for 0xC4 frames — **cut content** |
 | 22 | `ThrowerStateLeapStrike` | a pounce off the descriptor — **dead code** |
@@ -2564,13 +2571,14 @@ makes its fall and its knock-back physical.
 | 24 | `ThrowerStateCloseAndStrike` | `zskamere`'s standing swing |
 | **25** | `ThrowerStateWithdraw` | back off, then stand |
 | 26 | `ThrowerStatePathFollow` | a route walked before fighting |
-| 27 | `ThrowerStateGrabPlayer` | a camera-relative grab — stage 5's four `zslman` |
+| 27 | `ThrowerStateGrabPlayer` | a camera-relative grab — stage 5's four `zslman`. Shot-immune (`0x100`) from the spawn to the solid part of the hold, and `NoHitReaction` (`0x2000`) from the landing, so nothing knocks it off the camera; it cries its attack voice as it lands |
 | 28 | `ThrowerStateWaitForCue` | wait on a timer, a path frame or a flag |
 | 29, 30 | `ThrowerStateRearm` / `ThrowerStateRestoreBothHands` | the weapon goes back |
 | 31 | `ThrowerStateThrow` | see §10 |
 | 32 | `ThrowerStateStrikeOnTheSpot` | `zskamere` perched on surface `0x35`, swinging for ever |
 | 33 | `ThrowerStateKnockedTumbling` | `zslman`'s shot reaction: bounced along its stance's axis |
 | 34 | `ThrowerStateBlinkInThreeHops` | stage 6's blinking materialisation |
+| 35 | `0x0041EBB0` | the shared no-op again -- no descriptor names it |
 
 ### The spawn record's flags word
 
@@ -2780,7 +2788,8 @@ values and no more:
 * **Never**: 6 is a subroutine occupying a state slot, and nothing anywhere
   writes 6 to `obj+0x1310`. 21 and 22 are unreachable from anywhere — cut
   content. 24 and 32 are `zskamere`'s and come only from state 8. 29 and 30
-  can be reached only by a descriptor byte, and no descriptor names them.
+  can be reached only by a descriptor byte, and no descriptor names them; nor
+  does any name 0 or 35, the two no-ops.
 
 ### The repertoire is data — `g_class31_action_picks`, 0x00592A60
 
@@ -2793,6 +2802,11 @@ d <= 30                 -> state 8 outright: wait for a permit, then pounce
 40 < d <= 50            -> band 1
 everything else         -> band 2
 ```
+
+The close range is 15.0 (`[0x004C4398]`) instead of 30.0 (`[0x0055CCD4]`) for
+character type 0x17 standing on surface `0x35` --
+`QueryGroundSurfaceAt(x, y + 4.5, z)` at `0x0044AE58`, the same perch test
+state 8 splits on. `[proved]`
 
 then draws a **state id** out of
 `g_class31_action_picks[set][band][(rand()>>4) % 10 + (destroyed_zones & 7) * 10]`

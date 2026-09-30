@@ -40,6 +40,10 @@ const CHAR_ZSASS = 0x16;
 /** State 0x20's surface, and the probe's rise: `FADD [0x00565DE8]`, 4.5. */
 const PERCH_SURFACE = 0x35;
 const SURFACE_PROBE_RISE = 4.5;
+/** The one character type whose close range depends on its surface. */
+const CHAR_ZSKAMERE = 0x17;
+/** ...and its close range on surface 0x35: `[0x004C4398]` = 15.0f. */
+const CLOSE_RANGE_PERCHED = 15;
 
 /**
  * The destroyed-zone bits an arm going bare sets — the same two the cancel
@@ -144,9 +148,17 @@ export function ThrowerPickNextState(obj: ThrowerActor, rng: Rng,
   const band = d > BAND_NEAR_MIN && d <= BAND_NEAR_MAX
     ? ThrowerBand.Near : ThrowerBand.Far;
 
-  // `[diverges]` Character type 0x17's threshold is 15.0 and is conditional on
-  // the surface under it being 0x35; nothing ported is that type.
-  if (d <= CLOSE_RANGE) {
+  // `CMP word ptr [ESI + 0x1f4], 0x17; JZ` at `0x0044ADE0`: character type
+  // 0x17 alone asks what it is standing on -- `QueryGroundSurfaceAt(x, y +
+  // 4.5, z)` at `0x0044AE58` -- and on surface 0x35 comes in to 15.0
+  // (`FCOMP [0x004C4398]`, `0x0044AE97`) before it waits for a permit; on
+  // anything else, and for every other type, it is 30.0 (`[0x0055CCD4]`).
+  // Set 2's fifteen `zskamere` on stage 4 are that type.
+  const close = obj.charType === CHAR_ZSKAMERE
+      && QueryGroundSurfaceAt(obj.pos.x, obj.pos.y + SURFACE_PROBE_RISE,
+                              obj.pos.z) === PERCH_SURFACE
+    ? CLOSE_RANGE_PERCHED : CLOSE_RANGE;
+  if (d <= close) {
     if (obj.state !== ThrowerState.WaitForPermit) {
       obj.state = ThrowerState.WaitForPermit;
       obj.sub = 0;

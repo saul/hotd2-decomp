@@ -843,6 +843,23 @@ behaviour: find the reader of each bit** (a `TEST` of its mask, L32's two
 forms) **before leaving one out, and test the state with the thing that reads
 it happening** -- here a shot on every sub.
 
+**L100 -- The one-shot channel ends itself; the engine's track wraps. A clip a
+state holds longer than its play length belongs on the base track.** The
+engine has one motion track, and `ActorSetMotionBlended` puts every clip on it;
+`obj.action`, the port's one-shot channel, is a port construct that empties
+when its clip's authored frames run out and hands the body back to whatever
+the base track holds. Two fixes of `ThrowerStateGrabPlayer` were written in
+parallel, one moving its clips onto the one-shot channel and one onto the base
+track, and both passed their tests -- because neither test looked at the clip
+past the ride clip's end. The shipped holds are 45 and 75 frames and
+`zslman`'s ride clip `0x1E9` has a play length of 39: on the one-shot channel
+the rider dropped back into its spawn clip for the rest of the long hold. The
+same shape as `L94`'s stumble, from the other end: there the channel held a
+clip too long, here it lets one go too soon. **Before putting a clip on the
+one-shot channel, find what ends it in the exe -- a state change, or nothing,
+in which case the track wraps -- and test for as long as the shipped data
+holds it.**
+
 ---
 
 ## Running the tools

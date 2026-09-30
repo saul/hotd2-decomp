@@ -97,9 +97,14 @@ export async function openPlayer({ url = "", size = "1600x1000",
                                    init = null, debug = true,
                                    context = {} } = {}) {
   const [width, height] = size.split("x").map(Number);
-  const port = await freePort();
-  if (!quiet) console.log(`vite on :${port}`);
-  const vite = await serve(port);
+  // `npm run verify` starts one vite for its whole browser lane and names it
+  // here, so each check reuses its module transforms rather than paying a
+  // cold server and a cold first page load of its own. Run by hand, a check
+  // starts its own, as it always did.
+  const shared = Number(process.env.HOTD2_VITE_PORT) || 0;
+  const port = shared || await freePort();
+  if (!quiet) console.log(shared ? `vite (shared) on :${port}` : `vite on :${port}`);
+  const vite = shared ? null : await serve(port);
   const browser = await chromium.launch({ channel: "chrome", headless });
   // `faults` stays a **number**, and `faultLines` is what it counted. An
   // array alone would not do: every caller writes `if (state.faults)`, and an
@@ -195,8 +200,11 @@ export async function openPlayer({ url = "", size = "1600x1000",
     } catch { /* site data blocked: the page starts muted anyway */ }
   });
 
+  // Two minutes, not Playwright's thirty seconds: `domcontentloaded` waits for
+  // the module graph, and on a busy machine a cold server's first transform
+  // of it alone has taken thirty.
   await page.goto(`http://127.0.0.1:${port}/${url}`,
-                  { waitUntil: "domcontentloaded" });
+                  { waitUntil: "domcontentloaded", timeout: 120_000 });
 
   // Which renderer actually got the work. A run that fell back to software
   // still produces a picture, and the picture is subtly not what a player
@@ -212,7 +220,7 @@ export async function openPlayer({ url = "", size = "1600x1000",
 
   const close = async () => {
     await browser.close();
-    vite.kill("SIGTERM");
+    vite?.kill("SIGTERM");
   };
   return { page, browser, port, state, close };
 }

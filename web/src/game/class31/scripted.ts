@@ -33,12 +33,12 @@ import { MotionOf, MotionPlayLength } from "../tables";
 import { vec3 } from "../vec";
 import { GAME_HZ, MotionFade } from "../class30/states";
 import {
-  ActorArcBegin, ActorArcStep, ActorLocalPoint, ActorPlayCursor,
-  ActorPlayMotion, ClearCurrentActorVelocityAndAccel,
+  ActorArcBegin, ActorArcStep, ActorLocalPoint, ActorPlayCursor, ActorPlayMotion,
+  ClearCurrentActorVelocityAndAccel,
 } from "./arc";
-import { ActorSetOneShotBlended } from "../class30/motion_cue";
+import { ThrowerFallIntegrate, ThrowerLeave } from "./death";
+import { ActorSetMotionBlended } from "../class30/motion_cue";
 import { ActorPlayHitVoice, ActorVoice } from "../combat/voice";
-import { ThrowerLeave } from "./death";
 import { ThrowerPickLandingPoint } from "./leap_down";
 import { ThrowerState } from "./states";
 import { ThrowerStrikeConnect } from "./strike";
@@ -213,16 +213,44 @@ const GRAB_BLINK_FRAMES = 15;
  * moves — wait for the camera path to reach a named frame, drop onto the
  * player, hold, and grab. It is the only state in the class that takes a
  * permit **outright** rather than claiming one, and the only one that names
- * its victim in the descriptor.
+ * its victim in the descriptor. `[proved]`, read in full; each sub falls into
+ * the next on the frame it finishes:
  *
- * The engine rides subs 2 to 4 through `MatrixTranslate(camera eye);
- * MatrixRotateY(g_camera_yaw_bams + 0x8000)` and writes only X and Z, leaving
- * Y to the descent. The cue accepts either camera block's path frame, each by
- * address (`CMP [0x9a6110], EAX` / `CMP [0x9a6458], EAX` at `0x0044F070` and
- * `0x0044F078`), and block 2's is always 0; no shipped cue is 0.
+ * ```
+ * sub 0  obj+0x34 |= 0x4100                  ; PoseFrozen, ShotImmune
+ *        ActorSetMotionBlended(0x1E9, 0, 5)
+ *        obj+0x13C0.. = pos (the offset); obj+0x13CC.. = desc+4..0xC
+ *        pos += g_camera_eye; sub 1
+ * sub 1  pos = g_camera_eye + obj+0x13C0..
+ *        until either camera block's path frame is desc+0x10:
+ *        obj+0x34 &= ~0x4000; obj+0x1330 = desc+0x12
+ *        obj+0x50 = (obj+0x13D0 - obj+0x13C4) / desc+0x12
+ *        PlaySoundId(0x2516A9); sub 2
+ * sub 2  blink; until --obj+0x1330 reaches 0:
+ *        ClearCurrentActorVelocityAndAccel; y = eye.y + obj+0x13D0
+ *        obj+0x34 |= 0x2000                    ; NoHitReaction
+ *        PlaySoundId(0x2916A9); ActorSetMotionBlended(0x1E9, 0, 5)
+ *        obj+0x1330 = desc+0x14; ActorPlayHitVoice(obj, 3)
+ *        PlaySoundId(0x1F23A9); sub 3
+ * sub 3  the first fifteen frames: blink, obj+0x34 |= 0x100
+ *        the rest: PlaySoundId(0x2023A9), solid, obj+0x34 &= ~0x100
+ *        until --obj+0x1330 reaches 0: take the permit (below), and if one
+ *        was taken ActorSetMotionBlended(0x1E7 or 0x1E5, 0, 5); sub 4
+ * sub 4  on obj+0x19C == 30, PlayerTakeDamage(p, 1, clip != 0x1E5)
+ *        at g_motion_play_length - 1: obj+0x137C.. = eye;
+ *        ActorSetMotionBlended(0x1E8, 0, 5); sub 5
+ * sub 5  on obj+0x19C == g_motion_play_length / 2, PlaySoundId(0x2516A9)
+ *        at g_motion_play_length - 1, ThrowerLeave (which does not return)
+ * then   subs 2..4: x, z = eye + RotY(g_camera_yaw_bams + 0x8000) offset
+ *        sub 5: pos += eye - obj+0x137C..; obj+0x137C.. = eye
+ * ```
+ *
+ * The cue accepts either camera block's path frame, each by address (`CMP
+ * [0x9a6110], EAX` / `CMP [0x9a6458], EAX` at `0x0044F070` and `0x0044F078`),
+ * and block 2's is always 0; no shipped cue is 0.
  *
  * **A rider on this state is never knocked off it.** The routine writes the
- * actor's flag word four times, and the port wrote none of them:
+ * actor's flag word four times:
  *
  * ```
  * 0044efbb  OR  AH,0x41      ; sub 0: 0x100 shot-immune, 0x4000 clip held
@@ -245,9 +273,21 @@ const GRAB_BLINK_FRAMES = 15;
  * how shooting the rider in its grab saves the player: sub 4 damages only
  * while `obj+0x121` holds one. `[proved]`
  *
- * Every clip is `ActorSetMotionBlended(obj+0x194, clip, 0, 5)` (`0x004119A0`),
- * put on this class's one-shot channel as its other states put theirs, and
- * `obj+0x19C` / `obj+0x1B4` are read through that channel the same way.
+ * **Every clip is on the base track**, as the engine's one track has it:
+ * `ActorSetMotionBlended(obj+0x194, clip, 0, 5)` (`0x004119A0`), the ride
+ * clip set a second time over itself on landing, and `obj+0x19C` /
+ * `obj+0x1B4` read as that track's cursor and clip. The port's one-shot
+ * channel ends itself when its clip runs out and hands the body back to
+ * whatever was on the base, where the engine's track wraps -- and `zslman`'s
+ * 0x1E9 runs out: 21 frames, play length 39, under holds of 45 and 75 frames
+ * in `st5evtbl`.
+ *
+ * The port also left the rider where it hung for the whole descent -- nothing
+ * integrated the velocity the cue writes; `EnemyThrowerUpdate` does, after the
+ * state -- rode the camera's turned offset while it waited in sub 1, where the
+ * tail's `1 < sub < 5` test rides only subs 2 to 4, tested the damage frame
+ * with `>=` and a latch where the engine tests `==`, and waited the baked clip
+ * lengths out.
  */
 export function ThrowerStateGrabPlayer(obj: ThrowerActor, dt: number,
                                        rng: Rng, events?: Events): void {
@@ -255,14 +295,15 @@ export function ThrowerStateGrabPlayer(obj: ThrowerActor, dt: number,
   // Every read here is `g_camera_eye` by address -- nineteen of them,
   // `0x0044F015`..`0x0044F4E2` -- the gameplay eye, fifteen under the drawn one.
   const eye = G.g_camera_eye;
+  const frames = dt * GAME_HZ;
   if (!g) { obj.state = ThrowerState.StandAndDecide; obj.sub = 0; return; }
-  const emit = (id: number): void => { events?.emit("sound.play", { id }); };
+  const emit = (id: number) => { events?.emit("sound.play", { id }); };
 
   if (obj.sub === GrabSub.Anchor) {
     // `OR AH,0x41` at `0x0044EFBB`: shot-immune, and the clock held, so the
     // ride clip below stays on its first frame until the cue.
-    obj.flags |= ActorFlag.ShotImmune | ActorFlag.PoseFrozen;
-    ActorSetOneShotBlended(obj, GRAB_RIDE, 0, MotionFade.Quick);
+    obj.flags |= ActorFlag.PoseFrozen | ActorFlag.ShotImmune;
+    ActorSetMotionBlended(obj, GRAB_RIDE, 0, MotionFade.Quick);
     // The spawn position *is* the camera-relative offset, kept for ever.
     obj.arcFrom = { x: obj.pos.x, y: obj.pos.y, z: obj.pos.z };
     obj.arcTo = { x: g.offset[0], y: g.offset[1], z: g.offset[2] };
@@ -270,39 +311,42 @@ export function ThrowerStateGrabPlayer(obj: ThrowerActor, dt: number,
     obj.sub = GrabSub.WaitForCue;
   }
 
-  if (obj.sub === GrabSub.WaitForCue) {
+  const entry = obj.sub;
+  if (entry === GrabSub.WaitForCue) {
     obj.pos.x = eye.x + obj.arcFrom.x;
     obj.pos.y = eye.y + obj.arcFrom.y;
     obj.pos.z = eye.z + obj.arcFrom.z;
-    if (G.g_cam_path_frame !== g.cue_frame
-        && G.g_cam_path_frame_2 !== g.cue_frame) return ThrowerGrabRide(obj);
-    // `AND AH,0xbf` at `0x0044F092`: the clip lets go. The shot stays off.
-    obj.flags &= ~ActorFlag.PoseFrozen;
-    // Only the Y of the destination offset is ever read; the engine stores the
-    // other two and never looks at them again.
-    obj.vel.y = (obj.arcTo.y - obj.arcFrom.y) / g.drop_frames;
-    obj.slideTimer = g.drop_frames;
-    emit(GRAB_STEP);
-    obj.sub = GrabSub.Descend;
+    if (G.g_cam_path_frame === g.cue_frame
+        || G.g_cam_path_frame_2 === g.cue_frame) {
+      // `AND AH,0xbf` at `0x0044F092`: the clip lets go. The shot stays off.
+      obj.flags &= ~ActorFlag.PoseFrozen;
+      obj.slideTimer = g.drop_frames;
+      // Only the Y of the destination offset is ever read; the engine stores
+      // the other two and never looks at them again.
+      obj.vel.y = (obj.arcTo.y - obj.arcFrom.y) / g.drop_frames;
+      emit(GRAB_STEP);
+      obj.sub = GrabSub.Descend;
+    }
   }
 
   if (obj.sub === GrabSub.Descend) {
     ThrowerBlink(obj);
-    obj.slideTimer -= dt * GAME_HZ;
-    if (obj.slideTimer > 0) return ThrowerGrabRide(obj);
-    // `CALL 0x0044E120` at `0x0044F10E`: acceleration too, not only velocity.
-    ClearCurrentActorVelocityAndAccel(obj);
-    obj.pos.y = eye.y + obj.arcTo.y;
-    // `OR DH,0x20` at `0x0044F127`, and nothing in the state lowers it.
-    obj.flags |= ActorFlag.NoHitReaction;
-    emit(GRAB_LAND);
-    ActorSetOneShotBlended(obj, GRAB_RIDE, 0, MotionFade.Quick);
-    obj.slideTimer = g.hold_frames;
-    // `PUSH 0x3; PUSH ESI; CALL 0x0040A6F0` at `0x0044F14E`: the attack cry,
-    // between the thump and the sword.
-    ActorPlayHitVoice(obj, ActorVoice.Attack, rng, emit);
-    emit(GRAB_SWORD_ON);
-    obj.sub = GrabSub.Hold;
+    obj.slideTimer -= frames;
+    if (obj.slideTimer <= 0) {
+      // `CALL 0x0044E120` at `0x0044F10E`: acceleration too, not only velocity.
+      ClearCurrentActorVelocityAndAccel(obj);
+      obj.pos.y = eye.y + obj.arcTo.y;
+      // `OR DH,0x20` at `0x0044F127`, and nothing in the state lowers it.
+      obj.flags |= ActorFlag.NoHitReaction;
+      emit(GRAB_LAND);
+      ActorSetMotionBlended(obj, GRAB_RIDE, 0, MotionFade.Quick);
+      obj.slideTimer = g.hold_frames;
+      // `PUSH 0x3; PUSH ESI; CALL 0x0040A6F0` at `0x0044F14E`: the attack cry,
+      // between the thump and the sword.
+      ActorPlayHitVoice(obj, ActorVoice.Attack, rng, emit);
+      emit(GRAB_SWORD_ON);
+      obj.sub = GrabSub.Hold;
+    }
   }
 
   if (obj.sub === GrabSub.Hold) {
@@ -323,42 +367,49 @@ export function ThrowerStateGrabPlayer(obj: ThrowerActor, dt: number,
       // `AND AH,0xfe` at `0x0044F1ED`: solid, so it can be hurt.
       obj.flags &= ~ActorFlag.ShotImmune;
     }
-    obj.slideTimer -= dt * GAME_HZ;
-    if (obj.slideTimer > 0) return ThrowerGrabRide(obj);
-    ThrowerGrabTakePermit(obj, g.player, rng);
-    obj.sub = GrabSub.Grab;
+    obj.slideTimer -= frames;
+    if (obj.slideTimer <= 0) {
+      ThrowerGrabTakePermit(obj, g.player, rng);
+      obj.sub = GrabSub.Grab;
+    }
   }
 
   if (obj.sub === GrabSub.Grab) {
+    const cursor = ActorPlayCursor(obj);
+    const clip = ActorPlayMotion(obj);
     // `CMP AL,0xff` / `CMP dword ptr [ESI + 0x19c],0x1e` at `0x0044F309`: on
     // the frame the cursor is 30, for as long as a permit is held -- and a
     // shot gives it back, so shooting the rider here saves the player.
-    if (obj.attackPermit !== -1 && ActorPlayCursor(obj) === GRAB_HIT_FRAME) {
-      PlayerTakeDamage(obj.attackPermit, 1,
-                       ActorPlayMotion(obj) !== GRAB_A ? 1 : 0, events, obj,
-                       "strike", -1);
+    if (obj.attackPermit !== -1 && cursor === GRAB_HIT_FRAME) {
+      PlayerTakeDamage(obj.attackPermit, 1, clip !== GRAB_A ? 1 : 0, events,
+                       obj, "strike", -1);
     }
     // `g_motion_play_length[obj+0x1B4] - 1 <= obj+0x19C` at `0x0044F351`.
-    if (ActorPlayCursor(obj)
-        < MotionPlayLength(obj, ActorPlayMotion(obj)) - 1) {
-      return ThrowerGrabRide(obj);
+    if (cursor >= MotionPlayLength(obj, clip) - 1) {
+      obj.strikeStart = { x: eye.x, y: eye.y, z: eye.z };
+      ActorSetMotionBlended(obj, GRAB_FINISH, 0, MotionFade.Quick);
+      obj.sub = GrabSub.ThrowAway;
     }
-    obj.strikeStart = { x: eye.x, y: eye.y, z: eye.z };
-    ActorSetOneShotBlended(obj, GRAB_FINISH, 0, MotionFade.Quick);
-    obj.sub = GrabSub.ThrowAway;
   }
 
   if (obj.sub === GrabSub.ThrowAway) {
+    const cursor = ActorPlayCursor(obj);
+    const play = MotionPlayLength(obj, ActorPlayMotion(obj));
     // `CDQ; SUB EAX,EDX; SAR EAX,1` at `0x0044F3AF`: half the play length,
     // truncated toward zero.
-    const len = MotionPlayLength(obj, ActorPlayMotion(obj));
-    if (ActorPlayCursor(obj) === Math.trunc(len / 2)) emit(GRAB_STEP);
+    if (cursor === Math.trunc(play / 2)) emit(GRAB_STEP);
     // `CALL 0x0044AD60` at `0x0044F3DF`, which does not return (L72): the
     // delta ride below is not reached on the frame it leaves.
-    if (ActorPlayCursor(obj) >= len - 1) {
+    if (play - 1 <= cursor) {
       ThrowerLeave(obj);
       return;
     }
+  }
+
+  // The tail: `1 < sub < 5` rides the camera's turned offset, sub 5 its delta.
+  if (obj.sub > GrabSub.WaitForCue && obj.sub < GrabSub.ThrowAway) {
+    ThrowerGrabRide(obj);
+  } else if (obj.sub === GrabSub.ThrowAway) {
     // Sub 5 rides the camera by **delta** rather than by offset, so the throw
     // plays out wherever the camera has got to.
     obj.pos.x += eye.x - obj.strikeStart.x;
@@ -366,11 +417,13 @@ export function ThrowerStateGrabPlayer(obj: ThrowerActor, dt: number,
     obj.pos.z += eye.z - obj.strikeStart.z;
     obj.strikeStart = { x: eye.x, y: eye.y, z: eye.z };
   }
+  // `EnemyThrowerUpdate`'s `vel += acc; pos += vel`, which is what carries the
+  // descent down at the velocity the cue wrote.
+  ThrowerFallIntegrate(obj, frames);
 }
 
 /** Subs 2 to 4 hang off the camera's yaw, half a turn round. X and Z only. */
 function ThrowerGrabRide(obj: ThrowerActor): void {
-  if (obj.sub < GrabSub.Descend || obj.sub > GrabSub.Grab) return;
   ActorLocalPoint(G.g_camera_eye, G.g_camera_yaw_bams + 0x8000, obj.arcFrom.x,
                   obj.arcFrom.y, obj.arcFrom.z, _p);
   obj.pos.x = _p.x;
@@ -386,7 +439,9 @@ function ThrowerGrabRide(obj: ThrowerActor): void {
  * "free" is `TEST EAX, EAX` at `0x0044F276`/`0x0044F297`, against the 1 every
  * claim stores. The port stores the holder's `at` and frees with -1, so the
  * first test is `!== -1`; it was `=== 1`, which a permit
- * `ThrowerTryClaimAttackSlot` held never equals. `[proved]`
+ * `ThrowerTryClaimAttackSlot` held never equals. `[proved]` On a taken permit
+ * the grab clip is `rand()`'s parity -- even 0x1E7, odd 0x1E5 -- blended in
+ * over five frames.
  */
 function ThrowerGrabTakePermit(obj: ThrowerActor, named: number,
                                rng: Rng): void {
@@ -400,8 +455,8 @@ function ThrowerGrabTakePermit(obj: ThrowerActor, named: number,
   }
   if (p !== -1) {
     G.g_attack_permits[p] = obj.at;
-    ActorSetOneShotBlended(obj, rng.int(2) === 0 ? GRAB_B : GRAB_A, 0,
-                           MotionFade.Quick);
+    ActorSetMotionBlended(obj, rng.int(2) === 0 ? GRAB_B : GRAB_A, 0,
+                          MotionFade.Quick);
   }
   obj.attackPermit = p;
 }

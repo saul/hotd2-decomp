@@ -14,17 +14,17 @@ import { ActorFlag, MotionFlag, ThrowerFlag, type ThrowerActor }
   from "../actor";
 import { ThrowerTryClaimAttackSlot } from "../combat/permits";
 import type { GameHost } from "../host";
-import { MotionOf, MotionPlayLength, SecondsToTicks } from "../tables";
+import { MotionPlayLength, SecondsToTicks } from "../tables";
 import { G } from "../globals";
 import { GameMode } from "../game_mode";
 import { vec3 } from "../vec";
 import { TurnAngleTowardFrames } from "../actor_turn";
-import { ActorSetMotionBlended, SetCurrentActorMotionBlended }
-  from "../class30/motion_cue";
+import {
+  ActorSetMotion, ActorSetMotionBlended, SetCurrentActorMotionBlended,
+} from "../class30/motion_cue";
 import { GAME_HZ, MotionFade } from "../class30/states";
 import {
-  ActorArcBegin, ActorArcStep, ActorClipFrame, ActorClipLength,
-  ActorPlayCursor, ArcPhase,
+  ActorArcBegin, ActorArcStep, ActorPlayCursor, ActorPlayMotion, ArcPhase,
 } from "./arc";
 import { ThrowerPickLandingPoint } from "./leap_down";
 import { ThrowerMotion, ThrowerState } from "./states";
@@ -130,22 +130,53 @@ export function ThrowerStateWalkDistance(obj: ThrowerActor, rng: Rng): void {
 }
 
 /**
+ * `PUSH 0x2916a9; CALL PlaySoundId` at `0x0044E47B` --
+ * `COMMON\ENE_WALK6_22.WAV`, the step the entrance lands on.
+ */
+export const SND_ENTRANCE_DONE = 0x2916a9;
+
+/**
  * `ThrowerStateEntranceClip` — `FUN_0044E410`, class 0x31 state 19.
  *
- * One clip, named by the descriptor, played to two frames off its end. Stage
- * 2's `zstin` all name motion 296.
+ * One clip, named by the descriptor, cut to and played to two frames off its
+ * play length. Stage 2's `zstin` all name motion 296. `[proved]`, read in full:
+ *
+ * ```
+ * sub 0  0044e42f  obj+0x136C &= ~0x80000     ; CollideWorld down
+ *        0044e434  obj+0x34 |= 0x100          ; ShotImmune
+ *        0044e451  ActorSetMotion(obj+0x194, *(int *)(desc + 4))
+ *                  sub 1, and on
+ * sub 1  0044e477  if (obj+0x19C < g_motion_play_length[obj+0x1B4] - 2) return
+ *        0044e480  PlaySoundId(0x2916A9)
+ *        0044e491  obj+0x34 &= ~0x100; obj+0x136C |= 0x80000
+ *                  state 7, sub 0
+ * other  return
+ * ```
+ *
+ * **The entrance cannot be shot and does not collide with the world.**
+ * `ShotImmune` makes every hit a ricochet for the whole clip, and with
+ * `CollideWorld` down `ThrowerPushOutOfWorld` leaves the body where the clip
+ * takes it, through whatever it is climbing out of; both come back, with the
+ * landing step, on the frame it hands to the hub. The port used to play the
+ * clip on its one-shot channel with neither bit and no sound, waited the
+ * baked length rather than the play length, and sent a spawn with no clip
+ * straight to the hub.
  */
-export function ThrowerStateEntranceClip(obj: ThrowerActor): void {
+export function ThrowerStateEntranceClip(obj: ThrowerActor,
+                                         events?: Events): void {
   if (obj.sub === 0) {
-    const m = MotionOf(obj, obj.entranceMotion);
-    if (!m) { obj.state = ThrowerState.StandAndDecide; return; }
-    obj.action = { motion: obj.entranceMotion, ticks: 0 };
-    obj.rootActionCursor = -1;
+    obj.flags2 &= ~ThrowerFlag.CollideWorld;
+    obj.flags |= ActorFlag.ShotImmune;
+    ActorSetMotion(obj, obj.entranceMotion);
     obj.sub = 1;
+  } else if (obj.sub !== 1) {
+    return;
   }
-  const len = ActorClipLength(obj, obj.entranceMotion);
-  if (obj.action && ActorClipFrame(obj) < len - 2) return;
-  obj.action = null;
+  if (ActorPlayCursor(obj)
+      < MotionPlayLength(obj, ActorPlayMotion(obj)) - 2) return;
+  events?.emit("sound.play", { id: SND_ENTRANCE_DONE });
+  obj.flags &= ~ActorFlag.ShotImmune;
+  obj.flags2 |= ThrowerFlag.CollideWorld;
   obj.state = ThrowerState.StandAndDecide;
   obj.sub = 0;
 }

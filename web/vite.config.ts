@@ -342,6 +342,10 @@ function buildId(): string {
 
 export default defineConfig({
   plugins: [serveBundle(), serveMatchmaker()],
+  // The app's module graph, transformed as the server starts rather than on
+  // the first page load: a headless check's Chrome launches meanwhile, and
+  // `npm run verify`'s shared server has it ready before its first check.
+  server: { warmup: { clientFiles: ["./src/app/main.ts"] } },
   define: { __HOTD2_BUILD__: JSON.stringify(buildId()) },
   // Relative, so a build works wherever it is put -- a bucket's root, a
   // prefix in one, a CloudFront path. Every URL the page makes for itself

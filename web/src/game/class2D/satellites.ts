@@ -20,6 +20,7 @@ import { PlayerTakeDamageIfOnScreen } from "../combat/player";
 import { RegisterForShotTest } from "../combat/shot_test";
 import { ActorDespawn } from "../despawn";
 import { ActorByAt, G } from "../globals";
+import { LightsRestoreScene } from "../light_sets";
 import type { GameHost } from "../host";
 import {
   MatCopy, MatIdentity, MatrixGetTranslation, MatrixLoadIdentity,
@@ -232,6 +233,7 @@ export function Class2DSatelliteDraw(obj: EmperorActor): void {
   MatrixRotateY(m, (G.g_frame_counter << SPIN_SHIFT) | 0);
   MatrixScale(m, s.scale, s.scale, s.scale);
   Class2DPushDraw(SAT_SLOT, m, false, null, true, Class2DCameraLight());
+  LightsRestoreScene();
 }
 
 /**
@@ -754,6 +756,7 @@ export function Class2DSatellitePairBeam(obj: EmperorActor,
       MatrixRotateY(m, (G.g_frame_counter << SPIN_SHIFT) | 0);
       MatrixScale(m, s.scale, s.scale, s.scale);
       Class2DPushDraw(PAIR_SLOT, m, false, null, true, Class2DCameraLight());
+      LightsRestoreScene();
       Class2DSatelliteRegisterShot(obj, f.host);
       break;
     }
@@ -781,6 +784,7 @@ function Class2DPairBeamDraw(obj: EmperorActor, s: Class2DSatelliteWords,
                   Math.fround((PAIR_BEAM_FRAMES - s.count) * PAIR_BEAM_STEP), 0);
   Class2DPushDraw(CLASS2D_PAIR_BEAM_FIRST + s.count, m, false, null, true,
                   Class2DCameraLight());
+  LightsRestoreScene();
 }
 
 /**

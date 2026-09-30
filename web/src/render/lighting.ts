@@ -7,7 +7,9 @@
  * "+ scene light" is the default and unlit, the bake alone, is the
  * comparison -- and the script sets it: opcodes
  * `0x18`/`0x19` set the direction, `0x17` slerps it, and the `0x20`–`0x27`
- * tween channels 6/7/8 set its colour and 10 the ambient.
+ * tween channels 6/7/8 set its colour and 10 the ambient. The two light
+ * blocks they write are `G`'s -- `g_scene_light_block0/1`,
+ * `game/light_block.ts` -- and this reads them there.
  *
  * `SetLightingDefaultSingle` (`0x004AA120`) is the whole setup. The
  * decompiler drops every FPU argument in it — `__ftol()` with no arguments,
@@ -108,7 +110,12 @@ import {
   type WebGLProgramParametersWithUniforms,
   type WebGLRenderer,
 } from "three";
+import { BAMS_TO_RAD } from "../core/bams";
 import type { System } from "../core/system";
+import { G } from "../game/globals";
+import {
+  CH_AMBIENT, CH_LIGHT_R, type LightBlock,
+} from "../game/light_block";
 import type { RenderContext } from "./context";
 import {
   applyForcedAlphaBlend, copyDrawState, fadedCopy, setUnfadedMaterial, unfadedMaterial,
@@ -153,15 +160,14 @@ export type LightingMode = "unlit" | "scene";
  * dirty. The world draws under **light block 0**. Forty-four routines --
  * `ZombieAdvanceMotion`'s very first instruction among them -- switch to
  * **light block 1** before they draw and back after, so every character is
- * lit by block 1. `[proved]` The port keeps both blocks in the walker and asks
- * `app/` which actors are under block 1 (`ActorDrawsUnderSecondaryLights`).
+ * lit by block 1. `[proved]` Both blocks are `G`'s; which actors are under
+ * block 1 is the port's answer, which `app/` hands across
+ * (`ActorDrawsUnderSecondaryLights`).
  *
  * Only this module's "+ scene light" view -- the default -- draws with
  * either; the unlit view shows no difference.
  */
 export interface SecondaryLightSource {
-  /** Block 1, as the walker holds it. Null before a stage. */
-  light(): SceneLightState | null;
   /** Is the actor at this spawn address drawn under block 1? */
   secondary(at: number): boolean;
 }
@@ -218,17 +224,19 @@ const SECONDARY_LIGHTS = (() => {
  * `SetRenderAmbient(ambient)` and the direction from its own pitch and yaw,
  * through the same `SetLightingDefaultSingle`. A node carries that as
  * `userData.hod2_light_set`, {@link LightSet}, and is lit the same way with
- * the set's ambient and direction where it names them and its block's where
- * it does not.
+ * the set's ambient, direction and colour where it names them and its
+ * block's where it does not -- class 0x32's boss names only the direction
+ * its draw was made under.
  */
 interface ColouredLight {
-  rgb: [number, number, number];
+  /** The colour, or null for the block's. */
+  rgb: [number, number, number] | null;
   /** Block 1's ambient and direction rather than block 0's. */
   secondary: boolean;
   /** `SetRenderAmbient`'s scalar, or null for the block's. */
   ambientScalar: number | null;
-  /** BAMS pitch and yaw, or null for the block's direction. */
-  dirBams: [number, number] | null;
+  /** The world direction the light comes from, or null for the block's. */
+  dir: [number, number, number] | null;
   ambient: { value: Color };
   color: { value: Color };
   dirView: { value: Vector3 };
@@ -248,46 +256,54 @@ interface ColouredLight {
  */
 
 /**
- * One draw's whole light set, as `LightsUseCustomSet` (`FUN_0041DC10`) takes
- * it: the ambient scalar, the direction's BAMS pitch and yaw (`null` for
- * block 0's own), and the colour in the engine's 0..1. See `ColouredLight`.
+ * One draw's light set, as the game recorded it with the draw: the ambient
+ * scalar, the world direction the light comes from, and the colour in the
+ * engine's 0..1 (`LightSetRecord`, `game/light_block.ts`) -- each `null` for
+ * the draw's block's own. See `ColouredLight`.
  */
 export interface LightSet {
-  /** `SetRenderAmbient`'s scalar, or `null` for block 0's. */
+  /** `SetRenderAmbient`'s scalar, or `null` for the block's. */
   ambient: number | null;
-  pitch: number | null;
-  yaw: number | null;
-  rgb: readonly number[];
+  dir: readonly number[] | null;
+  rgb: readonly number[] | null;
 }
 
 export interface SceneLightState {
-  /** Light colour, 0..1 per component, from tween channels 6/7/8. */
+  /** Light colour, 0..1 per component, channels 6/7/8 (`+0x240`). */
   rgb: [number, number, number];
-  /** Global ambient, from channel 10. */
+  /** The ambient scalar, channel 10 (`+0x24C`). */
   ambient: number;
-  /**
-   * Direction the light comes from. The script stores BAMS; `hod2lib/script.ts`
-   * converts to degrees on the way out, so that is what travels.
-   */
-  pitchDeg: number;
-  yawDeg: number;
+  /** Direction the light comes from, the block's BAMS pitch and yaw. */
+  pitch: number;
+  yaw: number;
 }
 
 export const DEFAULT_LIGHT: SceneLightState = {
   rgb: [1, 1, 1],
   ambient: 0.7,                     // LightBlockInit's
-  pitchDeg: 0,
-  yawDeg: 0,
+  pitch: 0,
+  yaw: 0,
 };
 
 /**
- * The world-space direction the light comes from, from a BAMS pitch/yaw pair.
- * See the derivation in the module comment.
+ * One of `G`'s light blocks as this module draws it: channels 6..8 and 10,
+ * and the angles `BuildSceneLightDirection` builds the direction from.
  */
-export function lightDirection(pitchDeg: number, yawDeg: number,
+function blockLight(b: LightBlock): SceneLightState {
+  const c = b.channels;
+  return { rgb: [c[CH_LIGHT_R], c[CH_LIGHT_R + 1], c[CH_LIGHT_R + 2]],
+           ambient: c[CH_AMBIENT], pitch: b.pitch, yaw: b.yaw };
+}
+
+/**
+ * The world-space direction the light comes from, from a BAMS pitch/yaw pair
+ * -- `BuildSceneLightDirection`'s world vector. See the derivation in the
+ * module comment.
+ */
+export function lightDirection(pitch: number, yaw: number,
                                out = new Vector3()): Vector3 {
-  const p = (pitchDeg * Math.PI) / 180;
-  const y = (yawDeg * Math.PI) / 180;
+  const p = pitch * BAMS_TO_RAD;
+  const y = yaw * BAMS_TO_RAD;
   const cp = Math.cos(p);
   return out.set(cp * Math.sin(y), -Math.sin(p), cp * Math.cos(y));
 }
@@ -313,7 +329,7 @@ export class SceneLighting implements System<RenderContext> {
   private readonly coloured = new Map<string, ColouredLight>();
   /** The layers whose meshes are not under the stage root. */
   private readonly extraRoots: Object3D[] = [];
-  source: SecondaryLightSource = { light: () => null, secondary: () => false };
+  source: SecondaryLightSource = { secondary: () => false };
   private root: Object3D | null = null;
   private readonly _v = new Vector3();
 
@@ -355,7 +371,7 @@ export class SceneLighting implements System<RenderContext> {
   set(state: Partial<SceneLightState>): void {
     const next = { ...this.state, ...state };
     const key = `${next.rgb.join(",")}|${next.ambient}|` +
-      `${next.pitchDeg}|${next.yawDeg}`;
+      `${next.pitch}|${next.yaw}`;
     if (key === this.lastKey) return;
     this.lastKey = key;
     this.state = next;
@@ -367,13 +383,11 @@ export class SceneLighting implements System<RenderContext> {
   }
 
   /**
-   * The script's light block, every tick, because the script ramps the colour
-   * over frames rather than switching it; `set` no-ops when nothing moved.
+   * Light block 0, every tick, because the script ramps the colour over
+   * frames rather than switching it; `set` no-ops when nothing moved.
    */
   update(ctx: RenderContext): void {
-    const w = ctx.walker;
-    if (!w) return;
-    this.set(w.light);
+    this.set(blockLight(G.g_scene_light_block0));
     if (this.mode !== "scene") return;
     this.refreshSecondary(ctx);
     this.refreshColoured(ctx);
@@ -399,19 +413,18 @@ export class SceneLighting implements System<RenderContext> {
    * zeroes a fresh set starts at.
    */
   private fillColoured(set: ColouredLight): void {
-    const l = set.secondary ? this.source.light() ?? DEFAULT_LIGHT : this.state;
+    const l = set.secondary ? blockLight(G.g_scene_light_block1) : this.state;
     const a = set.ambientScalar ?? l.ambient;
     const amb = a + LIGHT_AMBIENT_SCALE;
-    const [r, g, b] = set.rgb;
+    const [r, g, b] = set.rgb ?? l.rgb;
     set.color.value.setRGB(r * a * DIFFUSE_SCALE, g * a * DIFFUSE_SCALE,
                            b * a * DIFFUSE_SCALE, SRGBColorSpace)
       .multiplyScalar(this.intensity);
     set.ambient.value.setRGB(r * amb, g * amb, b * amb, SRGBColorSpace)
       .multiplyScalar(this.intensity);
-    const pitchDeg = set.dirBams ? set.dirBams[0] * 360 / 65536 : l.pitchDeg;
-    const yawDeg = set.dirBams ? set.dirBams[1] * 360 / 65536 : l.yawDeg;
-    lightDirection(pitchDeg, yawDeg, set.dirView.value)
-      .transformDirection(this.viewInverse);
+    if (set.dir) set.dirView.value.fromArray(set.dir);
+    else lightDirection(l.pitch, l.yaw, set.dirView.value);
+    set.dirView.value.transformDirection(this.viewInverse);
   }
 
   /**
@@ -481,12 +494,13 @@ export class SceneLighting implements System<RenderContext> {
   }
 
   /**
-   * Block 1's uniforms, from the walker, by the same arithmetic `refresh`
-   * applies to block 0 -- `SetLightingDefaultSingle` is one routine and both
-   * blocks go through it.
+   * Block 1's uniforms, from `G`, by the same arithmetic `refresh` applies to
+   * block 0 -- `SetLightingDefaultSingle` is one routine and both blocks go
+   * through it. The direction is built from the block's angles as
+   * `LightsUseSecondarySet` builds it at every character's draw.
    */
   private refreshSecondary(ctx: RenderContext): void {
-    const l = this.source.light() ?? DEFAULT_LIGHT;
+    const l = blockLight(G.g_scene_light_block1);
     const [r, g, b] = l.rgb;
     const a = l.ambient;
     secColor.value.setRGB(r * a * DIFFUSE_SCALE, g * a * DIFFUSE_SCALE,
@@ -495,7 +509,7 @@ export class SceneLighting implements System<RenderContext> {
     const amb = a + LIGHT_AMBIENT_SCALE;
     secAmbient.value.setRGB(r * amb, g * amb, b * amb, SRGBColorSpace)
       .multiplyScalar(this.intensity);
-    lightDirection(l.pitchDeg, l.yawDeg, secDirView.value)
+    lightDirection(l.pitch, l.yaw, secDirView.value)
       .transformDirection(ctx.camera.matrixWorldInverse);
   }
 
@@ -534,7 +548,7 @@ export class SceneLighting implements System<RenderContext> {
 
     // A directional light shines from its position toward its target, and the
     // vector above is the direction the light comes *from*.
-    lightDirection(this.state.pitchDeg, this.state.yawDeg, this._v);
+    lightDirection(this.state.pitch, this.state.yaw, this._v);
     this.dir.position.copy(this._v).multiplyScalar(4000);
     this.dir.target.position.set(0, 0, 0);
     this.dir.target.updateMatrixWorld();
@@ -564,8 +578,7 @@ export class SceneLighting implements System<RenderContext> {
       const colour = x?.hod2_light_colour;
       const lit = x?.hod2_light_set
         ?? (colour !== undefined
-          ? (colour ? { ambient: null, pitch: null, yaw: null, rgb: colour }
-            : null)
+          ? (colour ? { ambient: null, dir: null, rgb: colour } : null)
           : light);
       const mesh = o as Mesh;
       if (mesh.isMesh && mesh.material) {
@@ -614,24 +627,26 @@ export class SceneLighting implements System<RenderContext> {
     if (!(m instanceof MeshBasicMaterial)) return m;
     const rgb = spec.rgb;
     const amb = spec.ambient;
-    const dir: [number, number] | null =
-      spec.pitch !== null && spec.yaw !== null ? [spec.pitch, spec.yaw] : null;
+    const dir: [number, number, number] | null =
+      spec.dir ? [spec.dir[0]!, spec.dir[1]!, spec.dir[2]!] : null;
     // A set that names its own direction is keyed on having one, not on its
-    // value: the one caller that names it hands the camera block's, which
-    // moves with the camera, and a set per angle would be a material per
-    // frame. The set takes the angle it was last asked for.
-    const key = `${secondary ? "block1|" : ""}${rgb[0]},${rgb[1]},${rgb[2]}`
+    // value: the directions the callers name move with the camera (class
+    // 0x2D's) or with the boss's pose (class 0x32's), and a set per
+    // direction would be a material per frame. The set takes the direction
+    // it was last asked for.
+    const key = `${secondary ? "block1|" : ""}`
+      + `${rgb ? `${rgb[0]},${rgb[1]},${rgb[2]}` : "block"}`
       + `|${amb}|${dir ? "dir" : "block"}`;
     let set = this.coloured.get(key);
-    if (set && dir && (!set.dirBams || set.dirBams[0] !== dir[0]
-                       || set.dirBams[1] !== dir[1])) {
-      set.dirBams = dir;
+    if (set && dir && (!set.dir || set.dir[0] !== dir[0]
+                       || set.dir[1] !== dir[1] || set.dir[2] !== dir[2])) {
+      set.dir = dir;
       this.fillColoured(set);
     }
     if (!set) {
       set = {
-        rgb: [rgb[0]!, rgb[1]!, rgb[2]!], secondary, ambientScalar: amb,
-        dirBams: dir,
+        rgb: rgb ? [rgb[0]!, rgb[1]!, rgb[2]!] : null, secondary,
+        ambientScalar: amb, dir,
         ambient: { value: new Color(0, 0, 0) },
         color: { value: new Color(0, 0, 0) },
         dirView: { value: new Vector3(0, 0, 1) },
@@ -735,6 +750,7 @@ export class SceneLighting implements System<RenderContext> {
     const [r, g, b] = this.state.rgb;
     const c = new Color(r, g, b).getHexString();
     return `#${c} x${DIFFUSE_SCALE} amb ${this.state.ambient.toFixed(2)} ` +
-      `pitch ${this.state.pitchDeg.toFixed(0)}° yaw ${this.state.yawDeg.toFixed(0)}°`;
+      `pitch ${(this.state.pitch * 360 / 65536).toFixed(0)}° `
+      + `yaw ${(this.state.yaw * 360 / 65536).toFixed(0)}°`;
   }
 }

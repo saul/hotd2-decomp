@@ -35,25 +35,10 @@ import {
 import { ActorRunNodeDrawHooks } from "../model_draw";
 import type { ClassFrame } from "../registry";
 import { DrawSkinnedModelAndShadow } from "../skeleton";
+import {
+  LightsRestoreScene, LightsUseCustomSet, RenderLightSet,
+} from "../light_sets";
 import { type Class2DLight } from "./state";
-
-/**
- * `LightsUseCustomSet` — `FUN_0041DC10`, `(ambient, pitch, yaw, r, g, b)`:
- * `SetRenderAmbient(ambient)`, `BuildSceneLightDirection(pitch, yaw)` and
- * `SetRenderLightDirection`, `SetRenderLightColour(r, g, b)` -- the three
- * calls `LightsUseSecondarySet` (`FUN_0041DC70`) makes, with the values handed
- * in. `[proved]`
- *
- * The device state it sets is the renderer's; the port returns the set, and
- * every draw the routine makes before its `LightsRestoreScene` (`FUN_0041DCC0`)
- * carries it. The restore is where the routine stops passing it on.
- */
-export function LightsUseCustomSet(ambient: number, pitch: number | null,
-                                   yaw: number | null,
-                                   r: number, g: number, b: number):
-    Class2DLight {
-  return { ambient, pitch, yaw, rgb: [r, g, b] };
-}
 
 /**
  * `LightsUseCustomSet(1.0, camera block pitch, yaw, 1, 1, 1)` -- the set
@@ -167,7 +152,8 @@ export function Class2DNodeDrawHook(obj: EmperorActor, bone: number,
   const b = obj.class2d.boss;
   const rec = obj.skel?.bones[bone];
   if (!b || !rec) return;
-  const light = Class2DBossLight(obj);
+  // Under the set `Class2DDraw` installed round the walk.
+  const light = RenderLightSet();
   const node = rec.mat;
   if (slot !== HOOK_SLOT_BONE5 || b.glowMode === 0) {
     Class2DPushDraw(slot, node, false, b.alpha, true, light);
@@ -222,20 +208,6 @@ export function Class2DNodeDrawHook(obj: EmperorActor, bone: number,
 /** `0x3F333333` at `0x0042900F` -- `Class2DDraw`'s ambient. */
 const BOSS_AMBIENT = Math.fround(0.7);
 
-/**
- * The set `Class2DDraw` draws the boss under: ambient 0.7, the scene light's
- * direction, and the colour words -- the **second twice**, as the pushes are
- * (`PUSH EAX` of `+0x1348` two times at `0x00429001`/`0x00429006`, `+0x134C`
- * never loaded). `[port-only]` as a function.
- */
-function Class2DBossLight(obj: EmperorActor): Class2DLight | null {
-  const b = obj.class2d.boss;
-  if (!b) return null;
-  // `g_scene_light_pitch_bams`, `g_scene_light_yaw_bams`: `null`, the
-  // scene light's own -- see `Class2DLight`.
-  return LightsUseCustomSet(BOSS_AMBIENT, null, null, b.colour[0],
-                            b.colour[1], b.colour[1]);
-}
 
 /** `FADD qword ptr [0x0055D190]` -- 0.01, the flash's recovery a frame. */
 const COLOUR_RECOVER = 0.01;
@@ -264,8 +236,15 @@ export function Class2DDraw(obj: EmperorActor, f: ClassFrame): void {
       b.colour[i] = Math.fround(b.colour[i] + COLOUR_RECOVER);
     }
   }
+  // `g_scene_light_pitch_bams`, `g_scene_light_yaw_bams`, and the colour
+  // words -- the **second twice**, as the pushes are (`PUSH EAX` of `+0x1348`
+  // two times at `0x00429001`/`0x00429006`, `+0x134C` never loaded).
+  const l0 = G.g_scene_light_block0;
+  obj.class2d.drawLight = LightsUseCustomSet(BOSS_AMBIENT, l0.pitch, l0.yaw,
+                                             b.colour[0], b.colour[1],
+                                             b.colour[1]);
   DrawSkinnedModelAndShadow(obj);
-  obj.class2d.drawLight = Class2DBossLight(obj);
   ActorRunNodeDrawHooks(obj, (o, bone, slot, ff) =>
     Class2DNodeDrawHook(o as EmperorActor, bone, slot, ff), f);
+  LightsRestoreScene();
 }

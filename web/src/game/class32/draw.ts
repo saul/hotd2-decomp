@@ -17,6 +17,8 @@
  */
 import { ActorFlag, type Actor, type Boss5Actor } from "../actor";
 import { G } from "../globals";
+import { BuildSceneLightDirection } from "../light_block";
+import { LightsRestoreScene, LightsUseSecondarySet } from "../light_sets";
 import { FtolS16 } from "../matrix";
 import { SetRenderLightColour } from "../screen_sprite";
 import { DrawSkinnedModelAndShadow, RegisterSkeletonNodeHook } from "../skeleton";
@@ -49,20 +51,24 @@ const BARRAGE_LIT_SUB = 3;
  * if (!(obj+0x34 & 0x4000)) { obj+0x194++; obj+0x198++ }
  * ```
  *
- * The two light calls are `game/light_sets.ts`'s; the colour the first
- * installs is the one a node draw keeps as `null`, and the one the walk's
- * part loop draws under is whatever the last node left (`partLight`).
- * `obj+0x194` is the block's counter (`model+0x00`), which the next draw
- * turns into the cursor the states read; `obj+0x198` is a second word the
- * block does not read.
+ * The draw is made under block 1 as `LightsUseSecondarySet` installs it:
+ * its direction (`drawDir`) for every model, its colour where a node draw
+ * keeps `null`, and the part loop under whatever colour the last node left
+ * (`partLight`). `obj+0x194` is the block's counter (`model+0x00`), which
+ * the next draw turns into the cursor the states read; `obj+0x198` is a
+ * second word the block does not read.
  */
 export function Class32DrawAndAdvance(obj: Boss5Actor): void {
   const t = obj.boss5;
+  LightsUseSecondarySet();
+  const d = G.g_render_light_dir;
+  t.drawDir = [d.x, d.y, d.z];
   t.nodeDraws = {};
   t.drawLight = null;
   DrawSkinnedModelAndShadow(obj);
   t.partLight = t.drawLight;
   t.drawLight = null;
+  LightsRestoreScene();
   const skel = obj.skel;
   if (skel && (obj.flags & ActorFlag.PoseFrozen) === 0) skel.counter += 1;
 }
@@ -125,13 +131,16 @@ export function Class32DrawBonePart(obj: Actor, bone: number,
  * ```
  *
  * The light is aimed from each node toward bone 8's hand, where the lunge
- * holds its projectile and the barrage gathers its own.
- *
- * **The scene-light write is not made.** The port keeps both light blocks'
- * direction on the script's `Walker` (`script/state/channels.ts`), which
- * `game/` cannot reach; the angles are computed and left on the tail
- * (`Boss5Tail.lightAngles`) and go no further. The colour is made: it is the
- * draw's own state, and the record keeps it per draw.
+ * holds its projectile and the barrage gathers its own -- into **both**
+ * blocks' angles and built vectors, and no `SetRenderLightDirection`: the
+ * draw in progress keeps the direction `LightsUseSecondarySet` installed
+ * (`drawDir`). What the aim reaches is everything after it: the
+ * `LightsRestoreScene` that ends this draw puts block 0's new vector on the
+ * device, so the world, and every draw after the boss this frame, is lit
+ * from it; the next frame's `UpdateSceneViewAndLight` rebuilds block 0 from
+ * the angles, and the next `LightsUseSecondarySet` -- this boss's own, next
+ * frame -- block 1. The last node drawn wins, and nothing puts the scene's
+ * own angles back until the script next writes them. `[proved]`
  *
  * Both submits draw the slot; `obj+0x38` bit 3 is written by nothing in the
  * class, so the boss is always the plain `AssetDrawSlot`.
@@ -145,7 +154,16 @@ export function Class32DrawNodeSlot(obj: Boss5Actor, bone: number,
     const a = obj.skel?.bones[bone]?.hit ?? [0, 0, 0];
     const b = obj.skel?.bones[LIGHT_TARGET_BONE]?.hit ?? [0, 0, 0];
     const ang = VecToAngles(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
-    t.lightAngles = [FtolS16(ang.pitch), FtolS16(ang.yaw)];
+    const p = FtolS16(ang.pitch);
+    const y = FtolS16(ang.yaw);
+    const b0 = G.g_scene_light_block0;
+    b0.pitch = p;
+    b0.yaw = y;
+    BuildSceneLightDirection(p, y, b0.dir);
+    const b1 = G.g_scene_light_block1;
+    b1.pitch = p;
+    b1.yaw = y;
+    BuildSceneLightDirection(p, y, b1.dir);
     SetRenderLightColour(LIGHT_WARM[0], LIGHT_WARM[1], LIGHT_WARM[2]);
     t.drawLight = [...LIGHT_WARM];
   }

@@ -536,7 +536,8 @@ export class ExeTables {
    * A scene off the stage chain -- training, the attract screens, the ending
    * -- has no predecessor here and reports block 0. That is not a claim about
    * how those scenes are entered: `RunAttractDemo` names its own block and
-   * `ResetGameOnStart` names `g_training_lesson`'s.
+   * `ResetGameOnStart` takes Training's from `0x009A2BBC`, which the select
+   * screen sets by `g_training_course`.
    */
   sceneEntryBlocks(scene: number): number[] {
     return this.cached(`entries:${scene}`, () => {

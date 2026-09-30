@@ -170,6 +170,20 @@ export interface ThrowerTail extends HeadAimWords {
    * once so it never bit, but it was the wrong address.
    */
   handRegrow: number;       // +0x1384
+  /**
+   * `obj+0x1370` — how far `ThrowerStateWalkDistance` (`FUN_0044E2A0`)
+   * walks: its sub 0 latches the descriptor's `desc+0x04` here
+   * (`0x0044E385`) and its sub 1 compares against this word, not the
+   * descriptor. No other class-0x31 routine touches it. The same word is
+   * class 0x30's `targetArrive`.
+   */
+  walkTarget: number;       // +0x1370, also class 0x30 `targetArrive`
+  /**
+   * `obj+0x1374` — how far the walk has come, on x and z, written every
+   * frame of sub 1 (`FST` at `0x0044E3AD`) and read by nothing. The same
+   * word is class 0x30's `walkTravelled`.
+   */
+  walkTravelled: number;    // +0x1374, also class 0x30 `walkTravelled`
 }
 
 /**
@@ -202,5 +216,7 @@ export function makeThrowerTail(): ThrowerTail {
     hopsLeft: 0,
     hopFrames: 0,
     handRegrow: 0,
+    walkTarget: 0,
+    walkTravelled: 0,
   };
 }

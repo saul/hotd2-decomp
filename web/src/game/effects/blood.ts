@@ -130,14 +130,24 @@ export function BloodSpraysTick(): void {
  * what says this is blood and not some other sprite: it is
  * {@link SpawnBloodSpray} with a fixed point instead of a bone.
  *
- * Five routines call it, and the ones the port already has are
- * `OwlUpdateAndResolveShot` (`FUN_004460C0`) — class 0x43's death, at
- * `0x00446123` — and `BodyCreatureUpdate` (`FUN_0043E880`).
- *
  * The point is whatever the caller's `obj+0x70..0x78` holds, which is the
  * shot-test sphere's centre, and that is **camera space** — the same space
  * `MatrixLoadIdentity` draws in and the same one `render/effects.ts` already
- * puts the bone spray's sprite in.
+ * puts the bone spray's sprite in. So a caller hands this the view-space
+ * point, never a world position: for an actor, `Actor.shotCentre`
+ * through `GameHost.viewSpaceOfPoint`, which is how the port holds
+ * `obj+0x70`.
+ *
+ * Eight `CALL`s in the image, one per routine, every one pushing its own
+ * `obj+0x40` on the frame its actor is shot and before it moves -- so the
+ * point is what the actor's own last registration left there. The bat's
+ * three (`0x0042E350`, `0x0042EBA0`, `0x0042EE6A`) read the view of
+ * `(x, y + 1, z)`; the horde member's (`0x0043C4B1`), the worm's
+ * (`0x0042FCD7`) and the owl's (`0x00446123`) their registered point; and
+ * `BodyCreatureUpdate` (`FUN_0043E880`, `0x0043EC0C`) its position, which is
+ * already camera space for the creature. The eighth,
+ * `LoneHordeMemberUpdate47` (`FUN_0043D800`), is class 0x47's, which nothing
+ * the game ships places.
  */
 export interface PointBloodSpray {
   /** `[port-only]` — a stable key for the renderer. */

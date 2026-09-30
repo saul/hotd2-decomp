@@ -418,8 +418,10 @@ function BodyCreatureFly(c: BodyCreature, rng: Rng,
       : ((c.flags & SHOT_BY_PLAYER0) !== 0 ? 0 : 1);
     ScoreAddForPlayer(who, BODY_CREATURE_SCORE);
     G.g_player_hit_count[who] = (G.g_player_hit_count[who] ?? 0) + 1;
-    // `FUN_00430C50(obj+0x40)`, which reads `+0x30` past it: `obj+0x70`, and
-    // in state 3 that is the position this frame.
+    // `FUN_00430C50(obj+0x40)` at `0x0043EC0C`, which reads `+0x30` past it:
+    // `obj+0x70`, which last frame's tail copied from `obj+0x40` unchanged
+    // (`0x0043EE13`) -- and this arm runs before the flight moves it, so it
+    // is the position as it stands, already in camera space.
     SpawnBloodSprayAtPoint(c.pos);
     c.frame = 0;
     c.fallSpeed = 0;

@@ -14,16 +14,17 @@ import { ActorFlag, MotionFlag, ThrowerFlag, type ThrowerActor }
   from "../actor";
 import { ThrowerTryClaimAttackSlot } from "../combat/permits";
 import type { GameHost } from "../host";
-import { MotionOf, MotionPlayLength, SecondsToTicks } from "../tables";
+import { MotionPlayLength, SecondsToTicks } from "../tables";
 import { G } from "../globals";
+import { GameMode } from "../game_mode";
 import { vec3 } from "../vec";
 import { TurnAngleTowardFrames } from "../actor_turn";
-import { ActorSetMotionBlended, SetCurrentActorMotionBlended }
-  from "../class30/motion_cue";
+import {
+  ActorSetMotion, ActorSetMotionBlended, SetCurrentActorMotionBlended,
+} from "../class30/motion_cue";
 import { GAME_HZ, MotionFade } from "../class30/states";
 import {
-  ActorArcBegin, ActorArcStep, ActorClipFrame, ActorClipLength,
-  ActorPlayCursor, ArcPhase,
+  ActorArcBegin, ActorArcStep, ActorPlayCursor, ActorPlayMotion, ArcPhase,
 } from "./arc";
 import { ThrowerPickLandingPoint } from "./leap_down";
 import { ThrowerMotion, ThrowerState } from "./states";
@@ -36,56 +37,146 @@ import {
 const _dest = vec3();
 
 /**
+ * The walk clips of training course 5, by level: a table the routine builds
+ * on its own stack, `MOV dword ptr [ESP + ...]` at `0x0044E2C3`..`0x0044E2E7`,
+ * and indexes with `MOVSX EAX, byte ptr [g_training_lesson]`.
+ */
+const TRAINING_WALK_BY_LESSON = [0x13c, 0x13b, 0x13a, 0x13a, 0x139];
+/** `CMP byte ptr [g_training_course], 0x5` at `0x0044E2BA`. */
+const TRAINING_WALK_COURSE = 5;
+
+/**
  * `ThrowerStateWalkDistance` — `FUN_0044E2A0`, class 0x31 state 18.
  *
- * Plays the set's walk clip and hands to the hub once the **2D** distance from
- * where it started reaches the float at descriptor tail `+0x04`. The walking
- * is the clip's own root motion, exactly as class 0x30's is; there is no
- * velocity here at all.
+ * Plays a walk and hands to the hub once the **2D** distance from where it
+ * started reaches the float at descriptor tail `+0x04`. The walking is the
+ * clip's own root motion, exactly as class 0x30's is; there is no velocity
+ * here at all. `[proved]`, read in full:
+ *
+ * ```
+ *        walk = g_GameMode == 2 && g_training_course == 5
+ *             ? {0x13C,0x13B,0x13A,0x13A,0x139}[(s8)g_training_lesson]
+ *             : g_class31_motion_sets[obj+0x130C][2 + (obj+0x34 >> 27 & 1)]
+ * sub 0  0044e32e  obj+0x136C |= 0x1000; obj+0x34 |= 0x2000
+ *        0044e358  SetCurrentActorMotionBlended(obj+0x194, walk,
+ *                      rand() % g_motion_play_length[walk], 5)
+ *        0044e366  obj+0x13C0..C8 = pos; sub 1
+ *        0044e385  obj+0x1370 = *(float *)(desc+4), and on
+ * sub 1  0044e3ad  obj+0x1374 = |(obj+0x13C0, obj+0x13C8) - (x, z)|
+ *        0044e3be  if (obj+0x1374 < obj+0x1370) return
+ *        0044e3c9  obj+0x13D8..E0 = pos
+ *        0044e3de  obj+0x136C &= ~0x1000; obj+0x34 &= ~0x2100
+ *        0044e3f3  state 7, sub 0
+ * other  return
+ * ```
+ *
+ * **A walking entrance does not flinch.** `obj+0x34 |= 0x2000` is
+ * `NoHitReaction`, which `ThrowerOnShot` returns on before it picks a
+ * reaction, so a shot on the walk costs hit points and changes nothing else
+ * until the walk is over. The exit takes down `ShotImmune` as well, which
+ * this state never raised.
+ *
+ * **The walk is one of a pair**, as the hub's is: bit 27 of the spawn's own
+ * flags word picks it. Stage 4's six state-18 `zskamere` are set 2, whose
+ * pair is 443 and 438, and four of them carry the bit.
+ *
+ * The training arm is transcribed and unreachable: the port plays no
+ * Training, so `g_GameMode` is never 2.
+ *
+ * It used to walk every spawn on the pair's first clip, raise and drop
+ * neither flag, keep no `+0x1370`/`+0x1374`, and run the distance test
+ * whatever the sub-state.
  */
 export function ThrowerStateWalkDistance(obj: ThrowerActor, rng: Rng): void {
+  const walk = G.g_GameMode === GameMode.Training
+      && G.g_training_course === TRAINING_WALK_COURSE
+    ? TRAINING_WALK_BY_LESSON[(G.g_training_lesson << 24) >> 24]
+    : ThrowerMotionOf(obj, ThrowerMotion.Walk + ((obj.flags >>> 27) & 1));
+
   if (obj.sub === 0) {
-    // `SetCurrentActorMotionBlended(obj+0x194, walk, rand() % play_length, 5)`
-    // at `0x0044E358` -- class 0x31's own call, unconditional. This used to
-    // borrow class 0x30's `ZombieSetMotionIfIdle`, whose `obj+0x136C` tests
-    // read bits that mean something else on a thrower (L3).
-    const walk = ThrowerMotionOf(obj, ThrowerMotion.Walk);
+    obj.flags2 |= ThrowerFlag.Walking;
+    obj.flags |= ActorFlag.NoHitReaction;
+    // Class 0x31's own call, unconditional. This used to borrow class 0x30's
+    // `ZombieSetMotionIfIdle`, whose `obj+0x136C` tests read bits that mean
+    // something else on a thrower (L3). [port-only] The test is for a bundle
+    // whose set has no walk: every shipped set names both, and the training
+    // table all five.
     if (walk !== undefined) {
       SetCurrentActorMotionBlended(obj, walk,
                                    rng.int(MotionPlayLength(obj, walk)),
                                    MotionFade.Quick);
     }
-    obj.arcFrom = { x: obj.pos.x, y: obj.pos.y, z: obj.pos.z };
-    obj.sub = 1;
+    obj.arcFrom.x = obj.pos.x;
+    obj.arcFrom.y = obj.pos.y;
+    obj.arcFrom.z = obj.pos.z;
+    obj.sub += 1;
+    obj.thr.walkTarget = obj.walkDistance;
+  } else if (obj.sub !== 1) {
+    return;
   }
-  const dx = obj.arcFrom.x - obj.pos.x;
+
   const dz = obj.arcFrom.z - obj.pos.z;
-  if (Math.hypot(dx, dz) < obj.walkDistance) return;
+  const dx = obj.arcFrom.x - obj.pos.x;
+  obj.thr.walkTravelled = Math.sqrt(dz * dz + dx * dx);
+  if (obj.thr.walkTravelled < obj.thr.walkTarget) return;
 
   obj.strikeStart.x = obj.pos.x;
   obj.strikeStart.y = obj.pos.y;
   obj.strikeStart.z = obj.pos.z;
+  obj.flags2 &= ~ThrowerFlag.Walking;
+  obj.flags &= ~(ActorFlag.NoHitReaction | ActorFlag.ShotImmune);
   obj.state = ThrowerState.StandAndDecide;
   obj.sub = 0;
 }
 
 /**
+ * `PUSH 0x2916a9; CALL PlaySoundId` at `0x0044E47B` --
+ * `COMMON\ENE_WALK6_22.WAV`, the step the entrance lands on.
+ */
+export const SND_ENTRANCE_DONE = 0x2916a9;
+
+/**
  * `ThrowerStateEntranceClip` — `FUN_0044E410`, class 0x31 state 19.
  *
- * One clip, named by the descriptor, played to two frames off its end. Stage
- * 2's `zstin` all name motion 296.
+ * One clip, named by the descriptor, cut to and played to two frames off its
+ * play length. Stage 2's `zstin` all name motion 296. `[proved]`, read in full:
+ *
+ * ```
+ * sub 0  0044e42f  obj+0x136C &= ~0x80000     ; CollideWorld down
+ *        0044e434  obj+0x34 |= 0x100          ; ShotImmune
+ *        0044e451  ActorSetMotion(obj+0x194, *(int *)(desc + 4))
+ *                  sub 1, and on
+ * sub 1  0044e477  if (obj+0x19C < g_motion_play_length[obj+0x1B4] - 2) return
+ *        0044e480  PlaySoundId(0x2916A9)
+ *        0044e491  obj+0x34 &= ~0x100; obj+0x136C |= 0x80000
+ *                  state 7, sub 0
+ * other  return
+ * ```
+ *
+ * **The entrance cannot be shot and does not collide with the world.**
+ * `ShotImmune` makes every hit a ricochet for the whole clip, and with
+ * `CollideWorld` down `ThrowerPushOutOfWorld` leaves the body where the clip
+ * takes it, through whatever it is climbing out of; both come back, with the
+ * landing step, on the frame it hands to the hub. The port used to play the
+ * clip on its one-shot channel with neither bit and no sound, waited the
+ * baked length rather than the play length, and sent a spawn with no clip
+ * straight to the hub.
  */
-export function ThrowerStateEntranceClip(obj: ThrowerActor): void {
+export function ThrowerStateEntranceClip(obj: ThrowerActor,
+                                         events?: Events): void {
   if (obj.sub === 0) {
-    const m = MotionOf(obj, obj.entranceMotion);
-    if (!m) { obj.state = ThrowerState.StandAndDecide; return; }
-    obj.action = { motion: obj.entranceMotion, ticks: 0 };
-    obj.rootActionCursor = -1;
+    obj.flags2 &= ~ThrowerFlag.CollideWorld;
+    obj.flags |= ActorFlag.ShotImmune;
+    ActorSetMotion(obj, obj.entranceMotion);
     obj.sub = 1;
+  } else if (obj.sub !== 1) {
+    return;
   }
-  const len = ActorClipLength(obj, obj.entranceMotion);
-  if (obj.action && ActorClipFrame(obj) < len - 2) return;
-  obj.action = null;
+  if (ActorPlayCursor(obj)
+      < MotionPlayLength(obj, ActorPlayMotion(obj)) - 2) return;
+  events?.emit("sound.play", { id: SND_ENTRANCE_DONE });
+  obj.flags &= ~ActorFlag.ShotImmune;
+  obj.flags2 |= ThrowerFlag.CollideWorld;
   obj.state = ThrowerState.StandAndDecide;
   obj.sub = 0;
 }

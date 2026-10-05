@@ -17,7 +17,8 @@
  *    words from the script.
  * 2. `CarriedPropHeldUpdate` (`FUN_00442820`, `g_prop_behaviours[1]`): seated
  *    between the carrier's bones 4 and 7 every frame, and **shootable** —
- *    `RegisterForShotTest` is called — but nothing reads the hit bit yet.
+ *    `RegisterForShotTest`, then `CarriedPropCheckShot` — so it can be shot
+ *    to pieces in the hands, which drops the carrier to its sub 4.
  * 3. On the carrier's cue frame `ZombieStateCarryProp` writes the release
  *    mode into `sub+0x10`, and the held routine's next frame calls
  *    `CarriedPropRelease` (`FUN_00442B90`): into the world, and for mode 4 a
@@ -442,10 +443,21 @@ function boneViewMatrix(carrier: Actor, bone: number, host: GameHost,
  * The draw is `seat · offset · RotX RotZ RotY`, in view space from an
  * identity, and the translation of that is the shot point. The carrier's
  * death takes it to {@link CarriedPropDrop}; the release mode appearing in
- * `sub+0x10` takes it to {@link CarriedPropRelease}.
+ * `sub+0x10` takes it to {@link CarriedPropRelease}. Then the shot test and
+ * the shot response, on whichever routine is installed by now:
+ *
+ * ```
+ * 00442928  CALL RegisterForShotTest
+ * 0044292f  CALL MatrixStackPop          ; back to the draw matrix
+ * 00442935  CALL CarriedPropCheckShot
+ * ```
+ *
+ * so a barrel or drum shot in the hands loses a hit point a hit and breaks
+ * at zero, which `ZombieStateCarryProp` sees as the prop's `obj+0x11C < 1`.
  */
 export function CarriedPropHeldUpdate(p: CarriedProp, host: GameHost,
-                                      cam: CameraPair | null): void {
+                                      cam: CameraPair | null, rng: Rng,
+                                      events?: Events): void {
   const carrier = ActorByAt(p.carrier);
   const m = MatIdentity();
   const seat = carrier && cam
@@ -480,6 +492,7 @@ export function CarriedPropHeldUpdate(p: CarriedProp, host: GameHost,
   }
   MatrixGetTranslation(m, p.shotPoint);
   RegisterForShotTest(p);
+  CarriedPropCheckShot(p, m, cam, rng, events);
 }
 
 /**
@@ -827,7 +840,7 @@ const BONE8 = 8;
  * CarriedPropCheckShot(obj); Pop
  * ```
  *
- * Unlike {@link CarriedPropHeldUpdate} it **checks shots while held**; the
+ * Like {@link CarriedPropHeldUpdate} it **checks shots while held**, but the
  * prop arrives shot-immune (`obj+0x34` bit `0x100`, `Boss4SpawnHeldProp`) and
  * `CarriedPropRelease` clears the bit, so a shot at a held prop is taken and
  * costs nothing. Its only allocator is `Boss4SpawnHeldProp` (`FUN_00494F70`).
@@ -1466,7 +1479,7 @@ export function CarriedPropPoolUpdate(rng: Rng, host: GameHost,
         CarriedPropInit(p);
         return true;
       case CarriedPropRoutine.Held:
-        CarriedPropHeldUpdate(p, host, cam);
+        CarriedPropHeldUpdate(p, host, cam, rng, events);
         return true;
       case CarriedPropRoutine.HeldInBone8:
         CarriedPropHeldInBone8Update(p, host, cam, rng, events);

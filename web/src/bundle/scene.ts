@@ -714,5 +714,12 @@ export interface HumanoidProgramJson {
   flags2: number;
   motion: number;
   phase: number;
+  /**
+   * The index in `cmds` of the block's first command, `blk + 8`, which
+   * `ScriptedHumanoidInit` (`FUN_004840D0`) points the cursor at. `cmds` is
+   * in address order and a program can jump back into commands stored before
+   * its block, so this is not always 0.
+   */
+  entry: number;
   cmds: HumanoidCmdJson[];
 }

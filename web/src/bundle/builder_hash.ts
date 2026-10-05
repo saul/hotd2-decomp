@@ -25,11 +25,11 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
   "approach.ts": "f2458fca4f4f943e775d2f73237eef7bf925b37dc38ba653bc89f80d3e800443",
   "arcscript.ts": "7c64fa78e89264425a0032c0918c846f8972905d848251d517112cd307722b35",
   "bams.ts": "f03b1290866a63ab2ae764d49bd15c57bd53c6b1a03794f7a0357e8dd842eb8f",
-  "bundle.ts": "d4283894d9489ca77bbc4596a57e81ec556b93ad6fb256d315795fff6717df04",
+  "bundle.ts": "d5b2149f3438fbd0999357fb2e74fdd41e782aa779dcccd3107b752c067ab827",
   "bytes.ts": "59b2f363e98da56e88ada59458239032e40cad3a27342659e213d849c0967168",
   "cam.ts": "fe50200cb57c6578681a121766e7a5f4ed2425d91996169f83a82e8375dd63c3",
   "campaths.ts": "fbe28df3265d37b60a006e937a926eca8546609aa29cc5d80e7f1fc9afd639be",
-  "characters.ts": "4351cbf2731539caaae208ce7e601d6652efbb062f31245c822d4a77390833f9",
+  "characters.ts": "2284c65d475d426a135e56f56240178042c69a6bf8ef2be1df80031bb93c8550",
   "charbuild.ts": "ca6053cb572c669cc535cfb18e3298f00a4c32169cd19e9ba35bbe0bc0532bf5",
   "charmotion.ts": "07ab2de53a6f6d18a47bc08ff3e5a73521756b947edbab5b05a61031695cc9a2",
   "class14.ts": "e143aab15d3067812e27d18bdd8b35b4b6fc45d6091948c7b8920bf4350a512a",
@@ -89,6 +89,7 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
   "game/class28/state.ts": "e13c9559854a8e7dae197167092904b7aae51cf2df9a568cdc2c74e704b4f3e3",
   "game/class2D/state.ts": "9da086cd2736d251162086e2a7b54b8dfee77ab65d49e10a4a231ac448c6ba6d",
   "game/class30/bonecels.ts": "3392ad3933ddf0e5951773cc492c850af53eeb62e5af592fe28bec2bdd7508b0",
+  "game/class30/drag_clips.ts": "12e5772d02adc33f786841f8474d3c4e262191fd6cd0ffd25ffc31cf231f7054",
   "game/class30/halved.ts": "6ded7bbc1e9fc4e3378988e25635d58323d8c3172ddcea6d1e6869e4c57a075c",
   "game/class30/motion_cue.ts": "f6613a00a619f7d1cf3ab47bef7bd4b6c7d678e4b40a892541cf954047f1848d",
   "game/class30/ring.ts": "54fe72079fb638c07aaa94c6dd9dd5da1eceeb25c412cea1775911f6311fdf9a",
@@ -203,4 +204,4 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
 };
 
 /** One digest over {@link BUILDER_FILES}, in filename order. */
-export const BUILDER_HASH = "5fcd621f6f4204987991260cfdb8636bc32453fffd701d31ac8e04c15d4c15af";
+export const BUILDER_HASH = "a3f321bf7ce42ce110bfab765b7d490a8908835cf28e4a2310f61730e2ef5282";

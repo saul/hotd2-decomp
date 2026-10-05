@@ -36,7 +36,7 @@ function humanoidScene(cmds: HumanoidProgram["cmds"],
   EnterPlay();
   const prog: HumanoidProgram = {
     charType: 1, removePath: 90, removeFrame: 900, flags2: 0,
-    motion: 10, phase: 0, cmds, ...over,
+    motion: 10, phase: 0, entry: 0, cmds, ...over,
   };
   SetGameTables(CHARS, undefined, undefined, { "12288": prog });
   G.g_active_cam_path = -1;
@@ -346,6 +346,29 @@ console.log("\nclass 0x25, op 10 picks an arm by g_active_player:");
     check("a mismatched op 10 with no skip leaves the VM rather than killing",
           !a.dead && a.visible && a.hum.routine === HumanoidRoutine.Idle,
           `dead ${a.dead} pc ${a.hum.pc}`);
+  }
+  {
+    // Stage 4 block 4's pair, shaped as the bundle lists player 2's program:
+    // in address order, so the first two commands are the tail player 1's
+    // block keeps and player 2's `op 15` jumps back into, and player 2's own
+    // block -- the `op 0` the Init points at (`blk + 8`, `0x00484282`) --
+    // comes after them. One player on slot 0, so player 2's figure goes.
+    const { a, events } = humanoidScene([
+      { op: HumanoidOp.WaitUntil, mode: HumanoidCond.Frames, a: 9999, b: 0 },
+      { op: HumanoidOp.End, mode: 0, a: 0, b: 0 },
+      { op: HumanoidOp.WaitThenPlay, mode: -1, a: 0, b: 0 },
+      { op: HumanoidOp.IfActivePlayer, mode: 0, a: 0, b: 0, skip: 5 },
+      { op: HumanoidOp.Kill, mode: 0, a: 0, b: 0 },
+      { op: HumanoidOp.SetPos, mode: 1, a: 0, b: 0, f0: 99, f1: 0 },
+      { op: HumanoidOp.WaitUntil, mode: HumanoidCond.Frames, a: 9999, b: 0 },
+    ], { entry: 2 });
+    check("the Init starts the program at its block's first command, not at "
+          + "the first one listed", a.hum.pc === 2, `pc ${a.hum.pc}`);
+    G.g_active_player = 0;
+    hFrame(a, events, rng);
+    check("...so player 2's figure tests the active player and goes, rather "
+          + "than playing player 1's tail beside player 1",
+          a.dead && !a.visible, `dead ${a.dead} pc ${a.hum.pc}`);
   }
   G.g_active_player = 0;
 }
@@ -661,7 +684,7 @@ function woundScene(cmds: HumanoidProgram["cmds"]):
   EnterPlay();
   SetGameTables(WOUND_CHARS, undefined, undefined, { "12288": {
     charType: 1, removePath: 100, removeFrame: 65, flags2: 1,
-    motion: 1024, phase: 0, cmds,
+    motion: 1024, phase: 0, entry: 0, cmds,
   } });
   G.g_active_cam_path = 79;
   G.g_cam_path_frame = 0;
@@ -871,7 +894,7 @@ console.log("\nclass 0x25, op 2 and the Init write the counter itself:");
   ResetGameGlobals();
   SetGameTables(JETTY_CHARS, undefined, undefined, { "12288": {
     charType: 1, removePath: 100, removeFrame: 65, flags2: 2, motion: 900,
-    phase: -1, cmds: [] } });
+    phase: -1, entry: 0, cmds: [] } });
   const seeded = ActorSpawn(0x3000, SpawnClass.ScriptedHumanoid, 1, "seed",
                             { visible: true }, new Rng(4));
   check("a phase of -1 is rand() % 10, drawn from the spawn's generator",

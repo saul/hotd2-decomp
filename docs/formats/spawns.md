@@ -328,6 +328,21 @@ So the pair is *one* character on screen, chosen at run time, and each stage-3
 cut scene that shows the player has a pair of its own — `0x3378`/`0x345C`,
 `0x54F0`/`0x55A4`, `0x69C8`/`0x6A5C` and `0x6C98`/`0x6D14`.
 
+**The second of a pair can share the first one's tail.** In stages 2, 4, 5 and
+6 the player-2 figure's program (`0x3A`) ends in an `op 15` that jumps back
+into the commands stored *before* its own block -- player 1's performance --
+rather than repeating them. `ScriptedHumanoidInit` (`FUN_004840D0`) points the
+cursor at its own block's first command, `blk + 8` (`MOV [ESI+0x1394], EBP`
+at `0x00484282`), and the bundle lists a program's commands in address order,
+so for these the first command listed is player 1's and not the program's
+start. `script.json`'s humanoid programs therefore carry **`entry`**, the
+index of `blk + 8`; it is not 0 for 13 of the 137 programs, every one a
+player-2 figure (`web/tools/checks/script_corpus.ts` counts them). The port
+started every program at index 0 until 2026-10-05, so each of those figures
+ran player 1's tail from the top, never reached its own `op 10`, and stood in
+the shot on top of player 1 -- stage 4 block 4's corridor
+(`?stage=4&original=1&entry=4&block=4&step=2&op=37`) is one.
+
 ### The generic props' `+0x11C`: a lifetime that is *sometimes also* a slot
 
 **[proved]** `PlaceGenericProp` (`FUN_00461CF0`) — the constructor 44 of class

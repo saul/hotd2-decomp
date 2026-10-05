@@ -415,6 +415,12 @@ export const CHECKS: readonly Check[] = [
       + " an exact `obj+0x19C >= 0x3C` against a play clock that is 0 for a "
       + "clip nothing carried",
         NEEDS_BUNDLE),
+  check("bundle:state_clips", ["node", "tools/run_ts.mjs", "tools/checks/state_clips.ts"],
+        "that every clip a class-0x30 state names as an immediate rather than "
+      + "in a script is baked for each spawn that can be in that state -- the "
+      + "only check that sees a state played in the clip it inherited, because "
+      + "`ActorSetMotionBlended` on a clip the bundle lacks is silent",
+        NEEDS_BUNDLE),
   check("bundle:cam_waits", ["node", "tools/run_ts.mjs", "tools/checks/cam_waits.ts"],
         "that every `wait_camera_path_frame <n>` asks for a frame the play in "
       + "force actually publishes -- the only check that holds the three "

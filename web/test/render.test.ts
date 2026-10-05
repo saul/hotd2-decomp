@@ -2144,7 +2144,8 @@ console.log("\nclass 0x25's object-path draw is under the actor, not at it:");
   // descriptor word; the program is here because that is where the Init gets
   // it from.
   T.humanoids = { "4128": { charType: 59, removePath: 124, removeFrame: 0,
-                            flags2: 1, motion: 717, phase: 0, cmds: [] } };
+                            flags2: 1, motion: 717, phase: 0, entry: 0,
+                            cmds: [] } };
   ScriptedHumanoidInit(a);
   a.hum.pathSlot = 340;
   layer.update(ctx);
@@ -3801,7 +3802,7 @@ console.log("\nthe player's character survives its own op 10:");
   const HUMANOIDS = {
     [String(AT)]: {
       charType: 0x39, removePath: 129, removeFrame: 0, drawVariant: 0,
-      flags2: 2, motion: 890, phase: -1,
+      flags2: 2, motion: 890, phase: -1, entry: 0,
       cmds: [
         { op: HumanoidOp.WaitThenPlay, mode: -1, a: 0, b: 0 },
         { op: HumanoidOp.SetHandModel, mode: 1, a: 0, b: 0 },
@@ -4150,7 +4151,7 @@ console.log("\nthe shot: a class-0x25 humanoid is not in the shot test");
   // gun is live: held until camera path 79 reaches frame 100.
   SetGameTables(CHARS as never, undefined, undefined, { [String(AT)]: {
     charType: 15, removePath: 100, removeFrame: 65, flags2: 1, motion: 1024,
-    phase: 0, cmds: [{ op: 1, mode: -1, a: 0, b: 0 },
+    phase: 0, entry: 0, cmds: [{ op: 1, mode: -1, a: 0, b: 0 },
                      { op: 0, mode: 1, a: 79, b: 100 }],
   } } as never);
   const chars = new CharacterLayer();

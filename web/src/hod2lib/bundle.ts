@@ -1236,6 +1236,12 @@ export function scriptedHumanoidsJson(evt: evtlib.EvtFile,
       flags2: i16(raw, blk + 2),
       motion: i16(raw, blk + 4),
       phase: i16(raw, blk + 6),
+      // Where the program starts: `ScriptedHumanoidInit` points `obj+0x1394`
+      // at `blk + 8` (`0x00484282`). That is not always `cmds[0]`: the list
+      // is sorted by address, and a program whose `op 15` jumps back into
+      // commands stored before its own block -- another spawn's, shared --
+      // lists those first.
+      entry: index.get(blk + 8) ?? 0,
       cmds,
     };
   }

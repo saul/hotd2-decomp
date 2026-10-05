@@ -950,6 +950,18 @@ the port, and so the reason the bug existed rather than a fact about the game.
 by retiring it, read the exe's handler before believing it does nothing**;
 and a part named for what it looks like is a guess about what draws the rest.
 
+**L106 -- A program turned into a list keeps its edges and can lose its
+start.** The exporter turns each class-0x25 program into an address-sorted
+command list with its jumps as indices, so that "the next command" stays
+`pc + 1`. The port then started every program at index 0, and for 13 of the
+137 that is not where it starts: a player-2 figure whose `op 15` jumps back
+into player 1's commands, stored before its own block, lists those first. So
+the figure ran player 1's tail, never reached the `op 10` that should have
+removed it, and both player characters stood in the same spot. The `op 10`
+fix before it (B21) was right and was tested at index 0 only. **When code
+becomes data with its addresses replaced, carry the entry point as data too**,
+and test a program whose entry is not its first element.
+
 ---
 
 ## Running the tools

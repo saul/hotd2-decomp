@@ -39,10 +39,14 @@ console.log("\nan entrance state is counted from its first frame:");
   const rng = new Rng(31);
   const events = new Events();
   // Stage 1 block 4 step 5's pair, in shape: class 0x30 on the ledge at
-  // y = 61 with `ZombieStateDelayedLeap` (26) as the initial state.
+  // y = 61 with `ZombieStateDelayedLeap` (26) as the initial state, and the
+  // tail that state reads with no test -- a drop to the floor at `0x39DC`'s
+  // gravity.
   const drop = (at: number): Actor => ActorSpawn(at, SpawnClass.Zombie, 1,
     "ledge dropper", { initialState: ZombieState.DelayedLeap, hp: 100,
-                       maxHp: 100, visible: true, pos: vec3(0, 61, -20) }, rng);
+                       maxHp: 100, visible: true, pos: vec3(0, 61, -20),
+                       delayedLeap: { delay: 0, dest: [0, 0, -30],
+                                      gravity: 0.03674 } }, rng);
 
   ResetGameGlobals();
   EnterPlay();

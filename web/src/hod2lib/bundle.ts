@@ -1826,29 +1826,60 @@ export function carriedPropDrawSlots(
 }
 
 /**
- * The asset slots a stage's class-0x33 **selector-4 descriptors** ask for.
+ * `ScriptedCarrierUpdate33` (`FUN_004331D0`)'s literal draws, by the slot its
+ * descriptor names: slot `0x1B0E` (stage 5's car) adds `0x899`, `0x8CB` twice,
+ * `0x1B0A` and `0x1B0D` (`0x0043362B`..`0x00433813`); every other slot adds
+ * the two 22-slot loops `0x24A..0x25F` and `0x260..0x275` it cycles while the
+ * ride runs (`0x004334E9`..`0x0043361B`). Every carrier can raise the fire,
+ * `0x1AAB..0x1AD2` (`0x004332B7`..`0x004332C8`).
+ */
+export const CARRIER33_SLOT_CAR = 0x1b0e;
+export const CARRIER33_CAR_PARTS = [0x899, 0x8cb, 0x1b0a, 0x1b0d];
+export const CARRIER33_LOOPS = Array.from({ length: 0x275 - 0x24a + 1 },
+                                          (_, i) => 0x24a + i);
+export const CARRIER33_FIRE = Array.from({ length: 0x1ad2 - 0x1aab + 1 },
+                                         (_, i) => 0x1aab + i);
+
+/**
+ * The asset slots a stage's class-0x33 **selector-1 and selector-4
+ * descriptors** ask for.
  *
  * Not in {@link ACTOR_SLOTS}, for the same reason {@link humanoidDrawSlots} is
  * not: the slot is a property of the descriptor and not of the class.
  * `ScriptedPushableUpdate33` (`FUN_00433B70`) writes `tail+0x00` to
  * `obj+0x13F0` and draws it, and the two shipped spawns both name 4196 --
  * `komono_7.bin` part 0, a chair. Keying it on the class would put a chair in
- * all six bundles for the benefit of one room.
+ * all six bundles for the benefit of one room. `ScriptedCarrierUpdate33`
+ * (`FUN_004331D0`) does the same with its own `tail+0x00` -- stage 2's boats
+ * `0x1A35` and `0x1A36`, stage 5's car `0x1B0E` -- and draws the literal
+ * slots {@link CARRIER33_CAR_PARTS}, {@link CARRIER33_LOOPS} and
+ * {@link CARRIER33_FIRE} beside it.
  *
  * Without this the placement travels, the actor is made, the push works and
  * the client has **no geometry to clone**, which is class 0x52's old bug from
  * the other side: there it was a model nothing could hit, here it would be a
- * chair nothing could see.
+ * chair nothing could see -- and, until the carrier's draw was ported, it
+ * was stage 2 block 9's boat.
  */
 export function sceneryDrawSlots(
-    placements: readonly { class33_push?: { slot?: number } | null }[],
+    placements: readonly {
+      class33_push?: { slot?: number } | null;
+      class33?: { slot?: number } | null;
+    }[],
 ): number[] {
   const out: number[] = [];
+  const add = (slot: number) => {
+    if (slot > 0 && !out.includes(slot)) out.push(slot);
+  };
   for (const p of placements) {
-    const slot = p.class33_push?.slot;
-    if (typeof slot === "number" && slot > 0 && !out.includes(slot)) {
-      out.push(slot);
-    }
+    const push = p.class33_push?.slot;
+    if (typeof push === "number") add(push);
+    const ride = p.class33?.slot;
+    if (typeof ride !== "number") continue;
+    add(ride);
+    for (const s of ride === CARRIER33_SLOT_CAR ? CARRIER33_CAR_PARTS
+                                                : CARRIER33_LOOPS) add(s);
+    for (const s of CARRIER33_FIRE) add(s);
   }
   return out;
 }
@@ -2077,7 +2108,7 @@ export async function actorSlotEntry(
     name: "slots_actor",
     routine: "asset-slot actor draws (classes 0x13, 0x14, 0x32, 0x40, 0x42, "
       + "0x43, 0x51, 0x52; class 0x25 variant 3; class 0x26 subtypes 6 and 7; "
-      + "class 0x33 selector 4; class 0x41 type 1's water tiles)",
+      + "class 0x33 selectors 1 and 4; class 0x41 type 1's water tiles)",
     worldSpace: false,
     parts: parts.map(([p]) => p),
     note: "actor models drawn by asset slot; hidden, cloned per live actor",

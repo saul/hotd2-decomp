@@ -3379,7 +3379,7 @@ the evt's `hp` field is what picks it. It writes itself into `g_carrier_object`
 | bit | raised at | read by |
 |---|---|---|
 | `0x10000000` | `0x00433203`, when `g_script_flags[tail+0x20] == 1` or `(s32)tail+0x18 == obj+0x1370` | `ZombieStateRideCarrier` (class 0x30 state 29) — the ride is over |
-| `0x40000000` | `0x00433280`, once `tail+0x14` is not `-1.0f` and `obj+0x1370` has passed it | `ZombieStateDelayedStrikeInPlace` (state 32) at `0x0045EAFE` — give up to state 10 after `0x14` frames |
+| `0x40000000` | `0x00433280`, on the frame `obj+0x1370` **equals** `tail+0x14` (`FCOMP` / `TEST AH,0x40`), when that is not `-1.0f` | `ZombieStateDelayedStrikeInPlace` (state 32) at `0x0045EAFE` — give up to state 10 after `0x14` frames |
 
 Both reads are `[EAX + 0x34]`. **Not `obj+0x136C`**: `0x40000000` there is
 `ZombieFlag2.CollideActors`, half of the `|= 0x60000000` that `EnemyZombieInit`

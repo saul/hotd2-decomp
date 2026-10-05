@@ -116,7 +116,7 @@ because a cross-stage gate could never fire.
 | `0x00416B00` | `obj_416b00` | `0x194` | `PlayerShotEffectsThink`: the three per-shot rings, all runtime. **Not placed** -- see below |
 | `0x00452320` | `obj_452320` | `0x148`, `0x14D`, `0x14E`, `0x19A`–`0x1A1` | **[proved] a car** — the stage-2 opening vehicle. See below. |
 | `0x00432840` | `obj_432840` | `0x145`, `0x146`, `0x149`, `0x14A` | class `0x28`; route chosen by `obj+0x11C`, **not** by camera path. Posed by the port's actor (`game/class28/`) |
-| `SUB_004331D0` | `obj_4331d0` | — | class `0x33`, 9 draw sites; **not placed**, see below |
+| `SUB_004331D0` | `obj_4331d0` | — | class `0x33`, 9 draw sites; **not placed** -- the routine is ported in `game/class33/`, which draws the carrier from its descriptor |
 
 ### The stage-2 car, and why the 9-vs-22 split nearly lost it
 
@@ -198,6 +198,13 @@ spawn descriptor**. Two independent checks:
 So `obj+0x1390` is a **per-class parameter block distinct from the evt
 descriptor**, and `[open]` where it lives. Without it neither rig has a route,
 so neither is placed.
+
+**Superseded for class `0x33`.** The check above read `+0x0C` from the
+descriptor's head. `SpawnFromDescriptor` (`FUN_00408A20`) sets `obj+0x1390 =
+descriptor + 0x24` (`docs/formats/spawns.md`, *The three spawn allocators*),
+and at `descriptor + 0x24 + 0x0C` the three carriers carry op_ slots 336, 338
+and 382. The carrier is not placed as a rig because `game/class33/` runs
+`ScriptedCarrierUpdate33` and records its draws.
 
 Gating `obj_484ff0_props` by stage bounding box instead was tried and
 rejected: levels span thousands of units, so the box accepts the props in

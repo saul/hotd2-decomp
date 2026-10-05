@@ -183,9 +183,10 @@ function DrawSlotFor(a: Actor): number | null {
     case SpawnClass.ScriptedScenery:
       // `obj+0x13F0`, which `ScriptedPushableUpdate33` (`FUN_00433B70`) seeds
       // from its descriptor tail and never changes. Selector 1's draw is a
-      // whole chain of sprite loops and sub-models the rig writer already
-      // exports, so it is deliberately not here: `a.scenery.slot` is non-zero
-      // only once a selector-4 object has seeded itself.
+      // fire, the model and a chain of sprite loops or sub-models, recorded
+      // by `game/class33/` and placed by {@link drawCarrier33}, so it is not
+      // here: `a.scenery.slot` is non-zero only once a selector-4 object has
+      // seeded itself.
       return a.hp === ScriptedScenerySelector.Pushable
         ? (a.scenery.slot || null) : null;
     case SpawnClass.HordeSpawner:
@@ -551,6 +552,7 @@ export class SlotModelLayer implements System<RenderContext> {
     }
 
     this.drawCarrierEffects(seen);
+    this.drawCarrier33(seen);
     this.drawPropStrips(seen);
     this.drawBoss2Flipbooks(ctx, seen);
     this.drawLandingRings(seen);
@@ -637,6 +639,23 @@ export class SlotModelLayer implements System<RenderContext> {
       _m.fromArray(d.m);
       this.extra(`c32t:${task.id}`, d.slot, _m, seen, d.alpha, d.light,
                  d.layer);
+    }
+  }
+
+  /**
+   * Class 0x33 selector 1's draws, every one of them: `ScriptedCarrierUpdate33`
+   * (`FUN_004331D0`) records each `AssetDrawSlot` it makes with its world
+   * matrix (`game/class33/`) -- the fire, the model at `obj+0x118`'s scale,
+   * and stage 5's car parts or the two sprite loops.
+   */
+  private drawCarrier33(seen: Set<number | string>): void {
+    for (const a of G.g_object_list) {
+      if (a.despawned || a.cls !== SpawnClass.ScriptedScenery) continue;
+      if (a.hp !== ScriptedScenerySelector.Carrier) continue;
+      a.scenery.draws.forEach((d, i) => {
+        _m.fromArray(d.m);
+        this.extra(`c33:${i}:${a.at}`, d.slot, _m, seen);
+      });
     }
   }
 

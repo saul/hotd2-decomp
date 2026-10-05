@@ -27,6 +27,7 @@ import { HIT_SLOT_CLAIMED } from "../../src/game/hit_slots";
 import { ZombiePushOutOfWorldAndActors } from "../../src/game/class30/ground";
 import { SpawnClass } from "../../src/game/spawn_class";
 import { vec3 } from "../../src/game/vec";
+import { MatrixTransformPoint } from "../../src/game/matrix";
 import { RunPendingInits, SpawnSlotActors } from "../../src/game/director";
 import {
   check, TYPE, CHARS, SCENE_MAJOR_PLAYING, spawnZombie, EnterPlay,
@@ -161,15 +162,39 @@ console.log("\nclass 0x33 selector 1: the carrier, and the room it opens:");
     tick(c, 1);
     check("...and then it is up", (c.flags & ActorFlag.FireLoop) !== 0,
           `after ${c.scenery.effectFrames}`);
-    const frozen = c.scenery.pathFrame;
-    tick(c, 60);
-    check("...after which the routine returns before its own ride, so the "
-          + "object stops where it burned",
-          c.scenery.pathFrame === frozen, String(c.scenery.pathFrame));
+    check("...and stage 5's cursor has already stopped on `tail+0x10` (590)",
+          c.scenery.pathFrame === 590, String(c.scenery.pathFrame));
+  }
+  {
+    // `0x004333B8` falls through to `0x004333BB`: the fire does not return.
+    // The port once did, from pseudocode that ended early, and froze the
+    // carrier where it burned. Stage 5's own numbers cannot tell the two
+    // apart -- its ride has ended ten frames before the fire -- so the
+    // descriptor's end is moved past the fire.
+    reset();
+    const c = makeCarrier({ ...STAGE5(), path_end: 700 });
+    const sounds: number[] = [];
+    const events = new Events();
+    events.on("sound.play", (e) => sounds.push(e.id));
+    const frame = () => ({ ...carrierFrame(), events });
+    for (let i = 0; i < 580 - CAM_AT_SPAWN + 2 + 0x13; i++) {
+      ScriptedCarrierUpdate33(c, frame());
+    }
+    check("a carrier whose ride outlasts its effect is burning by now",
+          (c.flags & ActorFlag.FireLoop) !== 0,
+          `after ${c.scenery.effectFrames}`);
+    const burning = c.scenery.pathFrame;
+    for (let i = 0; i < 30; i++) ScriptedCarrierUpdate33(c, frame());
+    check("...and it rides on while it burns -- the fire is drawn and the "
+          + "routine carries on into its ride",
+          c.scenery.pathFrame === burning + 30,
+          `${burning} -> ${c.scenery.pathFrame}`);
     G.g_cam_path_frame = 650;
-    tick(c, 5);
-    check("...and it does not reach its despawn either, camera cue or not",
-          !c.despawned);
+    ScriptedCarrierUpdate33(c, frame());
+    check("...and leaves on its camera cue with `CAR_FIRE_22_OFF` (0x823A9), "
+          + "the sound only a burning carrier's despawn plays",
+          c.despawned && sounds.at(-1) === 0x823a9,
+          `despawned ${c.despawned} last 0x${(sounds.at(-1) ?? 0).toString(16)}`);
   }
   {
     reset();
@@ -225,6 +250,106 @@ console.log("\nclass 0x33 selector 1: the carrier, and the room it opens:");
           + "frame (`0x004333DF`)",
           c.despawned && G.g_cam_path_frame === CAM_AT_SPAWN,
           `despawned ${c.despawned} frame ${G.g_cam_path_frame}`);
+  }
+
+  // -- the draw ------------------------------------------------------------
+  //
+  // `0x004332DA`..`0x0043382F`, read off the listing. The pose is off the
+  // path on purpose: a turn and a tilt in every angle, so a draw that took
+  // the wrong word, or none, cannot land on the right point.
+  {
+    const POSE = { x: 12, y: 3, z: -40, pitch: 0x0400, yaw: 0x2000, roll: 0x0200 };
+    const host = { ...NULL_HOST, objectPath: () => ({ ...POSE }) };
+    const frame = () => ({ ...carrierFrame(), host });
+    const at = (m: number[], x: number, y: number, z: number) => {
+      const out = vec3();
+      MatrixTransformPoint(m, vec3(x, y, z), out);
+      return out;
+    };
+    const near = (a: { x: number; y: number; z: number },
+                  b: { x: number; y: number; z: number }) =>
+      Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z) < 1e-3;
+
+    // Stage 2 block 9's boat, slot 0x1A36 -- the one the user found missing.
+    reset();
+    const boat = makeCarrier({ ...STAGE2(), slot: 0x1a36 });
+    ScriptedCarrierUpdate33(boat, frame());
+    const d = boat.scenery.draws;
+    check("the boat draws its own slot, `obj+0x13F0`, first",
+          d[0]?.slot === 0x1a36, d.map((x) => x.slot.toString(16)).join());
+    check("...at the ride's position", near(at(d[0].m, 0, 0, 0), POSE),
+          JSON.stringify(at(d[0].m, 0, 0, 0)));
+    // `obj+0x118` is 2.5 for this slot (`0x004339E1`): a unit along any of
+    // the model's axes is 2.5 in the world.
+    const ax = at(d[0].m, 1, 0, 0);
+    check("...scaled by `obj+0x118`, 2.5 for slots 0x1A35 and 0x1A36",
+          Math.abs(Math.hypot(ax.x - POSE.x, ax.y - POSE.y, ax.z - POSE.z)
+                   - 2.5) < 1e-4);
+    check("...and its yaw is the path's plus a quarter turn, `obj+0x68`",
+          boat.yaw === POSE.yaw + 0x4000, String(boat.yaw));
+    check("...then the two sprite loops, from 0x24A and 0x260, while the "
+          + "ride runs", d.length === 3 && d[1].slot === 0x24a
+            && d[2].slot === 0x260,
+          d.map((x) => x.slot.toString(16)).join());
+    // The loops sit 25 along the object's own Z without the 2.5: the same
+    // point as 10 along the model's.
+    check("...25 units along the object's Z, outside the model's scale",
+          near(at(d[1].m, 0, 0, 0), at(d[0].m, 0, 0, 10)),
+          `${JSON.stringify(at(d[1].m, 0, 0, 0))} vs ${JSON.stringify(at(d[0].m, 0, 0, 10))}`);
+    for (let i = 0; i < 0x16; i++) ScriptedCarrierUpdate33(boat, frame());
+    check("...each loop stepped after its draw and wrapped at its 22nd slot",
+          boat.scenery.draws[1]?.slot === 0x24a
+            && boat.scenery.draws[2]?.slot === 0x260,
+          boat.scenery.draws.map((x) => x.slot.toString(16)).join());
+    for (let i = 0; i < 200; i++) ScriptedCarrierUpdate33(boat, frame());
+    check("...and once `tail+0x10` ends the ride, the model alone",
+          boat.scenery.draws.length === 1
+            && boat.scenery.draws[0].slot === 0x1a36,
+          boat.scenery.draws.map((x) => x.slot.toString(16)).join());
+
+    // Stage 5's car: five parts, the wheels turning `0x2000` a frame.
+    reset();
+    const car = makeCarrier(STAGE5());
+    ScriptedCarrierUpdate33(car, frame());
+    check("stage 5's car draws 0x1B0E, then 0x899, both wheels, 0x1B0A and "
+          + "0x1B0D, and no sprite loop",
+          car.scenery.draws.map((x) => x.slot).join()
+            === [0x1b0e, 0x899, 0x8cb, 0x8cb, 0x1b0a, 0x1b0d].join(),
+          car.scenery.draws.map((x) => x.slot.toString(16)).join());
+    check("...the car itself at scale 1.0, `obj+0x118`'s other value",
+          Math.abs(Math.hypot(...(() => {
+            const p = at(car.scenery.draws[0].m, 1, 0, 0);
+            return [p.x - car.pos.x, p.y - car.pos.y, p.z - car.pos.z];
+          })()) - 1) < 1e-4);
+    check("...5 units short of the path in x (`0x004339CD`)",
+          car.pos.x === POSE.x - 5, String(car.pos.x));
+    // The two wheels share an axle line through the object: 0x8CB at
+    // (0, 3.5437, 17.0281) and (0, 3.5437, -12.384) of the object's frame.
+    const front = at(car.scenery.draws[2].m, 0, 0, 0);
+    const back = at(car.scenery.draws[3].m, 0, 0, 0);
+    check("...the wheels 29.41 apart along the car",
+          Math.abs(Math.hypot(front.x - back.x, front.y - back.y,
+                              front.z - back.z) - (17.0281 + 12.384)) < 1e-3);
+    ScriptedCarrierUpdate33(car, frame());
+    check("...and `obj+0x135C` turns them 0x2000 a frame",
+          car.scenery.wheelTurn === 0x4000, String(car.scenery.wheelTurn));
+
+    // The fire: at the descriptor's point, the first slot 0x1AAC.
+    reset();
+    const lit = makeCarrier(STAGE5());
+    for (let i = 0; i < 580 - CAM_AT_SPAWN + 2 + 0x13; i++) {
+      ScriptedCarrierUpdate33(lit, frame());
+    }
+    const fire = lit.scenery.draws[0];
+    check("the fire is drawn first, from 0x1AAC -- the cursor steps before "
+          + "its draw",
+          (lit.flags & ActorFlag.FireLoop) !== 0 && fire?.slot === 0x1aac,
+          `${fire?.slot.toString(16)} flags 0x${(lit.flags >>> 0).toString(16)}`);
+    check("...at the descriptor's effect point, `tail+0x24`, not the car's",
+          near(at(fire.m, 0, 0, 0), { x: 678.8, y: -70, z: -2616.5 }),
+          JSON.stringify(at(fire.m, 0, 0, 0)));
+    check("...and the car is still drawn behind it",
+          lit.scenery.draws[1]?.slot === 0x1b0e);
   }
 
   // -- stage 5 block 2's room, end to end ---------------------------------

@@ -91,6 +91,31 @@ export interface ScriptedSceneryTail {
    * is a different actor.
    */
   effectFrames: number;   // +0x1334
+  /**
+   * `obj+0x118` — the uniform scale the draw puts on the main slot. The ride
+   * writes it every step: `1.0`, or `2.5` for slots `0x1A35` and `0x1A36`
+   * (`0x004339B3`, `0x004339E1`, `0x004339F3`). Not `Actor.scale`, which is
+   * the skinned model's `model+0x116C`.
+   */
+  drawScale: number;      // +0x118
+  /** `obj+0x1354` — the first sprite loop, `0x24A..0x25F`, seeded `0x24A`. */
+  loopA: number;          // +0x1354
+  /** `obj+0x1358` — the second sprite loop, `0x260..0x275`, seeded `0x260`. */
+  loopB: number;          // +0x1358
+  /** `obj+0x135C` — the wheels' turn, `+0x2000` a frame, slot `0x1B0E` only. */
+  wheelTurn: number;      // +0x135C
+  /** `obj+0x1364` — the fire loop's slot, stepped before it is drawn. */
+  fireSlot: number;       // +0x1364
+  /** `obj+0x1368` — the slot the fire loop wraps back to, `0x1AAB`. */
+  fireFirst: number;      // +0x1368
+  /** `obj+0x136C` — the fire loop's last slot, `0x1AD2`. */
+  fireLast: number;       // +0x136C
+  /**
+   * `[port-only]` Every `AssetDrawSlot` the update made this frame, with the
+   * world matrix the stack held: `render/slotmodels.ts` draws them. Cleared
+   * at the top of each update, so a frame that draws nothing leaves none.
+   */
+  draws: { slot: number; m: number[] }[];
 }
 
 /**
@@ -100,5 +125,9 @@ export interface ScriptedSceneryTail {
  * the engine's words are whatever the pool held, and this is that written out.
  */
 export function makeScriptedSceneryTail(): ScriptedSceneryTail {
-  return { pathFrame: 0, pathEnd: 0, pathSlot: -1, slot: 0, effectFrames: 0 };
+  return {
+    pathFrame: 0, pathEnd: 0, pathSlot: -1, slot: 0, effectFrames: 0,
+    drawScale: 0, loopA: 0, loopB: 0, wheelTurn: 0,
+    fireSlot: 0, fireFirst: 0, fireLast: 0, draws: [],
+  };
 }

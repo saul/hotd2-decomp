@@ -25,7 +25,7 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
   "approach.ts": "f2458fca4f4f943e775d2f73237eef7bf925b37dc38ba653bc89f80d3e800443",
   "arcscript.ts": "7c64fa78e89264425a0032c0918c846f8972905d848251d517112cd307722b35",
   "bams.ts": "f03b1290866a63ab2ae764d49bd15c57bd53c6b1a03794f7a0357e8dd842eb8f",
-  "bundle.ts": "74c5c29afec3d462c3bb2604bd5ab5ef2dee5f1d29c01653180e89aff987bc8f",
+  "bundle.ts": "96b0d97dcdfc9e84b94b2f92cebc845a0aebbae084acb328149257d6eaac2222",
   "bytes.ts": "59b2f363e98da56e88ada59458239032e40cad3a27342659e213d849c0967168",
   "cam.ts": "fe50200cb57c6578681a121766e7a5f4ed2425d91996169f83a82e8375dd63c3",
   "campaths.ts": "fbe28df3265d37b60a006e937a926eca8546609aa29cc5d80e7f1fc9afd639be",
@@ -97,7 +97,7 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
   "game/class31/state.ts": "96d181421fbfed4611ab348b17c43262598f836438c5e09e5d3325c8052f8ee2",
   "game/class32/bone_parts.ts": "2c0d1d68ae80e2fba3baf99f9665a7a420412b18d804c66a1ffa6ed4211b3838",
   "game/class32/state.ts": "00c277713bcac0ff979da5b13cd15500acae2129c37b4ca49440a036808136e6",
-  "game/class33/state.ts": "6b962d5a160bb75c94188eaa4827988e9f4ac4a05fded8ce4043d5e11c25c81e",
+  "game/class33/state.ts": "b33e5512547da9e593247e8aac837209ca9f9eaa38606c134c48aba7a389ee70",
   "game/class40/state.ts": "c9b6483157c70bc4a12766e0dadb6f4e6a1f83aec7471818127f111624781328",
   "game/class40/submodel.ts": "b6dfac762802387c64d5d6692fef7ed6f3f1b15933643f57a75108f72d21a785",
   "game/class41/group.ts": "aa66aedbc0ecec00cd9413ab396bcdc6796d7e253c429f2ef647af81f48ce034",
@@ -202,4 +202,4 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
 };
 
 /** One digest over {@link BUILDER_FILES}, in filename order. */
-export const BUILDER_HASH = "2e996813bd6d1dd2325b266236bf167eeae8b8b8f3771b35379d2b0f6f514a9b";
+export const BUILDER_HASH = "f3f4541d3fccfa50ee58699eb71878f307be52ebfa0b8fa6be8ffedc0ffbd942";

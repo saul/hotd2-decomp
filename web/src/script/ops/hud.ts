@@ -38,21 +38,20 @@ export const OPS: Record<number, OpImpl> = {
     },
     0x2d: {                                     // play_dialogue
       status: "done",
-      // EvtOpPlayDialogue2D returns before both the voice and the subtitle
-      // task when the skip flag is up.
+      // `EvtOpPlayDialogue2D` (`FUN_00435B80`), through the host for its
+      // events bus: it picks the variant, plays the voice and allocates the
+      // subtitle task (`game/dialogue.ts`), and says nothing while the skip
+      // flags are up.
       //
       // Nothing happens on a quiet replay, and that is deliberate rather than
       // an oversight: a seek arrives at an address without having spent the
-      // frames in between, so a caption started on the way would be one the
+      // frames in between, so a subtitle started on the way would be one the
       // countdown never had a chance to expire -- and the voice would play.
       run: (w, op, quiet) => {
-        if (w.skipRequested) return "not said — skipping";
         if (quiet || op.message_group === undefined) return undefined;
         const m = w.host.showMessage(op.message_group);
-        if (!m) return undefined;
-        w.captionGroup = op.message_group;
-        w.captionFrames = m.frames;
-        return m.note;
+        if (m) return m.note;
+        return w.skipRequested ? "not said — skipping" : undefined;
       },
     },
 };

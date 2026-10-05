@@ -114,7 +114,8 @@ web/src/
                 shooting, lighting, fog, draw order, free roam, debug overlays
   audio/        bgm.ts (`PlaySoundId`'s dispatch and the mixer), stream.ts
                 (what channel 0xF plays, byte for byte)
-  hud/          hud.ts: the shutter bars, the caption, the screen sprites
+  hud/          hud.ts: the shutter bars and the screen sprites (the
+                subtitles' glyphs among them)
   ui/           React: App.tsx, the store, useSlice, ErrorBoundary, shortcuts,
                 panels/
 ```
@@ -489,12 +490,12 @@ the hook three times.
    registers a claim on its slice in an effect (never during render, which
    strict mode runs twice); `app/` asks `wants(slice)`.
 6. **One writer per pixel.** React renders every element. Where a layer writes
-   geometry — the shutter bars, the caption, the crosshair — React renders the
+   geometry — the shutter bars, the crosshair — React renders the
    node and hands it across through `UiHost`. Nothing under `web/src/` calls
    `appendChild` or its siblings.
 7. **State the script drives belongs to the script**, not the layer that
-   draws it: the caption's countdown is on `Walker`, the shutter's words are in
-   `G`, and `hud/` holds nothing.
+   draws it: the subtitle is a task in `G` (`game/dialogue.ts`), the shutter's
+   words are in `G`, and `hud/` holds nothing.
 
 Two rules need an AST, and `web/tools/verify_ui.mjs` (`npm run verify:ui`)
 holds them: `useSlice` selectors return fields, and `store.demand` is called

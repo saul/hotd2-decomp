@@ -1056,3 +1056,20 @@ console.log("\nclass 0x25 answers the sidebar (B13's other half):");
   check("...and the camera pair it is waiting for",
         !!d?.summary.includes("cam (67,85)"), d?.summary);
 }
+
+console.log("\nclass 0x25, a skipped cut scene tears the actor down:");
+{
+  // `MOV ECX,[0x009a2230]` is `ScriptedHumanoidUpdate`'s first instruction
+  // (`0x004842A0`): with `g_cutscene_skipping` up the actor is killed before
+  // its program runs, its removal cue unread.
+  const rng = new Rng(25);
+  const { a, events } = humanoidScene([
+    { op: HumanoidOp.WaitUntil, mode: HumanoidCond.Frames, a: 9999, b: 0 },
+  ]);
+  ScriptedHumanoidUpdate(a, { dt: 1 / 60, rng, host: NULL_HOST, events });
+  check("it lives through a frame with no skip", !a.dead);
+  G.g_cutscene_skipping = 1;
+  ScriptedHumanoidUpdate(a, { dt: 1 / 60, rng, host: NULL_HOST, events });
+  G.g_cutscene_skipping = 0;
+  check("...and dies on the frame g_cutscene_skipping is up", a.dead);
+}

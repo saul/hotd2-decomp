@@ -16,6 +16,7 @@ import { seekTo } from "../../src/script/seek";
 import { Boss4BlockNew } from "../../src/game/class19/state";
 import { Boss4PlayCameraCue } from "../../src/game/class19/camera";
 import { CamPath } from "../../src/game/camera/curve";
+import { g_class_handlers } from "../../src/game/registry";
 import { check, WalkerCameraFrame, EnterPlay } from "./harness";
 
 /**
@@ -131,7 +132,7 @@ console.log("\nthe camera path publishes every frame, ends included:");
     presentEnemies: () => null,
     aliveCivilians: () => null, cameraFree: () => null,
     scriptFlagRaised: () => null,
-    showMessage: () => null, endDialogue: () => undefined,
+    showMessage: () => null,
   });
   // No `primeToFirstWait`: it steps *over* waits to get a scene on screen, and
   // the wait between the two shots is the whole point here. The first tick
@@ -209,19 +210,33 @@ console.log("\na block change carries the action ring's count:");
     presentEnemies: () => null,
     aliveCivilians: () => null, cameraFree: () => null,
     scriptFlagRaised: () => null,
-    showMessage: () => null, endDialogue: () => undefined,
+    showMessage: () => null,
   });
   ResetGameGlobals();
-  let lowest = 0, skipped = false, passedAt = -1;
+  // The skip is the watcher's, class 0x63, as `spawn_simple` places it at the
+  // top of a step: the press only raises `g_nSkipRequested`.
+  const watcher = ActorSpawn(-1, SpawnClass.CutsceneSkipWatcher, -1, "watcher");
+  watcher.visible = true;
+  let lowest = 0, skipped = false, passedAt = -1, releasedAt = -1;
   for (let f = 0; f < 60; f++) {
     if (f === 5) skipped = w.requestSkip();
     WalkerCameraFrame(w);
+    if (releasedAt < 0 && (w.block > 0 || w.opIndex > 2)) releasedAt = f;
+    if (!watcher.dead) {
+      g_class_handlers[SpawnClass.CutsceneSkipWatcher]?.update(watcher,
+        { dt: 1 / 60, rng: new Rng(1), host: NULL_HOST });
+    }
     lowest = Math.min(lowest, G.g_queued_events_pending);
     if (passedAt < 0 && w.block === 1 && w.opIndex === 2) {
       passedAt = G.g_cam_path_frame;
     }
   }
   check("the skip is taken inside the region", skipped);
+  // Pressed on frame 5: the walker runs first and the watcher takes the
+  // request after it, so the flag is up from frame 5's walk -- and the wait
+  // the interpreter is parked on re-runs its skip test on frame 6.
+  check("...and the wait pending at the press goes on the next frame",
+        releasedAt === 6, `released on frame ${releasedAt}`);
   check("the count never goes below zero", lowest >= 0, `${lowest}`);
   check("...and the next block's wait holds until its own shot has ended",
         passedAt === 10, `passed with the camera on ${passedAt}`);
@@ -306,7 +321,7 @@ console.log("\ngoto_scene_state_when_alive holds while a player is out of lives:
     presentEnemies: () => null,
     aliveCivilians: () => null, cameraFree: () => null,
     scriptFlagRaised: () => null,
-    showMessage: () => null, endDialogue: () => undefined,
+    showMessage: () => null,
   });
   ResetGameGlobals();
   G.g_scene_state_major = 2;
@@ -386,7 +401,7 @@ console.log("\na camera-frame wait releases one frame past its operand:");
     presentEnemies: () => null,
     aliveCivilians: () => null, cameraFree: () => null,
     scriptFlagRaised: () => null,
-    showMessage: () => null, endDialogue: () => undefined,
+    showMessage: () => null,
   });
   ResetGameGlobals();
   G.g_script_flags[9] = 0;
@@ -469,7 +484,7 @@ console.log("\na stashed path is played by a hook that steps first:");
     presentEnemies: () => null,
     aliveCivilians: () => null, cameraFree: () => null,
     scriptFlagRaised: () => null,
-    showMessage: () => null, endDialogue: () => undefined,
+    showMessage: () => null,
   };
 
   const w = new Walker(script, host);
@@ -548,7 +563,7 @@ console.log("\na stashed path is played by a hook that steps first:");
     presentEnemies: () => null,
     aliveCivilians: () => null, cameraFree: () => null,
     scriptFlagRaised: () => null,
-    showMessage: () => null, endDialogue: () => undefined,
+    showMessage: () => null,
   };
   const w = new Walker(script, host);
   ResetGameGlobals();

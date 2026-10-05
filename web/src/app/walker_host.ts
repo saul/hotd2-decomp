@@ -18,8 +18,7 @@
  *   `aliveCivilians`, `cameraFree`, `gameplayLive`. The genuinely
  *   irreducible part, and the read-only port the doc says should be all
  *   that survives.
- * * **Output devices** — `playSound`, `setShutter`, `showMessage`,
- *   `endDialogue`. Audio and the screen-space layer, reached directly.
+ * * **Output devices** — `playSound`, `setShutter`, `showMessage`. Audio and the screen-space layer, reached directly.
  *
  * `loadRegion` and `releaseCamera` are gone. They did nothing at all on every
  * implementation, and had not since the streaming moved into `enterRegion` --
@@ -27,14 +26,14 @@
  * lines each test stub had to write to satisfy the type.
  */
 import { Walker, type WalkerHost } from "../script/walker";
-import type { ScriptJson } from "../bundle";
 import { G } from "../game/globals";
 import { CameraTargetsClear } from "../script/waits/targets";
 import { EvtGameplayLiveUpdate } from "../game/player_shell";
-import { screenMessage } from "./projection/message";
+import { EvtOpPlayDialogue2D } from "../game/dialogue";
+import { T } from "../game/tables";
 import type { Player } from "./main";
 
-export function makeWalkerHost(p: Player, script: ScriptJson): WalkerHost {
+export function makeWalkerHost(p: Player): WalkerHost {
   // On a netplay replica the walker never ticks, and the only calls it makes
   // are `loadState`'s announcements as the host's deltas land. Streaming there
   // follows the walker's state (`Player.replicaStreaming`), so these are not
@@ -98,33 +97,22 @@ export function makeWalkerHost(p: Player, script: ScriptJson): WalkerHost {
     // wait.
     gameplayLive: () => EvtGameplayLiveUpdate() !== 0,
     // The shutter is the walker's own state now: there is nothing to tell.
+    // `EvtOpPlayDialogue2D` (`FUN_00435B80`), with the page's bus for the
+    // voice: the variant is the player configuration's, the subtitle a task
+    // in `G` that `game/dialogue.ts` steps and draws. A skip ends it the same
+    // way, through the flags it tests every frame; the voice is stopped by
+    // the script, where it is stopped at all -- skippable regions carry
+    // `stop_voice_if_skipped` (evt 0x2E), whose `PlaySoundId(0x80000002)` is
+    // the voice channel's stop. A region without one leaves the line playing,
+    // in the game as here.
     showMessage: (g) => {
-      // Variant 0 is the 1P / player-1 configuration, which is what a
-      // single-viewer playback corresponds to.
-      const raw = script.sound?.messages?.[String(g)]?.[0] ?? null;
-      const v = screenMessage(raw);
-      if (!raw || !v) return null;
-      if (raw.voice) p.playSound(raw.voice);
-      const said = v.lines.map((l) => l.text).join(" / ");
-      return {
-        frames: v.frames,
-        note: said
-          ? `“${said}”${v.voiceFile ? `  ·  ${v.voiceFile}` : ""}`
-          : `dialogue ${v.frames}f${v.voiceFile ? ` · ${v.voiceFile}` : ""}`
-            + " (no subtitle lines)",
-      };
+      const task = EvtOpPlayDialogue2D(g, p.events);
+      if (!task) return null;
+      const v = T.dialogueVariants[task.variant];
+      const said = (v?.lines ?? []).map((l) => l.text).join(" / ");
+      const voice = v?.voice_file ? `  ·  ${v.voice_file}` : "";
+      return { note: said ? `“${said}”${voice}` : `dialogue ${task.frames}f${voice}` };
     },
-    // The subtitle task tests the skip flag every frame and ends itself, so
-    // the caption goes at once -- and that is all a skip does to a dialogue
-    // at the moment it is taken. The voice is stopped by the script, where it
-    // is stopped at all: skippable regions carry `stop_voice_if_skipped` (evt
-    // 0x2E), whose `PlaySoundId(0x80000002)` is the voice channel's stop, and
-    // the walker reaches it a few frames later as it races through the
-    // skipped waits. A region without one leaves the line playing, in the
-    // game as here. This used to stop the voice here instead, on the belief
-    // that the game never did; that belief was the misreading of 0x2E as
-    // "resume the BGM".
-    endDialogue: () => {},
   };
 }
 

@@ -303,7 +303,7 @@ console.log("\nOriginal Mode, a seek past the trunk:");
     presentEnemies: () => G.g_enemies_present,
     aliveCivilians: () => null, cameraFree: () => null,
     scriptFlagRaised: () => null,
-    showMessage: () => null, endDialogue: () => undefined,
+    showMessage: () => null,
   });
   w.reset();
   const reached = seekTo(w, 0, 2, 0);
@@ -472,7 +472,7 @@ console.log("\nthe script: a -1 step word, and g_evt_ip moved under a wait:");
     presentEnemies: () => G.g_enemies_present,
     aliveCivilians: () => null, cameraFree: () => null,
     scriptFlagRaised: () => null,
-    showMessage: () => null, endDialogue: () => undefined,
+    showMessage: () => null,
   });
   w.reset();
   check("Original Mode enters block 0 at step 5, past the -1 at step 4",

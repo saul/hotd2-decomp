@@ -381,11 +381,12 @@ export function RescueTargetRideInState(obj: Actor, f: ClassFrame): void {
   // hand-over's included.
   RescueTargetDraw(obj, f);
   ActorAdvanceMotion(obj, f.dt);
-  // [diverges] `g_cutscene_skipping` (0x009A2230) hands over at once wherever
-  // the ride has got to, and that arm is not ported. It is not in `G` — the
-  // port's skip is the walker's `skipRequested`, which is a different global —
-  // so a skipped cutscene here simply finishes the ride. The one shipped
-  // spawn's block is not skippable.
+  // `g_cutscene_skipping` (0x009A2230) hands over at once wherever the ride
+  // has got to.
+  if (G.g_cutscene_skipping !== 0) {
+    t.route = 1;
+    t.state = RescueTargetState.Held;
+  }
 }
 
 /**

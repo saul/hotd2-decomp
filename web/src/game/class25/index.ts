@@ -564,6 +564,13 @@ export function ScriptedHumanoidUpdate(obj: HumanoidActor, f: ClassFrame): void 
   const p = HumanoidProgramOf(obj);
   if (!p) return;
 
+  // `MOV ECX,[0x009a2230]` at `0x004842A0`, the routine's first instruction:
+  // a skipped cut scene tears the actor down -- hit slot, part list (unless
+  // `+0x1316` keeps it), `ActorKill`.
+  if (G.g_cutscene_skipping !== 0) {
+    HumanoidKill(obj);
+    return;
+  }
   if (HumanoidShouldRemove(obj, p)) {
     HumanoidKill(obj);
     return;
@@ -1222,12 +1229,17 @@ function HumanoidApplyPathOffset(obj: HumanoidActor, rx: number, ry: number,
  * object can be handed ({@link HumanoidRoutine}); `op 17` installs three
  * others, which this used to stand in for as well.
  *
- * The skip teardown is not ported: `g_cutscene_skipping` — `0x009A2230` is
- * never raised, because the player has no cutscene skip.
+ * The skip teardown comes first (`0x00484D40`): with `g_cutscene_skipping`
+ * (`0x009A2230`) up the actor gives back its hit slot and its part list and
+ * is killed, whatever its removal cue says.
  */
 export function ScriptedHumanoidIdle(obj: HumanoidActor): void {
   const p = HumanoidProgramOf(obj);
   if (!p) return;
+  if (G.g_cutscene_skipping !== 0) {
+    HumanoidKill(obj);
+    return;
+  }
   if (HumanoidShouldRemove(obj, p)) {
     HumanoidKill(obj);
     return;

@@ -89,6 +89,12 @@ export interface ScriptJson {
    */
   options?: OptionsJson;
   /**
+   * `g_subtitle_glyphs` (`0x0055E054`), s16[128]: the screen sprite
+   * `DrawTextCentred` (`FUN_00436850`) draws for each character code, 0 for
+   * none. Absent in a bundle written before it, which draws no subtitles.
+   */
+  subtitle_glyphs?: number[];
+  /**
    * Original Mode's `.rdata` -- the weapon records, fire and ammo-readout
    * rows, and the trunk's tables. See `ExeTables.originalModeTables` in the
    * exporter. Absent in a bundle written before it, which arms every item as

@@ -78,7 +78,6 @@ const mkHost = () => ({
   scriptFlagRaised: () => null,
   cameraFree: () => null,
   showMessage: () => null,
-  endDialogue: () => undefined,
 });
 
 let bad = 0, seen = 0, unreachable = 0;

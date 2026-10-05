@@ -12,6 +12,7 @@
  * clip itself, and eight of the words it writes the step puts back before it
  * returns -- see `CivilianStepScript`.
  */
+import { EvtOpPlayDialogue2D } from "../dialogue";
 import { ActorFlag, MotionFlag, type Actor } from "../actor";
 import type { Rng } from "../../core/rng";
 import { ScoreAddForPlayer } from "../combat/score";
@@ -166,14 +167,12 @@ export function CivilianRunScript(obj: Actor, script: number, pc: number,
       case CivilianOp.PlayDialogue:
         // `EvtOpPlayDialogue2D` (`FUN_00435B80`) — the *same* call evt op 0x2D
         // makes, and all 36 operands the shipped streams use are real message
-        // groups, so a civilian's line goes through the player's own subtitle
-        // and voice path rather than out as a bare sound id.
+        // groups, so a civilian's line is a subtitle task and a voice like
+        // the script's.
         //
         // The engine gates it on the removal countdown, so a civilian already
         // walking off stays quiet.
-        if (sub.removeDelay === 0) {
-          f?.events?.emit("civilian.dialogue", { at: obj.at, group: a[0] });
-        }
+        if (sub.removeDelay === 0) EvtOpPlayDialogue2D(a[0], f?.events);
         break;
       case CivilianOp.SetResume:
         sub.resume = a[0]; sub.resumeScript = c.scripts?.[0] ?? -1; break;

@@ -25,7 +25,7 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
   "approach.ts": "f2458fca4f4f943e775d2f73237eef7bf925b37dc38ba653bc89f80d3e800443",
   "arcscript.ts": "7c64fa78e89264425a0032c0918c846f8972905d848251d517112cd307722b35",
   "bams.ts": "f03b1290866a63ab2ae764d49bd15c57bd53c6b1a03794f7a0357e8dd842eb8f",
-  "bundle.ts": "d5b2149f3438fbd0999357fb2e74fdd41e782aa779dcccd3107b752c067ab827",
+  "bundle.ts": "8a270a1bdbb387fb30c896efc3c2abf8e5abb41c616fb2f0142e6ffc46fe0e99",
   "bytes.ts": "59b2f363e98da56e88ada59458239032e40cad3a27342659e213d849c0967168",
   "cam.ts": "fe50200cb57c6578681a121766e7a5f4ed2425d91996169f83a82e8375dd63c3",
   "campaths.ts": "fbe28df3265d37b60a006e937a926eca8546609aa29cc5d80e7f1fc9afd639be",
@@ -46,8 +46,8 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
   "core/snapshot.ts": "eaf7d46402a96e68d7af7c3a5527db39e6d39e3947c5120e100f75a7b9f7e1b9",
   "degraded.ts": "f53ceffd81c8182f0c5edde7e6f0c1bc7f62da1851ca23e351eda62a87fb9f2e",
   "evt.ts": "0899c8c66b424688a5307c7c47aa85914f0172b4672690582e89ee58da6bffc3",
-  "exetab.ts": "0a3fcf5d46adb26a3d596a2ff2731313e4d5f723fda8d8864a2b7419023b2df7",
-  "game/actor.ts": "e9519dbf918c394a0d0e7f70d5c6bc84cbce910fa6bf78bf3857b5596df73e85",
+  "exetab.ts": "35ebdc2e2b5783a18e62a6dfeecb27be742161f5b7f2847193d3784b34f9275c",
+  "game/actor.ts": "ab3e34c0ab2bcc10193f22bdceead93049f7e0ef617601678ed298050a0f0c5d",
   "game/actor_turn.ts": "90f995674d988a8a56ccc14f912c6d6e2ec7b53487f57eec1a9b0587eaca8951",
   "game/app_state.ts": "6330925b362be22e524aff120571ae6925f845979ce63921a276803a328a67c6",
   "game/body_creature.ts": "b7be6dff36666d55fffc837101c9b695eb6d0e2b5b56da64f134f988de43c33f",
@@ -132,6 +132,7 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
   "game/class53/records.ts": "b6800eb8234f8a37c11908ce38316f82b17387ae41e753aeb67089fae09192d0",
   "game/class53/state.ts": "6a40cb1760986fca2741bb278ff38048c49b6f74e8cdc0b15ae3c858a3785ad3",
   "game/class61/state.ts": "10295909bed89c5b3fd208e8b7165eadd95c73fd5d14c14ad1519fa6f9527f6b",
+  "game/class63/state.ts": "90d2ff66f990c971e67d936eab17716e994e3172a666e64f4c42f0193e1750e0",
   "game/class6e/state.ts": "ed57b622b5410366d86d5eac8e4c7a6fc12f31d9bb83b8b2d1337f85f8b5526e",
   "game/coli.ts": "21f227b4ac1c5a78694c47d4536a9ac41902033184caad59ab9c0c41c86c8d43",
   "game/combat/counts.ts": "30e8d40aed3c842ac1b1dba09659e84a85ac0a6ca14fcd722fb1b2cf9e3cb374",
@@ -144,9 +145,10 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
   "game/combat/shot_test.ts": "c7da83f6e241e0917e982a340cd8cb128358aae78c45598765d4116d41ab937a",
   "game/combat/voice.ts": "8583a8a474bd5b7569a0aabc56eb42cfa69950a7a0359fc585a566407879496b",
   "game/continue_readout.ts": "0d15c1220d6386e871b1c01bd18f3fdf8a402534454af5a8ac55da96135df5fe",
-  "game/credit_prompt.ts": "b175eae79d54553f2dcc5db232c9ba919ffd074bd6024dcd7a4712acaa35bf6f",
+  "game/credit_prompt.ts": "6003af094b902dcc7fde7bca454520c401ae839e445022cfc4e46ab350ef1689",
   "game/credits.ts": "f17ca616385349672d354f057ab16fc2dbd3caa01108cd473cc5e977f8962d2c",
   "game/despawn.ts": "37a979d85d5f208e587c5104ffd4ba9c3edea9b75c15e0bec1522e7f0f6af256",
+  "game/dialogue_data.ts": "906a56a0a2ee8ae132c14a9662dba6dde9714aafe0fee117d415a36cb53b5c35",
   "game/effect_draw.ts": "0b554604c0c34526cb1ca111b49aaec2f6a9cf96a3fcfba6f2f69538ba32078f",
   "game/effects/blood.ts": "761ec5b22a9bb6ef75ce93a366650617c8e52c329524e823b97ff1780a81c074",
   "game/effects/damage_overlay.ts": "e64ddb652f0ef07aa1906ff085d587b440ddfdd81eee9255d2485ed623db67ec",
@@ -157,7 +159,7 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
   "game/effects/sprite.ts": "d395915d03641d7df3f3fb1d529517d3b3f0b06bd9bed116be72a5b6e33d43a5",
   "game/entity_light.ts": "772c4d0367f43206af39a2e8af8a7bed243b93035c301c09b4efd87793b87802",
   "game/game_mode.ts": "5882c6716bb8bf4b64ce7ebb370d273ebbbac02f9989a030ff60f5a7f43ce506",
-  "game/globals.ts": "9a9cdbd83dc67b9f3f5a8d5f17469c20639b4e2f975b6b3ae94d6e0d94d11262",
+  "game/globals.ts": "7243f7634a70f4eac189551d036f1962b84324dddff521f37aab4393cf0beae4",
   "game/hit_slots.ts": "4b1ce29c6b5184e6749b3e9c597b8b0464331eba06b204aa227c749b1785feb7",
   "game/host.ts": "21e513a7c95dcbac9e7d57eacd536604c7642a4c0000c601cc340706b70633d7",
   "game/hud_readout.ts": "f3962cfdf8036b54a31778d37b01b70c415d36ae6ad9d43c35ba58b0d5e24f36",
@@ -183,7 +185,7 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
   "game/screen_sprite.ts": "962a830c367d9869d3b6813fdf8897c7b5898f77c9835d1d45987f386ee6dcd7",
   "game/skeleton.ts": "7de0b8ceccb47b105acdc5e2a09e441d5c1d0af3bea3fe28f7137f7558ab5194",
   "game/spawn_class.ts": "0586d13bed61f230172cbceea4962d292ffb5d9ce2f2cdf66a19a72149b6653f",
-  "game/tables.ts": "89acbbee2c2a133b503103fc971f23b182fe68868730b07c8e881b072ec49fac",
+  "game/tables.ts": "d0bcb7871858b8098130c569299d71a272d690152cd17094ae1915f1d225267d",
   "game/thrown_weapon.ts": "adbfdb358e6ee1a12ab1bbf18b0964e34c2c85eb387f822bf4608813123effae",
   "game/vec.ts": "e4fa0c9c582bc4a70b040cd96ca378d7b6039501cb9f38ad0b93425f5a7563b8",
   "gltf.ts": "4ca1bf1b90f93acb0ca990b968eba8fccf4d6c79d03320833962f8732956579f",
@@ -204,4 +206,4 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
 };
 
 /** One digest over {@link BUILDER_FILES}, in filename order. */
-export const BUILDER_HASH = "e89624c62c87d23e7d6ddf9504169acfb090143a2e84ecc27d5d24d0b290f7ed";
+export const BUILDER_HASH = "c7ba9b951d6aeb75ea655721e142fcca47e1d5206c99f57edaff71847ec02d8a";

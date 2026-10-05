@@ -29,7 +29,6 @@ import {
   WebGLRenderer,
 } from "three";
 import { type Manifest } from "../bundle";
-import type { SoundJson } from "../bundle/scene";
 import type { ScriptJson } from "../bundle/stage";
 import { CamPaths } from "../game/camera/curve";
 import { QueueOffscreenPull, QueueShotRequest } from "../game/combat/shot";
@@ -163,7 +162,8 @@ import { readOriginalChoice, readProfile, writeOriginalChoice, writeProfile }
   from "./profile_store";
 import { OptionsPad, OptionsTap } from "../game/options/list";
 import { SetBoss4Tables, SetClass2DTables, SetGameOverTables, SetGameTables,
-         SetOptionsTables, SetOriginalModeTables, SetResultCardTables }
+         SetOptionsTables, SetOriginalModeTables, SetResultCardTables,
+         SetDialogueTables }
   from "../game/tables";
 import { PressKind, type Press } from "../core/net/protocol";
 import { NetSession, type NetRole } from "./net/session";
@@ -357,12 +357,6 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
   /** The `coli/` overlay — see `render/coli_debug.ts`. */
   readonly coliDebug = new ColiDebugLayer();
   readonly stuckDebug = new StuckDebugLayer();
-  /**
-   * The stage's `sound` block, kept for the one caller that is not the walker:
-   * class 0x10's op 0x1D plays a dialogue group from inside the port, and the
-   * port cannot reach the bundle.
-   */
-  dialogue: SoundJson | null = null;
   /** The registry and the tick order: script -> game -> render -> hud. */
   readonly world = new World<RenderContext>();
   /**
@@ -835,15 +829,14 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     this.scene.add(this.screenIdleDim.group);
     this.world.add("render", this.screenIdleDim);
     // The screen-space layer, and the last thing the tick does: it draws the
-    // caption straight off the walker and the shutter bars and screen sprites
-    // the engine recorded in `G`, and holds no state of its own for a
+    // shutter bars and the screen sprites -- the subtitle's glyphs among them
+    // -- the engine recorded in `G`, and holds no state of its own for a
     // snapshot to miss. The projection is *not* built here --
     // it is built at the end of `frame`, outside the tick, because a world
     // with no walker in it does not tick at all. See `frame`.
     this.world.add("hud", drawSystem("hud.layer",
-                                    (ctx) => this.hudLayer.draw(ctx.walker,
-                                                            G.g_screen_sprite_draws,
-                                                            G.g_hud_shutter_bars)));
+                                    () => this.hudLayer.draw(G.g_screen_sprite_draws,
+                                                             G.g_hud_shutter_bars)));
     this.game.backend = this.chars;
     this.debug.source = this.chars;
     // One generator for the whole player, so a snapshot replays the gore
@@ -917,30 +910,6 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
       if (!this.asReplica) writeOriginalChoice(d.slots);
     });
 
-    // -- class 0x10, the civilians ---------------------------------------
-    // Op 0x1D is `EvtOpPlayDialogue2D`, the same call evt op 0x2D makes, so a
-    // civilian's line goes through the player's own subtitles and voice rather
-    // than out as a bare sound id.
-    const playDialogue = (d: { group: number }): void => {
-      const v = this.dialogue?.messages?.[String(d.group)]?.[0] ?? null;
-      if (!v || !this.walker) return;
-      if (v.voice) this.bgm.play(v.voice);
-      // Onto the walker, not into the layer: a caption is script state, and
-      // the one raised by a civilian is no less so than the one raised by
-      // evt 0x2D. It goes in the snapshot with the rest.
-      //
-      // **Not on a replica.** There the caption arrives as state, with the
-      // tick that raised it, and this handler runs on the host's event as a
-      // replay -- a write here would be a second author of script state the
-      // host never hears from, and the next tick's hash would say so. The
-      // voice above is an output and plays on both.
-      if (this.net.role === "replica") return;
-      this.walker.captionGroup = d.group;
-      this.walker.captionFrames = v.frames;
-    };
-    this.events.on("civilian.dialogue", playDialogue);
-    // ...and the stage-3 boss's body, which makes the same call.
-    this.events.on("actor.dialogue", playDialogue);
     this.events.on("civilian.rescued", (d) => {
       this.onFeed({
         seq: -1, block: this.walker?.block ?? -1, step: -1, opIndex: -1,
@@ -1245,6 +1214,7 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     // the gameplay eye, which the next turn does again.
     PlayerBodiesCreate();
     SetOptionsTables(script.options);
+    SetDialogueTables(script.sound?.messages, script.subtitle_glyphs);
     SetOriginalModeTables(script.original_mode);
     SetBoss4Tables(script.boss4, script.carrier_door_yaw);
     SetClass2DTables(script.class2d);

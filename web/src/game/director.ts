@@ -24,6 +24,7 @@ import { ThrownWeaponPoolUpdate } from "./class31/projectile";
 import { ThrownWeaponCameraOf } from "./thrown_weapon";
 import { BreakablePropPoolUpdate } from "./class41/pool";
 import { WaterSurfacesTick } from "./class41/water";
+import { DialogueTasksTick } from "./dialogue";
 import { Type3UvScrollTick } from "./class41/type03";
 import { St2CarsTick } from "./class21/car";
 import { PropContainerType } from "./class41";
@@ -1037,6 +1038,9 @@ function SceneTaskWalk(dt: number, host: GameHost,
   // `ActorAlloc` like the props, so after the actors that placed them: a task
   // made this frame draws this frame. See `game/class41/water.ts`.
   WaterSurfacesTick();
+  // ...and the subtitle tasks evt 0x2D and its other callers allocate, the
+  // same way. See `game/dialogue.ts`.
+  DialogueTasksTick();
   // ...and the car reflection's task, constructor 3's, the same way.
   Type3UvScrollTick(host);
 

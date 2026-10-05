@@ -116,6 +116,12 @@ lists themselves are `.data` literals in `web/src/game/class29/`, checked
 word for word by `web/tools/checks/prop_tables.ts`; the two slots they draw,
 `0x93C` and `0x93D`, ride the hidden `slots_effect` rig.
 
+Every stage carries `subtitle_glyphs`, `g_subtitle_glyphs` (`0x0055E054`)
+as s16[128]: the screen sprite `DrawTextCentred` (`FUN_00436850`) draws for
+each character. `screen_sprites` carries the glyphs of the characters the
+shipped dialogue lines use, and `0x62D` for `~` -- `scr_jimaku_e.bin`, PAL4
+on palette 0. See `evt.md`, *`2D` -- the dialogue*.
+
 Class 0x41 constructor 3 -- stage 1 block 0's placer -- is a breakables
 placement with `container: "uv_scroll"` and nothing else: the task reads
 nothing of the placer. The three shells it rewrites are the `st1_vehicle`

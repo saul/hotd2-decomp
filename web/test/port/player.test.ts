@@ -691,7 +691,7 @@ console.log("\nthe continue screen, as the exe draws it:");
     playSound: () => undefined, aliveEnemies: () => 0,
     presentEnemies: () => 0, aliveCivilians: () => 0, cameraFree: () => true,
     scriptFlagRaised: () => null, gameplayLive: () => live,
-    showMessage: () => null, endDialogue: () => undefined,
+    showMessage: () => null,
   });
   for (let f = 0; f < 10; f++) w.tick(1 / 60);
   check("the script holds at wait_frames 3 for ten frames while no player "

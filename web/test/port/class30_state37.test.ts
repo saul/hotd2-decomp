@@ -504,7 +504,7 @@ console.log("\nthe gun lights:");
     presentEnemies: () => null,
     aliveCivilians: () => null, cameraFree: () => null,
     scriptFlagRaised: () => null,
-    showMessage: () => null, endDialogue: () => undefined,
+    showMessage: () => null,
   });
   w.tick(1 / 60);
   check("evt 0x14 and 0x15 write g_scene_lighting and g_entity_spotlights_on",
@@ -830,7 +830,7 @@ console.log("\nlight block 1 (the characters' light):");
     presentEnemies: () => null,
     aliveCivilians: () => null, cameraFree: () => null,
     scriptFlagRaised: () => null,
-    showMessage: () => null, endDialogue: () => undefined,
+    showMessage: () => null,
   });
   const B0 = G.g_scene_light_block0;
   const B1 = G.g_scene_light_block1;

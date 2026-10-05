@@ -67,7 +67,8 @@ import {
   LIFT_PANEL_SLOT, PROP_HIT_SCORE,
 } from "../../src/game/class41";
 import { PropWords } from "../../src/game/class41/words";
-import { TYPE13_DROP_SLOT, TYPE13_JUDDER } from "../../src/game/class41/type13";
+import { TYPE13_DROP_SLOT, TYPE13_FLOOR_Y, TYPE13_JUDDER }
+  from "../../src/game/class41/type13";
 import {
   TYPE35_LEAF_A, TYPE35_LEAF_A_SLOT, TYPE35_LEAF_B, TYPE35_LEAF_B_SLOT,
 } from "../../src/game/class41/type35";
@@ -1445,6 +1446,36 @@ console.log("\nclass 0x41 types 5, 6, 10, 12, 21, 51, 63, 78, transcribed whole:
   G.g_GameMode = GameMode.Original;
   check("...having asked for 0x1A60 in Arcade and 0xA6C otherwise",
         arcade === TYPE78_ARCADE_SLOT && PropType78LoadSlot() === 0xa6c);
+}
+
+console.log("\nclass 0x41 type 13, a skipped cut scene:");
+{
+  // `0x00467FC8`: flag 0x6D up with `g_cutscene_skipping` puts the part on
+  // the floor in the judder phase at once, before the switch runs, and no
+  // landing sound plays.
+  const rng = new Rng(1314);
+  const events = propScene(rng);
+  const sounds: number[] = [];
+  events.on("sound.play", (e) => sounds.push(e.id));
+  G.g_scene_index = 1;
+  G.g_evt_step_index = 4;
+  const p = PlaceGenericProp({ at: 0xec95, container: "generic", type: 13,
+    slot: 4, lifetime_evt_steps: 4, field_1f4: 0, pos: [-925, 180, -1297],
+    pitch: 0, yaw: 0, roll: 0 }, rng);
+  G.g_breakable_props.push(p);
+  BreakablePropPoolUpdate(rng, events);
+  G.g_script_flags[SCRIPT_FLAG_TYPE13_DROP] = 1;
+  G.g_cutscene_skipping = 1;
+  BreakablePropPoolUpdate(rng, events);
+  G.g_cutscene_skipping = 0;
+  // The arm writes the phase and y and not `+0x1C8`, which is still 0, so
+  // the same frame's judder arm finds nothing to damp and goes to rest.
+  check("the part is on the floor and at rest on the skip's frame",
+        p.y === TYPE13_FLOOR_Y && p.routinePhase === Type13Phase.Rest,
+        `y ${p.y} phase ${p.routinePhase}`);
+  check("...with no fall and no landing sound", sounds.length === 0,
+        sounds.map((s) => s.toString(16)).join());
+  G.g_script_flags[SCRIPT_FLAG_TYPE13_DROP] = 0;
 }
 
 console.log("\nclass 0x41 type 13, its draws:");

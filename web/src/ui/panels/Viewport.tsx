@@ -81,7 +81,6 @@ export interface ViewportRefs {
   hud: RefObject<HTMLDivElement | null>;
   shutterTop: RefObject<HTMLDivElement | null>;
   shutterBottom: RefObject<HTMLDivElement | null>;
-  message: RefObject<HTMLDivElement | null>;
   screen: RefObject<HTMLCanvasElement | null>;
   crosshair: RefObject<HTMLDivElement | null>;
 }
@@ -157,17 +156,6 @@ export function Viewport(
           <div className="shutter shutter-top" ref={refs.shutterTop} />
           <div className="shutter shutter-bottom" ref={refs.shutterBottom} />
         </div>
-        {/* The caption is the one node on this subtree whose `hidden` stays
-            with the layer, and it is deliberately not written here at all:
-            whether there is a caption is a countdown on the walker, not a
-            field of the projection, so React has nothing to render it from and
-            an initial value written here would make two writers in sequence.
-            `hud/` owns `hidden`, `textContent`, `left`, `top` and `fontSize`
-            on this node — it sets `hidden` in its own constructor — and React
-            owns its class. Nothing writes both. Between mount and the layer's
-            first `draw` the div is empty, which has no box and paints
-            nothing. */}
-        <div className="screen-message" ref={refs.message} />
         {/* The game's 640x480 screen, for the readouts `DrawScreenSprite`
             draws -- the lives, the bullets, the RELOAD prompt. A canvas so
             that `hud/` draws into it rather than growing nodes inside an

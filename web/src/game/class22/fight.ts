@@ -11,6 +11,7 @@
  *
  * Both tails were read past the `MatrixStackPop` Ghidra ends them at (L35).
  */
+import { EvtOpPlayDialogue2D } from "../dialogue";
 import type { JudgmentActor } from "../actor";
 import { BossHpFractionOf } from "../boss_hp_bar";
 import { ActorRegisterCameraPoint } from "../camera/track";
@@ -422,16 +423,14 @@ function Glide(obj: JudgmentActor, f: ClassFrame): void {
 /**
  * One hint line: `+0x1324 = 1; +0x1328 = 0x78; g_bHudShutterState = 5;
  * EvtOpPlayDialogue2D(line)`. The line plays as evt op 0x2D would --
- * `EvtOpPlayDialogue2D` (`FUN_00435B80`) is that opcode's own handler, and
- * the port's is the host's (`civilian.dialogue` is the event every caller of
- * it raises).
+ * `EvtOpPlayDialogue2D` (`FUN_00435B80`) is that opcode's own handler.
  */
 function Phase1Hint(obj: JudgmentActor, f: ClassFrame, line: number): void {
   const t = obj.judgment;
   t.hint = 1;
   t.hintFrames = HINT_FRAMES;
   G.g_bHudShutterState = 5;
-  f.events?.emit("civilian.dialogue", { at: obj.at, group: line });
+  EvtOpPlayDialogue2D(line, f.events);
 }
 
 /** `pick` — `g_class22_phase2_picks[g_class22_phase2_pick_rows[aggr] * 10 + rand() % 10]`. */

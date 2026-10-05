@@ -31,7 +31,6 @@ import { G } from "../game/globals";
 import { seekTo as seekWalkerTo } from "../script/seek";
 import { PlayerTasksDrawWithoutAFrame } from "../game/player_shell";
 import { treeProjection } from "./projection/script";
-import { screenMessage } from "./projection/message";
 import { makeWalkerHost } from "./walker_host";
 import { LoadMeter } from "./load_meter";
 import type { Player } from "./main";
@@ -238,7 +237,6 @@ export async function loadStageInto(p: Player): Promise<void> {
   p.chars.effects = p.effects;
   p.shooting.reset();
   p.shooting.setTables(bundle.script.characters?.combat);
-  p.dialogue = bundle.script.sound ?? null;
   p.bullets.source = p.chars;
   p.scene.add(p.bullets.group);
   // Same template source as the weapons: the head that flies is a bone model
@@ -274,15 +272,11 @@ export async function loadStageInto(p: Player): Promise<void> {
   // in the player.
   // `branchPause` is the sidebar's debug aid, read at every branch; the
   // toggles above were applied before this walker existed.
-  p.walker = new Walker(bundle.script, makeWalkerHost(p, bundle.script),
+  p.walker = new Walker(bundle.script, makeWalkerHost(p),
                         { branchPause: p.toggles.branchPause });
   p.script.walker = p.walker;
 
-  // The dialogue table for the stage. The walker carries the group; the words
-  // are bundle data and belong here.
-  p.hudLayer.messages =
-    (g) => screenMessage(bundle.script.sound?.messages?.[String(g)]?.[0] ?? null);
-  // ...and the screen sprites' images -- the HUD's, the game-over logo's and
+  // The screen sprites' images -- the HUD's, the game-over logo's and
   // the route map's -- which are bundle data in the same way.
   const hudSprites = bundle.script.screen_sprites ?? {};
   p.hudLayer.spriteImages = (id) => {

@@ -1594,7 +1594,7 @@ console.log("\na held captor's cue frame, and the finish_sequence that frees it:
     presentEnemies: () => 1,
     aliveCivilians: () => null, cameraFree: () => null,
     scriptFlagRaised: () => null,
-    showMessage: () => null, endDialogue: () => undefined,
+    showMessage: () => null,
   };
   const w = new Walker(script, host);
   // The action runs in the camera actor, after the interpreter has queued it,

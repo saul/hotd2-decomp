@@ -26,7 +26,8 @@ import { PropWords } from "../../src/game/class41/words";
 import { check, CHARS, BREAKABLES, propScene } from "./harness";
 import { GameUpdate, SpawnPropContainers } from "../../src/game/director";
 import { NULL_HOST, type GameHost } from "../../src/game/host";
-import { Type3UvScrollTick } from "../../src/game/class41/type03";
+import { PlaceType3UvScrollTask, Type3UvScrollTick }
+  from "../../src/game/class41/type03";
 
 /** The three tables as `hod2lib/class41_rows.ts` reads them from the image. */
 const ROWS: Partial<BreakablesJson> = {
@@ -576,13 +577,23 @@ console.log("\nclass 0x41 constructor 3 -- the stage-1 car's reflection:");
           && uv(0x157d).uOffset === before,
         `${uv(0x157d).uOffset} vs ${before}`);
 
-  // The kills: only g_actor_kill_all, in the port. The skip arm (path 0x21
-  // with g_cutscene_skipping) is the declared departure.
-  check("path 0x21 alone does not end the task", G.g_type3_tasks.length === 1);
+  // The kills: g_actor_kill_all, and path 0x21 with g_cutscene_skipping.
+  check("path 0x21 without a skip does not end the task",
+        G.g_type3_tasks.length === 1);
   G.g_script_flags[0xe0] = 1;
   Type3UvScrollTick(host);
   check("g_actor_kill_all (g_script_flags[0xE0]) ends it, and what it did "
         + "to the shells stays",
         G.g_type3_tasks.length === 0 && uv(0x157d).uOffset !== 0);
   G.g_script_flags[0xe0] = 0;
+
+  // ...and on path 0x21 with `g_cutscene_skipping` up (`0x00465C0C`).
+  PlaceType3UvScrollTask();
+  Type3UvScrollTick(host);
+  G.g_active_cam_path = 0x21;
+  G.g_cam_path_frame = 0x10;
+  G.g_cutscene_skipping = 1;
+  Type3UvScrollTick(host);
+  G.g_cutscene_skipping = 0;
+  check("path 0x21 with g_cutscene_skipping ends it", G.g_type3_tasks.length === 0);
 }

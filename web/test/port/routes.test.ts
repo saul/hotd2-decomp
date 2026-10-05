@@ -116,6 +116,20 @@ console.log("\nclass 0x21, the rescue target and stage 2's first fork:");
     RescueTargetUpdate(a, { dt: 1 / 60, rng, host, events });
 
   {
+    // `if (g_cutscene_skipping) { obj+0x1350 = 1; *obj = Held; }` at the
+    // ride's tail: a skip hands over wherever the ride has got to, here on
+    // frame 0x20, long before 0xBD.
+    const { a, events, rng } = rescueScene();
+    G.g_cam_path_frame = 0x20;
+    G.g_cutscene_skipping = 1;
+    rFrame(a, events, rng);
+    G.g_cutscene_skipping = 0;
+    check("a skipped cut scene hands the ride over at once, onto row 1",
+          a.rescue.state === RescueTargetState.Held && a.rescue.route === 1,
+          `state ${a.rescue.state} route ${a.rescue.route}`);
+  }
+
+  {
     const { a, events, rng } = rescueScene();
     check("the Init counts it as an enemy, twice over",
           G.g_enemies_alive === 1 && G.g_enemies_present === 1,
@@ -353,7 +367,7 @@ console.log("\na replay does not rebuild a rescue target it has played past:");
     playSound: () => undefined, aliveEnemies: () => null,
     presentEnemies: () => null, aliveCivilians: () => null,
     cameraFree: () => null, scriptFlagRaised: () => null,
-    showMessage: () => null, endDialogue: () => undefined,
+    showMessage: () => null,
   };
   const fresh = () => {
     ResetGameGlobals();
@@ -588,7 +602,7 @@ console.log("\na replay does not rebuild JUDGMENT past its own way out:");
     playSound: () => undefined, aliveEnemies: () => null,
     presentEnemies: () => null, aliveCivilians: () => null,
     cameraFree: () => null, scriptFlagRaised: () => null,
-    showMessage: () => null, endDialogue: () => undefined,
+    showMessage: () => null,
   };
   // The shipped rows' cues: stage 5 `0xCF`/140, stage 1's fight `0x31`/400
   // (never reached -- block 14 plays `0x31` to 230), the cameo `0x22`/400.

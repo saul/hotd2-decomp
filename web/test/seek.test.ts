@@ -61,7 +61,6 @@ const mkHost = (): WalkerHost => ({
   scriptFlagRaised: () => null,
   cameraFree: () => null,
   showMessage: () => null,
-  endDialogue: () => undefined,
 });
 
 /**

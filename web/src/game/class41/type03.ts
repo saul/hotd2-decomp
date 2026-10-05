@@ -249,17 +249,17 @@ function AbsDiff(a: number, b: number): number {
  * `0x157B`'s loses it with two players in play, and every slot's `v` gains
  * `b`. Last, the camera block's eye into `+0x40..+0x48`.
  *
- * [diverges] The kill at `0x00465C0C` -- camera path `0x21` playing with
- * `g_cutscene_skipping` (`0x009A2230`) set -- is not transcribed: `G` has no
- * port of that global, the gap `class10/update.ts`, `class21/index.ts`,
- * `class25/index.ts` and `class41/type13.ts` already declare. A skipped
- * opening therefore leaves the reflection scrolling through path `0x21`
- * rather than freezing it; the port test pins that only
- * `g_actor_kill_all` ends the task.
+ * It kills itself on `g_actor_kill_all`, and on camera path `0x21` with
+ * `g_cutscene_skipping` (`0x009A2230`) up (`0x00465C0C`): a skipped opening
+ * freezes the reflection where it stands.
  */
 export function Type3UvScrollUpdate(t: Type3UvScrollTask,
                                     host?: GameHost): boolean {
   if ((G.g_script_flags[ACTOR_KILL_ALL_FLAG] ?? 0) === 1) return false;
+  if (G.g_active_cam_path === CAM_PATH_DRIVE_B
+      && G.g_cutscene_skipping !== 0) {
+    return false;
+  }
   let a = 0;
   let b = 0;
   let c = 0;

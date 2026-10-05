@@ -351,15 +351,19 @@ export function CivilianReleaseCaptors(obj: Actor): void {
  * only, so a rescued civilian stood where her script left her for the rest of
  * the stage.
  *
- * [diverges] The skip arm is not ported: `g_cutscene_skipping`
- * (`0x009A2230`) has no field in `G` -- the port's skip is the walker's own --
- * so a skipped cut scene does not remove the civilian early.
- * `class41/type13.ts` and `class21/index.ts` leave their own skip arms out for
- * the same reason.
+ * The skip arm (`0x0048AF8E`): with `g_cutscene_skipping` (`0x009A2230`) up
+ * and {@link CivilianWait.SkipKeepsRemoval} clear, the countdown is set to 1
+ * (`MOV word [ECX+0x2A],DI` at `0x0048B0C4`) and the other arms are passed
+ * over; on the next frame the countdown takes her off.
  */
 function CivilianCheckRemoval(obj: Actor, host: GameHost): void {
   const sub = obj.civ;
   if (!sub) return;
+  if (G.g_cutscene_skipping !== 0
+      && (sub.wait & CivilianWait.SkipKeepsRemoval) === 0) {
+    sub.removeDelay = 1;
+    return;
+  }
   if (sub.removeDelay !== 0) {
     sub.removeDelay -= 1;
     if (sub.removeDelay !== 0) return;

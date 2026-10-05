@@ -365,6 +365,14 @@ export enum CivilianWait {
   LeaveCountNow = 0x00080000,
   /** May be removed when off camera. */
   RemoveOffCamera = 0x02000000,
+  /**
+   * Bit `0x20000000`: **a skip does not cut the removal short.**
+   * `CivilianUpdate` (`FUN_0048A920`) tests it at `0x0048AFA0` only while
+   * `g_cutscene_skipping` is up: clear, the removal countdown is set to 1
+   * there and then; set, the ordinary arms run. What else it means, if
+   * anything, is `[open]`.
+   */
+  SkipKeepsRemoval = 0x20000000,
   /** **The rescue.** Pay 400 and clear the bit. */
   Rescued = 0x10000000,
   /**

@@ -46,6 +46,7 @@ import { makeWormTail, type WormTail } from "./class42/state";
 import { makeFishTail, type FishTail } from "./class51/state";
 import { makeMouseTail, type MouseTail } from "./class52/state";
 import { makeCatTail, type CatTail } from "./class53/state";
+import { makeSkipWatchTail, type SkipWatchTail } from "./class63/state";
 import { makeScriptedSceneryTail, type ScriptedSceneryTail }
   from "./class33/state";
 import { makeSetPiecePropTail, type SetPiecePropTail }
@@ -2644,6 +2645,7 @@ export type Actor =
   | (ActorBase & { cls: SpawnClass.ScriptedScenery;
                    scenery: ScriptedSceneryTail })
   | (ActorBase & { cls: SpawnClass.ResultCard; card: ResultCardTail })
+  | (ActorBase & { cls: SpawnClass.CutsceneSkipWatcher; skipWatch: SkipWatchTail })
   | (ActorBase & { cls: Exclude<SpawnClass,
       SpawnClass.ScriptedHumanoid | SpawnClass.SetPieceProp
       | SpawnClass.Thrower | SpawnClass.Zombie
@@ -2656,7 +2658,8 @@ export type Actor =
       | SpawnClass.CarriedZombie
       | SpawnClass.ScriptedScenery | SpawnClass.Vehicle
       | SpawnClass.PathRidingProp | SpawnClass.HordeSpawner
-      | SpawnClass.Worm | SpawnClass.ResultCard> });
+      | SpawnClass.Worm | SpawnClass.ResultCard
+      | SpawnClass.CutsceneSkipWatcher> });
 
 /** An actor already narrowed to class 0x25, for that class's own routines. */
 export type HumanoidActor = Extract<Actor,
@@ -2979,6 +2982,9 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
   }
   if (cls === SpawnClass.ResultCard) {
     return { ...head, cls, card: makeResultCardTail() };
+  }
+  if (cls === SpawnClass.CutsceneSkipWatcher) {
+    return { ...head, cls, skipWatch: makeSkipWatchTail() };
   }
   return { ...head, cls };
 }

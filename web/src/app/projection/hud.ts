@@ -32,22 +32,22 @@ import type { DebugGroupName, StripRow } from "../../ui/projection";
 /**
  * The shutter's row: what state it is in, and any dialogue still counting.
  *
- * The parameter is the two walker fields this reads and not `Walker` itself.
- * `Walker` satisfies it structurally, so the call site is unchanged, and
- * naming the two fields is what lets the check in `test/projection.test.ts`
- * hand it a plain object and pin all nine labels without a bundle.
+ * The parameter is the walker field this reads and not `Walker` itself.
+ * `Walker` satisfies it structurally, and naming the field is what lets the
+ * check in `test/projection.test.ts` hand it a plain object and pin all nine
+ * labels without a bundle. `dialogueFrames` is the newest subtitle task's
+ * frames left (`G.g_dialogue_tasks`, `game/dialogue.ts`).
  *
  * `shown` is `toggles.hud`, read from `Player` where the toggle lives, so the
  * sentence and `.hud-layer`'s `hidden` come from one fact rather than two.
  */
 export function describeShutter(
-    w: { shutterState: number; captionFrames: number } | null,
-    shown: boolean): string {
+    w: { shutterState: number } | null,
+    shown: boolean, dialogueFrames = 0): string {
   if (!shown) return "off";
   const state = w?.shutterState ?? 2;
   const label = SHUTTER_LABEL[state] ?? `state ${state}`;
-  const frames = w?.captionFrames ?? 0;
-  return `${label}${frames > 0 ? `, dialogue ${Math.ceil(frames)}f` : ""}`;
+  return `${label}${dialogueFrames > 0 ? `, dialogue ${dialogueFrames}f` : ""}`;
 }
 
 export interface XYZ { x: number; y: number; z: number }
@@ -136,7 +136,8 @@ export function hudInputs(p: HudSource): HudInputs | null {
       coli: p.coliDebug.describe,
       wedged: p.stuckDebug.describe,
       enemies: p.game.describe,
-      shutter: describeShutter(w, p.toggles.hud),
+      shutter: describeShutter(w, p.toggles.hud,
+                               G.g_dialogue_tasks.at(-1)?.frames ?? 0),
       rain: p.rain.describe,
       fog: p.sceneFog.describe,
       light: p.lighting.describe,

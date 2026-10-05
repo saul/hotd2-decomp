@@ -35,6 +35,7 @@ import type { OwlFeather, OwlGroundRing, OwlWaterSplash }
 import type { RingEffect } from "./effects/ring_effect";
 import type { WaterRing } from "./effects/water_ring";
 import type { WaterSurface, WaterSurfaceUv } from "./class41/water";
+import type { DialogueTask } from "./dialogue";
 import type { Type3SlotUv, Type3UvScrollTask } from "./class41/type03";
 import type { St2Car } from "./class21/car";
 import type { Actor } from "./actor";
@@ -1510,6 +1511,13 @@ export const G = {
    * `[port-only]` — the canal water tasks `PlaceWaterSurface`
    * (`FUN_00462F70`, class 0x41 type 1) has allocated. `game/class41/water.ts`.
    */
+  /**
+   * `[port-only]` — the subtitle tasks `EvtOpPlayDialogue2D` (`FUN_00435B80`)
+   * has allocated. `game/dialogue.ts`.
+   */
+  g_dialogue_tasks: [] as DialogueTask[],
+  /** `[port-only]` — see {@link DialogueTask.id}. */
+  g_dialogue_task_seq: 0,
   g_water_surfaces: [] as WaterSurface[],
   /** `[port-only]` — see {@link WaterSurface.id}. */
   g_water_surface_seq: 0,
@@ -2788,6 +2796,32 @@ export const G = {
    * accordingly when `g_max_attackers` is 1.
    */
   g_active_player: 0,
+  /**
+   * `g_nSkipRequested` — 0x009A1A18, a byte. Start pressed inside a skippable
+   * region with the firing gate down: the player-update routines
+   * (`FUN_00414940`, `FUN_00414B90`) raise it, and the skip watcher, class
+   * 0x63, takes it (`game/class63/`).
+   */
+  g_nSkipRequested: 0,
+  /**
+   * `g_nEvtSkippableRegion` — 0x009A2D7C. Set and cleared by
+   * `set_skippable_region` (evt 0x2C); while it is clear the skip watcher
+   * kills itself.
+   */
+  g_nEvtSkippableRegion: 0,
+  /**
+   * `g_nEvtSkipFlag` — 0x009A2D74. Raised by `CheckCutsceneSkipRequest`
+   * (`FUN_00435F40`) and cleared only by `set_skippable_region(0)`: every
+   * skippable wait passes and every dialogue goes quiet while it is up.
+   */
+  g_nEvtSkipFlag: 0,
+  /**
+   * `g_cutscene_skipping` — 0x009A2230. Raised with {@link g_nEvtSkipFlag}
+   * by `CheckCutsceneSkipRequest`, cleared by `FinishCutsceneSkip`
+   * (`FUN_00435FA0`) on the watcher's next run and by
+   * `set_skippable_region(1)`.
+   */
+  g_cutscene_skipping: 0,
 
   // -- game mode ---------------------------------------------------------
   /**
@@ -3282,6 +3316,9 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   G.g_water_ring_seq = 0;
   // The water tasks go with the scene's list, and the tiles they rewrote go
   // with the scene's assets.
+  // The subtitle tasks are the scene list's too.
+  G.g_dialogue_tasks = [];
+  G.g_dialogue_task_seq = 0;
   G.g_water_surfaces = [];
   G.g_water_surface_seq = 0;
   G.g_water_surface_uv = [];

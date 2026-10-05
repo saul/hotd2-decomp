@@ -87,6 +87,28 @@ console.log("\nclass 0x10, the civilian and the rescue:");
   const cmdKill = (scripts: number[], ...args: number[]): CivilianCmdJson =>
     ({ op: CivilianOp.SetOnShot, args, scripts });
 
+  // The skip arm at `0x0048AF8E`: with `g_cutscene_skipping` up and the wait
+  // word's `0x20000000` clear, the removal countdown is set to 1 and the
+  // other arms are passed over; the next frame's countdown takes her off.
+  {
+    const { a, events } = civScene([[
+      cmd(CivilianOp.Wait, 0), cmd(CivilianOp.SetMotionBlend, 1),
+      cmd(CivilianOp.Wait, 0),
+    ]]);
+    cFrame(a, events);
+    const alive = G.g_civilians_alive;
+    G.g_cutscene_skipping = 1;
+    cFrame(a, events);
+    G.g_cutscene_skipping = 0;
+    check("a skipped cut scene sets a civilian's removal countdown to 1",
+          a.civ?.removeDelay === 1 && !a.despawned,
+          `delay ${a.civ?.removeDelay}`);
+    cFrame(a, events);
+    check("...and the next frame's countdown takes her off the field",
+          a.despawned && G.g_civilians_alive === alive - 1,
+          `despawned ${a.despawned}, alive ${G.g_civilians_alive}`);
+  }
+
   // The VM runs a whole block in one go and parks on the next wait. A wait
   // word leads its block and governs the wait that *follows* it, which is why
   // a stream opens with one.

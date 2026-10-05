@@ -78,6 +78,7 @@ import { GAME_OVER_LOGO_SPRITES, ROUTE_FIGURE_SHADOW_SLOT, ROUTE_MARK_SLOTS }
   from "../game/player_body_data";
 // And the options screen's: its titles, EXIT and backgrounds are immediates
 // in its routines; its glyphs, crosshairs and sliders are `.rdata` read below.
+import { SUBTITLE_TILDE_SPRITE } from "../game/dialogue_data";
 import { OPTIONS_SCREEN_SPRITES, SCREEN_IDLE_DIM_SLOT }
   from "../game/options_data";
 // And the result card's: its seventeen tiles and its glyph models are
@@ -2851,6 +2852,10 @@ export async function buildStage(stage: Stage, sink: BundleSink,
     ammo_hud_rows: { sprite: number }[]; list_sprites: number[];
   };
   scriptJson.original_mode = originalMode;
+  // The dialogue subtitles' glyph table, one block for the whole game as
+  // `options` is, and the sprites it names beside `~`'s literal.
+  const subtitleGlyphs = tables.subtitleGlyphs();
+  scriptJson.subtitle_glyphs = subtitleGlyphs;
   const optionTableSprites = [
     ...(options.glyphs as number[]), ...(options.crosshair_sprites as number[]),
     ...(options.sight_speed_sprites as number[]),
@@ -2861,6 +2866,11 @@ export async function buildStage(stage: Stage, sink: BundleSink,
      ...BOSS_HP_BAR_SPRITES, ...BOSS_BANNER_SPRITES, ...BOSS3_CARD_SPRITES,
      ...GAME_OVER_LOGO_SPRITES, ...routeTiles,
      ...OPTIONS_SCREEN_SPRITES, ...optionTableSprites,
+     // `DrawTextCentred`'s glyphs for every character a shipped line uses,
+     // in every stage: any of them can play any group (`game/dialogue.ts`).
+     // The table's other entries are never drawn -- two of them, under
+     // control characters, name a sprite with no bank at all.
+     ...subtitleGlyphSprites(tables, subtitleGlyphs),
      // `OriginalItemBannerUpdate`'s two sprites, for the ids this stage's
      // collectibles can be.
      ...originalItemSprites(originalItemsJson(tables, placements,
@@ -2987,6 +2997,27 @@ export async function writeManifest(
  * col`.
  */
 const ROUTE_TILES_PER_SCREEN = 5 * 15;
+
+/**
+ * The sprites `DrawTextCentred` (`FUN_00436850`) can draw for the shipped
+ * dialogue: `g_subtitle_glyphs[c]` for every character a line holds, and
+ * `0x62D` for `~`.
+ */
+function subtitleGlyphSprites(tables: ExeTables,
+                              glyphs: readonly number[]): number[] {
+  const chars = new Set<string>();
+  for (const m of tables.screenMessages()) {
+    for (const v of (m.variants as ({ lines?: { text: string }[] } | null)[])) {
+      for (const l of v?.lines ?? []) for (const ch of l.text) chars.add(ch);
+    }
+  }
+  const out: number[] = [];
+  for (const ch of chars) {
+    const id = ch === "~" ? SUBTITLE_TILDE_SPRITE : glyphs[ch.charCodeAt(0)] ?? 0;
+    if (id > 0 && !out.includes(id)) out.push(id);
+  }
+  return out.sort((a, b) => a - b);
+}
 
 /**
  * The screen sprites the game draws, as images the right way up.

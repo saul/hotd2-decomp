@@ -7,7 +7,8 @@ import { CameraResetForPathShot } from "../../src/game/camera/mode";
 import { G } from "../../src/game/globals";
 import { NULL_HOST } from "../../src/game/host";
 import {
-  MatIdentity, MatrixRotateX, MatrixRotateY, MatrixRotateZ, MatrixTranslate,
+  FtolS16, MatIdentity, MatrixRotateX, MatrixRotateY, MatrixRotateZ,
+  MatrixTranslate,
 } from "../../src/game/matrix";
 import { SetGameTables } from "../../src/game/tables";
 import { SpawnClass } from "../../src/game/spawn_class";
@@ -50,7 +51,9 @@ import { ClearPropShotTestList } from "../../src/game/class41/shot_test";
 import { MatrixScale } from "../../src/game/matrix";
 import { PropWords } from "../../src/game/class41/words";
 import { TYPE13_JUDDER } from "../../src/game/class41/type13";
-import { PlaceChainSegments } from "../../src/game/class41/triggers";
+import { PlaceChainSegments } from "../../src/game/class41/chain";
+import { CHAIN_LINK_SLOT } from "../../src/game/class41/chain_slots";
+import { PICKED_ITEM_WORDS_ZERO } from "../../src/game/class41/original_item";
 import {
   MatrixFromZYX, MatrixInterpolateSwingTwist, MatrixToZYX,
 } from "../../src/game/class44/swing_twist";
@@ -296,19 +299,118 @@ console.log("\nprops are shot by a sphere, not by the model they draw:");
     check("...and out of it the moment the list is cleared", !p.shotRegistered);
   }
 
-  // The chain's twenty links are twenty spheres, dropping 1.5 apiece. Placing
-  // them all at the anchor would make one link out of twenty.
+  // The chain (`ChainSegmentUpdate`, `FUN_00469510`): every link hangs from
+  // the matrix the link above stored, 1.5 lower, and draws slot 0x1234 turned
+  // its own `i << 14` -- from its first update, not from its constructor.
   {
     propScene(rng);
     const links = PlaceChainSegments({ at: 0x9200, container: "chain",
                                        chain_group: 0, lifetime_evt_steps: 9,
-                                       pos: [0, 0, 0] });
-    check("each link hangs 1.5 below the one above it",
-          Math.abs(links[0].y - -1.5) < 1e-6
-          && Math.abs(links[19].y - -30.0) < 1e-6,
-          `${links[0].y} .. ${links[19].y}`);
-    check("...and each carries its own 2.0 sphere", links[7].hitRadius === 2,
-          String(links[7].hitRadius));
+                                       pos: [10, 20, -5] });
+    G.g_breakable_props.push(...links);
+    BreakablePropPoolUpdate(rng);
+    const d0 = links[0].draws ?? [];
+    const d19 = links[19].draws ?? [];
+    check("a chain link draws one 0x1234, at the anchor for the top link",
+          d0.length === 1 && d0[0].slot === CHAIN_LINK_SLOT
+          && Math.abs(d0[0].m[12] - 10) < 1e-5
+          && Math.abs(d0[0].m[13] - 20) < 1e-5
+          && Math.abs(d0[0].m[14] - -5) < 1e-5,
+          JSON.stringify(d0.map((d) => [d.slot, d.m[12], d.m[13], d.m[14]])));
+    check("...and 1.5 lower for each link above it: the twentieth at 20 - 28.5",
+          d19.length === 1 && Math.abs(d19[0].m[13] - (20 - 1.5 * 19)) < 1e-4,
+          JSON.stringify(d19.map((d) => d.m[13])));
+    const d1 = links[1].draws?.[0]?.m ?? [];
+    check("...each turned a quarter from the last (RotY(1 << 14))",
+          Math.abs(d1[0]) < 1e-6 && Math.abs(Math.abs(d1[2]) - 1) < 1e-6,
+          JSON.stringify(d1.slice(0, 3)));
+    check("...and its 2.0 sphere is at its foot, 1.5 under its model",
+          links[7].shotRegistered && links[7].hitRadius === 2
+          && Math.abs(links[7].shotY - (20 - 1.5 * 8)) < 1e-4,
+          `${links[7].shotRegistered} ${links[7].shotY}`);
+
+    // A shot on link 5: two `rand()` pairs make the swing, and every link
+    // from two above the hit gets a rate scaled by its distance from it.
+    const twin = new Rng(1);
+    twin.state = rng.state;
+    BreakablePropTakeShot(links[5], 0);
+    BreakablePropPoolUpdate(rng);
+    const flipA = twin.int(2);
+    const a = twin.int(0x51) - flipA * 0x180 + 0x98;
+    const flipB = twin.int(2);
+    const b = twin.int(0x51) - flipB * 0x180 + 0x98;
+    const c = (i: number) => links[i].chain!;
+    const below = (k: number) => (k * 0.25 + 1.0) - (k * k) * Math.fround(0.09);
+    const sprung = (r: number) => FtolS16(r - Math.trunc(r / 48));
+    check("the link two above the hit takes half the swing, one above three "
+          + "quarters (they ran before the hit, so unsprung)",
+          c(3).pitchRate === FtolS16(a * 0.5)
+          && c(4).pitchRate === FtolS16(a * 0.75)
+          && c(3).rollRate === FtolS16(b * 0.5),
+          `a=${a} b=${b} 3:${c(3).pitchRate} 4:${c(4).pitchRate}`);
+    check("...three above it takes none",
+          c(2).pitchRate === 0 && c(2).rollRate === 0,
+          `${c(2).pitchRate} ${c(2).rollRate}`);
+    check("...the hit link takes all of it and springs it the same frame",
+          c(5).pitchRate === sprung(a) && c(5).pitch === sprung(a)
+          && c(5).rollRate === sprung(b),
+          `${c(5).pitchRate} vs ${sprung(a)}`);
+    check("...and the links below take 1 + k/4 - 0.09k^2 of it",
+          c(6).pitchRate === sprung(FtolS16(a * below(1)))
+          && c(12).pitchRate === sprung(FtolS16(a * below(7))),
+          `${c(6).pitchRate} ${c(12).pitchRate}`);
+    check("a swing in 152..232 either way", Math.abs(a) >= 152
+          && Math.abs(a) <= 232 && Math.abs(b) >= 152 && Math.abs(b) <= 232,
+          `${a} ${b}`);
+    check("a shot link pays nothing: BreakablePropAwardHit(flags, 0)",
+          (G.g_player_score[0] ?? 0) === 0, String(G.g_player_score[0]));
+  }
+
+  // Chain group 1 in block 0x16: any link opens the route, and segment 0 --
+  // not the shot link -- drops row 4's item on its next update, under its
+  // own foot at the world height 18.
+  {
+    propScene(rng);
+    SetGameTables(CHARS, {
+      ...BREAKABLES,
+      original_items: {
+        scene: 1,
+        rows: { "4": { ids: [17, 17, 17, 17], weights: [1, 2, 3, 4] } },
+        records: ORIGINAL_ITEMS_SCENE2.records,
+      },
+    } as typeof BREAKABLES);
+    G.g_evt_block_index = 0x16;
+    const links = PlaceChainSegments({ at: 0x9210, container: "chain",
+                                       chain_group: 1, lifetime_evt_steps: 3,
+                                       pos: [0, 20, 0] });
+    G.g_breakable_props.push(...links);
+    BreakablePropPoolUpdate(rng);
+    BreakablePropTakeShot(links[9], 0);
+    BreakablePropPoolUpdate(rng);
+    check("shooting link 9 of group 1 opens the route and latches segment 0",
+          G.g_script_branch_var === 2 && links[0].chain!.latch === 1,
+          `${G.g_script_branch_var} ${links[0].chain!.latch}`);
+    const drops0 = G.g_breakable_props.filter(
+      (q) => q.family === PropFamily.OriginalItemDrop);
+    check("...and nothing drops on the frame of the shot", drops0.length === 0,
+          String(drops0.length));
+    // The foot segment 0 reads is the one its previous update left.
+    const footX = links[0].chain!.wx;
+    const footZ = links[0].chain!.wz;
+    BreakablePropPoolUpdate(rng);
+    const drops = G.g_breakable_props.filter(
+      (q) => q.family === PropFamily.OriginalItemDrop);
+    const s0 = links[0].chain!;
+    check("segment 0 drops one item from row 4 on its next update",
+          drops.length === 1 && s0.latch === 2
+          && PropWords(drops[0], PICKED_ITEM_WORDS_ZERO).o290 === 17,
+          `${drops.length} latch ${s0.latch}`);
+    check("...at its foot's x and z, at y 18, with the chain's own lifetime",
+          drops.length === 1 && drops[0].y === 18
+          && drops[0].x === footX && drops[0].z === footZ
+          && drops[0].lifetime === 3,
+          drops.length ? `${drops[0].x} ${drops[0].y} ${drops[0].z} `
+            + `${drops[0].lifetime}` : "none");
   }
 
   // The fragment pair is two objects 41.683 apart, not two in one place.

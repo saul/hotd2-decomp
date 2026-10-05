@@ -49,6 +49,7 @@ import { WATER_SURFACE_ALSO_DRAWS } from "../game/class41/water_slots";
 import { SLIDE_SECOND_DRAW_SLOT, SLIDE_SECOND_SLOT }
   from "../game/class44/slide_slots";
 import { TYPE47_CONSTRUCTOR, TYPE47_SLOT } from "../game/class41/type47_slots";
+import { CHAIN_ITEM_ROW, CHAIN_LINK_SLOT } from "../game/class41/chain_slots";
 // ...and constructors 16, 17, 29 and 37: their models, and where their tables
 // are (`class41_rows.ts` reads them).
 import { TYPE16_CONSTRUCTOR, Type16DrawSlots }
@@ -1341,7 +1342,8 @@ export const STORY_ITEM_ROW_BY_TYPE: Record<number, number> = { 74: 2, 75: 1 };
  * placements can reach. See `OriginalItemsJson`.
  *
  * A row is named by the placer's byte for a collectible (types 70, 71, 72),
- * by a routine's own immediate for types 7, 43, 74 and 75, and by a story item --
+ * by a routine's own immediate for types 7, 43, 74 and 75 and the chain, and
+ * by a story item --
  * `obj+0x2A0` -- for a group member or a falling container, whose destroy
  * path hands `SpawnStoryModeItem` that word in Original Mode.
  */
@@ -1365,6 +1367,10 @@ export function originalItemsJson(tables: ExeTables,
       for (const m of groups[pl.group as number] ?? []) named.push(m.story_item);
     } else if (pl.container === "falling") {
       named.push((pl.story_item as number) ?? -1);
+    } else if (pl.container === "chain") {
+      // `SpawnChainItemDrop(18.0, 4, seg)` -- segment 0's drop, once a link
+      // of group 1 has opened the route.
+      named.push(CHAIN_ITEM_ROW);
     }
   }
   for (const row of named) {
@@ -2412,6 +2418,8 @@ export async function breakableSlotEntry(
     }
     if (pl.container === "table29") slots.push(...Type29DrawSlots());
     if (pl.container === "type37") slots.push(...Type37DrawSlots());
+    // `ChainSegmentUpdate` draws one literal for every link.
+    if (pl.container === "chain") slots.push(CHAIN_LINK_SLOT);
     for (const slot of slots) {
       if (slot && !want.includes(slot)) want.push(slot);
     }

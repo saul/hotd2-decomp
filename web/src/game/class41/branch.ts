@@ -19,7 +19,7 @@
  * type 70  scene 2, block 4, flag 0x13 -> scene    original only  (original_item.ts)
  * type 73  first hit, block 7, flag 0x12, key -> 2 original only  (type73.ts)
  * type 76  first hit, block 5 or 0x0E + key -> 2   original only  (type76.ts)
- * chain    any link, group 1, block 0x16 -> 2      original only
+ * chain    any link, group 1, block 0x16 -> 2      original only  (chain.ts)
  * switch   scene/block table, its own flag -> 2    original only
  * ```
  *
@@ -36,16 +36,16 @@
  *
  * ## What is transcribed here, and what is not
  *
- * Eight of the nine are no longer here: types 14, 19, 25, 56, 69, 70 (and 71,
- * the same routine), 73 and 76 are transcribed whole, each in its own file
- * beside type 40's, and their branch write sits in its routine exactly where
+ * Nine are no longer here: types 14, 19, 25, 56, 69, 70 (and 71, the same
+ * routine), 73 and 76 and the chain are transcribed whole, each in its own
+ * file beside type 40's, and their branch write sits in its routine exactly where
  * the exe has it — with the fall, the swing, the sounds, the draws and, for
  * 14, 19 and 25, the enemy count their arms raise and their routines give
  * back.
  *
  * **What is left here is the gate and the write, and the latch that stops it
- * firing twice**, for the routines whose other arms are not yet read: the
- * chain segments and the story-mode switch. What each doc comment lists as
+ * firing twice**, for the one routine whose other arms are not yet read: the
+ * story-mode switch. What each doc comment lists as
  * unported is what a later pass still
  * owes it. The line was drawn there first because a route the stage takes is
  * a fact about where the whole rest of the level goes, and a prop that swings
@@ -98,44 +98,6 @@ export enum BranchBlock {
   Chain = 0x16,
   /** `PropUpdateType25`. */
   Type25 = 0x17,
-}
-
-/**
- * `ChainSegmentUpdate` — `FUN_00469510`. One link of the twenty
- * `PlaceChainSegments` builds.
- *
- * ```c
- * if ((obj->+0x34 & 8)) {
- *     ...pay, PlaySoundId(0xF16A9), shake the two neighbours either side...
- *     if (g_GameMode == 1 && obj->+0x1AC == 1
- *         && g_chain_segments[1 * 0x14 + 0]->+0x1B0 == 0
- *         && g_evt_block_index == 0x16) {
- *         g_chain_segments[1 * 0x14 + 0]->+0x1B0 = 1;
- *         g_script_branch_var = 2;
- *     }
- * }
- * ```
- *
- * **Any link opens the route**, and the latch lives on segment 0 rather than
- * on the link that was hit — which is what makes twenty objects behave as one
- * switch. Group 1 is the only group that carries it, and
- * `PlaceChainSegments` refuses to build group 1 at all outside Original Mode.
- *
- * Stage 2 block 22 is 0x16 and its record is `{23, -1, 34}`.
- *
- * Not transcribed: the neighbour shake, the spark, and the hanging matrix
- * that swings the whole chain from one hit.
- */
-export function ChainSegmentUpdate(p: BreakableProp,
-                                   segmentZero: BreakableProp | undefined):
-                                   void {
-  if ((p.flags & BreakableFlag.Hit) === 0) return;
-  if (G.g_GameMode !== GameMode.Original) return;
-  if (p.chainGroup !== 1) return;
-  if (G.g_evt_block_index !== BranchBlock.Chain) return;
-  if (!segmentZero || segmentZero.branchLatched) return;
-  segmentZero.branchLatched = true;
-  G.g_script_branch_var = 2;
 }
 
 /**

@@ -32,9 +32,9 @@ import { SwingThenBreakUpdate } from "../class44/swing_then_break";
 import { EffectCollapseUpdate } from "../class44/effect_collapse";
 import { ScriptFlagEffectUpdate } from "../class44/script_flag_effect";
 import {
-  ChainSegmentUpdate, StoryModeSwitchUpdate,
-  STORY_SWITCH_FLAG_AT, STORY_SWITCH_SCRIPT_FLAG,
+  StoryModeSwitchUpdate, STORY_SWITCH_FLAG_AT, STORY_SWITCH_SCRIPT_FLAG,
 } from "./branch";
+import { ChainSegmentUpdate } from "./chain";
 import {
   PropDrawOnlyType31, PropDrawOnlyType33, PropDrawOnlyType53,
   PropDrawOnlyType54,
@@ -48,7 +48,6 @@ import { Type67MountedPartUpdate } from "./type67";
 import { PropUpdateType43 } from "./type43";
 import { PropUpdateType48FlickerLight } from "./type48";
 import { KindedPropUpdate } from "./kinded";
-import { PropExpireByStepLifetime } from "./lifetime";
 import { ClearPropShotTestList, PropRegisterAtOrigin } from "./shot_test";
 import { ActorDespawnProp, BreakablePropUpdate } from "./prop";
 import { HIT_FLAG_MASK, PropFamily, type BreakableProp }
@@ -158,6 +157,9 @@ export function BreakablePropPoolUpdate(rng: Rng, events?: Events,
       case PropFamily.Type39: PropUpdateType39(p, rng, events); break;
       case PropFamily.Type40: PropUpdateType40(p, rng, events); break;
       case PropFamily.Type44: PropUpdateType44(p, rng, events); break;
+      // A chain link: its own byte-wide lifetime, its own hit arm and swing,
+      // and its shot sphere at its own foot. See `class41/chain.ts`.
+      case PropFamily.ChainSegment: ChainSegmentUpdate(p, rng, events); break;
       // Its own inlined lifetime (step count before the sweep, `ActorKill`
       // rather than `ActorDespawn`), no `AND` on `obj+0x34` and no
       // `RegisterForShotTest`. See `class41/type13.ts`.
@@ -205,8 +207,7 @@ export function BreakablePropPoolUpdate(rng: Rng, events?: Events,
 
 /**
  * The pool's generic arm: `g_class41_updates[type]` for the objects
- * `PlaceGenericProp` (`FUN_00461CF0`) builds with no family of their own, and
- * `ChainSegmentUpdate` for the twenty links `PlaceChainSegments` builds.
+ * `PlaceGenericProp` (`FUN_00461CF0`) builds with no family of their own.
  *
  * Every class-0x41 generic routine is transcribed whole and is a
  * `GENERIC_ROUTINES` row (`class41/generic_routines.ts`): it brings its own
@@ -215,23 +216,15 @@ export function BreakablePropPoolUpdate(rng: Rng, events?: Events,
  * `g_class41_updates[obj->+0x130C]` and the object calls through it every
  * frame.
  *
- * What is left below is a chain link (type 0, which has no row): the shared
- * `PropExpireByStepLifetime` head, its branch arm (`class41/branch.ts`), the
- * mask of the four hit bits and its sphere at its own link.
+ * A type with no row has no routine and does nothing -- neither draws nor
+ * registers -- as a class with no `g_class_handlers` entry does nothing. The
+ * last object that reached this arm without a row was the chain link, which
+ * has its own family now (`class41/chain.ts`); no shipped placement does.
  */
 function GenericPropUpdate(p: BreakableProp, rng: Rng,
                            events?: Events): void {
   const routine = GENERIC_ROUTINES[p.kind];
-  if (routine) {
-    routine(p, rng, events);
-    return;
-  }
-  if (PropExpireByStepLifetime(p)) return;
-  if (p.chainGroup > 0) {
-    ChainSegmentUpdate(p, ChainSegmentZero(p.chainGroup));
-  }
-  p.flags &= ~HIT_FLAG_MASK;
-  PropRegisterAtOrigin(p);
+  if (routine) routine(p, rng, events);
 }
 
 /**
@@ -289,15 +282,3 @@ function StoryModeSwitchPoolUpdate(p: BreakableProp): void {
   PropRegisterAtOrigin(p);
 }
 
-/**
- * Segment 0 of a chain group — where `ChainSegmentUpdate` keeps the latch
- * that stops twenty links opening one route twenty times.
- *
- * `g_chain_segments[group * 0x14 + 0]`, by prop id, because the port's pool
- * is a list and the engine's is an array of pointers.
- */
-function ChainSegmentZero(group: number): BreakableProp | undefined {
-  const id = G.g_chain_segments[group * 0x14];
-  if (!id) return undefined;
-  return G.g_breakable_props.find((q) => q.id === id);
-}

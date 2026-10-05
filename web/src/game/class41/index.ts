@@ -33,7 +33,7 @@ import { T } from "../tables";
 import { PlaceBreakableGroup } from "./group";
 import { PlaceKindedProp } from "./kinded";
 import { PlaceGenericProp } from "./generic";
-import { PlaceChainSegments } from "./triggers";
+import { PlaceChainSegments } from "./chain";
 import { PlaceFragmentProps } from "./type40";
 import { PlaceTable38Props } from "./type38";
 import { PlaceTable39Stacks } from "./type39";

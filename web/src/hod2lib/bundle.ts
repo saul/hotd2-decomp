@@ -1634,6 +1634,12 @@ export const ACTOR_SLOTS: Record<number, number[]> = {
   // (`Class23LandingRingUpdate`, `FUN_00491700`: slot `0x17C8`, `boss1q.bin`
   // 94). The walker is only ever made by the flier, so the flier carries both.
   0x22: [...Array.from({ length: 15 }, (_, i) => 0x94 + i), 0x17c8],
+  // Class 0x15, the floating planks: the strip a plank throws as it leaves
+  // on its flag, `SpawnPropStripEffect` (`FUN_0043FCA0`) kind 1 --
+  // `sanbasi.bin` 12..90, slots 0x16E1..0x172F -- which the strip object
+  // draws by slot. The plank's own model is its descriptor's
+  // (`floatingPropDrawSlots`).
+  0x15: Array.from({ length: 0x172f - 0x16e1 + 1 }, (_, i) => 0x16e1 + i),
   // Class 0x42, the worm: `buyo.bin` 0..53, every slot its three routines
   // draw through `WormAssetDrawSlot` (`FUN_00430B90`) -- the body `0x85A`,
   // its shadow `0x85B`, the landing splat `0x85C..0x874` (which the lone
@@ -1817,6 +1823,26 @@ export function humanoidDrawSlots(
  * blood hang off the same one. `render/slotmodels.ts` places its clones in
  * the world.
  */
+/**
+ * The asset slots a stage's **class-0x15 planks** draw: `tail+0x00` of each
+ * placement, `AssetDrawSlot((s16)obj+0x1F4)` at the end of
+ * `FloatingPropUpdate` (`FUN_004418C0`). A property of the descriptor, so of
+ * the placement, as `scriptedPropDrawSlots`' are. They ride `slots_effect`
+ * because the plank's draw is recorded with its world matrix
+ * (`DrawSlotInWorld`) and `render/view_slots.ts` places it from that layer.
+ */
+export function floatingPropDrawSlots(
+    placements: readonly { class15?: { slot?: number } | null }[]): number[] {
+  const out: number[] = [];
+  for (const p of placements) {
+    const slot = p.class15?.slot;
+    if (typeof slot === "number" && slot > 0 && !out.includes(slot)) {
+      out.push(slot);
+    }
+  }
+  return out;
+}
+
 export function bodyCreatureDrawSlots(
     charTypes: Iterable<number>): number[] {
   const out: number[] = [];
@@ -2757,6 +2783,7 @@ export async function buildStage(stage: Stage, sink: BundleSink,
     cache);
   const eff = await effectSlotEntry(stage, cache, [
     ...bodyCreatureDrawSlots(charDefs.keys()),
+    ...floatingPropDrawSlots(charPlaces),
     ...carriedPropDrawSlots(charPlaces as unknown as Record<string, unknown>[]),
     // ...and the break effects' node models, which `render/effects.ts` draws
     // for the same object once it has broken.

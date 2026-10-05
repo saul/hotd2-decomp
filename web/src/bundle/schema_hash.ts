@@ -20,7 +20,7 @@
 /** The per-file digests, so a mismatch can name the block that moved. */
 export const SCHEMA_FILES: Readonly<Record<string, string>> = {
   "cameras.ts": "e711fd29f97441deae96406d95600d68fc9b5e9ccb1c170b46f23120cd8d67ce",
-  "characters.ts": "6d2c3d2c1adb7041dfa958752025a86cf3df519512e61447df8508c1781ac295",
+  "characters.ts": "a829bf21f09679e5eb755e0daa6da0c04505c506b7a68d4fef2f1a0a6868b537",
   "manifest.ts": "37c3e33623221efd0aee11e8cb4df1437155c73c1055bec6a7a6818cf8d962bb",
   "scene.ts": "24df1508015b4b5ba7fdf827d23f388bdd71ead033cfa238ed142d98c54b1580",
   "script.ts": "24322ec31dd1b8cbd71e8f6dc257df656e433149663182b70722aaf69330357f",
@@ -29,4 +29,4 @@ export const SCHEMA_FILES: Readonly<Record<string, string>> = {
 };
 
 /** One digest over {@link SCHEMA_FILES}, in filename order. */
-export const SCHEMA_HASH = "624b10132f0c820c78298d3b7f760575f99d2e3b06a54159f75db16bf8d8d4f0";
+export const SCHEMA_HASH = "21373e1de966836cb9ab04b75d9d71c20c17c19cb94167a76a3f301983251bc6";

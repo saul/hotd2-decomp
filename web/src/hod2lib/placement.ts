@@ -385,6 +385,8 @@ export class Placement {
   class13: Record<string, unknown> | null = null;
   /** Class 0x12's tail -- the slot strip, its flag, delay and despawn cue. */
   class12: Record<string, unknown> | null = null;
+  /** Class 0x15's tail -- the row of floating planks; see `class15Tail`. */
+  class15: Record<string, unknown> | null = null;
   /** Class 0x18's three -- the state it leaves from and the camera cue. */
   class18: Record<string, unknown> | null = null;
   /** Class 0x26 subtype 2's collision blob -- the boat the player rides. */
@@ -572,6 +574,7 @@ export class Placement {
     if (this.class20) d.class20 = this.class20;
     if (this.class13) d.class13 = this.class13;
     if (this.class12) d.class12 = this.class12;
+    if (this.class15) d.class15 = this.class15;
     if (this.class18) d.class18 = this.class18;
     if (this.class26) d.class26 = this.class26;
     if (this.class19) d.class19 = this.class19;

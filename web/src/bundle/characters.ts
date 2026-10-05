@@ -487,6 +487,23 @@ export interface CharacterPlacement {
     flag: number; step: number; scale: number;
   } | null;
   /**
+   * Class 0x15's tail — a row of floating planks, every field
+   * `FloatingPropRowSpawn` (`FUN_00441750`) reads out of it. `count` planks
+   * (`+0x24`, s8) at `delta` (`+0x18..+0x20`) apart, each drawing `slot`
+   * (`+0x00`) with `coli` (`+0x04`, the `coli.blobs` key, `null` for -1) as
+   * its mesh; the last `keep` (`+0x25`) never leave on `flag` (`+0x12`), the
+   * rest leave `delay_step` (`+0x26`) frames apart once it is up;
+   * `cam_path`/`cam_frame` (`+0x0A`/`+0x0C`) kill every one. `word_0e` and
+   * `word_10` are copied into the plank and read by nothing. See
+   * `game/class15/`.
+   */
+  class15?: {
+    slot: number; coli: string | null; behaviour: number;
+    cam_path: number; cam_frame: number; word_0e: number; word_10: number;
+    flag: number; delta: [number, number, number]; count: number;
+    keep: number; delay_step: number;
+  } | null;
+  /**
    * Class 0x18's three — the class-0x30 state a rider leaves the carrier from,
    * and the camera path and frame that let it. See `game/class18/`.
    */

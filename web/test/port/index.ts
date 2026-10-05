@@ -74,6 +74,7 @@
  *                     effects, the guns they arm, the script's entry at step 5
  *   class32           the stage-5 boss: its shot, its node hook, its
  *                     projectiles' burst and the flags it raises
+ *   class15_2B        stage 2's floating planks; the scripted lights
  *
  * Run with `npm run test:port` (`node tools/run_test.mjs test/port/index.ts`).
  */
@@ -115,6 +116,7 @@ import "./class28_12.test";
 import "./options.test";
 import "./original.test";
 import "./class32.test";
+import "./class15_2B.test";
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");
 process.exit(failures ? 1 : 0);

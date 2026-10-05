@@ -145,11 +145,13 @@ export function class20Tail(rec: Spawn): Record<string, unknown> {
  * Classes 0x16 and 0x17 draw nothing at all -- `WaterFieldCreate` and
  * `WaterWaveSourceAdd` build the stage-2 boss arena's wave field and kill
  * themselves -- but they are here for the same reason: no character type,
- * and the port still needs the placement to build them.
+ * and the port still needs the placement to build them. So is class 0x2B,
+ * a scripted light (`DynamicLightInit`, `FUN_00438060`), which draws nothing
+ * and reads only `desc+0x22`, the placement's `hp`.
  */
-export const SLOT_DRAWN_CLASSES = new Set([0x12, 0x13, 0x16, 0x17, 0x26, 0x29,
-                                           0x33, 0x40, 0x42, 0x43, 0x51,
-                                           0x52]);
+export const SLOT_DRAWN_CLASSES = new Set([0x12, 0x13, 0x15, 0x16, 0x17, 0x26,
+                                           0x29, 0x2b, 0x33, 0x40, 0x42, 0x43,
+                                           0x51, 0x52]);
 
 /**
  * Class 0x17's descriptor tail, as `WaterWaveSourceAdd` (`FUN_004422D0`) and
@@ -446,6 +448,52 @@ export function class12Tail(
     flag: rec.param(0x12, "i16") ?? -1,
     step: rec.param(0x14, "f32") ?? 0,
     scale: rec.param(0x18, "f32") ?? 1,
+  };
+}
+
+/**
+ * Class 0x15's descriptor tail, as `FloatingPropRowSpawn` (`FUN_00441750`)
+ * reads it through `obj+0x130C`:
+ *
+ * ```
+ * +0x00  s16  the slot every plank draws           -> plank+0x1F4
+ * +0x04  u32  a coli blob pointer, -1 for none      -> plank+0x14C
+ * +0x08  s16  the g_prop_behaviours index           -> sub+0x00
+ * +0x0A  s16  the camera path that kills a plank    -> sub+0x06
+ * +0x0C  s16  ...and its frame                       -> sub+0x08
+ * +0x0E  s16, +0x10 s16  copied, read by nothing   -> sub+0x0A, sub+0x0C
+ * +0x12  s16  the script flag that starts the delay -> sub+0x0E
+ * +0x18  f32 x3  the step between planks
+ * +0x24  s8   the count
+ * +0x25  s8   how many of the last never leave on the flag
+ * +0x26  s16  the delay step between the ones that do
+ * ```
+ *
+ * `+0x14` (1.0 in both shipped descriptors) is read by neither the routine
+ * nor the plank's update, so it is not carried. Every width is the load's:
+ * `MOVSX` byte for `+0x24`/`+0x25`, word moves into the block and `MOVSX`
+ * word where the update reads them back. See `game/class15/`.
+ */
+export function class15Tail(
+    rec: Spawn,
+    sets: [colilib.ColiFile, colilib.ColiFile] | null): Record<string, unknown> {
+  const word = rec.param(0x04, "u32");
+  const hit = word !== null && word !== 0xffffffff && sets
+    ? colilib.pointerToOffset(word, sets[0], sets[1]) : null;
+  return {
+    slot: rec.param(0x00, "i16") ?? 0,
+    coli: hit ? `${hit[0]}:${hit[1]}` : null,
+    behaviour: rec.param(0x08, "i16") ?? 0,
+    cam_path: rec.param(0x0a, "i16") ?? -1,
+    cam_frame: rec.param(0x0c, "i16") ?? -1,
+    word_0e: rec.param(0x0e, "i16") ?? 0,
+    word_10: rec.param(0x10, "i16") ?? 0,
+    flag: rec.param(0x12, "i16") ?? -1,
+    delta: [rec.param(0x18, "f32") ?? 0, rec.param(0x1c, "f32") ?? 0,
+            rec.param(0x20, "f32") ?? 0],
+    count: rec.param(0x24, "i8") ?? 0,
+    keep: rec.param(0x25, "i8") ?? 0,
+    delay_step: rec.param(0x26, "i16") ?? 0,
   };
 }
 
@@ -1186,6 +1234,9 @@ export function slotDrawnSpawn(cls: number, rec: Spawn): boolean {
   // shipped descriptor names. One that named another would arrive drawing
   // the right slot and doing nothing else.
   if (cls === 0x12) return rec.param(0x08, "i16") === 0;
+  // Class 0x15's planks call theirs every frame too (`FloatingPropUpdate`,
+  // `FUN_004418C0`), and both shipped descriptors name entry 0.
+  if (cls === 0x15) return rec.param(0x08, "i16") === 0;
   if (cls === 0x33) {
     return rec.hp === CLASS33_CARRIER || rec.hp === CLASS33_PUSHABLE
       || rec.hp === CLASS33_EFFECT_CUE || rec.hp === CLASS33_DRAW_UNTIL_FLAG
@@ -2018,6 +2069,7 @@ export async function resolveForStage(
     }
     const class13 = cls === 0x13 ? class13Tail(rec) : null;
     const class12 = cls === 0x12 ? class12Tail(rec, coliSets) : null;
+    const class15 = cls === 0x15 ? class15Tail(rec, coliSets) : null;
     const class18 = cls === 0x18 ? class18Tail(rec) : null;
     const class26 = cls === 0x26 ? class26Tail(rec, coliSets) : null;
     const class19 = cls === 0x19 ? class19Tail(rec, coliSets) : null;
@@ -2143,6 +2195,7 @@ export async function resolveForStage(
     p.ring_set = res.charType === 0 ? RING_SET_FOR_CHAR0 : 0;
     p.class13 = class13;
     p.class12 = class12;
+    p.class15 = class15;
     p.class18 = class18;
     p.class26 = class26;
     p.class19 = class19;

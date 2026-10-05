@@ -331,6 +331,98 @@ console.log("\nclass 0x30 state 37, release 3 — stage 1's barrel over the civi
         p ? `pivot ${JSON.stringify(p.pivot)} spin ${p.spin}` : "no prop");
 }
 
+console.log("\nclass 0x30 state 37 — stage 1's barrel shot out of the carrier's hands:");
+{
+  // `CarriedPropHeldUpdate` (`FUN_00442820`) runs `CarriedPropCheckShot` at
+  // `0x00442935`, straight after `RegisterForShotTest`: the barrel is shot to
+  // pieces in the hands, and `ZombieStateCarryProp`'s sub 2 sees hp < 1 and
+  // drops to sub 4 without ever letting go of it.
+  const HOLD_TYPE: CharacterType = {
+    ...TYPE,
+    motions: {
+      ...TYPE.motions,
+      "271": motion(20, 0, 38), "265": motion(20, 0, 38),
+      "266": motion(20, 0, 38), "270": motion(20),
+    },
+  };
+  const holdScript: TargetScriptJson = {
+    state: ZombieState.CarryProp,
+    head: { prop_type: 0, behaviour: 1, release: 3, offset: [0, 2, 0],
+            spin: [512, 0, 0], launch: [0, -1.5, 0],
+            motion: 271, frame: 0, loops: 2, mode: -2 },
+    entries: [{ motion: 265, frame: 0, loops: 1, mode: -1 },
+              { motion: 266, frame: 0, loops: 1, mode: 15 }],
+  };
+  const retire: TargetScriptJson = {
+    state: ZombieState.RetireOffScreen,
+    head: { point: [0, 0, -60], motion: 270, frame: 0, loops: 1, mode: 0 },
+    entries: [],
+  };
+  const identity = MatIdentity();
+  const HOLD_HOST: GameHost = {
+    ...NULL_HOST,
+    boneMatrix: (at, bone, out) => {
+      const z = ActorByAt(at);
+      if (!z || (bone !== 4 && bone !== 7)) return false;
+      const m = MatIdentity();
+      m[12] = z.pos.x + (bone === 4 ? -1 : 1); m[13] = z.pos.y + 10;
+      m[14] = z.pos.z;
+      for (let i = 0; i < 16; i++) out[i] = m[i];
+      return true;
+    },
+    cameraMatrices: (w2v, v2w) => {
+      for (let i = 0; i < 16; i++) { w2v[i] = identity[i]; v2w[i] = identity[i]; }
+      return true;
+    },
+  };
+  const rng = new Rng(13);
+  ResetGameGlobals();
+  EnterPlay();
+  SetGameTables({ ...CHARS, types: { "1": HOLD_TYPE } } as unknown as CharactersJson);
+  G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+  G.g_scene_state_major = SCENE_MAJOR_PLAYING;
+  G.g_app_state = AppState.InPlay;
+  const z = spawnZombie(0x3c7c, 1, "barrel man", {
+    initialState: ZombieState.CarryProp,
+    attackState: ZombieState.RetireOffScreen,
+    script: { target: holdScript, attack: retire },
+  }, rng);
+  z.visible = true;
+  z.pos = vec3(0, 0, -60);
+  const events = new Events();
+  const sounds: number[] = [];
+  events.on("sound.play", (e) => sounds.push(e.id));
+  const slots: number[] = [];
+  let shots = 0, broke = -1, released = false, leftState = -1;
+  for (let f = 0; f < 120; f++) {
+    GameUpdate(1 / 60, HOLD_HOST, rng, events);
+    const p = G.g_carried_props[0];
+    if (p && p.routine !== CarriedPropRoutine.Held
+        && p.routine !== CarriedPropRoutine.Break) released = true;
+    if (p?.routine === CarriedPropRoutine.Break && broke < 0) broke = f;
+    if (leftState < 0 && z.state !== ZombieState.CarryProp) leftState = f;
+    // Two hits, a few frames apart, both while it is still in the hands.
+    if (f >= 10 && (f % 5) === 0 && shots < 2
+        && p?.routine === CarriedPropRoutine.Held && p.shootable) {
+      slots.push(p.slot);
+      MarkCarriedPropShot(p, 0);
+      shots++;
+    }
+  }
+  check("the held barrel takes both shots", shots === 2, `shots ${shots}`);
+  check("...the first steps its draw slot from 0x19E9 to 0x19E7 and plays 0x1D16A9",
+        slots.join(",") === `${0x19e9},${0x19e7}` && sounds.includes(0x001d16a9),
+        slots.map((x) => x.toString(16)).join(","));
+  check("...the second breaks it in the hands and plays 0x2216A9",
+        broke >= 0 && sounds.includes(0x002216a9), `broke ${broke}`);
+  check("...so it is never released into the drop", !released);
+  check("the carrier's sub 2 sees hp < 1, drops to sub 4 and ends its script",
+        leftState > broke && leftState <= broke + 2,
+        `broke ${broke} left state 37 on ${leftState}, state ${z.state}`);
+  check("...and the break runs its clip and despawns",
+        G.g_carried_props.length === 0, `props ${G.g_carried_props.length}`);
+}
+
 console.log("\na civilian's captors are made with it, though the script never lists them:");
 {
   // `CivilianInit` (`FUN_0048A3E0`) spawns its children itself, so the

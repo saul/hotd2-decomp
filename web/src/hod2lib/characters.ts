@@ -70,7 +70,8 @@ import type { Program } from "./script";
 import { resolveSpawn } from "./spawnres";
 import type { Stage } from "./stage";
 // Data only -- see the head of that file for why `hod2lib` may import it.
-import { PLAYER_BODY_AT, ROUTE_FIGURES } from "../game/player_body_data";
+import { PLAYER_BODY_AT, PLAYER_ENTITY_HOOK_CLIPS, ROUTE_FIGURES }
+  from "../game/player_body_data";
 // Data only, for the same reason: the result card's clips, its template rows'
 // address, and the car rescue's type.
 import {
@@ -695,7 +696,7 @@ async function zombieTwinPlacements(stage: Stage, tables: ExeTables,
 
 /**
  * The synthetic placement a player's body is drawn from on the game-over
- * screen, and the character type it needs in the bundle.
+ * screen and in play, and the character type it needs in the bundle.
  *
  * `PlayerBodiesCreate` (`FUN_00416450`) allocates a skinned actor per player
  * with no spawn record behind it, and the route map's figures
@@ -707,7 +708,10 @@ async function zombieTwinPlacements(stage: Stage, tables: ExeTables,
  *
  * Every clip the screen can draw that type on is baked: the start motion
  * (`0x004EC8A4`), the fall (`0x004EC8B4`) -- both read from the exe -- and
- * the route figures' walk and end clips where the figure is this type.
+ * the route figures' walk and end clips where the figure is this type -- and
+ * every clip the `+0x80` hooks put a body on in play: their four immediates
+ * (`PLAYER_ENTITY_HOOK_CLIPS`) and `g_player_stand_motions` (`0x004EC91C`)
+ * entries 2..5, the ones `p + g_players_in_play * 2` can name.
  * Returns null when the type or the fall will not build, which leaves the
  * screen with no body rather than a heap.
  */
@@ -717,7 +721,7 @@ async function playerBodyPlacement(stage: Stage, tables: ExeTables,
     Promise<Placement | null> {
   const go = tables.gameOverTables() as {
     body_char_types: number[]; body_start_motions: number[];
-    fall_motions: number[];
+    fall_motions: number[]; stand_motions: number[];
   };
   const ct = go.body_char_types[player];
   const fall = go.fall_motions[player];
@@ -731,7 +735,9 @@ async function playerBodyPlacement(stage: Stage, tables: ExeTables,
   const c = chars.get(ct)!;
   const clips = [fall, go.body_start_motions[player],
                  ...ROUTE_FIGURES.filter((f) => f.charType === ct)
-                   .flatMap((f) => [f.walk, f.end])];
+                   .flatMap((f) => [f.walk, f.end]),
+                 ...PLAYER_ENTITY_HOOK_CLIPS,
+                 ...go.stand_motions.slice(2)];
   for (const mid of clips) {
     if (c.motions.has(mid)) continue;
     const baked = await bake(stage.source, tables, mid, c.boneCount);

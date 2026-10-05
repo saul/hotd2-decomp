@@ -93,7 +93,7 @@ const boneSuffix = (part: string) => `_${part}`;
  * What is left here is three.js, which a snapshot never contains and which
  * `resync` rebuilds from the actor after a load.
  */
-import type { Instance } from "./characters/instance";
+import type { GoreSwap, Instance } from "./characters/instance";
 import { Poser } from "./characters/pose";
 import { PoseFromModelBlock } from "./characters/model_block";
 import { clearBoss5NodeDraws, syncBoss5NodeDraws } from "./characters/boss5";
@@ -1245,6 +1245,24 @@ export class CharacterLayer implements System {
     node.updateWorldMatrix(true, false);
     for (let i = 0; i < 16; i++) out[i] = node.matrixWorld.elements[i];
     return true;
+  }
+
+  /**
+   * One bone's drawn model on a hierarchy this layer handed out with
+   * {@link claim} -- a player body's hand, `PlayerBodySetHandSlot`'s slot.
+   * `gore` is the claimant's record of what it laid on; `own` is the
+   * skeleton's own model for the bone, which puts the bone back as built.
+   */
+  setClaimedBoneSlot(body: Pick<Instance, "bones">,
+                     gore: Map<number, GoreSwap>, bone: number, slot: number,
+                     own: number): void {
+    const inst = { bones: body.bones, gore } as Instance;
+    const prev = gore.get(bone);
+    if (prev) {
+      restoreGore(inst, bone, prev);
+      gore.delete(bone);
+    }
+    if (slot !== own) swapGore(this.goreParts, inst, bone, slot);
   }
 
   /** Swap one bone's drawn model — the thrower's hand going bare and back. */

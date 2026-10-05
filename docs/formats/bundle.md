@@ -62,14 +62,20 @@ Since format 11 every stage's `characters.placements` also carries two
 **synthetic** rows with `player_body` set, at `0x20000000 + p`: the players'
 bodies, character types `0x39` and `0x3A` -- the game-over fly-over's bodies
 and the route map's figures -- with every clip that screen draws them on
-(`0x32C`, `0x338`, `0x339`, `0x358`, `0x35B` as each type has them). Nothing
-spawns from them; `render/game_over_scene.ts` claims their hierarchies from the
-character layer.
+(`0x32C`, `0x338`, `0x339`, `0x358`, `0x35B` as each type has them), and every
+clip the `+0x80` player hooks put them on in play: `0x322`, `0x34A`, `0x319`,
+`0x334` (stage 1's car) and `g_player_stand_motions`' `0x349`, `0x356`
+(stage 2 block 6), on both types. Nothing spawns from them;
+`render/game_over_scene.ts` claims their hierarchies from the character layer
+and draws them on the game-over screen and in play.
 
 Since format 12 `script.json` carries a `game_over` block -- the game-over
 screen's `.rdata`, read by `ExeTables.gameOverTables`: the
 bodies' types, start and fall clips, fall frames and stands; the route map's
-tile bases, waypoint table and default route -- and `screen_sprites` (the old
+tile bases, waypoint table and default route; and the bodies' tables in play,
+`entity_offsets` (`0x00579E98`), `seat_x` (`g_st1_vehicle_seat_x`),
+`stand_points` and `stand_motions` (`g_player_stand_points`,
+`g_player_stand_motions`) -- and `screen_sprites` (the old
 `hud_sprites`) holds the logo's and the route tiles' images beside the HUD's.
 The `.text` immediates that are join keys (the logo sprite ids, the figures'
 clips, the disc and footprint slots) live in `web/src/game/player_body_data.ts`,

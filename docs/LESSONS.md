@@ -921,6 +921,22 @@ find which task writes it and whether that task runs before or after the
 object's first call**, and a test of what an `Init` does is a test of the
 frame, not of the spawn.
 
+**L105 -- An action the port only retires is behaviour it does not have.**
+"The player isn't rendered in the car at the start of stage 1, maybe render
+order" sent the reading to the stage-1 vehicle's rig, whose two seat-height
+parts were noted "[likely] an occupant" -- from their shape and where they
+sit. They are the car's doors: 52 vertices each, swung about Y only once the
+car is parked, the passenger's only with two players. The occupant is the
+player's own body, which no rig draws: stage 1's `queue_event` with selector
+0x12 (`EvtActionSetUpdateRoutine12`) installs a `+0x80` player hook that seats
+it on the car's route every frame and raises the flag `PlayerHookDrawBody`
+draws by. The port dispatched selectors 0x10 and 0x12 to one handler that
+retired the action, under a comment saying the body "is not drawn" -- true of
+the port, and so the reason the bug existed rather than a fact about the game.
+**When the script queues an action, a selector or an opcode the port handles
+by retiring it, read the exe's handler before believing it does nothing**;
+and a part named for what it looks like is a guess about what draws the rest.
+
 ---
 
 ## Running the tools

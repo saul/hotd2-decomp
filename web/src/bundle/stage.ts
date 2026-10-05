@@ -367,6 +367,14 @@ export interface GameOverJson {
   route_waypoints: number[][][][];
   /** `0x0059351C`: `[stage][16]` blocks, -1 ending each. */
   default_route: number[][];
+  /** `0x00579E98`: a body's x in the eye's frame, by `p + attackers * 2 - 2`. */
+  entity_offsets: number[];
+  /** `g_st1_vehicle_seat_x`, `0x004EC8D8`: by `p + players * 2`. */
+  seat_x: number[];
+  /** `g_player_stand_points`, `0x004EC8F0`: `[x, y, z]` by `p - 2 + players * 2`. */
+  stand_points: number[][];
+  /** `g_player_stand_motions`, `0x004EC91C`: by `p + players * 2`. */
+  stand_motions: number[];
 }
 
 export interface HudSpriteImage {

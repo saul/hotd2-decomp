@@ -862,7 +862,7 @@ export class RigLayer implements System {
    *
    * Two of them, both from `St1VehicleUpdate`. The dust trails sit inside
    * `if (obj+0x1320 != 0)`, so a parked or finished object does not draw them.
-   * The occupants' yaw is `obj+0x1334`, which the routine fills from a *second*
+   * The doors' yaw is `obj+0x1334`, which the routine fills from a *second*
    * path evaluation on its own clock -- not the camera frame, and not the
    * frame the body is posed at.
    */

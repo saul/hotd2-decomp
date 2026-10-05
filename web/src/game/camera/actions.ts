@@ -49,6 +49,7 @@ import { LightsRestoreScene, LightsUseSecondarySet } from "../light_sets";
 import { MatIdentity, MatrixLoadIdentity, MatrixRotateX, MatrixRotateY,
          MatrixTransformPoint, MatrixTranslate } from "../matrix";
 import { vec3 } from "../vec";
+import { PlayerEntityHook } from "../effects/damage_overlay";
 import { EVT_ACTION_TABLE, EvtActionHandler } from "./driver";
 import { CAMERA_EYE_DROP, CamStashPathRange } from "./rail";
 import { CamAdvancePathFrame, CamEvalStaticPose, CamStartPathPlayback,
@@ -138,8 +139,9 @@ export function EvtCallActionHandler(): void {
       return CameraActionStartWithEyeMatrix();
     case EvtActionHandler.StartDeferredPose:
       return CameraActionStartDeferredPose();
-    case EvtActionHandler.SetPlayerFlag:
+    case EvtActionHandler.SetPlayerFlag: return EvtActionSetPlayerFlag10();
     case EvtActionHandler.SetUpdateRoutine:
+      return EvtActionSetUpdateRoutine12();
     case EvtActionHandler.SetContinuation:
       return EvtActionRetireOnly();
     case EvtActionHandler.SceneState: return EvtActionSceneState11();
@@ -154,14 +156,55 @@ export function EvtCallActionHandler(): void {
 }
 
 /**
- * Selectors 0x10, 0x12 and 0x13: `EvtActionSetPlayerFlag10` (both players'
- * flag bit 0, the on-screen body), `EvtActionSetUpdateRoutine12` (both
- * players' update routine out of `0x00579E90`) and
- * `EvtActionSetContinuation13`. Each writes a player word the port does not
- * keep -- the body is not drawn and the routine table has one live entry --
- * and retires, which is the half the camera sees.
+ * Selector 0x13, `EvtActionSetContinuation13` (`FUN_00403250`): it writes a
+ * per-player continuation the port does not keep and retires, which is the
+ * half the camera sees. No shipped script queues it.
  */
 function EvtActionRetireOnly(): void {
+  EvtActionRetire();
+}
+
+/**
+ * `EvtActionSetPlayerFlag10` — `FUN_00403830`. Player 1's `g_player_flags`
+ * bit 0 from the operand, then player 0's from player 1's:
+ *
+ * ```c
+ * flags[1] = flags[1] ^ ((op0 ^ flags[1]) & 1);
+ * flags[0] = flags[0] ^ ((flags[0] ^ flags[1]) & 1);
+ * ```
+ *
+ * Bit 0 is the on-screen body, `PlayerHookDrawBody`'s test. The three shipped
+ * sites all pass 0. `[proved]`
+ */
+function EvtActionSetPlayerFlag10(): void {
+  const f = G.g_player_flags;
+  f[1] = f[1] ^ ((G.g_evt_action_operands[0] ^ f[1]) & 1);
+  f[0] = f[0] ^ ((f[0] ^ f[1]) & 1);
+  EvtActionRetire();
+}
+
+/**
+ * `g_player_entity_routines` — `0x00579E90`, the two code pointers
+ * `EvtActionSetUpdateRoutine12` indexes by its operand. `[proved]`
+ * (`read_memory`).
+ */
+const PLAYER_ENTITY_ROUTINES: readonly PlayerEntityHook[] = [
+  PlayerEntityHook.EnterSt1Vehicle,     // 0x00415B60
+  PlayerEntityHook.StandAtScenePoint,   // 0x00415E40
+];
+
+/**
+ * `EvtActionSetUpdateRoutine12` — `FUN_00403780`. Both players' `+0x80`
+ * hook = `g_player_entity_routines[op0]`: stage 1's opening (0) seats the
+ * bodies in the car, stage 2 block 6 (1) stands them at a point. See
+ * `game/player_body.ts`. The table has two entries and the shipped operands
+ * are 0 and 1; a larger one reads the floats after it as code in the exe.
+ */
+function EvtActionSetUpdateRoutine12(): void {
+  const h = PLAYER_ENTITY_ROUTINES[G.g_evt_action_operands[0]]
+    ?? PlayerEntityHook.None;
+  G.g_player_entity_hook[0] = h;
+  G.g_player_entity_hook[1] = h;
   EvtActionRetire();
 }
 
@@ -440,6 +483,8 @@ export function EvtGotoSceneState(minor: number, clearsLatches: boolean): void {
     G.g_evt_cam_override_valid = 0;
     G.g_camera_ease_eye = 0;
   }
+  G.g_player_flags[1] &= ~1;
+  G.g_player_flags[0] &= ~1;
   G.g_evt_action_handler = EvtActionHandler.None;
   G.g_evt_action_advance = 1;
   G.g_queued_events_pending -= 1;
@@ -512,6 +557,8 @@ export function EvtOpSetActionDrainMode33(mode: number, delta: number): void {
 export function CheckpointResetCamera(): void {
   G.g_cam_path_frame = 0;
   EvtEnterSceneStateUnstamped(1, 3);
+  G.g_player_flags[1] &= ~1;
+  G.g_player_flags[0] &= ~1;
   G.g_cam_path_frames_left = 0x7fffffff;
   G.g_camera_turn_curve = 1;
   G.g_evt_cam_override_valid = 0;

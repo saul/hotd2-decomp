@@ -39,7 +39,7 @@ has just finished -- so the car is parked, not moving, and `obj+0x1320` is
 cleared so its wheels and dust trails stop being drawn.
 
 The same shot also calls `CamEvalObjectPath6(0xFF, ...)`, but keeps only
-`local_8` (`rot_y`) and writes it to `obj+0x1334`, the occupants' yaw. Slot
+`local_8` (`rot_y`) and writes it to `obj+0x1334`, the doors' yaw. Slot
 `0xFF`'s **position channels are never read.** That is why its `pos_*` keys
 span frames 0..110 while its `rot_*` keys span 100..150: the two are not
 sampled together, and nothing in the file says they should be.
@@ -71,8 +71,8 @@ Two other stop rules a route may carry:
   `if (obj+0x1320 != 0)`, so a parked or finished object does not draw it. The
   stage-1 vehicle's four dust trails are the case.
 * `RigPart.path_rotation` -- a part rotation driven from a path channel on the
-  routine's *own* clock rather than the camera frame. The stage-1 occupants'
-  yaw is `op_st1` 2's `rot_y` less `0x4000`, sampled at
+  routine's *own* clock rather than the camera frame. The stage-1 vehicle's
+  doors' yaw is `op_st1` 2's `rot_y` less `0x4000`, sampled at
   `clamp(frame, 0, 0x31) + 100`.
 
 ## How a rig is bound to a stage

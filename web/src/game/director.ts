@@ -837,6 +837,8 @@ function SceneTaskWalk(dt: number, host: GameHost,
   PushSceneLightStateToDevice(dt * GAME_HZ);
   CameraActorTick();
   CameraUpdateTick();
+  // `[port-only]`: a body is on screen only on a frame a hook draws it.
+  for (const b of G.g_player_bodies) b.drawn = 0;
   PlayerTasksRun({ host, rng, events });
   // The letterbox, the task `HudShutterTaskCreate` makes on the line after
   // `SpawnAttackablePlayerTask` (`0x00460733`): after both players have read

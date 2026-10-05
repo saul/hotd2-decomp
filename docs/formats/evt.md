@@ -804,9 +804,9 @@ null, and the sub-tables are laid out immediately **before** it:
 
 | Sel | Name | Effect |
 |---|---|---|
-| `0x10` | `set_player_flag` | `DAT_009A5EBC` bit 0 = op0, mirrored to `DAT_009A5D8C` |
+| `0x10` | `set_player_flag` | `g_player_flags` (`0x009A5D8C + p*0x130`) bit 0: player 1's = op0, then player 0's = player 1's. Bit 0 is what `PlayerHookDrawBody` draws the player's body by |
 | `0x11` | `scene_state` | `EvtEnterSceneState(current_major, op0)` — a transition in the 2-D state table at `0x00576C14` |
-| `0x12` | `set_update_routine` | `DAT_009A5CE0 = PTR_FUN_00579E90[op0]` (two routines exist) |
+| `0x12` | `set_update_routine` | both players' `+0x80` hook (`g_player_entity_hook`, `0x009A5CE0`) = `g_player_entity_routines[op0]`: 0 `PlayerHookEnterSt1Vehicle` (stage 1 block 0: the bodies ride in the car), 1 `PlayerHookStandAtScenePoint` (stage 2 block 6). See `web/src/game/player_body.ts` |
 | `0x13` | `set_continuation` | per-player continuation = `op0 ? LAB_00403290 : FUN_00420810`. **Defined but never used in shipped data** |
 | `0x14` | `set_global` | `DAT_009C6F00 = op0` |
 | `0x15` | `set_flag` | `DAT_009C6F33 = 1`; the operand is ignored |

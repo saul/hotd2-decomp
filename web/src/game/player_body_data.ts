@@ -65,3 +65,20 @@ export const ROUTE_MARK_SLOTS: readonly number[] = [0x14c2, 0x14d2];
 
 /** The figure's ground disc, `AssetDrawSlot(0x145B)` under each figure. */
 export const ROUTE_FIGURE_SHADOW_SLOT = 0x145b;
+
+/**
+ * The clips the `+0x80` hooks put a body on in play, each a `PUSH` immediate
+ * in its routine. `PlayerHookEnterSt1Vehicle` (`FUN_00415B60`): `0x34A` for
+ * player 1 of two, `0x322` for anyone else. `PlayerHookRideSt1Vehicle`
+ * (`FUN_00415BD0`), on the parked car's frame 0xC: `0x334` and `0x319` the
+ * same way. Which a body takes is the player count and its index, never its
+ * character type, so the exporter bakes all four on both types.
+ */
+export const ST1_VEHICLE_SEATED_CLIP = 0x322;
+export const ST1_VEHICLE_SEATED_CLIP_P2 = 0x34a;
+export const ST1_VEHICLE_PARKED_CLIP = 0x319;
+export const ST1_VEHICLE_PARKED_CLIP_P2 = 0x334;
+export const PLAYER_ENTITY_HOOK_CLIPS: readonly number[] = [
+  ST1_VEHICLE_SEATED_CLIP, ST1_VEHICLE_SEATED_CLIP_P2,
+  ST1_VEHICLE_PARKED_CLIP, ST1_VEHICLE_PARKED_CLIP_P2,
+];

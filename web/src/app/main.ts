@@ -51,6 +51,7 @@ import { hasThumb, rememberedInstall, runExport,
 import { hideExportScreen, showExportScreen } from "./install/ExportScreen";
 import { readState, writeState, type PlayerState } from "./urlstate";
 import { PlayerState as GamePlayerState } from "../game/player_state";
+import { PlayerBodiesCreate } from "../game/player_body";
 import { seekTo as seekWalkerTo } from "../script/seek";
 import { CameraReseatFromFrame } from "../game/camera/view";
 import { readViewPrefs, writeViewPrefs } from "./viewprefs";
@@ -1225,6 +1226,12 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     SetGameTables(script.characters, script.breakables, script.set_pieces,
                   script.humanoids, script.coli, script.civilians);
     SetGameOverTables(script.game_over);
+    // The scene's task list makes the player bodies (`PlayerBodiesCreate`,
+    // inside `ResetGameGlobals`), but their types, clips and hands are this
+    // bundle's, which arrive only now on a page's first load. Made again on
+    // them: all the reset's own player turn did to a body was stand it on
+    // the gameplay eye, which the next turn does again.
+    PlayerBodiesCreate();
     SetOptionsTables(script.options);
     SetOriginalModeTables(script.original_mode);
     SetBoss4Tables(script.boss4, script.carrier_door_yaw);

@@ -25,8 +25,8 @@ import type { ShotFlash, ShotTracer, ShotWeaponEffect }
 import { makeShotFlashRing, makeShotTracerRing, makeShotWeaponRing }
   from "./effects/shot_effects";
 import type { SpriteEffect } from "./effects/sprite";
-import { makeDamageOverlays, PlayerCameraHook, type DamageOverlay }
-  from "./effects/damage_overlay";
+import { makeDamageOverlays, PlayerCameraHook, PlayerEntityHook,
+  type DamageOverlay } from "./effects/damage_overlay";
 import type { PropStripEffect } from "./effects/prop_strip";
 import type { FishBloodCloud, FishSurfaceRing, FishWaterSplash }
   from "./effects/fish";
@@ -71,6 +71,7 @@ import { makeEntityLights } from "./entity_light";
 import { LightBlockSetDirection, makeLightBlock, makeLightTweens }
   from "./light_block";
 import { PlayerState, PlayerTask, RunPhase } from "./player_state";
+import { PlayerBodiesCreate } from "./player_body";
 import { AdvanceToNextScene, PlayerBlockBoot, PlayerBlockRestore,
   PlayerStartGameFromTitle, PlayerTasksCreate, PlayerTasksRunFirstTurn,
   type PlayerBlock }
@@ -1238,6 +1239,21 @@ export const G = {
   // before `effects/damage_overlay.ts` has finished loading whenever that
   // module is the one imported first, and its enum is not there yet.
   g_player_camera_hook: [0, 0] as PlayerCameraHook[],
+  /**
+   * `g_player_entity_hook` — 0x009A5CE0 + player*0x130, the block's `+0x80`.
+   * What `PlayerUpdateInPlay` calls first: `PlayerEnterPlay`'s row, the
+   * scene-state installers and `EvtActionSetUpdateRoutine12` write it, and
+   * the routines that one installs chain to their successors. See
+   * `game/player_body.ts`. `PlayerEntityHook.None`, spelled as its value, for
+   * the reason `g_player_camera_hook` gives.
+   */
+  g_player_entity_hook: [0, 0] as PlayerEntityHook[],
+  /**
+   * `g_player_flags` — 0x009A5D8C + player*0x130, the block's `+0x12C`. Bit 0:
+   * `PlayerHookDrawBody` draws the body. Bit 1: cleared by three writers,
+   * read by nothing the port has.
+   */
+  g_player_flags: [0, 0],
   /** `g_damage_overlays` — 0x009A26C0, one 0x14-byte record per player. */
   g_damage_overlays: makeDamageOverlays() as DamageOverlay[],
   /**
@@ -2418,7 +2434,8 @@ export const G = {
   g_stage_unloaded: 0,
   /**
    * `0x009A5CD8 + p*0x130` -- each player's body actor, `PlayerBodiesCreate`'s
-   * (`FUN_00416450`). Empty until a game-over fly-over builds them; see
+   * (`FUN_00416450`): made afresh with every task list that has the camera
+   * tasks in it -- each scene's, and the game-over fly-over's. See
    * `game/player_body.ts`.
    */
   g_player_bodies: [] as PlayerBody[],
@@ -3486,6 +3503,11 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   if (carry) {
     PlayerBlockRestore(carry);
     AdvanceToNextScene();
+    // The list's fifth call, `CameraUpdateTaskCreate` (`FUN_00414F20`),
+    // makes the bodies; the sixth makes the player tasks that run them. Here
+    // and not beside `CameraActorInit` above because the body's type reads
+    // the carried block's Original Mode character.
+    PlayerBodiesCreate();
     PlayerTasksCreate();
     PlayerTasksRunFirstTurn();
   } else {
@@ -3507,6 +3529,7 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
     // `0x0045FF48`: in every mode, before the player task enters play and
     // reads the magazine (`PlayerEnterPlay`).
     ResetOriginalModeLoadout();
+    PlayerBodiesCreate();
     PlayerStartGameFromTitle(G.g_GameMode);
   }
   // The player turn taken above is the port's sequencing, not a frame the

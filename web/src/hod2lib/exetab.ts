@@ -1474,6 +1474,22 @@ export class ExeTables {
    * * `default_route` -- `0x0059351C`, s8[6][16]: the route
    *   `GameOverRouteMapArm` (`FUN_00460F00`) copies over an empty history.
    *
+   * And the bodies' tables in play, which travel in the same block because
+   * the same two bodies are what they place:
+   *
+   * * `entity_offsets` -- `0x00579E98`, f32[4], indexed
+   *   `p + g_max_attackers * 2 - 2`: the x a body sits at in the gameplay
+   *   eye's frame (`PlacePlayerEntityFromViewPose`, `FUN_004159A0`, which
+   *   indexes from `0x00579E90`, two code pointers earlier).
+   * * `seat_x` -- `g_st1_vehicle_seat_x`, `0x004EC8D8`, f32[6], indexed
+   *   `p + g_players_in_play * 2`: the seat's x in the stage-1 vehicle
+   *   (`PlayerHookRideSt1Vehicle`, `FUN_00415BD0`).
+   * * `stand_points` -- `g_player_stand_points`, `0x004EC8F0`, four
+   *   `{f32 x, y, z}`, indexed `p - 2 + g_players_in_play * 2`
+   *   (`PlayerHookStandAtScenePoint`, `FUN_00415E40`).
+   * * `stand_motions` -- `g_player_stand_motions`, `0x004EC91C`, s16[6],
+   *   indexed `p + g_players_in_play * 2` (the same routine).
+   *
    * All `[proved]` from the routines named.
    */
   gameOverTables(): Record<string, unknown> {
@@ -1489,6 +1505,8 @@ export class ExeTables {
       const v = this.data[r];
       return v >= 0x80 ? v - 0x100 : v;
     };
+    const f32s = (va: number, n: number) =>
+      Array.from({ length: n }, (_u, i) => this.rf32(va + i * 4) ?? 0);
     const offsets = Array.from({ length: 4 }, (_u, i) =>
       [this.rf32(0x00579ea8 + i * 12) ?? 0,
        this.rf32(0x00579ea8 + i * 12 + 8) ?? 0]);
@@ -1509,6 +1527,12 @@ export class ExeTables {
       route_tiles: Array.from({ length: 4 }, (_u, i) => s16(0x005679fc + i * 2)),
       route_waypoints: waypoints,
       default_route: route,
+      entity_offsets: f32s(0x00579e98, 4),
+      seat_x: f32s(0x004ec8d8, 6),
+      stand_points: Array.from({ length: 4 }, (_u, i) =>
+        f32s(0x004ec8f0 + i * 12, 3)),
+      stand_motions: Array.from({ length: 6 }, (_u, i) =>
+        s16(0x004ec91c + i * 2)),
     };
   }
 

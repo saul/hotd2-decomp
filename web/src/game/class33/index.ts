@@ -73,12 +73,23 @@
  *   the **mesh** test (`obj+0x34 |= 0x50`), `ShotTestMesh` in
  *   `combat/shot_test.ts`, which this class would reach by registering at
  *   that site with its blob and its matrix on the actor.
- * * Everything from `0x00433463` to `0x0043382F`, which is drawing: the two
- *   22-slot sprite loops at `obj+0x1354`/`+0x1358`, the 45-degree spin at
- *   `obj+0x135C`, and the five sub-models slot `0x1B0E` carries. It is in
- *   `hod2lib/rigs_data.ts` as `obj_4331d0` and the renderer already places
- *   it. **The decompiler shows none of it** — its pseudocode ends at
- *   `0x0043345E` with a `return` the code does not have, which is `L37`.
+ * * `MatrixStore(obj+0x150)` and the view-space point at `obj+0x70`
+ *   (`0x00433450`..`0x004334C7`), the matrix the mesh test above would
+ *   need; they go with it.
+ *
+ * ## The draw
+ *
+ * `[proved]` from the listing, `0x004332DA`..`0x0043382F`: the fire, the
+ * model, and either stage 5's car parts or the two sprite loops. The
+ * pseudocode once ended at `0x0043345E` with a `return` the code does not
+ * have (`L37`), and this module was written from it: it said the draw was
+ * the rig writer's and that the fire returned early. Both were wrong; the
+ * database decompiles the whole routine now, and the listing agrees with it
+ * line for line. Each `AssetDrawSlot` is recorded on
+ * `obj.scenery.draws` with the world matrix the stack held, and
+ * `render/slotmodels.ts` places them; nothing else draws this object. Before
+ * this was ported nothing drew it at all: stage 2 block 9's boat, slot
+ * `0x1A36` at scale 2.5, was missing from the river.
  */
 import type { Rng } from "../../core/rng";
 import { type Actor, ActorFlag, type ScriptedSceneryActor } from "../actor";
@@ -91,7 +102,12 @@ import {
   registerClass, type ActorDebug, type ClassFrame, type ClassHandler,
 } from "../registry";
 import { SpawnClass } from "../spawn_class";
-import { vec3 } from "../vec";
+import { CameraBlockEye } from "../camera/view";
+import {
+  FtolS16, MatIdentity, type Mat, MatrixRotateX, MatrixRotateY,
+  MatrixRotateZ, MatrixScale, MatrixTranslate,
+} from "../matrix";
+import { vec3, VecToAngles } from "../vec";
 import { ScriptedEffectAtCameraCue33 } from "./effect_cue";
 import { ScriptedPushableUpdate33, SCENERY_SKIP_COLLISION }
   from "./pushable";
@@ -158,6 +174,52 @@ const SLOT_B_YAW_BIAS = 0x4000;
 const SLOT_CAR_X_BIAS = 5.0;
 
 /**
+ * `MOV dword [ESI+0x118],0x3f800000` at `0x004339B3`, and `0x40200000` at
+ * `0x004339E1`/`0x004339F3` for the two scaled slots.
+ */
+const DRAW_SCALE = 1.0;
+const DRAW_SCALE_BOAT = 2.5;
+
+/** `obj+0x1354/+0x1358/+0x135C` as the seat writes them, `0x004338CE`. */
+const LOOP_A_FIRST = 0x24a;
+const LOOP_A_LAST = 0x25f;
+const LOOP_B_FIRST = 0x260;
+const LOOP_B_LAST = 0x275;
+
+/** `MOV EAX,0x1aab` / `MOV dword [EBP+0x136c],0x1ad2` at `0x004332B7`. */
+const FIRE_FIRST = 0x1aab;
+const FIRE_LAST = 0x1ad2;
+
+/**
+ * The two sprite loops' matrix after the object's: `PUSH 0x41c80000; PUSH 0;
+ * PUSH 0` then `MatrixScale(0x3f19999a, 0x3f000000, 0x3f333333)` at
+ * `0x0043352A`..`0x00433547`.
+ */
+const LOOP_Z = 25.0;
+const LOOP_SCALE: readonly [number, number, number] = [
+  Math.fround(0.6), 0.5, Math.fround(0.7)];
+
+/**
+ * Stage 5's car parts, `0x0043362B`..`0x00433813`: each under the object's
+ * `T RotZ RotY RotX`, then its own offset. The floats are the pushed raws.
+ */
+const CAR_PART_DOOR = 0x899;
+const CAR_PART_DOOR_AT: readonly [number, number, number] = [
+  Math.fround(-5.2664), Math.fround(8.3328), Math.fround(6.717)];  // 0xc0a88659..
+const CAR_PART_DOOR_PITCH = -0x2d3a;                                // PUSH 0xffffd2c6
+const CAR_PART_WHEEL = 0x8cb;
+const CAR_PART_WHEEL_Y = Math.fround(3.5437);                       // 0x4062cbfb
+const CAR_PART_WHEEL_FRONT_Z = Math.fround(17.0281);                // 0x4188398c
+const CAR_PART_WHEEL_BACK_Z = Math.fround(-12.384);                 // 0xc14624dd
+/** `ADD EDX,0x2000` at `0x004336E8` — the wheels' turn a frame. */
+const CAR_WHEEL_TURN_STEP = 0x2000;
+const CAR_PART_LEFT = 0x1b0a;
+const CAR_PART_RIGHT = 0x1b0d;
+const CAR_PART_SIDE_X = 10.0;                                       // 0x41200000
+const CAR_PART_SIDE_Y = Math.fround(6.216);                         // 0x40c6e979
+const CAR_PART_SIDE_Z = Math.fround(6.878);                         // 0x40dc1893
+
+/**
  * `ScriptedSceneryDispatch33` — `FUN_00432FF0`. Class 0x33's `Init`.
  *
  * The engine's switch installs one of twelve update pointers into `*obj`, and
@@ -220,8 +282,11 @@ export function ScriptedCarrierStepPath33(obj: ScriptedSceneryActor,
     s.slot = t.slot;
     s.pathSlot = t.path;
     s.pathEnd = t.path_end;
-    // `obj+0x1354/+0x1358/+0x135C = 0x24A/0x260/0` are the sprite cursors the
-    // draw tail cycles, and the draw is `render/`'s — see the module note.
+    // `0x004338CE`..`0x004338E2`: the two sprite loops' cursors and the
+    // wheels' turn, which the update's draw steps.
+    s.loopA = LOOP_A_FIRST;
+    s.loopB = LOOP_B_FIRST;
+    s.wheelTurn = 0;
     s.pathFrame = G.g_cam_path_frame - 1;
     if (s.slot === SLOT_STAGE5_CAR) events?.emit("sound.play", { id: SND_DRIVE });
     obj.sub += 1;
@@ -245,16 +310,16 @@ export function ScriptedCarrierStepPath33(obj: ScriptedSceneryActor,
   // `AND ECX, 0xFFFF` at `0x00433982`/`0x0043398F`/`0x004339A5`: the engine
   // masks each of the three on the way onto the object.
   obj.pitch = (p.pitch ?? 0) & 0xffff;
+  obj.roll = (p.roll ?? 0) & 0xffff;
   obj.yaw = (p.yaw ?? 0) & 0xffff;
-  // `obj+0x6C` (the roll) and `obj+0x118` (the uniform scale, 1.0 here and
-  // 2.5 for the two slots below) are written by the engine and read only by
-  // its own draw. The port has no field for either and the renderer takes
-  // both from the exported rig, so they are left out rather than invented.
+  // `MOV dword [ESI+0x118],0x3f800000` at `0x004339B3`, before the slot test.
+  s.drawScale = DRAW_SCALE;
 
-  if (s.slot === SLOT_SCALED_A) return;
+  if (s.slot === SLOT_SCALED_A) { s.drawScale = DRAW_SCALE_BOAT; return; }
   if (s.slot === SLOT_SCALED_B) {
     // **Not masked.** `MOV [ESI+0x68], ECX` at `0x004339EB` takes the *raw*
     // `ry` the routine kept in ECX before the `AND`, plus a quarter turn.
+    s.drawScale = DRAW_SCALE_BOAT;
     obj.yaw = (p.yaw ?? 0) + SLOT_B_YAW_BIAS;
     return;
   }
@@ -265,9 +330,11 @@ export function ScriptedCarrierStepPath33(obj: ScriptedSceneryActor,
  * `ScriptedCarrierUpdate33` — `FUN_004331D0`. One frame of the carrier.
  *
  * Read top to bottom, because the order is the behaviour: the two cues are
- * tested against the cursor the **previous** frame's ride left, the fire's
- * early return is what stops the ride, and the despawn arm is reached only by
- * falling past both.
+ * tested against the cursor the **previous** frame's ride left, the fire is
+ * drawn where the descriptor put it and the routine runs on, and then either
+ * the despawn arm or the ride and the draw. A burning carrier keeps riding
+ * until `tail+0x10` stops it, and leaves on its despawn cue with
+ * `CAR_FIRE_22_OFF`.
  *
  * The despawn cue is `g_cam_path_frame == tail+0x1C || g_cam_path_frame_2 ==
  * tail+0x1C`, camera blocks 0 and 2 by address (`0x004333D7`, `0x004333DF`),
@@ -284,6 +351,7 @@ export function ScriptedCarrierUpdate33(obj: ScriptedSceneryActor,
 
   // `MOV dword ptr [0x009a5c34], EBP` at `0x004331E1` — every frame, not once.
   G.g_carrier_object = obj.at;
+  s.draws.length = 0;
 
   // `MOV AL, byte ptr [EBX + 0x20]` / `CMP byte ptr [EAX + 0x9C7200], 0x1` at
   // `0x004331E7` — the flag index is used raw, with no "none" test in front of
@@ -317,21 +385,24 @@ export function ScriptedCarrierUpdate33(obj: ScriptedSceneryActor,
     s.effectFrames += 1;
     if (s.effectFrames === FIRE_DELAY_FRAMES) {
       obj.flags |= ActorFlag.FireLoop;
-      // `obj+0x1364/+0x1368 = 0x1AAB` and `obj+0x136C = 0x1AD2`, the first and
-      // last slots of the fire loop. Drawing, and `render/`'s.
+      s.fireSlot = FIRE_FIRST;
+      s.fireFirst = FIRE_FIRST;
+      s.fireLast = FIRE_LAST;
       f.events?.emit("sound.play", { id: SND_FIRE });
     }
-    // **The early return, and it is not a drawing detail.** Once the fire is
-    // up the routine never reaches `ScriptedCarrierStepPath33` again, so the
-    // cursor freezes and the object stops moving — and it never reaches the
-    // despawn arm either, so it stays on the field burning.
-    if (obj.flags & ActorFlag.FireLoop) return;
+    // `0x004332DA`: the fire is drawn and the routine **carries on** into
+    // the despawn test and the ride below -- `ADD ESP,0x8` at `0x004333B8`
+    // falls through to `0x004333BB`. The port returned here, on a reading of
+    // pseudocode that ended early, which froze a burning carrier and made
+    // `SND_FIRE_OFF` unreachable.
+    if (obj.flags & ActorFlag.FireLoop) Carrier33DrawFire(s, t.effect);
   }
 
   if (G.g_script_flags[t.despawn_flag] !== 1
       && G.g_cam_path_frame !== t.despawn_frame
       && G.g_cam_path_frame_2 !== t.despawn_frame) {
     ScriptedCarrierStepPath33(obj, f.host, f.events);
+    Carrier33Draw(obj);
     return;
   }
 
@@ -339,6 +410,112 @@ export function ScriptedCarrierUpdate33(obj: ScriptedSceneryActor,
     f.events?.emit("sound.play", { id: SND_FIRE_OFF });
   }
   ActorDespawn(obj);
+}
+
+/**
+ * `AssetDrawSlot` (`FUN_00418560`) under `m`, recorded rather than made.
+ * `[port-only]` as a function, as `Class26DrawSlot` is.
+ */
+function Carrier33DrawSlot(s: ScriptedSceneryActor["scenery"], m: Mat,
+                           slot: number): void {
+  s.draws.push({ slot, m: m.slice(0, 16) });
+}
+
+/** `MatrixStackPush; MatrixTranslate(pos); RotZ; RotY; RotX` — every draw's head. */
+function Carrier33ObjectMatrix(obj: ScriptedSceneryActor): Mat {
+  const m = MatIdentity();
+  MatrixTranslate(m, obj.pos.x, obj.pos.y, obj.pos.z);
+  MatrixRotateZ(m, obj.roll);
+  MatrixRotateY(m, obj.yaw);
+  MatrixRotateX(m, obj.pitch);
+  return m;
+}
+
+/**
+ * `ScriptedCarrierUpdate33`'s fire, `0x004332E7`..`0x004333B8`: the slot loop
+ * at the descriptor's effect point (`tail+0x24`), turned to face the camera
+ * block's eye in yaw alone (`MOV dword [ESP+0x40],0x0` zeroes the pitch
+ * `VecToAngles` gave). The cursor steps **before** it is drawn, so the first
+ * slot drawn is `0x1AAC`.
+ *
+ * `[port-only]` as a function: a stretch of the update, split out because
+ * the update runs it before the despawn test and the model after it.
+ */
+function Carrier33DrawFire(s: ScriptedSceneryActor["scenery"],
+                           at: readonly number[]): void {
+  const eye = CameraBlockEye(G.g_camera_index);
+  const ang = VecToAngles(eye.x - at[0], eye.y - at[1], eye.z - at[2]);
+  const m = MatIdentity();
+  MatrixTranslate(m, at[0], at[1], at[2]);
+  MatrixRotateY(m, FtolS16(ang.yaw));
+  MatrixRotateX(m, 0);
+  s.fireSlot += 1;
+  if (s.fireLast < s.fireSlot) s.fireSlot = s.fireFirst;
+  Carrier33DrawSlot(s, m, s.fireSlot);
+}
+
+/**
+ * `ScriptedCarrierUpdate33`'s draw after the ride, `0x004333F1`..`0x0043382F`.
+ *
+ * The model is `obj+0x13F0` under `T RotZ RotY RotX Scale(obj+0x118)`
+ * (`NoOpStub` is handed the scale and does nothing). Then slot `0x1B0E`
+ * draws its five parts and returns; any other slot draws the two sprite loops
+ * 25 units along its own Z, scaled `(0.6, 0.5, 0.7)`, but only while
+ * `obj+0x1312` is 1 -- while the ride runs -- each loop stepped after it is
+ * drawn.
+ *
+ * `[port-only]` as a function, for the reason {@link Carrier33DrawFire} is.
+ */
+function Carrier33Draw(obj: ScriptedSceneryActor): void {
+  const s = obj.scenery;
+  let m = Carrier33ObjectMatrix(obj);
+  MatrixScale(m, s.drawScale, s.drawScale, s.drawScale);
+  Carrier33DrawSlot(s, m, s.slot);
+
+  if (s.slot === SLOT_STAGE5_CAR) {
+    m = Carrier33ObjectMatrix(obj);
+    MatrixTranslate(m, CAR_PART_DOOR_AT[0], CAR_PART_DOOR_AT[1],
+                    CAR_PART_DOOR_AT[2]);
+    MatrixRotateZ(m, 0);
+    MatrixRotateY(m, 0);
+    MatrixRotateX(m, CAR_PART_DOOR_PITCH);
+    Carrier33DrawSlot(s, m, CAR_PART_DOOR);
+
+    m = Carrier33ObjectMatrix(obj);
+    MatrixTranslate(m, 0, CAR_PART_WHEEL_Y, CAR_PART_WHEEL_FRONT_Z);
+    s.wheelTurn = (s.wheelTurn + CAR_WHEEL_TURN_STEP) | 0;
+    MatrixRotateX(m, s.wheelTurn);
+    Carrier33DrawSlot(s, m, CAR_PART_WHEEL);
+
+    m = Carrier33ObjectMatrix(obj);
+    MatrixTranslate(m, 0, CAR_PART_WHEEL_Y, CAR_PART_WHEEL_BACK_Z);
+    MatrixRotateX(m, s.wheelTurn);
+    Carrier33DrawSlot(s, m, CAR_PART_WHEEL);
+
+    m = Carrier33ObjectMatrix(obj);
+    MatrixTranslate(m, CAR_PART_SIDE_X, CAR_PART_SIDE_Y, CAR_PART_SIDE_Z);
+    Carrier33DrawSlot(s, m, CAR_PART_LEFT);
+
+    m = Carrier33ObjectMatrix(obj);
+    MatrixTranslate(m, -CAR_PART_SIDE_X, CAR_PART_SIDE_Y, CAR_PART_SIDE_Z);
+    Carrier33DrawSlot(s, m, CAR_PART_RIGHT);
+    return;
+  }
+
+  if (obj.sub !== 1) return;
+  m = Carrier33ObjectMatrix(obj);
+  MatrixTranslate(m, 0, 0, LOOP_Z);
+  MatrixScale(m, LOOP_SCALE[0], LOOP_SCALE[1], LOOP_SCALE[2]);
+  Carrier33DrawSlot(s, m, s.loopA);
+  s.loopA += 1;
+  if (LOOP_A_LAST < s.loopA) s.loopA = LOOP_A_FIRST;
+
+  m = Carrier33ObjectMatrix(obj);
+  MatrixTranslate(m, 0, 0, LOOP_Z);
+  MatrixScale(m, LOOP_SCALE[0], LOOP_SCALE[1], LOOP_SCALE[2]);
+  Carrier33DrawSlot(s, m, s.loopB);
+  s.loopB += 1;
+  if (LOOP_B_LAST < s.loopB) s.loopB = LOOP_B_FIRST;
 }
 
 /**

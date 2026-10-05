@@ -6,8 +6,8 @@
  * a second, without anyone looking at the screen.
  *
  * It is `game/` plus the three-free things that sit either side of it:
- * `core/`, `script/`'s walker, `render/hinge.ts` — the one transcription in
- * `render/` — and `app/systems.ts`, which is the port's *frame* and imports
+ * `core/`, `script/`'s walker and `app/systems.ts`, which is the port's
+ * *frame* and imports
  * three.js only as a type. That last one is how the tick a stopped transport
  * hands the port is reachable here at all; `test/state.test.ts` drives the
  * same class for the same reason.
@@ -39,6 +39,8 @@
  *                     triggers, and every branch writer
  *   class41_stages    stage props: the church, the lift, the doors, the
  *                     collectibles, Training's targets
+ *   class44           class 0x44's hinges and the selectors round them:
+ *                     1 to 8, 10 and 15
  *   class31           the thrower's states, arcs and root motion
  *   class31_throw     the thrower's eye, its weapons and its throw; `coli/`
  *   class10           the civilian and the rescue
@@ -46,7 +48,7 @@
  *   player            the player shell, the continue screen, the counters
  *   class30_states    class 0x30's scripted states and the attack-slot claim
  *   registry          `g_class_handlers`, `ActorDeadSweep`, the shot queue,
- *                     the strike anchor; the rain and the hinge pose
+ *                     the strike anchor; the rain
  *   class30_death     class 0x30's death chain, fades and `ZombieOnShot`
  *   script            the walker's waits and the camera path
  *   shots             the character's size, severed heads, the camera block's
@@ -83,6 +85,7 @@ import "./class25.test";
 import "./class20_24.test";
 import "./routes.test";
 import "./class41_stages.test";
+import "./class44.test";
 import "./class31.test";
 import "./class31_throw.test";
 import "./class10.test";

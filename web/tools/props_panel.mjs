@@ -18,8 +18,9 @@
  * **It does not.** Three separate facts came out of it, and each is one of the
  * assertions below, because all three read as "the props are gone":
  *
- *  1. `props 0 / 0` is `render/props.ts` — the scripted scenery, the hinged
- *     doors and their statics. Stage 3's bundle has **zero** of each, so that
+ *  1. `props 0 / 0` is `render/props.ts` — class 0x33's scripted statics
+ *     (the hinged doors are game objects now, in `breakables`). Stage 3's
+ *     bundle has **zero** of them, so that
  *     row is correct and has nothing to do with class 0x41. Two rows, two
  *     subjects, one word.
  *  2. At `block=0&step=3` the seek lands at **op 0**, and the step places its

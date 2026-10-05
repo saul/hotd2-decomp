@@ -189,10 +189,17 @@ export function PropMatrixTRzRyRx(m: Mat, x: number, y: number, z: number,
  * state block names: a routine that drew one effect id with two motions would
  * need two records, and none of the routines that use this does.
  *
+ * *slot*, when it is not -1, is the slot override `EffectDrawWithSlot`
+ * (`FUN_0040E010`) and `EffectDrawWithCapture` (`FUN_0040DFD0`) set in
+ * `DAT_007C178C`: every node that draws draws that slot instead of its own.
+ * The capture those two can also make (`MatrixStore` of one node into the
+ * state block) is read only by the mesh shot test, and is not recorded.
+ *
  * `[port-only]` as a function: the three routines' walk, recorded rather than
  * drawn, with the state-block writes they make kept exactly where they are.
  */
-export function PropDrawEffect(p: BreakableProp, m: Mat, rng: Rng): void {
+export function PropDrawEffect(p: BreakableProp, m: Mat, rng: Rng,
+                               slot = -1): void {
   const def = T.breakables?.effects?.[String(p.effect)];
   if (!def || !def.frames || def.motion !== p.effectVariant) return;
   if (def.play_length - 1 <= p.effectFrames) p.effectFrames = 0;
@@ -200,7 +207,7 @@ export function PropDrawEffect(p: BreakableProp, m: Mat, rng: Rng): void {
   const root = def.nodes[0];
   const pose: EffectNodePose = { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0 };
   for (const c of root?.children ?? []) {
-    PropDrawEffectNode(p, def, c, m, pose, rng);
+    PropDrawEffectNode(p, def, c, m, pose, rng, slot);
   }
   p.effectPrevFrame = p.effectFrames;
 }
@@ -215,7 +222,7 @@ const EFFECT_SMOKE_PUFF_BASE = 0.27;
 /** One node of {@link PropDrawEffect}'s walk, and its children. */
 function PropDrawEffectNode(p: BreakableProp, def: EffectDefJson, i: number,
                             parent: Mat, pose: EffectNodePose,
-                            rng: Rng): void {
+                            rng: Rng, slot: number): void {
   const node = def.nodes[i];
   if (!node) return;
   const m = PropMatrixPush(parent);
@@ -223,12 +230,16 @@ function PropDrawEffectNode(p: BreakableProp, def: EffectDefJson, i: number,
       && EffectSampleNode(def, i, p.effectFrames, p.effectPrevFrame, pose)) {
     PropMatrixTRzRyRx(m, pose.x, pose.y, pose.z, pose.pitch, pose.yaw,
                       pose.roll);
+    // The puff test is on the node's own slot, whatever the override.
     if (node.slot === EFFECT_SMOKE_PUFF_SLOT) {
       const s = rng.int(EFFECT_SMOKE_PUFF_SPREAD) * EFFECT_SMOKE_PUFF_STEP
         + EFFECT_SMOKE_PUFF_BASE;
       MatrixScale(m, s, s, s);
     }
-    PropDrawSlot(p, m, node.slot);
+    // `if (DAT_007C178C < 0) ...node->slot... else AssetDrawSlot(override)`.
+    PropDrawSlot(p, m, slot < 0 ? node.slot : slot);
   }
-  for (const c of node.children) PropDrawEffectNode(p, def, c, m, pose, rng);
+  for (const c of node.children) {
+    PropDrawEffectNode(p, def, c, m, pose, rng, slot);
+  }
 }

@@ -6,29 +6,6 @@
 
 import type { MessageVariant } from "./sound";
 
-export interface PropHinge {
-  name: string;
-  kind: "hinge";
-  at: number;
-  /** The class-0x44 builder that made it: 1, 2 or 4. */
-  selector: number;
-  slot: number;
-  /**
-   * `obj+0x1DC`. Its **sign** mirrors the swing so a pair opens outward; its
-   * magnitude is the amplitude of the wobble the prop does when it is shot,
-   * and must never scale the pose — see `render/hinge.ts`. Four of the game's
-   * 56 hinges carry ±512 or ±416, so ±1 is not safe to assume.
-   */
-  side: number;
-  curve: number;
-  /** BAMS mounting angle, separate from the swing. */
-  base_yaw: number;
-  /** Script flag that starts the swing. */
-  open_flag: number;
-  /** Script flag that deletes it, or −1. */
-  remove_flag: number;
-}
-
 /** A class-0x33 selector-2 prop: drawn until a flag or a camera frame. */
 export interface PropStatic {
   name: string;
@@ -39,11 +16,13 @@ export interface PropStatic {
   remove_frame: number | null;
 }
 
+/**
+ * The class-0x33 selector-2 props. The class-0x44 hinges that used to travel
+ * here are game objects now: their placements are in
+ * {@link BreakablesJson.placements} and their curves beside them.
+ */
 export interface PropsJson {
-  hinges: PropHinge[];
   statics: PropStatic[];
-  /** Curve id → `[rx, ry, rz]` in BAMS, one per frame. */
-  curves: Record<string, number[][]>;
   note: string;
 }
 
@@ -239,12 +218,19 @@ export interface BreakablePlacement {
     | "flicker_light" | "table38" | "table39" | "table44" | "table50"
     | "table66" | "water_surface" | "type47"
     | "table16" | "type17" | "table29" | "type37"
-    | "draw_only_14";
+    | "draw_only_14"
+    | "hinge" | "van_doors" | "hinge_scaled"
+    | "flag_slot_effect" | "effect_handoff" | "swing_then_break"
+    | "scaled_slot_effect" | "effect_collapse" | "slot_strip_loop"
+    | "kinded_44";
   /** How many evt blocks it lives for. */
   lifetime_evt_steps: number;
   /** `group` only — the row of `g_breakable_group_ptrs` to build. */
   group?: number;
-  /** `kinded` and `falling` — the object kind in the orientation word. */
+  /**
+   * `kinded`, `kinded_44` and `falling` — the object kind in the orientation
+   * word.
+   */
   kind?: number;
   /**
    * `rising_door` — the script flag that starts the rise, `obj+0x2A0`.
@@ -265,10 +251,10 @@ export interface BreakablePlacement {
    */
   rise?: number;
   /**
-   * `rise_to_height` only — the i32 at tail `+0x08`, which the constructor
-   * stores to `obj+0x14C` and the update tests against `-1` twice: to choose
-   * `ActorDespawn` over `ActorKill` on the remove flag, and to register for
-   * the shot test. `-1` in every shipped spawn.
+   * The i32 at tail `+0x08`, which the constructor stores to `obj+0x14C`
+   * and the update tests against `-1`: to choose `ActorDespawn` over
+   * `ActorKill` on the remove flag, and to register for the shot test. Every
+   * class-0x44 selector that reads it: 1 to 7, 12 and 13.
    */
   coli?: number;
   /**
@@ -313,21 +299,58 @@ export interface BreakablePlacement {
   slot?: number;
   /**
    * `generic` and `draw_only_14` — the other two orientation words, which
-   * really are angles.
+   * really are angles. `slot_strip_loop` carries `roll` only, as the strip's
+   * last cursor.
    */
   pitch?: number;
   roll?: number;
   /**
-   * `draw_only_14` only — the tail's three f32 at `+0x08`, `+0x0C`, `+0x10`,
-   * which `PropBuildDrawOnlySelector14` (`FUN_004736D0`) copies to
-   * `obj+0x1A8`..`+0x1B0` and its update hands to `MatrixScale`.
+   * Three f32 of scale from the tail, which the builder copies to
+   * `obj+0x1A8`..`+0x1B0` and the update hands to `MatrixScale`: at
+   * `+0x08` for `draw_only_14` (`PropBuildDrawOnlySelector14`,
+   * `FUN_004736D0`), at `+0x14` for `hinge_scaled`, `swing_then_break`,
+   * `scaled_slot_effect` and `slot_strip_loop`, and at `+0x14` for
+   * `effect_collapse`, whose object keeps it at `+0x1A0`.
    */
   scale?: [number, number, number];
+  /**
+   * The class-0x44 hinges and their neighbours -- `hinge`, `van_doors` and
+   * `hinge_scaled` (selectors 1, 2 and 4, run by `HingeUpdate`,
+   * `FUN_00473CF0`), `effect_handoff` (5), `swing_then_break` (6) and
+   * `scaled_slot_effect` (7):
+   *
+   * * `curve` -- the u16 at tail `+0x00`, `obj+0x290`: which swing curve.
+   * * `side` -- `obj+0x1DC`, the i32 at tail `+0x10` (selectors 1 and 5) or
+   *   `+0x0C` (4, 6, 7). Its **sign** picks the way the swing goes and its
+   *   magnitude is the shot wobble's amplitude.
+   * * `wobble_phase` -- `obj+0x1E8`, the i32 at tail `+0x14` (selectors 1, 2
+   *   and 5).
+   * * `field_2ac` -- `obj+0x2AC`, the signed byte at tail `+0x12` (selectors
+   *   6 and 7), which no routine of theirs reads.
+   *
+   * `slot`, `coli`, `open_flag`, `remove_flag` and `scale` as for the
+   * selectors above.
+   */
+  curve?: number;
+  side?: number;
+  wobble_phase?: number;
+  field_2ac?: number;
+  /**
+   * `effect_collapse` only — keys 0x22 and 0x23 of motion 0x1D3 as
+   * `EffectCollapseUpdate` (`FUN_004748C0`) reads them: 73 entries each,
+   * one past effect 0x10's 72 bones, at the addresses
+   * `EffectFrameTranslations`/`EffectFrameRotations` return. `t_bits` are the
+   * translations' raw 32-bit patterns (the 73rd is rotation shorts), `r` the
+   * rotations as signed shorts.
+   */
+  collapse_keys?: { key: number; t_bits: number[]; r: number[] }[];
   /** The item set it belongs to, 0 for none. */
   item_set?: number;
   /** How many props share that set; the countdown is seeded from it. */
   set_size?: number;
-  /** `falling` only — the `g_GameMode == 1` drop, `-1` for none. */
+  /**
+   * `falling` and `kinded_44` — the `g_GameMode == 1` drop, `-1` for none.
+   */
   story_item?: number;
   /**
    * `chain` only — the group id `PlaceChainSegments` stamps on all twenty
@@ -504,6 +527,12 @@ export interface BreakablesJson {
    * literal, and read it from here.
    */
   hinge_curves_xyz?: Record<string, number[][]>;
+  /**
+   * `g_pHingeCurvesYaw` (`0x005960C8`) by curve index -- 1 and 4, the ones
+   * whose pointer is not null -- each a u16 BAMS yaw per frame. `HingeUpdate`
+   * reads every curve but 0, 2 and 3 from here.
+   */
+  hinge_curves_yaw?: Record<string, number[]>;
 }
 
 /** One `g_original_item_tables` row: four item ids and their weights. */

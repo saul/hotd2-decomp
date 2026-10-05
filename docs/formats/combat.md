@@ -309,7 +309,7 @@ Who reaches it, over every shipped record (`[proved]` writers: every store to
 | `0x26` subtype 2 | `Class26Subtype2Update` `0x0048EB0E` (`|= 0x51`), `0x0048EB16` | `0x0048EE9C` | stage 3's boat |
 | `0x33` selector 1 | `ScriptedCarrierStepPath33` `0x0043389A` (`|= 0x50` when `tail+0x04 != -1`), `0x004338A3` | `ScriptedCarrierUpdate33` `0x004334D0` | stage 2's two name a mesh; stage 5's names none |
 | `0x33` selector 4 | `ScriptedPushableUpdate33` `0x00433BC9`, when `tail+0x04 != -1` | `0x00433CC7` | stage 1's two name none and carry `0x8000` |
-| `0x44` 0-7, 11-13 | each builder, `|= 0x51` unconditionally, `+0x14C` from the descriptor | selector 0's `ScriptFlagEffectUpdate` `0x00473CDF`; 1, 2, 4's `HingeUpdate` `0x0047410B`; 3's `0x00474120` at `0x0047422F`; 6's `0x00474470` at `0x00474760`; 7's `0x00474770` at `0x004748B6`; 12's `0x004755B0` at `0x004757E0`; 13's `0x004757F0` at `0x004758C7`. **11's `RisingDoorUpdate` never registers**, and 5's `0x00474240` has no call of its own (it copies its blob to an object it makes, whose routine is `[open]`) | 0: 2, 1: 37, 2: 3 (two doors each), 3: 2, 4: 13, 5-7: 1 each, 11: 2, 12: 8, 13: 13 |
+| `0x44` 0-7, 11-13 | each builder, `|= 0x51` unconditionally, `+0x14C` from the descriptor | selector 0's `ScriptFlagEffectUpdate` `0x00473CDF`; 1, 2, 4's `HingeUpdate` `0x0047410B`; 3's `FlagSlotEffectUpdate` (`0x00474120`) at `0x0047422F`; 6's `SwingThenBreakUpdate` (`0x00474470`) at `0x00474760`; 7's `ScaledSlotEffectUpdate` (`0x00474770`) at `0x004748B6`; 12's `0x004755B0` at `0x004757E0`; 13's `0x004757F0` at `0x004758C7`. **11's `RisingDoorUpdate` never registers**, and 5's `EffectHandoffUpdate` (`0x00474240`) has no call of its own: it copies its blob to the `HingeUpdate` object it makes | 0: 2, 1: 37, 2: 3 (two doors each), 3: 2, 4: 13, 5-7: 1 each, 11: 2, 12: 8, 13: 13 |
 | `0x44` 17 | `PlaceStoryModeSwitch` `0x00473ADB`, when `desc+0x08 != -1` | `StoryModeSwitchUpdate` `0x004753D7` | all nine name a volume |
 
 The per-bone classes' registration sites `[proved]`:
@@ -3379,7 +3379,7 @@ the evt's `hp` field is what picks it. It writes itself into `g_carrier_object`
 | bit | raised at | read by |
 |---|---|---|
 | `0x10000000` | `0x00433203`, when `g_script_flags[tail+0x20] == 1` or `(s32)tail+0x18 == obj+0x1370` | `ZombieStateRideCarrier` (class 0x30 state 29) — the ride is over |
-| `0x40000000` | `0x00433280`, once `tail+0x14` is not `-1.0f` and `obj+0x1370` has passed it | `ZombieStateDelayedStrikeInPlace` (state 32) at `0x0045EAFE` — give up to state 10 after `0x14` frames |
+| `0x40000000` | `0x00433280`, on the frame `obj+0x1370` **equals** `tail+0x14` (`FCOMP` / `TEST AH,0x40`), when that is not `-1.0f` | `ZombieStateDelayedStrikeInPlace` (state 32) at `0x0045EAFE` — give up to state 10 after `0x14` frames |
 
 Both reads are `[EAX + 0x34]`. **Not `obj+0x136C`**: `0x40000000` there is
 `ZombieFlag2.CollideActors`, half of the `|= 0x60000000` that `EnemyZombieInit`

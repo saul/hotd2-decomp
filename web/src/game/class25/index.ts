@@ -229,6 +229,13 @@ export interface HumanoidProgram {
   flags2: number;
   motion: number;
   phase: number;
+  /**
+   * The index of the block's first command (`blk + 8`), where the Init points
+   * the cursor. `cmds` is in address order and a program can jump back into
+   * commands stored before its own block -- stage 4's player pair share their
+   * tails that way -- so it is not always 0.
+   */
+  entry: number;
   cmds: HumanoidCmd[];
 }
 
@@ -412,7 +419,9 @@ export function ScriptedHumanoidInit(obj: HumanoidActor, rng?: Rng): void {
   const p = HumanoidProgramOf(obj);
   // The Init's last line is `*param_1 = ScriptedHumanoidUpdate`.
   obj.hum.routine = HumanoidRoutine.Update;
-  obj.hum.pc = 0;
+  // `MOV [ESI + 0x1394], EBP` at `0x00484282`, `EBP` the block plus 8: the
+  // block's own first command, which the bundle names by its index.
+  obj.hum.pc = p?.entry ?? 0;
   obj.hum.stallFrames = 0;
   // The Init pre-applies the first command: `obj+0x1324 = 1` when the block
   // opens with an op-1 wait, so an actor whose first instruction is "hold"
@@ -445,7 +454,8 @@ export function ScriptedHumanoidInit(obj: HumanoidActor, rng?: Rng): void {
   // `ActorBuildSkinnedModel` leaves the sampled cursor at the clip's start.
   obj.hum.playCursor = 0;
   if (!p) return;
-  if (p.cmds[0]?.op === HumanoidOp.WaitThenHold) obj.frozen = 1;
+  // `CMP word ptr [EBP], 0x1` at `0x00484270`: the first command's op.
+  if (p.cmds[p.entry]?.op === HumanoidOp.WaitThenHold) obj.frozen = 1;
   obj.motion = p.motion;
   // `if (*(short *)(blk + 2) == 2) obj+0x1F8 |= 4`, straight after the build.
   if (p.flags2 === 2) obj.motionFlags |= MotionFlag.TraceGround;

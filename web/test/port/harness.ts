@@ -730,7 +730,7 @@ export function jettyScene(cmds: HumanoidProgram["cmds"], pos = vec3(-1325, -23,
   EnterPlay();
   SetGameTables(JETTY_CHARS, undefined, undefined, { "12288": {
     charType: 1, removePath: 100, removeFrame: 65, flags2: 1,
-    motion: motion0, phase: 0, cmds,
+    motion: motion0, phase: 0, entry: 0, cmds,
   } });
   G.g_active_cam_path = 79;
   G.g_cam_path_frame = 0;

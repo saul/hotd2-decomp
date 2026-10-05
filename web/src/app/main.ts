@@ -51,6 +51,8 @@ import { hideExportScreen, showExportScreen } from "./install/ExportScreen";
 import { readState, writeState, type PlayerState } from "./urlstate";
 import { PlayerState as GamePlayerState } from "../game/player_state";
 import { PlayerBodiesCreate } from "../game/player_body";
+import { OriginalRunStartWithLastChoice } from "../game/class6e";
+import { SpawnClass } from "../game/spawn_class";
 import { seekTo as seekWalkerTo } from "../script/seek";
 import { CameraReseatFromFrame } from "../game/camera/view";
 import { readViewPrefs, writeViewPrefs } from "./viewprefs";
@@ -61,7 +63,6 @@ import { CharacterLayer } from "../render/characters";
 import { GameOverScene } from "../render/game_over_scene";
 import { ScreenSpritesDeep } from "../render/screen_sprites_deep";
 import { ScreenIdleDimLayer } from "../render/screen_idle_dim";
-import { PropLayer } from "../render/props";
 import { Shooting } from "../render/shooting";
 import { ColiDebugLayer } from "../render/coli_debug";
 import { StuckDebugLayer } from "../render/stuck_debug";
@@ -329,7 +330,6 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
   /** Screen sprites deeper than the HUD's plane, drawn in the 3D. */
   readonly deepSprites = new ScreenSpritesDeep();
   readonly screenIdleDim = new ScreenIdleDimLayer();
-  readonly props = new PropLayer();
   readonly breakables = new BreakableLayer();
   /** A stacked prop's fifteen pieces, off the breakables' templates. */
   readonly shatters = new PropShatterLayer();
@@ -802,7 +802,6 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     // After the characters: a gore swap clones a part onto a bone, and the
     // light should see it the frame it appears.
     this.world.add("render", this.gunLights);
-    this.world.add("render", this.props);
     this.world.add("render", this.breakables);
     this.world.add("render", this.shatters);
     this.world.add("render", this.slotModels);
@@ -1219,6 +1218,20 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     SetBoss4Tables(script.boss4, script.carrier_door_yaw);
     SetClass2DTables(script.class2d);
     SetResultCardTables(script.result_card);
+  }
+
+  /**
+   * A new Original Mode run on a stage with no trunk -- a link, the picker, a
+   * restart or a seek into stages 2 to 6 -- gets the items the trunk last
+   * closed with (`OriginalRunStartWithLastChoice`). Stage 1's own trunk, or
+   * a seek past it (`ItemSelectPassedBySeek`), hands them out there instead;
+   * a stage step's run carries its own and never comes here. Called once the
+   * tables are in and the generator is seeded, which the costume draw reads.
+   */
+  startRunItems(script: ScriptJson): void {
+    const trunk = script.blocks.some((b) => b.steps?.some((s) => s.ops.some(
+      (o) => o.simple?.some((r) => r.class === SpawnClass.ItemSelect))));
+    if (!trunk) OriginalRunStartWithLastChoice(this.rng);
   }
 
   /**
@@ -1947,6 +1960,8 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     // phase of every clip. `stage_load.ts` was the only place that reseeded, so
     // "the same address" meant the same script state and a different game.
     this.rng.reseed(this.state.seed ?? 1);
+    // The reset started a new run, so it gets a new run's items.
+    if (this.gameTables) this.startRunItems(this.gameTables);
     // The replay rewrites the world; nothing that described the old one may
     // outlive it. The rewind ring is part of that: `ctx.frame` goes back to
     // near zero with `g_frame`, so every slot it holds is the future of a

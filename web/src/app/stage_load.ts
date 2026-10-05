@@ -188,8 +188,12 @@ export async function loadStageInto(p: Player): Promise<void> {
   // (`FUN_004603B0`) steps `g_scene_index` before `LoadSceneAndReset` runs,
   // and `ResetSceneOnEnter` zeroes *that* scene's rescue count.
   G.g_scene_index = bundle.script.scene ?? 0;
+  // A stage step carries the run's player block in; anything else -- a page
+  // load, a link, the picker, a restart -- is a new run.
+  const newRun = p.game.carry === null;
   p.world.attach(p.ctx);
   p.applyGameTables(bundle.script);
+  if (newRun) p.startRunItems(bundle.script);
   // Characters are already in the stage glTF, one hierarchy per spawn;
   // this adopts them and takes over the pose.
   // The object paths class 0x25 rides live in the camera bundle; the
@@ -205,9 +209,6 @@ export async function loadStageInto(p: Player): Promise<void> {
   p.spawns.setPosed(p.chars.posed);
   // The two player bodies are the game-over screen's, not the script's.
   p.gameOverScene.build(p.ctx.scope, p.chars, p.effects);
-  // Doors, shutters and the vans they hang off; driven by the script's
-  // own flags, so nothing here needs a clock of its own.
-  p.props.build(p.scene3d.root, p.ctx.scope, bundle.script.props);
   // Class 0x41's props are built at run time, so only the templates are
   // adopted here; the nodes follow `G.g_breakable_props`.
   p.breakables.adopt(p.scene3d.root);

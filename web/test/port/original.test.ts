@@ -23,7 +23,8 @@ import {
   OriginalItem, OriginalItemsApply, OriginalItemsApplyOnJoin,
   ResetOriginalModeLoadout,
 } from "../../src/game/original_mode";
-import { ItemSelectApplyToPlayers } from "../../src/game/class6e";
+import { ItemSelectApplyToPlayers, OriginalRunStartWithLastChoice }
+  from "../../src/game/class6e";
 import {
   ITEM_SELECT_BGM, ItemSelectPad, ItemSelectRoutine, ItemSelectSound,
   ItemSelectSprite, ItemSelectState,
@@ -326,6 +327,42 @@ console.log("\nOriginal Mode, a seek past the trunk:");
   check("...and leaves the script where the seek put it: not back at step 1",
         w.step === 2 && G.g_evt_step_index === 2,
         `step ${w.step} g_evt_step_index ${G.g_evt_step_index}`);
+}
+
+console.log("\nOriginal Mode, a new run on a stage with no trunk:");
+{
+  // A link into stage 3, say: the run starts from the title in the reset, as
+  // every new run does, and no trunk is coming. It gets the last choice.
+  ProfileBoot(null);
+  OriginalRun();
+  G.g_original_last_choice = [[OriginalItem.Chamber2, OriginalItem.PowerUp12],
+                              [-1, -1]];
+  OriginalRunStartWithLastChoice(new Rng(3));
+  check("the run takes the last choice out of the saved items, as the trunk "
+        + "would: both slots, and the counts one lower",
+        G.g_original_item_slots[0].join()
+          === [OriginalItem.Chamber2, OriginalItem.PowerUp12].join()
+        && G.g_original_items_taken[OriginalItem.Chamber2] === 0
+        && G.g_original_items_taken[OriginalItem.PowerUp12] === 0,
+        `slots ${G.g_original_item_slots[0]}`);
+  check("...and the hand-over runs: an eight-round magazine, loaded, and 1.2 "
+        + "times the damage",
+        G.g_player_magazine_size[0] === 8 && G.g_player_ammo[0] === 8
+        && G.g_original_weapon_damage_scale[0] === Math.fround(1.2),
+        `mag ${G.g_player_magazine_size[0]}`);
+
+  // Arcade has no items, remembered or not.
+  ProfileBoot(null);
+  G.g_GameMode = GameMode.Arcade;
+  ResetGameGlobals();
+  SetGameTables(CHARS);
+  SetOriginalModeTables(ORIGINAL_MODE);
+  EnterPlay();
+  OriginalRunStartWithLastChoice(new Rng(3));
+  check("...and an Arcade run is left alone",
+        G.g_original_item_slots[0].join() === "-1,-1"
+        && G.g_player_magazine_size[0] === 6,
+        `slots ${G.g_original_item_slots[0]} mag ${G.g_player_magazine_size[0]}`);
 }
 
 console.log("\nOriginal Mode, a pair the trunk refuses:");

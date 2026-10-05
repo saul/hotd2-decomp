@@ -145,7 +145,11 @@ choice as `hod2.originalChoice`), and the script stays where the seek put
 it. Until 2026-10-05 such a trunk opened over the stage-1 opening and, when
 its menu was done, `ItemSelectFinish` sent the script back to step 1. The
 menu's Original mode switch is a new run from the top of stage 1 for the
-same reason: it used to keep the Arcade address and seek there.
+same reason: it used to keep the Arcade address and seek there. A new run the
+port starts on a stage with no trunk at all -- a link, the picker, a restart
+or a seek into stages 2 to 6, none of which the game can do -- gets the same
+remembered items (`OriginalRunStartWithLastChoice`), where it used to start
+with none; a stage step carries its run's own.
 
 ## 4. Collecting and saving
 

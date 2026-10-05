@@ -410,6 +410,8 @@ export class Placement {
   class13: Record<string, unknown> | null = null;
   /** Class 0x12's tail -- the slot strip, its flag, delay and despawn cue. */
   class12: Record<string, unknown> | null = null;
+  /** Class 0x15's tail -- the row of floating planks; see `class15Tail`. */
+  class15: Record<string, unknown> | null = null;
   /** Class 0x18's three -- the state it leaves from and the camera cue. */
   class18: Record<string, unknown> | null = null;
   /** Class 0x26 subtype 2's collision blob -- the boat the player rides. */
@@ -520,6 +522,17 @@ export class Placement {
    */
   class33_cue: Record<string, unknown> | null = null;
   /**
+   * Class 0x33 **selectors 6 to 11 and 99**'s tails, each tagged with its
+   * selector -- `class33SubTail`. Never set beside the other blocks.
+   */
+  class33_sub: Record<string, unknown> | null = null;
+  /**
+   * Class 0x33 **selector 2's** tail -- the draw slot, and the camera frame
+   * and script flag `ScriptedPropDrawUntilFlag` leaves on. Selector 2 only,
+   * and never set beside any of the others.
+   */
+  class33_prop: Record<string, unknown> | null = null;
+  /**
    * The spawn's attachment list -- `obj+0x1170`, ids into
    * `g_actor_attachment_records`.
    *
@@ -586,6 +599,7 @@ export class Placement {
     if (this.class20) d.class20 = this.class20;
     if (this.class13) d.class13 = this.class13;
     if (this.class12) d.class12 = this.class12;
+    if (this.class15) d.class15 = this.class15;
     if (this.class18) d.class18 = this.class18;
     if (this.class26) d.class26 = this.class26;
     if (this.class19) d.class19 = this.class19;
@@ -613,6 +627,8 @@ export class Placement {
     if (this.class33) d.class33 = this.class33;
     if (this.class33_push) d.class33_push = this.class33_push;
     if (this.class33_cue) d.class33_cue = this.class33_cue;
+    if (this.class33_sub) d.class33_sub = this.class33_sub;
+    if (this.class33_prop) d.class33_prop = this.class33_prop;
     if (this.attachments.length) d.attachments = [...this.attachments];
     return d;
   }

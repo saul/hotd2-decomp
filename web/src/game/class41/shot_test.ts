@@ -77,17 +77,6 @@ export const FALLING_CONTAINER_RADIUS = 8.0;
 export const BREAKABLE_STANDING_RISE = 3.770148;
 
 /**
- * `ChainSegmentUpdate`'s link spacing — `MatrixTranslate(0, -1.5, 0)` at the
- * end of each link's chain, so `M_i = M_{i-1} * Rz * Rx * T(0, -1.5, 0)`.
- *
- * The sphere sits at the **bottom** of a link while the model is drawn at its
- * top, and with no swing the twenty links cover thirty units of drop from the
- * anchor. That is why the port places them all at the anchor and then steps
- * them down: a chain of twenty spheres in one spot is one link, not twenty.
- */
-export const CHAIN_LINK_DROP = -1.5;
-
-/**
  * `StoryModeSwitchUpdate` **never writes `obj+0x70..0x78`**, and calls
  * `RegisterForShotTest` anyway.
  *

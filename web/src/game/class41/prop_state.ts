@@ -268,6 +268,12 @@ export enum PropFamily {
    */
   EffectCollapse = 34,
   /**
+   * `ChainSegmentUpdate` (`FUN_00469510`) — one of the twenty 0x200-byte links
+   * `PlaceChainSegments` (`FUN_00463160`, constructor 24) builds. Its words
+   * are {@link BreakableProp.chain}. See `class41/chain.ts`.
+   */
+  ChainSegment = 35,
+  /**
    * `OriginalItemDropUpdate` (`FUN_00466BE0`) — the Original Mode item
    * `SpawnOriginalItemDrop` (`FUN_00466B40`) releases, which
    * `PropUpdateType7`'s first hit does. See `class41/type07.ts`.
@@ -736,16 +742,6 @@ export interface BreakableProp {
    */
   shotRegistered: boolean;
   /**
-   * `obj+0x1AC` — which chain a `ChainSegmentUpdate` segment belongs to, and
-   * `obj+0x1AD` its index 0..19 within it.
-   *
-   * Only `PlaceChainSegments`' twenty-segment objects have these; for every
-   * other family they are 0. `g_chain_segments` is indexed
-   * `[chainGroup * 0x14 + chainIndex]`.
-   */
-  chainGroup: number;     // +0x1AC
-  chainIndex: number;     // +0x1AD
-  /**
    * `obj+0x1BA` — `PropUpdateType40`'s sub-kind, from the placer.
    *
    * Sub-kind **9** is the pair whose two breakages
@@ -796,8 +792,9 @@ export interface BreakableProp {
    *
    * One port field for the engine offsets of the routines ported only as far
    * as their branch arm — `obj+0x34` bit `0x40000000` for type 76,
-   * `obj+0x192` for the story switch, `obj+0x1B0` of a chain's **segment 0**
-   * for the chain — and `obj+0x1B9` for type 40. Types 14, 19, 25, 56, 69
+   * `obj+0x192` for the story switch — and `obj+0x1B9` for type 40. The
+   * chain's `obj+0x1B0` was here too and is its own word now
+   * ({@link ChainSegmentState.latch}). Types 14, 19, 25, 56, 69
    * and 73 used to be here too; they are transcribed whole now and keep
    * their latch in the word their routine does. Where the rest are ported,
    * this splits the same way.
@@ -908,6 +905,59 @@ export interface BreakableProp {
   dead: boolean;
   /** {@link PropFamily.Type48}'s own words, and null for every other family. */
   flicker: FlickerLightState | null;
+  /**
+   * {@link PropFamily.ChainSegment}'s own words, and null for every other
+   * family: the link is a 0x200-byte object with a layout of its own, and the
+   * offsets the fields above name are other words of it (`L3`).
+   */
+  chain: ChainSegmentState | null;
+}
+
+/**
+ * The words of one chain link (`ChainSegmentUpdate`, `FUN_00469510`), by the
+ * offsets `PlaceChainSegments` and the routine write.
+ */
+export interface ChainSegmentState {
+  /** `+0x11C` (s16) — how many step boundaries the link outlives. */
+  lifetime: number;       // +0x11C
+  /**
+   * `+0x194..+0x19C` — the link's **foot** in the world: the translation of
+   * its stored matrix, which is 1.5 below where its model is drawn. The shot
+   * sphere's centre and the item drop's `x`/`z`.
+   */
+  wx: number;             // +0x194
+  wy: number;             // +0x198
+  wz: number;             // +0x19C
+  /** `+0x1A0..+0x1A8` — the placer's position, the top of the chain. */
+  ax: number;             // +0x1A0
+  ay: number;             // +0x1A4
+  az: number;             // +0x1A8
+  /** `+0x1AC` (s8) — the chain group, `g_chain_segments`' row. */
+  group: number;          // +0x1AC
+  /** `+0x1AD` (s8) — 0..19, the link's place from the top. */
+  index: number;          // +0x1AD
+  /** `+0x1AE` (s8) — the step index as a byte, read back sign-extended. */
+  lastStep: number;       // +0x1AE
+  /** `+0x1AF` (s8) — step boundaries seen. */
+  steps: number;          // +0x1AF
+  /** `+0x1B0` — segment 0's route latch (`ChainLatch`); unused on the rest. */
+  latch: number;          // +0x1B0
+  /** `+0x1B2` (s16 BAMS) — the swing about X. */
+  pitch: number;          // +0x1B2
+  /** `+0x1B4` (s16 BAMS) — the link's own turn, `index << 14`. */
+  yaw: number;            // +0x1B4
+  /** `+0x1B6` (s16 BAMS) — the swing about Z. */
+  roll: number;           // +0x1B6
+  /** `+0x1B8` (s16) — {@link pitch}'s rate. */
+  pitchRate: number;      // +0x1B8
+  /** `+0x1BC` (s16) — {@link roll}'s rate. */
+  rollRate: number;       // +0x1BC
+  /**
+   * `+0x1C0` — `MatrixStore` of the link's matrix after its 1.5 drop: what the
+   * link below hangs from. The world matrix in the port, where the engine's
+   * is built on the view (`class41/prop_draw.ts`).
+   */
+  m: number[];            // +0x1C0
 }
 
 /** `obj+0x34` bits `BreakablePropUpdate` tests. */
@@ -973,8 +1023,6 @@ export function makeBreakableProp(id: number, group: number,
     hitRadius: 0,
     shotX: 0, shotY: 0, shotZ: 0,
     shotRegistered: false,
-    chainGroup: 0,
-    chainIndex: 0,
     subKind: 0,
     removeFlag: -1,
     cuePhase: PropCuePhase.Untouched,
@@ -995,5 +1043,6 @@ export function makeBreakableProp(id: number, group: number,
     hitAim: null,
     dead: false,
     flicker: null,
+    chain: null,
   };
 }

@@ -489,6 +489,8 @@ console.log("\n`g_class_handlers`, filled by the classes themselves:");
     [SpawnClass.RankScaledEnemy, "0x21 rescue target"],
     [SpawnClass.ScriptedProp, "0x13 script-driven prop / the boat"],
     [SpawnClass.FlagStripProp, "0x12 slot strip on a flag / the bin's door"],
+    [SpawnClass.FloatingPropRow, "0x15 stage 2's floating planks"],
+    [SpawnClass.DynamicLight, "0x2B a scripted light"],
     [SpawnClass.CarriedZombie, "0x18 the zombie that rides it"],
     [SpawnClass.Vehicle, "0x26 subtype 2, the boat the player rides"],
     [SpawnClass.PathRidingProp, "0x28 stage 1's two burning cars"],

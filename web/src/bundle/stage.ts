@@ -12,7 +12,7 @@
 import type { CamJson } from "./cameras";
 import type { StageEntry } from "./manifest";
 import type { CharactersJson } from "./characters";
-import type { BackdropJson, BreakablesJson, PropsJson, RainJson, RigsJson,
+import type { BackdropJson, BreakablesJson, RainJson, RigsJson,
               CiviliansJson, HumanoidProgramJson, SetPieceParamsJson,
               SoundJson } from "./scene";
 import type { BlockJson, ColiJson, RegionEntryJson } from "./script";
@@ -62,7 +62,6 @@ export interface ScriptJson {
   backdrop?: BackdropJson;
   rigs?: RigsJson;
   characters?: CharactersJson;
-  props?: PropsJson;
   breakables?: BreakablesJson;
   /** Class 0x24's parameter tail, keyed by spawn address. */
   set_pieces?: Record<string, SetPieceParamsJson>;

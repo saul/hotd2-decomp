@@ -48,9 +48,8 @@ import {
   CAT_TRIGGER_STOP_X, CatTriggerState, type CatTail,
 } from "../../src/game/class53";
 import { CAT_CLIPS, CAT_MOTIONS } from "../../src/game/class53/records";
-import {
-  PlaceChainSegments, PlaceStoryModeSwitch,
-} from "../../src/game/class41/triggers";
+import { PlaceStoryModeSwitch } from "../../src/game/class41/triggers";
+import { PlaceChainSegments } from "../../src/game/class41/chain";
 import { PlaceFragmentProps } from "../../src/game/class41/type40";
 import {
   STORY_SWITCH_FLAG_AT, STORY_SWITCH_SCRIPT_FLAG,

@@ -49,6 +49,7 @@ import { WATER_SURFACE_ALSO_DRAWS } from "../game/class41/water_slots";
 import { SLIDE_SECOND_DRAW_SLOT, SLIDE_SECOND_SLOT }
   from "../game/class44/slide_slots";
 import { TYPE47_CONSTRUCTOR, TYPE47_SLOT } from "../game/class41/type47_slots";
+import { CHAIN_ITEM_ROW, CHAIN_LINK_SLOT } from "../game/class41/chain_slots";
 // ...and constructors 16, 17, 29 and 37: their models, and where their tables
 // are (`class41_rows.ts` reads them).
 import { TYPE16_CONSTRUCTOR, Type16DrawSlots }
@@ -1342,7 +1343,8 @@ export const STORY_ITEM_ROW_BY_TYPE: Record<number, number> = { 74: 2, 75: 1 };
  * placements can reach. See `OriginalItemsJson`.
  *
  * A row is named by the placer's byte for a collectible (types 70, 71, 72),
- * by a routine's own immediate for types 7, 43, 74 and 75, and by a story item --
+ * by a routine's own immediate for types 7, 43, 74 and 75 and the chain, and
+ * by a story item --
  * `obj+0x2A0` -- for a group member or a falling container, whose destroy
  * path hands `SpawnStoryModeItem` that word in Original Mode.
  */
@@ -1366,6 +1368,10 @@ export function originalItemsJson(tables: ExeTables,
       for (const m of groups[pl.group as number] ?? []) named.push(m.story_item);
     } else if (pl.container === "falling") {
       named.push((pl.story_item as number) ?? -1);
+    } else if (pl.container === "chain") {
+      // `SpawnChainItemDrop(18.0, 4, seg)` -- segment 0's drop, once a link
+      // of group 1 has opened the route.
+      named.push(CHAIN_ITEM_ROW);
     }
   }
   for (const row of named) {
@@ -1629,6 +1635,12 @@ export const ACTOR_SLOTS: Record<number, number[]> = {
   // (`Class23LandingRingUpdate`, `FUN_00491700`: slot `0x17C8`, `boss1q.bin`
   // 94). The walker is only ever made by the flier, so the flier carries both.
   0x22: [...Array.from({ length: 15 }, (_, i) => 0x94 + i), 0x17c8],
+  // Class 0x15, the floating planks: the strip a plank throws as it leaves
+  // on its flag, `SpawnPropStripEffect` (`FUN_0043FCA0`) kind 1 --
+  // `sanbasi.bin` 12..90, slots 0x16E1..0x172F -- which the strip object
+  // draws by slot. The plank's own model is its descriptor's
+  // (`floatingPropDrawSlots`).
+  0x15: Array.from({ length: 0x172f - 0x16e1 + 1 }, (_, i) => 0x16e1 + i),
   // Class 0x42, the worm: `buyo.bin` 0..53, every slot its three routines
   // draw through `WormAssetDrawSlot` (`FUN_00430B90`) -- the body `0x85A`,
   // its shadow `0x85B`, the landing splat `0x85C..0x874` (which the lone
@@ -1738,16 +1750,20 @@ export const EFFECT_SLOTS_BY_CLASS: Record<number, number[]> = {
   // `LifeGrantedMarkerUpdate` draws in camera space. See
   // `game/class10/life_marker.ts`.
   0x10: [0x1256, 0x1257],
-  // Class 0x33, the two sprite kinds its ported routines throw:
+  // Class 0x33, the sprite kinds its ported routines throw:
   // `SpawnSpriteEffectFromParams`' `case 0x44:` run `0xFD4..0x1031`, all 94 of
   // `eff_dokan.bin` (`ScriptedEffectAtCameraCue33`, `FUN_00433B00`, and
   // `ScriptedCarrierUpdate33`, `FUN_004331D0`, on every slot but `0x1B0E`),
   // and its `case 0x45:` run `0x174A..0x1785`, all 60 of `eff_shop.bin`
   // (the carrier on slot `0x1B0E`). Stage 2's script loads `eff_dokan.bin` in
-  // the steps that spawn them, and stage 5's `eff_shop.bin`.
+  // the steps that spawn them, and stage 5's `eff_shop.bin`. And `case 0x62:`,
+  // the kind-0x61 splash run `0x1339..0x1356` again, which
+  // `ScriptedEffectOnFirstFrame33` (`FUN_00433AC0`) throws -- stage 1 has no
+  // other class that would carry it.
   0x33: [
     ...Array.from({ length: 0x1031 - 0xfd4 + 1 }, (_, i) => 0xfd4 + i),
     ...Array.from({ length: 0x1785 - 0x174a + 1 }, (_, i) => 0x174a + i),
+    ...CREATURE_SPLASH_SLOTS,
   ],
   // Class 0x32, the stage-5 boss: sprite kind 0x50, `0x23A..0x248`, the
   // spark `Class32ChargeShotBone` (`FUN_0047CE10`) throws off a damaging hit.
@@ -1808,6 +1824,26 @@ export function humanoidDrawSlots(
  * blood hang off the same one. `render/slotmodels.ts` places its clones in
  * the world.
  */
+/**
+ * The asset slots a stage's **class-0x15 planks** draw: `tail+0x00` of each
+ * placement, `AssetDrawSlot((s16)obj+0x1F4)` at the end of
+ * `FloatingPropUpdate` (`FUN_004418C0`). A property of the descriptor, so of
+ * the placement, as `scriptedPropDrawSlots`' are. They ride `slots_effect`
+ * because the plank's draw is recorded with its world matrix
+ * (`DrawSlotInWorld`) and `render/view_slots.ts` places it from that layer.
+ */
+export function floatingPropDrawSlots(
+    placements: readonly { class15?: { slot?: number } | null }[]): number[] {
+  const out: number[] = [];
+  for (const p of placements) {
+    const slot = p.class15?.slot;
+    if (typeof slot === "number" && slot > 0 && !out.includes(slot)) {
+      out.push(slot);
+    }
+  }
+  return out;
+}
+
 export function bodyCreatureDrawSlots(
     charTypes: Iterable<number>): number[] {
   const out: number[] = [];
@@ -1860,7 +1896,15 @@ export const CARRIER33_FIRE = Array.from({ length: 0x1ad2 - 0x1aab + 1 },
                                          (_, i) => 0x1aab + i);
 
 /**
- * The asset slots a stage's class-0x33 **selector-1 and selector-4
+ * `ScriptedBridgeCrashStrip33` (`FUN_00433FE0`)'s strip, `0x174A..0x1785`
+ * (`eff_shop.bin` parts 0..59), one a frame. `ScriptedFireLoopUntilCue33`
+ * (`FUN_00434100`) draws {@link CARRIER33_FIRE}.
+ */
+export const SCENERY33_CRASH_STRIP = Array.from(
+  { length: 0x1785 - 0x174a + 1 }, (_, i) => 0x174a + i);
+
+/**
+ * The asset slots a stage's class-0x33 **selector-1, -4, -8, -9 and -99
  * descriptors** ask for.
  *
  * Not in {@link ACTOR_SLOTS}, for the same reason {@link humanoidDrawSlots} is
@@ -1883,7 +1927,9 @@ export const CARRIER33_FIRE = Array.from({ length: 0x1ad2 - 0x1aab + 1 },
 export function sceneryDrawSlots(
     placements: readonly {
       class33_push?: { slot?: number } | null;
+      class33_prop?: { slot?: number } | null;
       class33?: { slot?: number } | null;
+      class33_sub?: { selector?: number; slot?: number } | null;
     }[],
 ): number[] {
   const out: number[] = [];
@@ -1891,8 +1937,17 @@ export function sceneryDrawSlots(
     if (slot > 0 && !out.includes(slot)) out.push(slot);
   };
   for (const p of placements) {
+    // Selectors 8, 9 and 99 -- `class33/strips.ts`.
+    const sub = p.class33_sub;
+    if (sub?.selector === 8) for (const s of SCENERY33_CRASH_STRIP) add(s);
+    if (sub?.selector === 9) for (const s of CARRIER33_FIRE) add(s);
+    if (sub?.selector === 99 && typeof sub.slot === "number") add(sub.slot);
     const push = p.class33_push?.slot;
     if (typeof push === "number") add(push);
+    // Selector 2, `ScriptedPropDrawUntilFlag` (`FUN_00433A10`): one model,
+    // `tail+0x00`, and nothing beside it.
+    const prop = p.class33_prop?.slot;
+    if (typeof prop === "number") add(prop);
     const ride = p.class33?.slot;
     if (typeof ride !== "number") continue;
     add(ride);
@@ -2413,6 +2468,8 @@ export async function breakableSlotEntry(
     }
     if (pl.container === "table29") slots.push(...Type29DrawSlots());
     if (pl.container === "type37") slots.push(...Type37DrawSlots());
+    // `ChainSegmentUpdate` draws one literal for every link.
+    if (pl.container === "chain") slots.push(CHAIN_LINK_SLOT);
     for (const slot of slots) {
       if (slot && !want.includes(slot)) want.push(slot);
     }
@@ -2697,14 +2754,6 @@ export async function buildStage(stage: Stage, sink: BundleSink,
           entries: charEntries } = await resolveCharacters(
     stage, prog, spawnRecords, null, null, cache);
 
-  // Scripted scenery -- class 0x33 selector 2, a model at the spawn's pose
-  // until a flag or a camera frame. Same writer again: a prop is one model at
-  // a pose, which is a rig with a fixed placement. The class-0x44 hinges are
-  // game objects and travel as placements below.
-  say(`  ${name}: scripted props`);
-  const statics = propslib.resolveForStage(prog, spawnRecords);
-  const propEntries = await propslib.rigEntries(stage, statics, cache);
-
   // Before the glTF: the template rig has to include every asset slot the
   // stage's generic props name, and only the script knows which those are.
   const placements = evt ? containerPlacements(tables, evt, spawnRecords) : [];
@@ -2735,6 +2784,7 @@ export async function buildStage(stage: Stage, sink: BundleSink,
     cache);
   const eff = await effectSlotEntry(stage, cache, [
     ...bodyCreatureDrawSlots(charDefs.keys()),
+    ...floatingPropDrawSlots(charPlaces),
     ...carriedPropDrawSlots(charPlaces as unknown as Record<string, unknown>[]),
     // ...and the break effects' node models, which `render/effects.ts` draws
     // for the same object once it has broken.
@@ -2769,7 +2819,7 @@ export async function buildStage(stage: Stage, sink: BundleSink,
   // own option offers. See `bloodTexturePredicate`.
   const isBloodTexture = bloodTexturePredicate(tables);
   const info = await gltf.exportLevel(name, parts, outDir, sink, deflate, {
-    rigs: [...rigInstances, ...charEntries, ...propEntries,
+    rigs: [...rigInstances, ...charEntries,
            ...(brk ? [brk] : []), ...(act ? [act] : []),
            ...(eff ? [eff] : [])],
     modelRegions,
@@ -2811,7 +2861,6 @@ export async function buildStage(stage: Stage, sink: BundleSink,
     (scriptJson.characters as Record<string, unknown>).class42 =
       await class42Tables(stage);
   }
-  scriptJson.props = propslib.propsJson(statics);
   // The carriers' effects ride in the same map, and after
   // `breakableSlotEntry` has taken its node slots: theirs travel in
   // `slots_actor`, which is what draws them.
@@ -2932,7 +2981,6 @@ export async function buildStage(stage: Stage, sink: BundleSink,
       spawns: nSpawns,
       rigs: info.rigs,
       characters: charDefs.size,
-      props: statics.length,
       posed_spawns: charPlaces.filter((p) => p.motion !== null).length,
       // **Zero is the only good value here.** Every other count says how much
       // is in the bundle; this one says how much of the game did not make it,

@@ -17,18 +17,9 @@
  * any `Init` runs, and the class reads it as a selector. That is `L3`, and it
  * has already caught someone on this class.
  *
- * Only the ones the port has read are members. The rest are, by the
- * dispatch's own jump table:
- *
- * ```
- * 3  -> 0x00433AC0    6  -> 0x00433E30    9  -> 0x00434100
- *                     7  -> 0x00433E90   10  -> 0x00433F40
- *                     8  -> 0x00433FE0   11  -> 0x00434260
- *                                        99  -> 0x00433160
- * ```
- *
- * `docs/formats/spawns.md` records what three of those are; none of them is
- * read here and none has a module.
+ * Every reachable arm is read and is a member. `class33/cues.ts` has the
+ * four of 6 to 11 that draw nothing (6, 7, 10, 11) and `class33/strips.ts`
+ * the three that do (8, 9, 99).
  */
 export enum ScriptedScenerySelector {
   /**
@@ -37,12 +28,21 @@ export enum ScriptedScenerySelector {
    */
   Carrier = 1,
   /**
-   * `ScriptedPropDrawUntilFlag` (`FUN_00433A10`) — a static prop drawn until
-   * a camera frame or a script flag. Ten shipped spawns, and they already
-   * reach the player through the bundle's `props`, so this class gives them
-   * no second behaviour.
+   * `ScriptedPropDrawUntilFlag` (`FUN_00433A10`) — one model drawn at the
+   * object's own pose until block 0's camera frame equals `tail+0x0C` or the
+   * script flag at `tail+0x11` reads 1, then a despawn. **Ported**, in
+   * `class33/draw_until_flag.ts`. Fifty-six shipped spawns over ten
+   * descriptors, stage 1's and stage 2's.
    */
   DrawUntilFlag = 2,
+  /**
+   * `ScriptedEffectOnFirstFrame33` (`FUN_00433AC0`) — one sprite of kind
+   * 0x62 thrown at the object's own position, facing the camera, on its first
+   * update, and a despawn. Reads no tail. **Ported**, in
+   * `class33/effect_first_frame.ts`. Fourteen shipped spawns, stage 1's
+   * block 4 and stage 2's blocks 9 and 16.
+   */
+  EffectOnFirstFrame = 3,
   /**
    * `ScriptedPushableUpdate33` (`FUN_00433B70`) — a piece of scenery an actor
    * shoves out of its way. **Ported**, in `class33/pushable.ts`. Two shipped
@@ -56,6 +56,47 @@ export enum ScriptedScenerySelector {
    * stage 2's `0x12568`.
    */
   EffectAtCameraCue = 5,
+  /**
+   * `ScriptedSpriteEffectOnce33` (`FUN_00433E30`) — one sprite effect from
+   * the object's own position and facing, kind, mode and player from the
+   * tail, then a despawn. **Ported**, in `class33/cues.ts`. No shipped spawn.
+   */
+  SpriteEffectOnce = 6,
+  /**
+   * `ScriptedSoundCues33` (`FUN_00433E90`) — a list of sounds, each on a frame
+   * count or a camera frame. **Ported**, in `class33/cues.ts`. One shipped
+   * spawn, stage 5 block 2's tyres and brakes.
+   */
+  SoundCues = 7,
+  /**
+   * `ScriptedBridgeCrashStrip33` (`FUN_00433FE0`) — `BRIDGE_CRASH1_22` and the
+   * sixty models of `eff_shop.bin`, one a frame. **Ported**, in
+   * `class33/strips.ts`. One shipped spawn, stage 5 block 7.
+   */
+  BridgeCrashStrip = 8,
+  /**
+   * `ScriptedFireLoopUntilCue33` (`FUN_00434100`) — `CAR_FIRE_22` and the
+   * fire loop until a cue. **Ported**, in `class33/strips.ts`. One shipped
+   * spawn, stage 5 block 7.
+   */
+  FireLoopUntilCue = 9,
+  /**
+   * `ScriptedSoundAndFlagAtCue33` (`FUN_00433F40`) — a sound and a script flag
+   * on a cue. **Ported**, in `class33/cues.ts`. No shipped spawn.
+   */
+  SoundAndFlagAtCue = 10,
+  /**
+   * `ScriptedEndingTrackSelect33` (`FUN_00434260`) — `ENDL` or `ENDS` by the
+   * score rank. **Ported**, in `class33/cues.ts`. Spawned only by the ending
+   * scene, which no bundle carries.
+   */
+  EndingTrackSelect = 11,
+  /**
+   * `ScriptedStaticSlotDraw33` (`FUN_00433160`) — the tail's slot, drawn
+   * where the object stands, every frame. **Ported**, in
+   * `class33/strips.ts`. No shipped spawn.
+   */
+  StaticSlotDraw = 99,
 }
 
 /**
@@ -116,6 +157,24 @@ export interface ScriptedSceneryTail {
    * at the top of each update, so a frame that draws nothing leaves none.
    */
   draws: { slot: number; m: number[] }[];
+  /**
+   * `obj+0x1330` — selectors 7, 9 and 10 count frames up in it toward a
+   * mode-0 cue, and selector 8 counts down from `0x14` to its second sound.
+   */
+  frames: number;         // +0x1330
+  /**
+   * `obj+0x1390` as selector 7 moves it: `ADD ECX, 0x8` at `0x00433F15`
+   * steps the descriptor tail pointer itself, one 8-byte record a cue. The
+   * port keeps it as the index of that record in the bundle's list.
+   */
+  cue: number;            // +0x1390
+  /**
+   * `obj+0x1350` and `obj+0x1354` as selectors 7 and 10 seed them: the first
+   * record's frame and sound. Nothing reads either back. The same two words
+   * are selector 1's {@link pathSlot} and {@link loopA} (`L3`).
+   */
+  seedFrame: number;      // +0x1350
+  seedSound: number;      // +0x1354
 }
 
 /**
@@ -129,5 +188,6 @@ export function makeScriptedSceneryTail(): ScriptedSceneryTail {
     pathFrame: 0, pathEnd: 0, pathSlot: -1, slot: 0, effectFrames: 0,
     drawScale: 0, loopA: 0, loopB: 0, wheelTurn: 0,
     fireSlot: 0, fireFirst: 0, fireLast: 0, draws: [],
+    frames: 0, cue: 0, seedFrame: 0, seedSound: 0,
   };
 }

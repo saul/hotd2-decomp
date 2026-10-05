@@ -1,30 +1,10 @@
 /**
- * The scenery the script drives: props, backdrops, camera rigs and rain.
+ * The scenery the script drives: backdrops, camera rigs and rain.
  *
  * Part of the bundle the exporter writes; see docs/formats/ for each block.
  */
 
 import type { MessageVariant } from "./sound";
-
-/** A class-0x33 selector-2 prop: drawn until a flag or a camera frame. */
-export interface PropStatic {
-  name: string;
-  kind: "static";
-  at: number;
-  slot: number;
-  remove_flag: number;
-  remove_frame: number | null;
-}
-
-/**
- * The class-0x33 selector-2 props. The class-0x44 hinges that used to travel
- * here are game objects now: their placements are in
- * {@link BreakablesJson.placements} and their curves beside them.
- */
-export interface PropsJson {
-  statics: PropStatic[];
-  note: string;
-}
 
 /** One row of `g_looping_se_ids` / `g_looping_se_stop_ids`, paired by index. */
 export interface LoopingSe {

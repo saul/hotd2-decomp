@@ -643,15 +643,18 @@ export class SlotModelLayer implements System<RenderContext> {
   }
 
   /**
-   * Class 0x33 selector 1's draws, every one of them: `ScriptedCarrierUpdate33`
+   * Class 0x33's recorded draws, every one of them: `ScriptedCarrierUpdate33`
    * (`FUN_004331D0`) records each `AssetDrawSlot` it makes with its world
    * matrix (`game/class33/`) -- the fire, the model at `obj+0x118`'s scale,
-   * and stage 5's car parts or the two sprite loops.
+   * and stage 5's car parts or the two sprite loops -- and so do selectors 8,
+   * 9 and 99 (`class33/strips.ts`) and selector 2's one model,
+   * `ScriptedPropDrawUntilFlag` (`FUN_00433A10`), recorded the same way on the
+   * frames it draws. Selector 4 records none; its one slot is
+   * {@link DrawSlotFor}'s.
    */
   private drawCarrier33(seen: Set<number | string>): void {
     for (const a of G.g_object_list) {
       if (a.despawned || a.cls !== SpawnClass.ScriptedScenery) continue;
-      if (a.hp !== ScriptedScenerySelector.Carrier) continue;
       a.scenery.draws.forEach((d, i) => {
         _m.fromArray(d.m);
         this.extra(`c33:${i}:${a.at}`, d.slot, _m, seen);

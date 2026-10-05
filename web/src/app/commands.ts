@@ -43,7 +43,6 @@ import type { FogMode, SceneFog } from "../render/fog";
 import type { TextureFilter } from "../render/texfilter";
 import type { SceneLighting } from "../render/lighting";
 import type { SpawnLayer } from "../render/overlays";
-import type { PropLayer } from "../render/props";
 import type { Rain } from "../render/rain";
 import type { RigLayer } from "../render/rigs";
 import type { Shooting } from "../render/shooting";
@@ -98,7 +97,6 @@ export interface PlayerCommands {
   readonly rain: Rain;
   readonly rigs: RigLayer;
   readonly chars: CharacterLayer;
-  readonly props: PropLayer;
   readonly breakables: BreakableLayer;
   /** The shot effects, for the muzzle-flash toggle. */
   readonly effects: EffectLayer;
@@ -356,9 +354,7 @@ export function applyToggle(p: PlayerCommands, name: ToggleName,
       return;
     case "spawns":       p.spawns.setVisible(on); return;
     case "chars":        p.chars.setEnabled(on); return;
-    case "props":        p.props.setEnabled(on); return;
     case "breakables":   p.breakables.setEnabled(on); return;
-    case "propBoxes":    p.props.setDebugVisible(on); return;
     // Both of these are about what is *drawn*, not about what the game does:
     // the port spawns the same records and marks the same materials either
     // way, so neither changes a snapshot.

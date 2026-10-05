@@ -80,7 +80,6 @@ export interface HudSource {
     readonly view: { readonly yawBams: number; readonly forward: XYZ };
   };
   readonly chars: Describes;
-  readonly props: Describes;
   readonly rigs: Describes;
   /**
    * `render/slotmodels.ts` — the actors drawn as a bare asset slot rather
@@ -126,7 +125,6 @@ export function hudInputs(p: HudSource): HudInputs | null {
     yawBams: p.ctx.view.yawBams,
     describe: {
       characters: p.chars.describe,
-      props: p.props.describe,
       rigs: p.rigs.describe,
       slotModels: p.slotModels.describe(),
       breakables: p.breakables.describe,
@@ -167,7 +165,7 @@ export interface HudInputs {
   /** The camera's heading in the engine's own units. See `core/bams.ts`. */
   yawBams: number;
   describe: {
-    characters: string; props: string; rigs: string; breakables: string;
+    characters: string; rigs: string; breakables: string;
     slotModels: string;
     shooting: string; effects: string; blood: string; coli: string;
     wedged: string; enemies: string;
@@ -263,7 +261,6 @@ export function groupRows(w: Walker, x: HudInputs):
       ["enemies", d.enemies],
     ],
     props: [
-      ["props", d.props],
       ["breakables", d.breakables],
       ["rigs", d.rigs],
       ["slot models", d.slotModels],

@@ -146,11 +146,13 @@ export function class20Tail(rec: Spawn): Record<string, unknown> {
  * Classes 0x16 and 0x17 draw nothing at all -- `WaterFieldCreate` and
  * `WaterWaveSourceAdd` build the stage-2 boss arena's wave field and kill
  * themselves -- but they are here for the same reason: no character type,
- * and the port still needs the placement to build them.
+ * and the port still needs the placement to build them. So is class 0x2B,
+ * a scripted light (`DynamicLightInit`, `FUN_00438060`), which draws nothing
+ * and reads only `desc+0x22`, the placement's `hp`.
  */
-export const SLOT_DRAWN_CLASSES = new Set([0x12, 0x13, 0x16, 0x17, 0x26, 0x29,
-                                           0x33, 0x40, 0x42, 0x43, 0x51,
-                                           0x52]);
+export const SLOT_DRAWN_CLASSES = new Set([0x12, 0x13, 0x15, 0x16, 0x17, 0x26,
+                                           0x29, 0x2b, 0x33, 0x40, 0x42, 0x43,
+                                           0x51, 0x52]);
 
 /**
  * Class 0x17's descriptor tail, as `WaterWaveSourceAdd` (`FUN_004422D0`) and
@@ -447,6 +449,52 @@ export function class12Tail(
     flag: rec.param(0x12, "i16") ?? -1,
     step: rec.param(0x14, "f32") ?? 0,
     scale: rec.param(0x18, "f32") ?? 1,
+  };
+}
+
+/**
+ * Class 0x15's descriptor tail, as `FloatingPropRowSpawn` (`FUN_00441750`)
+ * reads it through `obj+0x130C`:
+ *
+ * ```
+ * +0x00  s16  the slot every plank draws           -> plank+0x1F4
+ * +0x04  u32  a coli blob pointer, -1 for none      -> plank+0x14C
+ * +0x08  s16  the g_prop_behaviours index           -> sub+0x00
+ * +0x0A  s16  the camera path that kills a plank    -> sub+0x06
+ * +0x0C  s16  ...and its frame                       -> sub+0x08
+ * +0x0E  s16, +0x10 s16  copied, read by nothing   -> sub+0x0A, sub+0x0C
+ * +0x12  s16  the script flag that starts the delay -> sub+0x0E
+ * +0x18  f32 x3  the step between planks
+ * +0x24  s8   the count
+ * +0x25  s8   how many of the last never leave on the flag
+ * +0x26  s16  the delay step between the ones that do
+ * ```
+ *
+ * `+0x14` (1.0 in both shipped descriptors) is read by neither the routine
+ * nor the plank's update, so it is not carried. Every width is the load's:
+ * `MOVSX` byte for `+0x24`/`+0x25`, word moves into the block and `MOVSX`
+ * word where the update reads them back. See `game/class15/`.
+ */
+export function class15Tail(
+    rec: Spawn,
+    sets: [colilib.ColiFile, colilib.ColiFile] | null): Record<string, unknown> {
+  const word = rec.param(0x04, "u32");
+  const hit = word !== null && word !== 0xffffffff && sets
+    ? colilib.pointerToOffset(word, sets[0], sets[1]) : null;
+  return {
+    slot: rec.param(0x00, "i16") ?? 0,
+    coli: hit ? `${hit[0]}:${hit[1]}` : null,
+    behaviour: rec.param(0x08, "i16") ?? 0,
+    cam_path: rec.param(0x0a, "i16") ?? -1,
+    cam_frame: rec.param(0x0c, "i16") ?? -1,
+    word_0e: rec.param(0x0e, "i16") ?? 0,
+    word_10: rec.param(0x10, "i16") ?? 0,
+    flag: rec.param(0x12, "i16") ?? -1,
+    delta: [rec.param(0x18, "f32") ?? 0, rec.param(0x1c, "f32") ?? 0,
+            rec.param(0x20, "f32") ?? 0],
+    count: rec.param(0x24, "i8") ?? 0,
+    keep: rec.param(0x25, "i8") ?? 0,
+    delay_step: rec.param(0x26, "i16") ?? 0,
   };
 }
 
@@ -1124,20 +1172,54 @@ export const CLASS33_PUSHABLE = 4;
 export const CLASS33_EFFECT_CUE = 5;
 
 /**
+ * The class-0x33 sub-handlers {@link class33SubTail} reads, by their
+ * `obj+0x11C`: 6 `ScriptedSpriteEffectOnce33` (`FUN_00433E30`), 7
+ * `ScriptedSoundCues33` (`FUN_00433E90`), 8 `ScriptedBridgeCrashStrip33`
+ * (`FUN_00433FE0`), 9 `ScriptedFireLoopUntilCue33` (`FUN_00434100`), 10
+ * `ScriptedSoundAndFlagAtCue33` (`FUN_00433F40`), 11
+ * `ScriptedEndingTrackSelect33` (`FUN_00434260`) and 99
+ * `ScriptedStaticSlotDraw33` (`FUN_00433160`) -- jump-table entries 5 to 11
+ * at `0x004330C4`, 99 through byte 98 of the map at `0x004330F8`.
+ */
+export const CLASS33_SUB_SELECTORS = [6, 7, 8, 9, 10, 11, 99] as const;
+
+/**
+ * The fourth class-0x33 sub-handler the player runs: `obj+0x11C == 2`.
+ *
+ * `ScriptedPropDrawUntilFlag` (`FUN_00433A10`), entry 1 of the jump table at
+ * `0x004330C4` (`0x00433027`). One model at the object's own pose until block
+ * 0's camera frame equals `tail+0x0C` or script flag `tail+0x11` reads 1.
+ * Ten descriptors, stage 1's `0x5FE8`..`0x60C8` and stage 2's
+ * `0x668`..`0x748`, spawned fifty-six times over both modes.
+ */
+export const CLASS33_DRAW_UNTIL_FLAG = 2;
+
+/**
+ * The fifth: `obj+0x11C == 3`. `ScriptedEffectOnFirstFrame33`
+ * (`FUN_00433AC0`), entry 2 (`0x00433035`). One kind-0x62 sprite on its first
+ * update and a despawn; it reads **no tail**, so it has no block and its
+ * placement is all the port needs. Stage 1's `0x37E8`, stage 2's `0x5574`,
+ * `0x5598`, `0xA4D0` and `0xA4F4`.
+ */
+export const CLASS33_EFFECT_FIRST_FRAME = 3;
+
+/**
  * Which spawns of a {@link SLOT_DRAWN_CLASSES} class the bundle carries a
  * placement for.
  *
  * Class 0x52 is one object, so every spawn of it qualifies. Class 0x33 is
- * eleven, and only **three** sub-handlers are decoded below -- selector 1 by
- * {@link class33Tail}, selector 4 by {@link class33PushTail} and selector 5 by
- * {@link class33CueTail}. Selector 2's props already reach the player through
- * `props`, and the rest are unread. Emitting one of those would be a
- * placement whose tail block is a different handler's bytes read under one of
- * these three's names, which is `L3` written into the bundle.
+ * twelve, and every one is decoded below -- selector 1 by
+ * {@link class33Tail}, selector 2 by {@link class33PropTail}, selector 4 by
+ * {@link class33PushTail}, selector 5 by {@link class33CueTail} and selectors
+ * 6 to 11 and 99 by {@link class33SubTail}; selector 3 reads no tail at all.
+ * A selector outside these would be a placement whose tail block is a
+ * different handler's bytes read under one of these names, which is `L3`
+ * written into the bundle.
  *
- * **The three blocks are mutually exclusive and the port reads their presence
- * as the selector**, so widening this is only half the change: see the gate on
- * `class33`/`class33_push`/`class33_cue` in {@link resolveCharacters}.
+ * **The blocks are mutually exclusive and the port reads their presence as
+ * the selector**, so widening this is only half the change: see the gate on
+ * `class33`/`class33_prop`/`class33_push`/`class33_cue`/`class33_sub` in
+ * {@link resolveCharacters}, and the director's.
  */
 export function slotDrawnSpawn(cls: number, rec: Spawn): boolean {
   // Class 0x26 is eight objects behind one id, switched on `obj+0x11C` by
@@ -1153,9 +1235,14 @@ export function slotDrawnSpawn(cls: number, rec: Spawn): boolean {
   // shipped descriptor names. One that named another would arrive drawing
   // the right slot and doing nothing else.
   if (cls === 0x12) return rec.param(0x08, "i16") === 0;
+  // Class 0x15's planks call theirs every frame too (`FloatingPropUpdate`,
+  // `FUN_004418C0`), and both shipped descriptors name entry 0.
+  if (cls === 0x15) return rec.param(0x08, "i16") === 0;
   if (cls === 0x33) {
     return rec.hp === CLASS33_CARRIER || rec.hp === CLASS33_PUSHABLE
-      || rec.hp === CLASS33_EFFECT_CUE;
+      || rec.hp === CLASS33_EFFECT_CUE || rec.hp === CLASS33_DRAW_UNTIL_FLAG
+      || rec.hp === CLASS33_EFFECT_FIRST_FRAME
+      || (CLASS33_SUB_SELECTORS as readonly number[]).includes(rec.hp);
   }
   return true;
 }
@@ -1300,6 +1387,95 @@ export function class33PushTail(rec: Spawn): Record<string, unknown> {
  */
 export function class33CueTail(rec: Spawn): Record<string, unknown> {
   return { cue: rec.param(0x00, "i32") ?? -1 };
+}
+
+/**
+ * Class 0x33 **selectors 6 to 11 and 99**'s tails, each read the way its own
+ * routine reads it and tagged with the selector, or null for any other
+ * selector. Every offset is from the routines' listings:
+ *
+ * ```
+ * 6   tail+0x0C kind, +0x10 face-camera mode, +0x14 player  (0x00433E68)
+ * 7   {s16 mode, s16 frame, u32 sound} records, stride 8    (0x00433ED6, 0x00433F15)
+ * 8   nothing
+ * 9   tail+0x00 s16 mode, +0x02 s16 frame                   (0x00434208)
+ * 10  selector 7's first record, and tail+0x08 s16 flag     (0x00433FBC)
+ * 11  nothing
+ * 99  tail+0x00 the draw slot                               (0x004331B3)
+ * ```
+ *
+ * Selector 7 walks its records by moving `obj+0x1390` itself, one record per
+ * cue, and only a mode of 0 or 1 can ever be a cue. So the list stops at, and
+ * includes, the first record with any other mode: the routine parks there
+ * and reads nothing beyond it. That record's `+0x04` is never read and is not
+ * carried -- on the one shipped spawn, `0x1E7C`, it is the class word of the
+ * descriptor after it (`L6`). The list is also bounded by the file.
+ */
+export function class33SubTail(rec: Spawn): Record<string, unknown> | null {
+  const mode = rec.param(0x00, "i16") ?? -1;
+  const frame = rec.param(0x02, "i16") ?? -1;
+  switch (rec.hp) {
+    case 6:
+      return { selector: 6, kind: rec.param(0x0c, "i32") ?? 0,
+               face: rec.param(0x10, "i32") ?? 0,
+               player: rec.param(0x14, "i32") ?? -1 };
+    case 7: {
+      const cues: Record<string, number>[] = [];
+      for (let at = 0; ; at += 8) {
+        const m = rec.param(at, "i16");
+        const fr = rec.param(at + 2, "i16");
+        if (m === null || fr === null) break;
+        if (m !== 0 && m !== 1) {
+          cues.push({ mode: m, frame: fr });
+          break;
+        }
+        const sound = rec.param(at + 4, "u32");
+        if (sound === null) break;
+        cues.push({ mode: m, frame: fr, sound });
+      }
+      return { selector: 7, cues };
+    }
+    case 8:
+      return { selector: 8 };
+    case 9:
+      return { selector: 9, mode, frame };
+    case 10:
+      return { selector: 10, mode, frame,
+               sound: rec.param(0x04, "u32") ?? 0,
+               flag: rec.param(0x08, "i16") ?? 0 };
+    case 11:
+      return { selector: 11 };
+    case 99:
+      return { selector: 99, slot: rec.param(0x00, "i32") ?? 0 };
+  }
+  return null;
+}
+
+/**
+ * Class 0x33 **selector 2's** tail, as `ScriptedPropDrawUntilFlag`
+ * (`FUN_00433A10`) reads it.
+ *
+ * ```
+ * tail+0x00  i32  draw slot                  -> obj+0x13F0   MOV EDX,[ECX]      0x00433A27
+ * tail+0x0C  i32  the camera frame it leaves on              MOV EAX,[ECX+0xC]  0x00433A37
+ * tail+0x11  u8   the script flag it leaves on               MOV DL,[ECX+0x11]  0x00433A46
+ * ```
+ *
+ * Nothing else: `+0x04`, `+0x08`, `+0x10` and `+0x12..+0x13` are read by
+ * nothing in the routine, and the next descriptor starts at `tail+0x14`. The
+ * frame is compared with `g_cam_path_frame` as an integer and carried as the
+ * raw word -- every shipped one is `-1` -- rather than turned into a "none":
+ * the routine has no such test. The flag byte has none either.
+ *
+ * Its own block for the reason the other three are each other's: `tail+0x0C`
+ * is selector 1's path slot and selector 4's arming flag.
+ */
+export function class33PropTail(rec: Spawn): Record<string, unknown> {
+  return {
+    slot: rec.param(0x00, "i32") ?? 0,
+    despawn_frame: rec.param(0x0c, "i32") ?? -1,
+    despawn_flag: rec.param(0x11, "u8") ?? 0xff,
+  };
 }
 
 /**
@@ -1897,6 +2073,7 @@ export async function resolveForStage(
     }
     const class13 = cls === 0x13 ? class13Tail(rec) : null;
     const class12 = cls === 0x12 ? class12Tail(rec, coliSets) : null;
+    const class15 = cls === 0x15 ? class15Tail(rec, coliSets) : null;
     const class18 = cls === 0x18 ? class18Tail(rec) : null;
     const class26 = cls === 0x26 ? class26Tail(rec, coliSets) : null;
     const class19 = cls === 0x19 ? class19Tail(rec, coliSets) : null;
@@ -1925,7 +2102,7 @@ export async function resolveForStage(
     const class45 = cls === 0x45 ? class45Tail(rec) : null;
     const class2d = cls === 0x2d ? class2dTail(rec) : null;
     // **Gated on the selector, not on the class.** Class 0x33 is eleven
-    // objects behind one id and these three blocks are three of them reading
+    // objects behind one id and these four blocks are four of them reading
     // the same bytes; emitting two for one spawn, or any for a sub-handler
     // that is none of them, is `L3` written into the bundle. The port reads
     // which key is present as the selector, so exactly one of them is ever
@@ -1937,6 +2114,9 @@ export async function resolveForStage(
       ? class33PushTail(rec) : null;
     const class33Cue = is33 && rec.hp === CLASS33_EFFECT_CUE
       ? class33CueTail(rec) : null;
+    const class33Sub = is33 ? class33SubTail(rec) : null;
+    const class33Prop = is33 && rec.hp === CLASS33_DRAW_UNTIL_FLAG
+      ? class33PropTail(rec) : null;
     let tscript: TargetScript | null = null;
     let ascript: TargetScript | null = null;
     let cameraCue: Record<string, unknown> | null = null;
@@ -2019,6 +2199,7 @@ export async function resolveForStage(
     p.ring_set = res.charType === 0 ? RING_SET_FOR_CHAR0 : 0;
     p.class13 = class13;
     p.class12 = class12;
+    p.class15 = class15;
     p.class18 = class18;
     p.class26 = class26;
     p.class19 = class19;
@@ -2049,6 +2230,8 @@ export async function resolveForStage(
     p.class33 = class33;
     p.class33_push = class33Push;
     p.class33_cue = class33Cue;
+    p.class33_sub = class33Sub;
+    p.class33_prop = class33Prop;
     // `ActorBindPartList` (`FUN_00412440`) -- the faces and accessories this
     // spawn wears. 97 of the game's spawns carry one and every list matches
     // its character's own family, which is what says the tail offsets are

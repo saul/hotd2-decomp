@@ -962,6 +962,17 @@ fix before it (B21) was right and was tested at index 0 only. **When code
 becomes data with its addresses replaced, carry the entry point as data too**,
 and test a program whose entry is not its first element.
 
+**L107 -- A join key that reaches the bundle by two routes is lost when one
+route moves.** The Arcade bullet, sprite `0xA74`, came into every bundle as
+row 0 of the Original Mode ammo table, which `HUD_READOUT_SPRITES` spread in.
+When that table moved to `.rdata` read only for Original stages, the row went
+with it, and every Arcade stage shipped no bullet for a week: the readout drew
+an id with no image, which the HUD skips without a word, and Original Mode --
+where the row still arrived -- looked fine. **When a list of what to export
+is split, check every id each reader can draw is still in every bundle that
+reader runs in** (`tools/checks/original_mode.ts` now does, per stage), not
+just the bundle the change was about.
+
 ---
 
 ## Running the tools

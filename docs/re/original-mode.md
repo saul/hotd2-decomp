@@ -134,9 +134,18 @@ walks by the exe's index rather than by the stream.
    `g_evt_step_index = 1` and `g_evt_ip = 0`, and kills itself -- the script
    resumes at step 1, instruction 0.
 
-The port adds one thing, `[port-only]`: `ItemSelectTap` turns a tap or a
+The port adds two things, `[port-only]`. `ItemSelectTap` turns a tap or a
 click on a row, a held item, END or a scroll mark into the pad bits the
-engine reads, because a phone has no d-pad and a mouse is a gun.
+engine reads, because a phone has no d-pad and a mouse is a gun. And a trunk
+the port reaches **past** -- a seek or a deep link into stage 1 beyond step 5
+replays the script over the trunk's spawn and steps over its wait, which the
+game itself can never do -- is closed on its first frame with the items each
+player last left a trunk with (`ItemSelectPassedBySeek`; the page keeps that
+choice as `hod2.originalChoice`), and the script stays where the seek put
+it. Until 2026-10-05 such a trunk opened over the stage-1 opening and, when
+its menu was done, `ItemSelectFinish` sent the script back to step 1. The
+menu's Original mode switch is a new run from the top of stage 1 for the
+same reason: it used to keep the Arcade address and seek there.
 
 ## 4. Collecting and saving
 

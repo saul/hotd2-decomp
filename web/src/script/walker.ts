@@ -33,6 +33,7 @@ import { CameraReplayFor, CameraReplaySettle, CameraReplayUntil }
   from "../game/camera/actor";
 import { SpawnClass } from "../game/spawn_class";
 import { ITEM_SELECT_RESUME_STEP } from "../game/class6e/state";
+import { ItemSelectPassedBySeek } from "../game/class6e";
 
 /** `wait_enemies_present` -- `EvtOpWaitEnemiesPresent43`. */
 const WAIT_ENEMIES_PRESENT_OP = 0x43;
@@ -1104,10 +1105,15 @@ export class Walker {
     // the `-1` behind it are never run. A replay runs no frames for the trunk
     // to finish in, so stepping over its gate leaves the script where the
     // trunk does -- without this every seek in stage 1's opening ran off the
-    // end of block 0.
+    // end of block 0. The trunk the replay spawned is closed too, with the
+    // items last chosen (`ItemSelectPassedBySeek`): left in the pool it
+    // opened over wherever the seek landed and, once its menu was done, sent
+    // the script back to step 1.
     const trunk = this.simpleSpawns.findIndex(
       (s) => s.class === SpawnClass.ItemSelect);
     if (trunk >= 0 && this.wait.op.op === WAIT_ENEMIES_PRESENT_OP) {
+      const obj = ActorByAt(this.simpleSpawns[trunk].at);
+      if (obj && !obj.dead) ItemSelectPassedBySeek(obj);
       this.simpleSpawns.splice(trunk, 1);
       this.wait = null;
       this.step = ITEM_SELECT_RESUME_STEP;

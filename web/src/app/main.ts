@@ -159,7 +159,8 @@ import {
 } from "../game/player_shell";
 import { RequestAppState } from "../game/app_state";
 import { ProfileBoot } from "../game/profile";
-import { readProfile, writeProfile } from "./profile_store";
+import { readOriginalChoice, readProfile, writeOriginalChoice, writeProfile }
+  from "./profile_store";
 import { OptionsPad, OptionsTap } from "../game/options/list";
 import { SetBoss4Tables, SetClass2DTables, SetGameOverTables, SetGameTables,
          SetOptionsTables, SetOriginalModeTables, SetResultCardTables }
@@ -907,6 +908,13 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     ProfileBoot(readProfile());
     this.events.on("profile.save", (d) => {
       if (!this.asReplica) writeProfile(d.profile);
+    });
+    // ...and the items the trunk last closed with, which a trunk the port
+    // passes by seek or deep link is given (`ItemSelectPassedBySeek`).
+    const choice = readOriginalChoice();
+    if (choice) G.g_original_last_choice = choice;
+    this.events.on("original.choice", (d) => {
+      if (!this.asReplica) writeOriginalChoice(d.slots);
     });
 
     // -- class 0x10, the civilians ---------------------------------------

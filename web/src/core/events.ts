@@ -39,6 +39,11 @@ export interface EventMap {
    * browser keeps things. The state is `G`'s; this only says "now".
    */
   "profile.save": { profile: ProfileBlock };
+  /**
+   * `[port-only]` -- the trunk closed with these items in each player's two
+   * slots (`G.g_original_last_choice`), for the page to keep.
+   */
+  "original.choice": { slots: number[][] };
   /** `ScoreAddForPlayer` ran. Negative `points` is a penalty. */
   "player.score": { player: number; points: number; score: number };
   /**

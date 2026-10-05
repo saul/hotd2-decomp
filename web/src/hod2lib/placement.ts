@@ -10,6 +10,7 @@
 import { i16 } from "./bytes";
 import type { EvtFile, Spawn } from "./evt";
 import type { TargetScript } from "./actorscript";
+import { ZombieState } from "../game/class30/states";
 
 /**
  * Where a class's `Init` reads its **attachment list** pointer from, inside
@@ -163,6 +164,30 @@ export const ENTRY_TAIL_STATES: Record<number, string> = {
   /** `ZombieStateDelayedStrikeInPlace`: s16 delay `+0x04`. */
   32: "delayed_strike",
 };
+
+/**
+ * **The state that reads a class-0x30 spawn's tail past byte 3**, given the
+ * classes running `g_class30_states` and the tail's initial and attack bytes.
+ *
+ * That is the state the spawn starts in, with one exception.
+ * `ZombieStateRideCarrier` (`FUN_00458960`, state 29), the passenger, reads
+ * nothing of the tail but byte 3. It hands over with
+ * `MOVSX CX, byte [EBX + 0x3]; MOV [ESI + 0x1310], CX` at `0x00458A48`, so for
+ * a spawn that starts there every entrance word in the tail is its attack
+ * state's. Stage 2's six boat riders are those spawns: three hand over to
+ * state 26 (`ZombieStateDelayedLeap`, `FUN_004581A0`) and three to state 30
+ * (`ZombieStateArcScriptedEntrance`, `FUN_00458A70`). Keyed on the initial
+ * state, neither decode ran, so the riders had no leap and no arc and walked
+ * straight off their boats.
+ *
+ * Class 0x18 runs the same table (`CarriedZombieUpdate18` calls
+ * `EnemyZombieUpdate`), so the rule is the state's and holds for both.
+ */
+export function entranceTailState(cls: number, initial: number,
+                                  attack: number): number {
+  const zombie = cls === 0x30 || cls === 0x18;
+  return zombie && initial === ZombieState.RideCarrier ? attack : initial;
+}
 
 /**
  * The tail one of {@link ENTRY_TAIL_STATES} reads, or null.

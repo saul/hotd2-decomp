@@ -26,6 +26,7 @@
  */
 import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
+import { GameMode } from "../game_mode";
 import type { Actor } from "../actor";
 import { CamBlockSetAnglesFromLookAt, CamEvalPath7, CameraPoseBlock }
   from "../camera/path";
@@ -588,6 +589,7 @@ export function ItemSelectFinish(obj: Actor, f: ClassFrame): void {
   ItemSelectDrawTrunk(b);
   PlaySoundId(ITEM_SELECT_BGM_STOP, f.events);
   G.g_enemies_present = 0;
+  ItemSelectRememberChoice(f.events);
   OriginalItemsApply(0, f.rng);
   OriginalItemsApply(1, f.rng);
   ItemSelectApplyToPlayers();
@@ -596,6 +598,104 @@ export function ItemSelectFinish(obj: Actor, f: ClassFrame): void {
   // `ActorKill` (`FUN_004A7040`).
   obj.dead = true;
   obj.visible = false;
+}
+
+/**
+ * `[port-only]` -- the choice the trunk closed with, kept for a trunk the
+ * port passes without opening (`ItemSelectPassedBySeek`): copied into
+ * `G.g_original_last_choice` and raised for the page to store. Nothing in
+ * the engine reads or writes it; it changes no state the engine has.
+ */
+function ItemSelectRememberChoice(events?: Events): void {
+  G.g_original_last_choice = G.g_original_item_slots.map((s) => [...s]);
+  events?.emit("original.choice", {
+    slots: G.g_original_last_choice.map((s) => [...s]),
+  });
+}
+
+/**
+ * `[port-only]` -- a trunk the script has been replayed past.
+ *
+ * The engine cannot get past stage 1's trunk without it: `wait_enemies_present`
+ * holds until `ItemSelectFinish` moves the script on. The port can -- a seek,
+ * or a deep link, replays the script and steps over that wait
+ * (`Walker.stepOverWait`), and the trunk it spawned on the way is still in
+ * the pool, unrun. Left alone it opened over whatever the seek landed on,
+ * and its finish then sent the script back to step 1. So the walker hands it
+ * here: the routine becomes {@link ItemSelectRoutine.PassedBySeek}, and the
+ * first frame closes it as `ItemSelectFinish` would, with the items each
+ * player last left the trunk with.
+ */
+export function ItemSelectPassedBySeek(obj: Actor): void {
+  obj.initPending = false;
+  obj.visible = true;
+  obj.itemSelect = makeItemSelectBlock();
+  obj.itemSelect.routine = ItemSelectRoutine.PassedBySeek;
+}
+
+/**
+ * `[port-only]` -- {@link ItemSelectPassedBySeek}'s frame: what the trunk's
+ * set-up and its finish would have done, with the remembered choice in the
+ * menu's place and the script left where the seek put it.
+ *
+ * State 0's `g_original_items_taken` from the profile and
+ * `ResetOriginalModeLoadout`; then each player in play takes the items of
+ * `G.g_original_last_choice` still in the count, one each, as the menu's A
+ * does (an item the profile no longer holds is left out); then
+ * `ItemSelectFinish`'s `OriginalItemsApply` for both and
+ * `ItemSelectApplyToPlayers` -- no music, no draw, and no `g_evt_ip`.
+ */
+function ItemSelectPassed(obj: Actor, f: ClassFrame): void {
+  ItemSelectTakeLastChoice();
+  G.g_enemies_present = 0;
+  OriginalItemsApply(0, f.rng);
+  OriginalItemsApply(1, f.rng);
+  ItemSelectApplyToPlayers();
+  obj.dead = true;
+  obj.visible = false;
+}
+
+/**
+ * `[port-only]` -- the trunk's set-up and menu with the remembered choice in
+ * the menu's place: state 0's `g_original_items_taken` from the profile and
+ * `ResetOriginalModeLoadout`, then each player in play takes the items of
+ * `G.g_original_last_choice` the count still holds, one each, as the menu's
+ * A does. An item the profile no longer holds is left out.
+ */
+function ItemSelectTakeLastChoice(): void {
+  G.g_original_items_taken = [...G.g_profile_original_items];
+  ResetOriginalModeLoadout();
+  const taken = G.g_original_items_taken;
+  for (let p = 0; p < 2; p++) {
+    if (G.g_player_state[p] !== PlayerState.InPlay) continue;
+    const slots = G.g_original_item_slots[p];
+    let n = 0;
+    for (const id of G.g_original_last_choice[p] ?? []) {
+      if (id < 0 || s8(taken[id] ?? 0) <= 0) continue;
+      slots[n++] = id;
+      taken[id] = s8(taken[id] - 1);
+    }
+  }
+}
+
+/**
+ * `[port-only]` -- an Original Mode run the port starts on a stage with no
+ * trunk: a deep link, the stage picker, a restart or a seek into stage 2 to
+ * 6. The engine starts every Original run at stage 1's trunk and carries the
+ * items from there; the port can start one anywhere, and it used to start
+ * those with no items at all. So `app/` calls this on a new run's stage when
+ * the stage's script spawns no trunk, and the run gets what the trunk would
+ * have handed out given the last choice: {@link ItemSelectTakeLastChoice},
+ * then `ItemSelectFinish`'s `OriginalItemsApply` for both players and
+ * `ItemSelectApplyToPlayers`. Not for a stage step, whose run carries its
+ * own items, and not in Arcade.
+ */
+export function OriginalRunStartWithLastChoice(rng: Rng): void {
+  if (G.g_GameMode !== GameMode.Original) return;
+  ItemSelectTakeLastChoice();
+  OriginalItemsApply(0, rng);
+  OriginalItemsApply(1, rng);
+  ItemSelectApplyToPlayers();
 }
 
 /**
@@ -750,6 +850,8 @@ const ItemSelectHandler: ClassHandler = {
   update: (obj, f) => {
     if (Block(obj).routine === ItemSelectRoutine.Finish) {
       ItemSelectFinish(obj, f);
+    } else if (Block(obj).routine === ItemSelectRoutine.PassedBySeek) {
+      ItemSelectPassed(obj, f);
     } else {
       ItemSelectUpdate(obj, f);
     }

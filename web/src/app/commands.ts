@@ -227,9 +227,15 @@ export function runCommand(p: PlayerCommands, c: UiCommand): void {
       p.loadAndPlay();
       return;
     case "setOriginal":
+      // A new run rather than a different picture of this one. On, it starts
+      // at the top of stage 1, where Original Mode's trunk hands out the
+      // items; off, Arcade starts the stage being played from its entry.
+      // Either way the address goes: it is a place in one mode's script, and
+      // kept across the switch it replayed Original's stage 1 into the middle
+      // of its opening with the trunk spawned on the way and still open.
       p.state.original = c.on;
-      p.pushUrl();
-      p.loadAndPlay();
+      p.state.entry = undefined;
+      p.restartRun(c.on ? 1 : p.state.stage);
       return;
     case "setMode":    p.setMode(c.mode); return;
     case "play":       p.play(); return;

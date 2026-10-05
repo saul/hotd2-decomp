@@ -1521,6 +1521,9 @@ console.log("class 0x30, the dust, the splash and the rings a death leaves:");
     z.hp = 10;
     z.state = ZombieState.ArcScriptedEntrance;
     z.sub = 4;
+    // The state reads its tail with no test, as `0x00458A70` does, so the
+    // fixture carries one: an actor in state 30 always has its arc's.
+    z.entry = { dest: [0, 0, 60], frames: 20, step: 1, delay: 0 };
     z.arcPhase = ArcPhase.Settled;
     z.flags2 |= ZombieFlag2.Carried;
     G.g_screen_shake_frames = 0;

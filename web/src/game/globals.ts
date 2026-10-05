@@ -2917,6 +2917,15 @@ export const G = {
    */
   g_original_item_slots: [[-1, -1], [-1, -1]] as number[][],
   /**
+   * `[port-only]` -- the two slots each player last left the trunk with
+   * (`ItemSelectFinish`), kept by the page across loads. The engine has no
+   * such word: it cannot reach stage 1 past the trunk without the trunk. The
+   * port can -- a seek or a deep link replays the script over it -- and
+   * `ItemSelectPassedBySeek` (`game/class6e/`) gives a trunk passed that way
+   * these items rather than none. No reset writes it.
+   */
+  g_original_last_choice: [[-1, -1], [-1, -1]] as number[][],
+  /**
    * `g_original_items_taken` — 0x009C90C0, one byte per Original Mode item
    * id, 33 of them: how many of each the player has to take out of the
    * trunk. The pickups count one in, capped at 0x63; the trunk takes one out

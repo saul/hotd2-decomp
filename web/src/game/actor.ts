@@ -1586,10 +1586,11 @@ export interface ActorBase {
     delay: number; dest: [number, number, number]; gravity: number;
   } | null;
   /**
-   * The descriptor tail of whichever of the twelve entrance states this spawn
-   * starts in — see `class30/entrance.ts`. One field rather than twelve
-   * because a spawn has one initial state and every other state's reading of
-   * the same bytes is the next descriptor's.
+   * The descriptor tail of whichever of the twelve entrance states reads this
+   * spawn's tail — see `class30/entrance.ts`. That is the state it starts in,
+   * or, for a spawn that starts in `ZombieStateRideCarrier` (state 29, which
+   * reads only byte 3), the attack state the ride hands it to. One field
+   * rather than twelve because only one state reads the bytes.
    */
   entry: ZombieEntryTail | null;
   hp: number;               // +0x11C

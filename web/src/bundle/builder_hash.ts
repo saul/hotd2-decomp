@@ -29,7 +29,7 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
   "bytes.ts": "59b2f363e98da56e88ada59458239032e40cad3a27342659e213d849c0967168",
   "cam.ts": "fe50200cb57c6578681a121766e7a5f4ed2425d91996169f83a82e8375dd63c3",
   "campaths.ts": "fbe28df3265d37b60a006e937a926eca8546609aa29cc5d80e7f1fc9afd639be",
-  "characters.ts": "94709795879cc614ae07bf9ea1c014ea948029aa549c1a9a438df634f1181a3b",
+  "characters.ts": "361e2a250b8e8d4778b29495a7fbbe874b8f63ff0f49f1534b14386c2532a74c",
   "charbuild.ts": "ca6053cb572c669cc535cfb18e3298f00a4c32169cd19e9ba35bbe0bc0532bf5",
   "charmotion.ts": "07ab2de53a6f6d18a47bc08ff3e5a73521756b947edbab5b05a61031695cc9a2",
   "class14.ts": "e143aab15d3067812e27d18bdd8b35b4b6fc45d6091948c7b8920bf4350a512a",
@@ -135,7 +135,7 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
   "game/class53/records.ts": "b6800eb8234f8a37c11908ce38316f82b17387ae41e753aeb67089fae09192d0",
   "game/class53/state.ts": "6a40cb1760986fca2741bb278ff38048c49b6f74e8cdc0b15ae3c858a3785ad3",
   "game/class61/state.ts": "10295909bed89c5b3fd208e8b7165eadd95c73fd5d14c14ad1519fa6f9527f6b",
-  "game/class6e/state.ts": "c35e621259f337fe2576f567d0f567242470210adc99f72c19bbb8ed068b02da",
+  "game/class6e/state.ts": "ed57b622b5410366d86d5eac8e4c7a6fc12f31d9bb83b8b2d1337f85f8b5526e",
   "game/coli.ts": "21f227b4ac1c5a78694c47d4536a9ac41902033184caad59ab9c0c41c86c8d43",
   "game/combat/counts.ts": "30e8d40aed3c842ac1b1dba09659e84a85ac0a6ca14fcd722fb1b2cf9e3cb374",
   "game/combat/feedback.ts": "457fc9298166539d9109ab673adda9198a50a650930a7b2884674176969b758f",
@@ -160,12 +160,12 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
   "game/effects/sprite.ts": "d395915d03641d7df3f3fb1d529517d3b3f0b06bd9bed116be72a5b6e33d43a5",
   "game/entity_light.ts": "772c4d0367f43206af39a2e8af8a7bed243b93035c301c09b4efd87793b87802",
   "game/game_mode.ts": "5882c6716bb8bf4b64ce7ebb370d273ebbbac02f9989a030ff60f5a7f43ce506",
-  "game/globals.ts": "9fdad2da83dada665b705bc867e879cd2e68e69b21c384db662ab217a525f07b",
+  "game/globals.ts": "9a9cdbd83dc67b9f3f5a8d5f17469c20639b4e2f975b6b3ae94d6e0d94d11262",
   "game/hit_slots.ts": "4b1ce29c6b5184e6749b3e9c597b8b0464331eba06b204aa227c749b1785feb7",
   "game/host.ts": "21e513a7c95dcbac9e7d57eacd536604c7642a4c0000c601cc340706b70633d7",
   "game/hud_readout.ts": "f3962cfdf8036b54a31778d37b01b70c415d36ae6ad9d43c35ba58b0d5e24f36",
   "game/hud_shutter.ts": "70a56bc624699aef36ff76d12beb1ca2ec5f94bc0f9541b199575947156dd125",
-  "game/hud_sprites.ts": "d6b6d304d9a3c79b1fc7cff6210dfdcd1ccee976cfa0723180419cbb2b182547",
+  "game/hud_sprites.ts": "d903cb78429806c91ae7ac1b99d224f02848594fdf5e42d2843d9b6cc07b8ee0",
   "game/input_mode.ts": "57d0719f5ccd9252728da573b7250de4013d9befb1680101789d841f3a46875b",
   "game/light_block.ts": "471d7042b78a5e4bc84b079c6b598444a1deaa228949fcdbf8668d685dda01c8",
   "game/light_sets.ts": "a98791582ffa33b53c46306b5802b848c031d3db22475e6619a0abc61d5be138",
@@ -194,7 +194,7 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
   "lz.ts": "dddff2029ebd1cafc686d25b57da5e5ad8e22fdb2febf4af4988651d627aa80e",
   "mot.ts": "36074edfd603b44267daf67fdcf5ccfc37652d48808b2258d6c327b8a0d99c39",
   "nl1.ts": "53d01a8b87a5a65508687f5a5c7ea1c041c98f0b20a224f13c387a5ca4cdc25f",
-  "placement.ts": "4349e0031a8df3bb0faab0f5d8834fecff36256feefd08ba07907e08d1aac388",
+  "placement.ts": "34b4ea16badd9d0648bc61136b031b140769154b1f9e6df849d6115e101e9fcd",
   "png.ts": "326d5417b68475ad54b90e2a91a1f68ca3859d6ba044582928a13459b4afa50b",
   "props.ts": "5c5a9ac4076eb54fd0b2045bf8ddfc1e76c91f280a372c38bb54a8596d610a95",
   "rigs.ts": "c5e93e79cc7a7f9c678c5b8cff81c0310ac3496f50d25b5af3ea63733c3617b0",
@@ -207,4 +207,4 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
 };
 
 /** One digest over {@link BUILDER_FILES}, in filename order. */
-export const BUILDER_HASH = "7a8764ae13ec4b68a8db124c5e8db21edcdf68ae423ad9015eda96da13645cc5";
+export const BUILDER_HASH = "b98d483742aeb157381f155c1e6b0a575ea27cc5ac8a4a176becc2d8ddd05674";

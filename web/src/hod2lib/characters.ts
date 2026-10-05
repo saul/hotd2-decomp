@@ -62,7 +62,8 @@ import type { ExeTables } from "./exetab";
 import { attachmentList, BACK_AWAY_STATES, CUE_STATES,
          ENTRANCE_CLIP_STATES, entryTail, GRAB_STATES, LEAP_STATES,
          LEAP_STRIKE_STATES, PATH_STATES, Placement, POUNCE_STATES,
-         WALK_DISTANCE_STATES, WAYPOINT_BYTES } from "./placement";
+         WALK_DISTANCE_STATES, WAYPOINT_BYTES, entranceTailState }
+  from "./placement";
 import type { SpawnJson } from "./placement";
 import { AssetCache } from "./rigs";
 import type { RigInstance } from "./rigs";
@@ -1941,8 +1942,11 @@ export async function resolveForStage(
          rec.param(3, "i8") || 0]
       : cls === 0x19 ? [0, rec.param(1, "u8") || 0, 0]
       : [0, 0, 0];
+    // Whichever state reads the tail past byte 3: the initial state, or the
+    // attack state for a passenger. See `entranceTailState`.
+    const tailState = entranceTailState(cls, tail[1], tail[2]);
     const inStates = (m: Record<number, number[]>) =>
-      (m[cls] ?? []).includes(tail[1]);
+      (m[cls] ?? []).includes(tailState);
 
     // The leap states read a destination and a duration out of the same
     // descriptor; every other state uses those bytes for something else, so
@@ -2006,7 +2010,7 @@ export async function resolveForStage(
     }
     // The twelve entrance states, each gated on its own initial state. Class
     // 0x30 only: class 0x31 numbers its states differently.
-    const entry = cls === 0x30 ? entryTail(rec, tail[1], tail[2]) : null;
+    const entry = cls === 0x30 ? entryTail(rec, tailState, tail[2]) : null;
     let entranceMotion: number | null = null;
     if (inStates(ENTRANCE_CLIP_STATES)) {
       const m = rec.param(4, "i32");
@@ -2054,13 +2058,13 @@ export async function resolveForStage(
     // off the tail at offsets no other state uses.
     let emerge: Record<string, unknown> | null = null;
     let delayedLeap: Record<string, unknown> | null = null;
-    if (cls === 0x30 && tail[1] === 27) {
+    if (cls === 0x30 && tailState === 27) {
       const m = rec.param(8, "i32");
       if (m !== null && m > 0 && m < 4096) {
         emerge = { delay: rec.param(4, "i32") || 0, motion: m };
       }
     }
-    if (cls === 0x30 && tail[1] === 26) {
+    if (cls === 0x30 && tailState === 26) {
       const dest = [0, 1, 2].map((k) => rec.param(8 + 4 * k, "f32"));
       const g = rec.param(0x14, "f32");
       if (dest.every(finite) && finite(g) && g > 0 && g < 10) {
@@ -2348,15 +2352,15 @@ export async function resolveForStage(
       entryClips.push(entry.motion as number | undefined,
                       entry.idle_motion as number | undefined,
                       entry.strike_motion as number | undefined);
-      if (tail[1] === 13) {
+      if (tailState === 13) {
         // Chosen by character type, not named in the tail.
         entryClips.push(0xb8, 0x3d8);
       }
-      if (tail[1] === 23) {
+      if (tailState === 23) {
         // The paired wait/grab clips: it plays 0xBB and blends 0xBA.
         entryClips.push(0xba, 0xbb);
       }
-      if (tail[1] === 30) {
+      if (tailState === 30) {
         // The crouch and the three arc-script stages, both by type.
         entryClips.push(0x10c, 0x39f);
         for (const k of CLASS30_ENTRANCE_ARC_SCRIPTS) {

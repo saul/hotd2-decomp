@@ -52,6 +52,8 @@ import { hideExportScreen, showExportScreen } from "./install/ExportScreen";
 import { readState, writeState, type PlayerState } from "./urlstate";
 import { PlayerState as GamePlayerState } from "../game/player_state";
 import { PlayerBodiesCreate } from "../game/player_body";
+import { OriginalRunStartWithLastChoice } from "../game/class6e";
+import { SpawnClass } from "../game/spawn_class";
 import { seekTo as seekWalkerTo } from "../script/seek";
 import { CameraReseatFromFrame } from "../game/camera/view";
 import { readViewPrefs, writeViewPrefs } from "./viewprefs";
@@ -158,7 +160,8 @@ import {
 } from "../game/player_shell";
 import { RequestAppState } from "../game/app_state";
 import { ProfileBoot } from "../game/profile";
-import { readProfile, writeProfile } from "./profile_store";
+import { readOriginalChoice, readProfile, writeOriginalChoice, writeProfile }
+  from "./profile_store";
 import { OptionsPad, OptionsTap } from "../game/options/list";
 import { SetBoss4Tables, SetClass2DTables, SetGameOverTables, SetGameTables,
          SetOptionsTables, SetOriginalModeTables, SetResultCardTables }
@@ -905,6 +908,13 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     this.events.on("profile.save", (d) => {
       if (!this.asReplica) writeProfile(d.profile);
     });
+    // ...and the items the trunk last closed with, which a trunk the port
+    // passes by seek or deep link is given (`ItemSelectPassedBySeek`).
+    const choice = readOriginalChoice();
+    if (choice) G.g_original_last_choice = choice;
+    this.events.on("original.choice", (d) => {
+      if (!this.asReplica) writeOriginalChoice(d.slots);
+    });
 
     // -- class 0x10, the civilians ---------------------------------------
     // Op 0x1D is `EvtOpPlayDialogue2D`, the same call evt op 0x2D makes, so a
@@ -1238,6 +1248,20 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     SetBoss4Tables(script.boss4, script.carrier_door_yaw);
     SetClass2DTables(script.class2d);
     SetResultCardTables(script.result_card);
+  }
+
+  /**
+   * A new Original Mode run on a stage with no trunk -- a link, the picker, a
+   * restart or a seek into stages 2 to 6 -- gets the items the trunk last
+   * closed with (`OriginalRunStartWithLastChoice`). Stage 1's own trunk, or
+   * a seek past it (`ItemSelectPassedBySeek`), hands them out there instead;
+   * a stage step's run carries its own and never comes here. Called once the
+   * tables are in and the generator is seeded, which the costume draw reads.
+   */
+  startRunItems(script: ScriptJson): void {
+    const trunk = script.blocks.some((b) => b.steps?.some((s) => s.ops.some(
+      (o) => o.simple?.some((r) => r.class === SpawnClass.ItemSelect))));
+    if (!trunk) OriginalRunStartWithLastChoice(this.rng);
   }
 
   /**
@@ -1966,6 +1990,8 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     // phase of every clip. `stage_load.ts` was the only place that reseeded, so
     // "the same address" meant the same script state and a different game.
     this.rng.reseed(this.state.seed ?? 1);
+    // The reset started a new run, so it gets a new run's items.
+    if (this.gameTables) this.startRunItems(this.gameTables);
     // The replay rewrites the world; nothing that described the old one may
     // outlive it. The rewind ring is part of that: `ctx.frame` goes back to
     // near zero with `g_frame`, so every slot it holds is the future of a

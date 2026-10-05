@@ -24,6 +24,7 @@ import { ThrownWeaponPoolUpdate } from "./class31/projectile";
 import { ThrownWeaponCameraOf } from "./thrown_weapon";
 import { BreakablePropPoolUpdate } from "./class41/pool";
 import { WaterSurfacesTick } from "./class41/water";
+import { Type3UvScrollTick } from "./class41/type03";
 import { St2CarsTick } from "./class21/car";
 import { PropContainerType } from "./class41";
 import { FLICKER_LIGHT_TYPE } from "./class41/type48";
@@ -704,6 +705,7 @@ export function SpawnPropContainers(spawns: readonly ScriptSpawn[]): void {
       : pl.container === "table50" ? PropContainerType.Table50Props
       : pl.container === "table66" ? PropContainerType.Table66Props
       : pl.container === "water_surface" ? PropContainerType.WaterSurface
+      : pl.container === "uv_scroll" ? PropContainerType.UvScrollTask
       : pl.container === "type47" ? PropContainerType.Type47Prop
       : pl.container === "table16" ? PropContainerType.Table16Props
       : pl.container === "type17" ? PropContainerType.Type17Props
@@ -1035,6 +1037,8 @@ function SceneTaskWalk(dt: number, host: GameHost,
   // `ActorAlloc` like the props, so after the actors that placed them: a task
   // made this frame draws this frame. See `game/class41/water.ts`.
   WaterSurfacesTick();
+  // ...and the car reflection's task, constructor 3's, the same way.
+  Type3UvScrollTick(host);
 
   // The stage-2 car, which `RescueTargetInit` (`FUN_00451720`) allocates:
   // an actor's task, so after the scene's own -- the camera's among them --

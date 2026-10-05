@@ -99,6 +99,8 @@ export function DescriptorFromPlacement(p: CharacterPlacement | undefined):
     class40: p?.class40 ?? null,
     // Class 0x42's sub-type, on the same terms.
     class42: p?.class42 ?? null,
+    // Class 0x29's kill cue; the list it draws is `hp`.
+    class29: p?.class29 ?? null,
     class51: p?.class51 ?? null,
     class52: p?.class52 ?? null,
     class53: p?.class53 ?? null,

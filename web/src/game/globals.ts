@@ -35,6 +35,7 @@ import type { OwlFeather, OwlGroundRing, OwlWaterSplash }
 import type { RingEffect } from "./effects/ring_effect";
 import type { WaterRing } from "./effects/water_ring";
 import type { WaterSurface, WaterSurfaceUv } from "./class41/water";
+import type { Type3SlotUv, Type3UvScrollTask } from "./class41/type03";
 import type { St2Car } from "./class21/car";
 import type { Actor } from "./actor";
 import type { OriginalItemBanner } from "./class41/item_banner";
@@ -1526,6 +1527,20 @@ export const G = {
    * per slot the walk has run on. See {@link WaterSurfaceUv}.
    */
   g_water_surface_uv: [] as WaterSurfaceUv[],
+  /**
+   * `[port-only]` — the tasks `PlaceType3UvScrollTask` (`FUN_00462DF0`,
+   * class 0x41 constructor 3) has allocated. `game/class41/type03.ts`.
+   */
+  g_type3_tasks: [] as Type3UvScrollTask[],
+  /** `[port-only]` — see {@link Type3UvScrollTask.id}. */
+  g_type3_task_seq: 0,
+  /**
+   * `[port-only]` in shape — what `Type3UvScrollInit` (`FUN_004659D0`) and
+   * `Type3UvScrollUpdate` (`FUN_00465BC0`) have done to the stage-1 car's
+   * three reflection shells, which the engine rewrites in place. See
+   * {@link Type3SlotUv}.
+   */
+  g_type3_slot_uv: [] as Type3SlotUv[],
   /**
    * `[port-only]` — the owl's and the fish's effect tasks, and the ring task
    * the fish's corpse leaves on the water: `game/effects/owl.ts`,
@@ -3261,6 +3276,10 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   G.g_water_surfaces = [];
   G.g_water_surface_seq = 0;
   G.g_water_surface_uv = [];
+  // ...and the car reflection's task and the shells it rewrote, the same way.
+  G.g_type3_tasks = [];
+  G.g_type3_task_seq = 0;
+  G.g_type3_slot_uv = [];
   // ...and the stage-2 car, a task like them: no class 0x21, no car.
   G.g_st2_cars = [];
   G.g_st2_car_seq = 0;

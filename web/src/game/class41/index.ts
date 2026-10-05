@@ -44,6 +44,7 @@ import { PlaceType47Prop } from "./type47";
 import { PROP75_SCRIPT_FLAG, PROP75_TYPE } from "./flag_prop";
 import { FLICKER_LIGHT_TYPE, PlaceFlickerLightProp48 } from "./type48";
 import { PlaceWaterSurface } from "./water";
+import { PlaceType3UvScrollTask } from "./type03";
 import { PlaceTable16Props } from "./type16";
 import { PlaceType17Props } from "./type17";
 import { PlaceTable29Props } from "./type29";
@@ -67,6 +68,12 @@ export enum PropContainerType {
    * spawn's position. See `class41/water.ts`.
    */
   WaterSurface = 1,
+  /**
+   * `PlaceType3UvScrollTask` (`FUN_00462DF0`) — the stage-1 car's moving
+   * reflection: a task that rewrites three shells' UVs and draws nothing.
+   * See `class41/type03.ts`.
+   */
+  UvScrollTask = 3,
   /** `PlaceKindedProp` (`FUN_00462E10`) — one prop, kind from `obj+0x6C`. */
   KindedProp = 4,
   /**
@@ -228,6 +235,10 @@ export const g_class41_constructors:
   },
   // The canal water. `+0x1F4` is a table index and `+0x11C` a lifetime in
   // step changes; the position is never read.
+  // Nothing of the placer is read.
+  [PropContainerType.UvScrollTask]: () => {
+    PlaceType3UvScrollTask();
+  },
   [PropContainerType.WaterSurface]: (obj) => {
     PlaceWaterSurface(obj);
   },

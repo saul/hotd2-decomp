@@ -24,6 +24,9 @@ import { PlaceTable29Props } from "../../src/game/class41/type29";
 import { PlaceType37PropPair, Type37Phase } from "../../src/game/class41/type37";
 import { PropWords } from "../../src/game/class41/words";
 import { check, CHARS, BREAKABLES, propScene } from "./harness";
+import { GameUpdate, SpawnPropContainers } from "../../src/game/director";
+import { NULL_HOST, type GameHost } from "../../src/game/host";
+import { Type3UvScrollTick } from "../../src/game/class41/type03";
 
 /** The three tables as `hod2lib/class41_rows.ts` reads them from the image. */
 const ROWS: Partial<BreakablesJson> = {
@@ -484,4 +487,102 @@ console.log("\nclass 0x41 type 43 reads g_original_first_aid too:");
         build(GameMode.Original, 1) === 1);
   check("...not without the item", build(GameMode.Original, 0) === 2);
   check("...and not outside Original Mode", build(GameMode.Arcade, 1) === 2);
+}
+
+// -- constructor 3: the stage-1 car's moving reflection ---------------------
+
+console.log("\nclass 0x41 constructor 3 -- the stage-1 car's reflection:");
+{
+  // Stage 1 block 0 step 1's placer, evt 0x076C. `PlaceType3UvScrollTask`
+  // (`FUN_00462DF0`) allocates a task whose Init scales the three shells' UVs
+  // and whose Update slides them every frame; the port had no constructor 3,
+  // so the reflection on the car stood still. The placer is built and run by
+  // the director; the frames after are the task's own tick, with the camera
+  // block's yaw and eye set as a camera would leave them.
+  const rng = new Rng(3);
+  propScene(rng, GameMode.Arcade);
+  SetGameTables(CHARS, { ...BREAKABLES, placements: [
+    { at: 0x76c, container: "uv_scroll", lifetime_evt_steps: 0 },
+  ] } as unknown as BreakablesJson);
+  G.g_scene_index = 0;
+  const PATH_YAW = 0x5000;
+  const BLOCK_YAW = 0x0800;
+  const host: GameHost = {
+    ...NULL_HOST,
+    objectPath: (slot) => ({ x: slot, y: 0, z: -slot, pitch: 0,
+                             yaw: PATH_YAW, roll: 0 }),
+  };
+  SpawnPropContainers([{ at: 0x76c, class: 0x41, pos: [0, 0, 0] }]);
+  GameUpdate(1 / 60, host, rng);
+  const uv = (slot: number) => G.g_type3_slot_uv.find((e) => e.slot === slot)!;
+  check("the placer's constructor makes one task, and its Init runs the "
+        + "frame it is made and installs the Update",
+        G.g_type3_tasks.length === 1 && G.g_type3_tasks[0].stage === "update"
+          && G.g_type3_tasks[0].resident === 3,
+        JSON.stringify(G.g_type3_tasks.map((t) => [t.stage, t.resident])));
+  const third = Math.fround(1 / 3);
+  const twoThirds = Math.fround(2 / 3);
+  check("...0x157E's u scaled by 1/3 and every v by 2/3; the sides' u untouched",
+        uv(0x157e).uScale === third && uv(0x157e).vScale === twoThirds
+          && uv(0x157d).uScale === 1 && uv(0x157d).vScale === twoThirds
+          && uv(0x157b).uScale === 1 && uv(0x157b).vScale === twoThirds,
+        JSON.stringify(G.g_type3_slot_uv));
+
+  // The drive: camera path 0x20 reads op_ 0xFD. |0x5000 - 0x0800| = 0x4800,
+  // past a quarter turn, so 0x8000 - 0x4800 = 0x3800; a = c = that * 2.25e-5
+  // as f32, and 0x157D's u gains sqrt(a^2 + c^2) * 0.016 a frame. The eye
+  // starts at the Init's seed height, so the first frame's v moves nothing,
+  // and rises 10 a frame after: v gains 10 * 0.006 a frame.
+  G.g_active_cam_path = 0x20;
+  G.g_cam_path_frame = 40;
+  G.g_camera_index = 0;
+  G.g_camera_block_yaw_bams = BLOCK_YAW;
+  G.g_camera_block_eye.y = Math.fround(196.77259826660156);
+  G.g_players_in_play = 1;
+  const a = Math.fround(0x3800 * Math.fround(2.25e-5));
+  const slide = Math.sqrt(2 * a * a) * Math.fround(0.016);
+  const N = 30;
+  for (let i = 0; i < N; i++) {
+    Type3UvScrollTick(host);
+    G.g_camera_block_eye.y += 10;
+  }
+  const rise = Math.fround(10 * Math.fround(0.006));
+  check("0x157D's u slides by sqrt(a^2 + c^2) * 0.016 a frame, the turn "
+        + "folded past a quarter",
+        Math.abs(uv(0x157d).uOffset - N * slide) < 1e-9,
+        `${uv(0x157d).uOffset} vs ${N * slide}`);
+  check("...0x157E's u never moves, and 0x157B's not with one player",
+        uv(0x157e).uOffset === 0 && uv(0x157b).uOffset === 0);
+  check("...and every v gains the eye's rise * 0.006, block 0's eye",
+        Math.abs(uv(0x157e).vOffset - (N - 1) * rise) < 1e-6
+          && uv(0x157e).vOffset === uv(0x157b).vOffset,
+        `${uv(0x157e).vOffset} vs ${(N - 1) * rise}`);
+  G.g_players_in_play = 2;
+  Type3UvScrollTick(host);
+  check("with two players 0x157B's u slides the other way",
+        Math.abs(uv(0x157b).uOffset + slide) < 1e-9, String(uv(0x157b).uOffset));
+
+  // The swerve: path 0x21 at frame 0x15E hands over to op_ 0xFF, whose
+  // first frame in [0, 0x32) only records the turn.
+  G.g_active_cam_path = 0x21;
+  G.g_cam_path_frame = 0x15e;
+  const before = uv(0x157d).uOffset;
+  Type3UvScrollTick(host);
+  G.g_cam_path_frame = 5;
+  Type3UvScrollTick(host);
+  check("path 0x21 from frame 0x15E starts the swerve, whose first frame "
+        + "records the turn and slides nothing",
+        G.g_type3_tasks[0].swerving === 1 && G.g_type3_tasks[0].o64 === 1
+          && uv(0x157d).uOffset === before,
+        `${uv(0x157d).uOffset} vs ${before}`);
+
+  // The kills: only g_actor_kill_all, in the port. The skip arm (path 0x21
+  // with g_cutscene_skipping) is the declared departure.
+  check("path 0x21 alone does not end the task", G.g_type3_tasks.length === 1);
+  G.g_script_flags[0xe0] = 1;
+  Type3UvScrollTick(host);
+  check("g_actor_kill_all (g_script_flags[0xE0]) ends it, and what it did "
+        + "to the shells stays",
+        G.g_type3_tasks.length === 0 && uv(0x157d).uOffset !== 0);
+  G.g_script_flags[0xe0] = 0;
 }

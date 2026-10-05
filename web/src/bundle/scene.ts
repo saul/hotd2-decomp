@@ -222,7 +222,7 @@ export interface BreakablePlacement {
     | "hinge" | "van_doors" | "hinge_scaled"
     | "flag_slot_effect" | "effect_handoff" | "swing_then_break"
     | "scaled_slot_effect" | "effect_collapse" | "slot_strip_loop"
-    | "kinded_44";
+    | "kinded_44" | "uv_scroll";
   /** How many evt blocks it lives for. */
   lifetime_evt_steps: number;
   /** `group` only — the row of `g_breakable_group_ptrs` to build. */

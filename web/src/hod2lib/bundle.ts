@@ -854,6 +854,13 @@ export function containerPlacements(tables: ExeTables, evt: evtlib.EvtFile,
           field_1f4: index, slot,
           lifetime_evt_steps: rec.hp,
         });
+      } else if (ctor === 3) {
+        // `PlaceType3UvScrollTask` -- the stage-1 car's reflection. The task
+        // reads nothing of the placer; the placement only says it is there.
+        out.push({
+          at: rec.offset, container: "uv_scroll",
+          lifetime_evt_steps: rec.hp,
+        });
       } else if (ctor === 4) {
         out.push({
           at: rec.offset, container: "kinded",

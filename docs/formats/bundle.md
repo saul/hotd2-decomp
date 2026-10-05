@@ -116,6 +116,11 @@ lists themselves are `.data` literals in `web/src/game/class29/`, checked
 word for word by `web/tools/checks/prop_tables.ts`; the two slots they draw,
 `0x93C` and `0x93D`, ride the hidden `slots_effect` rig.
 
+Class 0x41 constructor 3 -- stage 1 block 0's placer -- is a breakables
+placement with `container: "uv_scroll"` and nothing else: the task reads
+nothing of the placer. The three shells it rewrites are the `st1_vehicle`
+rig's own primitives, found by `hod2_slots` and `hod2_model`.
+
 Every stage carries `characters.class32` -- class 0x32's `.rdata`, read by
 `web/src/hod2lib/class32.ts` where the stage-5 boss's routines index it:
 `phases` (`g_class32_phases`, six `[state, floor]` rows), `hop_offsets` and

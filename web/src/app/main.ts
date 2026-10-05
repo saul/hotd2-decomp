@@ -149,6 +149,7 @@ import { BloodColourLayer } from "../render/bloodcolour";
 import { EffectLayer } from "../render/effects";
 import { SlotModelLayer } from "../render/slotmodels";
 import { WaterSurfaceLayer } from "../render/water_surfaces";
+import { UvScrollLayer } from "../render/uv_scroll";
 import { ResetPropContainers } from "../game/class41";
 import {
   ActorByAt, AppState, G, ResetGameGlobals, ScreenFurniture,
@@ -339,6 +340,7 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
   readonly slotModels = new SlotModelLayer();
   /** Class 0x41 type 1's canal water: the tiles it draws and ripples. */
   readonly waterSurfaces = new WaterSurfaceLayer();
+  readonly uvScroll = new UvScrollLayer();
   /**
    * The shot effects — blood, muzzle flash, tracer, impacts. Its own layer
    * because it draws in two spaces at once: one group in the world and one
@@ -811,6 +813,8 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     this.world.add("render", this.slotModels);
     // After the slot models, whose templates its clones come from.
     this.world.add("render", this.waterSurfaces);
+    // The stage-1 car's reflection, rewritten on the rig's own meshes.
+    this.world.add("render", this.uvScroll);
     this.world.add("render", this.effects);
     this.world.add("render", this.bullets);
     this.world.add("render", this.heads);

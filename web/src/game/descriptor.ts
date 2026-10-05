@@ -117,6 +117,8 @@ export function DescriptorFromPlacement(p: CharacterPlacement | undefined):
     class33Cue: p?.class33_cue ?? null,
     // ...and selectors 6 to 11 and 99's, each tagged with its selector.
     class33Sub: p?.class33_sub ?? null,
+    // ...and selector 2's, the fourth: a slot, a camera frame and a flag.
+    class33Prop: p?.class33_prop ?? null,
     // Class 0x14's, on the same terms: `Class14Init` (`FUN_00475E90`) reads
     // `tail+0x00` as a character type and `tail+0x01` as the state the boss
     // starts in, which are class 0x30's body condition and initial state.

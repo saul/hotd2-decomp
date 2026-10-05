@@ -1743,16 +1743,20 @@ export const EFFECT_SLOTS_BY_CLASS: Record<number, number[]> = {
   // `LifeGrantedMarkerUpdate` draws in camera space. See
   // `game/class10/life_marker.ts`.
   0x10: [0x1256, 0x1257],
-  // Class 0x33, the two sprite kinds its ported routines throw:
+  // Class 0x33, the sprite kinds its ported routines throw:
   // `SpawnSpriteEffectFromParams`' `case 0x44:` run `0xFD4..0x1031`, all 94 of
   // `eff_dokan.bin` (`ScriptedEffectAtCameraCue33`, `FUN_00433B00`, and
   // `ScriptedCarrierUpdate33`, `FUN_004331D0`, on every slot but `0x1B0E`),
   // and its `case 0x45:` run `0x174A..0x1785`, all 60 of `eff_shop.bin`
   // (the carrier on slot `0x1B0E`). Stage 2's script loads `eff_dokan.bin` in
-  // the steps that spawn them, and stage 5's `eff_shop.bin`.
+  // the steps that spawn them, and stage 5's `eff_shop.bin`. And `case 0x62:`,
+  // the kind-0x61 splash run `0x1339..0x1356` again, which
+  // `ScriptedEffectOnFirstFrame33` (`FUN_00433AC0`) throws -- stage 1 has no
+  // other class that would carry it.
   0x33: [
     ...Array.from({ length: 0x1031 - 0xfd4 + 1 }, (_, i) => 0xfd4 + i),
     ...Array.from({ length: 0x1785 - 0x174a + 1 }, (_, i) => 0x174a + i),
+    ...CREATURE_SPLASH_SLOTS,
   ],
   // Class 0x32, the stage-5 boss: sprite kind 0x50, `0x23A..0x248`, the
   // spark `Class32ChargeShotBone` (`FUN_0047CE10`) throws off a damaging hit.
@@ -1896,6 +1900,7 @@ export const SCENERY33_CRASH_STRIP = Array.from(
 export function sceneryDrawSlots(
     placements: readonly {
       class33_push?: { slot?: number } | null;
+      class33_prop?: { slot?: number } | null;
       class33?: { slot?: number } | null;
       class33_sub?: { selector?: number; slot?: number } | null;
     }[],
@@ -1912,6 +1917,10 @@ export function sceneryDrawSlots(
     if (sub?.selector === 99 && typeof sub.slot === "number") add(sub.slot);
     const push = p.class33_push?.slot;
     if (typeof push === "number") add(push);
+    // Selector 2, `ScriptedPropDrawUntilFlag` (`FUN_00433A10`): one model,
+    // `tail+0x00`, and nothing beside it.
+    const prop = p.class33_prop?.slot;
+    if (typeof prop === "number") add(prop);
     const ride = p.class33?.slot;
     if (typeof ride !== "number") continue;
     add(ride);
@@ -2718,14 +2727,6 @@ export async function buildStage(stage: Stage, sink: BundleSink,
           entries: charEntries } = await resolveCharacters(
     stage, prog, spawnRecords, null, null, cache);
 
-  // Scripted scenery -- class 0x33 selector 2, a model at the spawn's pose
-  // until a flag or a camera frame. Same writer again: a prop is one model at
-  // a pose, which is a rig with a fixed placement. The class-0x44 hinges are
-  // game objects and travel as placements below.
-  say(`  ${name}: scripted props`);
-  const statics = propslib.resolveForStage(prog, spawnRecords);
-  const propEntries = await propslib.rigEntries(stage, statics, cache);
-
   // Before the glTF: the template rig has to include every asset slot the
   // stage's generic props name, and only the script knows which those are.
   const placements = evt ? containerPlacements(tables, evt, spawnRecords) : [];
@@ -2790,7 +2791,7 @@ export async function buildStage(stage: Stage, sink: BundleSink,
   // own option offers. See `bloodTexturePredicate`.
   const isBloodTexture = bloodTexturePredicate(tables);
   const info = await gltf.exportLevel(name, parts, outDir, sink, deflate, {
-    rigs: [...rigInstances, ...charEntries, ...propEntries,
+    rigs: [...rigInstances, ...charEntries,
            ...(brk ? [brk] : []), ...(act ? [act] : []),
            ...(eff ? [eff] : [])],
     modelRegions,
@@ -2832,7 +2833,6 @@ export async function buildStage(stage: Stage, sink: BundleSink,
     (scriptJson.characters as Record<string, unknown>).class42 =
       await class42Tables(stage);
   }
-  scriptJson.props = propslib.propsJson(statics);
   // The carriers' effects ride in the same map, and after
   // `breakableSlotEntry` has taken its node slots: theirs travel in
   // `slots_actor`, which is what draws them.
@@ -2944,7 +2944,6 @@ export async function buildStage(stage: Stage, sink: BundleSink,
       spawns: nSpawns,
       rigs: info.rigs,
       characters: charDefs.size,
-      props: statics.length,
       posed_spawns: charPlaces.filter((p) => p.motion !== null).length,
       // **Zero is the only good value here.** Every other count says how much
       // is in the bundle; this one says how much of the game did not make it,

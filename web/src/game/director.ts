@@ -72,6 +72,7 @@ import { DeadSweep, g_class_handlers } from "./registry";
 // in this file names a class, and that is the point -- see `game/classes.ts`.
 import "./classes";
 import { SpawnClass as SpawnClassValue, type SpawnClass } from "./spawn_class";
+import { ScriptedScenerySelector } from "./class33/state";
 import { vec3, type Vec3 } from "./vec";
 
 const GAME_HZ = 60;
@@ -521,22 +522,26 @@ export function SpawnSlotActor(s: ScriptSpawn): void {
     // `SpawnFromDescriptor` (`FUN_00408A20`) copies the raw `s16` at
     // `desc+0x22` into `obj+0x11C`, and `ScriptedSceneryDispatch33`
     // (`FUN_00432FF0`) switches on it. The bundle carries a tail block for the
-    // sub-handlers this port has read and for no other -- `class33` for
-    // selector 1, `class33_push` for selector 4, `class33_cue` for selector 5,
-    // `class33_sub` for 6 to 11 and 99 -- and never two on one spawn, so a
-    // placement with none is a sub-handler nothing here can run and gets no
-    // object. That is the same
-    // refusal `SpawnPropContainers` makes for an unnamed class-0x44 kind,
-    // rather than a default arm that would run the wrong handler.
+    // sub-handlers this port has read that read one, and for no other --
+    // `class33` for selector 1, `class33_prop` for selector 2, `class33_push`
+    // for selector 4, `class33_cue` for selector 5, `class33_sub` for 6 to 11
+    // and 99 -- and never two on one spawn. Selector 3
+    // (`ScriptedEffectOnFirstFrame33`, `FUN_00433AC0`) reads no tail at all,
+    // so its placement is the whole of what it needs. Any other placement is a
+    // sub-handler nothing here can run and gets no object: the same refusal
+    // `SpawnPropContainers` makes for an unnamed class-0x44 kind, rather than
+    // a default arm that would run the wrong handler.
     if (s.class === SpawnClassValue.ScriptedScenery) {
       if (!pl.class33 && !pl.class33_push && !pl.class33_cue
-          && !pl.class33_sub) return;
+          && !pl.class33_prop && !pl.class33_sub
+          && pl.hp !== ScriptedScenerySelector.EffectOnFirstFrame) return;
       G.g_slot_actors_built.push(s.at);
       SpawnFromDescriptor(s.at, SpawnClassValue.ScriptedScenery, -1,
                           `scenery ${pl.hp}`,
                           { class33: pl.class33, class33Push: pl.class33_push,
                             class33Cue: pl.class33_cue,
                             class33Sub: pl.class33_sub,
+                            class33Prop: pl.class33_prop,
                             hp: pl.hp, maxHp: pl.hp,
                             ...PlacementOrientation(pl),
                             // `ActorInitFlags` (`FUN_00408970`) makes the

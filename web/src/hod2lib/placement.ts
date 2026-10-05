@@ -496,9 +496,15 @@ export class Placement {
   class33_cue: Record<string, unknown> | null = null;
   /**
    * Class 0x33 **selectors 6 to 11 and 99**'s tails, each tagged with its
-   * selector -- `class33SubTail`. Never set beside the three blocks above.
+   * selector -- `class33SubTail`. Never set beside the other blocks.
    */
   class33_sub: Record<string, unknown> | null = null;
+  /**
+   * Class 0x33 **selector 2's** tail -- the draw slot, and the camera frame
+   * and script flag `ScriptedPropDrawUntilFlag` leaves on. Selector 2 only,
+   * and never set beside any of the others.
+   */
+  class33_prop: Record<string, unknown> | null = null;
   /**
    * The spawn's attachment list -- `obj+0x1170`, ids into
    * `g_actor_attachment_records`.
@@ -594,6 +600,7 @@ export class Placement {
     if (this.class33_push) d.class33_push = this.class33_push;
     if (this.class33_cue) d.class33_cue = this.class33_cue;
     if (this.class33_sub) d.class33_sub = this.class33_sub;
+    if (this.class33_prop) d.class33_prop = this.class33_prop;
     if (this.attachments.length) d.attachments = [...this.attachments];
     return d;
   }

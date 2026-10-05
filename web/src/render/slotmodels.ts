@@ -647,7 +647,9 @@ export class SlotModelLayer implements System<RenderContext> {
    * (`FUN_004331D0`) records each `AssetDrawSlot` it makes with its world
    * matrix (`game/class33/`) -- the fire, the model at `obj+0x118`'s scale,
    * and stage 5's car parts or the two sprite loops -- and so do selectors 8,
-   * 9 and 99 (`class33/strips.ts`). Selector 4 records none; its one slot is
+   * 9 and 99 (`class33/strips.ts`) and selector 2's one model,
+   * `ScriptedPropDrawUntilFlag` (`FUN_00433A10`), recorded the same way on the
+   * frames it draws. Selector 4 records none; its one slot is
    * {@link DrawSlotFor}'s.
    */
   private drawCarrier33(seen: Set<number | string>): void {

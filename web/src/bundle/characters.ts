@@ -829,8 +829,8 @@ export interface CharacterPlacement {
   /**
    * Class 0x33 **selectors 6 to 11 and 99** — each its own reading of the
    * descriptor tail, tagged with the selector that reads it (which is the
-   * placement's `hp`). Never set beside {@link class33}, {@link class33_push}
-   * or {@link class33_cue}.
+   * placement's `hp`). Never set beside {@link class33}, {@link class33_push},
+   * {@link class33_cue} or {@link class33_prop}.
    *
    * * 6, `ScriptedSpriteEffectOnce33`: `tail+0x0C` kind, `+0x10` face-camera
    *   mode, `+0x14` player.
@@ -855,6 +855,20 @@ export interface CharacterPlacement {
     | { selector: 11 }
     | { selector: 99; slot: number }
     | null;
+  /**
+   * Class 0x33 **selector 2's** tail — `ScriptedPropDrawUntilFlag`
+   * (`FUN_00433A10`): `slot` is `tail+0x00`, the `AssetDrawSlot` id it copies
+   * to `obj+0x13F0`; `despawn_frame` the `i32` at `tail+0x0C`, compared with
+   * `g_cam_path_frame` as an integer (every shipped one is `-1`, carried as
+   * it is); `despawn_flag` the byte at `tail+0x11`, a script flag that takes
+   * it off the field when it reads 1. One of the class's five mutually
+   * exclusive blocks. Selector 3 reads no tail, so its placement carries none.
+   */
+  class33_prop?: {
+    slot: number;
+    despawn_frame: number;
+    despawn_flag: number;
+  } | null;
 }
 
 /** The directional death set — see docs/formats/combat.md. */

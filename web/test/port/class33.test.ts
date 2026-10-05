@@ -7,7 +7,7 @@ import {
   G, HIT_SLOT_NONE, ResetGameGlobals, ResetSceneOnEnter,
 } from "../../src/game/globals";
 import { NULL_HOST } from "../../src/game/host";
-import { SpriteEffectKind } from "../../src/game/effects/sprite";
+import { AnglesToward, SpriteEffectKind } from "../../src/game/effects/sprite";
 import { SetGameTables } from "../../src/game/tables";
 import { ColiPublishDynamicList } from "../../src/game/coli";
 import { MotionRow, ZombieState } from "../../src/game/class30/states";
@@ -26,8 +26,12 @@ import { EnemyZombieUpdate } from "../../src/game/class30";
 import { HIT_SLOT_CLAIMED } from "../../src/game/hit_slots";
 import { ZombiePushOutOfWorldAndActors } from "../../src/game/class30/ground";
 import { SpawnClass } from "../../src/game/spawn_class";
+import { g_class_handlers } from "../../src/game/registry";
 import { vec3 } from "../../src/game/vec";
-import { MatrixTransformPoint } from "../../src/game/matrix";
+import {
+  MatIdentity, MatrixRotateX, MatrixRotateY, MatrixRotateZ, MatrixTranslate,
+  MatrixTransformPoint,
+} from "../../src/game/matrix";
 import { RunPendingInits, SpawnSlotActors } from "../../src/game/director";
 import {
   check, TYPE, CHARS, SCENE_MAJOR_PLAYING, spawnZombie, EnterPlay,
@@ -1166,6 +1170,332 @@ console.log("\nclass 0x33 selector 4: the scenery an actor shoves aside:");
           c.pos.x === p0.x && c.sub === p0.sub && !c.despawned,
           `${c.pos.x}/${c.sub}`);
   }
+}
+
+// -- class 0x33 selector 2: a model drawn until a flag or a camera frame -----
+//
+// `ScriptedPropDrawUntilFlag` (`FUN_00433A10`). Before this the director built
+// nothing for selector 2: the exporter wrote its ten descriptors as rigs at a
+// fixed pose and `render/props.ts` hid them on a non-zero flag, so the model
+// stood from the stage's first frame, came back if the flag fell, and never
+// left on its camera frame. Driven from the front, as selector 5's block
+// below is: the placement the exporter emits, `SpawnSlotActors`, `GameUpdate`.
+
+console.log("\nclass 0x33 selector 2: a model drawn until a flag or a camera frame:");
+{
+  // Stage 1's `0x5FE8`, as the exporter reads it: slot `0x36`
+  // (`char_adv04.bin` 11), frame word `-1`, flag 1.
+  const PROP_AT = 0x5fe8;
+  const POS: [number, number, number] = [-968.1, -7, -544.6];
+  const shipped = () => ({ slot: 0x36, despawn_frame: -1, despawn_flag: 1 });
+
+  const tables = (prop: { slot: number; despawn_frame: number;
+                          despawn_flag: number },
+                  angles = { pitch: 0, yaw: 55742, roll: 0 }) => ({
+    ...CHARS,
+    placements: [{
+      at: PROP_AT, class: 0x33, char_type: -1, motion: null,
+      hp: ScriptedScenerySelector.DrawUntilFlag, init_flags: 0,
+      ...angles, class33_prop: prop,
+    }],
+  } as unknown as CharactersJson);
+  const reset = (prop = shipped(), angles?: { pitch: number; yaw: number;
+                                              roll: number }) => {
+    ResetGameGlobals();
+    EnterPlay();
+    SetGameTables(tables(prop, angles));
+    G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    G.g_scene_state_major = SCENE_MAJOR_PLAYING;
+    G.g_players_in_play = 1;
+  };
+  const build = (rng: Rng) => {
+    SpawnSlotActors([{ at: PROP_AT, class: SpawnClass.ScriptedScenery,
+                       pos: [...POS] as [number, number, number] }]);
+    RunPendingInits(rng);
+    return G.g_object_list.find((o) => o.at === PROP_AT) as
+      ScriptedSceneryActor | undefined;
+  };
+
+  // -- P1. the wiring, and the claim the arm at `0x0043302E` makes ----------
+  {
+    reset();
+    const rng = new Rng(61);
+    const o = build(rng);
+    check("a placement carrying only `class33_prop` is spawned as selector 2",
+          !!o && o.cls === SpawnClass.ScriptedScenery
+          && o.hp === ScriptedScenerySelector.DrawUntilFlag,
+          o ? `class ${o.cls} hp ${o.hp}` : "no actor");
+    if (!o) throw new Error("no selector-2 object");
+    const k = o.hitSlot;
+    check("...and its dispatch arm claims a hit slot (`CALL 0x00409270` at "
+          + "`0x0043302E`)",
+          k !== HIT_SLOT_NONE && G.g_hit_slots[k] === PROP_AT,
+          `slot ${k} holds ${G.g_hit_slots[k]}`);
+    check("...and before its first update it has drawn nothing and seeded "
+          + "nothing: `obj+0x13F0` is copied by the update, not the `Init`",
+          o.scenery.draws.length === 0 && o.scenery.slot === 0 && o.sub === 0,
+          `${o.scenery.draws.length} draws, slot ${o.scenery.slot}, sub ${o.sub}`);
+  }
+
+  // -- P2. the seed, and one draw a frame at the object's own pose ----------
+  {
+    reset();
+    const rng = new Rng(62);
+    const o = build(rng);
+    if (!o) throw new Error("no selector-2 object");
+    G.g_cam_path_frame = 100;
+    GameUpdate(1 / 60, NULL_HOST, rng, new Events());
+    const d = o.scenery.draws;
+    check("the first frame copies `tail+0x00` to `obj+0x13F0` and steps "
+          + "`obj+0x1312` to 1 (`INC EAX` at `0x00433A29`)",
+          o.scenery.slot === 0x36 && o.sub === 1,
+          `slot 0x${o.scenery.slot.toString(16)}, sub ${o.sub}`);
+    const xf = (m: ArrayLike<number>, v: ReturnType<typeof vec3>) => {
+      const out = vec3();
+      MatrixTransformPoint(m, v, out);
+      return out;
+    };
+    const at = d[0] ? xf(d[0].m, vec3(0, 0, 0)) : null;
+    check("...and draws exactly that one slot, at the spawn's position",
+          d.length === 1 && d[0].slot === 0x36 && !!at
+          && Math.abs(at.x - POS[0]) < 1e-3 && Math.abs(at.y - POS[1]) < 1e-3
+          && Math.abs(at.z - POS[2]) < 1e-3,
+          d.map((x) => `0x${x.slot.toString(16)}`).join(",")
+          + (at ? ` at (${at.x}, ${at.y}, ${at.z})` : ""));
+    GameUpdate(1 / 60, NULL_HOST, rng, new Events());
+    GameUpdate(1 / 60, NULL_HOST, rng, new Events());
+    check("three frames later it is still one draw and still sub 1 -- the "
+          + "list is the frame's, and the seed ran once",
+          !o.despawned && o.scenery.draws.length === 1 && o.sub === 1,
+          `${o.scenery.draws.length} draws, sub ${o.sub}`);
+  }
+
+  // -- P3. the matrix is `T RotZ RotY RotX Scale(1)` -------------------------
+  //
+  // A non-identity pose in all three angles (`L48`), so the order shows:
+  // `0x00433A6A`..`0x00433A80` is Z, then Y, then X, after the translate.
+  {
+    const angles = { pitch: 0x1000, yaw: 0x4000, roll: 0x2800 };
+    reset(shipped(), angles);
+    const rng = new Rng(63);
+    const o = build(rng);
+    if (!o) throw new Error("no selector-2 object");
+    GameUpdate(1 / 60, NULL_HOST, rng, new Events());
+    const want = MatIdentity();
+    MatrixTranslate(want, ...POS);
+    MatrixRotateZ(want, angles.roll);
+    MatrixRotateY(want, angles.yaw);
+    MatrixRotateX(want, angles.pitch);
+    const other = MatIdentity();
+    MatrixTranslate(other, ...POS);
+    MatrixRotateX(other, angles.pitch);
+    MatrixRotateZ(other, angles.roll);
+    MatrixRotateY(other, angles.yaw);
+    const p = vec3(3, 5, 7);
+    const xf = (m: ArrayLike<number>) => {
+      const out = vec3();
+      MatrixTransformPoint(m, p, out);
+      return out;
+    };
+    const got = o.scenery.draws[0] ? xf(o.scenery.draws[0].m) : null;
+    const w = xf(want);
+    const x = xf(other);
+    const near = (a: { x: number; y: number; z: number },
+                  b: { x: number; y: number; z: number }) =>
+      Math.abs(a.x - b.x) + Math.abs(a.y - b.y) + Math.abs(a.z - b.z) < 1e-3;
+    check("a point of the model lands where `T RotZ RotY RotX` puts it, and "
+          + "not where class 0x13's `T RotX RotZ RotY` would -- the two differ "
+          + "at this pose",
+          !!got && near(got, w) && !near(w, x),
+          got ? `(${got.x.toFixed(3)}, ${got.y.toFixed(3)}, ${got.z.toFixed(3)})`
+                + ` want (${w.x.toFixed(3)}, ${w.y.toFixed(3)}, ${w.z.toFixed(3)})`
+              : "no draw");
+  }
+
+  // -- P4. the flag: `== 1`, and the despawn draws nothing ------------------
+  {
+    reset();
+    const rng = new Rng(64);
+    const o = build(rng);
+    if (!o) throw new Error("no selector-2 object");
+    GameUpdate(1 / 60, NULL_HOST, rng, new Events());
+    G.g_script_flags[1] = 2;
+    GameUpdate(1 / 60, NULL_HOST, rng, new Events());
+    check("flag 1 at 2 is not raised for this routine -- `CMP byte ptr "
+          + "[EDX + 0x9c7200], 0x1` at `0x00433A49` is an equality with 1",
+          !o.despawned && o.scenery.draws.length === 1,
+          `despawned ${o.despawned}`);
+    const k = o.hitSlot;
+    G.g_script_flags[1] = 1;
+    GameUpdate(1 / 60, NULL_HOST, rng, new Events());
+    check("at 1 the object despawns that frame, draws nothing, and gives its "
+          + "hit slot back",
+          o.despawned && o.scenery.draws.length === 0
+          && G.g_hit_slots[k] === HIT_SLOT_NONE,
+          `despawned ${o.despawned}, ${o.scenery.draws.length} draws`);
+    G.g_script_flags[1] = 0;
+    GameUpdate(1 / 60, NULL_HOST, rng, new Events());
+    check("...and lowering the flag again brings nothing back: the old layer "
+          + "showed the model whenever the flag read zero",
+          !G.g_object_list.some((a) => a.at === PROP_AT && !a.despawned),
+          String(G.g_object_list.filter((a) => a.at === PROP_AT).length));
+  }
+
+  // -- P5. the camera frame: block 0's, by equality --------------------------
+  //
+  // Every shipped frame word is `-1`, so this is the arm on a written tail:
+  // `CMP EAX, [0x009a6110]` at `0x00433A40`, and no second compare against
+  // block 2's frame, which selector 5 has.
+  {
+    reset({ slot: 0x36, despawn_frame: 300, despawn_flag: 1 });
+    const rng = new Rng(65);
+    const o = build(rng);
+    if (!o) throw new Error("no selector-2 object");
+    G.g_cam_path_frame = 299;
+    GameUpdate(1 / 60, NULL_HOST, rng, new Events());
+    G.g_cam_path_frame = 301;
+    GameUpdate(1 / 60, NULL_HOST, rng, new Events());
+    check("on 299 and 301 it stays and draws -- an equality, not a threshold",
+          !o.despawned && o.scenery.draws.length === 1,
+          `despawned ${o.despawned}`);
+    G.g_cam_path_frame_2 = 300;
+    GameUpdate(1 / 60, NULL_HOST, rng, new Events());
+    check("block 2's frame at 300 does nothing: the routine never reads it",
+          !o.despawned, `despawned ${o.despawned}`);
+    G.g_cam_path_frame = 300;
+    GameUpdate(1 / 60, NULL_HOST, rng, new Events());
+    check("block 0's frame at 300 takes it off the field",
+          o.despawned && o.scenery.draws.length === 0,
+          `despawned ${o.despawned}`);
+  }
+
+  // -- P6. a replay that steps over the raise does not rebuild it -----------
+  //
+  // `[port-only]`: the walker asks the class after every instruction it
+  // replays. The question is the routine's own two tests, read off the state
+  // the replay has made.
+  {
+    reset();
+    const outlived = g_class_handlers[SpawnClass.ScriptedScenery]
+      ?.outlivedByReplay;
+    const rec = { at: PROP_AT, class: 0x33,
+                  hp: ScriptedScenerySelector.DrawUntilFlag, block: 5 };
+    const before = outlived?.(rec);
+    G.g_script_flags[1] = 1;
+    const after = outlived?.(rec);
+    check("a replayed selector-2 record is outlived once its flag reads 1, "
+          + "and not before",
+          before === false && after === true, `${before} -> ${after}`);
+  }
+
+  SetGameTables(CHARS);
+}
+
+// -- class 0x33 selector 3: one sprite on the first frame ----------------------
+//
+// `ScriptedEffectOnFirstFrame33` (`FUN_00433AC0`): no tail, no test, one
+// kind-0x62 sprite facing the camera and a despawn. Before this the bundle
+// carried no placement for selector 3 and nothing was built at all. The
+// sprite table is `SpawnSpriteEffectFromParams`' `case 0x62:` row,
+// `0x1339..0x1356` at 1.5, and `PlayImpactSoundForMaterial`'s `BOMB2_16`.
+
+console.log("\nclass 0x33 selector 3: one sprite on the first frame:");
+{
+  const FIRST_AT = 0x37e8;
+  // Stage 1's, block 4 step 1 op 21.
+  const POS: [number, number, number] = [-250, 0, -544.3];
+  const SPLASH_FIRST = 0x1339;
+  const SPLASH_LAST = 0x1356;
+  const BOMB2 = 792233;
+  const EYE = vec3(-240, 10, -534.3);
+
+  ResetGameGlobals();
+  EnterPlay();
+  SetGameTables({
+    ...CHARS,
+    combat: {
+      impact_sprite: { [String(SpriteEffectKind.SplashLarge)]:
+                         [SPLASH_FIRST, SPLASH_LAST, 1.5] },
+      impact_sprite_default: [0x0904, 0x0904, 0.1],
+      ricochet: { [String(SpriteEffectKind.SplashLarge)]:
+                    { id: BOMB2, file: "COMMON\\BOMB2_16.WAV" } },
+    },
+    placements: [{
+      at: FIRST_AT, class: 0x33, char_type: -1, motion: null,
+      hp: ScriptedScenerySelector.EffectOnFirstFrame, init_flags: 0, yaw: 0,
+    }],
+  } as unknown as CharactersJson);
+  G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+  G.g_scene_state_major = SCENE_MAJOR_PLAYING;
+  G.g_players_in_play = 1;
+
+  const rng = new Rng(71);
+  const events = new Events();
+  const sounds: number[] = [];
+  events.on("sound.play", (e) => sounds.push(e.id));
+  SpawnSlotActors([{ at: FIRST_AT, class: SpawnClass.ScriptedScenery,
+                     pos: [...POS] as [number, number, number] }]);
+  RunPendingInits(rng);
+  const o = G.g_object_list.find((a) => a.at === FIRST_AT);
+  check("a placement with no tail block is spawned when its selector is 3 -- "
+        + "the routine reads none",
+        !!o && o.cls === SpawnClass.ScriptedScenery
+        && o.hp === ScriptedScenerySelector.EffectOnFirstFrame,
+        o ? `class ${o.cls} hp ${o.hp}` : "no actor");
+  if (!o) throw new Error("no selector-3 object");
+  const k = o.hitSlot;
+  check("...and its dispatch arm claims a hit slot (`0x0043303C`)",
+        k !== HIT_SLOT_NONE && G.g_hit_slots[k] === FIRST_AT,
+        `slot ${k} holds ${G.g_hit_slots[k]}`);
+
+  // A host whose eye is somewhere off the object, so face mode 1 has a line
+  // to aim along that is not the identity (`L48`).
+  const host = {
+    ...NULL_HOST,
+    viewPoint: (_x: number, _y: number, _z: number,
+                out: { x: number; y: number; z: number }) => {
+      out.x = EYE.x; out.y = EYE.y; out.z = EYE.z;
+    },
+  };
+  G.g_cam_path_frame = 12345;
+  GameUpdate(1 / 60, host, rng, events);
+  const fx = G.g_sprite_effects.filter(
+    (e) => e.kind === SpriteEffectKind.SplashLarge);
+  const e = fx[0];
+  const face = AnglesToward(EYE.x - POS[0], EYE.y - POS[1], EYE.z - POS[2]);
+  check("its first update throws one kind-0x62 sprite at its own position, "
+        + "whatever the camera frame",
+        fx.length === 1 && !!e && e.pos.x === POS[0] && e.pos.y === POS[1]
+        && e.pos.z === POS[2],
+        e ? `${fx.length} at (${e.pos.x}, ${e.pos.y}, ${e.pos.z})` : "none");
+  check("...facing the camera in pitch and yaw -- face mode 1 (`PUSH 0x1` at "
+        + "`0x00433ACA`), not selector 5's 0 and not the carrier's 2",
+        !!e && e.pitch === face.pitch && e.yaw === face.yaw
+        && face.pitch !== 0 && face.yaw !== 0,
+        e ? `(${e.pitch}, ${e.yaw}) want (${face.pitch}, ${face.yaw})` : "none");
+  check("...the `case 0x62:` run `0x1339..0x1356` at 1.5, with `BOMB2_16`",
+        !!e && e.lastSlot === SPLASH_LAST && e.slot >= SPLASH_FIRST
+        && e.slot <= SPLASH_FIRST + 1 && sounds.length === 1
+        && sounds[0] === BOMB2,
+        e ? `0x${e.slot.toString(16)}..0x${e.lastSlot.toString(16)}, `
+            + `sounds ${sounds.join(",")}` : "none");
+  check("...and the object despawns on that frame, giving its hit slot back",
+        o.despawned && G.g_hit_slots[k] === HIT_SLOT_NONE,
+        `despawned ${o.despawned}`);
+  GameUpdate(1 / 60, host, rng, events);
+  check("a second frame throws nothing more",
+        G.g_sprite_effects.filter(
+          (x) => x.kind === SpriteEffectKind.SplashLarge).length <= 1
+        && sounds.length === 1,
+        String(sounds.length));
+  check("`[port-only]` a replay never rebuilds one: it lives one frame, and "
+        + "a replay runs none",
+        g_class_handlers[SpawnClass.ScriptedScenery]?.outlivedByReplay?.(
+          { at: FIRST_AT, class: 0x33,
+            hp: ScriptedScenerySelector.EffectOnFirstFrame, block: 4 })
+          === true);
+
+  SetGameTables(CHARS);
 }
 
 // -- class 0x33 selector 5: the effect a camera frame sets off ---------------

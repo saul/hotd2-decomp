@@ -9,12 +9,15 @@
  * update and never runs again. See {@link ScriptedScenerySelector} for the
  * jump table.
  *
- * **Ten of the twelve are ported.** Selectors 6, 7, 10 and 11 are in
- * `class33/cues.ts` and 8, 9 and 99 in `class33/strips.ts`, carried by the
- * bundle's `class33_sub`. Selector 4 is the pushable scenery in
- * `class33/pushable.ts` — stage 1's two chairs. Selector 5 is the sprite
- * effect stage 2 throws at a camera frame, in `class33/effect_cue.ts`.
- * Selector 1 is here: the object stage 5 block 2's room is held by, and stage
+ * **All twelve are ported.** Selector 2 is a model drawn until a flag or a
+ * camera frame, in `class33/draw_until_flag.ts`. Selector 3 throws one
+ * sprite on its first frame, in `class33/effect_first_frame.ts`. Selectors
+ * 6, 7, 10 and 11 are in `class33/cues.ts` and 8, 9 and 99 in
+ * `class33/strips.ts`, carried by the bundle's `class33_sub`. Selector 4 is
+ * the pushable scenery in `class33/pushable.ts` — stage 1's two chairs.
+ * Selector 5 is the sprite effect stage 2 throws at a camera frame, in
+ * `class33/effect_cue.ts`. Selector 1 is here: the object stage 5 block 2's
+ * room is held by, and stage
  * 2's two riders leave on:
  *
  * ```
@@ -61,14 +64,6 @@
  *
  * ## What is not ported, by name
  *
- * * **The other sub-handlers.** Selector 2's ten spawns already reach the
- *   player through the bundle's `props`; selector 3 is unread and the bundle
- *   carries no tail for them, so the director builds no object for them and
- *   they keep the nothing they had -- **including the hit slot**, which their
- *   dispatch arms claim in the engine like every other arm's. So while one of
- *   them would be alive, a skinned actor spawned after it can take a lower
- *   `obj+0x3C` in the port than in the game, and that index is its cel phase
- *   (`game/hit_slots.ts`).
  * * `RegisterForShotTest` (`FUN_00405160`), at `0x004334D0` in the tail of
  *   the draw. The carrier's sphere is `tail+0x08`, which is `0.1` on stage
  *   5's and `0.0` on stage 2's two, and `tail+0x04 != -1` puts stage 2's on
@@ -102,7 +97,9 @@ import { ActorClaimHitSlot } from "../hit_slots";
 import type { GameHost } from "../host";
 import {
   registerClass, type ActorDebug, type ClassFrame, type ClassHandler,
+  type ReplaySpawnRecord,
 } from "../registry";
+import { T } from "../tables";
 import { SpawnClass } from "../spawn_class";
 import { CameraBlockEye } from "../camera/view";
 import {
@@ -119,12 +116,16 @@ import {
   ScriptedBridgeCrashStrip33, ScriptedFireLoopUntilCue33,
   ScriptedStaticSlotDraw33,
 } from "./strips";
+import { ScriptedPropDrawUntilFlag } from "./draw_until_flag";
+import { ScriptedEffectOnFirstFrame33 } from "./effect_first_frame";
 import { ScriptedPushableUpdate33, SCENERY_SKIP_COLLISION }
   from "./pushable";
 import { ScriptedScenerySelector } from "./state";
 
 export { ScriptedScenerySelector };
 export { ScriptedEffectAtCameraCue33 } from "./effect_cue";
+export { ScriptedPropDrawUntilFlag } from "./draw_until_flag";
+export { ScriptedEffectOnFirstFrame33 } from "./effect_first_frame";
 export { ScriptedPushableUpdate33 } from "./pushable";
 
 /**
@@ -534,13 +535,22 @@ function Carrier33Draw(obj: ScriptedSceneryActor): void {
  * class, so the choice is a test on the selector here — the same shape
  * `MouseUpdate` has, and for the same reason. Each arm is the pointer the
  * dispatch's jump table installs for that selector: `0x004331D0` at
- * `0x0043301A`, `0x00433B70` at `0x00433044`, `0x00433B00` at `0x00433052`,
- * and the seven in the switch.
+ * `0x0043301A`, `0x00433A10` at `0x00433028`, `0x00433AC0` at `0x00433036`,
+ * `0x00433B70` at `0x00433044`, `0x00433B00` at `0x00433052`, and the seven
+ * in the switch.
  */
 export function ScriptedSceneryUpdate33(obj: Actor, f: ClassFrame): void {
   if (obj.cls !== SpawnClass.ScriptedScenery) return;
   if (obj.hp === ScriptedScenerySelector.Carrier) {
     ScriptedCarrierUpdate33(obj, f);
+    return;
+  }
+  if (obj.hp === ScriptedScenerySelector.DrawUntilFlag) {
+    ScriptedPropDrawUntilFlag(obj);
+    return;
+  }
+  if (obj.hp === ScriptedScenerySelector.EffectOnFirstFrame) {
+    ScriptedEffectOnFirstFrame33(obj, f);
     return;
   }
   if (obj.hp === ScriptedScenerySelector.Pushable) {
@@ -616,6 +626,20 @@ function ScriptedSceneryDebug33(obj: Actor): ActorDebug {
       hot: false,
     };
   }
+  if (obj.hp === ScriptedScenerySelector.DrawUntilFlag) {
+    const t = obj.class33Prop;
+    return {
+      summary: `drawn until flag ${t?.despawn_flag ?? -1}`
+        + ` or camera frame ${t?.despawn_frame ?? -1}`,
+      detail: [`slot 0x${obj.scenery.slot.toString(16)}`
+               + ` · flag reads ${G.g_script_flags[t?.despawn_flag ?? 0] ?? 0}`
+               + ` · camera at ${G.g_cam_path_frame}`],
+      hot: false,
+    };
+  }
+  if (obj.hp === ScriptedScenerySelector.EffectOnFirstFrame) {
+    return { summary: "kind 0x62 on its first frame", hot: false };
+  }
   if (obj.hp !== ScriptedScenerySelector.Carrier) {
     return { summary: `selector ${obj.hp} · unported`, hot: false };
   }
@@ -638,10 +662,48 @@ function ScriptedSceneryDebug33(obj: Actor): ActorDebug {
   };
 }
 
+/**
+ * `[port-only]` -- a replay's question, `ClassHandler.outlivedByReplay`: has
+ * the replay gone past this record's own way out, so that at the landing
+ * address the engine's object is gone and must not be rebuilt?
+ *
+ * * **Selector 2** leaves on the first frame its flag reads 1 or block 0's
+ *   camera frame equals its word -- the two tests
+ *   `ScriptedPropDrawUntilFlag` (`FUN_00433A10`) makes every frame. A replay
+ *   raises the flag with the `set_script_flag` it steps over, and is asked
+ *   straight after, so the record goes then. Without it the replay rebuilt
+ *   the object at the landing, to leave on its first frame -- or not at all
+ *   when the flag did not survive to that frame, which on a seek into stage
+ *   2's block 9 it does not: the class-0x44 swing-then-break builder
+ *   (`class44/swing_then_break.ts`) writes `g_script_flags[0] = 0` from its
+ *   zero placer words on that first frame, and all five of stage 2's stood
+ *   for the rest of the stage. In the engine they left on the frame block 3
+ *   raised the flag, long before.
+ * * **Selector 3** has no test: `ScriptedEffectOnFirstFrame33`
+ *   (`FUN_00433AC0`) throws its sprite and leaves on the first frame it
+ *   runs, and a replay runs none -- so every record a replay has seen is
+ *   outlived. The one address this answers early is a landing between the
+ *   spawn instruction and the next instruction that yields a frame, where
+ *   the engine would still throw it; without the answer, every landing past
+ *   it threw the sprite on the landing frame instead.
+ *
+ * The other selectors' exits are not answered here.
+ */
+function ScriptedSceneryOutlivedByReplay33(rec: ReplaySpawnRecord): boolean {
+  if (rec.hp === ScriptedScenerySelector.EffectOnFirstFrame) return true;
+  if (rec.hp !== ScriptedScenerySelector.DrawUntilFlag) return false;
+  const t = (T.chars?.placements ?? []).find((p) => p.at === rec.at)
+    ?.class33_prop;
+  if (!t) return false;
+  return t.despawn_frame === G.g_cam_path_frame
+    || G.g_script_flags[t.despawn_flag] === 1;
+}
+
 export const ScriptedSceneryHandler: ClassHandler = {
   init: ScriptedSceneryInit33,
   update: ScriptedSceneryUpdate33,
   debug: ScriptedSceneryDebug33,
+  outlivedByReplay: ScriptedSceneryOutlivedByReplay33,
 };
 
 registerClass(SpawnClass.ScriptedScenery, ScriptedSceneryHandler);

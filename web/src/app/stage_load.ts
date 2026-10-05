@@ -206,9 +206,6 @@ export async function loadStageInto(p: Player): Promise<void> {
   p.spawns.setPosed(p.chars.posed);
   // The two player bodies are the game-over screen's, not the script's.
   p.gameOverScene.build(p.ctx.scope, p.chars, p.effects);
-  // Doors, shutters and the vans they hang off; driven by the script's
-  // own flags, so nothing here needs a clock of its own.
-  p.props.build(p.scene3d.root, p.ctx.scope, bundle.script.props);
   // Class 0x41's props are built at run time, so only the templates are
   // adopted here; the nodes follow `G.g_breakable_props`.
   p.breakables.adopt(p.scene3d.root);

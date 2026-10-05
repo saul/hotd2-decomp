@@ -794,17 +794,19 @@ function glbNodeNames(path: string): string[] {
 }
 
 /** The class-0x33 selectors the port runs, and so the bundle must carry. */
-const CLASS33_PORTED = [1, 4, 5, 6, 7, 8, 9, 10, 11, 99];
+const CLASS33_PORTED = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 99];
 
 /**
  * Class 0x33's decoded sub-handlers, producer against consumer.
  *
  * `ScriptedSceneryDispatch33` (`FUN_00432FF0`) switches `obj+0x11C` into
  * twelve objects that read the same descriptor bytes twelve ways, and the
- * port has ten: selector 1 through the `class33` block, selector 4 through
- * `class33_push`, selector 5 through `class33_cue` and selectors 6 to 11 and
- * 99 through `class33_sub`, which names its own selector. The port takes which
- * block arrived as the selector, so in the bundle:
+ * port has all twelve: selector 1 through the `class33` block, selector 2
+ * through `class33_prop`, selector 4 through `class33_push`, selector 5
+ * through `class33_cue`, selectors 6 to 11 and 99 through `class33_sub`,
+ * which names its own selector, and selector 3, which reads no tail and has
+ * no block. The port takes which block arrived as the selector, so in the
+ * bundle:
  *
  * 1. **every spawn of a ported selector the script makes has a placement**;
  * 2. **each placement carries exactly one block**, the one its selector
@@ -812,20 +814,21 @@ const CLASS33_PORTED = [1, 4, 5, 6, 7, 8, 9, 10, 11, 99];
  *    (`L3`), selector 5's is the one integer word it reads, and
  *    `class33_sub`'s selector is the placement's, and selector 7's list ends
  *    on the one record that cannot fire, with a sound on every record before
- *    it;
- * 3. **the model travels**: selector 4's draw slot is named by the
- *    descriptor, not the class, so its `slots_actor` part must be in the
- *    glTF, and every cel of the kind-0x44 sprite selector 5 throws must be
- *    in `slots_effect`, or the object works and is not drawn; so must the
- *    strip selectors 8 and 9 draw and selector 99's slot.
+ *    it -- **except selector 3's, which carries none**;
+ * 3. **the model travels**: selector 2's and 4's draw slots are named by the
+ *    descriptor, not the class, so their `slots_actor` parts must be in the
+ *    glTF, and every cel of the kind-0x44 sprite selector 5 throws, and of
+ *    the kind-0x62 one selector 3 throws, must be in `slots_effect`, or the
+ *    object works and is not drawn; so must the strips selectors 8 and 9
+ *    draw and selector 99's slot.
  */
 export function checkClass33Selectors(t: PortTree, out: Findings): void {
   const stages = bundleStages(t);
   if (!stages.length) {
-    out.note("class 0x33's three tail blocks unchecked (no bundle)");
+    out.note("class 0x33's tail blocks unchecked (no bundle)");
     return;
   }
-  let nCarrier = 0, nPush = 0, nCue = 0, nSub = 0;
+  let nCarrier = 0, nPush = 0, nCue = 0, nSub = 0, nProp = 0, nFirst = 0;
   for (const path of stages) {
     const doc = readJson(path);
     const stage = basename(dirname(path));
@@ -852,19 +855,47 @@ export function checkClass33Selectors(t: PortTree, out: Findings): void {
     }
     const pushSlots = new Set<number>();
     const subSlots = new Set<number>();
-    let cueHere = false;
+    let cueHere = false, firstHere = false;
     for (const p of places) {
       if (p.class !== 0x33) continue;
       const carrier = p.class33, push = p.class33_push, cue = p.class33_cue;
-      const sub = p.class33_sub;
+      const sub = p.class33_sub, prop = p.class33_prop;
       const at: number = p.at ?? 0, hp = p.hp;
       const blocks = ([["class33", carrier], ["class33_push", push],
-                       ["class33_cue", cue], ["class33_sub", sub]] as [string, Json][])
+                       ["class33_cue", cue], ["class33_sub", sub],
+                       ["class33_prop", prop]] as [string, Json][])
         .filter(([, v]) => truthy(v)).map(([k]) => k);
       if (blocks.length > 1) {
         out.fail(`${stage} spawn ${hexw(at, 4)}: carries `
           + `${blocks.map((k) => `\`${k}\``).join(" and ")} -- sub-handlers' `
           + `readings of the same bytes, which is \`L3\` in the bundle`);
+      }
+      // Selector 3, `ScriptedEffectOnFirstFrame33` (`FUN_00433AC0`), reads
+      // no tail: a block on it would be bytes of the next record.
+      if (hp === 3) {
+        nFirst++;
+        firstHere = true;
+        if (blocks.length) {
+          out.fail(`${stage} spawn ${hexw(at, 4)}: selector 3 carries `
+            + `${blocks.join(", ")}, but the routine reads no tail`);
+        }
+        continue;
+      }
+      if (truthy(prop)) {
+        nProp++;
+        if (hp !== 2) {
+          out.fail(`${stage} spawn ${hexw(at, 4)}: \`class33_prop\` on selector `
+            + `${show(hp)}, but only selector 2 reads those bytes`);
+        }
+        if (Object.keys(prop).sort().join() !== "despawn_flag,despawn_frame,slot"
+            || !Number.isInteger(prop.slot) || prop.slot <= 0
+            || !Number.isInteger(prop.despawn_frame)
+            || !Number.isInteger(prop.despawn_flag)) {
+          out.fail(`${stage} spawn ${hexw(at, 4)}: \`class33_prop\` is `
+            + `${repr(prop)}, not the slot, frame and flag selector 2 reads`);
+        } else {
+          pushSlots.add(prop.slot);
+        }
       }
       if (!blocks.length) {
         out.fail(`${stage} spawn ${hexw(at, 4)}: selector ${show(hp)} has a `
@@ -931,16 +962,16 @@ export function checkClass33Selectors(t: PortTree, out: Findings): void {
         }
       }
     }
-    if (!pushSlots.size && !cueHere && !subSlots.size) continue;
+    if (!pushSlots.size && !cueHere && !subSlots.size && !firstHere) continue;
     const glb = join(dirname(path), `${stage}.glb`);
     if (!isFile(glb)) continue;
     const names = new Set(glbNodeNames(glb));
     for (const slot of [...pushSlots].sort(byNumber)) {
       const part = `slots_actor_fixed000_slot_${slot.toString(16).padStart(4, "0")}`;
       if (!names.has(part)) {
-        out.fail(`${stage}: selector-4 draw slot ${hexw(slot, 4)} is in a `
+        out.fail(`${stage}: selector-2/4 draw slot ${hexw(slot, 4)} is in a `
           + `placement but has no \`${part}\` part in the glTF -- the object `
-          + `is pushable and invisible`);
+          + `runs and is invisible`);
       }
     }
     for (const slot of [...subSlots].sort(byNumber)) {
@@ -964,11 +995,24 @@ export function checkClass33Selectors(t: PortTree, out: Findings): void {
         }
       }
     }
+    if (firstHere) {
+      // `SpawnSpriteEffectFromParams`' `case 0x62:`, first and last slot.
+      for (let slot = 0x1339; slot <= 0x1356; slot++) {
+        const part = `slots_effect_fixed000_slot_${slot.toString(16).padStart(4, "0")}`;
+        if (!names.has(part)) {
+          out.fail(`${stage}: a selector-3 placement throws sprite kind 0x62, `
+            + `and its cel ${hexw(slot, 4)} has no \`${part}\` part in the glTF `
+            + `-- the effect fires and draws nothing`);
+          break;
+        }
+      }
+    }
   }
-  out.note(`class 0x33: ${nCarrier} selector-1, ${nPush} selector-4, `
-    + `${nCue} selector-5 and ${nSub} selector-6..11/99 tails across `
-    + `${stages.length} bundles, each with `
-    + `exactly one block, and a model to draw where it draws one`);
+  out.note(`class 0x33: ${nCarrier} selector-1, ${nProp} selector-2, `
+    + `${nFirst} selector-3, ${nPush} selector-4, ${nCue} selector-5 and `
+    + `${nSub} selector-6..11/99 placements across ${stages.length} bundles, `
+    + `each with exactly the block its routine reads, and a model to draw `
+    + `where it draws one`);
 }
 
 /**

@@ -17,16 +17,9 @@
  * any `Init` runs, and the class reads it as a selector. That is `L3`, and it
  * has already caught someone on this class.
  *
- * Only the ones the port has read are members. The rest are, by the
- * dispatch's own jump table:
- *
- * ```
- * 3  -> 0x00433AC0
- * ```
- *
- * Selectors 6 to 11 and 99 are read and are members: `class33/cues.ts` has
- * the four that draw nothing (6, 7, 10, 11) and `class33/strips.ts` the
- * three that do (8, 9, 99).
+ * Every reachable arm is read and is a member. `class33/cues.ts` has the
+ * four of 6 to 11 that draw nothing (6, 7, 10, 11) and `class33/strips.ts`
+ * the three that do (8, 9, 99).
  */
 export enum ScriptedScenerySelector {
   /**
@@ -35,12 +28,21 @@ export enum ScriptedScenerySelector {
    */
   Carrier = 1,
   /**
-   * `ScriptedPropDrawUntilFlag` (`FUN_00433A10`) — a static prop drawn until
-   * a camera frame or a script flag. Ten shipped spawns, and they already
-   * reach the player through the bundle's `props`, so this class gives them
-   * no second behaviour.
+   * `ScriptedPropDrawUntilFlag` (`FUN_00433A10`) — one model drawn at the
+   * object's own pose until block 0's camera frame equals `tail+0x0C` or the
+   * script flag at `tail+0x11` reads 1, then a despawn. **Ported**, in
+   * `class33/draw_until_flag.ts`. Fifty-six shipped spawns over ten
+   * descriptors, stage 1's and stage 2's.
    */
   DrawUntilFlag = 2,
+  /**
+   * `ScriptedEffectOnFirstFrame33` (`FUN_00433AC0`) — one sprite of kind
+   * 0x62 thrown at the object's own position, facing the camera, on its first
+   * update, and a despawn. Reads no tail. **Ported**, in
+   * `class33/effect_first_frame.ts`. Fourteen shipped spawns, stage 1's
+   * block 4 and stage 2's blocks 9 and 16.
+   */
+  EffectOnFirstFrame = 3,
   /**
    * `ScriptedPushableUpdate33` (`FUN_00433B70`) — a piece of scenery an actor
    * shoves out of its way. **Ported**, in `class33/pushable.ts`. Two shipped

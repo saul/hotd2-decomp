@@ -332,8 +332,89 @@ export function genericPropEffects(type: number,
 }
 
 /**
+ * The effect trees a class-0x44 builder's object draws, as `[effect, motion]`
+ * pairs, by the container the exporter names it: each is a pair of literals
+ * the builder writes to `obj+0x324`/`+0x328`, or its update rewrites the
+ * block with between draws.
+ *
+ * * `flag_slot_effect` -- `PropBuildFlagSlotEffect` (`FUN_00472E00`): 0xB on
+ *   0x1D6.
+ * * `effect_handoff` -- `PropBuildEffectHandoff` (`FUN_00472F80`): 0xC
+ *   on 0x1CE.
+ * * `swing_then_break` -- `SwingThenBreakUpdate` (`FUN_00474470`) draws 0xD
+ *   on 0x1C7 and 0xE on 0x1C8 while flag 0x64 is down, 0xF on 0x1CA once it
+ *   is up.
+ * * `scaled_slot_effect` -- `PropBuildScaledSlotEffect` (`FUN_00473170`):
+ *   0xF on 0x1CA.
+ * * `effect_collapse` -- `PropBuildEffectCollapse` (`FUN_00473260`): 0x10 on
+ *   0x1D3.
+ */
+export function class44PropEffects(container: string): [number, number][] {
+  switch (container) {
+    case "flag_slot_effect": return [[0xb, 0x1d6]];
+    case "effect_handoff": return [[0xc, 0x1ce]];
+    case "swing_then_break": return [[0xd, 0x1c7], [0xe, 0x1c8], [0xf, 0x1ca]];
+    case "scaled_slot_effect": return [[0xf, 0x1ca]];
+    case "effect_collapse": return [[0x10, 0x1d3]];
+    default: return [];
+  }
+}
+
+/** `PropBuildVanDoors` (`FUN_00472C90`): `obj+0x28C = 0x1794 + i`, i = 0, 1. */
+export const VAN_DOOR_SLOTS = [0x1794, 0x1795];
+/** `EffectHandoffUpdate` (`FUN_00474240`) draws this until its clip starts. */
+export const EFFECT_HANDOFF_CLOSED_SLOT = 0x17d7;
+/** `SwingThenBreakUpdate` (`FUN_00474470`)'s strip, `0x170` stepped to `0x174`. */
+export const SWING_THEN_BREAK_STRIP = [0x170, 0x171, 0x172, 0x173, 0x174];
+/** `PropBuildFlagSlotEffect` (`FUN_00472E00`): scene 0's slot, and every other's. */
+export const FLAG_SLOT_EFFECT_SLOTS = [0x17ee, 0x197c];
+/**
+ * `EffectCollapseUpdate` (`FUN_004748C0`): block 0xB's two models, one per
+ * state of its flag, and block 0x12's one.
+ */
+export const EFFECT_COLLAPSE_SLOTS = [0x173b, 0x173c, 0x197e];
+/**
+ * `PropDrawOnlyType31` (`FUN_0046A1C0`)'s second strip, drawn only in scene 2
+ * block 0xB: `g_scene_tick_counter % 7 + 0x1797`.
+ */
+export const TYPE31_EXTRA_SLOTS = Array.from({ length: 7 }, (_, i) => 0x1797 + i);
+export const TYPE31_EXTRA_SCENE = 2;
+
+/**
+ * Every asset slot a class-0x44 builder's object can draw, from its placement
+ * -- the descriptor's slot or the literals the routine names -- for the
+ * `slots_breakable` template rig.
+ */
+export function class44DrawSlots(pl: Record<string, unknown>,
+                                 scene: number): number[] {
+  const slot = (pl.slot as number) ?? 0;
+  switch (pl.container) {
+    case "hinge": case "hinge_scaled": case "scaled_slot_effect":
+      return [slot];
+    case "van_doors": return VAN_DOOR_SLOTS;
+    case "effect_handoff": return [slot, EFFECT_HANDOFF_CLOSED_SLOT];
+    case "swing_then_break": return [slot, ...SWING_THEN_BREAK_STRIP];
+    case "flag_slot_effect":
+      return [scene === 0 ? FLAG_SLOT_EFFECT_SLOTS[0] : FLAG_SLOT_EFFECT_SLOTS[1]];
+    case "effect_collapse": return EFFECT_COLLAPSE_SLOTS;
+    case "slot_strip_loop": {
+      const span = Math.max(0, (pl.roll as number) ?? 0);
+      return [...Array.from({ length: span + 1 }, (_, i) => slot + i),
+              ...(scene === TYPE31_EXTRA_SCENE ? TYPE31_EXTRA_SLOTS : [])];
+    }
+    case "generic":
+      // A class-0x41 type-31 prop runs the same routine.
+      return pl.type === 31 && scene === TYPE31_EXTRA_SCENE
+        ? TYPE31_EXTRA_SLOTS : [];
+    default: return [];
+  }
+}
+
+/**
  * The effect trees the stage's generic props draw, keyed by effect id, for
- * the same map {@link scriptFlagEffectsJson} fills. One motion per id is all
+ * the same map {@link scriptFlagEffectsJson} fills -- and the class-0x44
+ * builders' in {@link class44PropEffects}, which go into the same map on the
+ * same terms. One motion per id is all
  * the map can hold: a second motion for an id already there is noted and not
  * exported, rather than silently posing one effect with another's clip.
  */
@@ -342,9 +423,10 @@ export async function genericPropEffectsJson(
     have: Record<string, unknown>): Promise<Record<string, unknown>> {
   const out: Record<string, unknown> = {};
   for (const pl of placements) {
-    if (pl.container !== "generic") continue;
-    for (const [effect, motion] of genericPropEffects(pl.type as number,
-                                                      stage.scene ?? -1)) {
+    const pairs = pl.container === "generic"
+      ? genericPropEffects(pl.type as number, stage.scene ?? -1)
+      : class44PropEffects(pl.container as string);
+    for (const [effect, motion] of pairs) {
       const key = String(effect);
       const prior = (out[key] ?? have[key]) as { motion?: number } | undefined;
       if (prior) {
@@ -895,6 +977,114 @@ export function containerPlacements(tables: ExeTables, evt: evtlib.EvtFile,
         pos: [...rec.pos],
         pitch: rec.orient[0], yaw: rec.orient[1], roll: rec.orient[2],
       });
+    } else if (rec.hp === 1 || rec.hp === 2 || rec.hp === 4) {
+      // Class 0x44 selectors 1, 2 and 4 -- `PropBuildHinge` (`FUN_00472BD0`),
+      // `PropBuildVanDoors` (`FUN_00472C90`) and `PropBuildHingeScaled`
+      // (`FUN_00472EB0`), whose objects all run `HingeUpdate`. The tail at the
+      // offsets and widths each builder reads it: the u16 at `+0x00` is the
+      // curve (`obj+0x290`), the u16 at `+0x04` the slot, the i32 at `+0x08`
+      // the collision blob (`obj+0x14C`), and then the builders part --
+      // selector 1 takes `obj+0x1DC` from the i32 at `+0x10`, the wobble
+      // phase `obj+0x1E8` from the i32 at `+0x14` and its two flags from the
+      // signed bytes at `+0x20`/`+0x21`; selector 4 takes `obj+0x1DC` from
+      // `+0x0C`, its flags from `+0x10`/`+0x11` and three f32 of scale from
+      // `+0x14`; selector 2 reads only `+0x08`, `+0x14` and `+0x20`/`+0x21`,
+      // its slots, curve and sides being literals. No lifetime: the remove
+      // flag is the object's whole life.
+      const scaled = rec.hp === 4;
+      out.push({
+        at: rec.offset,
+        container: rec.hp === 1 ? "hinge" : scaled ? "hinge_scaled"
+                                                   : "van_doors",
+        curve: rec.param(0x00, "u16") ?? 0,
+        slot: rec.param(0x04, "u16") ?? 0,
+        coli: rec.param(0x08, "i32") ?? -1,
+        side: rec.param(scaled ? 0x0c : 0x10, "i32") ?? 0,
+        ...(scaled ? {} : { wobble_phase: rec.param(0x14, "i32") ?? 0 }),
+        open_flag: rec.param(scaled ? 0x10 : 0x20, "i8") ?? 0,
+        remove_flag: rec.param(scaled ? 0x11 : 0x21, "i8") ?? -1,
+        ...(scaled ? { scale: [0x14, 0x18, 0x1c].map(
+          (o) => rec.param(o, "f32") ?? 0) } : {}),
+        lifetime_evt_steps: 0,
+        pos: [...rec.pos], yaw: rec.orient[1],
+      });
+    } else if (rec.hp === 5 || rec.hp === 6 || rec.hp === 7) {
+      // Selectors 5, 6 and 7 -- `PropBuildEffectHandoff` (`FUN_00472F80`),
+      // `PropBuildSwingThenBreak` (`FUN_00473060`) and
+      // `PropBuildScaledSlotEffect` (`FUN_00473170`). All three read the
+      // hinges' words: selector 5 at selector 1's offsets, 6 and 7 at
+      // selector 4's, plus the signed byte at `+0x12` (`obj+0x2AC`). The
+      // effects each draws are literals (`class44PropEffects`).
+      const five = rec.hp === 5;
+      out.push({
+        at: rec.offset,
+        container: five ? "effect_handoff"
+          : rec.hp === 6 ? "swing_then_break" : "scaled_slot_effect",
+        curve: rec.param(0x00, "u16") ?? 0,
+        slot: rec.param(0x04, "u16") ?? 0,
+        coli: rec.param(0x08, "i32") ?? -1,
+        side: rec.param(five ? 0x10 : 0x0c, "i32") ?? 0,
+        ...(five ? { wobble_phase: rec.param(0x14, "i32") ?? 0 }
+                 : { field_2ac: rec.param(0x12, "i8") ?? 0,
+                     scale: [0x14, 0x18, 0x1c].map(
+                       (o) => rec.param(o, "f32") ?? 0) }),
+        open_flag: rec.param(five ? 0x20 : 0x10, "i8") ?? 0,
+        remove_flag: rec.param(five ? 0x21 : 0x11, "i8") ?? -1,
+        lifetime_evt_steps: 0,
+        pos: [...rec.pos], yaw: rec.orient[1],
+      });
+    } else if (rec.hp === 3) {               // class 0x44 selector 3
+      // `PropBuildFlagSlotEffect` (`FUN_00472E00`): the two signed bytes at
+      // `+0x20`/`+0x21` and the i32 at `+0x08`, nothing else of the tail. The
+      // slot is a literal picked by `g_scene_index` and the effect is the
+      // literal 0xB on motion 0x1D6.
+      out.push({
+        at: rec.offset, container: "flag_slot_effect",
+        coli: rec.param(0x08, "i32") ?? -1,
+        open_flag: rec.param(0x20, "i8") ?? 0,
+        remove_flag: rec.param(0x21, "i8") ?? -1,
+        lifetime_evt_steps: 0,
+        pos: [...rec.pos],
+      });
+    } else if (rec.hp === 8) {               // class 0x44 selector 8
+      // `PropBuildEffectCollapse` (`FUN_00473260`): the signed byte at `+0x10`
+      // is the flag that plays it, the one at `+0x11` its lifetime in steps
+      // (`MOVSX AX, byte` into the word at `obj+0x11C`), and three f32 at
+      // `+0x14` the scale. Effect 0x10 on motion 0x1D3, literals.
+      out.push({
+        at: rec.offset, container: "effect_collapse",
+        open_flag: rec.param(0x10, "i8") ?? 0,
+        lifetime_evt_steps: rec.param(0x11, "i8") ?? 0,
+        scale: [0x14, 0x18, 0x1c].map((o) => rec.param(o, "f32") ?? 0),
+        pos: [...rec.pos], yaw: rec.orient[1],
+      });
+    } else if (rec.hp === 10) {              // class 0x44 selector 10
+      // `PropBuildSlotStripLoop` (`FUN_00473370`): the u16 at `+0x00` is the
+      // lifetime, the u16 at `+0x04` the strip's first slot, three f32 at
+      // `+0x14` the scale, and the descriptor's `+0x6C` the strip's last
+      // cursor -- so every frame of the strip travels.
+      out.push({
+        at: rec.offset, container: "slot_strip_loop",
+        slot: rec.param(0x04, "u16") ?? 0,
+        lifetime_evt_steps: rec.param(0x00, "u16") ?? 0,
+        scale: [0x14, 0x18, 0x1c].map((o) => rec.param(o, "f32") ?? 0),
+        roll: rec.orient[2],
+        pos: [...rec.pos], yaw: rec.orient[1],
+      });
+    } else if (rec.hp === 15) {              // class 0x44 selector 15
+      // `PropBuildKindedProp` (`FUN_00473770`): the kind is the descriptor's
+      // `+0x6C` read as a word, the set size its `+0x64`, the lifetime the u16
+      // at tail `+0x00`, the item set the signed byte at `+0x04` and the
+      // story item the i32 at `+0x08`.
+      out.push({
+        at: rec.offset, container: "kinded_44",
+        kind: (rec.orient[2] << 16) >> 16,
+        set_size: rec.orient[0],
+        item_set: rec.param(0x04, "i8") ?? 0,
+        story_item: rec.param(0x08, "i32") ?? -1,
+        lifetime_evt_steps: rec.param(0x00, "u16") ?? 0,
+        pos: [...rec.pos], yaw: rec.orient[1],
+      });
     } else if (rec.hp === 16) {              // class 0x44 selector 16
       const tail = rec.offset + 0x24;
       out.push({
@@ -1078,12 +1268,17 @@ export function breakablesJson(tables: ExeTables,
     effects,
     level_height: 7.540296,
     original_items: originalItemsJson(tables, placements, scene),
-    // `g_pHingeCurvesXYZ`, whole: the class-0x41 generic routines that swing
-    // a hinge read it by a literal curve index, in `game/`, where the
-    // class-0x44 hinges' own copy in `props.curves` cannot be reached.
+    // `g_pHingeCurvesXYZ` and `g_pHingeCurvesYaw`, whole: `HingeUpdate`
+    // (`FUN_00473CF0`) reads one or the other by the curve its object names,
+    // `SwingThenBreakUpdate` (`FUN_00474470`) the yaw table's curve 1 by a
+    // literal, and the class-0x41 generic routines that swing a part the XYZ
+    // table by a literal.
     hinge_curves_xyz: Object.fromEntries(
       propslib.HINGE_CURVES_XYZ_SELECTORS.map(
         (c) => [String(c), propslib.hingeCurve(tables, c)])),
+    hinge_curves_yaw: Object.fromEntries(
+      propslib.hingeYawCurves(tables).map(
+        (c) => [String(c), propslib.hingeCurve(tables, c).map((k) => k[1])])),
   };
   return out;
 }
@@ -1281,6 +1476,47 @@ function carriedPropTypes(placements: readonly Record<string, unknown>[]):
 }
 
 /** One effect id's tree and baked motion, or null with a degraded note. */
+/**
+ * `EffectCollapseUpdate` (`FUN_004748C0`) copies **73** entries of keys 0x22
+ * and 0x23 out of effect 0x10's motion, which has 72 -- so its last entry is
+ * read out of the rotation block and the next key. The bundle's decoded
+ * `t`/`r` stop at the node count, so the two keys travel raw on each
+ * `effect_collapse` placement as `collapse_keys`, read at the routine's own
+ * addresses (`MotionBank.effectKeyRaw`).
+ */
+export const EFFECT_COLLAPSE_EFFECT = 0x10;
+export const EFFECT_COLLAPSE_MOTION = 0x1d3;
+export const EFFECT_COLLAPSE_KEYS = [0x22, 0x23];
+export const EFFECT_COLLAPSE_ENTRIES = 0x49;
+
+export async function addEffectCollapseKeys(
+    stage: Stage, placements: Record<string, unknown>[]): Promise<void> {
+  const mine = placements.filter((pl) => pl.container === "effect_collapse");
+  if (!mine.length) return;
+  const tables = stage.tables;
+  const nodes = tables.ru16(propslib.EFFECT_BONE_COUNTS
+                            + EFFECT_COLLAPSE_EFFECT * 2) ?? 0;
+  const banks = tables.motionBanks();
+  const bankId = tables.motionBankOf(EFFECT_COLLAPSE_MOTION);
+  const bank = bankId !== null && banks.has(bankId)
+    ? await loadBank(stage.source, banks.get(bankId)![0],
+                     banks.get(bankId)![1])
+    : null;
+  const keys = EFFECT_COLLAPSE_KEYS.map((k) => {
+    const raw = bank?.effectKeyRaw(EFFECT_COLLAPSE_MOTION, nodes, k,
+                                   EFFECT_COLLAPSE_ENTRIES);
+    return raw ? { key: k, t_bits: raw.t, r: raw.r } : null;
+  });
+  if (keys.some((k) => k === null)) {
+    degraded.note("hod2lib.bundle.effect_collapse_keys",
+                  `motion 0x${EFFECT_COLLAPSE_MOTION.toString(16)}`,
+                  "the collapse's pieces start from nothing",
+                  "keys 0x22/0x23 could not be read");
+    return;
+  }
+  for (const pl of mine) pl.collapse_keys = keys;
+}
+
 async function effectDefJson(stage: Stage, effect: number, motion: number,
                              site: string, cues: number[]):
     Promise<Record<string, unknown> | null> {
@@ -2131,6 +2367,13 @@ export async function breakableSlotEntry(
       if (slot && !want.includes(slot)) want.push(slot);
     }
   }
+  // The class-0x44 selectors whose objects `HingeUpdate` and its neighbours
+  // run: each draws its descriptor's slot, or literals its routine names.
+  for (const pl of placements) {
+    for (const slot of class44DrawSlots(pl, stage.scene ?? -1)) {
+      if (slot && !want.includes(slot)) want.push(slot);
+    }
+  }
   // Class 0x44 selector 0 draws an effect tree, so the slots it needs are the
   // tree's nodes and **not** the descriptor's `obj+0x28C`, which that family
   // never passes to `AssetDrawSlot`. A node with slot 0 is a pure transform.
@@ -2404,17 +2647,18 @@ export async function buildStage(stage: Stage, sink: BundleSink,
           entries: charEntries } = await resolveCharacters(
     stage, prog, spawnRecords, null, null, cache);
 
-  // Scripted scenery -- the doors, shutters and vans the script opens. Same
-  // writer again: a prop is one model at a pose, which is a rig with a fixed
-  // placement.
+  // Scripted scenery -- class 0x33 selector 2, a model at the spawn's pose
+  // until a flag or a camera frame. Same writer again: a prop is one model at
+  // a pose, which is a rig with a fixed placement. The class-0x44 hinges are
+  // game objects and travel as placements below.
   say(`  ${name}: scripted props`);
-  const [hinges, statics] = propslib.resolveForStage(prog, spawnRecords);
-  const propEntries = await propslib.rigEntries(stage, hinges, statics, null,
-                                                cache);
+  const statics = propslib.resolveForStage(prog, spawnRecords);
+  const propEntries = await propslib.rigEntries(stage, statics, cache);
 
   // Before the glTF: the template rig has to include every asset slot the
   // stage's generic props name, and only the script knows which those are.
   const placements = evt ? containerPlacements(tables, evt, spawnRecords) : [];
+  await addEffectCollapseKeys(stage, placements);
   const carriedEffects = await carriedPropEffectsJson(
     stage, charPlaces as unknown as Record<string, unknown>[]);
   const flagEffects = {
@@ -2517,7 +2761,7 @@ export async function buildStage(stage: Stage, sink: BundleSink,
     (scriptJson.characters as Record<string, unknown>).class42 =
       await class42Tables(stage);
   }
-  scriptJson.props = propslib.propsJson(tables, hinges, statics);
+  scriptJson.props = propslib.propsJson(statics);
   // The carriers' effects ride in the same map, and after
   // `breakableSlotEntry` has taken its node slots: theirs travel in
   // `slots_actor`, which is what draws them.
@@ -2629,7 +2873,7 @@ export async function buildStage(stage: Stage, sink: BundleSink,
       spawns: nSpawns,
       rigs: info.rigs,
       characters: charDefs.size,
-      props: hinges.length + statics.length,
+      props: statics.length,
       posed_spawns: charPlaces.filter((p) => p.motion !== null).length,
       // **Zero is the only good value here.** Every other count says how much
       // is in the bundle; this one says how much of the game did not make it,

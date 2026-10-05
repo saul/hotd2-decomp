@@ -1,89 +1,31 @@
 /**
- * Scripted scenery: the doors, shutters and van doors the script opens.
+ * Scripted scenery drawn from the spawn's own pose: class 0x33 selector 2
+ * (`FUN_00433A10`), a model shown until a script flag or a camera frame
+ * removes it -- the van body stage 2's rear doors hang off is one.
  *
- * The exporter has placed the geometry — a prop is one model at a pose, so it
+ * The exporter has placed the geometry -- a prop is one model at a pose, so it
  * goes through the rig writer with a fixed placement, and the glTF arrives with
- * each prop already standing where it belongs. What is left is the two things
- * that only the running script knows: whether a prop is still there, and how
- * far its hinge has swung.
+ * each prop already standing where it belongs. What is left is whether it is
+ * still there.
  *
- * ## The hinge, from `HingeUpdate` (`FUN_00473CF0`)
- *
- * ```c
- * if (remove_flag >= 0 && g_script_flags[remove_flag]) { despawn(); }
- * if (g_script_flags[open_flag]) {
- *     f = frame++;                          // stops at 59, or 129 on curve 4
- *     rx = curve[f].rx; ry = curve[f].ry; rz = curve[f].rz;
- *     obj.rz  = base_rz + rz;                        // never mirrored
- *     if (side > 0) { obj.rx = base_rx + rx; obj.yaw = +ftol(ry * scale); }
- *     else          { obj.rx = base_rx - rx; obj.yaw = -ftol(ry * scale); }
- * }
- * Translate(pos); RotY(base_yaw); RotZ(obj.rz); RotY(obj.yaw); RotX(obj.rx);
- * ```
- *
- * The two Y rotations with a Z between them are the point: the **mounting**
- * angle and the **swing** are separate, which is what lets four baked curves
- * serve doors hung at any angle in the level. `side` mirrors the swing, so one
- * curve opens a pair of doors outward.
- *
- * ### `side` is a sign here, and a magnitude somewhere else
- *
- * `side` is `obj+0x1DC`, and the exe reads it in exactly two places:
- *
- * * `TEST EAX,EAX; JLE` at `0x00473EE6` — a **sign test**. The branches
- *   differ only in `ADD ECX` vs `SUB ECX` on the X angle and a `NEG EAX` on
- *   the yaw. The magnitude never reaches either angle.
- * * `IMUL EAX, [ESI+0x1DC]` at `0x00473FB5` — the amplitude, in BAMS, of the
- *   damped yaw wobble a prop does **when it is shot**.
- *
- * So the field is a wobble amplitude whose sign happens also to pick the side,
- * and `PropBuildVanDoors` (`FUN_00472C90`) writing it as literally −1 and +1
- * for the van's two doors is what makes it look like nothing else. It is not:
- * stage 1 has four hinges carrying **±512 and ±416**, and multiplying the X
- * angle by one of those throws the door through a hundred turns rather than
- * the two-degree judder the curve holds. That was this layer's bug, not the
- * exporter's.
- *
- * `scale` is `obj+0x2C0`, an `FMUL` that `PropBuildHinge` (`FUN_00472BD0`),
- * `PropBuildVanDoors` and `PropBuildHingeScaled` (`FUN_00472EB0`) all seed
- * with `1.0f` and nothing here writes, so it is an identity and is not
- * carried. `base_rx`/`base_rz` (`obj+0x1CC`, `obj+0x1D4`) are likewise never
- * written by any of the three, so they are the pool's zero. Both `[proved]`.
- *
- * That composite is applied here as `qY(base) · qZ(rz) · qY(swing) · qX(rx)` —
- * written as four axis-angle quaternions in that order rather than as an Euler,
- * for the same reason as the character bones: the multiplication is obvious and
- * the equivalence is not.
- *
- * ## The curves
- *
- * Baked keyframes, not a spring, and the bundle carries them per frame in BAMS
- * so nothing has to be approximated. Curve 2 is the van: 179 degrees by frame
- * 12, settling back to 137 — a door thrown hard enough to rebound.
- *
- * `HingeUpdate` also swings a prop when it is *shot*, one damped sine over
- * 16 frames. There is no shooting here, so that is not run.
+ * **The doors, shutters and van doors are not here.** Class 0x44's hinges
+ * (selectors 1, 2 and 4) are game objects: `game/class44/hinge.ts` runs
+ * `HingeUpdate` (`FUN_00473CF0`) and records its draw, and
+ * `render/breakables.ts` shows it. This layer used to pose them itself from a
+ * copy of the curve, which is the two-copies shape `L16` is about.
  */
 
 import {
   Box3, BoxGeometry, BufferAttribute, BufferGeometry, EdgesGeometry, Group,
-  LineBasicMaterial, LineSegments, Object3D, Quaternion, Sprite,
-  SpriteMaterial, Vector3,
+  LineBasicMaterial, LineSegments, Object3D, Sprite, SpriteMaterial, Vector3,
 } from "three";
-import { ticksOfSeconds } from "../core/play_cursor";
-import type { PropsJson, PropHinge, PropStatic } from "../bundle";
+import type { PropsJson, PropStatic } from "../bundle";
 import { IDLE_TICK, type Context, type System, type Tick }
   from "../core/system";
 import type { Scope } from "../core/scope";
 import { attachTo } from "./scope3d";
 import { LabelCache } from "./overlays";
-import { BAMS_TO_RAD } from "../core/bams";
-import { HingePose } from "./hinge";
 import { G } from "../game/globals";
-
-const AXIS_X = new Vector3(1, 0, 0);
-const AXIS_Y = new Vector3(0, 1, 0);
-const AXIS_Z = new Vector3(0, 0, 1);
 
 /**
  * Why a prop is or is not on screen — the whole point of the overlay.
@@ -140,12 +82,7 @@ const STAND_IN = 3;
 
 interface Live {
   node: Object3D;
-  hinge: PropHinge | null;
-  stat: PropStatic | null;
-  /** BAMS `[rx, ry, rz]` per frame; empty for a static prop. */
-  curve: number[][];
-  /** `obj+0x2A8` — advances only while the open flag is set. */
-  frame: number;
+  stat: PropStatic;
   /** False until a glTF node claims this prop's name. */
   bound: boolean;
 }
@@ -171,8 +108,6 @@ export class PropLayer implements System {
   private markers: Marker[] = [];
   /** Everything this layer built for the current stage. */
   private scope: Scope | null = null;
-  private readonly q = new Quaternion();
-  private readonly qa = new Quaternion();
   private readonly unitBox = new EdgesGeometry(new BoxGeometry(1, 1, 1));
   private readonly _box = new Box3();
   private readonly _size = new Vector3();
@@ -204,14 +139,8 @@ export class PropLayer implements System {
     if (!json) return;
 
     const byName = new Map<string, Live>();
-    for (const h of json.hinges) {
-      byName.set(h.name, { node: root, hinge: h, stat: null,
-                           curve: json.curves[String(h.curve)] ?? [],
-                           frame: 0, bound: false });
-    }
     for (const s of json.statics) {
-      byName.set(s.name, { node: root, hinge: null, stat: s, curve: [],
-                           frame: 0, bound: false });
+      byName.set(s.name, { node: root, stat: s, bound: false });
     }
 
     root.traverse((o) => {
@@ -258,53 +187,19 @@ export class PropLayer implements System {
 
   /**
    * The flags are `G.g_script_flags` — 0x009C7200 — which is what
-   * `set_script_flag` (0x48) writes and what `HingeUpdate` reads. They used to
-   * come off a `Set` the walker kept beside it; there is one array now, and
-   * gameplay writes it too. `frames` is elapsed 60 Hz frames the walker
-   * advanced — the swing counter is game frames, so a paused player holds a
-   * half-open door open.
+   * `set_script_flag` (0x48) writes and what the class-0x33 routine reads. A
+   * prop is shown until its remove flag is up.
    */
-  update(ctx: Context, t: Tick): void {
+  update(ctx: Context, _t: Tick): void {
     const w = ctx.walker;
     if (!w) return;
     const raised = (i: number) => (G.g_script_flags[i] ?? 0) !== 0;
-    const frames = ticksOfSeconds(t.dt);
     if (!this.live.length) return;
     for (const l of this.live) {
-      if (!l.bound) continue;              // nothing to pose
-      const p = l.hinge ?? l.stat!;
-      // Both kinds vanish on their remove flag; a static one has no other
-      // state, so this is all it does.
-      const gone = p.remove_flag >= 0 && raised(p.remove_flag);
+      if (!l.bound) continue;
+      const gone = l.stat.remove_flag >= 0 && raised(l.stat.remove_flag);
       l.node.visible = this.enabled && !gone;
-      if (!l.hinge || gone || !l.curve.length) continue;
-
-      if (raised(l.hinge.open_flag)) {
-        // `CMP EDI,0x3C; JL` -- or `CMP EDI,0x82; JGE` on curve 4. Past the
-        // end the exe stops writing the angles at all, so the prop holds the
-        // last frame it posed; clamping the cursor is the same pose.
-        l.frame = Math.min(l.curve.length - 1, l.frame + frames);
-      }
-      const k = l.curve[Math.floor(l.frame)];
-      if (!k) continue;
-      // `TEST EAX,EAX; JLE` -- the **sign** of `side`, never its magnitude.
-      // Four of the game's 56 hinges carry a magnitude (stage 1's, at 512 and
-      // 416), because the same field is the shot wobble's amplitude. Scaling
-      // by it sent those four spinning through 103 turns of X at the point in
-      // the curve where the door slams and the judder peaks.
-      const { rx, ry, rz } = HingePose(l.hinge, k);
-
-      // RotY(base); RotZ(rz); RotY(swing); RotX(rx) -- the engine's order.
-      this.q.setFromAxisAngle(AXIS_Y, l.hinge.base_yaw * BAMS_TO_RAD);
-      this.qa.setFromAxisAngle(AXIS_Z, rz * BAMS_TO_RAD);
-      this.q.multiply(this.qa);
-      this.qa.setFromAxisAngle(AXIS_Y, ry * BAMS_TO_RAD);
-      this.q.multiply(this.qa);
-      this.qa.setFromAxisAngle(AXIS_X, rx * BAMS_TO_RAD);
-      this.q.multiply(this.qa);
-      l.node.quaternion.copy(this.q);
     }
-    // After the poses, so a box fits where the prop actually ended up.
     this.updateDebug();
   }
 
@@ -335,7 +230,7 @@ export class PropLayer implements System {
     }
     this.live.forEach((l, i) => {
       const m = this.marker(i);
-      const p = l.hinge ?? l.stat!;
+      const p = l.stat;
 
       const state = this.stateOf(l);   // leaves the bounds in `this._box`
 
@@ -417,31 +312,17 @@ export class PropLayer implements System {
     m.label.userData.text = key;
   }
 
-  /** Reset the swing counters, for a seek or a stage change. */
-  reset(): void {
-    for (const l of this.live) l.frame = 0;
-  }
-
-  /**
-   * A load restored the flag set but not how long ago each flag was raised,
-   * and the swing counter is elapsed frames. So the doors go back to shut and
-   * swing again from there — which is exactly what a seek already does, and
-   * the two disagreeing would be worse than either.
-   *
-   * `[diverges]` — the engine has no seek, so it never has to answer this.
-   */
+  /** A load restored the flag set; the visibility follows it. */
   resync(ctx: Context): void {
-    this.reset();
     this.update(ctx, IDLE_TICK);
   }
 
   get describe(): string {
     if (!this.json) return "—";
     const n = this.live.length;
-    if (!n) return `0 / ${this.json.hinges.length + this.json.statics.length}`;
+    if (!n) return `0 / ${this.json.statics.length}`;
     const now = this.live.map((l) => this.stateOf(l));
     const by = (st: PropDebugState) => now.filter((x) => x === st).length;
-    const open = this.live.filter((l) => l.hinge && l.frame > 0).length;
     // Anything that is not simply drawn is worth naming in the status line --
     // "38 up" reads like success when six are quietly missing.
     const bad = [
@@ -451,7 +332,6 @@ export class PropLayer implements System {
     ] as const;
     const tail = bad.filter(([c]) => c > 0)
                     .map(([c, name]) => `${c} ${name}`).join(", ");
-    return `${by(PropDebugState.Shown)}/${n} up, ${open} swinging`
-           + (tail ? ` — ${tail}` : "");
+    return `${by(PropDebugState.Shown)}/${n} up` + (tail ? ` — ${tail}` : "");
   }
 }

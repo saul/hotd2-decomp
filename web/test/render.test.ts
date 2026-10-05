@@ -1699,7 +1699,7 @@ console.log("\nthe object-path seam carries six values");
  * `hod2_kind: "rig"` is the exporter's tag for **every** transcribed hierarchy
  * in a stage, and four layers own different sets of them — `RigLayer` the
  * `op_` path riders, `CharacterLayer` the `chr_` skeletons and their `gore_`
- * templates, `PropLayer` the `prop_` doors, `BreakableLayer` the slot
+ * templates, `PropLayer` the `prop_` statics, `BreakableLayer` the slot
  * templates. `RigLayer` used to adopt all of them and write `root.visible` on
  * every one once a frame; a rig with no route is ungated, so the first
  * instance of each character type was shown at its authored spawn point, in

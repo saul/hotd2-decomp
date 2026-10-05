@@ -421,6 +421,13 @@ export const CHECKS: readonly Check[] = [
       + "only check that sees a state played in the clip it inherited, because "
       + "`ActorSetMotionBlended` on a clip the bundle lacks is silent",
         NEEDS_BUNDLE),
+  check("bundle:entry_tails", ["node", "tools/run_ts.mjs", "tools/checks/entry_tails.ts"],
+        "that every class-0x30 spawn whose entrance state reads its tail "
+      + "unconditionally carries that tail decoded -- for a carrier's passenger"
+      + " the attack state's, not the ride's -- the only check that sees a "
+      + "rider with no leap, since the port's states read the tail with no "
+      + "test, as the exe's do",
+        NEEDS_BUNDLE),
   check("bundle:cam_waits", ["node", "tools/run_ts.mjs", "tools/checks/cam_waits.ts"],
         "that every `wait_camera_path_frame <n>` asks for a frame the play in "
       + "force actually publishes -- the only check that holds the three "

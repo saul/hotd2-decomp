@@ -35,6 +35,7 @@ import { crc32 } from "../src/hod2lib/png";
 import { zipBlob } from "../src/app/install/zip";
 import { RIGS } from "../src/hod2lib/rigs_data";
 import { holdFrameOf } from "../src/hod2lib/rigs";
+import { entranceTailState } from "../src/hod2lib/placement";
 
 let failures = 0;
 function check(name: string, ok: boolean, detail = ""): void {
@@ -320,6 +321,35 @@ console.log("\na rig route parked on its path:");
   check("...and a prose rule is not a literal frame",
         holdFrameOf({ slot: 1, frame: "(age % 24), a 24-frame loop" }) === null,
         String(holdFrameOf({ slot: 1, frame: "(age % 24)" })));
+}
+
+// -- which state reads a class-0x30 tail ------------------------------------
+
+/**
+ * `ZombieStateRideCarrier` (`FUN_00458960`) reads only the tail's byte 3 and
+ * hands the actor to that state at `0x00458A48`, so a passenger's entrance
+ * tail is decoded for its **attack** state. Stage 2's boat riders start in 29
+ * and hand over to 30 and 26; keyed on 29, their arcs and leaps were never
+ * decoded and they walked off the boats. Spawns that start in any other state
+ * keep their own: stage 4's three state-30 spawns, whose attack byte is 0.
+ */
+console.log("\nthe state that reads a class-0x30 tail:");
+{
+  check("a passenger's tail is its attack state's: 29 handing to 30",
+        entranceTailState(0x30, 29, 30) === 30,
+        String(entranceTailState(0x30, 29, 30)));
+  check("...and 29 handing to 26",
+        entranceTailState(0x30, 29, 26) === 26,
+        String(entranceTailState(0x30, 29, 26)));
+  check("a spawn that starts in its entrance keeps it: 30 with attack 0",
+        entranceTailState(0x30, 30, 0) === 30,
+        String(entranceTailState(0x30, 30, 0)));
+  check("class 0x18 runs the same table, so the same rule",
+        entranceTailState(0x18, 29, 47) === 47,
+        String(entranceTailState(0x18, 29, 47)));
+  check("a class that is not a zombie keeps its byte as it is",
+        entranceTailState(0x31, 29, 30) === 29,
+        String(entranceTailState(0x31, 29, 30)));
 }
 
 // -- a texture's alpha is the bank's, whatever the mesh's IgnoreTexAlpha -----

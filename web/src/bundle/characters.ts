@@ -826,6 +826,20 @@ export interface CharacterPlacement {
   class33_cue?: {
     cue: number;
   } | null;
+  /**
+   * Class 0x33 **selector 2's** tail — `ScriptedPropDrawUntilFlag`
+   * (`FUN_00433A10`): `slot` is `tail+0x00`, the `AssetDrawSlot` id it copies
+   * to `obj+0x13F0`; `despawn_frame` the `i32` at `tail+0x0C`, compared with
+   * `g_cam_path_frame` as an integer (every shipped one is `-1`, carried as
+   * it is); `despawn_flag` the byte at `tail+0x11`, a script flag that takes
+   * it off the field when it reads 1. The fourth of the class's mutually
+   * exclusive blocks. Selector 3 reads no tail, so its placement carries none.
+   */
+  class33_prop?: {
+    slot: number;
+    despawn_frame: number;
+    despawn_flag: number;
+  } | null;
 }
 
 /** The directional death set — see docs/formats/combat.md. */

@@ -62,7 +62,6 @@ import { CharacterLayer } from "../render/characters";
 import { GameOverScene } from "../render/game_over_scene";
 import { ScreenSpritesDeep } from "../render/screen_sprites_deep";
 import { ScreenIdleDimLayer } from "../render/screen_idle_dim";
-import { PropLayer } from "../render/props";
 import { Shooting } from "../render/shooting";
 import { ColiDebugLayer } from "../render/coli_debug";
 import { StuckDebugLayer } from "../render/stuck_debug";
@@ -328,7 +327,6 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
   /** Screen sprites deeper than the HUD's plane, drawn in the 3D. */
   readonly deepSprites = new ScreenSpritesDeep();
   readonly screenIdleDim = new ScreenIdleDimLayer();
-  readonly props = new PropLayer();
   readonly breakables = new BreakableLayer();
   /** A stacked prop's fifteen pieces, off the breakables' templates. */
   readonly shatters = new PropShatterLayer();
@@ -807,7 +805,6 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     // After the characters: a gore swap clones a part onto a bone, and the
     // light should see it the frame it appears.
     this.world.add("render", this.gunLights);
-    this.world.add("render", this.props);
     this.world.add("render", this.breakables);
     this.world.add("render", this.shatters);
     this.world.add("render", this.slotModels);

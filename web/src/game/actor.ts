@@ -1994,6 +1994,14 @@ export interface ActorBase {
    */
   class33Cue: CharacterPlacement["class33_cue"];
   /**
+   * Class 0x33 **selector 2's** tail — the draw slot, and the camera frame
+   * and script flag `ScriptedPropDrawUntilFlag` (`FUN_00433A10`) leaves on.
+   *
+   * A fourth mutually exclusive block, on the same terms as the other three.
+   * See `class33/draw_until_flag.ts`. Selector 3 reads no tail and has none.
+   */
+  class33Prop: CharacterPlacement["class33_prop"];
+  /**
    * `obj+0x124` — the radius `ShotTestSphere` (`FUN_00404630`) measures the
    * shot against, and the **whole** hit test for an actor with no skeleton.
    *
@@ -2837,6 +2845,7 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     class33: null,
     class33Push: null,
     class33Cue: null,
+    class33Prop: null,
     class53: null,
     hitRadius: 0,
     entranceMotion: 0,

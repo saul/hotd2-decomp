@@ -88,6 +88,8 @@ import {
 import { CLASS23_MOTIONS } from "../game/class23/records";
 // Data only, for the same reason: every clip the cat's two routines play.
 import { CAT_CLIPS } from "../game/class53/records";
+import { DRAG_TARGET_CLIPS } from "../game/class30/drag_clips";
+import { ZombieState } from "../game/class30/states";
 import {
   CLASS2D_AT_KIND0, CLASS2D_AT_WING, CLASS2D_CHILD_CHAR_TYPES,
   CLASS2D_CHILD_CLIPS, CLASS2D_CLIPS, CLASS2D_PART_SHELLS,
@@ -2177,6 +2179,20 @@ export async function resolveForStage(
     // they are offered per character type rather than per spawn, and which
     // four arms are deliberately still out.
     if (cls === 0x30) entryClips.push(...CLASS30_DEATH_CLIPS);
+    // State 43's four -- `ZombieStateDragTarget` (`FUN_0045C080`) names them
+    // as immediates, so no script does. Gated on the actor being able to be
+    // in state 43: its descriptor's own initial or attack state, or a state
+    // its civilian's op 0x1A orders it into. Stage 4's `0x35B4` is the one
+    // spawn in the game that is; without them it stood upright inside the
+    // civilian it is meant to be on the back of.
+    if (cls === 0x30) {
+      const parent = recs.get((sp.civilian_child as number | undefined) ?? -1);
+      const ordered = parent === undefined ? []
+        : civilianOrderedStates(civscripts, parent.param(0x01, "i8") || 0);
+      if ([tail[1], tail[2], ...ordered].includes(ZombieState.DragTarget)) {
+        entryClips.push(...DRAG_TARGET_CLIPS);
+      }
+    }
     // Class 0x25's own clips: the ones its command block names with `op 2` and
     // `op 3`. Baking only the header's motion leaves some of the six stages'
     // 385 (program, clip) pairs, across 137 programs, with no frames, and a

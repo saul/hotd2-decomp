@@ -1123,20 +1123,34 @@ export const CLASS33_PUSHABLE = 4;
 export const CLASS33_EFFECT_CUE = 5;
 
 /**
+ * The class-0x33 sub-handlers {@link class33SubTail} reads, by their
+ * `obj+0x11C`: 6 `ScriptedSpriteEffectOnce33` (`FUN_00433E30`), 7
+ * `ScriptedSoundCues33` (`FUN_00433E90`), 8 `ScriptedBridgeCrashStrip33`
+ * (`FUN_00433FE0`), 9 `ScriptedFireLoopUntilCue33` (`FUN_00434100`), 10
+ * `ScriptedSoundAndFlagAtCue33` (`FUN_00433F40`), 11
+ * `ScriptedEndingTrackSelect33` (`FUN_00434260`) and 99
+ * `ScriptedStaticSlotDraw33` (`FUN_00433160`) -- jump-table entries 5 to 11
+ * at `0x004330C4`, 99 through byte 98 of the map at `0x004330F8`.
+ */
+export const CLASS33_SUB_SELECTORS = [6, 7, 8, 9, 10, 11, 99] as const;
+
+/**
  * Which spawns of a {@link SLOT_DRAWN_CLASSES} class the bundle carries a
  * placement for.
  *
  * Class 0x52 is one object, so every spawn of it qualifies. Class 0x33 is
- * eleven, and only **three** sub-handlers are decoded below -- selector 1 by
- * {@link class33Tail}, selector 4 by {@link class33PushTail} and selector 5 by
- * {@link class33CueTail}. Selector 2's props already reach the player through
- * `props`, and the rest are unread. Emitting one of those would be a
+ * twelve, and ten sub-handlers are decoded below -- selector 1 by
+ * {@link class33Tail}, selector 4 by {@link class33PushTail}, selector 5 by
+ * {@link class33CueTail} and selectors 6 to 11 and 99 by
+ * {@link class33SubTail}. Selector 2's props already reach the player through
+ * `props`, and selector 3 is unread. Emitting one of those would be a
  * placement whose tail block is a different handler's bytes read under one of
  * these three's names, which is `L3` written into the bundle.
  *
- * **The three blocks are mutually exclusive and the port reads their presence
+ * **The blocks are mutually exclusive and the port reads their presence
  * as the selector**, so widening this is only half the change: see the gate on
- * `class33`/`class33_push`/`class33_cue` in {@link resolveCharacters}.
+ * `class33`/`class33_push`/`class33_cue`/`class33_sub` in
+ * {@link resolveCharacters}.
  */
 export function slotDrawnSpawn(cls: number, rec: Spawn): boolean {
   // Class 0x26 is eight objects behind one id, switched on `obj+0x11C` by
@@ -1154,7 +1168,8 @@ export function slotDrawnSpawn(cls: number, rec: Spawn): boolean {
   if (cls === 0x12) return rec.param(0x08, "i16") === 0;
   if (cls === 0x33) {
     return rec.hp === CLASS33_CARRIER || rec.hp === CLASS33_PUSHABLE
-      || rec.hp === CLASS33_EFFECT_CUE;
+      || rec.hp === CLASS33_EFFECT_CUE
+      || (CLASS33_SUB_SELECTORS as readonly number[]).includes(rec.hp);
   }
   return true;
 }
@@ -1299,6 +1314,68 @@ export function class33PushTail(rec: Spawn): Record<string, unknown> {
  */
 export function class33CueTail(rec: Spawn): Record<string, unknown> {
   return { cue: rec.param(0x00, "i32") ?? -1 };
+}
+
+/**
+ * Class 0x33 **selectors 6 to 11 and 99**'s tails, each read the way its own
+ * routine reads it and tagged with the selector, or null for any other
+ * selector. Every offset is from the routines' listings:
+ *
+ * ```
+ * 6   tail+0x0C kind, +0x10 face-camera mode, +0x14 player  (0x00433E68)
+ * 7   {s16 mode, s16 frame, u32 sound} records, stride 8    (0x00433ED6, 0x00433F15)
+ * 8   nothing
+ * 9   tail+0x00 s16 mode, +0x02 s16 frame                   (0x00434208)
+ * 10  selector 7's first record, and tail+0x08 s16 flag     (0x00433FBC)
+ * 11  nothing
+ * 99  tail+0x00 the draw slot                               (0x004331B3)
+ * ```
+ *
+ * Selector 7 walks its records by moving `obj+0x1390` itself, one record per
+ * cue, and only a mode of 0 or 1 can ever be a cue. So the list stops at, and
+ * includes, the first record with any other mode: the routine parks there
+ * and reads nothing beyond it. That record's `+0x04` is never read and is not
+ * carried -- on the one shipped spawn, `0x1E7C`, it is the class word of the
+ * descriptor after it (`L6`). The list is also bounded by the file.
+ */
+export function class33SubTail(rec: Spawn): Record<string, unknown> | null {
+  const mode = rec.param(0x00, "i16") ?? -1;
+  const frame = rec.param(0x02, "i16") ?? -1;
+  switch (rec.hp) {
+    case 6:
+      return { selector: 6, kind: rec.param(0x0c, "i32") ?? 0,
+               face: rec.param(0x10, "i32") ?? 0,
+               player: rec.param(0x14, "i32") ?? -1 };
+    case 7: {
+      const cues: Record<string, number>[] = [];
+      for (let at = 0; ; at += 8) {
+        const m = rec.param(at, "i16");
+        const fr = rec.param(at + 2, "i16");
+        if (m === null || fr === null) break;
+        if (m !== 0 && m !== 1) {
+          cues.push({ mode: m, frame: fr });
+          break;
+        }
+        const sound = rec.param(at + 4, "u32");
+        if (sound === null) break;
+        cues.push({ mode: m, frame: fr, sound });
+      }
+      return { selector: 7, cues };
+    }
+    case 8:
+      return { selector: 8 };
+    case 9:
+      return { selector: 9, mode, frame };
+    case 10:
+      return { selector: 10, mode, frame,
+               sound: rec.param(0x04, "u32") ?? 0,
+               flag: rec.param(0x08, "i16") ?? 0 };
+    case 11:
+      return { selector: 11 };
+    case 99:
+      return { selector: 99, slot: rec.param(0x00, "i32") ?? 0 };
+  }
+  return null;
 }
 
 /**
@@ -1933,6 +2010,7 @@ export async function resolveForStage(
       ? class33PushTail(rec) : null;
     const class33Cue = is33 && rec.hp === CLASS33_EFFECT_CUE
       ? class33CueTail(rec) : null;
+    const class33Sub = is33 ? class33SubTail(rec) : null;
     let tscript: TargetScript | null = null;
     let ascript: TargetScript | null = null;
     let cameraCue: Record<string, unknown> | null = null;
@@ -2045,6 +2123,7 @@ export async function resolveForStage(
     p.class33 = class33;
     p.class33_push = class33Push;
     p.class33_cue = class33Cue;
+    p.class33_sub = class33Sub;
     // `ActorBindPartList` (`FUN_00412440`) -- the faces and accessories this
     // spawn wears. 97 of the game's spawns carry one and every list matches
     // its character's own family, which is what says the tail offsets are

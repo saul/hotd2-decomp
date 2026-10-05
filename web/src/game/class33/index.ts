@@ -9,7 +9,9 @@
  * update and never runs again. See {@link ScriptedScenerySelector} for the
  * jump table.
  *
- * **Three of the twelve are ported.** Selector 4 is the pushable scenery in
+ * **Ten of the twelve are ported.** Selectors 6, 7, 10 and 11 are in
+ * `class33/cues.ts` and 8, 9 and 99 in `class33/strips.ts`, carried by the
+ * bundle's `class33_sub`. Selector 4 is the pushable scenery in
  * `class33/pushable.ts` — stage 1's two chairs. Selector 5 is the sprite
  * effect stage 2 throws at a camera frame, in `class33/effect_cue.ts`.
  * Selector 1 is here: the object stage 5 block 2's room is held by, and stage
@@ -60,7 +62,7 @@
  * ## What is not ported, by name
  *
  * * **The other sub-handlers.** Selector 2's ten spawns already reach the
- *   player through the bundle's `props`; the rest are unread and the bundle
+ *   player through the bundle's `props`; selector 3 is unread and the bundle
  *   carries no tail for them, so the director builds no object for them and
  *   they keep the nothing they had -- **including the hit slot**, which their
  *   dispatch arms claim in the engine like every other arm's. So while one of
@@ -109,6 +111,14 @@ import {
 } from "../matrix";
 import { vec3, VecToAngles } from "../vec";
 import { ScriptedEffectAtCameraCue33 } from "./effect_cue";
+import {
+  ScriptedEndingTrackSelect33, ScriptedSoundAndFlagAtCue33,
+  ScriptedSoundCues33, ScriptedSpriteEffectOnce33,
+} from "./cues";
+import {
+  ScriptedBridgeCrashStrip33, ScriptedFireLoopUntilCue33,
+  ScriptedStaticSlotDraw33,
+} from "./strips";
 import { ScriptedPushableUpdate33, SCENERY_SKIP_COLLISION }
   from "./pushable";
 import { ScriptedScenerySelector } from "./state";
@@ -524,7 +534,8 @@ function Carrier33Draw(obj: ScriptedSceneryActor): void {
  * class, so the choice is a test on the selector here — the same shape
  * `MouseUpdate` has, and for the same reason. Each arm is the pointer the
  * dispatch's jump table installs for that selector: `0x004331D0` at
- * `0x0043301A`, `0x00433B70` at `0x00433044`, `0x00433B00` at `0x00433052`.
+ * `0x0043301A`, `0x00433B70` at `0x00433044`, `0x00433B00` at `0x00433052`,
+ * and the seven in the switch.
  */
 export function ScriptedSceneryUpdate33(obj: Actor, f: ClassFrame): void {
   if (obj.cls !== SpawnClass.ScriptedScenery) return;
@@ -538,6 +549,26 @@ export function ScriptedSceneryUpdate33(obj: Actor, f: ClassFrame): void {
   }
   if (obj.hp === ScriptedScenerySelector.EffectAtCameraCue) {
     ScriptedEffectAtCameraCue33(obj, f);
+    return;
+  }
+  // `0x00433E30` at `0x00433060` .. `0x00434260` at `0x004330A6`, and
+  // `0x00433160` at `0x004330B3` for 99 -- `class33/cues.ts` and
+  // `class33/strips.ts`.
+  switch (obj.hp) {
+    case ScriptedScenerySelector.SpriteEffectOnce:
+      ScriptedSpriteEffectOnce33(obj, f); return;
+    case ScriptedScenerySelector.SoundCues:
+      ScriptedSoundCues33(obj, f); return;
+    case ScriptedScenerySelector.BridgeCrashStrip:
+      ScriptedBridgeCrashStrip33(obj, f); return;
+    case ScriptedScenerySelector.FireLoopUntilCue:
+      ScriptedFireLoopUntilCue33(obj, f); return;
+    case ScriptedScenerySelector.SoundAndFlagAtCue:
+      ScriptedSoundAndFlagAtCue33(obj, f); return;
+    case ScriptedScenerySelector.EndingTrackSelect:
+      ScriptedEndingTrackSelect33(obj, f); return;
+    case ScriptedScenerySelector.StaticSlotDraw:
+      ScriptedStaticSlotDraw33(obj); return;
   }
 }
 
@@ -572,6 +603,16 @@ function ScriptedSceneryDebug33(obj: Actor): ActorDebug {
       detail: [`camera at ${G.g_cam_path_frame}`
                + ` · kind 0x44 at (${obj.pos.x.toFixed(2)},`
                + ` ${obj.pos.y.toFixed(2)}, ${obj.pos.z.toFixed(2)})`],
+      hot: false,
+    };
+  }
+  if (obj.class33Sub) {
+    const s = obj.scenery;
+    return {
+      summary: `selector ${obj.hp} · sub ${obj.sub} · frames ${s.frames}`
+        + ` · cue ${s.cue}`,
+      detail: [`slot 0x${s.slot.toString(16)}`
+               + ` · camera at ${G.g_cam_path_frame}`],
       hot: false,
     };
   }

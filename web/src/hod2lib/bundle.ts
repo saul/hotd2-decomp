@@ -1865,7 +1865,15 @@ export const CARRIER33_FIRE = Array.from({ length: 0x1ad2 - 0x1aab + 1 },
                                          (_, i) => 0x1aab + i);
 
 /**
- * The asset slots a stage's class-0x33 **selector-1 and selector-4
+ * `ScriptedBridgeCrashStrip33` (`FUN_00433FE0`)'s strip, `0x174A..0x1785`
+ * (`eff_shop.bin` parts 0..59), one a frame. `ScriptedFireLoopUntilCue33`
+ * (`FUN_00434100`) draws {@link CARRIER33_FIRE}.
+ */
+export const SCENERY33_CRASH_STRIP = Array.from(
+  { length: 0x1785 - 0x174a + 1 }, (_, i) => 0x174a + i);
+
+/**
+ * The asset slots a stage's class-0x33 **selector-1, -4, -8, -9 and -99
  * descriptors** ask for.
  *
  * Not in {@link ACTOR_SLOTS}, for the same reason {@link humanoidDrawSlots} is
@@ -1889,6 +1897,7 @@ export function sceneryDrawSlots(
     placements: readonly {
       class33_push?: { slot?: number } | null;
       class33?: { slot?: number } | null;
+      class33_sub?: { selector?: number; slot?: number } | null;
     }[],
 ): number[] {
   const out: number[] = [];
@@ -1896,6 +1905,11 @@ export function sceneryDrawSlots(
     if (slot > 0 && !out.includes(slot)) out.push(slot);
   };
   for (const p of placements) {
+    // Selectors 8, 9 and 99 -- `class33/strips.ts`.
+    const sub = p.class33_sub;
+    if (sub?.selector === 8) for (const s of SCENERY33_CRASH_STRIP) add(s);
+    if (sub?.selector === 9) for (const s of CARRIER33_FIRE) add(s);
+    if (sub?.selector === 99 && typeof sub.slot === "number") add(sub.slot);
     const push = p.class33_push?.slot;
     if (typeof push === "number") add(push);
     const ride = p.class33?.slot;

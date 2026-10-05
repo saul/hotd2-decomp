@@ -1994,6 +1994,12 @@ export interface ActorBase {
    */
   class33Cue: CharacterPlacement["class33_cue"];
   /**
+   * Class 0x33 **selectors 6 to 11 and 99**'s tails, each tagged with the
+   * selector that reads it. The fourth of the class's mutually exclusive
+   * blocks; see `class33/cues.ts` and `class33/strips.ts`.
+   */
+  class33Sub: CharacterPlacement["class33_sub"];
+  /**
    * `obj+0x124` — the radius `ShotTestSphere` (`FUN_00404630`) measures the
    * shot against, and the **whole** hit test for an actor with no skeleton.
    *
@@ -2837,6 +2843,7 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     class33: null,
     class33Push: null,
     class33Cue: null,
+    class33Sub: null,
     class53: null,
     hitRadius: 0,
     entranceMotion: 0,

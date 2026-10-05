@@ -793,23 +793,31 @@ function glbNodeNames(path: string): string[] {
   }
 }
 
+/** The class-0x33 selectors the port runs, and so the bundle must carry. */
+const CLASS33_PORTED = [1, 4, 5, 6, 7, 8, 9, 10, 11, 99];
+
 /**
  * Class 0x33's decoded sub-handlers, producer against consumer.
  *
  * `ScriptedSceneryDispatch33` (`FUN_00432FF0`) switches `obj+0x11C` into
- * eleven objects that read the same descriptor bytes eleven ways, and the
- * port has three: selector 1 through the `class33` block, selector 4 through
- * `class33_push` and selector 5 through `class33_cue`. The port takes which
+ * twelve objects that read the same descriptor bytes twelve ways, and the
+ * port has ten: selector 1 through the `class33` block, selector 4 through
+ * `class33_push`, selector 5 through `class33_cue` and selectors 6 to 11 and
+ * 99 through `class33_sub`, which names its own selector. The port takes which
  * block arrived as the selector, so in the bundle:
  *
- * 1. **every selector-1, -4 and -5 spawn the script makes has a placement**;
+ * 1. **every spawn of a ported selector the script makes has a placement**;
  * 2. **each placement carries exactly one block**, the one its selector
  *    reads -- two would be one handler's names over the other's bytes
- *    (`L3`), and selector 5's is the one integer word it reads;
+ *    (`L3`), selector 5's is the one integer word it reads, and
+ *    `class33_sub`'s selector is the placement's, and selector 7's list ends
+ *    on the one record that cannot fire, with a sound on every record before
+ *    it;
  * 3. **the model travels**: selector 4's draw slot is named by the
  *    descriptor, not the class, so its `slots_actor` part must be in the
  *    glTF, and every cel of the kind-0x44 sprite selector 5 throws must be
- *    in `slots_effect`, or the object works and is not drawn.
+ *    in `slots_effect`, or the object works and is not drawn; so must the
+ *    strip selectors 8 and 9 draw and selector 99's slot.
  */
 export function checkClass33Selectors(t: PortTree, out: Findings): void {
   const stages = bundleStages(t);
@@ -817,7 +825,7 @@ export function checkClass33Selectors(t: PortTree, out: Findings): void {
     out.note("class 0x33's three tail blocks unchecked (no bundle)");
     return;
   }
-  let nCarrier = 0, nPush = 0, nCue = 0;
+  let nCarrier = 0, nPush = 0, nCue = 0, nSub = 0;
   for (const path of stages) {
     const doc = readJson(path);
     const stage = basename(dirname(path));
@@ -829,7 +837,7 @@ export function checkClass33Selectors(t: PortTree, out: Findings): void {
       for (const step of blk.steps || []) {
         for (const op of step.ops || []) {
           for (const sp of op.spawns || []) {
-            if (sp.class === 0x33 && [1, 4, 5].includes(sp.hp)) want.set(sp.at, sp.hp);
+            if (sp.class === 0x33 && CLASS33_PORTED.includes(sp.hp)) want.set(sp.at, sp.hp);
           }
         }
       }
@@ -843,13 +851,15 @@ export function checkClass33Selectors(t: PortTree, out: Findings): void {
       }
     }
     const pushSlots = new Set<number>();
+    const subSlots = new Set<number>();
     let cueHere = false;
     for (const p of places) {
       if (p.class !== 0x33) continue;
       const carrier = p.class33, push = p.class33_push, cue = p.class33_cue;
+      const sub = p.class33_sub;
       const at: number = p.at ?? 0, hp = p.hp;
       const blocks = ([["class33", carrier], ["class33_push", push],
-                       ["class33_cue", cue]] as [string, Json][])
+                       ["class33_cue", cue], ["class33_sub", sub]] as [string, Json][])
         .filter(([, v]) => truthy(v)).map(([k]) => k);
       if (blocks.length > 1) {
         out.fail(`${stage} spawn ${hexw(at, 4)}: carries `
@@ -882,6 +892,29 @@ export function checkClass33Selectors(t: PortTree, out: Findings): void {
             + `-- nothing can be cloned for it`);
         }
       }
+      if (truthy(sub)) {
+        nSub++;
+        if (sub.selector !== hp) {
+          out.fail(`${stage} spawn ${hexw(at, 4)}: \`class33_sub\` names `
+            + `selector ${show(sub.selector)} on a selector-${show(hp)} spawn`);
+        }
+        if (sub.selector === 7) {
+          // `ScriptedSoundCues33` parks on the first record that cannot fire
+          // and reads nothing past it; every record before it plays a sound.
+          const cues: Json[] = Array.isArray(sub.cues) ? sub.cues : [];
+          const last = cues[cues.length - 1];
+          const fires = (c: Json) => c.mode === 0 || c.mode === 1;
+          if (!last || fires(last) || "sound" in last
+              || cues.slice(0, -1).some((c) => !fires(c) || !Number.isInteger(c.sound))) {
+            out.fail(`${stage} spawn ${hexw(at, 4)}: selector 7's cues `
+              + `${repr(cues)} do not end on one record that cannot fire, `
+              + `with a sound on every record before it`);
+          }
+        }
+        if (sub.selector === 8) for (let s = 0x174a; s <= 0x1785; s++) subSlots.add(s);
+        if (sub.selector === 9) for (let s = 0x1aab; s <= 0x1ad2; s++) subSlots.add(s);
+        if (sub.selector === 99) subSlots.add(sub.slot);
+      }
       if (truthy(cue)) {
         nCue++;
         cueHere = true;
@@ -898,7 +931,7 @@ export function checkClass33Selectors(t: PortTree, out: Findings): void {
         }
       }
     }
-    if (!pushSlots.size && !cueHere) continue;
+    if (!pushSlots.size && !cueHere && !subSlots.size) continue;
     const glb = join(dirname(path), `${stage}.glb`);
     if (!isFile(glb)) continue;
     const names = new Set(glbNodeNames(glb));
@@ -908,6 +941,15 @@ export function checkClass33Selectors(t: PortTree, out: Findings): void {
         out.fail(`${stage}: selector-4 draw slot ${hexw(slot, 4)} is in a `
           + `placement but has no \`${part}\` part in the glTF -- the object `
           + `is pushable and invisible`);
+      }
+    }
+    for (const slot of [...subSlots].sort(byNumber)) {
+      const part = `slots_actor_fixed000_slot_${slot.toString(16).padStart(4, "0")}`;
+      if (!names.has(part)) {
+        out.fail(`${stage}: class-0x33 draw slot ${hexw(slot, 4)} (selector `
+          + `8, 9 or 99) has no \`${part}\` part in the glTF -- the object `
+          + `runs and is not drawn`);
+        break;
       }
     }
     if (cueHere) {
@@ -923,8 +965,9 @@ export function checkClass33Selectors(t: PortTree, out: Findings): void {
       }
     }
   }
-  out.note(`class 0x33: ${nCarrier} selector-1, ${nPush} selector-4 and `
-    + `${nCue} selector-5 tails across ${stages.length} bundles, each with `
+  out.note(`class 0x33: ${nCarrier} selector-1, ${nPush} selector-4, `
+    + `${nCue} selector-5 and ${nSub} selector-6..11/99 tails across `
+    + `${stages.length} bundles, each with `
     + `exactly one block, and a model to draw where it draws one`);
 }
 

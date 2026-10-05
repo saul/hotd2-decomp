@@ -26,6 +26,7 @@
  */
 import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
+import { GameMode } from "../game_mode";
 import type { Actor } from "../actor";
 import { CamBlockSetAnglesFromLookAt, CamEvalPath7, CameraPoseBlock }
   from "../camera/path";
@@ -645,6 +646,23 @@ export function ItemSelectPassedBySeek(obj: Actor): void {
  * `ItemSelectApplyToPlayers` -- no music, no draw, and no `g_evt_ip`.
  */
 function ItemSelectPassed(obj: Actor, f: ClassFrame): void {
+  ItemSelectTakeLastChoice();
+  G.g_enemies_present = 0;
+  OriginalItemsApply(0, f.rng);
+  OriginalItemsApply(1, f.rng);
+  ItemSelectApplyToPlayers();
+  obj.dead = true;
+  obj.visible = false;
+}
+
+/**
+ * `[port-only]` -- the trunk's set-up and menu with the remembered choice in
+ * the menu's place: state 0's `g_original_items_taken` from the profile and
+ * `ResetOriginalModeLoadout`, then each player in play takes the items of
+ * `G.g_original_last_choice` the count still holds, one each, as the menu's
+ * A does. An item the profile no longer holds is left out.
+ */
+function ItemSelectTakeLastChoice(): void {
   G.g_original_items_taken = [...G.g_profile_original_items];
   ResetOriginalModeLoadout();
   const taken = G.g_original_items_taken;
@@ -658,12 +676,26 @@ function ItemSelectPassed(obj: Actor, f: ClassFrame): void {
       taken[id] = s8(taken[id] - 1);
     }
   }
-  G.g_enemies_present = 0;
-  OriginalItemsApply(0, f.rng);
-  OriginalItemsApply(1, f.rng);
+}
+
+/**
+ * `[port-only]` -- an Original Mode run the port starts on a stage with no
+ * trunk: a deep link, the stage picker, a restart or a seek into stage 2 to
+ * 6. The engine starts every Original run at stage 1's trunk and carries the
+ * items from there; the port can start one anywhere, and it used to start
+ * those with no items at all. So `app/` calls this on a new run's stage when
+ * the stage's script spawns no trunk, and the run gets what the trunk would
+ * have handed out given the last choice: {@link ItemSelectTakeLastChoice},
+ * then `ItemSelectFinish`'s `OriginalItemsApply` for both players and
+ * `ItemSelectApplyToPlayers`. Not for a stage step, whose run carries its
+ * own items, and not in Arcade.
+ */
+export function OriginalRunStartWithLastChoice(rng: Rng): void {
+  if (G.g_GameMode !== GameMode.Original) return;
+  ItemSelectTakeLastChoice();
+  OriginalItemsApply(0, rng);
+  OriginalItemsApply(1, rng);
   ItemSelectApplyToPlayers();
-  obj.dead = true;
-  obj.visible = false;
 }
 
 /**

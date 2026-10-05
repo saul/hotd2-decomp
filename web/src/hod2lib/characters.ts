@@ -145,8 +145,9 @@ export function class20Tail(rec: Spawn): Record<string, unknown> {
  * themselves -- but they are here for the same reason: no character type,
  * and the port still needs the placement to build them.
  */
-export const SLOT_DRAWN_CLASSES = new Set([0x12, 0x13, 0x16, 0x17, 0x26, 0x33,
-                                           0x40, 0x42, 0x43, 0x51, 0x52]);
+export const SLOT_DRAWN_CLASSES = new Set([0x12, 0x13, 0x16, 0x17, 0x26, 0x29,
+                                           0x33, 0x40, 0x42, 0x43, 0x51,
+                                           0x52]);
 
 /**
  * Class 0x17's descriptor tail, as `WaterWaveSourceAdd` (`FUN_004422D0`) and
@@ -480,6 +481,26 @@ export function class42Tail(rec: Spawn): Record<string, unknown> {
   const b = rec.evt?.raw;
   const at = rec.offset + 0x25;
   return { subtype: b ? ((b[at] ?? 0) << 24) >> 24 : 0 };
+}
+
+/**
+ * Class 0x29's descriptor tail, as `SceneryBatchUpdate29` (`FUN_00432C80`)
+ * reads it through `obj+0x1390`:
+ *
+ * ```
+ * tail+0x00  s16  the camera path that ends it  (MOVSX EDX,[EAX])
+ * tail+0x02  s16  ...from this frame on         (MOVSX EAX,[EAX+0x2])
+ * ```
+ *
+ * The list it draws is `obj+0x11C`, the spawn's `hp`. All three shipped
+ * spawns use `spawn_obj` (0x0B), whose allocator sets `obj+0x1390` to
+ * `desc+0x24`. See `game/class29/`.
+ */
+export function class29Tail(rec: Spawn): Record<string, unknown> {
+  return {
+    kill_path: rec.param(0x00, "i16") ?? -1,
+    kill_frame: rec.param(0x02, "i16") ?? 0,
+  };
 }
 
 /**
@@ -1880,6 +1901,7 @@ export async function resolveForStage(
     const class43 = cls === 0x43 ? class43Tail(rec) : null;
     const class46 = cls === 0x46 ? class46Tail(rec) : null;
     const class42 = cls === 0x42 ? class42Tail(rec) : null;
+    const class29 = cls === 0x29 ? class29Tail(rec) : null;
     const class40 = cls === CLASS40 ? class40Tail(rec) : null;
     const class51 = cls === 0x51 ? class51Tail(rec) : null;
     const class52 = cls === 0x52 ? class52Tail(rec) : null;
@@ -2000,6 +2022,7 @@ export async function resolveForStage(
     p.class43 = class43;
     p.class46 = class46;
     p.class42 = class42;
+    p.class29 = class29;
     p.class40 = class40;
     p.class51 = class51;
     p.class52 = class52;

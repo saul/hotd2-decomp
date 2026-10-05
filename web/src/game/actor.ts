@@ -1897,6 +1897,12 @@ export interface ActorBase {
    * it; the objects it builds are allocated with none.
    */
   class42: CharacterPlacement["class42"];
+  /**
+   * Class 0x29's descriptor tail -- the camera path and frame
+   * `SceneryBatchUpdate29` (`FUN_00432C80`) dies on. The list it draws is
+   * `obj+0x11C`, {@link hp}.
+   */
+  class29: CharacterPlacement["class29"];
   class51: CharacterPlacement["class51"];
   class52: CharacterPlacement["class52"];
   /**
@@ -2816,6 +2822,7 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     class2dSpawn: null,
     class40: null,
     class42: null,
+    class29: null,
     class51: null,
     class52: null,
     class14: null,

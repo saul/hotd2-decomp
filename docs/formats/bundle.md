@@ -109,6 +109,13 @@ effect-layout frames `MotionFrameRecord` (`FUN_00412FB0`) reads, sixty each,
 (`0x85A..0x88F`). `web/tools/checks/worm.ts` holds the port's scalars to the
 EXE; see [`docs/re/worm.md`](../re/worm.md).
 
+A class-0x29 placement -- the floor decals, stages 1 and 2 -- carries
+`class29: {kill_path, kill_frame}`, the two `s16`s at `desc+0x24`, and its
+`hp` is the list `SceneryBatchUpdate29` (`FUN_00432C80`) draws. The three
+lists themselves are `.data` literals in `web/src/game/class29/`, checked
+word for word by `web/tools/checks/prop_tables.ts`; the two slots they draw,
+`0x93C` and `0x93D`, ride the hidden `slots_effect` rig.
+
 Every stage carries `characters.class32` -- class 0x32's `.rdata`, read by
 `web/src/hod2lib/class32.ts` where the stage-5 boss's routines index it:
 `phases` (`g_class32_phases`, six `[state, floor]` rows), `hop_offsets` and

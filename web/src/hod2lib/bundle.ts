@@ -1689,6 +1689,11 @@ export const EFFECT_SLOTS_BY_CLASS: Record<number, number[]> = {
   // sparks, splashes, bite flashes, wake, path effects, the civilian's
   // shadow and the water mound. See `game/class45/tables.ts`.
   0x45: [...BOSS3_EFFECT_SLOTS],
+  // Class 0x29, `SceneryBatchUpdate29` (`FUN_00432C80`): every record of its
+  // three lists draws `0x93C` or `0x93D` in the world -- the blood stage 1's
+  // blocks 3 and 8 and stage 2's block 11 leave on the floor
+  // (`game/class29/`).
+  0x29: [0x93c, 0x93d],
   // The stage-6 boss's: every slot its routines draw by hand -- its own
   // nodes and shells, the satellites, the children's nodes, the flares and
   // the tasks. See `CLASS2D_EFFECT_SLOTS` in `game/class2D/state.ts`.

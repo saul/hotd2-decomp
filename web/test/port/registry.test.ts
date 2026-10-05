@@ -492,6 +492,7 @@ console.log("\n`g_class_handlers`, filled by the classes themselves:");
     [SpawnClass.CarriedZombie, "0x18 the zombie that rides it"],
     [SpawnClass.Vehicle, "0x26 subtype 2, the boat the player rides"],
     [SpawnClass.PathRidingProp, "0x28 stage 1's two burning cars"],
+    [SpawnClass.SceneryBatch, "0x29 the floor decals"],
     [SpawnClass.SetPieceProp, "0x24 set piece"],
     [SpawnClass.ScriptedHumanoid, "0x25 scripted humanoid"],
     [SpawnClass.Zombie, "0x30 zombie"],
@@ -525,11 +526,12 @@ console.log("\n`g_class_handlers`, filled by the classes themselves:");
         PORTED_CLASSES.map((c) => `0x${c.toString(16)}`).join(","));
   // The cat is 0x53 and now has one -- its sub-type 2 is a route-branch
   // trigger -- and 0x40, the horde, and 0x42, the worm, have one too, and so
-  // does 0x2D, the stage-6 boss. Class 0x29 still has none: an unported class
-  // must stay absent rather than fall back to anything, because an `if` is
-  // what had the cat running the zombie's state machine.
+  // does 0x2D, the stage-6 boss, and 0x29, the floor decals. Class 0x27
+  // still has none: an unported class must stay absent rather than fall back
+  // to anything, because an `if` is what had the cat running the zombie's
+  // state machine.
   check("a class with no module has no row",
-        g_class_handlers[SpawnClass.SceneryBatch] === undefined);
+        g_class_handlers[SpawnClass.PathRidingVehicle] === undefined);
 
   // Loud, not last-one-wins. A row silently overwritten by a second module is
   // a class whose behaviour depends on evaluation order.

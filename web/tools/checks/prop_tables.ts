@@ -28,10 +28,18 @@
  * route table, the path lengths it is killed on and the `g_app_state` 10 poses
  * -- a freeze frame one off throws stage 1's burning cars a frame early.
  *
+ * Class 0x29's three decal lists ride along too (`src/game/class29/`), with
+ * each list's `-1` terminator where the port's length says it is, and every
+ * shipped class-0x29 descriptor's selector inside 0..2: the default arm the
+ * port declares it does not walk is reached by none.
+ *
  * One line per table; a word that differs is its own failure. The last line
  * gives the number of words compared.
  */
 import { Checker, f32Bits, gameDirOrSkip, hex, openGame } from "../lib/exe_check";
+import { ExeTables } from "../../src/hod2lib/exetab";
+import * as evt from "../../src/hod2lib/evt";
+import { CLASS29_LIST_VA, CLASS29_LISTS } from "../../src/game/class29/index";
 import { asF32, i16, i32, i8, u16, u32, u8 } from "../../src/hod2lib/bytes";
 import { PROP38_HULL_POINTS, PROP_TABLE38 } from "../../src/game/class41/type38";
 import { PROP_TABLE39 } from "../../src/game/class41/type39";
@@ -49,7 +57,7 @@ import {
 } from "../../src/game/class28/index";
 
 const c = new Checker("prop_tables");
-const { exe } = await openGame(gameDirOrSkip("prop_tables"));
+const { exe, source } = await openGame(gameDirOrSkip("prop_tables"));
 const data = exe.data;
 
 /** File offset of `n` bytes at `va`; an address outside the image is a crash. */
@@ -313,6 +321,48 @@ CLASS28_FIXED_POSE_WORDS.forEach((row, i) => {
   }
 });
 end();
+
+// Class 0x29 (`class29/index.ts`): {i32 slot; f32 x,y,z; i32 yaw; f32 scale}
+// at a stride of 0x18, each list ended by a -1 slot.
+begin("CLASS29_LISTS");
+CLASS29_LISTS.forEach((list, n) => {
+  const base = CLASS29_LIST_VA[n]!;
+  list.forEach((row, i) => {
+    const va = base + i * 0x18;
+    sameInt(`CLASS29_LISTS[${n}][${i}].slot`, row[0], i32(data, at(va, 4)));
+    for (let k = 1; k <= 3; k++) {
+      sameF32(`CLASS29_LISTS[${n}][${i}][${k}]`, row[k]!, va + 4 * k);
+    }
+    sameInt(`CLASS29_LISTS[${n}][${i}].yaw`, row[4], i32(data, at(va + 16, 4)));
+    sameF32(`CLASS29_LISTS[${n}][${i}].scale`, row[5], va + 20);
+  });
+  sameInt(`CLASS29_LISTS[${n}] ends where the EXE's -1 is`, -1,
+          i32(data, at(base + list.length * 0x18, 4)));
+});
+end();
+
+{
+  // Every class-0x29 spawn on the disc, and the list its `desc+0x22` picks.
+  const com = evt.parse(await source.read("evt/comevtbl.bin"), "comevtbl.bin");
+  const seen = new Set<string>();
+  let spawns = 0;
+  for (let scene = 0; scene < ExeTables.SCENE_COUNT; scene++) {
+    const name = exe.sceneEvtFile(scene);
+    if (!name || seen.has(name)) continue;
+    seen.add(name);
+    if (!(await source.exists(`evt/${name}`))) continue;
+    const f = evt.parse(await source.read(`evt/${name}`), name,
+                        exe.sceneBlockCount(scene), com);
+    for (const sp of evt.spawns(f)) {
+      if (sp.cls !== 0x29) continue;
+      spawns++;
+      c.ok(sp.hp >= 0 && sp.hp < CLASS29_LISTS.length,
+           `${name}:${hex(sp.offset)} class 0x29 selector ${sp.hp} picks a `
+           + "list, not the default arm");
+    }
+  }
+  c.ok(spawns === 3, `three class-0x29 spawns on the disc (found ${spawns})`);
+}
 
 c.note(`${checked} table words compared against the EXE`);
 c.finish();

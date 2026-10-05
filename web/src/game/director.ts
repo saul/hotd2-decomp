@@ -455,6 +455,21 @@ export function SpawnSlotActor(s: ScriptSpawn): void {
                             visible: true });
       return;
     }
+    // Class 0x29 -- a batch of floor decals. No character type: every draw is
+    // an asset slot from one of the image's three lists, picked by `hp`
+    // (`obj+0x11C`), and the tail names the camera cue that ends it.
+    if (s.class === SpawnClassValue.SceneryBatch) {
+      if (!pl.class29) return;
+      G.g_slot_actors_built.push(s.at);
+      SpawnFromDescriptor(s.at, SpawnClassValue.SceneryBatch, -1,
+                          `decals ${pl.hp}`,
+                          { class29: pl.class29, hp: pl.hp, maxHp: pl.hp,
+                            ...PlacementOrientation(pl),
+                            pos: vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0,
+                                      s.pos?.[2] ?? 0),
+                            visible: true });
+      return;
+    }
     // Classes 0x16 and 0x17 -- the stage-2 boss arena's wave field and its
     // sources. They draw nothing and kill themselves the frame they run, so
     // they have no character type either; the position is the one thing

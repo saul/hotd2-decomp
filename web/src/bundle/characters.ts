@@ -563,6 +563,13 @@ export interface CharacterPlacement {
    */
   class42?: { subtype: number } | null;
   /**
+   * Class 0x29's tail -- `SceneryBatchUpdate29` (`FUN_00432C80`) kills the
+   * object on the first frame camera path `kill_path` is at or past
+   * `kill_frame`. The list it draws is the placement's `hp`. See
+   * `game/class29/`.
+   */
+  class29?: { kill_path: number; kill_frame: number } | null;
+  /**
    * The placement this one rides, when it is a child rather than a descriptor.
    *
    * Set on the bat's wing rows, which are {@link synthetic}. The client wants

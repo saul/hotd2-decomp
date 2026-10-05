@@ -408,6 +408,8 @@ export class Placement {
   class40: Record<string, unknown> | null = null;
   /** Class 0x42's sub-type, `desc+0x25`. See `class42Tail`. */
   class42: Record<string, unknown> | null = null;
+  /** Class 0x29's kill cue, `tail+0x00`/`+0x02`. See `class29Tail`. */
+  class29: Record<string, unknown> | null = null;
   /**
    * The placement this one rides, when it is not a descriptor of its own.
    *
@@ -568,6 +570,7 @@ export class Placement {
     if (this.class46) d.class46 = this.class46;
     if (this.class40) d.class40 = this.class40;
     if (this.class42) d.class42 = this.class42;
+    if (this.class29) d.class29 = this.class29;
     if (this.parent_at !== null) d.parent_at = this.parent_at;
     if (this.synthetic) d.synthetic = true;
     if (this.player_body !== null) d.player_body = this.player_body;

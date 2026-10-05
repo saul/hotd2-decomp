@@ -56,6 +56,7 @@
  *   cards             `wait_script_flag`, `spawn_simple` and the cards
  *   class19_14        the stage-4 and stage-2 bosses
  *   class33           the carrier, the scenery it shoves, its effects
+ *   class33_sub       class 0x33 selectors 6 to 11 and 99
  *   flyers            classes 0x11, 0x43 and 0x51, and the bone cel runs
  *   horde             znjoe's creature, stage 3's boats, class 0x40
  *   class26           class 0x26 subtypes 6 and 7, stage 6 block 12's pair
@@ -99,6 +100,7 @@ import "./shots.test";
 import "./cards.test";
 import "./class19_14.test";
 import "./class33.test";
+import "./class33_sub.test";
 import "./flyers.test";
 import "./horde.test";
 import "./class26.test";

@@ -495,6 +495,11 @@ export class Placement {
    */
   class33_cue: Record<string, unknown> | null = null;
   /**
+   * Class 0x33 **selectors 6 to 11 and 99**'s tails, each tagged with its
+   * selector -- `class33SubTail`. Never set beside the three blocks above.
+   */
+  class33_sub: Record<string, unknown> | null = null;
+  /**
    * The spawn's attachment list -- `obj+0x1170`, ids into
    * `g_actor_attachment_records`.
    *
@@ -588,6 +593,7 @@ export class Placement {
     if (this.class33) d.class33 = this.class33;
     if (this.class33_push) d.class33_push = this.class33_push;
     if (this.class33_cue) d.class33_cue = this.class33_cue;
+    if (this.class33_sub) d.class33_sub = this.class33_sub;
     if (this.attachments.length) d.attachments = [...this.attachments];
     return d;
   }

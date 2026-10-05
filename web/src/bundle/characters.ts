@@ -826,6 +826,35 @@ export interface CharacterPlacement {
   class33_cue?: {
     cue: number;
   } | null;
+  /**
+   * Class 0x33 **selectors 6 to 11 and 99** — each its own reading of the
+   * descriptor tail, tagged with the selector that reads it (which is the
+   * placement's `hp`). Never set beside {@link class33}, {@link class33_push}
+   * or {@link class33_cue}.
+   *
+   * * 6, `ScriptedSpriteEffectOnce33`: `tail+0x0C` kind, `+0x10` face-camera
+   *   mode, `+0x14` player.
+   * * 7, `ScriptedSoundCues33`: 8-byte records `{s16 mode, s16 frame, u32
+   *   sound}` up to and including the first whose mode is neither 0 nor 1,
+   *   which never fires and so is as far as the routine ever reads. That last
+   *   record carries no `sound`: its `+0x04` is never read, and on the one
+   *   shipped spawn it is the next descriptor's class.
+   * * 9, `ScriptedFireLoopUntilCue33`: the first record's mode and frame.
+   * * 10, `ScriptedSoundAndFlagAtCue33`: the first record, and `tail+0x08`'s
+   *   `s16` flag.
+   * * 8 and 11 read no tail; 99, `ScriptedStaticSlotDraw33`, reads `tail+0x00`.
+   */
+  class33_sub?:
+    | { selector: 6; kind: number; face: number; player: number }
+    | { selector: 7;
+        cues: { mode: number; frame: number; sound?: number }[] }
+    | { selector: 8 }
+    | { selector: 9; mode: number; frame: number }
+    | { selector: 10; mode: number; frame: number; sound: number;
+        flag: number }
+    | { selector: 11 }
+    | { selector: 99; slot: number }
+    | null;
 }
 
 /** The directional death set — see docs/formats/combat.md. */

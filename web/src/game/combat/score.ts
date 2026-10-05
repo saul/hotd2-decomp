@@ -34,6 +34,33 @@ export function ScoreAddForPlayer(player: number, points: number,
   });
 }
 
+/**
+ * The score floors `ScoreRankForPlayer` steps down through: `CMP EAX, imm`
+ * at `0x0043621C`, `26`, `33`, `40`, `4D` and `5A`, each a `JL` past its
+ * rank, and the last rank's `CMP EAX, 0x5DC0` / `SETL` at `0x00436269`.
+ */
+const SCORE_RANK_FLOORS = [80000, 72000, 64000, 56000, 46000, 36000] as const;
+const SCORE_RANK_LAST_FLOOR = 24000;
+
+/**
+ * `ScoreRankForPlayer` — `FUN_00436200`. A player's score as a rank, 0 the
+ * best: one rank for each of {@link SCORE_RANK_FLOORS} the score is not below,
+ * then 6, or 7 below {@link SCORE_RANK_LAST_FLOOR}. Signed compares.
+ *
+ * `mode` is the routine's second argument and the routine does test it
+ * (`CMP ECX, 0x1` at `0x00436211`), but its two arms, `0x0043621C` and
+ * `0x00436277`, are the same seven compares against the same seven
+ * immediates, instruction for instruction -- so it changes nothing and the
+ * port has one copy of them. Kept as a parameter because both callers pass it.
+ */
+export function ScoreRankForPlayer(player: number, _mode: number): number {
+  const score = G.g_player_score[player];
+  for (let rank = 0; rank < SCORE_RANK_FLOORS.length; rank++) {
+    if (score >= SCORE_RANK_FLOORS[rank]) return rank;
+  }
+  return SCORE_RANK_FLOORS.length + (score < SCORE_RANK_LAST_FLOOR ? 1 : 0);
+}
+
 /*
  * `ScoreResetAll` used to be here: a `[port-only]` reset the player's own
  * button called, added so that `render/shooting.ts` would not write

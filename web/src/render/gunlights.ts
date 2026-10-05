@@ -124,7 +124,9 @@ const LIGHTS_BEGIN = patchLightsBegin(ShaderChunk.lights_fragment_begin);
 
 /**
  * The point lights the rest of `g_entity_lights` can hold — class 0x41 type
- * 48's lamp claims one through `EntityLightAcquireSlot`, from entry 3 up.
+ * 48's lamp and class 0x2B selector 0 (`game/class2B/`) claim one through
+ * `EntityLightAcquireSlot`, from entry 3 up. Class 0x2B's selectors 1 and 2
+ * claim spots there, which this layer does not draw.
  */
 const ENTITY_POINT_FIRST = 3;
 
@@ -258,8 +260,8 @@ export class GunLights implements System<RenderContext> {
       this.group.add(sp, sp.target);
     }
     for (let i = ENTITY_POINT_FIRST; i < 16; i++) {
-      // No shadow: a cube map per lamp is six passes, and the one lamp the
-      // game ships hangs in a room the torch already shadows.
+      // No shadow: a cube map per lamp is six passes, and the two point lights
+      // the game ships hang in rooms the torch already shadows.
       const pt = new PointLight(0xffffff, 0, 0, 2);
       pt.name = `entity_light_${i}`;
       pt.visible = false;

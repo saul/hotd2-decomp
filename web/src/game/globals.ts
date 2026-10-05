@@ -1997,7 +1997,8 @@ export const G = {
    * sources that have ticked and eight wave sources, which class 0x17's
    * spawns add (`game/class16/`, `game/class17/`).
    * `WaterFieldSampleHeight` (`FUN_00442390`) is the surface at a point, and
-   * the stage-2 boss is its only reader. Null until a class-0x16 spawn runs.
+   * the stage-2 boss and class 0x15's planks are its readers. Null until a
+   * class-0x16 spawn runs.
    */
   g_water_wave_field: null as WaterWaveField | null,
   /**
@@ -2006,7 +2007,8 @@ export const G = {
    * as `Class14AdvanceMotionAndPublishPoints` (`FUN_00476AD0`) publishes them
    * every frame the stage-2 boss's feet are live. The strengths come from the
    * clip's contact cue; the y-follow reads `[0]` and `[1]` to decide which
-   * foot is planted.
+   * foot is planted, and `FloatingPropUpdate` (`FUN_004418C0`, class 0x15)
+   * tips and sinks a plank under each live one.
    */
   g_class14_foot_contacts: [
     { strength: 0, x: 0, y: 0, z: 0 }, { strength: 0, x: 0, y: 0, z: 0 },

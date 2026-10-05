@@ -402,6 +402,32 @@ export function SpawnSlotActor(s: ScriptSpawn): void {
                             visible: true });
       return;
     }
+    // Class 0x15 -- the row of floating planks. Opcode 0x0C too, so the
+    // record's three angles and flags word, which every plank copies; the
+    // placer builds the row from the tail and kills itself (`game/class15/`).
+    if (s.class === SpawnClassValue.FloatingPropRow) {
+      if (!pl.class15) return;
+      G.g_slot_actors_built.push(s.at);
+      SpawnFromDescriptor(s.at, SpawnClassValue.FloatingPropRow, -1,
+                          "plank row",
+                          { class15: pl.class15, ...PlacementOrientation(pl),
+                            flags: pl.init_flags ?? 0,
+                            pos: vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0,
+                                      s.pos?.[2] ?? 0),
+                            visible: true });
+      return;
+    }
+    // Class 0x2B -- a scripted light. No tail and no position of its own:
+    // `obj+0x11C`, the selector, is all `DynamicLightInit` reads
+    // (`game/class2B/`).
+    if (s.class === SpawnClassValue.DynamicLight) {
+      G.g_slot_actors_built.push(s.at);
+      SpawnFromDescriptor(s.at, SpawnClassValue.DynamicLight, -1,
+                          `light ${pl.hp}`,
+                          { hp: pl.hp, maxHp: pl.hp, flags: pl.init_flags ?? 0,
+                            visible: true });
+      return;
+    }
     if (s.class === SpawnClassValue.ScriptedProp) {
       if (!pl.class13) return;
       G.g_slot_actors_built.push(s.at);

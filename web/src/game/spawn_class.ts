@@ -47,12 +47,19 @@ export enum SpawnClass {
    * `wait_script_flag 30`s wait on. Ported (`game/class32/`).
    */
   Boss5 = 0x32,
-  /** `FUN_00441750` — row spawner for floating props. */
+  /**
+   * `FloatingPropRowSpawn` (`FUN_00441750`) — **a row of floating planks** in
+   * stage 2's boss arena: it builds `N` planks running `FloatingPropUpdate`
+   * (`FUN_004418C0`), which ride the class-0x16 water, tip under the boss's
+   * feet and leave on a script flag, and kills itself. **Ported**
+   * (`game/class15/`).
+   */
   FloatingPropRow = 0x15,
   /**
    * `WaterFieldCreate` (`FUN_00442290`) — creates the water-wave field the
    * stage-2 boss's summons are seated under, with the spawn's `y` as its
-   * plane, and kills itself. Four spawns, stage 2 blocks 35, 37, 39 and 41.
+   * plane, and kills itself. Six spawns, stage 2 blocks 16, 20, 35, 37, 39
+   * and 41.
    * **Ported** (`game/class16/`).
    */
   WaterWaveField = 0x16,
@@ -104,7 +111,11 @@ export enum SpawnClass {
   SceneryBatch = 0x29,
   /** `FUN_00432D40` — the handler is `JMP ActorKill`. It dies on sight. */
   DeadClass = 0x2a,
-  /** `FUN_00438060` — scripted dynamic light source. */
+  /**
+   * `DynamicLightInit` (`FUN_00438060`) — **a scripted light**: one
+   * `g_entity_lights` entry held until a flag or a camera cue, the routine
+   * chosen by `obj+0x11C`. **Ported** (`game/class2B/`).
+   */
   DynamicLight = 0x2b,
   /**
    * `Class2DClassHandler` (`FUN_00426A70`) — the stage-6 boss, `boss6.bin`.

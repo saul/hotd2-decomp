@@ -489,6 +489,13 @@ console.log("\nthe scene light is the light SetLightingDefaultSingle builds");
         shader.vertexShader.includes("vD3dColour = clamp( d3dC, 0.0, 1.0 );")
         && shader.vertexShader.includes("pow( d3dNH, d3dPower )")
         && shader.vertexShader.includes("d3dTexAmbient * diffuse * d3dLightAmbient"));
+  // The declared departure: the normal is renormalised. Taken literally, D3D
+  // leaves it at the inverse transpose's length, and `FishDraw`'s Scale(0.3)
+  // stretched the fish's normals 3.3 times and drew them white; the shipped
+  // game draws them coloured.
+  check("...on a unit normal, whatever scale the model is drawn under",
+        shader.vertexShader.includes(
+          "vec3 d3dN = normalize( normalMatrix * objectNormal );"));
   check("...three.js's light loop, and its divide by pi, are gone",
         !shader.fragmentShader.includes("#include <lights_fragment_begin>")
         && !shader.fragmentShader.includes("reflectedLight.directDiffuse +"));

@@ -26,6 +26,7 @@ import { G, ResetGameGlobals, RestoreGameGlobals, type Globals }
 import type { CamJson, OpJson, ScriptJson } from "../src/bundle";
 import { seekTo } from "../src/script/seek";
 import { CameraActorTick, CameraUpdateTick } from "../src/game/camera/actor";
+import { PushSceneLightStateToDevice } from "../src/game/light_sets";
 import { EvtActionHandler } from "../src/game/camera/driver";
 import { CamPaths } from "../src/game/camera/curve";
 import { SetCameraPaths, SetGameTables } from "../src/game/tables";
@@ -1490,6 +1491,140 @@ console.log("\nJUDGMENT is not rebuilt past its own way out:");
   if (ran) {
     check("some bundle places a JUDGMENT flier, so something was checked",
           fliers > 0);
+  }
+}
+
+// -- the scene light a seek lands with ---------------------------------------
+
+/**
+ * A seek lands with the scene light the script's own frames leave.
+ *
+ * The light blocks' tweens (evt `0x21`/`0x23`) are stepped once a frame by
+ * `PushSceneLightStateToDevice`, task 2 of the scene's list, and a set
+ * (`0x20`) on a channel still tweening leaves the tween running. So a replay
+ * that runs no light frames across a wait keeps every tween it met armed, and
+ * the first frame after the landing walks the channels it has since set back
+ * to wherever the tween was going. Stage 1's opening fades its fog to
+ * `(0, 0, 0)` at `1..1` over twenty frames, waits them out (`wait_frames 20`)
+ * and sets the fog back; a seek to block 2 or 3 landed with the fade armed
+ * and drew as a field of fog: `?stage=1&block=2&step=1&op=0` was a blue
+ * screen with no world.
+ *
+ * The oracle is the stage played on the clock, task 2 in its place, sampled
+ * at the first instruction a frame leaves it on in every step it enters;
+ * each sample is then a cold seek to that instruction. Both blocks' channels
+ * are compared once the landing's tweens have run out, which is where a
+ * wrongly armed one shows, and the channels and tweens on its first frame --
+ * except where a tween was armed across a wait the player times (a room, a
+ * flag, the targets): how far a fade has got there is how long the fight
+ * took, which the harness's stand-in decides and the script does not. The
+ * camera waits and `wait_frames` the script times itself.
+ */
+console.log("\na seek lands with the scene light the clock leaves:");
+{
+  /** One frame of `SceneTaskWalk` for a walker with no pool: tasks 1, 2, 3, 5. */
+  const sceneFrame = (w: Walker): void => {
+    w.tick(1 / 60);
+    PushSceneLightStateToDevice(1);
+    CameraActorTick();
+    CameraUpdateTick();
+  };
+  const round = (v: number): number => Math.round(v * 1000) / 1000;
+  const light = (): string => JSON.stringify([
+    G.g_scene_light_block0.channels.map(round),
+    G.g_scene_light_block1.channels.map(round),
+    G.g_light_tween_block0.map((t) => t && [round(t.to), round(t.rate)]),
+    G.g_light_tween_block1.map((t) => t && [round(t.to), round(t.rate)]),
+  ]);
+  /** The channels once every tween has run out, as the page reaches them. */
+  const settled = (): string => {
+    for (let i = 0; i < 60 * 30; i++) {
+      if (!G.g_light_tween_block0.some((t) => t)
+          && !G.g_light_tween_block1.some((t) => t)) break;
+      PushSceneLightStateToDevice(1);
+    }
+    return JSON.stringify([G.g_scene_light_block0.channels.map(round),
+                           G.g_scene_light_block1.channels.map(round)]);
+  };
+  const tweening = (): boolean => G.g_light_tween_block0.some((t) => t)
+    || G.g_light_tween_block1.some((t) => t);
+  /** `wait_queued_events_done`, `wait_camera_path_frame`, `wait_frames`. */
+  const SCRIPT_TIMED = new Set([0x40, 0x41, 0x42]);
+  const gated = () => ({ ...mkHost(), aliveEnemies: () => 0,
+                         presentEnemies: () => 0, aliveCivilians: () => 0,
+                         cameraFree: roomOver, scriptFlagRaised: shotsDone });
+  for (const stage of STAGES) {
+    const file = join(ROOT, `stage${stage}`, `stage${stage}.script.json`);
+    if (!existsSync(file)) continue;
+    const script = JSON.parse(readFileSync(file, "utf8")) as ScriptJson;
+
+    // Every step the clock enters, at the first instruction a frame leaves
+    // it on: the channels and what they settle to.
+    freshGame(file);
+    const live = new Walker(script, gated());
+    live.reset();
+    const want = new Map<string,
+      { op: number; at: string; settles: string; playerTimed: boolean }>();
+    let playerTimed = false;
+    for (let i = 0; i < 60 * 60 * 20 && !live.finished; i++) {
+      if (live.branch) live.takeBranch(0);
+      if (!tweening()) playerTimed = false;
+      else if (live.wait && !SCRIPT_TIMED.has(live.wait.op.op)) {
+        playerTimed = true;
+      }
+      const key = `${live.block}/${live.step}`;
+      if (!want.has(key)) {
+        const at = light();
+        const keep = structuredClone(G) as Globals;
+        want.set(key, { op: live.opIndex, at, settles: settled(),
+                        playerTimed });
+        RestoreGameGlobals(keep);
+      }
+      sceneFrame(live);
+    }
+
+    let landed = 0, timed = 0, bad = "", badSettle = "";
+    for (const [key, w0] of want) {
+      const [b, st] = key.split("/").map(Number);
+      freshGame(file);
+      const w = new Walker(script, gated());
+      if (!seekTo(w, b, st, w0.op) || w.opIndex !== w0.op) continue;
+      landed++;
+      // The clock was sampled after its frame's task 2, which steps a tween
+      // on the frame it is armed; the landing has not run that frame yet.
+      PushSceneLightStateToDevice(1);
+      const got = light();
+      const settles = settled();
+      if (settles !== w0.settles) {
+        badSettle ||= `${key}/${w0.op}: settles to ${settles}, the clock to ${w0.settles}`;
+      } else if (w0.playerTimed) {
+        timed++;
+      } else if (got !== w0.at) {
+        bad ||= `${key}/${w0.op}: ${got}\n        clock ${w0.at}`;
+      }
+    }
+    check(`stage ${stage}: all ${landed} of ${want.size} steps a seek lands `
+          + "on settle to the clock's scene light", !badSettle && landed > 0,
+          badSettle || "no steps sampled");
+    check(`stage ${stage}: ...and ${landed - timed} land with the clock's `
+          + `channels and tweens (${timed} fading across a room)`, !bad, bad);
+  }
+  // The address it was reported at, which the clock's first-fork route does
+  // not pass: block 2 is behind block 9. Block 2 step 0 sets the fog to
+  // `(101, 102, 105)` at `34..220.6` (evt ops `0x20` at `8188`..`8220`), and
+  // nothing after it in the block writes a fog channel.
+  const file = join(ROOT, "stage1", "stage1.script.json");
+  if (existsSync(file)) {
+    const script = JSON.parse(readFileSync(file, "utf8")) as ScriptJson;
+    freshGame(file);
+    const w = new Walker(script, gated());
+    const ok = seekTo(w, 2, 1, 0);
+    settled();
+    const fog = G.g_scene_light_block0.channels.slice(0, 5).map(round);
+    check("stage 1: `block=2&step=1&op=0` keeps block 2's fog once its "
+          + "tweens have run out", ok
+          && JSON.stringify(fog) === JSON.stringify([34, 220.6, 101, 102, 105]),
+          `near, far, rgb ${JSON.stringify(fog)}`);
   }
 }
 

@@ -1673,3 +1673,20 @@ camera-facing strip, on a shot that never shows it so. A picture taken at a seek
 of the seek unless every object in it is stateless or was spawned after the
 address; **to see a state machine's later state, drive frames from its
 spawn**, and read the pool (`G.g_object_list`) before trusting the frame.
+
+**L111 -- A replay that stands in for a wait's frames has to run every task
+those frames run, not the ones it was written for.** The seek steps over each
+wait by running the camera's tasks (3 and 5) for the frames the wait spans,
+and that was the whole of it: task 2, `PushSceneLightStateToDevice`, which
+steps the light blocks' tweens, never ran. A set on a channel leaves its tween
+armed (`ApplyLightChannelOperand`), so every tween a replay met stayed live
+past every later set, and the first frames after the landing walked the light
+back to wherever the tween had been going. Stage 1's opening fades its fog to
+black at `1..1`, waits twenty frames and sets it back; every seek past it --
+`?stage=1&block=2&step=1&op=0` among them -- drew a field of fog with no world,
+and every stage had its own. It read as a missing region or a camera facing
+nothing; the sidebar's `fog planar 2..2` said it from the first look. **When a
+port runs some of a frame's tasks to stand in for frames it skips, list the
+scene's task list (`camera/actor.ts`) beside it and say why each one left out
+holds no state across the gap** -- `L97` is the same shape for an object's
+own frames.

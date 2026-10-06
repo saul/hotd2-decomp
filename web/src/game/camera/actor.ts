@@ -25,6 +25,7 @@
  * execution order, and every actor is allocated after the list is built.
  */
 import { G } from "../globals";
+import { PushSceneLightStateToDevice } from "../light_sets";
 import { EvtRunQueuedActions } from "./actions";
 import { CameraUpdateHook, EvtActionHandler } from "./driver";
 import { CameraUpdateTick } from "./hooks";
@@ -120,14 +121,33 @@ const REPLAY_FRAMES = 16;
  * words that describe it, keeps the landing one the game could be in: the
  * ring dequeues as it would, the scene state's hook evaluates the rail, the
  * drivers seat the block. What is skipped is the frames between.
+ *
+ * **The scene light runs the same frames.** `PushSceneLightStateToDevice` is
+ * task 2, one ahead of the camera actor, and steps every tween the script
+ * armed once a frame; a replay that carries the camera across a wait's frames
+ * and not the light leaves the tweens armed, and the next `light0_set` on a
+ * tweened channel is then undone by the frames played after the landing
+ * (`ApplyLightChannelOperand` stores the word and leaves the slot's `enabled`
+ * alone). Stage 1's opening fades its fog to `(0, 0, 0)` at `1..1` over twenty
+ * frames, waits them out and sets the fog back: every seek past it landed with
+ * that fade still running, and blocks 2 and 3 drew as a field of
+ * `(0, 0, 105)` -- block 2's fog, its red and green faded out and its blue
+ * never tweened. So each pass runs task 2 for the frames it stands for -- the ones
+ * the cursor was carried over, and the one it ticks -- before task 3, as
+ * `SceneTaskWalk` orders them.
  */
 export function CameraReplayUntil(done: () => boolean, target: number | null,
                                   minFrames = 0): void {
   for (let i = 0; i < REPLAY_FRAMES && (i < minFrames || !done()); i++) {
+    // The frames this pass carries the camera over without ticking it.
+    let carried = 0;
     if (G.g_evt_action_handler === EvtActionHandler.PathPlay) {
       const end = G.g_cam_path_end_frame;
       const to = target === null ? end : Math.min(target, end);
-      if (G.g_cam_path_cursor < to) G.g_cam_path_cursor = to;
+      if (G.g_cam_path_cursor < to) {
+        carried = to - G.g_cam_path_cursor;
+        G.g_cam_path_cursor = to;
+      }
     }
     const hook = G.g_camera_update_hook as CameraUpdateHook;
     if (hook === CameraUpdateHook.StepRail
@@ -141,8 +161,12 @@ export function CameraReplayUntil(done: () => boolean, target: number | null,
         : Math.min(target, last);
       // The hook steps before it publishes, when its gate lets it.
       const from = RailMayAdvance() ? to - 1 : to;
-      if (G.g_stashed_path_frame < from) G.g_stashed_path_frame = from;
+      if (G.g_stashed_path_frame < from) {
+        carried = Math.max(carried, from - G.g_stashed_path_frame);
+        G.g_stashed_path_frame = from;
+      }
     }
+    PushSceneLightStateToDevice(carried + 1);
     CameraActorTick();
     CameraUpdateTick();
   }
@@ -161,7 +185,8 @@ export function CameraReplaySettle(): void {
 
 /**
  * `[port-only]` -- the camera a replay leaves past `wait_frames n`: `n + 1`
- * frames on (`EvtOpWaitFrames42`), the shot or the rail carried that far.
+ * frames on (`EvtOpWaitFrames42`), the shot or the rail carried that far, and
+ * the scene light stepped through all of them (see {@link CameraReplayUntil}).
  */
 export function CameraReplayFor(frames: number): void {
   // The frames the camera tasks really run: at most two, which is enough for
@@ -182,7 +207,9 @@ export function CameraReplayFor(frames: number): void {
                                         G.g_stashed_path_end_frame);
     }
   }
+  if (skip > 0) PushSceneLightStateToDevice(skip);
   for (let i = 0; i < run; i++) {
+    PushSceneLightStateToDevice(1);
     CameraActorTick();
     CameraUpdateTick();
   }

@@ -221,6 +221,7 @@ export async function loadStageInto(p: Player): Promise<void> {
   p.chars.slotModels = p.slotModels;
   // ...and the canal water, which draws the stage's own tiles where it has
   // them and clones the rest from the same rig.
+  p.regionDraw.scene = p.scene3d;
   p.waterSurfaces.scene = p.scene3d;
   p.waterSurfaces.templates = p.slotModels;
   p.waterSurfaces.textures = p.texFilter;

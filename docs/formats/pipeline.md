@@ -512,7 +512,7 @@ where its routine puts it and once where the model's own coordinates do.
 | Disposition | Slots |
 |---|---|
 | **Backdrop** -- `render/backdrop.ts` sets these stage nodes itself, every frame (9) | `0x17A0`, `0x17A1`, `0x18A3`, `0x18A5`..`0x18A8`, `0x1AFF`, `0x1B00` |
-| **Canal water** -- class 0x41 type 1's task, through `StageScene.setWaterSlots` (6) | `0x13A0`, `0x13AD`, `0x13AE`, `0x13B0`, `0x13B2`, `0x183C` |
+| **Canal water** -- class 0x41 type 1's task, through `StageScene.setWaterSlots` (6); `0x13B2` and `0x13B0` also by `RegionDrawResidentSet` itself beside slot `0x1828` in stage 3's regions 2 and 3 ([`water.md`](water.md)) | `0x13A0`, `0x13AD`, `0x13AE`, `0x13B0`, `0x13B2`, `0x183C` |
 | **Ported with this change** (6) | `0x189B`, `0x189D` (class 0x44 selector 12, `SlideOnFlagUpdate`); `0x1986` (selector 9, `FlagLiftedPropUpdate`); `0x1384` (class 0x41 constructor 47, `PropUpdateType47`); `0x0954`, `0x0956` (class 0x13's own draw of its slot, posed by carrier selectors 4/7, `CarrierPropRoutine4`, and 5/8, `CarrierPropRoutine5`, stage 4 blocks 23/25/27/29) |
 | **Ported before; its model now travels** (1) | `0x1853` (class 0x44 selector 17, `StoryModeSwitchUpdate`) |
 | **Original Mode and civilian items** -- the item draws, from `slots_breakable` (40) | `0x107C`..`0x1084`, `0x1086`..`0x1088`, `0x108A`..`0x1092`, `0x1094`, `0x1096`..`0x109C`, `0x109E`, `0x109F`, `0x10A3`..`0x10AB` |

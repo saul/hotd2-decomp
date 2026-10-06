@@ -5435,6 +5435,69 @@ console.log("\nthe stage's loaded models: loaded is not drawn (L54)");
         scene.slotResident(0x0100) && scene.slotResident(0x7777));
 }
 
+console.log("\nRegionDrawResidentSet: the canal it draws, and the chapter card's gate");
+
+{
+  // `RegionDrawResidentSet` (`0x00401260`): for entry slot 0x1828
+  // (`st3_08[2]`) while the region is 2 or 3 it draws 0x13B2 and 0x13B0 --
+  // `st1_1[14]` and `[12]`, the canal under the boat in stage 3's two cut
+  // scenes, which no region lists and no water task draws there. And it
+  // draws nothing while `g_screen_furniture_flags & 0x20` is up. The port
+  // had neither: stage 3's canal shot showed the boat over an empty frame.
+  const { StageScene, RegionDrawGate, RegionEntryAlsoDraws }
+    = await import("../src/render/stagescene");
+  const model = (slot: number, regions: number[] = []) => {
+    const m = new Group();
+    m.userData = { hod2_regions: regions, hod2_slot: slot, hod2_draw_mode: 0 };
+    m.add(new Mesh(new PlaneGeometry(1, 1), new MeshBasicMaterial()));
+    return m;
+  };
+  const tree = new Group();
+  const quay = model(0x1828, [2, 3, 5]);
+  const tile14 = model(0x13b2), tile12 = model(0x13b0);
+  const other = model(0x0200, [4]);
+  tree.add(quay, tile14, tile12, other);
+  const scene = StageScene.fromScene(tree, { regions: [0, 1, 2, 3, 4, 5] } as never);
+  scene.loadSlot(0x13b2);
+  scene.loadSlot(0x13b0);
+  scene.enterRegion(2);
+  check("region 2's 0x1828 entry draws both canal tiles beside itself",
+        quay.visible && tile14.visible && tile12.visible,
+        `${quay.visible} ${tile14.visible} ${tile12.visible}`);
+  scene.enterRegion(4);
+  check("...a region without the entry draws neither",
+        !tile14.visible && !tile12.visible && other.visible);
+  scene.enterRegion(5);
+  check("...nor does the entry in a region other than 2 or 3",
+        quay.visible && !tile14.visible && !tile12.visible);
+  scene.enterRegion(3);
+  scene.unloadSlot(0x13b0);
+  check("region 3 draws them too, and AssetDrawSlot skips the one unloaded "
+        + "(block 0 step 2 op 42 frees 0x13B0)",
+        tile14.visible && !tile12.visible);
+  check("the arm names exactly those two slots, in the exe's order",
+        RegionEntryAlsoDraws(0x1828, 2).join() === "5042,5040"
+        && RegionEntryAlsoDraws(0x1828, 4).length === 0
+        && RegionEntryAlsoDraws(0x1829, 2).length === 0);
+
+  // The gate, driven from `G` as the frame drives it.
+  ResetGameGlobals();
+  const gate = new RegionDrawGate();
+  gate.scene = scene;
+  G.g_screen_furniture_flags |= 0x20;
+  gate.update();
+  scene.setWaterSlots(new Set([0x13b2]), new Set([0x13b2]));
+  check("with the chapter card's bit up no region model is drawn, and "
+        + "nothing beside one",
+        !quay.visible && !other.visible && !tile12.visible);
+  check("...but a tile the water task draws is that task's, and still shows",
+        tile14.visible);
+  G.g_screen_furniture_flags &= ~0x20;
+  gate.update();
+  check("...and the region comes back the frame the bit goes down",
+        quay.visible);
+}
+
 console.log("\nrigs: a part drawn behind a camera-path test");
 {
   // `FUN_0048F560`, stage 6's lift car: `AssetDrawSlot(0xAFE/0xAFF)` only

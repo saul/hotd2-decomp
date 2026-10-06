@@ -48,7 +48,7 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
   "degraded.ts": "f53ceffd81c8182f0c5edde7e6f0c1bc7f62da1851ca23e351eda62a87fb9f2e",
   "evt.ts": "0899c8c66b424688a5307c7c47aa85914f0172b4672690582e89ee58da6bffc3",
   "exetab.ts": "35ebdc2e2b5783a18e62a6dfeecb27be742161f5b7f2847193d3784b34f9275c",
-  "game/actor.ts": "968e94f7b120dc2f75320a70213a640b39f165b9416f757b34df18c09ad3a48b",
+  "game/actor.ts": "75547dfae165eafccf5c6533462128831b83ce209372e50022b615c996e20f82",
   "game/actor_turn.ts": "90f995674d988a8a56ccc14f912c6d6e2ec7b53487f57eec1a9b0587eaca8951",
   "game/app_state.ts": "6330925b362be22e524aff120571ae6925f845979ce63921a276803a328a67c6",
   "game/body_creature.ts": "b7be6dff36666d55fffc837101c9b695eb6d0e2b5b56da64f134f988de43c33f",
@@ -199,11 +199,11 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
   "game/tables.ts": "d0bcb7871858b8098130c569299d71a272d690152cd17094ae1915f1d225267d",
   "game/thrown_weapon.ts": "438b228fd2baf04ff0c5daca16ad44ed856418af57366e037999e47de0db6876",
   "game/vec.ts": "e4fa0c9c582bc4a70b040cd96ca378d7b6039501cb9f38ad0b93425f5a7563b8",
-  "gltf.ts": "4ca1bf1b90f93acb0ca990b968eba8fccf4d6c79d03320833962f8732956579f",
+  "gltf.ts": "a305d3d423e115208824a1c46c93ce135f428c9656bf07421f5c04a5ea0e5de5",
   "io.ts": "4471bf8bfab1643c6395ae496bdb7d26678835b053b867544c69d0b4c1403df8",
   "lz.ts": "dddff2029ebd1cafc686d25b57da5e5ad8e22fdb2febf4af4988651d627aa80e",
   "mot.ts": "36074edfd603b44267daf67fdcf5ccfc37652d48808b2258d6c327b8a0d99c39",
-  "nl1.ts": "53d01a8b87a5a65508687f5a5c7ea1c041c98f0b20a224f13c387a5ca4cdc25f",
+  "nl1.ts": "035b863e71203b6f69616f101eb7331e276fc04efddd6ecbb1bccad70d796b81",
   "placement.ts": "34b4ea16badd9d0648bc61136b031b140769154b1f9e6df849d6115e101e9fcd",
   "png.ts": "326d5417b68475ad54b90e2a91a1f68ca3859d6ba044582928a13459b4afa50b",
   "props.ts": "5c5a9ac4076eb54fd0b2045bf8ddfc1e76c91f280a372c38bb54a8596d610a95",
@@ -217,4 +217,4 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
 };
 
 /** One digest over {@link BUILDER_FILES}, in filename order. */
-export const BUILDER_HASH = "c97bba204c0990e44474d84720cd6d4501ed8b2d9c8c5799df32f128e02791a4";
+export const BUILDER_HASH = "fa0b7c6427848258f81219449436bd6d258877b5c0316316ca3bec0a04b68961";

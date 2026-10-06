@@ -98,6 +98,7 @@ import {
 import type { Context, System } from "../core/system";
 import { G } from "../game/globals";
 import { CH_FOG_FAR, CH_FOG_NEAR, CH_FOG_R } from "../game/light_block";
+import { SRGB_TRANSFER_GLSL } from "./srgb_glsl";
 
 export type FogMode = "off" | "planar" | "radial";
 
@@ -155,30 +156,6 @@ function patchShaderChunk(): void {
     + ShaderChunk.fog_pars_fragment;
 }
 
-/**
- * The sRGB transfer pair, spelled out rather than taken from three's
- * `colorspace_pars_fragment`.
- *
- * That chunk has the encode half (`sRGBTransferOETF`) and no decode half, and
- * whether it is in scope at `fog_fragment` is an ordering detail of a file
- * this code does not own. Two twelve-line functions are cheaper than that
- * coupling. The constants are three's own, so the round trip is exact.
- *
- * `max(x, 0)` guards `pow`: a negative component is undefined behaviour there,
- * and one can arrive from a material that subtracts.
- */
-const SRGB_TRANSFER_GLSL = /* glsl */`
-vec3 hod2SrgbEncode( vec3 c ) {
-	c = max( c, vec3( 0.0 ) );
-	return mix( pow( c, vec3( 0.41666 ) ) * 1.055 - vec3( 0.055 ),
-	            c * 12.92, vec3( lessThanEqual( c, vec3( 0.0031308 ) ) ) );
-}
-vec3 hod2SrgbDecode( vec3 c ) {
-	c = max( c, vec3( 0.0 ) );
-	return mix( pow( ( c + 0.055 ) / 1.055, vec3( 2.4 ) ),
-	            c / 12.92, vec3( lessThanEqual( c, vec3( 0.04045 ) ) ) );
-}
-`;
 
 /**
  * The game doubles the near and far plane before setting FOGSTART/FOGEND.
@@ -196,6 +173,12 @@ export const FOG_RANGE_SCALE = 2;
  * near enough to see.
  */
 const CAMERA_FAR_PLANE = 8000;
+
+/**
+ * `g_clear_colour` -- `0x00598C58`, the colour the frame is cleared to in
+ * play: black. See {@link SceneFog}'s `apply`.
+ */
+export const CLEAR_COLOUR = 0x000000;
 
 /**
  * `SetFogRange` (`FUN_004ABDF0`), as a pair.
@@ -349,13 +332,31 @@ export class SceneFog implements System {
 
   private activeRange = false;
 
+  /**
+   * The fog onto the scene, and the frame's clear colour, which the fog does
+   * **not** set.
+   *
+   * The port used to paint the background with the fog colour, on the
+   * reasoning that distant geometry should fade into the fog rather than into
+   * a void. The engine clears to a colour of its own and nothing fogs it:
+   * `RenderBeginFrame` (`FUN_004ABF00`), ahead of every frame's scene, is
+   * `BeginScene`, the D3DX context's `Clear(D3DCLEAR_TARGET |
+   * D3DCLEAR_ZBUFFER)` (vtable `+0x54`) and `SetClearColor` (`+0x58`) of
+   * `g_clear_colour` (`0x00598C58`). That word is `0xFF000000` in the image
+   * and its one writer, `SetClearColour` (`FUN_004ABEF0`), is handed 0 by
+   * `ScreenLeaveReset` and a value of its own only by the options
+   * calibration screens -- so in play every pixel no geometry covers is
+   * black, fog or no fog. The sky the fog colours is the dome's meshes,
+   * fogged like any other (`render/backdrop.ts`). `[proved]` for the word and
+   * its writers; the two vtable slots are `ID3DXContext`'s `Clear` and
+   * `SetClearColor` by the DX7 SDK's declaration order, which the `+0x14`
+   * `GetD3DDevice` and `+0x18` `GetPrimary` calls in
+   * `InitD3DDeviceAndTextureStages` agree with: `[likely]`.
+   */
   private apply(): void {
     const on = this.mode !== "off" && this.activeRange;
     this.scene.fog = on ? this.fog : null;
-    // Distant geometry should fade into the fog, not into a void. When fog is
-    // off the background goes back to the neutral dark the viewport uses.
-    (this.scene.background as Color | null)?.set(
-      on ? this.fog.color : new Color(0x05070a));
+    (this.scene.background as Color | null)?.set(CLEAR_COLOUR);
   }
 
   get describe(): string {

@@ -108,7 +108,7 @@ function FreshProfileItems(): number[] {
   items[OriginalItem.CreditPlus2] = 1;
   return items;
 }
-import { SceneFog } from "../render/fog";
+import { CLEAR_COLOUR, SceneFog } from "../render/fog";
 import { TextureFilter, type TextureFilterMode } from "../render/texfilter";
 import { type LightingMode, SceneLighting } from "../render/lighting";
 import { GunLights } from "../render/gunlights";
@@ -700,7 +700,8 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
       document.documentElement.classList.add("no-blur");
     }
     this.perfMeter.onSnapshot = (r) => this.reportPerf(r);
-    this.scene.background = new Color(0x05070a);
+    // `SetClearColor(0x00598C58)`: black. See `SceneFog`'s `apply`.
+    this.scene.background = new Color(CLEAR_COLOUR);
     // World matrices are brought up to date for the visible branches only,
     // just before each render. See `render/visible_world.ts`.
     this.scene.matrixWorldAutoUpdate = false;
@@ -740,6 +741,9 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
       },
     };
     this.scene.add(this.backdrop.group);
+    // The dome is an `AssetDrawSlot` like any model, so the device lights it
+    // (`render/lighting.ts`); it used to be the one model drawn unlit.
+    this.lighting.addRoot(this.backdrop.group);
     this.scene.add(this.rain.group);
     this.scene.add(this.spawns.group);
     this.scene.add(this.debug.group);

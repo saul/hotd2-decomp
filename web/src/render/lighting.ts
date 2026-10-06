@@ -75,7 +75,8 @@
  * `SPECULARENABLE` is 1 from `RenderInitStates` (`0x004A7630`) and nothing
  * turns it off; `COLORVERTEX` is 0 and every material source is
  * `D3DMCS_MATERIAL`; `LOCALVIEWER` and `NORMALIZENORMALS` are never written
- * and keep their defaults (on, off); and every one of the 278,807 strips in
+ * and keep their defaults (on, off) -- though the port renormalises anyway,
+ * see `D3D_VERTEX_MAIN`; and every one of the 278,807 strips in
  * `pol/` sets bit `0x40`, which `WalkMeshChainAndDraw` turns into
  * `D3DSHADE_GOURAUD`. (The device pointer `0x007DEB74` is read by 25
  * routines and those are all of them.) The material is the mesh's own:
@@ -92,7 +93,7 @@
  * so one vertex comes out of the device as
  *
  * ```
- * N.L    = dot(N, L)              N not renormalised, L toward the light
+ * N.L    = dot(N, L)              N renormalised (see D3D_VERTEX_MAIN), L toward the light
  * colour = clamp(Ma * (Ga + La) + (N.L > 0 ? Md * Ld * N.L : 0))
  * spec   = clamp(N.L > 0 && N.H > 0 ? Ms * Ls * N.H^P : 0)
  *          H = normalize(L + normalize(eye - vertex))
@@ -303,15 +304,29 @@ varying vec3 vD3dSpecular;
 /**
  * The equation in the module comment, once a vertex. `objectNormal` is the
  * normal after skinning and morphing, put through `normalMatrix` -- the
- * inverse transpose of the modelview, which is the matrix D3D7 transforms
- * normals by -- and **not renormalised**, because `NORMALIZENORMALS` is off:
- * the dome's 1.2 scale dims its light exactly as it did the engine's.
+ * inverse transpose of the modelview, which is the matrix D3D's
+ * fixed-function pipeline transforms normals by -- and then renormalised.
  * `transformedNormal` is not used because three flips it for a back-sided
  * material, which the device never does.
+ *
+ * `[diverges]` from the documented D3D arithmetic, on the renormalisation.
+ * The exe never writes `NORMALIZENORMALS`, and Microsoft's fixed-function
+ * reference normalises the camera-space normal only when it is TRUE. Taken at
+ * its word, a model drawn under a `MatrixScale` below 1 has its normals
+ * stretched by the reciprocal, `N.L` and `N.H` past 1, and `pow(N.H, P)`
+ * explodes: `FishDraw` (`FUN_00439860`) draws the fish under `Scale(0.3)`,
+ * and they came out white. The PC game on Windows draws them coloured --
+ * checked by the user against the shipped game -- so whatever its runtime
+ * does, it is not that; and the game's own data agrees: the fish's surface
+ * silhouette, under `Scale(0.4, 0.01, 0.4)` at light colour 0.1, reads as a
+ * shadow only with unit normals. The inputs this changes are the draws made
+ * under a non-unit scale -- the fish (0.3), the silhouettes, the civilians
+ * (0.9), the dome (1.2) -- and every one reaches this program through the
+ * scene lighting. `test/render.test.ts` pins the normalisation.
  */
 const D3D_VERTEX_MAIN = /* glsl */`
 {
-	vec3 d3dN = normalMatrix * objectNormal;
+	vec3 d3dN = normalize( normalMatrix * objectNormal );
 	float d3dNL = dot( d3dN, d3dLightDir );
 	vec3 d3dC = d3dTexAmbient * diffuse * d3dLightAmbient;
 	vec3 d3dS = vec3( 0.0 );

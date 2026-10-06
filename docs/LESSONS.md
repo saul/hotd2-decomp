@@ -1380,6 +1380,17 @@ byte "written nowhere in the image" that `CameraResetForPathShot` writes at
 when. The longer copy is not necessarily the newer one, and a name nobody
 exported may be one nobody merged.**
 
+**L111 -- A seek that misses must stop where it can prove the miss, and a
+second replay is not a seek.** `?stage=1&block=2&step=0` opened stage 2: the
+engine enters a routed block at step 1 and never runs step 0 in Arcade or
+Original play, so the replay looked for 2/0/0 to the end of the scene, returned
+`false` with the walker `finished`, and the first frame of play loaded the next
+stage. `L44`'s "silent and total" again, from a well-formed address. The first
+fix replayed a second time to the block's entry from inside `seekTo` -- on the
+`G` the first pass had left, flags and route history from the rest of the stage
+included, because `Walker.reset` clears none of it. **A seek's precondition is
+the caller's whole reset, so a re-seek goes back through the caller.**
+
 ## Believing what you are looking at
 
 **L17 — A negative result from one agent is not a fact.** Two agents reported

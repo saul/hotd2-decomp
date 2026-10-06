@@ -558,7 +558,7 @@ defaults; and all 278,807 strips in `pol/` set bit `0x40`, `D3DSHADE_GOURAUD`.
 therefore
 
 ```
-N.L    = dot(N, L)                     N not renormalised; L toward the light
+N.L    = dot(N, L)                     N per the reference not renormalised (see below); L toward the light
 colour = clamp(Ma·(Ga + La) + (N.L > 0 ? Md·Ld·N.L : 0))
 spec   = clamp(Ms·Ls·max(N.H, 0)^P)    H = normalize(L + normalize(eye − vertex))
 pixel  = texel·colour + spec, then the fog
@@ -566,7 +566,15 @@ pixel  = texel·colour + spec, then the fog
 
 with `Ga` the packed `D3DRENDERSTATE_AMBIENT` and `La`, `Ld`, `Ls` the light's
 three colours from `SetLightingDefaultSingle` above, every term a fraction of a
-framebuffer byte. Whether the hardware gates the highlight on `N.L > 0` is the
+framebuffer byte. **The normal, as the PC game draws it, is unit length.**
+Microsoft's fixed-function reference transforms it by the inverse transpose of
+the world-view matrix and renormalises only under `NORMALIZENORMALS`, which
+the exe never sets; taken literally, `FishDraw`'s `Scale(0.3)` stretches the
+fish's normals by 3.3 and the highlight saturates them white. The shipped
+game on Windows draws them coloured, and the fish's silhouette (flattened
+`Scale(0.4, 0.01, 0.4)` at light colour 0.1) is a shadow only with unit
+normals, so the player renormalises. Whether the
+hardware gates the highlight on `N.L > 0` is the
 driver's and not the exe's; the reference rasteriser does, and the player
 follows it: `[likely]`.
 

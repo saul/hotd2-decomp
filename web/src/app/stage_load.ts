@@ -28,7 +28,7 @@ import { RailLayer } from "../render/overlays";
 import { attachTo, ownResources } from "../render/scope3d";
 import { Walker } from "../script/walker";
 import { G } from "../game/globals";
-import { seekTo as seekWalkerTo } from "../script/seek";
+import { seekToward } from "../script/seek";
 import { PlayerTasksDrawWithoutAFrame } from "../game/player_shell";
 import { treeProjection } from "./projection/script";
 import { makeWalkerHost } from "./walker_host";
@@ -405,15 +405,24 @@ function applyIncomingState(p: Player): void {
   if (p.state.slot !== undefined) {
     p.poseFromSlot(p.state.slot, p.state.frame ?? 0);
   } else if (p.state.block !== undefined) {
-    const arrived = seekWalkerTo(w, p.state.block, p.state.step ?? 1,
-                           p.state.op ?? 0, undefined, entry);
-    if (!arrived) {
+    const [block, step, op] =
+      [p.state.block, p.state.step ?? 1, p.state.op ?? 0];
+    const r = seekToward(w, block, step, op, undefined, entry);
+    if (!r.arrived && r.entered) {
+      // A block the run reaches, at a step it never sits on: `step=0`, which
+      // only a scene load in Training, Boss Mode or the attract demo runs.
+      // The replay stopped as it left the block, so go to where the run
+      // entered it -- through `Player.seekTo`, whose reset clears what this
+      // replay wrote to `G`.
+      // Before this the replay ran to the end of the scene and the first
+      // frame of play loaded the next stage. See `seekTo` in `script/seek.ts`.
+      p.seekTo(block, r.entered[0], r.entered[1]);
+      p.noteSeekMiss(block, step, op);
+    } else if (!r.arrived) {
       // The address is not on any route the script can take from the entry
       // block -- a stale link, or a branch this run did not take. Say so
       // rather than silently presenting whatever the replay ran into.
-      console.warn(`no route to ${p.state.block}/${p.state.step ?? 1}` +
-                   `/${p.state.op ?? 0}; showing ${w.block}/${w.step}` +
-                   `/${w.opIndex}`);
+      p.noteSeekMiss(block, step, op);
     }
     // The replay runs no frame, so the HUD readouts -- which the engine
     // draws every frame -- would be the reset's empty list.

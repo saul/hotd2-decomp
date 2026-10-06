@@ -276,33 +276,33 @@ export const g_class41_constructors:
   },
   // `PlaceType42Prop` reads nothing of the placer.
   [PropContainerType.Type42Prop]: (obj) => {
-    G.g_breakable_props.push(PlaceType42Prop(obj.at));
+    G.g_breakable_props.push(PlaceType42Prop(obj.descAt));
   },
   // `PlaceType52VanDoors` reads the placer's position, yaw and `+0x11C`.
   [PropContainerType.Type52VanDoors]: (obj) => {
     G.g_breakable_props.push(
-      ...PlaceType52VanDoors(obj.at, obj.pos, obj.yaw, obj.hp));
+      ...PlaceType52VanDoors(obj.descAt, obj.pos, obj.yaw, obj.hp));
   },
   // `PlaceType55Particles` reads the placer's position, and a table of the
   // image's that travels on the placement.
   [PropContainerType.Type55Particles]: (obj, f) => {
     const pl = T.breakables?.placements?.find(
-      (q) => q.at === obj.at && q.container === "type55");
+      (q) => q.at === obj.descAt && q.container === "type55");
     if (!pl?.offsets) return;
     G.g_breakable_props.push(
-      PlaceType55Particles(obj.at, obj.pos, pl.offsets, f.rng));
+      PlaceType55Particles(obj.descAt, obj.pos, pl.offsets, f.rng));
   },
   // `PlaceType61Figures` builds actors, not props: nine skinned figures in the
   // object pool, their types a table of the image's on the placement.
   [PropContainerType.Type61Figures]: (obj) => {
     const pl = T.breakables?.placements?.find(
-      (q) => q.at === obj.at && q.container === "type61");
+      (q) => q.at === obj.descAt && q.container === "type61");
     if (!pl?.char_types) return;
     PlaceType61Figures(obj, pl.char_types);
   },
   // `PlaceType65Particles` copies the placer's position and never reads it.
   [PropContainerType.Type65Particles]: (obj, f) => {
-    G.g_breakable_props.push(PlaceType65Particles(obj.at, obj.pos, f.rng));
+    G.g_breakable_props.push(PlaceType65Particles(obj.descAt, obj.pos, f.rng));
   },
   [PropContainerType.KindedProp]: (obj, f) => {
     const pl = T.breakables?.placements?.find(

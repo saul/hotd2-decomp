@@ -1047,6 +1047,7 @@ function SceneTaskWalk(dt: number, host: GameHost,
     // engine's routine does, and sets nothing. See `camera/track.ts`.
     if (handler?.tracksCamera?.(obj)
         && !G.g_camera_candidates.some((c) => c.prop === null
+                                           && c.thrown === null
                                            && c.at === obj.at)) {
       RegisterForCameraTracking(obj);
     }

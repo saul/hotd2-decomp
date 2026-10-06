@@ -227,15 +227,27 @@ export function ThrowerStateLeapDown(obj: ThrowerActor, dt: number, rng: Rng,
  * the exporter used to read them at `0x30`, which gave rows 1 to 3 a pounce
  * and its neighbour's leap.
  *
- * [diverges] **Character type 0x17 gets no script.** Its arm is
- * `JZ 0x0044BAE7`, past the `MOVSD.REP` every other arm ends in, so the engine
- * hands `ActorArcBeginToWaypoint` twelve dwords of this frame's uninitialised
- * stack. The port cannot reproduce that and does not invent a stand-in: it
- * installs none, and the arc ends on the frame it begins. `zskamere` reaches
- * this state only through `ThrowerStateFallToSurface` with `obj+0x34` bit
- * `0x20000000` up -- its picks name neither 12 nor 13, and
- * `ThrowerStateWaitForPermit` sends it to 0x18 or 0x20 -- and no shipped run
- * has been shown to get it there. `[open]` whether one does.
+ * **Character type 0x17 copies no script.** Its arm is `DEC EAX; JZ
+ * 0x0044BAE7` at `0x0044BA6D`, two bytes past the `MOVSD.REP` every other arm
+ * ends in, so `ActorArcBeginToWaypoint` is handed the address of a stack local
+ * nothing on that path writes: twelve dwords of whatever the calls before
+ * this one left at that depth. The port has no such stack and installs no
+ * script there, so the arc would end on the frame it begins.
+ *
+ * **No shipped `zskamere` gets here**, `[proved]` and held by
+ * `tools/checks/zskamere_aside.ts`. State 10 is stored by three instructions:
+ * `ThrowerStateLeapDown`'s exit, the dead `ThrowerStateLeapStrike`'s, and
+ * `ThrowerStateFallToSurface`'s when `obj+0x34` bit `0x20000000` is up. A
+ * `zskamere` is behaviour set 2, every one of them, starting in state 18 or
+ * 20; set 2's `g_class31_action_picks` offer nothing but 7 where the pounces
+ * are, and `ThrowerStateWaitForPermit` sends type 0x17 to 0x18 or 0x20 -- so it
+ * never leaps down. The bit is raised only here and by
+ * the withdraw, state 25 below, whose exit clears it, as
+ * `ThrowerOnShot` (`FUN_004499A0`) does; and state 11 is entered only from
+ * states 7 and 8, through `ThrowerSnapToSurface` (`FUN_0044C600`) -- so it
+ * never falls into here either. Its attack picks are 4 to 6, so the attack-3
+ * arm above cannot take it. What the arm would read is therefore never read,
+ * and the note that called it an open divergence is settled.
  */
 function LeapAsideScript(obj: ThrowerActor): ArcStage[] | null {
   if (obj.attack === 3 && obj.charType !== CHAR_ZSLMAN) {

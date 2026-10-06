@@ -29,6 +29,15 @@
  *
  * The engine's light colour is global state and the afterimage never puts it
  * back; what the port does instead is declared on `applyLight`.
+ *
+ * ## The ground shadow
+ *
+ * Class 0x31's weapon also draws slot `0x10D0` under it every frame it is
+ * drawn (`ActorDrawGroundShadowWithSize`, `FUN_0040A600`), and the record
+ * carries that matrix too (`ThrownWeapon.shadow`). The disc is not one of the
+ * thrower's own models, so it comes from the `slots_actor` templates the
+ * exporter emits for class 0x31 (`shadows`), and it is drawn in the layer the
+ * routine names, `0xD`, as the `renderOrder` the port spells a layer with.
  */
 import {
   Color, Group, Mesh, Object3D, SRGBColorSpace, type Material,
@@ -36,10 +45,19 @@ import {
 import type { System } from "../core/system";
 import type { RenderContext } from "./context";
 import { G } from "../game/globals";
+import { GROUND_SHADOW_LAYER, GROUND_SHADOW_SLOT } from "../game/ground_shadow";
 
 export interface SlotSource {
   cloneSlot(slot: number): Object3D | null;
 }
+
+/** Where the ground shadow's model comes from: `render/slotmodels.ts`. */
+export interface TemplateSource {
+  cloneTemplate(slot: number): Object3D | null;
+}
+
+/** `SetDrawLayerNibble(8)`, the world's layer, which the port spells as 0. */
+const WORLD_LAYER = 8;
 
 export class ProjectileLayer implements System<RenderContext> {
   readonly id = "render.projectiles";
@@ -53,8 +71,12 @@ export class ProjectileLayer implements System<RenderContext> {
   readonly group = new Group();
   /** The character layer, which owns the per-type model templates. */
   source: SlotSource | null = null;
+  /** The slot-model layer, which owns the ground shadow's template. */
+  shadows: TemplateSource | null = null;
 
   private readonly nodes = new Map<number, Object3D>();
+  /** Each weapon's ground-shadow node, by the weapon's id. */
+  private readonly shadowNodes = new Map<number, Object3D>();
   /**
    * The nodes a light colour tints: each mesh's own material clone, and the
    * colour it had before the tint. Cloned the first time a record asks,
@@ -84,6 +106,8 @@ export class ProjectileLayer implements System<RenderContext> {
     ctx.session.defer(() => {
       for (const n of this.nodes.values()) n.removeFromParent();
       this.nodes.clear();
+      for (const n of this.shadowNodes.values()) n.removeFromParent();
+      this.shadowNodes.clear();
       for (const ts of this.tinted.values()) {
         for (const t of ts) t.mat.dispose();
       }
@@ -97,6 +121,7 @@ export class ProjectileLayer implements System<RenderContext> {
     const seen = new Set<number>();
     for (const w of G.g_thrown_weapons) {
       seen.add(w.id);
+      this.placeShadow(w.id, w.shadow);
       let node = this.nodes.get(w.id);
       if (!node) {
         const made = this.source?.cloneSlot(w.slot);
@@ -122,6 +147,36 @@ export class ProjectileLayer implements System<RenderContext> {
       this.nodes.delete(id);
       for (const t of this.tinted.get(id) ?? []) t.mat.dispose();
       this.tinted.delete(id);
+    }
+    for (const [id, node] of this.shadowNodes) {
+      if (seen.has(id)) continue;
+      node.removeFromParent();
+      this.shadowNodes.delete(id);
+    }
+  }
+
+  /**
+   * `AssetDrawSlot(0x10D0)` under the matrix the weapon's routine recorded,
+   * in draw layer `0xD`, or nothing on a frame it drew none. A modelview,
+   * like the weapon's own.
+   */
+  private placeShadow(id: number, m: readonly number[] | null): void {
+    let node = this.shadowNodes.get(id);
+    if (!node && m) {
+      const made = this.shadows?.cloneTemplate(GROUND_SHADOW_SLOT) ?? null;
+      if (!made) return;
+      made.matrixAutoUpdate = false;
+      // As `render/slotmodels.ts` spells a layer: on the node, the world's
+      // own 8 being 0.
+      made.renderOrder = GROUND_SHADOW_LAYER - WORLD_LAYER;
+      this.group.add(made);
+      this.shadowNodes.set(id, (node = made));
+    }
+    if (!node) return;
+    node.visible = m !== null;
+    if (m) {
+      node.matrix.fromArray(m);
+      node.matrixWorldNeedsUpdate = true;
     }
   }
 

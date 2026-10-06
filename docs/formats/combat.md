@@ -2071,6 +2071,32 @@ It scores nothing. The landing raises `0x400C000` — `0x4000000` and `0x8000`
 among it — so a weapon that has landed is out of the shot test and cannot be
 deflected. `[proved]`
 
+### Its shadow, its hit slot and the camera
+
+Three more calls make the weapon an object like any other, and each is past a
+`MatrixStackPop` or at the very top of a routine:
+
+* **A hit slot.** `SpawnThrownWeapon` opens with `ActorClaimHitSlot`
+  (`FUN_00409270`, at `0x004504FE`), so a knife in the air holds one of the
+  fourteen `g_hit_slots` entries until `ActorDespawn` gives it back -- and an
+  actor spawned meanwhile is dealt the next one, which is the phase of a
+  class-0x30 bone's cel animation.
+* **The ground shadow.** Every frame it draws, after `RegisterForShotTest`,
+  `ThrownWeaponUpdate` calls `ActorDrawGroundShadowWithSize(obj, 5.0, 5.0)`
+  (`FUN_0040A600`, at `0x004508BA`): slot `0x10D0` in draw layer `0xD`, at
+  `T(x, h + 0.1, z) S(5, 1, 5)`, `h` the floor `QueryGroundHeightAt` finds from
+  three units above the weapon (its `obj+0x1F8` is 5, bit 2 up) -- or
+  `g_camera_fixed_eye_y` in `g_app_state` 0xD. `ActorDrawGroundShadow`
+  (`FUN_0040A620`) is the routine; the skinned actors reach it through
+  `ActorDrawShadow` at a size by character type.
+* **A camera candidate.** In state 0 -- the flight, and the ninety frames
+  stuck to the screen -- it copies its position to `obj+0x100` and calls
+  `RegisterForCameraTracking` (`0x00450917`), as `SpawnThrownWeapon` did once
+  already (`0x00450771`). It holds its thrower's permit in `obj+0x121`, so
+  `UpdateCameraEnemySlots` deals it slot 0 or 1 and the camera looks at it,
+  or at its midpoint with the other permit holder -- the thrower, left holding
+  0, among them. Shot down, in state 1, it is not offered. `[proved]`
+
 ### Class 0x30's weapon
 
 `ZombieThrowHandWeapon` (`FUN_0045A240`) allocates the same `0x13F4` object

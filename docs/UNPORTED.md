@@ -75,9 +75,10 @@ does not have yet. A class not listed has no such note.
 * **`0x30` zombie** -- states 16 (`0x00457360`), 28, `0x32`, `0x33`, `0x35`
   and `ZombieSplitInTwo` (`FUN_0045D9F0`, which `game:split_unreachable`
   holds unreachable); `ZombieCorpsePoseFrame` (`FUN_00454E00`); five bone-cel
-  arms.
-* **`0x31` thrower** -- the thrown weapon's ground shadow and camera
-  tracking; character type `0x17`'s pounce.
+  arms; the thrown weapon's hit slot (`ZombieThrowHandWeapon`, `0x0045A25F`),
+  its camera tracking (`0x0045A4DD`, `0x0045A676`) and its ground shadow
+  (`0x0045A622`) -- class 0x31's weapon makes all three, through the same
+  record.
 * **`0x33` scripted scenery** -- every selector runs; the carrier's
   (selector 1's) `RegisterForShotTest` at `0x004334D0` and the
   `MatrixStore(obj+0x150)` the mesh shot test would read. `[open]`: what

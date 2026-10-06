@@ -144,7 +144,7 @@ console.log("\nevery caller of the ring effects, where the exe calls it:");
     const a = corpse(285, 1);
     const slot = a.hitSlot;
     a.cameraSlot = 3;
-    G.g_enemy_slots[3] = { occupied: 1, at: a.at, prop: null };
+    G.g_enemy_slots[3] = { occupied: 1, at: a.at, prop: null, thrown: null };
     G.g_enemies_present = 1;
     const alive = G.g_enemies_alive;
     const rng = new Rng(15);
@@ -165,7 +165,7 @@ console.log("\nevery caller of the ring effects, where the exe calls it:");
     const b = corpse(285, 1);
     b.flags |= ActorFlag.KeepCameraWhenLast;
     b.cameraSlot = 3;
-    G.g_enemy_slots[3] = { occupied: 1, at: b.at, prop: null };
+    G.g_enemy_slots[3] = { occupied: 1, at: b.at, prop: null, thrown: null };
     G.g_enemies_present = 0;
     for (let i = 0; i < 200 && !b.despawned; i++) {
       ThrowerStateCorpseSink(b, 1 / 60, rng);

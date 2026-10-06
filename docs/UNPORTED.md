@@ -40,12 +40,6 @@ the same commit.
   (`0x0048B160`); `SpawnCivilianBloodPool` (`FUN_0048E080`, its object's
   update unread); VM ops `0x23`, `0x24`, `0x25` and `0x2B`'s two words
   (`[open]`); op `0x1F`'s second stream.
-* **`0x13` scripted prop** -- `g_prop_behaviours` entries 6
-  (`PropBehaviourLaunchWithAccel`, `FUN_0043FFC0`) and 7
-  (`PropBehaviourRideObjectPath`, `FUN_004400D0`), which no shipped
-  descriptor selects (`[proved]` by census; entry 9 is Training's, below).
-  Every carrier routine is ported, routine 3 and routines 1's and 6's
-  screen-test exit included.
 * **`0x20` one-hit target** -- the damaged-part swap.
 * **`0x21` rescue target** -- the sixteen body parts.
 * **`0x25` scripted humanoid** -- `ScriptedHumanoidAimHeadAtCamera`

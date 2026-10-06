@@ -125,6 +125,19 @@ lists themselves are `.data` literals in `web/src/game/class29/`, checked
 word for word by `web/tools/checks/prop_tables.ts`; the two slots they draw,
 `0x93C` and `0x93D`, ride the hidden `slots_effect` rig.
 
+A class-0x13 placement carries `class13: {slot, cam_path, cam_frame, scale,
+behaviour, selector}` (`class13Tail`), `selector` being the operand block's
+first dword (`desc+0x24+0x14`). Two optional fields ride with the two
+`g_prop_behaviours` entries that read more of it, and only on those:
+`operand`, the six f32 at `+0x14..+0x28` that `PropBehaviourLaunchWithAccel`
+(`FUN_0043FFC0`, behaviour 6) turns into a velocity and an acceleration, and
+`path_length`, `g_cam_path_length[selector]` (`0x00576D38`), the end
+`PropBehaviourRideObjectPath` (`FUN_004400D0`, behaviour 7) compares the
+camera frame with -- the image's table, read by the exporter
+(`ExeTables.camPathLength`) for the one slot the descriptor names. No
+shipped descriptor takes either behaviour, so no shipped bundle carries
+either field; the schema digest moved and no format bump.
+
 Every stage carries `subtitle_glyphs`, `g_subtitle_glyphs` (`0x0055E054`)
 as s16[128]: the screen sprite `DrawTextCentred` (`FUN_00436850`) draws for
 each character. `screen_sprites` carries the glyphs of the characters the

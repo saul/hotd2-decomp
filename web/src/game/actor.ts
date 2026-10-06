@@ -58,6 +58,8 @@ import { makeSetPiecePropTail, type SetPiecePropTail }
 import { makeThrowerTail, type ThrowerTail } from "./class31/state";
 import { makeZombieTail, type ZombieTail } from "./class30/state";
 import { makeResultCardTail, type ResultCardTail } from "./class61/state";
+import { makePropContainerTail, type PropContainerTail }
+  from "./class41/placer_state";
 
 /**
  * `model+0x64` — the **motion block's** flag word, which is `obj+0x1F8`.
@@ -448,10 +450,14 @@ export enum ActorFlag {
    * the bit. It runs once, from `ActorBuildSkinnedModel` (`FUN_00410440`),
    * which every skinned class's `Init` calls after pointing `g_cur_actor` at
    * itself -- so a civilian, a zombie, a thrower and every boss carry it.
-   * Six builders clear it again with `AND 0x7F` straight after: `PlaceBats`,
-   * `SpawnBatWings`, `CatInit`, `SpawnGoldenFrog` and two class-0x41 builders
-   * (`0x00463E50`, `0x004641F0`). `ActorBuildSkinnedModel` in `spawn.ts` is
-   * where the port raises it.
+   * `PlaceBats`, `SpawnBatWings` and `CatInit` clear it again with `AND 0x7F`
+   * straight after. `SpawnGoldenFrog` and constructor 68 (`0x00463E50`) make
+   * their `AND 0x7F` on the word of the object they were **handed** -- the
+   * prop, or the placer (`AND DL,0x7F` on `[EDI+0x34]`, `[EBX+0x34]`) -- and
+   * the frog loses the bit to the `MOV dword ptr [ESI+0x34], 0x1` before it
+   * (`class41/golden_frog.ts`). Which word `0x004641F0`'s `AND` is on is not
+   * read here. `ActorBuildSkinnedModel` in `spawn.ts` is where the port
+   * raises it.
    */
   ShootPerBone = 0x80,
   /**
@@ -2673,6 +2679,8 @@ export type Actor =
                    scenery: ScriptedSceneryTail })
   | (ActorBase & { cls: SpawnClass.ResultCard; card: ResultCardTail })
   | (ActorBase & { cls: SpawnClass.CutsceneSkipWatcher; skipWatch: SkipWatchTail })
+  | (ActorBase & { cls: SpawnClass.PropContainerPlacer;
+                   placer: PropContainerTail })
   | (ActorBase & { cls: Exclude<SpawnClass,
       SpawnClass.ScriptedHumanoid | SpawnClass.SetPieceProp
       | SpawnClass.Thrower | SpawnClass.Zombie
@@ -2687,7 +2695,8 @@ export type Actor =
       | SpawnClass.ScriptedScenery | SpawnClass.Vehicle
       | SpawnClass.PathRidingProp | SpawnClass.HordeSpawner
       | SpawnClass.Worm | SpawnClass.ResultCard
-      | SpawnClass.CutsceneSkipWatcher> });
+      | SpawnClass.CutsceneSkipWatcher
+      | SpawnClass.PropContainerPlacer> });
 
 /** An actor already narrowed to class 0x25, for that class's own routines. */
 export type HumanoidActor = Extract<Actor,
@@ -2739,6 +2748,10 @@ export type FishActor = Extract<Actor, { cls: SpawnClass.WaterEnemy }>;
 
 /** An actor already narrowed to class 0x61: the result card or a figure. */
 export type ResultCardActor = Extract<Actor, { cls: SpawnClass.ResultCard }>;
+
+/** An actor already narrowed to class 0x41: a placer or a golden frog. */
+export type PropContainerActor = Extract<Actor,
+  { cls: SpawnClass.PropContainerPlacer }>;
 
 /** An actor already narrowed to class 0x33, for that class's own routines. */
 export type ScriptedSceneryActor = Extract<Actor,
@@ -3022,6 +3035,9 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
   }
   if (cls === SpawnClass.CutsceneSkipWatcher) {
     return { ...head, cls, skipWatch: makeSkipWatchTail() };
+  }
+  if (cls === SpawnClass.PropContainerPlacer) {
+    return { ...head, cls, placer: makePropContainerTail() };
   }
   return { ...head, cls };
 }

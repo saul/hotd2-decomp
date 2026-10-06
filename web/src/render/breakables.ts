@@ -59,6 +59,7 @@ import { Rng } from "../core/rng";
 import { COMPOSITE_FAMILIES, PropParts, type PropPart } from "./prop_parts";
 import { BannerWave } from "./banner_wave";
 import { releaseAssetDrawAlpha, setAssetDrawAlpha } from "./draw_order";
+import { rewriteEnvUvs } from "./class2d_draws";
 
 /** `AssetDrawSlot(0x10D0)` — the ground shadow a standing prop gets. */
 const SHADOW_SLOT = 0x10d0;
@@ -247,6 +248,9 @@ export class BreakableLayer implements System<RenderContext> {
   /** Draw-time noise only — see `shake`. Reseeded by `adopt`. */
   private readonly rng = new Rng(SHAKE_SEED);
   private readonly _m = new Matrix4();
+  /** This frame's world-to-view, for {@link PropDrawCall.envUv}. */
+  private readonly _view = new Matrix4();
+  private viewValid = false;
   /** `PropUpdateType45`'s bend of the banner templates (`banner_wave.ts`). */
   private readonly banners = new BannerWave();
 
@@ -344,9 +348,16 @@ export class BreakableLayer implements System<RenderContext> {
     return c;
   }
 
-  update(): void {
+  update(ctx?: RenderContext): void {
     this.group.visible = this.enabled;
     if (!this.enabled) return;
+    // The modelview an `AssetSlotUVsFromViewNormals` draw rewrites its UVs
+    // through: the camera's world-to-view, as `render/effects.ts` takes it.
+    this.viewValid = false;
+    if (ctx?.camera) {
+      this._view.copy(ctx.camera.matrixWorldInverse);
+      this.viewValid = true;
+    }
     const seen = new Set<number>();
 
     for (const p of G.g_breakable_props) {
@@ -604,6 +615,8 @@ export class BreakableLayer implements System<RenderContext> {
       n.matrixWorldNeedsUpdate = true;
       // `AssetDrawSlotWithAlpha`'s forced blend, or the plain draw.
       setAssetDrawAlpha(n, c.alpha ?? null);
+      // `AssetSlotUVsFromViewNormals` on the same slot just before the draw.
+      if (c.envUv && this.viewValid) rewriteEnvUvs(n, this._view);
       // The layer goes on the primitives, as `draw_order.ts` puts layer 7:
       // a group's order would become its children's `groupOrder`, which
       // three.js compares before anything else.

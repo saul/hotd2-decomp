@@ -108,6 +108,7 @@ import {
   clearHumanoidHookDraws, syncHumanoidHookDraws,
 } from "./characters/humanoid_hook";
 import { syncResultFigure } from "./characters/result_figure";
+import { syncGoldenFrogDraw } from "./characters/golden_frog";
 import { RESULT_FIGURE_AT_BIT, RESULT_FIGURE_TEMPLATE_BIT }
   from "../game/class61/state";
 import {
@@ -137,7 +138,10 @@ interface Pending {
 /**
  * A result card figure's address: bit 26 without the template's bit 25 --
  * `ResultFigureAt` in `game/class61/state.ts`, written out, because a
- * renderer may not call into the port.
+ * renderer may not call into the port. A golden frog's address is in the
+ * same space (`GoldenFrogAt`, `game/class41/golden_frog.ts`), for the same
+ * reason: it is allocated with no descriptor and drawn from its type's
+ * template.
  */
 function isFigureAt(at: number): boolean {
   return at > 0 && (at & RESULT_FIGURE_AT_BIT) !== 0
@@ -641,6 +645,9 @@ export class CharacterLayer implements System {
       // `ResultCardFigureDrawNode` (`FUN_004357F0`)'s own draws -- see
       // `render/characters/result_figure.ts`.
       syncResultFigure(inst, (slot) => this.cloneSlot(slot));
+      // `GoldenFrogUpdate` (`FUN_00471FA0`)'s light and strip -- see
+      // `render/characters/golden_frog.ts`.
+      syncGoldenFrogDraw(inst, (slot) => this.cloneSlot(slot));
       // `ScriptedHumanoidBoneDrawHook` (`FUN_00485260`)'s extra models -- see
       // `render/characters/humanoid_hook.ts`.
       syncHumanoidHookDraws(inst, (slot) => this.cloneSlot(slot));

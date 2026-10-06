@@ -191,6 +191,11 @@ export interface BreakablePlacement {
    * `type17` reads the point; `type37` the point, `yaw`, `set_size`,
    * `field_1f4` (the item set) and the lifetime, and names the effect and
    * motion its break draws. See `game/class41/type16.ts` and its siblings.
+   *
+   * `golden_frog` is constructor 68 (`PlaceGoldenFrogFromLessonTable`),
+   * whose three places a lesson ride in {@link BreakablePlacement.xz}; it
+   * reads the placer's `+0x44` and `+0x11C` besides. See
+   * `game/class41/golden_frog.ts`.
    */
   container: "group" | "kinded" | "falling" | "generic"
     | "chain" | "fragment" | "story_switch" | "script_flag_effect"
@@ -202,7 +207,7 @@ export interface BreakablePlacement {
     | "hinge" | "van_doors" | "hinge_scaled"
     | "flag_slot_effect" | "effect_handoff" | "swing_then_break"
     | "scaled_slot_effect" | "effect_collapse" | "slot_strip_loop"
-    | "kinded_44" | "uv_scroll";
+    | "kinded_44" | "uv_scroll" | "golden_frog";
   /** How many evt blocks it lives for. */
   lifetime_evt_steps: number;
   /** `group` only — the row of `g_breakable_group_ptrs` to build. */
@@ -276,6 +281,12 @@ export interface BreakablePlacement {
    * builds from.
    */
   field_1f4?: number;
+  /**
+   * `golden_frog` -- `g_golden_frog_lesson_xz` (`0x0059579C`), fifteen raw
+   * `[s16 x, s16 z]` rows, three a lesson for `g_training_lesson` 0..4. The
+   * `* 0.1` is the constructor's.
+   */
+  xz?: [number, number][];
   slot?: number;
   /**
    * `generic` and `draw_only_14` — the other two orientation words, which
@@ -449,6 +460,19 @@ export interface ShatterPiecesJson {
   angles: [number, number, number][];
 }
 
+/**
+ * One `g_item_pickup_slot` record (`0x00595058`, stride `0xC`), raw: the
+ * slot the score pickup is drawn with, the points it pays
+ * (`g_item_score_table`, the s16 at `+2`), the scale it is drawn at (`+4`)
+ * and how far above its prop it is let out (`g_item_pickup_y_offset`, `+8`).
+ */
+export interface ItemPickupRowJson {
+  slot: number;
+  score: number;
+  scale: number;
+  y_offset: number;
+}
+
 export interface BreakablesJson {
   /** All nine groups, indexed by group id. */
   groups: BreakableMember[][];
@@ -477,6 +501,12 @@ export interface BreakablesJson {
    * pivot on.
    */
   type37_hull?: [number, number, number][];
+  /**
+   * `g_item_pickup_slot` (`0x00595058`) -- the score pickup's `0xC`-byte
+   * record for each kind the release switch hands `SpawnScorePickup`
+   * (`FUN_004723F0`): 2 and 5..8, keyed by the kind.
+   */
+  item_pickups?: Record<string, ItemPickupRowJson>;
   /** What a stacked group prop's fifteen shatter pieces are made of. */
   shatter: ShatterPiecesJson;
   /** `g_prop_kind_params`, indexed by kind. */

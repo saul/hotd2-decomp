@@ -61,7 +61,11 @@ import { TYPE29_CONSTRUCTOR, Type29DrawSlots }
 import {
   TYPE37_CONSTRUCTOR, TYPE37_EFFECT, TYPE37_MOTION, Type37DrawSlots,
 } from "../game/class41/type37_slots";
-import { type16Rows, type29Rows, type37Hull } from "./class41_rows";
+import {
+  goldenFrogLessonRows, itemPickupRows, type16Rows, type29Rows, type37Hull,
+} from "./class41_rows";
+import { GOLDEN_FROG_LESSON_CONSTRUCTOR }
+  from "../game/class41/item_pickup_slots";
 // Same argument again: `hud_sprites.ts` is the id list `hud_readout.ts` draws
 // from, as data, and the exporter must put exactly those textures in.
 // The continue screen's and the credit line's are in the same file.
@@ -856,6 +860,16 @@ export function containerPlacements(tables: ExeTables, evt: evtlib.EvtFile,
           field_1f4: index, slot,
           lifetime_evt_steps: rec.hp,
         });
+      } else if (ctor === GOLDEN_FROG_LESSON_CONSTRUCTOR) {
+        // `PlaceGoldenFrogFromLessonTable` -- a golden frog at one of three
+        // places a Training lesson picks, from `g_golden_frog_lesson_xz`,
+        // which travels raw; the placer gives its `+0x44` and its `+0x11C`.
+        out.push({
+          at: rec.offset, container: "golden_frog",
+          xz: goldenFrogLessonRows(tables),
+          lifetime_evt_steps: rec.hp,
+          pos: [...rec.pos],
+        });
       } else if (ctor === 3) {
         // `PlaceType3UvScrollTask` -- the stage-1 car's reflection. The task
         // reads nothing of the placer; the placement only says it is there.
@@ -1277,6 +1291,9 @@ export function breakablesJson(tables: ExeTables,
     type16_xz: type16Rows(tables),
     type29_xyz: type29Rows(tables),
     type37_hull: type37Hull(tables),
+    // `g_item_pickup_slot`'s five rows: the score pickup any container's
+    // item set 2 or 5..8 lets out (`SpawnScorePickup`, `ScorePickupUpdate`).
+    item_pickups: itemPickupRows(tables),
     shatter: tables.shatterPieces(),
     kinds: tables.propKindParams(),
     placements,
@@ -2383,6 +2400,13 @@ export async function breakableSlotEntry(
   for (const slot of [...shatter.slots_a, ...shatter.slots_b]) {
     if (!want.includes(slot)) want.push(slot);
   }
+  // The score pickup's models, one per kind, from its own table: any of the
+  // three families can let one out, so every stage carries all five, as it
+  // carries the extra life's heart. Its shadow (`0x10D0`) and the two
+  // players' strips are already in `BREAKABLE_SLOTS`.
+  for (const row of Object.values(itemPickupRows(stage.tables))) {
+    if (!want.includes(row.slot)) want.push(row.slot);
+  }
   for (const pl of placements) {
     if (pl.container !== "generic") continue;
     // The literals this type's routine draws, always; plus the descriptor slot
@@ -2749,14 +2773,15 @@ export async function buildStage(stage: Stage, sink: BundleSink,
   // parts with a translation and an asset slot, which is exactly a rig. They
   // are appended to the glTF list only -- `rigsJson` below is built from
   // `rigInstances`, so a character never turns up as an object rig.
+  // Before the glTF: the template rig has to include every asset slot the
+  // stage's generic props name, and only the script knows which those are.
+  // Before the characters too: whether a container can let out a golden
+  // frog decides whether its type's template travels.
+  const placements = evt ? containerPlacements(tables, evt, spawnRecords) : [];
   say(`  ${name}: characters`);
   const { chars: charDefs, placements: charPlaces,
           entries: charEntries } = await resolveCharacters(
-    stage, prog, spawnRecords, null, null, cache);
-
-  // Before the glTF: the template rig has to include every asset slot the
-  // stage's generic props name, and only the script knows which those are.
-  const placements = evt ? containerPlacements(tables, evt, spawnRecords) : [];
+    stage, prog, spawnRecords, null, null, cache, placements);
   await addEffectCollapseKeys(stage, placements);
   const carriedEffects = await carriedPropEffectsJson(
     stage, charPlaces as unknown as Record<string, unknown>[]);

@@ -49,6 +49,10 @@ import { PlaceTable16Props } from "./type16";
 import { PlaceType17Props } from "./type17";
 import { PlaceTable29Props } from "./type29";
 import { PlaceType37PropPair } from "./type37";
+import { PropContainerRoutine } from "./placer_state";
+import {
+  GoldenFrogUpdate, PlaceGoldenFrogFromLessonTable,
+} from "./golden_frog";
 
 /**
  * `obj+0x130C` for this class — the constructor index, **not** the body
@@ -143,6 +147,12 @@ export enum PropContainerType {
    * sharing an item set. See `class41/type37.ts`.
    */
   Type37PropPair = 37,
+  /**
+   * `PlaceGoldenFrogFromLessonTable` (`FUN_00463E50`) -- a golden frog at
+   * one of three places `g_training_lesson` picks. Training only. See
+   * `class41/golden_frog.ts`.
+   */
+  GoldenFrogFromLessonTable = 68,
 }
 
 /** What one class-0x41 constructor does. `undefined` where none is ported. */
@@ -241,6 +251,14 @@ export const g_class41_constructors:
   },
   [PropContainerType.WaterSurface]: (obj) => {
     PlaceWaterSurface(obj);
+  },
+  // A golden frog, an actor and not a prop: its three places travel on the
+  // placement, and the placer's `+0x44` and `+0x11C` are what it reads.
+  [PropContainerType.GoldenFrogFromLessonTable]: (obj, f) => {
+    const pl = T.breakables?.placements?.find(
+      (q) => q.at === obj.at && q.container === "golden_frog");
+    if (!pl?.xz) return;
+    PlaceGoldenFrogFromLessonTable(obj, pl.xz, f);
   },
   [PropContainerType.KindedProp]: (obj, f) => {
     const pl = T.breakables?.placements?.find(
@@ -357,9 +375,32 @@ export function PropContainerCountsForEnemyGate(rec: SpawnRecord): boolean {
   return pl?.type !== undefined && GENERIC_ENEMY_COUNTING_TYPES.has(pl.type);
 }
 
+/**
+ * `[port-only]` -- the task walk's call through `obj+0x00`, for the two
+ * routines a class-0x41 actor can be on: the placer's own, or the golden
+ * frog's, which `SpawnGoldenFrog` (`FUN_004722A0`) and constructor 68 hand
+ * the actors they make. See `class41/placer_state.ts`.
+ */
+export function PropContainerRun(obj: Actor, f: ClassFrame): void {
+  if (obj.cls !== SpawnClass.PropContainerPlacer) return;
+  switch (obj.placer.routine) {
+    case PropContainerRoutine.Placer: PropContainerPlacerUpdate(obj, f); break;
+    case PropContainerRoutine.GoldenFrog: GoldenFrogUpdate(obj, f); break;
+  }
+}
+
 export const PropContainerPlacerHandler: ClassHandler = {
   init: PropContainerPlacerInit,
-  update: PropContainerPlacerUpdate,
+  update: PropContainerRun,
+  // A placer has no model and dies on its first frame; the golden frog
+  // steps `obj+0x194` itself, and not on every frame (`GoldenFrogUpdate`).
+  advancesOwnMotion: true,
+  // The frog calls `RegisterForShotTest` (`FUN_00405160`) from its own
+  // update and reads `obj+0x34` bit 3 itself; the placer is gone before a
+  // shot can reach it. The props the constructors build are not actors and
+  // register through the prop pool (`class41/shot_test.ts`).
+  registersForShotTest: true,
+  ownsShotResult: true,
   raisesScriptFlag: PropContainerRaisesScriptFlag,
   countsForEnemyGate: PropContainerCountsForEnemyGate,
 };
@@ -416,6 +457,8 @@ export * from "./type16";
 export * from "./type17";
 export * from "./type29";
 export * from "./type37";
+export * from "./placer_state";
+export * from "./golden_frog";
 export {
   BreakableGroupMembers, BreakableMemberSlot, BreakablePropAt,
   BreakableGroupFloor, MsvcRand, PROP_TARGET_SETS, MEMBERS_PER_GROUP,

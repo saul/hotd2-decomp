@@ -746,6 +746,8 @@ export function SpawnPropContainers(spawns: readonly ScriptSpawn[]): void {
       : pl.container === "type17" ? PropContainerType.Type17Props
       : pl.container === "table29" ? PropContainerType.Table29Props
       : pl.container === "type37" ? PropContainerType.Type37PropPair
+      : pl.container === "golden_frog"
+        ? PropContainerType.GoldenFrogFromLessonTable
       : PropContainerType.BreakableGroup;
     // The table constructors -- 38, 39, 44, 16 and 29 -- and constructor 37
     // read the placer's `+0x11C` as the step lifetime they copy into every
@@ -753,7 +755,10 @@ export function SpawnPropContainers(spawns: readonly ScriptSpawn[]): void {
     // group id.
     const table = pl.container === "table38" || pl.container === "table39"
       || pl.container === "table44" || pl.container === "table16"
-      || pl.container === "table29" || pl.container === "type37";
+      || pl.container === "table29" || pl.container === "type37"
+      // ...and constructor 68 copies it into its frog's `+0x11C`, the step
+      // lifetime `GoldenFrogUpdate` counts against.
+      || pl.container === "golden_frog";
     // The water task and constructors 50 and 66 read both descriptor fields
     // as themselves: `+0x1F4` the table index, `+0x11C` the lifetime.
     const bothFields = pl.container === "water_surface"

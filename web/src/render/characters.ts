@@ -108,6 +108,7 @@ import {
   clearHumanoidHookDraws, syncHumanoidHookDraws,
 } from "./characters/humanoid_hook";
 import { syncResultFigure } from "./characters/result_figure";
+import { syncType61FigureLight } from "./characters/type61_figure";
 import { RESULT_FIGURE_AT_BIT, RESULT_FIGURE_TEMPLATE_BIT }
   from "../game/class61/state";
 import {
@@ -641,6 +642,9 @@ export class CharacterLayer implements System {
       // `ResultCardFigureDrawNode` (`FUN_004357F0`)'s own draws -- see
       // `render/characters/result_figure.ts`.
       syncResultFigure(inst, (slot) => this.cloneSlot(slot));
+      // `Type61FigureUpdate` (`FUN_004729E0`)'s light -- see
+      // `render/characters/type61_figure.ts`.
+      syncType61FigureLight(inst);
       // `ScriptedHumanoidBoneDrawHook` (`FUN_00485260`)'s extra models -- see
       // `render/characters/humanoid_hook.ts`.
       syncHumanoidHookDraws(inst, (slot) => this.cloneSlot(slot));

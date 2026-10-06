@@ -63,6 +63,9 @@ import { PropUpdateType16, Type16DropStripUpdate } from "./type16";
 import { PropUpdateType17 } from "./type17";
 import { PropUpdateType29 } from "./type29";
 import { PropUpdateType37 } from "./type37";
+import { PropDrawOnlyType42 } from "./type42";
+import { PropUpdateType55Particles } from "./type55";
+import { PropUpdateType65Particles } from "./type65";
 
 /**
  * Every live container, once a frame.
@@ -183,6 +186,12 @@ export function BreakablePropPoolUpdate(rng: Rng, events?: Events,
       case PropFamily.Type17: PropUpdateType17(p, rng, events); break;
       case PropFamily.Type29: PropUpdateType29(p); break;
       case PropFamily.Type37: PropUpdateType37(p, rng, events); break;
+      // Constructors 42, 55 and 65 hand `ActorAlloc` routines of their own,
+      // each with its own way out and no prologue, sphere or counter. See
+      // `class41/type42.ts`, `type55.ts` and `type65.ts`.
+      case PropFamily.Type42: PropDrawOnlyType42(p); break;
+      case PropFamily.Type55: PropUpdateType55Particles(p, rng); break;
+      case PropFamily.Type65: PropUpdateType65Particles(p); break;
       default: BreakablePropUpdate(p, rng, events, cam); break;
     }
   }

@@ -62,6 +62,12 @@ import {
   TYPE37_CONSTRUCTOR, TYPE37_EFFECT, TYPE37_MOTION, Type37DrawSlots,
 } from "../game/class41/type37_slots";
 import { type16Rows, type29Rows, type37Hull } from "./class41_rows";
+import {
+  TYPE42_CONSTRUCTOR, TYPE42_SLOT, TYPE52_CONSTRUCTOR, TYPE52_OBJECTS,
+  TYPE52_SLOT, TYPE55_CONSTRUCTOR, TYPE55_SLOT, TYPE55_SLOT_SPAN,
+  TYPE61_CONSTRUCTOR, TYPE65_CONSTRUCTOR, TYPE65_SLOT, TYPE65_SLOT_SPAN,
+} from "../game/class41/ctor_literals";
+import { type55ParticleOffsets, type61FigureTypes } from "./class41_ctors";
 // Same argument again: `hud_sprites.ts` is the id list `hud_readout.ts` draws
 // from, as data, and the exporter must put exactly those textures in.
 // The continue screen's and the credit line's are in the same file.
@@ -781,6 +787,32 @@ export function containerPlacements(tables: ExeTables, evt: evtlib.EvtFile,
           effect: TYPE37_EFFECT, motion: TYPE37_MOTION,
           pos: [...rec.pos], yaw: rec.orient[1],
         });
+      } else if (ctor === TYPE42_CONSTRUCTOR || ctor === TYPE52_CONSTRUCTOR
+                 || ctor === TYPE55_CONSTRUCTOR || ctor === TYPE61_CONSTRUCTOR
+                 || ctor === TYPE65_CONSTRUCTOR) {
+        // Constructors 42, 52, 55, 61 and 65 (`game/class41/type42.ts` and
+        // its neighbours) read at most the descriptor's position, yaw and
+        // `+0x11C`; 55 and 61 read a table of the image as well, and it
+        // travels here, cut to the rows the constructor's own immediate
+        // reaches.
+        const pl: Record<string, unknown> = {
+          at: rec.offset, container: `type${ctor}`,
+          lifetime_evt_steps: rec.hp,
+          pos: [...rec.pos], yaw: rec.orient[1],
+        };
+        const table = ctor === TYPE55_CONSTRUCTOR
+          ? type55ParticleOffsets(tables)
+          : ctor === TYPE61_CONSTRUCTOR ? type61FigureTypes(tables) : [];
+        if (table === null) {
+          degraded.note("hod2lib.bundle.container_placements",
+                        `constructor ${ctor} at 0x${rec.offset.toString(16)}`,
+                        "the objects are not placed and nothing draws them",
+                        "its table is not in the image");
+          continue;
+        }
+        if (ctor === TYPE55_CONSTRUCTOR) pl.offsets = table;
+        if (ctor === TYPE61_CONSTRUCTOR) pl.char_types = table;
+        out.push(pl);
       } else if (ctor === 24) {
         // `PlaceChainSegments` -- twenty segments, each carrying the placer's
         // `+0x1F4` as a chain group. Group 1 is a **route-branch trigger**.
@@ -2470,6 +2502,19 @@ export async function breakableSlotEntry(
     if (pl.container === "type37") slots.push(...Type37DrawSlots());
     // `ChainSegmentUpdate` draws one literal for every link.
     if (pl.container === "chain") slots.push(CHAIN_LINK_SLOT);
+    // Constructors 42, 52, 55 and 65 draw literals: one model, a pair, and
+    // a strip each task steps through by piece. 61 draws skeletons, which
+    // are the character layer's.
+    if (pl.container === "type42") slots.push(TYPE42_SLOT);
+    if (pl.container === "type52") {
+      for (let k = 0; k < TYPE52_OBJECTS; k++) slots.push(TYPE52_SLOT + k);
+    }
+    if (pl.container === "type55") {
+      for (let k = 0; k < TYPE55_SLOT_SPAN; k++) slots.push(TYPE55_SLOT + k);
+    }
+    if (pl.container === "type65") {
+      for (let k = 0; k < TYPE65_SLOT_SPAN; k++) slots.push(TYPE65_SLOT + k);
+    }
     for (const slot of slots) {
       if (slot && !want.includes(slot)) want.push(slot);
     }

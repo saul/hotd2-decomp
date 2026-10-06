@@ -4943,6 +4943,45 @@ console.log("\nthe bat's splash: thirty models, one a frame, on the water");
   G.g_object_list.length = 0;
 }
 
+console.log("\nthe gun light takes a scene-lit mesh with the torch's program, not the scene light's:");
+{
+  // `GunLights` built its twin from the material the mesh wore, which under
+  // "+ scene light" is the device-lit twin: chained under the gun light's
+  // patch, that twin's patch had already stripped `lights_fragment_begin`
+  // (the spot loop and its shadows) and rewritten the output, so the torch
+  // drew nothing and cast nothing.
+  const { GunLights } = await import("../src/render/gunlights");
+  const base = new MeshBasicMaterial();
+  base.userData = { pvr2: { tex_ambient: 0.75, specular: [0, 0, 0], specular_power: 0 } };
+  const mesh = new Mesh(new PlaneGeometry(1, 1), base);
+  const root = new Group();
+  root.add(mesh);
+  const scene = new Scene();
+  const lights = new SceneLighting(scene);
+  lights.build(root);
+  lights.beforeRender();
+  check("the mesh wears its scene-lit twin first",
+        (mesh.material as { customProgramCacheKey(): string })
+          .customProgramCacheKey() === "d3dlit");
+  const gun = new GunLights(scene, lights);
+  (gun as unknown as { light(m: unknown): void }).light(mesh);
+  const lit = mesh.material as InstanceType<typeof MeshBasicMaterial>;
+  const shader = {
+    vertexShader: ShaderLib.lambert.vertexShader,
+    fragmentShader: ShaderLib.lambert.fragmentShader,
+    uniforms: {} as Record<string, { value: unknown }>,
+  };
+  lit.onBeforeCompile(shader as never, undefined as never);
+  check("the gun-lit twin keeps three.js's spot loop, where the torch and its "
+        + "shadow are evaluated",
+        shader.fragmentShader.includes("NUM_SPOT_LIGHTS")
+        && shader.fragmentShader.includes("gunAmbient * PI"),
+        lit.userData?.gunLit ? "gunLit" : "not gunLit");
+  check("...and is not the scene light's device equation underneath",
+        !shader.fragmentShader.includes("vD3dColour")
+        && !shader.vertexShader.includes("d3dLightDir"));
+}
+
 console.log("\nthe gun lights are built off the camera this frame draws:");
 {
   // `GunLightBuildSystem` runs after the camera draw, so the torch is placed

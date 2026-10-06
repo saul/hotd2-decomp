@@ -1002,7 +1002,12 @@ hook until a player reported it. **When state moves into a hook, find every
 `clone()` of the materials that carry it** (`rg '\.clone\(\)' src/render`);
 here each one now clones `unlitMaterial(worn)`, and the swap twins the copy.
 `render/draw_order.ts`'s `fadedCopy` is the other answer, copying the two
-across, and was already right.
+across, and was already right. **Chaining is the same trap from the other
+side**: `render/gunlights.ts` built its own twin over the scene twin and called
+the scene twin's hook first, which had already stripped the chunk the gun
+light's patch rewrites -- the torch and its shadows drew nothing until a player
+reported it. A layer that builds its own twin builds it from
+`unlitMaterial(worn)` too.
 
 **L109 -- A transpose standing in for an inverse is a claim that nothing
 scales, and it holds only for the callers it was written for.** `coli.ts`

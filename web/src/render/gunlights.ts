@@ -77,7 +77,7 @@ import type { RenderContext } from "./context";
 import {
   copyDrawState, setUnfadedMaterial, unfadedMaterial,
 } from "./draw_order";
-import type { SceneLighting } from "./lighting";
+import { unlitMaterial, type SceneLighting } from "./lighting";
 
 /**
  * The two questions this layer asks the port, answered by `app/`.
@@ -479,9 +479,19 @@ export class GunLights implements System<RenderContext> {
     this.litNodes = nodes;
   }
 
-  private twinOf(m: Material): Material {
-    if (m.userData?.gunLit) return m;
-    if (!lightable(m)) return m;
+  /**
+   * The gun-lit twin of what a mesh wears -- built from its **unlit** base,
+   * never from the scene-lit twin "+ scene light" has on it. That twin keeps
+   * the device equation in its `onBeforeCompile` (`render/lighting.ts`),
+   * which strips `lights_fragment_begin`, where three.js evaluates the spots
+   * and their shadows: chained under this one's patch it left the patch
+   * nothing to replace, and every gun-lit mesh drew the plain scene light
+   * under the `gunlit` program key -- no torch, no shadow (`L110`).
+   */
+  private twinOf(worn: Material): Material {
+    if (worn.userData?.gunLit) return worn;
+    const m = unlitMaterial(worn);
+    if (!lightable(m)) return worn;
     let t = this.twins.get(m);
     if (!t) {
       t = makeGunLitMaterial(m);

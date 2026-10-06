@@ -21,6 +21,11 @@
  *   eleven `Init`s and three updates put their object straight into the first
  *   free slot from 2, bypassing the sort, until the next fill clears it.
  *
+ * Two kinds of candidate are not {@link Actor}s in the port -- the carried
+ * props and the thrown weapons -- and each has a registration of its own
+ * that files it by id; the fill treats them as the engine does, by their
+ * `obj+0x121`.
+ *
  * So the table has **holes** -- slot 2 is empty whenever the nearest
  * candidate holds a permit -- and the camera drivers read slots 0..3 by index
  * (`SelectCameraLookAtTarget`, `CameraDriverSelectMode`,
@@ -76,7 +81,7 @@ export function RegisterForCameraTracking(obj: Actor): void {
   if (obj.flags & ActorFlag.NoCameraTrack) return;
   if (G.g_camera_candidate_count >= CAMERA_MAX_CANDIDATES) return;
   G.g_camera_candidates.push({ key: CameraCandidateKey(obj.pos),
-                               at: obj.at, prop: null });
+                               at: obj.at, prop: null, thrown: null });
   G.g_camera_candidate_count += 1;
 }
 
@@ -90,7 +95,25 @@ export function RegisterPropForCameraTracking(id: number, flags: number,
                                               pos: Vec3): void {
   if (flags & ActorFlag.NoCameraTrack) return;
   if (G.g_camera_candidate_count >= CAMERA_MAX_CANDIDATES) return;
-  G.g_camera_candidates.push({ key: CameraCandidateKey(pos), at: 0, prop: id });
+  G.g_camera_candidates.push({ key: CameraCandidateKey(pos), at: 0, prop: id,
+                               thrown: null });
+  G.g_camera_candidate_count += 1;
+}
+
+/**
+ * The same routine again, called on a thrown weapon -- `SpawnThrownWeapon`
+ * (`FUN_004504E0`) at `0x00450771` and `ThrownWeaponUpdate` (`FUN_00450780`)
+ * at `0x00450917`, each after copying the position to `obj+0x100`.
+ * `[port-only]` as a third function, because the weapons are records in
+ * `G.g_thrown_weapons` and not {@link Actor}s. The key is the weapon's own
+ * `obj+0x40`, as for everything else; the slot fill reads its `obj+0x121`.
+ */
+export function RegisterThrownWeaponForCameraTracking(
+    w: { id: number; flags: number; pos: Vec3 }): void {
+  if (w.flags & ActorFlag.NoCameraTrack) return;
+  if (G.g_camera_candidate_count >= CAMERA_MAX_CANDIDATES) return;
+  G.g_camera_candidates.push({ key: CameraCandidateKey(w.pos), at: 0,
+                               prop: null, thrown: w.id });
   G.g_camera_candidate_count += 1;
 }
 
@@ -154,6 +177,27 @@ export function UpdateCameraEnemySlots(): void {
       s.prop = e.prop;
       continue;
     }
+    if (e.thrown !== null) {
+      // A thrown weapon's `obj+0x121` is the permit it took from its thrower
+      // (`SpawnThrownWeapon`, `0x004506C4`), so while it holds one it is
+      // dealt a permit slot like any attacker. Its `obj+0x120` is written
+      // too, and nothing in either weapon family reads it back.
+      const w = G.g_thrown_weapons.find((x) => x.id === e.thrown);
+      if (!w) continue;
+      if (w.attackPermit !== -1) {
+        for (let s = 0; s < CAMERA_ATTACK_SLOTS; s++) {
+          if (slots[s].occupied) continue;
+          slots[s].occupied = 1;
+          slots[s].thrown = w.id;
+          break;
+        }
+      } else {
+        const s = slots[rank + CAMERA_ATTACK_SLOTS];
+        s.occupied = 1;
+        s.thrown = w.id;
+      }
+      continue;
+    }
     const obj = ActorByAt(e.at);
     if (!obj) continue;
     if (obj.attackPermit !== -1) {
@@ -191,6 +235,7 @@ export function RegisterEnemySlot(obj: Actor): void {
     slot.occupied = 1;
     slot.at = obj.at;
     slot.prop = null;
+    slot.thrown = null;
     return;
   }
 }
@@ -226,14 +271,17 @@ export function CameraSlotVacate(obj: Actor): void {
  */
 export function CameraSlotActor(i: number): Actor | undefined {
   const slot = G.g_enemy_slots[i];
-  if (!slot || !slot.occupied || slot.prop !== null) return undefined;
+  if (!slot || !slot.occupied || slot.prop !== null || slot.thrown !== null) {
+    return undefined;
+  }
   return ActorByAt(slot.at);
 }
 
 /**
  * What `SelectCameraLookAtTarget` reads off the object in slot `i`: its
  * `obj+0x100` and its `obj+0x121`. A carried prop answers with its own camera
- * point and no permit. `[port-only]`, for the same reason as
+ * point and no permit; a thrown weapon with its own point and the permit it
+ * carries. `[port-only]`, for the same reason as
  * {@link CameraSlotActor}.
  */
 export function CameraSlotObject(i: number):
@@ -243,6 +291,10 @@ export function CameraSlotObject(i: number):
   if (slot.prop !== null) {
     const p = G.g_carried_props.find((q) => q.id === slot.prop);
     return p ? { lookAt: p.lookAt, attackPermit: -1 } : undefined;
+  }
+  if (slot.thrown !== null) {
+    const w = G.g_thrown_weapons.find((q) => q.id === slot.thrown);
+    return w ? { lookAt: w.lookAt, attackPermit: w.attackPermit } : undefined;
   }
   return ActorByAt(slot.at);
 }

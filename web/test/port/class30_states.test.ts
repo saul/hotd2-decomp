@@ -68,7 +68,7 @@ import {
 
 /** Slot `i` held by `at`, as a fill or a direct claim leaves it. */
 function ClaimSlot(i: number, at = 0): void {
-  G.g_enemy_slots[i] = { occupied: 1, at, prop: null };
+  G.g_enemy_slots[i] = { occupied: 1, at, prop: null, thrown: null };
 }
 
 console.log("\nclass 0x30 state 26: the arc alone moves the leap:");

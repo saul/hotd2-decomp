@@ -574,6 +574,13 @@ export const CHECKS: readonly Check[] = [
      + "that must be found -- which is the whole of the case for the port "
      + "not transcribing the split, and the only check that can say when "
      + "that case stops holding"),
+  game("zskamere_aside",
+       "that no `zskamere` (class 0x31, type 0x17) can reach "
+     + "`ThrowerStateLeapAside` (`FUN_0044B880`), whose type-0x17 arm hands "
+     + "the arc an unfilled stack buffer -- the three stores of state 10, "
+     + "the two raises of the retreat bit, set 2's picks and every type-0x17 "
+     + "descriptors, each beside a control -- which is the whole of the case "
+     + "for the port installing no script on that arm"),
   game("horde",
        "that every number the class-0x40 horde is steered by -- its entry "
      + "splines, spline rates, shot delays, wander grid, second skin and the "

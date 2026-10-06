@@ -25,7 +25,7 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
   "approach.ts": "f2458fca4f4f943e775d2f73237eef7bf925b37dc38ba653bc89f80d3e800443",
   "arcscript.ts": "7c64fa78e89264425a0032c0918c846f8972905d848251d517112cd307722b35",
   "bams.ts": "f03b1290866a63ab2ae764d49bd15c57bd53c6b1a03794f7a0357e8dd842eb8f",
-  "bundle.ts": "e3a6d6f7f6358a363186011a4f6b6ab4df2843f2a1faa1757d4adf813b705659",
+  "bundle.ts": "b2714f9f383990616ff177b90f7cfa803b1bd8158e322bccafd983462f4ccd69",
   "bytes.ts": "59b2f363e98da56e88ada59458239032e40cad3a27342659e213d849c0967168",
   "cam.ts": "fe50200cb57c6578681a121766e7a5f4ed2425d91996169f83a82e8375dd63c3",
   "campaths.ts": "fbe28df3265d37b60a006e937a926eca8546609aa29cc5d80e7f1fc9afd639be",
@@ -61,8 +61,8 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
   "game/camera/path.ts": "90168b4d20d02463c589f5b8e327b1abea0d1514ca6887c64ac0f051dc4f00ee",
   "game/camera/rail.ts": "c397e6db93e56019154edabaa39d350a9487928a48aa295c630a93b7d0c3e480",
   "game/camera/select_target.ts": "53dbcc7ef4f8ba4f7b3496723d359b71e0533da503437e3586f32f62a54d4ab9",
-  "game/camera/slot_table.ts": "8d80d7e8d92d9a2c41b46335894006c009593d0bc1dae587953a6f599b646ca8",
-  "game/camera/slots.ts": "03ed073eddd31c581ea715c0f13ca7fdf164f87d6e7cec9137f1596f51dcdd1e",
+  "game/camera/slot_table.ts": "b9c838f461cf7877361a3bd05d507f174ef5cca0f4081695ea4f4a7083aa7368",
+  "game/camera/slots.ts": "0cf29e7792273864220ece002c9da82bf7566eb7e697c2fe52fbc8f444a2e3fb",
   "game/camera/track.ts": "e1652ffc778b88c8ec1f2bd6ffa0dae9805bd397ea5ae54c21ee32ad6a6a7e71",
   "game/camera/turn.ts": "54d9c2af22c864eb0586aab6e8d94b81538645f46410ffb972c4f14e23fdb9d2",
   "game/camera/view.ts": "450f5fe33db496f9484248060e8e5e6f4b76ac72e83d191d539ec64b0d5a72ea",
@@ -192,7 +192,7 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
   "game/skeleton.ts": "7de0b8ceccb47b105acdc5e2a09e441d5c1d0af3bea3fe28f7137f7558ab5194",
   "game/spawn_class.ts": "78ff0f981338798b2022c27eb4e5ab1799bf6bab7d3afa5471b6b320721fc709",
   "game/tables.ts": "d0bcb7871858b8098130c569299d71a272d690152cd17094ae1915f1d225267d",
-  "game/thrown_weapon.ts": "adbfdb358e6ee1a12ab1bbf18b0964e34c2c85eb387f822bf4608813123effae",
+  "game/thrown_weapon.ts": "438b228fd2baf04ff0c5daca16ad44ed856418af57366e037999e47de0db6876",
   "game/vec.ts": "e4fa0c9c582bc4a70b040cd96ca378d7b6039501cb9f38ad0b93425f5a7563b8",
   "gltf.ts": "4ca1bf1b90f93acb0ca990b968eba8fccf4d6c79d03320833962f8732956579f",
   "io.ts": "4471bf8bfab1643c6395ae496bdb7d26678835b053b867544c69d0b4c1403df8",
@@ -212,4 +212,4 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
 };
 
 /** One digest over {@link BUILDER_FILES}, in filename order. */
-export const BUILDER_HASH = "4c628d1bda311c09f174ac389f183cb43cf2adb9368cd43254ce0d8956574168";
+export const BUILDER_HASH = "4b640218032cf419b9525ebb2943af4f8fcacce4772922407dccd219ff6d39ac";

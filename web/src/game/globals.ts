@@ -2613,7 +2613,9 @@ export const G = {
   g_civilian_carrier: -1,
 
   /**
-   * `g_hit_slots` — `0x009C88C0`. Fourteen entries, an actor's `at` or `-1`.
+   * `g_hit_slots` — `0x009C88C0`. Fourteen entries, an actor's `at` or `-1`
+   * -- or, for class 0x31's thrown weapon, `ThrownWeaponHitSlotOwner` of its
+   * id (`game/thrown_weapon.ts`), which is below `-1`.
    *
    * `ActorClaimHitSlot` (`FUN_00409270`) hands out the indices and
    * `ActorDespawn` (`FUN_00409CC0`) gives them back; `game/hit_slots.ts` is

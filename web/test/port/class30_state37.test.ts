@@ -10,9 +10,9 @@ import {
 } from "../../src/game/globals";
 import { NULL_HOST, type GameHost } from "../../src/game/host";
 import {
-  CarriedPropIsOnScreen, CarriedPropRoutine, MarkCarriedPropShot,
-  type CarriedProp,
+  CarriedPropRoutine, MarkCarriedPropShot, type CarriedProp,
 } from "../../src/game/carried_prop";
+import { CarriedPropIsOnScreen } from "../../src/game/combat/permits";
 import {
   MatIdentity, MatrixRotateX, MatrixRotateY, MatrixRotateZ, MatrixToEulerZYX,
   VecAimXAxisYThenZ,

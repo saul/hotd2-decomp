@@ -524,6 +524,17 @@ export class SlotModelLayer implements System<RenderContext> {
         live.node.position.set(a.pos.x, a.pos.y, a.pos.z);
         live.node.rotation.set(a.pitch * BAMS_TO_RAD, a.yaw * BAMS_TO_RAD,
                                a.roll * BAMS_TO_RAD, "XZY");
+        if (a.cls === SpawnClass.ScriptedProp) {
+          // `AssetDrawSlotWithAlpha(obj+0x1F4, sub+0x18)` whenever the alpha
+          // is not 1.0 (`0x0043FF2F`..`0x0043FF62`), in the layer the
+          // behaviour left -- carrier selector 3's 9; the world's 8 keeps
+          // the template's order, as `extra` does.
+          const t = a.prop13;
+          setDrawAlpha(live.node, t.alpha === 1 ? null : t.alpha);
+          if (t.drawLayer !== WORLD_LAYER) {
+            live.node.renderOrder = t.drawLayer - WORLD_LAYER;
+          }
+        }
       } else if (a.cls === SpawnClass.HordeSpawner
                  || a.cls === SpawnClass.Worm
                  || a.cls === SpawnClass.Vehicle

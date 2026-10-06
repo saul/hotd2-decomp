@@ -43,9 +43,9 @@ the same commit.
 * **`0x13` scripted prop** -- `g_prop_behaviours` entries 6
   (`PropBehaviourLaunchWithAccel`, `FUN_0043FFC0`) and 7
   (`PropBehaviourRideObjectPath`, `FUN_004400D0`), which no shipped
-  descriptor selects (`[proved]` by census; entry 9 is Training's, below);
-  carrier routine 3 (`0x00440AD0`); routine 1's and 6's screen-test exit
-  (`FUN_004459C0`).
+  descriptor selects (`[proved]` by census; entry 9 is Training's, below).
+  Every carrier routine is ported, routine 3 and routines 1's and 6's
+  screen-test exit included.
 * **`0x20` one-hit target** -- the damaged-part swap.
 * **`0x21` rescue target** -- the sixteen body parts.
 * **`0x25` scripted humanoid** -- `ScriptedHumanoidAimHeadAtCamera`

@@ -88,6 +88,30 @@ export enum CarrierRoutine2State {
 }
 
 /**
+ * `sub+0x0C` as `CarrierPropRoutine3` (`FUN_00440AD0`) switches on it -- a
+ * fifth reading of the word (`L3`). Jump table `0x00440C00`, eight entries;
+ * anything past 7 returns at once.
+ */
+export enum CarrierRoutine3State {
+  /** `0x00440AF5` -- allocate the 8-byte block, play the sound. */
+  Begin = 0,
+  /** `0x00440B1F` -- step `ride+0x00` up to `0x95D`. */
+  CountUp = 1,
+  /** `0x00440B3C` -- the draw alpha falls by 0.03 a frame to 0.7. */
+  FadeDown = 2,
+  /** `0x00440B6D` -- wait for camera frame `0x1DF`, of any path. */
+  WaitFrame = 3,
+  /** `0x00440B90` -- count `ride+0x04` down from `0xB9` through 0. */
+  Hold = 4,
+  /** `0x00440BAD` -- the alpha rises by 0.03 a frame back to 1.0. */
+  FadeUp = 5,
+  /** `0x00440BDE` -- step `ride+0x00` back down to `0x958`. */
+  CountDown = 6,
+  /** `0x00440BF7` -- `ActorKill`. */
+  Kill = 7,
+}
+
+/**
  * `sub+0x0C` as `CarrierPropRoutine4` (`FUN_00440C20`) and
  * `CarrierPropRoutine5` (`FUN_00441000`) switch on it -- a fourth reading of
  * the word (`L3`), the same seven states in both: jump tables `0x00440FD8`
@@ -129,7 +153,7 @@ export enum CarrierRoutine4State {
  * than have it arrive doing the wrong thing.
  */
 export const CARRIER_SELECTORS_PORTED: ReadonlySet<number> =
-  new Set([0, 1, 2, 4, 5, 6, 7, 8, 9]);
+  new Set([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
 
 /**
  * `CarrierPropRoutine4` (selectors 4 and 7) and `CarrierPropRoutine5` (5
@@ -243,6 +267,10 @@ export function CarrierDrawSlots(selector: number): number[] {
     case 2:
     case 9:
       return [...CARRIER2_DOOR_SLOTS];
+    case 3:
+      // `CarrierPropRoutine3` draws nothing of its own: its block's cursor
+      // runs over `0x958..0x95D` and no instruction draws it.
+      return [];
     case 4:
     case 5:
       // Selectors 7 and 8 start past `Ride`, the only state that draws it.
@@ -280,18 +308,34 @@ export interface ScriptedPropTail {
    * `sub+0x0C` — the behaviour's own state word, and whose it is depends on
    * the selector: {@link CarrierState} for 1 and 6,
    * {@link CarrierRoutine0State} for 0, {@link CarrierRoutine2State} for 2
-   * and 9, {@link CarrierRoutine4State} for 4, 5, 7 and 8.
+   * and 9, {@link CarrierRoutine3State} for 3, {@link CarrierRoutine4State}
+   * for 4, 5, 7 and 8 -- and, for `g_prop_behaviours` 6 and 7 rather than a
+   * carrier, {@link PropBehaviourState}.
    */
   state: CarrierState | CarrierRoutine0State | CarrierRoutine2State
-    | CarrierRoutine4State | PropBehaviourState;
+    | CarrierRoutine3State | CarrierRoutine4State | PropBehaviourState;
   /** `sub+0x0E` — the camera path that despawns the prop. */
   camPath: number;
   /** `sub+0x10` — ...and the frame on it. */
   camFrame: number;
   /** `sub+0x14` — a uniform scale, applied only when it is not 1.0. */
   scale: number;
-  /** `sub+0x18` — the draw alpha; 1.0 is the plain `AssetDrawSlot`. */
+  /**
+   * `sub+0x18` — the draw alpha; 1.0 is the plain `AssetDrawSlot`, anything
+   * else `AssetDrawSlotWithAlpha` (`FUN_004185A0`). Only
+   * `CarrierPropRoutine3` (`FUN_00440AD0`) writes it after the `Init`.
+   */
   alpha: number;
+  /**
+   * `[port-only]` — the `g_draw_layer_nibble` (`0x007E78BC`) the prop's own
+   * draw is made in. `ScriptedPropUpdate13` (`FUN_0043FE90`) draws straight
+   * after the behaviour returns and sets the world's 8 only after its draw,
+   * so a behaviour's `SetDrawLayerNibble` reaches the prop's draw:
+   * `CarrierPropRoutine3`'s 9. Every other behaviour leaves it, and the
+   * layer it starts with is 8, which every routine that changes the nibble
+   * restores (`[likely]`: the previous task's).
+   */
+  drawLayer: number;
   /** `obj+0x1F4` — the asset slot the update draws. */
   slot: number;
   /** Whether the 0x18-byte ride block below has been allocated. */
@@ -347,6 +391,16 @@ export interface ScriptedPropTail {
   /** `ride+0x08` -- the index into `g_carrier2_door_yaw`, 0..0x3B. */
   doorStep: number;
 
+  // -- `CarrierPropRoutine3`'s 8-byte block, another layout (`L3`) ----------
+  /**
+   * `ride+0x00` -- a cursor over `0x958..0x95D` (`colo_monitor.bin[0..5]`),
+   * stepped up in state 1 and down in state 6. The routine only compares it,
+   * and nothing draws it.
+   */
+  monitorCursor: number;
+  /** `ride+0x04` -- state 4's countdown, from `0xB9`. */
+  monitorHold: number;
+
   // -- `CarrierPropRoutine4`'s and `5`'s 0x58-byte ride block (`L3`) --------
   /**
    * `ride+0x00..0x0C` -- the four words `EffectDrawUnlit` (`FUN_0040DD90`)
@@ -370,11 +424,12 @@ export function makeScriptedPropTail(): ScriptedPropTail {
   return {
     behaviour: 0, selector: 0, operand: [], pathLength: 0,
     state: CarrierState.Begin,
-    camPath: -1, camFrame: -1, scale: 1, alpha: 1, slot: 0, riding: false,
+    camPath: -1, camFrame: -1, scale: 1, alpha: 1, drawLayer: 8, slot: 0,
+    riding: false,
     pathFrame: 0, wakeCel: 0, wakeOn: 0, wakeScale: 0, wakeFade: 0,
     stripCel: 0, splashCel: 0, wakeGroundY: 0, wakeYaw: 0,
     wakeDrawn: 0, splashDrawn: 0, stripDrawn: 0,
-    door0Yaw: 0, door1Yaw: 0, doorStep: 0,
+    door0Yaw: 0, door1Yaw: 0, doorStep: 0, monitorCursor: 0, monitorHold: 0,
     fx: { effect: 0, motion: 0, frame: 0, prev: 0 }, spriteCel: 0,
     draws: [],
   };

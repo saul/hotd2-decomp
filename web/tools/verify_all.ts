@@ -502,12 +502,14 @@ export const CHECKS: readonly Check[] = [
      + "lift car's rig draws its two pairs of doors on the camera paths "
      + "`FUN_0048F560` tests, and no others"),
   game("carrier_routines",
-       "that class 0x13's carrier selectors 4, 5, 7 and 8 install "
-     + "`CarrierPropRoutine4` and `5`, that the port's paths, offsets, cues, "
-     + "anchors, sounds and clip lengths are the routines' own bytes and "
-     + "`.data`, and, with a bundle, that stage 4 places all four spawns and "
-     + "ships both motions of both effects and every slot the two draw -- "
-     + "the set models round the boss's entrances, which nothing else draws"),
+       "that class 0x13's carrier selectors 3, 4, 5, 7 and 8 install "
+     + "`CarrierPropRoutine3`, `4` and `5`, that the port's paths, offsets, "
+     + "cues, anchors, sounds, alphas and clip lengths are the routines' own "
+     + "bytes and `.data`, that routines 1 and 6 leave state 6 through "
+     + "`FUN_004459C0`, and, with a bundle, that stage 4 places all five "
+     + "spawns and ships both motions of both effects and every slot the "
+     + "three draw -- the monitor and the set models round the boss's "
+     + "entrances, which nothing else draws"),
   game("draw_only_14",
        "that class 0x44 selector 14 is `g_class44_subtypes[14]`, that the "
      + "exporter reads its tail -- lifetime, slot, three-float scale -- at the "

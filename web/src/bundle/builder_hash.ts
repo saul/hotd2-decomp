@@ -66,11 +66,11 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
   "game/camera/track.ts": "e1652ffc778b88c8ec1f2bd6ffa0dae9805bd397ea5ae54c21ee32ad6a6a7e71",
   "game/camera/turn.ts": "54d9c2af22c864eb0586aab6e8d94b81538645f46410ffb972c4f14e23fdb9d2",
   "game/camera/view.ts": "450f5fe33db496f9484248060e8e5e6f4b76ac72e83d191d539ec64b0d5a72ea",
-  "game/carried_prop.ts": "277cb47908e34953b266db70705828b38862dc503f829d2aec6e4d97df69fa98",
+  "game/carried_prop.ts": "58cb2e022bafbc56cf2ed9e5c362e33c73e0b326bb3e123279f06a4d982770b8",
   "game/carrier.ts": "96dc37766c10fcd3fd7fed124facdb9ad465413ee1a1ecc3f23bd28fd366eb83",
   "game/class11/state.ts": "634a039223a06cdd50f87ef0485668a371988b9821ba8887c46015e0676cbf8b",
   "game/class12/state.ts": "6de91256d9e69c4b07d8969720517733a13c90a1f25f5bf4a8c929bd55df1c2d",
-  "game/class13/index.ts": "b091d78eed742c53c6056a57559270204b575a003e1de1b59d85a6bac8613bbc",
+  "game/class13/index.ts": "e4d522a4d74ca74c6d7d09a9566b3326f709dea367ea14b047a8c2b5b03de3ef",
   "game/class13/routine0.ts": "0f8f6f25c86802636ab81e07d868fcf7370b3cee66e9f601f4f9c5e81d9cf1a5",
   "game/class13/routine2.ts": "f401825d7a29e092209ce0cee36a7f2c7269c9c8ca227883811ea0138d743005",
   "game/class13/routine4.ts": "8186ff4a4043ee27f59840af7c50424872710941d288d4514f8b6e609147e528",
@@ -217,4 +217,4 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
 };
 
 /** One digest over {@link BUILDER_FILES}, in filename order. */
-export const BUILDER_HASH = "fa0b7c6427848258f81219449436bd6d258877b5c0316316ca3bec0a04b68961";
+export const BUILDER_HASH = "7fbac652601cffdf55360a50229b8ad8ba2114785b4b0b692d9474e075899dfc";

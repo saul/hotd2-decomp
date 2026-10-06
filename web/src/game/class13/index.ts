@@ -8,7 +8,8 @@
  * instructions) take behaviour 8, which is an installer rather than a
  * behaviour. This said "the other eighteen", counting descriptors on one side
  * and instructions on the other. `trnevtbl.bin` holds a sixteenth descriptor,
- * on behaviour 9 (`0x00445050`, unread).
+ * on behaviour 9, `TrainingPropKeepAloft` -- Training's, which the port does
+ * not have, and so not ported.
  *
  * ```
  * ScriptedPropInit13 (FUN_0043FE10)
@@ -140,15 +141,16 @@ const CARRIER6_FRAME_BOW_EFFECT = 0x6a4;
 
 /**
  * `g_prop_behaviours` — `0x005926A8`, ten entries indexed by the descriptor's
- * `tail+0x10`.
+ * `tail+0x10`, read from the table's forty bytes.
  *
  * Entry 0 is `NoOpStub` and is what a static prop takes; entry 8 is
- * {@link CarrierPropSelectRoutine}. Entries 1, 3, 4 and 5 are the carried
- * props' — class 0x30 state 37's barrels, which reach the table through the
- * state-37 script rather than through a class-0x13 descriptor; 1 and 4 are
- * ported in `game/carried_prop.ts`, and so is 2, the stage-4 boss's. The
- * rest — `0x0043FFC0`, `0x004400D0` and `0x00445050` — are not read.
- * `[open]`
+ * {@link CarrierPropSelectRoutine}. Entries 1 to 5 are the carried props' —
+ * class 0x30 state 37's barrels, which reach the table through the state-37
+ * script's `+0x04` and `+0x08` rather than through a class-0x13 descriptor,
+ * and the stage-4 boss's — all ported in `game/carried_prop.ts`. 6 and 7 are
+ * descriptor behaviours no shipped descriptor selects, and 9 is Training's
+ * only. `[proved]`: every class-0x12, 0x13 and 0x15 descriptor any `evt/`
+ * word points at takes 0, 8 or 9, and every state-37 script 1 then 3, 4 or 5.
  */
 export enum PropBehaviour {
   /** `NoOpStub` (`0x0041EBB0`) — a static prop, drawn and nothing else. */
@@ -160,14 +162,20 @@ export enum PropBehaviour {
    * The stage-4 boss's props; `Boss4SpawnHeldProp` is its only allocator.
    */
   CarriedPropHeldInBone8 = 2,
-  /** `CarriedPropThrowAtTarget` (`FUN_004432D0`) — not ported. */
+  /** `CarriedPropThrowAtTarget` (`FUN_004432D0`) — `game/carried_prop.ts`. */
   CarriedPropThrowAtTarget = 3,
   /** `CarriedPropThrowAtCamera` (`FUN_00443B90`) — `game/carried_prop.ts`. */
   CarriedPropThrowAtCamera = 4,
-  /** `CarriedPropRollAtCamera` (`FUN_00443DC0`) — not ported. */
+  /** `CarriedPropRollAtCamera` (`FUN_00443DC0`) — `game/carried_prop.ts`. */
   CarriedPropRollAtCamera = 5,
   /** `CarrierPropSelectRoutine` (`FUN_00440190`). */
   SelectCarrierRoutine = 8,
+  /**
+   * `TrainingPropKeepAloft` (`FUN_00445050`) — Training's object, kept in the
+   * air by shooting it; `trnevtbl.bin`'s descriptor `0x5400` is its only
+   * selector, and the port has no Training. Not ported.
+   */
+  TrainingPropKeepAloft = 9,
 }
 
 /** The tail, when this actor has one. */

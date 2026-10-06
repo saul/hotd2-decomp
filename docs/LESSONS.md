@@ -973,6 +973,22 @@ is split, check every id each reader can draw is still in every bundle that
 reader runs in** (`tools/checks/original_mode.ts` now does, per stage), not
 just the bundle the change was about.
 
+**L108 -- When the exe's arithmetic is on framebuffer bytes, do it on bytes;
+converting its inputs into three.js's light model fixes only the inputs
+someone thought to convert.** The fog and the scene light were each "fixed"
+by putting the engine's numbers through sRGB->linear so three.js's linear
+pipeline would land near the device's byte sum. The fog came out right. The
+light kept three other faults the conversion could not see: three.js's
+`BRDF_Lambert` divides by pi, so the light and ambient were drawn at a third of
+their strength (`render/gunlights.ts` had already found that and fed its own
+lights in times pi); `GLTFLoader` adopts glTF's `baseColorFactor` as linear,
+so the baked shading of a fifth of the meshes was washed out; and D3D7 sums
+the light per vertex and clamps it, with a material ambient and a highlight
+three.js's Lambert does not have. **Write the device's equation in the shader,
+on the bytes -- encode the texel, compute, decode -- and hand it the engine's
+numbers unconverted.** Each of `D3DMATERIAL7`'s terms is then one uniform with
+one exe address behind it, and there is no model left to disagree with.
+
 ---
 
 ## Running the tools

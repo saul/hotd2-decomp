@@ -68,47 +68,73 @@
  * and places the light with it. Reaching for the view vector to "match the
  * exe" here would transform it twice.
  *
- * **The colour space, and why the multiplier converts.** These are the same
- * framebuffer-encoded quantities the fog colour is (see `render/fog.ts`):
- * D3D multiplies them against gamma-encoded texels. Writing `L` for the
- * engine's multiplier and `L'` for a linear-space one, matching
- * `tex^γ · L' == (tex · L)^γ` gives `L' = L^γ` — so the linear-space
- * equivalent of a gamma-space multiply is the multiplier put through
- * sRGB→linear. `setRGB`'s default is the linear working space, so the port
- * was using `L` where it needed `L'`: the engine's `(1.0, 0.2, 0.1)` was
- * being applied about three times too weakly in green and blue, which reads
- * as a light that is far less saturated than the game's.
+ * **What the device does with it: the whole of D3D7's fixed-function light
+ * equation, per vertex, on framebuffer bytes.** `[proved]` from the states the
+ * exe sets and the ones it never touches. `D3DRENDERSTATE_LIGHTING` is never
+ * written, so it keeps D3D7's default of on and every mesh draw is lit;
+ * `SPECULARENABLE` is 1 from `RenderInitStates` (`0x004A7630`) and nothing
+ * turns it off; `COLORVERTEX` is 0 and every material source is
+ * `D3DMCS_MATERIAL`; `LOCALVIEWER` and `NORMALIZENORMALS` are never written
+ * and keep their defaults (on, off); and every one of the 278,807 strips in
+ * `pol/` sets bit `0x40`, which `WalkMeshChainAndDraw` turns into
+ * `D3DSHADE_GOURAUD`. (The device pointer `0x007DEB74` is read by 25
+ * routines and those are all of them.) The material is the mesh's own:
+ * `WalkMeshChainAndDraw` (`FUN_004A7EF0`) calls `SetMaterial` per mesh with
  *
- * The whole product `colour · ambient · 1.4` goes through the transfer, not
- * just the colour, because the scalars are gamma-space scalars too — an
- * `ambient` of 0.5 is a 0.22 multiplier in linear light, not a 0.5 one.
+ * ```
+ * diffuse  = base colour (+0x30..+0x38), alpha = base alpha (+0x2C)
+ * ambient  = base colour * +0x28                     // `tex_ambient`
+ * specular = offset colour (+0x40..+0x48) when power != 0, else 0
+ * power    = shading (+0x24) < 1 ? 0 : 1 << shading
+ * emissive = 0                                       // never written
+ * ```
  *
- * **What is still approximate.** D3D fixed-function lighting and three.js's
- * Lambert model are not the same shader, and the game's material ambient and
- * specular terms are not modelled — `MeshLambertMaterial` has no specular at
- * all, so `light.specular` goes nowhere. The equality above is exact for the
- * *multiplicative* part and not for `N·L`, which stays three.js's. This
- * reproduces the inputs faithfully and accepts that the response curve
- * diverges; it is off by default for that reason.
+ * so one vertex comes out of the device as
+ *
+ * ```
+ * N.L    = dot(N, L)              N not renormalised, L toward the light
+ * colour = clamp(Ma * (Ga + La) + (N.L > 0 ? Md * Ld * N.L : 0))
+ * spec   = clamp(N.L > 0 && N.H > 0 ? Ms * Ls * N.H^P : 0)
+ *          H = normalize(L + normalize(eye - vertex))
+ * ```
+ *
+ * with `Ga` the packed `D3DRENDERSTATE_AMBIENT` and `La`, `Ld`, `Ls` the
+ * light's three colours above; both are Gouraud-interpolated, and the pixel
+ * is `texel * colour + spec` (`COLOROP MODULATE` against `DIFFUSE`, then the
+ * specular add), and then the fog. Every one of those numbers is a fraction of
+ * a framebuffer byte -- DX7 has no other kind -- so the program here computes
+ * exactly that in the vertex shader, encodes the texel back to the byte the
+ * file holds, and decodes the result so that three.js's output encode lands
+ * it on the byte D3D wrote. The `N.L > 0` gate on the highlight is the
+ * reference rasteriser's and not something the exe chooses: `[likely]`.
+ *
+ * Three things the port had wrong before this, all of them brightness:
+ *
+ * * three.js's `BRDF_Lambert` divides by pi and nothing put it back, so the
+ *   scene light and ambient were each drawn at a third of their strength.
+ *   (`render/gunlights.ts` feeds its lights in times pi for this reason.)
+ * * The base colour was taken as linear light -- glTF's `baseColorFactor` is
+ *   linear by the spec, and `GLTFLoader` adopts it so -- where the device
+ *   multiplies the byte. A base colour of 0.5, the commonest dark value in the
+ *   stages, drew at 0.73 of the texel instead of 0.5: the baked lighting of a
+ *   fifth of the game's meshes came out washed out.
+ * * The light was summed per pixel in linear light and never clamped, with no
+ *   material ambient and no highlight. The engine saturates per vertex: under
+ *   `LightBlockInit`'s ambient of 0.7 a lit face of a white mesh is the texel
+ *   itself and an unlit one is `tex_ambient` (0.75 on 35,372 meshes) of it.
  */
 
 import {
-  AmbientLight,
   Color,
-  SRGBColorSpace,
-  DirectionalLight,
-  Group,
   Mesh,
   MeshBasicMaterial,
   Matrix4,
   MeshLambertMaterial,
   Object3D,
-  Scene,
-  ShaderChunk,
   Vector3,
   type Material,
+  type Scene,
   type WebGLProgramParametersWithUniforms,
-  type WebGLRenderer,
 } from "three";
 import { BAMS_TO_RAD } from "../core/bams";
 import type { System } from "../core/system";
@@ -120,6 +146,7 @@ import type { RenderContext } from "./context";
 import {
   applyForcedAlphaBlend, copyDrawState, fadedCopy, setUnfadedMaterial, unfadedMaterial,
 } from "./draw_order";
+import { SRGB_TRANSFER_GLSL } from "./srgb_glsl";
 
 /**
  * What of a mesh and its material goes into its twins' programs, as far as
@@ -141,8 +168,6 @@ function programKind(mesh: Mesh, m: Material): string {
     m.customProgramCacheKey(),
   ].join("|");
 }
-
-/** 2*pi / 65536 — the constant both matrix rotators multiply by. */
 
 /** `SetLightingDefaultSingle`'s two scalings of the scene light colour. */
 export const DIFFUSE_SCALE = 1.4;
@@ -172,29 +197,192 @@ export interface SecondaryLightSource {
   secondary(at: number): boolean;
 }
 
-/** Block 1's three terms, shared by every secondary-lit program. */
-const secAmbient = { value: new Color(0, 0, 0) };
-const secColor = { value: new Color(0, 0, 0) };
-/** Toward the light, in **view** space: rewritten every frame. */
-const secDirView = { value: new Vector3(0, 0, 1) };
+/**
+ * One light set as the device holds it after `SetLightingDefaultSingle`, in
+ * the engine's own numbers -- fractions of a framebuffer byte, no colour
+ * space conversion -- as the uniforms every twin drawn under it shares.
+ */
+interface DeviceLight {
+  /** `D3DRENDERSTATE_AMBIENT` plus `light.ambient`: `Ga + La`. */
+  ambient: { value: Color };
+  /** `light.diffuse`, which `light.specular` is a copy of. */
+  color: { value: Color };
+  /** Toward the light, unit, in **view** space: rewritten every frame. */
+  dirView: { value: Vector3 };
+}
 
-const SECONDARY_LIGHTS = (() => {
-  const src = ShaderChunk.lights_fragment_begin;
-  const out = src
-    .replace("( NUM_POINT_LIGHTS > 0 ) && defined( RE_Direct )", "0")
-    .replace("( NUM_SPOT_LIGHTS > 0 ) && defined( RE_Direct )", "0")
-    .replace("( NUM_DIR_LIGHTS > 0 ) && defined( RE_Direct )", "0")
-    .replace("( NUM_HEMI_LIGHTS > 0 )", "0")
-    .replace("getAmbientLightIrradiance( ambientLightColor )", "secAmbient");
-  if (out === src) console.warn("lighting: lights_fragment_begin not patched");
-  // Block 1's one directional light, in place of the scene's.
-  return out + `
-  {
-    float secNL = saturate( dot( geometryNormal, secDirView ) );
-    reflectedLight.directDiffuse += secNL * secColor
-      * BRDF_Lambert( material.diffuseColor );
-  }`;
-})();
+function deviceLight(): DeviceLight {
+  return { ambient: { value: new Color(0, 0, 0) },
+           color: { value: new Color(0, 0, 0) },
+           dirView: { value: new Vector3(0, 0, 1) } };
+}
+
+/**
+ * `SetLightingDefaultSingle`'s `D3DRENDERSTATE_AMBIENT` word
+ * (`0x004AA15E`..`0x004AA19D`): each of `colour * ambient * 255.0` through
+ * `__ftol`, which truncates, packed as
+ *
+ * ```
+ * MOV EBX, r;  OR EBX, 0xFFFFFF00;  SHL EBX, 8
+ * OR  EBX, g;  SHL EBX, 8;  OR EBX, b
+ * ```
+ *
+ * so alpha is `0xFF` and nothing is clamped: a product past 1.0 carries its
+ * high bits into the next byte up, as the hardware would see it.
+ */
+export function PackRenderAmbient(r: number, g: number, b: number): number {
+  const ftol = (x: number) => Math.trunc(x * 255) | 0;
+  let ebx = (ftol(r) | 0xffffff00) << 8;
+  ebx = (ebx | ftol(g)) << 8;
+  ebx |= ftol(b);
+  return ebx >>> 0;
+}
+
+/**
+ * One light set's colour terms from its block's colour and ambient scalar:
+ * `SetLightingDefaultSingle`'s
+ *
+ * ```
+ * t = colour * ambient
+ * D3DRENDERSTATE_AMBIENT = PackRenderAmbient(t)      -> Ga
+ * light.diffuse  = t * 1.4                           -> Ld (and Ls)
+ * light.ambient  = colour * 0.3                      -> La
+ * ```
+ *
+ * The device sums the two ambients before the material multiplies them, so
+ * the set carries `Ga + La` as one.
+ */
+function fillDeviceLight(out: DeviceLight, rgb: readonly number[],
+                         a: number): void {
+  const [r, g, b] = [rgb[0]!, rgb[1]!, rgb[2]!];
+  const ga = PackRenderAmbient(r * a, g * a, b * a);
+  out.ambient.value.setRGB(
+    ((ga >>> 16) & 0xff) / 255 + r * LIGHT_AMBIENT_SCALE,
+    ((ga >>> 8) & 0xff) / 255 + g * LIGHT_AMBIENT_SCALE,
+    (ga & 0xff) / 255 + b * LIGHT_AMBIENT_SCALE);
+  out.color.value.setRGB(r * a * DIFFUSE_SCALE, g * a * DIFFUSE_SCALE,
+                         b * a * DIFFUSE_SCALE);
+}
+
+/**
+ * The per-mesh half of the equation: what `WalkMeshChainAndDraw` hands
+ * `SetMaterial` besides the base colour, read off the exporter's
+ * `extras.pvr2` (`tex_ambient`, `specular`, `specular_power`).
+ *
+ * A material without them is one the port made rather than one the game
+ * loaded -- nothing in `pol/` lacks the words -- and is drawn with an ambient
+ * scale of 1 and no highlight, the material the D3D defaults would give it.
+ */
+function materialTerms(m: Material): { amb: number; spec: Vector3;
+                                       power: number } {
+  const pvr2 = (m.userData as { pvr2?: { tex_ambient?: number;
+    specular?: number[]; specular_power?: number } })?.pvr2;
+  const s = pvr2?.specular;
+  return {
+    amb: pvr2?.tex_ambient ?? 1,
+    spec: new Vector3(s?.[0] ?? 0, s?.[1] ?? 0, s?.[2] ?? 0),
+    power: pvr2?.specular_power ?? 0,
+  };
+}
+
+/** The program every scene-lit twin is drawn with, block 0, 1 or its own. */
+const D3D_LIT_KEY = "d3dlit";
+
+const D3D_VERTEX_PARS = /* glsl */`
+uniform vec3 diffuse;
+uniform vec3 d3dLightAmbient;
+uniform vec3 d3dLightColor;
+uniform vec3 d3dLightDir;
+uniform float d3dTexAmbient;
+uniform vec3 d3dSpecular;
+uniform float d3dPower;
+varying vec3 vD3dColour;
+varying vec3 vD3dSpecular;
+`;
+
+/**
+ * The equation in the module comment, once a vertex. `objectNormal` is the
+ * normal after skinning and morphing, put through `normalMatrix` -- the
+ * inverse transpose of the modelview, which is the matrix D3D7 transforms
+ * normals by -- and **not renormalised**, because `NORMALIZENORMALS` is off:
+ * the dome's 1.2 scale dims its light exactly as it did the engine's.
+ * `transformedNormal` is not used because three flips it for a back-sided
+ * material, which the device never does.
+ */
+const D3D_VERTEX_MAIN = /* glsl */`
+{
+	vec3 d3dN = normalMatrix * objectNormal;
+	float d3dNL = dot( d3dN, d3dLightDir );
+	vec3 d3dC = d3dTexAmbient * diffuse * d3dLightAmbient;
+	vec3 d3dS = vec3( 0.0 );
+	if ( d3dNL > 0.0 ) {
+		d3dC += diffuse * d3dLightColor * d3dNL;
+		if ( d3dPower > 0.0 ) {
+			vec3 d3dH = normalize( d3dLightDir + normalize( - mvPosition.xyz ) );
+			float d3dNH = dot( d3dN, d3dH );
+			if ( d3dNH > 0.0 ) d3dS = d3dSpecular * d3dLightColor * pow( d3dNH, d3dPower );
+		}
+	}
+	vD3dColour = clamp( d3dC, 0.0, 1.0 );
+	vD3dSpecular = clamp( d3dS, 0.0, 1.0 );
+}
+`;
+
+const D3D_FRAGMENT_PARS = SRGB_TRANSFER_GLSL + /* glsl */`
+varying vec3 vD3dColour;
+varying vec3 vD3dSpecular;
+`;
+
+/**
+ * `COLOROP MODULATE` of the texel by the lit colour, then the specular add, on
+ * bytes. Untextured, the texel is white (`DrawSpriteQuadCommand`'s untextured
+ * arm is the only place the exe swaps the colour argument, and that is not a
+ * mesh). Alpha is untouched: it is `diffuseColor.a` as the material built it.
+ */
+const D3D_OUTGOING = /* glsl */`
+#ifdef USE_MAP
+	vec3 d3dTexel = hod2SrgbEncode( sampledDiffuseColor.rgb );
+#else
+	vec3 d3dTexel = vec3( 1.0 );
+#endif
+	vec3 outgoingLight = hod2SrgbDecode(
+		clamp( d3dTexel * vD3dColour + vD3dSpecular, 0.0, 1.0 ) );`;
+
+const STOCK_OUTGOING = "vec3 outgoingLight = reflectedLight.directDiffuse + "
+  + "reflectedLight.indirectDiffuse + totalEmissiveRadiance;";
+
+/**
+ * Rewrite a Lambert program into the device's equation. Every replacement is
+ * checked: a three.js upgrade that moves a chunk would otherwise draw the
+ * stock Lambert -- divided by pi, in linear light -- without a word.
+ */
+function patchD3dLit(shader: WebGLProgramParametersWithUniforms): void {
+  const v = shader.vertexShader;
+  const f = shader.fragmentShader;
+  const swaps: [string, string, string][] = [
+    ["vertex", "#include <common>", "#include <common>\n" + D3D_VERTEX_PARS],
+    ["vertex", "#include <fog_vertex>", "#include <fog_vertex>\n" + D3D_VERTEX_MAIN],
+    ["fragment", "#include <common>", "#include <common>\n" + D3D_FRAGMENT_PARS],
+    ["fragment", "#include <lights_fragment_begin>", ""],
+    ["fragment", "#include <lights_fragment_maps>", ""],
+    ["fragment", "#include <lights_fragment_end>", ""],
+    ["fragment", STOCK_OUTGOING, D3D_OUTGOING],
+  ];
+  let vs = v;
+  let fs = f;
+  for (const [stage, from, to] of swaps) {
+    const src = stage === "vertex" ? vs : fs;
+    if (!src.includes(from)) {
+      console.warn(`lighting: ${stage} shader has no "${from}"; `
+                   + "the scene light is three.js's Lambert, not the device's");
+      return;
+    }
+    if (stage === "vertex") vs = src.replace(from, to);
+    else fs = src.replace(from, to);
+  }
+  shader.vertexShader = vs;
+  shader.fragmentShader = fs;
+}
 
 /**
  * A light colour one draw is made under -- `SetRenderLightColour`
@@ -203,17 +391,15 @@ const SECONDARY_LIGHTS = (() => {
  * brackets `common.bin[135]`. The call changes the colour and nothing else,
  * so the draw is lit by the scene's block 0 -- its ambient, its direction --
  * through `SetLightingDefaultSingle` with that colour in place of the
- * block's: the same three terms, `colour * ambient * 1.4` diffuse and
- * `colour * (ambient + 0.3)` ambient, as {@link SceneLighting} computes for
- * the block's own colour.
+ * block's: the same three terms {@link fillDeviceLight} computes for the
+ * block's own colour.
  *
  * A node carries it as `userData.hod2_light_colour`, `[r, g, b]` in the
  * engine's 0..1, and every mesh under it is drawn with a twin whose uniforms
- * are this set's. The twin's program is block 1's (`secondarylit`): the
- * shader is the same one light and one ambient from uniforms, and only the
- * values differ. A tag of `null` is the block's own colour again, for a node
- * whose parent carries a colour it does not share -- class 0x32's bones,
- * each drawn under the colour its own draw was made with.
+ * are this set's. The program is every scene-lit twin's; only the values
+ * differ. A tag of `null` is the block's own colour again, for a node whose
+ * parent carries a colour it does not share -- class 0x32's bones, each drawn
+ * under the colour its own draw was made with.
  *
  * **Under block 1 when the actor is.** A draw between `LightsUseSecondarySet`
  * and `LightsRestoreScene` that changes the colour keeps block 1's ambient
@@ -228,7 +414,7 @@ const SECONDARY_LIGHTS = (() => {
  * block's where it does not -- class 0x32's boss names only the direction
  * its draw was made under.
  */
-interface ColouredLight {
+interface ColouredLight extends DeviceLight {
   /** The colour, or null for the block's. */
   rgb: [number, number, number] | null;
   /** Block 1's ambient and direction rather than block 0's. */
@@ -237,9 +423,6 @@ interface ColouredLight {
   ambientScalar: number | null;
   /** The world direction the light comes from, or null for the block's. */
   dir: [number, number, number] | null;
-  ambient: { value: Color };
-  color: { value: Color };
-  dirView: { value: Vector3 };
   /** Twin by base material, and base by twin. */
   twins: Map<Material, Material>;
 }
@@ -308,20 +491,21 @@ export function lightDirection(pitch: number, yaw: number,
   return out.set(cp * Math.sin(y), -Math.sin(p), cp * Math.cos(y));
 }
 
+
 export class SceneLighting implements System<RenderContext> {
   readonly id = "render.lighting";
-  readonly group = new Group();
-  private readonly dir = new DirectionalLight(0xffffff, DIFFUSE_SCALE);
-  private readonly amb = new AmbientLight(0xffffff, 1);
   /**
    * "+ scene light" by default: the script's light block drawn, which is
    * what the stages look like with their light. `unlit` is the baked
    * textures alone, one switch away in the Scene panel.
    */
   private mode: LightingMode = "scene";
-  private intensity = 1;
   private state: SceneLightState = { ...DEFAULT_LIGHT };
-  /** Lambert twins of the unlit materials, built once and reused. */
+  /** Block 0's device light, shared by every block-0 twin. */
+  private readonly block0 = deviceLight();
+  /** Block 1's, the same way. */
+  private readonly block1 = deviceLight();
+  /** Block-0 twins of the unlit materials, built once and reused. */
   private readonly lit = new Map<Material, Material>();
   /** Block-1 twins, the same way. */
   private readonly litSecondary = new Map<Material, Material>();
@@ -331,13 +515,13 @@ export class SceneLighting implements System<RenderContext> {
   private readonly extraRoots: Object3D[] = [];
   source: SecondaryLightSource = { secondary: () => false };
   private root: Object3D | null = null;
-  private readonly _v = new Vector3();
 
-  constructor(scene: Scene) {
-    this.group.name = "scene_lights";
-    this.group.add(this.dir, this.dir.target, this.amb);
-    this.group.visible = this.mode === "scene";
-    scene.add(this.group);
+  /**
+   * Takes the scene for the signature every layer has; the device light is
+   * uniforms on the twins and puts nothing in it.
+   */
+  constructor(_scene: Scene) {
+    this.refresh();
   }
 
   /** Remember the stage root so materials can be swapped in place. */
@@ -356,13 +540,7 @@ export class SceneLighting implements System<RenderContext> {
   setMode(mode: LightingMode): void {
     if (mode === this.mode) return;
     this.mode = mode;
-    this.group.visible = mode === "scene";
     this.applyMaterials();
-  }
-
-  setIntensity(v: number): void {
-    this.intensity = v;
-    this.refresh();
   }
 
   private lastKey = "";
@@ -384,22 +562,17 @@ export class SceneLighting implements System<RenderContext> {
 
   /**
    * Light block 0, every tick, because the script ramps the colour over
-   * frames rather than switching it; `set` no-ops when nothing moved.
+   * frames rather than switching it; `set` no-ops when nothing moved. The
+   * directions are rewritten every tick whatever moved: they are in view
+   * space, and the camera moves.
    */
   update(ctx: RenderContext): void {
     this.set(blockLight(G.g_scene_light_block0));
     if (this.mode !== "scene") return;
-    this.refreshSecondary(ctx);
-    this.refreshColoured(ctx);
-  }
-
-  /**
-   * Each draw-colour set's uniforms: block 0's ambient and direction with the
-   * draw's colour, by `SetLightingDefaultSingle`'s arithmetic -- `refresh`'s,
-   * with the colour swapped.
-   */
-  private refreshColoured(ctx: RenderContext): void {
     this.viewInverse.copy(ctx.camera.matrixWorldInverse);
+    lightDirection(this.state.pitch, this.state.yaw, this.block0.dirView.value)
+      .transformDirection(this.viewInverse);
+    this.refreshSecondary();
     for (const set of this.coloured.values()) this.fillColoured(set);
   }
 
@@ -414,14 +587,7 @@ export class SceneLighting implements System<RenderContext> {
    */
   private fillColoured(set: ColouredLight): void {
     const l = set.secondary ? blockLight(G.g_scene_light_block1) : this.state;
-    const a = set.ambientScalar ?? l.ambient;
-    const amb = a + LIGHT_AMBIENT_SCALE;
-    const [r, g, b] = set.rgb ?? l.rgb;
-    set.color.value.setRGB(r * a * DIFFUSE_SCALE, g * a * DIFFUSE_SCALE,
-                           b * a * DIFFUSE_SCALE, SRGBColorSpace)
-      .multiplyScalar(this.intensity);
-    set.ambient.value.setRGB(r * amb, g * amb, b * amb, SRGBColorSpace)
-      .multiplyScalar(this.intensity);
+    fillDeviceLight(set, set.rgb ?? l.rgb, set.ambientScalar ?? l.ambient);
     if (set.dir) set.dirView.value.fromArray(set.dir);
     else lightDirection(l.pitch, l.yaw, set.dirView.value);
     set.dirView.value.transformDirection(this.viewInverse);
@@ -445,18 +611,15 @@ export class SceneLighting implements System<RenderContext> {
 
   /**
    * Compile, now, both twins every kind of drawable can be given -- the
-   * primary Lambert and the block-1 one -- so neither is compiled on the
-   * frame a mesh first needs it.
+   * block-0 and the block-1 one -- so neither is compiled on the frame a mesh
+   * first needs it.
    *
-   * The twins are made lazily, as meshes come into view, and the block-1
-   * twin carries its own shader (`secondarylit`): the stage's warm-up never
-   * saw one, and every character first met in a block-1 region compiled one
-   * or two programs as it appeared -- stage 1's boss at the start, a civilian
-   * and the partner half a minute in. A program depends on the material's
-   * kind and the mesh's (skinned, vertex colours, sides, alpha), not on the
-   * texture, so one mesh of each kind stands for all of them: a few dozen
-   * compiles, where twins for every one of a stage's five thousand materials
-   * would be memory a phone does not have.
+   * The twins are made lazily, as meshes come into view. A program depends on
+   * the material's kind and the mesh's (skinned, sides, alpha), not on the
+   * texture or the light set -- every twin is the one `d3dlit` program -- so
+   * one mesh of each kind stands for all of them: a few dozen compiles, where
+   * twins for every one of a stage's five thousand materials would be memory
+   * a phone does not have.
    *
    * Each twin faded too, as `render/draw_order.ts` draws a character fading
    * in or out: its own blended copy, which three.js compiles without
@@ -499,22 +662,15 @@ export class SceneLighting implements System<RenderContext> {
    * through it. The direction is built from the block's angles as
    * `LightsUseSecondarySet` builds it at every character's draw.
    */
-  private refreshSecondary(ctx: RenderContext): void {
+  private refreshSecondary(): void {
     const l = blockLight(G.g_scene_light_block1);
-    const [r, g, b] = l.rgb;
-    const a = l.ambient;
-    secColor.value.setRGB(r * a * DIFFUSE_SCALE, g * a * DIFFUSE_SCALE,
-                          b * a * DIFFUSE_SCALE, SRGBColorSpace)
-      .multiplyScalar(this.intensity);
-    const amb = a + LIGHT_AMBIENT_SCALE;
-    secAmbient.value.setRGB(r * amb, g * amb, b * amb, SRGBColorSpace)
-      .multiplyScalar(this.intensity);
-    lightDirection(l.pitch, l.yaw, secDirView.value)
-      .transformDirection(ctx.camera.matrixWorldInverse);
+    fillDeviceLight(this.block1, l.rgb, l.ambient);
+    lightDirection(l.pitch, l.yaw, this.block1.dirView.value)
+      .transformDirection(this.viewInverse);
   }
 
   /**
-   * What this view draws a stage material with: its Lambert twin under
+   * What this view draws a stage material with: its block-0 twin under
    * "+ scene light", the exported unlit one otherwise. Either can come in.
    */
   viewMaterial(m: Material): Material {
@@ -527,35 +683,13 @@ export class SceneLighting implements System<RenderContext> {
     this.update(ctx);
   }
 
+  /** Block 0's colour terms, from the state `set` last took. */
   private refresh(): void {
-    const [r, g, b] = this.state.rgb;
-    const a = this.state.ambient;
-
-    // `light.diffuse = colour * ambient * 1.4`. The ambient channel is a
-    // master brightness and scales this too -- leaving it out is what made
-    // the directional light twice as bright as the engine's at the default
-    // ambient of 0.5.
-    this.dir.color.setRGB(r * a * DIFFUSE_SCALE, g * a * DIFFUSE_SCALE,
-                          b * a * DIFFUSE_SCALE, SRGBColorSpace);
-    this.dir.intensity = this.intensity;
-
-    // `D3DRENDERSTATE_AMBIENT + light.ambient` = `colour * (ambient + 0.3)`.
-    // Tinted by the light colour on both terms; the port used to add an
-    // untinted `ambient` to `colour * 0.3`.
-    const amb = a + LIGHT_AMBIENT_SCALE;
-    this.amb.color.setRGB(r * amb, g * amb, b * amb, SRGBColorSpace);
-    this.amb.intensity = this.intensity;
-
-    // A directional light shines from its position toward its target, and the
-    // vector above is the direction the light comes *from*.
-    lightDirection(this.state.pitch, this.state.yaw, this._v);
-    this.dir.position.copy(this._v).multiplyScalar(4000);
-    this.dir.target.position.set(0, 0, 0);
-    this.dir.target.updateMatrixWorld();
+    fillDeviceLight(this.block0, this.state.rgb, this.state.ambient);
   }
 
   /**
-   * Swap between the exported unlit materials and Lambert twins.
+   * Swap between the exported unlit materials and the device-lit twins.
    *
    * The bundle is exported `KHR_materials_unlit`, which three.js loads as
    * `MeshBasicMaterial` — a material no light can reach. Lighting therefore
@@ -605,7 +739,7 @@ export class SceneLighting implements System<RenderContext> {
     this.refresh();
   }
 
-  /** The exported unlit material behind either twin. */
+  /** The exported unlit material behind any twin. */
   private baseOf(m: Material): Material {
     let back = this.lit.get(m) ?? this.litSecondary.get(m);
     if (!back) {
@@ -619,8 +753,7 @@ export class SceneLighting implements System<RenderContext> {
 
   /**
    * The twin a draw under its own light colour takes -- see `ColouredLight`.
-   * Built like the block-1 twin, on the block-1 program, with the colour
-   * set's own uniform objects, which three.js keeps per material.
+   * The one program, with the colour set's own uniform objects.
    */
   private colouredTwinOf(m: Material, spec: LightSet,
                          secondary: boolean): Material {
@@ -645,11 +778,9 @@ export class SceneLighting implements System<RenderContext> {
     }
     if (!set) {
       set = {
+        ...deviceLight(),
         rgb: rgb ? [rgb[0]!, rgb[1]!, rgb[2]!] : null, secondary,
         ambientScalar: amb, dir,
-        ambient: { value: new Color(0, 0, 0) },
-        color: { value: new Color(0, 0, 0) },
-        dirView: { value: new Vector3(0, 0, 1) },
         twins: new Map(),
       };
       this.coloured.set(key, set);
@@ -657,88 +788,31 @@ export class SceneLighting implements System<RenderContext> {
     }
     let twin = set.twins.get(m);
     if (!twin) {
-      const w = this.twinOf(m) as MeshLambertMaterial;
-      const t = w.clone();
-      t.userData = { ...m.userData, lightColour: key };
-      const inner = m.onBeforeCompile;
-      const u = set;
-      t.onBeforeCompile = (shader: WebGLProgramParametersWithUniforms,
-                           renderer: WebGLRenderer) => {
-        inner?.call(m, shader, renderer);
-        shader.uniforms.secAmbient = u.ambient;
-        shader.uniforms.secColor = u.color;
-        shader.uniforms.secDirView = u.dirView;
-        shader.fragmentShader = shader.fragmentShader
-          .replace("#include <common>", "#include <common>\nuniform vec3 "
-                   + "secAmbient;\nuniform vec3 secColor;\nuniform vec3 secDirView;")
-          .replace("#include <lights_fragment_begin>", SECONDARY_LIGHTS);
-      };
-      t.customProgramCacheKey = () => "secondarylit";
-      twin = t;
+      twin = d3dLitTwin(m, set, { lightColour: key });
       set.twins.set(m, twin);
       set.twins.set(twin, m);
     }
     return twin;
   }
 
-  /**
-   * The block-1 twin: a Lambert material whose shader takes block 1's
-   * direction, colour and ambient from uniforms and none of the scene's
-   * lights.
-   */
+  /** The block-1 twin: the one program, under block 1's device light. */
   private secondaryTwinOf(m: Material): Material {
     if (!(m instanceof MeshBasicMaterial)) return m;
     let twin = this.litSecondary.get(m);
     if (!twin) {
-      const w = this.twinOf(m) as MeshLambertMaterial;
-      const t = w.clone();
-      t.userData = { ...m.userData, secondaryLit: true };
-      const inner = m.onBeforeCompile;
-      t.onBeforeCompile = (shader: WebGLProgramParametersWithUniforms,
-                           renderer: WebGLRenderer) => {
-        inner?.call(m, shader, renderer);
-        shader.uniforms.secAmbient = secAmbient;
-        shader.uniforms.secColor = secColor;
-        shader.uniforms.secDirView = secDirView;
-        shader.fragmentShader = shader.fragmentShader
-          .replace("#include <common>", "#include <common>\nuniform vec3 "
-                   + "secAmbient;\nuniform vec3 secColor;\nuniform vec3 secDirView;")
-          .replace("#include <lights_fragment_begin>", SECONDARY_LIGHTS);
-      };
-      t.customProgramCacheKey = () => "secondarylit";
-      twin = t;
+      twin = d3dLitTwin(m, this.block1, { secondaryLit: true });
       this.litSecondary.set(m, twin);
       this.litSecondary.set(twin, m);
     }
     return twin;
   }
 
-  /** The Lambert twin of an unlit material, built once and cached both ways. */
+  /** The block-0 twin of an unlit material, built once and cached both ways. */
   private twinOf(m: Material): Material {
+    if (!(m instanceof MeshBasicMaterial)) return m;
     let twin = this.lit.get(m);
     if (!twin) {
-      const b = m as MeshBasicMaterial;
-      twin = new MeshLambertMaterial({
-        map: b.map,
-        color: b.color,
-        transparent: b.transparent,
-        opacity: b.opacity,
-        alphaTest: b.alphaTest,
-        alphaMap: b.alphaMap,
-        side: b.side,
-        depthWrite: b.depthWrite,
-        depthTest: b.depthTest,
-        blending: b.blending,
-        vertexColors: b.vertexColors,
-        fog: b.fog,
-        name: b.name,
-      });
-      // The depth function and blend factors `TranslatePvr2StateToD3D`
-      // decided, which the constructor above does not take.
-      copyDrawState(b, twin);
-      twin.userData = m.userData;
-      // Keep the fog uniform hook the fog module installed.
-      twin.onBeforeCompile = m.onBeforeCompile;
+      twin = d3dLitTwin(m, this.block0, {});
       this.lit.set(m, twin);
       this.lit.set(twin, m);        // reverse, for the swap back
     }
@@ -753,4 +827,56 @@ export class SceneLighting implements System<RenderContext> {
       `pitch ${(this.state.pitch * 360 / 65536).toFixed(0)}° `
       + `yaw ${(this.state.yaw * 360 / 65536).toFixed(0)}°`;
   }
+}
+
+/**
+ * A device-lit twin of an unlit material: a `MeshLambertMaterial` for the
+ * normals and the chunks it brings, with the light loop replaced by the
+ * device's equation (`patchD3dLit`), drawn under `light`'s uniforms and its
+ * own mesh's material terms.
+ *
+ * `diffuse` is the material's colour, which is the exporter's base colour
+ * **as the number the mesh file holds**: `GLTFLoader` adopts
+ * `baseColorFactor` as linear, which is to say unconverted, so the shader
+ * reads exactly `D3DMATERIAL7.diffuse`.
+ */
+function d3dLitTwin(m: MeshBasicMaterial, light: DeviceLight,
+                    tag: Record<string, unknown>): Material {
+  const twin = new MeshLambertMaterial({
+    map: m.map,
+    color: m.color,
+    transparent: m.transparent,
+    opacity: m.opacity,
+    alphaTest: m.alphaTest,
+    alphaMap: m.alphaMap,
+    side: m.side,
+    depthWrite: m.depthWrite,
+    depthTest: m.depthTest,
+    blending: m.blending,
+    vertexColors: m.vertexColors,
+    fog: m.fog,
+    name: m.name,
+  });
+  // The depth function and blend factors `TranslatePvr2StateToD3D`
+  // decided, which the constructor above does not take.
+  copyDrawState(m, twin);
+  twin.userData = { ...m.userData, ...tag };
+  const terms = materialTerms(m);
+  const own = {
+    d3dTexAmbient: { value: terms.amb },
+    d3dSpecular: { value: terms.spec },
+    d3dPower: { value: terms.power },
+  };
+  // Keep the fog uniform hook the fog module installed.
+  const inner = m.onBeforeCompile;
+  twin.onBeforeCompile = (shader, renderer) => {
+    inner?.call(m, shader, renderer);
+    shader.uniforms.d3dLightAmbient = light.ambient;
+    shader.uniforms.d3dLightColor = light.color;
+    shader.uniforms.d3dLightDir = light.dirView;
+    Object.assign(shader.uniforms, own);
+    patchD3dLit(shader);
+  };
+  twin.customProgramCacheKey = () => D3D_LIT_KEY;
+  return twin;
 }

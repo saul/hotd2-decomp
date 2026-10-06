@@ -191,11 +191,11 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
   "game/tables.ts": "d0bcb7871858b8098130c569299d71a272d690152cd17094ae1915f1d225267d",
   "game/thrown_weapon.ts": "adbfdb358e6ee1a12ab1bbf18b0964e34c2c85eb387f822bf4608813123effae",
   "game/vec.ts": "e4fa0c9c582bc4a70b040cd96ca378d7b6039501cb9f38ad0b93425f5a7563b8",
-  "gltf.ts": "4ca1bf1b90f93acb0ca990b968eba8fccf4d6c79d03320833962f8732956579f",
+  "gltf.ts": "a305d3d423e115208824a1c46c93ce135f428c9656bf07421f5c04a5ea0e5de5",
   "io.ts": "4471bf8bfab1643c6395ae496bdb7d26678835b053b867544c69d0b4c1403df8",
   "lz.ts": "dddff2029ebd1cafc686d25b57da5e5ad8e22fdb2febf4af4988651d627aa80e",
   "mot.ts": "36074edfd603b44267daf67fdcf5ccfc37652d48808b2258d6c327b8a0d99c39",
-  "nl1.ts": "53d01a8b87a5a65508687f5a5c7ea1c041c98f0b20a224f13c387a5ca4cdc25f",
+  "nl1.ts": "035b863e71203b6f69616f101eb7331e276fc04efddd6ecbb1bccad70d796b81",
   "placement.ts": "34b4ea16badd9d0648bc61136b031b140769154b1f9e6df849d6115e101e9fcd",
   "png.ts": "326d5417b68475ad54b90e2a91a1f68ca3859d6ba044582928a13459b4afa50b",
   "props.ts": "5c5a9ac4076eb54fd0b2045bf8ddfc1e76c91f280a372c38bb54a8596d610a95",
@@ -209,4 +209,4 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
 };
 
 /** One digest over {@link BUILDER_FILES}, in filename order. */
-export const BUILDER_HASH = "836ce66c9f321a4b511f376131ca1fe1e2fceedcd7a1a881f21aa532e3238ca4";
+export const BUILDER_HASH = "47950e5a2b636a992a773a5aa81d7298145d1812105f5c6b94956e71aad00372";

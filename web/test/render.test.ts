@@ -78,11 +78,11 @@ const { FreeRoam, isTyping, ownsKey }
   = await import("../src/render/freeroam");
 const { RigLayer } = await import("../src/render/rigs");
 const { CamPaths } = await import("../src/game/camera/curve");
-const { AmbientLight, CanvasTexture, DirectionalLight, Group, Mesh,
+const { CanvasTexture, Color, Group, Mesh,
         MeshBasicMaterial, PerspectiveCamera, PlaneGeometry, Scene,
-        ShaderChunk } = await import("three");
-const { SceneLighting, lightDirection, DIFFUSE_SCALE, LIGHT_AMBIENT_SCALE }
-  = await import("../src/render/lighting");
+        ShaderChunk, ShaderLib } = await import("three");
+const { SceneLighting, lightDirection, DIFFUSE_SCALE, LIGHT_AMBIENT_SCALE,
+        PackRenderAmbient } = await import("../src/render/lighting");
 const { SlotModelLayer } = await import("../src/render/slotmodels");
 const { EffectLayer } = await import("../src/render/effects");
 const { BloodColourLayer } = await import("../src/render/bloodcolour");
@@ -277,6 +277,18 @@ console.log("\nthe fog colour is the game's colour");
   check("the default mode is the game's planar falloff",
         new SceneFog(new Scene()).fogMode === "planar",
         new SceneFog(new Scene()).fogMode);
+
+  // The clear is `SetClearColor(0x00598C58)`, black in play, and the fog
+  // never touches it: an uncovered pixel is black under any fog. The port
+  // used to paint it the fog colour -- stage 4's grey, stage 6's pale blue.
+  const scene = new Scene();
+  scene.background = new Color(0x123456);
+  const fogged = new SceneFog(scene);
+  fogged.update(walkerWith([197, 196, 255]));
+  const bg = scene.background as InstanceType<typeof Color>;
+  check("an uncovered pixel is the clear colour, black, not the fog colour",
+        scene.fog !== null && bg.r === 0 && bg.g === 0 && bg.b === 0,
+        `fog ${scene.fog ? "on" : "off"}, background #${bg.getHexString()}`);
 }
 
 console.log("\nthe fog range is `SetFogRange`'s pair, in either order");
@@ -393,60 +405,102 @@ console.log("\nthe scene light is the light SetLightingDefaultSingle builds");
   // the decompiler drops every FPU argument in it:
   //
   //   t = colour * ambient
-  //   D3DRENDERSTATE_AMBIENT = pack(t * 255)      <- TINTED by the colour
+  //   D3DRENDERSTATE_AMBIENT = pack(t * 255)      <- TINTED, truncated bytes
   //   light.diffuse          = t * 1.4            <- scaled by ambient too
   //   light.ambient          = colour * 0.3       <- and this one is not
   //
-  // The port had `diffuse = colour * 1.4` (no ambient) and
-  // `ambient = <scalar> + colour * 0.3` (untinted). Both are checked here
-  // against the engine's own default light colour, which is where the
-  // difference is loudest.
-  const srgbToLinear = (c: number) =>
-    c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
-  const near = (a: number, b: number) => Math.abs(a - b) < 1e-4;
+  // and the device sums the two ambients. All of it is in framebuffer bytes,
+  // so the uniforms carry the engine's numbers unconverted -- the port used
+  // to put them through sRGB->linear for three.js's Lambert, which then
+  // divided them by pi.
+  const near = (a: number, b: number) => Math.abs(a - b) < 1e-6;
+  type U = { value: { r: number; g: number; b: number } };
+  const terms = (l: unknown) => (l as { block0: { ambient: U; color: U } }).block0;
+
+  // `PackRenderAmbient` is the exe's own packing, `__ftol` truncating: at
+  // the engine's default light (1.0, 0.2, 0.1) and ambient 0.5 the three
+  // products are 127.5, 25.5 and 12.75, which the hardware saw as 127, 25, 12.
+  check("the ambient word truncates each byte under alpha 0xFF",
+        PackRenderAmbient(0.5, 0.1, 0.05) === 0xff7f190c,
+        PackRenderAmbient(0.5, 0.1, 0.05).toString(16));
+  // ...and does not clamp: OR 0xFFFFFF00 keeps a red past 255 to its low
+  // byte, and a green past 255 carries into red's.
+  check("...and a product past 1.0 carries into the next byte as the exe's would",
+        PackRenderAmbient(1.2, 0, 0) === 0xff320000
+        && PackRenderAmbient(0, 1.2, 0) === 0xff013200,
+        `${PackRenderAmbient(1.2, 0, 0).toString(16)} `
+        + `${PackRenderAmbient(0, 1.2, 0).toString(16)}`);
 
   const lights = new SceneLighting(new Scene());
-  const dir = lights.group.children.find(
-    (o) => (o as { isDirectionalLight?: boolean }).isDirectionalLight,
-  ) as InstanceType<typeof DirectionalLight>;
-  const amb = lights.group.children.find(
-    (o) => (o as { isAmbientLight?: boolean }).isAmbientLight,
-  ) as InstanceType<typeof AmbientLight>;
-  check("the layer has one directional light and one ambient",
-        !!dir && !!amb);
-
   // `FUN_00460250` seeds the scene light colour to exactly this.
   const rgb: [number, number, number] = [1.0, 0.2, 0.1];
   const a = 0.5;
   lights.set({ rgb, ambient: a, pitch: 0, yaw: 0 });
+  const t = terms(lights);
 
-  const wantDir = rgb.map((c) => srgbToLinear(c * a * DIFFUSE_SCALE));
-  check("diffuse is colour * ambient * 1.4, through the sRGB transfer",
-        near(dir.color.r, wantDir[0]) && near(dir.color.g, wantDir[1])
-        && near(dir.color.b, wantDir[2]),
-        `${dir.color.r},${dir.color.g},${dir.color.b} want ${wantDir}`);
-
-  const wantAmb = rgb.map((c) => srgbToLinear(c * (a + LIGHT_AMBIENT_SCALE)));
-  check("...and ambient is colour * (ambient + 0.3), tinted on both terms",
-        near(amb.color.r, wantAmb[0]) && near(amb.color.g, wantAmb[1])
-        && near(amb.color.b, wantAmb[2]),
-        `${amb.color.r},${amb.color.g},${amb.color.b} want ${wantAmb}`);
-
-  // The signature of the bug, stated as a property rather than a number: the
-  // engine's light is deep orange, so its ambient must stay deep orange. The
-  // old `ambient + colour*0.3` gave (0.8, 0.56, 0.53) -- near-grey.
-  check("...so a strongly tinted light keeps a strongly tinted ambient",
-        amb.color.g < amb.color.r * 0.2 && amb.color.b < amb.color.r * 0.1,
-        `r=${amb.color.r.toFixed(3)} g=${amb.color.g.toFixed(3)} `
-        + `b=${amb.color.b.toFixed(3)}`);
+  check("light.diffuse is colour * ambient * 1.4, as the engine's number",
+        near(t.color.value.r, 1.0 * a * DIFFUSE_SCALE)
+        && near(t.color.value.g, 0.2 * a * DIFFUSE_SCALE)
+        && near(t.color.value.b, 0.1 * a * DIFFUSE_SCALE),
+        JSON.stringify(t.color.value));
+  check("...and the ambient is the packed bytes plus colour * 0.3",
+        near(t.ambient.value.r, 127 / 255 + 1.0 * LIGHT_AMBIENT_SCALE)
+        && near(t.ambient.value.g, 25 / 255 + 0.2 * LIGHT_AMBIENT_SCALE)
+        && near(t.ambient.value.b, 12 / 255 + 0.1 * LIGHT_AMBIENT_SCALE),
+        JSON.stringify(t.ambient.value));
 
   // Turning the master brightness down must dim the directional light with
-  // it -- the property the port was missing entirely.
-  const wasR = dir.color.r;
+  // it.
+  const wasR = t.color.value.r;
   lights.set({ rgb, ambient: a / 2, pitch: 0, yaw: 0 });
   check("the ambient channel is a master brightness and dims the light too",
-        dir.color.r < wasR * 0.5,
-        `${wasR.toFixed(4)} -> ${dir.color.r.toFixed(4)}`);
+        near(t.color.value.r, wasR / 2),
+        `${wasR.toFixed(4)} -> ${t.color.value.r.toFixed(4)}`);
+
+  // The twin's program, against three's own Lambert source: every chunk the
+  // patch needs is found, three's light loop is gone, and the pixel is the
+  // device's `texel * colour + spec` on bytes.
+  const base = new MeshBasicMaterial();
+  base.userData = { pvr2: { tex_ambient: 0.75, specular: [0.5, 0.25, 0.125],
+                            specular_power: 32 } };
+  const mesh = new Mesh(new PlaneGeometry(1, 1), base);
+  const root = new Group();
+  root.add(mesh);
+  lights.build(root);
+  const twin = mesh.material as InstanceType<typeof MeshBasicMaterial>;
+  check("a scene-lit mesh draws a twin, not its unlit material",
+        twin !== base && twin.customProgramCacheKey() === "d3dlit",
+        twin.type);
+  const shader = {
+    vertexShader: ShaderLib.lambert.vertexShader,
+    fragmentShader: ShaderLib.lambert.fragmentShader,
+    uniforms: {} as Record<string, { value: unknown }>,
+  };
+  const warned: string[] = [];
+  const warn = console.warn;
+  console.warn = (m: string) => { warned.push(m); };
+  twin.onBeforeCompile(shader as never, undefined as never);
+  console.warn = warn;
+  check("every chunk the device's equation replaces is where it expects",
+        warned.length === 0, warned.join("; "));
+  check("...the light is summed per vertex, clamped, with the highlight",
+        shader.vertexShader.includes("vD3dColour = clamp( d3dC, 0.0, 1.0 );")
+        && shader.vertexShader.includes("pow( d3dNH, d3dPower )")
+        && shader.vertexShader.includes("d3dTexAmbient * diffuse * d3dLightAmbient"));
+  check("...three.js's light loop, and its divide by pi, are gone",
+        !shader.fragmentShader.includes("#include <lights_fragment_begin>")
+        && !shader.fragmentShader.includes("reflectedLight.directDiffuse +"));
+  check("...and the pixel is texel * colour + specular, on bytes",
+        shader.fragmentShader.includes(
+          "clamp( d3dTexel * vD3dColour + vD3dSpecular, 0.0, 1.0 )")
+        && shader.fragmentShader.includes(
+          "hod2SrgbEncode( sampledDiffuseColor.rgb )"));
+  const u = shader.uniforms;
+  check("the program reads block 0's terms and the mesh's own material",
+        u.d3dLightAmbient === t.ambient && u.d3dLightColor === t.color
+        && u.d3dTexAmbient?.value === 0.75 && u.d3dPower?.value === 32
+        && (u.d3dSpecular?.value as { y: number }).y === 0.25,
+        Object.keys(u).join(","));
 
   // `BuildSceneLightDirection` (`0x0040E0B0`): rotate (0,0,1) by Y then X,
   // giving (cos p · sin y, −sin p, cos p · cos y), the direction the light
@@ -5578,7 +5632,7 @@ console.log("\nclass 0x26 subtypes 6/7: the recorded draws, where they were reco
   };
   const plain = matOf(kids[0]!);
   const lit = matOf(kids[1]!);
-  check("the plain draw gets the scene's Lambert twin",
+  check("the plain draw gets the scene's device-lit twin",
         plain?.type === "MeshLambertMaterial" && !plain.userData.lightColour,
         `${plain?.type} ${JSON.stringify(plain?.userData)}`);
   check("...and the lit one a twin keyed on its own colour",
@@ -5586,22 +5640,18 @@ console.log("\nclass 0x26 subtypes 6/7: the recorded draws, where they were reco
         && lit.userData.lightColour === "0.05,0.01,0|null|block",
         `${lit?.type} ${JSON.stringify(lit?.userData)}`);
   // Its terms are `SetLightingDefaultSingle`'s with the colour swapped: the
-  // block's ambient 0.5, so diffuse `C * 0.5 * 1.4` and ambient
-  // `C * (0.5 + 0.3)`, each through the sRGB transfer.
-  const cam = new PerspectiveCamera();
-  cam.updateMatrixWorld();
-  (lights as unknown as { refreshColoured(c: unknown): void })
-    .refreshColoured({ camera: cam });
+  // block's ambient 0.5, so diffuse `C * 0.5 * 1.4` and ambient the packed
+  // `C * 0.5` -- 6.375 truncated to 6 in red -- plus `C * 0.3`, all in the
+  // engine's own numbers. A set is filled the moment it is made.
   const set = (lights as unknown as {
     coloured: Map<string, { color: { value: { r: number; g: number } };
                             ambient: { value: { r: number; g: number } } }> })
     .coloured.get("0.05,0.01,0|null|block");
-  const lin = (c: number) =>
-    c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
   check("...on block 0's ambient with the draw's colour in place of the block's",
-        !!set && Math.abs(set.color.value.r - lin(0.05 * 0.5 * DIFFUSE_SCALE)) < 1e-6
-        && Math.abs(set.color.value.g - lin(0.01 * 0.5 * DIFFUSE_SCALE)) < 1e-6
-        && Math.abs(set.ambient.value.r - lin(0.05 * (0.5 + LIGHT_AMBIENT_SCALE))) < 1e-6,
+        !!set && Math.abs(set.color.value.r - 0.05 * 0.5 * DIFFUSE_SCALE) < 1e-6
+        && Math.abs(set.color.value.g - 0.01 * 0.5 * DIFFUSE_SCALE) < 1e-6
+        && Math.abs(set.ambient.value.r
+                    - (6 / 255 + 0.05 * LIGHT_AMBIENT_SCALE)) < 1e-6,
         JSON.stringify(set && [set.color.value, set.ambient.value]));
   // `AssetDrawSlot` (`FUN_00418560`) draws nothing that is not resident: a
   // recorded draw of a slot the script has unloaded is dropped, the rest
@@ -5734,17 +5784,11 @@ console.log("\nclass 0x32: the node hook's draws, and the light each was made un
         ud(child.material).secondaryLit === true
         && ud(child.material).lightColour === undefined,
         JSON.stringify(ud(child.material)));
-  const cam = new PerspectiveCamera();
-  cam.updateMatrixWorld();
-  (lights as unknown as { refreshColoured(c: unknown): void })
-    .refreshColoured({ camera: cam });
   const set = (lights as unknown as {
     coloured: Map<string, { color: { value: { r: number } } }> })
     .coloured.get("block1|1,0,0|null|block");
-  const lin = (c: number) =>
-    c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
   check("...whose diffuse is block 1's ambient 0.4, not block 0's 0.5",
-        !!set && Math.abs(set.color.value.r - lin(0.4 * DIFFUSE_SCALE)) < 1e-6,
+        !!set && Math.abs(set.color.value.r - 0.4 * DIFFUSE_SCALE) < 1e-6,
         JSON.stringify(set?.color.value));
 
   // The hook's models on the nodes: a single-primitive bone whose arm draws

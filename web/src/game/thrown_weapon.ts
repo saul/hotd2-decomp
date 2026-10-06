@@ -45,6 +45,7 @@
 import type { Events } from "../core/events";
 import type { Rng } from "../core/rng";
 import { ActorFlag } from "./actor";
+import { ColiDynamicListRemove } from "./coli";
 import type { ShotTestEntry } from "./combat/shot_test";
 import { G, HIT_SLOT_COUNT, HIT_SLOT_NONE } from "./globals";
 import { HIT_SLOT_CLAIMED } from "./hit_slots";
@@ -337,12 +338,9 @@ export function ThrownWeaponAlloc(routine: ThrownWeaponRoutine): ThrownWeapon {
  * `0x00409CF5`); and out of the task list. `[port-only]` as a function: the
  * engine calls the one routine for every object.
  *
- * The call between the two, `ColiDynamicListRemove` (`FUN_00405220`), blanks
- * the object's entry in last frame's `g_coli_dynamic_list`, and is not made
- * here: a weapon's entry there is one its only reader, the crowd push
- * (`ColiTestSphereAgainstActors`, `FUN_00405B10`), never takes -- the
- * weapon's `0x80000001` refuses it -- so blanking it changes nothing a frame
- * can show.
+ * Between the two, `ColiDynamicListRemove` (`FUN_00405220`) at `0x00409CD3`
+ * makes a hole of the weapon's entry in last frame's `g_coli_dynamic_list`
+ * -- the entry its registration filed, found by the weapon's id.
  *
  * **Nothing after it runs.** `ActorDespawn` ends in `ActorKill`
  * (`FUN_004A7040`), which unlinks the running task, puts it on the free list
@@ -354,6 +352,7 @@ export function ThrownWeaponAlloc(routine: ThrownWeaponRoutine): ThrownWeapon {
  */
 export function ThrownWeaponDespawn(w: ThrownWeapon): void {
   w.flags = (w.flags & ~1) | THROWN_WEAPON_DESPAWN_FLAGS;
+  ColiDynamicListRemove({ at: w.from, thrown: w.id });
   if ((w.flags38 & HIT_SLOT_CLAIMED) && w.hitSlot !== HIT_SLOT_NONE) {
     G.g_hit_slots[w.hitSlot] = HIT_SLOT_NONE;
     w.hitSlot = HIT_SLOT_NONE;

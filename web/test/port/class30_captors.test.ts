@@ -6,14 +6,22 @@ import { ActorAdvanceMotion } from "../../src/game/motion";
 import { MotionFlag } from "../../src/game/actor";
 import { ActorRegisterCameraPoint } from "../../src/game/camera/track";
 import {
-  ShotTestListReset, ShotTestPickedHere,
+  ShotTestListReset, ShotTestPickedHere, type ShotTestEntry,
 } from "../../src/game/combat/shot_test";
 import { G, ResetGameGlobals } from "../../src/game/globals";
 import { NULL_HOST, type GameHost } from "../../src/game/host";
 import {
   MotionOf, MotionPlayFrame, MotionPlayLength, SetGameTables, T,
 } from "../../src/game/tables";
-import { ColiTestSphereAgainstActors } from "../../src/game/coli";
+import {
+  ColiDynamicListRemove, ColiTestSphereAgainstActors,
+} from "../../src/game/coli";
+import { ActorDespawn } from "../../src/game/despawn";
+import {
+  ThrownWeaponAlloc, ThrownWeaponDespawn, ThrownWeaponRoutine,
+} from "../../src/game/thrown_weapon";
+import { ActorDespawnProp } from "../../src/game/class41/prop";
+import type { BreakableProp } from "../../src/game/class41/prop_state";
 import { ZombieState } from "../../src/game/class30/states";
 import { ZombieStateWalkDistance } from "../../src/game/class30/walk_distance";
 import { ActorDrawShadow } from "../../src/game/model_draw";
@@ -1088,6 +1096,82 @@ console.log("\nthe crowd push, as the exe runs it:");
           `${first} / ${filed}`);
     check("...and the second frame's test what the first filed",
           second.includes(a.at) && second.includes(b.at), String(second));
+  }
+
+  // -- `ActorDespawn` takes the object out: `ColiDynamicListRemove` --------
+  //
+  // `FUN_00409CC0` is four lines: `obj+0x34 = (obj+0x34 & ~1) | 0x80018000`,
+  // `ColiDynamicListRemove(obj)` (`FUN_00405220`, `CALL` at `0x00409CD3`),
+  // the hit slot, `ActorKill`. The remove zeroes the first matching entry's
+  // `+0x00` and `+0x04` and leaves the count, so the entry stays as a hole;
+  // the push passes over it at `0x00405B5D`.
+  {
+    const [a, b] = crowd();
+    PublishCrowd(a, b);
+    const n = G.g_coli_dynamic_list.length;
+    const before = G.g_coli_dynamic_list.map((e) => ({ ...e }));
+    ActorDespawn(b);
+    const holes = G.g_coli_dynamic_list.filter((e) => e.at === -1);
+    const bi = before.findIndex((e) => e.at === b.at);
+    const hole = G.g_coli_dynamic_list[bi];
+    check("a despawn makes a hole of the object's published entry -- `+0x00` "
+          + "and `+0x04` zeroed -- and leaves the count as it was",
+          G.g_coli_dynamic_list.length === n && n === 2 && holes.length === 1
+          && hole?.at === -1 && hole.flags === 0,
+          JSON.stringify(G.g_coli_dynamic_list));
+    check("...the sphere centre left where it was, and the other entry "
+          + "untouched",
+          !!hole && hole.x === before[bi].x && hole.y === before[bi].y
+          && hole.z === before[bi].z
+          && JSON.stringify(G.g_coli_dynamic_list[1 - bi])
+             === JSON.stringify(before[1 - bi]),
+          JSON.stringify(G.g_coli_dynamic_list));
+    check("...and raises `0x80018000` on the object, bit 0 cleared "
+          + "(`0x00409CC9`)",
+          (b.flags & (0x80018000 | 1)) === (0x80018000 | 0),
+          (b.flags >>> 0).toString(16));
+    // The rest of the frame's actors do not meet it: two bodies two units
+    // apart overlap by five, and `a` is not pushed at all.
+    ZombiePushOutOfWorldAndActors(a);
+    check("...so an actor later in the same frame is not pushed by it",
+          a.pos.x === 0 && b.pushedBy !== a.at,
+          `${a.pos.x} pushedBy ${b.pushedBy}`);
+  }
+  {
+    // The entry found is the object's own. A thrown weapon files its
+    // thrower's `at` beside its id and a class-0x44 prop its placer's beside
+    // its id; the engine compares one pointer, so each despawn takes its own
+    // entry and none of the others.
+    ResetGameGlobals();
+    const AT = 0x7b00;
+    const w = ThrownWeaponAlloc(ThrownWeaponRoutine.Thrower);
+    w.from = AT;
+    const p = ({ id: 5, at: AT, flags: 0, group: 0, member: 0,
+                 dead: false } as unknown) as BreakableProp;
+    const entries = (): ShotTestEntry[] => [
+      { at: AT, flags: 1, x: 1, y: 2, z: 3 },
+      { at: AT, flags: 0x80000001 | 0, x: 4, y: 5, z: 6, thrown: w.id },
+      { at: AT, flags: 0x51, x: 0, y: 0, z: 0, prop: p.id },
+    ];
+    const kinds = () => G.g_coli_dynamic_list.map((e) =>
+      e.at === -1 ? "hole" : e.thrown !== undefined ? "thrown"
+        : e.prop !== undefined ? "prop" : "actor").join(",");
+    G.g_coli_dynamic_list = entries();
+    ThrownWeaponDespawn(w);
+    check("a thrown weapon's despawn makes a hole of its own entry, not its "
+          + "thrower's", kinds() === "actor,hole,prop", kinds());
+    G.g_coli_dynamic_list = entries();
+    ActorDespawnProp(p);
+    check("...a prop's of its own, not its placer's",
+          kinds() === "actor,thrown,hole", kinds());
+    G.g_coli_dynamic_list = entries();
+    ColiDynamicListRemove({ at: AT });
+    check("...and an actor's of its own, not its weapon's or its prop's",
+          kinds() === "hole,thrown,prop", kinds());
+    G.g_coli_dynamic_list = [entries()[0], entries()[0]];
+    ColiDynamicListRemove({ at: AT });
+    check("...the first match only (`JZ 0x00405244` leaves the loop)",
+          kinds() === "hole,actor", kinds());
   }
 }
 

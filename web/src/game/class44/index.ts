@@ -167,7 +167,7 @@ export type Class44Builder = (obj: Actor, f: ClassFrame) => void;
 function Class44Placement(obj: Actor, container: string):
     BreakablePlacement | undefined {
   return T.breakables?.placements?.find(
-    (q) => q.at === obj.at && q.container === container);
+    (q) => q.at === obj.descAt && q.container === container);
 }
 
 export const g_class44_subtypes: Partial<Record<number, Class44Builder>> = {
@@ -215,59 +215,59 @@ export const g_class44_subtypes: Partial<Record<number, Class44Builder>> = {
   [Class44Selector.ScriptFlagEffect]: (obj, f) => {
     void f;
     const pl = T.breakables?.placements?.find(
-      (q) => q.at === obj.at && q.container === "script_flag_effect");
+      (q) => q.at === obj.descAt && q.container === "script_flag_effect");
     if (!pl) return;
     G.g_breakable_props.push(...PropBuildScriptFlagEffect(
-      obj.at, pl.effect ?? 0, pl.capture_bone ?? 0, pl.motion ?? 0));
+      obj.descAt, pl.effect ?? 0, pl.capture_bone ?? 0, pl.motion ?? 0));
   },
   [Class44Selector.StoryModeSwitch]: (obj, f) => {
     void f;
     const pl = T.breakables?.placements?.find(
-      (q) => q.at === obj.at && q.container === "story_switch");
+      (q) => q.at === obj.descAt && q.container === "story_switch");
     if (!pl) return;
     G.g_breakable_props.push(PlaceStoryModeSwitch(pl));
   },
   [Class44Selector.RisingDoor]: (obj, f) => {
     void f;
     const pl = T.breakables?.placements?.find(
-      (q) => q.at === obj.at && q.container === "rising_door");
+      (q) => q.at === obj.descAt && q.container === "rising_door");
     if (!pl) return;
     G.g_breakable_props.push(PropBuildRisingDoor(pl));
   },
   [Class44Selector.RiseToHeight]: (obj, f) => {
     void f;
     const pl = T.breakables?.placements?.find(
-      (q) => q.at === obj.at && q.container === "rise_to_height");
+      (q) => q.at === obj.descAt && q.container === "rise_to_height");
     if (!pl) return;
     G.g_breakable_props.push(PropBuildRiseToHeight(pl));
   },
   [Class44Selector.SlideOnFlag]: (obj, f) => {
     void f;
     const pl = T.breakables?.placements?.find(
-      (q) => q.at === obj.at && q.container === "slide_on_flag");
+      (q) => q.at === obj.descAt && q.container === "slide_on_flag");
     if (!pl) return;
     G.g_breakable_props.push(PropBuildSlideOnFlag(pl));
   },
   [Class44Selector.FlagLifted]: (obj, f) => {
     void f;
     const pl = T.breakables?.placements?.find(
-      (q) => q.at === obj.at && q.container === "flag_lifted");
+      (q) => q.at === obj.descAt && q.container === "flag_lifted");
     if (!pl) return;
     G.g_breakable_props.push(PropBuildFlagLiftedProp(pl));
   },
   [Class44Selector.DrawOnly]: (obj, f) => {
     void f;
     const pl = T.breakables?.placements?.find(
-      (q) => q.at === obj.at && q.container === "draw_only_14");
+      (q) => q.at === obj.descAt && q.container === "draw_only_14");
     if (!pl) return;
     G.g_breakable_props.push(PropBuildDrawOnlySelector14(pl));
   },
   [Class44Selector.FallingContainer]: (obj, f) => {
     const pl = T.breakables?.placements?.find(
-      (q) => q.at === obj.at && q.container === "falling");
+      (q) => q.at === obj.descAt && q.container === "falling");
     if (!pl) return;
     G.g_breakable_props.push(PlaceFallingContainer(
-      obj.at, pl.kind ?? 0, pl.item_set ?? 0, pl.story_item ?? -1,
+      obj.descAt, pl.kind ?? 0, pl.item_set ?? 0, pl.story_item ?? -1,
       pl.set_size ?? 0, pl.lifetime_evt_steps,
       obj.pos.x, obj.pos.y, obj.pos.z, obj.yaw, f.rng));
   },

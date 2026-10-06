@@ -122,6 +122,53 @@ export interface ScriptSpawn {
   hp?: number;
   orient?: [number, number, number];
   flags?: number;
+  /**
+   * The instruction that pushed it -- the walker's `ActiveSpawn` carries all
+   * three. What {@link SpawnSiteKeys} tells one spawn instruction from
+   * another by, when two of them name the same descriptor.
+   */
+  block?: number;
+  step?: number;
+  opIndex?: number;
+}
+
+/**
+ * `[port-only]` -- one key per **spawn instruction run**, in list order.
+ *
+ * The spawn opcodes allocate a fresh object every time they run
+ * (`ActorAlloc`, `FUN_004A6FA0`), whatever descriptor they name: stage 2
+ * block 12 spawns block 11's class-0x2B light again while the first is still
+ * burning, block 35 places block 20's class-0x15 plank row again, and stage 1
+ * block 14 re-spawns the class-0x33 cars of blocks 5 and 11. The port
+ * materialises these objects from the walker's list rather than from the
+ * instruction, so it has to remember which list entries it has built -- and
+ * an entry is an instruction, `(block, step, op, descriptor)`, not a
+ * descriptor. The ordinal tells apart the same instruction run twice while
+ * both entries are listed.
+ */
+export function SpawnSiteKeys(spawns: readonly ScriptSpawn[]): string[] {
+  const seen = new Map<string, number>();
+  return spawns.map((s) => {
+    const base = `${s.block ?? -1}:${s.step ?? -1}:${s.opIndex ?? -1}:${s.at}`;
+    const k = seen.get(base) ?? 0;
+    seen.set(base, k + 1);
+    return `${base}#${k}`;
+  });
+}
+
+/**
+ * `[port-only]` -- the pool address a new object from descriptor `at` is
+ * linked under: `at` itself, or, when an object from that descriptor is
+ * already in the pool, the next synthetic address (`g_summoned_actor_at`,
+ * the counter `SpawnWaterEnemyAt` and the plank row draw from). The object
+ * keeps `at` as its {@link Actor.descAt}. The engine needs neither: its pool
+ * is keyed by pointer.
+ */
+export function SpawnSiteAt(at: number): number {
+  if (!ActorByAt(at)) return at;
+  const fresh = G.g_summoned_actor_at;
+  G.g_summoned_actor_at -= 1;
+  return fresh;
 }
 
 /**
@@ -310,8 +357,8 @@ export function RunPendingInits(rng?: Rng, events?: Events): void {
 export function SpawnSlotActors(spawns: readonly ScriptSpawn[]): void {
   const placements = T.chars?.placements;
   if (!placements?.length) return;
-  // `[port-only]` — **build each listed spawn once**, and forget it when the
-  // script stops listing it. This routine runs every frame over the walker's
+  // `[port-only]` — **build each listed spawn instruction once**
+  // (`SpawnSiteKeys`), and forget it when the script stops listing it. This routine runs every frame over the walker's
   // list, and `GameUpdate` prunes a despawned actor from the pool at the end of
   // the frame, so without this an actor that leaves under its own state machine
   // is rebuilt on the next one. Class 0x52's mouse and class 0x33's carrier
@@ -326,7 +373,8 @@ export function SpawnSlotActors(spawns: readonly ScriptSpawn[]): void {
   // Class 0x40 counts instructions rather than addresses: see
   // `SpawnHordePlacers`.
   SpawnHordePlacers(spawns, placements);
-  for (const s of spawns) SpawnSlotActor(s);
+  const keys = SpawnSiteKeys(spawns);
+  spawns.forEach((s, i) => SpawnSlotActor(s, keys[i]));
 }
 
 /**
@@ -335,8 +383,8 @@ export function SpawnSlotActors(spawns: readonly ScriptSpawn[]): void {
  * there.
  */
 export function SlotActorsForgetUnlisted(spawns: readonly ScriptSpawn[]): void {
-  const listed = new Set(spawns.map((s) => s.at));
-  G.g_slot_actors_built = G.g_slot_actors_built.filter((at) => listed.has(at));
+  const listed = new Set(SpawnSiteKeys(spawns));
+  G.g_slot_actors_built = G.g_slot_actors_built.filter((k) => listed.has(k));
 }
 
 /**
@@ -347,26 +395,28 @@ export function SlotActorsForgetUnlisted(spawns: readonly ScriptSpawn[]): void {
  * what the previous one left behind (`g_civilian_carrier`) sees exactly that.
  * `[port-only]`, as {@link SpawnSlotActors} is.
  */
-export function SpawnSlotActor(s: ScriptSpawn): void {
+export function SpawnSlotActor(s: ScriptSpawn,
+                               key = SpawnSiteKeys([s])[0]): void {
   if (s.class === SpawnClassValue.PathRidingProp) {
-    SpawnPathRidingProp(s);
+    SpawnPathRidingProp(s, key);
     return;
   }
   const placements = T.chars?.placements;
   if (!placements?.length) return;
   {
-    if (G.g_slot_actors_built.includes(s.at)) return;
-    if (ActorByAt(s.at)) return;
+    if (G.g_slot_actors_built.includes(key)) return;
     const pl = placements.find((p) => p.at === s.at);
     if (!pl) return;
+    // Decided before any arm links its object, and only once it is sure to.
+    const at = (): number => SpawnSiteAt(s.at);
     if (s.class === SpawnClassValue.Mouse) {
-      G.g_slot_actors_built.push(s.at);
-      SpawnFromDescriptor(s.at, SpawnClassValue.Mouse, -1, "mouse",
+      G.g_slot_actors_built.push(key);
+      SpawnFromDescriptor(at(), SpawnClassValue.Mouse, -1, "mouse",
                           { class52: pl.class52 ?? null,
                             ...PlacementOrientation(pl),
                             pos: vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0,
                                       s.pos?.[2] ?? 0),
-                            visible: true });
+                            visible: true, descAt: s.at });
       return;
     }
     // Class 0x43 -- the owl. Its handler is a placer that builds a 0x2A0-byte
@@ -395,13 +445,13 @@ export function SpawnSlotActor(s: ScriptSpawn): void {
     // the word goes on as the class-0x13 arm below explains.
     if (s.class === SpawnClassValue.FlagStripProp) {
       if (!pl.class12) return;
-      G.g_slot_actors_built.push(s.at);
-      SpawnFromDescriptor(s.at, SpawnClassValue.FlagStripProp, -1, "strip",
+      G.g_slot_actors_built.push(key);
+      SpawnFromDescriptor(at(), SpawnClassValue.FlagStripProp, -1, "strip",
                           { class12: pl.class12, ...PlacementOrientation(pl),
                             flags: pl.init_flags ?? 0,
                             pos: vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0,
                                       s.pos?.[2] ?? 0),
-                            visible: true });
+                            visible: true, descAt: s.at });
       return;
     }
     // Class 0x15 -- the row of floating planks. Opcode 0x0C too, so the
@@ -409,36 +459,36 @@ export function SpawnSlotActor(s: ScriptSpawn): void {
     // placer builds the row from the tail and kills itself (`game/class15/`).
     if (s.class === SpawnClassValue.FloatingPropRow) {
       if (!pl.class15) return;
-      G.g_slot_actors_built.push(s.at);
-      SpawnFromDescriptor(s.at, SpawnClassValue.FloatingPropRow, -1,
+      G.g_slot_actors_built.push(key);
+      SpawnFromDescriptor(at(), SpawnClassValue.FloatingPropRow, -1,
                           "plank row",
                           { class15: pl.class15, ...PlacementOrientation(pl),
                             flags: pl.init_flags ?? 0,
                             pos: vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0,
                                       s.pos?.[2] ?? 0),
-                            visible: true });
+                            visible: true, descAt: s.at });
       return;
     }
     // Class 0x2B -- a scripted light. No tail and no position of its own:
     // `obj+0x11C`, the selector, is all `DynamicLightInit` reads
     // (`game/class2B/`).
     if (s.class === SpawnClassValue.DynamicLight) {
-      G.g_slot_actors_built.push(s.at);
-      SpawnFromDescriptor(s.at, SpawnClassValue.DynamicLight, -1,
+      G.g_slot_actors_built.push(key);
+      SpawnFromDescriptor(at(), SpawnClassValue.DynamicLight, -1,
                           `light ${pl.hp}`,
                           { hp: pl.hp, maxHp: pl.hp, flags: pl.init_flags ?? 0,
-                            visible: true });
+                            visible: true, descAt: s.at });
       return;
     }
     if (s.class === SpawnClassValue.ScriptedProp) {
       if (!pl.class13) return;
-      G.g_slot_actors_built.push(s.at);
-      SpawnFromDescriptor(s.at, SpawnClassValue.ScriptedProp, -1, "prop",
+      G.g_slot_actors_built.push(key);
+      SpawnFromDescriptor(at(), SpawnClassValue.ScriptedProp, -1, "prop",
                           { class13: pl.class13, ...PlacementOrientation(pl),
                             flags: pl.init_flags ?? 0,
                             pos: vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0,
                                       s.pos?.[2] ?? 0),
-                            visible: true });
+                            visible: true, descAt: s.at });
       return;
     }
     // Class 0x26 subtypes 2, 6 and 7 -- stage 3's boat and stage 6 block 12's
@@ -448,25 +498,25 @@ export function SpawnSlotActor(s: ScriptSpawn): void {
     // subtype, `obj+0x11C`, as `SpawnFromDescriptor` copies it.
     if (s.class === SpawnClassValue.Vehicle) {
       if (!pl.class26) return;
-      G.g_slot_actors_built.push(s.at);
-      SpawnFromDescriptor(s.at, SpawnClassValue.Vehicle, -1,
+      G.g_slot_actors_built.push(key);
+      SpawnFromDescriptor(at(), SpawnClassValue.Vehicle, -1,
                           pl.hp === 2 ? "boat" : `class 0x26 subtype ${pl.hp}`,
                           { class26: pl.class26, hp: pl.hp, maxHp: pl.hp,
                             ...PlacementOrientation(pl),
                             flags: pl.init_flags ?? 0,
                             pos: vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0,
                                       s.pos?.[2] ?? 0),
-                            visible: true });
+                            visible: true, descAt: s.at });
       return;
     }
     if (s.class === SpawnClassValue.FlyingEnemy) {
       if (!pl.class43) return;
-      G.g_slot_actors_built.push(s.at);
-      SpawnFromDescriptor(s.at, SpawnClassValue.FlyingEnemy, -1, "owl",
+      G.g_slot_actors_built.push(key);
+      SpawnFromDescriptor(at(), SpawnClassValue.FlyingEnemy, -1, "owl",
                           { class43: pl.class43, ...PlacementOrientation(pl),
                             pos: vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0,
                                       s.pos?.[2] ?? 0),
-                            visible: true });
+                            visible: true, descAt: s.at });
       return;
     }
     // Class 0x42 -- the worm's placer. No character type: every draw of the
@@ -476,12 +526,12 @@ export function SpawnSlotActor(s: ScriptSpawn): void {
     // spawn record's, which is all `EvtOpSpawnPlaced09` gives it.
     if (s.class === SpawnClassValue.Worm) {
       if (!pl.class42) return;
-      G.g_slot_actors_built.push(s.at);
-      SpawnFromDescriptor(s.at, SpawnClassValue.Worm, -1, "worm placer",
+      G.g_slot_actors_built.push(key);
+      SpawnFromDescriptor(at(), SpawnClassValue.Worm, -1, "worm placer",
                           { class42: pl.class42, ...PlacementOrientation(pl),
                             pos: vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0,
                                       s.pos?.[2] ?? 0),
-                            visible: true });
+                            visible: true, descAt: s.at });
       return;
     }
     // Class 0x29 -- a batch of floor decals. No character type: every draw is
@@ -489,14 +539,14 @@ export function SpawnSlotActor(s: ScriptSpawn): void {
     // (`obj+0x11C`), and the tail names the camera cue that ends it.
     if (s.class === SpawnClassValue.SceneryBatch) {
       if (!pl.class29) return;
-      G.g_slot_actors_built.push(s.at);
-      SpawnFromDescriptor(s.at, SpawnClassValue.SceneryBatch, -1,
+      G.g_slot_actors_built.push(key);
+      SpawnFromDescriptor(at(), SpawnClassValue.SceneryBatch, -1,
                           `decals ${pl.hp}`,
                           { class29: pl.class29, hp: pl.hp, maxHp: pl.hp,
                             ...PlacementOrientation(pl),
                             pos: vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0,
                                       s.pos?.[2] ?? 0),
-                            visible: true });
+                            visible: true, descAt: s.at });
       return;
     }
     // Classes 0x16 and 0x17 -- the stage-2 boss arena's wave field and its
@@ -506,26 +556,26 @@ export function SpawnSlotActor(s: ScriptSpawn): void {
     // in the descriptor so the `Init` sees it.
     if (s.class === SpawnClassValue.WaterWaveField) {
       if (!pl.class16) return;
-      G.g_slot_actors_built.push(s.at);
-      SpawnFromDescriptor(s.at, SpawnClassValue.WaterWaveField, -1,
+      G.g_slot_actors_built.push(key);
+      SpawnFromDescriptor(at(), SpawnClassValue.WaterWaveField, -1,
                           "wave field",
                           { class16: pl.class16, ...PlacementOrientation(pl),
                             pos: vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0,
                                       s.pos?.[2] ?? 0),
-                            visible: true });
+                            visible: true, descAt: s.at });
       return;
     }
     if (s.class === SpawnClassValue.WaterWaveSource) {
       if (!pl.class17) return;
-      G.g_slot_actors_built.push(s.at);
-      SpawnFromDescriptor(s.at, SpawnClassValue.WaterWaveSource, -1,
+      G.g_slot_actors_built.push(key);
+      SpawnFromDescriptor(at(), SpawnClassValue.WaterWaveSource, -1,
                           "wave source",
                           { class17: pl.class17, hp: pl.hp, maxHp: pl.hp,
                             yaw: pl.yaw ?? 0, pitch: pl.class17.pitch,
                             roll: pl.class17.roll,
                             pos: vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0,
                                       s.pos?.[2] ?? 0),
-                            visible: true });
+                            visible: true, descAt: s.at });
       return;
     }
     // Class 0x51 -- the fish. Drawn by asset slot from `fish.bin`, so it has
@@ -537,12 +587,12 @@ export function SpawnSlotActor(s: ScriptSpawn): void {
       if (!pl.class51) return;
       // The position goes in the **descriptor**, not after the spawn: it is
       // the one class here whose `Init` reads it, into `sub+0x00..0x08`.
-      G.g_slot_actors_built.push(s.at);
-      SpawnFromDescriptor(s.at, SpawnClassValue.WaterEnemy, -1, "fish",
+      G.g_slot_actors_built.push(key);
+      SpawnFromDescriptor(at(), SpawnClassValue.WaterEnemy, -1, "fish",
                           { class51: pl.class51, ...PlacementOrientation(pl),
                             pos: vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0,
                                       s.pos?.[2] ?? 0),
-                            visible: true });
+                            visible: true, descAt: s.at });
       return;
     }
     // Class 0x33 -- `hp` is the **selector**, not hit points:
@@ -562,8 +612,8 @@ export function SpawnSlotActor(s: ScriptSpawn): void {
       if (!pl.class33 && !pl.class33_push && !pl.class33_cue
           && !pl.class33_prop && !pl.class33_sub
           && pl.hp !== ScriptedScenerySelector.EffectOnFirstFrame) return;
-      G.g_slot_actors_built.push(s.at);
-      SpawnFromDescriptor(s.at, SpawnClassValue.ScriptedScenery, -1,
+      G.g_slot_actors_built.push(key);
+      SpawnFromDescriptor(at(), SpawnClassValue.ScriptedScenery, -1,
                           `scenery ${pl.hp}`,
                           { class33: pl.class33, class33Push: pl.class33_push,
                             class33Cue: pl.class33_cue,
@@ -580,7 +630,7 @@ export function SpawnSlotActor(s: ScriptSpawn): void {
                             flags: pl.init_flags ?? 0,
                             pos: vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0,
                                       s.pos?.[2] ?? 0),
-                            visible: true });
+                            visible: true, descAt: s.at });
       return;
     }
   }
@@ -602,11 +652,10 @@ export function SpawnSlotActor(s: ScriptSpawn): void {
  * Before this arm the spawn built nothing, and the object's draw ran in
  * `render/rigs.ts` off the rig table with no object behind it.
  */
-function SpawnPathRidingProp(s: ScriptSpawn): void {
-  if (G.g_slot_actors_built.includes(s.at)) return;
-  if (ActorByAt(s.at)) return;
-  G.g_slot_actors_built.push(s.at);
-  SpawnFromDescriptor(s.at, SpawnClassValue.PathRidingProp, -1,
+function SpawnPathRidingProp(s: ScriptSpawn, key: string): void {
+  if (G.g_slot_actors_built.includes(key)) return;
+  G.g_slot_actors_built.push(key);
+  SpawnFromDescriptor(SpawnSiteAt(s.at), SpawnClassValue.PathRidingProp, -1,
                       `path prop ${s.hp ?? 0}`,
                       { hp: s.hp ?? 0, maxHp: s.hp ?? 0,
                         flags: s.flags ?? 0,
@@ -614,7 +663,7 @@ function SpawnPathRidingProp(s: ScriptSpawn): void {
                         roll: s.orient?.[2] ?? 0,
                         pos: vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0,
                                   s.pos?.[2] ?? 0),
-                        visible: true });
+                        visible: true, descAt: s.at });
 }
 
 /**
@@ -665,13 +714,23 @@ export function SpawnSimpleActors(spawns: readonly SimpleScriptSpawn[]): void {
 export function SpawnPropContainers(spawns: readonly ScriptSpawn[]): void {
   const placements = T.breakables?.placements;
   if (!placements?.length) return;
-  for (const s of spawns) {
+  // Built once per spawn **instruction** while the script lists it, as
+  // `SpawnSlotActors` does and for its reason: the placer dies on its first
+  // frame and stays in the pool dead, which is what used to stop a second
+  // build -- and so also stopped every re-spawn of the same descriptor by a
+  // later instruction, which in the engine places the props again.
+  const keys = SpawnSiteKeys(spawns);
+  const listed = new Set(keys);
+  G.g_prop_placers_built = G.g_prop_placers_built.filter((k) => listed.has(k));
+  for (let i = 0; i < spawns.length; i++) {
+    const s = spawns[i];
     const isPlacer = s.class === SpawnClassValue.PropContainerPlacer
                   || s.class === SpawnClassValue.PropPlacer;
     if (!isPlacer) continue;
-    if (ActorByAt(s.at)) continue;
+    if (G.g_prop_placers_built.includes(keys[i])) continue;
     const pl = placements.find((p) => p.at === s.at);
     if (!pl) continue;
+    G.g_prop_placers_built.push(keys[i]);
 
     // Class 0x44 dispatches on `+0x11C`, so the selector goes in `hp` — the
     // same field that is the *group id* for a class-0x41 placer.
@@ -703,7 +762,7 @@ export function SpawnPropContainers(spawns: readonly ScriptSpawn[]): void {
     };
     const sel = CLASS44_SELECTOR[pl.container];
     if (s.class === SpawnClassValue.PropPlacer && sel !== undefined) {
-      const a = ActorSpawn(s.at, SpawnClassValue.PropPlacer, 0,
+      const a = ActorSpawn(SpawnSiteAt(s.at), SpawnClassValue.PropPlacer, 0,
                            pl.container === "story_switch"
                              ? "story-mode switch"
                              : pl.container === "script_flag_effect"
@@ -719,7 +778,7 @@ export function SpawnPropContainers(spawns: readonly ScriptSpawn[]): void {
                                      : pl.container === "falling"
                                        ? `container kind ${pl.kind}`
                                        : pl.container,
-                           { hp: sel });
+                           { hp: sel, descAt: s.at });
       a.pos = vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0, s.pos?.[2] ?? 0);
       a.yaw = pl.yaw ?? 0;
       a.visible = true;
@@ -758,7 +817,7 @@ export function SpawnPropContainers(spawns: readonly ScriptSpawn[]): void {
     // as themselves: `+0x1F4` the table index, `+0x11C` the lifetime.
     const bothFields = pl.container === "water_surface"
       || pl.container === "table50" || pl.container === "table66";
-    const a = ActorSpawn(s.at, SpawnClassValue.PropContainerPlacer,
+    const a = ActorSpawn(SpawnSiteAt(s.at), SpawnClassValue.PropContainerPlacer,
                          bothFields ? pl.field_1f4 ?? 0 : pl.lifetime_evt_steps,
                          pl.container === "kinded"
                            ? `prop kind ${pl.kind}`
@@ -769,7 +828,7 @@ export function SpawnPropContainers(spawns: readonly ScriptSpawn[]): void {
                                : `breakable group ${pl.group}`,
                          { hp: table || bothFields ? pl.lifetime_evt_steps
                                               : pl.group ?? 0,
-                           condition: type });
+                           condition: type, descAt: s.at });
     a.pos = vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0, s.pos?.[2] ?? 0);
     a.yaw = pl.yaw ?? 0;
     a.visible = true;

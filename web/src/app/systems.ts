@@ -24,7 +24,7 @@ import { CameraFrame } from "../core/camera";
 import type { Walker } from "../script/walker";
 import {
   RetireUnlistedActor, SpawnPropContainers, SpawnScriptedCharacters,
-  SlotActorsForgetUnlisted, SpawnSlotActor,
+  SlotActorsForgetUnlisted, SpawnSiteKeys, SpawnSlotActor,
   type CharacterSpawnRequest, type ScriptSpawn,
 } from "../game/director";
 import type { Actor } from "../game/actor";
@@ -344,11 +344,12 @@ export function syncCharacterSpawns(chars: CharacterPool,
   // ahead of the rest -- see `SpawnHordePlacers`. They read nothing another
   // spawn leaves behind, so building them first changes nothing they do.
   SpawnHordePlacers(spawns, T.chars?.placements ?? []);
-  for (const s of spawns) {
+  const keys = SpawnSiteKeys(spawns);
+  spawns.forEach((s, i) => {
     const r = ready.get(s.at);
     if (r) make(r);
-    else SpawnSlotActor(s);
-  }
+    else SpawnSlotActor(s, keys[i]);
+  });
   for (const r of reqs) make(r);
   for (const a of chars.syncSpawns(spawns, made)) RetireUnlistedActor(a);
 }
@@ -403,7 +404,8 @@ export function syncPortGlobals(w: Walker, freeRoam: boolean,
   // There is one array, in `game/globals.ts`, and both halves write it.
   // The spawn opcode places a group the moment it runs, so this is only the
   // safety net for a spawn list restored by a snapshot load rather than by
-  // an instruction. It is idempotent — `ActorByAt` refuses a second one.
+  // an instruction. It is idempotent -- each listed spawn instruction is
+  // built once (`g_prop_placers_built`).
   SpawnPropContainers(w.spawns);
 }
 

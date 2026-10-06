@@ -1375,8 +1375,24 @@ export type ListCursor = number;
  */
 export interface ActorBase {
   // -- identity ----------------------------------------------------------
-  /** The spawn's script address. Stable, and the key the renderer binds on. */
+  /**
+   * The object's address in the pool -- the key every other object and the
+   * renderer reach it by. The spawn's script address, except for a second
+   * live object built from the same descriptor (see {@link descAt}).
+   *
+   * [port-only] The engine's pool is keyed by pointer: `ActorAlloc`
+   * (`FUN_004A6FA0`) hands out a fresh object every time a spawn instruction
+   * runs, however many already came from that descriptor.
+   */
   at: number;
+  /**
+   * `obj+0x1390`'s descriptor, by its script address: what the object was
+   * spawned from, and what a constructor reads its tail by. Equal to
+   * {@link at} unless an object from the same descriptor was already in the
+   * pool when this one was built, in which case `at` is a fresh synthetic
+   * address (`g_summoned_actor_at`) and this still names the descriptor.
+   */
+  descAt: number;
   /**
    * The spawn class — `g_class_handlers` is indexed by it.
    *
@@ -2779,7 +2795,7 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
   // assigning `cls` here would widen it back to `SpawnClass` and defeat the
   // narrowing the union exists for.
   const head: Omit<ActorBase, "cls"> = {
-    at, charType, name, flags38: 0, hitSlot: HIT_SLOT_NONE,
+    at, descAt: at, charType, name, flags38: 0, hitSlot: HIT_SLOT_NONE,
     // `ActorBuildSkinnedModel` writes both of these while building the model:
     // the scale from the character type alone, the flags unconditionally.
     scale: ActorModelScale(charType),

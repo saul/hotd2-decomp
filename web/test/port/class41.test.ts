@@ -530,6 +530,29 @@ console.log("\nclass 0x41, the script spawns reach the pool:");
   check("a second pass does not place the group again",
         G.g_breakable_props.length === 3,
         `${G.g_breakable_props.length} props`);
+
+  // A **later instruction** naming the same descriptor is a new placer: the
+  // spawn opcode allocates one per run (`ActorAlloc`), and stage 2 re-spawns
+  // block 21's groups in block 22 that way. The first placer is still in the
+  // pool, dead, under 0xA100, so the second takes a pool address of its own
+  // and keeps the descriptor's as `descAt`, which its constructor reads.
+  const again = [...spawns, { at: 0xa100, class: SpawnClass.PropContainerPlacer,
+                              block: 22, step: 0, opIndex: 25 }];
+  SpawnPropContainers(again);
+  const second = G.g_object_list.filter(
+    (o) => o.cls === SpawnClass.PropContainerPlacer && o.descAt === 0xa100);
+  check("a second instruction naming the descriptor spawns a second placer",
+        second.length === 2 && second[1].at !== 0xa100 && second[1].at < 0,
+        second.map((o) => `${o.at}/${o.descAt}`).join(" "));
+  GameUpdate(1 / 60, NULL_HOST, rng, events);
+  check("...which places the group again from the same descriptor",
+        G.g_breakable_props.length === 6,
+        `${G.g_breakable_props.length} props`);
+  SpawnPropContainers(again);
+  GameUpdate(1 / 60, NULL_HOST, rng, events);
+  check("...once per instruction, however many frames list it",
+        G.g_breakable_props.length === 6,
+        `${G.g_breakable_props.length} props`);
 }
 
 console.log("\nclass 0x41 type 4, the kinded props:");

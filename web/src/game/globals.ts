@@ -2044,16 +2044,24 @@ export const G = {
    */
   g_summoned_actor_at: -1,
   /**
-   * `[port-only]` — the spawn addresses `SpawnSlotActors` has already built.
+   * `[port-only]` — the spawn instructions `SpawnSlotActors` has already
+   * built, by `SpawnSiteKeys`' key.
    *
    * There is no such list in the engine, and there cannot be: the spawn opcode
-   * builds an object once, in the step that holds it, and never looks again.
-   * The port materialises slot-drawn actors from the walker's live spawn list
-   * every frame, so it needs to remember which of them it has made — otherwise
-   * an actor that despawns under its own state machine comes straight back.
-   * An entry is dropped when the script stops listing that spawn.
+   * builds an object every time it runs, in the step that holds it, and never
+   * looks again. The port materialises slot-drawn actors from the walker's
+   * live spawn list every frame, so it needs to remember which entries it has
+   * made — otherwise an actor that despawns under its own state machine comes
+   * straight back. **Keyed by instruction, not by descriptor**: a descriptor
+   * a second instruction names again is a second object, as it is in the
+   * engine. An entry is dropped when the script stops listing it.
    */
-  g_slot_actors_built: [] as number[],
+  g_slot_actors_built: [] as string[],
+  /**
+   * `[port-only]` — the same, for the class-0x41/0x44 placers
+   * `SpawnPropContainers` builds when a spawn instruction runs.
+   */
+  g_prop_placers_built: [] as string[],
 
   // -- the owls, class 0x43 ----------------------------------------------
   /**
@@ -3484,6 +3492,7 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   G.g_water_wave_field = null;
   G.g_summoned_actor_at = -1;
   G.g_slot_actors_built = [];
+  G.g_prop_placers_built = [];
   G.g_class43_attack_token = -1;
   G.g_bat_members = [];
   // The splash is a task, and the scene's task list goes with the scene.

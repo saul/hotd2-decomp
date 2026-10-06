@@ -1237,6 +1237,35 @@ console.log("\nclass 0x33 selector 2: a model drawn until a flag or a camera fra
           `${o.scenery.draws.length} draws, slot ${o.scenery.slot}, sub ${o.sub}`);
   }
 
+  // -- P1b. a descriptor two instructions name is two objects --------------
+  // Stage 1 block 14 step 0 re-spawns the cars blocks 5 and 11 spawned, and
+  // `EvtOpSpawnObj0B` allocates afresh each time. Built per instruction: the
+  // second lives under a synthetic pool address and names its descriptor in
+  // `descAt`; a frame that lists both again builds nothing more.
+  {
+    reset();
+    const rng = new Rng(62);
+    const one = { at: PROP_AT, class: SpawnClass.ScriptedScenery,
+                  pos: [...POS] as [number, number, number],
+                  block: 5, step: 1, opIndex: 10 };
+    const two = { ...one, block: 14, step: 0, opIndex: 4 };
+    SpawnSlotActors([one]);
+    SpawnSlotActors([one, two]);
+    SpawnSlotActors([one, two]);
+    RunPendingInits(rng);
+    const cars = G.g_object_list.filter((o) => o.descAt === PROP_AT);
+    check("two instructions naming one selector-2 descriptor build two objects",
+          cars.length === 2 && cars[0].at === PROP_AT && cars[1].at < 0
+          && cars[1].hp === ScriptedScenerySelector.DrawUntilFlag,
+          cars.map((o) => `${o.at}/${o.descAt}`).join(" "));
+    // The first instruction's entry leaves the list and comes back: a run of
+    // the spawn opcode the walker has not seen built.
+    SpawnSlotActors([two]);
+    SpawnSlotActors([two, one]);
+    check("...and an entry the script lists anew is a new object",
+          G.g_object_list.filter((o) => o.descAt === PROP_AT).length === 3);
+  }
+
   // -- P2. the seed, and one draw a frame at the object's own pose ----------
   {
     reset();

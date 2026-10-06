@@ -166,14 +166,14 @@ export const g_class41_constructors:
   [PropContainerType.ChainSegments]: (obj, f) => {
     void f;
     const pl = T.breakables?.placements?.find(
-      (q) => q.at === obj.at && q.container === "chain");
+      (q) => q.at === obj.descAt && q.container === "chain");
     if (!pl) return;
     G.g_breakable_props.push(...PlaceChainSegments(pl));
   },
   [PropContainerType.FragmentProps]: (obj, f) => {
     void f;
     const pl = T.breakables?.placements?.find(
-      (q) => q.at === obj.at && q.container === "fragment");
+      (q) => q.at === obj.descAt && q.container === "fragment");
     if (!pl) return;
     G.g_breakable_props.push(...PlaceFragmentProps(pl));
   },
@@ -181,7 +181,7 @@ export const g_class41_constructors:
   [FLICKER_LIGHT_TYPE]: (obj, f) => {
     void f;
     const pl = T.breakables?.placements?.find(
-      (q) => q.at === obj.at && q.container === "flicker_light");
+      (q) => q.at === obj.descAt && q.container === "flicker_light");
     if (!pl) return;
     G.g_breakable_props.push(PlaceFlickerLightProp48(
       pl, obj.pos.x, obj.pos.y, obj.pos.z, obj.yaw));
@@ -189,47 +189,47 @@ export const g_class41_constructors:
   // The three table constructors copy the placer's `+0x11C` into every object
   // they build as its step lifetime; nothing else of the descriptor is read.
   [PropContainerType.Table38Props]: (obj) => {
-    G.g_breakable_props.push(...PlaceTable38Props(obj.at, obj.hp));
+    G.g_breakable_props.push(...PlaceTable38Props(obj.descAt, obj.hp));
   },
   [PropContainerType.Table39Stacks]: (obj, f) => {
-    G.g_breakable_props.push(...PlaceTable39Stacks(obj.at, obj.hp, f.rng));
+    G.g_breakable_props.push(...PlaceTable39Stacks(obj.descAt, obj.hp, f.rng));
   },
   [PropContainerType.Table44Props]: (obj) => {
-    G.g_breakable_props.push(...PlaceTable44Props(obj.at, obj.hp));
+    G.g_breakable_props.push(...PlaceTable44Props(obj.descAt, obj.hp));
   },
   // These two read `+0x1F4` as well: the table to build from. `+0x11C` is the
   // step lifetime every object copies, as for the three above.
   [PropContainerType.Table50Props]: (obj) => {
     G.g_breakable_props.push(
-      ...PlaceTable50Props(obj.at, obj.charType, obj.hp));
+      ...PlaceTable50Props(obj.descAt, obj.charType, obj.hp));
   },
   // `PlaceType47Prop` reads the position and nothing else.
   [PropContainerType.Type47Prop]: (obj) => {
     const pl = T.breakables?.placements?.find(
-      (q) => q.at === obj.at && q.container === "type47");
+      (q) => q.at === obj.descAt && q.container === "type47");
     if (!pl) return;
     G.g_breakable_props.push(PlaceType47Prop(pl));
   },
   [PropContainerType.Table66Props]: (obj) => {
     G.g_breakable_props.push(
-      ...PlaceTable66Props(obj.at, obj.charType, obj.hp));
+      ...PlaceTable66Props(obj.descAt, obj.charType, obj.hp));
   },
   // Constructors 16 and 29 build from image tables the bundle carries and
   // read only the placer's `+0x11C`; 17 reads its point; 37 its point, its
   // `+0x68`, `+0x64`, `+0x1F4` and `+0x11C`, which the placement carries.
   [PropContainerType.Table16Props]: (obj, f) => {
-    G.g_breakable_props.push(...PlaceTable16Props(obj.at, obj.hp, f.rng));
+    G.g_breakable_props.push(...PlaceTable16Props(obj.descAt, obj.hp, f.rng));
   },
   [PropContainerType.Type17Props]: (obj) => {
     G.g_breakable_props.push(
-      ...PlaceType17Props(obj.at, obj.pos.x, obj.pos.y, obj.pos.z));
+      ...PlaceType17Props(obj.descAt, obj.pos.x, obj.pos.y, obj.pos.z));
   },
   [PropContainerType.Table29Props]: (obj) => {
-    G.g_breakable_props.push(...PlaceTable29Props(obj.at, obj.hp));
+    G.g_breakable_props.push(...PlaceTable29Props(obj.descAt, obj.hp));
   },
   [PropContainerType.Type37PropPair]: (obj, f) => {
     const pl = T.breakables?.placements?.find(
-      (q) => q.at === obj.at && q.container === "type37");
+      (q) => q.at === obj.descAt && q.container === "type37");
     if (!pl) return;
     G.g_breakable_props.push(...PlaceType37PropPair(pl, f.rng));
   },
@@ -244,10 +244,10 @@ export const g_class41_constructors:
   },
   [PropContainerType.KindedProp]: (obj, f) => {
     const pl = T.breakables?.placements?.find(
-      (q) => q.at === obj.at && q.container === "kinded");
+      (q) => q.at === obj.descAt && q.container === "kinded");
     if (!pl) return;
     G.g_breakable_props.push(PlaceKindedProp(
-      obj.at, pl.kind ?? 0, pl.item_set ?? 0, pl.set_size ?? 0,
+      obj.descAt, pl.kind ?? 0, pl.item_set ?? 0, pl.set_size ?? 0,
       pl.lifetime_evt_steps, obj.pos.x, obj.pos.y, obj.pos.z, obj.yaw,
       f.rng));
   },
@@ -277,7 +277,7 @@ export function PropContainerPlacerUpdate(obj: Actor, f: ClassFrame): void {
  */
 function PlaceGenericPropFor(obj: Actor, f: ClassFrame): void {
   const pl = T.breakables?.placements?.find(
-    (q) => q.at === obj.at && q.container === "generic");
+    (q) => q.at === obj.descAt && q.container === "generic");
   if (!pl) return;
   // `ActorAlloc` appends the prop to the task list **before** its arm
   // allocates anything, so the objects cases 8 and 0x43 hang off it come

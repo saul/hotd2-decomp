@@ -1048,8 +1048,10 @@ export class Walker {
       // the instruction runs (`script/ops/spawn.ts`), and a replay runs no
       // frame to build the object. The gate is past, so what it counted is
       // gone -- the placer with it, before it can build and count again.
-      const placed = s.at === undefined ? undefined : ActorByAt(s.at);
-      if (placed && !placed.dead) {
+      // By its descriptor: a re-spawn's placer has a pool address of its own.
+      const placed = s.at === undefined ? undefined
+        : G.g_object_list.find((o) => o.descAt === s.at && !o.dead);
+      if (placed) {
         placed.dead = true;
         placed.visible = false;
       }

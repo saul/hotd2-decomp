@@ -179,7 +179,7 @@ const s8 = (v: number): number => (v << 24) >> 24;
  */
 export function PlaceWaterSurface(obj: Actor): WaterSurface | null {
   const pl = T.breakables?.placements?.find(
-    (q) => q.at === obj.at && q.container === "water_surface");
+    (q) => q.at === obj.descAt && q.container === "water_surface");
   if (!pl || pl.slot === undefined) return null;
   const index = obj.charType & 0xff;
   const w: WaterSurface = {

@@ -78,6 +78,7 @@ import { ActorDespawn } from "../despawn";
 import { SpawnBoneHitSprite } from "../effects/blood";
 import { SpawnGroundRingEffect } from "../effects/ring_effect";
 import { G, HIT_SLOT_NONE } from "../globals";
+import { DrawSkinnedModelAndShadow } from "../skeleton";
 import type { GameHost } from "../host";
 import {
   MatCopy, MatIdentity, MatrixRotateX, MatrixRotateY, MatrixRotateZ,
@@ -1290,6 +1291,9 @@ export function FrogDrawAndCycleBone2Slot(obj: Actor, f: ClassFrame): void {
   // frame's cursor is the one the renderer poses.
   sub.playCursor = MotionPlayFrame(obj);
   FrogStoreBone1Record(sub, obj, f.host);
+  // ...and the draw's ground shadow, under `g_cur_actor`, which `FrogUpdate`
+  // pointed at the frog on its first line (`0x0043A1E8`).
+  DrawSkinnedModelAndShadow(obj);
   if (obj.flags & ActorFlag.Dead) return;
   const slot = FROG_BONE2_FIRST_SLOT + sub.boneSlot;
   if (obj.boneSlot["2"] === slot) return;
@@ -1455,6 +1459,9 @@ const g_class11_states: Record<number, (obj: Actor, f: ClassFrame) => void> = {
 export function FrogUpdate(obj: Actor, f: ClassFrame): void {
   const sub = Tail(obj);
   if (!sub) return;
+  // `MOV [0x009a26a0], ESI` at `0x0043A1E8`: the update names itself, and
+  // the draw's shadow is drawn for that name.
+  G.g_cur_actor = obj.at;
   // `g_camera_eye_z` and `_x` by address, `0x0043A212` and `0x0043A21A`, as
   // every eye in this class is (`0x0043AA97..AB2`, `0x0043AB8C`, `0x0043AFCF`,
   // `0x0043B1DC..1F6`): the gameplay eye.

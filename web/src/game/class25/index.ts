@@ -47,7 +47,8 @@ import { ActorSetMotion, ActorSetMotionBlended } from "../class30/motion_cue";
 import { ScriptedHumanoidDebug } from "./debug";
 import { SpawnBloodSpray } from "../effects/blood";
 import { SpawnSpriteEffect, SpriteEffectKind } from "../effects/sprite";
-import { G, HIT_SLOT_NONE } from "../globals";
+import { G, HIT_SLOT_NONE, ScreenFurniture } from "../globals";
+import { DrawSkinnedModelAndShadow } from "../skeleton";
 import { GameMode } from "../game_mode";
 import { ActorFreeHitSlot } from "../hit_slots";
 import {
@@ -115,7 +116,7 @@ export enum HumanoidOp {
   /**
    * `obj+0x1330` — which of the character's hand props is drawn.
    *
-   * It **is** a draw mode. `ScriptedHumanoidDraw` (`FUN_00484FF0`) never reads
+   * It **is** a draw mode. `ScriptedHumanoidDraw` (`0x00484FF0`) never reads
    * it, which had been taken to mean nothing did; the reader is
    * `ScriptedHumanoidBoneDrawHook` (`FUN_00485260`), the per-bone callback
    * the Init at `0x004840D0` installs at `obj+0x12EC`.
@@ -215,7 +216,7 @@ export interface HumanoidProgram {
   removeFrame: number;
   /**
    * `desc + 0x2A` — the decoration selector `ScriptedHumanoidDraw`
-   * (`FUN_00484FF0`) switches on, `*(int16*)(obj+0x1390 + 6)`.
+   * (`0x00484FF0`) switches on, `*(int16*)(obj+0x1390 + 6)`.
    *
    * No arm of the VM reads it — it is a draw-time field. `ScriptedHumanoidInit`
    * copies it onto the actor as `HumanoidTail.drawVariant`, which is where the
@@ -437,7 +438,7 @@ export function ScriptedHumanoidInit(obj: HumanoidActor, rng?: Rng): void {
   obj.hum.pathMode = 0;
   obj.hum.pathOffsetRecord = 0;
   // [port-only] The descriptor word `desc + 0x2A`, cached on the actor. The
-  // engine re-reads it in `ScriptedHumanoidDraw` (`FUN_00484FF0`) every draw
+  // engine re-reads it in `ScriptedHumanoidDraw` (`0x00484FF0`) every draw
   // and it cannot change; see {@link HumanoidTail.drawVariant} for why the
   // port keeps a copy instead.
   obj.hum.drawVariant = p?.drawVariant ?? HumanoidDrawVariant.None;
@@ -636,16 +637,24 @@ function HumanoidKill(obj: HumanoidActor): void {
 }
 
 /**
- * The half of `ScriptedHumanoidDraw` (`FUN_00484FF0`) the game reads back: its
- * skeleton draw samples `obj+0x19C` from the counter before the counter is
- * stepped. See {@link HumanoidTail.playCursor}.
+ * `ScriptedHumanoidDraw` — `FUN_00484FF0`, the half of it the game reads
+ * back. The skeleton draw samples `obj+0x19C` from the counter before the
+ * counter is stepped (see {@link HumanoidTail.playCursor}) and ends in the
+ * ground shadow, under `g_cur_actor` -- which the VM (`0x00484357`) and each
+ * of the four routines it can hand the object to point at the actor first.
  *
- * Private, like {@link HumanoidApplyPathOffset}: it is part of another routine,
- * and the rest of that routine -- the skeleton, the shadow, the decoration and
- * the counter's step -- is the renderer's and `ActorAdvanceMotion`'s.
+ * Both are behind the routine's chapter-card test, `TEST AL, 0x20` at
+ * `0x00484FF8`: its `JNZ 0x0048523A` lands on the tick, past the skeleton
+ * and the decoration, so behind a card the cursor is not sampled and no
+ * shadow drawn, and the counter runs on. `[proved]`
+ *
+ * The skeleton, the decoration and the counter's step are the renderer's and
+ * `ActorAdvanceMotion`'s.
  */
-function HumanoidSampleDrawnCursor(obj: HumanoidActor): void {
+function ScriptedHumanoidDraw(obj: HumanoidActor): void {
+  if ((G.g_screen_furniture_flags & ScreenFurniture.ChapterCard) !== 0) return;
   obj.hum.playCursor = MotionPlayFrame(obj);
+  DrawSkinnedModelAndShadow(obj);
 }
 
 /** One command. Returns whether the cursor moved — false parks the VM. */
@@ -1020,7 +1029,7 @@ export function ScriptedHumanoidFallAndSplash(obj: HumanoidActor,
     HumanoidKill(obj);
     return;
   }
-  HumanoidSampleDrawnCursor(obj);
+  ScriptedHumanoidDraw(obj);
 }
 
 /**
@@ -1044,7 +1053,7 @@ export function ScriptedHumanoidLaunchAndDrop(obj: HumanoidActor): void {
     obj.vel.x = obj.pos.x - LAUNCH_ORIGIN_X;
     obj.sub += 1;
   } else if (obj.sub !== 1) {
-    HumanoidSampleDrawnCursor(obj);
+    ScriptedHumanoidDraw(obj);
     return;
   }
   obj.accY -= GRAVITY_STEP;
@@ -1055,7 +1064,7 @@ export function ScriptedHumanoidLaunchAndDrop(obj: HumanoidActor): void {
     HumanoidKill(obj);
     return;
   }
-  HumanoidSampleDrawnCursor(obj);
+  ScriptedHumanoidDraw(obj);
 }
 
 /**
@@ -1074,7 +1083,7 @@ export function ScriptedHumanoidFallTimed(obj: HumanoidActor): void {
     HumanoidKill(obj);
     return;
   }
-  HumanoidSampleDrawnCursor(obj);
+  ScriptedHumanoidDraw(obj);
 }
 
 /**
@@ -1143,7 +1152,7 @@ function HumanoidFrameTail(obj: HumanoidActor, f: ClassFrame): void {
   obj.hum.prevPos.y = obj.pos.y;
   obj.hum.prevPos.z = obj.pos.z;
   // `ScriptedHumanoidDraw(obj)`, the tail's last call.
-  HumanoidSampleDrawnCursor(obj);
+  ScriptedHumanoidDraw(obj);
 }
 
 /**
@@ -1218,7 +1227,7 @@ function HumanoidApplyPathOffset(obj: HumanoidActor, rx: number, ry: number,
  *
  * `[proved]` exhaustively: the cutscene-skip teardown, the same removal test
  * the VM at `0x004842A0` opens with -- hit slot, part list, `ActorKill` --
- * then `ScriptedHumanoidDraw` (`FUN_00484FF0`) and `RET` at `0x00484DE2`.
+ * then `ScriptedHumanoidDraw` (`0x00484FF0`) and `RET` at `0x00484DE2`.
  *
  * **And nothing else** — no `obj+0x1320` step, no turn, no object-path follow,
  * no `obj+0x13C0` capture. So a class-0x25 actor whose program has ended stops
@@ -1244,11 +1253,8 @@ export function ScriptedHumanoidIdle(obj: HumanoidActor): void {
     HumanoidKill(obj);
     return;
   }
-  // `CALL 0x00484FF0` — the draw, which is the renderer's. Its chapter-card
-  // early-out (`ScreenFurniture.ChapterCard`, `0x00484FF8`) skips the body
-  // and the decoration but lands on the tick at `0x0048523A`, not the `RET`,
-  // so the motion frame advances behind a card either way.
-  HumanoidSampleDrawnCursor(obj);
+  // `CALL 0x00484FF0` -- the draw.
+  ScriptedHumanoidDraw(obj);
 }
 
 export const ScriptedHumanoidHandler: ClassHandler = {

@@ -43,6 +43,7 @@ import {
   PLAYER_BODY_AT, ST1_VEHICLE_PARKED_CLIP, ST1_VEHICLE_PARKED_CLIP_P2,
   ST1_VEHICLE_SEATED_CLIP, ST1_VEHICLE_SEATED_CLIP_P2,
 } from "./player_body_data";
+import { ActorDrawShadow } from "./model_draw";
 import { ActorModelScale, rootDelta } from "./root_motion";
 import { T } from "./tables";
 import { vec3, type Vec3 } from "./vec";
@@ -89,6 +90,13 @@ export interface PlayerBody {
   handSlot: number;
   /** `model+0x64` -- `ActorBuildSkinnedModel` leaves 3. */
   motionFlags: number;
+  /**
+   * `obj+0x34`, which the draw's ground shadow tests for `0x80000`. 0:
+   * `ActorAllocSub` (`FUN_004A74E0`) zeroes the block with `STOSD.REP`, and
+   * `PlayerBodiesCreate` (`FUN_00416450`) stores nothing there. `[proved]`
+   * for both; no other writer of the body's word has been looked for.
+   */
+  flags: number;
   /** `model+0x116C`, from the character type alone. */
   scale: number;
   /**
@@ -183,7 +191,7 @@ export function PlayerBodiesCreate(): void {
       at, charType: ct, motion: go.body_start_motions[p], playTicks: 0,
       cursor: 0, fadeOrigin: 0, fadeDiv: 0, fading: 0,
       pos: vec3(), pitch: 0, yaw: 0, roll: 0, handSlot: hand,
-      motionFlags: MOTION_FLAGS_INIT, scale: ActorModelScale(ct),
+      motionFlags: MOTION_FLAGS_INIT, flags: 0, scale: ActorModelScale(ct),
       lastFrame: -1, drawn: 0,
     };
   });
@@ -527,10 +535,9 @@ export function PlayerHookDrawBody(player: number): void {
  * `DrawSkinnedModelAndShadow` (`FUN_00411090`) is `MatrixStackPush`,
  * `SkeletonDrawWalk`, `MatrixStackPop` -- and then `ActorDrawShadow`
  * (`FUN_0040A590`) on **`g_cur_actor`**, past the `MatrixStackPop` Ghidra
- * marks no-return (`L35`); this note said "no shadow" until that was read. So
- * the shadow drawn here is whatever actor `g_cur_actor` last named, not the
- * body's. `[proved]` for the call, `[open]` for which actor that is in app
- * state 7; the port draws no character shadow either way.
+ * marks no-return (`L35`). This routine stores the body there itself before
+ * the draw -- `MOV [0x009a26a0], EAX` at `0x004151F5`, `EAX` the body loaded
+ * from `0x009A5CD8 + p*0x130` -- so the shadow is the body's. `[proved]`
  */
 export function PlayerHookDrawBodyUntilMotionEnd(player: number): void {
   const b = G.g_player_bodies[player];
@@ -613,4 +620,8 @@ function PlayerBodyDraw(b: PlayerBody): void {
     b.lastFrame = f;
   }
   b.drawn = 1;
+  // `DrawSkinnedModelAndShadow`'s last call, `ActorDrawShadow(g_cur_actor)`:
+  // both hooks that draw the body point `g_cur_actor` at it first
+  // (`0x0041514B`, `0x004151F5`), so the shadow is the body's own.
+  ActorDrawShadow(b);
 }

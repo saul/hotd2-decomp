@@ -86,9 +86,6 @@ the same commit.
 
 ### Gaps several classes share
 
-* **No character draws its ground shadow.** `ActorDrawShadow`
-  (`game/model_draw.ts`) computes the disc and the renderer draws none for a
-  skinned actor; the thrown weapons' and props' discs are drawn.
 * **`ColiDynamicListRemove`** (`0x00405220`), which `ActorDespawn` calls to
   take the object out of the collision list the crowd push reads, is named
   and not called by the port's despawn for any object.

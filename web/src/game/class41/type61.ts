@@ -95,6 +95,7 @@ import { ActorFlag, type Actor, type PropContainerActor } from "../actor";
 import { CameraBlockViewToWorld } from "../camera/view";
 import { ActorDespawn } from "../despawn";
 import { G, HIT_SLOT_NONE } from "../globals";
+import { DrawSkinnedModelAndShadow } from "../skeleton";
 import { BuildSceneLightDirection } from "../light_block";
 import {
   LightsRestoreScene, LightsUseSecondarySet, SetRenderLightDirection,
@@ -223,7 +224,8 @@ export function Type61FigureUpdate(obj: PropContainerActor): void {
   SetRenderLightDirection(_handed);
   const d = G.g_render_light_dir;
   obj.placer.drawDir = [d.x, d.y, d.z];
-  // `DrawSkinnedModelAndShadow`: the renderer's, at frame 0 of the clip --
-  // the counter is never stepped.
+  // `DrawSkinnedModelAndShadow` (`0x00472A3B`): the renderer's, at frame 0
+  // of the clip -- the counter is never stepped -- but for its ground shadow.
+  DrawSkinnedModelAndShadow(obj);
   LightsRestoreScene();
 }

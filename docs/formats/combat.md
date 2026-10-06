@@ -2104,7 +2104,8 @@ Three more calls make the weapon an object like any other, and each is past a
   three units above the weapon (its `obj+0x1F8` is 5, bit 2 up) -- or
   `g_camera_fixed_eye_y` in `g_app_state` 0xD. `ActorDrawGroundShadow`
   (`FUN_0040A620`) is the routine; the skinned actors reach it through
-  `ActorDrawShadow` at a size by character type.
+  `ActorDrawShadow` at a size by character type -- see *Every character's
+  ground shadow* below.
 * **A camera candidate.** In state 0 -- the flight, and the ninety frames
   stuck to the screen -- it copies its position to `obj+0x100` and calls
   `RegisterForCameraTracking` (`0x00450917`), as `SpawnThrownWeapon` did once
@@ -2119,6 +2120,45 @@ every weapon, axe or blade (`FADD [0x004C4CB8]` at `0x0045A4B7`, no test in
 front of it) -- and `ZombieThrownWeaponUpdate` draws the same 5-by-5 shadow
 (`0x0045A622`) and files the weapon in states 1 and 2 (`0x0045A676`), lifting
 the point 1.5 for the axe (`0x249`) alone. `[proved]`
+
+### Every character's ground shadow
+
+`DrawSkinnedModelAndShadow` (`FUN_00411090`) is four calls, and the fourth,
+past the `MatrixStackPop` Ghidra marks no-return, is
+`ActorDrawShadow(g_cur_actor)` (`FUN_0040A590`, `0x004110B8`). A byte scan of
+`.text` finds **52** calls to it (Ghidra's xrefs miss `0x0042F450`), so every
+skinned draw in the game ends in a disc:
+
+* **Whose.** `g_cur_actor`'s, not the model's owner's -- but every caller,
+  or the update that reached it, has just stored the drawn object there:
+  `EnemyZombieUpdate` at `0x004533FC`, `EnemyThrowerUpdate` at `0x0044991B`,
+  `CivilianUpdate` at `0x0048A930`, and so on; class 0x22's and class 0x2D's
+  sub-actors are stored by name before their own draws (`0x0049D817`,
+  `0x0042C692`), and a player's body by the camera hook that draws it
+  (`0x0041514B`, `0x004151F5`).
+* **The gate.** Nothing when `obj+0x34` bit `0x80000` is up or `obj+0x1F8`
+  bit 0 -- the skeleton's own draw gate -- is down, so a hidden or blinking
+  actor's shadow goes with it. Never cast at all: bats and their wings
+  (`0x80000` / `0x80001`), class 0x22's and 0x2D's sub-actors (`0x88000` at
+  `0x0049B1BC` and `0x0042C17F`), the game-over route map's figures
+  (`0x0046146C`, `0x0046188B`), a class-0x30 twin and corpse.
+* **The size.** `MatrixScale(11, 1, 10)` -- or `(50, 1, 30)` for character
+  types `0x44` and `0x47`, JUDGMENT's walker and the Hierophant -- over slot
+  `0x10D0` at `T(x, h + 0.1, z)` in draw layer `0xD`, `h` the floor traced
+  from three above while `obj+0x1F8` bit 2 is up (classes 0x30, 0x31, 0x11,
+  0x22, 0x23, the stage-3 bystander, the stage-6 boss and its children) and
+  the actor's own height otherwise.
+* **The frame.** On whatever the caller has pushed above the view. Three
+  callers ride: `CivilianUpdateOnCarrier` (`FUN_0048B140`) and
+  `CarriedZombieUpdate18` (`FUN_0045CD90`) push the carrier's `T Rx Rz Ry`
+  around the whole update, and `Boss4AdvanceMotionAndDrawHeldProps`
+  (`FUN_00492620`) around its draw while the boss is on one, so a rider's
+  disc lies in its carrier's frame, under the rider.
+
+The port records each disc as one world draw in `G.g_world_slot_draws`
+(`ActorDrawGroundShadow`, `game/ground_shadow.ts`), the thrown weapons'
+included, and `render/view_slots.ts` draws the list; every stage bundle
+carries `0x10D0` in its `slots_effect` rig.
 
 ### Class 0x30's weapon
 

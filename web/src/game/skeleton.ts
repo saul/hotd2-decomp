@@ -49,7 +49,9 @@ import {
   MatrixRotateZ, MatrixScale, MatrixToEulerZYX, MatrixTransformPoint,
   MatrixTranslate, type Mat,
 } from "./matrix";
-import { DrawRecordSlot } from "./model_draw";
+import { CarrierMatrixCompose } from "./carrier";
+import { ActorByAt, G } from "./globals";
+import { ActorDrawShadow, DrawRecordSlot } from "./model_draw";
 import { SkeletonNodeDrawSuppressed } from "./parts";
 import { CharacterTypeOf, MotionOf, MotionPlayLength } from "./tables";
 import type { Vec3 } from "./vec";
@@ -669,14 +671,53 @@ function SkeletonDrawWalk(obj: Actor, skel: SkeletonModel): void {
 }
 
 /**
- * `DrawSkinnedModelAndShadow` — `FUN_00411090`. `MatrixStackPush;
- * SkeletonDrawWalk; MatrixStackPop; ActorDrawShadow` -- the pose, and a
- * shadow the renderer draws. Does nothing for an actor without the block.
+ * `DrawSkinnedModelAndShadow` — `FUN_00411090`. Four calls:
+ *
+ * ```
+ * 00411092  CALL 0x004a9880        ; MatrixStackPush(0)
+ * 004110a6  CALL 0x004110d0        ; SkeletonDrawWalk(model, pos, nodes)
+ * 004110ad  CALL 0x004a9840        ; MatrixStackPop(1)
+ * 004110b2  MOV  EAX, [0x009a26a0] ; g_cur_actor
+ * 004110b8  CALL 0x0040a590        ; ActorDrawShadow(g_cur_actor)
+ * ```
+ *
+ * `[proved]`. The pose is this file's for an actor that carries the
+ * engine's model block and `render/`'s for every other; the shadow is
+ * {@link ActorDrawShadow}'s for all of them, and it is **`g_cur_actor`'s**,
+ * not the model's owner's. At each of the 52 call sites in the image the
+ * routine that calls it, or the update that called that, has just pointed
+ * `g_cur_actor` at the object it draws -- class 0x22's and class 0x2D's
+ * sub-actors are pointed at by name before their own draws -- so the two are
+ * the same object everywhere the port reaches.
+ *
+ * **What is on the stack above the view** is the caller's, and the disc is
+ * drawn under it. Every call site makes the call with nothing pushed except
+ * three that ride: `CivilianUpdateOnCarrier` (`FUN_0048B140`) and
+ * `CarriedZombieUpdate18` (`FUN_0045CD90`) push the carrier's `T Rx Rz Ry`
+ * around the whole update, and `Boss4AdvanceMotionAndDrawHeldProps`
+ * (`FUN_00492620`) around its draw while the boss is on one. The port's
+ * stand-in for that push is the rider's {@link Actor.carrierAt}, which is
+ * set exactly while each of the three is in the carrier's frame; the
+ * composition is `game/carrier.ts`'s.
  */
 export function DrawSkinnedModelAndShadow(obj: Actor): void {
-  if (!obj.skel) return;
-  SkeletonDrawWalk(obj, obj.skel);
-  obj.motion = obj.skel.motion;
+  if (obj.skel) {
+    SkeletonDrawWalk(obj, obj.skel);
+    obj.motion = obj.skel.motion;
+  }
+  // `[port-only]` the pointer's lookup: the engine's `g_cur_actor` is the
+  // object, the port's is its spawn address. And `ActorKill`'s `_longjmp`:
+  // the engine's update ends at a despawn, so a despawned object's update
+  // draws nothing more; the port's runs on, and stops drawing here.
+  const cur = G.g_cur_actor === obj.at ? obj : ActorByAt(G.g_cur_actor);
+  if (!cur || cur.despawned) return;
+  const carrier = cur.carrierAt >= 0 ? ActorByAt(cur.carrierAt) : undefined;
+  let top: Mat | null = null;
+  if (carrier && !carrier.despawned) {
+    top = MatIdentity();
+    CarrierMatrixCompose(top, carrier);
+  }
+  ActorDrawShadow(cur, top);
 }
 
 /**

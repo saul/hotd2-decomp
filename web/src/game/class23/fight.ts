@@ -18,6 +18,7 @@ import { ScoreAddForPlayer } from "../combat/score";
 import { RegisterForShotTest } from "../combat/shot_test";
 import { GameMode } from "../game_mode";
 import { ActorByAt, G } from "../globals";
+import { DrawSkinnedModelAndShadow } from "../skeleton";
 import { CameraBlockEye } from "../camera/view";
 import { ActorReleaseHitSlot } from "../hit_slots";
 import type { GameHost } from "../host";
@@ -135,8 +136,10 @@ function Flier(obj: JudgmentCompanionActor): Actor | undefined {
 export function Class23Draw(obj: JudgmentCompanionActor,
                             host: GameHost): void {
   obj.alpha = 1;
+  G.g_cur_actor = obj.at;
   Class22SampleCursor(obj, obj.companion);
   JudgmentEmitTrackedBone(obj, host);
+  DrawSkinnedModelAndShadow(obj);
 }
 
 /** `Class23Draw(obj); obj+0x194++` — the tail most paths end in. `[port-only]` as a function. */

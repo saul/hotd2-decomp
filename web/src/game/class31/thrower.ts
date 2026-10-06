@@ -59,6 +59,7 @@ import {
 import { ThrowerStateLeapToSurface } from "./surface";
 import { ThrowerPushOutOfWorld } from "./collide";
 import { ActorRunNodeDrawHooks } from "../model_draw";
+import { DrawSkinnedModelAndShadow } from "../skeleton";
 import { ThrowerDrawBonePart, ThrowerDrawWithEnlargedHead } from "./draw";
 import { HeadAimBeginDraw, HeadAimEndDraw, HeadAimSeed }
   from "../class30/head_aim";
@@ -513,6 +514,9 @@ export function ThrowerStateThrow(obj: ThrowerActor, host: GameHost,
  */
 export function EnemyThrowerUpdate(obj: ThrowerActor, f: ClassFrame): void {
   const { dt, rng, host, events } = f;
+  // `MOV [0x009a26a0], ESI` at `0x0044991B`, the routine's first store: the
+  // draw's shadow is drawn for this name.
+  G.g_cur_actor = obj.at;
   // The cooldown is also the post-knockdown window in which shots ricochet:
   // `EnemyThrowerUpdate` clears `obj+0x34` bit 0x100 when it reaches zero.
   if (obj.cooldown > 0) {
@@ -554,6 +558,9 @@ export function EnemyThrowerUpdate(obj: ThrowerActor, f: ClassFrame): void {
   ActorRunNodeDrawHooks(obj, obj.nodeDrawHook === NodeDrawHookId.EnlargedHead
     ? ThrowerDrawWithEnlargedHead : ThrowerDrawBonePart, f);
   HeadAimEndDraw(obj, obj.thr, host);
+  // ...and the draw's last call, the ground shadow under `g_cur_actor`,
+  // which `EnemyThrowerUpdate` pointed here at `0x0044991B`.
+  DrawSkinnedModelAndShadow(obj);
   // `PUSH 0; CALL 0x00409b70` at `0x0044998F`, the routine's last act and on
   // every path: the camera point, not lifted, and the candidate filing. The
   // death chain's `0x10000` keeps a corpse off the list.

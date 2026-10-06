@@ -25,6 +25,7 @@ import { CivilianRunScript } from "./script";
 import { CivilianCheckShot } from "./shot";
 import { CivilianStepScript } from "./step";
 import { CivilianStepTurnToTarget } from "./turn";
+import { DrawSkinnedModelAndShadow } from "../skeleton";
 
 /**
  * `CivilianUpdate` — `FUN_0048A920`. One frame of a civilian.
@@ -38,6 +39,9 @@ import { CivilianStepTurnToTarget } from "./turn";
 export function CivilianUpdate(obj: Actor, f: ClassFrame): void {
   const sub = obj.civ;
   if (!sub) return;
+  // `MOV [0x009a26a0], ESI` at `0x0048A930`: the update names itself, and
+  // the draw's shadow is drawn for that name.
+  G.g_cur_actor = obj.at;
   // `CivilianUpdateOnCarrier` (`FUN_0048B140`) is this routine with the
   // carrier's matrix pushed around it. The push is `game/carrier.ts`'s and
   // the world point it produces is published for the renderer; everything
@@ -64,8 +68,11 @@ export function CivilianUpdate(obj: Actor, f: ClassFrame): void {
 
   // `DrawSkinnedModelAndShadow` (`FUN_00411090`) at `0x0048AA02`. The pose is
   // the renderer's; what the draw runs that is the game's is the pose hook at
-  // `model+0x115C`, which reads the sphere the switch below left last frame.
+  // `model+0x115C`, which reads the sphere the switch below left last frame,
+  // and the ground shadow it ends with, under `g_cur_actor` -- this actor
+  // since `0x0048A930`.
   PoseHookGrowAndPushOutOfWorld(obj);
+  DrawSkinnedModelAndShadow(obj);
 
   // The loop counter. The clip clock itself is `ActorAdvanceMotion`'s; this is
   // the part class 0x10 owns — how many more times it may come round.

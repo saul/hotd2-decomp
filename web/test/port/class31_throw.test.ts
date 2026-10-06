@@ -41,7 +41,10 @@ import {
   ThrownWeaponRoutine, THROWN_WEAPON_DRAW_FLAGS, THROWN_WEAPON_SPAWN_FLAGS,
   type ThrownWeapon, type ThrownWeaponFrame,
 } from "../../src/game/thrown_weapon";
-import { ActorDrawGroundShadow } from "../../src/game/ground_shadow";
+import {
+  ActorDrawGroundShadow, GROUND_SHADOW_LAYER, GROUND_SHADOW_SLOT,
+} from "../../src/game/ground_shadow";
+import type { WorldSlotDraw } from "../../src/game/view_slot";
 import {
   CameraSlotObject, UpdateCameraEnemySlots,
 } from "../../src/game/camera/slots";
@@ -1942,6 +1945,9 @@ console.log("class 0x31's weapon: its ground shadow, its camera candidacy, "
   const near = (a: Vec3, b: Vec3): boolean =>
     Math.abs(a.x - b.x) < 1e-4 && Math.abs(a.y - b.y) < 1e-4
     && Math.abs(a.z - b.z) < 1e-4;
+  // The disc this frame drew, as `ActorDrawGroundShadow` recorded it.
+  const shadowDrawn = (): WorldSlotDraw | null =>
+    G.g_world_slot_draws.find((d) => d.slot === GROUND_SHADOW_SLOT) ?? null;
 
   // -- the shadow: on the floor traced from three units above --------------
   {
@@ -1959,18 +1965,20 @@ console.log("class 0x31's weapon: its ground shadow, its camera candidacy, "
     G.g_coli_full_set = ["hi", "floor"];
     G.g_camera_fixed_eye_y = -999;
     const w = knife();
+    G.g_world_slot_draws = [];
     ThrownWeaponPoolUpdate(frame());
-    // `MatrixTranslate(x, h + 0.1, z); MatrixScale(5, 1, 5)` under the
-    // camera's world-to-view, h the ledge: 20.1 as an f32.
+    // `MatrixTranslate(x, h + 0.1, z); MatrixScale(5, 1, 5)` on top of the
+    // view, so a world matrix; h the ledge: 20.1 as an f32.
     const h = Math.fround(20 + 0.10000000149011612);
+    const shadow = shadowDrawn();
     check("a flying knife draws its shadow on the floor traced from three "
-          + "above it, lifted 0.1", w.shadow !== null
-          && near(at(w.shadow, vec3(0, 0, 0)),
-                  at(flip, vec3(w.pos.x, h, w.pos.z))),
-          JSON.stringify(at(w.shadow, vec3(0, 0, 0))));
-    const o = at(w.shadow, vec3(0, 0, 0));
+          + "above it, lifted 0.1, in layer 0xD", shadow !== null
+          && shadow.layer === GROUND_SHADOW_LAYER
+          && near(at(shadow.m, vec3(0, 0, 0)), vec3(w.pos.x, h, w.pos.z)),
+          JSON.stringify(shadow && at(shadow.m, vec3(0, 0, 0))));
+    const o = at(shadow?.m ?? null, vec3(0, 0, 0));
     const len = (p: Vec3): number => {
-      const q = at(w.shadow, p);
+      const q = at(shadow?.m ?? null, p);
       return Math.hypot(q.x - o.x, q.y - o.y, q.z - o.z);
     };
     check("...five across, one high and five deep",
@@ -1980,9 +1988,10 @@ console.log("class 0x31's weapon: its ground shadow, its camera candidacy, "
           `${len(vec3(1, 0, 0))} ${len(vec3(0, 1, 0))} ${len(vec3(0, 0, 1))}`);
     // The blink's off half: `obj+0x1F8` bit 0 down draws neither.
     w.drawFlags &= ~1;
+    G.g_world_slot_draws = [];
     ThrownWeaponPoolUpdate(frame());
     check("...and none on a frame the knife is not drawn",
-          w.shadow === null && w.draw === null);
+          shadowDrawn() === null && w.draw === null);
     T.coli = prevColi;
     G.g_coli_full_set = prevSet;
   }
@@ -1991,20 +2000,26 @@ console.log("class 0x31's weapon: its ground shadow, its camera candidacy, "
     ResetGameGlobals();
     G.g_camera_fixed_eye_y = -7;
     const obj = { flags: 0, pos: vec3(1, 2, 3) };
-    const m1 = ActorDrawGroundShadow(obj, 1, 11, 10, null);
+    const drawn = (drawWord: number, o = obj): readonly number[] | null => {
+      G.g_world_slot_draws = [];
+      ActorDrawGroundShadow(o, drawWord, 11, 10, null);
+      return shadowDrawn()?.m ?? null;
+    };
+    const m1 = drawn(1);
     check("ActorDrawGroundShadow without bit 2 sits at the object's own y",
-          near(at(m1, vec3(0, 0, 0)), vec3(1, Math.fround(2.1), 3)),
+          m1 !== null
+          && near(at(m1, vec3(0, 0, 0)), vec3(1, Math.fround(2.1), 3)),
           JSON.stringify(at(m1, vec3(0, 0, 0))));
     G.g_app_state = 0x0d as AppState;
-    const m2 = ActorDrawGroundShadow(obj, 5, 11, 10, null);
+    const m2 = drawn(5);
     check("...on g_camera_fixed_eye_y in app state 0xD, whatever the bits say",
-          near(at(m2, vec3(0, 0, 0)), vec3(1, Math.fround(-7 + 0.1), 3)),
+          m2 !== null
+          && near(at(m2, vec3(0, 0, 0)), vec3(1, Math.fround(-7 + 0.1), 3)),
           JSON.stringify(at(m2, vec3(0, 0, 0))));
     G.g_app_state = AppState.InPlay;
     check("...and none for obj+0x34 bit 0x80000 or obj+0x1F8 bit 0 clear",
-          ActorDrawGroundShadow({ flags: ActorFlag.NoShadow, pos: obj.pos },
-                                5, 5, 5, null) === null
-          && ActorDrawGroundShadow(obj, 4, 5, 5, null) === null);
+          drawn(5, { flags: ActorFlag.NoShadow, pos: obj.pos }) === null
+          && drawn(4) === null);
   }
 
   // -- the camera: a knife in flight is a candidate, and holds a permit slot
@@ -2179,12 +2194,12 @@ console.log("class 0x30's weapon: the same three calls:");
           `state ${w.state} filed ${filed(w.id).length} `
           + `lookAt.y ${w.lookAt.y} y ${w.pos.y}`);
     const o = vec3();
-    MatrixTransformPoint(w.shadow ?? MatIdentity(), vec3(0, 0, 0), o);
-    const want = vec3();
-    MatrixTransformPoint(flip, vec3(w.pos.x, Math.fround(-3 + 0.1), w.pos.z),
-                         want);
+    const disc = G.g_world_slot_draws.filter(
+      (d) => d.slot === GROUND_SHADOW_SLOT).pop();
+    MatrixTransformPoint(disc?.m ?? MatIdentity(), vec3(0, 0, 0), o);
+    const want = vec3(w.pos.x, Math.fround(-3 + 0.1), w.pos.z);
     check("...and draws its shadow 0.1 over the floor under it",
-          w.shadow !== null && Math.abs(o.x - want.x) < 1e-4
+          disc !== undefined && Math.abs(o.x - want.x) < 1e-4
           && Math.abs(o.y - want.y) < 1e-4 && Math.abs(o.z - want.z) < 1e-4,
           JSON.stringify(o));
     const slot = w.hitSlot;

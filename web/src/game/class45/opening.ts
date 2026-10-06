@@ -158,7 +158,7 @@ export function Boss3OpeningBystanderInit(obj: Boss3Actor): void {
   G.g_boss3_bystanders[0] = obj.at;
   Boss3SetMotion(obj, CLIP_WALK);
   ActorBuildSkinnedModel(obj);
-  obj.motionFlags |= 4;
+  obj.motionFlags |= MotionFlag.TraceGround;
   obj.flags |= ActorFlag.NoShotTest;
   t.modelFrame = 0;
   t.poseHook = Boss3PoseHook.Bystander;

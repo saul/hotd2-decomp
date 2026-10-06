@@ -6,6 +6,7 @@
 import type { Events } from "../../core/events";
 import type { Actor } from "../actor";
 import { ActorByAt, G } from "../globals";
+import { DrawSkinnedModelAndShadow } from "../skeleton";
 import type { GameHost } from "../host";
 import { CarrierPublishWorld } from "../carrier";
 import {
@@ -142,6 +143,9 @@ export function Boss4AdvanceMotionAndDrawHeldProps(obj: Actor, b: Blk,
   } else {
     obj.carrierAt = -1;
   }
+  // Either arm's `DrawSkinnedModelAndShadow` (`0x00492681` under the carrier,
+  // `0x004926A3` not): its shadow follows the push, which `carrierAt` says.
+  DrawSkinnedModelAndShadow(obj);
   if (b.flags & Boss4Flag.CycleBlade) {
     let slot = (obj.boneSlot[String(BOSS4_BLADE_BONE)] ?? BOSS4_BLADE_FIRST) + 1;
     if (slot > BOSS4_BLADE_LAST) slot = BOSS4_BLADE_FIRST;

@@ -32,11 +32,11 @@
  *
  * ## The ground shadow
  *
- * Class 0x31's weapon also draws slot `0x10D0` under it every frame it is
- * drawn (`ActorDrawGroundShadowWithSize`, `FUN_0040A600`), and the record
- * carries that matrix too (`ThrownWeapon.shadow`). The disc is not one of the
- * thrower's own models, so it comes from the `slots_actor` templates the
- * exporter emits for class 0x31 (`shadows`), and it is drawn in the layer the
+ * Both weapon families also draw slot `0x10D0` under the weapon every frame
+ * it is drawn (`ActorDrawGroundShadowWithSize`, `FUN_0040A600`), and the
+ * record carries that matrix too (`ThrownWeapon.shadow`). The disc is not one
+ * of the throwers' own models, so it comes from the `slots_actor` templates
+ * the exporter emits for classes 0x30 and 0x31 (`shadows`), drawn in the
  * routine names, `0xD`, as the `renderOrder` the port spells a layer with.
  */
 import {

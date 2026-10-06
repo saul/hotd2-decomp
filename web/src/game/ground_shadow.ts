@@ -2,9 +2,9 @@
  * The ground shadow: asset slot `0x10D0`, a disc flattened onto the floor
  * under an object.
  *
- * Two routines, and the port draws through them only for class 0x31's thrown
- * weapon so far: class 0x30's weapon makes the same call at `0x0045A622` and
- * its port does not yet. `ActorDrawShadow` (`FUN_0040A590`, `model_draw.ts`)
+ * Two routines, and the port draws through them only for the thrown weapons
+ * so far -- class 0x31's at `0x004508BA`, class 0x30's at `0x0045A622`.
+ * `ActorDrawShadow` (`FUN_0040A590`, `model_draw.ts`)
  * is the skinned actors' way in, picking the size by character type; the
  * renderer does not draw a character's shadow yet, so that routine stops at
  * the size and does not call down here.

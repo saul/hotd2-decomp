@@ -70,6 +70,7 @@
  *   rings             every caller of the ring effects
  *   spheres           spawn angles and the hit spheres' writers
  *   class28_12        class 0x28, the bin captor's door, `ShotTestMesh`
+ *   class27           class 0x27, stage 2 block 0's two path riders
  *   options           the options screen and the input devices
  *   original          Original Mode: the profile's items, the trunk, the items'
  *                     effects, the guns they arm, the script's entry at step 5
@@ -115,6 +116,7 @@ import "./turning.test";
 import "./rings.test";
 import "./spheres.test";
 import "./class28_12.test";
+import "./class27.test";
 import "./options.test";
 import "./original.test";
 import "./class32.test";

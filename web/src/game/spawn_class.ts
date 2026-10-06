@@ -97,7 +97,12 @@ export enum SpawnClass {
    * **Ported** — `game/class23/`.
    */
   JudgmentCompanion = 0x23,
-  /** `FUN_004329D0` — path-riding vehicle; swaps model and lights a flame. */
+  /**
+   * `PathRidingVehicleUpdate` (`FUN_004329D0`) — stage 2 block 0's two
+   * objects that ride `op_st2` `0x149`/`0x14A` at the camera's frame, swap
+   * slot `0x2B` for `0x33` at frame `0xBE` and then hold and draw two cel
+   * loops until `g_script_flags[0]`. **Ported** — `game/class27/`.
+   */
   PathRidingVehicle = 0x27,
   /** `FUN_00432610` — path-riding prop. */
   PathRidingProp = 0x28,

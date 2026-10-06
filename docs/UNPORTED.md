@@ -29,7 +29,6 @@ the same commit.
 
 | class | handler | spawned in | what it is |
 |---|---|---|---|
-| `0x27` | `FUN_004329D0` | stage 2 block 0 (two, `hp` 0 and 1) | Rides an `op_` path (`CamEvalObjectPath6` on the table at `0x00589AE8`, indexed by `obj+0x11C`) at `g_cam_path_frame`, switches motion `0x2B` to `0x33` past frame `0xBD`, and jumps to frame 190 on a skip. `SpawnClass.PathRidingVehicle`. `[proved]` for the routine, `[open]` what it draws |
 | `0x65` | `EndingRouteSelect65` (`FUN_00436140`) | the ending (`spawn_simple`) | **The ending's route selector**: route 1 when a player's `ScoreRankForPlayer` is 0, else 2 when the score is a multiple of 10, else 0; `ActorKill`. Waits on the port having an ending scene. `[proved]` |
 | `0x54` | `FUN_00431780` | the ending (`hp` 1040, 1240) | Dies under caption mode 5; otherwise picks one of two target points by its `x` against `0x004C436C` and installs `FUN_00431810`. `[open]` |
 | `0x55` | `FUN_00431C90` | the ending (`hp` 240) | Counts the players in state 7 and takes each one's `ScoreRankForPlayer`; installs `0x00431D50`. `[likely]` the ending's rank display |

@@ -115,7 +115,8 @@ because a cross-stage gate could never fire.
 | `0x00470080` | `obj_470080` | `0x196`–`0x198` | actor state 406; slot is runtime, nothing to place |
 | `0x00416B00` | `obj_416b00` | `0x194` | `PlayerShotEffectsThink`: the three per-shot rings, all runtime. **Not placed** -- see below |
 | `0x00452320` | `obj_452320` | `0x148`, `0x14D`, `0x14E`, `0x19A`–`0x1A1` | **[proved] a car** — the stage-2 opening vehicle. See below. |
-| `0x00432840` | `obj_432840` | `0x145`, `0x146`, `0x149`, `0x14A` | class `0x28`; route chosen by `obj+0x11C`, **not** by camera path. Posed by the port's actor (`game/class28/`) |
+| `0x00432840` | `obj_432840` | `0x145`, `0x146` | class `0x28`; route chosen by `obj+0x11C`, **not** by camera path. Posed by the port's actor (`game/class28/`). The table's other two rows, `0x149`/`0x14A`, are class `0x27`'s (below), not this rig's |
+| `PathRidingVehicleDraw` `0x00432B10` | — | `0x149`, `0x14A` | class `0x27`, stage 2 block 0's two objects; no rig. `PathRidingVehicleUpdate` (`0x004329D0`) reads `g_class28_route_table` as dwords from row 2 (`0x00589AE8`); the port's actor (`game/class27/`) poses it and records every draw with its world matrix (`DrawSlotInWorld`) |
 | `SUB_004331D0` | `obj_4331d0` | — | class `0x33`, 9 draw sites; **not placed** -- the routine is ported in `game/class33/`, which draws the carrier from its descriptor |
 
 ### The stage-2 car, and why the 9-vs-22 split nearly lost it
@@ -223,7 +224,8 @@ unless the source column says otherwise.
 | `0x00426A70` | `0x185` | literal, `g_GameMode == 3` | `FUN_00428F70` → `FUN_00411090` | no — class `0x2D` |
 | `0x00429530` | `0x188`–`0x18F` | `obj+0x1350 + 0x188` | same object as above | no |
 | `0x0042C490` | `0x192`/`0x193` | `obj+0x1350 = rand() & 1` | `FUN_0042C5A0` | no |
-| `0x00432610` | `0x145`,`0x146`,`0x149`,`0x14A` | table `0x00589AE0` | `0x00432840` | **yes** — 3 slots |
+| `0x00432610` | `0x145`,`0x146` | table `0x00589AE0`, rows 0 and 1 | `0x00432840` | **yes** — 3 slots |
+| `0x004329D0` | `0x149`,`0x14A` | the same table's rows 2 and 3, as dwords from `0x00589AE8` | `0x00432B10` | no — class `0x27`, `game/class27/` |
 | `0x00433860` | spawn param | `spawnParams[3]` | `SUB_004331D0` | **yes** — 9 slots, the largest found |
 | `0x00440130` | `0x151`,`0x15E`–`0x161`,`0x175`–`0x177` | pure setter; callers pass literals | each caller draws | small |
 | `0x0044E5D0` | `0x14F` | literal | `FUN_00449EF0` | no — class `0x31` |

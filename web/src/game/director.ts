@@ -114,10 +114,10 @@ export interface ScriptSpawn {
   class: number;
   pos?: [number, number, number];
   /**
-   * The descriptor's own words, for the one class built from them alone:
+   * The descriptor's own words, for the classes built from them alone:
    * `desc+0x22` (`obj+0x11C`), the three angles at `+0x14`..`+0x1C` and the
    * flags word at `+0x04`. The walker's `ActiveSpawn` carries all three; see
-   * {@link SpawnPathRidingProp}.
+   * {@link SpawnPlacedFromRecord}.
    */
   hp?: number;
   orient?: [number, number, number];
@@ -397,8 +397,9 @@ export function SlotActorsForgetUnlisted(spawns: readonly ScriptSpawn[]): void {
  */
 export function SpawnSlotActor(s: ScriptSpawn,
                                key = SpawnSiteKeys([s])[0]): void {
-  if (s.class === SpawnClassValue.PathRidingProp) {
-    SpawnPathRidingProp(s, key);
+  if (s.class === SpawnClassValue.PathRidingProp
+      || s.class === SpawnClassValue.PathRidingVehicle) {
+    SpawnPlacedFromRecord(s, key);
     return;
   }
   const placements = T.chars?.placements;
@@ -637,26 +638,31 @@ export function SpawnSlotActor(s: ScriptSpawn,
 }
 
 /**
- * Class 0x28, as `EvtOpSpawnPlaced09` (`FUN_004088A0`) builds it.
+ * Classes 0x28 and 0x27, as `EvtOpSpawnPlaced09` (`FUN_004088A0`) builds
+ * them.
  *
- * Opcode 9 allocates `g_class_handlers[desc[0]]`, runs `ActorInitFlags` on
- * the descriptor's flags word, and copies `desc+0x22` into `obj+0x11C` (and
- * `+0x11E`), the position into `obj+0x40..0x48` and the three angles into
- * `obj+0x64..0x6C` -- and calls no `Init` and reads no tail. So there is no
- * placement row to look up: everything the object starts with is on the
- * spawn record, and the handler seats it on its first frame
- * (`game/class28/`).
+ * Opcode 9 allocates `g_class_handlers[desc[0]]`, runs `ActorClearGameFields`
+ * and `ActorInitFlags` on the descriptor's flags word, and copies `desc+0x22`
+ * into `obj+0x11C` (and `+0x11E`), the position into `obj+0x40..0x48` and the
+ * three angles into `obj+0x64..0x6C` -- and calls no `Init` and reads no
+ * tail. So there is no placement row to look up: everything the object
+ * starts with is on the spawn record, and the class's handler seats it on its
+ * first frame (`game/class28/`, `game/class27/`). Both classes are placed
+ * only by this opcode: stage 1's six class-0x28 spawns and stage 2 block 0's
+ * two class-0x27 ones.
  *
  * `[port-only]` as a *function*, for the reason {@link SpawnSlotActors}
- * gives: built once per listed spawn, which is the port's answer to a replay.
- * Before this arm the spawn built nothing, and the object's draw ran in
- * `render/rigs.ts` off the rig table with no object behind it.
+ * gives: built once per listed spawn instruction, which is the port's answer
+ * to a replay. Before this arm each class's spawn built nothing: class 0x28's
+ * draw ran in `render/rigs.ts` off the rig table with no object behind it,
+ * and class 0x27 was not drawn at all.
  */
-function SpawnPathRidingProp(s: ScriptSpawn, key: string): void {
+function SpawnPlacedFromRecord(s: ScriptSpawn, key: string): void {
   if (G.g_slot_actors_built.includes(key)) return;
   G.g_slot_actors_built.push(key);
-  SpawnFromDescriptor(SpawnSiteAt(s.at), SpawnClassValue.PathRidingProp, -1,
-                      `path prop ${s.hp ?? 0}`,
+  const cls = s.class as SpawnClass;
+  SpawnFromDescriptor(SpawnSiteAt(s.at), cls, -1,
+                      `placed 0x${cls.toString(16)} ${s.hp ?? 0}`,
                       { hp: s.hp ?? 0, maxHp: s.hp ?? 0,
                         flags: s.flags ?? 0,
                         pitch: s.orient?.[0] ?? 0, yaw: s.orient?.[1] ?? 0,

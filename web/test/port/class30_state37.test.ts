@@ -53,6 +53,7 @@ import {
 import { ZombieAux } from "../../src/game/actor";
 import { makeCivilianState } from "../../src/game/class10/state";
 import { RunPendingInits, SpawnSlotActors } from "../../src/game/director";
+import { ActorRunInit, SpawnFromDescriptor } from "../../src/game/spawn";
 import {
   check, motion, TYPE, CHARS, SCENE_MAJOR_PLAYING, spawnZombie, scene,
   EnterPlay,
@@ -1417,4 +1418,71 @@ console.log("stage 3 block 0's boat, and the riders it carries to the wall:");
   check("MatrixGetAngles takes a RotY·RotX·RotZ pose back, elevation signed",
         Math.abs(g.x - 0x800) <= 1 && Math.abs(g.y - 0x2000) <= 1
         && Math.abs(g.z - 0x400) <= 1, `${g.x} ${g.y} ${g.z}`);
+}
+
+console.log("\nclass 0x13, g_prop_behaviours[6] and [7] -- the launch and the path ride:");
+{
+  // `PropBehaviourLaunchWithAccel` (`FUN_0043FFC0`): the Init's one call
+  // (`CALL dword ptr [EAX]` at `0x0043FE72`) turns the operand block's two
+  // vectors by `RotX(+0x64) RotZ(+0x6C) RotY(+0x68)` and falls into the
+  // integrate, `pos += vel` and then `vel += acc`. A half turn about Y alone
+  // takes (x, y, z) to (-x, y, -z) whichever way the engine's RotY turns,
+  // and a half turn about X or Z would not.
+  const rng = new Rng(61);
+  ResetGameGlobals();
+  const frame: ClassFrame = { dt: 1 / 60, rng, host: NULL_HOST };
+  const launch = SpawnFromDescriptor(0x7000, SpawnClass.ScriptedProp, -1,
+                                     "launch", {
+    class13: { slot: 0x1234, cam_path: 0xffff, cam_frame: 0xffff, scale: 1,
+               behaviour: 6, selector: 0x3f800000,
+               operand: [1, 2, 3, 0, -0.5, 0.25] },
+    pos: vec3(10, 20, 30), yaw: 0x8000, pitch: 0, roll: 0,
+  });
+  ActorRunInit(launch, rng, undefined, NULL_HOST);
+  const near = (a: number, b: number) => Math.abs(a - b) < 1e-4;
+  const at = (o: Actor, x: number, y: number, z: number) =>
+    near(o.pos.x, x) && near(o.pos.y, y) && near(o.pos.z, z);
+  // v = (-1, 2, -3), a = (0, -0.5, -0.25): one step at the Init.
+  check("behaviour 6: the Init turns the velocity and steps once",
+        at(launch, 9, 22, 27) && near(launch.vel.x, -1)
+        && near(launch.vel.y, 1.5) && near(launch.vel.z, -3.25),
+        `pos ${JSON.stringify(launch.pos)} vel ${JSON.stringify(launch.vel)}`);
+  ScriptedPropUpdate13(launch, frame);
+  ScriptedPropUpdate13(launch, frame);
+  // Three steps: 10 - 3 = 7; 20 + 6 - 1.5 = 24.5; 30 - 9 - 0.75 = 20.25.
+  check("...and every update integrates, position before velocity",
+        at(launch, 7, 24.5, 20.25) && near(launch.vel.y, 0.5),
+        `pos ${JSON.stringify(launch.pos)} vel ${JSON.stringify(launch.vel)}`);
+
+  // `PropBehaviourRideObjectPath` (`FUN_004400D0`): seated on the `op_` path
+  // the operand block's first dword names, at `g_cam_path_frame`, from the
+  // Init's call on, until the frame reaches `g_cam_path_length[path]`; then
+  // held where the last seat left it.
+  const seen: [number, number][] = [];
+  const host: GameHost = {
+    ...NULL_HOST,
+    objectPath: (slot, fr) => {
+      seen.push([slot, fr]);
+      return { x: fr, y: 2 * fr, z: -fr, pitch: 0x100, yaw: 0x200, roll: 0x300 };
+    },
+  };
+  const pf: ClassFrame = { dt: 1 / 60, rng, host };
+  G.g_cam_path_frame = 3;
+  const ride = SpawnFromDescriptor(0x7100, SpawnClass.ScriptedProp, -1, "ride", {
+    class13: { slot: 0x1234, cam_path: 0xffff, cam_frame: 0xffff, scale: 1,
+               behaviour: 7, selector: 0x176, path_length: 5 },
+    pos: vec3(100, 100, 100),
+  });
+  ActorRunInit(ride, rng, undefined, host);
+  check("behaviour 7: the Init's call already seats it on path 0x176 at the frame",
+        at(ride, 3, 6, -3) && ride.yaw === 0x200
+        && seen.length === 1 && seen[0][0] === 0x176,
+        `pos ${JSON.stringify(ride.pos)} calls ${JSON.stringify(seen)}`);
+  G.g_cam_path_frame = 5;
+  ScriptedPropUpdate13(ride, pf);
+  G.g_cam_path_frame = 7;
+  ScriptedPropUpdate13(ride, pf);
+  check("...rides to g_cam_path_length[path] and holds there past it",
+        at(ride, 5, 10, -5) && seen.length === 2,
+        `pos ${JSON.stringify(ride.pos)} calls ${seen.length}`);
 }

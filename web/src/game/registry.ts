@@ -139,8 +139,13 @@ export interface ClassHandler {
    * An `Init` that draws or plays declares it by taking the parameter; the
    * eight that do neither still satisfy this type, because a function of fewer
    * arguments is assignable to one of more.
+   *
+   * `host` is here because one `Init` **seats its object on a path**:
+   * `ScriptedPropInit13` calls the behaviour once, and
+   * `PropBehaviourRideObjectPath` (`g_prop_behaviours[7]`) evaluates an `op_`
+   * curve, which only the host can.
    */
-  init(obj: Actor, rng?: Rng, events?: Events): void;
+  init(obj: Actor, rng?: Rng, events?: Events, host?: GameHost): void;
   /**
    * The class's `Update` — one call per 60 Hz frame.
    *

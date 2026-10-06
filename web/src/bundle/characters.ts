@@ -464,11 +464,19 @@ export interface CharacterPlacement {
    * pair that despawns it, `scale` is applied only when it is not 1.0, and
    * `behaviour` indexes `g_prop_behaviours` (`0x005926A8`). `selector` is the
    * first dword of the behaviour's operand block and means something only for
-   * behaviour 8, `CarrierPropSelectRoutine`.
+   * behaviour 8, `CarrierPropSelectRoutine`, and 7,
+   * `PropBehaviourRideObjectPath`, whose `op_` path it is.
+   *
+   * `operand` is behaviour 6's (`PropBehaviourLaunchWithAccel`) whole operand
+   * block, two f32 vectors -- the velocity and the acceleration -- and is
+   * present only on that behaviour. `path_length` is
+   * `g_cam_path_length[selector]` (`0x00576D38`), present only on behaviour 7.
    */
   class13?: {
     slot: number; cam_path: number; cam_frame: number;
     scale: number; behaviour: number; selector: number;
+    operand?: number[];
+    path_length?: number;
   } | null;
   /**
    * Class 0x12's tail — a slot strip a script flag starts, every field

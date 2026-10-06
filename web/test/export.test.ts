@@ -36,6 +36,9 @@ import { zipBlob } from "../src/app/install/zip";
 import { RIGS } from "../src/hod2lib/rigs_data";
 import { holdFrameOf } from "../src/hod2lib/rigs";
 import { entranceTailState } from "../src/hod2lib/placement";
+import { class13Tail } from "../src/hod2lib/characters";
+import { SPAWN_HEADER, Spawn, type EvtFile } from "../src/hod2lib/evt";
+import type { ExeTables } from "../src/hod2lib/exetab";
 
 let failures = 0;
 function check(name: string, ok: boolean, detail = ""): void {
@@ -495,6 +498,47 @@ console.log("\na texture's alpha is the bank's, not the mesh's:");
         + "first match's",
         factors.length === 3 && factors[0] === "1,1,1,1"
         && factors[2] === "0,0,0,1", JSON.stringify(factors));
+}
+
+console.log("\nclass 0x13's tail carries what behaviours 6 and 7 read:");
+{
+  // `PropBehaviourLaunchWithAccel` (`FUN_0043FFC0`) reads six floats from
+  // the operand block at tail `+0x14`; `PropBehaviourRideObjectPath`
+  // (`FUN_004400D0`) its first dword as a path slot and
+  // `g_cam_path_length[slot]` (`CMP EDX, [EDI*4 + 0x576D38]`). A
+  // hand-built descriptor, every operand word different, so each field can
+  // only have come from one offset.
+  const tail = (behaviour: number, words: number[]): Spawn => {
+    const raw = new Uint8Array(SPAWN_HEADER + 0x14 + 4 * words.length);
+    const dv = new DataView(raw.buffer);
+    dv.setUint32(0, 0x13, true);
+    dv.setUint16(SPAWN_HEADER + 0x00, 0x1234, true);
+    dv.setFloat32(SPAWN_HEADER + 0x0c, 1, true);
+    dv.setUint32(SPAWN_HEADER + 0x10, behaviour, true);
+    words.forEach((w, k) => dv.setFloat32(SPAWN_HEADER + 0x14 + 4 * k, w, true));
+    return new Spawn(0, 0x0c, 0x13, 0, [0, 0, 0], [0, 0, 0], 0, 0,
+                     { raw } as unknown as EvtFile);
+  };
+  const lengths: number[] = [];
+  const tables = {
+    camPathLength: (slot: number) => { lengths.push(slot); return 240; },
+  } as unknown as ExeTables;
+  const six = class13Tail(tail(6, [1.5, -2, 3.25, 0.125, -0.5, 0.75]), tables);
+  check("behaviour 6 carries the operand block's six floats, in order",
+        JSON.stringify(six.operand) === "[1.5,-2,3.25,0.125,-0.5,0.75]"
+        && six.path_length === undefined && lengths.length === 0,
+        JSON.stringify(six));
+  const raw7 = tail(7, [0]);
+  new DataView(raw7.evt!.raw.buffer).setUint32(SPAWN_HEADER + 0x14, 0x176, true);
+  const seven = class13Tail(raw7, tables);
+  check("behaviour 7 carries g_cam_path_length at the first dword's slot",
+        seven.selector === 0x176 && seven.path_length === 240
+        && lengths.join() === String(0x176) && seven.operand === undefined,
+        JSON.stringify(seven));
+  const eight = class13Tail(tail(8, [0]), tables);
+  check("...and no other behaviour carries either",
+        eight.operand === undefined && eight.path_length === undefined,
+        JSON.stringify(eight));
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

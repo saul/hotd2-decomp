@@ -2137,15 +2137,17 @@ export function scriptedPropDrawSlots(
   const out: number[] = [];
   for (const p of placements) {
     // Only a prop whose behaviour the port runs: `g_prop_behaviours[0]` is
-    // `NoOpStub`, a static model, and `[8]` is a carrier whose selector must
-    // be one of {@link CARRIER_SELECTORS_PORTED}, so that a carrier the port
-    // cannot drive never stands at its descriptor while the game drives it --
-    // right geometry, wrong behaviour, which is the reason
-    // `GENERIC_DESCRIPTOR_SLOT` holds its unported types back too. All ten
-    // are ported now; stage 4's selector 3 (`CarrierPropRoutine3`,
+    // `NoOpStub`, a static model, `[6]` and `[7]` move the one model the
+    // update draws (no shipped descriptor takes either), and `[8]` is a
+    // carrier whose selector must be one of {@link CARRIER_SELECTORS_PORTED},
+    // so that a carrier the port cannot drive never stands at its descriptor
+    // while the game drives it -- right geometry, wrong behaviour, which is
+    // the reason `GENERIC_DESCRIPTOR_SLOT` holds its unported types back too.
+    // All ten are ported now; stage 4's selector 3 (`CarrierPropRoutine3`,
     // `FUN_00440AD0`) brings `colo_monitor.bin[14]`, slot `0x966`.
     const t = p.class13;
-    const ported = t?.behaviour === 0
+    const ported = t?.behaviour === 0 || t?.behaviour === 6
+      || t?.behaviour === 7
       || (t?.behaviour === 8 && CARRIER_SELECTORS_PORTED.has(t.selector ?? -1));
     if (!ported) continue;
     const slot = t?.slot;

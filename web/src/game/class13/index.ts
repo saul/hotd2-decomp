@@ -80,8 +80,15 @@ import { vec3, VecToAngles } from "../vec";
 import {
   CARRIER1_STRIP_FIRST, CARRIER1_STRIP_LAST, CARRIER_GROUND_WAKE_DRAW,
   CARRIER_WAKE_FIRST,
-  CARRIER_WAKE_LAST, CarrierState, type ScriptedPropTail,
+  CARRIER_WAKE_LAST, CarrierState, PropBehaviourState, type ScriptedPropTail,
 } from "./state";
+import { NULL_HOST, type GameHost } from "../host";
+import type { Rng } from "../../core/rng";
+import type { Events } from "../../core/events";
+import {
+  MatIdentity, MatrixRotateX, MatrixRotateY, MatrixRotateZ,
+  MatrixTransformPoint,
+} from "../matrix";
 
 /** `ActorAllocSub(0x18)`'s `ride+0x04`, and the range it wraps in. */
 const WAKE_CEL_FIRST = CARRIER_WAKE_FIRST;
@@ -166,8 +173,8 @@ const CARRIER6_FRAME_BOW_EFFECT = 0x6a4;
  * class 0x30 state 37's barrels, which reach the table through the state-37
  * script's `+0x04` and `+0x08` rather than through a class-0x13 descriptor,
  * and the stage-4 boss's — all ported in `game/carried_prop.ts`. 6 and 7 are
- * descriptor behaviours no shipped descriptor selects, and 9 is Training's
- * only. `[proved]`: every class-0x12, 0x13 and 0x15 descriptor any `evt/`
+ * descriptor behaviours, ported here, that no shipped descriptor selects, and
+ * 9 is Training's only. `[proved]`: every class-0x12, 0x13 and 0x15 descriptor any `evt/`
  * word points at takes 0, 8 or 9, and every state-37 script 1 then 3, 4 or 5.
  */
 export enum PropBehaviour {
@@ -186,6 +193,10 @@ export enum PropBehaviour {
   CarriedPropThrowAtCamera = 4,
   /** `CarriedPropRollAtCamera` (`FUN_00443DC0`) — `game/carried_prop.ts`. */
   CarriedPropRollAtCamera = 5,
+  /** {@link PropBehaviourLaunchWithAccel}. No shipped descriptor takes it. */
+  LaunchWithAccel = 6,
+  /** {@link PropBehaviourRideObjectPath}. No shipped descriptor takes it. */
+  RideObjectPath = 7,
   /** `CarrierPropSelectRoutine` (`FUN_00440190`). */
   SelectCarrierRoutine = 8,
   /**
@@ -215,7 +226,8 @@ function Tail(obj: Actor): ScriptedPropTail | null {
  * behind `NoOpStub`, the only ones a static prop ever has. Stage 2's five
  * static props all carry a pitch; see `PlacementOrientation`.
  */
-export function ScriptedPropInit13(obj: Actor): void {
+export function ScriptedPropInit13(obj: Actor, _rng?: Rng, _events?: Events,
+                                   host?: GameHost): void {
   const sub = Tail(obj);
   const p = obj.class13;
   if (!sub || !p) return;
@@ -226,13 +238,90 @@ export function ScriptedPropInit13(obj: Actor): void {
   // `sub+0x18 = 1.0f` in the Init; no ported behaviour writes it.
   sub.alpha = 1;
   sub.behaviour = p.behaviour;
+  // `sub+0x08 = tail + 0x14`: the operand block, which the port keeps as the
+  // words its readers read -- the first dword, behaviour 6's six floats, and
+  // the table entry behaviour 7 indexes with the first dword.
   sub.selector = p.selector;
+  sub.operand = p.operand ? [...p.operand] : [];
+  sub.pathLength = p.path_length ?? 0;
   sub.state = CarrierState.Begin;
   // `obj+0x3C = -1`.
   obj.motion = -1;
+  // `CALL dword ptr [EAX]` at `0x0043FE72`: the behaviour, once.
   if (sub.behaviour === PropBehaviour.SelectCarrierRoutine) {
     CarrierPropSelectRoutine(obj, sub);
+  } else if (sub.behaviour === PropBehaviour.LaunchWithAccel) {
+    PropBehaviourLaunchWithAccel(obj, sub);
+  } else if (sub.behaviour === PropBehaviour.RideObjectPath) {
+    // `[port-only]`: the app's paused-seek `Init` has no host to hand over,
+    // and a host with no paths leaves the prop where it is.
+    PropBehaviourRideObjectPath(obj, sub, { host: host ?? NULL_HOST });
   }
+}
+
+/**
+ * `PropBehaviourLaunchWithAccel` — `FUN_0043FFC0`. `g_prop_behaviours[6]`.
+ *
+ * ```
+ * case 0: Push; LoadIdentity; RotX(obj+0x64); RotZ(obj+0x6C); RotY(obj+0x68)
+ *         obj+0x4C..0x54 = M * operand[0..2]; obj+0x58..0x60 = M * operand[3..5]
+ *         Pop; sub+0x0C++                        ; and on into case 1
+ * case 1: obj+0x40 += obj+0x4C; obj+0x4C += obj+0x58   (x, y, z each)
+ * default: return
+ * ```
+ *
+ * A launch along the record's own facing with a constant acceleration, for
+ * as long as the prop lives; nothing here despawns it. The state-0 fall
+ * through is `JZ 0x0043FFEA` running into `0x00440090` past `INC word ptr
+ * [EBX + 0xC]` (`0x0044008C`). No shipped descriptor selects it `[proved]`.
+ */
+export function PropBehaviourLaunchWithAccel(obj: Actor,
+                                             sub: ScriptedPropTail): void {
+  if (sub.state === PropBehaviourState.Begin) {
+    const m = MatIdentity();
+    MatrixRotateX(m, obj.pitch);
+    MatrixRotateZ(m, obj.roll);
+    MatrixRotateY(m, obj.yaw);
+    const o = sub.operand;
+    const v = { x: 0, y: 0, z: 0 }, a = { x: 0, y: 0, z: 0 };
+    MatrixTransformPoint(m, { x: o[0], y: o[1], z: o[2] }, v);
+    MatrixTransformPoint(m, { x: o[3], y: o[4], z: o[5] }, a);
+    obj.vel.x = v.x; obj.vel.y = v.y; obj.vel.z = v.z;
+    obj.accX = a.x; obj.accY = a.y; obj.accZ = a.z;
+    sub.state = PropBehaviourState.Running;
+  } else if (sub.state !== PropBehaviourState.Running) {
+    return;
+  }
+  obj.pos.x += obj.vel.x;
+  obj.pos.y += obj.vel.y;
+  obj.pos.z += obj.vel.z;
+  obj.vel.x += obj.accX;
+  obj.vel.y += obj.accY;
+  obj.vel.z += obj.accZ;
+}
+
+/**
+ * `PropBehaviourRideObjectPath` — `FUN_004400D0`. `g_prop_behaviours[7]`.
+ *
+ * ```
+ * path = *(sub+0x08)                            ; the operand block's first dword
+ * case 0: sub+0x0C = 1                          ; INC ECX; and on into case 1
+ * case 1: PropSeatOnObjectPath(obj, path, g_cam_path_frame)
+ *         if (g_cam_path_frame >= g_cam_path_length[path]) sub+0x0C++
+ * default: return                               ; held at the last seat
+ * ```
+ *
+ * No shipped descriptor selects it `[proved]`.
+ */
+export function PropBehaviourRideObjectPath(obj: Actor, sub: ScriptedPropTail,
+                                            f: Pick<ClassFrame, "host">): void {
+  if (sub.state === PropBehaviourState.Begin) {
+    sub.state = PropBehaviourState.Running;
+  } else if (sub.state !== PropBehaviourState.Running) {
+    return;
+  }
+  PropSeatOnObjectPath(obj, sub.selector, G.g_cam_path_frame, f);
+  if (sub.pathLength <= G.g_cam_path_frame) sub.state = PropBehaviourState.Ended;
 }
 
 /**
@@ -266,7 +355,7 @@ export function CarrierPropSelectRoutine(obj: Actor,
  * path should look like.
  */
 export function PropSeatOnObjectPath(obj: Actor, slot: number, frame: number,
-                                     f: ClassFrame): void {
+                                     f: Pick<ClassFrame, "host">): void {
   const p = f.host.objectPath?.(slot, frame);
   if (!p) return;
   obj.pos.x = p.x;
@@ -592,6 +681,10 @@ export function ScriptedPropUpdate13(obj: Actor, f: ClassFrame): void {
   if (sub.behaviour === PropBehaviour.SelectCarrierRoutine) {
     g_carrier_prop_routines[sub.selector]?.(obj, f);
     if (obj.despawned) return;
+  } else if (sub.behaviour === PropBehaviour.LaunchWithAccel) {
+    PropBehaviourLaunchWithAccel(obj, sub);
+  } else if (sub.behaviour === PropBehaviour.RideObjectPath) {
+    PropBehaviourRideObjectPath(obj, sub, f);
   }
   // `T(obj+0x40)` is the matrix's translation before the turns and the
   // scale, so the point is the position; the port keeps it in world space.

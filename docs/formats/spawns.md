@@ -116,6 +116,9 @@ state bytes name 37, spawned by an opcode or not:
 vectors, turned by the record's `RotX; RotZ; RotY`, then `pos += vel; vel +=
 acc` for ever. 7 seats the prop on the `op_` path the operand block's first
 dword names at `g_cam_path_frame` until the frame reaches the path's length.
+Both run first from `ScriptedPropInit13`'s own call, and both are ported
+(`game/class13/index.ts`), their inputs carried by the class-0x13 placement
+(`bundle.md`).
 9 is the object Training has the player keep in the air by shooting it --
 `g_training_out = 1` if it falls to `g_camera_fixed_eye_y`, `g_script_flags[3]`
 once the lesson's frame limit (1200..3000 by `g_training_lesson`) runs out,

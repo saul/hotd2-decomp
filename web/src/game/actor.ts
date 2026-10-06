@@ -42,6 +42,8 @@ import { makeDynamicLightTail, type DynamicLightTail }
 import { makeVehicleTail, type VehicleTail } from "./class26/state";
 import { makePathRidingPropTail, type PathRidingPropTail }
   from "./class28/state";
+import { makePathRidingVehicleTail, type PathRidingVehicleTail }
+  from "./class27/state";
 import { makeBatTail, type BatTail } from "./class46/state";
 import { makeBoss3Tail, type Boss3Tail } from "./class45/state";
 import { makeBoss5Tail, type Boss5Tail } from "./class32/state";
@@ -2684,6 +2686,8 @@ export type Actor =
   | (ActorBase & { cls: SpawnClass.Vehicle; vehicle: VehicleTail })
   | (ActorBase & { cls: SpawnClass.PathRidingProp;
                    pathProp: PathRidingPropTail })
+  | (ActorBase & { cls: SpawnClass.PathRidingVehicle;
+                   vehicle27: PathRidingVehicleTail })
   | (ActorBase & { cls: SpawnClass.Bat; bat: BatTail })
   | (ActorBase & { cls: SpawnClass.Boss3; boss3: Boss3Tail })
   | (ActorBase & { cls: SpawnClass.Emperor; class2d: Class2DTail })
@@ -2708,7 +2712,8 @@ export type Actor =
       | SpawnClass.FloatingPropRow | SpawnClass.DynamicLight
       | SpawnClass.CarriedZombie
       | SpawnClass.ScriptedScenery | SpawnClass.Vehicle
-      | SpawnClass.PathRidingProp | SpawnClass.HordeSpawner
+      | SpawnClass.PathRidingProp | SpawnClass.PathRidingVehicle
+      | SpawnClass.HordeSpawner
       | SpawnClass.Worm | SpawnClass.ResultCard
       | SpawnClass.CutsceneSkipWatcher
       | SpawnClass.PropContainerPlacer> });
@@ -3023,6 +3028,9 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
   }
   if (cls === SpawnClass.PathRidingProp) {
     return { ...head, cls, pathProp: makePathRidingPropTail() };
+  }
+  if (cls === SpawnClass.PathRidingVehicle) {
+    return { ...head, cls, vehicle27: makePathRidingVehicleTail() };
   }
   if (cls === SpawnClass.Bat) {
     return { ...head, cls, bat: makeBatTail() };

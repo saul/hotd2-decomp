@@ -627,6 +627,13 @@ export const RIGS: readonly Rig[] = [
    * object starts *moving*, which is a different thing. Conflating the two
    * would claim a cp_st1 gate on op_st2 routes, a gate that could never fire.
    *
+   * Only the table's rows 0 and 1 are routes of this routine: every shipped
+   * class-0x28 spawn carries `obj+0x11C` 0 or 1. Rows 2 and 3, op_st2 0x149
+   * and 0x14A, are **class 0x27's** -- `PathRidingVehicleUpdate`
+   * (`FUN_004329D0`) reads the same table as dwords from `0x00589AE8` -- and
+   * listing them here exported this rig into stage 2, which places no class
+   * 0x28, as two route roots nothing draws.
+   *
    * - part `part_135f`: Both sprite parts bias the path position before the
    *   billboard yaw, so neither offset can be expressed as a child of the
    *   rotated root.
@@ -649,14 +656,6 @@ export const RIGS: readonly Rig[] = [
       {
         slot: 326,
         note: "obj+0x11C == 1; held at frame 0x29B before launch",
-      },
-      {
-        slot: 329,
-        note: "obj+0x11C == 2; held at frame 0",
-      },
-      {
-        slot: 330,
-        note: "obj+0x11C == 3; held at frame 0",
       },
     ],
     spawnClass: 40,

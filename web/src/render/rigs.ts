@@ -680,16 +680,19 @@ export class RigLayer implements System {
     for (const o of this.undrawn) o.visible = false;
     // **One root per actor.** The exporter places a rig once per spawn
     // *record*, and a descriptor the script spawns in three blocks is three
-    // records at one address -- class 0x28's two are in blocks 5, 11 and 14
-    // -- where the pool holds one object for it. Drawing every root bound to
-    // it drew the object three times over itself.
+    // records at one address -- class 0x28's two are in blocks 5, 11 and 14.
+    // Each spawn instruction that runs is an object of its own (the pool keys
+    // a second one from the same descriptor by a synthetic address and keeps
+    // the descriptor's as `descAt`), so each root takes the next live object
+    // from its descriptor that no root has drawn yet, and a root with none
+    // left draws nothing.
     const drawn = new Set<number>();
     for (const inst of this.instances) {
       if (inst.spawnAt === null) continue;
       const a = G.g_object_list.find(
-        (o) => o.at === inst.spawnAt && o.cls === inst.spawnClass
-               && !o.despawned);
-      const mine = !!a && !drawn.has(a.at);
+        (o) => o.descAt === inst.spawnAt && o.cls === inst.spawnClass
+               && !o.despawned && !drawn.has(o.at));
+      const mine = !!a;
       inst.root.visible = this.enabled && mine;
       if (!a || !mine) continue;
       drawn.add(a.at);

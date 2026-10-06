@@ -1774,6 +1774,19 @@ export const EFFECT_SLOTS_BY_CLASS: Record<number, number[]> = {
   // blocks 3 and 8 and stage 2's block 11 leave on the floor
   // (`game/class29/`).
   0x29: [0x93c, 0x93d],
+  // Class 0x27, `PathRidingVehicleDraw` (`FUN_00432B10`), drawn in the world
+  // through `DrawSlotInWorld` (`game/class27/`): the body `0x2B` and, from
+  // camera frame `0xBE`, `0x33` (`char_adv04.bin` 0 and 8), and the two cel
+  // loops it then steps -- `0x1434..0x145A` once and `0x1AAB..0x1AD2` for
+  // good (`char_adv00.bin` 10..48 and 57..96), and `0xB67..0xB6E`
+  // (`char_adv00.bin` 1..8). `0x1433` is never drawn: the counter is stepped
+  // before the first cel is named.
+  0x27: [
+    0x2b, 0x33,
+    ...Array.from({ length: 0x145a - 0x1434 + 1 }, (_, i) => 0x1434 + i),
+    ...Array.from({ length: 0x1ad2 - 0x1aab + 1 }, (_, i) => 0x1aab + i),
+    ...Array.from({ length: 8 }, (_, i) => 0xb67 + i),
+  ],
   // The stage-6 boss's: every slot its routines draw by hand -- its own
   // nodes and shells, the satellites, the children's nodes, the flares and
   // the tasks. See `CLASS2D_EFFECT_SLOTS` in `game/class2D/state.ts`.

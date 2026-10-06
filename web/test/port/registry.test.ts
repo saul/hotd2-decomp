@@ -493,6 +493,7 @@ console.log("\n`g_class_handlers`, filled by the classes themselves:");
     [SpawnClass.DynamicLight, "0x2B a scripted light"],
     [SpawnClass.CarriedZombie, "0x18 the zombie that rides it"],
     [SpawnClass.Vehicle, "0x26 subtype 2, the boat the player rides"],
+    [SpawnClass.PathRidingVehicle, "0x27 stage 2's two path riders"],
     [SpawnClass.PathRidingProp, "0x28 stage 1's two burning cars"],
     [SpawnClass.SceneryBatch, "0x29 the floor decals"],
     [SpawnClass.CutsceneSkipWatcher, "0x63 the cutscene-skip watcher"],
@@ -530,12 +531,12 @@ console.log("\n`g_class_handlers`, filled by the classes themselves:");
         PORTED_CLASSES.map((c) => `0x${c.toString(16)}`).join(","));
   // The cat is 0x53 and now has one -- its sub-type 2 is a route-branch
   // trigger -- and 0x40, the horde, and 0x42, the worm, have one too, and so
-  // does 0x2D, the stage-6 boss, and 0x29, the floor decals. Class 0x27
-  // still has none: an unported class must stay absent rather than fall back
-  // to anything, because an `if` is what had the cat running the zombie's
-  // state machine.
+  // does 0x2D, the stage-6 boss, 0x29, the floor decals, and 0x27, stage 2's
+  // path riders. Class 0x54, an ending-scene class, still has none: an
+  // unported class must stay absent rather than fall back to anything,
+  // because an `if` is what had the cat running the zombie's state machine.
   check("a class with no module has no row",
-        g_class_handlers[SpawnClass.PathRidingVehicle] === undefined);
+        g_class_handlers[0x54 as SpawnClass] === undefined);
 
   // Loud, not last-one-wins. A row silently overwritten by a second module is
   // a class whose behaviour depends on evaluation order.

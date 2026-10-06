@@ -61,23 +61,8 @@ the same commit.
   root, for any prop. Constructor 26's and the canal water's slots are
   treated as resident whatever loads their `pol/` files, beyond opcodes
   0x52/0x53's whole-file loads.
-* **`0x44` prop placer** -- the mesh shot test of selectors 0 (stage 1's
-  window, evt `0x1580`/`0x15CC`) and 3 (stage 1's `0x3ACC`), whose blobs
-  travel (`coli_blob`) but which are not filed: each copies the capture
-  `EffectDrawWithCapture` (`FUN_0040DFD0`) stores at `obj+0x338` into
-  `obj+0x150` -- portable -- and writes `obj+0x64..0x6C`, the angles
-  `ShotTestMesh` turns a hit's normal by, from `EffectFrameRotations` at the
-  raw cursor: selector 0 from cursor 101 to 197 and selector 3 (row
-  `obj+0x2A0 - 1` = its open flag, 29) from cursor 66 read past the end of
-  `komono_niwa.bin` / `komono_man.bin`. What is there is the run's own heap,
-  not data: the bank's uncleared block slack, then the next arena block's
-  header (absolute addresses) and contents, placed first-fit by every
-  allocation since `ArenaReset` -- including a sprite actor per shot into
-  the scenery -- with the bank loaded mid-play by opcode `0x56`
-  (`docs/formats/mot.md`, "What lies after a bank in memory"). Not
-  determinable; filing them needs a declared divergence for those angles,
-  the user's call.
-  Stage 2's hinge `0xFFD0` and selector-5 handoff `0x10018` carry stage 1's
+* **`0x44` prop placer** -- stage 2's hinge `0xFFD0` and selector-5 handoff
+  `0x10018` carry stage 1's
   door pointer, which in stage 2 lands inside a quad of `coli2.bin`: they
   register, `[open]` what the engine's traces do with it, and the port's
   resolve to no blob. The story-mode switch's scene-4 count and blink read

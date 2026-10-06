@@ -192,14 +192,19 @@ export function PropMatrixTRzRyRx(m: Mat, x: number, y: number, z: number,
  * *slot*, when it is not -1, is the slot override `EffectDrawWithSlot`
  * (`FUN_0040E010`) and `EffectDrawWithCapture` (`FUN_0040DFD0`) set in
  * `DAT_007C178C`: every node that draws draws that slot instead of its own.
- * The capture those two can also make (`MatrixStore` of one node into the
- * state block) is read only by the mesh shot test, and is not recorded.
+ *
+ * *capture*, when it is not -1, is `EffectDrawWithCapture`'s capture bone
+ * (`DAT_007C1789 = capture + 1`; `EffectDrawUnlit` and `EffectDrawWithSlot`
+ * pass `0xFF`, which is no capture): every node whose bone is *capture*
+ * `MatrixStore`s the stack top -- posed, puff-scaled -- into the state
+ * block's `+0x14` after its draw (`0x0040DF11`..`0x0040DF29`), which is
+ * {@link BreakableProp.effectCapture}. The last such node walked wins.
  *
  * `[port-only]` as a function: the three routines' walk, recorded rather than
  * drawn, with the state-block writes they make kept exactly where they are.
  */
 export function PropDrawEffect(p: BreakableProp, m: Mat, rng: Rng,
-                               slot = -1): void {
+                               slot = -1, capture = -1): void {
   const def = T.breakables?.effects?.[String(p.effect)];
   if (!def || !def.frames || def.motion !== p.effectVariant) return;
   if (def.play_length - 1 <= p.effectFrames) p.effectFrames = 0;
@@ -207,7 +212,7 @@ export function PropDrawEffect(p: BreakableProp, m: Mat, rng: Rng,
   const root = def.nodes[0];
   const pose: EffectNodePose = { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0 };
   for (const c of root?.children ?? []) {
-    PropDrawEffectNode(p, def, c, m, pose, rng, slot);
+    PropDrawEffectNode(p, def, c, m, pose, rng, slot, capture);
   }
   p.effectPrevFrame = p.effectFrames;
 }
@@ -222,7 +227,7 @@ const EFFECT_SMOKE_PUFF_BASE = 0.27;
 /** One node of {@link PropDrawEffect}'s walk, and its children. */
 function PropDrawEffectNode(p: BreakableProp, def: EffectDefJson, i: number,
                             parent: Mat, pose: EffectNodePose,
-                            rng: Rng, slot: number): void {
+                            rng: Rng, slot: number, capture: number): void {
   const node = def.nodes[i];
   if (!node) return;
   const m = PropMatrixPush(parent);
@@ -238,8 +243,12 @@ function PropDrawEffectNode(p: BreakableProp, def: EffectDefJson, i: number,
     }
     // `if (DAT_007C178C < 0) ...node->slot... else AssetDrawSlot(override)`.
     PropDrawSlot(p, m, slot < 0 ? node.slot : slot);
+    // `CMP '\0' < DAT_007C1789 && DAT_007C1789 - 1 == node->bone`.
+    if (capture >= 0 && node.bone === capture) {
+      p.effectCapture = m.slice(0, 16);
+    }
   }
   for (const c of node.children) {
-    PropDrawEffectNode(p, def, c, m, pose, rng, slot);
+    PropDrawEffectNode(p, def, c, m, pose, rng, slot, capture);
   }
 }

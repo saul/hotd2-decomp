@@ -332,14 +332,19 @@ both halves of selector 0's window. Stage 2's hinge `0xFFD0` and selector-5
 handoff `0x10018` carry `0x0CECFBE0`, stage 1's door blob, which in stage 2
 is `coli2.bin+3040`, inside a quad's vertices (a group count of
 3,297,643,553): both register, what the engine's traces do with it is
-`[open]`, and the port's resolves to no blob. Selectors 0 and 3 are **not
-filed**: the three
-angles `ShotTestMesh` turns their normal by are `EffectFrameRotations` at the
-raw cursor, and from cursor 101 (selector 0, motion 471, the last block of
-`komono_niwa.bin`) and 66 (selector 3, motion 470, row `obj+0x2A0 - 1` = 29
-of the only block of `komono_man.bin`) those reads are past the end of the
-file -- the run's own heap, not data (`mot.md`, "What lies after a bank in
-memory"). The trace takes a point into the object
+`[open]`, and the port's resolves to no blob. Selectors 0 and 3 are filed
+through the matrix their effect draw **captures** (`EffectDrawWithCapture`
+stores the node whose bone is the capture bone at `obj+0x338`, and the
+routine copies it over `obj+0x150`). The three angles `ShotTestMesh` turns
+their normal by are `EffectFrameRotations` at the raw cursor, entry
+`obj+0x2A0`, which the exporter reads where the routine reads them
+(`rotation_entries`); from cursor 101 (selector 0, motion 471, the last block
+of `komono_niwa.bin`) and 66 (selector 3, motion 470, entry 30 of the only
+block of `komono_man.bin`) those reads are past the end of the file -- the
+run's own heap, not data (`mot.md`, "What lies after a bank in memory") --
+and the port reads zero there, its one declared divergence in this path
+(`EffectFrameRotationsEntry`, `game/class44/script_flag_effect.ts`). The
+trace takes a point into the object
 through the **general** inverse of `obj+0x150`, as `MatrixInvert`
 (`FUN_004A8D20`) does, because the switch's draw scales: stage 1's door by
 (1.02, 1.04, 1) and stage 2's two keyed doors by (0.8878, 0.8197, 1) and

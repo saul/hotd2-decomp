@@ -422,8 +422,8 @@ const _w = { x: 0, y: 0, z: 0 };
  * {@link ShotTestEntry.prop}: the story-mode switch, so a shot at a gate's
  * door kicks it open (`class44/story_switch.ts`), and the hinges and
  * selectors 6, 7, 12 and 13, so a shot at a door stops on it
- * (`class44/hinge.ts`). Selectors 0 and 3 raise it and are not filed yet --
- * see `docs/formats/combat.md`, "The shot test".
+ * (`class44/hinge.ts`), and selectors 0 and 3 through the node matrix
+ * their effect draw captures (`class44/script_flag_effect.ts`).
  *
  * What is not here is `ShotTestWorld` (`FUN_00404B80`). In the engine the
  * static collision's hits are candidates in the same list, which is what

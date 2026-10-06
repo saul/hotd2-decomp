@@ -123,10 +123,6 @@ const GENERIC_FAMILY_DEFAULT = PoseOrder.YawRollPitch;
  * and does not record its own draws (a family that does is drawn from
  * {@link BreakableProp.draws} and never reaches this).
  *
- * * {@link PropFamily.ScriptFlagEffect} — `EffectPoseNode` (`FUN_0040D9D0`)
- *   is `RotZ; RotY; RotX` after its translate, and the port has already
- *   resolved its three angles into `pitch`/`yaw`/`roll`, so the effect tree's
- *   nodes ride this rather than a fourth arm.
  * * {@link PropFamily.RisingDoor} — `RisingDoorUpdate` (`FUN_004753F0`) is
  *   `MatrixTranslate` then **one** `MatrixRotateY` and then its draw. Both
  *   shipped shutters carry a zero pitch and roll, because
@@ -135,7 +131,6 @@ const GENERIC_FAMILY_DEFAULT = PoseOrder.YawRollPitch;
  *   three rotations it does not make.
  */
 const FAMILY_POSE_ORDER: Partial<Record<PropFamily, PoseOrder>> = {
-  [PropFamily.ScriptFlagEffect]: PoseOrder.RollYawPitch,
   [PropFamily.RisingDoor]: PoseOrder.YawOnly,
   // `FallingContainerFragmentUpdate` (`FUN_0046AD20`): `RotZ; RotY; RotX`
   // in both draw blocks, the container's own order.
@@ -447,10 +442,10 @@ export class BreakableLayer implements System<RenderContext> {
         // "roll" that is really a slot-strip length. The check prints both.
         //
         // For every other family it is the family's single order:
-        // `FallingContainerUpdate` and `ScriptFlagEffectUpdate` -- whose
-        // nodes are posed by `EffectPoseNode` (`FUN_0040D9D0`) -- draw
-        // `Rz.Ry.Rx`, which is also the order `BreakablePropGroundContact`'s
-        // hull test uses, so box and model agree.
+        // `FallingContainerUpdate` -- whose nodes are posed by
+        // `EffectPoseNode` (`FUN_0040D9D0`) -- draws `Rz.Ry.Rx`, which is
+        // also the order `BreakablePropGroundContact`'s hull test uses, so
+        // box and model agree.
         for (const axis of PoseOrderFor(p)) {
           if (axis === "Z") l.node.rotateZ(p.roll * BAMS_TO_RAD);
           else if (axis === "Y") l.node.rotateY(p.yaw * BAMS_TO_RAD);

@@ -360,6 +360,17 @@ export interface BreakablePlacement {
    * rotations as signed shorts.
    */
   collapse_keys?: { key: number; t_bits: number[]; r: number[] }[];
+  /**
+   * `script_flag_effect` and `flag_slot_effect` — the three signed shorts
+   * `ScriptFlagEffectUpdate` (`FUN_00473B90`) and `FlagSlotEffectUpdate`
+   * (`FUN_00474120`) load into `obj+0x64..0x6C` at each play cursor
+   * `0 .. play_length - 2`: `EffectFrameRotations` of the raw cursor, entry
+   * `obj+0x2A0` (the capture bone, or selector 3's open flag), read where
+   * the routine reads in the bank's file. `null` where those bytes are past
+   * the end of the file -- the engine's heap, not data
+   * (`docs/formats/mot.md`).
+   */
+  rotation_entries?: ([number, number, number] | null)[];
   /** The item set it belongs to, 0 for none. */
   item_set?: number;
   /** How many props share that set; the countdown is seeded from it. */

@@ -109,7 +109,7 @@ export function BreakablePropPoolUpdate(rng: Rng, events?: Events,
       case PropFamily.StoryModeSwitch:
         StoryModeSwitchUpdate(p, rng, events); break;
       case PropFamily.ScriptFlagEffect:
-        ScriptFlagEffectUpdate(p, events); break;
+        ScriptFlagEffectUpdate(p, rng, events); break;
       // No prologue and no shot-test tail around this one either:
       // `RisingDoorUpdate` has no `PropExpireByStepLifetime`, no `AND` on
       // `obj+0x34` and no `RegisterForShotTest` in it. Its remove flag is its

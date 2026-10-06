@@ -985,6 +985,14 @@ export interface BreakableProp {
    */
   coliMatrixDrawn: boolean;
   /**
+   * `obj+0x338` -- the effect state block's `+0x14`, where `EffectDrawNode`
+   * (`FUN_0040DE50`) `MatrixStore`s the matrix of the node whose bone is
+   * `EffectDrawWithCapture`'s capture bone (`ADD ECX,0x14` at `0x0040DF25`),
+   * sixteen floats in the matrix stack's layout. Class 0x44 selectors 0 and
+   * 3 copy it to `obj+0x150`. `null` until a capturing draw stores it.
+   */
+  effectCapture: number[] | null;  // +0x338
+  /**
    * `obj+0x192` for the two generic routines that keep a small state machine
    * there: {@link PropFamily.Type13}'s drop (`Type13Phase`) and type 35's
    * door rattle (`Type35Phase`) -- and {@link PropFamily.Type37}'s fall,
@@ -1146,6 +1154,7 @@ export function makeBreakableProp(id: number, group: number,
     coliBlob: null,
     coliMatrix: null,
     coliMatrixDrawn: false,
+    effectCapture: null,
     dead: false,
     flicker: null,
     chain: null,

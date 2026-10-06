@@ -1128,10 +1128,13 @@ Mode in scene 1 block 0x15, scene 2 blocks 1, 4 and 8, and scene 5 block 1.
 Their `obj+0x34 |= 0x51` and `obj+0x14C` send each one with a blob to the
 mesh shot test and into the moving-object collision passes, and the port
 files them so -- `MatrixStore(obj+0x150)` where each routine makes it, and
-`RegisterForShotTest`'s mesh arm (`class41/shot_test.ts`) -- except
-selectors 0 and 3, whose `obj+0x150` is a captured node matrix and whose
-`obj+0x64..0x6C` are read past the end of their motion's file; see
-`docs/formats/combat.md`, "The shot test".
+`RegisterForShotTest`'s mesh arm (`class41/shot_test.ts`). Selectors 0 and
+3's `obj+0x150` is the node matrix their effect draw captures, and their
+`obj+0x64..0x6C` are `EffectFrameRotations` of the raw cursor at entry
+`obj+0x2A0` (selector 3's open flag): those three shorts per play cursor
+travel raw on the placement as `rotation_entries`
+(`MotionBank.effectRotationEntry`), `null` where the read leaves the bank's
+file; see `docs/formats/combat.md`, "The shot test".
 
 ### Class 0x24's parameter tail
 

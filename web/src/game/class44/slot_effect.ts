@@ -82,20 +82,21 @@
  * (`PropRegisterForShotTestAsIs`, `class41/shot_test.ts`) -- its one shipped
  * spawn's `obj+0x14C` is `-1`, so it never registers.
  *
- * **Selector 3 is not filed**, and stage 1's spawn (evt `0x3ACC`) names a
- * blob (`coli1.bin`, resolved as `coli_blob`). Its `obj+0x150` is the
- * capture -- the matrix `EffectDrawNode` stores for the node whose bone is 1,
- * into `obj+0x338`, copied over by `REP MOVSD` -- and `obj+0x64..0x6C`, the
- * three angles `ShotTestMesh` turns the hit's normal by, are read by
- * `EffectFrameRotations` (`FUN_0040E070`) at the **raw** cursor and at row
- * `obj+0x2A0 - 1`, where `obj+0x2A0` is this selector's **open flag**
- * (30 for the shipped spawn), not a bone: motion `0x1D6` is the only block of
- * `komono_man.bin` and ends the file after 75 keys of 20 bytes, so from
- * cursor 66 on the routine reads past the end of the file's buffer, at
- * bytes the disc does not hold: the run's own heap, which depends on every
- * allocation since the scene's arena reset (`docs/formats/mot.md`, "What
- * lies after a bank in memory"). Reproducing that needs a declared
- * divergence, which is the user's call (`docs/UNPORTED.md`). Selector 3's
+ * **Selector 3** is filed the same way, through the tail it shares with
+ * selector 0 (`ScriptFlagEffectFileMesh`, `class44/script_flag_effect.ts`):
+ * stage 1's spawn (evt `0x3ACC`) names `coli1.bin:4400`. Its `obj+0x150` is
+ * the capture -- the matrix `EffectDrawNode` stores for the node whose bone
+ * is 1, into `obj+0x338`, copied over by `REP MOVSD` at `0x0047420B` -- and
+ * `obj+0x64..0x6C`, the three angles `ShotTestMesh` turns the hit's normal
+ * by, are `EffectFrameRotations` (`FUN_0040E070`) at the **raw** cursor,
+ * entry `obj+0x2A0` -- this selector's **open flag** (30 for the shipped
+ * spawn), not a bone, so the shorts are later keys' translation halves.
+ * Motion `0x1D6` is the only block of `komono_man.bin` and ends the file
+ * after 75 keys of 20 bytes, so from cursor 66 on the routine reads past the
+ * end of the file's buffer, the run's own heap (`docs/formats/mot.md`, "What
+ * lies after a bank in memory"): zero there is the declared divergence on
+ * `EffectFrameRotationsEntry`. Stage 2's spawn (`0xD400`) names no blob, so
+ * nothing ever traces it. Selector 3's
  * builder writes `obj+0x124 = 5.0f`, which only `ShotTestSphere`
  * (`FUN_00404630`) reads and bit `0x10` keeps this object from, so
  * `hitRadius` carries 0.
@@ -122,9 +123,8 @@ import { PropDrawBegin, PropDrawEffect, PropMatrixPush }
 import {
   BreakableState, makeBreakableProp, PropFamily, type BreakableProp,
 } from "../class41/prop_state";
-import {
-  PropRegisterForShotTest, PropRegisterForShotTestAsIs,
-} from "../class41/shot_test";
+import { PropRegisterForShotTestAsIs } from "../class41/shot_test";
+import { ScriptFlagEffectFileMesh } from "./script_flag_effect";
 import { ColiStoreObjectMatrix } from "../coli";
 import { PropWords } from "../class41/words";
 import { HINGE_FLAGS, HINGE_WORDS, PROP_SWEEP_FLAG, PROP_SWEEP_SCENE }
@@ -138,7 +138,7 @@ export const FLAG_SLOT_EFFECT_SLOT_SCENE0 = 0x17ee;
 export const FLAG_SLOT_EFFECT_SLOT = 0x197c;
 /**
  * `EffectDrawWithCapture(obj + 0x324, 1, ...)` -- the capture bone, whose
- * matrix only the mesh shot test reads (see the file comment).
+ * matrix the routine copies over `obj+0x150` (see the file comment).
  */
 export const FLAG_SLOT_EFFECT_CAPTURE = 1;
 /** `PlaySoundId(0x1116A9)` on these four effect frames. */
@@ -214,15 +214,11 @@ export function FlagSlotEffectUpdate(p: BreakableProp, rng: Rng,
   }
   const m = PropMatrixPush();
   MatrixTranslate(m, w.o40, w.o44, w.o48);
-  // `EffectDrawWithCapture(obj + 0x324, 1, (s16)obj->+0x28C)`; the capture
-  // (bone 1's matrix into `obj+0x338`, copied to `obj+0x150`) is the mesh
-  // shot test's.
-  PropDrawEffect(p, m, rng, (p.slot << 16) >> 16);
-  // `RegisterForShotTest`, whose `0x51` takes the mesh arm in the engine.
-  // Not filed so here: the angles that arm needs are past the end of the
-  // motion's file (see the file comment). This sphere has radius 0, which
-  // nothing hits.
-  PropRegisterForShotTest(p, p.shotX, p.shotY, p.shotZ);
+  // `EffectDrawWithCapture(obj + 0x324, 1, (s16)obj->+0x28C)`: bone 1's
+  // matrix into `obj+0x338`. Then the pop, and the tail selector 0 shares --
+  // the capture over `obj+0x150`, the three angles, the registration.
+  PropDrawEffect(p, m, rng, (p.slot << 16) >> 16, FLAG_SLOT_EFFECT_CAPTURE);
+  ScriptFlagEffectFileMesh(p, "flag_slot_effect");
 }
 
 /** `PropBuildScaledSlotEffect` — `FUN_00473170`. `g_class44_subtypes[7]`. */

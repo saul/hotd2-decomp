@@ -106,10 +106,11 @@ const SLOT_PART = /_slot_([0-9a-f]{4})$/;
  * family until `GENERIC_POSE_ORDER` was read out of the EXE.
  *
  * `[open]` It stays the default for the families whose own routine has **not**
- * been read for its rotation order — the group props, the kinded props, the
- * break puff and the story-mode switch. Keeping the behaviour those four had
- * is deliberate: changing it would be a guess in the other direction.
- * (`PropUpdateType75` was a fifth; its routine records its draws now.)
+ * been read for its rotation order — the group props, the kinded props and the
+ * break puff. Keeping the behaviour those three had is deliberate: changing
+ * it would be a guess in the other direction. (`PropUpdateType75` and
+ * `StoryModeSwitchUpdate` were two more; their routines record their draws
+ * now.)
  * `RisingDoorUpdate` (`FUN_004753F0`) is the one that is
  * read, and it is one `MatrixRotateY` and nothing else, so it gets a row.
  */

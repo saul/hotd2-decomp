@@ -221,21 +221,46 @@ function ColiDynamicObjects(): Actor[] {
  * port's 3x4 is the transpose of the top's first three columns, so a point is
  * `R·p + t` either way.
  */
-export function ColiStoreObjectMatrix(obj: Actor, top: ArrayLike<number>):
-    void {
+export function ColiStoreObjectMatrix(obj: ColiObject,
+                                      top: ArrayLike<number>): void {
   const m = obj.coliMatrix ?? (obj.coliMatrix = new Array(12).fill(0));
   m[0] = top[0]; m[1] = top[4]; m[2] = top[8]; m[3] = top[12];
   m[4] = top[1]; m[5] = top[5]; m[6] = top[9]; m[7] = top[13];
   m[8] = top[2]; m[9] = top[6]; m[10] = top[10]; m[11] = top[14];
 }
 
-/** `R^T (p - t)`: a world point into the object's space. The matrix is rigid. */
+/**
+ * What a moving-object pass reads off an object: `obj+0x14C` and `obj+0x150`.
+ * An `Actor` is one, and so is a class-0x44 prop shot through its mesh
+ * (`class41/prop_state.ts`); the engine's two are one 0x378-byte layout.
+ */
+export interface ColiObject {
+  coliBlob: string | null;
+  coliMatrix: number[] | null;
+}
+
+/**
+ * `R^-1 (p - t)`: a world point into the object's space, through the
+ * **general** inverse, as `MatrixInvert` (`FUN_004A8D20`) takes it -- not the
+ * transpose, which is the inverse only of a rotation and a translation. The
+ * story-mode switch's draw scales by the descriptor's `+0x14..0x1C` before
+ * its `MatrixStore` -- (1.02, 1.04, 1) in stage 1, (0.8878, 0.8197, 1) and
+ * (0.77, 0.7154, 1) in stage 2 -- and class 0x12's by its tail's scale when
+ * that is not 1.0 (every shipped door with a blob has 1.0). A singular
+ * matrix, which no shipped object stores, maps every point to `NaN`, where
+ * the engine's maps it to its `3.4e38`s; both miss every quad.
+ */
 function ColiToObject(m: readonly number[], x: number, y: number, z: number,
                       out: { x: number; y: number; z: number }): void {
   const dx = x - m[3], dy = y - m[7], dz = z - m[11];
-  out.x = m[0] * dx + m[4] * dy + m[8] * dz;
-  out.y = m[1] * dx + m[5] * dy + m[9] * dz;
-  out.z = m[2] * dx + m[6] * dy + m[10] * dz;
+  const a = m[0], b = m[1], c = m[2];
+  const d = m[4], e = m[5], f = m[6];
+  const g = m[8], h = m[9], i = m[10];
+  const A = e * i - f * h, B = f * g - d * i, C = d * h - e * g;
+  const det = a * A + b * B + c * C;
+  out.x = (A * dx + (c * h - b * i) * dy + (b * f - c * e) * dz) / det;
+  out.y = (B * dx + (a * i - c * g) * dy + (c * d - a * f) * dz) / det;
+  out.z = (C * dx + (b * g - a * h) * dy + (a * e - b * d) * dz) / det;
 }
 
 /** `R p + t` — `MatrixTransformPoint` (`FUN_004A8A80`). */
@@ -272,7 +297,7 @@ const _w = { x: 0, y: 0, z: 0 };
  * trace and the transform back are at `0x00404FDA`..`0x00405074`.
  */
 export function ColiTraceSegmentInObjectSpace(
-    obj: Actor, ax: number, ay: number, az: number,
+    obj: ColiObject, ax: number, ay: number, az: number,
     bx: number, by: number, bz: number, out: ColiHit): boolean {
   G.g_coli_hit_surface = 0;
   const blob = obj.coliBlob ? T.coli?.blobs?.[obj.coliBlob] : undefined;
@@ -307,8 +332,10 @@ export function ColiTraceSegmentInObjectSpace(
  * this matters to read only the hit's height, and a reader of this normal gets
  * what the engine's gets.
  *
- * The object-space distance the blob test ranks by is the world distance,
- * because the matrix is a rotation and a translation and nothing else.
+ * The blob test ranks by its distance in the **object's** space, which is the
+ * world distance only for an object drawn without a scale -- every shipped
+ * object in this pass; the scaled story-mode switch is a prop and never in
+ * it (see {@link ColiDynamicObjects}, which walks actors).
  */
 export function ColiTraceSegmentVsObjectBlob(
     obj: Actor, ax: number, ay: number, az: number,
@@ -595,6 +622,12 @@ export function ColiTestSphereAgainstActors(self: Actor, cx: number, cy: number,
   const candidates: ColiCandidate[] = [];
   for (const e of G.g_coli_dynamic_list) {
     if (e.thrown !== undefined) continue;
+    // A prop the port files is one shot through its mesh, filed by
+    // `RegisterForShotTest`'s bit-0x10 arm, and bit `0x10` of its live
+    // `obj+0x34` is half of what `TEST AL, 0x10` at `0x00405B82` refuses.
+    // Its `at` is its placer's, which is in the pool under the same address,
+    // so it is passed over by the entry and never looked up as an actor.
+    if (e.prop !== undefined) continue;
     const o = ActorByAt(e.at);
     if (!o || o === self) continue;
     if (o.flags & ACTOR_PUSH_REFUSE) continue;

@@ -25,9 +25,8 @@
  * port could not shoot for exactly this reason — three of them draw no static
  * model at all, and one of those, class 0x41 type 25, was the only branch in
  * arcade mode the port could not reach. Five of the nine are the story-mode
- * switch, and the sphere is **not** what opens those: see
- * {@link STORY_SWITCH_RADIUS}. This closes four of the nine and arcade
- * outright, and names what is left.
+ * switch, and the sphere is **not** what opens those: every shipped switch
+ * is shot through its own collision mesh, {@link PropRegisterForShotTestMesh}.
  *
  * ## Where the point comes from
  *
@@ -49,6 +48,8 @@
  * where that lives instead.
  */
 import { G } from "../globals";
+import { CameraBlockViewToWorld } from "../camera/view";
+import { MatrixTransformPoint, MatrixTransformVector } from "../matrix";
 import { BreakableFlag, PropFamily, type BreakableProp } from "./prop_state";
 
 /**
@@ -77,33 +78,6 @@ export const FALLING_CONTAINER_RADIUS = 8.0;
 export const BREAKABLE_STANDING_RISE = 3.770148;
 
 /**
- * `StoryModeSwitchUpdate` **never writes `obj+0x70..0x78`**, and calls
- * `RegisterForShotTest` anyway.
- *
- * `PlaceStoryModeSwitch` decides which consumer sees it, from the descriptor's
- * `+0x08`:
- *
- * * `!= -1` — `obj+0x34 |= 0x51`, so **bit 4 is set** and `ProcessPlayerShots`
- *   sends it to `ShotTestMesh` (`FUN_00404A00`), the volume test on
- *   `obj+0x14C`/`+0x150`. The port has that routine for an actor
- *   (`combat/shot_test.ts`), but the prop pool files itself in its own flag,
- *   not in `G.g_shot_test_list`, and carries neither the volume as a blob nor
- *   a matrix, so these are unshootable here. **Every shipped switch names a
- *   volume** -- all nine records in the arcade bundles -- so this is the arm
- *   the game takes.
- * * `== -1` — bit 4 clear, radius 8.0, and the sphere centre is **still
- *   `(0, 0, 0)`** because nothing ever wrote it. `RayTestSphere`
- *   (`FUN_004062A0`) is a perpendicular-distance test with no divide, so a
- *   centre at the origin is distance 0 from every ray: **the switch answers
- *   any shot fired anywhere on screen.**
- *
- * That is what the binary does. Whether it is intentional is `[open]` — but it
- * is the only reading that explains a switch with no visible target, and the
- * port reproduces it rather than inventing a hitbox the engine has not got.
- */
-export const STORY_SWITCH_RADIUS = 8.0;
-
-/**
  * `RegisterForShotTest` (`FUN_00405160`), the prop half.
  *
  * Publishes the sphere centre and marks the object as being in
@@ -126,6 +100,62 @@ export function PropRegisterForShotTest(p: BreakableProp, x: number, y: number,
   p.shotY = y;
   p.shotZ = z;
   p.shotRegistered = true;
+}
+
+/**
+ * `obj+0x34` bit 4 — `RegisterForShotTest` files the object past its depth
+ * test and `ProcessPlayerShots` sends it to `ShotTestMesh` (`FUN_00404A00`).
+ * The same bit as `ActorFlag.ShotTestMesh`, on the prop pool's word.
+ */
+export const PROP_SHOT_TEST_MESH = 0x10;
+
+const _col = { x: 0, y: 0, z: 0 };
+const _out = { x: 0, y: 0, z: 0 };
+
+/**
+ * `RegisterForShotTest` (`FUN_00405160`), the bit-0x10 arm, for a prop shot
+ * through its own collision mesh:
+ *
+ * ```
+ * 00405165  TEST AH,0x80; JNZ out                 ; bit 0x8000: never
+ * 00405171  AND ECX,0x10; JNZ take                ; a mesh: no depth test
+ * 00405190  Push; SetTop(g_camera_blocks[g_camera_index]);
+ *           MatrixMultiply(obj+0x150); MatrixStore(obj+0x150); Pop
+ * 004051D7  list[g_shot_test_count++] = {obj, obj+0x34, obj+0x12C..0x134}
+ * ```
+ *
+ * `[proved]`. The product turns the view-space matrix the draw stored into
+ * the world's (`[likely]`, as `Actor.coliMatrix` says); the port's draw
+ * stores that world matrix already ({@link BreakableProp.coliMatrixDrawn}),
+ * so the product is made here only when no draw has stored one since the
+ * last registration -- which in the engine composes the camera block onto
+ * a matrix that is already the world's, and so here too.
+ *
+ * `[port-only]` as a function of its own: the engine's routine is one, and
+ * {@link PropRegisterForShotTest} is its other arm for the prop pool. A
+ * caller whose object carries {@link PROP_SHOT_TEST_MESH} calls this; the
+ * entry is the engine's record with the prop's id beside it
+ * (`ShotTestEntry.prop`, `combat/shot_test.ts`). `obj+0x12C..0x134` are
+ * zero, as `ActorClearGameFields` left them: no class-0x44 routine writes
+ * them.
+ */
+export function PropRegisterForShotTestMesh(p: BreakableProp): void {
+  if ((p.flags & SHOT_TEST_SUPPRESSED) !== 0 || p.dead) return;
+  const m = p.coliMatrix;
+  if (m && !p.coliMatrixDrawn) {
+    const v2w = CameraBlockViewToWorld(G.g_camera_index);
+    for (let c = 0; c < 3; c++) {
+      _col.x = m[c]; _col.y = m[4 + c]; _col.z = m[8 + c];
+      MatrixTransformVector(v2w, _col, _out);
+      m[c] = _out.x; m[4 + c] = _out.y; m[8 + c] = _out.z;
+    }
+    _col.x = m[3]; _col.y = m[7]; _col.z = m[11];
+    MatrixTransformPoint(v2w, _col, _out);
+    m[3] = _out.x; m[7] = _out.y; m[11] = _out.z;
+  }
+  p.coliMatrixDrawn = false;
+  G.g_shot_test_list.push({ at: p.at, flags: p.flags, x: 0, y: 0, z: 0,
+                            prop: p.id });
 }
 
 /**

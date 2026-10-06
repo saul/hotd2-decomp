@@ -460,9 +460,9 @@ export enum ActorFlag {
    * (`FUN_00404A00`) instead of `ShotTestSphere`, and `RegisterForShotTest`
    * takes it whatever its depth. Class 0x12's stage-1 door carries it in its
    * record's flags word, class 0x26's boat raises it with `obj+0x34 |= 0x51`,
-   * and so does a story switch whose descriptor names a mesh. The test is
-   * `combat/shot_test.ts`'s, on {@link Actor.coliBlob} through
-   * {@link Actor.coliMatrix}.
+   * and so does a story switch whose descriptor names a mesh (a prop, the
+   * same bit on `BreakableProp.flags`). The test is `combat/shot_test.ts`'s,
+   * on {@link Actor.coliBlob} through {@link Actor.coliMatrix}.
    */
   ShotTestMesh = 0x10,
   /**

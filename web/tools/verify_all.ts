@@ -274,6 +274,13 @@ export const CHECKS: readonly Check[] = [
       + "events at an actor the engine never files for the shot test, which the"
       + " render pick used to offer and `ResolveHit` then killed",
         NEEDS_BUNDLE, LANE_BROWSER),
+  check("story_switch", ["node", "tools/story_switch_page.mjs", "--headless"],
+        "that a click on stage 5's gateway in Original Mode kicks both leaves "
+      + "open and writes block 4's slot-2 route once flag 16 is up, and that "
+      + "the same frames unclicked write nothing: the only check that fires "
+      + "real pointer events at a prop shot through its own collision mesh "
+      + "(class 0x44 selector 17), which the port could not shoot at all",
+        NEEDS_BUNDLE, LANE_BROWSER),
   check("humanoid_shot", ["node", "tools/humanoid_shot_page.mjs", "--headless"],
         "that stage 2's jetty zombies -- class-0x25 scripted humanoids, the "
       + "four in the game whose spawn record leaves bit 0x8000 clear -- "

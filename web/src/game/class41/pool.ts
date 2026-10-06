@@ -31,9 +31,7 @@ import { EffectHandoffUpdate } from "../class44/effect_handoff";
 import { SwingThenBreakUpdate } from "../class44/swing_then_break";
 import { EffectCollapseUpdate } from "../class44/effect_collapse";
 import { ScriptFlagEffectUpdate } from "../class44/script_flag_effect";
-import {
-  StoryModeSwitchUpdate, STORY_SWITCH_FLAG_AT, STORY_SWITCH_SCRIPT_FLAG,
-} from "./branch";
+import { StoryModeSwitchUpdate } from "../class44/story_switch";
 import { ChainSegmentUpdate } from "./chain";
 import {
   PropDrawOnlyType31, PropDrawOnlyType33, PropDrawOnlyType53,
@@ -48,9 +46,9 @@ import { Type67MountedPartUpdate } from "./type67";
 import { PropUpdateType43 } from "./type43";
 import { PropUpdateType48FlickerLight } from "./type48";
 import { KindedPropUpdate } from "./kinded";
-import { ClearPropShotTestList, PropRegisterAtOrigin } from "./shot_test";
-import { ActorDespawnProp, BreakablePropUpdate } from "./prop";
-import { HIT_FLAG_MASK, PropFamily, type BreakableProp }
+import { ClearPropShotTestList } from "./shot_test";
+import { BreakablePropUpdate } from "./prop";
+import { PropFamily, type BreakableProp }
   from "./prop_state";
 import { LiftUpdate } from "./lift";
 import { PropUpdateType38 } from "./type38";
@@ -102,7 +100,11 @@ export function BreakablePropPoolUpdate(rng: Rng, events?: Events,
         FallingContainerFragmentUpdate(p, rng, events); break;
       case PropFamily.Lift: LiftUpdate(p, events); break;
       case PropFamily.Generic: GenericPropUpdate(p, rng, events); break;
-      case PropFamily.StoryModeSwitch: StoryModeSwitchPoolUpdate(p); break;
+      // The whole routine, with its own despawn tests, its own shot-test
+      // registration and no `AND` on `obj+0x34`: the hit bits a shot leaves
+      // stay up. See `class44/story_switch.ts`.
+      case PropFamily.StoryModeSwitch:
+        StoryModeSwitchUpdate(p, rng, events); break;
       case PropFamily.ScriptFlagEffect:
         ScriptFlagEffectUpdate(p, events); break;
       // No prologue and no shot-test tail around this one either:
@@ -225,60 +227,5 @@ function GenericPropUpdate(p: BreakableProp, rng: Rng,
                            events?: Events): void {
   const routine = GENERIC_ROUTINES[p.kind];
   if (routine) routine(p, rng, events);
-}
-
-/**
- * `StoryModeSwitchUpdate`'s own frame — its removal flag, the script flag its
- * head raises, then its route.
- *
- * It does **not** run `PropExpireByStepLifetime`: `PlaceStoryModeSwitch`
- * writes `obj+0x11C` as a literal 1, so that word is not a lifetime here and
- * counting against it would retire every switch in the game one step boundary
- * after it was placed.
- *
- * [port-only] as a *function*: the head of `StoryModeSwitchUpdate`
- * (`FUN_00474F30`), split from the branch arm so the pool has one call to
- * make. **The split is between the two despawn tests and the mode gate**, at
- * `0x00474FB4`, which is exactly where the engine's `CMP g_GameMode, 1` is —
- * so everything in here runs in Arcade and everything in
- * {@link StoryModeSwitchUpdate} does not.
- */
-function StoryModeSwitchPoolUpdate(p: BreakableProp): void {
-  // `if (obj->+0x2A4 >= 0 && g_script_flags[obj->+0x2A4] == 1) ActorDespawn;`
-  if (p.removeFlag >= 0 && (G.g_script_flags[p.removeFlag] ?? 0) === 1) {
-    ActorDespawnProp(p);
-    return;
-  }
-  // ```c
-  // if (g_scene_index == 1) {
-  //     if (g_script_flags[0x77] != 0) { ActorDespawn(obj); return; }
-  // } else if (g_scene_index == 2 && g_evt_block_index == 2
-  //            && obj->+0x192 == 0) {
-  //     g_script_flags[0x15] = 1;                       // 0x00474FA6
-  // }
-  // ```
-  //
-  // An `if`/`else if`, and the `else` is load-bearing: the second arm is not a
-  // separate test the engine also makes. The scene-1 arm is the sweep every
-  // prop family answers; the scene-2 arm is the flag stage 3's block 2 waits
-  // on, raised **every frame** while the switch is unthrown and with no
-  // reference to `g_GameMode` — see `STORY_SWITCH_SCRIPT_FLAG`.
-  if (G.g_scene_index === 1) {
-    if ((G.g_script_flags[0x77] ?? 0) !== 0) {
-      ActorDespawnProp(p);
-      return;
-    }
-  } else if (G.g_scene_index === STORY_SWITCH_FLAG_AT[0]
-             && G.g_evt_block_index === STORY_SWITCH_FLAG_AT[1]
-             // `obj+0x192`, and for this family that word is the branch latch
-             // — `L3`. Unthrown is what the write is gated on: once the switch
-             // has been shot it is the *second* write, behind the mode gate
-             // and the item spawn, that raises the flag instead.
-             && !p.branchLatched) {
-    G.g_script_flags[STORY_SWITCH_SCRIPT_FLAG] = 1;
-  }
-  StoryModeSwitchUpdate(p);
-  p.flags &= ~HIT_FLAG_MASK;
-  PropRegisterAtOrigin(p);
 }
 

@@ -310,7 +310,17 @@ Who reaches it, over every shipped record (`[proved]` writers: every store to
 | `0x33` selector 1 | `ScriptedCarrierStepPath33` `0x0043389A` (`|= 0x50` when `tail+0x04 != -1`), `0x004338A3` | `ScriptedCarrierUpdate33` `0x004334D0` | stage 2's two name a mesh; stage 5's names none |
 | `0x33` selector 4 | `ScriptedPushableUpdate33` `0x00433BC9`, when `tail+0x04 != -1` | `0x00433CC7` | stage 1's two name none and carry `0x8000` |
 | `0x44` 0-7, 11-13 | each builder, `|= 0x51` unconditionally, `+0x14C` from the descriptor | selector 0's `ScriptFlagEffectUpdate` `0x00473CDF`; 1, 2, 4's `HingeUpdate` `0x0047410B`; 3's `FlagSlotEffectUpdate` (`0x00474120`) at `0x0047422F`; 6's `SwingThenBreakUpdate` (`0x00474470`) at `0x00474760`; 7's `ScaledSlotEffectUpdate` (`0x00474770`) at `0x004748B6`; 12's `0x004755B0` at `0x004757E0`; 13's `0x004757F0` at `0x004758C7`. **11's `RisingDoorUpdate` never registers**, and 5's `EffectHandoffUpdate` (`0x00474240`) has no call of its own: it copies its blob to the `HingeUpdate` object it makes | 0: 2, 1: 37, 2: 3 (two doors each), 3: 2, 4: 13, 5-7: 1 each, 11: 2, 12: 8, 13: 13 |
-| `0x44` 17 | `PlaceStoryModeSwitch` `0x00473ADB`, when `desc+0x08 != -1` | `StoryModeSwitchUpdate` `0x004753D7` | all nine name a volume |
+| `0x44` 17 | `PlaceStoryModeSwitch` `0x00473ADB`, when `desc+0x08 != -1` | `StoryModeSwitchUpdate` `0x004753D7` | all nine name a blob; three are drawn at a scale, so their `obj+0x150` is not a rotation |
+
+In the port two of these are picked through the list: class 0x12's door, an
+actor, and the story-mode switch, which the prop pool files by its id
+(`ShotTestEntry.prop`, `PropRegisterForShotTestMesh` in
+`game/class41/shot_test.ts`). The trace takes a point into the object
+through the **general** inverse of `obj+0x150`, as `MatrixInvert`
+(`FUN_004A8D20`) does, because the switch's draw scales: stage 1's door by
+(1.02, 1.04, 1) and stage 2's two keyed doors by (0.8878, 0.8197, 1) and
+(0.77, 0.7154, 1). The rest of class 0x44 is filed as a sphere of the radius
+its builder writes, or not at all, which a mesh object never is.
 
 The per-bone classes' registration sites `[proved]`:
 

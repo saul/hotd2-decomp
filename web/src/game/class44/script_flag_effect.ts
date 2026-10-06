@@ -47,10 +47,15 @@
  *
  * `[port-only]` **The shot test is not registered.** `PropBuildScriptFlagEffect`
  * sets `obj+0x34 |= 0x51`, and bit `0x10` sends `RegisterForShotTest`
- * (`FUN_00405160`) to `ShotTestMesh` rather than to the sphere — the same path
- * the story-mode switch's volume takes, and one the port runs for actors in
- * `G.g_shot_test_list` and not for the prop pool (`class41/shot_test.ts`).
- * `hitRadius` carries the engine's 40.0, which `ShotTestMesh` never reads.
+ * (`FUN_00405160`) to `ShotTestMesh` rather than to the sphere — the path
+ * the story-mode switch is shot through (`PropRegisterForShotTestMesh`,
+ * `class41/shot_test.ts`). This one is not filed: its `obj+0x150` is the
+ * captured bone's matrix (`EffectDrawWithCapture`, `FUN_0040DFD0`), which
+ * the port's one-prop-per-node pose does not compose, its blob does not
+ * travel, and the three angles `ShotTestMesh` turns the normal by are read
+ * at the raw cursor, past key 100 outside the motion block -- `[open]` what
+ * those bytes are. `hitRadius` carries the engine's 40.0, which
+ * `ShotTestMesh` never reads.
  */
 import type { EffectDefJson } from "../../bundle";
 import {

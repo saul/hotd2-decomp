@@ -67,7 +67,16 @@ export type ShotPick =
        */
       mesh?: { surface: number; normal: Vec3 };
     }
-  | { kind: "prop"; propId: number; point: Vec3 }
+  | {
+      kind: "prop"; propId: number; point: Vec3;
+      /**
+       * A prop shot through its own collision mesh (`ShotTestMesh`,
+       * `FUN_00404A00`), which only ever arrives from the registration list:
+       * the quad's surface and its normal, for `MarkActorShot`'s world
+       * impact, as on an actor. Absent for `render/`'s sphere pick.
+       */
+      mesh?: { surface: number; normal: Vec3 };
+    }
   /**
    * One of `znjoe`'s released creatures — `G.g_body_creatures`, identified by
    * its `id`.

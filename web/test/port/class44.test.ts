@@ -10,10 +10,18 @@ import { Events } from "../../src/core/events";
 import type {
   BreakablePlacement, BreakablesJson, EffectDefJson,
 } from "../../src/bundle";
-import { G } from "../../src/game/globals";
+import { G, ResetGameGlobals } from "../../src/game/globals";
 import { GameMode } from "../../src/game/game_mode";
-import { NULL_HOST } from "../../src/game/host";
-import { SetGameTables } from "../../src/game/tables";
+import { NULL_HOST, type GameHost } from "../../src/game/host";
+import { SetGameTables, T } from "../../src/game/tables";
+import {
+  MatIdentity, MatrixRotateY, MatrixScale, MatrixTransformPoint,
+  MatrixTransformVector, MatrixTranslate,
+} from "../../src/game/matrix";
+import { BreakablePropPoolUpdate } from "../../src/game/class41/pool";
+import { BreakablePropTakeShot } from "../../src/game/class41/prop";
+import { ProcessPlayerShotsTestList } from "../../src/game/combat/shot_test";
+import { QueueShotRequest } from "../../src/game/combat/shot";
 import { GameUpdate, SpawnPropContainers } from "../../src/game/director";
 import { SpawnClass } from "../../src/game/spawn_class";
 import { PropFamily, type BreakableProp } from "../../src/game/class41/prop_state";
@@ -29,8 +37,12 @@ import {
   PropBuildSwingThenBreak, PropBuildVanDoors, ScaledSlotEffectUpdate,
   SFX_FLAG_SLOT_EFFECT, SFX_HINGE_1866, SFX_HINGE_A60_KNOCK,
   SFX_HINGE_A60_OPEN, SwingThenBreakUpdate,
+  PlaceStoryModeSwitch, SFX_STORY_SWITCH_KICK, STORY_SWITCH_ITEM_WAIT_FLAG,
+  STORY_SWITCH_SCRIPT_FLAG, StoryModeSwitchPhase, StoryModeSwitchUpdate,
 } from "../../src/game/class44";
-import { check, CHARS, BREAKABLES, propScene } from "./harness";
+import {
+  check, CHARS, BREAKABLES, propScene, scene as playScene,
+} from "./harness";
 
 /** `g_pHingeCurvesXYZ[0]`'s first four frames, held after. */
 const XYZ0 = Array.from({ length: 60 }, (_, i) => (
@@ -539,4 +551,393 @@ console.log("\nclass 0x44 selector 15, the kinded prop and its gate:");
         + "and kind 0 draws no model",
         s1?.storyItem === 3 && s1.itemSet === 2 && s1.lifetime === 4
         && s1.slot === 0xffff);
+}
+
+// -- selector 17, the story-mode switch --------------------------------------
+//
+// `PlaceStoryModeSwitch` (`FUN_00473A70`) and `StoryModeSwitchUpdate`
+// (`FUN_00474F30`), driven through the pool the page runs. Every placement is
+// a shipped descriptor as the exporter decodes it; the curve is `XYZ0`
+// (frame 1 = (55, 2989, 55)).
+
+/** Stage 5's gate, left leaf: evt 0x1F14, curve 2, side -1, blob coli5.bin:0. */
+const GATE5_L: BreakablePlacement = {
+  at: 0x1f14, container: "story_switch", curve: 2, slot: 0x1794,
+  coli: 216854528, coli_blob: "coli5.bin:0", side: -1, branch_flag: 16,
+  remove_flag: 10, scale: [1, 1, 1], keys: [-1, -1, -1, -1],
+  lifetime_evt_steps: 1, pos: [548.8346557617188, -59.39999771118164,
+                               -5706.0126953125], yaw: 12743,
+};
+/** ...and its right leaf, evt 0x1F5C, side +1, blob coli5.bin:176. */
+const GATE5_R: BreakablePlacement = {
+  ...GATE5_L, at: 0x1f5c, slot: 0x1795, coli: 216854704,
+  coli_blob: "coli5.bin:176", side: 1,
+  pos: [555.1895751953125, -59.39999771118164, -5723.47216796875], yaw: 45511,
+};
+/** Stage 2's evt 0x25A4: a keyed door, scaled, blob coli2.bin:25760. */
+const DOOR2: BreakablePlacement = {
+  at: 0x25a4, container: "story_switch", curve: 2, slot: 0x17d7,
+  coli: 216880288, coli_blob: "coli2.bin:25760", side: -1, branch_flag: 115,
+  remove_flag: 116, scale: [0.8877999782562256, 0.8196999430656433, 1],
+  keys: [0, 2, 5, 6], lifetime_evt_steps: 1,
+  pos: [-724.1669921875, 53.171897888183594, -901.8709716796875], yaw: -26493,
+};
+/** Stage 3's evt 0x3630: no route flag, removal flag 22, keyed on 0 and 6. */
+const DOOR3: BreakablePlacement = {
+  at: 0x3630, container: "story_switch", curve: 0, slot: 0x1852,
+  coli: 216893688, coli_blob: "coli3.bin:39160", side: -1, branch_flag: -1,
+  remove_flag: 22, scale: [1, 1, 1], keys: [0, 0, 6, 6],
+  lifetime_evt_steps: 1, pos: [-391.218994140625, -14.61769962310791,
+                               -3173.35986328125], yaw: 0,
+};
+
+/** `coli5.bin:0`, the bundle's numbers: two quads of surface 53. */
+const GATE5_L_BLOB = {
+  min: [-0.0006389999762177467, -5.777933120727539, -1.6344419717788696],
+  max: [9.2947359085083, 7.699643135070801, 0.002942000050097704], n: 2,
+  plane: [-0.001993000041693449, 0.2360289990901947, 0.9717440009117126,
+          -0.21055500209331512, 0, 0, 1, -0.002942000050097704],
+  verts: [9.2947359085083, 0.9584599733352661, 0.002942000050097704,
+          9.2947359085083, 7.699643135070801, -1.6344419717788696,
+          1.7107199430465698, 7.635591983795166, -1.6344419717788696,
+          -0.0006389999762177467, 0.9584599733352661, 0.002942000050097704,
+          9.2947359085083, -5.777933120727539, 0.002942000050097704,
+          9.2947359085083, 0.9584599733352661, 0.002942000050097704,
+          -0.0006389999762177467, 0.9584599733352661, 0.002942000050097704,
+          -0.0006389999762177467, -5.777933120727539, 0.002942000050097704],
+  axis: [2, 2], surface: [53, 53],
+};
+/** `coli2.bin:25760`: a 13.4 x 23.4 x 0.46 box, five faces 56, back 53. */
+const DOOR2_BLOB = {
+  min: [-0.09974999725818634, -14.083992004394531, -0.46000000834465027],
+  max: [13.260449409484863, 9.318479537963867, 0], n: 6,
+  plane: [-1, 0, 0, -0.09974999725818634, 0, 1, 0, -9.318479537963867,
+          1, 0, 0, -13.260449409484863, 0, 0, 1, 0,
+          0, -1, 0, -14.083992004394531, 0, 0, -1, -0.46000000834465027],
+  verts: [-0.09974999725818634, 9.318479537963867, -0.46000000834465027,
+          -0.09974999725818634, -14.083992004394531, -0.46000000834465027,
+          -0.09974999725818634, -14.083992004394531, 0,
+          -0.09974999725818634, 9.318479537963867, 0,
+          13.260449409484863, 9.318479537963867, -0.46000000834465027,
+          -0.09974999725818634, 9.318479537963867, -0.46000000834465027,
+          -0.09974999725818634, 9.318479537963867, 0,
+          13.260449409484863, 9.318479537963867, 0,
+          13.260449409484863, -14.083992004394531, -0.46000000834465027,
+          13.260449409484863, 9.318479537963867, -0.46000000834465027,
+          13.260449409484863, 9.318479537963867, 0,
+          13.260449409484863, -14.083992004394531, 0,
+          13.260449409484863, 9.318479537963867, 0,
+          -0.09974999725818634, 9.318479537963867, 0,
+          -0.09974999725818634, -14.083992004394531, 0,
+          13.260449409484863, -14.083992004394531, 0,
+          -0.09974999725818634, -14.083992004394531, -0.46000000834465027,
+          13.260449409484863, -14.083992004394531, -0.46000000834465027,
+          13.260449409484863, -14.083992004394531, 0,
+          -0.09974999725818634, -14.083992004394531, 0,
+          13.260449409484863, -14.083992004394531, -0.46000000834465027,
+          -0.09974999725818634, -14.083992004394531, -0.46000000834465027,
+          -0.09974999725818634, 9.318479537963867, -0.46000000834465027,
+          13.260449409484863, 9.318479537963867, -0.46000000834465027],
+  axis: [0, 1, 0, 2, 1, 2], surface: [56, 56, 56, 56, 56, 53],
+};
+
+/** One switch placed and pooled, as the placer would. */
+function placeSwitch(pl: BreakablePlacement): BreakableProp {
+  const p = PlaceStoryModeSwitch(pl);
+  G.g_breakable_props.push(p);
+  return p;
+}
+
+console.log("\nclass 0x44 selector 17, the story-mode switch:");
+{
+  const rng = new Rng(0x4417);
+  let events = scene(rng, GameMode.Original);
+  let heard = sounds(events);
+  // The constructor: the mesh arm, the tail at its own offsets, the latch.
+  G.g_story_switch_thrown = 1;
+  const l = placeSwitch(GATE5_L);
+  const lw = PropWords(l, { o64: 0, o68: 0, o6c: 0, o1dc: 0, o2a8: 0 });
+  check("PlaceStoryModeSwitch: the mesh arm (0x51, no radius), the blob, "
+        + "the curve, the side, the scale, +0x11C a literal 1, and the latch "
+        + "written 0",
+        l.flags === 0x51 && l.hitRadius === 0
+        && l.coliBlob === "coli5.bin:0" && l.group === 2 && lw.o1dc === -1
+        && l.restX === 1 && l.lifetime === 1 && l.storyItem === 16
+        && l.removeFlag === 10 && G.g_story_switch_thrown === 0,
+        `0x${l.flags.toString(16)} ${l.hitRadius} ${l.coliBlob} ${l.group} `
+        + `${lw.o1dc} ${G.g_story_switch_thrown}`);
+  const sphere = PlaceStoryModeSwitch({ ...GATE5_L, coli: -1,
+                                        coli_blob: null });
+  check("...and a -1 descriptor is the sphere arm: 0x80000001, radius 8",
+        sphere.flags === 0x80000001 && sphere.hitRadius === 8.0,
+        `0x${sphere.flags.toString(16)} ${sphere.hitRadius}`);
+  const r = placeSwitch(GATE5_R);
+
+  // Scene 4 block 4, the gate's block: one shot on the left leaf.
+  G.g_scene_index = 4;
+  G.g_evt_block_index = 4;
+  BreakablePropPoolUpdate(rng, events);
+  check("an unshot gate stands, and both leaves file themselves as meshes",
+        l.routinePhase === StoryModeSwitchPhase.Unthrown
+        && G.g_shot_test_list.filter((e) => e.prop !== undefined).length === 2
+        && G.g_shot_test_list.every((e) => e.flags === 0x51),
+        JSON.stringify(G.g_shot_test_list));
+  BreakablePropTakeShot(l, 0);
+  BreakablePropPoolUpdate(rng, events);
+  check("a shot throws the left leaf AND the right one, which it never "
+        + "touched, through g_story_switch_thrown -- and the kick plays once",
+        l.routinePhase === StoryModeSwitchPhase.Thrown
+        && r.routinePhase === StoryModeSwitchPhase.Thrown
+        && G.g_story_switch_thrown === 1
+        && heard.filter((id) => id === SFX_STORY_SWITCH_KICK).length === 1,
+        `${l.routinePhase} ${r.routinePhase} ${JSON.stringify(heard)}`);
+  check("...the throw frame swings nothing yet (an else-if) and writes no "
+        + "route", lw.o2a8 === 0 && G.g_script_branch_var === 0);
+  check("...and the hit bits are still up: nothing in the routine clears "
+        + "them", (l.flags & 0x0a) === 0x0a, `0x${l.flags.toString(16)}`);
+  BreakablePropPoolUpdate(rng, events);
+  const rw = PropWords(r, { o64: 0, o68: 0, o6c: 0 });
+  check("frame 0 of the curve, then frame 1: side -1 mirrors x and negates "
+        + "the yaw, side +1 does not",
+        lw.o2a8 === 1 && lw.o64 === 0 && lw.o68 === 0, `${lw.o2a8}`);
+  BreakablePropPoolUpdate(rng, events);
+  check("...(-55, -2989, 55) on the left and (55, 2989, 55) on the right",
+        lw.o64 === -55 && lw.o68 === -2989 && lw.o6c === 55
+        && rw.o64 === 55 && rw.o68 === 2989 && rw.o6c === 55,
+        `${lw.o64} ${lw.o68} ${lw.o6c} / ${rw.o64} ${rw.o68} ${rw.o6c}`);
+  check("...and with flag 16 down the route is not written",
+        G.g_script_branch_var === 0, String(G.g_script_branch_var));
+  G.g_script_flags[16] = 1;
+  BreakablePropPoolUpdate(rng, events);
+  check("flag 16 up in scene 4 block 4: the route is 2, and +0x2A0 goes to "
+        + "-1",
+        G.g_script_branch_var === 2 && l.storyItem === -1
+        && r.storyItem === -1, `${G.g_script_branch_var}`);
+  G.g_script_branch_var = 0;
+  BreakablePropPoolUpdate(rng, events);
+  check("...once", G.g_script_branch_var === 0);
+  check("the draw composes T Ry(base) Rz Ry Rx S and stores it as obj+0x150",
+        l.draws?.length === 1 && !!l.coliMatrix
+        && Math.abs(l.coliMatrix[3] - Math.fround(GATE5_L.pos![0])) < 1e-4
+        && Math.abs(l.coliMatrix[11] - Math.fround(GATE5_L.pos![2])) < 1e-4,
+        JSON.stringify(l.coliMatrix));
+
+  // The route waits on its flag and its table: scene 1 block 2 is not in it.
+  events = scene(rng, GameMode.Original);
+  G.g_scene_index = 1;
+  G.g_evt_block_index = 2;
+  const s2 = placeSwitch({ ...GATE5_L, at: 0x0bac, branch_flag: 114,
+                           remove_flag: 62 });
+  G.g_script_flags[114] = 1;
+  BreakablePropTakeShot(s2, 0);
+  for (let i = 0; i < 3; i++) BreakablePropPoolUpdate(rng, events);
+  check("a block the table does not name writes nothing, flag or no flag",
+        s2.routinePhase === StoryModeSwitchPhase.Thrown
+        && G.g_script_branch_var === 0 && s2.storyItem === 114);
+  G.g_evt_block_index = 3;
+  BreakablePropPoolUpdate(rng, events);
+  check("...and scene 1 block 3 does", G.g_script_branch_var === 2);
+
+  // A keyed door: a shot alone does nothing, and the bit it leaves waits.
+  events = scene(rng, GameMode.Original);
+  heard = sounds(events);
+  G.g_scene_index = 1;
+  G.g_evt_block_index = 3;
+  const k = placeSwitch(DOOR2);
+  BreakablePropTakeShot(k, 0);
+  BreakablePropPoolUpdate(rng, events);
+  BreakablePropPoolUpdate(rng, events);
+  check("a keyed door refuses a player carrying none of 0, 2, 5 and 6",
+        k.routinePhase === StoryModeSwitchPhase.Unthrown
+        && G.g_story_switch_thrown === 0);
+  G.g_original_item_slots[G.g_active_player] = [5, -1];
+  BreakablePropPoolUpdate(rng, events);
+  check("...and the first frame one is held it throws, on the shot it "
+        + "already took", k.routinePhase === StoryModeSwitchPhase.Thrown
+        && heard.includes(SFX_STORY_SWITCH_KICK));
+
+  // Arcade: the head runs, nothing behind the mode gate does.
+  events = scene(rng, GameMode.Arcade);
+  G.g_scene_index = 4;
+  G.g_evt_block_index = 4;
+  const a = placeSwitch(GATE5_L);
+  BreakablePropTakeShot(a, 0);
+  BreakablePropPoolUpdate(rng, events);
+  check("in Arcade a shot throws nothing",
+        a.routinePhase === StoryModeSwitchPhase.Unthrown
+        && G.g_story_switch_thrown === 0);
+}
+
+console.log("\nthe story-mode switch's scene-2 items and second flag-0x15 write:");
+{
+  const rng = new Rng(0x4418);
+  const events = scene(rng, GameMode.Original);
+  G.g_scene_index = 2;
+  G.g_evt_block_index = 2;
+  const d = placeSwitch(DOOR3);
+  G.g_original_item_slots[G.g_active_player] = [6, -1];
+  BreakablePropTakeShot(d, 0);
+  BreakablePropPoolUpdate(rng, events);
+  check("the head raises flag 0x15 while it is shut, and stops once thrown",
+        G.g_script_flags[STORY_SWITCH_SCRIPT_FLAG] === 1
+        && d.routinePhase === StoryModeSwitchPhase.Thrown);
+  G.g_script_flags[STORY_SWITCH_SCRIPT_FLAG] = 0;
+  const before = G.g_breakable_props.length;
+  BreakablePropPoolUpdate(rng, events);
+  const item = G.g_breakable_props.slice(before)[0];
+  const dw = PropWords(d, { o2b0: 0 });
+  check("block 2's first thrown frame hands out item row 2 at the literal "
+        + "point (-402.6, -16, -3176.5), with +0x11C 2, and puts its own "
+        + "position back",
+        !!item && item.family === PropFamily.Generic && item.kind === 70
+        && item.x === Math.fround(-402.6) && item.y === -16
+        && item.z === -3176.5 && item.lifetime === 2
+        && (item.words.o194 ?? -1) === 2
+        && d.x === Math.fround(DOOR3.pos![0]) && d.storyItem === -1
+        && dw.o2b0 === 1 && G.g_original_item_pickup_blocked === 0,
+        `${item?.family} ${item?.kind} ${item?.x} ${item?.y} ${item?.z} `
+        + `${item?.lifetime} ${JSON.stringify(item?.words)} ${dw.o2b0}`);
+  for (let i = 0; i < 5; i++) BreakablePropPoolUpdate(rng, events);
+  check("...then it waits for flag 0x18", dw.o2b0 === 1
+        && (G.g_script_flags[STORY_SWITCH_SCRIPT_FLAG] ?? 0) === 0);
+  G.g_script_flags[STORY_SWITCH_ITEM_WAIT_FLAG] = 1;
+  // n = 1, 2, ... and the write is on n > 0x4C: the 0x4D-th counted frame.
+  for (let i = 0; i < 0x4c; i++) BreakablePropPoolUpdate(rng, events);
+  const early = G.g_script_flags[STORY_SWITCH_SCRIPT_FLAG] ?? 0;
+  BreakablePropPoolUpdate(rng, events);
+  check("...and 0x4D frames after it rises, 0x004751B1 raises flag 0x15",
+        early === 0 && G.g_script_flags[STORY_SWITCH_SCRIPT_FLAG] === 1,
+        `${early} ${dw.o2b0}`);
+
+  // Block 4's item: row 4 at (-999.8, -23.8, -3204.7).
+  scene(rng, GameMode.Original);
+  G.g_scene_index = 2;
+  G.g_evt_block_index = 4;
+  const e = placeSwitch({ ...DOOR3, at: 0x5788 });
+  G.g_story_switch_thrown = 1;
+  BreakablePropPoolUpdate(rng);
+  // The routine alone, so the item's own first frame -- which in this
+  // fixture's item table retires it -- does not run before it is looked at.
+  const n0 = G.g_breakable_props.length;
+  StoryModeSwitchUpdate(e, rng);
+  const item4 = G.g_breakable_props.slice(n0)[0];
+  check("block 4 hands out row 4 at (-999.8, -23.8, -3204.7), once",
+        (item4?.words.o194 ?? -1) === 4 && item4.x === Math.fround(-999.8)
+        && item4.z === Math.fround(-3204.7) && e.storyItem === -1,
+        JSON.stringify(item4?.words));
+  const n1 = G.g_breakable_next_id;
+  StoryModeSwitchUpdate(e, rng);
+  StoryModeSwitchUpdate(e, rng);
+  check("...and never again: obj+0x2B0 is 1, and nothing more is made",
+        G.g_breakable_next_id === n1, `${n1} ${G.g_breakable_next_id}`);
+}
+
+console.log("\nthe story-mode switch is shot through its mesh:");
+{
+  const rng = new Rng(0x4419);
+  const events = playScene(0, rng);
+  G.g_GameMode = GameMode.Original;
+  SetGameTables(CHARS, { ...TABLES, placements: [GATE5_L, GATE5_R, DOOR2] });
+  T.coli = { files: ["coli5.bin"],
+             blobs: { "coli5.bin:0": GATE5_L_BLOB,
+                      "coli2.bin:25760": DOOR2_BLOB } } as never;
+  G.g_scene_index = 4;
+  G.g_evt_block_index = 4;
+  G.g_evt_step_index = 1;
+  SpawnPropContainers([
+    { at: GATE5_L.at, class: SpawnClass.PropPlacer },
+    { at: GATE5_R.at, class: SpawnClass.PropPlacer },
+  ]);
+  // A point on the left leaf's front quad (z = 0.002942, x 0..9.29, y
+  // -5.78..0.96), and the shot along its face normal, from 40 units out.
+  const L = { x: 4.6, y: -2.4, z: 0.002942000050097704 };
+  const M = MatIdentity();
+  MatrixTranslate(M, GATE5_L.pos![0], GATE5_L.pos![1], GATE5_L.pos![2]);
+  MatrixRotateY(M, GATE5_L.yaw!);
+  const W = { x: 0, y: 0, z: 0 };
+  MatrixTransformPoint(M, L, W);
+  const N = { x: 0, y: 0, z: 0 };
+  MatrixTransformVector(M, { x: 0, y: 0, z: 1 }, N);
+  const EYE = { x: W.x + N.x * 40, y: W.y + N.y * 40, z: W.z + N.z * 40 };
+  const AT = { origin: EYE, dir: { x: -N.x, y: -N.y, z: -N.z } };
+  const host: GameHost = {
+    ...NULL_HOST,
+    pickShot: () => null,
+    viewSpaceOfPoint: (p, out) => {
+      out.x = p.x - EYE.x; out.y = p.y - EYE.y; out.z = p.z - EYE.z;
+      return true;
+    },
+  };
+  GameUpdate(1 / 60, host, rng, events);
+  const left = G.g_breakable_props.find((q) => q.at === GATE5_L.at)!;
+  const right = G.g_breakable_props.find((q) => q.at === GATE5_R.at)!;
+  const hit = ProcessPlayerShotsTestList(AT, host);
+  check("a shot at the left leaf's quad is a candidate: the prop, whole, "
+        + "surface 53, on the quad",
+        !!left && hit?.prop === left.id && hit.whole
+        && hit.mesh?.surface === 53
+        && Math.hypot(hit.point.x - W.x, hit.point.y - W.y,
+                      hit.point.z - W.z) < 1e-3,
+        `${JSON.stringify(hit)} want ${JSON.stringify(W)}`);
+  const MISS = { origin: { x: EYE.x, y: EYE.y + 30, z: EYE.z },
+                 dir: AT.dir };
+  check("...and one thirty units above it is not",
+        ProcessPlayerShotsTestList(MISS, host) === null);
+
+  // The whole pull: the bits, the impact, then the throw on the switch's
+  // own next update, and the right leaf with it.
+  const resolved: { kind: string }[] = [];
+  events.on("shot.resolved", (x) => resolved.push(x));
+  QueueShotRequest(0, AT);
+  GameUpdate(1 / 60, host, rng, events);
+  const rec = G.g_shot_hit_records[0];
+  check("the pull marks the leaf and throws a surface-53 impact on it",
+        resolved.length === 1 && resolved[0].kind === "prop"
+        && rec?.surface === 53
+        && Math.hypot(rec.x - W.x, rec.y - W.y, rec.z - W.z) < 1e-3,
+        `${JSON.stringify(resolved)} ${JSON.stringify(rec)}`);
+  check("...and both leaves are thrown",
+        left?.routinePhase === StoryModeSwitchPhase.Thrown
+        && right?.routinePhase === StoryModeSwitchPhase.Thrown,
+        `${left?.routinePhase} ${right?.routinePhase}`);
+
+  // Stage 2's door is drawn at a scale of (0.8878, 0.8197, 1), so obj+0x150
+  // is not a rotation: the shot goes into the door through the INVERSE, and
+  // the hit comes back on the scaled face, where the transpose would put it
+  // 1.25 units off.
+  playScene(0, rng);
+  G.g_GameMode = GameMode.Original;
+  SetGameTables(CHARS, { ...TABLES, placements: [DOOR2] });
+  T.coli = { files: ["coli2.bin"],
+             blobs: { "coli2.bin:25760": DOOR2_BLOB } } as never;
+  const door = placeSwitch(DOOR2);
+  BreakablePropPoolUpdate(rng);
+  const L2 = { x: 6, y: 2, z: 0 };
+  const M2 = MatIdentity();
+  MatrixTranslate(M2, DOOR2.pos![0], DOOR2.pos![1], DOOR2.pos![2]);
+  MatrixRotateY(M2, DOOR2.yaw!);
+  MatrixScale(M2, DOOR2.scale![0], DOOR2.scale![1], DOOR2.scale![2]);
+  const W2 = { x: 0, y: 0, z: 0 };
+  MatrixTransformPoint(M2, L2, W2);
+  const N2 = { x: 0, y: 0, z: 0 };
+  MatrixTransformVector(M2, { x: 0, y: 0, z: 1 }, N2);
+  const EYE2 = { x: W2.x + N2.x * 40, y: W2.y + N2.y * 40,
+                 z: W2.z + N2.z * 40 };
+  const host2: GameHost = {
+    ...NULL_HOST,
+    viewSpaceOfPoint: (p, out) => {
+      out.x = p.x - EYE2.x; out.y = p.y - EYE2.y; out.z = p.z - EYE2.z;
+      return true;
+    },
+  };
+  const hit2 = ProcessPlayerShotsTestList(
+    { origin: EYE2, dir: { x: -N2.x, y: -N2.y, z: -N2.z } }, host2);
+  check("a scaled door is hit on its scaled face (surface 56, the front)",
+        hit2?.prop === door.id && hit2.mesh?.surface === 56
+        && Math.hypot(hit2.point.x - W2.x, hit2.point.y - W2.y,
+                      hit2.point.z - W2.z) < 1e-3,
+        `${JSON.stringify(hit2?.point)} want ${JSON.stringify(W2)}`);
+  T.coli = null;
+  SetGameTables(CHARS);
+  ResetGameGlobals();
 }

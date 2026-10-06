@@ -39,7 +39,7 @@ export enum PropFamily {
    * `StoryModeSwitchUpdate` (`FUN_00474F30`) — class 0x44 selector 17, the
    * branch writer with the widest reach. Its own family and not `Generic`
    * because `PlaceStoryModeSwitch` is a different constructor and the object
-   * does **not** run `PropExpireByStepLifetime`.
+   * does **not** run `PropExpireByStepLifetime`. See `class44/story_switch.ts`.
    */
   StoryModeSwitch = 6,
   /**
@@ -791,8 +791,10 @@ export interface BreakableProp {
    * twice.
    *
    * One port field for the engine offsets of the routines ported only as far
-   * as their branch arm — `obj+0x34` bit `0x40000000` for type 76,
-   * `obj+0x192` for the story switch — and `obj+0x1B9` for type 40. The
+   * as their branch arm — `obj+0x34` bit `0x40000000` for type 76 — and
+   * `obj+0x1B9` for type 40. The story switch's `obj+0x192` was here too and
+   * is {@link BreakableProp.routinePhase} now, its routine being transcribed
+   * whole (`class44/story_switch.ts`). The
    * chain's `obj+0x1B0` was here too and is its own word now
    * ({@link ChainSegmentState.latch}). Types 14, 19, 25, 56, 69
    * and 73 used to be here too; they are transcribed whole now and keep
@@ -891,10 +893,40 @@ export interface BreakableProp {
    */
   hitAim: { x: number; y: number } | null;
   /**
+   * `obj+0x14C` — the object's own collision blob, as its `coli.blobs` key,
+   * for a family that is shot through it: `RegisterForShotTest`
+   * (`FUN_00405160`) files an object whose `obj+0x34` has bit `0x10` past its
+   * depth test, and `ProcessPlayerShots` sends it to `ShotTestMesh`
+   * (`FUN_00404A00`), which traces the shot against this blob in the
+   * object's own space. `null` for `-1`, and for every family that does not
+   * carry the blob resolved (the hinges keep the raw word in their own).
+   * See `class41/shot_test.ts`, `PropRegisterForShotTestMesh`.
+   */
+  coliBlob: string | null;   // +0x14C
+  /**
+   * `obj+0x150` — the matrix {@link coliBlob} is in, row-major 3x4 as
+   * `Actor.coliMatrix` is. The engine's draw stores its stack top here (the
+   * view under the model) and `RegisterForShotTest`'s mesh arm multiplies the
+   * camera block's view-to-world in on top; the port's draw stores the world
+   * matrix that product leaves, and {@link coliMatrixDrawn} says whether a
+   * draw has stored it since the last registration. `null` until drawn.
+   */
+  coliMatrix: number[] | null;  // +0x150
+  /**
+   * `[port-only]` Whether `obj+0x150` holds what the draw's `MatrixStore`
+   * left (true) or what `RegisterForShotTest`'s product left (false). The
+   * engine tells the two apart by nothing -- its product runs on every
+   * registration -- so a frame that registers without drawing composes the
+   * camera block onto a matrix that is already the world's. The port's
+   * stored matrix is already the world's, so it needs to know which.
+   */
+  coliMatrixDrawn: boolean;
+  /**
    * `obj+0x192` for the two generic routines that keep a small state machine
    * there: {@link PropFamily.Type13}'s drop (`Type13Phase`) and type 35's
    * door rattle (`Type35Phase`) -- and {@link PropFamily.Type37}'s fall,
-   * pivot and break (`Type37Phase`), which is its own constructor's.
+   * pivot and break (`Type37Phase`), which is its own constructor's -- and
+   * {@link PropFamily.StoryModeSwitch}'s throw (`StoryModeSwitchPhase`).
    *
    * The fifth port field for that one engine word, and separate for the same
    * reason {@link BreakableProp.cuePhase} is (`L3`): each routine's `1` means
@@ -1041,6 +1073,9 @@ export function makeBreakableProp(id: number, group: number,
     draws: null,
     words: {},
     hitAim: null,
+    coliBlob: null,
+    coliMatrix: null,
+    coliMatrixDrawn: false,
     dead: false,
     flicker: null,
     chain: null,

@@ -87,8 +87,15 @@ does not have yet. A class not listed has no such note.
   when it is a point light, so the two spot lights (stage 4 block 10, stage 5
   block 0) are not seen.
 * **`0x41` prop placer** -- constructors 26 (`PlaceType26RippleTask`), 42,
-  52, 55, 61, 65 and 68 (the golden frog); the story-mode switch's hinge and
-  item spawns; `SpawnScorePickup`'s object.
+  52, 55, 61, 65 and 68 (the golden frog); `SpawnScorePickup`'s object.
+* **`0x44` prop placer** -- the mesh shot test of every selector but 17
+  (`class44/story_switch.ts` is the one the prop pool files as a mesh):
+  selector 0's window and the hinges carry no resolved blob, so a shot passes
+  through them; and the moving-object collision passes, which no prop is in
+  (`coli.ts`, `ColiDynamicObjects`). Selector 0's registration also needs the
+  captured bone's matrix (`EffectDrawWithCapture`, `FUN_0040DFD0`) and reads
+  its three angles past key 100 out of the motion block -- `[open]` what
+  those bytes are.
 * **`0x60` chapter card** -- `BossModeChapterCardUpdate` (`FUN_00434920`) and
   `FUN_00434DA0`.
 * **`0x61` result card** -- the one writer of `g_original_item_part_scale`.

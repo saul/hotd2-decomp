@@ -9,7 +9,7 @@
  * file is the drawing of them and nothing else, as `cels.ts` is for class
  * 0x30's hook. Which arm draws is a function of `a.charType`, `a.motion` and
  * `a.hum.playCursor` -- the cursor the draw computed, which
- * `HumanoidSampleDrawnCursor` leaves on the actor -- so a snapshot fully
+ * `ScriptedHumanoidDraw` (`game/class25/`) leaves on the actor -- so a snapshot fully
  * determines it and `resync` needs no help.
  *
  * **Every call post-multiplies** (`game/matrix.ts`), so each arm's local

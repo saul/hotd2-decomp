@@ -172,6 +172,7 @@ function ChildInitModel(obj: EmperorActor, type: number, clip: number,
 
 /** `MOV byte ptr [EDI + 0x68], 5`; `OR AL, 4` into `model+0x64`. */
 const MODEL_ORDER = 5;
+/** ...the `OR AL, 4`: `MotionFlag.TraceGround`, the shadow's floor trace. */
 const MODEL_FLAG_4 = 4;
 
 /** Kind 0: `b6boss1z.bin` on `0x40C`, its wing `0x4E` on `0xF`. */

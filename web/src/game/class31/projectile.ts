@@ -454,7 +454,6 @@ export function ThrownWeaponUpdate(w: ThrownWeapon,
                                    f: ThrownWeaponFrame): void {
   ThrownWeaponTakeMark(w, ThrownWeaponState.Deflected);
   w.draw = null;
-  w.shadow = null;
   switch (w.state as ThrownWeaponState) {
     case ThrownWeaponState.Fly: ThrownWeaponFlyToTarget(w, f); break;
     case ThrownWeaponState.Deflected: ThrownWeaponDeflected(w, f); break;
@@ -465,10 +464,8 @@ export function ThrownWeaponUpdate(w: ThrownWeapon,
     if (ThrownWeaponDrawAndProject(w, (w.tilt + w.rx) | 0, f.cam)) {
       RegisterThrownWeaponForShotTest(w);
     }
-    w.shadow = ActorDrawGroundShadowWithSize(w, w.drawFlags,
-                                             THROWN_WEAPON_SHADOW_SIZE,
-                                             THROWN_WEAPON_SHADOW_SIZE,
-                                             f.cam?.w2v ?? null);
+    ActorDrawGroundShadowWithSize(w, w.drawFlags, THROWN_WEAPON_SHADOW_SIZE,
+                                  THROWN_WEAPON_SHADOW_SIZE, null);
   }
   if (w.charType === CHAR_ZSLMAN
       && ((w.state === ThrownWeaponState.Fly && w.sub < FlySub.Land)

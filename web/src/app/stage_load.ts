@@ -241,7 +241,6 @@ export async function loadStageInto(p: Player): Promise<void> {
   p.shooting.reset();
   p.shooting.setTables(bundle.script.characters?.combat);
   p.bullets.source = p.chars;
-  p.bullets.shadows = p.slotModels;
   p.scene.add(p.bullets.group);
   // Same template source as the weapons: the head that flies is a bone model
   // off the character the shot killed.

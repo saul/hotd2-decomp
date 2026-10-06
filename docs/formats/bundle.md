@@ -118,6 +118,12 @@ effect-layout frames `MotionFrameRecord` (`FUN_00412FB0`) reads, sixty each,
 (`0x85A..0x88F`). `web/tools/checks/worm.ts` holds the port's scalars to the
 EXE; see [`docs/re/worm.md`](../re/worm.md).
 
+Every stage's `slots_effect` rig carries the ground shadow, `common.bin`
+200 (slot `0x10D0`): the last call of every skinned draw and of both thrown
+weapons' (`ActorDrawGroundShadow`, `FUN_0040A620`), drawn from
+`G.g_world_slot_draws` by `render/view_slots.ts` in its draw layer `0xD`.
+See `combat.md`, *Every character's ground shadow*.
+
 A class-0x29 placement -- the floor decals, stages 1 and 2 -- carries
 `class29: {kill_path, kill_frame}`, the two `s16`s at `desc+0x24`, and its
 `hp` is the list `SceneryBatchUpdate29` (`FUN_00432C80`) draws. The three

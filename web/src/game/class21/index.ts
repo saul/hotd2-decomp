@@ -62,6 +62,7 @@ import { ActorPlayHitVoice, ActorVoice } from "../combat/voice";
 import { ActorDespawn } from "../despawn";
 import { SpawnGroundRingEffect } from "../effects/ring_effect";
 import { G, HIT_SLOT_NONE } from "../globals";
+import { DrawSkinnedModelAndShadow } from "../skeleton";
 import { ActorFreeHitSlot } from "../hit_slots";
 import { RecordRescue, RESCUE_TARGET_CHAR_TYPE } from "../rescue";
 import { ActorAdvanceMotion } from "../motion";
@@ -713,6 +714,9 @@ export function RescueTargetDraw(obj: Actor, f: ClassFrame): void {
   if (!t) return;
   if (f.host.viewSpaceOfPoint?.(obj.pos, _view) && !(_view.z < 0)) return;
   t.clipEnded = MotionPlayFrame(obj) >= MotionPlayLength(obj) ? 1 : 0;
+  // ...and the draw's ground shadow, under `g_cur_actor`, which every state
+  // that draws points at the body first.
+  DrawSkinnedModelAndShadow(obj);
 }
 
 /**

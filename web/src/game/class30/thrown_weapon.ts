@@ -454,7 +454,6 @@ export function ZombieThrownWeaponUpdate(w: ThrownWeapon,
                                          f: ThrownWeaponFrame): void {
   ThrownWeaponTakeMark(w, ZombieThrownWeaponState.ShotDown);
   w.draw = null;
-  w.shadow = null;
   switch (w.state as ZombieThrownWeaponState) {
     case ZombieThrownWeaponState.Straight:
       ZombieThrownWeaponStateStraight(w, f); break;
@@ -471,10 +470,8 @@ export function ZombieThrownWeaponUpdate(w: ThrownWeapon,
     if (ThrownWeaponDrawAndProject(w, w.rx, f.cam)) {
       RegisterThrownWeaponForShotTest(w);
     }
-    w.shadow = ActorDrawGroundShadowWithSize(w, w.drawFlags,
-                                             ZOMBIE_WEAPON_SHADOW_SIZE,
-                                             ZOMBIE_WEAPON_SHADOW_SIZE,
-                                             f.cam?.w2v ?? null);
+    ActorDrawGroundShadowWithSize(w, w.drawFlags, ZOMBIE_WEAPON_SHADOW_SIZE,
+                                  ZOMBIE_WEAPON_SHADOW_SIZE, null);
   }
   if (w.state === ZombieThrownWeaponState.Straight
       || w.state === ZombieThrownWeaponState.Arc) {

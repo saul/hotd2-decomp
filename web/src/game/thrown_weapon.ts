@@ -258,13 +258,6 @@ export interface ThrownWeapon {
    */
   draw: Mat | null;
   /**
-   * `[port-only]` The matrix this frame's ground shadow was drawn under —
-   * `ActorDrawGroundShadowWithSize` (`FUN_0040A600`), slot `0x10D0` in draw
-   * layer `0xD` — or `null` for a frame that drew none. The renderer reads
-   * it; nothing reads it back.
-   */
-  shadow: Mat | null;
-  /**
    * `[port-only]` `ActorDespawn` ran on it. The engine unlinks the task; the
    * port keeps the record to the end of the frame so the frame still draws
    * it, and the next walk drops it.
@@ -326,7 +319,7 @@ export function ThrownWeaponAlloc(routine: ThrownWeaponRoutine): ThrownWeapon {
     view: { x: 0, y: 0, z: 0 }, hitRadius: 0, ttl: 0, timer: 0,
     target: { x: 0, y: 0, z: 0 }, afterimageTimer: 0, afterimagePeriod: 0,
     afterimages: 0, weapon: 0, light: 0, lightStep: 0, lightColour: null,
-    draw: null, shadow: null, despawned: false,
+    draw: null, despawned: false,
   };
 }
 

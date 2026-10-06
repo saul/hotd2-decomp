@@ -84,9 +84,6 @@ the same commit.
 
 ### Gaps several classes share
 
-* **No character draws its ground shadow.** `ActorDrawShadow`
-  (`game/model_draw.ts`) computes the disc and the renderer draws none for a
-  skinned actor; the thrown weapons' and props' discs are drawn.
 * **The body creature's shot-test registration.** `BodyCreatureInit`
   (`0x0043E860`) and every unshot flying frame (`0x0043EE1C`) call
   `RegisterForShotTest`; the port files nothing, and `render/effects.ts`

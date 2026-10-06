@@ -2528,6 +2528,42 @@ console.log("\nthe water ring is drawn from its record alone:");
   ResetGameGlobals();
 }
 
+console.log("\na ground shadow is drawn from the frame's record, in its layer:");
+{
+  const { ActorDrawShadow } = await import("../src/game/model_draw");
+  const root = new Obj3D();
+  const part = new Mesh(new PlaneGeometry(1, 1), new MeshBasicMaterial());
+  part.name = "slots_effect_fixed000_slot_10d0";
+  part.userData = { hod2_kind: "rig_part", hod2_rig: "slots_effect" };
+  root.add(part);
+  ResetGameGlobals();
+  const layer = new EffectLayer();
+  layer.adopt(root);
+  const camera = new PerspectiveCamera(41.1, 4 / 3, 0.8, 8000);
+  camera.updateMatrixWorld(true);
+  const ctx = { camera } as unknown as Parameters<typeof layer.update>[0];
+  // `ActorDrawShadow` (`FUN_0040A590`) on an ordinary character at its own
+  // height: `T(x, y + 0.1, z) Scale(11, 1, 10)`, slot 0x10D0, layer 0xD.
+  ActorDrawShadow({ flags: 0, motionFlags: 1, charType: 1,
+                    pos: { x: 4, y: 2, z: -6 } });
+  layer.update(ctx);
+  const disc = layer.group.children[0];
+  const e = disc?.matrix.elements ?? [];
+  check("the disc is placed at the matrix the draw recorded, in world space",
+        disc !== undefined && e[12] === 4 && e[13] === Math.fround(2 + 0.1)
+        && e[14] === -6 && e[0] === 11 && e[5] === 1 && e[10] === 10,
+        JSON.stringify(e));
+  // `SetDrawLayerNibble(0xD)` against the world's 8: drawn after the floor
+  // it lies on.
+  check("...in draw layer 0xD, five past the world's",
+        disc?.renderOrder === 0xd - 8, `${disc?.renderOrder}`);
+  G.g_world_slot_draws = [];
+  layer.update(ctx);
+  check("...and a frame that drew none has none",
+        layer.group.children.length === 0, `${layer.group.children.length}`);
+  ResetGameGlobals();
+}
+
 
 console.log("\nthe blood colour switch moves the map, not the shader:");
 {

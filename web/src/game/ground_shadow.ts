@@ -2,24 +2,33 @@
  * The ground shadow: asset slot `0x10D0`, a disc flattened onto the floor
  * under an object.
  *
- * Two routines, and the port draws through them only for the thrown weapons
- * so far -- class 0x31's at `0x004508BA`, class 0x30's at `0x0045A622`.
- * `ActorDrawShadow` (`FUN_0040A590`, `model_draw.ts`)
- * is the skinned actors' way in, picking the size by character type; the
- * renderer does not draw a character's shadow yet, so that routine stops at
- * the size and does not call down here.
+ * Two routines, and three ways in:
+ *
+ * * `ActorDrawShadow` (`FUN_0040A590`, `model_draw.ts`) -- every skinned
+ *   actor's, from the tail of `DrawSkinnedModelAndShadow` (`FUN_00411090`),
+ *   sized by character type;
+ * * `ActorDrawGroundShadowWithSize` below -- the thrown weapons', class
+ *   0x31's at `0x004508BA` and class 0x30's at `0x0045A622`, at 5 by 5.
+ *
+ * Those are the only callers of either routine (a byte scan of `.text` for
+ * `E8` calls finds `0x0040A5E7` and `0x0040A60F` for `0x0040A620`, and
+ * `0x004508BA` and `0x0045A622` for `0x0040A600`). `[proved]`
  *
  * The routine is the draw and nothing else: no state of the object's is
  * written, and the one thing it does besides the draw is the floor query,
- * whose trace leaves `g_coli_hit_*` behind like any other.
+ * whose trace leaves `g_coli_hit_*` behind like any other. The draw is
+ * recorded as one `AssetDrawSlot` in the world (`G.g_world_slot_draws`,
+ * `game/view_slot.ts`), in its draw layer, and `render/view_slots.ts` draws
+ * it -- the one path for every disc, the weapons' and the actors' alike.
  */
 import { ActorFlag } from "./actor";
 import { QueryGroundHeightAt } from "./coli";
 import { AppState, G } from "./globals";
 import {
-  MatCopy, MatIdentity, MatrixScale, MatrixTranslate, type Mat,
+  MatCopy, MatIdentity, MatrixScale, MatrixTranslate,
 } from "./matrix";
 import type { Vec3 } from "./vec";
+import { DrawSlotInWorld } from "./view_slot";
 
 /** `PUSH 0x10d0` at `0x0040A6C8`: the disc, `common.bin` 200. */
 export const GROUND_SHADOW_SLOT = 0x10d0;
@@ -69,17 +78,18 @@ export interface GroundShadowCaster {
  * through the `FSTP [ESP]` that pushes `MatrixTranslate`'s argument.
  *
  * `drawWord` is the object's `obj+0x1F8`, which the port keeps under a
- * different name on each kind of object. `top` is the matrix the stack holds
- * when the routine is called -- the camera's world-to-view, for every caller
- * the port has. Returns the matrix `AssetDrawSlot` draws the disc under, or
- * `null` for no disc. `[port-only]`: the engine draws, the port hands the
- * renderer the matrix.
+ * different name on each kind of object. `top` is what the caller has put on
+ * the matrix stack **above the view** when it calls: `null` for nothing,
+ * which is both thrown weapons and every skinned draw but the three that
+ * ride a carrier's `T R` (`DrawSkinnedModelAndShadow` in `game/skeleton.ts`
+ * says which). The disc is recorded at the world matrix that makes,
+ * `[port-only]` as a record: the engine draws.
  */
 export function ActorDrawGroundShadow(obj: GroundShadowCaster, drawWord: number,
                                       w: number, d: number,
-                                      top: ArrayLike<number> | null): Mat | null {
-  if (obj.flags & ActorFlag.NoShadow) return null;
-  if (!(drawWord & DRAWN)) return null;
+                                      top: ArrayLike<number> | null): void {
+  if (obj.flags & ActorFlag.NoShadow) return;
+  if (!(drawWord & DRAWN)) return;
   let h: number;
   if (G.g_app_state === APP_STATE_FIXED_GROUND) {
     h = G.g_camera_fixed_eye_y;
@@ -92,7 +102,7 @@ export function ActorDrawGroundShadow(obj: GroundShadowCaster, drawWord: number,
   const m = top ? MatCopy(MatIdentity(), top) : MatIdentity();
   MatrixTranslate(m, obj.pos.x, Math.fround(h + GROUND_SHADOW_LIFT), obj.pos.z);
   MatrixScale(m, w, 1.0, d);
-  return m;
+  DrawSlotInWorld(GROUND_SHADOW_SLOT, m, GROUND_SHADOW_LAYER);
 }
 
 /**
@@ -105,6 +115,6 @@ export function ActorDrawGroundShadowWithSize(obj: GroundShadowCaster,
                                               drawWord: number, w: number,
                                               d: number,
                                               top: ArrayLike<number> | null):
-    Mat | null {
-  return ActorDrawGroundShadow(obj, drawWord, w, d, top);
+    void {
+  ActorDrawGroundShadow(obj, drawWord, w, d, top);
 }

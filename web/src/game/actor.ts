@@ -295,8 +295,12 @@ export enum ActorFlag {
    * `0x90100` with {@link ShotImmune} as well in
    * `ZombieStateWaitForCameraFrame`, `0xA0000` with {@link Airborne} in both
    * corpse states. Other classes use the same bit of this word for their own
-   * ends (class 0x46's `PlaceBats` writes it, class 0x14 toggles it), and
-   * `L3` applies: this names the reader, not every writer's intent.
+   * ends (class 0x46's `PlaceBats` and `SpawnBatWings` write it, as do class
+   * 0x22's and 0x2D's sub-actors and the route map's figures; class 0x14
+   * toggles it), and `L3` applies: this names the reader, not every
+   * writer's intent. For every one of them it is at least the shadow, which
+   * `DrawSkinnedModelAndShadow` (`FUN_00411090`) draws for every skinned
+   * actor.
    */
   NoShadow = 0x80000,
   /**

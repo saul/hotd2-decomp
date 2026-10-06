@@ -69,6 +69,7 @@ import { RegisterForShotTest } from "../combat/shot_test";
 import { ActorDespawn } from "../despawn";
 import { GameMode } from "../game_mode";
 import { G } from "../globals";
+import { DrawSkinnedModelAndShadow } from "../skeleton";
 import type { GameHost } from "../host";
 import {
   registerClass, type ActorDebug, type ClassFrame, type ClassHandler,
@@ -240,6 +241,9 @@ export function CatInit(obj: Actor): void {
 export function CatMotionListUpdate(obj: Actor): void {
   const sub = Tail(obj);
   if (!sub) return;
+  // The draw comes first (`0x00431368`); its ground shadow is the game's,
+  // under `g_cur_actor`, this cat since `0x00431354`.
+  DrawSkinnedModelAndShadow(obj);
   sub.frames += 1;
   const row = sub.set * CAT_LIST_STRIDE;
   const clip = CAT_MOTIONS[row + sub.index] ?? obj.motion;
@@ -325,6 +329,9 @@ export function CatBranchTriggerUpdate(obj: Actor, host: GameHost): void {
     sub.set = CatTriggerState.Stopped;
     ActorSetMotionBlended(obj, CAT_TRIGGER_IDLE_MOTION, 0, CAT_TRIGGER_FADE);
   }
+  // `draw:` -- `DrawSkinnedModelAndShadow` at `0x00431526`, and its shadow
+  // under `g_cur_actor` (`0x0043144A`).
+  DrawSkinnedModelAndShadow(obj);
   ActorRegisterOriginInViewSpace(obj, host);
 }
 

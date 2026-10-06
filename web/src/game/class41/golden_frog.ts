@@ -40,6 +40,7 @@ import { BuildSceneLightDirection } from "../light_block";
 import { SetRenderLightDirection } from "../light_sets";
 import { MatrixRotateY, MatrixTranslate } from "../matrix";
 import { ActorRunNodeDrawHooks } from "../model_draw";
+import { DrawSkinnedModelAndShadow } from "../skeleton";
 import { ActorAdvanceMotion } from "../motion";
 import type { ClassFrame } from "../registry";
 import { ActorBuildSkinnedModel, ActorSpawn } from "../spawn";
@@ -361,8 +362,8 @@ const _dir: Vec3 = vec3();
  * {@link GoldenFrogWords.drawDir} -- the frog's own turning direction under
  * the scene's ambient and colour -- and the strip's
  * {@link GoldenFrogWords.stripDraw}. The shadow `DrawSkinnedModelAndShadow`
- * ends with is `ActorDrawShadow`'s, which no character's draw in the port
- * makes yet.
+ * ends with is the game's (`game/skeleton.ts`), under `g_cur_actor` --
+ * the frog, from `0x00472035` -- whose `obj+0x34` of 1 lets it through.
  */
 export function GoldenFrogUpdate(obj: PropContainerActor, f: ClassFrame): void {
   const w = Words(obj);
@@ -396,6 +397,7 @@ export function GoldenFrogUpdate(obj: PropContainerActor, f: ClassFrame): void {
   // `DrawSkinnedModelAndShadow`: the hook on every node, and the sampler's
   // done byte, `model+0x5D`.
   ActorRunNodeDrawHooks(obj, GoldenFrogDrawBonePart, f);
+  DrawSkinnedModelAndShadow(obj);
   const ended = MotionPlayFrame(obj) >= MotionPlayLength(obj);
   // `PUSH 0x9A354C` -- block 0's direction, back.
   SetRenderLightDirection(G.g_scene_light_block0.dir);

@@ -24,7 +24,6 @@ import { ActorDespawnProp } from "../../src/game/class41/prop";
 import type { BreakableProp } from "../../src/game/class41/prop_state";
 import { ZombieState } from "../../src/game/class30/states";
 import { ZombieStateWalkDistance } from "../../src/game/class30/walk_distance";
-import { ActorDrawShadow } from "../../src/game/model_draw";
 import {
   ActorFlag, ActorUpdateBoundingSphere, CountFlag, ThrowerFlag, ZombieFlag2,
   type Actor, type ZombieActor,
@@ -56,7 +55,7 @@ import {
 } from "../../src/game/combat/resolve_hit";
 import {
   check, CHARS, SCENE_MAJOR_PLAYING, DRAW_FRAME, spawnZombie, PublishCrowd,
-  EnterPlay, WALL_BLOB, FLOOR_BLOB, thrower,
+  EnterPlay, WALL_BLOB, FLOOR_BLOB, thrower, shadowsUnder,
 } from "./harness";
 
 console.log("\nclass 0x30's captor family — the zombies work on the civilian:");
@@ -274,12 +273,14 @@ console.log("\nclass 0x30's captor family — the zombies work on the civilian:"
     // Nothing ordered yet, so the hide is all the first frame does.
     const count = civ.civ!.childOrderFrames;
     civ.civ!.childOrderFrames = 0;
+    G.g_world_slot_draws = [];
     zFrame(z, events);                       // sub 0, into sub 1
     check("...and sub 0 takes the skeleton and part 0 off screen, not part 1",
           !skeleton() && z.partVisible.join() === "0,1" && z.sub === 1,
           `flags ${z.motionFlags} parts ${z.partVisible} sub ${z.sub}`);
-    check("...and the shadow with it: `ActorDrawShadow` reads the same bit",
-          ActorDrawShadow(z) === null);
+    check("...and the shadow with it: the draw's `ActorDrawShadow` reads the "
+          + "same bit", shadowsUnder(z).length === 0,
+          `${shadowsUnder(z).length} discs`);
     const flagsWhileHidden = z.flags;
     civ.civ!.childOrderFrames = count;
     zFrame(z, events);                       // takes the order
@@ -611,6 +612,7 @@ console.log("\nclass 0x30's placement: the ground snap and the two entrances:");
     w.emerge = { delay: 15, motion: 12 };
     w.attackState = 1;
     w.state = ZombieEntryState(ZombieState.Emerge);
+    G.g_world_slot_draws = [];
     EnemyZombieUpdate(w, { dt: 1 / 60, rng, host: NULL_HOST });
     // Both gates: `obj+0x1F8 &= ~1` for the skeleton and
     // `ActorSetPartVisibility(model, 0)` for every part -- and the
@@ -618,7 +620,8 @@ console.log("\nclass 0x30's placement: the ground snap and the two entrances:");
     check("`tail+0x03 == 1` is not drawn while it waits: no skeleton, no parts",
           (w.motionFlags & MotionFlag.Drawn) === 0
           && w.partVisible.join() === "0,0"
-          && (w.flags & ActorFlag.NoShadow) !== 0 && ActorDrawShadow(w) === null,
+          && (w.flags & ActorFlag.NoShadow) !== 0
+          && shadowsUnder(w).length === 0,
           `flags ${w.motionFlags} parts ${w.partVisible}`);
     check("...and the port's alpha is not what hides it", w.alpha === 1,
           `alpha ${w.alpha}`);
@@ -626,11 +629,12 @@ console.log("\nclass 0x30's placement: the ground snap and the two entrances:");
           (z.motionFlags & MotionFlag.Drawn) !== 0
           && z.partVisible.join() === "1,1");
     for (let i = 0; i < 14; i++) {
+      G.g_world_slot_draws = [];
       EnemyZombieUpdate(w, { dt: 1 / 60, rng, host: NULL_HOST });
     }
     check("...and is drawn again as the clip starts, shadow and all",
           w.motion === 12 && (w.motionFlags & MotionFlag.Drawn) !== 0
-          && w.partVisible.join() === "1,1" && ActorDrawShadow(w) !== null,
+          && w.partVisible.join() === "1,1" && shadowsUnder(w).length === 1,
           `motion ${w.motion} flags ${w.motionFlags} parts ${w.partVisible}`);
   }
 

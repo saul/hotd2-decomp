@@ -33,59 +33,66 @@
  *     PlaySoundId(0x1816A9);
  *     if (cues[++cursor] == -1) cursor = 0;
  * }
- * if (g_motion_slots[471].state == 2)                  // the motion is resident
- *     EffectDrawWithCapture(obj + 0x324, obj->+0x2A0, -1);
+ * if (g_motion_slots[471].state == 2) {                // the motion is resident
+ *     EffectDrawWithCapture(obj + 0x324, obj->+0x2A0, -1);  // -> obj+0x338
+ *     rot = EffectFrameRotations(obj + 0x324, obj->+0x32C);
+ *     memcpy(obj + 0x150, obj + 0x338, 64);              // REP MOVSD, 0x00473CBB
+ *     obj->+0x64/+0x68/+0x6C = rot[obj->+0x2A0 * 3 - 3 ..];  // three s16
+ *     RegisterForShotTest(obj);                          // 0x00473CDF
+ * }
  * ```
  *
- * Three script flags and a clip, and the sound is on the *play* cursor rather
- * than on the authored key — the cue frames run to 175 against 101 keys.
+ * `[proved]`, `0x00473B90`..`0x00473CE7`. Three script flags and a clip, and
+ * the sound is on the *play* cursor rather than on the authored key -- the
+ * cue frames run to 175 against 101 keys.
  *
  * `[port-only]` **The residency test is not modelled.** `g_motion_slots[471]`
  * is loaded by the scene's own asset job and the bundle bakes the motion
  * unconditionally, so the port's answer to "is it resident" is always yes; a
  * loader the port does not have cannot be asked.
  *
- * **The shot test is not registered, and that is a gap.**
- * `PropBuildScriptFlagEffect` sets `obj+0x34 |= 0x51` and copies the tail's
- * `+0x08` to `obj+0x14C` -- both halves name a blob in `coli1.bin` (the
- * placements' `coli_blob`) -- and the routine ends, inside its residency
- * test, `EffectDrawWithCapture(obj+0x324, obj+0x2A0, -1)`, a copy of the
- * capture at `obj+0x338` into `obj+0x150`, three stores to
- * `obj+0x64..0x6C` and `RegisterForShotTest` (`0x00473CDF`). Bit `0x10`
- * sends that to `ShotTestMesh` (`FUN_00404A00`), and `0x40` puts the window
- * in the moving-object collision passes (`coli.ts`). `[proved]`
+ * ## It is shot through its mesh, and it is in the way
  *
- * What stops the port filing it is the three stores. They are
- * `EffectFrameRotations` (`FUN_0040E070`) of the **raw** cursor `obj+0x32C`
- * -- not the half-rate key the draw samples -- at row `obj+0x2A0 - 1`, and
- * `ShotTestMesh` turns a hit's normal by them. Motion 471 is the last block
- * of `mot/komono_niwa.bin` (bank 26: 464, 465, 471), its 101 keys of 36
- * bytes end the file exactly at byte 127648, and the cursor runs to 197:
- * from cursor 101 on, the reads are past the end of the file's buffer, in
- * the allocation's slack and the heap after it -- bytes the disc does not
- * hold. `[proved]` from the bank. Nor are they a rule the port could apply:
- * the bank is `ActorAllocRaw`'d out of the shared arena when stage 1's
- * opcode `0x56` loads it in the middle of play, nothing in the arena is
- * cleared after its first reset, and what follows the block depends on
- * every allocation since -- a sprite actor per shot into the scenery among
- * them (`docs/formats/mot.md`, "What lies after a bank in memory"). The capture itself is portable
- * (`EffectDrawNode`'s `MatrixStore` for the node whose bone is the
- * capture bone, on the draw's own matrix); the angles past key 100 are a
- * divergence to declare or not, which is the user's call
- * (`docs/UNPORTED.md`). `hitRadius` carries the engine's 40.0, which
- * `ShotTestMesh` never reads.
+ * `PropBuildScriptFlagEffect` sets `obj+0x34 |= 0x51` and copies the tail's
+ * `+0x08` to `obj+0x14C` -- `coli1.bin:5248` and `:5712` for the two halves
+ * (the placements' `coli_blob`). Bit `0x10` sends the registration to
+ * `ShotTestMesh` (`FUN_00404A00`), and with `0x40` the window is in the
+ * moving-object collision passes (`coli.ts`). The matrix it is traced
+ * through is the **capture**: `EffectDrawNode` (`FUN_0040DE50`) stores the
+ * stack top for the node whose bone is `obj+0x2A0` at `obj+0x338`
+ * ({@link BreakableProp.effectCapture}, `PropDrawEffect`'s *capture*), and
+ * the routine copies it over `obj+0x150`. With no push or translate before
+ * the draw, the node's matrix is its motion's world pose, built here on the
+ * identity, which is what `RegisterForShotTest`'s mesh arm leaves
+ * (`class41/shot_test.ts`).
+ *
+ * The three angles `ShotTestMesh` turns a hit's normal by are
+ * `EffectFrameRotations` (`FUN_0040E070`) at the **raw** cursor, entry
+ * `obj+0x2A0` -- read where the routine reads them, in the bank's file, by
+ * the exporter (`rotation_entries`) -- and from cursor 101 they are past the
+ * end of `mot/komono_niwa.bin`: see {@link EffectFrameRotationsEntry}, which
+ * carries the one declared divergence. `hitRadius` carries the engine's
+ * 40.0, which `ShotTestMesh` never reads.
  */
 import type { EffectDefJson } from "../../bundle";
 import {
   MatrixFromZYX, MatrixInterpolateSwingTwist, MatrixToZYX,
 } from "./swing_twist";
 import type { Events } from "../../core/events";
+import type { Rng } from "../../core/rng";
+import type { BreakablePlacement } from "../../bundle";
 import { G } from "../globals";
 import { T } from "../tables";
+import { ColiStoreObjectMatrix } from "../coli";
 import { ActorDespawnProp } from "../class41/prop";
+import {
+  PropDrawBegin, PropDrawEffect, PropMatrixPush,
+} from "../class41/prop_draw";
 import {
   BreakableFlag, makeBreakableProp, PropFamily, type BreakableProp,
 } from "../class41/prop_state";
+import { PropRegisterForShotTestAsIs } from "../class41/shot_test";
+import { PropWords } from "../class41/words";
 
 /**
  * The `g_script_flags` indices `ScriptFlagEffectUpdate` reads.
@@ -136,62 +143,60 @@ function EffectDefOf(effect: number) {
 }
 
 /**
+ * The words of the object the window's routine writes that no shared
+ * {@link BreakableProp} field names: `obj+0x64`/`+0x68`/`+0x6C`, the three
+ * angles `ShotTestMesh` turns a hit's normal by (`PropShotMeshObject`).
+ */
+export interface EffectAngleWords {
+  o64: number;
+  o68: number;
+  o6c: number;
+}
+
+const EFFECT_ANGLE_WORDS: EffectAngleWords = { o64: 0, o68: 0, o6c: 0 };
+
+/**
  * `PropBuildScriptFlagEffect` — `FUN_00472B30`.
  *
  * `ActorAlloc(ScriptFlagEffectUpdate, 0x378)`, then the state block and two
  * literals. The dword at `tail+0x04` picks the pair (`CMP ECX,0x13F5` at
  * `0x00472B6C`) and the exporter has already resolved that to the effect id
- * and the capture bone, because it is the same test.
- *
- * `[port-only]` **One prop per drawable node.** The engine allocates one
- * object and `EffectDrawTree` walks its whole node tree from it; the port's
- * `BreakableProp` is one drawn model at one pose, which is what
- * `render/breakables.ts` clones by asset slot. Both of the game's two effects
- * have exactly one node with a slot — the others are pure transforms — so the
- * two shapes agree here; a tree with two drawable nodes would want the sound
- * and the cursor kept once rather than per node, which is why they are driven
- * by `member === 0` below.
+ * and the capture bone, because it is the same test. `obj+0x28C` is the
+ * tail's `+0x04`, which this family never draws through; `obj+0x14C` the
+ * tail's `+0x08`, raw and resolved. One object: `EffectDrawWithCapture`
+ * walks the whole tree from it, and the port records that walk's draws
+ * ({@link PropDrawEffect}).
  */
 export function PropBuildScriptFlagEffect(
-    at: number, effect: number, captureBone: number, motion: number,
-): BreakableProp[] {
-  const def = EffectDefOf(effect);
-  if (!def) return [];
-  const out: BreakableProp[] = [];
-  for (let i = 0; i < def.nodes.length; i++) {
-    const n = def.nodes[i];
-    // `EffectDrawNode` (`FUN_0040DE50`) poses and draws nothing below bone 1,
-    // and `AssetDrawSlot(0)` draws nothing at all.
-    if (n.bone < 1 || !n.slot) continue;
-    const p = makeBreakableProp(G.g_breakable_next_id++, 0, out.length);
-    p.family = PropFamily.ScriptFlagEffect;
-    p.at = at;
-    p.slot = n.slot;
-    // `obj+0x324`/`+0x328`/`+0x32C`/`+0x330` — the state block, in order.
-    p.effect = effect;
-    p.effectVariant = motion;
-    p.effectFrames = 0;
-    p.effectPrevFrame = 0;
-    // `obj+0x2A0`, and the two cue cursors.
-    p.storyItem = captureBone;
-    p.removeFlag = 0;
-    p.cueCursorB = 0;
-    // `obj+0x34 |= 0x51`, and `obj+0x124 = 40.0`.
-    p.flags = BreakableFlag.Live | 0x10 | 0x40;
-    p.hitRadius = SCRIPT_FLAG_EFFECT_RADIUS;
-    // `[port-only]` The node index this prop draws, so the pose can find its
-    // bone. The engine reaches it through the tree it is walking.
-    p.kind = i;
-    EffectPoseNode(p);
-    out.push(p);
-  }
-  return out;
+    pl: BreakablePlacement): BreakableProp | null {
+  const effect = pl.effect ?? 0;
+  if (!EffectDefOf(effect)) return null;
+  const p = makeBreakableProp(G.g_breakable_next_id++, 0, 0);
+  p.family = PropFamily.ScriptFlagEffect;
+  p.at = pl.at;
+  // `obj+0x34 |= 0x51`.
+  p.flags = BreakableFlag.Live | 0x10 | 0x40;
+  p.slot = pl.slot ?? 0;
+  // `obj+0x324`/`+0x328`/`+0x32C`/`+0x330` — the state block, in order.
+  p.effect = effect;
+  p.effectVariant = pl.motion ?? 0;
+  p.effectFrames = 0;
+  p.effectPrevFrame = 0;
+  // `obj+0x2A0`, and the two cue cursors `obj+0x2A4`/`+0x2A8`.
+  p.storyItem = pl.capture_bone ?? 0;
+  p.removeFlag = 0;
+  p.cueCursorB = 0;
+  // `obj+0x124 = 40.0` and `obj+0x14C = tail+0x08`.
+  p.hitRadius = SCRIPT_FLAG_EFFECT_RADIUS;
+  p.coliBlob = pl.coli_blob ?? null;
+  return p;
 }
 
 /**
  * `ScriptFlagEffectUpdate` — `FUN_00473B90`. One object, one 60 Hz frame.
+ * See the file comment for the routine.
  */
-export function ScriptFlagEffectUpdate(p: BreakableProp,
+export function ScriptFlagEffectUpdate(p: BreakableProp, rng: Rng,
                                        events?: Events): void {
   if (G.g_script_flags[ScriptFlagEffectFlag.Remove] === 1) {
     ActorDespawnProp(p);
@@ -203,10 +208,69 @@ export function ScriptFlagEffectUpdate(p: BreakableProp,
       && p.effectFrames < def.play_length - 2) {
     p.effectFrames += 1;
   }
-  // The engine has one object and one cursor; the port has one prop per
-  // drawable node, so only the first of them owns the sound.
-  if (p.member === 0) ScriptFlagEffectSoundCue(p, def.cues, events);
-  EffectPoseNode(p);
+  ScriptFlagEffectSoundCue(p, def.cues, events);
+  // `EffectDrawWithCapture(obj + 0x324, obj->+0x2A0, -1)`.
+  PropDrawBegin(p);
+  PropDrawEffect(p, PropMatrixPush(), rng, -1, p.storyItem);
+  ScriptFlagEffectFileMesh(p, "script_flag_effect");
+}
+
+/**
+ * The tail `ScriptFlagEffectUpdate` and `FlagSlotEffectUpdate`
+ * (`FUN_00474120`) share past their draws: `rot =
+ * EffectFrameRotations(obj + 0x324, obj->+0x32C)`, the capture copied over
+ * `obj+0x150` by `REP MOVSD` (`0x00473CBB`, `0x0047420B`), `obj+0x64`/`+0x68`
+ * /`+0x6C` = entry `obj+0x2A0` of `rot`, and `RegisterForShotTest`.
+ *
+ * `[port-only]` as a function: the engine writes the same eleven
+ * instructions out in both routines. *container* names the placement the
+ * exporter's reads ride on.
+ */
+export function ScriptFlagEffectFileMesh(p: BreakableProp,
+                                         container: string): void {
+  if (p.effectCapture) {
+    ColiStoreObjectMatrix(p, p.effectCapture);
+    p.coliMatrixDrawn = true;
+  }
+  const w = PropWords(p, EFFECT_ANGLE_WORDS);
+  const [rx, ry, rz] = EffectFrameRotationsEntry(p, container);
+  w.o64 = rx;
+  w.o68 = ry;
+  w.o6c = rz;
+  PropRegisterForShotTestAsIs(p);
+}
+
+/**
+ * `EffectFrameRotations` (`FUN_0040E070`) at the object's raw cursor
+ * `obj+0x32C`, entry `obj+0x2A0`: the three signed shorts the routine loads,
+ * as the exporter read them where the routine reads them
+ * (`rotation_entries`, `MotionBank.effectRotationEntry`).
+ *
+ * [diverges] **Zero past the end of the bank's file.** There the routine reads
+ * its own heap: the bank's uncleared block slack, then the next arena
+ * block's header (absolute addresses) and whatever is allocated or was left
+ * there, which depends on every allocation since the scene's `ArenaReset`
+ * -- a sprite actor per shot into the scenery among them -- and on the CRT's
+ * `malloc` address (`docs/formats/mot.md`, "What lies after a bank in
+ * memory"). No rule reproduces it; zero is the arena as `ArenaReset` first
+ * leaves it, and it is what this reads. The inputs that reach it: selector
+ * 0's two window halves (motion 471, entries 2 and 1) at cursor > 100, and
+ * selector 3 at stage 1's `0x3ACC` (motion 470, entry 30, its open flag) at
+ * cursor > 65; the other selector-3 spawn names no blob, so no trace reads
+ * its angles. All three reach the port: the cursor runs to `play_length -
+ * 2`, 198 and 146. The only reader is `ShotTestMesh`'s turn of a mesh hit's
+ * normal, which `SpawnWorldImpact` orients its sprite by.
+ * `test/port/class44.test.ts` pins the zero.
+ *
+ * `[port-only]` as a function: the read is two lines of each routine; the
+ * table is the bundle's.
+ */
+export function EffectFrameRotationsEntry(p: BreakableProp,
+                                          container: string):
+    [number, number, number] {
+  const pl = T.breakables?.placements?.find(
+    (q) => q.at === p.at && q.container === container);
+  return pl?.rotation_entries?.[p.effectFrames] ?? [0, 0, 0];
 }
 
 /**
@@ -233,27 +297,6 @@ function ScriptFlagEffectSoundCue(p: BreakableProp, cues: readonly number[],
 
 /** `CMP ECX,0x13F5`'s matching arm: effect 2, captured at bone 2. */
 export const SCRIPT_FLAG_EFFECT_A = 2;
-
-/**
- * `EffectPoseNode` — `FUN_0040D9D0`. One node's transform, for one frame.
- *
- * `MatrixTranslate(t); RotZ(rz); RotY(ry); RotX(rx)` — the engine's order, and
- * the one `render/breakables.ts` already draws `PropFamily.Falling` in.
- *
- * `[port-only]` The pose lands on the prop's own `x/y/z` and `pitch/yaw/roll`.
- * The engine puts it on the matrix stack and never in a field; the port needs
- * somewhere for the renderer to read it, and these are the fields that layer
- * already poses a prop from. Nothing else in the port reads them for this
- * family.
- */
-export function EffectPoseNode(p: BreakableProp): void {
-  const def = EffectDefOf(p.effect);
-  if (!def || !def.frames) return;
-  if (!EffectSampleNode(def, p.kind, p.effectFrames, p.effectPrevFrame, p)) {
-    return;
-  }
-  p.effectPrevFrame = p.effectFrames;
-}
 
 /** Where one node's pose lands: a position and three BAMS angles. */
 export interface EffectNodePose {

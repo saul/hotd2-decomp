@@ -1644,6 +1644,70 @@ export async function addEffectCollapseKeys(
   for (const pl of mine) pl.collapse_keys = keys;
 }
 
+/**
+ * The three angles class 0x44 selectors 0 and 3 write into `obj+0x64..0x6C`
+ * for `ShotTestMesh` to turn a hit's normal by, one triple per play cursor
+ * the routine can hold (`0 .. play_length - 2`, where its own step stops
+ * and `EffectDrawTree`'s wrap never fires):
+ *
+ * ```
+ * rot = EffectFrameRotations(obj + 0x324, obj->+0x32C);   // the RAW cursor
+ * obj->+0x64 = rot[obj->+0x2A0 * 3 - 3]; +0x68 = ...-2; +0x6C = ...-1;
+ * ```
+ *
+ * `obj+0x2A0` is the capture bone for selector 0 (`ScriptFlagEffectUpdate`,
+ * `FUN_00473B90`, `0x00473CBC`..) and the **open flag** for selector 3
+ * (`FlagSlotEffectUpdate`, `FUN_00474120`), so selector 3's entry is 30 for
+ * stage 1's spawn and lands in later keys' translations. Read where the
+ * routine reads (`MotionBank.effectRotationEntry`); `null` where the six
+ * bytes are past the end of the bank's file -- motion 471 from cursor 101,
+ * motion 470 at entry 30 from cursor 66 -- which the port reads as zero
+ * (the divergence declared on `EffectFrameRotationsEntry`,
+ * `game/class44/script_flag_effect.ts`).
+ */
+export async function addEffectRotationEntries(
+    stage: Stage, placements: Record<string, unknown>[]): Promise<void> {
+  const tables = stage.tables;
+  const banks = tables.motionBanks();
+  for (const pl of placements) {
+    let effect: number, motion: number, entry: number;
+    if (pl.container === "script_flag_effect") {
+      effect = pl.effect as number;
+      motion = pl.motion as number;
+      entry = pl.capture_bone as number;
+    } else if (pl.container === "flag_slot_effect") {
+      effect = FLAG_SLOT_EFFECT_EFFECT;
+      motion = FLAG_SLOT_EFFECT_MOTION;
+      entry = pl.open_flag as number;
+    } else {
+      continue;
+    }
+    const nodes = tables.ru16(propslib.EFFECT_BONE_COUNTS + effect * 2) ?? 0;
+    const bankId = tables.motionBankOf(motion);
+    const bank = bankId !== null && banks.has(bankId)
+      ? await loadBank(stage.source, banks.get(bankId)![0],
+                       banks.get(bankId)![1])
+      : null;
+    const len = tables.motionPlayLength(motion) ?? 0;
+    if (!bank || !nodes || len < 2) {
+      degraded.note("hod2lib.bundle.effect_rotation_entries",
+                    `effect ${effect} motion ${motion}`,
+                    "the shot test's normal is not turned",
+                    "the bank or the play length could not be read");
+      continue;
+    }
+    const out: ([number, number, number] | null)[] = [];
+    for (let c = 0; c <= len - 2; c++) {
+      out.push(bank.effectRotationEntry(motion, nodes, c, entry));
+    }
+    pl.rotation_entries = out;
+  }
+}
+
+/** `obj+0x324`/`+0x328` from `PropBuildFlagSlotEffect`: effect 0xB, motion 0x1D6. */
+const FLAG_SLOT_EFFECT_EFFECT = 0xb;
+const FLAG_SLOT_EFFECT_MOTION = 0x1d6;
+
 async function effectDefJson(stage: Stage, effect: number, motion: number,
                              site: string, cues: number[]):
     Promise<Record<string, unknown> | null> {
@@ -2911,6 +2975,7 @@ export async function buildStage(stage: Stage, sink: BundleSink,
           entries: charEntries } = await resolveCharacters(
     stage, prog, spawnRecords, null, null, cache, placements);
   await addEffectCollapseKeys(stage, placements);
+  await addEffectRotationEntries(stage, placements);
   const carriedEffects = await carriedPropEffectsJson(
     stage, charPlaces as unknown as Record<string, unknown>[]);
   const flagEffects = {

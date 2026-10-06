@@ -263,6 +263,28 @@ export class MotionBank {
     }
     return { t, r };
   }
+
+  /**
+   * The three signed shorts at `EffectFrameRotations(motion, frame) - 6 +
+   * entry * 6` -- `(n * 0x12 - 0xF & ~3) * frame + base - 8 + n * 0xC`, then
+   * the routine's own `entry * 6 - 6` -- which is what
+   * `ScriptFlagEffectUpdate` (`FUN_00473B90`) and `FlagSlotEffectUpdate`
+   * (`FUN_00474120`) load into `obj+0x64..0x6C` with `entry = obj+0x2A0`.
+   * Wherever that lands in the bank's file -- the rotation block, a later
+   * key's translations, the next motion's block -- the bytes are read as
+   * they are. Null when any of the six bytes is outside the file: the
+   * engine's buffer ends there and what follows is its heap
+   * (`docs/formats/mot.md`, "What lies after a bank in memory").
+   */
+  effectRotationEntry(motionId: number, nodeCount: number, frame: number,
+                      entry: number): [number, number, number] | null {
+    const base = this.offsets.get(motionId);
+    if (base === undefined || nodeCount < 1) return null;
+    const a = effectFrameStride(nodeCount) * frame + base - 8
+      + nodeCount * 0xc + entry * 6 - 6;
+    if (a < 0 || a + 6 > this.raw.length) return null;
+    return [i16(this.raw, a), i16(this.raw, a + 2), i16(this.raw, a + 4)];
+  }
 }
 
 /** Load one `mot/` bank and apply the header exactly as sub-step 2 does. */

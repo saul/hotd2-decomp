@@ -108,10 +108,9 @@ console.log("\nclass 0x44 selector 0, the effect the script flag plays:");
   const rng = new Rng(0x44);
   const PL = BREAKABLES.placements.find(
     (q) => q.container === "script_flag_effect")!;
-  const build = () => PropBuildScriptFlagEffect(
-    PL.at, PL.effect!, PL.capture_bone!, PL.motion!);
+  const build = () => PropBuildScriptFlagEffect(PL);
   /**
-   * The one prop the effect places, or a dead stand-in.
+   * The one object the effect places, or a dead stand-in.
    *
    * A stand-in rather than a throw because the failure this guards is
    * "the exporter emitted nothing", and a `TypeError` out of the harness ends
@@ -119,49 +118,68 @@ console.log("\nclass 0x44 selector 0, the effect the script flag plays:");
    */
   const only = (): BreakableProp =>
     G.g_breakable_props[0] ?? makeBreakableProp(-1, 0, 0);
+  /** `T(x, y, z) Rz Ry Rx` on the identity -- `EffectPoseNode`'s order. */
+  const posed = (x: number, y: number, z: number, yaw: number): number[] => {
+    const m = MatIdentity();
+    MatrixTranslate(m, x, y, z);
+    MatrixRotateZ(m, 0);
+    MatrixRotateY(m, yaw);
+    MatrixRotateX(m, 0);
+    return m;
+  };
+  const same = (a: readonly number[] | undefined, b: readonly number[]) =>
+    !!a && a.length === 16 && a.every((v, i) => Math.abs(v - b[i]) < 1e-9);
 
-  // The whole of the bug: the exporter emitted nothing for a class-0x44
+  // The whole of an old bug: the exporter emitted nothing for a class-0x44
   // selector-0 spawn, so nothing was placed and nothing was drawn. This fails
   // without the `effects` block, without the placement and without the
-  // builder -- `PropBuildScriptFlagEffect` returns an empty array for all
-  // three.
+  // builder -- `PropBuildScriptFlagEffect` returns null for all three.
   {
     propScene(rng);
     const made = build();
-    check("the placer builds one prop per drawable node", made.length === 1,
-          `${made.length} props`);
-    check("...and it draws the tree's own slot, not the descriptor's",
-          made[0]?.slot === 0x13f5, `0x${(made[0]?.slot ?? 0).toString(16)}`);
-    check("...seated at motion 471 key 0 rather than at the spawn position",
-          made[0]?.x === -13 && made[0]?.z === -362,
-          `${made[0]?.x}, ${made[0]?.y}, ${made[0]?.z}`);
+    check("the placer builds one object, the routine's", !!made
+          && made.family === PropFamily.ScriptFlagEffect
+          && made.storyItem === 2 && made.effect === 2
+          && made.effectVariant === 471);
+    if (made) G.g_breakable_props.push(made);
+    ScriptFlagEffectUpdate(only(), rng);
+    // `EffectDrawWithCapture` walks the tree: the bone-1 node draws nothing
+    // (`AssetDrawSlot(0)`), the bone-2 node its slot at motion 471 key 0.
+    check("...whose draw is the tree's own slot, posed at motion 471 key 0 "
+          + "rather than at the spawn position",
+          only().draws?.length === 1 && only().draws![0].slot === 0x13f5
+          && same(only().draws![0].m, posed(-13, 0, -362, 0)),
+          JSON.stringify(only().draws));
   }
 
   // `if (g_script_flags[0x12] && cursor < play_length - 2) cursor++`.
   {
     propScene(rng);
     const events = new Events();
-    G.g_breakable_props.push(...build());
+    const made = build();
+    if (made) G.g_breakable_props.push(made);
     const p = only();
-    for (let i = 0; i < 3; i++) ScriptFlagEffectUpdate(p, events);
+    for (let i = 0; i < 3; i++) ScriptFlagEffectUpdate(p, rng, events);
     check("the clip does not run with the flag down", p.effectFrames === 0,
           String(p.effectFrames));
 
     G.g_script_flags[ScriptFlagEffectFlag.Advance] = 1;
-    ScriptFlagEffectUpdate(p, events);
+    ScriptFlagEffectUpdate(p, rng, events);
     check("the flag starts it", p.effectFrames === 1, String(p.effectFrames));
     // An odd cursor is half way between key 0 and key 1: x from -13 to -3,
     // and the yaw from 0 to 0x4000.
     check("...an odd cursor blends half way to the next key",
-          p.x === -8 && p.yaw === 0x2000, `${p.x} yaw ${p.yaw}`);
-    ScriptFlagEffectUpdate(p, events);
+          same(p.draws?.[0]?.m, posed(-8, 0, -362, 0x2000)),
+          JSON.stringify(p.draws?.[0]?.m));
+    ScriptFlagEffectUpdate(p, rng, events);
     check("...and an even one sits on the key",
-          p.effectFrames === 2 && p.x === -3 && p.yaw === 0x4000,
-          `${p.effectFrames}: ${p.x} yaw ${p.yaw}`);
+          p.effectFrames === 2
+          && same(p.draws?.[0]?.m, posed(-3, 0, -362, 0x4000)),
+          `${p.effectFrames}: ${JSON.stringify(p.draws?.[0]?.m)}`);
 
     // `play_length - 2` is 4 for this fixture, so the cursor stops there and
     // the clip holds its last pose rather than looping.
-    for (let i = 0; i < 20; i++) ScriptFlagEffectUpdate(p, events);
+    for (let i = 0; i < 20; i++) ScriptFlagEffectUpdate(p, rng, events);
     check("...the cursor stops two short of the play length",
           p.effectFrames === 4, String(p.effectFrames));
   }
@@ -175,10 +193,11 @@ console.log("\nclass 0x44 selector 0, the effect the script flag plays:");
     events.on("sound.play", (d) => {
       if (d.id === SFX_SCRIPT_FLAG_EFFECT) sounds++;
     });
-    G.g_breakable_props.push(...build());
+    const made = build();
+    if (made) G.g_breakable_props.push(made);
     const p = only();
     G.g_script_flags[ScriptFlagEffectFlag.Advance] = 1;
-    for (let i = 0; i < 10; i++) ScriptFlagEffectUpdate(p, events);
+    for (let i = 0; i < 10; i++) ScriptFlagEffectUpdate(p, rng, events);
     check("both cue frames play the effect's sound", sounds === 2,
           `${sounds} plays`);
     check("...and a parked cursor does not play it again",
@@ -188,10 +207,11 @@ console.log("\nclass 0x44 selector 0, the effect the script flag plays:");
   // `g_script_flags[0x13]` is the whole lifetime, and it is tested first.
   {
     propScene(rng);
-    G.g_breakable_props.push(...build());
+    const made = build();
+    if (made) G.g_breakable_props.push(made);
     const p = only();
     G.g_script_flags[ScriptFlagEffectFlag.Remove] = 1;
-    ScriptFlagEffectUpdate(p);
+    ScriptFlagEffectUpdate(p, rng);
     check("the removal flag despawns it", p.dead);
   }
 

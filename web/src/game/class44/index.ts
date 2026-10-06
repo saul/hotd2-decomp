@@ -216,9 +216,8 @@ export const g_class44_subtypes: Partial<Record<number, Class44Builder>> = {
     void f;
     const pl = T.breakables?.placements?.find(
       (q) => q.at === obj.descAt && q.container === "script_flag_effect");
-    if (!pl) return;
-    G.g_breakable_props.push(...PropBuildScriptFlagEffect(
-      obj.descAt, pl.effect ?? 0, pl.capture_bone ?? 0, pl.motion ?? 0));
+    const p = pl ? PropBuildScriptFlagEffect(pl) : null;
+    if (p) G.g_breakable_props.push(p);
   },
   [Class44Selector.StoryModeSwitch]: (obj, f) => {
     void f;

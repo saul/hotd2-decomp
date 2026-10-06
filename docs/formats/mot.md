@@ -156,7 +156,9 @@ for every shot the player has put into the scenery (`SpawnWorldImpact`,
 runs off the end of a bank -- `ScriptFlagEffectUpdate`'s and
 `FlagSlotEffectUpdate`'s `EffectFrameRotations` at the raw cursor do -- reads
 the run's own heap. `[proved]` for the mechanism; what any one run finds
-there is unknowable.
+there is unknowable, and the port reads zero there -- the arena as
+`ArenaReset` first leaves it -- under a declared divergence
+(`EffectFrameRotationsEntry`, `game/class44/script_flag_effect.ts`).
 
 ## File format
 

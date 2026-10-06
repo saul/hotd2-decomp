@@ -288,6 +288,12 @@ export const CHECKS: readonly Check[] = [
       + "list in the page: the only check that drives a hinge's mesh "
       + "registration through real pointer events",
         NEEDS_BUNDLE, LANE_BROWSER),
+  check("window", ["node", "tools/window_page.mjs", "--headless"],
+        "that a click on stage 1's window -- class 0x44 selector 0, filed "
+      + "through the node matrix its effect draw captures -- lands on a "
+      + "half's mesh and raises the hit bit only a hit raises, and that both "
+      + "halves are in the moving-object passes' list in the page",
+        NEEDS_BUNDLE, LANE_BROWSER),
   check("humanoid_shot", ["node", "tools/humanoid_shot_page.mjs", "--headless"],
         "that stage 2's jetty zombies -- class-0x25 scripted humanoids, the "
       + "four in the game whose spawn record leaves bit 0x8000 clear -- "

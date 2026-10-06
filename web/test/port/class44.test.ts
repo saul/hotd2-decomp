@@ -1150,3 +1150,146 @@ console.log("\nthe props that file themselves are in the moving-object "
   SetGameTables(CHARS);
   ResetGameGlobals();
 }
+
+// -- selectors 0 and 3, through the captured node's matrix -------------------
+
+/**
+ * `coli1.bin:5248`, the bundle's numbers: the window's left half, a
+ * 13.7 x 29.7 x 1.36 box whose front quad faces +z at z = -0.0167 in the
+ * captured node's frame.
+ */
+const WINDOW_BLOB = {"min": [0.009031999856233597, 1.3937870264053345, -1.3762680292129517], "max": [13.751131057739258, 31.05638313293457, -0.016656000167131424], "n": 6, "plane": [0, 0, -1, -1.3762609958648682, -1, 0, 0, 0.009031999856233597, 0, -1, 0, 1.3937870264053345, 1, 0, 0, -13.751129150390625, 0, 0, 1, 0.016654999926686287, 0, 1, 0, -31.05638313293457], "verts": [13.751131057739258, 31.05638313293457, -1.3762680292129517, 13.751129150390625, 1.3937870264053345, -1.3762619495391846, 0.009031999856233597, 1.3937870264053345, -1.3762619495391846, 0.00903400033712387, 31.05638313293457, -1.3762680292129517, 0.009031999856233597, 1.3937870264053345, -1.3762619495391846, 0.009031999856233597, 1.3937870264053345, -0.016656000167131424, 0.00903400033712387, 31.05638313293457, -0.016661999747157097, 0.00903400033712387, 31.05638313293457, -1.3762680292129517, 13.751129150390625, 1.3937870264053345, -1.3762619495391846, 13.751129150390625, 1.3937870264053345, -0.016656000167131424, 0.009031999856233597, 1.3937870264053345, -0.016656000167131424, 0.009031999856233597, 1.3937870264053345, -1.3762619495391846, 13.751131057739258, 31.05638313293457, -1.3762680292129517, 13.751131057739258, 31.05638313293457, -0.016662999987602234, 13.751129150390625, 1.3937870264053345, -0.016656000167131424, 13.751129150390625, 1.3937870264053345, -1.3762619495391846, 13.751129150390625, 1.3937870264053345, -0.016656000167131424, 13.751131057739258, 31.05638313293457, -0.016662999987602234, 0.00903400033712387, 31.05638313293457, -0.016661999747157097, 0.009031999856233597, 1.3937870264053345, -0.016656000167131424, 13.751131057739258, 31.05638313293457, -0.016662999987602234, 13.751131057739258, 31.05638313293457, -1.3762680292129517, 0.00903400033712387, 31.05638313293457, -1.3762680292129517, 0.00903400033712387, 31.05638313293457, -0.016661999747157097], "axis": [2, 0, 1, 0, 2, 1], "surface": [53, 53, 53, 53, 53, 53]};
+
+/**
+ * Stage 1's evt 0x1580, the window's left half: effect 2 captured at bone 2
+ * on motion 471, blob `coli1.bin:5248`. The fixture's effect 2 is four keys
+ * long (`harness.ts`), so its cursor runs 0..4 and `rotation_entries` has
+ * five rows; the last is `null`, past the end of the bank's file, as rows
+ * 101..198 of the real one are.
+ */
+const WINDOW: BreakablePlacement = {
+  at: 0x1580, container: "script_flag_effect", effect: 2, capture_bone: 2,
+  motion: 471, slot: 0x13f5, coli: 216859776, coli_blob: "coli1.bin:5248",
+  rotation_entries: [[0, 0x4000, 0], [1, 2, 3], [4, 5, 6], [7, 8, 9], null],
+  lifetime_evt_steps: 0, pos: [-13.7748, 0, -362.302], yaw: 0,
+};
+
+/** `T(x, y, z) Rz Ry Rx` on the identity -- `EffectPoseNode`'s order. */
+function nodeMatrix(x: number, y: number, z: number, yaw: number): number[] {
+  const m = MatIdentity();
+  MatrixTranslate(m, x, y, z);
+  MatrixRotateY(m, yaw);
+  return m;
+}
+
+console.log("\nclass 0x44 selector 0, the window, is shot through its mesh:");
+{
+  const rng = new Rng(0x4430);
+  const events = playScene(0, rng);
+  SetGameTables(CHARS, { ...TABLES, placements: [WINDOW] });
+  T.coli = { files: ["coli1.bin"],
+             blobs: { "coli1.bin:5248": WINDOW_BLOB } } as never;
+  G.g_evt_step_index = 1;
+  SpawnPropContainers([{ at: WINDOW.at, class: SpawnClass.PropPlacer }]);
+  // Cursor 0: bone 2 sits at key 0, (-13, 0, -362) and no turn.
+  const L = { x: 6, y: 10, z: -0.016655 };
+  const at0 = shotAt(nodeMatrix(-13, 0, -362, 0), L);
+  GameUpdate(1 / 60, at0.host, rng, events);
+  const p = G.g_breakable_props.find((q) => q.at === WINDOW.at);
+  if (!p) throw new Error("no window");
+  const w = PropWords(p, { o64: 0, o68: 0, o6c: 0 });
+  check("the window's capture is its bone-2 node's matrix, copied over "
+        + "obj+0x150, and it files itself as a mesh",
+        !!p.effectCapture && p.coliBlob === "coli1.bin:5248"
+        && !!p.coliMatrix && Math.abs(p.coliMatrix[3] - -13) < 1e-9
+        && Math.abs(p.coliMatrix[11] - -362) < 1e-9
+        && G.g_shot_test_list.some((e) => e.prop === p.id
+                                          && e.flags === 0x51),
+        `${JSON.stringify(p.coliMatrix)} ${JSON.stringify(G.g_shot_test_list)}`);
+  check("...and obj+0x64..0x6C are the bank's shorts at cursor 0, entry 2",
+        w.o64 === 0 && w.o68 === 0x4000 && w.o6c === 0,
+        `${w.o64} ${w.o68} ${w.o6c}`);
+  const hit = ProcessPlayerShotsTestList(at0.ray, at0.host);
+  // `ShotTestMesh` turns the quad's normal by RotZ RotY RotX of those words
+  // on the identity -- a quarter turn about Y -- not by obj+0x150.
+  const R = MatIdentity();
+  MatrixRotateY(R, 0x4000);
+  const turned = { x: 0, y: 0, z: 0 };
+  MatrixTransformPoint(R, { x: 0, y: 0, z: 1 }, turned);
+  check("a shot at the window's quad hits the window, on the quad, with the "
+        + "normal turned by the words",
+        hit?.prop === p.id && hit.whole
+        && Math.hypot(hit.point.x - at0.W.x, hit.point.y - at0.W.y,
+                      hit.point.z - at0.W.z) < 1e-3
+        && Math.hypot(hit.mesh!.normal.x - turned.x,
+                      hit.mesh!.normal.y - turned.y,
+                      hit.mesh!.normal.z - turned.z) < 1e-6,
+        `${JSON.stringify(hit)}`);
+  // The clip runs to cursor 4, where the fixture's bank has ended: the
+  // declared divergence reads zero there (L26 -- this pins what the code
+  // does past the end), so the normal comes back unturned.
+  G.g_script_flags[0x12] = 1;
+  for (let i = 0; i < 6; i++) GameUpdate(1 / 60, at0.host, rng, events);
+  check("past the end of the bank's data the words are zero",
+        p.effectFrames === 4 && w.o64 === 0 && w.o68 === 0 && w.o6c === 0,
+        `${p.effectFrames}: ${w.o64} ${w.o68} ${w.o6c}`);
+  // Cursor 4 is key 2: x 7, half a turn about Y.
+  const at4 = shotAt(nodeMatrix(7, 0, -362, 0x8000), L);
+  const hit4 = ProcessPlayerShotsTestList(at4.ray, at4.host);
+  check("...so a shot on the window, turned half round with its node, comes "
+        + "back with the quad's own normal",
+        hit4?.prop === p.id
+        && Math.hypot(hit4.point.x - at4.W.x, hit4.point.y - at4.W.y,
+                      hit4.point.z - at4.W.z) < 1e-3
+        && Math.abs(hit4.mesh!.normal.z - 1) < 1e-9
+        && hit4.mesh!.normal.x === 0 && hit4.mesh!.normal.y === 0,
+        `${JSON.stringify(hit4)}`);
+  check("...and the window is in the moving-object passes' list",
+        G.g_coli_dynamic_list.some((e) => e.prop === p.id));
+  T.coli = null;
+  SetGameTables(CHARS);
+  ResetGameGlobals();
+}
+
+console.log("\nclass 0x44 selector 3 is filed through its captured node:");
+{
+  const rng = new Rng(0x4431);
+  const events = scene(rng);
+  // Stage 1's 0x3ACC: open flag 30, which is also the entry its rotations
+  // are read at. Bone 1 sits at the origin of its frame in the fixture's
+  // effect 0xB, so the capture is the routine's translate alone.
+  const FLAG3: BreakablePlacement = {
+    at: 0x3acc, container: "flag_slot_effect", coli: 216858928,
+    coli_blob: "coli1.bin:4400", open_flag: 30, remove_flag: 20,
+    lifetime_evt_steps: 0, pos: [-447.1, -15.4327, -461.3],
+    rotation_entries: Array.from(
+      { length: 0x80 - 1 },
+      (_, c): [number, number, number] | null => (c === 0 ? [11, -22, 33]
+                                                          : null)),
+  };
+  SetGameTables(CHARS, { ...TABLES, placements: [FLAG3] });
+  const p = PropBuildFlagSlotEffect(FLAG3);
+  G.g_breakable_props.push(p);
+  G.g_shot_test_list = [];
+  FlagSlotEffectUpdate(p, rng, events);
+  const w = PropWords(p, { o64: 0, o68: 0, o6c: 0 });
+  check("FlagSlotEffectUpdate copies bone 1's capture over obj+0x150 and "
+        + "files itself as a mesh",
+        p.coliBlob === "coli1.bin:4400" && !!p.coliMatrix
+        && p.coliMatrix[3] === Math.fround(-447.1)
+        && p.coliMatrix[7] === Math.fround(-15.4327)
+        && p.coliMatrix[11] === Math.fround(-461.3)
+        && G.g_shot_test_list.length === 1
+        && G.g_shot_test_list[0].prop === p.id
+        && G.g_shot_test_list[0].flags === 0x51,
+        `${JSON.stringify(p.coliMatrix)} ${JSON.stringify(G.g_shot_test_list)}`);
+  check("...with obj+0x64..0x6C from entry 30 at cursor 0",
+        w.o64 === 11 && w.o68 === -22 && w.o6c === 33);
+  G.g_script_flags[30] = 1;
+  FlagSlotEffectUpdate(p, rng, events);
+  check("...and zero at a cursor past the end of the bank's file",
+        p.effectFrames === 1 && w.o64 === 0 && w.o68 === 0 && w.o6c === 0,
+        `${p.effectFrames}: ${w.o64} ${w.o68} ${w.o6c}`);
+  SetGameTables(CHARS);
+  ResetGameGlobals();
+}

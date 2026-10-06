@@ -86,9 +86,10 @@ does not have yet. A class not listed has no such note.
   entries correctly, but `render/gunlights.ts` draws an entry from 3 up only
   when it is a point light, so the two spot lights (stage 4 block 10, stage 5
   block 0) are not seen.
-* **`0x41` prop placer** -- constructors 26 (`PlaceType26RippleTask`), 42,
-  52, 55, 61, 65 and 68 (the golden frog); the story-mode switch's hinge and
-  item spawns; `SpawnScorePickup`'s object.
+* **`0x41` prop placer** -- constructors 42, 52, 55, 61 and 65; the
+  story-mode switch's hinge and item spawns. The score pickup's light set
+  is recorded with its draw and not yet lit by: `render/breakables.ts`'s
+  group is no lighting root, for any prop.
 * **`0x60` chapter card** -- `BossModeChapterCardUpdate` (`FUN_00434920`) and
   `FUN_00434DA0`.
 * **`0x61` result card** -- the one writer of `g_original_item_part_scale`.

@@ -38,7 +38,7 @@ import {
 } from "../game/scene_lights";
 import { CameraDrawSystem, CameraRig, CameraTakeSystem }
   from "../render/camera";
-import { StageScene } from "../render/stagescene";
+import { RegionDrawGate, StageScene } from "../render/stagescene";
 import { ProgramPins } from "../render/program_pins";
 import { RenderCommandOrder } from "../render/draw_order";
 import { SpawnLayer } from "../render/overlays";
@@ -340,6 +340,8 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
    * hold one: those actors have no character type to resolve.
    */
   readonly slotModels = new SlotModelLayer();
+  /** `RegionDrawResidentSet`'s chapter-card gate, out of `G` once a frame. */
+  readonly regionDraw = new RegionDrawGate();
   /** Class 0x41 type 1's canal water: the tiles it draws and ripples. */
   readonly waterSurfaces = new WaterSurfaceLayer();
   /** Class 0x41 constructor 26's warehouse water. */
@@ -816,6 +818,7 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     this.world.add("render", this.breakables);
     this.world.add("render", this.shatters);
     this.world.add("render", this.slotModels);
+    this.world.add("render", this.regionDraw);
     // After the slot models, whose templates its clones come from.
     this.world.add("render", this.waterSurfaces);
     this.world.add("render", this.type26Ripples);

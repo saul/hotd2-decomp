@@ -10,9 +10,10 @@
  * texture as it does. No region names those tiles as something to draw: the
  * script loads them with opcode 0x50, and a slot that is only *loaded* is
  * drawn by nothing unless something calls `AssetDrawSlot` on it
- * (`RegionDrawResidentSet`, `FUN_00401260`, walks the current region's list
- * and nothing else). So stage 2's block 16 stood on a dock over no water at
- * all.
+ * (`RegionDrawResidentSet`, `FUN_00401260`, walks the current region's list,
+ * and beside one entry of stage 3's regions 2 and 3 draws two of these tiles
+ * itself -- `render/stagescene.ts`). So stage 2's block 16 stood on a dock
+ * over no water at all.
  *
  * The tile is `g_water_surface_slots` (`0x00593DA4`) indexed by the placer's
  * `obj+0x1F4`, the one table in this that is image data; the exporter resolves

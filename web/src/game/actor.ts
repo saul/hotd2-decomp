@@ -452,11 +452,13 @@ export enum ActorFlag {
    * the bit. It runs once, from `ActorBuildSkinnedModel` (`FUN_00410440`),
    * which every skinned class's `Init` calls after pointing `g_cur_actor` at
    * itself -- so a civilian, a zombie, a thrower and every boss carry it.
-   * Four builders clear it again with `AND 0x7F` straight after: `PlaceBats`,
-   * `SpawnBatWings`, `CatInit` and `SpawnGoldenFrog`. Class 0x41's two
-   * skinned constructors (`0x00463E50`, `PlaceType61Figures`) make the same
-   * `AND` on the **placer's** word, not their actors': the frog loses the bit
-   * to a later `MOV [ESI+0x34], 1` and constructor 61's figures keep it (see
+   * `PlaceBats`, `SpawnBatWings` and `CatInit` clear it again with `AND 0x7F`
+   * straight after. `SpawnGoldenFrog` and constructor 68 (`0x00463E50`) make
+   * their `AND 0x7F` on the word of the object they were **handed** -- the
+   * prop, or the placer (`AND DL,0x7F` on `[EDI+0x34]`, `[EBX+0x34]`) -- and
+   * the frog loses the bit to the `MOV dword ptr [ESI+0x34], 0x1` before it
+   * (`class41/golden_frog.ts`). `PlaceType61Figures` makes the same `AND` on
+   * the placer's word, so constructor 61's figures keep the bit (see
    * `docs/formats/combat.md`). `ActorBuildSkinnedModel` in `spawn.ts` is
    * where the port raises it.
    */
@@ -2769,13 +2771,16 @@ export type FishActor = Extract<Actor, { cls: SpawnClass.WaterEnemy }>;
 /** An actor already narrowed to class 0x61: the result card or a figure. */
 export type ResultCardActor = Extract<Actor, { cls: SpawnClass.ResultCard }>;
 
+/**
+ * An actor already narrowed to class 0x41: a placer, a constructor-61 figure
+ * or a golden frog.
+ */
+export type PropContainerActor = Extract<Actor,
+  { cls: SpawnClass.PropContainerPlacer }>;
+
 /** An actor already narrowed to class 0x33, for that class's own routines. */
 export type ScriptedSceneryActor = Extract<Actor,
   { cls: SpawnClass.ScriptedScenery }>;
-
-/** An actor already narrowed to class 0x41: a placer or a constructor-61 figure. */
-export type PropContainerActor = Extract<Actor,
-  { cls: SpawnClass.PropContainerPlacer }>;
 
 /** A fresh object. Everything the engine leaves zeroed is zero here. */
 /** `ActorUpdateBoundingSphere`'s two lifts — `FUN_00454AC0`'s own literals. */

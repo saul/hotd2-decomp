@@ -62,8 +62,11 @@ the same commit.
   (selector 1's) `RegisterForShotTest` at `0x004334D0` and the
   `MatrixStore(obj+0x150)` the mesh shot test would read. `[open]`: what
   takes selector 7's object away, since its own despawn test never passes.
-* **`0x41` prop placer** -- constructors 26 (`PlaceType26RippleTask`) and 68
-  (the golden frog); `SpawnScorePickup`'s object.
+* **`0x41` prop placer** -- the score pickup's light set is recorded with
+  its draw and not yet lit by: `render/breakables.ts`'s group is no lighting
+  root, for any prop. Constructor 26's and the canal water's slots are
+  treated as resident whatever loads their `pol/` files, beyond opcodes
+  0x52/0x53's whole-file loads.
 * **`0x44` prop placer** -- the mesh shot test of every selector but 17
   (`class44/story_switch.ts` is the one the prop pool files as a mesh):
   selector 0's window and the hinges carry no resolved blob, so a shot passes

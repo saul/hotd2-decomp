@@ -33,6 +33,7 @@
  *                     class 0x44 selector 16
  *   class41_types     class 0x41's transcribed types, 8 to 67
  *   class41_ctors     class 0x41 constructors 16, 17, 29 and 37
+ *   class41_pickups   the score pickup, the golden frog, constructors 26 and 68
  *   class25           the scripted humanoid's VM
  *   class20_24        the one-hit target and the set piece
  *   routes            the rescue target, the stage-2 car, the shootable
@@ -85,6 +86,7 @@ import "./director.test";
 import "./class41.test";
 import "./class41_types.test";
 import "./class41_ctors.test";
+import "./class41_pickups.test";
 import "./class25.test";
 import "./class20_24.test";
 import "./routes.test";

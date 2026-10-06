@@ -70,7 +70,10 @@ import { PropUpdateType75 } from "./flag_prop";
 import { PlaceGenericPropType76, PropUpdateType76 } from "./type76";
 import { PropUpdateType77 } from "./type77";
 import { PropUpdateType78 } from "./type78";
-import { EXTRA_LIFE_ROUTINE_TYPE, ExtraLifePickupUpdate } from "./items";
+import {
+  EXTRA_LIFE_ROUTINE_TYPE, ExtraLifePickupUpdate, SCORE_PICKUP_ROUTINE_TYPE,
+  ScorePickupUpdate,
+} from "./items";
 import { PlaceGenericPropType34 } from "../class44/container";
 
 /** One `g_class41_updates` entry, transcribed whole. */
@@ -140,6 +143,8 @@ export const GENERIC_ROUTINES: Partial<Record<number, GenericRoutine>> = {
   // The extra life: `ActorAlloc`'d by `SpawnExtraLifePickup` with its routine
   // and no table slot, so a number of the port's own.
   [EXTRA_LIFE_ROUTINE_TYPE]: ExtraLifePickupUpdate,
+  // ...and the score pickup, `ActorAlloc`'d by `SpawnScorePickup` the same way.
+  [SCORE_PICKUP_ROUTINE_TYPE]: ScorePickupUpdate,
 };
 
 /**

@@ -398,6 +398,24 @@ export interface PropDrawCall {
    * the renderer hands it to.
    */
   alpha?: number;
+  /**
+   * The light set the call was made under, for a routine that brackets its
+   * draw with `LightsUseSecondarySet` (`FUN_0041DC70`) and
+   * `LightsRestoreScene` (`FUN_0041DCC0`): the three device words as
+   * `RenderLightSet` reads them at the call. Absent means the scene's own,
+   * which is what every other prop routine draws under. Recorded and not yet
+   * drawn: `render/breakables.ts`'s group is not one `render/lighting.ts`
+   * lights, so no prop's draw is lit by either block there.
+   */
+  light?: { ambient: number; dir: [number, number, number];
+            rgb: [number, number, number] };
+  /**
+   * Made after `AssetSlotUVsFromViewNormals` (`FUN_00418660`) on the same
+   * slot: the model's marked primitives draw with UVs made from their
+   * normals through this frame's modelview (`ModelUVsFromViewNormals`,
+   * `FUN_004AA400`).
+   */
+  envUv?: boolean;
 }
 
 /**

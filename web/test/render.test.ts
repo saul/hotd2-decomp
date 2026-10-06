@@ -72,6 +72,8 @@ const { LabelCache } = await import("../src/render/overlays");
 const { SceneFog } = await import("../src/render/fog");
 const { Backdrop } = await import("../src/render/backdrop");
 const { Rain } = await import("../src/render/rain");
+const { type26RippleHeight, type26RippleUvOffset } =
+  await import("../src/render/type26_ripple");
 const { Scope } = await import("../src/core/scope");
 const { ownResources, subtreeResources } = await import("../src/render/scope3d");
 const { FreeRoam, isTyping, ownsKey }
@@ -5863,6 +5865,38 @@ console.log("\nclass 0x41 constructor 61's figures: block 1, lit from the screen
         !!v && Math.abs(v.x - 1) < 1e-5 && Math.abs(v.y) < 1e-5
         && Math.abs(v.z) < 1e-5,
         v ? v.toArray().join(",") : "no set");
+}
+
+console.log("\nthe warehouse water: the walk's heights and UVs, per vertex");
+{
+  // `Type26RippleUpdate` (`FUN_00469C80`): the height from the image's own
+  // constants -- the centre (-472.5158, -1230.6945) as f32, 400, the f64 0.1
+  // and 0x401338C8E0000000 -- at a vertex off both axes and a phase that is
+  // not zero.
+  const x = -503.7, z = -1188.2, phase = 0x1234;
+  const dx = x + Math.fround(472.5158), dz = z + Math.fround(1230.6945);
+  const b = Math.trunc((dx * dx + dz * dz) * 400 + phase);
+  check("a vertex's height is the rings about (-472.5, -1230.7) at the phase",
+        type26RippleHeight(x, z, phase) === Math.fround(
+          Math.sin(b * Math.PI * 2 / 65536) * 0.1 - 4.805453777313232));
+  // The UVs: the closed form against the walk's own adds, frame by frame, at
+  // ticks that cross the 16-bit wrap -- `u += sin((tick * 0x180 + ftol(x) *
+  // 600) & 0xFFFF) * 0.0004`, `v` the cosine of `z`'s.
+  let u = 0, v = 0, ss = 0, cc = 0;
+  for (let tick = 7; tick < 7 + 120; tick++) {
+    const t = ((tick * 0x180) & 0xffff) * Math.PI * 2 / 65536;
+    ss += Math.sin(t);
+    cc += Math.cos(t);
+    u += Math.sin(((tick * 0x180 + Math.trunc(x) * 600) & 0xffff)
+                  * Math.PI * 2 / 65536) * 0.0004;
+    v += Math.cos(((tick * 0x180 + Math.trunc(z) * 600) & 0xffff)
+                  * Math.PI * 2 / 65536) * 0.0004;
+  }
+  const [du, dv] = type26RippleUvOffset(
+    { sin: ss, cos: cc, frames: 120, phase: 0 }, x, z, [0, 0]);
+  check("...and its UVs, the two sums against the walk's adds",
+        Math.abs(du - u) < 1e-9 && Math.abs(dv - v) < 1e-9,
+        `${du} ${u} ${dv} ${v}`);
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

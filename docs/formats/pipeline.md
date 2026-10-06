@@ -96,6 +96,18 @@ Slot state lives in a 16-byte record at `0x009A66A0`:
 So slot-granular streaming genuinely exists: `FUN_00418820` seeks into a pol
 file and reads one model, without loading the rest.
 
+**[proved]** The flags word's `0x8000` is the **resident bit** every draw
+tests (`AssetDrawSlot` wants `0x8000` and `1`). For a whole file it follows
+the file: `PolFileJobBindSlot` (`0x00418EC0`) sets it slot by slot as the
+load's last state binds them, one a step, and only then marks the file
+loaded -- byte `+8` of its `g_pol_file_records` entry (`0x009C7320`, stride
+`0xC`; 0 free, 3 loading, 4 loaded); `AssetJobPolFileFree` (`0x00419020`)
+clears it from every slot of the file in its first step, over the file's
+list at `g_pol_file_slot_lists` (`0x004E794C`). A load of a file not free and
+a free of a file not loaded are dropped. The port keeps that state byte for
+the files opcodes `0x52`/`0x53` load and free, completing each job where it
+is queued (`web/src/game/pol_files.ts`); class 0x41 constructor 26 reads it.
+
 ---
 
 ## What the event script actually does

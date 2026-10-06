@@ -187,4 +187,10 @@ export interface Instance {
    * `Boss5Tail.nodeDraws` every frame. See `render/characters/boss5.ts`.
    */
   boss5Draws?: Map<string, { node: Object3D; slot: number }>;
+  /**
+   * The golden frog's score strip, the slot it was cloned for and the clone
+   * (null when the bundle has no template for it). Render bookkeeping. See
+   * `render/characters/golden_frog.ts`.
+   */
+  frogStrip?: { slot: number; node: Object3D | null };
 }

@@ -26,6 +26,7 @@ import { BreakablePropPoolUpdate } from "./class41/pool";
 import { WaterSurfacesTick } from "./class41/water";
 import { DialogueTasksTick } from "./dialogue";
 import { Type3UvScrollTick } from "./class41/type03";
+import { Type26RipplesTick } from "./class41/type26";
 import { St2CarsTick } from "./class21/car";
 import { PropContainerType } from "./class41";
 import { FLICKER_LIGHT_TYPE } from "./class41/type48";
@@ -816,6 +817,9 @@ export function SpawnPropContainers(spawns: readonly ScriptSpawn[]): void {
       : pl.container === "type55" ? PropContainerType.Type55Particles
       : pl.container === "type61" ? PropContainerType.Type61Figures
       : pl.container === "type65" ? PropContainerType.Type65Particles
+      : pl.container === "golden_frog"
+        ? PropContainerType.GoldenFrogFromLessonTable
+      : pl.container === "ripple" ? PropContainerType.Type26RippleTask
       : PropContainerType.BreakableGroup;
     // The table constructors -- 38, 39, 44, 16 and 29 -- and constructor 37
     // read the placer's `+0x11C` as the step lifetime they copy into every
@@ -825,8 +829,12 @@ export function SpawnPropContainers(spawns: readonly ScriptSpawn[]): void {
       || pl.container === "table44" || pl.container === "table16"
       || pl.container === "table29" || pl.container === "type37"
       // ...and constructors 52 and 61 copy it into what they build: 52's
-      // doors as their step lifetime, 61's figures as a word nothing reads.
-      || pl.container === "type52" || pl.container === "type61";
+      // doors as their step lifetime, 61's figures as a word nothing reads;
+      // constructor 68 into its frog's `+0x11C`, the step lifetime
+      // `GoldenFrogUpdate` counts against; and constructor 26 into its task's
+      // `+0x35`, the same.
+      || pl.container === "type52" || pl.container === "type61"
+      || pl.container === "golden_frog" || pl.container === "ripple";
     // The water task and constructors 50 and 66 read both descriptor fields
     // as themselves: `+0x1F4` the table index, `+0x11C` the lifetime.
     const bothFields = pl.container === "water_surface"
@@ -1151,6 +1159,8 @@ function SceneTaskWalk(dt: number, host: GameHost,
   DialogueTasksTick();
   // ...and the car reflection's task, constructor 3's, the same way.
   Type3UvScrollTick(host);
+  // ...and the warehouse water's, constructor 26's.
+  Type26RipplesTick();
 
   // The stage-2 car, which `RescueTargetInit` (`FUN_00451720`) allocates:
   // an actor's task, so after the scene's own -- the camera's among them --

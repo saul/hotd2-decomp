@@ -89,6 +89,11 @@ import {
 import { CLASS23_MOTIONS } from "../game/class23/records";
 // Data only, for the same reason: every clip the cat's two routines play.
 import { CAT_CLIPS } from "../game/class53/records";
+// Data only, for the same reason: the golden frog's type, clips and strips.
+import {
+  GOLDEN_FROG_CHAR_TYPE, GOLDEN_FROG_IDLE_MOTION, GOLDEN_FROG_SHOT_MOTION,
+  GOLDEN_FROG_STRIP_SLOTS,
+} from "../game/class41/item_pickup_slots";
 import { DRAG_TARGET_CLIPS } from "../game/class30/drag_clips";
 import { ZombieState } from "../game/class30/states";
 import {
@@ -1123,6 +1128,77 @@ async function resultFigureTemplates(stage: Stage, tables: ExeTables,
   return out;
 }
 
+/** Item set 3: `SpawnGoldenFrog` (`FUN_004722A0`)'s arm of the release. */
+const GOLDEN_FROG_ITEM_SET = 3;
+/** `g_class41_updates[63]`: `PropUpdateType63`, whose table lets one out. */
+const GOLDEN_FROG_TABLE_TYPE = 63;
+
+/**
+ * Whether this stage can make a golden frog: a container placement in item
+ * set 3 (a kinded prop, a falling container, constructor 37's pair, whose
+ * set is its `field_1f4`), a group with a member in it, a generic type 63
+ * -- whose table, `g_prop_type63_items`, holds one -- or constructor 68.
+ */
+export function stageMakesGoldenFrog(
+    tables: ExeTables, breakables: readonly Record<string, unknown>[]):
+    boolean {
+  const groups = tables.breakableGroups() as { item_set: number }[][];
+  return breakables.some((pl) =>
+    pl.item_set === GOLDEN_FROG_ITEM_SET
+    || (pl.container === "type37" && pl.field_1f4 === GOLDEN_FROG_ITEM_SET)
+    || (pl.container === "group"
+        && (groups[pl.group as number] ?? []).some(
+          (m) => m.item_set === GOLDEN_FROG_ITEM_SET))
+    || (pl.container === "generic" && pl.type === GOLDEN_FROG_TABLE_TYPE)
+    || pl.container === "golden_frog");
+}
+
+/**
+ * The template row the golden frog is drawn from: one hidden row of
+ * character type `0x1C`, at `ResultFigureTemplateAt(0x1C)`, which the
+ * character layer clones for each frog the port makes -- the result card's
+ * figures' arrangement, for the same reason: the frog is allocated with no
+ * descriptor (`SpawnGoldenFrog`, `FUN_004722A0`, and constructor 68), at a
+ * place decided in play. The type is baked both clips `GoldenFrogUpdate`
+ * plays, and given both players' score strips to clone
+ * (`GOLDEN_FROG_STRIP_SLOTS`). Nothing for a stage that cannot make one.
+ */
+async function goldenFrogTemplates(stage: Stage, tables: ExeTables,
+                                   breakables: readonly Record<string, unknown>[],
+                                   chars: Map<number, Character>):
+    Promise<Placement[]> {
+  if (!stageMakesGoldenFrog(tables, breakables)) return [];
+  const ct = GOLDEN_FROG_CHAR_TYPE;
+  if (!chars.has(ct)) {
+    const file = tables.characterAssetFile(ct);
+    if (!file) return [];
+    const built = build(tables, ct, file);
+    if (built === null) return [];
+    chars.set(ct, built);
+  }
+  const c = chars.get(ct)!;
+  for (const mid of [GOLDEN_FROG_IDLE_MOTION, GOLDEN_FROG_SHOT_MOTION]) {
+    if (c.motions.has(mid)) continue;
+    const baked = await bake(stage.source, tables, mid, c.boneCount);
+    if (baked !== null) c.motions.set(mid, baked);
+  }
+  if (!c.motions.has(GOLDEN_FROG_IDLE_MOTION)) return [];
+  for (const slot of GOLDEN_FROG_STRIP_SLOTS) c.heldSlots.add(slot);
+  const t = new Placement();
+  t.at = ResultFigureTemplateAt(ct);
+  t.cls = CLASS41_GOLDEN_FROG;
+  t.char_type = ct;
+  t.motion = GOLDEN_FROG_IDLE_MOTION;
+  t.hp = 0;
+  t.spawn = { at: t.at, class: CLASS41_GOLDEN_FROG, pos: [0, 0, 0],
+              yaw_deg: 0, orient: [0, 0, 0] };
+  t.synthetic = true;
+  return [t];
+}
+
+/** Class 0x41, which the port files the golden frog under. */
+const CLASS41_GOLDEN_FROG = 0x41;
+
 export function class46Tail(rec: Spawn): Record<string, unknown> {
   const b = rec.evt?.raw;
   const at = rec.offset + 0x24;
@@ -1856,7 +1932,9 @@ export interface ResolvedCharacters {
 export async function resolveForStage(
     stage: Stage, prog: Program | null, spawnRecords: Spawn[] | null,
     poseFrame: number | null = null, poseMotion: number | null = null,
-    cache: AssetCache = new AssetCache(stage)): Promise<ResolvedCharacters> {
+    cache: AssetCache = new AssetCache(stage),
+    breakables: readonly Record<string, unknown>[] = []):
+    Promise<ResolvedCharacters> {
   const tables = stage.tables;
   if (prog === null) {
     return { chars: new Map(), placements: [], entries: [] };
@@ -2683,6 +2761,18 @@ export async function resolveForStage(
     let flist = perType.get(t.char_type);
     if (!flist) { flist = []; perType.set(t.char_type, flist); }
     flist.push(t.spawn);
+  }
+
+  // -- the golden frog -----------------------------------------------------
+  //
+  // One hidden row of type 0x1C where a container can let one out; see
+  // `goldenFrogTemplates`.
+  for (const t of await goldenFrogTemplates(stage, tables, breakables,
+                                            chars)) {
+    placements.push(t);
+    let glist = perType.get(t.char_type);
+    if (!glist) { glist = []; perType.set(t.char_type, glist); }
+    glist.push(t.spawn);
   }
 
   const order = [...perType.keys()].sort((a, b) => a - b);

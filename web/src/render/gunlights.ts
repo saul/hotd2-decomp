@@ -123,10 +123,11 @@ const GUN_LIGHTS = 2;
 const LIGHTS_BEGIN = patchLightsBegin(ShaderChunk.lights_fragment_begin);
 
 /**
- * The point lights the rest of `g_entity_lights` can hold — class 0x41 type
- * 48's lamp and class 0x2B selector 0 (`game/class2B/`) claim one through
- * `EntityLightAcquireSlot`, from entry 3 up. Class 0x2B's selectors 1 and 2
- * claim spots there, which this layer does not draw.
+ * The lights the rest of `g_entity_lights` can hold, from entry 3 up, each
+ * claimed through `EntityLightAcquireSlot`: points -- class 0x41 type 48's
+ * lamp, class 0x2B selector 0 -- and spots -- class 0x2B selectors 1 and 2,
+ * stage 4 block 10's and stage 5 block 0's (`game/class2B/`). Each entry
+ * gets one of each kind here and shows the one its `type` names.
  */
 const ENTITY_POINT_FIRST = 3;
 
@@ -223,6 +224,8 @@ export class GunLights implements System<RenderContext> {
   private readonly spots: SpotLight[] = [];
   /** Entries 3..15 of `g_entity_lights` that are D3D point lights. */
   private readonly points: PointLight[] = [];
+  /** Entries 3..15 of `g_entity_lights` that are D3D spot lights. */
+  private readonly entitySpots: SpotLight[] = [];
   /** Meshes under a `draw_mode` 1 region node. */
   private regionLit: Mesh[] = [];
   /**
@@ -267,6 +270,13 @@ export class GunLights implements System<RenderContext> {
       pt.visible = false;
       this.points.push(pt);
       this.group.add(pt);
+      // No shadow either, for the same reason, and the gun lights' hard cone
+      // with its presentation-only soft rim (see the header).
+      const sp = new SpotLight(0xffffff, 0, 0, Math.PI / 16, PENUMBRA, 0);
+      sp.name = `entity_spot_${i}`;
+      sp.visible = false;
+      this.entitySpots.push(sp);
+      this.group.add(sp, sp.target);
     }
     scene.add(this.group);
   }
@@ -383,6 +393,30 @@ export class GunLights implements System<RenderContext> {
       pt.distance = e.range;
       pt.decay = 2;
       pt.position.set(e.pos.x, e.pos.y, e.pos.z);
+    }
+    // ...and the spots. Class 0x2B's two write `att0` and nothing past it,
+    // `theta` and not `phi`, a grey diffuse and a 65536 range: the gun
+    // light's terms exactly, so the gun light's mapping -- the half-angle,
+    // `diffuse / att0` and no fall with distance.
+    for (let k = 0; k < this.entitySpots.length; k++) {
+      const sp = this.entitySpots[k];
+      const idx = ENTITY_POINT_FIRST + k;
+      const e = G.g_entity_lights[idx];
+      const on = !!e && e.type === RenderLightType.Spot && this.source.live(idx);
+      sp.visible = on;
+      if (!on) continue;
+      any = true;
+      const peak = Math.max(e.diffuse[0], e.diffuse[1], e.diffuse[2], 1e-6);
+      sp.color.setRGB(e.diffuse[0] / peak, e.diffuse[1] / peak,
+                      e.diffuse[2] / peak);
+      sp.intensity = (Math.PI * peak) / Math.max(e.att0, 1e-6);
+      sp.angle = e.theta / 2;
+      sp.distance = 0;
+      sp.decay = 0;
+      sp.position.set(e.pos.x, e.pos.y, e.pos.z);
+      sp.target.position.set(e.pos.x + e.dir.x, e.pos.y + e.dir.y,
+                             e.pos.z + e.dir.z);
+      sp.target.updateMatrixWorld();
     }
     const [r, g, b] = G.g_light_array_ambient;
     gunAmbient.value.setRGB(r, g, b);

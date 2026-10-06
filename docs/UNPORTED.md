@@ -43,9 +43,9 @@ the same commit.
 * **`0x13` scripted prop** -- `g_prop_behaviours` entries 3
   (`CarriedPropThrowAtTarget`, `FUN_004432D0`), 5 (`CarriedPropRollAtCamera`,
   `FUN_00443DC0`), and the three the module calls unread -- `0x0043FFC0`,
-  `0x004400D0`, `0x00445050`, which by elimination are entries 6, 7 and 9;
-  carrier routine 3 (`0x00440AD0`); routine 1's and 6's screen-test exit
-  (`FUN_004459C0`).
+  `0x004400D0`, `0x00445050`, which by elimination are entries 6, 7 and 9.
+  Every carrier routine is ported, routine 3 and routines 1's and 6's
+  screen-test exit included.
 * **`0x20` one-hit target** -- the damaged-part swap.
 * **`0x21` rescue target** -- the sixteen body parts.
 * **`0x25` scripted humanoid** -- `ScriptedHumanoidAimHeadAtCamera`

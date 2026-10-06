@@ -4411,6 +4411,74 @@ console.log("\nclass 0x13's prop: the record's three angles, drawn RotX first");
   SetGameTables({ types: {}, placements: [] } as never);
 }
 
+console.log("\nclass 0x13's prop: the alpha and the layer the behaviour leaves");
+{
+  // `ScriptedPropUpdate13` (`FUN_0043FE90`) draws `AssetDrawSlotWithAlpha`
+  // whenever `sub+0x18` is not 1.0 (`0x0043FF2F`..`0x0043FF62`), in the
+  // layer the behaviour set -- carrier selector 3's 9 (`FUN_00440AD0`, every
+  // arm of states 1..6). Stage 4's monitor, `0x966`, at its dimmed 0.7.
+  const { RunPendingInits, SpawnSlotActors } =
+    await import("../src/game/director");
+  const { SetGameTables } = await import("../src/game/tables");
+  const { Rng } = await import("../src/core/rng");
+  const { BoxGeometry } = await import("three");
+  const { meshDrawAlpha } = await import("../src/render/draw_order");
+  await import("../src/game/classes");
+
+  const SLOT = 0x966;
+  const root = new Obj3D();
+  const part = new Obj3D();
+  part.name = `slots_actor_fixed000_slot_${SLOT.toString(16).padStart(4, "0")}`;
+  part.userData = { hod2_kind: "rig_part", hod2_rig: "slots_actor" };
+  part.add(new Mesh(new BoxGeometry(1, 1, 1), new MeshBasicMaterial()));
+  root.add(part);
+  ResetGameGlobals();
+  const layer = new SlotModelLayer();
+  layer.adopt(root);
+  const AT = 35916;
+  SetGameTables({
+    types: {}, placements: [{
+      at: AT, class: 0x13, char_type: -1, motion: null, hp: 0,
+      yaw: 0, init_flags: 0x8000,
+      class13: { slot: SLOT, cam_path: 180, cam_frame: 0, scale: 1,
+                 behaviour: 8, selector: 3 },
+    }],
+  } as never);
+  SpawnSlotActors([{ at: AT, class: SpawnClass.ScriptedProp,
+                     pos: [318.281982421875, 0, -353.91998291015625] }]);
+  RunPendingInits(new Rng(1));
+  const ctx = { paths: null } as unknown as Parameters<typeof layer.update>[0];
+  const a = G.g_object_list.find((o) => o.at === AT) as
+    { prop13: { alpha: number; drawLayer: number } } | undefined;
+  const meshOf = () => {
+    let m: InstanceType<typeof Mesh> | null = null;
+    layer.nodeFor(AT)?.traverse((o) => {
+      if ((o as InstanceType<typeof Mesh>).isMesh) m = o as InstanceType<typeof Mesh>;
+    });
+    return m as InstanceType<typeof Mesh> | null;
+  };
+  layer.update(ctx);
+  const before = layer.nodeFor(AT)?.renderOrder;
+  const m0 = meshOf();
+  check("a class-0x13 prop at alpha 1.0 in layer 8 draws plainly, in the "
+        + "template's order", !!a && !!m0 && meshDrawAlpha(m0) === null
+        && before === 0, `${before} ${m0 && meshDrawAlpha(m0)}`);
+  if (a) { a.prop13.alpha = Math.fround(0.7); a.prop13.drawLayer = 9; }
+  layer.update(ctx);
+  const m1 = meshOf();
+  check("...at 0.7 in layer 9 it is faded to 0.7 and ordered one layer on",
+        !!m1 && Math.abs((meshDrawAlpha(m1) ?? 0) - 0.7) < 1e-6
+        && layer.nodeFor(AT)?.renderOrder === 1,
+        `${m1 && meshDrawAlpha(m1)} ${layer.nodeFor(AT)?.renderOrder}`);
+  if (a) a.prop13.alpha = 1;
+  layer.update(ctx);
+  const m2 = meshOf();
+  check("...and back at 1.0 the fade is gone",
+        !!m2 && meshDrawAlpha(m2) === null);
+  G.g_object_list.length = 0;
+  SetGameTables({ types: {}, placements: [] } as never);
+}
+
 console.log("\nclass 0x12's strip: the cursor's slot, truncated, under class 0x13's matrix");
 {
   // `ScriptedPropUpdate12` (`FUN_0043FA60`) draws `MatrixTranslate(obj+0x40);

@@ -4,12 +4,19 @@ import { Events } from "../../src/core/events";
 import { ActorSpawn, GameUpdate } from "../../src/game/director";
 import { ActorAdvanceMotion } from "../../src/game/motion";
 import { MotionFlag } from "../../src/game/actor";
-import { ScriptedPropUpdate13, g_carrier_prop_routines, SFX_CARRIER_BOW }
-  from "../../src/game/class13";
+import {
+  CARRIER6_PATH_END, CARRIER_PATH_END, ScriptedPropUpdate13,
+  g_carrier_prop_routines, SFX_CARRIER_BOW,
+} from "../../src/game/class13";
+import {
+  CarrierPropRoutine3, SFX_CARRIER3_START,
+} from "../../src/game/class13/routine3";
+import { CarriedPropIsOnScreen } from "../../src/game/combat/permits";
 import {
   CARRIER4_SPRITE_FIRST, CARRIER4_SPRITE_LAST, CARRIER_SELECTORS_PORTED,
   CarrierDrawSlots, CarrierEffects, CarrierRoutine0State,
-  CarrierRoutine4State, CarrierState, type ScriptedPropTail,
+  CarrierRoutine3State, CarrierRoutine4State, CarrierState,
+  type ScriptedPropTail,
 } from "../../src/game/class13/state";
 import {
   CARRIER4_FX_A_AT, CARRIER4_OFFSET_Z, SFX_CARRIER4_CUE,
@@ -2695,6 +2702,177 @@ import {
              === "21@461,21@460"
           && CarrierEffects(8).map((e) => e.join("@")).join()
              === "24@460,24@461");
+  }
+
+  // -- class 0x13 selector 3: stage 4's monitor -----------------------------
+  {
+    // Stage 4 block 23 step 1 op 10, evt 0x8C4C: slot 0x966, despawn on
+    // camera path 180 frame 0, at (318.28, 0, -353.92) with no angles --
+    // spawned at frame 90 of path 179. Every number below is the routine's
+    // own: 0x958..0x95D, 0.03 and 0.7, 0x1DF, 0xB9.
+    const rng = new Rng(133);
+    scene(0, rng);
+    const events = new Events();
+    const sounds: number[] = [];
+    events.on("sound.play", (e) => sounds.push(e.id));
+    const fr = (r: Rng): ClassFrame =>
+      ({ dt: 1 / 60, rng: r, host: HOST, events });
+    G.g_active_cam_path = 179;
+    G.g_cam_path_frame = 90;
+    const at = vec3(318.281982421875, 0, -353.91998291015625);
+    const mon = ActorSpawn(0x8c4c, SpawnClass.ScriptedProp, -1, "monitor", {
+      class13: { slot: 0x966, cam_path: 180, cam_frame: 0, scale: 1,
+                 behaviour: 8, selector: 3 },
+      pos: vec3(at.x, at.y, at.z),
+    }, rng);
+    const t = () => (mon as { prop13: ScriptedPropTail }).prop13;
+    const st = () => t().state as CarrierRoutine3State;
+    check("selector 3 is installed and makes the monitor the carrier",
+          g_carrier_prop_routines[3] === CarrierPropRoutine3
+          && G.g_civilian_carrier === mon.at && CARRIER_SELECTORS_PORTED.has(3)
+          && CarrierDrawSlots(3).length === 0);
+    ScriptedPropUpdate13(mon, fr(rng));
+    check("its first frame allocates the block at 0x958, plays MONITOR3 and "
+          + "sets no layer",
+          st() === CarrierRoutine3State.CountUp && t().monitorCursor === 0x958
+          && sounds.join() === String(SFX_CARRIER3_START) && t().alpha === 1
+          && t().drawLayer === 8,
+          `${st()} ${t().monitorCursor} ${sounds} ${t().drawLayer}`);
+    check("...and the update's draw leaves its point in obj+0x70",
+          mon.shotCentre.x === at.x && mon.shotCentre.z === at.z);
+    let n = 0;
+    while (st() === CarrierRoutine3State.CountUp && n < 100) {
+      ScriptedPropUpdate13(mon, fr(rng)); n++;
+    }
+    check("the cursor climbs to 0x95D in five frames and the sixth moves on, "
+          + "every one in layer 9",
+          n === 6 && t().monitorCursor === 0x95d && t().drawLayer === 9
+          && st() === CarrierRoutine3State.FadeDown,
+          `${n} ${t().monitorCursor.toString(16)} ${t().drawLayer}`);
+    const alphas: number[] = [];
+    n = 0;
+    while (st() === CarrierRoutine3State.FadeDown && n < 100) {
+      ScriptedPropUpdate13(mon, fr(rng)); n++; alphas.push(t().alpha);
+    }
+    check("the alpha falls 0.03f a frame and the eleventh step clamps it to "
+          + "0.7f",
+          n === 11 && alphas[0] === Math.fround(1 - Math.fround(0.03))
+          && alphas[10] === Math.fround(0.7)
+          && st() === CarrierRoutine3State.WaitFrame,
+          alphas.join(" "));
+    G.g_active_cam_path = 181;
+    G.g_cam_path_frame = 0x1de;
+    ScriptedPropUpdate13(mon, fr(rng));
+    check("it waits for camera frame 0x1DF", st()
+          === CarrierRoutine3State.WaitFrame);
+    G.g_cam_path_frame = 0x1df;
+    ScriptedPropUpdate13(mon, fr(rng));
+    check("...of whatever path is playing, and loads 0xB9",
+          st() === CarrierRoutine3State.Hold && t().monitorHold === 0xb9);
+    n = 0;
+    while (st() === CarrierRoutine3State.Hold && n < 1000) {
+      ScriptedPropUpdate13(mon, fr(rng)); n++;
+    }
+    check("the hold is a post-decrement: 0xBA frames, ending on -1",
+          n === 0xba && t().monitorHold === -1, `${n} ${t().monitorHold}`);
+    n = 0;
+    while (st() === CarrierRoutine3State.FadeUp && n < 100) {
+      ScriptedPropUpdate13(mon, fr(rng)); n++;
+    }
+    check("the alpha climbs back in eleven and clamps to 1.0",
+          n === 11 && t().alpha === 1
+          && st() === CarrierRoutine3State.CountDown, `${n} ${t().alpha}`);
+    n = 0;
+    while (st() === CarrierRoutine3State.CountDown && n < 100) {
+      ScriptedPropUpdate13(mon, fr(rng)); n++;
+    }
+    check("the cursor steps back to 0x958 and the sixth frame moves to the "
+          + "kill", n === 6 && t().monitorCursor === 0x958
+          && st() === CarrierRoutine3State.Kill && !mon.despawned);
+    ScriptedPropUpdate13(mon, fr(rng));
+    check("...which takes it out of the pool",
+          mon.despawned && !mon.visible);
+    check("it never moved or turned: the record's pose for life",
+          mon.pos.x === at.x && mon.pos.y === at.y && mon.pos.z === at.z
+          && mon.pitch === 0 && mon.yaw === 0 && mon.roll === 0);
+  }
+
+  // -- class 0x13 selectors 1 and 6: the screen test that ends state 6 ------
+  {
+    // `CarriedPropIsOnScreen` (`FUN_004459C0`) on the point the update's
+    // draw left the frame before, radius 40. The camera here sits at
+    // (0, 0, 100) looking down -z, so a boat at x 0 is dead ahead and one at
+    // x 1000 is far off the right edge.
+    for (const selector of [1, 6]) {
+      const rng = new Rng(134 + selector);
+      scene(0, rng);
+      G.g_civilians_alive = 0;
+      const host: GameHost = {
+        ...HOST,
+        objectPath: () => null,
+        viewSpaceOfPoint: (p, out) => {
+          out.x = p.x; out.y = p.y; out.z = p.z - 100;
+          return true;
+        },
+      };
+      const fr = (r: Rng): ClassFrame => ({ dt: 1 / 60, rng: r, host });
+      const boat = ActorSpawn(0x9b10 + selector, SpawnClass.ScriptedProp, -1,
+                              "boat", {
+        class13: { slot: 6711, cam_path: 130, cam_frame: 170, scale: 1,
+                   behaviour: 8, selector },
+        pos: vec3(0, 0, -50),
+      }, rng);
+      const t = () => (boat as { prop13: ScriptedPropTail }).prop13;
+      ScriptedPropUpdate13(boat, fr(rng));
+      t().state = CarrierState.Wake;
+      G.g_cam_path_frame = selector === 1 ? CARRIER_PATH_END
+        : CARRIER6_PATH_END;
+      ScriptedPropUpdate13(boat, fr(rng));
+      check(`selector ${selector}: on screen, state 6 holds`,
+            t().state === CarrierState.WakeSpent
+            && !(boat.flags & ActorFlag.Dead), CarrierState[t().state]);
+      boat.pos.x = 1000;
+      ScriptedPropUpdate13(boat, fr(rng));
+      check(`selector ${selector}: the test reads last frame's point, so `
+            + "the frame it leaves still holds",
+            t().state === CarrierState.WakeSpent && boat.shotCentre.x === 1000);
+      ScriptedPropUpdate13(boat, fr(rng));
+      check(`selector ${selector}: off the frame it raises 0x4000000 on `
+            + "itself and goes to state 7",
+            t().state === CarrierState.Gone
+            && (boat.flags & ActorFlag.Dead) !== 0 && !boat.despawned);
+      ScriptedPropUpdate13(boat, fr(rng));
+      check(`selector ${selector}: ...which despawns it`, boat.despawned);
+    }
+    // Behind the eye is off whatever the projection says.
+    check("CarriedPropIsOnScreen: at or behind the eye is off, a sphere "
+          + "straddling the edge is on, one clear of it is off",
+          !CarriedPropIsOnScreen({ shotPoint: vec3(0, 0, 0), radius: 40 })
+          && CarriedPropIsOnScreen({ shotPoint: vec3(0, 0, -100), radius: 40 })
+          // centre at 320 / 640.2 * 120 = 60 off-axis at depth 120 is just
+          // past the right edge; a radius of 40 pulls its near side back in.
+          && CarriedPropIsOnScreen({ shotPoint: vec3(70, 0, -120), radius: 40 })
+          && !CarriedPropIsOnScreen({ shotPoint: vec3(70, 0, -120), radius: 1 })
+          && !CarriedPropIsOnScreen({ shotPoint: vec3(0, 60, -100), radius: 1 }));
+    {
+      // No camera to measure against: the boat stays, as a carried prop does.
+      const rng = new Rng(140);
+      scene(0, rng);
+      const fr = (r: Rng): ClassFrame =>
+        ({ dt: 1 / 60, rng: r, host: { ...HOST, objectPath: () => null } });
+      const boat = ActorSpawn(0x9b20, SpawnClass.ScriptedProp, -1, "boat", {
+        class13: { slot: 6711, cam_path: 130, cam_frame: 170, scale: 1,
+                   behaviour: 8, selector: 1 },
+        pos: vec3(5000, 0, 5000),
+      }, rng);
+      const t = () => (boat as { prop13: ScriptedPropTail }).prop13;
+      ScriptedPropUpdate13(boat, fr(rng));
+      t().state = CarrierState.WakeSpent;
+      ScriptedPropUpdate13(boat, fr(rng));
+      ScriptedPropUpdate13(boat, fr(rng));
+      check("with no camera the carrier holds state 6",
+            t().state === CarrierState.WakeSpent && !boat.despawned);
+    }
   }
 }
 

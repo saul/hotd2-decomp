@@ -49,13 +49,15 @@
  * They used to be declared a divergence, for want of their slots in the
  * bundle.
  *
- * `FUN_004459C0`, the on-screen test state 6 uses to decide when to despawn,
- * projects the shot radius through `g_projection_distance_px / obj+0x78` and
- * compares it against the viewport. It is **not** ported, in either routine
- * that reaches it, so the boat holds state 6 and the descriptor's own cue is
- * what removes it; each of the two declares that at its own `case`.
+ * State 6 leaves through a screen test, `CarriedPropIsOnScreen`
+ * (`FUN_004459C0`): the sphere of radius `obj+0x124` (40.0) at the
+ * view-space point `obj+0x70`, which `ScriptedPropUpdate13`'s draw took the
+ * frame before, projected at `g_projection_distance_px` against a 640x480
+ * frame. Off it, the boat raises `0x4000000` on itself and goes to state 7,
+ * which despawns it. Both routines that reach it run it.
  */
-import type { Actor } from "../actor";
+import { ActorFlag, type Actor } from "../actor";
+import { CarriedPropIsOnScreen } from "../combat/permits";
 import { ActorDespawn } from "../despawn";
 import { G } from "../globals";
 import { CameraBlockYaw } from "../camera/view";
@@ -65,6 +67,7 @@ import {
 import { SpawnClass } from "../spawn_class";
 import { CarrierPropRoutine0 } from "./routine0";
 import { CarrierPropRoutine2 } from "./routine2";
+import { CarrierPropRoutine3 } from "./routine3";
 import { CarrierPropRoutine4 } from "./routine4";
 import { CarrierPropRoutine5 } from "./routine5";
 import { QueryGroundHeightAt } from "../coli";
@@ -98,6 +101,21 @@ export const SFX_CARRIER_BOW = 0xb16a9;
  * state 6 makes, `FUN_004459C0`, which pads the projection by it.
  */
 const CARRIER_HIT_RADIUS = 40.0;
+const _view = vec3();
+
+/**
+ * `CarriedPropIsOnScreen(obj)` (`FUN_004459C0`) as states 6 of routines 1
+ * and 6 call it, at `0x00440712` and `0x004416F2`. `[port-only]` as a
+ * function: the port keeps `obj+0x70` in world space ({@link
+ * Actor.shotCentre}, which {@link ScriptedPropUpdate13} writes where the
+ * draw does) and takes it into the camera's space here, as
+ * `RegisterForShotTest` does. With no camera there is no frame to leave, and
+ * the carrier stays, as `CarriedPropDeflectedFlight` keeps its prop.
+ */
+function CarrierIsOnScreen(obj: Actor, f: ClassFrame): boolean {
+  if (!f.host.viewSpaceOfPoint?.(obj.shotCentre, _view)) return true;
+  return CarriedPropIsOnScreen({ shotPoint: _view, radius: obj.hitRadius });
+}
 /** The two `op_` object paths `CarrierPropRoutine1` rides. */
 export const CARRIER_PATH_MOOR = 0x15e;
 export const CARRIER_PATH_RUN = 0x15f;
@@ -214,11 +232,12 @@ export function ScriptedPropInit13(obj: Actor): void {
  *
  * Sets `g_civilian_carrier` and then overwrites `sub+0x00` with one of seven
  * routines chosen through the jump table at `0x004401E4` — see
- * {@link g_carrier_prop_routines}. Selectors 0, 1 and 6 are ported (stage
- * 2's block-16 boat and stage 3's two), and 2 and 9 (`FUN_004408A0`,
- * `class13/routine2.ts`, the stage-4 boss's transport); the other three
- * routines — `0x00440AD0` (3), `0x00440C20` (4 and 7) and `0x00441000` (5
- * and 8), all stage 4's — are unread. `[open]`
+ * {@link g_carrier_prop_routines}, all ten selectors ported: 0, 1 and 6
+ * (stage 2's block-16 boat and stage 3's two), and stage 4's -- 2 and 9
+ * (`FUN_004408A0`, the boss's transport), 3 (`FUN_00440AD0`, the monitor),
+ * 4 and 7 (`FUN_00440C20`) and 5 and 8 (`FUN_00441000`), the set models.
+ * Read off the table at `0x004401E4`: `0x004401B1`, `B8`, `DB`, `BF`, `CD`,
+ * `D4`, `C6`, `CD`, `D4`, `DB`.
  *
  * The carrier global is written **whatever the selector**, because the engine
  * writes it before it dispatches, and a rider placed after an unported carrier
@@ -401,16 +420,13 @@ export function CarrierPropRoutine1(obj: Actor, f: ClassFrame): void {
           && G.g_cam_path_frame >= CARRIER_PATH_END) {
         sub.state = CarrierState.WakeSpent;
       }
-      // `if (FUN_004459C0(obj) == 0) { obj+0x34 |= 0x4000000; state = 7; }`
-      // is the engine's exit from here, and it is a **screen** test: the
-      // routine projects the shot radius at `obj+0x124` through
-      // `g_projection_distance_px / obj+0x78` and compares it against the
-      // viewport. That is a rendering question the port has no answer to on a
-      // headless frame, and answering it wrongly despawns the boat while it is
-      // still on screen. It is left unported, which costs nothing: the
-      // descriptor's own cue removes the object anyway — stage 3's boat on
-      // camera path 130 frame 170, well after the path it rides has run out.
-      // [diverges]
+      // `0x00440707`..`0x00440733`: state 6, on the frame it is reached too,
+      // asks the screen test; off the frame, `obj+0x34 |= 0x4000000` and
+      // state 7, then the shared tail all the same.
+      if (sub.state === CarrierState.WakeSpent && !CarrierIsOnScreen(obj, f)) {
+        obj.flags |= ActorFlag.Dead;
+        sub.state = CarrierState.Gone;
+      }
       break;
     }
 
@@ -516,14 +532,18 @@ export function CarrierPropRoutine6(obj: Actor, f: ClassFrame): void {
     case CarrierState.WakeSpent:
       // `0x004415FC`: the strip drawn at the carrier's `Translate(0, 0, -2)`
       // and stepped, then `state == 5 && g_cam_path_frame >=
-      // g_cam_path_length[0x161]` moves it to 6, and 6's screen test is the
-      // same unported exit as routine 1's. [diverges]
+      // g_cam_path_length[0x161]` moves it to 6, and 6's screen test is
+      // routine 1's exit, at `0x004416E7`..`0x00441713`.
       sub.stripDrawn = sub.stripCel;
       sub.stripCel += 1;
       if (sub.stripCel > STRIP_CEL_LAST) sub.stripCel = STRIP_CEL_FIRST;
       if (sub.state === CarrierState.Wake
           && G.g_cam_path_frame >= CARRIER6_PATH_END) {
         sub.state = CarrierState.WakeSpent;
+      }
+      if (sub.state === CarrierState.WakeSpent && !CarrierIsOnScreen(obj, f)) {
+        obj.flags |= ActorFlag.Dead;
+        sub.state = CarrierState.Gone;
       }
       break;
     case CarrierState.Gone:
@@ -538,12 +558,18 @@ export function CarrierPropRoutine6(obj: Actor, f: ClassFrame): void {
  *
  * The despawn cue first — `g_active_cam_path` and `g_cam_path_frame` both
  * equal to the pair the descriptor named — then the behaviour. The draw that
- * follows it in the engine is `render/slotmodels.ts`'s.
+ * follows it in the engine is `render/slotmodels.ts`'s, at the alpha
+ * `sub+0x18` and the layer the behaviour left; what the draw writes back into
+ * the object is here: `MatrixGetTranslation` into `obj+0x70`
+ * (`0x0043FF8E`..`0x0043FF94`), the point routines 1 and 6 test against the
+ * screen on the next frame. A behaviour that despawns or kills its object
+ * does not return to the draw (`L72`).
  *
  * The behaviour runs **before** the draw (`CALL [EDI]` at `0x0043FEC9`, the
  * matrix from `0x0043FEDE`), so the record's angles are drawn only where the
- * behaviour writes none: behaviour 0, and carrier selector 3 (`0x00440AD0`,
- * which never stores to the object), both for life. Every other carrier
+ * behaviour writes none: behaviour 0, and carrier selector 3's
+ * `CarrierPropRoutine3` (`FUN_00440AD0`), which never stores to the object,
+ * both for life. Every other carrier
  * routine falls from state 0 into {@link PropSeatOnObjectPath} on its first
  * call, and its first draw is already on the path. `[proved]`
  */
@@ -555,8 +581,15 @@ export function ScriptedPropUpdate13(obj: Actor, f: ClassFrame): void {
     ActorDespawn(obj);
     return;
   }
-  if (sub.behaviour !== PropBehaviour.SelectCarrierRoutine) return;
-  g_carrier_prop_routines[sub.selector]?.(obj, f);
+  if (sub.behaviour === PropBehaviour.SelectCarrierRoutine) {
+    g_carrier_prop_routines[sub.selector]?.(obj, f);
+    if (obj.despawned) return;
+  }
+  // `T(obj+0x40)` is the matrix's translation before the turns and the
+  // scale, so the point is the position; the port keeps it in world space.
+  obj.shotCentre.x = obj.pos.x;
+  obj.shotCentre.y = obj.pos.y;
+  obj.shotCentre.z = obj.pos.z;
 }
 
 /**
@@ -570,6 +603,7 @@ export const g_carrier_prop_routines: Partial<Record<number,
   [CARRIER_ROUTINE_PORTED]: CarrierPropRoutine1,
   // `FUN_004408A0` is installed for both: 9 is 2 arriving parked.
   2: CarrierPropRoutine2,
+  3: CarrierPropRoutine3,
   // `FUN_00440C20` for 4 and 7, `FUN_00441000` for 5 and 8: 7 and 8 are 4
   // and 5 arriving already seated.
   4: CarrierPropRoutine4,

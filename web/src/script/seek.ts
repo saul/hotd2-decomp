@@ -46,9 +46,50 @@ import type { Walker } from "./walker";
  * was discarded. A `TypeError` here is the same trade `L15` describes for
  * `querySelector(...) as T`: fail at the call rather than three conclusions
  * later. `L44`.
+ *
+ * **A step the run never sits on is refused in its own block.** The engine
+ * enters a routed block at step 1 (`EvtAdvanceStepOrRoute`, `0x0045F000`), and
+ * picks step 0 only at a scene load in app state 5 or 9 or game mode 2 or 3
+ * (`EvtLoadBlockProgram`, `0x0045EBC0`) -- never in the Arcade or Original
+ * play the bundles are exported for. `[proved]` So `?block=2&step=0` names an
+ * address no run reaches, and the replay used to hunt for it to the end of the
+ * scene: it came back `false` with the walker `finished` and the next stage's
+ * entry block written, the page showed the end of stage 1, and the first frame
+ * of play loaded stage 2 (the boss banner's `block=14&step=0` landed on 14/3/0
+ * for the same reason). Once the replay has *left* the target block without
+ * arriving, the address is unreachable: a later visit is entered at step 1
+ * again and walks the same steps. So the replay stops there, returns `false`,
+ * and {@link seekToward} reports where the run entered the block -- the first
+ * instruction it reached there, an address the engine does reach. **It does
+ * not replay there itself.** A replay writes `G` -- script flags, the route
+ * history, the actor pool -- and `Walker.reset` clears none of it, so a second
+ * pass from here would land at the block's entry with the rest of the stage
+ * already played. Going there is the caller's, through the same reset its first
+ * seek took (`Player.seekTo`). The two step writers outside those routines that
+ * this argument does not cover, `FUN_00497440` and `FUN_00497760`, sit with the
+ * Training select screen and read `g_training_out`, so they are `[likely]`
+ * Training-only; `ItemSelectFinish` (`FUN_004895C0`) writes step 1 *within* the
+ * block, which the rule allows.
  */
 export function seekTo(w: Walker, block: number, step = 0, opIndex = 0,
                        maxOps = 500000, entryBlock?: number): boolean {
+  return seekToward(w, block, step, opIndex, maxOps, entryBlock).arrived;
+}
+
+/** What a seek found: whether it arrived, and if not, whether it could. */
+export interface SeekResult {
+  arrived: boolean;
+  /**
+   * The first `[step, opIndex]` the replay occupied in the target block, or
+   * null when it never got there. On a miss with this set, the address is
+   * inside a block the run does reach and this is where the run enters it.
+   */
+  entered: [number, number] | null;
+}
+
+/** {@link seekTo}, saying where the run entered the target block. */
+export function seekToward(w: Walker, block: number, step = 0, opIndex = 0,
+                           maxOps = 500000, entryBlock?: number): SeekResult {
   requireInt("block", block);
   requireInt("step", step);
   requireInt("opIndex", opIndex);
@@ -81,15 +122,20 @@ function requireInt(name: string, v: unknown): void {
   throw new TypeError(`seekTo: ${name} must be a whole number, got ${got}`);
 }
 
+/** The replay itself. */
 function seekInner(w: Walker, block: number, step: number, opIndex: number,
-                   maxOps: number): boolean {
+                   maxOps: number): SeekResult {
   let executed = 0;
   const arrived = () =>
     w.block === block && w.step === step && w.opIndex >= opIndex;
+  let entered: [number, number] | null = null;
   let steered = -1;
   let steerChoice = -1;
   while (executed++ < maxOps) {
     if (arrived() || w.finished) break;
+    if (w.block === block) entered ??= [w.step, w.opIndex];
+    // Left the block without arriving: see `seekTo`.
+    else if (entered) break;
     // Point the *next* block transition at the goal.
     //
     // A branch route only pauses when it has more than one live target;
@@ -128,7 +174,7 @@ function seekInner(w: Walker, block: number, step: number, opIndex: number,
   w.wait = null;
   w.branch = null;
   w.host.onBranch(null);
-  return arrived();
+  return { arrived: arrived(), entered };
 }
 
 /**

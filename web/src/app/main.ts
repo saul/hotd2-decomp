@@ -53,7 +53,7 @@ import { PlayerState as GamePlayerState } from "../game/player_state";
 import { PlayerBodiesCreate } from "../game/player_body";
 import { OriginalRunStartWithLastChoice } from "../game/class6e";
 import { SpawnClass } from "../game/spawn_class";
-import { seekTo as seekWalkerTo } from "../script/seek";
+import { seekToward } from "../script/seek";
 import { CameraReseatFromFrame } from "../game/camera/view";
 import { readViewPrefs, writeViewPrefs } from "./viewprefs";
 import { Bgm } from "../audio/bgm";
@@ -1946,7 +1946,7 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     this.playing = false;
     this.clearFeed();
     // No `hudLayer.reset()` here any more. The shutter and the caption are
-    // the walker's state, `seekWalkerTo` resets it with everything else, and
+    // the walker's state, `seekToward` resets it with everything else, and
     // `world.resync` redraws from what the replay left -- one rebuild path
     // rather than one path plus a thing this had to remember.
     this.shooting.reset();
@@ -1983,7 +1983,22 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     // timeline this seek has just left.
     this.newSession();
     this.ring.clear();
-    seekWalkerTo(w, block, step, op);
+    // From the entry this run opened at, as the deep link's seek does. Without
+    // it a run that opened at stage 3's block 7 replayed from block 0.
+    const r = seekToward(w, block, step, op, undefined, this.entry);
+    if (!r.arrived && r.entered
+        && (r.entered[0] !== step || r.entered[1] !== op)) {
+      // An address inside a block the run reaches, at a step it never sits
+      // on -- step 0, which only a scene load in Training, Boss Mode or the
+      // attract demo runs.
+      // The replay stopped as it left the block; land where the run entered
+      // it, through this same reset, since the replay has written `G` past
+      // there. See `seekTo` in `script/seek.ts`.
+      this.seekTo(block, r.entered[0], r.entered[1]);
+      this.noteSeekMiss(block, step, op);
+      return;
+    }
+    if (!r.arrived) this.noteSeekMiss(block, step, op);
     // The replay runs no frame, so the HUD readouts -- which the engine draws
     // every frame -- would be the reset's empty list. See the routine.
     PlayerTasksDrawWithoutAFrame();
@@ -1999,11 +2014,28 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     this.world.resync(this.ctx);
     this.syncBgmToWalker();
     this.net.host?.discontinuity();
-    this.state.block = block;
-    this.state.step = step;
-    this.state.op = op;
+    // Where the replay is, not where it was asked to go: the two differ when
+    // the address was refused, and the URL is how a reader finds out.
+    this.markAddress();
     this.state.slot = this.state.frame = undefined;
     this.pushUrl();
+  }
+
+  /**
+   * Say that a seek did not arrive, and where it is instead. `console.warn`
+   * as well as the feed, because a headless harness reads the one and a
+   * person the other.
+   */
+  noteSeekMiss(block: number, step: number, op: number): void {
+    const w = this.walker;
+    const at = w ? `${w.block}/${w.step}/${w.opIndex}` : "nowhere";
+    const note = `no route to ${block}/${step}/${op}; showing ${at}`;
+    console.warn(note);
+    this.onFeed({
+      seq: -1, block: w?.block ?? -1, step: -1, opIndex: -1,
+      op: { i: -1, at: 0, op: -1, name: "seek", cat: "flow" },
+      note,
+    });
   }
 
   /** `?slot=59&frame=170`: pose the camera straight off a path, no script. */

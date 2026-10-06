@@ -24,7 +24,7 @@ import { EvtOpSpawnIfOnePlayer, EvtOpSpawnIfTwoPlayers }
 import { G, ResetGameGlobals, RestoreGameGlobals, type Globals }
   from "../src/game/globals";
 import type { CamJson, OpJson, ScriptJson } from "../src/bundle";
-import { seekTo } from "../src/script/seek";
+import { seekTo, seekToward } from "../src/script/seek";
 import { CameraActorTick, CameraUpdateTick } from "../src/game/camera/actor";
 import { EvtActionHandler } from "../src/game/camera/driver";
 import { CamPaths } from "../src/game/camera/curve";
@@ -114,6 +114,29 @@ function freshGame(scriptFile: string): void {
   SetCameraPaths(existsSync(cam)
     ? new CamPaths(JSON.parse(readFileSync(cam, "utf8")) as CamJson) : null);
   PlayerTasksRun({ host: NULL_HOST, rng: new Rng(1) });
+}
+
+/**
+ * Every live block the route table reaches from `entry`, read the way
+ * `EvtAdvanceStepOrRoute` reads it: `goto` its `next[0]`, `branch` every live
+ * slot, anything else `block + 1`; a hole or a missing block ends the scene.
+ */
+function routeReachable(script: ScriptJson, entry: number): number[] {
+  const at = (n: number) => script.blocks.find((b) => b.index === n);
+  const seen = new Set<number>();
+  const queue = [entry];
+  while (queue.length > 0) {
+    const n = queue.shift() as number;
+    const blk = at(n);
+    if (n < 0 || seen.has(n) || !blk || blk.hole) continue;
+    seen.add(n);
+    const r = blk.route ?? script.routes[n];
+    if (!r) continue;
+    if (r.kind === "goto") queue.push(r.next[0]);
+    else if (r.kind === "branch") queue.push(...r.next.filter((x) => x >= 0));
+    else queue.push(n + 1);
+  }
+  return [...seen].sort((a, b) => a - b);
 }
 
 /**
@@ -488,6 +511,72 @@ for (const stage of STAGES) {
     check("an address behind the branch the script does not take by default",
           seekTo(w3, 18, 4, 7) === true);
   }
+}
+
+// A step the run never sits on is refused **in its own block**, not by
+// replaying the rest of the stage.
+//
+// `EvtAdvanceStepOrRoute` (`0x0045F000`) enters every routed block at step 1,
+// and `EvtLoadBlockProgram` (`0x0045EBC0`) picks step 0 only at a scene load in
+// app state 5 or 9 or game mode 2 or 3 -- never in Arcade or Original, the two
+// modes the bundles are exported for. `[proved]` So `?block=2&step=0` names an
+// address no run of these bundles reaches. The seek used to look for it all the
+// way to the end of the scene and leave the walker `finished` with the next
+// stage's entry block written: the page then showed the end of stage 1, and the
+// first frame of play loaded stage 2. Now the replay stops once it has left the
+// block and says where the run entered it, and a seek from a fresh world to
+// *that* address arrives -- which is what the page does with it.
+//
+// The named case is the report's address; the corpus is every block a route
+// reaches from each entry of every stage, at step 0.
+{
+  const file = join(ROOT, "stage1", "stage1.script.json");
+  if (existsSync(file)) {
+    const script = JSON.parse(readFileSync(file, "utf8")) as ScriptJson;
+    freshGame(file);
+    const w = new Walker(script, mkHost());
+    const r = seekToward(w, 2, 0, 0);
+    check("stage 1 `block=2&step=0`: refused in block 2, entered at 2/1/0, "
+          + "and the replay did not run on to the end of the scene",
+          !r.arrived && r.entered?.[0] === 1 && r.entered?.[1] === 0
+            && !w.finished && w.block === 3,
+          `arrived ${r.arrived} entered ${r.entered} at `
+          + `${w.block}/${w.step}/${w.opIndex} finished ${w.finished}`);
+  }
+  let blocks = 0;
+  for (const name of ["stage1", "stage1_original", "stage2", "stage2_original",
+                      "stage3", "stage3_original", "stage4", "stage4_original",
+                      "stage5", "stage5_original", "stage6",
+                      "stage6_original"]) {
+    const file = join(ROOT, name, `${name}.script.json`);
+    if (!existsSync(file)) continue;
+    ran++;
+    const script = JSON.parse(readFileSync(file, "utf8")) as ScriptJson;
+    const entries = script.entries?.length ? script.entries
+                                           : [script.entry_block];
+    for (const entry of entries) {
+      for (const b of routeReachable(script, entry)) {
+        freshGame(file);
+        const w = new Walker(script, mkHost());
+        const r = seekToward(w, b, 0, 0, undefined, entry);
+        blocks++;
+        if (r.arrived) continue;
+        let landed = false;
+        if (r.entered) {
+          freshGame(file);
+          const v = new Walker(script, mkHost());
+          landed = seekTo(v, b, r.entered[0], r.entered[1], undefined, entry);
+        }
+        check(`${name} from ${entry}: \`block=${b}&step=0\` is refused in `
+              + `block ${b}, at an address a seek reaches`,
+              landed,
+              `entered ${r.entered} at ${w.block}/${w.step}/${w.opIndex}`
+              + ` finished ${w.finished}`);
+      }
+    }
+  }
+  if (ran) check("some block was sought at step 0, so something was checked",
+                 blocks > 0);
 }
 
 // The branch itself: who decides it, and how long the decision survives.

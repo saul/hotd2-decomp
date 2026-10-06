@@ -134,7 +134,7 @@ holding paths like `COM\220_Y_M.WAV`, which is decisive.
 
 | Class | Handler | Spawns | What it is | Confidence |
 |---|---|---|---|---|
-| `0x41` | `PropContainerPlacerUpdate` (`FUN_00461CD0`) | 441 | **Breakable-prop / item-container placer.** A transient stub: dispatches on `obj+0x130C` through `g_class41_constructors`, 79 entries at `0x00593580`, builds child actors, then `ActorKill`s itself. Never drawn, never damaged. Type 0 is the breakable group (8 spawns) and is **ported**; **type 1** (`PlaceWaterSurface`, `FUN_00462F70`, 15 spawns) is not a prop at all but the task that draws and ripples a canal water tile, `WaterSurfaceUpdate` (`FUN_0046E3A0`) -- the tile is `g_water_surface_slots[+0x1F4]` (`0x00593DA4`) and `+0x11C` a step lifetime -- and is **ported**, see `docs/formats/water.md` §2; type 4 (`PlaceKindedProp`, 70 spawns) and **type 43** (`PropUpdateType43`, 7) both read `obj+0x6C` as an object kind; type 32 is the **lift** (`LiftUpdate`) and is ported; type 13 (`PropUpdateType13`, `FUN_00467F50`) is the part that drops out of stage 2's clock tower on script flag `0x6D`, and type 35 (`PropUpdateType35`, `FUN_0046B320`) the double door stage 2's block-5 civilian stands behind, drawn at **literal world coordinates** whatever its placement -- both ported. Types **38, 39 and 44** (`PlaceTable38Props`, `PlaceTable39Stacks`, `PlaceTable44Props`) and **40** (`PlaceFragmentProps` / `PropUpdateType40`, all twenty sub-kinds) build their objects from tables in the image and are ported whole — see *Stage 1's church* below — as are **50** (`PlaceTable50Props`, six tables of scenery: stage 1's bin-scene crate, stage 2 block 17's furniture) and **66** (`PlaceTable66Props` / `PropUpdateType66`, the `komono_kanban.bin` signs), see *Class 0x41 constructors 50 and 66*; **47** (`PlaceType47Prop` / `PropUpdateType47`) is stage 2's faded disc, see *Class 0x44 selectors 9 and 12*. Constructor 24, `PlaceChainSegments` (`FUN_00463160`), is **the hanging chain**: twenty 0x200-byte links running `ChainSegmentUpdate` (`FUN_00469510`), each drawn as slot `0x1234` on the matrix the link above stored 1.5 lower and turned its own `i << 14`; a shot gives every link from two above the hit downward a swing rate (`rand() % 0x51 - (rand() & 1) * 0x180 + 0x98`, falling off by distance) that springs back in sixteen bits, and in Original Mode any link of group 1 shot in block `0x16` writes `g_script_branch_var = 2` and makes segment 0 drop an item from row 4 (`SpawnChainItemDrop`, `FUN_004699C0`) under its foot at `y = 18`. Ported whole in `class41/chain.ts`; the bundle carries `0x1234` and row 4 for every `chain` placement. Before it the links were generic props of type 0, drawn as the generic family's slot -- a stack of wooden posts where stage 2 block 22's chain hangs -- with no swing, and only group 1 ran any of the routine. **Six constructors are unported**, each with the spawns that place it, in *Class 0x41's constructors: which are ported* (constructor 68, `PlaceGoldenFrogFromLessonTable`, is Training's golden frog and is ported with item set 3's, see *The golden frog*; constructor 3, `PlaceType3UvScrollTask`, the stage-1 car's moving reflection, is ported in `class41/type03.ts`); 16, 17, 29 and 37 are in *Class 0x41 constructors 16, 17, 29 and 37*. The 44 types `PlaceGenericProp` serves share one constructor and a jump table — `g_place_generic_prop_arm_index` at `0x00462978` and `g_place_generic_prop_arms` at `0x004628D4`, indexed `type - 6` — so which arm sets what is read and not guessed. The retail stages reach 74 of the 79. See *The generic props' `+0x11C`* below. | `[proved]` |
+| `0x41` | `PropContainerPlacerUpdate` (`FUN_00461CD0`) | 441 | **Breakable-prop / item-container placer.** A transient stub: dispatches on `obj+0x130C` through `g_class41_constructors`, 79 entries at `0x00593580`, builds child actors, then `ActorKill`s itself. Never drawn, never damaged. Type 0 is the breakable group (8 spawns) and is **ported**; **type 1** (`PlaceWaterSurface`, `FUN_00462F70`, 15 spawns) is not a prop at all but the task that draws and ripples a canal water tile, `WaterSurfaceUpdate` (`FUN_0046E3A0`) -- the tile is `g_water_surface_slots[+0x1F4]` (`0x00593DA4`) and `+0x11C` a step lifetime -- and is **ported**, see `docs/formats/water.md` §2; type 4 (`PlaceKindedProp`, 70 spawns) and **type 43** (`PropUpdateType43`, 7) both read `obj+0x6C` as an object kind; type 32 is the **lift** (`LiftUpdate`) and is ported; type 13 (`PropUpdateType13`, `FUN_00467F50`) is the part that drops out of stage 2's clock tower on script flag `0x6D`, and type 35 (`PropUpdateType35`, `FUN_0046B320`) the double door stage 2's block-5 civilian stands behind, drawn at **literal world coordinates** whatever its placement -- both ported. Types **38, 39 and 44** (`PlaceTable38Props`, `PlaceTable39Stacks`, `PlaceTable44Props`) and **40** (`PlaceFragmentProps` / `PropUpdateType40`, all twenty sub-kinds) build their objects from tables in the image and are ported whole — see *Stage 1's church* below — as are **50** (`PlaceTable50Props`, six tables of scenery: stage 1's bin-scene crate, stage 2 block 17's furniture) and **66** (`PlaceTable66Props` / `PropUpdateType66`, the `komono_kanban.bin` signs), see *Class 0x41 constructors 50 and 66*; **47** (`PlaceType47Prop` / `PropUpdateType47`) is stage 2's faded disc, see *Class 0x44 selectors 9 and 12*. Constructor 24, `PlaceChainSegments` (`FUN_00463160`), is **the hanging chain**: twenty 0x200-byte links running `ChainSegmentUpdate` (`FUN_00469510`), each drawn as slot `0x1234` on the matrix the link above stored 1.5 lower and turned its own `i << 14`; a shot gives every link from two above the hit downward a swing rate (`rand() % 0x51 - (rand() & 1) * 0x180 + 0x98`, falling off by distance) that springs back in sixteen bits, and in Original Mode any link of group 1 shot in block `0x16` writes `g_script_branch_var = 2` and makes segment 0 drop an item from row 4 (`SpawnChainItemDrop`, `FUN_004699C0`) under its foot at `y = 18`. Ported whole in `class41/chain.ts`; the bundle carries `0x1234` and row 4 for every `chain` placement. Before it the links were generic props of type 0, drawn as the generic family's slot -- a stack of wooden posts where stage 2 block 22's chain hangs -- with no swing, and only group 1 ran any of the routine. **Five constructors are unported**, each with the spawns that place it, in *Class 0x41's constructors: which are ported* (constructor 26, `PlaceType26RippleTask`, the warehouse water, is ported in `class41/type26.ts`; constructor 68, `PlaceGoldenFrogFromLessonTable`, is Training's golden frog and is ported with item set 3's, see *The golden frog*; constructor 3, `PlaceType3UvScrollTask`, the stage-1 car's moving reflection, is ported in `class41/type03.ts`); 16, 17, 29 and 37 are in *Class 0x41 constructors 16, 17, 29 and 37*. The 44 types `PlaceGenericProp` serves share one constructor and a jump table — `g_place_generic_prop_arm_index` at `0x00462978` and `g_place_generic_prop_arms` at `0x004628D4`, indexed `type - 6` — so which arm sets what is read and not guessed. The retail stages reach 74 of the 79. See *The generic props' `+0x11C`* below. | `[proved]` |
 | `0x30` | `FUN_00452DA0` | 288 | **The zombie.** HP, per-body-part damage zones, 80 points on kill / 10 per hit / 120 + combo on a head hit, a 54-state machine at `0x00592AE8`. Increments `g_enemies_alive`. State 2 (`FUN_00455720`) plays `COMMON2\ZOMBIE_041_16.wav`; the type-2 setup plays `CHAIN_SAW_22.wav` and a later state `KNIFE1_44.wav`. State 37, `ZombieStateCarryProp`, carries a **classless prop** (`CarriedPropInit`, `FUN_00442740`) typed by its script's `+0x00` out of `g_carried_prop_types` and throws it through `g_prop_behaviours` 1/3/4/5 -- stage 3's drums and stage 1's barrel; see `game/carried_prop.ts`. | `[proved]`, by the game's own sound record **Eleven of the 54 states never look at the camera**: they work on `obj+0x1394`, the object the actor was built for, and for 55 of the 70 spawns that reach one that is the class-0x10 civilian whose `CivilianInit` built them. See docs/formats/civilians.md. |
 | `0x44` | `PropPlacerDispatch44` (`FUN_00472B10`) | 204 | **Prop placer.** Same shape as 0x41: dispatches on `obj+0x11C` through `g_class44_subtypes`, 18 entries at `0x00595AB8`, builds a child, `ActorKill`s. **All eighteen are read and ported.** Selectors 0 (`PropBuildScriptFlagEffect`), 11 (`PropBuildRisingDoor`), 13 (`PropBuildRiseToHeight`, `0x00473640` -- stage 5's gate behind JUDGMENT, see below), 16 (`PlaceFallingContainer`) and 17 (`PlaceStoryModeSwitch`); 9 (`PropBuildFlagLiftedProp`, `0x00473300`, one stage-3 spawn that rises on a flag) and 12 (`PropBuildSlideOnFlag`, `0x004734A0`, eight stage-6 spawns that slide on a flag), see *Class 0x44 selectors 9 and 12*; 14 (`PropBuildDrawOnlySelector14`, `0x004736D0`, twelve spawns over stages 2 to 4 -- a descriptor-named model at a descriptor scale), see *Class 0x44 selector 14*; and the hinges 1, 2 and 4 (`HingeUpdate`) with 3, 5, 6, 7, 8, 10 and 15 round them, see *Class 0x44's hinges, and selectors 3 to 8, 10 and 15*. | `[proved]` |
 | `0x25` | `ScriptedHumanoidInit` (`FUN_004840D0`) | 142 | **Script-driven humanoid actor.** A bytecode VM (`FUN_004842A0`) drives a skinned character. Not an enemy, not damageable, awards nothing, and never filed for the shot test, so no shot reaches it (it holds a hit slot, from the model build, as every skinned actor does) — see [combat.md](combat.md), *A class that never registers*. **It is also how the game draws the player's own body in a cut scene** — see *`op 10` is an `if`* below. | `[proved]` |
@@ -519,17 +519,16 @@ image, and `web/tools/checks/prop_slots.ts` holds each bundle to the port's rows
 are `PlaceGenericProp` (`FUN_00461CF0`), which is ported with a routine for
 every type it serves (`GENERIC_ROUTINES` and `GENERIC_FAMILY` in
 `game/class41/`). Five — 2, 15, 22, 23 and 46 — are `NoOpStub`
-(`0x0041EBB0`) and no script places them. Of the other twenty-four, eighteen
-are ported: 0, 1, 3, 4, 16, 17, 24, 29, 37, 38, 39, 40, 44, 47, 48, 50, 66
-and 68 (the Training lesson's golden frog, *The golden frog* below).
+(`0x0041EBB0`) and no script places them. Of the other twenty-four,
+nineteen are ported: 0, 1, 3, 4, 16, 17, 24, 26, 29, 37, 38, 39, 40, 44, 47,
+48, 50, 66 and 68 (the Training lesson's golden frog, *The golden frog*
+below; 26 is the warehouse water, below the table).
 
-**Six constructors are unported**, and every one of them is placed by a
-script. What each allocates is `[proved]` from its decompile. Constructor 26
-is read whole and named, and stops at a missing piece: see below the table.
+**Five constructors are unported**, and every one of them is placed by a
+script. What each allocates is `[proved]` from its decompile.
 
 | ctor | routine | what it allocates | shipped spawns |
 |---|---|---|---|
-| 26 | `PlaceType26RippleTask` (`FUN_00463230`) | one `0x44`-byte task running `Type26RippleUpdate` (`FUN_00469C80`), the placer's `+0x11C` as its step lifetime: it rewrites and draws `komono_souko.bin[9]` (`0x197F`) at alpha 0.5 -- the water the six constructor-16 objects stand in | stage 2 block 24 step 1 (`0x109A8`) |
 | 42 | `0x004639D0` | `[open]` — Ghidra has no function there | stage 2 block 35 step 1 (`0x14968`) |
 | 52 | `FUN_00463D20` | two `PropDrawOnlyType12` objects, slots `0x1794` and `0x1795`, at `T(pos) . Ry(yaw)` of `(−9.29, 11.5, 22.68)` and `(9.29, 11.5, 22.68)`, the second turned half round | stage 1 block 14 step 1 (`0x68AC`); stage 5 block 0 step 2 (`0x0DD4`) |
 | 55 | `FUN_00463FE0` | one `0x8500`-byte object running `0x0046EEB0`, 800 particles off s16 xyz rows from `0x00594F2A` × 0.001 | stage 6 block 12 step 1 (`0x4780`) |
@@ -553,40 +552,46 @@ resident while the task lives (`char_adv00.bin` is stage 1's from its first
 step). The skip kill (`g_cutscene_skipping`) is left out as four other classes
 leave theirs.
 
-**Why 26 is not ported.** `[proved]` It and constructor 3 both walk the model of a
-slot in place -- the same strip walk `WaterSurfaceUpdate` makes -- and both
-gate the walk on the slot record's residency bit (`g_asset_slots[slot] +0xD &
-0x80`; `TEST AH, 0x80` on `0x009BFE9C` in `Type26RippleUpdate`, `TEST byte
-[ECX + 0x9A66AD], 0x80` in the pair). 26's slot belongs to
-`komono_souko.bin`, which stage 2 loads with `asset_load_polfile` at block 24
-step 0 and **frees at block 24 step 3 op 48**, while the task -- placed at
-step 1 with a lifetime of 3 -- lives on to the next block: from that
-instruction the engine walks nothing and `AssetDrawSlotWithAlphaSceneLights`
-draws nothing. The port tracks no pol-file residency (opcodes `0x52`/`0x53`
-are not in the walker), so it cannot follow that edge, and a port that walked
-and drew regardless would be a new departure. What would let both be
-transcribed: `asset_load_polfile`/`asset_free_polfile` (and the job queue
-that completes them) kept in the engine layer, with the slot-to-file map in
-the bundle; then `WaterSurfaceUpdate`'s own residency departure goes with
-them. The second thing both share with the water task: each frame's add is
-rounded to `float` per vertex and `v` gets bit 0 set (`OR EDX, 1` at
-`0x00469E06`; `OR EBP, 1` at `0x00465B22`), which the water port keeps as
-closed-form sums and declares as a departure -- faithful, it is every
-vertex's UVs in `G`. Constructor 3 now carries the first gap and the second
-as declared departures, with the slots taken as resident while its task
-lives; 26's slot is freed while its task lives, so the same choice would
-draw a model the engine does not.
+**Constructor 26 is ported** (`game/class41/type26.ts`, drawn by
+`render/type26_ripple.ts`): the warehouse water the six constructor-16 drums
+stand in, `komono_souko.bin[9]` (`0x197F`), placed at stage 2 block 24 step 1
+(`0x109A8`) with a lifetime of 3. `[proved]` from the listings of
+`PlaceType26RippleTask` and `Type26RippleUpdate`:
 
-What the ripple does, for when that lands:
+* the constructor allocates a `0x44`-byte task and writes only `+0x35` (the
+  placer's `+0x11C`), `+0x36` (the step index) and `+0x37 = 0`;
+* each frame: stage 2's prop sweep (flag `0x77`), the step lifetime
+  (`+0x37` against `+0x35`), then -- while the slot is resident -- the walk:
+  every header's TSP word `| 0x2000`, every full vertex's `y = (f32)(sin(
+  ftol(((x + 472.5158)^2 + (z + 1230.6945)^2) * 400 + +0x3C) BAMS) * 0.1 -
+  4.805454)` -- rings about (-472.5, -1230.7), among the drums -- and `u +=
+  sin(((tick * 0x180 + ftol(x) * 600) & 0xFFFF) BAMS) * 0.0004`, `v += cos(...
+  ftol(z) ...) * 0.0004 | 1`; then `AssetDrawSlotWithAlphaSceneLights(0x197F,
+  0.5)`, which draws nothing without the resident bit either, and `+0x3C +=
+  0x200`. Constants `0x005690C0`..`0x005690D8` and `0x005643D8`. The
+  decompiler takes `u`'s phase off the centred `x`; the stack (two `FSTP ST0`
+  at `0x00469D57` before the `__ftol` at `0x00469D90`) gives the raw one.
 
-* `Type26RippleUpdate`: scene-1 sweep, a step lifetime against `+0x35`
-  (`+0x36`/`+0x37` the step and the count, as the water task keeps them), then
-  per full vertex of `0x197F` `y = sin(ftol(((x + 472.5158)^2 + (z +
-  1230.6945)^2) * 400 + +0x3C) BAMS) * 0.1 - 4.805454` -- rings about (-472.5,
-  -1230.7), among the drums -- and `u += sin((tick * 0x180 + ftol(x) * 600) &
-  0xFFFF) * 0.0004`, `v += cos(... z ...) * 0.0004 | 1`, every header's TSP
-  word `| 0x2000`; then `AssetDrawSlotWithAlphaSceneLights(0x197F, 0.5)` and
-  `+0x3C += 0x200`. Constants `0x005690C0`..`0x005690D8`.
+**The resident bit is what the port had to grow.** The slot's file is
+loaded by the script (`asset_load_polfile` 112, from block 22) and **freed at
+block 24 step 3 op 48** with the task still alive, so from that instruction
+the engine walks and draws nothing. Opcodes `0x52`/`0x53` now keep the state
+of each file they load and free in `G.g_pol_file_state` -- the state byte of
+`g_pol_file_records` (`0x009C7320`) -- through `EvtOpAssetLoadPolfile52`
+(`FUN_0045F500`), `EvtOpAssetFreePolfile53` (`FUN_0045F580`),
+`PolFileQueueLoad` and `PolFileQueueFree` (`FUN_0041D690`), and a slot of a
+whole-file load is resident exactly while its file is loaded (the load's
+last state sets the bit slot by slot, the free's first clears it for every
+slot of the file: `docs/formats/pipeline.md`). The placement carries the
+file (`pol`), resolved from `g_pol_file_slot_lists`. Two departures are
+declared: the asset job completes where it is queued (the engine's runs
+over `4 + slots` steps behind whatever the ring holds), and the UV adds are
+kept as closed-form sums, without the per-vertex float rounding and the `|
+1` on `v`, as the water's and constructor 3's are. Constructor 3 and the
+canal water still take their slots as resident: their files come by loads
+the port does not track (the scene's own, opcode `0x50`'s single slots).
+The draw is under the gun lights when they are up (the scene light array,
+`render/gunlights.ts`'s `sceneLitNodes`).
 
 ### Class 0x41 constructors 16, 17, 29 and 37
 

@@ -9,7 +9,7 @@
  * `*_slots.ts` modules carry as immediates; nothing here scans for where a
  * table ends (`L6`).
  */
-import type { ExeTables } from "./exetab";
+import { ExeTables } from "./exetab";
 import { TYPE16_ROW_COUNT, TYPE16_ROWS } from "../game/class41/type16_slots";
 import { TYPE29_ROW_COUNT, TYPE29_ROWS } from "../game/class41/type29_slots";
 import { TYPE37_HULL, TYPE37_HULL_POINTS } from "../game/class41/type37_slots";
@@ -119,6 +119,28 @@ export function goldenFrogLessonRows(tables: ExeTables): [number, number][] {
     const z = ri16(tables, GOLDEN_FROG_LESSON_ROWS + i * 4 + 2);
     if (x === null || z === null) return [];
     out.push([x, z]);
+  }
+  return out;
+}
+
+/**
+ * Every `pol/` file whose slot list names `slot`: the lists at
+ * `0x004E794C` (`ExeTables.POL_SLOT_LIST`, a pointer a file, counts at
+ * `0x004E803C`) that the load job binds slot by slot and the free job clears
+ * slot by slot (`FUN_00419020`), so these are the files whose state decides
+ * the slot's resident bit (`game/pol_files.ts`).
+ */
+export function polFilesHoldingSlot(tables: ExeTables, slot: number): number[] {
+  const out: number[] = [];
+  for (const [fi, [, cnt]] of tables.polFiles()) {
+    const list = tables.ru32(ExeTables.POL_SLOT_LIST + fi * 4);
+    if (!list) continue;
+    for (let k = 0; k < cnt; k++) {
+      if (ri16(tables, list + k * 2) === slot) {
+        out.push(fi);
+        break;
+      }
+    }
   }
   return out;
 }

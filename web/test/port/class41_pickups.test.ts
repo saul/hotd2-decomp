@@ -5,6 +5,10 @@
  * number is worked from the listing and the image's tables, not measured
  * from the port.
  */
+// The walker before its op table: `ops/` and `walker.ts` import each other,
+// and the walker's `OPS` is read from the table when the walker module is
+// evaluated -- entered through the table, the walker would find it empty.
+import "../../src/script/walker";
 import { Rng } from "../../src/core/rng";
 import type { BreakablesJson } from "../../src/bundle";
 import { G } from "../../src/game/globals";
@@ -52,6 +56,12 @@ import {
   GOLDEN_FROG_IDLE_MOTION, GOLDEN_FROG_SHOT_MOTION, GOLDEN_FROG_STRIP_LAST,
   PropContainerRoutine, PropContainerType, SFX_GOLDEN_FROG, SpawnGoldenFrog,
 } from "../../src/game/class41";
+import { Type26RipplesTick } from "../../src/game/class41/type26";
+import {
+  EvtOpAssetFreePolfile53, EvtOpAssetLoadPolfile52, POL_FILE_LOADED,
+  PolFileResident,
+} from "../../src/game/pol_files";
+import { OPS as OPS_TABLE } from "../../src/script/ops";
 
 /**
  * `g_item_pickup_slot` (`0x00595058`), the five rows read out of the image
@@ -470,4 +480,117 @@ console.log("\nclass 0x41 constructor 68, the Training lesson's frog:");
         !!a && a.hp === 2
         && ((placer.flags & 0x80080000) >>> 0) === 0x80080000
         && placer.dead);
+}
+
+// -- whole pol files, and class 0x41 constructor 26 ----------------------------
+
+console.log("\nopcodes 0x52 and 0x53, a whole pol file's state:");
+{
+  propScene(new Rng(1), GameMode.Arcade);
+  // Through the walker's own table, as the script runs them.
+  const run = (op: number, pol: number) =>
+    OPS_TABLE[op]?.run?.({} as never, { pol } as never, false);
+  run(0x52, 112);
+  check("asset_load_polfile marks the file loaded, which is its slots' "
+        + "resident bit", G.g_pol_file_state[112] === POL_FILE_LOADED
+        && PolFileResident(112));
+  run(0x53, 112);
+  check("asset_free_polfile marks it free", !PolFileResident(112)
+        && G.g_pol_file_state[112] === 0);
+  run(0x53, 113);
+  check("...and drops a free of a file that is not loaded",
+        (G.g_pol_file_state[113] ?? 0) === 0);
+  G.g_pol_file_state[114] = 3;
+  run(0x52, 114);
+  check("the load refuses a file already loading",
+        G.g_pol_file_state[114] === 3);
+  // Original Mode reads 0xBE and 0xBF as the two players' characters' files.
+  propScene(new Rng(1), GameMode.Original);
+  G.g_original_character = [3, 9];
+  run(0x52, 0xbe);
+  run(0x52, 0xbf);
+  check("in Original Mode 0xBE is player 1's character's file, 0xBE + 3",
+        PolFileResident(0xc1) && !PolFileResident(0xbe));
+  check("...and 0xBF player 2's: character 9's is 0xB9",
+        PolFileResident(0xb9) && !PolFileResident(0xbf));
+  G.g_original_character = [10, 0];
+  run(0x52, 0xbe);
+  check("...a character past 9 queues nothing",
+        !G.g_pol_file_state.some((s, i) => s && ![0xc1, 0xb9].includes(i)));
+}
+
+console.log("\nclass 0x41 constructor 26, the warehouse water:");
+{
+  const rng = new Rng(26);
+  propScene(rng, GameMode.Arcade);
+  SetGameTables(CHARS, {
+    ...BREAKABLES, ...PICKUPS,
+    placements: [...BREAKABLES.placements,
+                 { at: 0x109a8, container: "ripple", slot: 0x197f, pol: 112,
+                   lifetime_evt_steps: 3 }],
+  } as BreakablesJson);
+  check("constructor 26 has a routine",
+        !!g_class41_constructors[PropContainerType.Type26RippleTask]);
+  G.g_scene_index = 1;
+  G.g_evt_step_index = 1;
+  const placer = ActorSpawn(0x109a8, SpawnClass.PropContainerPlacer, 0,
+                            "placer", { hp: 3, condition:
+                                        PropContainerType.Type26RippleTask });
+  g_class_handlers[placer.cls]?.update(
+    placer, { dt: 1 / 60, rng, host: NULL_HOST });
+  const [t] = G.g_type26_tasks;
+  check("the placer leaves one task: lifetime 3 off its +0x11C, this step",
+        !!t && t.lifetime === 3 && t.seenStep === 1 && t.stepChanges === 0
+        && t.phase === 0 && t.pol === 112 && placer.dead);
+  if (t) {
+    Type26RipplesTick();
+    check("its file not loaded: nothing walked, nothing drawn, phase stepped",
+          !t.drawn && G.g_type26_model === null && t.phase === 0x200);
+    EvtOpAssetLoadPolfile52(112);
+    G.g_scene_tick_counter = 7;
+    Type26RipplesTick();
+    const m = G.g_type26_model;
+    const a = ((7 * 0x180) & 0xffff) * Math.PI * 2 / 65536;
+    check("loaded: one walk at tick 7, from the phase before the step, drawn",
+          t.drawn && !!m && m.frames === 1 && m.phase === 0x200
+          && Math.abs(m.sin - Math.sin(a)) < 1e-12
+          && Math.abs(m.cos - Math.cos(a)) < 1e-12 && t.phase === 0x400,
+          JSON.stringify(m));
+    // The sums over every walk, at ticks that cross the 16-bit wrap.
+    let ss = Math.sin(a), cc = Math.cos(a);
+    for (let tick = 8; tick < 7 + 120; tick++) {
+      const t2 = ((tick * 0x180) & 0xffff) * Math.PI * 2 / 65536;
+      ss += Math.sin(t2);
+      cc += Math.cos(t2);
+      G.g_scene_tick_counter = tick;
+      Type26RipplesTick();
+    }
+    const m2 = G.g_type26_model!;
+    check("one tick term a walk, summed: 120 walks",
+          m2.frames === 120 && Math.abs(m2.sin - ss) < 1e-9
+          && Math.abs(m2.cos - cc) < 1e-9, `${m2.frames} ${m2.sin} ${ss}`);
+    // The file is freed with the task alive: the draw and the walk stop.
+    const frames = G.g_type26_model!.frames;
+    EvtOpAssetFreePolfile53(112);
+    Type26RipplesTick();
+    check("freed with the task alive: no walk and no draw from that frame",
+          !t.drawn && G.g_type26_model!.frames === frames
+          && G.g_type26_tasks.length === 1);
+    // Three changes of step outlived, the fourth not.
+    for (const s of [2, 3, 1]) {
+      G.g_evt_step_index = s;
+      Type26RipplesTick();
+    }
+    check("three step changes are outlived", G.g_type26_tasks.length === 1
+          && t.stepChanges === 3);
+    G.g_evt_step_index = 2;
+    Type26RipplesTick();
+    check("...and the fourth ends it", G.g_type26_tasks.length === 0);
+  }
+  // Stage 2's prop sweep, flag 0x77, ends it at once.
+  g_class41_constructors[PropContainerType.Type26RippleTask]!(
+    placer, { dt: 1 / 60, rng, host: NULL_HOST });
+  G.g_script_flags[0x77] = 1;
+  Type26RipplesTick();
+  check("stage 2's flag 0x77 sweeps it", G.g_type26_tasks.length === 0);
 }

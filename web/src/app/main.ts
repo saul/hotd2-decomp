@@ -149,6 +149,7 @@ import { BloodColourLayer } from "../render/bloodcolour";
 import { EffectLayer } from "../render/effects";
 import { SlotModelLayer } from "../render/slotmodels";
 import { WaterSurfaceLayer } from "../render/water_surfaces";
+import { Type26RippleLayer } from "../render/type26_ripple";
 import { UvScrollLayer } from "../render/uv_scroll";
 import { ResetPropContainers } from "../game/class41";
 import {
@@ -341,6 +342,8 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
   readonly slotModels = new SlotModelLayer();
   /** Class 0x41 type 1's canal water: the tiles it draws and ripples. */
   readonly waterSurfaces = new WaterSurfaceLayer();
+  /** Class 0x41 constructor 26's warehouse water. */
+  readonly type26Ripples = new Type26RippleLayer();
   readonly uvScroll = new UvScrollLayer();
   /**
    * The shot effects — blood, muzzle flash, tracer, impacts. Its own layer
@@ -747,6 +750,10 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     this.lighting.addRoot(this.slotModels.group);
     this.scene.add(this.waterSurfaces.group);
     this.lighting.addRoot(this.waterSurfaces.group);
+    this.scene.add(this.type26Ripples.group);
+    this.lighting.addRoot(this.type26Ripples.group);
+    // Drawn through the scene light array, which is the gun lights'.
+    this.gunLights.sceneLitNodes = () => this.type26Ripples.litNodes();
     this.scene.add(this.effects.group);
     this.scene.add(this.effects.viewGroup);
     this.scene.add(this.effects.litGroup);
@@ -807,6 +814,7 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     this.world.add("render", this.slotModels);
     // After the slot models, whose templates its clones come from.
     this.world.add("render", this.waterSurfaces);
+    this.world.add("render", this.type26Ripples);
     // The stage-1 car's reflection, rewritten on the rig's own meshes.
     this.world.add("render", this.uvScroll);
     this.world.add("render", this.effects);

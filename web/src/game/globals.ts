@@ -37,6 +37,7 @@ import type { WaterRing } from "./effects/water_ring";
 import type { WaterSurface, WaterSurfaceUv } from "./class41/water";
 import type { DialogueTask } from "./dialogue";
 import type { Type3SlotUv, Type3UvScrollTask } from "./class41/type03";
+import type { Type26ModelState, Type26RippleTask } from "./class41/type26";
 import type { St2Car } from "./class21/car";
 import type { Actor } from "./actor";
 import type { OriginalItemBanner } from "./class41/item_banner";
@@ -1549,6 +1550,27 @@ export const G = {
    * {@link Type3SlotUv}.
    */
   g_type3_slot_uv: [] as Type3SlotUv[],
+  /**
+   * `g_pol_file_records` — `0x009C7320`, one `0xC`-byte record per `pol/`
+   * file: `+0` its memory, `+4`/`+6` the loaded list's links, `+8` the state
+   * byte, which is what this keeps, by file index: 0 free, 3 loading, 4
+   * loaded. Written by the asset jobs opcodes `0x52` and `0x53` queue; see
+   * `game/pol_files.ts`.
+   */
+  g_pol_file_state: [] as number[],
+  /**
+   * `[port-only]` — the tasks `PlaceType26RippleTask` (`FUN_00463230`,
+   * class 0x41 constructor 26) has allocated. `game/class41/type26.ts`.
+   */
+  g_type26_tasks: [] as Type26RippleTask[],
+  /** `[port-only]` — see {@link Type26RippleTask.id}. */
+  g_type26_task_seq: 0,
+  /**
+   * `[port-only]` in shape — what `Type26RippleUpdate` (`FUN_00469C80`) has
+   * done to the model of slot `0x197F`, which the engine rewrites in place,
+   * or null where it has done nothing. See {@link Type26ModelState}.
+   */
+  g_type26_model: null as Type26ModelState | null,
   /**
    * `[port-only]` — the owl's and the fish's effect tasks, and the ring task
    * the fish's corpse leaves on the water: `game/effects/owl.ts`,
@@ -3328,6 +3350,12 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   G.g_type3_tasks = [];
   G.g_type3_task_seq = 0;
   G.g_type3_slot_uv = [];
+  // ...and the warehouse water's task and the model it rewrote; and every
+  // whole file the script loaded goes with the scene.
+  G.g_type26_tasks = [];
+  G.g_type26_task_seq = 0;
+  G.g_type26_model = null;
+  G.g_pol_file_state = [];
   // ...and the stage-2 car, a task like them: no class 0x21, no car.
   G.g_st2_cars = [];
   G.g_st2_car_seq = 0;

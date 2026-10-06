@@ -232,9 +232,10 @@ export function PlaceWaterSurface(obj: Actor): WaterSurface | null {
  * one frame. Transcribed as it is.
  *
  * [diverges] `resident` is the slot table's `+0xD` bit 0x80, which the port
- * does not keep: opcodes 0x52..0x58 are whole-file asset traffic it treats as
- * already done. So the walk runs
- * whether or not the tile is loaded. Every shipped placement follows the load
+ * keeps only for the files opcodes 0x52 and 0x53 load and free
+ * (`game/pol_files.ts`) -- not for the scene's own loads, nor for opcode
+ * 0x50's single slots, and a tile can come by any of the three. So the walk
+ * runs whether or not the tile is loaded. Every shipped placement follows the load
  * of its tile except block 16 step 10's, whose `komono_boss2.bin` arrives at
  * step 13, and the only effect is three steps of ripple phase on a tile that
  * is not drawn yet. `render/water_surfaces.ts` does honour the residency the

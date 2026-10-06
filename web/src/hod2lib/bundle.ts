@@ -62,8 +62,10 @@ import {
   TYPE37_CONSTRUCTOR, TYPE37_EFFECT, TYPE37_MOTION, Type37DrawSlots,
 } from "../game/class41/type37_slots";
 import {
-  goldenFrogLessonRows, itemPickupRows, type16Rows, type29Rows, type37Hull,
+  goldenFrogLessonRows, itemPickupRows, polFilesHoldingSlot, type16Rows,
+  type29Rows, type37Hull,
 } from "./class41_rows";
+import { TYPE26_CONSTRUCTOR, TYPE26_SLOT } from "../game/class41/type26_slots";
 import { GOLDEN_FROG_LESSON_CONSTRUCTOR }
   from "../game/class41/item_pickup_slots";
 // Same argument again: `hud_sprites.ts` is the id list `hud_readout.ts` draws
@@ -858,6 +860,25 @@ export function containerPlacements(tables: ExeTables, evt: evtlib.EvtFile,
         out.push({
           at: rec.offset, container: "water_surface",
           field_1f4: index, slot,
+          lifetime_evt_steps: rec.hp,
+        });
+      } else if (ctor === TYPE26_CONSTRUCTOR) {
+        // `PlaceType26RippleTask` -- the warehouse water's task. It reads
+        // the lifetime alone; what travels besides is the slot it walks and
+        // draws and the one `pol/` file that slot belongs to, whose state
+        // its resident bit is.
+        const pols = polFilesHoldingSlot(tables, TYPE26_SLOT);
+        if (pols.length !== 1) {
+          degraded.note("hod2lib.bundle.container_placements",
+                        `constructor 26 at 0x${rec.offset.toString(16)}`,
+                        "the task is not placed and nothing draws its water",
+                        `slot 0x${TYPE26_SLOT.toString(16)} is in `
+                        + `${pols.length} pol files, not one`);
+          continue;
+        }
+        out.push({
+          at: rec.offset, container: "ripple",
+          slot: TYPE26_SLOT, pol: pols[0],
           lifetime_evt_steps: rec.hp,
         });
       } else if (ctor === GOLDEN_FROG_LESSON_CONSTRUCTOR) {
@@ -1990,6 +2011,12 @@ export function waterSurfaceDrawSlots(
     placements: readonly Record<string, unknown>[]): number[] {
   const out: number[] = [];
   for (const pl of placements) {
+    // Constructor 26's task draws its one slot the same way, and nothing
+    // else draws it.
+    if (pl.container === "ripple") {
+      if (!out.includes(pl.slot as number)) out.push(pl.slot as number);
+      continue;
+    }
     if (pl.container !== "water_surface") continue;
     const first = pl.slot as number;
     for (const slot of [first, ...WATER_SURFACE_ALSO_DRAWS[first] ?? []]) {

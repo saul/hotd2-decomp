@@ -225,6 +225,8 @@ export async function loadStageInto(p: Player): Promise<void> {
   p.waterSurfaces.templates = p.slotModels;
   p.waterSurfaces.textures = p.texFilter;
   p.waterSurfaces.props = p.breakables;
+  p.type26Ripples.templates = p.slotModels;
+  p.type26Ripples.textures = p.texFilter;
   // ...and the car reflection's shells, which are the vehicle rig's parts.
   p.uvScroll.adopt(p.scene3d.root);
   p.uvScroll.textures = p.texFilter;

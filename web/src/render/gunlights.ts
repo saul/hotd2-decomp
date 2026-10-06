@@ -233,6 +233,15 @@ export class GunLights implements System<RenderContext> {
   private characters = new Map<number, Object3D>();
   /** The spawn addresses whose meshes the light holds now. */
   private litCharacters = new Set<number>();
+  /**
+   * Nodes another layer draws through the scene light array this frame --
+   * `AssetDrawSlotWithAlphaSceneLights` (`FUN_00418620`) and its twin are
+   * the light's, whichever routine makes the call. `render/type26_ripple.ts`
+   * hands its water in; the app wires it.
+   */
+  sceneLitNodes: () => readonly Object3D[] = () => [];
+  /** The nodes from {@link sceneLitNodes} the light holds now. */
+  private litNodes = new Set<Object3D>();
   /** Unlit material -> its gun-lit twin, built once per stage. */
   private readonly twins = new Map<Material, Material>();
   /** Mesh -> the material it had before the gun light took it. */
@@ -391,6 +400,7 @@ export class GunLights implements System<RenderContext> {
       if (this.active) this.restoreAll(base);
       this.active = false;
       this.litCharacters.clear();
+      this.litNodes.clear();
       return;
     }
     if (!this.active) {
@@ -418,6 +428,21 @@ export class GunLights implements System<RenderContext> {
       });
     }
     this.litCharacters = want;
+    // ...and the nodes another layer drew through the light array, the same
+    // way: every frame, the ones it hands over now.
+    const nodes = new Set(this.sceneLitNodes());
+    for (const n of this.litNodes) {
+      if (nodes.has(n)) continue;
+      n.traverse((o) => {
+        if ((o as Mesh).isMesh) this.restore(o as Mesh, base);
+      });
+    }
+    for (const n of nodes) {
+      n.traverse((o) => {
+        if ((o as Mesh).isMesh) this.light(o as Mesh);
+      });
+    }
+    this.litNodes = nodes;
   }
 
   private twinOf(m: Material): Material {

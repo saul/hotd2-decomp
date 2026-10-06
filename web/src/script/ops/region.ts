@@ -5,6 +5,9 @@
  * the script panel shows.
  */
 import type { OpImpl } from "../walker";
+import {
+  EvtOpAssetFreePolfile53, EvtOpAssetLoadPolfile52,
+} from "../../game/pol_files";
 
 export const OPS: Record<number, OpImpl> = {
     // -- regions and streaming ------------------------------------------
@@ -43,6 +46,24 @@ export const OPS: Record<number, OpImpl> = {
           w.loadedSlots.delete(op.slot);
           w.host.unloadSlot(op.slot);
         }
+        return undefined;
+      },
+    },
+    // Whole `pol/` files: the state the engine's asset jobs leave on each,
+    // which is what the resident bit of every slot in it reads. The models
+    // are the bundle's from the start; what moves is the state, in `G`. See
+    // `game/pol_files.ts`.
+    0x52: {                                     // asset_load_polfile
+      status: "done",
+      run: (_w, op) => {
+        if (op.pol !== undefined) EvtOpAssetLoadPolfile52(op.pol);
+        return undefined;
+      },
+    },
+    0x53: {                                     // asset_free_polfile
+      status: "done",
+      run: (_w, op) => {
+        if (op.pol !== undefined) EvtOpAssetFreePolfile53(op.pol);
         return undefined;
       },
     },

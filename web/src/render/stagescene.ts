@@ -221,8 +221,8 @@ export class StageScene {
    * `0x51`, and a slot this stage holds a model for and no region lists is
    * one the script streams that way -- resident while loaded, and not before
    * or after. Any other slot is taken as resident: a region's models are
-   * this class's own business, and whole-file loads (`0x52`) are not
-   * tracked.
+   * this class's own business, and whole-file loads (`0x52`) are the
+   * port's (`game/pol_files.ts`), which this does not read.
    */
   slotResident(slot: number): boolean {
     const m = this.bySlot.get(slot);

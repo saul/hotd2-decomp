@@ -196,6 +196,11 @@ export interface BreakablePlacement {
    * whose three places a lesson ride in {@link BreakablePlacement.xz}; it
    * reads the placer's `+0x44` and `+0x11C` besides. See
    * `game/class41/golden_frog.ts`.
+   *
+   * `ripple` is constructor 26 (`PlaceType26RippleTask`), the warehouse
+   * water: it reads only the lifetime, and carries the slot its task draws
+   * and the `pol/` file that slot belongs to ({@link BreakablePlacement.pol}).
+   * See `game/class41/type26.ts`.
    */
   container: "group" | "kinded" | "falling" | "generic"
     | "chain" | "fragment" | "story_switch" | "script_flag_effect"
@@ -207,7 +212,7 @@ export interface BreakablePlacement {
     | "hinge" | "van_doors" | "hinge_scaled"
     | "flag_slot_effect" | "effect_handoff" | "swing_then_break"
     | "scaled_slot_effect" | "effect_collapse" | "slot_strip_loop"
-    | "kinded_44" | "uv_scroll" | "golden_frog";
+    | "kinded_44" | "uv_scroll" | "golden_frog" | "ripple";
   /** How many evt blocks it lives for. */
   lifetime_evt_steps: number;
   /** `group` only — the row of `g_breakable_group_ptrs` to build. */
@@ -287,6 +292,11 @@ export interface BreakablePlacement {
    * `* 0.1` is the constructor's.
    */
   xz?: [number, number][];
+  /**
+   * `ripple` -- the index of the `pol/` file the task's slot belongs to, the
+   * file whose state answers the slot's resident bit (`game/pol_files.ts`).
+   */
+  pol?: number;
   slot?: number;
   /**
    * `generic` and `draw_only_14` — the other two orientation words, which

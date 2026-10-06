@@ -30,9 +30,11 @@
  *
  * [diverges] Both walks test the slot record's residency bit,
  * `g_asset_slots[slot] +0xD & 0x80` (`TEST byte [ECX+0x9a66ad],0x80`), and
- * the port keeps no residency for whole-file loads: the three slots are taken
- * as resident whenever the task runs. `char_adv00.bin` is the car's own file
- * and stage 1 has it loaded from its first step; the input that would differ
+ * the port keeps it only for the files the script loads and frees with
+ * opcodes 0x52 and 0x53 (`game/pol_files.ts`), which `char_adv00.bin`, the
+ * car's own file, is not: no stage-1 instruction loads it, so it arrives by
+ * some other load the port does not model. So the three slots are taken as
+ * resident whenever the task runs. Stage 1 has the file from its first step; the input that would differ
  * is a slot freed while the task lives, which stage 1 never does. The Init's
  * count of three resident slots is reached on its first frame, which the port
  * test pins.

@@ -53,6 +53,7 @@ import { PropContainerRoutine } from "./placer_state";
 import {
   GoldenFrogUpdate, PlaceGoldenFrogFromLessonTable,
 } from "./golden_frog";
+import { PlaceType26RippleTask } from "./type26";
 
 /**
  * `obj+0x130C` for this class — the constructor index, **not** the body
@@ -153,6 +154,12 @@ export enum PropContainerType {
    * `class41/golden_frog.ts`.
    */
   GoldenFrogFromLessonTable = 68,
+  /**
+   * `PlaceType26RippleTask` (`FUN_00463230`) -- the task that ripples and
+   * draws the warehouse water, `komono_souko.bin[9]`. Stage 2's one spawn.
+   * See `class41/type26.ts`.
+   */
+  Type26RippleTask = 26,
 }
 
 /** What one class-0x41 constructor does. `undefined` where none is ported. */
@@ -251,6 +258,10 @@ export const g_class41_constructors:
   },
   [PropContainerType.WaterSurface]: (obj) => {
     PlaceWaterSurface(obj);
+  },
+  // The warehouse water: `+0x11C` is the lifetime; nothing else is read.
+  [PropContainerType.Type26RippleTask]: (obj) => {
+    PlaceType26RippleTask(obj);
   },
   // A golden frog, an actor and not a prop: its three places travel on the
   // placement, and the placer's `+0x44` and `+0x11C` are what it reads.
@@ -459,6 +470,7 @@ export * from "./type29";
 export * from "./type37";
 export * from "./placer_state";
 export * from "./golden_frog";
+export * from "./type26";
 export {
   BreakableGroupMembers, BreakableMemberSlot, BreakablePropAt,
   BreakableGroupFloor, MsvcRand, PROP_TARGET_SETS, MEMBERS_PER_GROUP,

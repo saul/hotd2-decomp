@@ -2103,6 +2103,13 @@ Three more calls make the weapon an object like any other, and each is past a
   or at its midpoint with the other permit holder -- the thrower, left holding
   0, among them. Shot down, in state 1, it is not offered. `[proved]`
 
+Class 0x30's weapon makes the same three: `ZombieThrowHandWeapon` claims at
+`0x0045A25F` and files itself at `0x0045A4DD` with its point lifted 1.5 --
+every weapon, axe or blade (`FADD [0x004C4CB8]` at `0x0045A4B7`, no test in
+front of it) -- and `ZombieThrownWeaponUpdate` draws the same 5-by-5 shadow
+(`0x0045A622`) and files the weapon in states 1 and 2 (`0x0045A676`), lifting
+the point 1.5 for the axe (`0x249`) alone. `[proved]`
+
 ### Class 0x30's weapon
 
 `ZombieThrowHandWeapon` (`FUN_0045A240`) allocates the same `0x13F4` object

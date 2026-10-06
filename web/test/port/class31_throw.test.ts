@@ -32,8 +32,8 @@ import {
   ZslmanBladeAfterimageFade, ZslmanBladeEmitAfterimage,
 } from "../../src/game/class31/projectile";
 import {
-  ZombieThrownWeaponBeginArc, ZombieThrownWeaponState, ZOMBIE_BLADE_SPIN,
-  ZOMBIE_WEAPON_ROLL,
+  ZombieThrownWeaponBeginArc, ZombieThrownWeaponState, ZOMBIE_AXE_SLOT,
+  ZOMBIE_BLADE_SPIN, ZOMBIE_WEAPON_ROLL,
 } from "../../src/game/class30/thrown_weapon";
 import { ZombieThrowHandWeapon } from "../../src/game/class30/throw";
 import {
@@ -2101,5 +2101,119 @@ console.log("class 0x31's weapon: its ground shadow, its camera candidacy, "
             `in pool ${G.g_thrown_weapons.includes(w)} `
             + `entry ${G.g_hit_slots[slot]}`);
     }
+  }
+}
+
+console.log("class 0x30's weapon: the same three calls:");
+{
+  // `ZombieThrowHandWeapon` (`FUN_0045A240`) opens with `ActorClaimHitSlot`
+  // (`0x0045A25F`) and closes with `obj+0x104 = y + 1.5` -- for every weapon
+  // -- and `RegisterForCameraTracking` (`0x0045A4DD`); `ZombieThrownWeaponUpdate`
+  // (`FUN_0045A4F0`) draws the 5-by-5 shadow (`0x0045A622`) and, in states 1
+  // and 2, files `obj+0x100` -- lifted 1.5 for the axe alone -- with the
+  // camera (`0x0045A676`).
+  const flip = MatIdentity();
+  MatrixRotateY(flip, 0x8000);
+  const frame = (): ThrownWeaponFrame => ({
+    cam: { w2v: flip, v2w: flip }, host: NULL_HOST, rng: new Rng(5),
+  });
+  const ZNASSB = {
+    ...TYPE,
+    zombie_throw: {
+      ...TYPE.zombie_throw, straight: false,
+      hands: [
+        { bone: 5, held: 0x1ba9, bare: 0x1bac, weapon_bone: 6,
+          projectile: 0x1b8d },
+        { bone: 8, held: 0x1ba5, bare: 0x1ba8, weapon_bone: 9,
+          projectile: 0x1b8c },
+      ],
+    },
+  } as unknown as CharacterType;
+  const throwOne = (type: CharacterType) => {
+    ResetGameGlobals();
+    SetGameTables({ ...CHARS, types: { "1": type } } as unknown as
+                  CharactersJson);
+    G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    G.g_scene_state_major = SCENE_MAJOR_PLAYING;
+    EnterPlay();
+    G.g_camera_fixed_eye_y = -3;
+    const z = spawnZombie(0x7900, 1, "thrower", {
+      initialState: ZombieState.StandAndThrow, condition: 8,
+      standThrow: { delay_two_hands: 0, delay_one_hand: 0,
+                    delay_after_throw: 2, exit_state: 0, walk_distance: 5 },
+    });
+    z.visible = true;
+    z.hp = z.maxHp = 100;
+    z.pos = vec3(2, 0, 40);
+    z.attackPermit = 0;
+    G.g_attack_permits[0] = z.at;
+    ZombieThrowHandWeapon(z, 5, NULL_HOST);
+    return { z, w: G.g_thrown_weapons[0]! };
+  };
+  const filed = (id: number) =>
+    G.g_camera_candidates.filter((c) => c.thrown === id);
+  const lift = (y: number): number => Math.fround(y + 1.5);
+
+  // -- the axe --------------------------------------------------------------
+  {
+    const { z, w } = throwOne(TYPE);
+    check("the axe claims the g_hit_slots entry after its thrower's",
+          w.slot === ZOMBIE_AXE_SLOT && z.hitSlot !== HIT_SLOT_NONE
+          && w.hitSlot === z.hitSlot + 1 && (w.flags38 & 0x40) !== 0
+          && G.g_hit_slots[w.hitSlot] === ThrownWeaponHitSlotOwner(w.id),
+          `weapon ${w.hitSlot} thrower ${z.hitSlot} `
+          + `table ${G.g_hit_slots.join(",")}`);
+    const key = Math.trunc(Math.hypot(w.pos.x - G.g_camera_eye.x,
+                                      w.pos.y - G.g_camera_eye.y,
+                                      w.pos.z - G.g_camera_eye.z) * 10);
+    check("...and is filed with the camera at the launch, its point 1.5 up "
+          + "and its key from the unlifted position",
+          filed(w.id).length === 1 && filed(w.id)[0]!.key === key
+          && w.lookAt.y === lift(w.pos.y) && w.lookAt.x === w.pos.x
+          && w.lookAt.z === w.pos.z,
+          `${JSON.stringify(filed(w.id))} lookAt ${JSON.stringify(w.lookAt)}`);
+    ThrownWeaponPoolUpdate(frame());
+    check("in flight (state 1) it files again, the axe's point still 1.5 up",
+          w.state === ZombieThrownWeaponState.Straight
+          && filed(w.id).length === 2 && w.lookAt.y === lift(w.pos.y),
+          `state ${w.state} filed ${filed(w.id).length} `
+          + `lookAt.y ${w.lookAt.y} y ${w.pos.y}`);
+    const o = vec3();
+    MatrixTransformPoint(w.shadow ?? MatIdentity(), vec3(0, 0, 0), o);
+    const want = vec3();
+    MatrixTransformPoint(flip, vec3(w.pos.x, Math.fround(-3 + 0.1), w.pos.z),
+                         want);
+    check("...and draws its shadow 0.1 over the floor under it",
+          w.shadow !== null && Math.abs(o.x - want.x) < 1e-4
+          && Math.abs(o.y - want.y) < 1e-4 && Math.abs(o.z - want.z) < 1e-4,
+          JSON.stringify(o));
+    const slot = w.hitSlot;
+    for (let i = 0; i < 400 && G.g_thrown_weapons.includes(w); i++) {
+      ThrownWeaponPoolUpdate(frame());
+    }
+    check("...and gives the entry back when it despawns",
+          !G.g_thrown_weapons.includes(w)
+          && G.g_hit_slots[slot] === HIT_SLOT_NONE,
+          `in pool ${G.g_thrown_weapons.includes(w)} `
+          + `entry ${G.g_hit_slots[slot]}`);
+  }
+
+  // -- znassb's blade -------------------------------------------------------
+  {
+    const { w } = throwOne(ZNASSB);
+    check("a blade's launch point is lifted 1.5 as well",
+          w.slot === 0x1b8d && filed(w.id).length === 1
+          && w.lookAt.y === lift(w.pos.y), `lookAt.y ${w.lookAt.y}`);
+    ThrownWeaponPoolUpdate(frame());
+    check("...but in flight (state 2) a blade's point is not lifted",
+          w.state === ZombieThrownWeaponState.Arc
+          && filed(w.id).length === 2 && w.lookAt.y === w.pos.y,
+          `state ${w.state} lookAt.y ${w.lookAt.y} y ${w.pos.y}`);
+    w.state = ZombieThrownWeaponState.ShotDown;
+    w.sub = 0;
+    G.g_camera_candidates = [];
+    G.g_camera_candidate_count = 0;
+    ThrownWeaponPoolUpdate(frame());
+    check("shot down (state 3) it is not filed", filed(w.id).length === 0);
   }
 }

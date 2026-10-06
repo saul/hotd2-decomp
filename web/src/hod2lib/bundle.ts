@@ -1638,10 +1638,12 @@ export const ACTOR_SLOTS: Record<number, number[]> = {
   // 90 are drawn by nothing in the image at all.
   0x43: Array.from({ length: 106 }, (_, i) => 0xbbd + i),
   0x52: Array.from({ length: 10 }, (_, i) => 0x1385 + i),
-  // Class 0x31's thrown weapon: the ground shadow `ThrownWeaponUpdate`
-  // (`FUN_00450780`) draws under it through `ActorDrawGroundShadow`
-  // (`FUN_0040A620`, `PUSH 0x10d0` at `0x0040A6C8`) -- `common.bin` 200,
-  // the disc. The weapons themselves are the thrower's own models.
+  // Both thrown weapons' ground shadow: `ThrownWeaponUpdate` (`FUN_00450780`)
+  // for class 0x31 and `ZombieThrownWeaponUpdate` (`FUN_0045A4F0`) for class
+  // 0x30 draw it under the weapon through `ActorDrawGroundShadow`
+  // (`FUN_0040A620`, `PUSH 0x10d0` at `0x0040A6C8`) -- `common.bin` 200, the
+  // disc. The weapons themselves are the throwers' own models.
+  0x30: [0x10d0],
   0x31: [0x10d0],
   // Class 0x14, the stage-2 boss: the two flipbooks
   // `Class14AdvanceMotionAndPublishPoints` (`FUN_00476AD0`) draws under bone
@@ -2218,7 +2220,7 @@ export async function actorSlotEntry(
   const rig: Rig = {
     name: "slots_actor",
     routine: "asset-slot actor draws (classes 0x13, 0x14, 0x32, 0x40, 0x42, "
-      + "0x43, 0x51, 0x52; class 0x31's weapon shadow; class 0x25 variant 3; "
+      + "0x43, 0x51, 0x52; the thrown weapons' shadow; class 0x25 variant 3; "
       + "class 0x26 subtypes 6 and 7; "
       + "class 0x33 selectors 1 and 4; class 0x41 type 1's water tiles)",
     worldSpace: false,

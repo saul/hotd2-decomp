@@ -67,8 +67,18 @@ the same commit.
   `MatrixStore(obj+0x150)` the mesh shot test would read. `[open]`: what
   takes selector 7's object away, since its own despawn test never passes.
 * **`0x41` prop placer** -- constructors 26 (`PlaceType26RippleTask`) and 68
-  (the golden frog); the story-mode switch's hinge and item spawns;
-  `SpawnScorePickup`'s object.
+  (the golden frog); `SpawnScorePickup`'s object.
+* **`0x44` prop placer** -- the mesh shot test of every selector but 17
+  (`class44/story_switch.ts` is the one the prop pool files as a mesh):
+  selector 0's window and the hinges carry no resolved blob, so a shot passes
+  through them; and the moving-object collision passes, which no prop is in
+  (`coli.ts`, `ColiDynamicObjects`), so a standing door is not a wall for
+  ground probes, the crowd push or the world trace. Selector 0's registration
+  also needs the captured bone's matrix (`EffectDrawWithCapture`,
+  `FUN_0040DFD0`) and reads its three angles past key 100 out of the motion
+  block -- `[open]` what those bytes are. The story-mode switch's scene-4
+  count and blink read `g_script_flags[-1]` once its route is written, and
+  `[likely]` never run.
 * **`0x61` result card** -- the one writer of `g_original_item_part_scale`
   (Original Mode).
 * **`0x60` chapter card** -- `FUN_00434DA0`, the arm `ChapterCardInstall`

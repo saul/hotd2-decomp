@@ -3062,6 +3062,17 @@ export const G = {
    * inventory of the sixteen writers and which are Original-Mode-only.
    */
   g_script_branch_var: 0,
+  /**
+   * `g_story_switch_thrown` — `0x009A26EC`, a byte. **One story-mode switch
+   * kicked open opens every other one standing**: `StoryModeSwitchUpdate`
+   * (`FUN_00474F30`) throws an unthrown switch when it is non-zero, and the
+   * first switch thrown by a shot raises it. `PlaceStoryModeSwitch`
+   * (`FUN_00473A70`) writes it 0. Those four instructions are the whole of
+   * its use: the bytes `ec269a00` occur in the image at `0x00473B83`,
+   * `0x004752BA`, `0x004752CA` and `0x004752EA` and nowhere else, and no
+   * named table's extent covers it. `[proved]` See `class44/story_switch.ts`.
+   */
+  g_story_switch_thrown: 0,
 
   // -- thrown weapons ----------------------------------------------------
   /**

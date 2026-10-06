@@ -49,7 +49,7 @@ import { PropBuildEffectCollapse } from "./effect_collapse";
 import { PropBuildKindedProp } from "./kinded_prop";
 import type { BreakablePlacement } from "../../bundle";
 import { PropBuildScriptFlagEffect } from "./script_flag_effect";
-import { PlaceStoryModeSwitch } from "../class41/triggers";
+import { PlaceStoryModeSwitch } from "./story_switch";
 
 /**
  * `obj+0x11C` for this class — the builder index.
@@ -139,8 +139,8 @@ export enum Class44Selector {
   FallingContainer = 16,
   /**
    * `PlaceStoryModeSwitch` (`FUN_00473A70`) — the **route-branch trigger with
-   * the widest reach**: twelve spawns over four stages, and five of the game's
-   * sixteen branch records are answered by one. See `game/class41/branch.ts`.
+   * the widest reach**: nine spawns over four stages, and five of the game's
+   * sixteen branch records are answered by one. See `class44/story_switch.ts`.
    */
   StoryModeSwitch = 17,
 }
@@ -314,6 +314,7 @@ export * from "./effect_handoff";
 export * from "./swing_then_break";
 export * from "./effect_collapse";
 export * from "./kinded_prop";
+export * from "./story_switch";
 
 /**
  * The same shape: a placer that builds and dies. All eighteen selectors have

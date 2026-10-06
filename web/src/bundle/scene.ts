@@ -241,7 +241,9 @@ export interface BreakablePlacement {
    * The i32 at tail `+0x08`, which the constructor stores to `obj+0x14C`
    * and the update tests against `-1`: to choose `ActorDespawn` over
    * `ActorKill` on the remove flag, and to register for the shot test. Every
-   * class-0x44 selector that reads it: 1 to 7, 12 and 13.
+   * class-0x44 selector that reads it: 1 to 7, 12, 13 and 17 (the switch,
+   * which tests it at placement and also carries it resolved, as
+   * {@link coli_blob}).
    */
   coli?: number;
   /**
@@ -317,6 +319,11 @@ export interface BreakablePlacement {
    *
    * `slot`, `coli`, `open_flag`, `remove_flag` and `scale` as for the
    * selectors above.
+   *
+   * `story_switch` (selector 17, `PlaceStoryModeSwitch`, `FUN_00473A70`)
+   * carries `curve` as the **signed byte** at tail `+0x00` (`obj+0x194`, an
+   * index into `g_pHingeCurvesXYZ`), `side` from the i32 at `+0x0C` and
+   * `scale` from `+0x14`.
    */
   curve?: number;
   side?: number;
@@ -358,14 +365,15 @@ export interface BreakablePlacement {
   branch_flag?: number;
   remove_flag?: number;
   /**
-   * `story_switch` only — the descriptor's `+0x08`, which decides **how it is
-   * shot**. `-1` sends it to `ShotTestSphere` with a radius of 8 and a centre
-   * the routine never writes, so it answers any shot on screen; anything else
-   * sets `obj+0x34` bit 4 and sends it to `ShotTestMesh`, which the prop pool
-   * does not reach. Every shipped switch names one. See
-   * `game/class41/shot_test.ts`.
+   * `story_switch` (and `script_flag_effect`) — the `coli.blobs` key the
+   * tail's `+0x08` points at, which the constructor stores to `obj+0x14C`:
+   * the collision mesh `ShotTestMesh` (`FUN_00404A00`) traces a shot against.
+   * `null` for `-1`, which for the switch is the sphere arm instead (radius
+   * 8, a centre the routine never writes), and for a pointer that lands on
+   * no blob. Every shipped switch names one. The raw word is {@link coli}.
+   * See `game/class44/story_switch.ts`.
    */
-  volume?: number;
+  coli_blob?: string | null;
   /**
    * `story_switch` only — the four Original Mode item ids that throw the
    * switch without a shot. `-1` in the first means it has no key and any shot

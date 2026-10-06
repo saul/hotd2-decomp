@@ -86,8 +86,9 @@
  *   bytes are the exporter's and the port writes none.
  * * **The collision blob.** `0x0B00` and `0x0B48` name one, so in the engine
  *   the two doors stop a bullet and take part in both collision passes. The
- *   port's prop pool has no mesh shot test (the story-mode switch is the
- *   other object waiting on one, `class41/shot_test.ts`); the registration
+ *   prop pool's mesh arm (`PropRegisterForShotTestMesh`,
+ *   `class41/shot_test.ts`) needs the blob resolved to a `coli.blobs` key,
+ *   which only the story-mode switch's placement carries; this registration
  *   is transcribed and files a sphere of radius 0, which nothing can hit.
  * * **`SetRenderLightColour(0, 0.01, 0.01)`** around the second draw. That
  *   arm is taken only for slot `0x189C`, which no selector-12 spawn names --

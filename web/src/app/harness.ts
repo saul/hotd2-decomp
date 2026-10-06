@@ -53,6 +53,7 @@
  */
 import { G } from "../game/globals";
 import { ShotTestPickedHere } from "../game/combat/shot_test";
+import { T } from "../game/tables";
 import type { Walker } from "../script/walker";
 import type { Rng } from "../core/rng";
 import type { PlayerState } from "./urlstate";
@@ -136,6 +137,12 @@ export interface ShotTarget {
    * `at` is then its thrower and `cls` is -1: the weapon has no class.
    */
   thrown?: number;
+  /**
+   * A class-0x44 prop shot through its own mesh (the story-mode switch), by
+   * its id in `g_breakable_props`. `at` is its placer's address, `cls` 0x44,
+   * and the point is the middle of its blob's box through its `obj+0x150`.
+   */
+  prop?: number;
 }
 
 /**
@@ -357,6 +364,26 @@ export class Harness {
         if (!p) continue;
         out.push({ at: e.at, cls: -1, x: p.x, y: p.y, z: p.z,
                    thrown: e.thrown });
+        continue;
+      }
+      // A prop's entry carries its placer's `at`, which is an actor in the
+      // pool too: look it up by the prop, never as an actor.
+      if (e.prop !== undefined) {
+        const q = G.g_breakable_props.find((x) => x.id === e.prop);
+        const blob = q?.coliBlob ? T.coli?.blobs?.[q.coliBlob] : undefined;
+        const m = q?.coliMatrix;
+        if (!blob || !m) continue;
+        const cx = (blob.min[0] + blob.max[0]) / 2;
+        const cy = (blob.min[1] + blob.max[1]) / 2;
+        const cz = (blob.min[2] + blob.max[2]) / 2;
+        const p = project({
+          x: m[0] * cx + m[1] * cy + m[2] * cz + m[3],
+          y: m[4] * cx + m[5] * cy + m[6] * cz + m[7],
+          z: m[8] * cx + m[9] * cy + m[10] * cz + m[11],
+        });
+        if (!p) continue;
+        out.push({ at: e.at, cls: 0x44, x: p.x, y: p.y, z: p.z,
+                   prop: e.prop });
         continue;
       }
       const obj = G.g_object_list.find((o) => o.at === e.at);

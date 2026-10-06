@@ -107,6 +107,7 @@ import { SpriteEffectKind } from "../game/effects/sprite";
 import { charactersJson, resolveForStage as resolveCharacters,
          stagePlacesResultCard } from "./characters";
 import * as charmotion from "./charmotion";
+import * as colilib from "./coli";
 import { class42Tables } from "./class42";
 import * as degraded from "./degraded";
 import type { Degradation } from "./degraded";
@@ -699,8 +700,9 @@ function genericTypes(tables: ExeTables): Set<number> {
  * decrement the same `g_item_set_countdown` and the port has to place them all
  * before any of the countdowns mean anything.
  */
-export function containerPlacements(tables: ExeTables, evt: evtlib.EvtFile,
-                                    spawnRecords: Spawn[]):
+export function containerPlacements(
+    tables: ExeTables, evt: evtlib.EvtFile, spawnRecords: Spawn[],
+    coliSets: [colilib.ColiFile, colilib.ColiFile] | null = null):
     Record<string, unknown>[] {
   const raw = evt.raw;
   const out: Record<string, unknown>[] = [];
@@ -907,23 +909,36 @@ export function containerPlacements(tables: ExeTables, evt: evtlib.EvtFile,
         });
       }
     } else if (rec.hp === 17) {              // class 0x44 selector 17
-      // `PlaceStoryModeSwitch` -- the branch writer with the widest reach.
-      // `obj+0x11C` is written as the LITERAL 1 by the constructor, so it is
-      // not a lifetime here; `+0x2A4` names the script flag that removes it.
+      // `PlaceStoryModeSwitch` (`FUN_00473A70`) -- the branch writer with the
+      // widest reach. The tail at the offsets and widths the constructor
+      // reads it: the signed byte at `+0x00` is the hinge curve
+      // (`obj+0x194`, `MOVSX` at `0x00474FE3`), the i16 at `+0x04` the slot,
+      // the i32 at `+0x08` the collision blob (`obj+0x14C`), the i32 at
+      // `+0x0C` the swing's side (`obj+0x1DC`), the two signed bytes at
+      // `+0x10`/`+0x11` the route flag and the remove flag, three f32 at
+      // `+0x14` the draw's scale and four signed bytes at `+0x20` the item
+      // keys. `obj+0x11C` is written as the LITERAL 1, so it is not a
+      // lifetime here; `+0x2A4` is.
+      const coli = rec.param(0x08, "i32") ?? -1;
+      const hit = coli !== -1 && coliSets
+        ? colilib.pointerToOffset(coli >>> 0, coliSets[0], coliSets[1])
+        : null;
       out.push({
         at: rec.offset, container: "story_switch",
+        curve: rec.param(0x00, "i8") ?? 0,
         slot: rec.param(0x04, "i16") || 0,
-        // The script flag the route waits on, and the one that removes the
-        // object. Both signed bytes, and -1 means "none".
-        // The descriptor's `+0x08`, which decides how the switch is shot:
-        // -1 is the sphere path (radius 8, centre never written, so it answers
-        // any shot on screen) and anything else is the mesh volume, which the
-        // port has not got. See `game/class41/shot_test.ts`.
-        volume: rec.param(0x08, "i32"),
+        // -1 is the sphere arm (radius 8, `obj+0x34 |= 0x80000000`); anything
+        // else is the mesh arm (`|= 0x50`), and `coli_blob` is the
+        // `coli.blobs` key it points at -- `null` for -1, or for a pointer
+        // that lands on no blob, which is what a wrong reading looks like.
+        coli,
+        coli_blob: hit ? `${hit[0]}:${hit[1]}` : null,
+        side: rec.param(0x0c, "i32") ?? 0,
         branch_flag: rec.param(0x10, "i8"),
         remove_flag: rec.param(0x11, "i8"),
-        // The four Original Mode item ids that throw the switch without a
-        // shot. -1 in the first means the switch has no key at all.
+        scale: [0x14, 0x18, 0x1c].map((o) => rec.param(o, "f32") ?? 0),
+        // The four Original Mode item ids that throw the switch on a shot.
+        // -1 in the first means the switch has no key at all.
         keys: [0, 1, 2, 3].map((k) => rec.param(0x20 + k, "i8")),
         lifetime_evt_steps: 1,
         pos: [...rec.pos], yaw: rec.orient[1],
@@ -2807,7 +2822,9 @@ export async function buildStage(stage: Stage, sink: BundleSink,
 
   // Before the glTF: the template rig has to include every asset slot the
   // stage's generic props name, and only the script knows which those are.
-  const placements = evt ? containerPlacements(tables, evt, spawnRecords) : [];
+  const placements = evt
+    ? containerPlacements(tables, evt, spawnRecords, await stage.colisets())
+    : [];
   await addEffectCollapseKeys(stage, placements);
   const carriedEffects = await carriedPropEffectsJson(
     stage, charPlaces as unknown as Record<string, unknown>[]);

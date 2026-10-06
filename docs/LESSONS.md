@@ -973,6 +973,24 @@ is split, check every id each reader can draw is still in every bundle that
 reader runs in** (`tools/checks/original_mode.ts` now does, per stage), not
 just the bundle the change was about.
 
+**L108 -- A transpose standing in for an inverse is a claim that nothing
+scales, and it holds only for the callers it was written for.** `coli.ts`
+took a world point into an object's space as `R^T (p - t)`, under a comment
+saying the matrix is rigid -- true of every shipped object it had, class
+0x12's door, class 0x15's planks and stage 3's boat (class 0x12 can scale,
+and none of its doors with a blob does). The engine inverts `obj+0x150` with
+`MatrixInvert` (`FUN_004A8D20`), the general cofactor inverse, and the first
+prop shot through its mesh, the story-mode switch, draws with
+`MatrixScale(obj+0x1A8..)` before its `MatrixStore`: stage 2's keyed doors at
+(0.8878, 0.8197, 1) and (0.77, 0.7154, 1). Through the transpose a shot
+squarely on one of those doors came back 1.25 units off the face, and the
+test that pinned it was a hit point checked against the door's own scaled
+matrix, at a scale that is not one (`L48`'s rule with the scale in place of
+the turn). **When a port routine replaces the engine's general primitive with
+a cheaper special case, the special case is a divergence whose inputs must be
+named** -- here, every `MatrixScale` before a `MatrixStore(obj+0x150)` -- and
+a new caller is the moment to check them, not the moment to inherit them.
+
 ---
 
 ## Running the tools

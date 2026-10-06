@@ -58,10 +58,12 @@
  *   with a collision blob (`obj+0x14C != -1`) is filed for the shot test with
  *   bit 4 up and goes to `ShotTestMesh` (`FUN_00404A00`) -- the volume test on
  *   `obj+0x14C` and the matrix `MatrixStore` leaves at `obj+0x150`. The prop
- *   pool has no mesh shot test (`class41/shot_test.ts`; the story-mode switch
- *   and selectors 12 and 13 wait on the same one), so the registration is
- *   transcribed and files a sphere of radius 0, which nothing hits, and the
- *   wobble a shot starts is transcribed and never started.
+ *   pool's mesh arm is `PropRegisterForShotTestMesh` (`class41/shot_test.ts`),
+ *   which the story-mode switch files through; a hinge carries its blob as
+ *   the raw word, not resolved to a `coli.blobs` key, so its registration
+ *   still files a sphere of radius 0, which nothing hits, and the wobble a
+ *   shot starts is transcribed and never started. Selectors 12 and 13 are
+ *   the same.
  * * **The draw's lighting.** `SubmitSlotWithSceneLightArray` or
  *   `AssetDrawSlot`, on `g_GameMode`, `g_scene_lighting` and camera path 0x46;
  *   both are the one recorded draw (`class41/prop_draw.ts`).

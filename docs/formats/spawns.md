@@ -1738,6 +1738,14 @@ consumer sees it, from the descriptor's `+0x08`:
   switch would answer **any shot fired anywhere**. Whether that is intentional
   is `[open]`; no shipped switch takes the path.
 
+The port files the mesh arm in the shot-test list and traces the shot against
+the blob through the draw's matrix (`game/class44/story_switch.ts`); before
+that it gave the arm a radius of 0, and no shipped switch could be shot. The
+routine never clears the hit bits, so a keyed door shot by a player with none
+of its four items throws on the first frame one is held, and the first door
+thrown throws every other one standing through `g_story_switch_thrown`
+(`0x009A26EC`).
+
 ### The spark is at the crosshair, and the blood is not
 
 `SpawnPropHitSpark` (`FUN_00465860`) is the one effect in the whole shot path

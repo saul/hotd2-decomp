@@ -281,6 +281,13 @@ export const CHECKS: readonly Check[] = [
       + "real pointer events at a prop shot through its own collision mesh "
       + "(class 0x44 selector 17), which the port could not shoot at all",
         NEEDS_BUNDLE, LANE_BROWSER),
+  check("hinge", ["node", "tools/hinge_page.mjs", "--headless"],
+        "that a click on stage 1's door at 0x2C2C -- a class-0x44 hinge with a "
+      + "collision blob -- lands on its mesh and starts the wobble only a hit "
+      + "starts, and that the door is in the moving-object collision passes' "
+      + "list in the page: the only check that drives a hinge's mesh "
+      + "registration through real pointer events",
+        NEEDS_BUNDLE, LANE_BROWSER),
   check("humanoid_shot", ["node", "tools/humanoid_shot_page.mjs", "--headless"],
         "that stage 2's jetty zombies -- class-0x25 scripted humanoids, the "
       + "four in the game whose spawn record leaves bit 0x8000 clear -- "

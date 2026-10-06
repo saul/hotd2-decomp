@@ -1006,8 +1006,9 @@ unit a frame moves twenty times. Slots `0xAFC`..`0xAFF` are parts the
 `FUN_0048F560` rig also draws (`[likely]` the lift car's doors): their descriptors are in the car's frame, and the constructor carries
 them to where block 0, or any later block, parks the car --
 `T(557.5, -57.8 or 2492.2, -9880.2) . Ry(0x7555)` -- and slides them along the
-car's x. Only `0x0B00` and `0x0B48` carry a blob; the port's prop pool has no
-mesh shot test, so theirs is a sphere of radius 0 (as the story switch's is).
+car's x. Only `0x0B00` and `0x0B48` carry a blob (`coli6.bin:0` and `:104`),
+so those two are shot through their meshes and are walls to the collision
+passes, as the hinges are.
 The model patch the update makes once (strip-control bit 30) is `[open]`, and
 the second draw for slot `0x189C` (`0x1730` under the scene light) is taken by
 no spawn.
@@ -1086,11 +1087,13 @@ block-11 strip. Selector 15 is `PlaceKindedProp` with the item set and the
 Original Mode story item from the tail, and builds nothing outside Original
 Mode in scene 1 block 0x15, scene 2 blocks 1, 4 and 8, and scene 5 block 1.
 
-What the port does not carry is the same for all of them: the mesh shot test
-their `obj+0x34 |= 0x51` and `obj+0x14C` send them to, which the prop pool
-has not got (the registration files a sphere of radius 0), and everything
-written only for it -- `MatrixStore(obj+0x150)`, selector 3's captured matrix
-and its `obj+0x64..0x6C`.
+Their `obj+0x34 |= 0x51` and `obj+0x14C` send each one with a blob to the
+mesh shot test and into the moving-object collision passes, and the port
+files them so -- `MatrixStore(obj+0x150)` where each routine makes it, and
+`RegisterForShotTest`'s mesh arm (`class41/shot_test.ts`) -- except
+selectors 0 and 3, whose `obj+0x150` is a captured node matrix and whose
+`obj+0x64..0x6C` are read past the end of their motion's file; see
+`docs/formats/combat.md`, "The shot test".
 
 ### Class 0x24's parameter tail
 

@@ -45,16 +45,29 @@
  * unconditionally, so the port's answer to "is it resident" is always yes; a
  * loader the port does not have cannot be asked.
  *
- * `[port-only]` **The shot test is not registered.** `PropBuildScriptFlagEffect`
- * sets `obj+0x34 |= 0x51`, and bit `0x10` sends `RegisterForShotTest`
- * (`FUN_00405160`) to `ShotTestMesh` rather than to the sphere — the path
- * the story-mode switch is shot through (`PropRegisterForShotTestMesh`,
- * `class41/shot_test.ts`). This one is not filed: its `obj+0x150` is the
- * captured bone's matrix (`EffectDrawWithCapture`, `FUN_0040DFD0`), which
- * the port's one-prop-per-node pose does not compose, its blob does not
- * travel, and the three angles `ShotTestMesh` turns the normal by are read
- * at the raw cursor, past key 100 outside the motion block -- `[open]` what
- * those bytes are. `hitRadius` carries the engine's 40.0, which
+ * **The shot test is not registered, and that is a gap.**
+ * `PropBuildScriptFlagEffect` sets `obj+0x34 |= 0x51` and copies the tail's
+ * `+0x08` to `obj+0x14C` -- both halves name a blob in `coli1.bin` (the
+ * placements' `coli_blob`) -- and the routine ends, inside its residency
+ * test, `EffectDrawWithCapture(obj+0x324, obj+0x2A0, -1)`, a copy of the
+ * capture at `obj+0x338` into `obj+0x150`, three stores to
+ * `obj+0x64..0x6C` and `RegisterForShotTest` (`0x00473CDF`). Bit `0x10`
+ * sends that to `ShotTestMesh` (`FUN_00404A00`), and `0x40` puts the window
+ * in the moving-object collision passes (`coli.ts`). `[proved]`
+ *
+ * What stops the port filing it is the three stores. They are
+ * `EffectFrameRotations` (`FUN_0040E070`) of the **raw** cursor `obj+0x32C`
+ * -- not the half-rate key the draw samples -- at row `obj+0x2A0 - 1`, and
+ * `ShotTestMesh` turns a hit's normal by them. Motion 471 is the last block
+ * of `mot/komono_niwa.bin` (bank 26: 464, 465, 471), its 101 keys of 36
+ * bytes end the file exactly at byte 127648, and the cursor runs to 197:
+ * from cursor 101 on, the reads are past the end of the file's buffer, in
+ * the allocation's slack and the heap after it -- bytes the disc does not
+ * hold. `[proved]` from the bank. The capture itself is portable
+ * (`EffectDrawNode`'s `MatrixStore` for the node whose bone is the
+ * capture bone, on the draw's own matrix); the angles past key 100 are a
+ * divergence to declare or not, which is the user's call
+ * (`docs/UNPORTED.md`). `hitRadius` carries the engine's 40.0, which
  * `ShotTestMesh` never reads.
  */
 import type { EffectDefJson } from "../../bundle";

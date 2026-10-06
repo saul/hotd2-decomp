@@ -1305,6 +1305,7 @@ console.log("\nclass 0x44 selector 13, the remove flag and the blob word:");
   const bare = make(-1);
   const blob = make(0x0cebf000);
   G.g_breakable_props.push(bare, blob);
+  G.g_shot_test_list = [];
   RiseToHeightUpdate(bare);
   RiseToHeightUpdate(blob);
   // A quarter turn, where the rotation shows (L48): RotY(0x4000) after the
@@ -1313,8 +1314,14 @@ console.log("\nclass 0x44 selector 13, the remove flag and the blob word:");
   check("the yaw is obj+0x1D0, turned after the translate",
         Math.abs(m[0]) < 1e-6 && Math.abs(Math.abs(m[2]) - 1) < 1e-6
         && m[12] === Math.fround(256.6), JSON.stringify(m));
-  check("with a blob it registers for the shot test every frame; without, "
-        + "never", blob.shotRegistered && !bare.shotRegistered);
+  // The builder's 0x51 sends the registration to the mesh arm, which files
+  // the prop in the list by its id rather than publishing a sphere.
+  check("with a blob it registers for the shot test every frame, as a mesh; "
+        + "without, never",
+        G.g_shot_test_list.length === 1
+        && G.g_shot_test_list[0].prop === blob.id
+        && !blob.shotRegistered && !bare.shotRegistered,
+        JSON.stringify(G.g_shot_test_list));
   G.g_script_flags[25] = 1;
   RiseToHeightUpdate(bare);
   RiseToHeightUpdate(blob);
@@ -1432,8 +1439,14 @@ console.log("\nclass 0x44 selector 12, stage 6's sliding doors:");
         + "before it is tested, so a 21-unit door moves 20 times",
         left.x === 540 && right.x === 620 && xs[19] === 540 && xs[18] === 541,
         `${left.x} ${right.x} ${xs.slice(17, 22).join()}`);
-  check("...and both carry blobs, so both file for the shot test",
-        left.shotRegistered && right.shotRegistered);
+  G.g_shot_test_list = [];
+  SlideOnFlagUpdate(left);
+  SlideOnFlagUpdate(right);
+  check("...and both carry blobs, so both file for the shot test as meshes",
+        G.g_shot_test_list.map((e) => e.prop).join()
+          === [left.id, right.id].join()
+        && G.g_shot_test_list.every((e) => e.flags === 0x51),
+        JSON.stringify(G.g_shot_test_list));
   G.g_script_flags[24] = 1;
   SlideOnFlagUpdate(left);
   check("the remove flag takes a leaf with a blob by ActorDespawn",

@@ -22,6 +22,9 @@ import { BreakablePropPoolUpdate } from "../../src/game/class41/pool";
 import { BreakablePropTakeShot } from "../../src/game/class41/prop";
 import { ProcessPlayerShotsTestList } from "../../src/game/combat/shot_test";
 import { QueueShotRequest } from "../../src/game/combat/shot";
+import {
+  ColiTestSphereAgainstFullSet, ColiTraceSegmentAllSets, QueryGroundHeightAt,
+} from "../../src/game/coli";
 import { GameUpdate, SpawnPropContainers } from "../../src/game/director";
 import { SpawnClass } from "../../src/game/spawn_class";
 import { PropFamily, type BreakableProp } from "../../src/game/class41/prop_state";
@@ -30,7 +33,8 @@ import { PropDrawOnlyType31 } from "../../src/game/class41/draw_only";
 import { KIND_SLOT } from "../../src/game/class41/kinded";
 import {
   Class44Selector, EffectCollapseUpdate, EffectHandoffUpdate,
-  FlagSlotEffectUpdate, HINGE_FRAMES, HINGE_FRAMES_CURVE4, HINGE_WORDS,
+  FlagSlotEffectUpdate, HINGE_FRAMES, HINGE_FRAMES_CURVE4, HINGE_WOBBLE,
+  HINGE_WORDS,
   HingeUpdate, PropBuildEffectCollapse, PropBuildEffectHandoff,
   PropBuildFlagSlotEffect, PropBuildHinge, PropBuildHingeScaled,
   PropBuildKindedProp, PropBuildScaledSlotEffect, PropBuildSlotStripLoop,
@@ -41,7 +45,7 @@ import {
   STORY_SWITCH_SCRIPT_FLAG, StoryModeSwitchPhase, StoryModeSwitchUpdate,
 } from "../../src/game/class44";
 import {
-  check, CHARS, BREAKABLES, propScene, scene as playScene,
+  check, CHARS, BREAKABLES, coliQuad, propScene, scene as playScene,
 } from "./harness";
 
 /** `g_pHingeCurvesXYZ[0]`'s first four frames, held after. */
@@ -244,9 +248,15 @@ console.log("\nHingeUpdate's arms:");
 
   const blob = PropBuildHinge({ ...HINGE_6DC, at: 0x548c, coli: 0x0ced0640,
                                 open_flag: 0x23, remove_flag: 0x48 });
+  G.g_shot_test_list = [];
   HingeUpdate(blob, events);
-  check("with a blob it files itself for the shot test, at radius 0",
-        blob.shotRegistered && blob.hitRadius === 0);
+  check("with a blob it files itself for the shot test as a mesh -- the "
+        + "0x51's bit 0x10 -- and never as a sphere",
+        G.g_shot_test_list.length === 1
+        && G.g_shot_test_list[0].prop === blob.id
+        && G.g_shot_test_list[0].flags === 0x51
+        && !blob.shotRegistered && blob.hitRadius === 0,
+        JSON.stringify(G.g_shot_test_list));
   G.g_script_flags[0x48] = 1;
   HingeUpdate(blob, events);
   check("...and its remove flag is ActorDespawn",
@@ -298,7 +308,10 @@ console.log("\nclass 0x44 selector 5, an effect and then a hinge:");
     at: 0x10018, container: "effect_handoff", curve: 1, slot: 0x17ed,
     coli: 0x0cecfbe0, side: -1, wobble_phase: 0xbc00, open_flag: 0x26,
     remove_flag: 0x4b, lifetime_evt_steps: 0, pos: [-708.8, 5.5, -1303.6],
-    yaw: 49152 });
+    yaw: 49152,
+    // The shipped word lands on no blob in stage 2 (see `hinge.ts`); a key
+    // here, so the copy of both port fields of `obj+0x14C` is seen.
+    coli_blob: "fixture:0" });
   G.g_breakable_props.push(p);
   EffectHandoffUpdate(p, rng);
   check("until flag 0x62 it draws 0x17D7 and nothing else",
@@ -311,6 +324,7 @@ console.log("\nclass 0x44 selector 5, an effect and then a hinge:");
   check("flag 0x62 allocates one HingeUpdate object with its words",
         h?.family === PropFamily.Hinge && h.slot === 0x17ed
         && hw?.o290 === 1 && hw.o1dc === -1 && hw.o14c === 0x0cecfbe0
+        && h.coliBlob === "fixture:0" && p.coliBlob === "fixture:0"
         && h.storyItem === 0x26 && h.removeFlag === 0x4b && h.yaw === 49152);
   check("...but not its wobble phase, which the allocation does not copy",
         hw?.o1e8 === 0);
@@ -319,7 +333,9 @@ console.log("\nclass 0x44 selector 5, an effect and then a hinge:");
   for (let i = 0; i < 40; i++) EffectHandoffUpdate(p, rng);
   check("the hinge is made once, and the clip stops three short",
         G.g_breakable_props.length === 2 && p.effectFrames === 12 - 3);
-  check("it files nothing for the shot test", !p.shotRegistered);
+  check("it files nothing for the shot test",
+        !p.shotRegistered
+        && !G.g_shot_test_list.some((e) => e.prop === p.id));
 }
 
 console.log("\nclass 0x44 selector 6, a swing and then a break:");
@@ -937,6 +953,194 @@ console.log("\nthe story-mode switch is shot through its mesh:");
         && Math.hypot(hit2.point.x - W2.x, hit2.point.y - W2.y,
                       hit2.point.z - W2.z) < 1e-3,
         `${JSON.stringify(hit2?.point)} want ${JSON.stringify(W2)}`);
+  T.coli = null;
+  SetGameTables(CHARS);
+  ResetGameGlobals();
+}
+
+// -- the hinges, through their meshes, and the moving-object passes ----------
+
+/**
+ * Stage 1's evt 0x2C2C: the single door (slot 0x17D7) a hinge swings, blob
+ * `coli1.bin:3040` -- the same 13.4 x 23.4 x 0.46 box as {@link DOOR2_BLOB},
+ * which is that model's blob in stage 2.
+ */
+const HINGE_2C2C: BreakablePlacement = {
+  at: 0x2c2c, container: "hinge", curve: 3, slot: 0x17d7, coli: 216857568,
+  coli_blob: "coli1.bin:3040", side: -1, wobble_phase: 0xbc00,
+  open_flag: 24, remove_flag: 25, lifetime_evt_steps: 0,
+  pos: [-149.68499755859375, 8.310699462890625, -540.261962890625], yaw: 0,
+};
+
+/** A world point and the shot along -normal from forty units out. */
+function shotAt(m: number[], local: { x: number; y: number; z: number }) {
+  const W = { x: 0, y: 0, z: 0 };
+  MatrixTransformPoint(m, local, W);
+  const N = { x: 0, y: 0, z: 0 };
+  MatrixTransformVector(m, { x: 0, y: 0, z: 1 }, N);
+  const l = Math.hypot(N.x, N.y, N.z);
+  N.x /= l; N.y /= l; N.z /= l;
+  const EYE = { x: W.x + N.x * 40, y: W.y + N.y * 40, z: W.z + N.z * 40 };
+  const host: GameHost = {
+    ...NULL_HOST,
+    pickShot: () => null,
+    viewSpaceOfPoint: (p, out) => {
+      out.x = p.x - EYE.x; out.y = p.y - EYE.y; out.z = p.z - EYE.z;
+      return true;
+    },
+  };
+  return { W, N, host,
+           ray: { origin: EYE, dir: { x: -N.x, y: -N.y, z: -N.z } } };
+}
+
+console.log("\nclass 0x44's hinges are shot through their meshes:");
+{
+  const rng = new Rng(0x4420);
+  // The shutter open and a camera driver, so a pull can fire.
+  const events = playScene(0, rng);
+  SetGameTables(CHARS, { ...TABLES, placements: [HINGE_2C2C] });
+  T.coli = { files: ["coli1.bin"],
+             blobs: { "coli1.bin:3040": DOOR2_BLOB } } as never;
+  G.g_evt_step_index = 1;
+  SpawnPropContainers([{ at: HINGE_2C2C.at, class: SpawnClass.PropPlacer }]);
+  // A point on the door's front quad (z = 0, surface 56), at yaw 0 and no
+  // swing, so obj+0x150 is the translate alone.
+  const M = MatIdentity();
+  MatrixTranslate(M, HINGE_2C2C.pos![0], HINGE_2C2C.pos![1],
+                  HINGE_2C2C.pos![2]);
+  const { W, host, ray } = shotAt(M, { x: 6, y: -2, z: 0 });
+  GameUpdate(1 / 60, host, rng, events);
+  const h = G.g_breakable_props.find((q) => q.at === HINGE_2C2C.at);
+  if (!h) throw new Error("no hinge");
+  const w = PropWords(h, HINGE_WORDS);
+  check("PropBuildHinge carries obj+0x14C twice: the word and its blob",
+        w.o14c === 216857568 && h.coliBlob === "coli1.bin:3040");
+  check("HingeUpdate stores its draw's matrix at obj+0x150 and files itself "
+        + "as a mesh",
+        !!h.coliMatrix
+        && Math.abs(h.coliMatrix[3] - Math.fround(HINGE_2C2C.pos![0])) < 1e-4
+        && G.g_shot_test_list.some((e) => e.prop === h.id
+                                          && e.flags === 0x51),
+        `${JSON.stringify(h.coliMatrix)} ${JSON.stringify(G.g_shot_test_list)}`);
+  const hit = ProcessPlayerShotsTestList(ray, host);
+  check("a shot at the door's quad is a candidate: the hinge, whole, "
+        + "surface 56, on the quad",
+        hit?.prop === h.id && hit.whole && hit.mesh?.surface === 56
+        && Math.hypot(hit.point.x - W.x, hit.point.y - W.y,
+                      hit.point.z - W.z) < 1e-3,
+        `${JSON.stringify(hit)} want ${JSON.stringify(W)}`);
+  // The whole pull: bit 3 lands on the hinge, and its own update -- the
+  // flag down, so the `else` arm -- starts the wobble and takes the first
+  // step: phase 0x1000, sin(pi/8) * -1024 truncated is -391, times the
+  // side -1, from the yaw it held (0).
+  QueueShotRequest(0, ray);
+  GameUpdate(1 / 60, host, rng, events);
+  check("the pull starts the hinge's wobble: bit 30 up, one step in "
+        + "(-391)",
+        (h.flags & HINGE_WOBBLE) !== 0 && w.o1e8 === 0x1000
+        && w.o68 === -391,
+        `0x${(h.flags >>> 0).toString(16)} ${w.o1e8} ${w.o68}`);
+
+  // Stage 2's 0x548C is slot 0xA60, and its knock cue writes obj+0x14C = -1:
+  // both port fields, and the registration behind it stops.
+  const a60 = PropBuildHinge({ ...HINGE_2C2C, at: 0x548c, slot: 0xa60,
+                               curve: 0, coli: 0x0ced0640,
+                               coli_blob: "coli1.bin:3040", open_flag: 0x23,
+                               remove_flag: 0x48 });
+  G.g_breakable_props.push(a60);
+  G.g_script_flags[0x23] = 1;
+  G.g_shot_test_list = [];
+  HingeUpdate(a60, events);
+  check("the 0xA60 knock clears obj+0x14C -- the word and the blob -- and "
+        + "the hinge files nothing",
+        PropWords(a60, HINGE_WORDS).o14c === -1 && a60.coliBlob === null
+        && !G.g_shot_test_list.some((e) => e.prop === a60.id));
+  T.coli = null;
+  SetGameTables(CHARS);
+  ResetGameGlobals();
+}
+
+console.log("\nthe props that file themselves are in the moving-object "
+            + "collision passes:");
+{
+  const rng = new Rng(0x4421);
+  const events = scene(rng, GameMode.Arcade, [HINGE_2C2C]);
+  T.coli = { files: ["coli1.bin"],
+             blobs: { "coli1.bin:3040": DOOR2_BLOB } } as never;
+  G.g_coli_full_set = [];
+  G.g_camera_fixed_eye_y = -999;
+  G.g_evt_step_index = 1;
+  SpawnPropContainers([{ at: HINGE_2C2C.at, class: SpawnClass.PropPlacer }]);
+  const M = MatIdentity();
+  MatrixTranslate(M, HINGE_2C2C.pos![0], HINGE_2C2C.pos![1],
+                  HINGE_2C2C.pos![2]);
+  const { W, N } = shotAt(M, { x: 6, y: -2, z: 0 });
+  // A segment from behind the door to in front of it: the front quad is
+  // crossed the way `ColiSegmentVsMesh` accepts, behind first.
+  const trace = () => ColiTraceSegmentAllSets(
+    W.x - N.x * 5, W.y - N.y * 5, W.z - N.z * 5,
+    W.x + N.x * 20, W.y + N.y * 20, W.z + N.z * 20);
+  GameUpdate(1 / 60, NULL_HOST, rng, events);
+  check("the frame the hinge first files itself it is not yet a wall: the "
+        + "passes walk last frame's list",
+        G.g_breakable_props.length === 1 && !trace());
+  GameUpdate(1 / 60, NULL_HOST, rng, events);
+  check("the next frame a world trace stops on its front quad, in world "
+        + "space, surface 56",
+        trace() && G.g_coli_hit_surface === 56
+        && Math.hypot(G.g_coli_hit_x - W.x, G.g_coli_hit_y - W.y,
+                      G.g_coli_hit_z - W.z) < 1e-3,
+        `${G.g_coli_hit_x},${G.g_coli_hit_y},${G.g_coli_hit_z}`);
+  // A body half a unit in front of the face, radius 1: the front quad is
+  // nearer than the back (0.96), so it is the push, along the door's +z.
+  const ok = ColiTestSphereAgainstFullSet(W.x + N.x * 0.5, W.y + N.y * 0.5,
+                                          W.z + N.z * 0.5, 1);
+  check("...and a body's push meets it: depth 0.5 along its face normal, "
+        + "the hit's surface 1",
+        ok && Math.abs(G.g_coli_hit_depth - 0.5) < 1e-4
+        && Math.abs(G.g_coli_hit_normal[2] - 1) < 1e-6
+        && G.g_coli_hit_surface === 1,
+        `${ok} ${G.g_coli_hit_depth} ${G.g_coli_hit_normal}`);
+  G.g_script_flags[HINGE_2C2C.remove_flag!] = 1;
+  GameUpdate(1 / 60, NULL_HOST, rng, events);
+  check("despawned by its remove flag it is no wall, though last frame's "
+        + "list still names it",
+        G.g_coli_dynamic_list.some((e) => e.prop !== undefined)
+        && !trace() && !ColiTestSphereAgainstFullSet(
+          W.x + N.x * 0.5, W.y + N.y * 0.5, W.z + N.z * 0.5, 1));
+
+  // **Ranked on the world distance.** Stage 2's keyed door is drawn at a
+  // scale of (0.8878, 0.8197, 1). A ground probe ten units above its top
+  // face is 12.2 units from it in the door's own space; a floor one unit
+  // below the top face is 11 units away in the world. The door is nearer.
+  scene(rng, GameMode.Arcade, [DOOR2]);
+  const M2 = MatIdentity();
+  MatrixTranslate(M2, DOOR2.pos![0], DOOR2.pos![1], DOOR2.pos![2]);
+  MatrixRotateY(M2, DOOR2.yaw!);
+  MatrixScale(M2, DOOR2.scale![0], DOOR2.scale![1], DOOR2.scale![2]);
+  const top = { x: 0, y: 0, z: 0 };
+  MatrixTransformPoint(M2, { x: 6, y: 9.318479537963867, z: -0.23 }, top);
+  T.coli = { files: ["coli2.bin"], blobs: {
+    "coli2.bin:25760": DOOR2_BLOB,
+    floor: coliQuad([0, 1, 0, -(top.y - 1)], 1,
+                    [top.x - 50, top.y - 1, top.z + 50,
+                     top.x + 50, top.y - 1, top.z + 50,
+                     top.x + 50, top.y - 1, top.z - 50,
+                     top.x - 50, top.y - 1, top.z - 50]),
+  } } as never;
+  G.g_coli_full_set = ["floor"];
+  G.g_camera_fixed_eye_y = -999;
+  G.g_evt_step_index = 1;
+  SpawnPropContainers([{ at: DOOR2.at, class: SpawnClass.PropPlacer }]);
+  GameUpdate(1 / 60, NULL_HOST, rng, events);
+  const floorOnly = QueryGroundHeightAt(top.x, top.y + 10, top.z);
+  GameUpdate(1 / 60, NULL_HOST, rng, events);
+  const ground = QueryGroundHeightAt(top.x, top.y + 10, top.z);
+  check("before the door is published the probe finds the floor below it",
+        Math.abs(floorOnly - (top.y - 1)) < 1e-3, `${floorOnly}`);
+  check("...and after, the scaled door's top, ten world units down -- "
+        + "nearer than the floor's eleven",
+        Math.abs(ground - top.y) < 1e-3, `${ground} want ${top.y}`);
   T.coli = null;
   SetGameTables(CHARS);
   ResetGameGlobals();

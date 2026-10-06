@@ -121,7 +121,8 @@ export interface ShotTestEntry {
    * The engine's entry holds the object whatever pool the port keeps it in.
    * Only `RegisterForShotTest`'s bit-0x10 arm files one
    * (`PropRegisterForShotTestMesh`, `class41/shot_test.ts`); the prop pool's
-   * spheres are still picked by `render/breakables.ts`.
+   * spheres are still picked by `render/breakables.ts`. The moving-object
+   * collision passes resolve it by this too (`coli.ts`).
    */
   prop?: number;
 }
@@ -413,10 +414,12 @@ const _w = { x: 0, y: 0, z: 0 };
  * here, one raises it: class 0x12, whose stage-1 door (`0x3D88`) carries
  * `0x10` in its record and files itself every frame until its strip starts
  * (`game/class12/`), so a shot at the boarded doorway stops on the boards;
- * and class 0x44's story-mode switch, a prop the pool files here by
- * {@link ShotTestEntry.prop}, so a shot at a gate's door kicks it open
- * (`class44/story_switch.ts`). The other families that raise it are not in
- * this list in the port -- see `docs/formats/combat.md`, "The shot test".
+ * and class 0x44's props with a blob, which the pool files here by
+ * {@link ShotTestEntry.prop}: the story-mode switch, so a shot at a gate's
+ * door kicks it open (`class44/story_switch.ts`), and the hinges and
+ * selectors 6, 7, 12 and 13, so a shot at a door stops on it
+ * (`class44/hinge.ts`). Selectors 0 and 3 raise it and are not filed yet --
+ * see `docs/formats/combat.md`, "The shot test".
  *
  * What is not here is `ShotTestWorld` (`FUN_00404B80`). In the engine the
  * static collision's hits are candidates in the same list, which is what

@@ -72,18 +72,34 @@
  * [EAX+0x9C7200],1`), and the sound on selector 3 is on equality, so a
  * cursor parked on one of the four frames plays it every frame.
  *
+ * ## The mesh shot test
+ *
+ * `obj+0x34 |= 0x51` sends both to `ShotTestMesh` (`FUN_00404A00`), the
+ * test on `obj+0x14C` through the matrix at `obj+0x150`, and with a blob into
+ * the moving-object collision passes (`coli.ts`). **Selector 7** is filed
+ * as the hinges are: its `MatrixStore` keeps the matrix built on the
+ * identity, and `RegisterForShotTest` takes the mesh arm
+ * (`PropRegisterForShotTestAsIs`, `class41/shot_test.ts`) -- its one shipped
+ * spawn's `obj+0x14C` is `-1`, so it never registers.
+ *
+ * **Selector 3 is not filed**, and stage 1's spawn (evt `0x3ACC`) names a
+ * blob (`coli1.bin`, resolved as `coli_blob`). Its `obj+0x150` is the
+ * capture -- the matrix `EffectDrawNode` stores for the node whose bone is 1,
+ * into `obj+0x338`, copied over by `REP MOVSD` -- and `obj+0x64..0x6C`, the
+ * three angles `ShotTestMesh` turns the hit's normal by, are read by
+ * `EffectFrameRotations` (`FUN_0040E070`) at the **raw** cursor and at row
+ * `obj+0x2A0 - 1`, where `obj+0x2A0` is this selector's **open flag**
+ * (30 for the shipped spawn), not a bone: motion `0x1D6` is the only block of
+ * `komono_man.bin` and ends the file after 75 keys of 20 bytes, so from
+ * cursor 66 on the routine reads past the end of the file's buffer, at
+ * bytes the disc does not hold. Reproducing that needs a declared
+ * divergence, which is the user's call (`docs/UNPORTED.md`). Selector 3's
+ * builder writes `obj+0x124 = 5.0f`, which only `ShotTestSphere`
+ * (`FUN_00404630`) reads and bit `0x10` keeps this object from, so
+ * `hitRadius` carries 0.
+ *
  * ## What the port does not carry
  *
- * * **The mesh shot test.** `obj+0x34 |= 0x51` sends both to `ShotTestMesh`
- *   (`FUN_00404A00`), the test on `obj+0x14C` and the matrix at `obj+0x150`,
- *   which the prop pool does not have (`class41/shot_test.ts`). Everything
- *   either routine writes only for it -- selector 3's captured matrix and its
- *   `obj+0x64..0x6C`, selector 7's `MatrixStore` -- is not carried, and
- *   `RegisterForShotTest` files a sphere of radius 0. Selector 3's builder
- *   writes `obj+0x124 = 5.0f`, which only `ShotTestSphere` (`FUN_00404630`)
- *   reads and bit `0x10` keeps this object from; the port's pool has only the
- *   sphere, so `hitRadius` carries 0 rather than a radius the engine never
- *   tests with.
  * * `[port-only]` **The residency tests** on `g_motion_slots` (`0x009A37E0`)
  *   are not modelled: the bundle bakes the motion, so it is always resident
  *   here -- the answer `ScriptFlagEffectUpdate` (`FUN_00473B90`) and
@@ -104,7 +120,10 @@ import { PropDrawBegin, PropDrawEffect, PropMatrixPush }
 import {
   BreakableState, makeBreakableProp, PropFamily, type BreakableProp,
 } from "../class41/prop_state";
-import { PropRegisterForShotTest } from "../class41/shot_test";
+import {
+  PropRegisterForShotTest, PropRegisterForShotTestAsIs,
+} from "../class41/shot_test";
+import { ColiStoreObjectMatrix } from "../coli";
 import { PropWords } from "../class41/words";
 import { HINGE_FLAGS, HINGE_WORDS, PROP_SWEEP_FLAG, PROP_SWEEP_SCENE }
   from "./hinge";
@@ -164,6 +183,7 @@ export function PropBuildFlagSlotEffect(pl: BreakablePlacement): BreakableProp {
   p.effectFrames = 0;
   p.effectPrevFrame = 0;
   w.o14c = pl.coli ?? -1;
+  p.coliBlob = pl.coli_blob ?? null;
   // `obj+0x124 = 5.0f`, which only the sphere test reads -- see the file
   // comment for why the port's sphere is 0.
   p.hitRadius = 0;
@@ -196,6 +216,10 @@ export function FlagSlotEffectUpdate(p: BreakableProp, rng: Rng,
   // (bone 1's matrix into `obj+0x338`, copied to `obj+0x150`) is the mesh
   // shot test's.
   PropDrawEffect(p, m, rng, (p.slot << 16) >> 16);
+  // `RegisterForShotTest`, whose `0x51` takes the mesh arm in the engine.
+  // Not filed so here: the angles that arm needs are past the end of the
+  // motion's file (see the file comment). This sphere has radius 0, which
+  // nothing hits.
   PropRegisterForShotTest(p, p.shotX, p.shotY, p.shotZ);
 }
 
@@ -215,6 +239,7 @@ export function PropBuildScaledSlotEffect(
   w.o68 = 0;
   p.slot = pl.slot ?? 0;
   w.o14c = pl.coli ?? -1;
+  p.coliBlob = pl.coli_blob ?? null;
   w.o1dc = pl.side ?? 0;
   w.o290 = pl.curve ?? 0;
   p.storyItem = pl.open_flag ?? 0;
@@ -258,5 +283,8 @@ export function ScaledSlotEffectUpdate(p: BreakableProp, rng: Rng): void {
   MatrixRotateX(m, w.o64);
   MatrixScale(m, p.restX, p.restY, p.restZ);
   PropDrawEffect(p, m, rng, (p.slot << 16) >> 16);
-  if (w.o14c !== -1) PropRegisterForShotTest(p, p.shotX, p.shotY, p.shotZ);
+  // `MatrixStore(obj+0x150)` at `0x0047489D`, then the pop.
+  ColiStoreObjectMatrix(p, m);
+  p.coliMatrixDrawn = true;
+  if (w.o14c !== -1) PropRegisterForShotTestAsIs(p);
 }

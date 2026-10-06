@@ -159,6 +159,27 @@ export function PropRegisterForShotTestMesh(p: BreakableProp): void {
 }
 
 /**
+ * `RegisterForShotTest` (`FUN_00405160`) on a prop as it stands: the routine
+ * forks on the object's live bit `0x10` at `0x00405171`, into
+ * {@link PropRegisterForShotTestMesh} or, with the point the object already
+ * holds at `obj+0x70..0x78`, {@link PropRegisterForShotTest}.
+ *
+ * `[port-only]` as a function: the engine's routine is one, and this is the
+ * prop pool's call of it for the routines that call it on the object with
+ * nothing written first -- the class-0x44 hinges, selectors 6, 7, 12 and 13,
+ * and the story-mode switch. Each of those raises `0x10` in its builder
+ * (`0x51` or `0x50`), so for every one with a blob the mesh arm is the one
+ * taken; the other arm is here because the routine has it.
+ */
+export function PropRegisterForShotTestAsIs(p: BreakableProp): void {
+  if ((p.flags & PROP_SHOT_TEST_MESH) !== 0) {
+    PropRegisterForShotTestMesh(p);
+  } else {
+    PropRegisterForShotTest(p, p.shotX, p.shotY, p.shotZ);
+  }
+}
+
+/**
  * The commonest tail: the prop's own origin, unshifted.
  *
  * [port-only] as a *function*. The engine writes these three lines out at the

@@ -52,18 +52,43 @@
  * `0x00473FB5` multiplies the shot wobble by it. Stage 1 carries ±512 and
  * ±416; the van's two doors carry the literal ±1.
  *
+ * ## It is shot through its mesh, and it is in the way `[proved]`
+ *
+ * Every builder sets `obj+0x34 |= 0x51` and copies the tail's `+0x08` to
+ * `obj+0x14C`, and `HingeUpdate` ends `MatrixStore(obj+0x150); Pop` and then,
+ * when `obj+0x14C != -1`, `RegisterForShotTest` (`0x004740F1`..
+ * `0x0047410B`). Bit `0x10` sends that registration past the depth test and
+ * `ProcessPlayerShots` to `ShotTestMesh` (`FUN_00404A00`), which traces the
+ * shot against the blob through the stored matrix; with `0x40` and nothing
+ * of `0x80008000` the same object is in the moving-object collision passes
+ * (`coli.ts`), so a standing hinge with a blob is also a wall to a ground
+ * probe, a body's push and a world trace. Six shipped hinges carry one --
+ * stage 1's door at evt `0x2C2C` (`coli1.bin:3040`, the blob stage 1's
+ * story-mode switch names too), and in stage 2 the doors at `0x548C` and
+ * `0x8368`/`0x83B0` and the scaled pair at `0xD2F0`/`0xD334` -- so a shot at
+ * one stops on it and starts its wobble (`obj+0x34` bit 3, below). The one
+ * at `0x548C` is
+ * slot `0xA60`, whose knock arm writes `obj+0x14C = -1` and so takes it out
+ * of all three.
+ *
+ * Two more stage-2 hinges carry a word that is not `-1` and resolves to no
+ * blob: the door at `0xFFD0` and the one selector 5's `0x10018` hands off
+ * to both name `0x0CECFBE0`, stage 1's door blob (`coli1.bin:3040`) -- in
+ * stage 2 that address is `coli2.bin+3040`, the middle of a quad's
+ * vertices, whose first dword read as a group count is 3,297,643,553. Both
+ * register; what the engine's traces make of that `[open]` (a hang or a
+ * fault is `[likely]`, if a trace ever reaches one). The port's
+ * {@link BreakableProp.coliBlob} is `null` for them, so a trace finds
+ * nothing there.
+ *
+ * `obj+0x14C` is kept twice in the port, as the raw word
+ * ({@link HingeWords.o14c}, which the `-1` tests read) and resolved
+ * ({@link BreakableProp.coliBlob}, which the traces read), so every store to
+ * it writes both: the builders, the selector-5 handoff and the slot-`0xA60`
+ * knock arm's `-1` (`L79`).
+ *
  * ## What the port does not carry
  *
- * * **The mesh shot test.** Every builder sets `obj+0x34 |= 0x51`, so a hinge
- *   with a collision blob (`obj+0x14C != -1`) is filed for the shot test with
- *   bit 4 up and goes to `ShotTestMesh` (`FUN_00404A00`) -- the volume test on
- *   `obj+0x14C` and the matrix `MatrixStore` leaves at `obj+0x150`. The prop
- *   pool's mesh arm is `PropRegisterForShotTestMesh` (`class41/shot_test.ts`),
- *   which the story-mode switch files through; a hinge carries its blob as
- *   the raw word, not resolved to a `coli.blobs` key, so its registration
- *   still files a sphere of radius 0, which nothing hits, and the wobble a
- *   shot starts is transcribed and never started. Selectors 12 and 13 are
- *   the same.
  * * **The draw's lighting.** `SubmitSlotWithSceneLightArray` or
  *   `AssetDrawSlot`, on `g_GameMode`, `g_scene_lighting` and camera path 0x46;
  *   both are the one recorded draw (`class41/prop_draw.ts`).
@@ -84,7 +109,8 @@ import { PropDrawBegin, PropDrawSlot, PropMatrixPush }
 import {
   BreakableState, makeBreakableProp, PropFamily, type BreakableProp,
 } from "../class41/prop_state";
-import { PropRegisterForShotTest } from "../class41/shot_test";
+import { PropRegisterForShotTestAsIs } from "../class41/shot_test";
+import { ColiStoreObjectMatrix } from "../coli";
 import { PropWords } from "../class41/words";
 
 /**
@@ -212,6 +238,7 @@ function HingeAlloc(pl: BreakablePlacement): BreakableProp {
   const w = PropWords(p, HINGE_WORDS);
   w.o68 = 0;
   w.o14c = pl.coli ?? -1;
+  p.coliBlob = pl.coli_blob ?? null;
   w.o2a8 = 0;
   w.o2c0 = 1.0;
   return p;
@@ -337,6 +364,11 @@ export function HingeCurveKey(curve: number, frame: number):
  * The `else` arm is taken both when the flag is down and when the curve has
  * run out, so a door that has finished swinging can be shot into a wobble and
  * one still swinging cannot.
+ *
+ * `[port-only]` in the matrix `MatrixStore` keeps at `obj+0x150`: built on
+ * the identity rather than the view, which is the matrix
+ * `RegisterForShotTest`'s mesh arm leaves there (`class41/shot_test.ts`),
+ * as the story-mode switch's is.
  */
 export function HingeUpdate(p: BreakableProp, events?: Events): void {
   const w = PropWords(p, HINGE_WORDS);
@@ -361,7 +393,9 @@ export function HingeUpdate(p: BreakableProp, events?: Events): void {
     if (flag(HINGE_A60_KNOCK_CUE) !== 0 && w.o2a8 === 0
         && ((w.o290 << 16) >> 16) === 0) {
       events?.emit("sound.play", { id: SFX_HINGE_A60_KNOCK });
+      // `MOV dword ptr [ESI+0x14C], -1` at `0x00473DBF` -- both port fields.
       w.o14c = -1;
+      p.coliBlob = null;
     }
     if (w.o68 > HINGE_A60_STOP_YAW) w.o2a8 = HINGE_FRAMES;
   }
@@ -416,8 +450,11 @@ export function HingeUpdate(p: BreakableProp, events?: Events): void {
     MatrixScale(m, p.restX, p.restY, p.restZ);
   }
   PropDrawSlot(p, m, p.slot);
-  // `MatrixStore(obj+0x150)` is the mesh shot test's; see the file comment.
-  // The routine never writes `obj+0x70..0x78`, so the point it files is the
-  // one the object was cleared with.
-  if (w.o14c !== -1) PropRegisterForShotTest(p, p.shotX, p.shotY, p.shotZ);
+  // `MatrixStore(obj+0x150)` at `0x004740F1`, then the pop.
+  ColiStoreObjectMatrix(p, m);
+  p.coliMatrixDrawn = true;
+  // `CMP EAX,-1; JZ` on `obj+0x14C`, then `RegisterForShotTest(obj)`. The
+  // routine never writes `obj+0x70..0x78`; every builder's `0x51` sends the
+  // registration to the mesh arm, where they are not read.
+  if (w.o14c !== -1) PropRegisterForShotTestAsIs(p);
 }

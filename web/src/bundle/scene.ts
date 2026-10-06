@@ -252,9 +252,9 @@ export interface BreakablePlacement {
    * The i32 at tail `+0x08`, which the constructor stores to `obj+0x14C`
    * and the update tests against `-1`: to choose `ActorDespawn` over
    * `ActorKill` on the remove flag, and to register for the shot test. Every
-   * class-0x44 selector that reads it: 1 to 7, 12, 13 and 17 (the switch,
-   * which tests it at placement and also carries it resolved, as
-   * {@link coli_blob}).
+   * class-0x44 selector that reads it: 0 to 7, 12, 13 and 17 (the switch
+   * tests it at placement); each also carries it resolved, as
+   * {@link coli_blob}.
    */
   coli?: number;
   /**
@@ -387,13 +387,17 @@ export interface BreakablePlacement {
   branch_flag?: number;
   remove_flag?: number;
   /**
-   * `story_switch` (and `script_flag_effect`) — the `coli.blobs` key the
-   * tail's `+0x08` points at, which the constructor stores to `obj+0x14C`:
-   * the collision mesh `ShotTestMesh` (`FUN_00404A00`) traces a shot against.
-   * `null` for `-1`, which for the switch is the sphere arm instead (radius
-   * 8, a centre the routine never writes), and for a pointer that lands on
-   * no blob. Every shipped switch names one. The raw word is {@link coli}.
-   * See `game/class44/story_switch.ts`.
+   * Every class-0x44 placement that carries {@link coli} — the `coli.blobs`
+   * key the tail's `+0x08` points at, which the constructor stores to
+   * `obj+0x14C`: the collision mesh `ShotTestMesh` (`FUN_00404A00`) traces a
+   * shot against, and the moving-object collision passes a ground probe or
+   * a body's push. `null` for `-1` -- which for the switch is the sphere arm
+   * instead (radius 8, a centre the routine never writes) -- and for a
+   * pointer that lands on no blob. Every shipped switch names one, and so
+   * do six hinges, two selector-12 doors, stage 1's selector-3 effect and
+   * both its window halves (selector 0); stage 2's hinge `0xFFD0` and
+   * selector-5 handoff `0x10018` carry stage 1's door pointer, which in
+   * stage 2 lands on no blob. The raw word is {@link coli}. See `game/class44/story_switch.ts` and `hinge.ts`.
    */
   coli_blob?: string | null;
   /**

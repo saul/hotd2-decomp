@@ -182,28 +182,70 @@ const DYNAMIC_COLI_NEED = 0x10 | 0x40;
 const DYNAMIC_COLI_REFUSE = 0x80008000;
 
 /**
- * The objects the moving-object passes test, in `g_coli_dynamic_list`'s
- * place.
- *
- * [diverges] The engine walks `g_coli_dynamic_list` (`0x005A3098`), which
- * {@link ColiPublishDynamicList} copies from what `RegisterForShotTest`
- * collected, at the end of `ProcessPlayerShots` -- a task that runs before
- * every actor -- so both of these passes see the objects that registered on
- * the **previous** frame, whichever actor asks. The port walks the pool and
- * takes the matrix each object holds now. An object with a blob does
- * register every frame it draws: its `0x10` bit sends `RegisterForShotTest`
- * past the depth test (`0x00405176`), through the matrix rebuild and on into
- * the append at `0x004051D7` `[proved]`. So the set is the same and the
- * difference is the frame: a moving object is met a frame ahead of where the
- * engine meets it. `ColiTestSphereAgainstActors` already walks the published
- * list; moving these two passes onto it needs every blob-carrying class to
- * register at its exe site, which class 0x26's boat does not yet.
+ * What a moving-object pass reads off an entry's object besides `obj+0x14C`
+ * and `obj+0x150`: its live `obj+0x34`. An `Actor` is one, and so is a prop.
  */
-function ColiDynamicObjects(): Actor[] {
-  const out: Actor[] = [];
-  for (const o of G.g_object_list) {
-    if (o.despawned || !o.coliBlob || !o.coliMatrix) continue;
-    if (o.at === G.g_cur_actor) continue;
+interface ColiDynamicObject extends ColiObject {
+  flags: number;
+}
+
+/**
+ * The head both moving-object passes open with -- `ColiTraceSegmentAllSets`
+ * at `0x004053FE`..`0x0040544D` and `ColiTestSphereAgainstFullSet` the same
+ * way from `0x0040581E`:
+ *
+ * ```
+ * for (i = 0; i < g_coli_dynamic_count; i++) {
+ *   obj = g_coli_dynamic_list[i].obj;                 // MOV EDI, 0x5A3098
+ *   if (obj && obj != g_cur_actor && obj+0x14C != -1
+ *       && !(obj+0x34 & 0x80008000) && (obj+0x34 & 0x10) && (obj+0x34 & 0x40))
+ *     ...the pass's own test...
+ * }
+ * ```
+ *
+ * `[proved]`. So the passes test what registered on the **previous** frame
+ * -- {@link ColiPublishDynamicList}'s copy of `g_shot_test_list`, made before
+ * any actor runs -- and read the object's **live** word, blob and matrix,
+ * not the entry's. An object is met only if its routine called
+ * `RegisterForShotTest` (`FUN_00405160`) last frame: every one with a blob
+ * does, past the depth test on its bit `0x10` (`0x00405176`), and that is
+ * the class-0x12 boards, class 0x15's planks, stage 3's boat
+ * (`Class26Subtype2Update` at `0x0048EE9C`), and the class-0x44 props that
+ * file themselves: the hinges, selectors 6, 7, 12 and 13, and the
+ * story-mode switch. A prop is its own object to the engine; the port's
+ * entry names it by its id (`ShotTestEntry.prop`).
+ *
+ * This walked the actor pool instead, under a note that the set was the
+ * same and only the frame differed. It was not the same set: no prop was in
+ * it, so a standing door was no wall to a ground probe, a body or a world
+ * trace, and an object that stops registering -- the class-0x12 boards once
+ * their strip starts (`0x8000`) -- stayed a wall.
+ *
+ * Who `g_cur_actor` is: the port keeps the running actor's address there,
+ * and the prop pool runs with it at -1 (`director.ts`), so a prop is never
+ * the object asking -- nor is it in the engine on any frame a prop routine
+ * asks, because no routine of a family that files itself calls either pass.
+ * An entry whose actor has left the pool, or whose prop has, is passed over
+ * as the zeroed entry `ColiDynamicListRemove` (`FUN_00405220`) leaves is.
+ * The port's `ActorDespawn` raises {@link Actor.despawned} rather than
+ * `0x80018000` in the flags word, so that is the question asked of an actor
+ * (`L63`); `ActorDespawnProp` writes the word. A thrown weapon's entry is
+ * passed over too: both launchers write `obj+0x34 = 0x80000001` and nothing
+ * clears bit 31, and the port's weapons are not objects with a blob.
+ */
+function ColiDynamicObjects(): ColiDynamicObject[] {
+  const out: ColiDynamicObject[] = [];
+  for (const e of G.g_coli_dynamic_list) {
+    if (e.thrown !== undefined) continue;
+    let o: ColiDynamicObject | undefined;
+    if (e.prop !== undefined) {
+      o = G.g_breakable_props.find((q) => q.id === e.prop);
+    } else {
+      const a = ActorByAt(e.at);
+      if (!a || a.despawned || a.at === G.g_cur_actor) continue;
+      o = a;
+    }
+    if (!o || !o.coliBlob || !o.coliMatrix) continue;
     if (o.flags & DYNAMIC_COLI_REFUSE) continue;
     if ((o.flags & DYNAMIC_COLI_NEED) !== DYNAMIC_COLI_NEED) continue;
     out.push(o);
@@ -332,24 +374,30 @@ export function ColiTraceSegmentInObjectSpace(
  * this matters to read only the hit's height, and a reader of this normal gets
  * what the engine's gets.
  *
- * The blob test ranks by its distance in the **object's** space, which is the
- * world distance only for an object drawn without a scale -- every shipped
- * object in this pass; the scaled story-mode switch is a prop and never in
- * it (see {@link ColiDynamicObjects}, which walks actors).
+ * **Ranked on the world distance.** `ColiSegmentVsMesh` picks the blob's
+ * nearest quad in the object's own space, but the candidate it becomes is
+ * keyed by `ColiRecordHitCandidate` (`FUN_00405680`) on
+ * `|g_coli_query_ref - g_coli_hit|`, both world points -- the hit having
+ * gone back through the matrix in `ColiTraceSegmentInObjectSpace`. The two
+ * agree only for an object drawn without a scale, and three story-mode
+ * switches are drawn scaled (`L109`); this ranked on the object-space one
+ * while no scaled object could be in the pass.
  */
 export function ColiTraceSegmentVsObjectBlob(
-    obj: Actor, ax: number, ay: number, az: number,
+    obj: ColiObject, ax: number, ay: number, az: number,
     bx: number, by: number, bz: number,
     best: ColiHit, found: boolean): boolean {
   if (!ColiTraceSegmentInObjectSpace(obj, ax, ay, az, bx, by, bz, _dyn)) {
     return found;
   }
-  if (found && _dyn.distSq >= best.distSq) return found;
+  const dx = _dyn.x - bx, dy = _dyn.y - by, dz = _dyn.z - bz;
+  const distSq = dx * dx + dy * dy + dz * dz;
+  if (found && distSq >= best.distSq) return found;
   ColiToWorldPoint(obj.coliMatrix!, _dyn.nx, _dyn.ny, _dyn.nz, _w);
   best.x = _dyn.x; best.y = _dyn.y; best.z = _dyn.z;
   best.nx = _w.x; best.ny = _w.y; best.nz = _w.z;
   best.surface = _dyn.surface;
-  best.distSq = _dyn.distSq;
+  best.distSq = distSq;
   return true;
 }
 
@@ -718,9 +766,11 @@ export function ColiTestSphereAgainstActors(self: Actor, cx: number, cy: number,
  * branch reached it says the opposite, and the opposite drives it deeper.
  *
  * Nearest wins, not deepest: `ColiSphereVsMesh` keeps the candidate with the
- * smallest `dist²` and `ColiSelectNearestHitCandidate` does the same across
- * meshes. Those agree while every hit is in front and diverge the moment one
- * is behind, because then a *larger* distance is a *larger* depth.
+ * smallest `dist²` in its mesh, and `ColiSelectNearestHitCandidate` the one
+ * nearest the centre in the world across meshes
+ * ({@link ColiSphereKeepNearest}). Those agree while every hit is in front
+ * and diverge the moment one is behind, because then a *larger* distance is
+ * a *larger* depth.
  *
  * [diverges] The engine clamps to the nearest point on an *edge* when the
  * centre projects outside the quad and reports `centre - that point` as the
@@ -733,7 +783,7 @@ export function ColiTestSphereAgainstFullSet(cx: number, cy: number,
                                              cz: number, r: number): boolean {
   G.g_coli_hit_surface = 0;
   _sph.hit = false;
-  _sph.distSq = Infinity;
+  _sph.key = 0;
   // The moving objects first, at `0x0040582A`: the centre goes into the
   // object's space through the inverse of `obj+0x150`, the blob is tested
   // there, and a hit comes back with its point through the matrix and its
@@ -744,36 +794,94 @@ export function ColiTestSphereAgainstFullSet(cx: number, cy: number,
     const m = o.coliMatrix!;
     if (!blob) continue;
     ColiToObject(m, cx, cy, cz, _oa);
-    const before = _sph.distSq;
-    ColiSphereVsBlob(blob, _oa.x, _oa.y, _oa.z, r, _sph);
-    if (_sph.distSq < before) {
-      ColiToWorldVector(m, _sph.nx, _sph.ny, _sph.nz, _w);
-      _sph.nx = _w.x; _sph.ny = _w.y; _sph.nz = _w.z;
-    }
+    _one.hit = false;
+    _one.distSq = Infinity;
+    ColiSphereVsBlob(blob, _oa.x, _oa.y, _oa.z, r, _one);
+    if (!_one.hit) continue;
+    ColiToWorldPoint(m, _one.px, _one.py, _one.pz, _w);
+    _one.px = _w.x; _one.py = _w.y; _one.pz = _w.z;
+    ColiToWorldVector(m, _one.nx, _one.ny, _one.nz, _w);
+    _one.nx = _w.x; _one.ny = _w.y; _one.nz = _w.z;
+    ColiSphereKeepNearest(cx, cy, cz, _one, _sph);
   }
   for (const b of blobsOf(G.g_coli_full_set)) {
-    ColiSphereVsBlob(b, cx, cy, cz, r, _sph);
+    _one.hit = false;
+    _one.distSq = Infinity;
+    ColiSphereVsBlob(b, cx, cy, cz, r, _one);
+    if (_one.hit) ColiSphereKeepNearest(cx, cy, cz, _one, _sph);
   }
   if (!_sph.hit) return false;
+  G.g_coli_hit_x = _sph.px;
+  G.g_coli_hit_y = _sph.py;
+  G.g_coli_hit_z = _sph.pz;
+  G.g_coli_hit_dist_sq = _sph.distSq;
   G.g_coli_hit_depth = _sph.depth;
-  // Normalised as `ColiTestSphereAgainstFullSet` does before it returns.
-  // Unsigned: the side is already in the depth.
-  const l = Math.hypot(_sph.nx, _sph.ny, _sph.nz) || 1;
-  G.g_coli_hit_normal = [_sph.nx / l, _sph.ny / l, _sph.nz / l];
-  G.g_coli_hit_surface = _sph.surface;
+  // `0x00405A86`..`0x00405AA3`: normalised only when `nz + ny + nx` is not
+  // 0.0 -- a sum, as the crowd push tests it, and `TEST AH,0x40` skips an
+  // unordered one too -- and `g_coli_hit_surface = 1` at `0x00405AF3`
+  // whatever the quad's material, which is what the routine returns.
+  const { nx, ny, nz } = _sph;
+  const sum = nz + ny + nx;
+  if (!(sum === 0 || Number.isNaN(sum))) {
+    _n.x = nx; _n.y = ny; _n.z = nz;
+    Vec3Normalize(_n, _n);
+    G.g_coli_hit_normal = [_n.x, _n.y, _n.z];
+  } else {
+    G.g_coli_hit_normal = [nx, ny, nz];
+  }
+  G.g_coli_hit_surface = 1;
   return true;
+}
+
+/**
+ * `FMUL float ptr [0x004C43A4]` (10.0) at `0x004056C3` in
+ * `ColiRecordHitCandidate`: a candidate's key is its distance in tenths.
+ */
+const COLI_RECORD_KEY_SCALE = 10.0;
+
+/**
+ * One mesh's hit as `ColiSphereVsMesh`'s caller pushes it and
+ * `ColiSelectNearestHitCandidate` (`FUN_00405760`) picks it: the candidate
+ * is keyed by `ColiRecordHitCandidate` (`FUN_00405680`) on
+ * `__ftol(|centre - hit| * 10.0)`, both **world** points, and the stable
+ * radix sort on its low sixteen bits hands back the first-pushed of the
+ * least. So a hit replaces the one kept only on a strictly smaller key, and
+ * the moving objects, pushed first, win a tie.
+ *
+ * This used to rank on `dist²` in each mesh's own space, which is the world
+ * distance only for an object drawn without a scale -- every object the pass
+ * had, until the props were in it; three story-mode switches are scaled
+ * (`L109`).
+ *
+ * `[port-only]` as a function: the engine's candidates are records and a
+ * sort; the port keeps the winner as it goes, which is the same answer.
+ */
+function ColiSphereKeepNearest(cx: number, cy: number, cz: number,
+                               one: SphereHit, acc: SphereHit): void {
+  const d = Math.sqrt(sq3(cx - one.px, cy - one.py, cz - one.pz));
+  const key = (Math.trunc(d * COLI_RECORD_KEY_SCALE) & 0xffff) >>> 0;
+  if (acc.hit && key >= acc.key) return;
+  Object.assign(acc, one);
+  acc.key = key;
 }
 
 /** The nearest sphere hit so far, across every blob the query tests. */
 interface SphereHit {
   hit: boolean;
+  /** `g_coli_hit_dist_sq`, in the space of the mesh that was tested. */
   distSq: number;
   depth: number;
+  /** `g_coli_hit_x/y/z`: the centre's foot on the quad. */
+  px: number; py: number; pz: number;
   nx: number; ny: number; nz: number;
   surface: number;
+  /** The candidate's sort key ({@link ColiSphereKeepNearest}). */
+  key: number;
 }
 const _sph: SphereHit = { hit: false, distSq: Infinity, depth: 0,
-                          nx: 0, ny: 0, nz: 0, surface: 0 };
+                          px: 0, py: 0, pz: 0, nx: 0, ny: 0, nz: 0,
+                          surface: 0, key: 0 };
+const _one: SphereHit = { ..._sph };
 
 /**
  * `ColiSphereVsMesh` (`FUN_004AAFF0`) — one blob, the nearest face hit, kept
@@ -819,6 +927,9 @@ function ColiSphereVsBlob(b: ColiBlob, cx: number, cy: number, cz: number,
     const dist = Math.sqrt(distSq);
     // `radius - dist` in front of the surface, `radius + dist` behind it.
     acc.depth = s >= 0 ? r - dist : r + dist;
+    // `local_44..local_3c = centre - (s / |n|²) n`: the foot on the plane.
+    const f = s / nl2;
+    acc.px = cx - f * nx; acc.py = cy - f * ny; acc.pz = cz - f * nz;
     // The quad's own normal. `ColiTestSphereAgainstFullSet` normalises it.
     acc.nx = nx; acc.ny = ny; acc.nz = nz;
     acc.surface = b.surface[i];

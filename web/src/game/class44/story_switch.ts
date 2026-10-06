@@ -23,6 +23,12 @@
  * crossing. The `-1` arm -- a radius of 8.0 and a sphere centre the routine
  * never writes -- is taken by none of them.
  *
+ * The same `0x50` -- bits `0x10` and `0x40`, nothing of `0x80008000` -- is
+ * what `ColiTraceSegmentAllSets` and `ColiTestSphereAgainstFullSet` take a
+ * registered object into their first pass on, so a standing switch is also
+ * a wall to a ground probe, a body's push and a world trace (`coli.ts`,
+ * `ColiDynamicObjects`), through the same scaled matrix.
+ *
  * Until this file the port gave the mesh arm a hit radius of 0 and the prop
  * pool had no mesh test, so **no shipped switch could be shot**: the keyless
  * gates of stage 2 (block 1) and stage 5 (block 4), the keyed doors of stage
@@ -105,13 +111,6 @@
  *
  * ## What the port does not carry
  *
- * * **The moving-object collision passes.** The mesh arm's `0x50` raises
- *   bits `0x10` and `0x40` with `0x80008000` clear, which is what
- *   `ColiTraceSegmentAllSets` and `ColiTestSphereAgainstFullSet` take an
- *   object into their first pass on, so in the engine a standing door is
- *   also a wall for a ground probe, a body's push and a shot's world trace.
- *   The port's pass walks the actor pool (`coli.ts`, `ColiDynamicObjects`),
- *   and no prop is in it -- the hinges are missing from it the same way.
  * * **The draw's lighting**: `SubmitSlotWithSceneLightArray` or
  *   `AssetDrawSlot`, on `g_scene_lighting` and camera path 0x46, are one
  *   recorded draw (`class41/prop_draw.ts`), as for the hinges.
@@ -136,7 +135,7 @@ import {
   type BreakableProp,
 } from "../class41/prop_state";
 import {
-  PROP_SHOT_TEST_MESH, PropRegisterForShotTest, PropRegisterForShotTestMesh,
+  PROP_SHOT_TEST_MESH, PropRegisterForShotTestAsIs,
 } from "../class41/shot_test";
 import { HingeCurveXYZFrame } from "../class41/type56";
 import { PropWords } from "../class41/words";
@@ -452,11 +451,7 @@ export function StoryModeSwitchUpdate(p: BreakableProp, rng: Rng,
   }
   // `RegisterForShotTest`, at `0x004753D7` -- past the draw's pop, and made
   // on the frames the draw is skipped too. The routine forks on bit 0x10.
-  if ((p.flags & PROP_SHOT_TEST_MESH) !== 0) {
-    PropRegisterForShotTestMesh(p);
-  } else {
-    PropRegisterForShotTest(p, p.shotX, p.shotY, p.shotZ);
-  }
+  PropRegisterForShotTestAsIs(p);
 }
 
 /**

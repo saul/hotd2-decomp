@@ -67,17 +67,21 @@ the same commit.
   root, for any prop. Constructor 26's and the canal water's slots are
   treated as resident whatever loads their `pol/` files, beyond opcodes
   0x52/0x53's whole-file loads.
-* **`0x44` prop placer** -- the mesh shot test of every selector but 17
-  (`class44/story_switch.ts` is the one the prop pool files as a mesh):
-  selector 0's window and the hinges carry no resolved blob, so a shot passes
-  through them; and the moving-object collision passes, which no prop is in
-  (`coli.ts`, `ColiDynamicObjects`), so a standing door is not a wall for
-  ground probes, the crowd push or the world trace. Selector 0's registration
-  also needs the captured bone's matrix (`EffectDrawWithCapture`,
-  `FUN_0040DFD0`) and reads its three angles past key 100 out of the motion
-  block -- `[open]` what those bytes are. The story-mode switch's scene-4
-  count and blink read `g_script_flags[-1]` once its route is written, and
-  `[likely]` never run.
+* **`0x44` prop placer** -- the mesh shot test of selectors 0 (stage 1's
+  window, evt `0x1580`/`0x15CC`) and 3 (stage 1's `0x3ACC`), whose blobs
+  travel (`coli_blob`) but which are not filed: each copies the capture
+  `EffectDrawWithCapture` (`FUN_0040DFD0`) stores at `obj+0x338` into
+  `obj+0x150` -- portable -- and writes `obj+0x64..0x6C`, the angles
+  `ShotTestMesh` turns a hit's normal by, from `EffectFrameRotations` at the
+  raw cursor: selector 0 from cursor 101 to 197 and selector 3 (row
+  `obj+0x2A0 - 1` = its open flag, 29) from cursor 66 read past the end of
+  `komono_niwa.bin` / `komono_man.bin`, bytes the disc does not hold. Filing
+  them needs a declared divergence for those angles -- the user's call.
+  Stage 2's hinge `0xFFD0` and selector-5 handoff `0x10018` carry stage 1's
+  door pointer, which in stage 2 lands inside a quad of `coli2.bin`: they
+  register, `[open]` what the engine's traces do with it, and the port's
+  resolve to no blob. The story-mode switch's scene-4 count and blink read
+  `g_script_flags[-1]` once its route is written, and `[likely]` never run.
 * **`0x61` result card** -- the one writer of `g_original_item_part_scale`
   (Original Mode).
 * **`0x60` chapter card** -- `FUN_00434DA0`, the arm `ChapterCardInstall`

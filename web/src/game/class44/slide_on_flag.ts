@@ -73,6 +73,13 @@
  * every frame whose running total, this frame's step included, is still
  * short of the length: a 21-unit door at one unit a frame moves 20 times.
  *
+ * **The collision blob.** `0x0B00` and `0x0B48` name one (`coli_blob`), so
+ * the two doors stop a bullet and take part in both moving-object collision
+ * passes: `MatrixStore(obj+0x150)` at `0x0047571A`, right after the first
+ * draw, keeps the matrix built on the identity (as the hinges' does), and
+ * the `0x51` the builder raised sends `RegisterForShotTest` to the mesh arm
+ * (`PropRegisterForShotTestAsIs`, `class41/shot_test.ts`).
+ *
  * ## What the port does not carry
  *
  * * **The model patch.** Once the slot is resident (`TEST byte ptr
@@ -84,12 +91,6 @@
  *   `[open]`. The port has no residency (every slot is resident from load), so
  *   the latch goes up on the first update, which the port keeps; the model
  *   bytes are the exporter's and the port writes none.
- * * **The collision blob.** `0x0B00` and `0x0B48` name one, so in the engine
- *   the two doors stop a bullet and take part in both collision passes. The
- *   prop pool's mesh arm (`PropRegisterForShotTestMesh`,
- *   `class41/shot_test.ts`) needs the blob resolved to a `coli.blobs` key,
- *   which only the story-mode switch's placement carries; this registration
- *   is transcribed and files a sphere of radius 0, which nothing can hit.
  * * **`SetRenderLightColour(0, 0.01, 0.01)`** around the second draw. That
  *   arm is taken only for slot `0x189C`, which no selector-12 spawn names --
  *   `web/tools/checks/flag_props.ts` holds all eight to it -- so it is
@@ -107,7 +108,8 @@ import { PropDrawBegin, PropDrawSlot, PropMatrixPush }
 import {
   BreakableState, makeBreakableProp, PropFamily, type BreakableProp,
 } from "../class41/prop_state";
-import { PropRegisterForShotTest } from "../class41/shot_test";
+import { PropRegisterForShotTestAsIs } from "../class41/shot_test";
+import { ColiStoreObjectMatrix } from "../coli";
 import { PropWords } from "../class41/words";
 import { SLIDE_SECOND_DRAW_SLOT, SLIDE_SECOND_SLOT } from "./slide_slots";
 
@@ -177,6 +179,7 @@ export function PropBuildSlideOnFlag(pl: BreakablePlacement): BreakableProp {
   p.yaw = 0;
   p.slot = pl.slot ?? 0;
   w.o14c = pl.coli ?? -1;
+  p.coliBlob = pl.coli_blob ?? null;
   const speed = pl.speed ?? 0;
   // `FSIN; FIMUL [EDI+0x10]; FSTP [ESI+0x1C0]` and the `FCOS` beside it.
   p.vx = Math.fround(Math.sin(SLIDE_HEADING) * speed);
@@ -242,6 +245,9 @@ export function SlideOnFlagUpdate(p: BreakableProp): void {
   MatrixTranslate(m, p.x, p.y, p.z);
   MatrixRotateY(m, p.yaw);
   PropDrawSlot(p, m, p.slot, SLIDE_DRAW_LAYER);
+  // `MatrixStore(obj+0x150)` at `0x0047571A`.
+  ColiStoreObjectMatrix(p, m);
+  p.coliMatrixDrawn = true;
   if (p.slot === SLIDE_SECOND_DRAW_SLOT) {
     // `PUSH 0xBED2CA58; PUSH 0x41DBFE5D; PUSH 0x4196F3EB` and
     // `PUSH 0x3F28F5C3; PUSH 0x3F800000; PUSH 0x3C11D14E`.
@@ -250,5 +256,5 @@ export function SlideOnFlagUpdate(p: BreakableProp): void {
     MatrixScale(m, Math.fround(0.0089), 1.0, Math.fround(0.66));
     PropDrawSlot(p, m, SLIDE_SECOND_SLOT, SLIDE_DRAW_LAYER);
   }
-  if (w.o14c !== -1) PropRegisterForShotTest(p, p.shotX, p.shotY, p.shotZ);
+  if (w.o14c !== -1) PropRegisterForShotTestAsIs(p);
 }

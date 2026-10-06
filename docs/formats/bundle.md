@@ -69,6 +69,15 @@ clip the `+0x80` player hooks put them on in play: `0x322`, `0x34A`, `0x319`,
 `render/game_over_scene.ts` claims their hierarchies from the character layer
 and draws them on the game-over screen and in play.
 
+A stage that places class 0x41 constructor 61 (stage 6's `0x2058`) carries
+nine more synthetic rows, one per figure `PlaceType61Figures` builds, at
+`0x18000000 | i << 20 | placer` (`Type61FigureAt`), class `0x41`, parented to
+the placer, each of the character type `g_type61_figure_types[i]` on the clip
+the constructor gives it (`Type61FigureClip`); the placer's own
+`breakables.placements` row, `type61`, carries the nine types, and
+constructor 55's, `type55`, the 48 rows of `g_type55_particle_offsets`. See
+`spawns.md`, *Class 0x41 constructors 42, 52, 55, 61 and 65*.
+
 Since format 12 `script.json` carries a `game_over` block -- the game-over
 screen's `.rdata`, read by `ExeTables.gameOverTables`: the
 bodies' types, start and fall clips, fall frames and stands; the route map's

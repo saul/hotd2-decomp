@@ -5804,5 +5804,66 @@ console.log("\nclass 0x32: the node hook's draws, and the light each was made un
         && holders(b11).length === 0 && holders(b15).length === 0);
 }
 
+console.log("\nclass 0x41 constructor 61's figures: block 1, lit from the screen's right:");
+{
+  const { syncType61FigureLight } = await import("../src/render/characters/type61_figure");
+  const { Type61FigureUpdate } = await import("../src/game/class41/type61");
+  const { PropContainerRoutine } = await import("../src/game/class41/placer_state");
+  const mat = await import("../src/game/matrix");
+  const { Matrix4 } = await import("three");
+  // `Type61FigureUpdate` hands `SetRenderLightDirection` the world vector of
+  // `BuildSceneLightDirection(0, 0x4000)`, (1, 0, 0), which the device takes
+  // as view space. Driven through the game with a camera turned and pitched,
+  // the set the renderer builds must come out (1, 0, 0) in view space.
+  ResetGameGlobals();
+  const FIG_AT = 0x18302058;
+  const a = makeActor(FIG_AT, SpawnClass.PropContainerPlacer, 0x0a, "figure");
+  if (a.cls !== SpawnClass.PropContainerPlacer) throw new Error("not 0x41");
+  a.placer.routine = PropContainerRoutine.Type61Figure;
+  const v2w = mat.MatIdentity();
+  mat.MatrixTranslate(v2w, 100, 2600, -9500);
+  mat.MatrixRotateY(v2w, 0x3000);
+  mat.MatrixRotateX(v2w, 0x0800);
+  const w2v = mat.MatCopy(mat.MatIdentity(), v2w);
+  mat.MatrixInvert(w2v);
+  G.g_camera_view_to_world = v2w;
+  G.g_camera_world_to_view = w2v;
+  Type61FigureUpdate(a);
+  const root = new Obj3D();
+  root.userData = { hod2_spawn_at: FIG_AT };
+  const mesh = new Mesh(new PlaneGeometry(1, 1), new MeshBasicMaterial());
+  root.add(mesh);
+  type Inst = Parameters<typeof syncType61FigureLight>[0];
+  const inst = { at: FIG_AT, a, root } as unknown as Inst;
+  check("the figure's root is tagged with the direction its draw set",
+        syncType61FigureLight(inst)
+        && (root.userData.hod2_light_set as { dir: number[] }).dir.join()
+          === a.placer.drawDir.join()
+        && (root.userData.hod2_light_set as { rgb: unknown }).rgb === null);
+  const lights = new SceneLighting(new Scene());
+  lights.source = { secondary: (at: number) => at === FIG_AT };
+  lights.build(root);
+  lights.beforeRender();
+  const ud = (m: unknown) => (m as { userData: Record<string, unknown> }).userData;
+  check("...and drawn with a block-1 twin under a direction of its own",
+        ud(mesh.material).lightColour === "block1|block|null|dir",
+        JSON.stringify(ud(mesh.material)));
+  // The three.js camera as `render/camera.ts` places it: the view-to-world
+  // matrix's sixteen floats as they are.
+  const cam = new PerspectiveCamera();
+  new Matrix4().fromArray(v2w).decompose(cam.position, cam.quaternion, cam.scale);
+  cam.updateMatrixWorld(true);
+  (lights as unknown as { refreshColoured(c: unknown): void })
+    .refreshColoured({ camera: cam });
+  const set = (lights as unknown as {
+    coloured: Map<string, { dirView: { value: InstanceType<typeof Vector3> } }> })
+    .coloured.get("block1|block|null|dir");
+  const v = set?.dirView.value;
+  check("...which is view-space (1, 0, 0) with the camera turned",
+        !!v && Math.abs(v.x - 1) < 1e-5 && Math.abs(v.y) < 1e-5
+        && Math.abs(v.z) < 1e-5,
+        v ? v.toArray().join(",") : "no set");
+}
+
 console.log(failures ? `\n${failures} failed` : "\nall passed");
 process.exit(failures ? 1 : 0);

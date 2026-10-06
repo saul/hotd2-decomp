@@ -39,6 +39,7 @@
  *                     triggers, and every branch writer
  *   class41_stages    stage props: the church, the lift, the doors, the
  *                     collectibles, Training's targets
+ *   class41_ctors_b   class 0x41 constructors 42, 52, 55, 61 and 65
  *   class44           class 0x44's hinges and the selectors round them:
  *                     1 to 8, 10 and 15
  *   class31           the thrower's states, arcs and root motion
@@ -87,6 +88,7 @@ import "./class25.test";
 import "./class20_24.test";
 import "./routes.test";
 import "./class41_stages.test";
+import "./class41_ctors_b.test";
 import "./class44.test";
 import "./class31.test";
 import "./class31_throw.test";

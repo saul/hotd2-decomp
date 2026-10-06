@@ -299,6 +299,49 @@ export enum PropFamily {
    * same way. See `class41/type67.ts`.
    */
   Type67Piece = 167,
+  /**
+   * `PropDrawOnlyType42` (`FUN_0046CE80`) — constructor 42's 0x48-byte task:
+   * one model at its own coordinates until the step index is 2. See
+   * `class41/type42.ts`. These three are numbered 200 past their constructor,
+   * as constructor 16's family is.
+   */
+  Type42 = 242,
+  /**
+   * `PropUpdateType55Particles` (`FUN_0046EEB0`) — constructor 55's
+   * 0x8500-byte task: eight hundred pieces that wait for a script flag, fall
+   * and bounce. See `class41/type55.ts`.
+   */
+  Type55 = 255,
+  /**
+   * `PropUpdateType65Particles` (`FUN_0046FCC0`) — constructor 65's
+   * 0x8500-byte task: three hundred pieces that fall for 300 frames. See
+   * `class41/type65.ts`.
+   */
+  Type65 = 265,
+}
+
+/**
+ * One of the pieces constructors 55 and 65 build into their 0x8500-byte task
+ * -- the same layout in both, five parallel arrays in the engine and one
+ * record a piece here, so the pool still survives `structuredClone`.
+ */
+export interface ScatterParticle {
+  x: number;              // +0x1C0 + 12i
+  y: number;              // +0x1C4 + 12i
+  z: number;              // +0x1C8 + 12i
+  vx: number;             // +0x2740 + 12i
+  vy: number;             // +0x2744 + 12i
+  vz: number;             // +0x2748 + 12i
+  /** s16 BAMS; the draw is `Rz . Ry . Rx`. */
+  rx: number;             // +0x4CC0 + 6i
+  ry: number;             // +0x4CC2 + 6i
+  rz: number;             // +0x4CC4 + 6i
+  /** s16 BAMS added to each angle every frame. */
+  wx: number;             // +0x5F80 + 6i
+  wy: number;             // +0x5F82 + 6i
+  wz: number;             // +0x5F84 + 6i
+  /** The draw's `MatrixScale`. */
+  s: number;              // +0x7240 + 4i
 }
 
 /**
@@ -911,6 +954,13 @@ export interface BreakableProp {
    * offsets the fields above name are other words of it (`L3`).
    */
   chain: ChainSegmentState | null;
+  /**
+   * {@link PropFamily.Type55}'s eight hundred pieces and
+   * {@link PropFamily.Type65}'s three hundred; empty for every other family.
+   * The task's frame count, `obj+0x1A0`, is a word of the routine's own
+   * ({@link BreakableProp.words}) -- see each routine's file.
+   */
+  particles: ScatterParticle[];
 }
 
 /**
@@ -1044,5 +1094,6 @@ export function makeBreakableProp(id: number, group: number,
     dead: false,
     flicker: null,
     chain: null,
+    particles: [],
   };
 }

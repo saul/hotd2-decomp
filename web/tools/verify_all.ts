@@ -517,6 +517,15 @@ export const CHECKS: readonly Check[] = [
      + "every one of their 74 spawns is placed with its builder's reading of "
      + "the tail, with its models, its effect trees and the yaw curves -- the "
      + "hinges the renderer used to pose, now run by the game"),
+  game("class41_ctors",
+       "that class 0x41 constructors 42, 52, 55, 61 and 65 are the table "
+     + "entries the port builds, that every immediate and float their "
+     + "routines load is the port's own word (floats as bit patterns), that "
+     + "constructor 61's `AND` is on the placer and its figures' routine never "
+     + "steps a clip, and, with a bundle, that each spawn is placed with the "
+     + "descriptor's own fields and the table its constructor reads, every "
+     + "model its task draws travels, and the nine figures each have their "
+     + "row, type and baked clip"),
   game("class26",
        "that class 0x26 subtypes 6 and 7 -- stage 6 block 12's pair -- are "
      + "routed by the installer to `Class26Subtype67Update` and stored after "

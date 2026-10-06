@@ -338,7 +338,8 @@ angles `ShotTestMesh` turns their normal by are `EffectFrameRotations` at the
 raw cursor, and from cursor 101 (selector 0, motion 471, the last block of
 `komono_niwa.bin`) and 66 (selector 3, motion 470, row `obj+0x2A0 - 1` = 29
 of the only block of `komono_man.bin`) those reads are past the end of the
-file -- bytes the disc does not hold. The trace takes a point into the object
+file -- the run's own heap, not data (`mot.md`, "What lies after a bank in
+memory"). The trace takes a point into the object
 through the **general** inverse of `obj+0x150`, as `MatrixInvert`
 (`FUN_004A8D20`) does, because the switch's draw scales: stage 1's door by
 (1.02, 1.04, 1) and stage 2's two keyed doors by (0.8878, 0.8197, 1) and

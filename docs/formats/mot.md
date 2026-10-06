@@ -128,6 +128,36 @@ The three entries after the sub-step pointers are the format string itself,
 which is why `0x00579914` looks like a 7-entry table and is really a 3-entry
 one followed by `"mot\%s"`.
 
+### What lies after a bank in memory
+
+The buffer is `ActorAllocRaw(size + 0x20)` (`0x004A7400`), from the one
+16 MB arena every actor, sprite effect and asset buffer shares. `ArenaReset`
+(`0x004A7310`, called by `LoadSceneAndReset` and fourteen other phase
+starts) `malloc`s and zeroes it on its first call only; after that a reset
+makes one free block of the whole arena and clears nothing. Allocation is
+first fit, split off the front of a free block; a block is a 16-byte header
+`{size (negated in use), prev-adjacent block, next free, prev free}` and its
+data, `round16(n) + 0x10` bytes; `ArenaFree` (`0x004A7510`) coalesces and
+clears nothing. `[proved]`
+
+So the bytes past a bank's end are, in order: the slack of its own block
+(`0x20`..`0x38` bytes for these files, the bank being read in at the block's
+data rounded up to 32, which depends on the arena's `malloc` address), never
+written by this load; then the next block's header, whose words are block
+sizes and **absolute addresses**; then that block's bytes -- a free block's
+stale contents, or whatever was allocated there. Which, depends on every
+allocation and free since the scene's reset: a bank is loaded by evt opcode
+`0x56` in the middle of play (stage 1 loads `komono_niwa.bin` at block 1
+step 4 op 6 and `komono_man.bin` at block 4 step 2 op 5), and the hole map by
+then holds, among much else, one `ActorAlloc(SpriteEffectDrawAndTick, 0x68)`
+for every shot the player has put into the scenery (`SpawnWorldImpact`,
+`0x00405260` -> `SpawnSpriteEffect` -> `SpawnSpriteEffectFromParams`,
+`0x004073B0`). It is not a function of the disc and the script; a reader that
+runs off the end of a bank -- `ScriptFlagEffectUpdate`'s and
+`FlagSlotEffectUpdate`'s `EffectFrameRotations` at the raw cursor do -- reads
+the run's own heap. `[proved]` for the mechanism; what any one run finds
+there is unknowable.
+
 ## File format
 
 `MotionJobBindOffsets` is short enough to give in full:

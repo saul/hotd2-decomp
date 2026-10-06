@@ -92,7 +92,9 @@
  * (30 for the shipped spawn), not a bone: motion `0x1D6` is the only block of
  * `komono_man.bin` and ends the file after 75 keys of 20 bytes, so from
  * cursor 66 on the routine reads past the end of the file's buffer, at
- * bytes the disc does not hold. Reproducing that needs a declared
+ * bytes the disc does not hold: the run's own heap, which depends on every
+ * allocation since the scene's arena reset (`docs/formats/mot.md`, "What
+ * lies after a bank in memory"). Reproducing that needs a declared
  * divergence, which is the user's call (`docs/UNPORTED.md`). Selector 3's
  * builder writes `obj+0x124 = 5.0f`, which only `ShotTestSphere`
  * (`FUN_00404630`) reads and bit `0x10` keeps this object from, so

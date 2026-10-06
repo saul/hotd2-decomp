@@ -69,8 +69,14 @@ the same commit.
   `ShotTestMesh` turns a hit's normal by, from `EffectFrameRotations` at the
   raw cursor: selector 0 from cursor 101 to 197 and selector 3 (row
   `obj+0x2A0 - 1` = its open flag, 29) from cursor 66 read past the end of
-  `komono_niwa.bin` / `komono_man.bin`, bytes the disc does not hold. Filing
-  them needs a declared divergence for those angles -- the user's call.
+  `komono_niwa.bin` / `komono_man.bin`. What is there is the run's own heap,
+  not data: the bank's uncleared block slack, then the next arena block's
+  header (absolute addresses) and contents, placed first-fit by every
+  allocation since `ArenaReset` -- including a sprite actor per shot into
+  the scenery -- with the bank loaded mid-play by opcode `0x56`
+  (`docs/formats/mot.md`, "What lies after a bank in memory"). Not
+  determinable; filing them needs a declared divergence for those angles,
+  the user's call.
   Stage 2's hinge `0xFFD0` and selector-5 handoff `0x10018` carry stage 1's
   door pointer, which in stage 2 lands inside a quad of `coli2.bin`: they
   register, `[open]` what the engine's traces do with it, and the port's

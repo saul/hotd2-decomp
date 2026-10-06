@@ -63,7 +63,12 @@
  * bytes end the file exactly at byte 127648, and the cursor runs to 197:
  * from cursor 101 on, the reads are past the end of the file's buffer, in
  * the allocation's slack and the heap after it -- bytes the disc does not
- * hold. `[proved]` from the bank. The capture itself is portable
+ * hold. `[proved]` from the bank. Nor are they a rule the port could apply:
+ * the bank is `ActorAllocRaw`'d out of the shared arena when stage 1's
+ * opcode `0x56` loads it in the middle of play, nothing in the arena is
+ * cleared after its first reset, and what follows the block depends on
+ * every allocation since -- a sprite actor per shot into the scenery among
+ * them (`docs/formats/mot.md`, "What lies after a bank in memory"). The capture itself is portable
  * (`EffectDrawNode`'s `MatrixStore` for the node whose bone is the
  * capture bone, on the draw's own matrix); the angles past key 100 are a
  * divergence to declare or not, which is the user's call

@@ -89,11 +89,11 @@ the same commit.
 * **No character draws its ground shadow.** `ActorDrawShadow`
   (`game/model_draw.ts`) computes the disc and the renderer draws none for a
   skinned actor; the thrown weapons' and props' discs are drawn.
-* **`ColiDynamicListRemove`** (`0x00405220`), which `ActorDespawn` calls to
-  take the object out of the collision list the crowd push reads, is named
-  and not called by the port's despawn for any object.
-* **The body creature** (`game/body_creature.ts`) does not register with the
-  camera; the candidate mechanism the thrown weapons now use would carry it.
+* **The body creature's shot-test registration.** `BodyCreatureInit`
+  (`0x0043E860`) and every unshot flying frame (`0x0043EE1C`) call
+  `RegisterForShotTest`; the port files nothing, and `render/effects.ts`
+  picks every creature in the pool -- a falling one too, which the engine's
+  list never holds -- and none is in the list the crowd push reads.
 
 ## Training
 

@@ -100,7 +100,11 @@ import { VecToAngles, type Vec3 } from "../vec";
  * carried because they are the record, not because anything here reads them.
  */
 export interface ShotTestEntry {
-  /** The object, by the port's identity for it. */
+  /**
+   * The object, by the port's identity for it. `-1` in a published entry
+   * `ColiDynamicListRemove` (`FUN_00405220`) has made a hole of, as the
+   * engine's `+0x00` is zero there (`COLI_DYNAMIC_HOLE`, `game/coli.ts`).
+   */
   at: number;
   /** `obj+0x34` as it was when the object registered. */
   flags: number;

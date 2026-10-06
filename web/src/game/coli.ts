@@ -454,6 +454,67 @@ export function ColiPublishDynamicList(): void {
 }
 
 /**
+ * What a hole in `G.g_coli_dynamic_list` names: `-1`, the port's
+ * spelling of the null pointer {@link ColiDynamicListRemove} stores at the
+ * entry's `+0x00` (`ActorRef`'s own convention).
+ */
+export const COLI_DYNAMIC_HOLE = -1;
+
+/**
+ * Which object a {@link ColiDynamicListRemove} looks for: the identity its
+ * registration wrote into the entry -- an actor's `at` alone, or the `at` and
+ * the id of a thrown weapon or a class-0x44 prop, the pools the port keeps
+ * apart (`ShotTestEntry.thrown`, `ShotTestEntry.prop`). `[port-only]`: the
+ * engine compares the object pointer, which is one word whatever the object.
+ */
+export interface ColiDynamicKey { at: number; thrown?: number; prop?: number }
+
+/**
+ * `ColiDynamicListRemove` — `FUN_00405220`. `ActorDespawn` (`FUN_00409CC0`)
+ * calls it at `0x00409CD3`, straight after its `obj+0x34` write, to take the
+ * object out of last frame's published list:
+ *
+ * ```
+ * 00405220  MOV EDX, [0x0059d8e4]          ; g_coli_dynamic_count
+ * 00405229  TEST EDX, EDX / JLE ret
+ * 00405231  MOV ECX, 0x5a3098              ; the first entry's +0x00
+ * 00405236  CMP ESI, [ECX] / JZ found      ; the object pointer
+ * 0040523a  INC EAX / ADD ECX, 0x14 / CMP EAX, EDX / JL 00405236
+ * 00405244  found: [entry + 0x04] = 0      ; the flags copy
+ * 00405254         [entry + 0x00] = 0      ; the object
+ * ```
+ *
+ * The **first** match only, and the count is left as it was, so the entry
+ * stays in the list as a hole: the three passes that walk the list each test
+ * `+0x00` for zero before anything else and step over it --
+ * `ColiTraceSegmentAllSets` at `0x00405405`, `ColiTestSphereAgainstFullSet`
+ * at `0x00405832` and {@link ColiTestSphereAgainstActors} at `0x00405B60`.
+ * The sphere centre at `+0x08..0x10` is left where it was. `[proved]`
+ *
+ * What it guards is the pointer: `ActorKill` (`FUN_004A7040`), the next call
+ * but one, puts the block on the free list, and an `ActorAlloc` later in the
+ * same walk can hand it out again, so an entry left naming it would name
+ * whatever is built there. The port's `at` is not reused that way, and a
+ * despawned actor stays in the pool, flagged, until the next frame's prune --
+ * so the hole is what keeps the rest of this frame's actors from reading the
+ * despawned one back out of the list, as it is in the engine.
+ */
+export function ColiDynamicListRemove(obj: ColiDynamicKey): void {
+  const list = G.g_coli_dynamic_list;
+  for (let i = 0; i < list.length; i++) {
+    const e = list[i];
+    if (e.at !== obj.at || e.thrown !== obj.thrown || e.prop !== obj.prop) {
+      continue;
+    }
+    e.flags = 0;
+    e.at = COLI_DYNAMIC_HOLE;
+    delete e.thrown;
+    delete e.prop;
+    return;
+  }
+}
+
+/**
  * One record of `g_coli_candidates` (`0x0059F4D0`, stride `0x3C`) and its
  * sort key, as far as {@link ColiSelectNearestHitCandidate} copies it out.
  * Which quantity sits in `distSq` and `depth` is each caller's own business --
@@ -621,6 +682,9 @@ export function ColiTestSphereAgainstActors(self: Actor, cx: number, cy: number,
   G.g_coli_hit_surface = 0;
   const candidates: ColiCandidate[] = [];
   for (const e of G.g_coli_dynamic_list) {
+    // `MOV EBX, [ECX-8]; TEST EBX, EBX; JZ` at `0x00405B5D`: a hole
+    // `ColiDynamicListRemove` left is passed over before anything is read.
+    if (e.at === COLI_DYNAMIC_HOLE) continue;
     if (e.thrown !== undefined) continue;
     // A prop the port files is one shot through its mesh, filed by
     // `RegisterForShotTest`'s bit-0x10 arm, and bit `0x10` of its live

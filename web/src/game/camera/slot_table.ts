@@ -24,6 +24,11 @@ export interface CameraSlot {
    * thrown weapon (`G.g_thrown_weapons`, by id), which is no actor either.
    */
   thrown: number | null;
+  /**
+   * `[port-only]` -- set instead of {@link at} when the slot was dealt to a
+   * body creature (`G.g_body_creatures`, by id), which is no actor either.
+   */
+  creature: number | null;
 }
 
 /**
@@ -31,7 +36,7 @@ export interface CameraSlot {
  *
  * `prop` is set instead of a meaningful `at` when the object is a carried
  * prop, which registers through the same routine but is no actor; `thrown`
- * likewise for a thrown weapon.
+ * likewise for a thrown weapon, and `creature` for a body creature.
  */
 export interface CameraCandidate {
   key: number;
@@ -39,10 +44,13 @@ export interface CameraCandidate {
   prop: number | null;
   /** ...and `thrown` when it is a thrown weapon, by its id. */
   thrown: number | null;
+  /** ...and `creature` when it is a body creature, by its id. */
+  creature: number | null;
 }
 
 /** Sixteen empty slots, the shape `ResetCameraEnemySlots` leaves. `[port-only]`. */
 export function makeCameraSlots(): CameraSlot[] {
   return Array.from({ length: CAMERA_SLOTS },
-                    () => ({ occupied: 0, at: 0, prop: null, thrown: null }));
+                    () => ({ occupied: 0, at: 0, prop: null, thrown: null,
+                             creature: null }));
 }

@@ -1711,6 +1711,18 @@ passes over that 16-bit key — nearest first — and `UpdateCameraEnemySlots`
 then deals them out: permit holders into slots **0 and 1**, everyone else from
 slot 2 (`ClaimCameraEnemySlot` fills 2..13).
 
+"Permit holder" is the byte `obj+0x121` not being `0xFF`, read off whatever
+object registered. The creature a `znjoe` releases keeps the player it flies
+at there, so `BodyCreatureUpdate` (`FUN_0043E880`) -- which registers on the
+launch frame and on every flying frame (`0x0043EEF1`), its `obj+0x100` the
+camera-space position put through the block's view-to-world matrix
+(`0x009A6040 + index * 0x1A4`, so a world point) -- is dealt slot 0 or 1, and
+`SelectCameraLookAtTarget` can hold the view on it alone. It is also enrolled
+straight into a general slot by `RegisterEnemySlot` from `SpawnBodyCreature`
+(`0x0043E77B`), and frees its slot when shot (`0x0043EC4E`) or when it reaches
+the player (`0x0043EDAD`). Its key is its camera-space `obj+0x40` measured
+against the world eye -- the engine's sum, as it stands. `[proved]`
+
 ### The turn rate
 
 `ComputeLookAtAngleError` clamps the angle between where the camera looks and
@@ -1863,6 +1875,16 @@ the objects that called `RegisterForShotTest` on the previous frame (in front
 of the eye or a mesh, `0x8000` clear), each measured at the `obj+0x12C` its
 class had left when it registered, and refused on its **live** `obj+0x34` for
 `0x80008000` or `0x10`. A body behind the camera pushes nobody.
+
+**A despawn leaves a hole.** `ActorDespawn` (`FUN_00409CC0`) raises
+`0x80018000` and then calls `ColiDynamicListRemove` (`FUN_00405220`,
+`0x00409CD3`), which zeroes the object word and the flags word of the first
+entry naming the object and leaves the count -- so the entry is still there,
+naming nothing. All three walkers of the list test the object word first and
+step over a zero: `ColiTraceSegmentAllSets` at `0x00405405`,
+`ColiTestSphereAgainstFullSet` at `0x00405832`, this one at `0x00405B60`.
+What it protects is the pointer: `ActorKill` frees the block, and the same
+walk can allocate it again. `[proved]`
 
 For each candidate inside `r + obj+0x128` (a zero `obj+0x128` is filled from
 `obj+0x124` and stored back), the routine takes two surface points —

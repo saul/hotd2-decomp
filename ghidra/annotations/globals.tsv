@@ -428,7 +428,7 @@
 0059d8e8	g_shot_test_list	stride 5 dwords
 0059ecd8	g_coli_candidate_sort_keys
 0059f4d0	g_coli_candidates	hit candidates, stride 0x3C, sorted by the distance keys at 0x0059ECD8
-005a3098	g_coli_dynamic_list	Stride 5 dwords {obj, obj+0x34, obj+0x12C, +0x130, +0x134}: ColiPublishDynamicList's copy of g_shot_test_list, made once a frame at the end of ProcessPlayerShots, before any actor runs. The three moving-object passes walk it: ColiTraceSegmentAllSets, ColiTestSphereAgainstFullSet and ColiTestSphereAgainstActors, the crowd push, which reads its sphere centres from here. [proved]
+005a3098	g_coli_dynamic_list	Stride 5 dwords {obj, obj+0x34, obj+0x12C, +0x130, +0x134}: ColiPublishDynamicList's copy of g_shot_test_list, made once a frame at the end of ProcessPlayerShots, before any actor runs. The three moving-object passes walk it: ColiTraceSegmentAllSets, ColiTestSphereAgainstFullSet and ColiTestSphereAgainstActors, the crowd push, which reads its sphere centres from here. ActorDespawn's ColiDynamicListRemove zeroes an entry's obj and flags words and leaves the count, and all three passes skip an entry whose obj is zero. [proved]
 005a4488	g_coli_candidate_sort_scratch
 005a4c80	g_shot_test_count
 005a4c84	g_coli_candidate_count	entries in g_coli_candidates this frame

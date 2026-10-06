@@ -959,9 +959,11 @@ export interface BreakableProp {
    * (`FUN_00405160`) files an object whose `obj+0x34` has bit `0x10` past its
    * depth test, and `ProcessPlayerShots` sends it to `ShotTestMesh`
    * (`FUN_00404A00`), which traces the shot against this blob in the
-   * object's own space. `null` for `-1`, and for every family that does not
-   * carry the blob resolved (the hinges keep the raw word in their own).
-   * See `class41/shot_test.ts`, `PropRegisterForShotTestMesh`.
+   * object's own space, and which the moving-object collision passes trace
+   * (`coli.ts`). `null` for `-1`, and for every family whose builder does not
+   * write the offset. The families whose routines test the word against
+   * `-1` keep it raw as well (`o14c` in {@link words}), and every store to
+   * it writes both. See `class41/shot_test.ts`, `PropRegisterForShotTestMesh`.
    */
   coliBlob: string | null;   // +0x14C
   /**

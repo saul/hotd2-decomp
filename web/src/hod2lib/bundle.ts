@@ -714,6 +714,19 @@ export function containerPlacements(
   const out: Record<string, unknown>[] = [];
   const generic = genericTypes(tables);
   const s8 = (o: number) => (raw[o] << 24) >> 24;
+  // The i32 at tail `+0x08`, which every class-0x44 builder that reads it
+  // stores to `obj+0x14C` as it stands (selectors 0 to 7, 11, 12, 13 and
+  // 17 -- one `MOV [ESI+0x14C], r32` in each, and no class-0x41 routine
+  // writes the offset at all), resolved to the `coli.blobs` key it points
+  // at: the mesh `ShotTestMesh` (`FUN_00404A00`) and the moving-object
+  // collision passes trace through `obj+0x150`. `null` for `-1`, and for a
+  // pointer that lands on no blob, which is what a wrong reading looks like.
+  const coliBlobOf = (coli: number): string | null => {
+    const hit = coli !== -1 && coliSets
+      ? colilib.pointerToOffset(coli >>> 0, coliSets[0], coliSets[1])
+      : null;
+    return hit ? `${hit[0]}:${hit[1]}` : null;
+  };
   for (const rec of spawnRecords) {
     if (rec.cls !== 0x41 && rec.cls !== 0x44) continue;
     if (rec.offset + 0x30 > raw.length) continue;
@@ -955,9 +968,6 @@ export function containerPlacements(
       // keys. `obj+0x11C` is written as the LITERAL 1, so it is not a
       // lifetime here; `+0x2A4` is.
       const coli = rec.param(0x08, "i32") ?? -1;
-      const hit = coli !== -1 && coliSets
-        ? colilib.pointerToOffset(coli >>> 0, coliSets[0], coliSets[1])
-        : null;
       out.push({
         at: rec.offset, container: "story_switch",
         curve: rec.param(0x00, "i8") ?? 0,
@@ -967,7 +977,7 @@ export function containerPlacements(
         // `coli.blobs` key it points at -- `null` for -1, or for a pointer
         // that lands on no blob, which is what a wrong reading looks like.
         coli,
-        coli_blob: hit ? `${hit[0]}:${hit[1]}` : null,
+        coli_blob: coliBlobOf(coli),
         side: rec.param(0x0c, "i32") ?? 0,
         branch_flag: rec.param(0x10, "i8"),
         remove_flag: rec.param(0x11, "i8"),
@@ -1014,6 +1024,7 @@ export function containerPlacements(
         at: rec.offset, container: "rise_to_height",
         slot: rec.param(0x04, "u16") || 0,
         coli: rec.param(0x08, "i32") ?? -1,
+        coli_blob: coliBlobOf(rec.param(0x08, "i32") ?? -1),
         rise: rec.param(0x14, "i32") ?? 0,
         open_flag: rec.param(0x20, "i8") ?? 0,
         remove_flag: rec.param(0x21, "i8") ?? -1,
@@ -1033,6 +1044,7 @@ export function containerPlacements(
         slot: rec.param(0x04, "u16") || 0,
         slot_word: rec.param(0x04, "u32") ?? 0,
         coli: rec.param(0x08, "i32") ?? -1,
+        coli_blob: coliBlobOf(rec.param(0x08, "i32") ?? -1),
         speed: rec.param(0x10, "i32") ?? 0,
         travel: rec.param(0x14, "i32") ?? 0,
         open_flag: rec.param(0x20, "i8") ?? 0,
@@ -1090,6 +1102,7 @@ export function containerPlacements(
         curve: rec.param(0x00, "u16") ?? 0,
         slot: rec.param(0x04, "u16") ?? 0,
         coli: rec.param(0x08, "i32") ?? -1,
+        coli_blob: coliBlobOf(rec.param(0x08, "i32") ?? -1),
         side: rec.param(scaled ? 0x0c : 0x10, "i32") ?? 0,
         ...(scaled ? {} : { wobble_phase: rec.param(0x14, "i32") ?? 0 }),
         open_flag: rec.param(scaled ? 0x10 : 0x20, "i8") ?? 0,
@@ -1114,6 +1127,7 @@ export function containerPlacements(
         curve: rec.param(0x00, "u16") ?? 0,
         slot: rec.param(0x04, "u16") ?? 0,
         coli: rec.param(0x08, "i32") ?? -1,
+        coli_blob: coliBlobOf(rec.param(0x08, "i32") ?? -1),
         side: rec.param(five ? 0x10 : 0x0c, "i32") ?? 0,
         ...(five ? { wobble_phase: rec.param(0x14, "i32") ?? 0 }
                  : { field_2ac: rec.param(0x12, "i8") ?? 0,
@@ -1132,6 +1146,7 @@ export function containerPlacements(
       out.push({
         at: rec.offset, container: "flag_slot_effect",
         coli: rec.param(0x08, "i32") ?? -1,
+        coli_blob: coliBlobOf(rec.param(0x08, "i32") ?? -1),
         open_flag: rec.param(0x20, "i8") ?? 0,
         remove_flag: rec.param(0x21, "i8") ?? -1,
         lifetime_evt_steps: 0,
@@ -1207,6 +1222,12 @@ export function containerPlacements(
         // `obj+0x28C`, which this family never draws through: the routine
         // reads its own node slots out of the tree instead.
         slot: rec.param(0x04, "u16") ?? 0,
+        // `obj+0x14C` (`MOV [ESI+0x14C], EDX` at 0x00472BC0), raw and
+        // resolved. The port does not file this object yet -- see
+        // `game/class44/script_flag_effect.ts` -- and carries the blob so
+        // what that needs is measured on the data.
+        coli: rec.param(0x08, "i32") ?? -1,
+        coli_blob: coliBlobOf(rec.param(0x08, "i32") ?? -1),
         // `ScriptFlagEffectUpdate` has no `PropExpireByStepLifetime`; script
         // flag 0x13 is its whole lifetime.
         lifetime_evt_steps: 0,

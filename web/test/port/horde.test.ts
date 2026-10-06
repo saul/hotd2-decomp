@@ -593,6 +593,14 @@ console.log("stage 3's boats -- the one the player rides and the one that "
   check("...and the pose is the path's, two units up",
         boat.pos.x === 100 && boat.pos.y === -17 && boat.pos.z === 200,
         `${boat.pos.x},${boat.pos.y},${boat.pos.z}`);
+  // The passes walk `g_coli_dynamic_list`, last frame's registrations, which
+  // `ProcessPlayerShots` publishes before any actor runs: the boat files
+  // itself at `0x0048EE9C` on this tick and is met from the next.
+  check("...but the probe still falls through: the list is last frame's",
+        QueryGroundHeightAt(115, -10, 200) === -999
+        && G.g_shot_test_list.some((e) => e.at === boat.at
+                                          && e.flags === boat.flags));
+  GameUpdate(1 / 60, host, rng);
   // Local (0, -2, 15) is world (100 + 15, -17 - 2, 200) under a quarter turn
   // of RotY: x' = x cos + z sin.
   const deck = QueryGroundHeightAt(115, -10, 200);

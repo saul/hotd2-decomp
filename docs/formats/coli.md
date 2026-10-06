@@ -236,9 +236,17 @@ object's space through the inverse of `obj+0x150`, the hit comes back through
 the matrix, and it competes on the same nearest-to-the-query distance as a
 static hit. The segment pass returns the normal through `MatrixTransformPoint`
 (translation included — transcribed as read); the sphere pass through
-`MatrixTransformVector`. The port walks the pool for these objects and takes
-the matrix each stored at its last update; which frame's matrix a given query
-sees in the engine is `[open]`.
+`MatrixTransformVector`. "Registered" is `g_coli_dynamic_list`
+(`0x005A3098`): `ProcessPlayerShots` copies the frame's `g_shot_test_list`
+into it before any actor runs, so a query meets the objects that called
+`RegisterForShotTest` on the **previous** frame, and reads each one's live
+`obj+0x34`, `obj+0x14C` and `obj+0x150` -- the matrix as it stands when the
+query is made. `[proved]` The candidate's key is the **world** distance from
+the query's reference point to the hit brought back through the matrix
+(`ColiRecordHitCandidate`, `0x00405680`), not the distance inside the
+object, which matters for an object drawn at a scale. The port walks the
+same list, props included (`ColiDynamicObjects`), and stage 3's boat files
+itself at its exe site.
 
 
 The browser port answers its own collision queries, in `web/src/game/coli.ts`,

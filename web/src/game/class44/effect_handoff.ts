@@ -104,6 +104,7 @@ export function PropBuildEffectHandoff(pl: BreakablePlacement): BreakableProp {
   w.o192 = 0;
   p.slot = pl.slot ?? 0;
   w.o14c = pl.coli ?? -1;
+  p.coliBlob = pl.coli_blob ?? null;
   w.o1dc = pl.side ?? 0;
   w.o1e8 = pl.wobble_phase ?? 0;
   w.o290 = pl.curve ?? 0;
@@ -186,7 +187,10 @@ function EffectHandoffAllocHinge(p: BreakableProp,
   h.hitRadius = 0;
   const hw = PropWords(h, HINGE_WORDS);
   hw.o68 = 0;
+  // `MOV EDX,[EDI+0x14C]; MOV [ESI+0x14C],EDX` at `0x00474332` -- the one
+  // word, both its port fields: the hinge is shot through the same blob.
   hw.o14c = w.o14c;
+  h.coliBlob = p.coliBlob;
   hw.o1dc = w.o1dc;
   hw.o290 = w.o290;
   hw.o2a8 = 0;

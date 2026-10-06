@@ -90,10 +90,11 @@
  *
  * ## What the port does not carry
  *
- * The mesh shot test the `obj+0x34 |= 0x51` and `obj+0x14C` send it to, as
- * for the hinges (`class44/hinge.ts`): the `MatrixStore`s are its and are not
- * carried, and the registration files a sphere of radius 0. `[port-only]`
- * The residency test is not modelled: the bundle bakes the motions.
+ * `[port-only]` The residency test is not modelled: the bundle bakes the
+ * motions. The three `MatrixStore`s keep the matrix built on the identity,
+ * as the hinges' do (`class44/hinge.ts`), for the mesh shot test and the
+ * moving-object passes the `obj+0x34 |= 0x51` and a blob would put it in;
+ * the one shipped spawn's `obj+0x14C` is `-1`, so it never registers.
  */
 import type { Rng } from "../../core/rng";
 import type { BreakablePlacement } from "../../bundle";
@@ -110,7 +111,8 @@ import {
 import {
   BreakableState, makeBreakableProp, PropFamily, type BreakableProp,
 } from "../class41/prop_state";
-import { PropRegisterForShotTest } from "../class41/shot_test";
+import { PropRegisterForShotTestAsIs } from "../class41/shot_test";
+import { ColiStoreObjectMatrix } from "../coli";
 import { PropWords } from "../class41/words";
 import {
   HINGE_FLAGS, HINGE_FRAMES, HINGE_WORDS, PROP_SWEEP_FLAG,
@@ -176,6 +178,7 @@ export function PropBuildSwingThenBreak(pl: BreakablePlacement): BreakableProp {
   w.o192 = 0;
   p.slot = pl.slot ?? 0;
   w.o14c = pl.coli ?? -1;
+  p.coliBlob = pl.coli_blob ?? null;
   w.o1dc = pl.side ?? 0;
   w.o290 = pl.curve ?? 0;
   p.storyItem = pl.open_flag ?? 0;
@@ -255,6 +258,9 @@ export function SwingThenBreakUpdate(p: BreakableProp, rng: Rng): void {
     MatrixRotateY(m, SWING_THEN_BREAK_TURN);
     MatrixTranslate(m, SWING_THEN_BREAK_OFFSET, 0, 0);
     PropDrawSlot(p, m, p.slot);
+    // `MatrixStore(obj+0x150)` at `0x0047468D`.
+    ColiStoreObjectMatrix(p, m);
+    p.coliMatrixDrawn = true;
   } else if (broken === 1) {
     MatrixRotateY(m, SWING_THEN_BREAK_TURN);
     if (flag(SWING_THEN_BREAK_RESTART_FLAG) === 0) {
@@ -262,6 +268,9 @@ export function SwingThenBreakUpdate(p: BreakableProp, rng: Rng): void {
       if (((p.slot << 16) >> 16) < SWING_THEN_BREAK_STRIP_LAST) {
         p.slot = (p.slot + 1) & 0xffff;
       }
+      // `MatrixStore(obj+0x150)` at `0x004746E1`, before the two effects.
+      ColiStoreObjectMatrix(p, m);
+      p.coliMatrixDrawn = true;
       p.effectVariant = SWING_THEN_BREAK_MOTION_A;
       p.effect = SWING_THEN_BREAK_EFFECT_A;
       PropDrawEffect(p, m, rng);
@@ -272,7 +281,10 @@ export function SwingThenBreakUpdate(p: BreakableProp, rng: Rng): void {
       p.effectVariant = SWING_THEN_BREAK_MOTION_C;
       p.effect = SWING_THEN_BREAK_EFFECT_C;
       PropDrawEffect(p, m, rng);
+      // `MatrixStore(obj+0x150)` at `0x00474742`, after the effect.
+      ColiStoreObjectMatrix(p, m);
+      p.coliMatrixDrawn = true;
     }
   }
-  if (w.o14c !== -1) PropRegisterForShotTest(p, p.shotX, p.shotY, p.shotZ);
+  if (w.o14c !== -1) PropRegisterForShotTestAsIs(p);
 }

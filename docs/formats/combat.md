@@ -318,15 +318,40 @@ Who reaches it, over every shipped record (`[proved]` writers: every store to
 | `0x44` 0-7, 11-13 | each builder, `|= 0x51` unconditionally, `+0x14C` from the descriptor | selector 0's `ScriptFlagEffectUpdate` `0x00473CDF`; 1, 2, 4's `HingeUpdate` `0x0047410B`; 3's `FlagSlotEffectUpdate` (`0x00474120`) at `0x0047422F`; 6's `SwingThenBreakUpdate` (`0x00474470`) at `0x00474760`; 7's `ScaledSlotEffectUpdate` (`0x00474770`) at `0x004748B6`; 12's `0x004755B0` at `0x004757E0`; 13's `0x004757F0` at `0x004758C7`. **11's `RisingDoorUpdate` never registers**, and 5's `EffectHandoffUpdate` (`0x00474240`) has no call of its own: it copies its blob to the `HingeUpdate` object it makes | 0: 2, 1: 37, 2: 3 (two doors each), 3: 2, 4: 13, 5-7: 1 each, 11: 2, 12: 8, 13: 13 |
 | `0x44` 17 | `PlaceStoryModeSwitch` `0x00473ADB`, when `desc+0x08 != -1` | `StoryModeSwitchUpdate` `0x004753D7` | all nine name a blob; three are drawn at a scale, so their `obj+0x150` is not a rotation |
 
-In the port two of these are picked through the list: class 0x12's door, an
-actor, and the story-mode switch, which the prop pool files by its id
+In the port these are picked through the list: class 0x12's door, an actor,
+and the class-0x44 props, which the pool files by their id
 (`ShotTestEntry.prop`, `PropRegisterForShotTestMesh` in
-`game/class41/shot_test.ts`). The trace takes a point into the object
+`game/class41/shot_test.ts`) -- the story-mode switch, and the hinges (1, 2,
+4, and the one 5 hands off to) and selectors 6, 7, 12 and 13, each with its
+`MatrixStore(obj+0x150)` where the routine makes it. The exporter carries
+every class-0x44 `+0x08` resolved as `coli_blob`; the shipped ones that
+resolve are the nine switches, six hinges (stage 1 `0x2C2C`; stage 2
+`0x548C`, `0x8368`, `0x83B0`, `0xD2F0`, `0xD334`), the two selector-12 doors
+of stage 6 (`0x0B00`, `0x0B48`), selector 3's stage-1 effect (`0x3ACC`) and
+both halves of selector 0's window. Stage 2's hinge `0xFFD0` and selector-5
+handoff `0x10018` carry `0x0CECFBE0`, stage 1's door blob, which in stage 2
+is `coli2.bin+3040`, inside a quad's vertices (a group count of
+3,297,643,553): both register, what the engine's traces do with it is
+`[open]`, and the port's resolves to no blob. Selectors 0 and 3 are **not
+filed**: the three
+angles `ShotTestMesh` turns their normal by are `EffectFrameRotations` at the
+raw cursor, and from cursor 101 (selector 0, motion 471, the last block of
+`komono_niwa.bin`) and 66 (selector 3, motion 470, row `obj+0x2A0 - 1` = 29
+of the only block of `komono_man.bin`) those reads are past the end of the
+file -- bytes the disc does not hold. The trace takes a point into the object
 through the **general** inverse of `obj+0x150`, as `MatrixInvert`
 (`FUN_004A8D20`) does, because the switch's draw scales: stage 1's door by
 (1.02, 1.04, 1) and stage 2's two keyed doors by (0.8878, 0.8197, 1) and
-(0.77, 0.7154, 1). The rest of class 0x44 is filed as a sphere of the radius
-its builder writes, or not at all, which a mesh object never is.
+(0.77, 0.7154, 1).
+
+The same registrations are the moving-object collision passes' only input:
+`ColiTraceSegmentAllSets` (`FUN_004053B0`) and `ColiTestSphereAgainstFullSet`
+(`FUN_004057F0`) walk `g_coli_dynamic_list`, last frame's copy of the list,
+and take an entry whose object has `+0x14C != -1`, bits `0x10` and `0x40` and
+nothing of `0x80008000`, reading the object's live word and matrix. A hit
+there is ranked against the static sets on its **world** distance
+(`ColiRecordHitCandidate`, `FUN_00405680`), so a scaled switch is measured
+where it stands. The port's passes walk the same list (`game/coli.ts`).
 
 The per-bone classes' registration sites `[proved]`:
 

@@ -84,6 +84,17 @@ the same commit.
   takes at `g_app_state == 0x0B`, a screen the port never reaches. `[open]`
   which screen that is.
 
+### Gaps several classes share
+
+* **No character draws its ground shadow.** `ActorDrawShadow`
+  (`game/model_draw.ts`) computes the disc and the renderer draws none for a
+  skinned actor; the thrown weapons' and props' discs are drawn.
+* **`ColiDynamicListRemove`** (`0x00405220`), which `ActorDespawn` calls to
+  take the object out of the collision list the crowd push reads, is named
+  and not called by the port's despawn for any object.
+* **The body creature** (`game/body_creature.ts`) does not register with the
+  camera; the candidate mechanism the thrown weapons now use would carry it.
+
 ## Training
 
 Scene 6 (`trnevtbl.bin`, `g_GameMode` 2). The port has no Training.

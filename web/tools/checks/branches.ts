@@ -40,6 +40,10 @@
  * live slot too, and the block they name has to be a block their placement
  * can reach.
  *
+ * The third half is the selectors `spawn_simple` places with no actor to
+ * speak of: **class 0x64**, `ScoreRouteSelect64`, in stage 6's blocks 3, 5
+ * and 9, which writes from the run's score and rescues.
+ *
  * Not modelled: `PropUpdateType69`, which does not choose a route but
  * **promotes** one -- it turns an existing 1 into a 2 -- so it has no value of
  * its own to check.
@@ -121,6 +125,17 @@ const STORY_SWITCH_BRANCH = 2;
 /** What the shipped data holds for the prop half. */
 const EXPECT_PROP_WRITES = 31;
 
+/**
+ * `ScoreRouteSelect64` (`FUN_00435FB0`), class 0x64 by `spawn_simple`: every
+ * arm writes 0 and then, by its record's `hp`, may write these. It has no
+ * block gate -- it decides the block it is spawned in.
+ */
+const CLASS64_BRANCH: Record<number, readonly number[]> = {
+  0: [0, 1, 2], 1: [0, 1, 2], 2: [0, 1],
+};
+/** Stage 6 blocks 3, 5 and 9: what the shipped data holds. */
+const EXPECT_SIMPLE_WRITERS = 3;
+
 type Route = [number, number, number, number];
 type Civ = { entries: number[]; scripts: CivCommand[][] };
 
@@ -159,6 +174,23 @@ function blockSpawns(evtf: evt.EvtFile, blk: evt.Block): evt.Spawn[] {
           continue;
         }
         out.push(evt.readSpawn(evtf, off, ins.opcode));
+      }
+    }
+  }
+  return out;
+}
+
+/** Every `{class, hp}` record a `spawn_simple` in this block names. */
+function blockSimpleSpawns(evtf: evt.EvtFile, blk: evt.Block):
+    evt.SimpleSpawn[] {
+  const out: evt.SimpleSpawn[] = [];
+  for (const prog of blk.programs) {
+    for (const ins of prog) {
+      if (!evt.SIMPLE_SPAWN_OPCODES.includes(ins.opcode)) continue;
+      for (const word of ins.raw) {
+        if (word === 0xffffffff) break;
+        const rec = evt.readSimpleSpawn(evtf, word);
+        if (rec) out.push(rec);
       }
     }
   }
@@ -302,4 +334,31 @@ for (const [stage, st, evtf] of stages) {
 c.eq(propChecked, EXPECT_PROP_WRITES,
      `${propChecked} prop writes land in a branch block (a gate or a route `
      + "record has moved if this changes)");
+
+// -- the selectors `spawn_simple` places ---------------------------------
+let simpleChecked = 0;
+for (const [stage, st, evtf] of stages) {
+  const routes = st.routes;
+  for (const blk of evtf.blocks) {
+    if (blk.offset < 0) continue;
+    for (const rec of blockSimpleSpawns(evtf, blk)) {
+      if (rec.cls !== 0x64) continue;
+      const values = CLASS64_BRANCH[rec.hp];
+      const route = routes[blk.index]!;
+      if (!values || route[0] !== ExeTables.ROUTE_BRANCH) {
+        c.fail(`stage ${stage} block ${blk.index}: class 0x64 selector `
+               + `${rec.hp} in a block whose route reads no branch`);
+        continue;
+      }
+      simpleChecked++;
+      const holes = values.filter((v) => !liveSlots(route).includes(v));
+      c.ok(holes.length === 0,
+           `stage ${stage} block ${blk.index}: next=${next(route)}, `
+           + `${values.join("/")}=ScoreRouteSelect64 ${rec.hp}`
+           + (holes.length ? ` -- ${JSON.stringify(holes)} name no route` : ""));
+    }
+  }
+}
+c.eq(simpleChecked, EXPECT_SIMPLE_WRITERS,
+     `${simpleChecked} class-0x64 selectors decide a branch block`);
 c.finish();

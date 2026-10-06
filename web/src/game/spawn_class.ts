@@ -109,7 +109,7 @@ export enum SpawnClass {
   Vehicle = 0x26,
   /** `FUN_00432C80` — static scenery batch. */
   SceneryBatch = 0x29,
-  /** `FUN_00432D40` — the handler is `JMP ActorKill`. It dies on sight. */
+  /** `Class2AHandlerKill` (`FUN_00432D40`) — the handler is `JMP ActorKill`. It dies on sight. */
   DeadClass = 0x2a,
   /**
    * `DynamicLightInit` (`FUN_00438060`) — **a scripted light**: one
@@ -242,6 +242,11 @@ export enum SpawnClass {
    * watcher; writes no script flag.
    */
   CutsceneSkipWatcher = 0x63,
+  /**
+   * `ScoreRouteSelect64` (`FUN_00435FB0`) -- stage 6's route selector,
+   * `spawn_simple` in blocks 3, 5 and 9. Ported (`game/class64/`).
+   */
+  ScoreRouteSelect = 0x64,
   /**
    * `ItemSelectUpdate` (`FUN_00488820`) — **Original Mode's trunk**, where
    * each player takes up to two of the items they have collected. The last

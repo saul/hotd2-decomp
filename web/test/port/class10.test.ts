@@ -1082,6 +1082,10 @@ console.log("\nclass 0x10, the civilian and the rescue:");
     cFrame(a, events);
     check("a civilian in play is counted", G.g_civilians_alive === 1,
           `${G.g_civilians_alive}`);
+    // `INC word [0x009A21BA]` at `0x0048A714`: and the run has seen her, the
+    // tally class 0x64's route weighs against the rescues.
+    check("...and seen: `CivilianInit` raises `g_civilians_seen_total`",
+          G.g_civilians_seen_total === 1, `${G.g_civilians_seen_total}`);
 
 
     // What the maul does to it: `ZombieStateTargetMotionScript` raises the same

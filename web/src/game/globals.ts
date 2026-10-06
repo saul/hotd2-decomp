@@ -1321,6 +1321,16 @@ export const G = {
    */
   g_civilians_rescued_total: 0,
   /**
+   * `g_civilians_seen_total` — 0x009A21BA, u16. Every civilian the run has
+   * created: `CivilianInit` raises it for a counted one (`0x0048A714`),
+   * `RescueTargetInit` outside Training (`0x004517E8`) and
+   * `PropUpdateType19` as its knocking gives up (`0x00469161`).
+   * `ResetGameOnStart` zeroes it (`0x0045FF64`) and nothing else does. Its
+   * one reader is class 0x64's route selector (`0x004360C8`), against
+   * {@link g_civilians_rescued_total}.
+   */
+  g_civilians_seen_total: 0,
+  /**
    * `g_civilians_rescued_by_scene` — 0x009C89C0, s16 per scene. The rescues
    * in each scene; `ResetSceneOnEnter` zeroes this scene's and
    * `ResetGameOnStart` six. What the result card counts, and the index into
@@ -3138,8 +3148,8 @@ export type Globals = typeof G;
  * the civilian and route tallies -- as the app's stage load. Of the run
  * totals it owns, `g_civilians_rescued_total`, `g_civilians_rescued_by_scene`
  * and `g_rescued_char_types` are zeroed by `ResetGameGlobals`' new-game arm
- * and left by a stage step, as the engine leaves them;
- * `g_civilians_seen_total` is not in `G`. This said the port had
+ * and left by a stage step, as the engine leaves them, and so is
+ * `g_civilians_seen_total`. This said the port had
  * no equivalent at all, as an open question, before `run_phase.ts`.
  *
  * **The engine's body, line for line, and what the port does with each.** This
@@ -3599,6 +3609,7 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
     // first twelve bytes of each scene's twenty -- the rest are only ever read
     // after this run has written them, so zeroing all of it reads the same).
     G.g_civilians_rescued_total = 0;
+    G.g_civilians_seen_total = 0;
     G.g_civilians_rescued_by_scene = [0, 0, 0, 0, 0, 0];
     G.g_rescued_char_types = new Array<number>(60).fill(0);
     // ...and its loadout half, `CALL ResetOriginalModeLoadout` at

@@ -117,6 +117,7 @@ import "./options.test";
 import "./original.test";
 import "./class32.test";
 import "./class15_2B.test";
+import "./class64.test";
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");
 process.exit(failures ? 1 : 0);

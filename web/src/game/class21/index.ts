@@ -247,6 +247,9 @@ export function RescueTargetInit(obj: Actor, rng?: Rng): void {
   obj.hp = CLASS21_HP_BY_RANK[G.g_damage_rank] ?? 1;
   G.g_enemies_present += 1;
   G.g_enemies_alive += 1;
+  // `INC word [0x009A21BA]` at `0x004517E8`, in the arm that is not
+  // Training's: the rider counts as a civilian the run has seen.
+  G.g_civilians_seen_total = (G.g_civilians_seen_total + 1) & 0xffff;
   // **The car.** `PUSH 0x0` at `0x004517F6`, `CALL 0x00452120` at
   // `0x00451800`: this Init is the only thing in the game that allocates the
   // stage-2 car, so the car exists from the frame class 0x21 does and not

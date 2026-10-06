@@ -496,6 +496,7 @@ console.log("\n`g_class_handlers`, filled by the classes themselves:");
     [SpawnClass.PathRidingProp, "0x28 stage 1's two burning cars"],
     [SpawnClass.SceneryBatch, "0x29 the floor decals"],
     [SpawnClass.CutsceneSkipWatcher, "0x63 the cutscene-skip watcher"],
+    [SpawnClass.ScoreRouteSelect, "0x64 stage 6's route selector"],
     [SpawnClass.SetPieceProp, "0x24 set piece"],
     [SpawnClass.ScriptedHumanoid, "0x25 scripted humanoid"],
     [SpawnClass.Zombie, "0x30 zombie"],

@@ -69,7 +69,7 @@ import { QueryGroundHeightAt } from "./coli";
 import { RegisterPropForCameraTracking } from "./camera/slots";
 import { T } from "./tables";
 import { EffectNodePoseAt } from "./class44/script_flag_effect";
-import { PROJECTION_DISTANCE_PX } from "./combat/permits";
+import { CarriedPropIsOnScreen } from "./combat/permits";
 import { PropBehaviour } from "./class13";
 import { vec3, VecToAngles, type Vec3 } from "./vec";
 
@@ -1442,28 +1442,6 @@ export function LineSphereIntersect(r: number, c: Vec3, a: Vec3, b: Vec3):
   }
   if (d === r) return [vec3(f.x, f.y, f.z), vec3(f.x, f.y, f.z)];
   return null;
-}
-
-/**
- * `CarriedPropIsOnScreen` — `FUN_004459C0`. The sphere at the shot point,
- * projected at `g_projection_distance_px` against a 640x480 frame; anything
- * at or behind the eye is off.
- */
-export function CarriedPropIsOnScreen(p: CarriedProp): boolean {
-  const { x, y, z } = p.shotPoint;
-  if (0 <= z) return false;
-  const r = p.radius;
-  const ex = x <= 0 ? -x - r : r - x;
-  const ey = y <= 0 ? -y - r : r - y;
-  const k = PROJECTION_DISTANCE_PX / z;
-  const sx = k * ex, sy = k * ey;
-  const cx = -((PROJECTION_DISTANCE_PX * x) / z);
-  const cy = -((PROJECTION_DISTANCE_PX * y) / z);
-  if (((sx < 320 || cx < 320) && (-320 < sx || -320 < cx))
-      && (sy < 240 || cy < 240)) {
-    return !(sy <= -240 && cy <= -240);
-  }
-  return false;
 }
 
 /**

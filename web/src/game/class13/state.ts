@@ -17,6 +17,22 @@ import type { EffectDraw, EffectState } from "../effect_draw";
  * with a civilian still alive the boat pulls up and stops, and with none it
  * runs its path to the end.
  */
+/**
+ * `sub+0x0C` as `g_prop_behaviours[6]` and `[7]` read it --
+ * `PropBehaviourLaunchWithAccel` (`0x0043FFC0`) and
+ * `PropBehaviourRideObjectPath` (`0x004400D0`) switch on it with `SUB EAX, 0;
+ * JZ; DEC EAX; JZ` and return for anything else. A fifth reading of the word
+ * (`L3`).
+ */
+export enum PropBehaviourState {
+  /** Set up, then fall into {@link Running} on the same call. */
+  Begin = 0,
+  /** Every frame from then on. */
+  Running = 1,
+  /** Entry 7 only, past `g_cam_path_length[path]`: the call returns at once. */
+  Ended = 2,
+}
+
 export enum CarrierState {
   /** `0x004403F7` — allocate the ride block, seat the shot sphere. */
   Begin = 0,
@@ -249,13 +265,25 @@ export interface ScriptedPropTail {
   /** `sub+0x08[0]` — the first dword of the operand block at `desc+0x14`. */
   selector: number;
   /**
+   * `sub+0x08[0..5]` read as six f32 -- behaviour 6's two vectors, the
+   * velocity and the acceleration. Empty for every other behaviour, whose
+   * bundle record does not carry them.
+   */
+  operand: number[];
+  /**
+   * `g_cam_path_length[selector]` (`0x00576D38`) -- behaviour 7's end. The
+   * table is the image's, so the exporter reads the entry and the record
+   * carries it; 0 for every other behaviour.
+   */
+  pathLength: number;
+  /**
    * `sub+0x0C` — the behaviour's own state word, and whose it is depends on
    * the selector: {@link CarrierState} for 1 and 6,
    * {@link CarrierRoutine0State} for 0, {@link CarrierRoutine2State} for 2
    * and 9, {@link CarrierRoutine4State} for 4, 5, 7 and 8.
    */
   state: CarrierState | CarrierRoutine0State | CarrierRoutine2State
-    | CarrierRoutine4State;
+    | CarrierRoutine4State | PropBehaviourState;
   /** `sub+0x0E` — the camera path that despawns the prop. */
   camPath: number;
   /** `sub+0x10` — ...and the frame on it. */
@@ -340,7 +368,8 @@ export interface ScriptedPropTail {
 /** `[port-only]` — the two blocks `ActorAllocSub` zeroes, as one object. */
 export function makeScriptedPropTail(): ScriptedPropTail {
   return {
-    behaviour: 0, selector: 0, state: CarrierState.Begin,
+    behaviour: 0, selector: 0, operand: [], pathLength: 0,
+    state: CarrierState.Begin,
     camPath: -1, camFrame: -1, scale: 1, alpha: 1, slot: 0, riding: false,
     pathFrame: 0, wakeCel: 0, wakeOn: 0, wakeScale: 0, wakeFade: 0,
     stripCel: 0, splashCel: 0, wakeGroundY: 0, wakeYaw: 0,

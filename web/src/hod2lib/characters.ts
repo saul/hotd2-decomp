@@ -274,12 +274,21 @@ export function class52Tail(rec: Spawn): Record<string, unknown> {
  * +0x0C f32  a uniform scale, applied only when it is not 1.0
  * +0x10 u32  an index into g_prop_behaviours (0x005926A8)
  * +0x14 ...  the behaviour's own operand block. For behaviour 8,
- *            `CarrierPropSelectRoutine`, the first dword is the routine.
+ *            `CarrierPropSelectRoutine`, the first dword is the routine;
+ *            for 7, `PropBehaviourRideObjectPath` (`FUN_004400D0`), the
+ *            `op_` path slot; for 6, `PropBehaviourLaunchWithAccel`
+ *            (`FUN_0043FFC0`), two f32 vectors, the launch velocity and the
+ *            acceleration, turned by the record's angles.
  * ```
  *
  * `selector` is emitted for every spawn and is meaningless unless `behaviour`
- * is 8 — five of the game's 23 spawns take behaviour 0, `NoOpStub`, and are
- * static props whose `+0x14` is `-1`.
+ * is 7 or 8 — five of the game's 23 spawns take behaviour 0, `NoOpStub`, and
+ * are static props whose `+0x14` is `-1`. `operand` (the six floats) is
+ * emitted for behaviour 6 alone and `path_length` --
+ * `g_cam_path_length[selector]` (`0x00576D38`), the one table entry 7 reads
+ * besides the tail -- for behaviour 7 alone: each only where its reader is.
+ * No shipped descriptor takes either behaviour, so no shipped bundle carries
+ * either field.
  */
 /**
  * Class 0x18's three numbers, and they are all read out of the class-0x30
@@ -509,15 +518,32 @@ export function class15Tail(
   };
 }
 
-export function class13Tail(rec: Spawn): Record<string, unknown> {
-  return {
+/** `g_prop_behaviours[6]` and `[7]`, the two that read more than `selector`. */
+export const PROP13_LAUNCH_WITH_ACCEL = 6;
+export const PROP13_RIDE_OBJECT_PATH = 7;
+
+export function class13Tail(rec: Spawn,
+                            tables: ExeTables): Record<string, unknown> {
+  const behaviour = rec.param(0x10, "u32") ?? 0;
+  const selector = rec.param(0x14, "u32") ?? 0;
+  const out: Record<string, unknown> = {
     slot: rec.param(0x00, "u16") ?? 0,
     cam_path: rec.param(0x08, "u16") ?? -1,
     cam_frame: rec.param(0x0a, "u16") ?? -1,
     scale: rec.param(0x0c, "f32") ?? 1,
-    behaviour: rec.param(0x10, "u32") ?? 0,
-    selector: rec.param(0x14, "u32") ?? 0,
+    behaviour,
+    selector,
   };
+  if (behaviour === PROP13_LAUNCH_WITH_ACCEL) {
+    // `pfVar2 = *(sub+0x08)`, `pfVar2[0..2]` and `pfVar2[3..5]`.
+    out.operand = [0, 1, 2, 3, 4, 5].map((k) =>
+      rec.param(0x14 + 4 * k, "f32") ?? 0);
+  }
+  if (behaviour === PROP13_RIDE_OBJECT_PATH) {
+    // `CMP EDX, [EDI*4 + 0x576D38]` at `0x0044010C`, EDI = the first dword.
+    out.path_length = tables.camPathLength(selector);
+  }
+  return out;
 }
 
 export function class43Tail(rec: Spawn): Record<string, unknown> {
@@ -2220,7 +2246,7 @@ export async function resolveForStage(
         delayedLeap = { delay: rec.param(4, "i32") || 0, dest, gravity: g };
       }
     }
-    const class13 = cls === 0x13 ? class13Tail(rec) : null;
+    const class13 = cls === 0x13 ? class13Tail(rec, tables) : null;
     const class12 = cls === 0x12 ? class12Tail(rec, coliSets) : null;
     const class15 = cls === 0x15 ? class15Tail(rec, coliSets) : null;
     const class18 = cls === 0x18 ? class18Tail(rec) : null;

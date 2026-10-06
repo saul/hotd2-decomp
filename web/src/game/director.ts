@@ -306,9 +306,10 @@ export function SpawnScriptedCharacters(
  * `Init` runs where the port ran every `Init` before, at the spawn, reading
  * the camera as the paused frame holds it.
  */
-export function RunPendingInits(rng?: Rng, events?: Events): void {
+export function RunPendingInits(rng?: Rng, events?: Events,
+                                host?: GameHost): void {
   for (const obj of G.g_object_list) {
-    if (obj.initPending) ActorRunInit(obj, rng, events);
+    if (obj.initPending) ActorRunInit(obj, rng, events, host);
   }
 }
 
@@ -1046,7 +1047,7 @@ function SceneTaskWalk(dt: number, host: GameHost,
     // update from inside -- the port's split of each handler into `init` and
     // `update` answers that class by class, and moving it is not this change.
     if (obj.initPending) {
-      ActorRunInit(obj, rng, events);
+      ActorRunInit(obj, rng, events, host);
       // An `Init` that kills its object (`PlaceWormBatch`, a fish group
       // header) longjmps out of the walk: nothing else of it runs.
       if (obj.despawned) continue;

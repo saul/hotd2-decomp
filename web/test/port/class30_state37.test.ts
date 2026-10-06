@@ -10,7 +10,8 @@ import {
 } from "../../src/game/globals";
 import { NULL_HOST, type GameHost } from "../../src/game/host";
 import {
-  CarriedPropRoutine, MarkCarriedPropShot, type CarriedProp,
+  CarriedPropIsOnScreen, CarriedPropRoutine, MarkCarriedPropShot,
+  type CarriedProp,
 } from "../../src/game/carried_prop";
 import {
   MatIdentity, MatrixRotateX, MatrixRotateY, MatrixRotateZ, MatrixToEulerZYX,
@@ -50,6 +51,7 @@ import {
   PlaceFlickerLightProp48, PropUpdateType48FlickerLight, SFX_FLICKER_BREAK,
 } from "../../src/game/class41/type48";
 import { ZombieAux } from "../../src/game/actor";
+import { makeCivilianState } from "../../src/game/class10/state";
 import { RunPendingInits, SpawnSlotActors } from "../../src/game/director";
 import {
   check, motion, TYPE, CHARS, SCENE_MAJOR_PLAYING, spawnZombie, scene,
@@ -329,6 +331,21 @@ console.log("\nclass 0x30 state 37, release 3 — stage 1's barrel over the civi
         !!p && (p.pivot.x !== 0 || p.pivot.y !== 0 || p.pivot.z !== 0)
         && (p.spin[0] !== 512 || p.spin[1] !== 0 || p.spin[2] !== 0),
         p ? `pivot ${JSON.stringify(p.pivot)} spin ${p.spin}` : "no prop");
+  // `CarriedPropThrowAtTarget` ends `if (CarriedPropIsOnScreen(obj)) {...}
+  // else ActorDespawn(obj)` (`0x00443520`): the barrel falls out of the
+  // frame and is gone that frame. With the identity camera the view point is
+  // the world point, so "off screen" is below `-z * 240 / 640.2`.
+  let lastOn = true, gone = -1, lastY = 0;
+  for (let f = 0; f < 400 && gone < 0; f++) {
+    GameUpdate(1 / 60, DROP_HOST, rng, events);
+    const q = G.g_carried_props[0];
+    if (!q) { gone = f; break; }
+    lastOn = CarriedPropIsOnScreen(q);
+    lastY = q.shotPoint.y;
+  }
+  check("...and is despawned the first frame it has fallen out of the frame",
+        gone >= 0 && lastOn && G.g_carried_props.length === 0,
+        `gone ${gone} last on-screen ${lastOn} last view y ${lastY.toFixed(2)}`);
 }
 
 console.log("\nclass 0x30 state 37 — stage 1's barrel shot out of the carrier's hands:");
@@ -421,6 +438,93 @@ console.log("\nclass 0x30 state 37 — stage 1's barrel shot out of the carrier'
         `broke ${broke} left state 37 on ${leftState}, state ${z.state}`);
   check("...and the break runs its clip and despawns",
         G.g_carried_props.length === 0, `props ${G.g_carried_props.length}`);
+}
+
+console.log("\nCarriedPropCheckShot's break tail -- the civilian's shot script, the hit count:");
+{
+  // `CarriedPropCheckShot` (`FUN_004423F0`): the hit count is taken only
+  // while `g_accuracy_stats_suppressed` is 0, and the break's shared tail
+  // (`0x004426F6`) zeroes `sub+0x4C` of a live target's `+0x1310` block --
+  // for stage 1's barrel man, the civilian's `onShot`.
+  const TYPE_B: CharacterType = {
+    ...TYPE,
+    motions: { ...TYPE.motions, "271": motion(20, 0, 38), "270": motion(20) },
+  };
+  const script: TargetScriptJson = {
+    state: ZombieState.CarryProp,
+    head: { prop_type: 0, behaviour: 1, release: 3, offset: [0, 2, 0],
+            spin: [512, 0, 0], launch: [0, -1.5, 0],
+            motion: 271, frame: 0, loops: 4, mode: -2 },
+    entries: [],
+  };
+  const identity = MatIdentity();
+  const HOST: GameHost = {
+    ...NULL_HOST,
+    boneMatrix: (at, bone, out) => {
+      const z = ActorByAt(at);
+      if (!z || (bone !== 4 && bone !== 7)) return false;
+      const m = MatIdentity();
+      m[12] = z.pos.x + (bone === 4 ? -1 : 1); m[13] = z.pos.y + 10;
+      m[14] = z.pos.z;
+      for (let i = 0; i < 16; i++) out[i] = m[i];
+      return true;
+    },
+    cameraMatrices: (w2v, v2w) => {
+      for (let i = 0; i < 16; i++) { w2v[i] = identity[i]; v2w[i] = identity[i]; }
+      return true;
+    },
+  };
+  const run = (suppressed: number, victimDead: boolean) => {
+    const rng = new Rng(31);
+    ResetGameGlobals();
+    EnterPlay();
+    SetGameTables({ ...CHARS, types: { "1": TYPE_B } } as unknown as CharactersJson);
+    G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    G.g_scene_state_major = SCENE_MAJOR_PLAYING;
+    G.g_app_state = AppState.InPlay;
+    G.g_accuracy_stats_suppressed = suppressed;
+    // The civilian the barrel man was built for: only its `+0x1310` block
+    // is under test, so a held actor carries one by hand.
+    const victim = ActorSpawn(0x3c38, SpawnClass.Zombie, 1, "civilian");
+    victim.civ = makeCivilianState();
+    victim.civ.onShot = 0x0ced1234;
+    victim.civ.onShotScript = 2;
+    if (victimDead) victim.flags |= ActorFlag.Dead;
+    const z = spawnZombie(0x3c7c, 1, "barrel man", {
+      initialState: ZombieState.CarryProp,
+      attackState: ZombieState.RetireOffScreen,
+      script: { target: script, attack: null }, targetAt: victim.at,
+    }, rng);
+    z.visible = true;
+    z.pos = vec3(0, 0, -60);
+    const hits0 = G.g_player_hit_count[0];
+    let shots = 0, broke = false;
+    for (let f = 0; f < 80 && !broke; f++) {
+      GameUpdate(1 / 60, HOST, rng, new Events());
+      const p = G.g_carried_props[0];
+      if (p?.routine === CarriedPropRoutine.Break) broke = true;
+      else if (f >= 10 && p?.routine === CarriedPropRoutine.Held && p.shootable) {
+        MarkCarriedPropShot(p, 0);
+        shots++;
+      }
+    }
+    return { broke, shots, hits: G.g_player_hit_count[0] - hits0, civ: victim.civ,
+             pooled: ActorByAt(victim.at) === victim };
+  };
+  const a = run(0, false);
+  check("shot to pieces with the counter live: both hits counted",
+        a.broke && a.shots === 2 && a.hits === 2,
+        `broke ${a.broke} shots ${a.shots} hits ${a.hits}`);
+  check("...and the live civilian's shot script is taken away (+0x4C = 0)",
+        a.civ.onShot === 0 && a.civ.onShotScript === -1,
+        `onShot ${a.civ.onShot.toString(16)} script ${a.civ.onShotScript}`);
+  const b = run(1, true);
+  check("with g_accuracy_stats_suppressed up, neither hit is counted",
+        b.broke && b.shots === 2 && b.hits === 0,
+        `broke ${b.broke} shots ${b.shots} hits ${b.hits}`);
+  check("...and a dead civilian's (0x4000000) shot script is left alone",
+        b.pooled && b.civ.onShot === 0x0ced1234 && b.civ.onShotScript === 2,
+        `pooled ${b.pooled} onShot ${b.civ.onShot.toString(16)} script ${b.civ.onShotScript}`);
 }
 
 console.log("\na civilian's captors are made with it, though the script never lists them:");

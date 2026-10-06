@@ -40,10 +40,10 @@ the same commit.
   (`0x0048B160`); `SpawnCivilianBloodPool` (`FUN_0048E080`, its object's
   update unread); VM ops `0x23`, `0x24`, `0x25` and `0x2B`'s two words
   (`[open]`); op `0x1F`'s second stream.
-* **`0x13` scripted prop** -- `g_prop_behaviours` entries 3
-  (`CarriedPropThrowAtTarget`, `FUN_004432D0`), 5 (`CarriedPropRollAtCamera`,
-  `FUN_00443DC0`), and the three the module calls unread -- `0x0043FFC0`,
-  `0x004400D0`, `0x00445050`, which by elimination are entries 6, 7 and 9;
+* **`0x13` scripted prop** -- `g_prop_behaviours` entries 6
+  (`PropBehaviourLaunchWithAccel`, `FUN_0043FFC0`) and 7
+  (`PropBehaviourRideObjectPath`, `FUN_004400D0`), which no shipped
+  descriptor selects (`[proved]` by census; entry 9 is Training's, below);
   carrier routine 3 (`0x00440AD0`); routine 1's and 6's screen-test exit
   (`FUN_004459C0`).
 * **`0x20` one-hit target** -- the damaged-part swap.
@@ -114,6 +114,10 @@ Scene 6 (`trnevtbl.bin`, `g_GameMode` 2). The port has no Training.
 * **`0x21` rescue target** -- `RescueTargetTrainingWaitState`
   (`FUN_00452540`); the stage-2 car's two Training updates (`FUN_004528B0`,
   `FUN_00452930`).
+* **`0x13` scripted prop** -- `g_prop_behaviours[9]`,
+  `TrainingPropKeepAloft` (`FUN_00445050`), and `DrawSecondsLeftReadout`
+  (`FUN_00498C10`) with it: `trnevtbl.bin`'s descriptor `0x5400` is the only
+  selector of entry 9 in any `evt/` file.
 * **`0x23`** -- subtype 2.
 * **`0x30` zombie** -- the replay arm in `class30/carry_prop.ts`.
 * **`0x31` thrower** -- the `ThrowerDrawNodePart` swap.

@@ -702,15 +702,19 @@ export function CarriedPropCheckShot(p: CarriedProp, m: Mat,
   const rec = g_carried_prop_types[p.type] ?? g_carried_prop_types[0];
   const who = p.flags & 6;
   const player = who === 2 ? 0 : who === 4 ? 1 : rng.int(2);
-  // `if (DAT_009A5C48 == 0) g_player_hit_count[player]++`. `[open]` what the
-  // guard word is; nothing the port runs writes it, so the count is taken.
-  G.g_player_hit_count[player] = (G.g_player_hit_count[player] ?? 0) + 1;
+  // `CMP word ptr [0x009A5C48], 0` -- the shot counter's own guard.
+  if (G.g_accuracy_stats_suppressed === 0) {
+    G.g_player_hit_count[player] = (G.g_player_hit_count[player] ?? 0) + 1;
+  }
   const immune = (p.flags & ActorFlag.ShotImmune) !== 0;
   if (!immune) p.hp -= 1;
   p.flags &= ~SHOT_BITS;
   if (p.hp === 0) {
     if (p.type !== 2) {
+      // `sub+0x44/0x48` = the record's two break words (read where they are
+      // used, from `p.type`), `sub+0x4C = sub+0x50 = 0`.
       p.breakFrame = 0;
+      p.breakPrev = 0;
       p.routine = CarriedPropRoutine.Break;
       const w = MatCopy(MatIdentity(), cam?.v2w ?? MatIdentity());
       MatrixMultiply(w, m);
@@ -739,6 +743,18 @@ export function CarriedPropCheckShot(p: CarriedProp, m: Mat,
     // ```
     if (p.player >= 0) G.g_attack_permits[p.player] = -1;
     events?.emit("sound.play", { id: rec.breakSound });
+    // `0x004426F6`..: `t = sub[1]; if (t != 0 && !(t+0x34 & 0x4000000))
+    // *(t->+0x1310 + 0x4C) = 0`. `sub[1]` is the carrier's `obj+0x1394`, which
+    // for a class-0x30 carrier is the civilian `CivilianInit` built it for
+    // (`Actor.targetAt`), and that civilian's `+0x4C` is the script its
+    // own shot switches to: the barrel shot out of the air takes the
+    // civilian's shot reaction away with it. The port keeps the word as two
+    // fields, so both are cleared (L79).
+    const t = p.target >= 0 ? ActorByAt(p.target) : undefined;
+    if (t && !(t.flags & ActorFlag.Dead) && t.civ) {
+      t.civ.onShot = 0;
+      t.civ.onShotScript = -1;
+    }
     return;
   }
   if (!immune) {
@@ -1241,12 +1257,19 @@ const BOUNCE_TUMBLE = 0x200;
  * killing shot raises, so the civilian's own update runs its killed branch —
  * and plays `0x1D16A9`; every contact bounces the prop. It then turns by its
  * spin **about the pivot** the contact left, draws under
- * `g_camera_world_to_view`, and is shootable only while
- * `CarriedPropIsOnScreen`. Nothing here despawns it.
+ * `g_camera_world_to_view`, and is shot-tested while `CarriedPropIsOnScreen`
+ * -- and **despawned** the first frame it is not (`0x00443520`). Returns
+ * `false` on that frame.
+ *
+ * Only `CarriedPropRelease` installs it, from the state-37 script's `+0x08`:
+ * stage 1's barrel man (evt `0x3C7C`, reached through its civilian), and the
+ * same script in `advevtbl` and twice in `trnevtbl`, none of which the port
+ * plays. `[proved]` by a census of every class-0x30 and 0x18 head in the
+ * eleven `evt/` files.
  */
 export function CarriedPropThrowAtTarget(p: CarriedProp, host: GameHost,
                                          cam: CameraPair | null, rng: Rng,
-                                         events?: Events): void {
+                                         events?: Events): boolean {
   const w2v = cam?.w2v ?? MatIdentity();
   p.pos.x += p.vel.x;
   p.pos.y += p.vel.y;
@@ -1287,7 +1310,10 @@ export function CarriedPropThrowAtTarget(p: CarriedProp, host: GameHost,
   if (CarriedPropIsOnScreen(p)) {
     RegisterForShotTest(p);
     CarriedPropCheckShot(p, d, cam, rng, events);
+    return true;
   }
+  // `0x00443520`: `MatrixStackPop(1); ActorDespawn(obj)`.
+  return false;
 }
 
 /**
@@ -1490,8 +1516,7 @@ export function CarriedPropPoolUpdate(rng: Rng, host: GameHost,
         CarriedPropThrowAtCamera(p, cam, rng, events);
         return true;
       case CarriedPropRoutine.ThrowAtTarget:
-        CarriedPropThrowAtTarget(p, host, cam, rng, events);
-        return true;
+        return CarriedPropThrowAtTarget(p, host, cam, rng, events);
       case CarriedPropRoutine.RollAtCamera:
         CarriedPropRollAtCamera(p, cam, rng, events);
         return true;

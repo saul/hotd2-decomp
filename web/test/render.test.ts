@@ -5602,6 +5602,63 @@ console.log("\nRegionDrawResidentSet: the canal it draws, and the chapter card's
         quay.visible);
 }
 
+console.log("\na layer's clone of a lit mesh is lit: the canal tiles under the water task");
+
+{
+  // `render/water_surfaces.ts` clones a tile's material for the bilinear
+  // filter `WaterSurfaceUpdate` turns on. It cloned whatever the mesh wore,
+  // and by its first frame the lighting swap had already put the tile in its
+  // device-lit twin: `Material.clone` keeps neither the twin's
+  // `onBeforeCompile` nor its program key, so the copy was a stock
+  // `MeshLambertMaterial` under a scene with no three.js lights -- black --
+  // and the swap left it, being no unlit material. Every stage-3 canal shot
+  // with a water task drew the canal black.
+  const { StageScene } = await import("../src/render/stagescene");
+  const { WaterSurfaceLayer } = await import("../src/render/water_surfaces");
+  const { unlitMaterial } = await import("../src/render/lighting");
+  const { DataTexture, LinearFilter } = await import("three");
+  ResetGameGlobals();
+  const base = new MeshBasicMaterial({ map: new DataTexture(new Uint8Array(4), 1, 1) });
+  base.userData = { pvr2: { tex_ambient: 0.75, specular: [0, 0, 0], specular_power: 0 } };
+  const tileMesh = new Mesh(new PlaneGeometry(10, 10), base);
+  const tile = new Group();
+  tile.userData = { hod2_regions: [], hod2_slot: 0x13b2, hod2_draw_mode: 0 };
+  tile.add(tileMesh);
+  const tree = new Group();
+  tree.add(tile);
+  const stage = StageScene.fromScene(tree, { regions: [0, 1, 2, 3, 4] } as never);
+  stage.loadSlot(0x13b2);
+  stage.enterRegion(4);
+  const lights = new SceneLighting(new Scene());
+  lights.build(stage.root);
+  const water = new WaterSurfaceLayer();
+  water.scene = stage;
+  G.g_water_surfaces = [{ id: 1, index: 7, lifetime: 10, seenStep: 0,
+                          stepChanges: 0, killFlag: 0x12, slot: 0x13b2,
+                          drawn: [0x13b2] }];
+  G.g_water_surface_uv = [{ slot: 0x13b2, sin: 0.5, cos: 0.25, frames: 3,
+                            zLimited: false }];
+  // The frame before the task's first: the swap has the tile in its lit twin.
+  lights.beforeRender();
+  const key = (m: unknown) => (m as { customProgramCacheKey(): string })
+    .customProgramCacheKey();
+  check("the tile wears its device-lit twin before the walk's first frame",
+        key(tileMesh.material) === "d3dlit");
+  // Two frames of the task: its bilinear clone, then the swap.
+  for (let i = 0; i < 2; i++) {
+    water.update();
+    lights.beforeRender();
+  }
+  const worn = tileMesh.material as InstanceType<typeof MeshBasicMaterial>;
+  check("after the water layer's clone the tile is still drawn by the device's "
+        + "light equation, not a stock Lambert",
+        key(worn) === "d3dlit", `${worn.type} ${key(worn)}`);
+  check("...and its texture is the bilinear copy the walk asked for",
+        worn.map !== base.map && worn.map?.minFilter === LinearFilter);
+  check("...whose unlit base is the clone, not the stage's own material",
+        unlitMaterial(worn) !== base && unlitMaterial(worn).type === "MeshBasicMaterial");
+}
+
 console.log("\nrigs: a part drawn behind a camera-path test");
 {
   // `FUN_0048F560`, stage 6's lift car: `AssetDrawSlot(0xAFE/0xAFF)` only

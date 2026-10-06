@@ -31,6 +31,7 @@ import { G } from "../game/globals";
 import { TYPE3_BASE_ALPHA, type Type3SlotUv } from "../game/class41/type03";
 import type { RenderContext } from "./context";
 import { prepareFogMaterial } from "./fog";
+import { unlitMaterial } from "./lighting";
 
 /** What this needs of the texture filter: to own a texture it minted. */
 export interface UvScrollTextures {
@@ -137,7 +138,9 @@ export class UvScrollLayer implements System<RenderContext> {
       this.meshes.set(mesh, m);
     }
     if (!m.walked) {
-      const one = (x: Material): Material => {
+      // The unlit material, never the lit twin: see `unlitMaterial`.
+      const one = (worn: Material): Material => {
+        const x = unlitMaterial(worn);
         const c = x.clone();
         c.userData = { ...x.userData, [WALKED_TAG]: true };
         c.opacity = TYPE3_BASE_ALPHA;

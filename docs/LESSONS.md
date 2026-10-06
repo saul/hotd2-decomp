@@ -989,6 +989,21 @@ on the bytes -- encode the texel, compute, decode -- and hand it the engine's
 numbers unconverted.** Each of `D3DMATERIAL7`'s terms is then one uniform with
 one exe address behind it, and there is no model left to disagree with.
 
+**L110 -- A material that lives in a hook is lost by every clone, and the
+clone fails silently.** `Material.clone` copies a material's properties and
+neither its `onBeforeCompile` nor its `customProgramCacheKey`, and the
+scene light's twins (`render/lighting.ts`) keep the whole device equation in
+those two. Five layers clone a mesh's material to change it -- the canal
+water's bilinear filter, class 0x41 type 3's alpha, the warehouse water, the
+rain, the dome -- and the water layer's first clone happened after the swap
+had put the twin on: a stock Lambert, in a scene with no three.js lights,
+drew stage 3's canal black from the change that moved the light into the
+hook until a player reported it. **When state moves into a hook, find every
+`clone()` of the materials that carry it** (`rg '\.clone\(\)' src/render`);
+here each one now clones `unlitMaterial(worn)`, and the swap twins the copy.
+`render/draw_order.ts`'s `fadedCopy` is the other answer, copying the two
+across, and was already right.
+
 **L109 -- A transpose standing in for an inverse is a claim that nothing
 scales, and it holds only for the callers it was written for.** `coli.ts`
 took a world point into an object's space as `R^T (p - t)`, under a comment

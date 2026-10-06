@@ -829,6 +829,27 @@ export class SceneLighting implements System<RenderContext> {
   }
 }
 
+/** Every device-lit twin's unlit base, whichever set the twin is under. */
+const TWIN_BASE = new WeakMap<Material, Material>();
+
+/**
+ * The unlit material behind a device-lit twin, or the material itself.
+ *
+ * **A layer that clones a mesh's material to change it clones this, not what
+ * the mesh is wearing.** A twin's light lives in `onBeforeCompile` and its
+ * program key, and `Material.clone` carries neither, so a clone of a twin is a
+ * stock `MeshLambertMaterial` -- lit by three.js's lights, of which this
+ * module puts none in the scene: black. And the lighting swap does not twin
+ * it again, because it is not an unlit material any more. The canal tiles
+ * went black exactly so: `render/water_surfaces.ts` cloned each tile's
+ * material for its bilinear filter after the swap had put the twin on it.
+ * A clone of the base is an unlit material like any other, which the next
+ * swap gives a twin of its own, the clone's changes and all.
+ */
+export function unlitMaterial(m: Material): Material {
+  return TWIN_BASE.get(m) ?? m;
+}
+
 /**
  * A device-lit twin of an unlit material: a `MeshLambertMaterial` for the
  * normals and the chunks it brings, with the light loop replaced by the
@@ -878,5 +899,6 @@ function d3dLitTwin(m: MeshBasicMaterial, light: DeviceLight,
     patchD3dLit(shader);
   };
   twin.customProgramCacheKey = () => D3D_LIT_KEY;
+  TWIN_BASE.set(twin, m);
   return twin;
 }

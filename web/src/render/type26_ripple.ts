@@ -44,6 +44,7 @@ import {
   setAssetDrawAlpha, setUnfadedMaterial, unfadedMaterial,
 } from "./draw_order";
 import { prepareFogMaterial } from "./fog";
+import { unlitMaterial } from "./lighting";
 
 /** What this needs of the slot-model layer: a fresh copy of a rig template. */
 export interface Type26RippleTemplates {
@@ -218,7 +219,9 @@ export class Type26RippleLayer implements System<RenderContext> {
   /** TSP `|= 0x2000`, on this mesh alone. */
   private bilinear(mesh: Mesh): void {
     if (this.linear.has(mesh)) return;
-    const one = (x: Material): Material => {
+    // The unlit material, never the lit twin: see `unlitMaterial`.
+    const one = (worn: Material): Material => {
+      const x = unlitMaterial(worn);
       const c = x.clone();
       const map = (x as { map?: Texture | null }).map;
       if (map) {

@@ -42,6 +42,7 @@ import {
 } from "three";
 import type { System } from "../core/system";
 import type { RenderContext } from "./context";
+import { unlitMaterial } from "./lighting";
 import { G } from "../game/globals";
 
 export interface SlotSource {
@@ -151,8 +152,9 @@ export class ProjectileLayer implements System<RenderContext> {
       node.traverse((o) => {
         const mesh = o as Mesh;
         if (!mesh.isMesh) return;
+        // The unlit material, never a lit twin: see `unlitMaterial`.
         const own = (m: Material): Material => {
-          const c = m.clone() as Material & { color?: Color };
+          const c = unlitMaterial(m).clone() as Material & { color?: Color };
           if (c.color) {
             mats!.push({ mat: c as Material & { color: Color },
                          base: c.color.clone() });

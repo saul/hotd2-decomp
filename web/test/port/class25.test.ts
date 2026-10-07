@@ -23,6 +23,7 @@ import {
   type HumanoidProgram,
 } from "../../src/game/class25";
 import { HumanoidRoutine } from "../../src/game/class25/state";
+import { RotXZY, RotZYX } from "../../src/game/carrier";
 import {
   check, CHARS, slotsShown, EnterPlay, JETTY_CHARS, jettyScene,
 } from "./harness";
@@ -472,6 +473,48 @@ console.log("\nclass 0x25, the object path's attachment offset:");
         && Math.abs(a.pos.z - (20 + r.dz)) < 1e-6
         && a.yaw === r.dyaw,
         `pos ${a.pos.x},${a.pos.y},${a.pos.z} yaw ${a.yaw}`);
+}
+
+console.log("\nclass 0x25, an offset yaw re-reads the path's angles in the draw's order:");
+{
+  // `0x00484C32`-`0x00484C72`: a record with a yaw loads `RotZ(+0x6C);
+  // RotY(+0x68); RotX(+0x64)` -- the object path's order -- reads it back with
+  // `MatrixToEulerBams` (`FUN_00401AE0`) as the `RotX; RotZ; RotY` triple the
+  // body is drawn in (`model+0x68 = 1`), and only then adds the yaw. So the
+  // drawn body is the path's frame, half a turn about its own Y. The angles
+  // are `op_st3` 340's at frame 10, under stage 3's boat passengers (evt 3792,
+  // 3940, 4128, 4252, records 4..7, every one a `0x8000`): there the two
+  // orders differ by a quarter turn, and the port drew the four lying on
+  // their sides through the hull until frame ~1020.
+  const rng = new Rng(4);
+  const { a, events } = humanoidScene([
+    { op: HumanoidOp.FollowPath, mode: 1, a: 340, b: 4 },
+    { op: HumanoidOp.WaitUntil, mode: HumanoidCond.Frames, a: 9999, b: 0 },
+  ]);
+  const path = { pitch: 15445, yaw: -16384, roll: -16384 };
+  const host = {
+    ...NULL_HOST,
+    objectPath: () => ({ x: -137, y: -16, z: -2172, ...path }),
+  };
+  ScriptedHumanoidUpdate(a, { dt: 1 / 60, rng, host, events });
+  const want = RotZYX(path.roll, path.yaw, path.pitch);
+  const half = RotXZY(0, 0, g_class25_path_offsets[4].dyaw);
+  const drawn = RotXZY(a.pitch, a.roll, a.yaw);
+  // The frame times the half turn, as a column-vector product.
+  const turned = want.map((_, i) => {
+    const r = Math.floor(i / 3), c = i % 3;
+    return want[r * 3] * half[c] + want[r * 3 + 1] * half[3 + c]
+      + want[r * 3 + 2] * half[6 + c];
+  });
+  // `MatrixToEulerBams` truncates each angle to a BAMS, ~1e-4 rad.
+  const err = Math.max(...drawn.map((v, i) => Math.abs(v - turned[i])));
+  check("the body drawn RotX;RotZ;RotY is the path's RotZ;RotY;RotX frame, "
+        + "half-turned", err < 1e-3,
+        `max error ${err.toExponential(2)}; angles ${a.pitch} ${a.yaw} ${a.roll}`);
+  // ...which is upright, because the boat is: the path's frame carries +Y
+  // to within a few degrees of +Y.
+  check("so the passenger sits up in the boat", drawn[4] > 0.95,
+        `body up.y ${drawn[4].toFixed(3)}`);
 }
 
 console.log("\nclass 0x25, a path in mode 1 gives the rider all three angles:");

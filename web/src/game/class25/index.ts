@@ -43,6 +43,7 @@
 import type { Rng } from "../../core/rng";
 import { MotionFlag, type Actor, type HumanoidActor } from "../actor";
 import { ActorBindPartList } from "../attachments";
+import { MatrixToEulerBams, RotZYX } from "../carrier";
 import { ActorSetMotion, ActorSetMotionBlended } from "../class30/motion_cue";
 import { ScriptedHumanoidDebug } from "./debug";
 import { SpawnBloodSpray } from "../effects/blood";
@@ -1131,9 +1132,11 @@ function HumanoidFrameTail(obj: HumanoidActor, f: ClassFrame): void {
       // (its three ints, `L2`), and `CMP [EDI+0x1358],0x2 / JZ` at
       // `0x00484B5D` is the mode-2 skip. `[proved]` The draw then turns the
       // body by all three, in the order `ScriptedHumanoidInit` names --
-      // `render/characters/humanoid.ts`. This wrote the yaw alone for as long
-      // as the renderer drew only yaw, so `op_st3` 340's boat riders stood
-      // upright on a path whose `rot_x` runs to 15,758 BAMS.
+      // `render/characters/humanoid.ts` -- which is not the path's order: an
+      // offset record with a yaw has the triple re-read into the draw's order
+      // first (`HumanoidApplyPathOffset`). Without that, `op_st3` 340's
+      // `rot_x` of ~15,400 BAMS is not a deck's pitch but a quarter-turn
+      // that the path's other two angles undo.
       //
       // A host that publishes a position alone leaves the angles as they
       // were; `GameHost.objectPath` has all six whenever it has a path.
@@ -1161,9 +1164,11 @@ function HumanoidFrameTail(obj: HumanoidActor, f: ClassFrame): void {
  *
  * `[proved]` at `0x00484B77`–`0x00484C79`, and it is why `obj+0x1360` is a
  * record index rather than a distance: the record's three floats are rotated
- * through the **path's** orientation and added to the position, its `+0x10` is
- * added to the yaw unmasked, and a slot in `PATH_SLOT_LIFT_LO`..`_HI` takes a
- * further 2.0 in y on top. The port stored the index and never read it, so a
+ * through the **path's** orientation and added to the position, a slot in
+ * `PATH_SLOT_LIFT_LO`..`_HI` takes a further 2.0 in y on top, and a non-zero
+ * `+0x10` is added to the yaw unmasked -- after the actor's three angles have
+ * been re-read into the order its body is drawn in, which is the step that
+ * keeps stage 3's boat passengers in their seats. The port stored the index and never read it, so a
  * scripted actor rode its path with none of this applied — 22 of the 24
  * `op 11` commands the six stages carry name a non-zero record.
  *
@@ -1216,10 +1221,30 @@ function HumanoidApplyPathOffset(obj: HumanoidActor, rx: number, ry: number,
     obj.pos.y += PATH_SLOT_LIFT;
   }
 
+  // `CMP dword ptr [EBP+0x10],EBX; JZ 0x00484c7c` at `0x00484C2D`: a record
+  // with no yaw ends here, and the angles stay the path's own.
+  if (r.dyaw === 0) return;
+  // **The angles are re-read in the draw's order before the yaw is added.**
+  // `0x00484C32`-`0x00484C64`: `MatrixStackPush(0); MatrixLoadIdentity;
+  // MatrixRotateZ(obj+0x6C); MatrixRotateY(obj+0x68); MatrixRotateX(obj+0x64)`
+  // and then `MatrixToEulerBams(&obj+0x64, &obj+0x68, &obj+0x6C)`
+  // (`FUN_00401AE0`), which takes a `RotX; RotZ; RotY` triple back off that
+  // matrix -- the order `model+0x68 = 1` draws the body in
+  // (`render/characters/humanoid.ts`). An object path's angles are
+  // `RotZ; RotY; RotX`, and the two orders agree only when two of the three
+  // are zero: `op_st3` 340's boat is `(~0x3C00, -0x4000, -0x4000)` until frame
+  // 700, an upright hull in its own order and a body lying on its side in the
+  // draw's. This step was missing, so stage 3's four passengers were drawn
+  // tipped through the hull and righted themselves as the path's angles fell
+  // to `(0, -0x8000, -0x3AB)` between frames 700 and 1020.
+  const e = MatrixToEulerBams(RotZYX(obj.roll, obj.yaw, obj.pitch));
+  obj.pitch = e.pitch;
+  obj.yaw = e.yaw;
+  obj.roll = e.roll;
   // `MOV ECX,[EBP+0x10]; MOV EDX,[ESI]; ADD EDX,ECX; MOV [ESI],EDX` with
   // `ESI = obj+0x68` at `0x00484C69`-`0x00484C72`. No mask: the engine lets
   // the yaw run outside 0..0xFFFF here, as `op 5`'s `turnTarget` does.
-  if (r.dyaw !== 0) obj.yaw += r.dyaw;
+  obj.yaw += r.dyaw;
 }
 
 /**

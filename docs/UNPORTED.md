@@ -52,10 +52,6 @@ the same commit.
   and `ZombieSplitInTwo` (`FUN_0045D9F0`, which `game:split_unreachable`
   holds unreachable); `ZombieCorpsePoseFrame` (`FUN_00454E00`); five bone-cel
   arms; the `0x10000000` bit `class30/emerge.ts` clears.
-* **`0x33` scripted scenery** -- every selector runs; the carrier's
-  (selector 1's) `RegisterForShotTest` at `0x004334D0` and the
-  `MatrixStore(obj+0x150)` the mesh shot test would read. `[open]`: what
-  takes selector 7's object away, since its own despawn test never passes.
 * **`0x41` prop placer** -- the score pickup's light set is recorded with
   its draw and not yet lit by: `render/breakables.ts`'s group is no lighting
   root, for any prop. Constructor 26's and the canal water's slots are

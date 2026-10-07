@@ -53,6 +53,18 @@ export interface SpawnRecord {
  * block its instruction ran in, and the route the replay then left that block
  * by. What {@link ClassHandler.outlivedByReplay} is handed.
  */
+/**
+ * `[port-only]` The camera as a replay leaves it after an instruction, a wait
+ * it steps over or a block change: the path published, the frame it started
+ * the shot on, and the frame it published last. What
+ * {@link ClassHandler.followReplayCamera} is shown.
+ */
+export interface ReplayCamera {
+  slot: number;
+  startFrame: number;
+  frame: number;
+}
+
 export interface ReplaySpawnRecord extends SpawnRecord {
   /** The block whose instruction pushed the record. */
   block: number;
@@ -313,6 +325,22 @@ export interface ClassHandler {
    * and only while replaying.
    */
   outlivedByReplay?(rec: ReplaySpawnRecord): boolean;
+  /**
+   * `[port-only]` A replay's camera, shown to a listed spawn record whose
+   * object runs on camera frames it tests for itself and **outlives** them --
+   * so that the object a seek rebuilds is the one the engine would hold at the
+   * landing, not a fresh one. *state* is the record's own scratch, kept on the
+   * walker's spawn entry (and saved with it); the class reads and writes it
+   * here and hands it to {@link resumeFromReplay}. Asked where
+   * {@link outlivedByReplay} is, before it, and only while replaying.
+   */
+  followReplayCamera?(rec: ReplaySpawnRecord, cam: ReplayCamera,
+                      state: Record<string, number>): void;
+  /**
+   * `[port-only]` Seat what {@link followReplayCamera} found on the object a
+   * replay's spawn list rebuilds, before its first update.
+   */
+  resumeFromReplay?(obj: Actor, state: Readonly<Record<string, number>>): void;
   /**
    * Describe one of this class's actors for the debug sidebar.
    *

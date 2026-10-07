@@ -62,17 +62,30 @@
  * `wait_enemies_alive <= 0` at step 2 op 50, a room a player could not clear
  * by shooting. That is what this module is for.
  *
- * ## What is not ported, by name
+ * ## How it is shot `[proved]`
  *
- * * `RegisterForShotTest` (`FUN_00405160`), at `0x004334D0` in the tail of
- *   the draw. The carrier's sphere is `tail+0x08`, which is `0.1` on stage
- *   5's and `0.0` on stage 2's two, and `tail+0x04 != -1` puts stage 2's on
- *   the **mesh** test (`obj+0x34 |= 0x50`), `ShotTestMesh` in
- *   `combat/shot_test.ts`, which this class would reach by registering at
- *   that site with its blob and its matrix on the actor.
- * * `MatrixStore(obj+0x150)` and the view-space point at `obj+0x70`
- *   (`0x00433450`..`0x004334C7`), the matrix the mesh test above would
- *   need; they go with it.
+ * The draw's model ends `MatrixStore(obj+0x150)` (`0x00433457`), then
+ * `obj+0x70..0x78` is `obj+0x40` through the camera block's matrix
+ * (`0x00433463`..`0x004334C7`) and `RegisterForShotTest` (`0x004334D0`) files
+ * the object -- before the car's parts, and on every frame the ride runs.
+ * The seat (`0x00433886`..`0x004338B7`) raises `0x80000001` and then either
+ * the mesh arm -- `tail+0x04 != -1`: `obj+0x34 |= 0x50` and the pointer on
+ * `obj+0x14C` -- or the sphere, `tail+0x08` on `obj+0x124` and `obj+0x128`.
+ * Stage 2's two boats (`0x4FD0`, `0x12590`) take the mesh arm, so a shot
+ * stops where it crosses the boat's blob, through the 2.5-scaled matrix
+ * (`ShotTestMesh`, `combat/shot_test.ts`); stage 5's car the sphere, 0.1
+ * units round the car's origin.
+ *
+ * **Bit 31 keeps it out of every other list.** Nothing in the class clears
+ * the `0x80000000` the seat raises, and `0x80008000` is what both
+ * moving-object collision passes (`coli.ts`) and the crowd push
+ * (`ColiTestSphereAgainstActors`) refuse, so a boat is never a floor or a
+ * wall and pushes nobody: it is in the shot test and nowhere else. And no
+ * routine of the class reads the hit bits `MarkActorShot` (`FUN_00404DB0`)
+ * raises -- every `[reg + 0x34]` operand in `0x00432FF0`..`0x00434400` is a
+ * store or a test of `0x10000000`, `0x40000000`, `0x200000`, `0x8000`, or
+ * the pusher's `0x18000000` -- so a hit marks it and that is all (the
+ * handler's `ownsShotResult`).
  *
  * ## The draw
  *
@@ -94,10 +107,12 @@ import { ActorDespawn } from "../despawn";
 import { SpawnSpriteEffect } from "../effects/sprite";
 import { G } from "../globals";
 import { ActorClaimHitSlot } from "../hit_slots";
+import { ColiStoreObjectMatrix } from "../coli";
+import { RegisterForShotTest } from "../combat/shot_test";
 import type { GameHost } from "../host";
 import {
   registerClass, type ActorDebug, type ClassFrame, type ClassHandler,
-  type ReplaySpawnRecord,
+  type ReplayCamera, type ReplaySpawnRecord,
 } from "../registry";
 import { T } from "../tables";
 import { SpawnClass } from "../spawn_class";
@@ -110,7 +125,8 @@ import { vec3, VecToAngles } from "../vec";
 import { ScriptedEffectAtCameraCue33 } from "./effect_cue";
 import {
   ScriptedEndingTrackSelect33, ScriptedSoundAndFlagAtCue33,
-  ScriptedSoundCues33, ScriptedSpriteEffectOnce33,
+  ScriptedSoundCues33, ScriptedSoundCues33FollowReplayCamera,
+  ScriptedSoundCues33ResumeFromReplay, ScriptedSpriteEffectOnce33,
 } from "./cues";
 import {
   ScriptedBridgeCrashStrip33, ScriptedFireLoopUntilCue33,
@@ -288,7 +304,9 @@ export function ScriptedCarrierStepPath33(obj: ScriptedSceneryActor,
       obj.hitRadius = t.shot_radius;
       obj.bodyRadius = t.shot_radius;
     } else {
+      // ...and `obj+0x14C = tail+0x04`, which the port carries resolved.
       obj.flags |= 0x50;
+      obj.coliBlob = t.shot_blob ?? null;
     }
     s.slot = t.slot;
     s.pathSlot = t.path;
@@ -413,7 +431,7 @@ export function ScriptedCarrierUpdate33(obj: ScriptedSceneryActor,
       && G.g_cam_path_frame !== t.despawn_frame
       && G.g_cam_path_frame_2 !== t.despawn_frame) {
     ScriptedCarrierStepPath33(obj, f.host, f.events);
-    Carrier33Draw(obj);
+    Carrier33Draw(obj, f.host);
     return;
   }
 
@@ -466,7 +484,8 @@ function Carrier33DrawFire(s: ScriptedSceneryActor["scenery"],
 }
 
 /**
- * `ScriptedCarrierUpdate33`'s draw after the ride, `0x004333F1`..`0x0043382F`.
+ * `ScriptedCarrierUpdate33`'s draw after the ride, `0x004333F1`..`0x0043382F`,
+ * and the shot-test registration in the middle of it.
  *
  * The model is `obj+0x13F0` under `T RotZ RotY RotX Scale(obj+0x118)`
  * (`NoOpStub` is handed the scale and does nothing). Then slot `0x1B0E`
@@ -477,11 +496,22 @@ function Carrier33DrawFire(s: ScriptedSceneryActor["scenery"],
  *
  * `[port-only]` as a function, for the reason {@link Carrier33DrawFire} is.
  */
-function Carrier33Draw(obj: ScriptedSceneryActor): void {
+function Carrier33Draw(obj: ScriptedSceneryActor, host: GameHost): void {
   const s = obj.scenery;
   let m = Carrier33ObjectMatrix(obj);
   MatrixScale(m, s.drawScale, s.drawScale, s.drawScale);
   Carrier33DrawSlot(s, m, s.slot);
+  // `MatrixStore(obj+0x150)` at `0x00433457`, built on the identity -- the
+  // matrix `RegisterForShotTest`'s mesh arm leaves (`combat/shot_test.ts`).
+  ColiStoreObjectMatrix(obj, m);
+  // `obj+0x70..0x78 = g_camera_blocks[g_camera_index] * obj+0x40..0x48`
+  // (`0x00433463`..`0x004334C7`): the view-space point, which the port keeps
+  // in world space (`Actor.shotCentre`). Then the registration at
+  // `0x004334D0`.
+  obj.shotCentre.x = obj.pos.x;
+  obj.shotCentre.y = obj.pos.y;
+  obj.shotCentre.z = obj.pos.z;
+  RegisterForShotTest(obj, host);
 
   if (s.slot === SLOT_STAGE5_CAR) {
     m = Carrier33ObjectMatrix(obj);
@@ -699,8 +729,40 @@ function ScriptedSceneryOutlivedByReplay33(rec: ReplaySpawnRecord): boolean {
     || G.g_script_flags[t.despawn_flag] === 1;
 }
 
+/**
+ * `[port-only]` -- `ClassHandler.followReplayCamera`, for the one selector
+ * whose object outlives the camera frames it tests: 7 (`class33/cues.ts`).
+ */
+function ScriptedSceneryFollowReplayCamera33(
+    rec: ReplaySpawnRecord, cam: ReplayCamera,
+    state: Record<string, number>): void {
+  if (rec.hp !== ScriptedScenerySelector.SoundCues) return;
+  const t = (T.chars?.placements ?? []).find((p) => p.at === rec.at)
+    ?.class33_sub;
+  if (t?.selector !== 7) return;
+  ScriptedSoundCues33FollowReplayCamera(t.cues, cam, state);
+}
+
+/** `[port-only]` -- `ClassHandler.resumeFromReplay`, selector 7's. */
+function ScriptedSceneryResumeFromReplay33(
+    obj: Actor, state: Readonly<Record<string, number>>): void {
+  if (obj.cls !== SpawnClass.ScriptedScenery) return;
+  if (obj.hp !== ScriptedScenerySelector.SoundCues) return;
+  ScriptedSoundCues33ResumeFromReplay(obj, state);
+}
+
 export const ScriptedSceneryHandler: ClassHandler = {
   init: ScriptedSceneryInit33,
+  followReplayCamera: ScriptedSceneryFollowReplayCamera33,
+  resumeFromReplay: ScriptedSceneryResumeFromReplay33,
+  // The class's two registrations -- the carrier's at `0x004334D0` and the
+  // pushable's at `0x00433CC7`, the only calls of `RegisterForShotTest` in
+  // its routines (a rel32 scan of `0x00432FF0..0x00434400`) -- are made
+  // where the routines make them, so the pick is `game/`'s.
+  registersForShotTest: true,
+  // `MarkActorShot` and nothing else: no routine of the class reads the hit
+  // bits, so a shot on it must never reach the damage tables.
+  ownsShotResult: true,
   update: ScriptedSceneryUpdate33,
   debug: ScriptedSceneryDebug33,
   outlivedByReplay: ScriptedSceneryOutlivedByReplay33,

@@ -122,9 +122,37 @@ export function ScriptedSpriteEffectOnce33(obj: ScriptedSceneryActor,
  * `0x00433F1E` asks whether the record **just played** was a terminator --
  * `EDI` still holds the old pointer -- and it cannot have been, since only
  * modes 0 and 1 reach the call. So the despawn at `0x00433F30` never runs,
- * the object keeps its pool slot until something else clears it, and the
- * list ends by parking on its first record whose mode is neither 0 nor 1.
- * Transcribed as written.
+ * and the list ends by parking on its first record whose mode is neither 0
+ * nor 1. Transcribed as written.
+ *
+ * ## What takes the object away: the end of the scene `[proved]`
+ *
+ * Nothing else can. A task leaves the task list three ways, and only three:
+ *
+ * * `ActorKill` (`FUN_004A7040`), which takes no argument and unlinks the
+ *   **current** task (`MOV EAX,[0x007DF8B0]` at `0x004A7040`) -- so only an
+ *   object's own routine can end it, directly or through `ActorDespawn`
+ *   (`FUN_00409CC0`), which ends in it. Every one of its callers is a
+ *   routine killing the object it is running; selector 7's never reaches its
+ *   own.
+ * * `TaskListBuild` (`FUN_004A6F50`), which tears the previous list down
+ *   through `0x004A7120` before building the next -- thirteen callers, every
+ *   one a phase start: `LoadSceneAndReset` (`FUN_00460030`, the next stage and
+ *   the attract demo), the game-over screen's phases, the title,
+ *   the options, the ending. `0x004A7120`'s only callers are
+ *   `TaskListBuild` and itself.
+ * * `ArenaReset` (`FUN_004A7310`), which turns the heap the tasks live in
+ *   back into one free block, from the same phase starts.
+ *
+ * No routine walks the list and unlinks another object. So the object stands,
+ * parked, holding the hit slot `ScriptedSceneryDispatch33` claimed for it,
+ * until the stage ends, the game is over or the player quits -- and it plays
+ * a record whenever **any** camera path publishes that record's frame: stage
+ * 5's path 207 ends at frame 600 in block 2, so the 760, 820 and 990 records
+ * wait for the paths of the blocks after it. The port's pool keeps it the
+ * same way (`ActorDespawn` is the only way out of `G.g_object_list` short of
+ * the scene reset), and a seek that rebuilds it carries its cursor
+ * ({@link ScriptedSoundCues33FollowReplayCamera}).
  */
 export function ScriptedSoundCues33(obj: ScriptedSceneryActor,
                                     f: ClassFrame): void {
@@ -162,6 +190,65 @@ export function ScriptedSoundCues33(obj: ScriptedSceneryActor,
     return;
   }
   ActorDespawn(obj);
+}
+
+/**
+ * `[port-only]` -- selector 7's half of `ClassHandler.followReplayCamera`:
+ * the records a replay's camera has run the object past.
+ *
+ * A seek walks the script and carries the camera from frame to frame without
+ * publishing the frames between, and the spawn list rebuilds the object at the
+ * landing with its `Init` -- with the cursor at the first record, where the
+ * engine's object has played every mode-1 record whose frame some path
+ * published while it stood. So each time the replay shows the camera, the
+ * frames since the last showing are taken as played -- on the same path, the
+ * ones after the frame last seen; on a new path (or the same one started
+ * again), the ones from the shot's start -- and each record whose frame is
+ * among them, in order, is passed. The first showing is the spawn
+ * instruction's own: the object runs from the next frame, so only frames
+ * after it count. A mode-0 record counts the object's own frames, which a
+ * replay does not have; the walk stops at one, and no shipped list carries
+ * one (`[proved]`: stage 5's `0x1E7C` is four mode-1 records and the
+ * terminator, the only selector-7 spawn in the game).
+ */
+export function ScriptedSoundCues33FollowReplayCamera(
+    cues: readonly { mode: number; frame: number }[],
+    cam: { slot: number; startFrame: number; frame: number },
+    state: Record<string, number>): void {
+  if (state.slot === undefined) {
+    state.cue = 0;
+    state.slot = cam.slot;
+    state.frame = cam.frame;
+    return;
+  }
+  let lower = cam.slot === state.slot && cam.frame >= state.frame
+    ? state.frame + 1 : cam.startFrame;
+  for (let rec = cues[state.cue]; rec; rec = cues[state.cue]) {
+    if (rec.mode !== Class33CueMode.CameraFrame) break;
+    if (rec.frame < lower || rec.frame > cam.frame) break;
+    state.cue += 1;
+    lower = rec.frame + 1;
+  }
+  state.slot = cam.slot;
+  state.frame = cam.frame;
+}
+
+/**
+ * `[port-only]` -- selector 7's half of `ClassHandler.resumeFromReplay`: the
+ * rebuilt object stands on the record the replay ran it to, seeded as its
+ * first frame seeded it (`obj+0x1350`/`+0x1354` from the **first** record,
+ * `obj+0x1312 = 1`), and its next update tests that record.
+ */
+export function ScriptedSoundCues33ResumeFromReplay(
+    obj: ScriptedSceneryActor, state: Readonly<Record<string, number>>): void {
+  const t = obj.class33Sub;
+  if (t?.selector !== 7 || !state.cue) return;
+  const s = obj.scenery;
+  s.frames = 0;
+  s.seedFrame = t.cues[0]?.frame ?? 0;
+  s.seedSound = t.cues[0]?.sound ?? 0;
+  obj.sub = 1;
+  s.cue = state.cue;
 }
 
 /**

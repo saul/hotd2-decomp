@@ -36,7 +36,7 @@ import {
 import { drawBoss3Effects } from "./boss3_effects";
 import { releaseAssetDrawAlpha } from "./draw_order";
 import { drawBatSplashes } from "./bat_splash";
-import { drawLifeMarkers } from "./life_markers";
+import { drawCivilianHitMarkers, drawLifeMarkers } from "./life_markers";
 import { drawViewSlots, drawWorldSlots } from "./view_slots";
 import { drawClass2DDraws } from "./class2d_draws";
 import { drawCreatureEffects } from "./creature_effects";
@@ -292,6 +292,9 @@ export class EffectLayer implements System<RenderContext> {
     // The marker a civilian's extra life raises: `render/life_markers.ts`.
     drawLifeMarkers({ node: (key, slot, parent) => this.node(key, slot, parent),
                       view: this.viewGroup }, seen);
+    // ...and the one a shot civilian leaves, `render/life_markers.ts` too.
+    drawCivilianHitMarkers({ node: (key, slot, parent) => this.node(key, slot, parent),
+                             view: this.viewGroup }, seen);
     // The result card's glyphs, and anything else drawn under
     // `MatrixLoadIdentity` by slot: `render/view_slots.ts`.
     drawViewSlots({ node: (key, slot, parent) => this.node(key, slot, parent),

@@ -25,7 +25,7 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
   "approach.ts": "f2458fca4f4f943e775d2f73237eef7bf925b37dc38ba653bc89f80d3e800443",
   "arcscript.ts": "7c64fa78e89264425a0032c0918c846f8972905d848251d517112cd307722b35",
   "bams.ts": "f03b1290866a63ab2ae764d49bd15c57bd53c6b1a03794f7a0357e8dd842eb8f",
-  "bundle.ts": "0a6579e302b5864d08798e68a398b358e037830a6e39c1537e00a9b574185357",
+  "bundle.ts": "f2a770a6c99443fd30199f10f0b831803504248164aa7989198e89dfce3b2afe",
   "bytes.ts": "59b2f363e98da56e88ada59458239032e40cad3a27342659e213d849c0967168",
   "cam.ts": "fe50200cb57c6578681a121766e7a5f4ed2425d91996169f83a82e8375dd63c3",
   "campaths.ts": "fbe28df3265d37b60a006e937a926eca8546609aa29cc5d80e7f1fc9afd639be",
@@ -170,7 +170,7 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
   "game/effects/sprite.ts": "d395915d03641d7df3f3fb1d529517d3b3f0b06bd9bed116be72a5b6e33d43a5",
   "game/entity_light.ts": "772c4d0367f43206af39a2e8af8a7bed243b93035c301c09b4efd87793b87802",
   "game/game_mode.ts": "5882c6716bb8bf4b64ce7ebb370d273ebbbac02f9989a030ff60f5a7f43ce506",
-  "game/globals.ts": "f328270cf7435adead890602f7c4cf7316ab5c0c8195946f8801c068f011ba6b",
+  "game/globals.ts": "0ad76974477be54c99dbecb3cfa380253476e6a67638919ea03d30ac78779bb0",
   "game/ground_shadow.ts": "c1f1c7d18db7d154dc89074da7208f1d0e4f88df4b0262a31044695ccf153f61",
   "game/hit_slots.ts": "4b1ce29c6b5184e6749b3e9c597b8b0464331eba06b204aa227c749b1785feb7",
   "game/host.ts": "073e9d3d92613f4e9931609d992cf56718f91f772ca920bc89d25d22b8f6a765",
@@ -220,4 +220,4 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
 };
 
 /** One digest over {@link BUILDER_FILES}, in filename order. */
-export const BUILDER_HASH = "54ab09f8e658c161ea08dd783df927e01f99c941c2954aa289dda16d79616b06";
+export const BUILDER_HASH = "1c83f8af9fa1dcb1c2ff0bc7d914cb77bbb8f22aa88973083bfc9f57796a5fe5";

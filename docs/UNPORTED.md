@@ -37,9 +37,9 @@ the same commit.
 ### Registered classes with pieces missing
 
 * **`0x10` civilian** -- `CivilianUpdateOnCarrier`'s hand-back arm
-  (`0x0048B160`); `SpawnCivilianBloodPool` (`FUN_0048E080`, its object's
-  update unread); VM ops `0x23`, `0x24`, `0x25` and `0x2B`'s two words
-  (`[open]`); op `0x1F`'s second stream.
+  (`0x0048B160`); the head look at `sub+0x8C` (the shot arm's reset of it to
+  6 has nothing to write); VM ops `0x23`, `0x24`, `0x25` and `0x2B`'s two
+  words (`[open]`); op `0x1F`'s second stream.
 * **`0x20` one-hit target** -- the damaged-part swap.
 * **`0x21` rescue target** -- the sixteen body parts.
 * **`0x25` scripted humanoid** -- `ScriptedHumanoidAimHeadAtCamera`

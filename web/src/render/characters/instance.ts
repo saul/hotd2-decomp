@@ -82,6 +82,15 @@ export interface Instance {
    */
   slots?: Record<string, number>;
   /**
+   * The model each bone's node shows **instead of** its record this frame,
+   * by bone, as `a.nodeDrawSlot` says a class's node hook drew it -- a
+   * talking head's mouth cel. Render bookkeeping like {@link slots}, and kept
+   * apart from it because the record underneath has not changed: when the
+   * hook draws the record again the node goes back to {@link slots}' model,
+   * or to its own.
+   */
+  drawnSlots?: Record<number, number>;
+  /**
    * The class-0x10 civilian that built this actor, for the fifty captors whose
    * descriptors the walker never sees. They come and go with their parent.
    */

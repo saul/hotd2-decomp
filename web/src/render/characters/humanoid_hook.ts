@@ -28,9 +28,10 @@
  * 2's programs), because each also calls `SpawnTumblingModelAtBone5`
  * (`FUN_00485DE0`) on its first frame -- an object with an update of its own
  * that is state, and the port has no object for it yet. The rest of the hook
- * -- bone 2's head aim and hand-prop cels, and the Original Mode scale on
- * bones 2, 5, 8, 12 and 15 -- changes the node's own draw and is not here
- * either.
+ * changes the node's own draw and is not here either: bone 2's face cels,
+ * which `game/class25/face.ts` ports and `render/characters.ts` shows, and
+ * the head aim and the Original Mode scale on bones 2, 5, 8, 12 and 15,
+ * which are not ported.
  */
 import { Matrix4, Object3D } from "three";
 import {

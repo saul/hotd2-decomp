@@ -2747,8 +2747,13 @@ console.log("\ncivilian attachments: the face swaps, the hair is added");
   const gore = new Object3D();
   gore.name = "gore_hito_gal_fixed000";
   gore.userData = { hod2_kind: "rig", hod2_rig: "gore_hito_gal" };
-  gore.add(template(0x0c7d));
+  const face = template(0x0c7d);
+  gore.add(face);
   gore.add(template(0x11dd));
+  // The same face one mouth cel open, `hito_kao_gal.bin[21]`, for the talking
+  // head below.
+  const mouth = template(0x0c7e);
+  gore.add(mouth);
   // A damaged torso, for the swaps below that no `setBoneSlot` announces.
   gore.add(template(0x0d00));
   root.add(gore);
@@ -2796,6 +2801,27 @@ console.log("\ncivilian attachments: the face swaps, the hair is added");
   chars.update({} as never);
   check("a second frame adds nothing", head.children.length === before + 1,
         `${head.children.length}`);
+
+  // **A talking head.** `CivilianDrawBonePart` (`FUN_0048D1F0`) draws bone 2
+  // at its record plus a mouth cel and leaves the record alone; the port
+  // writes what it drew to `nodeDrawSlot`, and the layer shows that model
+  // until the hook draws the record again.
+  const faceGeom = head.geometry;
+  a.nodeDrawSlot[2] = 0x0c7e;
+  chars.update({} as never);
+  check("a head drawn as a mouth cel shows the cel's model",
+        head.geometry === (mouth as InstanceType<typeof Mesh>).geometry
+        && head.geometry !== faceGeom && a.boneSlot["2"] === 0x0c7d,
+        "head geometry is not the cel's");
+  check("...with the accessory still on it",
+        head.children.some((c) => c.name.includes("11dd")),
+        head.children.map((c) => c.name).join(","));
+  a.nodeDrawSlot[2] = 0x0c7d;
+  chars.update({} as never);
+  check("...and the face its record names once the hook draws the record",
+        head.geometry === faceGeom
+        && head.geometry === (face as InstanceType<typeof Mesh>).geometry,
+        "head geometry is not the face's");
 
   // And a snapshot carries it: the ids are on the actor, the nodes are not.
   chars.resync({} as never);

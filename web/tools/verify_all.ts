@@ -294,6 +294,18 @@ export const CHECKS: readonly Check[] = [
       + "half's mesh and raises the hit bit only a hit raises, and that both "
       + "halves are in the moving-object passes' list in the page",
         NEEDS_BUNDLE, LANE_BROWSER),
+  check("boat", ["node", "tools/boat_page.mjs", "--headless"],
+        "that a click on stage 2's block-9 boat -- class 0x33's carrier, "
+      + "filed through its blob and its 2.5-scaled matrix -- lands on its "
+      + "mesh and marks it without stopping it: the only check that shoots a "
+      + "class-0x33 object through real pointer events",
+        NEEDS_BUNDLE, LANE_BROWSER),
+  check("sound_cues", ["node", "tools/sound_cues_page.mjs", "--headless"],
+        "that stage 5's class-0x33 selector-7 object outlives block 2 with "
+      + "the cursor play leaves it on, and that a seek to block 3 rebuilds it "
+      + "on that same record and plays the brake from there: the only check "
+      + "of an object a seek must rebuild part-way through its own list",
+        NEEDS_BUNDLE, LANE_BROWSER),
   check("humanoid_shot", ["node", "tools/humanoid_shot_page.mjs", "--headless"],
         "that stage 2's jetty zombies -- class-0x25 scripted humanoids, the "
       + "four in the game whose spawn record leaves bit 0x8000 clear -- "
@@ -719,6 +731,11 @@ export const CHECKS: readonly Check[] = [
      + "`CMP AX,0x24` bytes, every spawn's list over every evt, `op 9` and "
      + "`op 16`'s table bytes, and, with a bundle, every face, accessory, "
      + "throwing hand and gore slot a list can name having a model to clone"),
+  game("faces",
+       "that op 0x25 and the two face hooks are the bytes the port transcribes "
+     + "-- their stores, rows, hand-over and every head base -- and, with a "
+     + "bundle, the mouth and face tables the exe's and every head a talking "
+     + "civilian or a talking or blinking humanoid can draw having a model"),
   game("walk_distance",
        "that every walk-in spawn's descriptor tail `+0x04` is an exact integer "
      + "distance in the range the docs state"),

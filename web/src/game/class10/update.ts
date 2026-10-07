@@ -26,6 +26,8 @@ import { CivilianCheckShot } from "./shot";
 import { CivilianStepScript } from "./step";
 import { CivilianStepTurnToTarget } from "./turn";
 import { DrawSkinnedModelAndShadow } from "../skeleton";
+import { ActorRunNodeDrawHooks } from "../model_draw";
+import { CivilianDrawBonePart } from "./mouth";
 
 /**
  * `CivilianUpdate` — `FUN_0048A920`. One frame of a civilian.
@@ -72,6 +74,9 @@ export function CivilianUpdate(obj: Actor, f: ClassFrame): void {
   // and the ground shadow it ends with, under `g_cur_actor` -- this actor
   // since `0x0048A930`.
   PoseHookGrowAndPushOutOfWorld(obj);
+  // ...and the node hook `CivilianInit` installed at `model+0x1158`, on every
+  // node the walk draws: the head's mouth, `class10/mouth.ts`.
+  ActorRunNodeDrawHooks(obj, CivilianDrawBonePart, f);
   DrawSkinnedModelAndShadow(obj);
 
   // The loop counter. The clip clock itself is `ActorAdvanceMotion`'s; this is

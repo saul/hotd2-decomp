@@ -318,8 +318,12 @@ Who reaches it, over every shipped record (`[proved]` writers: every store to
 | `0x44` 0-7, 11-13 | each builder, `|= 0x51` unconditionally, `+0x14C` from the descriptor | selector 0's `ScriptFlagEffectUpdate` `0x00473CDF`; 1, 2, 4's `HingeUpdate` `0x0047410B`; 3's `FlagSlotEffectUpdate` (`0x00474120`) at `0x0047422F`; 6's `SwingThenBreakUpdate` (`0x00474470`) at `0x00474760`; 7's `ScaledSlotEffectUpdate` (`0x00474770`) at `0x004748B6`; 12's `0x004755B0` at `0x004757E0`; 13's `0x004757F0` at `0x004758C7`. **11's `RisingDoorUpdate` never registers**, and 5's `EffectHandoffUpdate` (`0x00474240`) has no call of its own: it copies its blob to the `HingeUpdate` object it makes | 0: 2, 1: 37, 2: 3 (two doors each), 3: 2, 4: 13, 5-7: 1 each, 11: 2, 12: 8, 13: 13 |
 | `0x44` 17 | `PlaceStoryModeSwitch` `0x00473ADB`, when `desc+0x08 != -1` | `StoryModeSwitchUpdate` `0x004753D7` | all nine name a blob; three are drawn at a scale, so their `obj+0x150` is not a rotation |
 
-In the port these are picked through the list: class 0x12's door, an actor,
-and the class-0x44 props, which the pool files by their id
+In the port these are picked through the list: class 0x12's door and class
+0x33's carrier, actors -- stage 2's two boats through their blobs
+(`coli2.bin:31784`, `:40456`) and the 2.5-scaled matrix, stage 5's car by
+its 0.1 sphere; the carrier's `0x80000001` keeps it out of the
+moving-object passes and the crowd push, and a hit only marks it -- and the
+class-0x44 props, which the pool files by their id
 (`ShotTestEntry.prop`, `PropRegisterForShotTestMesh` in
 `game/class41/shot_test.ts`) -- the story-mode switch, and the hinges (1, 2,
 4, and the one 5 hands off to) and selectors 6, 7, 12 and 13, each with its

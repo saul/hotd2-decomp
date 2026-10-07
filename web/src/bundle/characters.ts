@@ -801,6 +801,12 @@ export interface CharacterPlacement {
   class33?: {
     slot: number;
     shot_mesh: number;
+    /**
+     * {@link shot_mesh} resolved to its `coli.blobs` key -- the blob
+     * `ShotTestMesh` traces stage 2's two boats through -- or `null` for
+     * `-1` and for a pointer that lands on no blob.
+     */
+    shot_blob?: string | null;
     shot_radius: number;
     path: number;
     path_end: number;
@@ -1325,6 +1331,24 @@ export interface CharactersJson {
    * which is the port's reader. Absent in a bundle older than that port.
    */
   player_hand_slots?: number[];
+  /**
+   * `g_civilian_mouth_tables` — `0x0056B950`: six lists of signed cels, one
+   * per mouth mode, which `CivilianDrawBonePart` (`FUN_0048D1F0`) adds to a
+   * civilian's head slot as she talks. Mode 6 is "no cel" and has no row.
+   * Absent in a bundle older than the port of the mouth.
+   */
+  civilian_mouth_tables?: number[][];
+  /**
+   * `g_class25_face_cels` — `0x00596C80`, thirteen cels: the ramp
+   * `ScriptedHumanoidBoneDrawHook` (`FUN_00485260`) adds to a scripted
+   * humanoid's head base to talk and to blink. Absent in an older bundle.
+   */
+  humanoid_face_cels?: number[];
+  /**
+   * `g_class25_face_cels_two` — `0x00596C90`, thirteen cels of two values:
+   * character type 0x36's mouth in the same hook. Absent in an older bundle.
+   */
+  humanoid_face_cels_two?: number[];
   /** `DAT_004C84A8` — bone → reaction group: head, torso, each limb. */
   reaction_groups: number[];
   approach: ApproachJson;

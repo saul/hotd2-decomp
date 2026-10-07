@@ -13,7 +13,7 @@
  * `ScriptedHumanoidInit` is not one of them [proved] — this class writes the
  * actor struct's tail words directly, and so do classes 0x24, 0x30 and 0x31.
  * The aliasing between them is therefore **real, and the engine's own design**:
- * `obj+0x1330` genuinely holds a hand-prop selector for this class and a slide
+ * `obj+0x1330` genuinely holds a face mode for this class and a slide
  * countdown for class 0x24, in the same word, because the engine reuses it.
  *
  * That is why every field below keeps its `obj+0xNNNN` citation and names who
@@ -180,33 +180,46 @@ export interface HumanoidTail {
    */
   drawVariant: HumanoidDrawVariant;
   /**
-   * `obj+0x1330` — `op 14`, and it **is** a draw mode: which of the
-   * character's hand props the per-bone hook draws.
+   * `obj+0x1330` — `op 14`: **what the face is doing**. 2 talks, 1 blinks,
+   * 0 is still -- the arm `ScriptedHumanoidBoneDrawHook` (`FUN_00485260`)
+   * takes for bone 2, which draws the head as a cel out of a run of models
+   * rather than as the bone's record. See `class25/face.ts`.
    *
-   * `[proved]`: the reader is `ScriptedHumanoidBoneDrawHook` (`FUN_00485260`),
-   * the callback `ScriptedHumanoidInit` installs at `obj+0x12EC` — `MOV EAX,
-   * dword ptr [ESI + 0x1330]; CMP EAX,0x2; JNZ` (`8b8630130000`, `83f802`) at
-   * `0x0048535F`, and `CMP EAX,0x1` at `0x004854F9`. `ScriptedHumanoidDraw`
-   * (`FUN_00484FF0`) never reads it, which had been taken to mean nothing did.
+   * `[proved]`: the reader is that hook, the callback `ScriptedHumanoidInit`
+   * installs at `obj+0x12EC` — `MOV EAX, dword ptr [ESI + 0x1330]; CMP
+   * EAX,0x2; JNZ` (`8b8630130000`, `83f802`) at `0x0048535F`, and `CMP
+   * EAX,0x1` at `0x004854F9`. `ScriptedHumanoidDraw` (`FUN_00484FF0`) never
+   * reads it, which had been taken to mean nothing did. It was called a
+   * hand-prop selector, from the hook's other arms, before the slots its
+   * bone-2 arm adds a cel to were looked up: every one is a head.
    *
    * The same word is class 0x24's `slideTimer` and class 0x31's `arcFrames`.
    */
-  bonePropMode: number;       // +0x1330, also class 0x24 / class 0x31
+  faceMode: number;           // +0x1330, also class 0x24 / class 0x31
   /**
-   * `obj+0x1334` — the frame counter `ScriptedHumanoidBoneDrawHook` increments
-   * once per drawn frame, indexing the 13-entry cel tables as `n % 13`:
-   * `g_class25_bone_prop_cels` — `0x00596C80` for `bonePropMode` 2,
-   * `g_class25_bone_prop_cels_alt` — `0x00596C90` for 1.
+   * `obj+0x1334` — the talking face's frame counter, which
+   * `ScriptedHumanoidBoneDrawHook` steps once per drawn frame in
+   * {@link faceMode} 2 and reads as `n % 13` into `g_class25_face_cels`
+   * (`0x00596C80`) or, for character type 0x36, `g_class25_face_cels_two`
+   * (`0x00596C90`).
    *
    * `[proved]`: `MOV EAX,[ESI+0x1334]; INC EAX; MOV [ESI+0x1334],EAX`
    * (`8b8634130000`, `40`, `898634130000`) at `0x0048549B`/`0x004854A4` and
-   * again at `0x004854DD`/`0x004854E9`. Kept because the exe keeps it on the
-   * actor and the VM writes it (`op 14` mode 2 zeroes it); drawing the prop is
-   * the renderer's and is not ported.
+   * again at `0x004854DD`/`0x004854E9`. `op 14` mode 2 zeroes it.
    *
    * The same word is class 0x30's `backoffFrames` and class 0x31's `arcTotal`.
    */
-  bonePropFrame: number;      // +0x1334, also class 0x30 / class 0x31
+  faceFrame: number;          // +0x1334, also class 0x30 / class 0x31
+  /**
+   * `obj+0x131B`, signed: the blink's phase, twenty frames a unit --
+   * `(g_frame_counter + phase * 20) % 150` is where in its cycle a
+   * {@link faceMode} 1 face is. **Nothing in class 0x25 writes it** (an
+   * operand sweep for `0x131B` and `0x1318` finds the hook's one read in
+   * `0x004840D0..0x00485F8F`), and `SpawnFromDescriptor` runs
+   * `ActorClearGameFields` (`FUN_004A73D0`) over the body first, so it is 0
+   * and every scripted humanoid blinks on the same frame.
+   */
+  facePhase: number;          // +0x131B
   /**
    * `obj+0x1364` — `op 12`: a **persistent** toggle, not the one-shot effect
    * the port used to call it. Mode 1 sets it, mode 0 clears it, any other mode
@@ -295,8 +308,9 @@ export function makeHumanoidTail(): HumanoidTail {
     pathSlot: 0,
     pathOffsetRecord: 0,
     drawVariant: HumanoidDrawVariant.None,
-    bonePropMode: 0,
-    bonePropFrame: 0,
+    faceMode: 0,
+    faceFrame: 0,
+    facePhase: 0,
     aimsHead: 0,
     prevPos: { x: 0, y: 0, z: 0 },
     playCursor: 0,

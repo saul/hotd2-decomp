@@ -1532,26 +1532,25 @@ console.log("\nclass 0x10, the civilian and the rescue:");
           `gate ${gate} dz ${d.dz.toFixed(3)} dx ${d.dx.toFixed(3)}`);
   }
   // **The bug this pair was written for.** `SetHudShutterState`,
-  // `SetAttachMode`, `SetAttachTarget` and `SetPairA` all used to fall through
-  // into `SetScale`'s body — so their operands, small integers, were
+  // `SetHeadLook`, `SetHeadLookTarget` and `SetMouth` all used to fall
+  // through into `SetScale`'s body — so their operands, small integers, were
   // reinterpreted as float bit patterns into `obj.scale`.
   // `AsFloat(2)` is 2.8e-45, `SkeletonApplyRootMotion` multiplies the root
   // delta by it, and the civilian stopped moving while her legs kept walking.
-  // 125 commands in the shipped streams run one of those four. The first has
-  // a body of its own now — see the shutter block below — and the other three
-  // are still unread; neither writes `model+0x116C`.
+  // The first and the last have bodies of their own now — the shutter block
+  // below, and the mouth — and none of the four writes `model+0x116C`.
   {
     const { a, events } = civScene([[
       cmd(CivilianOp.Wait, CivilianWait.RootMotion),
-      cmd(CivilianOp.SetPairA, 1, 2),
-      cmd(CivilianOp.SetAttachMode, 2),
+      cmd(CivilianOp.SetMouth, 1, 2),
+      cmd(CivilianOp.SetHeadLook, 2),
       cmd(CivilianOp.SetHudShutterState, 1),
       cmd(CivilianOp.SetMotion, 12, -1),
       cmd(CivilianOp.Wait, 0),
       cmd(CivilianOp.End),
     ]]);
     const d = cWalk(a, events, 120);
-    check("the unread opcodes leave `model+0x116C` alone, so she still walks",
+    check("the four leave `model+0x116C` alone, so she still walks",
           a.scale === 1 && d.dz < -10,
           `scale ${a.scale} dz ${d.dz.toFixed(3)}`);
   }
@@ -1857,5 +1856,104 @@ console.log("\nclass 0x10's resume stores the cursor, not the clock:");
           a.motion === 704 && (G.g_script_flags[7] ?? 0) === 0
           && G.g_script_flags[8] === 1,
           `flags 7:${G.g_script_flags[7]} 8:${G.g_script_flags[8]}`);
+  }
+}
+
+console.log("\nclass 0x10, the mouth -- op 0x25 and CivilianDrawBonePart:");
+{
+  const rng = new Rng(9);
+  // `g_civilian_mouth_tables` (`0x0056B950`), the six rows as the image holds
+  // them at `0x0056B88C`, `0x0056B8A4`, `0x0056B8CC`, `0x0056B8F0`,
+  // `0x0056B900` and `0x0056B914`, each its row's count of signed bytes.
+  const MOUTH = [
+    [1, 2, 3, 3, 2, 1, 0, 0, 1, 2, 2, 1, 2, 3, 4, 4, 3, 2, 1, 0, 0],
+    [1, 1, 2, 2, 3, 3, 3, 3, 2, 2, 1, 1, 1, 1, 2, 2, 2, 2, 1, 1, 2, 2, 3, 3,
+     4, 4, 4, 4, 3, 3, 2, 2, 1, 1, 0, 0, 0, 0],
+    [1, 1, 1, 2, 2, 2, 3, 3, 3, 3, 2, 2, 2, 1, 1, 1, 1, 2, 2, 2, 2, 1, 1, 1,
+     2, 2, 2, 3, 3, 3, 4, 4, 4, 4],
+    [5, 5, 5, 6, 6, 6, 7, 7, 7, 8, 8, 8, 9],
+    [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [1, 1, 2, 2, 3, 3, 3, 3, 2, 2, 1, 1, 1, 1, 2, 2, 2, 2, 1, 1, 0, 0, 0, 0,
+     1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 7, 7, 6, 6, 5, 5, 4, 4, 3, 3,
+     2, 2, 1, 1, 0, 0, 0, 0],
+  ];
+  const HEAD = TYPE.bones.find((b) => b.bone === 2)!.slot;
+  const cmd = (op: CivilianOp, ...args: number[]): CivilianCmdJson =>
+    ({ op, args });
+  // Driven from `ResetGameGlobals` and the class's own Init: the stream's
+  // first block runs inside `CivilianInit`, as the exe's does, and the hook
+  // runs from `CivilianUpdate`'s draw.
+  const talk = (script: CivilianCmdJson[], frames: number) => {
+    ResetGameGlobals();
+    EnterPlay();
+    G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    G.g_scene_state_major = SCENE_MAJOR_PLAYING;
+    SetGameTables({ ...CHARS, civilian_mouth_tables: MOUTH } as CharactersJson,
+                  undefined, undefined, undefined, undefined, {
+      entries: [0], scripts: [script], items: [],
+      spawns: { "16384": { charType: 1, script: 0, removePath: -1,
+                           removeFrame: 0, removeDelay: 0, children: [] } },
+    });
+    const a = ActorSpawn(0x4000, SpawnClass.Civilian, 1, "civilian",
+                         undefined, rng);
+    a.visible = true;
+    a.pos = vec3(0, 0, 0);
+    const events = new Events();
+    const drawn: number[] = [];
+    for (let i = 0; i < frames; i++) {
+      CivilianUpdate(a, { dt: 1 / 60, rng, host: NULL_HOST, events });
+      drawn.push((a.nodeDrawSlot[2] ?? -1) - HEAD);
+    }
+    return { a, drawn };
+  };
+
+  {
+    const { a, drawn } = talk([cmd(CivilianOp.Wait, 0), cmd(CivilianOp.Wait, 0),
+                               cmd(CivilianOp.End)], 4);
+    check("a civilian no op 0x25 has reached draws her head's own record",
+          a.civ?.mouthTable === 6 && drawn.every((d) => d === 0),
+          drawn.join(","));
+  }
+  // Row 2 for five drawn frames. The cel is read before the step, so the
+  // five are row 2's first five; the countdown's zero arm then hands row 2
+  // over to row 3 for row 3's own thirteen, and row 3, not being row 2,
+  // parks its cursor on its last cel, 9, and holds it.
+  {
+    const { a, drawn } = talk([cmd(CivilianOp.Wait, 0),
+                               cmd(CivilianOp.SetMouth, 5, 2),
+                               cmd(CivilianOp.Wait, 0), cmd(CivilianOp.End)],
+                              22);
+    const want = [...MOUTH[2].slice(0, 5), ...MOUTH[3], 9, 9, 9, 9];
+    check("op 0x25 row 2: the head draws row 2's cels, then row 3's, then holds 9",
+          drawn.join(",") === want.join(","),
+          `${drawn.join(",")} want ${want.join(",")}`);
+    check("...and the record under it is untouched",
+          a.boneSlot["2"] === undefined && a.civ?.mouthTable === 3
+          && a.civ?.mouthFrames === 0 && a.civ?.mouthFrame === 12,
+          `table ${a.civ?.mouthTable} frames ${a.civ?.mouthFrames} `
+          + `cursor ${a.civ?.mouthFrame}`);
+  }
+  // Any other row parks on its own last cel when the count runs out: row 0
+  // for three frames is 1, 2, 3 and then row 0's twenty-first, 0.
+  {
+    const { drawn } = talk([cmd(CivilianOp.Wait, 0),
+                            cmd(CivilianOp.SetMouth, 3, 0),
+                            cmd(CivilianOp.Wait, 0), cmd(CivilianOp.End)], 6);
+    check("op 0x25 row 0 for 3 frames: 1, 2, 3, then the row's last cel for good",
+          drawn.join(",") === "1,2,3,0,0,0", drawn.join(","));
+  }
+  // The hook counts drawn frames: with the skeleton hidden it is not called,
+  // and the mouth waits.
+  {
+    const { a } = talk([cmd(CivilianOp.Wait, 0), cmd(CivilianOp.SetMouth, 40, 5),
+                        cmd(CivilianOp.Wait, 0), cmd(CivilianOp.End)], 3);
+    a.motionFlags &= ~MotionFlag.Drawn;
+    for (let i = 0; i < 5; i++) {
+      CivilianUpdate(a, { dt: 1 / 60, rng, host: NULL_HOST,
+                          events: new Events() });
+    }
+    check("a civilian not drawn does not step her mouth",
+          a.civ?.mouthFrame === 3 && a.civ?.mouthFrames === 37,
+          `cursor ${a.civ?.mouthFrame} frames ${a.civ?.mouthFrames}`);
   }
 }

@@ -132,6 +132,11 @@ export interface ScriptSpawn {
   block?: number;
   step?: number;
   opIndex?: number;
+  /**
+   * `[port-only]` The record's replay scratch, which the walker's
+   * `ActiveSpawn` carries -- see `ClassHandler.followReplayCamera`.
+   */
+  replay?: Readonly<Record<string, number>>;
 }
 
 /**
@@ -617,8 +622,8 @@ export function SpawnSlotActor(s: ScriptSpawn,
           && !pl.class33_prop && !pl.class33_sub
           && pl.hp !== ScriptedScenerySelector.EffectOnFirstFrame) return;
       G.g_slot_actors_built.push(key);
-      SpawnFromDescriptor(at(), SpawnClassValue.ScriptedScenery, -1,
-                          `scenery ${pl.hp}`,
+      const obj = SpawnFromDescriptor(at(), SpawnClassValue.ScriptedScenery,
+                          -1, `scenery ${pl.hp}`,
                           { class33: pl.class33, class33Push: pl.class33_push,
                             class33Cue: pl.class33_cue,
                             class33Sub: pl.class33_sub,
@@ -635,6 +640,11 @@ export function SpawnSlotActor(s: ScriptSpawn,
                             pos: vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0,
                                       s.pos?.[2] ?? 0),
                             visible: true, descAt: s.at });
+      // `[port-only]` A seek's rebuild: what the replay's camera has run past
+      // this record's object -- selector 7's cues -- goes on before it runs.
+      if (s.replay) {
+        g_class_handlers[obj.cls]?.resumeFromReplay?.(obj, s.replay);
+      }
       return;
     }
   }

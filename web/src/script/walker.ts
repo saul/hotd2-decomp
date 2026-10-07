@@ -78,6 +78,12 @@ export interface ActiveSpawn extends SpawnJson {
   step: number;
   opIndex: number;
   opcode: number;
+  /**
+   * `[port-only]` A class's replay scratch for this record -- see
+   * `ClassHandler.followReplayCamera`. Absent until a replay shows the record
+   * a camera.
+   */
+  replay?: Record<string, number>;
 }
 
 /**
@@ -1154,10 +1160,30 @@ export class Walker {
    */
   private retireOutlivedSpawns(): void {
     if (!this.replaying) return;
+    this.followReplayCamera();
     this.spawns = this.spawns.filter((s) => {
       const outlived = g_class_handlers[s.class as SpawnClass]?.outlivedByReplay;
       return !outlived?.({ ...s, armOut: this.replayArms.get(s.block) });
     });
+  }
+
+  /**
+   * Show the camera the replay has carried to every listed spawn whose class
+   * follows it -- {@link ClassHandler.followReplayCamera}. Replay only; called
+   * at the head of {@link retireOutlivedSpawns}, so at every instruction, wait
+   * and block change the replay makes.
+   */
+  private followReplayCamera(): void {
+    const cam = this.cam;
+    if (!cam) return;
+    for (const s of this.spawns) {
+      const follow = g_class_handlers[s.class as SpawnClass]
+        ?.followReplayCamera;
+      if (!follow) continue;
+      follow({ ...s, armOut: this.replayArms.get(s.block) },
+             { slot: cam.slot, startFrame: cam.startFrame, frame: cam.frame },
+             s.replay ??= {});
+    }
   }
 
   /**

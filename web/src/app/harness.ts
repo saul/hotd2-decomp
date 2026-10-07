@@ -388,7 +388,23 @@ export class Harness {
       }
       const obj = G.g_object_list.find((o) => o.at === e.at);
       if (!obj || !ShotTestPickedHere(obj)) continue;
-      const p = project(obj.shotCentre);
+      // An actor shot through its own mesh (bit `0x10`) is aimed at the
+      // middle of its blob through `obj+0x150`, as a prop is: its sphere
+      // centre need not be on the mesh at all.
+      const blob = obj.flags & 0x10 && obj.coliBlob
+        ? T.coli?.blobs?.[obj.coliBlob] : undefined;
+      const mm = obj.coliMatrix;
+      const at = blob && mm ? (() => {
+        const cx = (blob.min[0] + blob.max[0]) / 2;
+        const cy = (blob.min[1] + blob.max[1]) / 2;
+        const cz = (blob.min[2] + blob.max[2]) / 2;
+        return {
+          x: mm[0] * cx + mm[1] * cy + mm[2] * cz + mm[3],
+          y: mm[4] * cx + mm[5] * cy + mm[6] * cz + mm[7],
+          z: mm[8] * cx + mm[9] * cy + mm[10] * cz + mm[11],
+        };
+      })() : obj.shotCentre;
+      const p = project(at);
       if (!p) continue;
       out.push({ at: obj.at, cls: obj.cls, x: p.x, y: p.y, z: p.z });
     }

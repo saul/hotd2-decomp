@@ -149,6 +149,9 @@ function isFigureAt(at: number): boolean {
     && (at & RESULT_FIGURE_TEMPLATE_BIT) === 0;
 }
 
+/** A character type's own slot per bone, for `syncNodeDrawSlots`. */
+const OWN_SLOTS = new WeakMap<CharacterType, Map<number, number>>();
+
 export class CharacterLayer implements System {
   readonly id = "render.characters";
   /** Characters the script has spawned. Everything here has a game object. */
@@ -631,6 +634,9 @@ export class CharacterLayer implements System {
       // `setBoneSlot`, which is what lands on the host; the actor says them
       // all, which is what lands everywhere.
       this.syncSlots(inst);
+      // ...and the model a class's node hook drew a bone with instead of its
+      // record this frame: a talking head's mouth.
+      this.syncNodeDrawSlots(inst);
       // `ZombieDrawBonePart` (`FUN_004534A0`) -- the cel a class-0x30 bone
       // draws instead of, or as well as, its own model. This is what fills
       // `char_adv02`'s midriff once its torso is shot; see
@@ -1069,6 +1075,7 @@ export class CharacterLayer implements System {
     clearBoneCels(inst);
     inst.hidden = 0;
     inst.slots = undefined;
+    inst.drawnSlots = undefined;
     clearHeldItems(inst);
     clearHumanoidHookDraws(inst);
     clearBoss5NodeDraws(inst);
@@ -1146,6 +1153,61 @@ export class CharacterLayer implements System {
       if (inst.slots?.[k] === slot) continue;
       swapGore(this.goreParts, inst, Number(k), slot);
       (inst.slots ??= {})[k] = slot;
+      // The node shows the record now, whatever cel it showed before; the
+      // next call puts the cel back if the hook still draws one.
+      if (inst.drawnSlots) delete inst.drawnSlots[Number(k)];
+    }
+  }
+
+  /**
+   * Show the model each bone's node hook drew it with, where that is not the
+   * bone's record -- `Actor.nodeDrawSlot`, which `CivilianDrawBonePart`
+   * (`FUN_0048D1F0`) and `ScriptedHumanoidBoneDrawHook` (`FUN_00485260`)
+   * write for a talking or blinking head -- and put the record's model back
+   * when the hook draws the record again.
+   *
+   * The swap is `swapGore`'s, which keeps the pristine model however many
+   * times a bone is swapped, and every model a hook can draw rides the
+   * type's hidden template (`hod2lib/characters.ts`). A cel the template
+   * lacks -- a bundle exported before the faces were carried -- leaves the
+   * record showing.
+   */
+  private syncNodeDrawSlots(inst: Instance): void {
+    const drawn = inst.a.nodeDrawSlot;
+    if (!drawn.length && !inst.drawnSlots) return;
+    let own = OWN_SLOTS.get(inst.type);
+    if (!own) {
+      own = new Map(inst.type.bones.map((b) => [b.bone, b.slot]));
+      OWN_SLOTS.set(inst.type, own);
+    }
+    for (let bone = 0; bone < drawn.length; bone++) {
+      const want = drawn[bone];
+      const shown = inst.drawnSlots?.[bone];
+      const record = inst.a.boneSlot[String(bone)] ?? own.get(bone) ?? 0;
+      // The common frame: the hook drew this bone's record and no cel is up.
+      if (shown === undefined && (want === null || want === undefined
+                                  || want === record)) {
+        continue;
+      }
+      if (want !== null && want !== undefined && want !== record && want) {
+        if (shown === want) continue;
+        if (swapGore(this.goreParts, inst, bone, want)) {
+          (inst.drawnSlots ??= {})[bone] = want;
+        }
+        continue;
+      }
+      if (shown === undefined) continue;
+      delete inst.drawnSlots![bone];
+      const over = inst.slots?.[String(bone)];
+      if (over !== undefined) {
+        swapGore(this.goreParts, inst, bone, over);
+        continue;
+      }
+      const g = inst.gore.get(bone);
+      if (g) {
+        restoreGore(inst, bone, g);
+        inst.gore.delete(bone);
+      }
     }
   }
 

@@ -1206,7 +1206,7 @@ reach decode with every opcode in `0..18` or `-1`.
 |---|---|---|
 | 4 | wait for a condition | 357 |
 | 3 | set the motion, with a blend | 195 |
-| 14 | set the draw mode | 155 |
+| 14 | the face: 2 talks, 1 blinks, 0 holds still — see below | 155 |
 | 0 | wait, and record which condition released it | 145 |
 | 9 | bone 5's draw slot from `g_player_hand_slots` (`0x004EC9E0`) — see below | 117 |
 | 10 | skip an arm unless the player count matches | 100 |
@@ -1286,6 +1286,36 @@ frame.
 The bundle carries the hand table as `characters.player_hand_slots`, and every
 slot either command can write rides the character's hidden template
 (`humanoidModelSlots` in `web/src/hod2lib/characters.ts`).
+
+**`op 14` is how a cut scene's character talks** `[proved]` (`0x0048490C`;
+modes 0, 1 and 2 store themselves into `obj+0x1330`, mode 2 also zeroes
+`obj+0x1334`, any other mode stores nothing). Nothing in the motion moves a
+mouth: the class's node hook, `ScriptedHumanoidBoneDrawHook` (`FUN_00485260`),
+draws **bone 2 as a cel out of a run of head models** by that word.
+
+* **Mode 2, talking.** The head drawn is `base + g_class25_face_cels[n % 13]`,
+  the ramp `0 1 2 3 4 5 6 5 4 3 2 1 0` at `0x00596C80`, and `n` -- `obj+0x1334`
+  -- steps once per drawn frame. The bases are immediates by character type:
+  `0x14B3` (0x39, `player1.bin` 0..6), `0x14C3` (0x3A, `player2.bin`), `0x14DA`
+  (0x3B, `char_adv05.bin` 8..14), `0x14E1` (0x3C, `player4.bin`), `0x0D28`
+  (0x3D, `player_gold.bin` from 6), `0x0C3A` (0x3E, `hou.bin` from 1) and
+  `0x1273` (0x3F, `logan.bin` from 26, under `MatrixScale(0.9)`); 0x36 reads
+  the two-cel `g_class25_face_cels_two` (`0x00596C90`) over `0x149D`
+  (`hito_kao_oyaji.bin` 60 and 61). Any other type draws its record, and **the
+  counter steps on that arm too**.
+* **Mode 1, blinking**, which `ScriptedHumanoidInit` gives types 0x39 to 0x3B.
+  `r = (u32)(g_frame_counter + (s8)obj[0x131B] * 20) % 150` -- an unsigned
+  `DIV` -- and while `r < 13` types 0x39, 0x3A and 0x3B draw `0x14BB`, `0x14CB`
+  and `0x14D3` plus the same ramp at `r`: the eyelids shut over six frames and
+  open over six, once every two and a half seconds. `obj+0x131B` is written by
+  nothing in the class and cleared by `ActorClearGameFields`, so every
+  scripted humanoid blinks on the same frame.
+
+The record under bone 2 is never written: the next mode-0 frame draws it
+again. The bundle carries both tables (`characters.humanoid_face_cels`,
+`humanoid_face_cels_two`) and every head a program can reach rides the
+type's template (`HumanoidFaceSlots`, `web/src/game/class25/face.ts`, which is
+the port).
 
 ## Two name tables, not none
 

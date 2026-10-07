@@ -2605,6 +2605,19 @@ export interface ActorBase {
    * under the head's turn, which is the order the hook pushes it in.
    */
   nodeDrawScale: ([number, number, number] | null)[];
+  /**
+   * The slot a class's node draw hook handed `AssetDrawSlot` for each bone
+   * this frame, by bone number: the bone's own record slot for an arm that
+   * draws the record, another model for one that draws a cel instead.
+   * `CivilianDrawBonePart` (`FUN_0048D1F0`) and `ScriptedHumanoidBoneDrawHook`
+   * (`FUN_00485260`) draw a talking head this way -- the record slot plus a
+   * mouth cel -- and leave the record itself alone, which is why this is not
+   * {@link Actor.boneSlot}.
+   *
+   * [port-only] as a field, for the reason {@link Actor.nodeDrawAlpha} is
+   * one; `render/characters.ts` shows the model.
+   */
+  nodeDrawSlot: (number | null)[];
   /** `obj+0x12EC` — which node draw hook `Init` installed. */
   nodeDrawHook: NodeDrawHookId;
   /**
@@ -2626,7 +2639,7 @@ export interface ActorBase {
  *
  * ## Why this is a union, and what it does and does not fix
  *
- * The struct's tail is reused. `obj+0x1330` is a hand-prop selector for class
+ * The struct's tail is reused. `obj+0x1330` is the face mode for class
  * 0x25, a slide countdown for 0x24 and an arc frame counter for 0x31 — one
  * word, three meanings, and that is the *engine's* design, not a porting
  * mistake. A flat interface asserts that all of those coexist on every actor,
@@ -2638,7 +2651,7 @@ export interface ActorBase {
  * plan's.** Two kinds of aliasing look alike in a flat struct and only one is
  * cross-class:
  *
- * * *Between* classes — `obj+0x1330` as class 0x25's `bonePropMode` against
+ * * *Between* classes — `obj+0x1330` as class 0x25's `faceMode` against
  *   class 0x24's `slideTimer`. A `cls` discriminant fixes this, and it is what
  *   the arms below are for.
  * * *Within* one class — `obj+0x1330` is also class 0x30's general-purpose
@@ -2971,6 +2984,7 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     suppressedBones: 0,
     nodeDrawAlpha: [],
     nodeDrawScale: [],
+    nodeDrawSlot: [],
     nodeDrawHook: NodeDrawHookId.Class,
     attachments: [],
   };

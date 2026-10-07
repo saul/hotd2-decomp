@@ -535,6 +535,22 @@ export function humanoidModelCommands(evt: EvtFile | null,
   return out;
 }
 
+/**
+ * Every mode a class-0x25 program's `op 14` can write to `obj+0x1330`, the
+ * face mode `ScriptedHumanoidBoneDrawHook` (`FUN_00485260`) reads: 2 talks,
+ * 1 blinks. `characters` resolves them to the head models the hook draws.
+ */
+export function humanoidFaceModes(evt: EvtFile | null,
+                                  spawnRec: Spawn): number[] {
+  const out = new Set<number>();
+  if (humanoidBlockOffset(evt, spawnRec) === null) return [];
+  const raw = evt!.raw;
+  for (const off of humanoidCommandOffsets(evt, spawnRec)) {
+    if (i16(raw, off) === 14) out.add(i16(raw, off + 2));
+  }
+  return [...out].sort((a, b) => a - b);
+}
+
 /** The motion id a class handler starts this spawn in, or null. */
 export function motionFor(tables: ExeTables, spawnRec: Spawn,
                           cls: number): number | null {

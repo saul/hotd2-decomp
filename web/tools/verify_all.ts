@@ -719,6 +719,11 @@ export const CHECKS: readonly Check[] = [
      + "`CMP AX,0x24` bytes, every spawn's list over every evt, `op 9` and "
      + "`op 16`'s table bytes, and, with a bundle, every face, accessory, "
      + "throwing hand and gore slot a list can name having a model to clone"),
+  game("faces",
+       "that op 0x25 and the two face hooks are the bytes the port transcribes "
+     + "-- their stores, rows, hand-over and every head base -- and, with a "
+     + "bundle, the mouth and face tables the exe's and every head a talking "
+     + "civilian or a talking or blinking humanoid can draw having a model"),
   game("walk_distance",
        "that every walk-in spawn's descriptor tail `+0x04` is an exact integer "
      + "distance in the range the docs state"),

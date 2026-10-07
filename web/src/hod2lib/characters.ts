@@ -31,7 +31,8 @@
 import {
   arcScript, CLASS30_ARC_SCRIPTS, CLASS30_ENTRANCE_ARC_SCRIPTS,
 } from "./arcscript";
-import { civilianItemSlots, civilianMotionIds, civilianOrderedStates,
+import { civilianItemSlots, civilianMotionIds, civilianMouthRows,
+         civilianOrderedStates,
          TARGET_SCRIPT_SHAPE, targetScript,
          targetScriptMotions } from "./actorscript";
 import type { CivBlock, TargetScript } from "./actorscript";
@@ -40,13 +41,19 @@ import { build, goreEntry, rigEntry } from "./charbuild";
 import { Boss4SwapSlots } from "../game/class19/slots";
 // Data only, as `class25/state.ts` is for `bundle.ts`: the hook's slots.
 import { HumanoidHookDrawSlots } from "../game/class25/state";
+import { FACE_MODE_TALK, HumanoidFaceSlots } from "../game/class25/face";
+import { CIVILIAN_HEAD_BONE, CIVILIAN_MOUTH_HANDOFF_FROM,
+         CIVILIAN_MOUTH_HANDOFF_TO } from "../game/class10/mouth";
 import type { Character } from "./charbuild";
 import { BODY_CREATURE_HOST_CLIPS, CLASS20_DEATH_MOTION,
          CLASS20_IDLE_MOTIONS, CLASS21_FREED_MOTION, CLASS30_DEATH_CLIPS,
-         bake, humanoidModelCommands, humanoidMotionIds, introFor, motionFor,
+         bake, humanoidFaceModes, humanoidModelCommands, humanoidMotionIds,
+         introFor, motionFor,
          BOSS3_CLIPS, BOSS4_CLIPS, FROG_CLIPS } from "./charmotion";
 import { class31MotionIds, class31Tables } from "./class31";
 import { class14Tables } from "./class14";
+import { civilianMouthTables, HUMANOID_FACE_CELS, HUMANOID_FACE_CELS_TWO,
+         humanoidFaceCels } from "./faces";
 import { CLASS32_MOTIONS, class32Tables, class32Tail } from "./class32";
 import { boneEffectSlot, boneZones, combatTables, DEATH_LEFT, DEATH_RIGHT,
          deathMotions, difficultyTables, HIT_STEPS,
@@ -2600,6 +2607,15 @@ export async function resolveForStage(
                                             humanoidMotionIds(evt, rec))) {
         c.heldSlots.add(s);
       }
+      // ...and the heads the same hook draws for a talking or blinking face
+      // -- see `game/class25/face.ts`.
+      const talks = humanoidFaceModes(evt, rec).includes(FACE_MODE_TALK);
+      for (const s of HumanoidFaceSlots(
+          res.charType, talks,
+          humanoidFaceCels(tables, HUMANOID_FACE_CELS),
+          humanoidFaceCels(tables, HUMANOID_FACE_CELS_TWO))) {
+        c.heldSlots.add(s);
+      }
     }
     // Class 0x20's four idles -- `OneHitTargetInit` picks between them with
     // `rand() & 3`, so all four have to exist before the draw is made -- and
@@ -2616,6 +2632,14 @@ export async function resolveForStage(
       const which = rec.param(0x01, "i8") || 0;
       entryClips.push(...civilianMotionIds(civscripts, which));
       for (const s of civilianItemSlots(civscripts, which)) c.heldSlots.add(s);
+      // ...and the mouth: `CivilianDrawBonePart` (`FUN_0048D1F0`) draws her
+      // head at its record slot plus a cel from the rows her script's op
+      // 0x25 names, so every `slot + cel` it can reach rides the template.
+      for (const s of civilianMouthSlots(tables, c, p.attachments,
+                                         attachRecords,
+                                         civilianMouthRows(civscripts, which))) {
+        c.heldSlots.add(s);
+      }
     }
     // The models the stage-4 boss swaps onto its bones -- the hand that holds
     // a prop, the blade `Boss4Init` seats, and the nine heads
@@ -2861,6 +2885,35 @@ export function partSpheres(tables: ExeTables,
   return out;
 }
 
+/**
+ * Every head model `CivilianDrawBonePart` (`FUN_0048D1F0`) can draw for one
+ * class-0x10 spawn: its head's record slot plus each cel of each mouth row
+ * its script names -- and row 3 behind row 2, which the hook hands over to.
+ *
+ * The record is what `ActorBindPartList` (`FUN_00412440`) leaves in bone 2:
+ * the last head id below the split the spawn's list names, or the skeleton's
+ * own head when it names none.
+ */
+function civilianMouthSlots(tables: ExeTables, c: Character,
+                            attachments: readonly number[],
+                            records: readonly { bone: number; slot: number }[],
+                            rows: readonly number[]): number[] {
+  if (!rows.length) return [];
+  let head = c.bones.find((b) => b.bone === CIVILIAN_HEAD_BONE)?.slot ?? 0;
+  for (const id of attachments) {
+    if (id >= ExeTablesClass.ATTACHMENT_REPLACES_BELOW) continue;
+    const r = records[id];
+    if (r && r.bone === CIVILIAN_HEAD_BONE && r.slot) head = r.slot;
+  }
+  if (!head) return [];
+  const mouth = civilianMouthTables(tables);
+  const want = new Set(rows);
+  if (want.has(CIVILIAN_MOUTH_HANDOFF_FROM)) want.add(CIVILIAN_MOUTH_HANDOFF_TO);
+  const out = new Set<number>();
+  for (const r of want) for (const cel of mouth[r] ?? []) out.add(head + cel);
+  return [...out].sort((a, b) => a - b);
+}
+
 /** The `characters` block of `<stage>.script.json`. */
 export function charactersJson(chars: Map<number, Character>,
                                placements: Placement[],
@@ -2884,6 +2937,12 @@ export function charactersJson(chars: Map<number, Character>,
     // `g_player_hand_slots` -- class 0x25's `op 9` reads it at run time,
     // because in Original Mode the row is a global's and not the command's.
     player_hand_slots: tables !== null ? playerHandSlots(tables) : [],
+    // The cels the two talking hooks add to a head's slot -- see `faces.ts`.
+    civilian_mouth_tables: tables !== null ? civilianMouthTables(tables) : [],
+    humanoid_face_cels: tables !== null
+      ? humanoidFaceCels(tables, HUMANOID_FACE_CELS) : [],
+    humanoid_face_cels_two: tables !== null
+      ? humanoidFaceCels(tables, HUMANOID_FACE_CELS_TWO) : [],
     class31: tables !== null ? class31Tables(tables) : {},
     // Class 0x14's `.rdata` -- the stage-2 boss's cue, cone, window and
     // round tables. See `class14.ts`.

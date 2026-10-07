@@ -49,6 +49,8 @@ import { SpawnBloodSpray } from "../effects/blood";
 import { SpawnSpriteEffect, SpriteEffectKind } from "../effects/sprite";
 import { G, HIT_SLOT_NONE, ScreenFurniture } from "../globals";
 import { DrawSkinnedModelAndShadow } from "../skeleton";
+import { ActorRunNodeDrawHooks } from "../model_draw";
+import { ScriptedHumanoidBoneDrawHook } from "./face";
 import { GameMode } from "../game_mode";
 import { ActorFreeHitSlot } from "../hit_slots";
 import {
@@ -114,15 +116,16 @@ export enum HumanoidOp {
   /** `PlaySoundId`. */
   PlaySound = 13,
   /**
-   * `obj+0x1330` — which of the character's hand props is drawn.
+   * `obj+0x1330` — what the face does: 2 talks, 1 blinks, 0 holds still.
    *
-   * It **is** a draw mode. `ScriptedHumanoidDraw` (`0x00484FF0`) never reads
-   * it, which had been taken to mean nothing did; the reader is
-   * `ScriptedHumanoidBoneDrawHook` (`FUN_00485260`), the per-bone callback
-   * the Init at `0x004840D0` installs at `obj+0x12EC`.
-   * Mode 2 also zeroes the cel counter at `obj+0x1334`.
+   * `ScriptedHumanoidDraw` (`0x00484FF0`) never reads it, which had been
+   * taken to mean nothing did; the reader is `ScriptedHumanoidBoneDrawHook`
+   * (`FUN_00485260`), the per-bone callback the Init at `0x004840D0` installs
+   * at `obj+0x12EC`, and it is how a cut scene's character moves its mouth.
+   * Mode 2 also zeroes the face's frame counter at `obj+0x1334`. It was
+   * `SetBonePropMode`, a hand-prop selector.
    */
-  SetBonePropMode = 14,
+  SetFaceMode = 14,
   /** Jump. */
   Jump = 15,
   /**
@@ -263,7 +266,7 @@ export interface HumanoidPathOffset {
  * `b` names, on top of whatever object path the actor is riding.
  *
  * **Fifteen records**, `0x00596B18`..`0x00596C7F`, ending exactly where
- * `g_class25_bone_prop_cels` — `0x00596C80` begins; the extent used to be an
+ * `g_class25_face_cels` — `0x00596C80` begins; the extent used to be an
  * open question, and that abutment is what answers it. Index 0 is the "no
  * offset" sentinel and is all zeroes. Record 1's `dyaw` of `0x8000` is exactly
  * a half turn, which is the check on the reading; shipped data reaches indices
@@ -289,13 +292,8 @@ export const g_class25_path_offsets: readonly HumanoidPathOffset[] = [
   { dx: 5.0, dy: 6.6, dz: 0.7, dyaw: 0x238e },
 ];
 
-// The two cel tables the counter at `obj+0x1334` feeds are the renderer's and
-// are not transcribed here: `g_class25_bone_prop_cels` — `0x00596C80` (a
-// ping-pong ramp 0->6->0, used when `bonePropMode` is 2) and
-// `g_class25_bone_prop_cels_alt` — `0x00596C90` (a two-cel blink, used when it
-// is 1). `ScriptedHumanoidBoneDrawHook` (`FUN_00485260`) indexes both with
-// `bonePropFrame % 13`, and each table is exactly thirteen bytes long. The
-// port keeps the counter because the VM writes it, and nothing more.
+// The two cel tables the counter at `obj+0x1334` feeds travel in the bundle
+// (`T.chars.humanoid_face_cels`, `_two`), and `class25/face.ts` reads them.
 
 /**
  * The object-path slots that get an extra lift.
@@ -333,9 +331,9 @@ export const BONE_EFFECT_CONTROL_MAX = 2;
 /** `PUSH 0x3f400000` at `0x00484976` -- `SpawnBloodSpray`'s severity, 0.75. */
 export const BONE_MODEL_BLOOD = 0.75;
 
-/** The character types `ScriptedHumanoidInit` seeds `bonePropMode` to 1 for. */
-export const BONE_PROP_CHAR_LO = 0x39;
-export const BONE_PROP_CHAR_HI = 0x3b;
+/** The character types `ScriptedHumanoidInit` seeds `faceMode` to 1 for. */
+export const FACE_BLINK_CHAR_LO = 0x39;
+export const FACE_BLINK_CHAR_HI = 0x3b;
 
 /** How many commands may run in one frame before the VM is called stuck. */
 export const MAX_COMMANDS_PER_FRAME = 256;
@@ -443,12 +441,12 @@ export function ScriptedHumanoidInit(obj: HumanoidActor, rng?: Rng): void {
   // port keeps a copy instead.
   obj.hum.drawVariant = p?.drawVariant ?? HumanoidDrawVariant.None;
   obj.hum.aimsHead = 0;
-  obj.hum.bonePropFrame = 0;
+  obj.hum.faceFrame = 0;
   // `MOVSX ECX, word ptr [EDI + 0x60]` (= `obj+0x1F4`), `CMP ECX,0x39 / JL /
   // CMP ECX,0x3b / JG` at `0x00484247`-`0x00484253`: character types 0x39
-  // through 0x3B open with hand prop 1, everything else with 0.
-  obj.hum.bonePropMode =
-    (obj.charType >= BONE_PROP_CHAR_LO && obj.charType <= BONE_PROP_CHAR_HI)
+  // through 0x3B open blinking, face mode 1, everything else still.
+  obj.hum.faceMode =
+    (obj.charType >= FACE_BLINK_CHAR_LO && obj.charType <= FACE_BLINK_CHAR_HI)
       ? 1 : 0;
   // `param_1[0x4ce] = 0` -- `ScriptedHumanoidFallTimed`'s frame count.
   obj.hum.fallFrames = 0;
@@ -600,16 +598,16 @@ export function ScriptedHumanoidRun(obj: HumanoidActor, f: ClassFrame): void {
       ScriptedHumanoidUpdate(obj, f);
       return;
     case HumanoidRoutine.Idle:
-      ScriptedHumanoidIdle(obj);
+      ScriptedHumanoidIdle(obj, f);
       return;
     case HumanoidRoutine.FallAndSplash:
       ScriptedHumanoidFallAndSplash(obj, f);
       return;
     case HumanoidRoutine.LaunchAndDrop:
-      ScriptedHumanoidLaunchAndDrop(obj);
+      ScriptedHumanoidLaunchAndDrop(obj, f);
       return;
     case HumanoidRoutine.FallTimed:
-      ScriptedHumanoidFallTimed(obj);
+      ScriptedHumanoidFallTimed(obj, f);
       return;
   }
 }
@@ -646,14 +644,18 @@ function HumanoidKill(obj: HumanoidActor): void {
  * Both are behind the routine's chapter-card test, `TEST AL, 0x20` at
  * `0x00484FF8`: its `JNZ 0x0048523A` lands on the tick, past the skeleton
  * and the decoration, so behind a card the cursor is not sampled and no
- * shadow drawn, and the counter runs on. `[proved]`
+ * shadow drawn, and the counter runs on. `[proved]` The node hook runs inside
+ * the same skeleton walk, so behind a card a talking face's counter stops.
  *
  * The skeleton, the decoration and the counter's step are the renderer's and
  * `ActorAdvanceMotion`'s.
  */
-function ScriptedHumanoidDraw(obj: HumanoidActor): void {
+function ScriptedHumanoidDraw(obj: HumanoidActor, f: ClassFrame): void {
   if ((G.g_screen_furniture_flags & ScreenFurniture.ChapterCard) !== 0) return;
   obj.hum.playCursor = MotionPlayFrame(obj);
+  // The skeleton walk's node hook, `ScriptedHumanoidBoneDrawHook`, on every
+  // node it draws: the face, `class25/face.ts`.
+  ActorRunNodeDrawHooks(obj, ScriptedHumanoidBoneDrawHook, f);
   DrawSkinnedModelAndShadow(obj);
 }
 
@@ -766,14 +768,14 @@ function RunCommand(obj: HumanoidActor, c: HumanoidCmd, f: ClassFrame): boolean 
       obj.hum.pc += 1;
       return true;
 
-    case HumanoidOp.SetBonePropMode:
+    case HumanoidOp.SetFaceMode:
       // `0x0048490C`-`0x00484956`: mode 0, 1 and 2 write 0, 1 and 2, and mode
-      // 2 alone restarts the cel counter. Any other mode leaves both alone.
+      // 2 alone restarts the face's counter. Any other mode leaves both alone.
       if (c.mode === 2) {
-        obj.hum.bonePropMode = 2;
-        obj.hum.bonePropFrame = 0;
-      } else if (c.mode === 1) obj.hum.bonePropMode = 1;
-      else if (c.mode === 0) obj.hum.bonePropMode = 0;
+        obj.hum.faceMode = 2;
+        obj.hum.faceFrame = 0;
+      } else if (c.mode === 1) obj.hum.faceMode = 1;
+      else if (c.mode === 0) obj.hum.faceMode = 0;
       obj.hum.stallFrames = 0;
       obj.hum.pc += 1;
       return true;
@@ -1029,7 +1031,7 @@ export function ScriptedHumanoidFallAndSplash(obj: HumanoidActor,
     HumanoidKill(obj);
     return;
   }
-  ScriptedHumanoidDraw(obj);
+  ScriptedHumanoidDraw(obj, f);
 }
 
 /**
@@ -1045,7 +1047,8 @@ export function ScriptedHumanoidFallAndSplash(obj: HumanoidActor,
  *
  * Stage 2 block 37's five bystanders run it on script flag 95.
  */
-export function ScriptedHumanoidLaunchAndDrop(obj: HumanoidActor): void {
+export function ScriptedHumanoidLaunchAndDrop(obj: HumanoidActor,
+                                              f: ClassFrame): void {
   if (obj.sub === 0) {
     obj.vel.y = LAUNCH_VY;
     obj.accY = 0;
@@ -1053,7 +1056,7 @@ export function ScriptedHumanoidLaunchAndDrop(obj: HumanoidActor): void {
     obj.vel.x = obj.pos.x - LAUNCH_ORIGIN_X;
     obj.sub += 1;
   } else if (obj.sub !== 1) {
-    ScriptedHumanoidDraw(obj);
+    ScriptedHumanoidDraw(obj, f);
     return;
   }
   obj.accY -= GRAVITY_STEP;
@@ -1064,7 +1067,7 @@ export function ScriptedHumanoidLaunchAndDrop(obj: HumanoidActor): void {
     HumanoidKill(obj);
     return;
   }
-  ScriptedHumanoidDraw(obj);
+  ScriptedHumanoidDraw(obj, f);
 }
 
 /**
@@ -1075,7 +1078,8 @@ export function ScriptedHumanoidLaunchAndDrop(obj: HumanoidActor): void {
  * the actor once it passes 200 -- with the hit slot freed and, unlike the
  * other two, no part-list release. Stage 6's evt 18820 is the one user.
  */
-export function ScriptedHumanoidFallTimed(obj: HumanoidActor): void {
+export function ScriptedHumanoidFallTimed(obj: HumanoidActor,
+                                          f: ClassFrame): void {
   obj.vel.y -= GRAVITY_STEP;
   obj.pos.y += obj.vel.y;
   obj.hum.fallFrames += 1;
@@ -1083,7 +1087,7 @@ export function ScriptedHumanoidFallTimed(obj: HumanoidActor): void {
     HumanoidKill(obj);
     return;
   }
-  ScriptedHumanoidDraw(obj);
+  ScriptedHumanoidDraw(obj, f);
 }
 
 /**
@@ -1152,7 +1156,7 @@ function HumanoidFrameTail(obj: HumanoidActor, f: ClassFrame): void {
   obj.hum.prevPos.y = obj.pos.y;
   obj.hum.prevPos.z = obj.pos.z;
   // `ScriptedHumanoidDraw(obj)`, the tail's last call.
-  ScriptedHumanoidDraw(obj);
+  ScriptedHumanoidDraw(obj, f);
 }
 
 /**
@@ -1242,7 +1246,7 @@ function HumanoidApplyPathOffset(obj: HumanoidActor, rx: number, ry: number,
  * (`0x009A2230`) up the actor gives back its hit slot and its part list and
  * is killed, whatever its removal cue says.
  */
-export function ScriptedHumanoidIdle(obj: HumanoidActor): void {
+export function ScriptedHumanoidIdle(obj: HumanoidActor, f: ClassFrame): void {
   const p = HumanoidProgramOf(obj);
   if (!p) return;
   if (G.g_cutscene_skipping !== 0) {
@@ -1254,7 +1258,7 @@ export function ScriptedHumanoidIdle(obj: HumanoidActor): void {
     return;
   }
   // `CALL 0x00484FF0` -- the draw.
-  ScriptedHumanoidDraw(obj);
+  ScriptedHumanoidDraw(obj, f);
 }
 
 export const ScriptedHumanoidHandler: ClassHandler = {

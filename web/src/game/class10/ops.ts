@@ -184,12 +184,28 @@ export enum CivilianOp {
   QueueSound = 0x21,
   /** Queue a list of `(id, delay)` pairs. */
   QueueSoundList = 0x22,
-  /** A child-attachment mode. `[open]` — only `2` is read, and it latches. */
-  SetAttachMode = 0x23,
-  /** The same with an explicit target. `[open]`. */
-  SetAttachTarget = 0x24,
-  /** `[open]` — writes `sub+0xA4` / `sub+0xA8`, which nothing read reads. */
-  SetPairA = 0x25,
+  /**
+   * `sub+0x8C = cmd[1]` (`0x0048C044`), and for a 2, `sub+0x90 = ` the first
+   * child, or `sub+0x8C = 0` with none: **where the head looks**. Its reader
+   * is `CivilianDrawBonePart` (`FUN_0048D1F0`)'s bone-2 arm, which turns the
+   * head toward the camera's eye (1), that child (2), the camera's target
+   * (3) or a point (4, 5), clamped and eased `0x100` a frame. That arm is not
+   * ported, so neither is this op's store. It was `SetAttachMode`.
+   */
+  SetHeadLook = 0x23,
+  /**
+   * `sub+0x8C = cmd[1]`, `sub+0x90 = cmd[2]` (`0x0048C08C`): the head look
+   * with its target given. It was `SetAttachTarget`.
+   */
+  SetHeadLookTarget = 0x24,
+  /**
+   * **The civilian talks.** `sub+0xA4 = cmd[1]` frames, `sub+0xA8 = cmd[2]`,
+   * a row of `g_civilian_mouth_tables` (`0x0056B950`), and `sub+0xA0 = 0`
+   * (`0x0048C0B0`..`0x0048C0D0`, `EBP` zero). `CivilianDrawBonePart`
+   * (`FUN_0048D1F0`) is what reads all three: see `class10/mouth.ts`. It was
+   * `SetPairA`, "which nothing read reads", before the hook was read.
+   */
+  SetMouth = 0x25,
   /** Move to a point over N frames; a point below 1 means the camera. */
   MoveOverFrames = 0x26,
   /**

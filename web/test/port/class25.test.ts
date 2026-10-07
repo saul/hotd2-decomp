@@ -24,7 +24,7 @@ import {
 } from "../../src/game/class25";
 import { HumanoidRoutine } from "../../src/game/class25/state";
 import {
-  check, CHARS, slotsShown, EnterPlay, JETTY_CHARS, jettyScene,
+  check, CHARS, slotsShown, EnterPlay, JETTY_CHARS, jettyScene, TYPE,
 } from "./harness";
 
 // -- 9. class 0x25, the scripted humanoid VM -------------------------------
@@ -81,8 +81,8 @@ function unionRejectsCrossClassReads(a: Actor, h: HumanoidActor,
   void a.hum;
   // @ts-expect-error and it has no class-0x30 arm either
   void a.zom;
-  // @ts-expect-error class 0x25's hand-prop selector is not on the head
-  void a.bonePropMode;
+  // @ts-expect-error class 0x25's face mode is not on the head
+  void a.faceMode;
   // @ts-expect-error nor is its command cursor
   void a.pc;
   // @ts-expect-error class 0x24's state selector is not on the head either
@@ -99,13 +99,13 @@ function unionRejectsCrossClassReads(a: Actor, h: HumanoidActor,
   void a.arcKind;
   // The two words 0x25 and 0x31 share are the ones worth pinning both ways:
   // `obj+0x1394` is a command cursor to one class and a waypoint cursor to the
-  // other, and `obj+0x1330` a hand-prop selector against a path delay.
+  // other, and `obj+0x1330` a face mode against a path delay.
   // @ts-expect-error a humanoid has no waypoint cursor
   void h.pathLeg;
   // @ts-expect-error and a thrower has no command cursor
   void t.pc;
-  // @ts-expect-error nor the hand-prop selector that shares its path delay
-  void t.bonePropMode;
+  // @ts-expect-error nor the face mode that shares its path delay
+  void t.faceMode;
   // The class-0x30 tail, one address at a time. Each of these was a field on
   // `ActorBase` before this change, readable off a civilian or a set-piece.
   // (`a.holdFrames` still compiles: that name is class 0x24's `obj+0x1320`
@@ -143,8 +143,8 @@ function unionRejectsCrossClassReads(a: Actor, h: HumanoidActor,
   // ...and the other way round: the zombie arm does not carry class 0x25's.
   // @ts-expect-error class 0x25's command cursor is not on a zombie
   void z.hum;
-  // @ts-expect-error nor is its hand-prop cel index, `obj+0x1334`
-  void z.bonePropFrame;
+  // @ts-expect-error nor is its face's frame counter, `obj+0x1334`
+  void z.faceFrame;
   // `obj+0x1334` as class 0x30's back-off counter is now behind its own arm,
   // so a humanoid can no longer be asked for it. This line used to be a plain
   // `void h.backoffFrames` with a comment saying why it could not be a
@@ -177,7 +177,7 @@ function unionRejectsCrossClassReads(a: Actor, h: HumanoidActor,
   // and fails the build, which is why it is not written as one.
   void h.slideTimer;
   // The arm is reachable once, and only once, `cls` has been tested.
-  if (a.cls === SpawnClass.ScriptedHumanoid) void a.hum.bonePropMode;
+  if (a.cls === SpawnClass.ScriptedHumanoid) void a.hum.faceMode;
   if (a.cls === SpawnClass.Thrower) void a.thr.landSurface;
   if (a.cls === SpawnClass.Zombie) void a.zom.backoffFrames;
   // And an already-narrowed arm needs no test at all.
@@ -223,14 +223,14 @@ console.log("\nclass 0x25, the VM runs until a command blocks:");
   // first frame, because only a wait costs one.
   const { a, events } = humanoidScene([
     { op: HumanoidOp.SetPos, mode: 0, a: 0, b: 0, f0: 5, f1: 7 },
-    { op: HumanoidOp.SetBonePropMode, mode: 2, a: 0, b: 0 },
+    { op: HumanoidOp.SetFaceMode, mode: 2, a: 0, b: 0 },
     { op: HumanoidOp.TurnMode, mode: 1, a: 0, b: 0 },
     { op: HumanoidOp.WaitUntil, mode: HumanoidCond.Frames, a: 30, b: 0 },
     { op: HumanoidOp.Kill, mode: 0, a: 0, b: 0 },
   ]);
   hFrame(a, events, rng);
   check("a run of setup commands all take effect in one frame",
-        a.pos.x === 5 && a.pos.z === 7 && a.hum.bonePropMode === 2
+        a.pos.x === 5 && a.pos.z === 7 && a.hum.faceMode === 2
         && a.hum.turnMode === HumanoidTurn.FaceCamera && a.hum.pc === 3,
         `pc ${a.hum.pc}`);
 
@@ -391,27 +391,30 @@ console.log("\nclass 0x25, the removal trigger:");
 console.log("\nclass 0x25, the two draw fields the VM writes:");
 {
   const rng = new Rng(4);
-  // `op 14` picks the hand prop and mode 2 restarts the cel counter; `op 12`
+  // `op 14` sets the face mode and mode 2 restarts its counter; `op 12`
   // is a persistent bone toggle, not the one-shot effect it was read as.
   const { a, events } = humanoidScene([
     { op: HumanoidOp.SetHeadAim, mode: 1, a: 0, b: 0 },
-    { op: HumanoidOp.SetBonePropMode, mode: 2, a: 0, b: 0 },
+    { op: HumanoidOp.SetFaceMode, mode: 2, a: 0, b: 0 },
     { op: HumanoidOp.WaitUntil, mode: HumanoidCond.Frames, a: 4, b: 0 },
     { op: HumanoidOp.SetHeadAim, mode: 0, a: 0, b: 0 },
-    { op: HumanoidOp.SetBonePropMode, mode: 7, a: 0, b: 0 },
+    { op: HumanoidOp.SetFaceMode, mode: 7, a: 0, b: 0 },
     { op: HumanoidOp.WaitUntil, mode: HumanoidCond.Frames, a: 9999, b: 0 },
   ]);
-  a.hum.bonePropFrame = 9;
+  a.hum.faceFrame = 9;
   hFrame(a, events, rng);
   check("op 12 mode 1 sets the head-aim toggle and it stays set",
         a.hum.aimsHead === 1);
-  check("op 14 mode 2 picks hand prop 2 and restarts the cel counter",
-        a.hum.bonePropMode === 2 && a.hum.bonePropFrame === 0);
+  // The VM runs before the frame's draw, and the draw's node hook steps the
+  // counter on the talking face's first frame: 9, zeroed, then 1.
+  check("op 14 mode 2 sets face mode 2 and restarts its counter under the draw",
+        a.hum.faceMode === 2 && a.hum.faceFrame === 1,
+        `mode ${a.hum.faceMode} frame ${a.hum.faceFrame}`);
 
   for (let i = 0; i < 4; i++) hFrame(a, events, rng);
   check("op 12 mode 0 clears it again", a.hum.aimsHead === 0);
-  check("and a mode op 14 does not know leaves the prop alone",
-        a.hum.bonePropMode === 2, `mode ${a.hum.bonePropMode}`);
+  check("and a mode op 14 does not know leaves the face alone",
+        a.hum.faceMode === 2, `mode ${a.hum.faceMode}`);
 }
 
 console.log("\nclass 0x25, the program ends into ScriptedHumanoidIdle:");
@@ -1072,4 +1075,101 @@ console.log("\nclass 0x25, a skipped cut scene tears the actor down:");
   ScriptedHumanoidUpdate(a, { dt: 1 / 60, rng, host: NULL_HOST, events });
   G.g_cutscene_skipping = 0;
   check("...and dies on the frame g_cutscene_skipping is up", a.dead);
+}
+
+console.log("\nclass 0x25, the face -- op 14 and ScriptedHumanoidBoneDrawHook:");
+{
+  const rng = new Rng(4);
+  // `g_class25_face_cels` (`0x00596C80`) and `g_class25_face_cels_two`
+  // (`0x00596C90`), thirteen bytes each as the image holds them.
+  const RAMP = [0, 1, 2, 3, 4, 5, 6, 5, 4, 3, 2, 1, 0];
+  const TWO = [0, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0];
+  const RECORD = TYPE.bones.find((b) => b.bone === 2)!.slot;
+  // One humanoid of `charType`, with the fixture's skeleton under that type
+  // so the walk has a head to hand the hook.
+  const faceScene = (charType: number, cmds: HumanoidProgram["cmds"]) => {
+    ResetGameGlobals();
+    EnterPlay();
+    const prog: HumanoidProgram = {
+      charType, removePath: 90, removeFrame: 900, flags2: 0,
+      motion: 10, phase: 0, entry: 0, cmds,
+    };
+    SetGameTables({
+      ...CHARS,
+      types: { ...CHARS.types, [String(charType)]: { ...TYPE, type: charType } },
+      humanoid_face_cels: RAMP, humanoid_face_cels_two: TWO,
+    } as CharactersJson, undefined, undefined, { "12288": prog });
+    G.g_active_cam_path = -1;
+    const a = ActorSpawn(0x3000, SpawnClass.ScriptedHumanoid, charType,
+                         "humanoid");
+    if (a.cls !== SpawnClass.ScriptedHumanoid) throw new Error("not 0x25");
+    a.visible = true;
+    a.pos = vec3(0, 0, 0);
+    return { a, events: new Events() };
+  };
+  const TALK: HumanoidProgram["cmds"] = [
+    { op: HumanoidOp.SetFaceMode, mode: 2, a: 0, b: 0 },
+    { op: HumanoidOp.WaitUntil, mode: HumanoidCond.Frames, a: 9999, b: 0 },
+  ];
+  const drawn = (a: HumanoidActor, events: Events, n: number,
+                 before?: (i: number) => void) => {
+    const out: number[] = [];
+    for (let i = 0; i < n; i++) {
+      before?.(i);
+      hFrame(a, events, rng);
+      out.push(a.nodeDrawSlot[2] ?? -1);
+    }
+    return out;
+  };
+
+  // James (0x39): the head is `0x14B3` plus the ramp at the counter, read
+  // before the step, so fifteen frames from the op are the whole ramp and
+  // the start of the next.
+  {
+    const { a, events } = faceScene(0x39, TALK);
+    const got = drawn(a, events, 15);
+    const want = [...RAMP, RAMP[0], RAMP[1]].map((c) => 0x14b3 + c);
+    check("op 14 mode 2 on type 0x39: the head draws 0x14B3 + the ramp, frame by frame",
+          got.join(",") === want.join(","),
+          `${got.map((s) => s.toString(16)).join(",")}`);
+    check("...and the record is still the skeleton's",
+          a.boneSlot["2"] === undefined && a.hum.faceFrame === 15,
+          `frame ${a.hum.faceFrame}`);
+  }
+  // A type with no face of its own takes the default arm: the record, and
+  // the counter steps all the same.
+  {
+    const { a, events } = faceScene(1, TALK);
+    const got = drawn(a, events, 4);
+    check("a type the switch does not name draws its record and still counts",
+          got.every((s) => s === RECORD) && a.hum.faceFrame === 4,
+          `${got.join(",")} frame ${a.hum.faceFrame}`);
+  }
+  // Type 0x36 reads the two-cel table over `0x149D`.
+  {
+    const { a, events } = faceScene(0x36, TALK);
+    const got = drawn(a, events, 13);
+    check("type 0x36 talks through g_class25_face_cels_two over 0x149D",
+          got.join(",") === TWO.map((c) => 0x149d + c).join(","),
+          got.map((s) => s.toString(16)).join(","));
+  }
+  // Gary (0x3A) opens blinking -- the Init's mode 1 -- and blinks for the
+  // thirteen frames in every hundred and fifty that `g_frame_counter`'s
+  // unsigned remainder is below 13, through the ramp at that remainder over
+  // `0x14CB`; the rest of the time the head is the record.
+  {
+    const { a, events } = faceScene(0x3a, [
+      { op: HumanoidOp.WaitUntil, mode: HumanoidCond.Frames, a: 9999, b: 0 },
+    ]);
+    const start = 2 * 150 - 5;
+    const got = drawn(a, events, 20, (i) => { G.g_frame_counter = start + i; });
+    const want = got.map((_, i) => {
+      const r = (start + i) % 150;
+      return r < 13 ? 0x14cb + RAMP[r] : RECORD;
+    });
+    check("type 0x3A opens in face mode 1 and blinks on g_frame_counter % 150 < 13",
+          a.hum.faceMode === 1 && got.join(",") === want.join(",")
+          && got.includes(0x14cb + 6) && got.includes(RECORD),
+          got.map((s) => s.toString(16)).join(","));
+  }
 }

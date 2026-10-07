@@ -249,20 +249,27 @@ export function CivilianRunScript(obj: Actor, script: number, pc: number,
           G.g_bHudShutterState = a[0] & 0xff;
         }
         break;
-      // Unread. Named so the stream stays legible and so a later reading has
-      // somewhere to land; deliberately no behaviour.
+      // The head look: its one reader, `CivilianDrawBonePart`'s bone-2 turn,
+      // is not ported, so its two words are not kept. See
+      // {@link CivilianOp.SetHeadLook}.
       //
-      // **These three used to fall through into `SetScale`'s body** and write
-      // its operand into `obj.scale`, which is `model+0x116C` and the factor
-      // `SkeletonApplyRootMotion` (`FUN_00410C50`) multiplies the root delta
-      // by. Their operands are small integers -- 1, 2, 5, 200 -- and
-      // {@link AsFloat} reinterprets a dword's bits, so the scale came out a
-      // denormal around 1e-45 and every step the clip authored was multiplied
-      // to nothing. 125 commands in the shipped streams run one of the four
-      // this case used to hold.
-      case CivilianOp.SetAttachMode:
-      case CivilianOp.SetAttachTarget:
-      case CivilianOp.SetPairA:
+      // **These used to fall through into `SetScale`'s body**, with op 0x25,
+      // and write its operand into `obj.scale`, which is `model+0x116C` and
+      // the factor `SkeletonApplyRootMotion` (`FUN_00410C50`) multiplies the
+      // root delta by. Their operands are small integers -- 1, 2, 5, 200 --
+      // and {@link AsFloat} reinterprets a dword's bits, so the scale came out
+      // a denormal around 1e-45 and every step the clip authored was
+      // multiplied to nothing.
+      case CivilianOp.SetHeadLook:
+      case CivilianOp.SetHeadLookTarget:
+        break;
+      // The mouth: `MOV [EAX+0xa4], ECX` / `MOV [EAX+0xa8], EDX` /
+      // `MOV [ECX+0xa0], EBP` at `0x0048C0B6`..`0x0048C0D0`, `EBP` the zero
+      // the routine cleared on entry. The draw hook does the rest.
+      case CivilianOp.SetMouth:
+        sub.mouthFrames = a[0];
+        sub.mouthTable = a[1];
+        sub.mouthFrame = 0;
         break;
       // `MOV dword ptr [g_cur_actor_model + 0x116c], param_2[1]` -- the
       // operand is stored **verbatim** into a float field, so it is a float

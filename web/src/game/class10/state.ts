@@ -13,6 +13,13 @@
  */
 import { CivilianFrameHook, CivilianSphereMode } from "./ops";
 
+/**
+ * `sub+0xA8`'s "no mouth": `CivilianDrawBonePart` (`FUN_0048D1F0`) skips its
+ * whole cel arm for it (`if (iVar2 != 6)`), and `CivilianInit` writes it.
+ * Below it, a row of `g_civilian_mouth_tables` (`0x0056B950`).
+ */
+export const CIVILIAN_MOUTH_NONE = 6;
+
 /** One 8-byte entry of the held-item array at `sub+0x70`. */
 export interface CivilianHeldItem {
   /** +0x00 the record, as an index into `T.civilians.items`. */
@@ -170,6 +177,23 @@ export interface CivilianState {
   /** +0x84 / +0x88 the sound queued to play, and the frames left before it. */
   soundId: number;
   soundDelay: number;
+  /**
+   * +0xA0 the mouth's cursor into its cel list, which
+   * `CivilianDrawBonePart` (`FUN_0048D1F0`) reads as `% count` and steps
+   * while {@link mouthFrames} runs. Op 0x25 zeroes it.
+   */
+  mouthFrame: number;
+  /**
+   * +0xA4 op 0x25's first operand: how many more drawn frames the mouth
+   * moves. At zero the cursor parks on the list's last cel.
+   */
+  mouthFrames: number;
+  /**
+   * +0xA8 op 0x25's second operand: which row of `g_civilian_mouth_tables`
+   * (`0x0056B950`) the mouth reads -- {@link CIVILIAN_MOUTH_NONE} for none,
+   * which is `CivilianInit`'s `g_cur_civilian[0x2a] = 6`.
+   */
+  mouthTable: number;
   /** +0xAC op 0x28 — the bone the camera point rides. */
   cameraBone: number;
   /** +0xAE / +0xB0..+0xB8 op 0x26's move: frames left, and where to. */
@@ -203,7 +227,9 @@ export function makeCivilianState(): CivilianState {
     items: [], heldDrawn: [], pickedItem: -1, attachSet: 5,
     scaleTarget: 1, scaleStep: 0, sphereCentreMode: CivilianSphereMode.Bone1,
     deathVoice: 0xff,
-    soundId: 0, soundDelay: 0, cameraBone: 2,
+    soundId: 0, soundDelay: 0,
+    mouthFrame: 0, mouthFrames: 0, mouthTable: CIVILIAN_MOUTH_NONE,
+    cameraBone: 2,
     moveFrames: 0, moveTo: { x: 0, y: 0, z: 0 },
     script: -1, pc: 0, onShotScript: -1, onShotAltScript: -1,
     resumeScript: -1,

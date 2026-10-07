@@ -9,6 +9,7 @@ import { SpriteEffectKind } from "../../src/game/effects/sprite";
 import { SetGameTables } from "../../src/game/tables";
 import type { Actor, ScriptedSceneryActor } from "../../src/game/actor";
 import { ScriptedScenerySelector } from "../../src/game/class33";
+import { ScriptedSoundCues33FollowReplayCamera } from "../../src/game/class33/cues";
 import { ScoreRankForPlayer } from "../../src/game/combat/score";
 import { SpawnClass } from "../../src/game/spawn_class";
 import {
@@ -170,6 +171,90 @@ console.log("\nclass 0x33 selector 7: stage 5's tyres and brakes, on camera fram
           + "then the camera's 50, then 5 two frames later",
           at.join() === "3:0x111,5:0x222,7:0x333" && o.scenery.frames === 5,
           `${at.join()} frames ${o.scenery.frames}`);
+  }
+}
+
+console.log("\nclass 0x33 selector 7 outlives its cues, and a seek carries them:");
+{
+  const AT = 0x1e7c;
+  const SHIPPED: Sub = {
+    selector: 7, cues: [
+      { mode: 1, frame: 505, sound: SND_CAR_SRIP },
+      { mode: 1, frame: 760, sound: SND_CAR_SRIP },
+      { mode: 1, frame: 820, sound: SND_CAR_SRIP },
+      { mode: 1, frame: 990, sound: SND_BRAKE },
+      { mode: -1, frame: -1 },
+    ],
+  };
+  // S7.R1 parked on the terminator, it stays: `CMP word [EDI], -1` reads the
+  // record just played, never a terminator, so no despawn.
+  {
+    const o = build(AT, SHIPPED, [0, 0, 0]);
+    const { events, sounds } = listen();
+    for (const cam of [505, 760, 820, 990, 990, 505, 760]) {
+      G.g_cam_path_frame = cam;
+      frame(events);
+    }
+    check("after all four records it is parked on the terminator, still in "
+          + "the pool, still holding its hit slot -- nothing in the routine "
+          + "takes it away",
+          sounds.length === 4 && o.scenery.cue === 4 && !o.despawned
+          && G.g_object_list.includes(o) && G.g_hit_slots[o.hitSlot] === AT,
+          `${sounds.map(hx).join()} cue ${o.scenery.cue}`);
+  }
+  // S7.R2 the replay's camera, as stage 5 runs it: spawned on path 207 at
+  // 230, the path ends at 600 (505 passed), then block 4's path 209 from 0.
+  {
+    const state: Record<string, number> = {};
+    const seen: number[] = [];
+    const show = (slot: number, frame: number, startFrame = 0) => {
+      ScriptedSoundCues33FollowReplayCamera(SHIPPED.cues,
+                                            { slot, startFrame, frame }, state);
+      seen.push(state.cue);
+    };
+    show(207, 230); show(207, 506); show(207, 600);
+    show(209, 601); show(209, 815); show(209, 900); show(209, 1000);
+    show(209, 1100);
+    // A later frame on a new path from its start, and a path started over.
+    check("a replay passes each record whose frame the camera has run "
+          + "over since the spawn, in order, on whatever path: 505 on 207, "
+          + "760 by 815 on 209, 820 by 900, 990 by 1000, then parked",
+          seen.join() === "0,1,1,1,2,3,4,4", seen.join());
+    const restart: Record<string, number> = {};
+    ScriptedSoundCues33FollowReplayCamera(
+      SHIPPED.cues, { slot: 207, startFrame: 0, frame: 600 }, restart);
+    const atSpawn = restart.cue;
+    ScriptedSoundCues33FollowReplayCamera(
+      SHIPPED.cues, { slot: 207, startFrame: 0, frame: 510 }, restart);
+    check("...and on the spawn's own frame nothing is passed: a path past "
+          + "505 when it spawns plays it only when a path runs over it again",
+          atSpawn === 0 && restart.cue === 1, `${atSpawn} ${restart.cue}`);
+  }
+  // S7.R3 the rebuilt object stands where the replay left it.
+  {
+    ResetGameGlobals();
+    EnterPlay();
+    SetGameTables(tables(AT, SHIPPED));
+    G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    G.g_scene_state_major = SCENE_MAJOR_PLAYING;
+    G.g_players_in_play = 1;
+    SpawnSlotActors([{ at: AT, class: SpawnClass.ScriptedScenery,
+                       pos: [0, 0, 0], hp: 7,
+                       replay: { cue: 1, slot: 207, frame: 600 } }]);
+    const rng = new Rng(9);
+    RunPendingInits(rng);
+    const o = G.g_object_list.find((a) => a.at === AT);
+    if (!o || o.cls !== SpawnClass.ScriptedScenery) throw new Error("no 0x1E7C");
+    const { events, sounds } = listen();
+    G.g_cam_path_frame = 505;
+    frame(events);
+    G.g_cam_path_frame = 760;
+    frame(events);
+    check("rebuilt by a seek past 505, it does not play 505 again: its next "
+          + "sound is 760's",
+          sounds.length === 1 && sounds[0] === SND_CAR_SRIP
+          && o.scenery.cue === 2,
+          `${sounds.map(hx).join()} cue ${o.scenery.cue}`);
   }
 }
 

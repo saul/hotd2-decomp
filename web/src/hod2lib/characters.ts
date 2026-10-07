@@ -1457,11 +1457,23 @@ export function slotDrawnSpawn(cls: number, rec: Spawn): boolean {
  *
  * Three shipped spawns, all `spawn_obj` (opcode 0x0B): stage 2's `0x4FD0` and
  * `0x12590`, and stage 5's `0x1CE4`.
+ *
+ * `shot_mesh` is the raw word, which the seat tests against `-1`;
+ * `shot_blob` is the same pointer resolved to the `coli.blobs` key
+ * `ShotTestMesh` traces through `obj+0x150` -- `null` for `-1`, and for a
+ * pointer that lands on no blob header.
  */
-export function class33Tail(rec: Spawn): Record<string, unknown> {
+export function class33Tail(
+    rec: Spawn,
+    sets: [colilib.ColiFile, colilib.ColiFile] | null = null):
+    Record<string, unknown> {
+  const mesh = rec.param(0x04, "i32") ?? -1;
+  const hit = mesh !== -1 && sets
+    ? colilib.pointerToOffset(mesh >>> 0, sets[0], sets[1]) : null;
   return {
     slot: rec.param(0x00, "i32") ?? 0,
-    shot_mesh: rec.param(0x04, "i32") ?? -1,
+    shot_mesh: mesh,
+    shot_blob: hit ? `${hit[0]}:${hit[1]}` : null,
     shot_radius: rec.param(0x08, "f32") ?? 0,
     path: rec.param(0x0c, "i32") ?? -1,
     path_end: rec.param(0x10, "f32") ?? 0,
@@ -2291,7 +2303,7 @@ export async function resolveForStage(
     // set.
     const is33 = cls === 0x33;
     const class33 = is33 && rec.hp === CLASS33_CARRIER
-      ? class33Tail(rec) : null;
+      ? class33Tail(rec, coliSets) : null;
     const class33Push = is33 && rec.hp === CLASS33_PUSHABLE
       ? class33PushTail(rec) : null;
     const class33Cue = is33 && rec.hp === CLASS33_EFFECT_CUE

@@ -25,6 +25,8 @@ import {
 import { CivilianLeaveField } from "../../src/game/class10/update";
 import type { CivilianCmdJson, CivilianItemJson } from "../../src/bundle/scene";
 import { vec3, type Vec3 } from "../../src/game/vec";
+import { MatIdentity, MatrixTranslate } from "../../src/game/matrix";
+import { CivilianHitMarkersTick } from "../../src/game/class10/hit_marker";
 import { ResolveHit } from "../../src/game/combat/resolve_hit";
 import {
   check, TYPE, CHARS, SCENE_MAJOR_PLAYING, spawnZombie, EnterPlay,
@@ -376,6 +378,92 @@ console.log("\nclass 0x10, the civilian and the rescue:");
           `lives ${G.g_player_lives[0]} score ${G.g_player_score[0]}`);
     check("...and switches it to the on-shot script",
           a.civ?.motionBlend === 55 && a.dead, `rate ${a.civ?.motionBlend}`);
+  }
+  // What a shot civilian looks like. `CivilianUpdate`'s shot arm calls
+  // `PlayerTakeDamageTimed(player, 0, 0, 1, -1)` (`0x0048AC3E`) -- latch 0,
+  // so **no** damage overlay, and through the invulnerability window -- and
+  // then `SpawnCivilianHitMarker(player, bone sub+0xAC's point)`
+  // (`0x0048AC6F`). The port raised the overlay latch with kind 0, the
+  // enemy's diagonal swipe, and drew no marker.
+  {
+    const shotScene = () => civScene([
+      [cmd(CivilianOp.Wait, CivilianWait.Free),
+       { op: CivilianOp.SetOnShot, args: [1], scripts: [1] },
+       cmd(CivilianOp.Wait, 0), cmd(CivilianOp.End)],
+      [cmd(CivilianOp.Wait, 0), cmd(CivilianOp.End)],
+    ]);
+    // The camera 100 in front of the bone's point: its view depth is -100,
+    // past -50, so the scale is z * -0.02 = 2.0 (`0x0056B184`).
+    const withCamera = () => {
+      G.g_camera_world_to_view = MatIdentity();
+      MatrixTranslate(G.g_camera_world_to_view, 0, 0, -100);
+    };
+    // Every bone the frame asks for: the update's sphere asks for its own
+    // too, so the shot arm's is one of several.
+    const asked: number[] = [];
+    const host = { ...NULL_HOST,
+      boneWorld: (_at: number, bone: number, out: Vec3) => {
+        asked.push(bone); out.x = 3; out.y = 1; out.z = 0; return true;
+      } };
+    const shoot = (a: ReturnType<typeof ActorSpawn>, events: Events) =>
+      CivilianUpdate(a, { dt: 1 / 60, rng, host, events });
+
+    const { a, events } = shotScene();
+    withCamera();
+    a.civ!.cameraBone = 7;
+    const lives0 = G.g_player_lives[0];
+    G.g_player_invuln_frames[0] = 0;
+    a.flags |= 8 | 2;
+    shoot(a, events);
+    check("a shot civilian costs the life and raises no damage overlay: the "
+          + "latch is 0",
+          G.g_player_lives[0] === lives0 - 1 && G.g_player_was_hit[0] === 0,
+          `lives ${G.g_player_lives[0]} was_hit ${G.g_player_was_hit[0]}`);
+    const m = G.g_civilian_hit_markers[0];
+    check("it leaves one marker, at bone sub+0xAC, player 1's slot 0x132D",
+          G.g_civilian_hit_markers.length === 1 && asked.includes(7)
+          && m.slot === 0x132d && m.pos.x === 3 && m.pos.y === 1
+          && m.pos.z === 0, JSON.stringify(m));
+    check("...scaled z * -0.02 for a point 100 deep",
+          !!m && Math.abs(m.scale - 2.0) < 1e-6, `${m?.scale}`);
+    CivilianHitMarkersTick();
+    check("...drawn in this frame's view, lifted 2 and pulled 5 toward the eye",
+          !!m && m.drawnAt.x === 3 && m.drawnAt.y === 3 && m.drawnAt.z === -95
+          && m.drawnAlpha === null, JSON.stringify(m?.drawnAt));
+    let frames = 1;
+    while (G.g_civilian_hit_markers.length && frames < 200) {
+      CivilianHitMarkersTick();
+      frames += 1;
+    }
+    check("...for 60 frames, then gone", frames === 61, `${frames}`);
+
+    // Inside the shooter's invulnerability window the life still goes: the
+    // fourth argument at `0x0048AC40` is 1, and the window is left as it was.
+    const s3 = shotScene();
+    withCamera();
+    const livesW = G.g_player_lives[0];
+    G.g_player_invuln_frames[0] = 30;
+    s3.a.flags |= 8 | 2;
+    shoot(s3.a, s3.events);
+    check("a shot inside the invulnerability window still takes the life",
+          G.g_player_lives[0] === livesW - 1
+          && G.g_player_invuln_frames[0] === 30,
+          `lives ${G.g_player_lives[0]} invuln ${G.g_player_invuln_frames[0]}`);
+
+    // Player 2's shot takes the next slot.
+    const s2 = shotScene();
+    withCamera();
+    s2.a.flags |= 8 | 4;
+    shoot(s2.a, s2.events);
+    check("player 2's marker is slot 0x132E",
+          G.g_civilian_hit_markers[0]?.slot === 0x132e,
+          `${G.g_civilian_hit_markers[0]?.slot.toString(16)}`);
+    // Tick k draws with 61 - k frames left; the first below 6 is tick 56's.
+    for (let i = 0; i < 56; i++) CivilianHitMarkersTick();
+    const last = G.g_civilian_hit_markers[0];
+    check("...and it fades over its last five draws, count / 6",
+          !!last && Math.abs((last.drawnAlpha ?? -1) - Math.fround(5 / 6))
+            < 1e-6, `${last?.drawnAlpha}`);
   }
   {
     const { a, events } = civScene([

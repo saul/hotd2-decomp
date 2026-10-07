@@ -1027,6 +1027,22 @@ a cheaper special case, the special case is a divergence whose inputs must be
 named** -- here, every `MatrixScale` before a `MatrixStore(obj+0x150)` -- and
 a new caller is the moment to check them, not the moment to inherit them.
 
+**L112 -- Three angles are a pose only together with their order, and a
+routine that copies a triple between two orders converts it or is wrong.**
+Class 0x25 copies an object path's `rx, ry, rz` onto the actor, and the draw
+turns the body `RotX; RotZ; RotY` while the path means `RotZ; RotY; RotX`.
+`op_st3` 340 is `(~0x3C00, -0x4000, -0x4000)`: an upright boat in its own
+order, a body on its side in the draw's. The port's note read the `rot_x` as
+the deck's pitch ("the riders pitch with the deck they stand on"), and stage
+3's passengers lay through the hull until the path's angles fell near zero at
+frame 1020, where every order agrees, and appeared to roll in. The tail had
+the conversion all along -- `MatrixRotateZ; RotateY; RotateX` then
+`MatrixToEulerBams` at `0x00484C32` -- behind the offset record's yaw test,
+and the port had transcribed the add after it without the call before it.
+**A large angle in a triple is not a tilt until you know the order it is
+in**, and a test of a copied triple has to be at angles where the orders
+disagree (two non-zero), which `L48` says of identity inputs.
+
 ---
 
 ## Running the tools

@@ -42,6 +42,7 @@ import type { St2Car } from "./class21/car";
 import type { Actor } from "./actor";
 import type { OriginalItemBanner } from "./class41/item_banner";
 import type { LifeGrantedMarker } from "./class10/life_marker";
+import type { CivilianHitMarker } from "./class10/hit_marker";
 import type { BreakableProp, PropFinalDraw } from "./class41/prop_state";
 import type { PropShatter } from "./class41/shatter";
 import type { ShotRequest } from "./combat/shot";
@@ -3047,6 +3048,13 @@ export const G = {
    */
   g_life_granted_markers: [] as LifeGrantedMarker[],
   /**
+   * The markers `SpawnCivilianHitMarker` (`FUN_0048E080`) allocates when a
+   * civilian is shot, in allocation order: every one that drew this frame.
+   * [port-only] as a list: each is a 0x1314-byte task in the engine. See
+   * `game/class10/hit_marker.ts`.
+   */
+  g_civilian_hit_markers: [] as CivilianHitMarker[],
+  /**
    * `g_chain_segments` — 0x007DCD18, `[group * 0x14 + segment]`.
    *
    * The twenty-segment chains `PlaceChainSegments` builds, by prop id rather
@@ -3591,6 +3599,8 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   G.g_original_item_banners = [];
   // ...and the life markers, which are tasks on the same list.
   G.g_life_granted_markers = [];
+  // ...and the markers a shot civilian leaves (`SpawnCivilianHitMarker`).
+  G.g_civilian_hit_markers = [];
   G.g_chain_segments = [];
   G.g_scene_index = 0;
   G.g_camera_block_eye = vec3();

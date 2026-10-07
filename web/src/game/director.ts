@@ -47,6 +47,7 @@ import { RunPhaseDispatch } from "./run_phase";
 import { ShotEffectsTick } from "./effects/tick";
 import { BossHpBarsTick } from "./boss_hp_bar";
 import { LifeGrantedMarkersTick } from "./class10/life_marker";
+import { CivilianHitMarkersTick } from "./class10/hit_marker";
 import { BossBannersTick } from "./boss_banner";
 import { WaterWaveSourcesTick } from "./class17";
 import { Boss4HitMarksTick } from "./class19/hit_mark";
@@ -131,6 +132,11 @@ export interface ScriptSpawn {
   block?: number;
   step?: number;
   opIndex?: number;
+  /**
+   * `[port-only]` The record's replay scratch, which the walker's
+   * `ActiveSpawn` carries -- see `ClassHandler.followReplayCamera`.
+   */
+  replay?: Readonly<Record<string, number>>;
 }
 
 /**
@@ -616,8 +622,8 @@ export function SpawnSlotActor(s: ScriptSpawn,
           && !pl.class33_prop && !pl.class33_sub
           && pl.hp !== ScriptedScenerySelector.EffectOnFirstFrame) return;
       G.g_slot_actors_built.push(key);
-      SpawnFromDescriptor(at(), SpawnClassValue.ScriptedScenery, -1,
-                          `scenery ${pl.hp}`,
+      const obj = SpawnFromDescriptor(at(), SpawnClassValue.ScriptedScenery,
+                          -1, `scenery ${pl.hp}`,
                           { class33: pl.class33, class33Push: pl.class33_push,
                             class33Cue: pl.class33_cue,
                             class33Sub: pl.class33_sub,
@@ -634,6 +640,11 @@ export function SpawnSlotActor(s: ScriptSpawn,
                             pos: vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0,
                                       s.pos?.[2] ?? 0),
                             visible: true, descAt: s.at });
+      // `[port-only]` A seek's rebuild: what the replay's camera has run past
+      // this record's object -- selector 7's cues -- goes on before it runs.
+      if (s.replay) {
+        g_class_handlers[obj.cls]?.resumeFromReplay?.(obj, s.replay);
+      }
       return;
     }
   }
@@ -1180,6 +1191,10 @@ function SceneTaskWalk(dt: number, host: GameHost,
   // the first is drawn on the frame the life is paid. See
   // `game/class10/life_marker.ts`.
   LifeGrantedMarkersTick();
+  // ...and the markers a shot civilian leaves (`SpawnCivilianHitMarker`,
+  // `FUN_0048E080`), allocated by her update's shot arm the same way. See
+  // `game/class10/hit_marker.ts`.
+  CivilianHitMarkersTick();
   // ...and the marks the stage-4 boss's flesh hits leave, which
   // `Boss4SpawnBoneHitMark` (`FUN_004920C0`) allocates during the fight --
   // after the bar, so after it in the walk.

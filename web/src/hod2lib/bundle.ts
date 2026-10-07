@@ -1932,8 +1932,12 @@ export const EFFECT_SLOTS_BY_CLASS: Record<number, number[]> = {
   // (`FUN_0048DF10`) raises when her held item pays a life --
   // `obj+0x1F4 = 0x1256 + player`, `common.bin` 303 and 304 -- which
   // `LifeGrantedMarkerUpdate` draws in camera space. See
-  // `game/class10/life_marker.ts`.
-  0x10: [0x1256, 0x1257],
+  // `game/class10/life_marker.ts`. And the marker her shot arm leaves,
+  // `SpawnCivilianHitMarker` (`FUN_0048E080`): `obj+0x1F4 = 0x132D` for
+  // player 0 and `0x132E` otherwise, `common.bin` 305 and 306, drawn in
+  // camera space by `CivilianHitMarkerUpdate`. See
+  // `game/class10/hit_marker.ts`.
+  0x10: [0x1256, 0x1257, 0x132d, 0x132e],
   // Class 0x33, the sprite kinds its ported routines throw:
   // `SpawnSpriteEffectFromParams`' `case 0x44:` run `0xFD4..0x1031`, all 94 of
   // `eff_dokan.bin` (`ScriptedEffectAtCameraCue33`, `FUN_00433B00`, and

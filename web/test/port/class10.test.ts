@@ -1,7 +1,8 @@
 import type { CharactersJson } from "../../src/bundle";
 import { Rng } from "../../src/core/rng";
 import { Events } from "../../src/core/events";
-import { ActorSpawn, RetireUnlistedActor } from "../../src/game/director";
+import { ActorSpawn, GameUpdate, RetireUnlistedActor } from "../../src/game/director";
+import { SpawnFromDescriptor } from "../../src/game/spawn";
 import { ActorKillAll } from "../../src/game/combat/resolve_hit";
 import { ActorAdvanceMotion } from "../../src/game/motion";
 import { UpdateSceneViewAndLight } from "../../src/game/camera/view";
@@ -379,6 +380,65 @@ console.log("\nclass 0x10, the civilian and the rescue:");
     check("...and switches it to the on-shot script",
           a.civ?.motionBlend === 55 && a.dead, `rate ${a.civ?.motionBlend}`);
   }
+  // Her first update is on the walk after her `Init`, not in the same pass.
+  // `CivilianInit` (`FUN_0048A3E0`) installs `CivilianUpdate` and returns
+  // (`0x0048A766`), and her captors' `Init`s -- which count them into
+  // `g_enemies_alive` -- run after hers in that walk. Updated in the same
+  // pass, she tested "wait while enemies are alive" against a count of zero
+  // and was rescued the frame she appeared: stage 2 Original's block 14
+  // civilian (0x8620) took the rescue route with both captors alive, and
+  // block 22's `wait_scripted_actors` hung on them.
+  {
+    ResetGameGlobals();
+    EnterPlay();
+    G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    G.g_scene_state_major = SCENE_MAJOR_PLAYING;
+    // Her stream opens on the wait the block-14 civilian's does: hold while
+    // any enemy is alive (`enemiesGoal` 0).
+    SetGameTables(CHARS, undefined, undefined, undefined, undefined, {
+      entries: [0],
+      scripts: [[
+        cmd(CivilianOp.Wait, CivilianWait.EnemiesAlive),
+        cmd(CivilianOp.SetMotionBlend, 55),
+        cmd(CivilianOp.Wait, 0), cmd(CivilianOp.End),
+      ]],
+      items: [],
+      spawns: {
+        "16384": {
+          charType: 1, script: 0, removePath: -1, removeFrame: 0,
+          removeDelay: 0,
+          children: [0x4100, 0x4200].map((at) => ({
+            at, class: 0x30, charType: 1,
+            pos: [0, 0, 0] as [number, number, number], yaw: 0, hp: 90,
+          })),
+        },
+      },
+    });
+    // As the script's spawn and `syncCharacterSpawns` leave them: the
+    // civilian, then her captors, every `Init` pending for the walk.
+    const civ = SpawnFromDescriptor(0x4000, SpawnClass.Civilian, 1, "civilian");
+    civ.visible = true;
+    for (const at of [0x4100, 0x4200]) {
+      const k = SpawnFromDescriptor(at, SpawnClass.Zombie, 1, "captor");
+      k.visible = true;
+    }
+    const events = new Events();
+    // Her Init runs the first block -- the wait word, the blend -- and parks
+    // on the second `Wait` (cursor 2) under the word it loaded. Released, she
+    // would run on to the `End` at 3.
+    const parked = () => civ.civ?.cursor === 2
+      && civ.civ?.wait === CivilianWait.EnemiesAlive;
+    GameUpdate(1 / 60, NULL_HOST, rng, events);
+    check("the walk that runs her Init runs no update of hers: she is parked "
+          + "on her first wait, both captors counted",
+          parked() && G.g_enemies_alive === 2,
+          `cursor ${civ.civ?.cursor} wait ${civ.civ?.wait.toString(16)} `
+          + `alive ${G.g_enemies_alive}`);
+    GameUpdate(1 / 60, NULL_HOST, rng, events);
+    check("...and on the next walk, her first update, it holds",
+          parked(), `cursor ${civ.civ?.cursor} wait ${civ.civ?.wait.toString(16)}`);
+  }
+
   // What a shot civilian looks like. `CivilianUpdate`'s shot arm calls
   // `PlayerTakeDamageTimed(player, 0, 0, 1, -1)` (`0x0048AC3E`) -- latch 0,
   // so **no** damage overlay, and through the invulnerability window -- and

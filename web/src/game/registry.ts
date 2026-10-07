@@ -185,6 +185,26 @@ export interface ClassHandler {
    */
   advancesOwnMotion?: boolean;
   /**
+   * This class's `Init` installs its update and returns, so its first update
+   * is on the **next** walk.
+   *
+   * The handler `SpawnFromDescriptor` stores at `obj+0x00` is the `Init`;
+   * `TaskRunTree` calls whatever is there once a walk, so an `Init` that ends
+   * by writing its update over `obj+0x00` and returning has spent the
+   * object's call for this frame. The port's walk runs `init` and then
+   * `update` in one pass, which is right only for a class whose `Init` calls
+   * its own update. `CivilianInit` (`FUN_0048A3E0`) does not: it writes
+   * `CivilianUpdate` (`MOV dword ptr [ESI], 0x48A920` at `0x0048A766`) or
+   * `CivilianUpdateOnCarrier`, builds the captors and returns. `[proved]`
+   *
+   * It matters because the objects an `Init` makes are reached later in the
+   * same walk: a civilian's captors run their `Init`s -- the ones that count
+   * them into `g_enemies_alive` -- after hers. Updated in the same pass, she
+   * tested her "wait while enemies are alive" with the count still at zero
+   * and was rescued on the frame she appeared.
+   */
+  firstUpdateNextWalk?: boolean;
+  /**
    * Can this actor be hurt at all, right now?
    *
    * Class 0x10's answer is `sub.onShotScript < 0` — a civilian with no on-shot

@@ -801,6 +801,12 @@ export interface CharacterPlacement {
   class33?: {
     slot: number;
     shot_mesh: number;
+    /**
+     * {@link shot_mesh} resolved to its `coli.blobs` key -- the blob
+     * `ShotTestMesh` traces stage 2's two boats through -- or `null` for
+     * `-1` and for a pointer that lands on no blob.
+     */
+    shot_blob?: string | null;
     shot_radius: number;
     path: number;
     path_end: number;

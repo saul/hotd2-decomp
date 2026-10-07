@@ -37,9 +37,9 @@ the same commit.
 ### Registered classes with pieces missing
 
 * **`0x10` civilian** -- `CivilianUpdateOnCarrier`'s hand-back arm
-  (`0x0048B160`); `SpawnCivilianBloodPool` (`FUN_0048E080`, its object's
-  update unread); VM ops `0x23`, `0x24`, `0x25` and `0x2B`'s two words
-  (`[open]`); op `0x1F`'s second stream.
+  (`0x0048B160`); the head look at `sub+0x8C` (the shot arm's reset of it to
+  6 has nothing to write); VM ops `0x23`, `0x24`, `0x25` and `0x2B`'s two
+  words (`[open]`); op `0x1F`'s second stream.
 * **`0x20` one-hit target** -- the damaged-part swap.
 * **`0x21` rescue target** -- the sixteen body parts.
 * **`0x25` scripted humanoid** -- `ScriptedHumanoidAimHeadAtCamera`
@@ -52,10 +52,6 @@ the same commit.
   and `ZombieSplitInTwo` (`FUN_0045D9F0`, which `game:split_unreachable`
   holds unreachable); `ZombieCorpsePoseFrame` (`FUN_00454E00`); five bone-cel
   arms; the `0x10000000` bit `class30/emerge.ts` clears.
-* **`0x33` scripted scenery** -- every selector runs; the carrier's
-  (selector 1's) `RegisterForShotTest` at `0x004334D0` and the
-  `MatrixStore(obj+0x150)` the mesh shot test would read. `[open]`: what
-  takes selector 7's object away, since its own despawn test never passes.
 * **`0x41` prop placer** -- the score pickup's light set is recorded with
   its draw and not yet lit by: `render/breakables.ts`'s group is no lighting
   root, for any prop. Constructor 26's and the canal water's slots are

@@ -2,14 +2,15 @@ import type { CharactersJson } from "../../src/bundle";
 import { Rng } from "../../src/core/rng";
 import { Events } from "../../src/core/events";
 import { ActorSpawn, GameUpdate } from "../../src/game/director";
-import { ShotTestListReset } from "../../src/game/combat/shot_test";
+import { ProcessPlayerShotsTestList, ShotTestListReset } from "../../src/game/combat/shot_test";
+import { QueueShotRequest } from "../../src/game/combat/shot";
 import {
   G, HIT_SLOT_NONE, ResetGameGlobals, ResetSceneOnEnter,
 } from "../../src/game/globals";
 import { NULL_HOST } from "../../src/game/host";
 import { AnglesToward, SpriteEffectKind } from "../../src/game/effects/sprite";
-import { SetGameTables } from "../../src/game/tables";
-import { ColiPublishDynamicList } from "../../src/game/coli";
+import { SetGameTables, T } from "../../src/game/tables";
+import { ColiPublishDynamicList, ColiTraceSegmentAllSets } from "../../src/game/coli";
 import { MotionRow, ZombieState } from "../../src/game/class30/states";
 import { ZombieStateHoldAtRange } from "../../src/game/class30/hold";
 import { ActorPlayHitVoice, ActorVoice }
@@ -34,7 +35,8 @@ import {
 } from "../../src/game/matrix";
 import { RunPendingInits, SpawnSlotActors } from "../../src/game/director";
 import {
-  check, TYPE, CHARS, SCENE_MAJOR_PLAYING, spawnZombie, EnterPlay,
+  check, TYPE, CHARS, SCENE_MAJOR_PLAYING, spawnZombie, EnterPlay, coliQuad,
+  scene,
 } from "./harness";
 
 /**
@@ -1697,5 +1699,102 @@ console.log("\nclass 0x33 selector 5: the effect a camera frame sets off:");
 
   // Put the fixture back: everything after this expects `CHARS` with no
   // placements and no combat table.
+  SetGameTables(CHARS);
+}
+
+// -- class 0x33 selector 1: the carrier in the shot test ---------------------
+
+console.log("\nclass 0x33 selector 1: the carrier is shot as the engine files it:");
+{
+  // Stage 2's `0x12590` boat, slot 0x1A35 drawn at 2.5, with a blob: one
+  // quad facing +z at z = 0 in the boat's own space, x -10..10, y -5..5.
+  const BOAT_BLOB = coliQuad([0, 0, 1, 0], 2,
+                             [10, 5, 0, -10, 5, 0, -10, -5, 0, 10, -5, 0], 53);
+  const BOAT = {
+    slot: 0x1a35, shot_mesh: 0x0cec69a8, shot_blob: "boat", shot_radius: 0,
+    path: 338, path_end: 420, effect_frame: -1,
+    commit_frame: 360, despawn_frame: -1,
+    commit_flag: 0xff, despawn_flag: 128,
+    effect: [0, 0, -0.9, 4.8, 2.5, 0],
+  };
+  // The boat rides to (100, 0, 200), unturned; a point on its quad at local
+  // (2, 1, 0) is world (105, 2.5, 200) through the 2.5 scale.
+  const W = { x: 105, y: 2.5, z: 200 };
+  const EYE = { x: 105, y: 2.5, z: 240 };
+  const ray = { origin: EYE, dir: { x: 0, y: 0, z: -1 } };
+  const host = {
+    ...NULL_HOST,
+    pickShot: () => null,
+    objectPath: () => ({ x: 100, y: 0, z: 200, pitch: 0, yaw: 0, roll: 0 }),
+    viewSpaceOfPoint: (p: { x: number; y: number; z: number },
+                       out: { x: number; y: number; z: number }) => {
+      out.x = p.x - EYE.x; out.y = p.y - EYE.y; out.z = p.z - EYE.z;
+      return true;
+    },
+  };
+  const rng = new Rng(0x3301);
+  const events = scene(0, rng);
+  T.coli = { files: ["test"], blobs: { boat: BOAT_BLOB } } as never;
+  G.g_coli_full_set = [];
+  G.g_camera_fixed_eye_y = -999;
+  G.g_cam_path_frame = 350;
+  const boat = ActorSpawn(0x12590, SpawnClass.ScriptedScenery, -1, "boat",
+                          { class33: BOAT as Actor["class33"],
+                            hp: ScriptedScenerySelector.Carrier,
+                            maxHp: ScriptedScenerySelector.Carrier }, rng);
+  boat.visible = true;
+  GameUpdate(1 / 60, host, rng, events);
+  const m = boat.coliMatrix;
+  check("the seat's mesh arm: 0x80000051, and obj+0x14C's blob",
+        ((boat.flags & 0x80000051) >>> 0) === 0x80000051
+        && boat.coliBlob === "boat",
+        `0x${(boat.flags >>> 0).toString(16)} ${boat.coliBlob}`);
+  check("the draw's MatrixStore(obj+0x150) is the model's matrix, scale and "
+        + "all, and RegisterForShotTest files the boat",
+        !!m && Math.abs(m[0] - 2.5) < 1e-9 && m[3] === 100 && m[11] === 200
+        && G.g_shot_test_list.some((e) => e.at === boat.at),
+        `${JSON.stringify(m)} ${JSON.stringify(G.g_shot_test_list)}`);
+  const hit = ProcessPlayerShotsTestList(ray, host);
+  check("a shot at the boat's quad stops on it: the boat, whole, surface 53",
+        hit?.at === boat.at && hit.whole && hit.mesh?.surface === 53
+        && Math.hypot(hit.point.x - W.x, hit.point.y - W.y,
+                      hit.point.z - W.z) < 1e-6,
+        JSON.stringify(hit));
+  const resolved: { kind: string }[] = [];
+  events.on("shot.resolved", (x) => resolved.push(x));
+  QueueShotRequest(0, ray);
+  GameUpdate(1 / 60, host, rng, events);
+  check("...and the pull marks it and nothing else: bit 3, no damage, "
+        + "still riding",
+        resolved.length === 1 && resolved[0].kind === "marked"
+        && (boat.flags & ActorFlag.Hit) !== 0 && !boat.dead
+        && !boat.despawned,
+        `${JSON.stringify(resolved)} 0x${(boat.flags >>> 0).toString(16)}`);
+  // Bit 31 is what both moving-object passes refuse: published, the boat is
+  // still no wall.
+  check("bit 31 keeps the published boat out of the moving-object passes",
+        G.g_coli_dynamic_list.some((e) => e.at === boat.at)
+        && !ColiTraceSegmentAllSets(W.x, W.y, W.z - 5, W.x, W.y, W.z + 20));
+
+  // Stage 5's car: no blob, so the sphere -- 0.1 round obj+0x70.
+  const events5 = scene(0, rng);
+  G.g_cam_path_frame = 231;
+  const car = ActorSpawn(0x1ce4, SpawnClass.ScriptedScenery, -1, "car",
+                         { class33: { ...BOAT, slot: 0x1b0e, shot_mesh: -1,
+                                      shot_blob: null, shot_radius: 0.1,
+                                      despawn_frame: 650,
+                                      despawn_flag: 0xff } as Actor["class33"],
+                           hp: ScriptedScenerySelector.Carrier,
+                           maxHp: ScriptedScenerySelector.Carrier }, rng);
+  car.visible = true;
+  GameUpdate(1 / 60, host, rng, events5);
+  const carHit = ProcessPlayerShotsTestList(
+    { origin: { x: 95, y: 0, z: 240 }, dir: { x: 0, y: 0, z: -1 } }, host);
+  check("stage 5's car files the sphere arm at its own origin, 0.1 round",
+        (car.flags & 0x10) === 0 && car.hitRadius === 0.1
+        && car.shotCentre.x === 95 && car.shotCentre.z === 200
+        && carHit?.at === car.at && carHit.whole,
+        `${car.shotCentre.x},${car.shotCentre.z} ${JSON.stringify(carHit)}`);
+  T.coli = null;
   SetGameTables(CHARS);
 }

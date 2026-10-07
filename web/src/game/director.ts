@@ -47,6 +47,7 @@ import { RunPhaseDispatch } from "./run_phase";
 import { ShotEffectsTick } from "./effects/tick";
 import { BossHpBarsTick } from "./boss_hp_bar";
 import { LifeGrantedMarkersTick } from "./class10/life_marker";
+import { CivilianHitMarkersTick } from "./class10/hit_marker";
 import { BossBannersTick } from "./boss_banner";
 import { WaterWaveSourcesTick } from "./class17";
 import { Boss4HitMarksTick } from "./class19/hit_mark";
@@ -1190,6 +1191,10 @@ function SceneTaskWalk(dt: number, host: GameHost,
   // the first is drawn on the frame the life is paid. See
   // `game/class10/life_marker.ts`.
   LifeGrantedMarkersTick();
+  // ...and the markers a shot civilian leaves (`SpawnCivilianHitMarker`,
+  // `FUN_0048E080`), allocated by her update's shot arm the same way. See
+  // `game/class10/hit_marker.ts`.
+  CivilianHitMarkersTick();
   // ...and the marks the stage-4 boss's flesh hits leave, which
   // `Boss4SpawnBoneHitMark` (`FUN_004920C0`) allocates during the fight --
   // after the bar, so after it in the walk.

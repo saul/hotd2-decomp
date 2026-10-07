@@ -2232,3 +2232,55 @@ console.log("class 0x30's weapon: the same three calls:");
     check("shot down (state 3) it is not filed", filed(w.id).length === 0);
   }
 }
+
+console.log("\na knife stuck to the screen: its point follows the camera, its angles do not");
+{
+  // BUGS.md asked whether a lodged knife should turn with the camera. In the
+  // exe it does not. `ThrownWeaponFlyToTarget` (`FUN_0044FD40`)'s stick and
+  // blink arms (`0x0044FF7D`, `0x0044FFC5`) re-aim the **point** every frame
+  // -- `AimThrownWeapon` (`FUN_004503D0`) into `obj+0x13C0..C8`, copied to
+  // `obj+0x40..0x48` -- and write none of `obj+0x64`/`+0x68`/`+0x6C`, which
+  // the landing set once; `ThrownWeaponUpdate` (`FUN_00450780`) draws them as
+  // world angles under the current camera. So when the camera yaws, the knife
+  // stays on the same spot of the screen and turns against it. `[proved]`
+  // This pins that, so it is not "fixed" into something the game never did.
+  const look = (yaw: number) => {
+    const w2v = MatIdentity();
+    MatrixRotateY(w2v, yaw);
+    const v2w = MatIdentity();
+    MatrixRotateY(v2w, (-yaw) & 0xffff);
+    return { w2v, v2w };
+  };
+  ResetGameGlobals();
+  G.g_max_attackers = 1;
+  const w = ThrownWeaponAlloc(ThrownWeaponRoutine.Thrower);
+  w.slot = 0x1fe1;
+  w.hand = 8;
+  w.flags = THROWN_WEAPON_SPAWN_FLAGS;
+  w.drawFlags = THROWN_WEAPON_DRAW_FLAGS;
+  w.spinRate = THROWN_WEAPON_SPIN;
+  w.attackPermit = 0;
+  w.pos = vec3(0, 5, 54);
+  w.target = vec3(0, 0, -4);
+  G.g_thrown_weapons.push(w);
+  let cam = look(0);
+  const frame = (): ThrownWeaponFrame => ({ cam, host: NULL_HOST,
+                                            rng: new Rng(9) });
+  for (let n = 0; n < 200 && w.sub !== FlySub.Stick; n++) {
+    ThrownWeaponPoolUpdate(frame());
+  }
+  const landed = { rx: w.rx, ry: w.ry, rz: w.rz };
+  // The camera turns a quarter, and the weapon runs on stuck.
+  cam = look(0x4000);
+  ThrownWeaponPoolUpdate(frame());
+  const want = vec3();
+  MatrixTransformPoint(cam.v2w, vec3(0, 0, -4), want);
+  check("stuck, the knife's point is four units down the camera that turned",
+        w.sub === FlySub.Stick && Math.abs(w.pos.x - want.x) < 1e-4
+        && Math.abs(w.pos.z - want.z) < 1e-4,
+        `sub ${w.sub} pos ${w.pos.x.toFixed(2)},${w.pos.z.toFixed(2)} `
+        + `want ${want.x.toFixed(2)},${want.z.toFixed(2)}`);
+  check("...and its three angles are the landing's, unturned",
+        w.rx === landed.rx && w.ry === landed.ry && w.rz === landed.rz,
+        `${w.rx},${w.ry},${w.rz} vs ${landed.rx},${landed.ry},${landed.rz}`);
+}

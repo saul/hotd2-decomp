@@ -108,13 +108,14 @@ export const MOUSE_REMOVE_FLAG: Partial<Record<number, number>> = {
 };
 
 /**
- * Where each subtype's flight ends, spelled as three immediates in three
- * `switch` arms rather than as a table — subtype 2 runs until its **z** falls
+ * Where each subtype's flight ends: three float32s, one per `switch` arm, at
+ * `0x00564458` (subtype 2's `z`, `c4f2999a`), `0x00564454` (3's `x`, -87.0)
+ * and `0x00564450` (4's `x`, -184.0) -- subtype 2 runs until its **z** falls
  * below the bound, 3 and 4 until their **x** passes theirs in opposite
  * directions.
  */
 export const MOUSE_FLEE_BOUND: Partial<Record<number, number>> = {
-  2: -1940.8, 3: -87.0, 4: -184.0,
+  2: Math.fround(-1940.8), 3: -87.0, 4: -184.0,
 };
 
 /** The ten frames of `mouse.bin`, as asset slots. */
@@ -122,8 +123,8 @@ export const MOUSE_FIRST_SLOT = 0x1385;
 export const MOUSE_LAST_SLOT = 0x138e;
 export const MOUSE_FRAMES = 10;
 
-/** `sub+0x0C` — the only speed the class has, in units a frame. */
-export const MOUSE_SPEED = 0.4;
+/** `sub+0x0C` — the only speed the class has, in units a frame: `0x3ECCCCCD`. */
+export const MOUSE_SPEED = Math.fround(0.4);
 /**
  * The width of each of the two draws the turn is built from — `rand() & 0xFFF`.
  *
@@ -161,13 +162,23 @@ const BAMS = (Math.PI * 2) / 65536;
  * here, because three copies of a velocity is how one of them ends up with a
  * different speed.
  *
- * The signs are the port's world convention, which negates both terms — the
- * same `(-sin, -cos)` `class30`'s facing uses.
+ * **Both terms positive**, as all three copies are: `FILD [EDI+0x68]; FMUL
+ * [0x004C4370]; FSIN; FMUL [ESI+0xC]; FSTP [ESI]` and the same with `FCOS`
+ * into `[ESI+0x8]` (`0x0043F591`, `0x0043F61E`, `0x0043F7BC`), no `FCHS`
+ * anywhere. The draw is `MatrixRotateY(obj+0x68)`, which carries the model's
+ * `+Z` onto `(sin yaw, cos yaw)` (`VecAimXAxisYThenZ`'s reading of the same
+ * matrix), so the mouse runs the way it faces. This used to negate both terms
+ * as "the port's world convention" -- there is none; positions are the
+ * engine's own -- and every mouse ran backwards, and every trigger fled away
+ * from the bound that stops it: stage 4 block 10's subtype 3 starts at
+ * `x = -110.2` facing 14848 and must pass `-87`, its subtype 4 at `-163.2`
+ * facing 53248 must pass `-184`, and stage 2's subtype 2 faces 32768 and must
+ * pass `z = -1940.8`. Each is a float32 store.
  */
 function MouseSetVelocityFromYaw(obj: Actor, sub: MouseTail): void {
   const r = obj.yaw * BAMS;
-  sub.vx = -Math.sin(r) * sub.speed;
-  sub.vz = -Math.cos(r) * sub.speed;
+  sub.vx = Math.fround(Math.sin(r) * sub.speed);
+  sub.vz = Math.fround(Math.cos(r) * sub.speed);
 }
 
 /** `sub->+0x20 += 1`, wrapping past `+0x22` back to `+0x24`. */
@@ -266,8 +277,9 @@ export function MouseWanderUpdate(obj: Actor, f: ClassFrame): void {
   const sub = Tail(obj);
   if (!sub) return;
   if (sub.state === MouseState.Run) {
-    obj.pos.x += sub.vx;
-    obj.pos.z += sub.vz;
+    // `FLD [ESI]; FADD [EDI+0x40]; FSTP [EDI+0x40]`: float32 stores.
+    obj.pos.x = Math.fround(obj.pos.x + sub.vx);
+    obj.pos.z = Math.fround(obj.pos.z + sub.vz);
     MouseAdvanceStrip(sub);
     if (sub.life % 100 === 99 && f.rng.int(10) < 4) {
       sub.state = MouseState.Pause;
@@ -362,11 +374,14 @@ export function MouseBranchTriggerUpdate(obj: Actor, host: GameHost): void {
     case MouseState.FleeSubtype2:
     case MouseState.FleeSubtype3:
     case MouseState.FleeSubtype4: {
-      obj.pos.x += sub.vx;
-      obj.pos.z += sub.vz;
+      obj.pos.x = Math.fround(obj.pos.x + sub.vx);
+      // Subtype 2 compares the sum still on the FPU stack (`FST [EDI+0x48];
+      // FCOMP [0x00564458]` at `0x0043F829`); 3 and 4 reload the stored x.
+      const z = obj.pos.z + sub.vz;
+      obj.pos.z = Math.fround(z);
       const bound = MOUSE_FLEE_BOUND[sub.subtype];
       if (bound !== undefined) {
-        const past = sub.subtype === 2 ? obj.pos.z < bound
+        const past = sub.subtype === 2 ? z < bound
           : sub.subtype === 3 ? bound < obj.pos.x
           : obj.pos.x < bound;
         if (past) sub.state = MouseState.Stopped;

@@ -15,7 +15,7 @@ import { ActorFlag, type Actor } from "../../src/game/actor";
 import { ENEMY_CLASSES, g_class_handlers } from "../../src/game/registry";
 import { SpawnClass } from "../../src/game/spawn_class";
 import { GameMode } from "../../src/game/game_mode";
-import { vec3 } from "../../src/game/vec";
+import { vec3, type Vec3 } from "../../src/game/vec";
 import type { ScriptJson } from "../../src/bundle";
 import { Walker } from "../../src/script/walker";
 import { ZombieAux } from "../../src/game/actor";
@@ -1182,27 +1182,62 @@ console.log("\nclasses 0x52 and 0x53, the two shootable triggers:");
           `${vx0},${vz0} -> ${c.mouse.vx},${c.mouse.vz}`);
   }
 
-  // The trigger's flight: shot, then the per-subtype bound, then stopped.
-  {
-    const a = triggerScene(SpawnClass.Mouse, { class52: { subtype: 3 } });
+  // The trigger's flight: shot, then the per-subtype bound, then stopped --
+  // from the shipped spawns, at their shipped yaws. `MouseInit` and the
+  // launch build the velocity as `(sin yaw, cos yaw) * 0.4` with no `FCHS`
+  // (`0x0043F591`, `0x0043F7BC`), and `MatrixRotateY` (`0x004A9AE0`, the
+  // matrix `MouseBranchTriggerUpdate` draws under) carries the model's +Z
+  // onto that same `(sin, cos)`: the mouse runs the way it faces, and each
+  // bound lies ahead of it. The port negated both terms, so every mouse ran
+  // backwards and a trigger fled away from the bound that ends its flight.
+  for (const [sub, pos, yaw, axis, bound, label] of [
+    [2, vec3(-1227.4, 120.4, -1917.6), 32768, "z", -1940.8,
+     "stage 2 block 18's subtype 2"],
+    [3, vec3(-110.2, -118, -578.4), 14848, "x", -87,
+     "stage 4 block 10's subtype 3"],
+    [4, vec3(-163.2, -118, -568.4), 53248, "x", -184,
+     "stage 4 block 10's subtype 4"],
+  ] as [number, Vec3, number, "x" | "z", number, string][]) {
+    const a = triggerScene(SpawnClass.Mouse,
+                           { class52: { subtype: sub }, pos, yaw });
     if (a.cls !== SpawnClass.Mouse) throw new Error("not class 0x52");
-    a.pos = vec3(-500, 0, 0);
-    a.yaw = 0x4000;                    // -x in the port's world convention
     MarkActorShot(a, 0, 0);
     MouseBranchTriggerUpdate(a, NULL_HOST);
-    check("the shot writes the route and starts the flight",
-          G.g_script_branch_var === 1 && a.mouse.state === MouseState.Pause,
-          `var ${G.g_script_branch_var} state ${a.mouse.state}`);
     MouseBranchTriggerUpdate(a, NULL_HOST);
-    check("...which resolves to subtype 3's own arm",
-          a.mouse.state === MouseState.FleeSubtype3, String(a.mouse.state));
-    const x0 = a.pos.x;
+    const r = yaw * Math.PI * 2 / 65536;
+    const step = (axis === "x" ? Math.sin(r) : Math.cos(r)) * 0.4;
+    const frames = Math.ceil((bound - pos[axis]) / step);
+    const x0 = a.pos.x, z0 = a.pos.z;
     MouseBranchTriggerUpdate(a, NULL_HOST);
-    check("...and it moves", a.pos.x !== x0, `${x0} -> ${a.pos.x}`);
-    a.pos.x = -80;                     // past subtype 3's bound of -87
-    MouseBranchTriggerUpdate(a, NULL_HOST);
-    check("...until it passes its bound, and then stops",
-          a.mouse.state === MouseState.Stopped, String(a.mouse.state));
+    check(`${label} runs along its own +Z, (sin, cos) of ${yaw}`,
+          a.mouse.state === sub
+          && Math.abs(a.pos.x - x0 - Math.sin(r) * 0.4) < 1e-4
+          && Math.abs(a.pos.z - z0 - Math.cos(r) * 0.4) < 1e-4,
+          `state ${a.mouse.state} moved ${a.pos.x - x0},${a.pos.z - z0}`);
+    let n = 1;
+    while (a.mouse.state !== MouseState.Stopped && n < 1000) {
+      MouseBranchTriggerUpdate(a, NULL_HOST);
+      n += 1;
+    }
+    check(`...and stops past ${axis} = ${bound} after the ${frames} frames `
+          + "the distance takes", a.mouse.state === MouseState.Stopped
+          && Math.abs(n - frames) <= 1,
+          `after ${n}, ${axis} = ${a.pos[axis]}`);
+  }
+
+  // A wanderer too: stage 1 block 1's mouse at 8192 (45 degrees) runs
+  // toward +x and +z, not back toward -x and -z.
+  {
+    const a = triggerScene(SpawnClass.Mouse,
+                           { class52: { subtype: 0 }, pos: vec3(16.2, 6.2, -34.4),
+                             yaw: 8192 }, GameMode.Arcade);
+    if (a.cls !== SpawnClass.Mouse) throw new Error("not class 0x52");
+    const x0 = a.pos.x, z0 = a.pos.z;
+    tick(a);
+    const d = 0.4 * Math.SQRT1_2;
+    check("a wandering mouse runs the way it is drawn facing",
+          Math.abs(a.pos.x - x0 - d) < 1e-4 && Math.abs(a.pos.z - z0 - d) < 1e-4,
+          `moved ${a.pos.x - x0},${a.pos.z - z0}`);
   }
 
   // Each trigger subtype has its own removal flag, tested before the switch.

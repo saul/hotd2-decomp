@@ -2865,6 +2865,138 @@ console.log("\ncivilian attachments: the face swaps, the hair is added");
 }
 
 /**
+ * **A talking head that is several meshes keeps its head.**
+ *
+ * Bug: "sometimes when characters are speaking their whole head disappears".
+ * glTF loads a bone node with more than one primitive as a `Group` of meshes
+ * -- every player character's head is one, nine meshes for `char_adv05` --
+ * and `swapGore` shows a cel on such a bone by hiding the bone's own meshes
+ * and hanging a clone of the cel beside them. When the hook drew the head's
+ * own record again, the layer called `restoreGore`, which took the clone off
+ * and **never showed the hidden meshes again**: after the first line, and
+ * after every blink, the head was gone. The same swap hid an accessory hung
+ * on the bone, which `ActorDrawAttachedParts` (`FUN_004124F0`) draws with no
+ * gate at all.
+ */
+console.log("\na multi-mesh head through a mouth cel and back: nothing goes missing");
+{
+  const { CharacterLayer } = await import("../src/render/characters");
+  const { RunPendingInits, SpawnScriptedCharacters } =
+    await import("../src/game/director");
+  const { G, ResetGameGlobals } = await import("../src/game/globals");
+  const { SetGameTables } = await import("../src/game/tables");
+  const { BoxGeometry, Mesh, MeshBasicMaterial, Object3D } =
+    await import("three");
+
+  const TYPE = {
+    type: 0x3d, name: "player_gold", file: "player_gold.bin", bone_count: 2,
+    actor_radius: 10,
+    bones: [
+      { bone: 1, part: "bone01_0d20", slot: 0x0d20, offset: [0, 0, 0],
+        parent: null, damage_rank: [], hit_radius: 2, steps: [] },
+      { bone: 2, part: "bone02_0d27", slot: 0x0d27, offset: [0, 0, 0],
+        parent: 0, damage_rank: [], hit_radius: 2, steps: [] },
+    ],
+    reactions: {}, attacks: {},
+    motions: {
+      "660": { bank: "people", frames: 1, fps: 30, root: [0, 0, 0],
+               rot: [0, 0, 0, 0, 0, 0, 0, 0, 0], play: 0 },
+    },
+  };
+  const RECORDS = [] as { bone: number; slot: number }[];
+  for (let i = 0; i < 0x40; i++) RECORDS.push({ bone: -1, slot: 0 });
+  RECORDS[0x33] = { bone: 2, slot: 0x11dd };
+  const PLACE = {
+    at: 0x8b74, class: 0x10, char_type: 0x3d, motion: 660, hp: 0, yaw: 0,
+    body_condition: 0, initial_state: 0, attack_state: 0, ring_set: 0,
+    attachments: [0x33],
+  };
+  const CHARS = {
+    types: { "61": TYPE }, placements: [PLACE],
+    attachments: RECORDS, attachment_replaces_below: 0x24,
+    approach: { rings: [{ inner: 25, mid: 38, outer: 51 }],
+                steps: { base: 2, mid_add: 3, outer_add: 4 },
+                ring_set_for_char0: 1 },
+    difficulty: { hp_delta: [0, 0, 0, 0, 0], hp_min: 1, hp_max: 300,
+                  initial_rank: [0, 0, 2, 0, 0], default: 2 },
+  };
+  const template = (slot: number): InstanceType<typeof Object3D> => {
+    const n = new Mesh(new BoxGeometry(1, 1, 1), new MeshBasicMaterial());
+    const s = slot.toString(16).padStart(4, "0");
+    n.name = `gore_player_gold_fixed000_gore_${s}`;
+    n.userData = { hod2_kind: "rig_part", hod2_rig: "gore_player_gold",
+                   hod2_part: `gore_${s}` };
+    return n;
+  };
+
+  const root = new Object3D();
+  const rig = new Object3D();
+  rig.name = "chr_player_gold_spawn000";
+  rig.userData = { hod2_kind: "rig", hod2_rig: "chr_player_gold",
+                   hod2_spawn_at: 0x8b74 };
+  const torso = new Object3D();
+  torso.name = "chr_player_gold_spawn000_bone01_0d20";
+  // The head as glTF loads a node with two primitives: a group of meshes.
+  const head = new Object3D();
+  head.name = "chr_player_gold_spawn000_bone02_0d27";
+  const face = new Mesh(new BoxGeometry(1, 1, 1), new MeshBasicMaterial());
+  const hair = new Mesh(new BoxGeometry(1, 1, 1), new MeshBasicMaterial());
+  head.add(face, hair);
+  torso.add(head);
+  rig.add(torso);
+  root.add(rig);
+  const gore = new Object3D();
+  gore.name = "gore_player_gold_fixed000";
+  gore.userData = { hod2_kind: "rig", hod2_rig: "gore_player_gold" };
+  gore.add(template(0x11dd));
+  gore.add(template(0x0d28));      // player_gold.bin[6], his first mouth cel
+  root.add(gore);
+
+  ResetGameGlobals();
+  SetGameTables(CHARS as never);
+  G.g_difficulty = 2;
+  const chars = new CharacterLayer();
+  const stage = new Scope("stage");
+  chars.build(root, stage, CHARS as never);
+  const made = SpawnScriptedCharacters(chars.readySpawns([{ at: 0x8b74 }]));
+  RunPendingInits();
+  const a = made[0];
+  a.visible = true;
+  chars.syncSpawns([{ at: 0x8b74 }], made);
+  chars.update({} as never);
+
+  const own = () => face.visible && hair.visible;
+  const hat = () => head.children.find((c) => c.name.includes("11dd"));
+  const cel = () => head.children.filter((c) => c.name.includes("0d28")
+                                           && c.visible).length;
+  check("the multi-mesh head shows its own meshes and its accessory",
+        own() && !!hat()?.visible, `own ${own()}, hat ${hat()?.visible}`);
+
+  a.nodeDrawSlot[2] = 0x0d28;
+  chars.update({} as never);
+  check("a mouth cel hides the head's own meshes and shows the cel",
+        !face.visible && !hair.visible && cel() === 1, `cel ${cel()}`);
+  check("...and leaves the accessory on",
+        !!hat()?.visible, `hat ${hat()?.visible}`);
+
+  a.nodeDrawSlot[2] = 0x0d27;
+  chars.update({} as never);
+  check("drawn as its record again, the head's own meshes come back",
+        own() && cel() === 0, `own ${own()}, cel ${cel()}`);
+  check("...with the accessory still on", !!hat()?.visible,
+        `hat ${hat()?.visible}`);
+
+  // Through it twice, as a blink does every hundred and fifty frames.
+  a.nodeDrawSlot[2] = 0x0d28;
+  chars.update({} as never);
+  a.nodeDrawSlot[2] = 0x0d27;
+  chars.update({} as never);
+  check("and a second time round", own() && cel() === 0 && !!hat()?.visible,
+        `own ${own()}, cel ${cel()}, hat ${hat()?.visible}`);
+  stage.dispose();
+}
+
+/**
  * **Where a civilian holds her item, and that she lets go of it.**
  *
  * Bug: "rescued civilians don't have the item they present to you in

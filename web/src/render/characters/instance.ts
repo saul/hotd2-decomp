@@ -38,6 +38,12 @@ export interface GoreSwap {
   keep: Mesh | null;
   /** Nodes the swap parented to the bone. Removed when it is undone. */
   added: Object3D[];
+  /**
+   * A multi-primitive bone's own primitives the first swap hid, shown again
+   * when it is undone. Absent for a single-primitive bone, which hides
+   * nothing.
+   */
+  hidden?: Object3D[];
 }
 
 export interface Instance {

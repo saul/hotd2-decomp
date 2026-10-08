@@ -17,6 +17,7 @@ import type { Rng } from "../../core/rng";
 import type { CharacterBone, CharacterType } from "../../bundle";
 import { ActorFlag, DamageZone, ZombieFlag2, type Actor } from "../actor";
 import { AppState, G } from "../globals";
+import { GameMode } from "../game_mode";
 import { CameraBlockYaw } from "../camera/view";
 import { SpawnClass } from "../spawn_class";
 import { ZombieState } from "../class30/states";
@@ -646,8 +647,15 @@ const RELEASE_CREATURE_BONE = 1;
 const RELEASE_CREATURE_SCORE = 0x50;
 
 /**
- * `ChooseDeathMotionDirectional` — `FUN_00456220`: the camera block's yaw
- * less the actor's, against four ±45° arcs.
+ * The arc half of `ChooseDeathMotionDirectional` (`FUN_00456220`): the camera
+ * block's yaw less the actor's, against four ±45° arcs, and the clip the last
+ * arc that holds names.
+ *
+ * `[port-only]` as a function. The routine itself -- which sets each arc's
+ * clip as it tests it and then remaps the result through `obj+0x136C` -- is
+ * class 0x30's, and is ported in `class30/death.ts` on top of this. The
+ * shared death clip the port gives the classes with no death machine of their
+ * own reads the pick alone.
  *
  * ```
  * 00456248  rel = (g_camera_block_yaw_bams[g_camera_index] - obj+0x68) & 0xFFFF
@@ -673,8 +681,7 @@ const RELEASE_CREATURE_SCORE = 0x50;
  * `hod2lib/combat.ts`, which explains why those labels depend on two
  * conventions at once and why the *data* is the reliable half.
  */
-export function ChooseDeathMotionDirectional(obj: Actor,
-                                             rng: Rng): number | undefined {
+export function DeathArcMotion(obj: Actor, rng: Rng): number | undefined {
   const d = T.chars?.deaths;
   if (!d || !d.front?.length) return undefined;
   const rel = (CameraBlockYaw(G.g_camera_index) - obj.yaw) & 0xffff;
@@ -862,6 +869,22 @@ export function ResolveHit(obj: Actor, bone: number,
 
   // `damage = table + DamageRankModifier(bone)`, floored at zero.
   let damage = Math.max(0, (step?.[2] ?? 0) + DamageRankModifier(b));
+  // Original Mode's weapon (`004094C8`..`00409527`). BULLET BLOW's -1.0
+  // (`CMP [EDX*4 + 0x9a224c], 0xbf800000`) makes the damage the actor's own
+  // hit points, `obj+0x11C`: one hit kills whatever the tables say. Any
+  // other scale multiplies (`FILD` / `FMUL [EDX+0xC]`), by 4.0 again under
+  // LIFE 1/4 (`CMP AL, 1` on `0x009C88A9`, `FMUL [0x004C4CA0]`), and
+  // `__ftol` truncates.
+  if (G.g_GameMode === GameMode.Original) {
+    const scale = G.g_original_weapon_damage_scale[player] ?? 1;
+    if (scale === -1) {
+      damage = obj.hp;
+    } else {
+      let x = damage * Math.fround(scale);
+      if (G.g_original_quarter_life === 1) x *= 4.0;
+      damage = Math.trunc(x);
+    }
+  }
 
   let result = HitResultCode.None;
   let gore = false;
@@ -1105,7 +1128,7 @@ export function ResolveHit(obj: Actor, bone: number,
     // paid both players.
     obj.killedBy = player;
     if (!ownDeath) {
-      death = ChooseDeathMotionDirectional(obj, rng);
+      death = DeathArcMotion(obj, rng);
       if (death !== undefined && MotionOf(obj, death)) {
         obj.death = { motion: death, ticks: 0 };
       }
@@ -1234,7 +1257,7 @@ export function ActorKillAll(rng: Rng): KillAllResult {
     // Same rule as `ResolveHit` above: a class that runs its own death gets
     // its own clip, and the shared one would stop the clock it counts on.
     if (!g_class_handlers[obj.cls]?.updatesWhenDead) {
-      const death = ChooseDeathMotionDirectional(obj, rng);
+      const death = DeathArcMotion(obj, rng);
       if (death !== undefined && MotionOf(obj, death)) {
         obj.death = { motion: death, ticks: 0 };
       }

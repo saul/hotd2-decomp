@@ -150,9 +150,14 @@ export class BloodColourLayer implements System {
     const hit = this.swaps.get(src);
     if (hit) return hit;
     const img = src.image as
-      { width?: number; height?: number } | null | undefined;
+      { width?: number; height?: number; data?: unknown } | null | undefined;
     if (!img?.width || !img.height) return null;
-    const px = this.straightPixels(img as TexImageSource, img.width, img.height);
+    // A stage map is a `DataTexture` of the file's bytes already
+    // (`png_textures.ts`), and a copy of them is the whole job; the readback
+    // is for a map some other loader decoded.
+    const px = img.data instanceof Uint8Array
+      ? new Uint8Array(img.data)
+      : this.straightPixels(img as TexImageSource, img.width, img.height);
     if (!px) return null;
     transposeRedGreen(px);
     const out = new DataTexture(px, img.width, img.height, RGBAFormat,

@@ -53,6 +53,18 @@ export interface SpawnRecord {
  * block its instruction ran in, and the route the replay then left that block
  * by. What {@link ClassHandler.outlivedByReplay} is handed.
  */
+/**
+ * `[port-only]` The camera as a replay leaves it after an instruction, a wait
+ * it steps over or a block change: the path published, the frame it started
+ * the shot on, and the frame it published last. What
+ * {@link ClassHandler.followReplayCamera} is shown.
+ */
+export interface ReplayCamera {
+  slot: number;
+  startFrame: number;
+  frame: number;
+}
+
 export interface ReplaySpawnRecord extends SpawnRecord {
   /** The block whose instruction pushed the record. */
   block: number;
@@ -139,8 +151,13 @@ export interface ClassHandler {
    * An `Init` that draws or plays declares it by taking the parameter; the
    * eight that do neither still satisfy this type, because a function of fewer
    * arguments is assignable to one of more.
+   *
+   * `host` is here because one `Init` **seats its object on a path**:
+   * `ScriptedPropInit13` calls the behaviour once, and
+   * `PropBehaviourRideObjectPath` (`g_prop_behaviours[7]`) evaluates an `op_`
+   * curve, which only the host can.
    */
-  init(obj: Actor, rng?: Rng, events?: Events): void;
+  init(obj: Actor, rng?: Rng, events?: Events, host?: GameHost): void;
   /**
    * The class's `Update` — one call per 60 Hz frame.
    *
@@ -179,6 +196,37 @@ export interface ClassHandler {
    * engine's slots and swing-twist, which the shared clock does not model.
    */
   advancesOwnMotion?: boolean;
+  /**
+   * This class's `Init` installs its update and returns, so its first update
+   * is on the **next** walk.
+   *
+   * The handler `SpawnFromDescriptor` stores at `obj+0x00` is the `Init`;
+   * `TaskRunTree` calls whatever is there once a walk, so an `Init` that ends
+   * by writing its update over `obj+0x00` and returning has spent the
+   * object's call for this frame. The port's walk runs `init` and then
+   * `update` in one pass, which is right only for a class whose `Init` calls
+   * its own update. `CivilianInit` (`FUN_0048A3E0`) does not: it writes
+   * `CivilianUpdate` (`MOV dword ptr [ESI], 0x48A920` at `0x0048A766`) or
+   * `CivilianUpdateOnCarrier`, builds the captors and returns. `[proved]`
+   *
+   * It matters because the objects an `Init` makes are reached later in the
+   * same walk: a civilian's captors run their `Init`s -- the ones that count
+   * them into `g_enemies_alive` -- after hers. Updated in the same pass, she
+   * tested her "wait while enemies are alive" with the count still at zero
+   * and was rescued on the frame she appeared.
+   *
+   * Read for every row of `g_class_handler_pairs` (`0x00593358`) the port
+   * registers. `[proved]` Install and return: 0x10, 0x11, 0x12, 0x13, 0x14,
+   * 0x18, 0x19, 0x20, 0x30, 0x31, 0x32, 0x33, 0x51, 0x52, 0x53 -- each row
+   * cites its store. Call the update, then install it: 0x21, 0x22, 0x23,
+   * 0x24, 0x25, 0x26, 0x2B, 0x60, 0x63. The handler *is* the update: 0x27,
+   * 0x28, 0x29, 0x64, 0x6E. Classes 0x2D and 0x45 install routine after
+   * routine and keep the chain themselves; class 0x40's member `Init` is a
+   * routine of its own (`HordeKind.MemberInit`). The placers (0x15, 0x16,
+   * 0x17, 0x41..0x44, 0x46) kill themselves on the first walk and allocate
+   * their objects on update routines, which run on that same walk.
+   */
+  firstUpdateNextWalk?: boolean;
   /**
    * Can this actor be hurt at all, right now?
    *
@@ -308,6 +356,22 @@ export interface ClassHandler {
    * and only while replaying.
    */
   outlivedByReplay?(rec: ReplaySpawnRecord): boolean;
+  /**
+   * `[port-only]` A replay's camera, shown to a listed spawn record whose
+   * object runs on camera frames it tests for itself and **outlives** them --
+   * so that the object a seek rebuilds is the one the engine would hold at the
+   * landing, not a fresh one. *state* is the record's own scratch, kept on the
+   * walker's spawn entry (and saved with it); the class reads and writes it
+   * here and hands it to {@link resumeFromReplay}. Asked where
+   * {@link outlivedByReplay} is, before it, and only while replaying.
+   */
+  followReplayCamera?(rec: ReplaySpawnRecord, cam: ReplayCamera,
+                      state: Record<string, number>): void;
+  /**
+   * `[port-only]` Seat what {@link followReplayCamera} found on the object a
+   * replay's spawn list rebuilds, before its first update.
+   */
+  resumeFromReplay?(obj: Actor, state: Readonly<Record<string, number>>): void;
   /**
    * Describe one of this class's actors for the debug sidebar.
    *

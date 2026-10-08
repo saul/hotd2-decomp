@@ -88,9 +88,11 @@ export enum CameraHandBackVariant {
  * The rate of `0x200` is what makes a new shot's first turn nearly nothing:
  * `TurnLookAtToward` steps `1 / (1 + 512)` of the angle on the frame before
  * `ComputeLookAtAngleError` or the untracked constant replaces it. The two
- * players' flag bit 0 is the on-screen body, which the port does not draw.
+ * players' flag bit 0 is the on-screen body (`PlayerHookDrawBody`).
  */
 export function CameraResetForPathShot(): void {
+  G.g_player_flags[1] &= ~1;
+  G.g_player_flags[0] &= ~1;
   G.g_rail_frame = G.g_cam_path_frame;
   G.g_camera_index = 0;
   G.g_camera_free = 0;

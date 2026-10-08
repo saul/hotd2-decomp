@@ -14,9 +14,10 @@
  * (`L44`), frame by frame, and held to numbers from the EXE's tables
  * (`docs/re/stage-end.md`), never to the port's own output.
  *
- *   node tools/result_card.mjs --headless [--loud]
+ *   node tools/result_card.mjs --headless [--loud] [--shots]
  *
- * Screenshots across the flight go to `web/shots/result-card-*.png`.
+ * With `--shots`, screenshots across the flight go to
+ * `web/shots/result-card-*.png`; the verify run takes none.
  *
  * The first case plays in a 16:9 window, where a desktop fills the frame by
  * default: the card holds the 640x480 screen, so the frame is boxed to 4:3
@@ -101,12 +102,15 @@ async function runCase(c) {
     const before = await aspect();
     await page.keyboard.press("Space");
 
-    // The whole card, one frame at a time, in the page.
-    const trace = [];
-    for (let f = 1; f <= CARD_FRAMES + 10; f++) {
-      const row = await page.evaluate(async () => {
-        await globalThis.__hotd2Drive.advance(1);
-        const { G } = await import("/src/game/globals.ts");
+    // The whole card, one row a frame, taken in the page by the harness's
+    // stop condition -- which never stops: it is asked after every frame, so
+    // it reads each one, and the frames run 64 to a rAF rather than one
+    // (L104). The run is cut only where the page's layout is read (the
+    // frame's shape) or a screenshot is taken, both of which want the frame
+    // drawn.
+    await page.evaluate(async () => {
+      const { G } = await import("/src/game/globals.ts");
+      globalThis.__resultRow = () => {
         const figs = G.g_object_list.filter(
           (o) => o.cls === 0x61 && o.card && o.card.routine !== 0);
         const count = G.g_view_slot_draws.find(
@@ -130,13 +134,27 @@ async function runCase(c) {
                                    cursor: o.card.cursor, frozen: o.frozen })),
           at: globalThis.__hotd2Drive.now().a,
         };
-      });
-      trace[f] = row;
-      if (c.wide && [1, CARD_FRAMES - 1, CARD_FRAMES + 10].includes(f)) {
-        row.aspect = await aspect();
-      }
-      if (c.shots.includes(f)) {
-        await page.waitForTimeout(150);
+      };
+    });
+    const trace = [];
+    const last = CARD_FRAMES + 10;
+    const aspectAt = c.wide ? [1, CARD_FRAMES - 1, last] : [];
+    const shotAt = flag("shots") ? c.shots : [];
+    const cuts = [...new Set([...aspectAt, ...shotAt, last])].sort((a, b) => a - b);
+    let f = 0;
+    for (const cut of cuts) {
+      const rows = await page.evaluate(async (n) => {
+        const out = [];
+        await globalThis.__hotd2Drive.advance(n, () => {
+          out.push(globalThis.__resultRow());
+          return false;
+        });
+        return out;
+      }, cut - f);
+      for (const row of rows) trace[++f] = row;
+      if (f !== cut) throw new Error(`asked for frame ${cut}, ran to ${f}`);
+      if (aspectAt.includes(f)) trace[f].aspect = await aspect();
+      if (shotAt.includes(f)) {
         await page.evaluate(() => globalThis.__hotd2Drive.advance(0));
         await page.screenshot({
           path: join(SHOTS, `result-card-${c.name}-f${String(f).padStart(3, "0")}.png`) });

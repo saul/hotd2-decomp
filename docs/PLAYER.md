@@ -114,7 +114,8 @@ web/src/
                 shooting, lighting, fog, draw order, free roam, debug overlays
   audio/        bgm.ts (`PlaySoundId`'s dispatch and the mixer), stream.ts
                 (what channel 0xF plays, byte for byte)
-  hud/          hud.ts: the shutter bars, the caption, the screen sprites
+  hud/          hud.ts: the shutter bars and the screen sprites (the
+                subtitles' glyphs among them)
   ui/           React: App.tsx, the store, useSlice, ErrorBoundary, shortcuts,
                 panels/
 ```
@@ -289,6 +290,16 @@ What it is used for:
 a system is one `world.add(...)`. A layer ticked by hand is a layer outside
 `save`/`load`/`resync`.
 
+**A script's spawn is linked in the script phase and initialised in the
+walk.** `SpawnFromDescriptor` (`game/spawn.ts`) puts the object in the pool
+with `initPending` set and runs no `Init`; `SceneTaskWalk` runs it when the
+loop reaches the object, after the scene's own tasks -- the camera actor and
+the scene state's hook among them -- as `TaskRunTree` reaches an object the
+interpreter allocated at the tail of the scene list. So an `Init` reads the
+camera this frame publishes. `ActorSpawn` (link and `Init` at once) is for
+the objects a class makes itself and for tests; `RunPendingInits` is the
+paused frame's, which walks no tasks (`L104`).
+
 **One clock, one fixed tick, never skipped.** The simulation advances in whole
 60 Hz ticks — the walker and the port together, by exactly one. A drawn frame
 runs however many ticks the accumulator owes: one on a 60 Hz display, often
@@ -374,7 +385,7 @@ drives the queue with a stubbed `pickShot`.
 | **The VM** — program counter over block/step/op, dispatch, `executeOne`, `advanceStepOrRoute`, `goToBlock`, the branch | `walker.ts` |
 | **The opcodes**, each with its `status` (what the script panel shows) | `ops/*.ts`, one module per group, merged by `ops/index.ts` |
 | **Resumption** — the wait policies, the enemy gates, the skip request | `waits/*.ts`, one file per policy |
-| **Script-driven state** — channel tweens, the shutter's accessors | `state/channels.ts`, `state/shutter.ts` |
+| **Script-driven state** — the light-block opcodes' operands (the blocks themselves are `G`'s, `game/light_block.ts`), the shutter's accessors | `state/channels.ts`, `state/shutter.ts` |
 | **Seek** — a planner that drives the VM to a target, as a debugger does | `seek.ts` |
 
 The queued events and the camera actions are the engine's and live in `G`
@@ -479,12 +490,12 @@ the hook three times.
    registers a claim on its slice in an effect (never during render, which
    strict mode runs twice); `app/` asks `wants(slice)`.
 6. **One writer per pixel.** React renders every element. Where a layer writes
-   geometry — the shutter bars, the caption, the crosshair — React renders the
+   geometry — the shutter bars, the crosshair — React renders the
    node and hands it across through `UiHost`. Nothing under `web/src/` calls
    `appendChild` or its siblings.
 7. **State the script drives belongs to the script**, not the layer that
-   draws it: the caption's countdown is on `Walker`, the shutter's words are in
-   `G`, and `hud/` holds nothing.
+   draws it: the subtitle is a task in `G` (`game/dialogue.ts`), the shutter's
+   words are in `G`, and `hud/` holds nothing.
 
 Two rules need an AST, and `web/tools/verify_ui.mjs` (`npm run verify:ui`)
 holds them: `useSlice` selectors return fields, and `store.demand` is called
@@ -619,10 +630,20 @@ and **Clear cache**.
   the served bundle.
 * A stage neither holds is built on demand when the menu picks it, if an
   install is remembered.
-* **Sounds are fetched from the server** (`bgm/`, `se/`, `voice/` beside the
-  page), which finds them through the game directory a served manifest names.
-  A bundle built only in the browser therefore plays silently unless a server
-  supplies the sounds; `web/tools/first_visit.mjs` counts those requests.
+* **Sounds are fetched from the server**, which finds them through the game
+  directory a served manifest names: as AAC when `npm run sounds` has
+  encoded them (`sounds.json`, `clips.pack` and `bgm/*.m4a`, from
+  `extract/sound/` or `HOTD2_SOUND`), and as the install's WAVs (`bgm/`,
+  `se/`, `voice/` beside the page) otherwise. A bundle built only in the
+  browser therefore plays silently unless a server supplies the sounds;
+  `web/tools/first_visit.mjs` counts those requests.
+* **A stage's sounds load with the stage.** `audio/precache.ts` reads the
+  ids its data names -- the script's sound ops and dialogue, the civilian
+  streams its spawns reach, class 0x25's programs -- and the loading screen
+  waits for them, fetched and decoded. With the AAC set the whole
+  `clips.pack` comes too, so the sounds the gameplay code raises are on the
+  device as well; the service worker keeps the pack and each stage's tracks
+  like the rest of a stage played, so it plays offline with its sound.
 
 `npm run bundle-flow -- --game-dir ...` drives the whole flow in Chrome — the
 screen, an export, a stage built on demand, and the second visit out of the
@@ -803,9 +824,11 @@ npm run deploy -- --worker     # redeploy the Worker even if unchanged
 ```
 
 * **Staging** (`npm run site`, into `extract/site/`): the `vite build` (with
-  `base: "./"`, so every URL is relative), the bundle, and `bgm/`, `se/`,
-  `voice/` from the install **lowercased**, since the exe's tables and the
-  install spell names differently and an object key cannot resolve that. It
+  `base: "./"`, so every URL is relative), the bundle, and the sounds as the
+  AAC set `tools/sounds.ts` encodes (about 72 MB against the WAVs' 368, at
+  96 kbit/s; `--wav` stages the WAVs instead), every name **lowercased**,
+  since the exe's tables and the install spell names differently and an
+  object key cannot resolve that. It
   refuses a bundle the page would refuse, or a stale stage (`--allow-stale`).
   `npm run site:check` serves the staged site case-sensitively and plays
   stage 1 in Chrome.
@@ -873,7 +896,11 @@ to the disc. The `bundle:*` checks there read an exported bundle.
 `ghidra_db`) live in `web/tools/repo/`; the source ones read the TypeScript
 through the compiler API. **Browser checks** (`net_pair`, `loops`, `keys`, `continue_page`,
 `result_card`, `options_page`, `crosshair_page`, ...) drive the real page in
-headless Chrome through `web/tools/lib/player.mjs`, one at a time.
+headless Chrome through `web/tools/lib/player.mjs`, one at a time. Under
+`?drive=1` every rAF is a vsync, so a driver books its frames in one
+`advance(n, until)` and stops only where it has to act -- a pull, a
+screenshot, a read of the layout -- with `until` watching every frame in the
+page, rather than stepping a frame or two per round trip (`L104`).
 
 **Headless harnesses** in `web/tools/` drive the real port against a real
 bundle with no browser, through `node tools/run_test.mjs tools/<name>.mjs` —

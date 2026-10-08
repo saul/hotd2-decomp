@@ -30,19 +30,20 @@
  *
  * ## What the port leaves out
  *
- * `[diverges]` **Two draws.** The `+0x80` hook places the player's entity on
- * the view (`PlacePlayerEntityFromViewPose`, `FUN_004159A0`) and
- * `PlayerHookDrawBody` draws the body; both are the renderer's and read the
- * state this module writes. The rest of what the handlers draw is recorded
- * here as screen sprites for the HUD layer: the lives, the bullets and the
- * RELOAD prompt (`hud_readout.ts`), the continue's CONTINUE? and digit, the
- * small GAME OVER and the cheat's score (`continue_readout.ts`), and the
- * credit line (`credit_prompt.ts`). The crosshair is recorded as a decision
- * (`HudDrawCrosshair`) and drawn by the page, which owns the pointer. The
- * damage overlay's state half is ported (`effects/damage_overlay.ts`) and
- * runs from here.
- * `PlayerEnterPlay`'s crosshair zeroing is left out: the engine re-polls the
- * aim the next frame, and the port's aim is written on pointer moves only, so
+ * The two hooks in the player block -- `+0x80`, which places the body, and
+ * `+0x7C`, which draws it or spawns the damage overlay -- are ported in
+ * `game/player_body.ts` and run from here; the body's pixels are the
+ * renderer's, from the record they leave. The rest of what the handlers draw
+ * is recorded here as screen sprites for the HUD layer: the lives, the
+ * bullets and the RELOAD prompt (`hud_readout.ts`), the continue's CONTINUE?
+ * and digit, the small GAME OVER and the cheat's score
+ * (`continue_readout.ts`), and the credit line (`credit_prompt.ts`). The
+ * crosshair is recorded as a decision (`HudDrawCrosshair`) and drawn by the
+ * page, which owns the pointer. The damage overlay's state half is ported
+ * (`effects/damage_overlay.ts`) and runs from here.
+ *
+ * `[diverges]` `PlayerEnterPlay`'s crosshair zeroing is left out: the
+ * engine re-polls the aim the next frame, and the port's aim is written on pointer moves only, so
  * zeroing it would park the gun light in the middle of the
  * screen until the mouse moved.
  */
@@ -60,14 +61,15 @@ import {
 } from "./player_gun";
 import { ScoreAddForPlayer } from "./combat/score";
 import { DamageOverlayClear, DamageOverlayUpdateAndDraw, PlayerCameraHook,
-  PlayerRunCameraHook, UpdateScreenShake } from "./effects/damage_overlay";
+  PlayerEntityHook, UpdateScreenShake } from "./effects/damage_overlay";
 import { CreditCount, CreditTrySpend, CreditsAvailable, ModeStartCounterValue,
   SetBothPlayerCounters } from "./credits";
 import { GameMode } from "./game_mode";
 import { AppState, G, RestoreGameGlobals } from "./globals";
+import { OriginalItemsApplyOnJoin } from "./original_mode";
 import { PlayerState, PlayerTask, RunPhase } from "./player_state";
-import { GameOverPlaceBody, PlayerBodySetMotion,
-         PlayerHookDrawBodyUntilMotionEnd } from "./player_body";
+import { GameOverPlaceBody, PlayerBodySetHandSlot, PlayerBodySetMotion,
+         PlayerRunCameraHook, PlayerRunEntityHook } from "./player_body";
 import { NULL_HOST, type GameHost } from "./host";
 import { T } from "./tables";
 import { Rng } from "../core/rng";
@@ -130,15 +132,17 @@ export enum EnterPlayFlag {
  */
 export const g_player_enter_play_modes: readonly {
   flags: number; state: number; invuln: number; hook: PlayerCameraHook;
+  entity: PlayerEntityHook;
 }[] = [
-  // `PlayerCameraHook` spelled as its values (2 draw body, 1 overlay): this
-  // table is built at load, and `effects/damage_overlay.ts` may not be yet.
-  { flags: 0x3d, state: PlayerState.InPlay, invuln: 90, hook: 2 },   // 0 new game
-  { flags: 0x19, state: PlayerState.InPlay, invuln: 180, hook: 1 },  // 1 continue
-  { flags: 0x08, state: PlayerState.InPlay, invuln: 90, hook: 2 },   // 2 next scene
-  { flags: 0x3d, state: PlayerState.InPlay, invuln: 180, hook: 1 },  // 3 join in
-  { flags: 0x3c, state: PlayerState.Out, invuln: 90, hook: 2 },      // 4 attract
-  { flags: 0x3d, state: PlayerState.Out, invuln: 90, hook: 2 },      // 5
+  // `PlayerCameraHook` and `PlayerEntityHook` spelled as their values (hook
+  // 2 draw body, 1 overlay; entity 2 `PlayerHookPlaceEntityB`, 3 `...C`):
+  // this table is built at load, and `effects/damage_overlay.ts` may not be.
+  { flags: 0x3d, state: PlayerState.InPlay, invuln: 90, hook: 2, entity: 2 },  // 0 new game
+  { flags: 0x19, state: PlayerState.InPlay, invuln: 180, hook: 1, entity: 3 }, // 1 continue
+  { flags: 0x08, state: PlayerState.InPlay, invuln: 90, hook: 2, entity: 2 },  // 2 next scene
+  { flags: 0x3d, state: PlayerState.InPlay, invuln: 180, hook: 1, entity: 3 }, // 3 join in
+  { flags: 0x3c, state: PlayerState.Out, invuln: 90, hook: 2, entity: 2 },     // 4 attract
+  { flags: 0x3d, state: PlayerState.Out, invuln: 90, hook: 2, entity: 2 },     // 5
 ];
 
 /** `PlayerStateArmContinue`'s start value for the continue countdown. */
@@ -196,12 +200,13 @@ export function PlayerTasksCreate(): void {
 /**
  * `PlayerEnterPlay` — `FUN_00414770`. Put a player into play by row `mode`.
  *
- * `[diverges]` Two of its Original Mode arms are left out: `FUN_00416420`
- * copies the carried weapon's magazine table into the player's block, and
- * modes 1 and 3 take the lives from the Original Mode life stock at
- * `0x009A2244` (`FUN_00416340`, `FUN_004163D0`) -- a per-item count the port
- * has no model of. The ammo half of each is transcribed. Arcade, which is every
- * mode but Original, is whole.
+ * In Original Mode the magazine comes from the block the items wrote
+ * (`OriginalWeaponLoadFireParams` loads the fire mode's latches), and rows 1,
+ * 2 and 3 -- the continue, the next scene and a join -- each end in their own
+ * routine: `PlayerEnterPlayOriginalContinue` (`FUN_00416340`, the lives from
+ * the block's stock), `PlayerEnterPlayOriginalNextScene` (`FUN_00416390`) and
+ * `PlayerEnterPlayOriginalJoin` (`FUN_004163D0`, which takes the items' weapon
+ * and lives back first). Every other mode writes the Arcade loadout.
  */
 export function PlayerEnterPlay(player: number, mode: number,
                                 f: PlayerFrame): void {
@@ -217,10 +222,13 @@ export function PlayerEnterPlay(player: number, mode: number,
     G.g_player_lives_shown[player] = G.g_start_lives;
   }
   if (row.flags & EnterPlayFlag.ClearScore) G.g_player_score[player] = 0;
-  // The `+0x7C` hook the row carries: `PlayerInstallDrawBodyHook`
-  // (`FUN_004150C0`) or `PlayerInstallDamageOverlayHook` (`FUN_004150E0`).
-  // The `+0x80` hook is the renderer's (`PlacePlayerEntityFromViewPose`).
+  // The two hooks the row carries, `+0x7C` then `+0x80`:
+  // `PlayerInstallDrawBodyHook` (`FUN_004150C0`) or
+  // `PlayerInstallDamageOverlayHook` (`FUN_004150E0`), and
+  // `PlayerInstallPlaceEntityHookB` (`FUN_00415920`) or
+  // `PlayerInstallPlaceEntityHookC` (`FUN_00415940`).
   G.g_player_camera_hook[player] = row.hook;
+  G.g_player_entity_hook[player] = row.entity;
   if (row.flags & EnterPlayFlag.CountPlayer) G.g_players_in_play += 1;
   if (row.flags & EnterPlayFlag.CountAttacker) G.g_max_attackers += 1;
   // The overlay's `active` and `frames` words, `0x009A26C0/C4 + player*0x14`.
@@ -248,18 +256,23 @@ export function PlayerEnterPlay(player: number, mode: number,
     G.g_player_ammo[player] = ARCADE_AMMO;
   }
   if (G.g_GameMode === GameMode.Original) {
-    // `FUN_00416340` / `FUN_00416390` / `FUN_004163D0`: ammo from the
-    // magazine size, 6 when it is -1. See the divergence above for lives.
-    if (mode >= 1 && mode <= 3) {
-      const m = G.g_player_magazine_size[player];
-      G.g_player_ammo[player] = m !== -1 ? m : ARCADE_AMMO;
-    }
+    if (mode === 1) PlayerEnterPlayOriginalContinue(player);
+    else if (mode === 2) PlayerEnterPlayOriginalNextScene(player);
+    else if (mode === 3) PlayerEnterPlayOriginalJoin(player);
   } else {
-    // `0x009A2247 = 0` and the dword `0x3000006` over `+0x08..+0x0B`: magazine
-    // 6, weapon kind 0, sound kind 0, `+0x0B` 3; `+0x0C` 1.0.
-    G.g_player_magazine_size[player] = ARCADE_AMMO;
-    G.g_original_weapon_kind[player] = 0;
+    // `MOV [EAX + 0x7], BL` (0) at `0x00414905`, then row 0 of the weapon
+    // records, as `ResetOriginalModeLoadout` writes it: the dword
+    // `[0x004EC928]` over `+0x08..+0x0B` (magazine 6, kind 0, sound kind 0,
+    // `+0x0B` 3) and `[0x004EC92C]` into `+0x0C`, 1.0.
     G.g_original_fire_mode[player] = 0;
+    const row0 = T.originalMode?.weapon_records[0];
+    if (row0) {
+      G.g_player_magazine_size[player] = row0.magazine;
+      G.g_original_weapon_kind[player] = row0.kind;
+      G.g_original_weapon_sound_kind[player] = row0.sound;
+      G.g_original_weapon_flags[player] = row0.flags;
+      G.g_original_weapon_damage_scale[player] = row0.damage;
+    }
   }
   PlayerSetState(row.state, 0, player);
   G.g_player_task[player] = PlayerTask.InPlay;
@@ -267,11 +280,49 @@ export function PlayerEnterPlay(player: number, mode: number,
 }
 
 /**
+ * `PlayerEnterPlayOriginalContinue` — `FUN_00416340`, row 1 in Original
+ * Mode: the lives back to the block's stock -- `g_original_start_lives`, what
+ * the player's LIFE item set -- and the magazine full, 6 when it is the
+ * unlimited -1.
+ */
+export function PlayerEnterPlayOriginalContinue(player: number): void {
+  G.g_player_lives[player] = G.g_original_start_lives[player];
+  G.g_player_lives_shown[player] = G.g_original_start_lives[player];
+  const m = G.g_player_magazine_size[player];
+  G.g_player_ammo[player] = m !== -1 ? m : ARCADE_AMMO;
+}
+
+/**
+ * `PlayerEnterPlayOriginalNextScene` — `FUN_00416390`, row 2 in Original
+ * Mode: the magazine full, 6 when it is -1.
+ */
+export function PlayerEnterPlayOriginalNextScene(player: number): void {
+  const m = G.g_player_magazine_size[player];
+  G.g_player_ammo[player] = m !== -1 ? m : ARCADE_AMMO;
+}
+
+/**
+ * `PlayerEnterPlayOriginalJoin` — `FUN_004163D0`, row 3 in Original Mode:
+ * `OriginalItemsApplyOnJoin` (`FUN_00416240`) takes back the weapon and the
+ * lives the items gave, then the lives and the magazine as a continue sets
+ * them -- the same lines as `PlayerEnterPlayOriginalContinue`, written out
+ * again rather than called.
+ */
+export function PlayerEnterPlayOriginalJoin(player: number): void {
+  OriginalItemsApplyOnJoin(player);
+  G.g_player_lives[player] = G.g_original_start_lives[player];
+  G.g_player_lives_shown[player] = G.g_original_start_lives[player];
+  const m = G.g_player_magazine_size[player];
+  G.g_player_ammo[player] = m !== -1 ? m : ARCADE_AMMO;
+}
+
+/**
  * `PlayerTryStartPress` — `FUN_00414FC0`. A START that finds a credit puts the
  * player into `state`; off the play screen it also requests it. Returns 1 if
  * it took.
  *
- * `+0x12C` bit 1, which it clears on every call, is `[open]` and not kept.
+ * It clears `g_player_flags` bit 1 on every call; what that bit means is
+ * `[open]`.
  */
 export function PlayerTryStartPress(player: number, state: number): number {
   let took = 0;
@@ -292,6 +343,7 @@ export function PlayerTryStartPress(player: number, state: number): number {
     }
     PlayerSetState(state, 1, player);
   }
+  G.g_player_flags[player] &= ~2;
   return took;
 }
 
@@ -504,21 +556,25 @@ export function PlayerResumeContinue(player: number): void {
  * `GameOverPlaceBody`, a 120-frame wait, and `PlayerGameOverWait` this frame.
  *
  * Outside app state 7 it first draws the small GAME OVER
- * (`HudDrawPlayerGameOver`). Left out: in app state 7,
- * `FUN_00416810(task, 1)` writes node 5's model slot from
- * `0x004EC9E0[p*3 + 1]` -- which is the skeleton's own slot for bone 5
- * (`0x1591`, `0x15A4`), so the bundle's body already wears it. It also clears
- * bit 1 of `0x009A5D8C + p*0x130` (unread).
+ * (`HudDrawPlayerGameOver`); in it, `PlayerBodySetHandSlot(task, 1)` puts
+ * the hand back to variant 1, the skeleton's own bone-5 model (`0x1591`,
+ * `0x15A4`). It also clears `g_player_flags` bit 1, whose meaning is
+ * `[open]`.
  */
 export function PlayerStateArmGameOver(player: number): void {
   if (G.g_app_state !== AppState.GameOver) HudDrawPlayerGameOver(player);
   G.g_player_camera_hook[player] = PlayerCameraHook.DrawBodyUntilMotionEnd;
   const body = G.g_player_bodies[player];
-  if (G.g_app_state === AppState.GameOver && body) {
-    PlayerBodySetMotion(body, T.gameOver?.fall_motions[player] ?? body.motion);
+  if (G.g_app_state === AppState.GameOver) {
+    if (body) {
+      PlayerBodySetMotion(body,
+                          T.gameOver?.fall_motions[player] ?? body.motion);
+    }
+    PlayerBodySetHandSlot(player, 1);
   }
   GameOverPlaceBody(player);
   G.g_player_gameover_timer[player] = GAME_OVER_FRAMES;
+  G.g_player_flags[player] &= ~2;
   G.g_player_task[player] = PlayerTask.GameOverWait;
   PlayerGameOverWait(player);
 }
@@ -527,21 +583,10 @@ export function PlayerStateArmGameOver(player: number): void {
  * `PlayerGameOverWait` — `FUN_004144C0`. On the game-over screen it only runs
  * the camera hook; otherwise it counts down and puts the player out -- and on
  * every frame of the count but the last, draws the small GAME OVER.
- *
- * The hook `PlayerStateArmGameOver` installed is the body's, and it is run
- * from here because this module can reach `game/player_body.ts` and
- * `PlayerRunCameraHook`'s cannot -- it is the same one indirect call.
  */
 export function PlayerGameOverWait(player: number, events?: Events): void {
   if (G.g_app_state === AppState.GameOver) {
-    if (G.g_player_camera_hook[player]
-        === PlayerCameraHook.DrawBodyUntilMotionEnd) {
-      if (!PlayerHookDrawBodyUntilMotionEnd(player)) {
-        G.g_player_camera_hook[player] = PlayerCameraHook.SetCurActor;
-      }
-    } else {
-      PlayerRunCameraHook(player, events);
-    }
+    PlayerRunCameraHook(player, events);
     return;
   }
   G.g_player_gameover_timer[player] -= 1;
@@ -624,8 +669,9 @@ export function PlayerStateFireOnly(player: number, f: PlayerFrame): void {
  * score cheat's readout is the last call.
  */
 export function PlayerUpdateInPlay(player: number, f: PlayerFrame): void {
-  // The `+0x80` hook (`PlacePlayerEntityFromViewPose`) is the renderer's.
-  // Then the `+0x7C` hook, which is where a hit becomes its damage overlay.
+  // The `+0x80` hook, which places the body; then the `+0x7C` hook, which
+  // draws it or is where a hit becomes its damage overlay.
+  PlayerRunEntityHook(player);
   PlayerRunCameraHook(player, f.events);
   if (G.g_app_state === AppState.Attract) G.g_player_lives[player] = 1;
   if (!(G.g_player_lives[player] > 0)) G.g_player_lives[player] = 0;
@@ -702,6 +748,7 @@ export function PlayerTaskRun(player: number, f: PlayerFrame): void {
 export function PlayerTasksRun(f: PlayerFrame): void {
   G.g_screen_sprite_draws = [];
   G.g_view_slot_draws = [];
+  G.g_world_slot_draws = [];
   G.g_crosshair_drawn = [0, 0];
   G.g_crosshair_sprite = [-1, -1];
   const offscreen = [false, false];
@@ -885,6 +932,10 @@ export function PlayerStartGameFromTitle(mode: number,
                                          f: PlayerFrame = TITLE_FRAME): void {
   RequestAppState(AppState.Title);
   CommitAppState();
+  // The confirm arm writes `g_GameMode = g_title_menu_cursor` for rows 0..3,
+  // so a game confirmed as `mode` was confirmed with the cursor on that row,
+  // and nothing moves it again until the title comes back round.
+  G.g_title_menu_cursor = mode;
   G.g_title_start_armed = 1;
   SetBothPlayerCounters(ModeStartCounterValue(mode));
   PlayerTasksCreate();
@@ -948,6 +999,16 @@ const PLAYER_BLOCK_FIELDS = [
   "g_player_magazine_empty", "g_player_reload_prompt_timer", "g_hud_ammo_slide",
   "g_player_input_is_gun", "g_player_pad_kind", "g_player_infinite_ammo",
   "g_original_fire_mode", "g_original_fire_latches",
+  // The rest of the Original Mode block and its flag bytes: only
+  // `ResetOriginalModeLoadout`, once a run, and the trunk's two item routines
+  // write them, so what the trunk chose at stage 1 is still in effect at 6.
+  "g_original_item_slots", "g_original_character",
+  "g_original_score_multiplier", "g_original_start_lives",
+  "g_original_life_cap", "g_original_bonus_credits",
+  "g_original_weapon_sound_kind", "g_original_weapon_flags",
+  "g_original_weapon_damage_scale", "g_original_item_part_scale",
+  "g_original_item_big_head", "g_original_quarter_life", "g_original_first_aid",
+  "g_original_ufo_item",
   // The rank is the run's, not the scene's: only `ResetDamageRank` resets it.
   "g_damage_rank", "g_damage_rank_pending", "g_rank_clock", "g_rank_clock_on",
   "g_rank_players_seen", "g_rank_attackers_seen",
@@ -955,6 +1016,8 @@ const PLAYER_BLOCK_FIELDS = [
   // writes them.
   "g_input_frame", "g_screen_frames", "g_credit_blink_clock",
   "g_credit_blink_seen", "g_score_cheat",
+  // The block's `+0x80` hook and `+0x12C` flags: no scene load writes them.
+  "g_player_entity_hook", "g_player_flags",
 ] as const;
 
 /**

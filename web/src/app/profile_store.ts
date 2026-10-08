@@ -45,6 +45,39 @@ export function readProfile(): ProfileBlock | null {
   }
 }
 
+/**
+ * The key for the items each player last left Original Mode's trunk with --
+ * `G.g_original_last_choice`, which the engine does not have and its profile
+ * does not hold. Kept apart from the profile because it is written when the
+ * trunk closes, which is not one of the exe's save points.
+ */
+export const ORIGINAL_CHOICE_KEY = "hod2.originalChoice";
+
+/** The last trunk choice the page kept, `[p][slot]`, or null. */
+export function readOriginalChoice(): number[][] | null {
+  try {
+    const raw = localStorage.getItem(ORIGINAL_CHOICE_KEY);
+    if (!raw) return null;
+    const v = JSON.parse(raw) as unknown;
+    const ok = Array.isArray(v) && v.length === 2 && v.every(
+      (p) => Array.isArray(p) && p.length === 2
+        && p.every((id) => Number.isInteger(id) && id >= -1 && id < 33));
+    return ok ? (v as number[][]).map((p) => [...p]) : null;
+  } catch {
+    // not-a-loss: nothing kept is a trunk passed with no items.
+    return null;
+  }
+}
+
+/** Keep the last trunk choice, if the browser lets the page keep anything. */
+export function writeOriginalChoice(slots: number[][]): void {
+  try {
+    localStorage.setItem(ORIGINAL_CHOICE_KEY, JSON.stringify(slots));
+  } catch {
+    // not-a-loss: storage blocked; the choice holds for this page's life.
+  }
+}
+
 /** Keep `profile`, if the browser lets the page keep anything. */
 export function writeProfile(profile: ProfileBlock): void {
   try {

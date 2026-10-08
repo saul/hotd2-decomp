@@ -2,14 +2,15 @@ import type { CharactersJson } from "../../src/bundle";
 import { Rng } from "../../src/core/rng";
 import { Events } from "../../src/core/events";
 import { ActorSpawn, GameUpdate } from "../../src/game/director";
-import { ShotTestListReset } from "../../src/game/combat/shot_test";
+import { ProcessPlayerShotsTestList, ShotTestListReset } from "../../src/game/combat/shot_test";
+import { QueueShotRequest } from "../../src/game/combat/shot";
 import {
   G, HIT_SLOT_NONE, ResetGameGlobals, ResetSceneOnEnter,
 } from "../../src/game/globals";
 import { NULL_HOST } from "../../src/game/host";
-import { SpriteEffectKind } from "../../src/game/effects/sprite";
-import { SetGameTables } from "../../src/game/tables";
-import { ColiPublishDynamicList } from "../../src/game/coli";
+import { AnglesToward, SpriteEffectKind } from "../../src/game/effects/sprite";
+import { SetGameTables, T } from "../../src/game/tables";
+import { ColiPublishDynamicList, ColiTraceSegmentAllSets } from "../../src/game/coli";
 import { MotionRow, ZombieState } from "../../src/game/class30/states";
 import { ZombieStateHoldAtRange } from "../../src/game/class30/hold";
 import { ActorPlayHitVoice, ActorVoice }
@@ -26,10 +27,16 @@ import { EnemyZombieUpdate } from "../../src/game/class30";
 import { HIT_SLOT_CLAIMED } from "../../src/game/hit_slots";
 import { ZombiePushOutOfWorldAndActors } from "../../src/game/class30/ground";
 import { SpawnClass } from "../../src/game/spawn_class";
+import { g_class_handlers } from "../../src/game/registry";
 import { vec3 } from "../../src/game/vec";
-import { SpawnSlotActors } from "../../src/game/director";
 import {
-  check, TYPE, CHARS, SCENE_MAJOR_PLAYING, spawnZombie, EnterPlay,
+  MatIdentity, MatrixRotateX, MatrixRotateY, MatrixRotateZ, MatrixTranslate,
+  MatrixTransformPoint,
+} from "../../src/game/matrix";
+import { RunPendingInits, SpawnSlotActors } from "../../src/game/director";
+import {
+  check, TYPE, CHARS, SCENE_MAJOR_PLAYING, spawnZombie, EnterPlay, coliQuad,
+  scene,
 } from "./harness";
 
 /**
@@ -161,15 +168,39 @@ console.log("\nclass 0x33 selector 1: the carrier, and the room it opens:");
     tick(c, 1);
     check("...and then it is up", (c.flags & ActorFlag.FireLoop) !== 0,
           `after ${c.scenery.effectFrames}`);
-    const frozen = c.scenery.pathFrame;
-    tick(c, 60);
-    check("...after which the routine returns before its own ride, so the "
-          + "object stops where it burned",
-          c.scenery.pathFrame === frozen, String(c.scenery.pathFrame));
+    check("...and stage 5's cursor has already stopped on `tail+0x10` (590)",
+          c.scenery.pathFrame === 590, String(c.scenery.pathFrame));
+  }
+  {
+    // `0x004333B8` falls through to `0x004333BB`: the fire does not return.
+    // The port once did, from pseudocode that ended early, and froze the
+    // carrier where it burned. Stage 5's own numbers cannot tell the two
+    // apart -- its ride has ended ten frames before the fire -- so the
+    // descriptor's end is moved past the fire.
+    reset();
+    const c = makeCarrier({ ...STAGE5(), path_end: 700 });
+    const sounds: number[] = [];
+    const events = new Events();
+    events.on("sound.play", (e) => sounds.push(e.id));
+    const frame = () => ({ ...carrierFrame(), events });
+    for (let i = 0; i < 580 - CAM_AT_SPAWN + 2 + 0x13; i++) {
+      ScriptedCarrierUpdate33(c, frame());
+    }
+    check("a carrier whose ride outlasts its effect is burning by now",
+          (c.flags & ActorFlag.FireLoop) !== 0,
+          `after ${c.scenery.effectFrames}`);
+    const burning = c.scenery.pathFrame;
+    for (let i = 0; i < 30; i++) ScriptedCarrierUpdate33(c, frame());
+    check("...and it rides on while it burns -- the fire is drawn and the "
+          + "routine carries on into its ride",
+          c.scenery.pathFrame === burning + 30,
+          `${burning} -> ${c.scenery.pathFrame}`);
     G.g_cam_path_frame = 650;
-    tick(c, 5);
-    check("...and it does not reach its despawn either, camera cue or not",
-          !c.despawned);
+    ScriptedCarrierUpdate33(c, frame());
+    check("...and leaves on its camera cue with `CAR_FIRE_22_OFF` (0x823A9), "
+          + "the sound only a burning carrier's despawn plays",
+          c.despawned && sounds.at(-1) === 0x823a9,
+          `despawned ${c.despawned} last 0x${(sounds.at(-1) ?? 0).toString(16)}`);
   }
   {
     reset();
@@ -225,6 +256,106 @@ console.log("\nclass 0x33 selector 1: the carrier, and the room it opens:");
           + "frame (`0x004333DF`)",
           c.despawned && G.g_cam_path_frame === CAM_AT_SPAWN,
           `despawned ${c.despawned} frame ${G.g_cam_path_frame}`);
+  }
+
+  // -- the draw ------------------------------------------------------------
+  //
+  // `0x004332DA`..`0x0043382F`, read off the listing. The pose is off the
+  // path on purpose: a turn and a tilt in every angle, so a draw that took
+  // the wrong word, or none, cannot land on the right point.
+  {
+    const POSE = { x: 12, y: 3, z: -40, pitch: 0x0400, yaw: 0x2000, roll: 0x0200 };
+    const host = { ...NULL_HOST, objectPath: () => ({ ...POSE }) };
+    const frame = () => ({ ...carrierFrame(), host });
+    const at = (m: number[], x: number, y: number, z: number) => {
+      const out = vec3();
+      MatrixTransformPoint(m, vec3(x, y, z), out);
+      return out;
+    };
+    const near = (a: { x: number; y: number; z: number },
+                  b: { x: number; y: number; z: number }) =>
+      Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z) < 1e-3;
+
+    // Stage 2 block 9's boat, slot 0x1A36 -- the one the user found missing.
+    reset();
+    const boat = makeCarrier({ ...STAGE2(), slot: 0x1a36 });
+    ScriptedCarrierUpdate33(boat, frame());
+    const d = boat.scenery.draws;
+    check("the boat draws its own slot, `obj+0x13F0`, first",
+          d[0]?.slot === 0x1a36, d.map((x) => x.slot.toString(16)).join());
+    check("...at the ride's position", near(at(d[0].m, 0, 0, 0), POSE),
+          JSON.stringify(at(d[0].m, 0, 0, 0)));
+    // `obj+0x118` is 2.5 for this slot (`0x004339E1`): a unit along any of
+    // the model's axes is 2.5 in the world.
+    const ax = at(d[0].m, 1, 0, 0);
+    check("...scaled by `obj+0x118`, 2.5 for slots 0x1A35 and 0x1A36",
+          Math.abs(Math.hypot(ax.x - POSE.x, ax.y - POSE.y, ax.z - POSE.z)
+                   - 2.5) < 1e-4);
+    check("...and its yaw is the path's plus a quarter turn, `obj+0x68`",
+          boat.yaw === POSE.yaw + 0x4000, String(boat.yaw));
+    check("...then the two sprite loops, from 0x24A and 0x260, while the "
+          + "ride runs", d.length === 3 && d[1].slot === 0x24a
+            && d[2].slot === 0x260,
+          d.map((x) => x.slot.toString(16)).join());
+    // The loops sit 25 along the object's own Z without the 2.5: the same
+    // point as 10 along the model's.
+    check("...25 units along the object's Z, outside the model's scale",
+          near(at(d[1].m, 0, 0, 0), at(d[0].m, 0, 0, 10)),
+          `${JSON.stringify(at(d[1].m, 0, 0, 0))} vs ${JSON.stringify(at(d[0].m, 0, 0, 10))}`);
+    for (let i = 0; i < 0x16; i++) ScriptedCarrierUpdate33(boat, frame());
+    check("...each loop stepped after its draw and wrapped at its 22nd slot",
+          boat.scenery.draws[1]?.slot === 0x24a
+            && boat.scenery.draws[2]?.slot === 0x260,
+          boat.scenery.draws.map((x) => x.slot.toString(16)).join());
+    for (let i = 0; i < 200; i++) ScriptedCarrierUpdate33(boat, frame());
+    check("...and once `tail+0x10` ends the ride, the model alone",
+          boat.scenery.draws.length === 1
+            && boat.scenery.draws[0].slot === 0x1a36,
+          boat.scenery.draws.map((x) => x.slot.toString(16)).join());
+
+    // Stage 5's car: five parts, the wheels turning `0x2000` a frame.
+    reset();
+    const car = makeCarrier(STAGE5());
+    ScriptedCarrierUpdate33(car, frame());
+    check("stage 5's car draws 0x1B0E, then 0x899, both wheels, 0x1B0A and "
+          + "0x1B0D, and no sprite loop",
+          car.scenery.draws.map((x) => x.slot).join()
+            === [0x1b0e, 0x899, 0x8cb, 0x8cb, 0x1b0a, 0x1b0d].join(),
+          car.scenery.draws.map((x) => x.slot.toString(16)).join());
+    check("...the car itself at scale 1.0, `obj+0x118`'s other value",
+          Math.abs(Math.hypot(...(() => {
+            const p = at(car.scenery.draws[0].m, 1, 0, 0);
+            return [p.x - car.pos.x, p.y - car.pos.y, p.z - car.pos.z];
+          })()) - 1) < 1e-4);
+    check("...5 units short of the path in x (`0x004339CD`)",
+          car.pos.x === POSE.x - 5, String(car.pos.x));
+    // The two wheels share an axle line through the object: 0x8CB at
+    // (0, 3.5437, 17.0281) and (0, 3.5437, -12.384) of the object's frame.
+    const front = at(car.scenery.draws[2].m, 0, 0, 0);
+    const back = at(car.scenery.draws[3].m, 0, 0, 0);
+    check("...the wheels 29.41 apart along the car",
+          Math.abs(Math.hypot(front.x - back.x, front.y - back.y,
+                              front.z - back.z) - (17.0281 + 12.384)) < 1e-3);
+    ScriptedCarrierUpdate33(car, frame());
+    check("...and `obj+0x135C` turns them 0x2000 a frame",
+          car.scenery.wheelTurn === 0x4000, String(car.scenery.wheelTurn));
+
+    // The fire: at the descriptor's point, the first slot 0x1AAC.
+    reset();
+    const lit = makeCarrier(STAGE5());
+    for (let i = 0; i < 580 - CAM_AT_SPAWN + 2 + 0x13; i++) {
+      ScriptedCarrierUpdate33(lit, frame());
+    }
+    const fire = lit.scenery.draws[0];
+    check("the fire is drawn first, from 0x1AAC -- the cursor steps before "
+          + "its draw",
+          (lit.flags & ActorFlag.FireLoop) !== 0 && fire?.slot === 0x1aac,
+          `${fire?.slot.toString(16)} flags 0x${(lit.flags >>> 0).toString(16)}`);
+    check("...at the descriptor's effect point, `tail+0x24`, not the car's",
+          near(at(fire.m, 0, 0, 0), { x: 678.8, y: -70, z: -2616.5 }),
+          JSON.stringify(at(fire.m, 0, 0, 0)));
+    check("...and the car is still drawn behind it",
+          lit.scenery.draws[1]?.slot === 0x1b0e);
   }
 
   // -- stage 5 block 2's room, end to end ---------------------------------
@@ -989,7 +1120,7 @@ console.log("\nclass 0x33 selector 4: the scenery an actor shoves aside:");
     const events = new Events();
     const listed = [{ at: CHAIR_AT, class: SpawnClass.ScriptedScenery,
                       pos: [22.83, 6.5, -16.74] as [number, number, number] }];
-    SpawnSlotActors(listed, rng);
+    SpawnSlotActors(listed);
     const c = G.g_object_list.find((o) => o.at === CHAIR_AT);
     check("a placement carrying only `class33_push` is spawned -- the gate "
           + "takes either block, not just the carrier's",
@@ -1001,8 +1132,17 @@ console.log("\nclass 0x33 selector 4: the scenery an actor shoves aside:");
           (c.flags & SCENERY_SKIP_COLLISION) !== 0,
           `0x${c.flags.toString(16)}`);
     G.g_script_flags[PUSH_FLAG] = 1;
+    // The walk that reaches the object runs `ScriptedSceneryDispatch33`,
+    // which installs the routine, claims the hit slot and returns
+    // (`0x00433044`..`0x00433050`): the routine is not called on that walk.
     GameUpdate(1 / 60, NULL_HOST, rng, events);
-    check("one `GameUpdate` reaches the selector-4 routine through the class "
+    check("the first `GameUpdate` runs the dispatch and not the routine: "
+          + "no sphere yet, still held",
+          c.bodyRadius !== CHAIR_SPHERE
+          && (c.flags & SCENERY_SKIP_COLLISION) !== 0,
+          `${c.bodyRadius}/0x${c.flags.toString(16)}`);
+    GameUpdate(1 / 60, NULL_HOST, rng, events);
+    check("the next reaches the selector-4 routine through the class "
           + "table, seeds the sphere and lifts the freeze",
           c.bodyRadius === CHAIR_SPHERE && c.scenery.slot === CHAIR_SLOT
           && !(c.flags & SCENERY_SKIP_COLLISION),
@@ -1041,6 +1181,361 @@ console.log("\nclass 0x33 selector 4: the scenery an actor shoves aside:");
           c.pos.x === p0.x && c.sub === p0.sub && !c.despawned,
           `${c.pos.x}/${c.sub}`);
   }
+}
+
+// -- class 0x33 selector 2: a model drawn until a flag or a camera frame -----
+//
+// `ScriptedPropDrawUntilFlag` (`FUN_00433A10`). Before this the director built
+// nothing for selector 2: the exporter wrote its ten descriptors as rigs at a
+// fixed pose and `render/props.ts` hid them on a non-zero flag, so the model
+// stood from the stage's first frame, came back if the flag fell, and never
+// left on its camera frame. Driven from the front, as selector 5's block
+// below is: the placement the exporter emits, `SpawnSlotActors`, `GameUpdate`.
+
+console.log("\nclass 0x33 selector 2: a model drawn until a flag or a camera frame:");
+{
+  // Stage 1's `0x5FE8`, as the exporter reads it: slot `0x36`
+  // (`char_adv04.bin` 11), frame word `-1`, flag 1.
+  const PROP_AT = 0x5fe8;
+  const POS: [number, number, number] = [-968.1, -7, -544.6];
+  const shipped = () => ({ slot: 0x36, despawn_frame: -1, despawn_flag: 1 });
+
+  const tables = (prop: { slot: number; despawn_frame: number;
+                          despawn_flag: number },
+                  angles = { pitch: 0, yaw: 55742, roll: 0 }) => ({
+    ...CHARS,
+    placements: [{
+      at: PROP_AT, class: 0x33, char_type: -1, motion: null,
+      hp: ScriptedScenerySelector.DrawUntilFlag, init_flags: 0,
+      ...angles, class33_prop: prop,
+    }],
+  } as unknown as CharactersJson);
+  const reset = (prop = shipped(), angles?: { pitch: number; yaw: number;
+                                              roll: number }) => {
+    ResetGameGlobals();
+    EnterPlay();
+    SetGameTables(tables(prop, angles));
+    G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    G.g_scene_state_major = SCENE_MAJOR_PLAYING;
+    G.g_players_in_play = 1;
+  };
+  const build = (rng: Rng) => {
+    SpawnSlotActors([{ at: PROP_AT, class: SpawnClass.ScriptedScenery,
+                       pos: [...POS] as [number, number, number] }]);
+    RunPendingInits(rng);
+    return G.g_object_list.find((o) => o.at === PROP_AT) as
+      ScriptedSceneryActor | undefined;
+  };
+
+  // -- P1. the wiring, and the claim the arm at `0x0043302E` makes ----------
+  {
+    reset();
+    const rng = new Rng(61);
+    const o = build(rng);
+    check("a placement carrying only `class33_prop` is spawned as selector 2",
+          !!o && o.cls === SpawnClass.ScriptedScenery
+          && o.hp === ScriptedScenerySelector.DrawUntilFlag,
+          o ? `class ${o.cls} hp ${o.hp}` : "no actor");
+    if (!o) throw new Error("no selector-2 object");
+    const k = o.hitSlot;
+    check("...and its dispatch arm claims a hit slot (`CALL 0x00409270` at "
+          + "`0x0043302E`)",
+          k !== HIT_SLOT_NONE && G.g_hit_slots[k] === PROP_AT,
+          `slot ${k} holds ${G.g_hit_slots[k]}`);
+    check("...and before its first update it has drawn nothing and seeded "
+          + "nothing: `obj+0x13F0` is copied by the update, not the `Init`",
+          o.scenery.draws.length === 0 && o.scenery.slot === 0 && o.sub === 0,
+          `${o.scenery.draws.length} draws, slot ${o.scenery.slot}, sub ${o.sub}`);
+  }
+
+  // -- P1b. a descriptor two instructions name is two objects --------------
+  // Stage 1 block 14 step 0 re-spawns the cars blocks 5 and 11 spawned, and
+  // `EvtOpSpawnObj0B` allocates afresh each time. Built per instruction: the
+  // second lives under a synthetic pool address and names its descriptor in
+  // `descAt`; a frame that lists both again builds nothing more.
+  {
+    reset();
+    const rng = new Rng(62);
+    const one = { at: PROP_AT, class: SpawnClass.ScriptedScenery,
+                  pos: [...POS] as [number, number, number],
+                  block: 5, step: 1, opIndex: 10 };
+    const two = { ...one, block: 14, step: 0, opIndex: 4 };
+    SpawnSlotActors([one]);
+    SpawnSlotActors([one, two]);
+    SpawnSlotActors([one, two]);
+    RunPendingInits(rng);
+    const cars = G.g_object_list.filter((o) => o.descAt === PROP_AT);
+    check("two instructions naming one selector-2 descriptor build two objects",
+          cars.length === 2 && cars[0].at === PROP_AT && cars[1].at < 0
+          && cars[1].hp === ScriptedScenerySelector.DrawUntilFlag,
+          cars.map((o) => `${o.at}/${o.descAt}`).join(" "));
+    // The first instruction's entry leaves the list and comes back: a run of
+    // the spawn opcode the walker has not seen built.
+    SpawnSlotActors([two]);
+    SpawnSlotActors([two, one]);
+    check("...and an entry the script lists anew is a new object",
+          G.g_object_list.filter((o) => o.descAt === PROP_AT).length === 3);
+  }
+
+  // -- P2. the seed, and one draw a frame at the object's own pose ----------
+  {
+    reset();
+    const rng = new Rng(62);
+    const o = build(rng);
+    if (!o) throw new Error("no selector-2 object");
+    G.g_cam_path_frame = 100;
+    GameUpdate(1 / 60, NULL_HOST, rng, new Events());
+    const d = o.scenery.draws;
+    check("the first frame copies `tail+0x00` to `obj+0x13F0` and steps "
+          + "`obj+0x1312` to 1 (`INC EAX` at `0x00433A29`)",
+          o.scenery.slot === 0x36 && o.sub === 1,
+          `slot 0x${o.scenery.slot.toString(16)}, sub ${o.sub}`);
+    const xf = (m: ArrayLike<number>, v: ReturnType<typeof vec3>) => {
+      const out = vec3();
+      MatrixTransformPoint(m, v, out);
+      return out;
+    };
+    const at = d[0] ? xf(d[0].m, vec3(0, 0, 0)) : null;
+    check("...and draws exactly that one slot, at the spawn's position",
+          d.length === 1 && d[0].slot === 0x36 && !!at
+          && Math.abs(at.x - POS[0]) < 1e-3 && Math.abs(at.y - POS[1]) < 1e-3
+          && Math.abs(at.z - POS[2]) < 1e-3,
+          d.map((x) => `0x${x.slot.toString(16)}`).join(",")
+          + (at ? ` at (${at.x}, ${at.y}, ${at.z})` : ""));
+    GameUpdate(1 / 60, NULL_HOST, rng, new Events());
+    GameUpdate(1 / 60, NULL_HOST, rng, new Events());
+    check("three frames later it is still one draw and still sub 1 -- the "
+          + "list is the frame's, and the seed ran once",
+          !o.despawned && o.scenery.draws.length === 1 && o.sub === 1,
+          `${o.scenery.draws.length} draws, sub ${o.sub}`);
+  }
+
+  // -- P3. the matrix is `T RotZ RotY RotX Scale(1)` -------------------------
+  //
+  // A non-identity pose in all three angles (`L48`), so the order shows:
+  // `0x00433A6A`..`0x00433A80` is Z, then Y, then X, after the translate.
+  {
+    const angles = { pitch: 0x1000, yaw: 0x4000, roll: 0x2800 };
+    reset(shipped(), angles);
+    const rng = new Rng(63);
+    const o = build(rng);
+    if (!o) throw new Error("no selector-2 object");
+    GameUpdate(1 / 60, NULL_HOST, rng, new Events());
+    const want = MatIdentity();
+    MatrixTranslate(want, ...POS);
+    MatrixRotateZ(want, angles.roll);
+    MatrixRotateY(want, angles.yaw);
+    MatrixRotateX(want, angles.pitch);
+    const other = MatIdentity();
+    MatrixTranslate(other, ...POS);
+    MatrixRotateX(other, angles.pitch);
+    MatrixRotateZ(other, angles.roll);
+    MatrixRotateY(other, angles.yaw);
+    const p = vec3(3, 5, 7);
+    const xf = (m: ArrayLike<number>) => {
+      const out = vec3();
+      MatrixTransformPoint(m, p, out);
+      return out;
+    };
+    const got = o.scenery.draws[0] ? xf(o.scenery.draws[0].m) : null;
+    const w = xf(want);
+    const x = xf(other);
+    const near = (a: { x: number; y: number; z: number },
+                  b: { x: number; y: number; z: number }) =>
+      Math.abs(a.x - b.x) + Math.abs(a.y - b.y) + Math.abs(a.z - b.z) < 1e-3;
+    check("a point of the model lands where `T RotZ RotY RotX` puts it, and "
+          + "not where class 0x13's `T RotX RotZ RotY` would -- the two differ "
+          + "at this pose",
+          !!got && near(got, w) && !near(w, x),
+          got ? `(${got.x.toFixed(3)}, ${got.y.toFixed(3)}, ${got.z.toFixed(3)})`
+                + ` want (${w.x.toFixed(3)}, ${w.y.toFixed(3)}, ${w.z.toFixed(3)})`
+              : "no draw");
+  }
+
+  // -- P4. the flag: `== 1`, and the despawn draws nothing ------------------
+  {
+    reset();
+    const rng = new Rng(64);
+    const o = build(rng);
+    if (!o) throw new Error("no selector-2 object");
+    GameUpdate(1 / 60, NULL_HOST, rng, new Events());
+    G.g_script_flags[1] = 2;
+    GameUpdate(1 / 60, NULL_HOST, rng, new Events());
+    check("flag 1 at 2 is not raised for this routine -- `CMP byte ptr "
+          + "[EDX + 0x9c7200], 0x1` at `0x00433A49` is an equality with 1",
+          !o.despawned && o.scenery.draws.length === 1,
+          `despawned ${o.despawned}`);
+    const k = o.hitSlot;
+    G.g_script_flags[1] = 1;
+    GameUpdate(1 / 60, NULL_HOST, rng, new Events());
+    check("at 1 the object despawns that frame, draws nothing, and gives its "
+          + "hit slot back",
+          o.despawned && o.scenery.draws.length === 0
+          && G.g_hit_slots[k] === HIT_SLOT_NONE,
+          `despawned ${o.despawned}, ${o.scenery.draws.length} draws`);
+    G.g_script_flags[1] = 0;
+    GameUpdate(1 / 60, NULL_HOST, rng, new Events());
+    check("...and lowering the flag again brings nothing back: the old layer "
+          + "showed the model whenever the flag read zero",
+          !G.g_object_list.some((a) => a.at === PROP_AT && !a.despawned),
+          String(G.g_object_list.filter((a) => a.at === PROP_AT).length));
+  }
+
+  // -- P5. the camera frame: block 0's, by equality --------------------------
+  //
+  // Every shipped frame word is `-1`, so this is the arm on a written tail:
+  // `CMP EAX, [0x009a6110]` at `0x00433A40`, and no second compare against
+  // block 2's frame, which selector 5 has.
+  {
+    reset({ slot: 0x36, despawn_frame: 300, despawn_flag: 1 });
+    const rng = new Rng(65);
+    const o = build(rng);
+    if (!o) throw new Error("no selector-2 object");
+    G.g_cam_path_frame = 299;
+    GameUpdate(1 / 60, NULL_HOST, rng, new Events());
+    G.g_cam_path_frame = 301;
+    GameUpdate(1 / 60, NULL_HOST, rng, new Events());
+    check("on 299 and 301 it stays and draws -- an equality, not a threshold",
+          !o.despawned && o.scenery.draws.length === 1,
+          `despawned ${o.despawned}`);
+    G.g_cam_path_frame_2 = 300;
+    GameUpdate(1 / 60, NULL_HOST, rng, new Events());
+    check("block 2's frame at 300 does nothing: the routine never reads it",
+          !o.despawned, `despawned ${o.despawned}`);
+    G.g_cam_path_frame = 300;
+    GameUpdate(1 / 60, NULL_HOST, rng, new Events());
+    check("block 0's frame at 300 takes it off the field",
+          o.despawned && o.scenery.draws.length === 0,
+          `despawned ${o.despawned}`);
+  }
+
+  // -- P6. a replay that steps over the raise does not rebuild it -----------
+  //
+  // `[port-only]`: the walker asks the class after every instruction it
+  // replays. The question is the routine's own two tests, read off the state
+  // the replay has made.
+  {
+    reset();
+    const outlived = g_class_handlers[SpawnClass.ScriptedScenery]
+      ?.outlivedByReplay;
+    const rec = { at: PROP_AT, class: 0x33,
+                  hp: ScriptedScenerySelector.DrawUntilFlag, block: 5 };
+    const before = outlived?.(rec);
+    G.g_script_flags[1] = 1;
+    const after = outlived?.(rec);
+    check("a replayed selector-2 record is outlived once its flag reads 1, "
+          + "and not before",
+          before === false && after === true, `${before} -> ${after}`);
+  }
+
+  SetGameTables(CHARS);
+}
+
+// -- class 0x33 selector 3: one sprite on the first frame ----------------------
+//
+// `ScriptedEffectOnFirstFrame33` (`FUN_00433AC0`): no tail, no test, one
+// kind-0x62 sprite facing the camera and a despawn. Before this the bundle
+// carried no placement for selector 3 and nothing was built at all. The
+// sprite table is `SpawnSpriteEffectFromParams`' `case 0x62:` row,
+// `0x1339..0x1356` at 1.5, and `PlayImpactSoundForMaterial`'s `BOMB2_16`.
+
+console.log("\nclass 0x33 selector 3: one sprite on the first frame:");
+{
+  const FIRST_AT = 0x37e8;
+  // Stage 1's, block 4 step 1 op 21.
+  const POS: [number, number, number] = [-250, 0, -544.3];
+  const SPLASH_FIRST = 0x1339;
+  const SPLASH_LAST = 0x1356;
+  const BOMB2 = 792233;
+  const EYE = vec3(-240, 10, -534.3);
+
+  ResetGameGlobals();
+  EnterPlay();
+  SetGameTables({
+    ...CHARS,
+    combat: {
+      impact_sprite: { [String(SpriteEffectKind.SplashLarge)]:
+                         [SPLASH_FIRST, SPLASH_LAST, 1.5] },
+      impact_sprite_default: [0x0904, 0x0904, 0.1],
+      ricochet: { [String(SpriteEffectKind.SplashLarge)]:
+                    { id: BOMB2, file: "COMMON\\BOMB2_16.WAV" } },
+    },
+    placements: [{
+      at: FIRST_AT, class: 0x33, char_type: -1, motion: null,
+      hp: ScriptedScenerySelector.EffectOnFirstFrame, init_flags: 0, yaw: 0,
+    }],
+  } as unknown as CharactersJson);
+  G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+  G.g_scene_state_major = SCENE_MAJOR_PLAYING;
+  G.g_players_in_play = 1;
+
+  const rng = new Rng(71);
+  const events = new Events();
+  const sounds: number[] = [];
+  events.on("sound.play", (e) => sounds.push(e.id));
+  SpawnSlotActors([{ at: FIRST_AT, class: SpawnClass.ScriptedScenery,
+                     pos: [...POS] as [number, number, number] }]);
+  RunPendingInits(rng);
+  const o = G.g_object_list.find((a) => a.at === FIRST_AT);
+  check("a placement with no tail block is spawned when its selector is 3 -- "
+        + "the routine reads none",
+        !!o && o.cls === SpawnClass.ScriptedScenery
+        && o.hp === ScriptedScenerySelector.EffectOnFirstFrame,
+        o ? `class ${o.cls} hp ${o.hp}` : "no actor");
+  if (!o) throw new Error("no selector-3 object");
+  const k = o.hitSlot;
+  check("...and its dispatch arm claims a hit slot (`0x0043303C`)",
+        k !== HIT_SLOT_NONE && G.g_hit_slots[k] === FIRST_AT,
+        `slot ${k} holds ${G.g_hit_slots[k]}`);
+
+  // A host whose eye is somewhere off the object, so face mode 1 has a line
+  // to aim along that is not the identity (`L48`).
+  const host = {
+    ...NULL_HOST,
+    viewPoint: (_x: number, _y: number, _z: number,
+                out: { x: number; y: number; z: number }) => {
+      out.x = EYE.x; out.y = EYE.y; out.z = EYE.z;
+    },
+  };
+  G.g_cam_path_frame = 12345;
+  GameUpdate(1 / 60, host, rng, events);
+  const fx = G.g_sprite_effects.filter(
+    (e) => e.kind === SpriteEffectKind.SplashLarge);
+  const e = fx[0];
+  const face = AnglesToward(EYE.x - POS[0], EYE.y - POS[1], EYE.z - POS[2]);
+  check("its first update throws one kind-0x62 sprite at its own position, "
+        + "whatever the camera frame",
+        fx.length === 1 && !!e && e.pos.x === POS[0] && e.pos.y === POS[1]
+        && e.pos.z === POS[2],
+        e ? `${fx.length} at (${e.pos.x}, ${e.pos.y}, ${e.pos.z})` : "none");
+  check("...facing the camera in pitch and yaw -- face mode 1 (`PUSH 0x1` at "
+        + "`0x00433ACA`), not selector 5's 0 and not the carrier's 2",
+        !!e && e.pitch === face.pitch && e.yaw === face.yaw
+        && face.pitch !== 0 && face.yaw !== 0,
+        e ? `(${e.pitch}, ${e.yaw}) want (${face.pitch}, ${face.yaw})` : "none");
+  check("...the `case 0x62:` run `0x1339..0x1356` at 1.5, with `BOMB2_16`",
+        !!e && e.lastSlot === SPLASH_LAST && e.slot >= SPLASH_FIRST
+        && e.slot <= SPLASH_FIRST + 1 && sounds.length === 1
+        && sounds[0] === BOMB2,
+        e ? `0x${e.slot.toString(16)}..0x${e.lastSlot.toString(16)}, `
+            + `sounds ${sounds.join(",")}` : "none");
+  check("...and the object despawns on that frame, giving its hit slot back",
+        o.despawned && G.g_hit_slots[k] === HIT_SLOT_NONE,
+        `despawned ${o.despawned}`);
+  GameUpdate(1 / 60, host, rng, events);
+  check("a second frame throws nothing more",
+        G.g_sprite_effects.filter(
+          (x) => x.kind === SpriteEffectKind.SplashLarge).length <= 1
+        && sounds.length === 1,
+        String(sounds.length));
+  check("`[port-only]` a replay never rebuilds one: it lives one frame, and "
+        + "a replay runs none",
+        g_class_handlers[SpawnClass.ScriptedScenery]?.outlivedByReplay?.(
+          { at: FIRST_AT, class: 0x33,
+            hp: ScriptedScenerySelector.EffectOnFirstFrame, block: 4 })
+          === true);
+
+  SetGameTables(CHARS);
 }
 
 // -- class 0x33 selector 5: the effect a camera frame sets off ---------------
@@ -1096,7 +1591,9 @@ console.log("\nclass 0x33 selector 5: the effect a camera frame sets off:");
   };
   const build = (rng: Rng) => {
     SpawnSlotActors([{ at: CUE_AT, class: SpawnClass.ScriptedScenery,
-                       pos: [...POS] as [number, number, number] }], rng);
+                       pos: [...POS] as [number, number, number] }]);
+    // The `Init` is the frame walk's (`SpawnFromDescriptor`).
+    RunPendingInits(rng);
     return G.g_object_list.find((o) => o.at === CUE_AT);
   };
   const dokans = () => G.g_sprite_effects.filter(
@@ -1211,5 +1708,102 @@ console.log("\nclass 0x33 selector 5: the effect a camera frame sets off:");
 
   // Put the fixture back: everything after this expects `CHARS` with no
   // placements and no combat table.
+  SetGameTables(CHARS);
+}
+
+// -- class 0x33 selector 1: the carrier in the shot test ---------------------
+
+console.log("\nclass 0x33 selector 1: the carrier is shot as the engine files it:");
+{
+  // Stage 2's `0x12590` boat, slot 0x1A35 drawn at 2.5, with a blob: one
+  // quad facing +z at z = 0 in the boat's own space, x -10..10, y -5..5.
+  const BOAT_BLOB = coliQuad([0, 0, 1, 0], 2,
+                             [10, 5, 0, -10, 5, 0, -10, -5, 0, 10, -5, 0], 53);
+  const BOAT = {
+    slot: 0x1a35, shot_mesh: 0x0cec69a8, shot_blob: "boat", shot_radius: 0,
+    path: 338, path_end: 420, effect_frame: -1,
+    commit_frame: 360, despawn_frame: -1,
+    commit_flag: 0xff, despawn_flag: 128,
+    effect: [0, 0, -0.9, 4.8, 2.5, 0],
+  };
+  // The boat rides to (100, 0, 200), unturned; a point on its quad at local
+  // (2, 1, 0) is world (105, 2.5, 200) through the 2.5 scale.
+  const W = { x: 105, y: 2.5, z: 200 };
+  const EYE = { x: 105, y: 2.5, z: 240 };
+  const ray = { origin: EYE, dir: { x: 0, y: 0, z: -1 } };
+  const host = {
+    ...NULL_HOST,
+    pickShot: () => null,
+    objectPath: () => ({ x: 100, y: 0, z: 200, pitch: 0, yaw: 0, roll: 0 }),
+    viewSpaceOfPoint: (p: { x: number; y: number; z: number },
+                       out: { x: number; y: number; z: number }) => {
+      out.x = p.x - EYE.x; out.y = p.y - EYE.y; out.z = p.z - EYE.z;
+      return true;
+    },
+  };
+  const rng = new Rng(0x3301);
+  const events = scene(0, rng);
+  T.coli = { files: ["test"], blobs: { boat: BOAT_BLOB } } as never;
+  G.g_coli_full_set = [];
+  G.g_camera_fixed_eye_y = -999;
+  G.g_cam_path_frame = 350;
+  const boat = ActorSpawn(0x12590, SpawnClass.ScriptedScenery, -1, "boat",
+                          { class33: BOAT as Actor["class33"],
+                            hp: ScriptedScenerySelector.Carrier,
+                            maxHp: ScriptedScenerySelector.Carrier }, rng);
+  boat.visible = true;
+  GameUpdate(1 / 60, host, rng, events);
+  const m = boat.coliMatrix;
+  check("the seat's mesh arm: 0x80000051, and obj+0x14C's blob",
+        ((boat.flags & 0x80000051) >>> 0) === 0x80000051
+        && boat.coliBlob === "boat",
+        `0x${(boat.flags >>> 0).toString(16)} ${boat.coliBlob}`);
+  check("the draw's MatrixStore(obj+0x150) is the model's matrix, scale and "
+        + "all, and RegisterForShotTest files the boat",
+        !!m && Math.abs(m[0] - 2.5) < 1e-9 && m[3] === 100 && m[11] === 200
+        && G.g_shot_test_list.some((e) => e.at === boat.at),
+        `${JSON.stringify(m)} ${JSON.stringify(G.g_shot_test_list)}`);
+  const hit = ProcessPlayerShotsTestList(ray, host);
+  check("a shot at the boat's quad stops on it: the boat, whole, surface 53",
+        hit?.at === boat.at && hit.whole && hit.mesh?.surface === 53
+        && Math.hypot(hit.point.x - W.x, hit.point.y - W.y,
+                      hit.point.z - W.z) < 1e-6,
+        JSON.stringify(hit));
+  const resolved: { kind: string }[] = [];
+  events.on("shot.resolved", (x) => resolved.push(x));
+  QueueShotRequest(0, ray);
+  GameUpdate(1 / 60, host, rng, events);
+  check("...and the pull marks it and nothing else: bit 3, no damage, "
+        + "still riding",
+        resolved.length === 1 && resolved[0].kind === "marked"
+        && (boat.flags & ActorFlag.Hit) !== 0 && !boat.dead
+        && !boat.despawned,
+        `${JSON.stringify(resolved)} 0x${(boat.flags >>> 0).toString(16)}`);
+  // Bit 31 is what both moving-object passes refuse: published, the boat is
+  // still no wall.
+  check("bit 31 keeps the published boat out of the moving-object passes",
+        G.g_coli_dynamic_list.some((e) => e.at === boat.at)
+        && !ColiTraceSegmentAllSets(W.x, W.y, W.z - 5, W.x, W.y, W.z + 20));
+
+  // Stage 5's car: no blob, so the sphere -- 0.1 round obj+0x70.
+  const events5 = scene(0, rng);
+  G.g_cam_path_frame = 231;
+  const car = ActorSpawn(0x1ce4, SpawnClass.ScriptedScenery, -1, "car",
+                         { class33: { ...BOAT, slot: 0x1b0e, shot_mesh: -1,
+                                      shot_blob: null, shot_radius: 0.1,
+                                      despawn_frame: 650,
+                                      despawn_flag: 0xff } as Actor["class33"],
+                           hp: ScriptedScenerySelector.Carrier,
+                           maxHp: ScriptedScenerySelector.Carrier }, rng);
+  car.visible = true;
+  GameUpdate(1 / 60, host, rng, events5);
+  const carHit = ProcessPlayerShotsTestList(
+    { origin: { x: 95, y: 0, z: 240 }, dir: { x: 0, y: 0, z: -1 } }, host);
+  check("stage 5's car files the sphere arm at its own origin, 0.1 round",
+        (car.flags & 0x10) === 0 && car.hitRadius === 0.1
+        && car.shotCentre.x === 95 && car.shotCentre.z === 200
+        && carHit?.at === car.at && carHit.whole,
+        `${car.shotCentre.x},${car.shotCentre.z} ${JSON.stringify(carHit)}`);
+  T.coli = null;
   SetGameTables(CHARS);
 }

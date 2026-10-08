@@ -36,13 +36,19 @@ import "./class24";
 import "./class25";
 import "./class30";
 import "./class31/thrower";
+import "./class32";
 import "./class33";
 import "./class41";
 import "./class12";
+import "./class15";
 import "./class13";
 import "./class18";
 import "./class26";
+import "./class27";
 import "./class28";
+import "./class29";
+import "./class2B";
+import "./class2D";
 import "./class43";
 import "./class40";
 import "./class42";
@@ -55,6 +61,9 @@ import "./class53";
 import "./class60";
 import "./class61";
 import "./class62";
+import "./class63";
+import "./class64";
+import "./class6e";
 
 /**
  * The classes with a ported behaviour, for the UI and `web/tools/repo/port.ts`.

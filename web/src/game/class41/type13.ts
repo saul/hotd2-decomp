@@ -140,14 +140,9 @@ export const SFX_TYPE13_LAND = 0x1916a9;
  * `ActorKill` (`FUN_004A7040`) where the sweep's end is `ActorDespawn`
  * (`FUN_00409CC0`). Both are transcribed.
  *
- * [diverges] The skip arm at `0x00467FC8` — `g_script_flags[0x6D] == 1` and
- * `g_cutscene_skipping` (`0x009A2230`) set, which snaps the part to the floor
- * in {@link Type13Phase.Judder} with no landing sound — is not transcribed:
- * `G` has no port of that global, the gap `class25/index.ts` and
- * `class21/index.ts` already declare. `CheckCutsceneSkipRequest`
- * (`FUN_00435F40`) raises it and `FinishCutsceneSkip` (`FUN_00435FA0`)
- * lowers it on the task's next run. A skipped cut scene therefore lets the
- * part finish falling on its own, 136 frames.
+ * The skip arm at `0x00467FC8` -- `g_script_flags[0x6D] == 1` and
+ * `g_cutscene_skipping` (`0x009A2230`) up -- snaps the part to the floor in
+ * {@link Type13Phase.Judder} with no landing sound, ahead of the switch.
  *
  * Float stores are `float`s the routine reads back next frame, so they are
  * rounded to single; the compares are made on the unrounded values still in
@@ -169,6 +164,12 @@ export function PropUpdateType13(p: BreakableProp, events?: Events): void {
       && (G.g_script_flags[SCRIPT_FLAG_CLEAR_PROPS] ?? 0) !== 0) {
     ActorDespawnProp(p);
     return;
+  }
+  // `0x00467FC8`: a skipped cut scene puts the part on the floor at once.
+  if ((G.g_script_flags[SCRIPT_FLAG_TYPE13_DROP] ?? 0) === 1
+      && G.g_cutscene_skipping !== 0) {
+    p.routinePhase = Type13Phase.Judder;
+    p.y = TYPE13_FLOOR_Y;
   }
 
   switch (p.routinePhase as Type13Phase) {

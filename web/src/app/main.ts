@@ -29,7 +29,6 @@ import {
   WebGLRenderer,
 } from "three";
 import { type Manifest } from "../bundle";
-import type { SoundJson } from "../bundle/scene";
 import type { ScriptJson } from "../bundle/stage";
 import { CamPaths } from "../game/camera/curve";
 import { QueueOffscreenPull, QueueShotRequest } from "../game/combat/shot";
@@ -39,7 +38,7 @@ import {
 } from "../game/scene_lights";
 import { CameraDrawSystem, CameraRig, CameraTakeSystem }
   from "../render/camera";
-import { StageScene } from "../render/stagescene";
+import { RegionDrawGate, StageScene } from "../render/stagescene";
 import { ProgramPins } from "../render/program_pins";
 import { RenderCommandOrder } from "../render/draw_order";
 import { SpawnLayer } from "../render/overlays";
@@ -51,7 +50,10 @@ import { hasThumb, rememberedInstall, runExport,
 import { hideExportScreen, showExportScreen } from "./install/ExportScreen";
 import { readState, writeState, type PlayerState } from "./urlstate";
 import { PlayerState as GamePlayerState } from "../game/player_state";
-import { seekTo as seekWalkerTo } from "../script/seek";
+import { PlayerBodiesCreate } from "../game/player_body";
+import { OriginalRunStartWithLastChoice } from "../game/class6e";
+import { SpawnClass } from "../game/spawn_class";
+import { seekToward } from "../script/seek";
 import { CameraReseatFromFrame } from "../game/camera/view";
 import { readViewPrefs, writeViewPrefs } from "./viewprefs";
 import { Bgm } from "../audio/bgm";
@@ -61,7 +63,6 @@ import { CharacterLayer } from "../render/characters";
 import { GameOverScene } from "../render/game_over_scene";
 import { ScreenSpritesDeep } from "../render/screen_sprites_deep";
 import { ScreenIdleDimLayer } from "../render/screen_idle_dim";
-import { PropLayer } from "../render/props";
 import { Shooting } from "../render/shooting";
 import { ColiDebugLayer } from "../render/coli_debug";
 import { StuckDebugLayer } from "../render/stuck_debug";
@@ -86,14 +87,33 @@ import { buildProjection, type PlayerView } from "./projection/player";
 import { groupRows, hudInputs, hudRows } from "./projection/hud";
 import type { DebugGroupName, StripRow } from "../ui/projection";
 import {
-  branchProjection, continueProjection, joinProjection, skipProjection, soundProjection,
-  transportProjection,
+  branchProjection, continueProjection, ItemSelectOpen, joinProjection,
+  padScreenUp, skipProjection, soundProjection, transportProjection,
 } from "./projection/chrome";
-import { SceneFog } from "../render/fog";
+import { ItemSelectBuildList, ItemSelectTap } from "../game/class6e";
+import { OriginalItem } from "../game/original_mode";
+import { ProfileSave } from "../game/profile";
+
+/** The count a pickup caps an item at, `CMP AL, 0x63` (the debug's give-all). */
+const ORIGINAL_ITEM_CAP = 0x63;
+
+/**
+ * `[port-only]` -- the items a fresh profile holds, as `ProfileFactoryReset`
+ * leaves them: POWER UP 1.2, CHAMBER +2 and CREDIT +2, one each.
+ */
+function FreshProfileItems(): number[] {
+  const items = new Array(33).fill(0);
+  items[OriginalItem.PowerUp12] = 1;
+  items[OriginalItem.Chamber2] = 1;
+  items[OriginalItem.CreditPlus2] = 1;
+  return items;
+}
+import { CLEAR_COLOUR, SceneFog } from "../render/fog";
 import { TextureFilter, type TextureFilterMode } from "../render/texfilter";
 import { type LightingMode, SceneLighting } from "../render/lighting";
 import { GunLights } from "../render/gunlights";
 import { ActorDrawsUnderSecondaryLights } from "../game/light_sets";
+import { RunPendingInits } from "../game/director";
 import { applyToggle, runCommand, type PlayerCommands } from "./commands";
 import { entryBlockFor, loadStageInto } from "./stage_load";
 import { Events } from "../core/events";
@@ -129,6 +149,8 @@ import { BloodColourLayer } from "../render/bloodcolour";
 import { EffectLayer } from "../render/effects";
 import { SlotModelLayer } from "../render/slotmodels";
 import { WaterSurfaceLayer } from "../render/water_surfaces";
+import { Type26RippleLayer } from "../render/type26_ripple";
+import { UvScrollLayer } from "../render/uv_scroll";
 import { ResetPropContainers } from "../game/class41";
 import {
   ActorByAt, AppState, G, ResetGameGlobals, ScreenFurniture,
@@ -138,10 +160,12 @@ import {
 } from "../game/player_shell";
 import { RequestAppState } from "../game/app_state";
 import { ProfileBoot } from "../game/profile";
-import { readProfile, writeProfile } from "./profile_store";
+import { readOriginalChoice, readProfile, writeOriginalChoice, writeProfile }
+  from "./profile_store";
 import { OptionsPad, OptionsTap } from "../game/options/list";
-import { SetBoss4Tables, SetGameOverTables, SetGameTables, SetOptionsTables,
-         SetResultCardTables }
+import { SetBoss4Tables, SetChapterCardTables, SetClass2DTables,
+         SetDialogueTables, SetGameOverTables, SetGameTables,
+         SetOptionsTables, SetOriginalModeTables, SetResultCardTables }
   from "../game/tables";
 import { PressKind, type Press } from "../core/net/protocol";
 import { NetSession, type NetRole } from "./net/session";
@@ -307,7 +331,6 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
   /** Screen sprites deeper than the HUD's plane, drawn in the 3D. */
   readonly deepSprites = new ScreenSpritesDeep();
   readonly screenIdleDim = new ScreenIdleDimLayer();
-  readonly props = new PropLayer();
   readonly breakables = new BreakableLayer();
   /** A stacked prop's fifteen pieces, off the breakables' templates. */
   readonly shatters = new PropShatterLayer();
@@ -317,8 +340,13 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
    * hold one: those actors have no character type to resolve.
    */
   readonly slotModels = new SlotModelLayer();
+  /** `RegionDrawResidentSet`'s chapter-card gate, out of `G` once a frame. */
+  readonly regionDraw = new RegionDrawGate();
   /** Class 0x41 type 1's canal water: the tiles it draws and ripples. */
   readonly waterSurfaces = new WaterSurfaceLayer();
+  /** Class 0x41 constructor 26's warehouse water. */
+  readonly type26Ripples = new Type26RippleLayer();
+  readonly uvScroll = new UvScrollLayer();
   /**
    * The shot effects — blood, muzzle flash, tracer, impacts. Its own layer
    * because it draws in two spaces at once: one group in the world and one
@@ -334,12 +362,6 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
   /** The `coli/` overlay — see `render/coli_debug.ts`. */
   readonly coliDebug = new ColiDebugLayer();
   readonly stuckDebug = new StuckDebugLayer();
-  /**
-   * The stage's `sound` block, kept for the one caller that is not the walker:
-   * class 0x10's op 0x1D plays a dialogue group from inside the port, and the
-   * port cannot reach the bundle.
-   */
-  dialogue: SoundJson | null = null;
   /** The registry and the tick order: script -> game -> render -> hud. */
   readonly world = new World<RenderContext>();
   /**
@@ -680,7 +702,8 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
       document.documentElement.classList.add("no-blur");
     }
     this.perfMeter.onSnapshot = (r) => this.reportPerf(r);
-    this.scene.background = new Color(0x05070a);
+    // `SetClearColor(0x00598C58)`: black. See `SceneFog`'s `apply`.
+    this.scene.background = new Color(CLEAR_COLOUR);
     // World matrices are brought up to date for the visible branches only,
     // just before each render. See `render/visible_world.ts`.
     this.scene.matrixWorldAutoUpdate = false;
@@ -702,10 +725,9 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     this.texFilter.setRenderer(this.renderer);
     this.lighting = new SceneLighting(this.scene);
     this.gunLights = new GunLights(this.scene, this.lighting);
-    // The two light sets -- see `SecondaryLightSource`. Block 1 is the
-    // walker's; which actors draw under it is the port's.
+    // The two light sets -- see `SecondaryLightSource`. Both blocks are
+    // `G`'s; which actors draw under block 1 is the port's.
     this.lighting.source = {
-      light: () => this.walker?.lightSecondary ?? null,
       secondary: (at) => {
         const obj = ActorByAt(at);
         return !!obj && ActorDrawsUnderSecondaryLights(obj);
@@ -721,6 +743,9 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
       },
     };
     this.scene.add(this.backdrop.group);
+    // The dome is an `AssetDrawSlot` like any model, so the device lights it
+    // (`render/lighting.ts`); it used to be the one model drawn unlit.
+    this.lighting.addRoot(this.backdrop.group);
     this.scene.add(this.rain.group);
     this.scene.add(this.spawns.group);
     this.scene.add(this.debug.group);
@@ -731,8 +756,16 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     this.lighting.addRoot(this.slotModels.group);
     this.scene.add(this.waterSurfaces.group);
     this.lighting.addRoot(this.waterSurfaces.group);
+    this.scene.add(this.type26Ripples.group);
+    this.lighting.addRoot(this.type26Ripples.group);
+    // Drawn through the scene light array, which is the gun lights'.
+    this.gunLights.sceneLitNodes = () => this.type26Ripples.litNodes();
     this.scene.add(this.effects.group);
     this.scene.add(this.effects.viewGroup);
+    this.scene.add(this.effects.litGroup);
+    this.scene.add(this.effects.litViewGroup);
+    this.lighting.addRoot(this.effects.litGroup);
+    this.lighting.addRoot(this.effects.litViewGroup);
 
     this.ctx = {
       scene: this.scene,
@@ -782,12 +815,15 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     // After the characters: a gore swap clones a part onto a bone, and the
     // light should see it the frame it appears.
     this.world.add("render", this.gunLights);
-    this.world.add("render", this.props);
     this.world.add("render", this.breakables);
     this.world.add("render", this.shatters);
     this.world.add("render", this.slotModels);
+    this.world.add("render", this.regionDraw);
     // After the slot models, whose templates its clones come from.
     this.world.add("render", this.waterSurfaces);
+    this.world.add("render", this.type26Ripples);
+    // The stage-1 car's reflection, rewritten on the rig's own meshes.
+    this.world.add("render", this.uvScroll);
     this.world.add("render", this.effects);
     this.world.add("render", this.bullets);
     this.world.add("render", this.heads);
@@ -807,15 +843,14 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     this.scene.add(this.screenIdleDim.group);
     this.world.add("render", this.screenIdleDim);
     // The screen-space layer, and the last thing the tick does: it draws the
-    // caption straight off the walker and the shutter bars and screen sprites
-    // the engine recorded in `G`, and holds no state of its own for a
+    // shutter bars and the screen sprites -- the subtitle's glyphs among them
+    // -- the engine recorded in `G`, and holds no state of its own for a
     // snapshot to miss. The projection is *not* built here --
     // it is built at the end of `frame`, outside the tick, because a world
     // with no walker in it does not tick at all. See `frame`.
     this.world.add("hud", drawSystem("hud.layer",
-                                    (ctx) => this.hudLayer.draw(ctx.walker,
-                                                            G.g_screen_sprite_draws,
-                                                            G.g_hud_shutter_bars)));
+                                    () => this.hudLayer.draw(G.g_screen_sprite_draws,
+                                                             G.g_hud_shutter_bars)));
     this.game.backend = this.chars;
     this.debug.source = this.chars;
     // One generator for the whole player, so a snapshot replays the gore
@@ -830,7 +865,8 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
         seq: -1, block: this.walker?.block ?? -1, step: -1, opIndex: -1,
         op: { i: -1, at: 0, op: -1, cat: "combat",
               name: d.source === "thrown" ? "hit by thrown weapon"
-                                          : "hit by enemy" },
+                : d.source === "civilian" ? "shot a civilian"
+                : "hit by enemy" },
         note: `${d.who}${d.attack >= 0 ? ` attack ${d.attack}` : ""}`
             + ` · −1 life → ${d.lives} · ${d.score} pts`,
       });
@@ -881,31 +917,14 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     this.events.on("profile.save", (d) => {
       if (!this.asReplica) writeProfile(d.profile);
     });
+    // ...and the items the trunk last closed with, which a trunk the port
+    // passes by seek or deep link is given (`ItemSelectPassedBySeek`).
+    const choice = readOriginalChoice();
+    if (choice) G.g_original_last_choice = choice;
+    this.events.on("original.choice", (d) => {
+      if (!this.asReplica) writeOriginalChoice(d.slots);
+    });
 
-    // -- class 0x10, the civilians ---------------------------------------
-    // Op 0x1D is `EvtOpPlayDialogue2D`, the same call evt op 0x2D makes, so a
-    // civilian's line goes through the player's own subtitles and voice rather
-    // than out as a bare sound id.
-    const playDialogue = (d: { group: number }): void => {
-      const v = this.dialogue?.messages?.[String(d.group)]?.[0] ?? null;
-      if (!v || !this.walker) return;
-      if (v.voice) this.bgm.play(v.voice);
-      // Onto the walker, not into the layer: a caption is script state, and
-      // the one raised by a civilian is no less so than the one raised by
-      // evt 0x2D. It goes in the snapshot with the rest.
-      //
-      // **Not on a replica.** There the caption arrives as state, with the
-      // tick that raised it, and this handler runs on the host's event as a
-      // replay -- a write here would be a second author of script state the
-      // host never hears from, and the next tick's hash would say so. The
-      // voice above is an output and plays on both.
-      if (this.net.role === "replica") return;
-      this.walker.captionGroup = d.group;
-      this.walker.captionFrames = v.frames;
-    };
-    this.events.on("civilian.dialogue", playDialogue);
-    // ...and the stage-3 boss's body, which makes the same call.
-    this.events.on("actor.dialogue", playDialogue);
     this.events.on("civilian.rescued", (d) => {
       this.onFeed({
         seq: -1, block: this.walker?.block ?? -1, step: -1, opIndex: -1,
@@ -1203,9 +1222,33 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     SetGameTables(script.characters, script.breakables, script.set_pieces,
                   script.humanoids, script.coli, script.civilians);
     SetGameOverTables(script.game_over);
+    // The scene's task list makes the player bodies (`PlayerBodiesCreate`,
+    // inside `ResetGameGlobals`), but their types, clips and hands are this
+    // bundle's, which arrive only now on a page's first load. Made again on
+    // them: all the reset's own player turn did to a body was stand it on
+    // the gameplay eye, which the next turn does again.
+    PlayerBodiesCreate();
     SetOptionsTables(script.options);
+    SetDialogueTables(script.sound?.messages, script.subtitle_glyphs);
+    SetOriginalModeTables(script.original_mode);
     SetBoss4Tables(script.boss4, script.carrier_door_yaw);
+    SetClass2DTables(script.class2d);
     SetResultCardTables(script.result_card);
+    SetChapterCardTables(script.chapter_card);
+  }
+
+  /**
+   * A new Original Mode run on a stage with no trunk -- a link, the picker, a
+   * restart or a seek into stages 2 to 6 -- gets the items the trunk last
+   * closed with (`OriginalRunStartWithLastChoice`). Stage 1's own trunk, or
+   * a seek past it (`ItemSelectPassedBySeek`), hands them out there instead;
+   * a stage step's run carries its own and never comes here. Called once the
+   * tables are in and the generator is seeded, which the costume draw reads.
+   */
+  startRunItems(script: ScriptJson): void {
+    const trunk = script.blocks.some((b) => b.steps?.some((s) => s.ops.some(
+      (o) => o.simple?.some((r) => r.class === SpawnClass.ItemSelect))));
+    if (!trunk) OriginalRunStartWithLastChoice(this.rng);
   }
 
   /**
@@ -1442,10 +1485,17 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
         : e.code === "ArrowDown" ? OptionsPad.Down
           : e.code === "ArrowLeft" ? OptionsPad.Left
             : e.code === "ArrowRight" ? OptionsPad.Right : 0;
-      if (dir !== 0 && G.g_app_state === AppState.Options && !this.asReplica) {
+      if (dir !== 0 && padScreenUp() && !this.asReplica) {
         e.preventDefault();
         if (!e.repeat) this.padLatch |= dir;
         this.padHeld |= dir;
+        return;
+      }
+      // A, on a screen that reads the pad: Right Shift, the keyboard's A in
+      // `KeyboardReadAsPad` (`FUN_0041F1A0`).
+      if (e.code === "ShiftRight" && padScreenUp() && !this.asReplica) {
+        e.preventDefault();
+        if (!e.repeat) this.padLatch |= OptionsPad.A;
         return;
       }
       if (e.code === "Space") { e.preventDefault(); this.togglePlay(); }
@@ -1770,10 +1820,31 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
           this.padLatch |= (tap ? OptionsTap(240 - this.localAim.y, this.events)
             : OptionsPad.A) * shift;
         } else if (ray && this.gameRunning && !this.frozen) {
+          // On the trunk the mouse's left button is also A: input mode 6
+          // ORs it into the pad word (`0x4`), which the trunk takes items
+          // with at the cursor the arrows move. It is still the trigger --
+          // the firing gate is shut. Neither a finger nor a mouse held
+          // without the keyboard has the arrows, so on this page's own screen
+          // a pull is on what it points at instead (`ItemSelectTap`): a row
+          // is taken, a held item put back, END pressed, a scroll mark
+          // scrolled. The keyboard's arrows and Right Shift are still the
+          // exe's pad. A mouse sent A here once, and a click on a scroll mark
+          // took the item under the cursor.
+          if (ItemSelectOpen()) {
+            const tap = player === 0 && !this.asReplica;
+            this.padLatch |= tap
+              ? ItemSelectTap(320 + this.localAim.x, 240 - this.localAim.y)
+              : OptionsPad.A * shift;
+          }
           QueueShotRequest(player, ray);
         }
         return;
       case PressKind.Offscreen:
+        // The reload is also B in the pad word -- the mouse's right button
+        // (`MouseReadButtons`, `FUN_0041F370`) and Right Ctrl
+        // (`KeyboardReadAsPad`, `FUN_0041F1A0`) are `0x2` -- which is the bit
+        // the chapter card's skip tests (`TEST AL, 0x2` at `0x0043481B`).
+        this.padLatch |= 0x2 * shift;
         if (this.gameRunning && !this.frozen) QueueOffscreenPull(player);
         return;
       case PressKind.Start:
@@ -1882,7 +1953,7 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     this.playing = false;
     this.clearFeed();
     // No `hudLayer.reset()` here any more. The shutter and the caption are
-    // the walker's state, `seekWalkerTo` resets it with everything else, and
+    // the walker's state, `seekToward` resets it with everything else, and
     // `world.resync` redraws from what the replay left -- one rebuild path
     // rather than one path plus a thing this had to remember.
     this.shooting.reset();
@@ -1911,13 +1982,30 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     // phase of every clip. `stage_load.ts` was the only place that reseeded, so
     // "the same address" meant the same script state and a different game.
     this.rng.reseed(this.state.seed ?? 1);
+    // The reset started a new run, so it gets a new run's items.
+    if (this.gameTables) this.startRunItems(this.gameTables);
     // The replay rewrites the world; nothing that described the old one may
     // outlive it. The rewind ring is part of that: `ctx.frame` goes back to
     // near zero with `g_frame`, so every slot it holds is the future of a
     // timeline this seek has just left.
     this.newSession();
     this.ring.clear();
-    seekWalkerTo(w, block, step, op);
+    // From the entry this run opened at, as the deep link's seek does. Without
+    // it a run that opened at stage 3's block 7 replayed from block 0.
+    const r = seekToward(w, block, step, op, undefined, this.entry);
+    if (!r.arrived && r.entered
+        && (r.entered[0] !== step || r.entered[1] !== op)) {
+      // An address inside a block the run reaches, at a step it never sits
+      // on -- step 0, which only a scene load in Training, Boss Mode or the
+      // attract demo runs.
+      // The replay stopped as it left the block; land where the run entered
+      // it, through this same reset, since the replay has written `G` past
+      // there. See `seekTo` in `script/seek.ts`.
+      this.seekTo(block, r.entered[0], r.entered[1]);
+      this.noteSeekMiss(block, step, op);
+      return;
+    }
+    if (!r.arrived) this.noteSeekMiss(block, step, op);
     // The replay runs no frame, so the HUD readouts -- which the engine draws
     // every frame -- would be the reset's empty list. See the routine.
     PlayerTasksDrawWithoutAFrame();
@@ -1933,11 +2021,28 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     this.world.resync(this.ctx);
     this.syncBgmToWalker();
     this.net.host?.discontinuity();
-    this.state.block = block;
-    this.state.step = step;
-    this.state.op = op;
+    // Where the replay is, not where it was asked to go: the two differ when
+    // the address was refused, and the URL is how a reader finds out.
+    this.markAddress();
     this.state.slot = this.state.frame = undefined;
     this.pushUrl();
+  }
+
+  /**
+   * Say that a seek did not arrive, and where it is instead. `console.warn`
+   * as well as the feed, because a headless harness reads the one and a
+   * person the other.
+   */
+  noteSeekMiss(block: number, step: number, op: number): void {
+    const w = this.walker;
+    const at = w ? `${w.block}/${w.step}/${w.opIndex}` : "nowhere";
+    const note = `no route to ${block}/${step}/${op}; showing ${at}`;
+    console.warn(note);
+    this.onFeed({
+      seq: -1, block: w?.block ?? -1, step: -1, opIndex: -1,
+      op: { i: -1, at: 0, op: -1, name: "seek", cat: "flow" },
+      note,
+    });
   }
 
   /** `?slot=59&frame=170`: pose the camera straight off a path, no script. */
@@ -2101,7 +2206,12 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
   idleTick(t: Tick): void {
     if (!this.walker) return;
     // A replica's script phase is the host's: nothing of it runs here.
-    if (!this.asReplica) this.pushPortGlobals();
+    if (!this.asReplica) {
+      this.pushPortGlobals();
+      // No walk runs on a stopped clock, so the `Init`s the spawns above left
+      // due run here -- see `RunPendingInits`.
+      RunPendingInits(this.rng, this.events);
+    }
     this.cam.scripted = this.state.mode !== "free";
     this.world.update(this.ctx, t);
   }
@@ -2691,10 +2801,11 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     // the layer that noticed: `render/` may notice that a spawn is placeable,
     // it does not get to decide that an object exists or that a lifetime has
     // ended. `web/tools/repo/layers.ts` is what keeps that honest, and
-    // `syncCharacterSpawns` is where the three layers meet.
-    // ...with `events`, because one class's `Init` makes a sound: character
-    // types 2 and 3 start the looping chainsaw or laser sword.
-    syncCharacterSpawns(this.chars, this.walker.spawns, this.events);
+    // `syncCharacterSpawns` is where the three layers meet. The character
+    // spawns' `Init`s are not run here but by the task walk, after the
+    // scene's own tasks, as `SpawnFromDescriptor` leaves them in the engine
+    // -- see `game/spawn.ts`.
+    syncCharacterSpawns(this.chars, this.walker.spawns);
   }
 
   /**
@@ -2779,8 +2890,9 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     if (!this.gameStopped) {
       G.g_pad_state = this.padLatch;
       this.padLatch = 0;
-      // The directions held on the options screen; nothing else is fed.
-      if (G.g_app_state !== AppState.Options) this.padHeld = 0;
+      // The directions held on a screen that reads the pad -- the options,
+      // the trunk; nothing else is fed.
+      if (!padScreenUp()) this.padHeld = 0;
       G.g_pad_held = this.padHeld;
     }
     this.world.update(this.ctx,
@@ -2871,6 +2983,27 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     if (this.state.mode !== "play") this.setMode("play");
     RequestAppState(AppState.Options);
     this.startGame();
+  }
+
+  /**
+   * `[port-only]` debug -- Original Mode's saved items. `giveAll` puts every
+   * one of the 33 in the profile at the count a pickup caps at (0x63), so the
+   * trunk offers everything; `reset` puts back what a fresh profile holds
+   * (`ProfileFactoryReset`'s POWER UP 1.2, CHAMBER +2 and CREDIT +2). Either
+   * is saved at once, as the game saves at a game over (`ProfileSave`), and
+   * copied into the run's counts as `ProfileApplyToRun` does -- and when the
+   * trunk is open its list is rebuilt, so the change shows without a restart.
+   */
+  originalItems(action: "giveAll" | "reset"): void {
+    if (this.asReplica) return;
+    const items = action === "giveAll"
+      ? new Array(33).fill(ORIGINAL_ITEM_CAP)
+      : FreshProfileItems();
+    G.g_profile_original_items = items;
+    G.g_original_items_taken = [...items];
+    if (ItemSelectOpen()) ItemSelectBuildList();
+    ProfileSave(this.events);
+    this.pacer.wake();
   }
 
   restartRun(stage: number): void {

@@ -31,6 +31,10 @@ import {
 } from "../../src/game/class41/shatter";
 import { MsvcRand } from "../../src/game/class41/group";
 import {
+  EXTRA_LIFE_HEART_SLOT, EXTRA_LIFE_ROUTINE_TYPE, EXTRA_LIFE_STRIP_SLOT,
+  EXTRA_LIFE_TAG_SLOT, ExtraLifePickupUpdate,
+} from "../../src/game/class41/items";
+import {
   FallingContainerGroundContact, FALLING_REMOVE_CAM_FRAME,
   FALLING_REMOVE_CAM_PATH, FALLING_SLOT_FRAGMENT,
 } from "../../src/game/class44/container";
@@ -63,7 +67,8 @@ import {
   LIFT_PANEL_SLOT, PROP_HIT_SCORE,
 } from "../../src/game/class41";
 import { PropWords } from "../../src/game/class41/words";
-import { TYPE13_DROP_SLOT, TYPE13_JUDDER } from "../../src/game/class41/type13";
+import { TYPE13_DROP_SLOT, TYPE13_FLOOR_Y, TYPE13_JUDDER }
+  from "../../src/game/class41/type13";
 import {
   TYPE35_LEAF_A, TYPE35_LEAF_A_SLOT, TYPE35_LEAF_B, TYPE35_LEAF_B_SLOT,
 } from "../../src/game/class41/type35";
@@ -428,6 +433,71 @@ console.log("\nclass 0x41, the extra life:");
   ProfileBoot(null);
 }
 
+console.log("\nclass 0x41, the extra life is an object you shoot (ExtraLifePickupUpdate):");
+{
+  const rng = new Rng(13);
+  const events = propScene(rng, GameMode.Arcade);
+  ProfileBoot(null);
+  const sounds: number[] = [];
+  events.on("sound.play", (e) => sounds.push(e.id));
+  const props = PlaceBreakableGroup(2, 4, rng);
+  const from = props[0];
+  shoot(from, 2, rng, events);
+  const life = G.g_breakable_props.find(
+    (q) => q.kind === EXTRA_LIFE_ROUTINE_TYPE && !q.dead);
+  check("the item-set-1 prop's break leaves a pickup in the pool: one unit "
+        + "above it, a sphere of 4.0, on the prop's own step clock",
+        !!life && life.y === Math.fround(from.y + 1.0) && life.hitRadius === 4
+        && life.lifetime === from.hp && life.storyItem === 0,
+        life ? `${life.y} ${life.hitRadius} ${life.lifetime}` : "none");
+  if (life) {
+    ExtraLifePickupUpdate(life, rng, events);
+    check("...drawing the heart three times its size, 1.5 up, and "
+          + "registering its sphere, unshot",
+          life.draws?.length === 1 && life.draws[0].slot === EXTRA_LIFE_HEART_SLOT
+          && life.draws[0].m[0] !== 0 && !life.dead);
+    G.g_player_lives[0] = 2;
+    sounds.length = 0;
+    BreakablePropTakeShot(life, 0);
+    ExtraLifePickupUpdate(life, rng, events);
+    check("shot by player 1: a life, 0x3616A9, player 1's strip and tag",
+          G.g_player_lives[0] === 3 && sounds.includes(0x3616a9)
+          && life.slot === EXTRA_LIFE_STRIP_SLOT
+          && life.removeFlag === EXTRA_LIFE_TAG_SLOT && life.storyItem === 2,
+          `${G.g_player_lives[0]} ${life.slot.toString(16)} ${life.storyItem}`);
+    ExtraLifePickupUpdate(life, rng, events);
+    check("...and only one: the taken bit stops a second",
+          G.g_player_lives[0] === 3);
+    check("...the tag rising over the heart and the strip beside it",
+          life.draws?.length === 3
+          && life.draws[1].slot === EXTRA_LIFE_TAG_SLOT
+          && life.draws[2].slot === EXTRA_LIFE_STRIP_SLOT - 1 + life.storyItem);
+    while (!life.dead && life.storyItem < 0x40) {
+      ExtraLifePickupUpdate(life, rng, events);
+    }
+    check("it fades from frame 0x19 and is gone after 0x31",
+          life.dead, `frame ${life.storyItem}`);
+  }
+}
+
+console.log("\nclass 0x41, FIRST AID KIT (g_original_first_aid):");
+{
+  const lifeAfterBreak = (firstAid: number): boolean => {
+    const rng = new Rng(29);
+    const events = propScene(rng);
+    G.g_original_first_aid = firstAid;
+    // Group 1's members all hide set 2, a score pickup, behind a countdown.
+    const props = PlaceBreakableGroup(1, 2, rng);
+    if (props[0]?.itemSet !== ItemSet.Score2) return false;
+    shoot(props[0], 2, rng, events);
+    return G.g_breakable_props.some((q) => q.kind === EXTRA_LIFE_ROUTINE_TYPE);
+  };
+  check("a prop hiding a score pickup gives no life without it",
+        !lifeAfterBreak(0));
+  check("...and an extra life with it, in place of its set and its countdown",
+        lifeAfterBreak(1));
+}
+
 console.log("\nclass 0x41, the script spawns reach the pool:");
 {
   const rng = new Rng(31);
@@ -459,6 +529,29 @@ console.log("\nclass 0x41, the script spawns reach the pool:");
   GameUpdate(1 / 60, NULL_HOST, rng, events);
   check("a second pass does not place the group again",
         G.g_breakable_props.length === 3,
+        `${G.g_breakable_props.length} props`);
+
+  // A **later instruction** naming the same descriptor is a new placer: the
+  // spawn opcode allocates one per run (`ActorAlloc`), and stage 2 re-spawns
+  // block 21's groups in block 22 that way. The first placer is still in the
+  // pool, dead, under 0xA100, so the second takes a pool address of its own
+  // and keeps the descriptor's as `descAt`, which its constructor reads.
+  const again = [...spawns, { at: 0xa100, class: SpawnClass.PropContainerPlacer,
+                              block: 22, step: 0, opIndex: 25 }];
+  SpawnPropContainers(again);
+  const second = G.g_object_list.filter(
+    (o) => o.cls === SpawnClass.PropContainerPlacer && o.descAt === 0xa100);
+  check("a second instruction naming the descriptor spawns a second placer",
+        second.length === 2 && second[1].at !== 0xa100 && second[1].at < 0,
+        second.map((o) => `${o.at}/${o.descAt}`).join(" "));
+  GameUpdate(1 / 60, NULL_HOST, rng, events);
+  check("...which places the group again from the same descriptor",
+        G.g_breakable_props.length === 6,
+        `${G.g_breakable_props.length} props`);
+  SpawnPropContainers(again);
+  GameUpdate(1 / 60, NULL_HOST, rng, events);
+  check("...once per instruction, however many frames list it",
+        G.g_breakable_props.length === 6,
         `${G.g_breakable_props.length} props`);
 }
 
@@ -1376,6 +1469,36 @@ console.log("\nclass 0x41 types 5, 6, 10, 12, 21, 51, 63, 78, transcribed whole:
   G.g_GameMode = GameMode.Original;
   check("...having asked for 0x1A60 in Arcade and 0xA6C otherwise",
         arcade === TYPE78_ARCADE_SLOT && PropType78LoadSlot() === 0xa6c);
+}
+
+console.log("\nclass 0x41 type 13, a skipped cut scene:");
+{
+  // `0x00467FC8`: flag 0x6D up with `g_cutscene_skipping` puts the part on
+  // the floor in the judder phase at once, before the switch runs, and no
+  // landing sound plays.
+  const rng = new Rng(1314);
+  const events = propScene(rng);
+  const sounds: number[] = [];
+  events.on("sound.play", (e) => sounds.push(e.id));
+  G.g_scene_index = 1;
+  G.g_evt_step_index = 4;
+  const p = PlaceGenericProp({ at: 0xec95, container: "generic", type: 13,
+    slot: 4, lifetime_evt_steps: 4, field_1f4: 0, pos: [-925, 180, -1297],
+    pitch: 0, yaw: 0, roll: 0 }, rng);
+  G.g_breakable_props.push(p);
+  BreakablePropPoolUpdate(rng, events);
+  G.g_script_flags[SCRIPT_FLAG_TYPE13_DROP] = 1;
+  G.g_cutscene_skipping = 1;
+  BreakablePropPoolUpdate(rng, events);
+  G.g_cutscene_skipping = 0;
+  // The arm writes the phase and y and not `+0x1C8`, which is still 0, so
+  // the same frame's judder arm finds nothing to damp and goes to rest.
+  check("the part is on the floor and at rest on the skip's frame",
+        p.y === TYPE13_FLOOR_Y && p.routinePhase === Type13Phase.Rest,
+        `y ${p.y} phase ${p.routinePhase}`);
+  check("...with no fall and no landing sound", sounds.length === 0,
+        sounds.map((s) => s.toString(16)).join());
+  G.g_script_flags[SCRIPT_FLAG_TYPE13_DROP] = 0;
 }
 
 console.log("\nclass 0x41 type 13, its draws:");

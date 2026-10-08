@@ -13,9 +13,12 @@ import type {
 import { authoredFrameOfTicks, ticksOfSeconds } from "../core/play_cursor";
 import type { Actor } from "./actor";
 import type { SetPieceParams } from "./class24";
+import type { MessageVariant } from "../bundle/sound";
 import type { CiviliansJson } from "../bundle/scene";
-import type { Boss4TablesJson, GameOverJson, OptionsJson, ResultCardJson }
-  from "../bundle/stage";
+import type {
+  Boss4TablesJson, ChapterCardJson, Class2DTablesJson, GameOverJson,
+  OptionsJson, OriginalModeJson, ResultCardJson,
+} from "../bundle/stage";
 import type { HumanoidProgram } from "./class25";
 import { G } from "./globals";
 import { TURN_CURVE_DEFAULT, TURN_RATE_UNTRACKED } from "./camera/constants";
@@ -71,11 +74,41 @@ export const T = {
    */
   options: null as OptionsJson | null,
   /**
+   * evt `0x2D`'s groups, three variants each in player-configuration order
+   * -- `g_pDialogueVariants` (`0x0058B6B8`), `u16[group * 3 + cfg]`, with the
+   * record each names (`g_screen_message_records`, `0x00589DA8`) and its
+   * subtitle lines (`g_pDialogueLines`, `0x005919A8`, into
+   * `g_pDialogueText`, `0x0058BC68`). `null` where the variant id is 0. Null
+   * in a bundle with no sound block, which says nothing.
+   */
+  dialogue: null as Record<string, (MessageVariant | null)[]> | null,
+  /** The same records by variant id: what the subtitle task holds. */
+  dialogueVariants: {} as Record<number, MessageVariant>,
+  /**
+   * `g_subtitle_glyphs` (`0x0055E054`), s16[128]: the screen sprite
+   * `DrawTextCentred` (`FUN_00436850`) draws for each character. Null in a
+   * bundle written before it, which draws no subtitles.
+   */
+  subtitleGlyphs: null as number[] | null,
+  /**
+   * Original Mode's `.rdata`: the weapon records the carried items load, the
+   * fire and ammo-readout rows their fire mode picks, and the trunk's tables.
+   * One block for the whole game. Null in a bundle written before it, which
+   * arms every item as the bare gun and opens an empty trunk.
+   */
+  originalMode: null as OriginalModeJson | null,
+  /**
    * Class 0x19's `.rdata` -- the stage-4 boss's seven tables. One block for
    * the whole game, read by `game/class19/`. Null in a bundle written before
    * format 13, and the boss then has no arena to fight in.
    */
   boss4: null as Boss4TablesJson | null,
+  /**
+   * Class 0x2D's `.rdata` -- the stage-6 boss's tables. One block for the
+   * whole game, read by `game/class2D/`. Null in a bundle written before it,
+   * and the boss then has no waypoints to fight from.
+   */
+  class2d: null as Class2DTablesJson | null,
   /**
    * `g_carrier2_door_yaw` (`0x005926D0`) -- the swing class 0x13's carrier
    * routine 2 steps its two doors through. Empty in a pre-13 bundle.
@@ -88,6 +121,12 @@ export const T = {
    * it. Read through `game/class61/rdata.ts`.
    */
   resultCard: null as ResultCardJson | null,
+  /**
+   * The chapter card's `.rdata`: the Boss Mode backdrop and its flags, and
+   * app state 0x0B's frames. Null in a bundle written before it. Read by
+   * `game/class60/boss_mode.ts` and `attract.ts`.
+   */
+  chapterCard: null as ChapterCardJson | null,
   /**
    * The turn-rate curves and the approach radii — the two `.rdata` tables the
    * camera director reads. The immediates that used to sit beside them in this
@@ -114,14 +153,41 @@ export function SetBoss4Tables(json: Boss4TablesJson | undefined,
   T.carrierDoorYaw = doorYaw ?? [];
 }
 
+/** `[port-only]` -- class 0x2D's block, from the same `script.json`. */
+export function SetClass2DTables(json: Class2DTablesJson | undefined): void {
+  T.class2d = json ?? null;
+}
+
+/** `[port-only]` -- the dialogue groups and the subtitle glyphs. */
+export function SetDialogueTables(
+    messages: Record<string, (MessageVariant | null)[]> | undefined,
+    glyphs: number[] | undefined): void {
+  T.dialogue = messages ?? null;
+  T.dialogueVariants = {};
+  for (const vs of Object.values(messages ?? {})) {
+    for (const v of vs) if (v) T.dialogueVariants[v.variant] = v;
+  }
+  T.subtitleGlyphs = glyphs ?? null;
+}
+
 /** `[port-only]` -- the options block, from the same `script.json`. */
 export function SetOptionsTables(json: OptionsJson | undefined): void {
   T.options = json ?? null;
 }
 
+/** `[port-only]` -- the Original Mode block, from the same `script.json`. */
+export function SetOriginalModeTables(json: OriginalModeJson | undefined): void {
+  T.originalMode = json ?? null;
+}
+
 /** `[port-only]` -- the result card's block, from the same `script.json`. */
 export function SetResultCardTables(json: ResultCardJson | undefined): void {
   T.resultCard = json ?? null;
+}
+
+/** `[port-only]` -- the chapter card's block, from the same `script.json`. */
+export function SetChapterCardTables(json: ChapterCardJson | undefined): void {
+  T.chapterCard = json ?? null;
 }
 
 /** `[port-only]` -- the game-over block, from the same `script.json`. */

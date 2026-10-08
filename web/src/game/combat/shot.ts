@@ -90,12 +90,18 @@ const NO_PROP_SPARK: ReadonlySet<PropFamily> = new Set([
   PropFamily.Falling,
 ]);
 import { ColiTraceSegmentAllSets } from "../coli";
-import { PlayerShotEffectSpawn } from "../effects/shot_effects";
-import { SpawnPropHitSpark } from "../effects/sprite";
+import { OriginalWeaponKind, PlayerShotEffectSpawn }
+  from "../effects/shot_effects";
+import { SpawnPropHitSpark, SpawnSpriteEffect, SpriteEffectKind }
+  from "../effects/sprite";
+import { GameMode } from "../game_mode";
 import { ActorShotFeedback, SpawnWorldImpact } from "./feedback";
 import { ActorByAt, G } from "../globals";
+import { CameraBlockViewToWorld } from "../camera/view";
+import { MatrixTransformPoint, MatrixTransformVector } from "../matrix";
+import { PROJECTION_DISTANCE_PX } from "../scene_lights";
 import type { GameHost, ShotPick, ShotRay } from "../host";
-import type { Vec3 } from "../vec";
+import { vec3, type Vec3 } from "../vec";
 import { g_class_handlers } from "../registry";
 import type { SpawnClass } from "../spawn_class";
 import { DispatchHit, HitResultCode } from "./resolve_hit";
@@ -138,13 +144,38 @@ export interface ShotRequest {
  * Original Mode fires through `PlayerFireOriginalModeWeapon`
  * (`FUN_00414B90`) instead, which prefers
  * `g_original_weapon_gunshot_ids[g_original_weapon_sound_kind]` and falls back
- * to this table when that entry is zero. `ResetOriginalModeLoadout`
- * (`FUN_0048A0D0`) writes that index 0, entry 0 of the weapon table is 0, and
- * no instruction in the image writes `0x009A224A` — so on the reading so far
- * every gunshot in the shipped game is one of these two. The weapon table is
- * therefore not ported.
+ * to this table when that entry is zero: entry 0, which the bare gun, the
+ * POWER UPs and the CHAMBERs keep. The seven guns the items give each have
+ * their own (`original_mode.gunshot_ids`, set by `OriginalItemsApply`).
  */
 export const g_gunshot_sound_ids: readonly number[] = [0x003416a9, 0x003316a9];
+
+/**
+ * `BuildShotRay` — `FUN_00406110`, the ray half: the crosshair at `(x, y)`
+ * pixels from the centre, `+y` up, unprojected at `g_projection_distance_px`
+ * -- `Vec3Normalize(x, y, -640.2)` -- then through the camera block
+ * `g_camera_index` names (`MatrixStackSetTopFromArray(g_camera_blocks +
+ * g_camera_index * 0x1A4)`): the record's `+0x28` point for the origin, and
+ * the direction with the translation cleared. `+0x28` has no writer in the
+ * image (`[likely]` zero from the boot's clear), so the origin is the eye.
+ * The angles and their sines the routine also leaves in the record are
+ * `ShotRayAnglesFromView`'s, taken where the shot is tested.
+ *
+ * The port's pulls arrive with this ray already built by the page, from the
+ * same crosshair; the routines that fire with no pull -- Original Mode's
+ * owed rounds and its recoil spread -- build it here, as the engine builds
+ * every one.
+ */
+export function BuildShotRay(x: number, y: number): ShotRay {
+  const len = Math.hypot(x, y, PROJECTION_DISTANCE_PX);
+  const view = { x: x / len, y: y / len, z: -PROJECTION_DISTANCE_PX / len };
+  const m = CameraBlockViewToWorld(G.g_camera_index);
+  const origin = { x: 0, y: 0, z: 0 };
+  MatrixTransformPoint(m, { x: 0, y: 0, z: 0 }, origin);
+  const dir = { x: 0, y: 0, z: 0 };
+  MatrixTransformVector(m, view, dir);
+  return { origin, dir };
+}
 
 /**
  * Put one trigger pull on the queue.
@@ -277,14 +308,21 @@ export function MergeShotPicks(picked: ShotPick | null,
                                ShotPick | null {
   if (!registered) return picked;
   if (picked && (picked.t ?? Infinity) <= registered.t) return picked;
+  const radius = registered.radius !== undefined
+    ? { radius: registered.radius } : {};
   if (registered.thrown !== undefined) {
     return { kind: "thrown", thrownId: registered.thrown,
-             point: registered.point, t: registered.t };
+             point: registered.point, t: registered.t, ...radius };
+  }
+  if (registered.prop !== undefined) {
+    return { kind: "prop", propId: registered.prop, point: registered.point,
+             ...(registered.mesh ? { mesh: registered.mesh } : {}),
+             t: registered.t, ...radius };
   }
   return { kind: "actor", at: registered.at, bone: registered.bone,
            whole: registered.whole, point: registered.point,
            ...(registered.mesh ? { mesh: registered.mesh } : {}),
-           t: registered.t };
+           t: registered.t, ...radius };
 }
 
 /**
@@ -354,6 +392,11 @@ export function FireShotRequest(req: ShotRequest, host: GameHost, rng: Rng,
     // A miss resets nothing -- the game only clears the head combo on a hit
     // that is not a head.
     const world = ShotHitWorld(req, host, events);
+    if (world) {
+      MarkActorShotBlast(player, { x: G.g_coli_hit_x, y: G.g_coli_hit_y,
+                                   z: G.g_coli_hit_z }, undefined, host,
+                         events);
+    }
     events?.emit("shot.resolved", {
       player, kind: "miss", ray: req.ray, points: 0,
       point: world ? { x: G.g_coli_hit_x, y: G.g_coli_hit_y,
@@ -376,6 +419,7 @@ export function FireShotRequest(req: ShotRequest, host: GameHost, rng: Rng,
       return;
     }
     MarkBodyCreatureShot(c, player);
+    MarkActorShotBlast(player, pick.point, pick.radius, host, events);
     events?.emit("shot.resolved", {
       player, kind: "marked", ray: req.ray, point: pick.point, points: 0,
     });
@@ -387,7 +431,10 @@ export function FireShotRequest(req: ShotRequest, host: GameHost, rng: Rng,
     // costs the prop is `CarriedPropCheckShot`'s, on its next update. No head
     // combo reset -- that is `ResolveHit`'s, and a prop never reaches it.
     const c = G.g_carried_props.find((x) => x.id === pick.carriedId);
-    if (c) MarkCarriedPropShot(c, player);
+    if (c) {
+      MarkCarriedPropShot(c, player);
+      MarkActorShotBlast(player, pick.point, pick.radius, host, events);
+    }
     events?.emit("shot.resolved", {
       player, kind: c ? "marked" : "miss", ray: req.ray,
       point: c ? pick.point : undefined, points: 0,
@@ -402,7 +449,10 @@ export function FireShotRequest(req: ShotRequest, host: GameHost, rng: Rng,
     // (`FUN_00450780`) or `ZombieThrownWeaponUpdate` (`FUN_0045A4F0`). No
     // score and no head-combo reset, both of which are `ResolveHit`'s.
     const w = G.g_thrown_weapons.find((x) => x.id === pick.thrownId);
-    if (w) MarkThrownWeaponShot(w, player);
+    if (w) {
+      MarkThrownWeaponShot(w, player);
+      MarkActorShotBlast(player, pick.point, pick.radius, host, events);
+    }
     events?.emit("shot.resolved", {
       player, kind: w ? "marked" : "miss", ray: req.ray,
       point: w ? pick.point : undefined, points: 0,
@@ -432,6 +482,8 @@ export function FireShotRequest(req: ShotRequest, host: GameHost, rng: Rng,
     MarkActorShot(obj, player, pick.bone, pick.whole ?? false,
                   pick.mesh ? { point: pick.point, ...pick.mesh } : undefined,
                   host, events);
+    MarkActorShotBlast(player, pick.point,
+                       pick.mesh ? undefined : pick.radius, host, events);
     events?.emit("shot.resolved", {
       player, kind: "marked", ray: req.ray, point: pick.point,
       at: obj.at, bone: pick.bone, who: obj.name, charType: obj.charType,
@@ -449,6 +501,8 @@ export function FireShotRequest(req: ShotRequest, host: GameHost, rng: Rng,
     SpawnWorldImpact(player, pick.point, pick.mesh.normal, pick.mesh.surface,
                      host, events);
   }
+  MarkActorShotBlast(player, pick.point, pick.mesh ? undefined : pick.radius,
+                     host, events);
   // Through `DispatchHit` (`FUN_004092F0`) and never straight into
   // `ResolveHit`: the engine has exactly one call to the damage tables and it
   // is behind the shot-immune gate. `null` is that refusal, and it is a
@@ -507,14 +561,23 @@ export function FireShotRequest(req: ShotRequest, host: GameHost, rng: Rng,
  * what cracks the prop, pays the ten points through `BreakablePropAwardHit`
  * and releases whatever it was hiding.
  */
-function ResolveShotOnProp(req: ShotRequest, pick: { propId: number;
-                                                     point: { x: number;
-                                                              y: number;
-                                                              z: number } },
+function ResolveShotOnProp(req: ShotRequest,
+                           pick: { propId: number; point: Vec3;
+                                   mesh?: { surface: number; normal: Vec3 } },
                            host: GameHost, events?: Events): void {
   const prop = G.g_breakable_props.find((p) => p.id === pick.propId);
   if (!prop) return;
   BreakablePropTakeShot(prop, req.player);
+  // A mesh candidate (`ShotPushMeshObjectCandidate`, `FUN_00404B50`: the
+  // object's word with `0x50` raised) takes `MarkActorShot`'s whole-object
+  // arm and then, for the `0x10`, `SpawnWorldImpact` (`FUN_00405260`) at the
+  // quad, and GRENADE's blast at the hit point -- the order an actor's mesh
+  // hit takes them in.
+  if (pick.mesh) {
+    SpawnWorldImpact(req.player, pick.point, pick.mesh.normal,
+                     pick.mesh.surface, host, events);
+    MarkActorShotBlast(req.player, pick.point, undefined, host, events);
+  }
   // `SpawnPropHitSpark` (`FUN_00465860`): the crosshair unprojected to the
   // prop's own camera depth, with `z` then replaced by the prop's `+0x1A4`.
   // The prop routines call it themselves on the frame they read the hit bit;
@@ -554,8 +617,10 @@ function ResolveShotOnProp(req: ShotRequest, pick: { propId: number;
  * `Boss4ResolveShot` reads the record back; so do class 0x30's weapon hands,
  * which do not come through here (`ResolveShot` spawns their impact).
  *
- * [diverges] The engine's version also runs the blood effect and, in Original
- * Mode, the item-drop test. Neither is state, and both are the renderer's.
+ * Its last arm, Original Mode's GRENADE blast, is {@link MarkActorShotBlast}.
+ *
+ * [diverges] The bone arm also ORs the shooter bit and `8` into the bone
+ * record's `+0x74` (`0x00404E21`); the port's bone records keep no such word.
  */
 export function MarkActorShot(obj: Actor, player: number, bone = 0,
                               whole = false,
@@ -575,6 +640,53 @@ export function MarkActorShot(obj: Actor, player: number, bone = 0,
     SpawnWorldImpact(player, mesh.point, mesh.normal, mesh.surface, host,
                      events);
   }
+}
+
+/**
+ * `MarkActorShot`'s last arm, `0x00404E87`..`0x00404F52`: in Original Mode,
+ * a hit with weapon kind 3 -- GRENADE -- throws sprite effect 0x53, the blast,
+ * `SpawnSpriteEffect(&at, 0x53, -1, player)` at `0x00404F43`.
+ *
+ * Where depends on the winning candidate's flags (`+0x2C`):
+ *
+ * * **Bit `0x10`**, a collision-mesh hit -- a bone's, a mesh object's or the
+ *   world's -- takes the hit point itself, the candidate's `+0x00..0x08`.
+ *   `radius` is `undefined` for these.
+ * * **Anything else** is a sphere, and the candidate's `+0x0C..0x14` is its
+ *   centre in view space (`obj+0x70..0x78`, `ShotTestSphere`'s `0x004046B3`;
+ *   `rec+0x68..0x70` for a bone). The routine adds `radius - 1.0` to the
+ *   depth (`FLD` the radius, `FSUB [0x004C4380]`, `FADD` z, at `0x00404EED`)
+ *   -- the radius it wrote into its own argument slot from `obj+0x124` or
+ *   `rec+0x78` -- and takes the point back to the world through
+ *   `g_camera_blocks[g_camera_index]` (`0x009A6040`, view to world). So the
+ *   blast sits on the sphere's near side, a unit inside it.
+ *
+ * The facing is `-1`, a full billboard, which overwrites the two angles
+ * before anything reads them; the routine leaves them as stack garbage.
+ *
+ * `[port-only]` as a function of its own. The engine runs this arm once, for
+ * the one winning candidate, inside `MarkActorShot`; the port reaches that
+ * routine's equivalent along one path per kind of pick, and each calls this
+ * where `MarkActorShot` would have reached it -- after the world impact.
+ * A breakable prop's sphere pick (`render/`'s) carries no radius, since which
+ * arm the engine's candidate for one takes is `[open]`, and so throws no
+ * blast; a prop shot through its mesh is a bit-`0x10` candidate and takes
+ * the hit-point arm, as any mesh hit does.
+ */
+function MarkActorShotBlast(player: number, point: Vec3,
+                            radius: number | undefined, host?: GameHost,
+                            events?: Events): void {
+  if (G.g_GameMode !== GameMode.Original) return;
+  if (G.g_original_weapon_kind[player] !== OriginalWeaponKind.Grenade) return;
+  const at = vec3(point.x, point.y, point.z);
+  if (radius !== undefined) {
+    const v = vec3();
+    if (!host?.viewSpaceOfPoint?.(point, v)) return;
+    v.z = (Math.fround(radius) - 1.0) + v.z;
+    MatrixTransformPoint(CameraBlockViewToWorld(G.g_camera_index), v, at);
+  }
+  SpawnSpriteEffect(at, 0, 0, SpriteEffectKind.OriginalBlast, -1, player,
+                    host, events);
 }
 
 /**

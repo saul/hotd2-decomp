@@ -274,6 +274,38 @@ export const CHECKS: readonly Check[] = [
       + "events at an actor the engine never files for the shot test, which the"
       + " render pick used to offer and `ResolveHit` then killed",
         NEEDS_BUNDLE, LANE_BROWSER),
+  check("story_switch", ["node", "tools/story_switch_page.mjs", "--headless"],
+        "that a click on stage 5's gateway in Original Mode kicks both leaves "
+      + "open and writes block 4's slot-2 route once flag 16 is up, and that "
+      + "the same frames unclicked write nothing: the only check that fires "
+      + "real pointer events at a prop shot through its own collision mesh "
+      + "(class 0x44 selector 17), which the port could not shoot at all",
+        NEEDS_BUNDLE, LANE_BROWSER),
+  check("hinge", ["node", "tools/hinge_page.mjs", "--headless"],
+        "that a click on stage 1's door at 0x2C2C -- a class-0x44 hinge with a "
+      + "collision blob -- lands on its mesh and starts the wobble only a hit "
+      + "starts, and that the door is in the moving-object collision passes' "
+      + "list in the page: the only check that drives a hinge's mesh "
+      + "registration through real pointer events",
+        NEEDS_BUNDLE, LANE_BROWSER),
+  check("window", ["node", "tools/window_page.mjs", "--headless"],
+        "that a click on stage 1's window -- class 0x44 selector 0, filed "
+      + "through the node matrix its effect draw captures -- lands on a "
+      + "half's mesh and raises the hit bit only a hit raises, and that both "
+      + "halves are in the moving-object passes' list in the page",
+        NEEDS_BUNDLE, LANE_BROWSER),
+  check("boat", ["node", "tools/boat_page.mjs", "--headless"],
+        "that a click on stage 2's block-9 boat -- class 0x33's carrier, "
+      + "filed through its blob and its 2.5-scaled matrix -- lands on its "
+      + "mesh and marks it without stopping it: the only check that shoots a "
+      + "class-0x33 object through real pointer events",
+        NEEDS_BUNDLE, LANE_BROWSER),
+  check("sound_cues", ["node", "tools/sound_cues_page.mjs", "--headless"],
+        "that stage 5's class-0x33 selector-7 object outlives block 2 with "
+      + "the cursor play leaves it on, and that a seek to block 3 rebuilds it "
+      + "on that same record and plays the brake from there: the only check "
+      + "of an object a seek must rebuild part-way through its own list",
+        NEEDS_BUNDLE, LANE_BROWSER),
   check("humanoid_shot", ["node", "tools/humanoid_shot_page.mjs", "--headless"],
         "that stage 2's jetty zombies -- class-0x25 scripted humanoids, the "
       + "four in the game whose spawn record leaves bit 0x8000 clear -- "
@@ -281,6 +313,14 @@ export const CHECKS: readonly Check[] = [
       + "bodies while the gun is up: the one check that fires real pointer "
       + "events at the class, which the render pick used to find through a "
       + "wall and `ResolveHit` then killed for ninety points",
+        NEEDS_BUNDLE, LANE_BROWSER),
+  check("boss5_page", ["node", "tools/boss5_page.mjs", "--headless"],
+        "that the stage-5 boss is fought to its end in the page -- live pulls "
+      + "aimed through the page's camera at the four bones that take damage, "
+      + "its projectiles and lunges striking the player, every one of its six "
+      + "task routines and its lit node draws reaching the render, and the "
+      + "script on past flag 30 -- the only check that fires real pointer "
+      + "events at class 0x32 and draws it",
         NEEDS_BUNDLE, LANE_BROWSER),
   check("crosshair", ["node", "tools/crosshair_page.mjs", "--headless"],
         "that real pointer events reach HudDrawCrosshair as the exe's devices "
@@ -334,6 +374,21 @@ export const CHECKS: readonly Check[] = [
       + "and camera paths -- the only check that plays a boss's phases, its "
       + "camera cues and the (2,6) rail they move, since the playthrough stops "
       + "on entering the end block the fight is in",
+        NEEDS_BUNDLE),
+  check("boss6_fight", ["npm", "run", "--silent", "boss6_fight"],
+        "that the stage-6 boss's fight runs from block 12's intro cut through "
+      + "its three rounds, a child and its death to past the block's "
+      + "`wait_enemies_alive 0`, against the stage's own script and paths -- "
+      + "the only check that plays class 0x2D, whose block the playthrough "
+      + "stops on entering",
+        NEEDS_BUNDLE),
+  check("boss5_fight", ["npm", "run", "--silent", "boss5_fight"],
+        "that the stage-5 boss's fight runs from its ride in to "
+      + "`g_script_flags[30]` against the stage's own script and camera and "
+      + "object paths, through all five phase rows, its casts, lunges and "
+      + "barrage, its death and exit, and the walker on past "
+      + "`wait_script_flag 30` to the block's end -- the only check that "
+      + "plays class 0x32 and the gate stage 5 ends on",
         NEEDS_BUNDLE),
   check("handback", ["npm", "run", "--silent", "handback"],
         "that a room waits for the camera to turn back onto its rail after the "
@@ -391,6 +446,19 @@ export const CHECKS: readonly Check[] = [
       + "whether an actor can leave state 12 at all, since that state's exit is"
       + " an exact `obj+0x19C >= 0x3C` against a play clock that is 0 for a "
       + "clip nothing carried",
+        NEEDS_BUNDLE),
+  check("bundle:state_clips", ["node", "tools/run_ts.mjs", "tools/checks/state_clips.ts"],
+        "that every clip a class-0x30 state names as an immediate rather than "
+      + "in a script is baked for each spawn that can be in that state -- the "
+      + "only check that sees a state played in the clip it inherited, because "
+      + "`ActorSetMotionBlended` on a clip the bundle lacks is silent",
+        NEEDS_BUNDLE),
+  check("bundle:entry_tails", ["node", "tools/run_ts.mjs", "tools/checks/entry_tails.ts"],
+        "that every class-0x30 spawn whose entrance state reads its tail "
+      + "unconditionally carries that tail decoded -- for a carrier's passenger"
+      + " the attack state's, not the ride's -- the only check that sees a "
+      + "rider with no leap, since the port's states read the tail with no "
+      + "test, as the exe's do",
         NEEDS_BUNDLE),
   check("bundle:cam_waits", ["node", "tools/run_ts.mjs", "tools/checks/cam_waits.ts"],
         "that every `wait_camera_path_frame <n>` asks for a frame the play in "
@@ -459,12 +527,14 @@ export const CHECKS: readonly Check[] = [
      + "lift car's rig draws its two pairs of doors on the camera paths "
      + "`FUN_0048F560` tests, and no others"),
   game("carrier_routines",
-       "that class 0x13's carrier selectors 4, 5, 7 and 8 install "
-     + "`CarrierPropRoutine4` and `5`, that the port's paths, offsets, cues, "
-     + "anchors, sounds and clip lengths are the routines' own bytes and "
-     + "`.data`, and, with a bundle, that stage 4 places all four spawns and "
-     + "ships both motions of both effects and every slot the two draw -- "
-     + "the set models round the boss's entrances, which nothing else draws"),
+       "that class 0x13's carrier selectors 3, 4, 5, 7 and 8 install "
+     + "`CarrierPropRoutine3`, `4` and `5`, that the port's paths, offsets, "
+     + "cues, anchors, sounds, alphas and clip lengths are the routines' own "
+     + "bytes and `.data`, that routines 1 and 6 leave state 6 through "
+     + "`FUN_004459C0`, and, with a bundle, that stage 4 places all five "
+     + "spawns and ships both motions of both effects and every slot the "
+     + "three draw -- the monitor and the set models round the boss's "
+     + "entrances, which nothing else draws"),
   game("draw_only_14",
        "that class 0x44 selector 14 is `g_class44_subtypes[14]`, that the "
      + "exporter reads its tail -- lifetime, slot, three-float scale -- at the "
@@ -473,6 +543,23 @@ export const CHECKS: readonly Check[] = [
      + "draw with no camera cue, and, with a bundle, that all twelve spawns "
      + "are placed with that tail and their models travel -- the one reader "
      + "of the descriptor word that is `0x10AE`'s only name"),
+  game("class44_builders",
+       "that class 0x44 selectors 1 to 8, 10 and 15 are the table's builders "
+     + "and each allocates its own routine, that the literals the port holds "
+     + "-- the van doors' offsets, the wobble's gains, the collapse's gravity, "
+     + "bounce, floor and alpha -- are the image's, and, with a bundle, that "
+     + "every one of their 74 spawns is placed with its builder's reading of "
+     + "the tail, with its models, its effect trees and the yaw curves -- the "
+     + "hinges the renderer used to pose, now run by the game"),
+  game("class41_ctors",
+       "that class 0x41 constructors 42, 52, 55, 61 and 65 are the table "
+     + "entries the port builds, that every immediate and float their "
+     + "routines load is the port's own word (floats as bit patterns), that "
+     + "constructor 61's `AND` is on the placer and its figures' routine never "
+     + "steps a clip, and, with a bundle, that each spawn is placed with the "
+     + "descriptor's own fields and the table its constructor reads, every "
+     + "model its task draws travels, and the nine figures each have their "
+     + "row, type and baked clip"),
   game("class26",
        "that class 0x26 subtypes 6 and 7 -- stage 6 block 12's pair -- are "
      + "routed by the installer to `Class26Subtype67Update` and stored after "
@@ -520,7 +607,15 @@ export const CHECKS: readonly Check[] = [
      + "of the split bit and no way into its state, each beside a control "
      + "that must be found -- which is the whole of the case for the port "
      + "not transcribing the split, and the only check that can say when "
-     + "that case stops holding"),
+     + "that case stops holding; and the same census for states 16 and 28, "
+     + "the class-0x30 dispatch's other two arms with no body"),
+  game("zskamere_aside",
+       "that no `zskamere` (class 0x31, type 0x17) can reach "
+     + "`ThrowerStateLeapAside` (`FUN_0044B880`), whose type-0x17 arm hands "
+     + "the arc an unfilled stack buffer -- the three stores of state 10, "
+     + "the two raises of the retreat bit, set 2's picks and every type-0x17 "
+     + "descriptors, each beside a control -- which is the whole of the case "
+     + "for the port installing no script on that arm"),
   game("horde",
        "that every number the class-0x40 horde is steered by -- its entry "
      + "splines, spline rates, shot delays, wander grid, second skin and the "
@@ -534,6 +629,15 @@ export const CHECKS: readonly Check[] = [
      + "the game's three class-0x42 descriptors are sub-types 1, 0 and 2, "
      + "and, with a bundle, that the shadow the port draws without the "
      + "scene light array is a black no light can change"),
+  game("chapter_card",
+       "that every sprite id, anchor point, dwell and model word the chapter "
+     + "card's port transcribes is the immediate at its instruction, found "
+     + "through the routine's own jump tables; that every float `title.ts` "
+     + "names by address is the `.rdata` float there; that the title's "
+     + "sprites resolve to paletted `scr_chapter` images with the palette "
+     + "`TexBankPaletteIndex` binds; that the variant arms' tables are where "
+     + "their instructions read; and, with a bundle, that each stage carries "
+     + "its scene's sprites, the block and stage 6 the card's model"),
   game("continue_screen",
        "that the continue screen the port draws -- the run's CONTINUE? and "
      + "digit, the two-player small ones, the small GAME OVER and the credit "
@@ -548,6 +652,14 @@ export const CHECKS: readonly Check[] = [
      + "Blood Color is dead in this build, and that the options screen's "
      + "factory tables, sprite ids, positions and glyph table are the EXE's, "
      + "with the bundle's `options` block when there is one"),
+  game("original_mode",
+       "that Original Mode's `.rdata` block has the extents its neighbours and "
+     + "its writers give it, that the port tests' fixture is the EXE's, that "
+     + "the trunk's class row, track, camera path, lid and models are the "
+     + "immediates in `ItemSelectUpdate`, that a failed profile load seeds "
+     + "items 3, 7 and 0x10, that stage 1 block 0 is indexed with its step-5 "
+     + "entry past a -1, and, with a bundle, that the Original stage 1 "
+     + "carries all of it"),
   game("result_card",
        "that every constant the result card's port transcribes is the "
      + "immediate at its instruction; that the `.rdata` span the card reads "
@@ -629,6 +741,11 @@ export const CHECKS: readonly Check[] = [
      + "`CMP AX,0x24` bytes, every spawn's list over every evt, `op 9` and "
      + "`op 16`'s table bytes, and, with a bundle, every face, accessory, "
      + "throwing hand and gore slot a list can name having a model to clone"),
+  game("faces",
+       "that op 0x25 and the two face hooks are the bytes the port transcribes "
+     + "-- their stores, rows, hand-over and every head base -- and, with a "
+     + "bundle, the mouth and face tables the exe's and every head a talking "
+     + "civilian or a talking or blinking humanoid can draw having a model"),
   game("walk_distance",
        "that every walk-in spawn's descriptor tail `+0x04` is an exact integer "
      + "distance in the range the docs state"),

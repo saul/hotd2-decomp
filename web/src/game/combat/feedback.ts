@@ -154,11 +154,13 @@ const WET_SURFACES: ReadonlySet<number> = new Set([5, 0x37]);
  *   *narrowing* — only classes 0x30 and 0x31 have an on-shot routine, so the
  *   seventeen other ported shootable classes would go silent, which is a
  *   behaviour change nobody asked for. It is declared here instead;
- * * `ActorUpdateBodyCondition` (`FUN_00454270`) runs on results 1, 3 and 4 and
- *   is **not ported** — it derives `obj+0x130C` from which hands are still
- *   armed and which zones are destroyed, and the death picker reads it. The
- *   port has the sibling `ActorBodyConditionFromHands` (`FUN_00455920`) and
- *   not this one;
+ * * `ActorUpdateBodyCondition` (`FUN_00454270`) runs on results 1, 3 and 4 --
+ *   the body condition the shot leaves, and the chainsaw's loop stopped when
+ *   its last hand goes -- and is called from `ZombieOnShot` (`FUN_00453EB0`)
+ *   instead, in `class30/on_shot.ts`: it is class 0x30's alone, and there it
+ *   runs at the engine's point in the frame, after the hit-reaction ticks that
+ *   read the old condition. This one's shot-time call would change the
+ *   condition a frame's worth of readers early;
  * * `NoOpStub` (`FUN_0041EBB0`) is a bare `RET` and is left out.
  */
 export function ActorShotFeedback(obj: Actor, bone: number, point: Vec3,

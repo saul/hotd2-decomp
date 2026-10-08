@@ -37,7 +37,10 @@
  *
  * Nothing the UI cannot. Stepping frames is Play and Pause with the count
  * made explicit; reading state is the existing projection plus the
- * same globals the sidebar already shows. It grants no power over the game —
+ * same globals the sidebar already shows. `advance`'s optional stop
+ * condition is Pause pressed on the frame something happened rather than on
+ * the next multiple of a driver's stride: it is asked, and it only reads. It
+ * grants no power over the game —
  * there is no "place this actor", no "set this flag", no way in at all. It is
  * a metronome and a tap.
  *
@@ -50,6 +53,7 @@
  */
 import { G } from "../game/globals";
 import { ShotTestPickedHere } from "../game/combat/shot_test";
+import { T } from "../game/tables";
 import type { Walker } from "../script/walker";
 import type { Rng } from "../core/rng";
 import type { PlayerState } from "./urlstate";
@@ -58,7 +62,7 @@ import type { PlayerState } from "./urlstate";
 export const DRIVE_GLOBAL = "__hotd2Drive";
 
 /** Bumped when the shape below changes, so a stale tool says so instead of lying. */
-export const DRIVE_VERSION = 3;
+export const DRIVE_VERSION = 4;
 
 /**
  * One frame of **game state** and nothing else.
@@ -96,8 +100,12 @@ const q = (v: number): number => Math.round(v * Q);
 
 /** What the harness needs from the player. Deliberately three things. */
 export interface DriveTarget {
-  /** Advance exactly one whole 60 Hz frame: walker and port together. */
-  stepOneFrame(): void;
+  /**
+   * Advance exactly one whole 60 Hz frame: walker and port together. False
+   * says the stage has finished, which ends this rAF's share early -- see
+   * {@link Harness.pump}.
+   */
+  stepOneFrame(): boolean | void;
   /** Ask the loop for a frame. It sleeps when nothing wants one. */
   wake(): void;
   readonly walker: Walker | null;
@@ -129,6 +137,12 @@ export interface ShotTarget {
    * `at` is then its thrower and `cls` is -1: the weapon has no class.
    */
   thrown?: number;
+  /**
+   * A class-0x44 prop shot through its own mesh (the story-mode switch), by
+   * its id in `g_breakable_props`. `at` is its placer's address, `cls` 0x44,
+   * and the point is the middle of its blob's box through its `obj+0x150`.
+   */
+  prop?: number;
 }
 
 /**
@@ -148,6 +162,11 @@ export class Harness {
   private tracing = false;
   private rows: TraceRow[] = [];
   private waiters: Array<() => void> = [];
+  /**
+   * `[port-only]` The driver's stop condition, asked after every frame a pump
+   * runs; true drops whatever is still owed. See {@link Harness.advance}.
+   */
+  private until: (() => boolean) | null = null;
 
   /**
    * The most frames one rAF will run.
@@ -189,8 +208,10 @@ export class Harness {
   pump(): number {
     const n = this.take();
     this.pending -= n;
+    let ran = 0;
     for (let i = 0; i < n; i++) {
-      this.target.stepOneFrame();
+      const more = this.target.stepOneFrame();
+      ran += 1;
       // Booked one at a time, and **before** the row is taken: a row is the
       // state frame `f` left behind, so `f` has to be that frame's number and
       // not the number the pump started on. Booking `n` at the end gave every
@@ -198,11 +219,43 @@ export class Harness {
       // human reading the trace does not.
       this.count += 1;
       if (this.tracing) this.rows.push(this.snapshot());
+      // The frame it stops on is the one this rAF then draws and publishes,
+      // so a driver that stops on a moment reads -- and screenshots -- that
+      // moment as the page rendered it.
+      if (this.until && this.stopHere(this.until)) {
+        this.pending = 0;
+        break;
+      }
+      // A finished stage ends the rAF's share, as it ends the accumulator's
+      // drain undriven (`Loop.advance`): the next stage's load starts from
+      // the page between two rAFs, and a pump that ran on through a
+      // finished stage would step it in a world the player never has. The
+      // rest stays owed, so the driver's count is still the count it gets.
+      if (more === false) {
+        this.pending += n - ran;
+        break;
+      }
     }
+    if (this.pending === 0) this.until = null;
     // After the frames and before the render, so the promise a driver is
     // waiting on settles a macrotask after this frame's publish.
     this.settle();
-    return n;
+    return ran;
+  }
+
+  /**
+   * Ask a stop condition. One that throws stops the run and says so on the
+   * console, where every driver counts a fault: thrown out of here it would
+   * take the rAF callback with it, and the driver would wait for ever on a
+   * promise nothing settles.
+   */
+  private stopHere(until: () => boolean): boolean {
+    try {
+      return until();
+    } catch (e) {
+      console.error(`drive: the stop condition threw: ${String(e)}`);
+      return true;
+    }
   }
 
   /**
@@ -221,15 +274,26 @@ export class Harness {
   }
 
   /**
-   * Book `n` frames, and wait for the loop to have run them.
+   * Book `n` frames, and wait for the loop to have run them -- or, given
+   * `until`, for the first frame after which it answers true, whichever
+   * comes first.
+   *
+   * `until` is for a driver that must act on the frame something happens --
+   * a pull when the aim is on a bone, a screenshot when a draw first appears
+   * -- so that it can book frames by the hundred rather than two at a time.
+   * Each frame is the same `stepOneFrame` either way; what it saves is the
+   * rAF a short stride pays for every stride, which was the whole of a boss
+   * fight's wall time (`tools/boss5_page.mjs`). One condition at a time: the
+   * latest `advance` sets it, and a run that ends clears it.
    *
    * Public because `test:state` drives it directly — the gate on the whole
    * seam is `install`, which answers null without the flag, not the reach of
    * one method.
    */
-  advance(n: number): Promise<number> {
+  advance(n: number, until?: () => boolean): Promise<number> {
     const frames = Math.max(0, Math.floor(n));
     this.pending += frames;
+    this.until = frames > 0 ? until ?? null : null;
     // The loop sleeps when nothing wants a frame, and what this just booked
     // is exactly that. Without it a driver's first `advance` after an idle
     // stretch would wait for a frame nobody was going to ask for.
@@ -302,9 +366,45 @@ export class Harness {
                    thrown: e.thrown });
         continue;
       }
+      // A prop's entry carries its placer's `at`, which is an actor in the
+      // pool too: look it up by the prop, never as an actor.
+      if (e.prop !== undefined) {
+        const q = G.g_breakable_props.find((x) => x.id === e.prop);
+        const blob = q?.coliBlob ? T.coli?.blobs?.[q.coliBlob] : undefined;
+        const m = q?.coliMatrix;
+        if (!blob || !m) continue;
+        const cx = (blob.min[0] + blob.max[0]) / 2;
+        const cy = (blob.min[1] + blob.max[1]) / 2;
+        const cz = (blob.min[2] + blob.max[2]) / 2;
+        const p = project({
+          x: m[0] * cx + m[1] * cy + m[2] * cz + m[3],
+          y: m[4] * cx + m[5] * cy + m[6] * cz + m[7],
+          z: m[8] * cx + m[9] * cy + m[10] * cz + m[11],
+        });
+        if (!p) continue;
+        out.push({ at: e.at, cls: 0x44, x: p.x, y: p.y, z: p.z,
+                   prop: e.prop });
+        continue;
+      }
       const obj = G.g_object_list.find((o) => o.at === e.at);
       if (!obj || !ShotTestPickedHere(obj)) continue;
-      const p = project(obj.shotCentre);
+      // An actor shot through its own mesh (bit `0x10`) is aimed at the
+      // middle of its blob through `obj+0x150`, as a prop is: its sphere
+      // centre need not be on the mesh at all.
+      const blob = obj.flags & 0x10 && obj.coliBlob
+        ? T.coli?.blobs?.[obj.coliBlob] : undefined;
+      const mm = obj.coliMatrix;
+      const at = blob && mm ? (() => {
+        const cx = (blob.min[0] + blob.max[0]) / 2;
+        const cy = (blob.min[1] + blob.max[1]) / 2;
+        const cz = (blob.min[2] + blob.max[2]) / 2;
+        return {
+          x: mm[0] * cx + mm[1] * cy + mm[2] * cz + mm[3],
+          y: mm[4] * cx + mm[5] * cy + mm[6] * cz + mm[7],
+          z: mm[8] * cx + mm[9] * cy + mm[10] * cz + mm[11],
+        };
+      })() : obj.shotCentre;
+      const p = project(at);
       if (!p) continue;
       out.push({ at: obj.at, cls: obj.cls, x: p.x, y: p.y, z: p.z });
     }
@@ -315,8 +415,11 @@ export class Harness {
   private get api() {
     return {
       version: DRIVE_VERSION,
-      /** Run `n` whole game frames. Resolves with the driven frame count. */
-      advance: (n: number) => this.advance(n),
+      /**
+       * Run `n` whole game frames, or fewer when `until`, asked after each,
+       * answers true. Resolves with the driven frame count.
+       */
+      advance: (n: number, until?: () => boolean) => this.advance(n, until),
       /** Driven frames run so far. */
       frames: () => this.count,
       /** Start or stop recording a row per driven frame. */

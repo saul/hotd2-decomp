@@ -253,8 +253,9 @@ export enum PlayerCameraHook {
   SpawnDamageOverlay = 1,
   /**
    * `PlayerHookDrawBody` (`FUN_00415120`) — the follow and no-op cameras.
-   * It draws the player's body; the port's body is the renderer's, so the
-   * hook does nothing here, and that is exactly its effect on the overlay.
+   * It draws the player's body when `g_player_flags` bit 0 is up, and steps
+   * the body's clip either way; see `game/player_body.ts`. It never looks at
+   * the hit latch, which is its whole effect on the overlay.
    */
   DrawBody = 2,
   /**
@@ -271,26 +272,62 @@ export enum PlayerCameraHook {
 }
 
 /**
- * `[port-only]` — the `+0x7C` half of the scene-state installers.
+ * What `g_player_entity_hook` (`0x009A5CE0`, the player block's `+0x80`)
+ * points at -- the hook `PlayerUpdateInPlay` calls first, before
+ * {@link PlayerCameraHook}'s. The four `PlaceEntity` thunks are four
+ * addresses with one body, `PlacePlayerEntityFromViewPose` (`FUN_004159A0`);
+ * they are kept apart because the writers write them apart. `None` is the
+ * port's: the engine's pointer is zero until `PlayerEnterPlay` installs one.
+ * The routines are in `game/player_body.ts`.
+ */
+export enum PlayerEntityHook {
+  /** `[port-only]` — nothing installed since the boot. */
+  None = 0,
+  /** `PlayerHookPlaceEntityA` (`FUN_00415960`). */
+  PlaceEntityA = 1,
+  /** `PlayerHookPlaceEntityB` (`FUN_00415970`). */
+  PlaceEntityB = 2,
+  /** `PlayerHookPlaceEntityC` (`FUN_00415980`). */
+  PlaceEntityC = 3,
+  /** `PlayerHookPlaceEntityD` (`FUN_00415990`). */
+  PlaceEntityD = 4,
+  /** `PlayerHookEnterSt1Vehicle` (`FUN_00415B60`), routine 0. */
+  EnterSt1Vehicle = 5,
+  /** `PlayerHookRideSt1Vehicle` (`FUN_00415BD0`). */
+  RideSt1Vehicle = 6,
+  /** `PlayerHookHoldClipEnd` (`FUN_00415E00`). */
+  HoldClipEnd = 7,
+  /** `PlayerHookStandAtScenePoint` (`FUN_00415E40`), routine 1. */
+  StandAtScenePoint = 8,
+  /** `PlayerHookHoldClipStart` (`FUN_00415F60`). */
+  HoldClipStart = 9,
+  /** `PlayerHookPlayClipAfterCamFrame` (`FUN_00415F90`). */
+  PlayClipAfterCamFrame = 10,
+}
+
+/**
+ * `[port-only]` — the player halves of the scene-state installers.
  *
  * `EvtEnterSceneState` (`FUN_00403BD0`) jumps to
  * `g_scene_state_table[major * 9 + minor]`, and each cell is an installer. Of
- * the table's live cells, six write the players' camera hook and the rest
- * leave it alone:
+ * the table's live cells, seven write one or both of the players' hooks and
+ * the rest leave them alone:
  *
- * | cell | installer | `+0x7C` |
- * |---|---|---|
- * | 1, 1 | `CameraInstallFollowMidpoint` (`FUN_00403980`) | `PlayerHookDrawBody` |
- * | 1, 2 | `CameraInstallNoOpWithBodyDraw` (`FUN_004039A0`) | `PlayerHookDrawBody` |
- * | 1, 3 | `CameraInstallViewAngles` (`FUN_004039D0`) | unchanged |
- * | 2, 4 | `CameraInstallSnapToPathEye` (`FUN_00403A00`) | `PlayerHookSpawnDamageOverlay` |
- * | 2, 5 | `CameraInstallPathImpulseShake` (`FUN_00403A30`) | `PlayerHookSpawnDamageOverlay` |
- * | 2, 6 | `CameraInstallDeferredRail` (`FUN_00403A60`) | `PlayerHookSpawnDamageOverlay` |
- * | 2, 7 | `CameraInstallStashedPath` (`FUN_00403A90`) | `PlayerHookSpawnDamageOverlay` |
- * | 0, 0 | `CameraInstallNoOpHook` (`FUN_00403970`) | unchanged |
+ * | cell | installer | `+0x7C` | `+0x80` |
+ * |---|---|---|---|
+ * | 1, 1 | `CameraInstallFollowMidpoint` (`FUN_00403980`) | `PlayerHookDrawBody` | unchanged |
+ * | 1, 2 | `CameraInstallNoOpWithBodyDraw` (`FUN_004039A0`) | `PlayerHookDrawBody` | `PlayerHookPlaceEntityA` |
+ * | 1, 3 | `CameraInstallViewAngles` (`FUN_004039D0`) | unchanged | `PlayerHookPlaceEntityB` |
+ * | 2, 4 | `CameraInstallSnapToPathEye` (`FUN_00403A00`) | `PlayerHookSpawnDamageOverlay` | `PlayerHookPlaceEntityC` |
+ * | 2, 5 | `CameraInstallPathImpulseShake` (`FUN_00403A30`) | `PlayerHookSpawnDamageOverlay` | `PlayerHookPlaceEntityD` |
+ * | 2, 6 | `CameraInstallDeferredRail` (`FUN_00403A60`) | `PlayerHookSpawnDamageOverlay` | `PlayerHookPlaceEntityD` |
+ * | 2, 7 | `CameraInstallStashedPath` (`FUN_00403A90`) | `PlayerHookSpawnDamageOverlay` | `PlayerHookPlaceEntityD` |
+ * | 0, 0 | `CameraInstallNoOpHook` (`FUN_00403970`) | unchanged | unchanged |
  *
- * Every other cell is `SceneStateInvalidHang` (`FUN_00402710`), and the
- * shipped scripts reach only these.
+ * `[proved]` from the stores to `0x009A5CDC`/`0x009A5E0C` and
+ * `0x009A5CE0`/`0x009A5E10`, every one of which is in one of these. Every
+ * other cell is `SceneStateInvalidHang` (`FUN_00402710`), and the shipped
+ * scripts reach only these.
  *
  * Every installer writes both players' slots. The rest of each installer --
  * the camera hook itself -- is the walker's and the camera port's business.
@@ -298,14 +335,29 @@ export enum PlayerCameraHook {
 export function SceneStateInstallPlayerHooks(major: number,
                                              minor: number): void {
   let hook: PlayerCameraHook | null = null;
-  if (major === 1 && (minor === 1 || minor === 2)) {
+  let entity: PlayerEntityHook | null = null;
+  if (major === 1 && minor === 1) {
     hook = PlayerCameraHook.DrawBody;
-  } else if (major === 2 && minor >= 4 && minor <= 7) {
+  } else if (major === 1 && minor === 2) {
+    hook = PlayerCameraHook.DrawBody;
+    entity = PlayerEntityHook.PlaceEntityA;
+  } else if (major === 1 && minor === 3) {
+    entity = PlayerEntityHook.PlaceEntityB;
+  } else if (major === 2 && minor === 4) {
     hook = PlayerCameraHook.SpawnDamageOverlay;
+    entity = PlayerEntityHook.PlaceEntityC;
+  } else if (major === 2 && minor >= 5 && minor <= 7) {
+    hook = PlayerCameraHook.SpawnDamageOverlay;
+    entity = PlayerEntityHook.PlaceEntityD;
   }
-  if (hook === null) return;
-  G.g_player_camera_hook[0] = hook;
-  G.g_player_camera_hook[1] = hook;
+  if (entity !== null) {
+    G.g_player_entity_hook[0] = entity;
+    G.g_player_entity_hook[1] = entity;
+  }
+  if (hook !== null) {
+    G.g_player_camera_hook[0] = hook;
+    G.g_player_camera_hook[1] = hook;
+  }
 }
 
 /**
@@ -348,26 +400,6 @@ export function PlayerHookSpawnDamageOverlay(player: number,
                                              events?: Events): void {
   if ((G.g_player_was_hit[player] ?? 0) !== 0) {
     DamageOverlaySpawn(player, G.g_player_damage_overlay_kind[player] ?? 0, events);
-  }
-}
-
-/**
- * `PlayerRunCameraHook` — `FUN_00415100`. One indirect call through
- * `g_player_camera_hook`.
- */
-export function PlayerRunCameraHook(player: number, events?: Events): void {
-  switch (G.g_player_camera_hook[player]) {
-    case PlayerCameraHook.SpawnDamageOverlay:
-      PlayerHookSpawnDamageOverlay(player, events);
-      return;
-    case PlayerCameraHook.DrawBody:
-    // Outside app state 7 the body's hook draws nothing and steps nothing;
-    // inside it `PlayerGameOverWait` runs the hook itself.
-    case PlayerCameraHook.DrawBodyUntilMotionEnd:
-    case PlayerCameraHook.SetCurActor:
-    case PlayerCameraHook.None:
-    default:
-      return;
   }
 }
 

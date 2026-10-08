@@ -10,6 +10,7 @@
  */
 import type { Events } from "../core/events";
 import type { Rng } from "../core/rng";
+import type { GameHost } from "./host";
 import { ActorFlag, MOTION_FLAGS_INIT, makeActor, type Actor } from "./actor";
 import { G } from "./globals";
 import { ActorClaimHitSlot, HIT_SLOT_CLAIMING_CLASSES }
@@ -21,7 +22,16 @@ import { CharacterTypeOf } from "./tables";
 import type { SpawnClass } from "./spawn_class";
 
 /**
- * Put one actor in the pool and run its class's `Init`.
+ * Put one actor in the pool and run its class's `Init` there and then.
+ *
+ * {@link SpawnFromDescriptor} and {@link ActorRunInit} back to back, for the
+ * objects the port still makes that way: those a class's own routine makes --
+ * a civilian's captors, class 0x14's summons, class 0x41's and 0x44's
+ * children -- and the tests. The engine makes those the same way it makes a
+ * script's, `ActorAlloc` with the handler as the entry point, so their
+ * `Init`s too run from the walk and not here; only the script's spawns have
+ * been moved to that, because the walk is where the frame order says what an
+ * `Init` reads (see {@link SpawnFromDescriptor}).
  *
  * `events` is here because **one class's `Init` makes a sound**:
  * `EnemyZombieInitByCharType` (`FUN_00452FD0`) starts the looping chainsaw or
@@ -33,31 +43,82 @@ export function ActorSpawn(at: number, cls: SpawnClass, charType: number,
                            name: string,
                            descriptor?: Partial<Actor>,
                            rng?: Rng, events?: Events): Actor {
+  const obj = SpawnFromDescriptor(at, cls, charType, name, descriptor);
+  ActorRunInit(obj, rng, events);
+  return obj;
+}
+
+/**
+ * `SpawnFromDescriptor` — `FUN_00408A20`. Link one object and give it the
+ * descriptor; **do not run its `Init`**.
+ *
+ * ```c
+ * obj = ActorAlloc(g_class_handlers[desc[0]], 0x13F4);
+ * ActorClearGameFields(obj);  ActorInitFlags(obj, desc[1]);
+ * obj+0x40..0x48 = desc[2..4];  obj+0x64..0x6C = desc[5..7];
+ * obj+0x1316 = desc[8];  obj+0x11C = obj+0x11E = desc+0x22;
+ * obj+0x1390 = desc + 0x24;
+ * ```
+ *
+ * `[proved]`. The handler `ActorAlloc` stores at `obj+0x00` is the class's
+ * `Init`, which `TaskRunTree` (`FUN_004A71A0`) calls when the walk reaches
+ * the object ({@link Actor.initPending}); `SceneTaskWalk` does that here,
+ * through {@link ActorRunInit}. `ActorAlloc` (`FUN_004A6FA0`) appends to the
+ * current task's parent, and `TaskRunTree` reads each child's next pointer
+ * after the child returns, so an object the interpreter makes is reached on
+ * the same frame, **after** the fourteen scene tasks -- the camera actor
+ * among them. An `Init` therefore reads the camera the frame's scene-state
+ * hook has just written, not the one the frame began with: the class-0x30
+ * and class-0x31 head-aim seed reads `g_camera_eye` there. The port ran every
+ * `Init` here, inside the script phase, so stage 2's canal zombies (block 16
+ * step 7, spawned in the same frame the script hands the camera from a
+ * cut-scene path to the player's) seeded their heads at the cut-scene's lens
+ * and spent two and a half seconds turning them round.
+ *
+ * The descriptor is the port's `Partial<Actor>`, as {@link ActorSpawn} has
+ * always taken it; `ActorClearGameFields` is `makeActor`'s defaults.
+ */
+export function SpawnFromDescriptor(at: number, cls: SpawnClass,
+                                    charType: number, name: string,
+                                    descriptor?: Partial<Actor>): Actor {
   const obj = makeActor(at, cls, charType, name);
   // The descriptor tail is what the class's own Init reads, so it goes on
   // before Init runs -- `EnemyZombieInit` starts the actor in `initialState`.
   if (descriptor) Object.assign(obj, descriptor);
   ActorInitFlags(obj, obj.flags);
+  // **Into the pool before its `Init` runs**, because that is where the
+  // engine's object is: `ActorAlloc` links the task into the ring, and the
+  // handler it installs is the `Init` -- run later, by the task walk, from
+  // its place in the ring. So an object an `Init` makes is linked **after**
+  // the one making it, and is updated after it every frame from then on.
+  // `Class22Init` (`FUN_0049B0D0`) is the case that reads the order: its
+  // companion, spawned from its own first update, reads the flier's hit
+  // points and phase every frame, and the flier reads the companion's
+  // position and strike bits, each a frame old in the engine. Pushing after
+  // the `Init` put every such child in front of its parent.
+  G.g_object_list.push(obj);
+  obj.initPending = true;
+  return obj;
+}
+
+/**
+ * The first call of a linked object's entry point: its class's `Init`.
+ *
+ * [port-only] as a function -- the engine calls `obj+0x00` and the handler
+ * there happens to be the `Init`; the port has `init` and `update` as two
+ * members of a {@link ClassHandler}, and {@link Actor.initPending} says which
+ * is due.
+ */
+export function ActorRunInit(obj: Actor, rng?: Rng, events?: Events,
+                             host?: GameHost): void {
+  obj.initPending = false;
   // 35 class `Init`s call `ActorBuildSkinnedModel` -- every one that builds a
   // skinned character. The port has no model build, so what the build leaves
   // on the actor is done here, for the classes whose `Init` is a proved
   // caller and no others. `obj+0x3C` is the phase of every cel a class-0x30
   // bone draws; see `class30/bonecels.ts`.
-  if (HIT_SLOT_CLAIMING_CLASSES.has(cls)) ActorBuildSkinnedModel(obj);
-  // **Into the pool before its `Init` runs**, because that is where the
-  // engine's object is: `SpawnFromDescriptor` (`FUN_00408A20`) is
-  // `ActorAlloc(g_class_handlers[class], 0x13F4)`, which links the task into
-  // the ring, and the handler it installs is the `Init` -- run later, by the
-  // task walk, from its place in the ring. So an object an `Init` makes is
-  // linked **after** the one making it, and is updated after it every frame
-  // from then on. `Class22Init` (`FUN_0049B0D0`) is the case that reads the
-  // order: its companion, spawned from its own first update, reads the
-  // flier's hit points and phase every frame, and the flier reads the
-  // companion's position and strike bits, each a frame old in the engine.
-  // Pushing after the `Init` put every such child in front of its parent.
-  G.g_object_list.push(obj);
-  g_class_handlers[cls]?.init(obj, rng, events);
-  return obj;
+  if (HIT_SLOT_CLAIMING_CLASSES.has(obj.cls)) ActorBuildSkinnedModel(obj);
+  g_class_handlers[obj.cls]?.init(obj, rng, events, host);
 }
 
 /**
@@ -238,5 +299,5 @@ export function ActorBuildSkinnedModel(obj: Actor): void {
  * was one nobody had read.
  */
 export function ActorInitFlags(obj: Actor, spawnFlags: number): void {
-  obj.flags = spawnFlags | 1;
+  obj.flags = spawnFlags | ActorFlag.Live;
 }

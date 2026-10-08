@@ -111,12 +111,20 @@ export class ScreenSpritesDeep implements System<RenderContext> {
       const a = s.flags & 0xf;
       const ax = a === 0 ? 1 : a & 3;
       const ay = a === 0 ? 1 : (a >> 2) & 3;
-      const cx = s.x + (1 - ax) * w / 2 + w / 2;
-      const cy = s.y + (1 - ay) * h / 2 + h / 2;
+      // The quad's centre from its anchor, turned about the anchor by `rot`
+      // (counter-clockwise on the screen, as `DrawSpriteQuadCommand` turns
+      // its corners); flags `0x10`/`0x20` mirror the texture in the quad.
+      const ox = (1 - ax) * w / 2 + w / 2;
+      const oy = (1 - ay) * h / 2 + h / 2;
+      const th = (s.rot ?? 0) * Math.PI * 2 / 65536;
+      const cx = s.x + ox * Math.cos(th) + oy * Math.sin(th);
+      const cy = s.y - ox * Math.sin(th) + oy * Math.cos(th);
       const k = s.depth / d;
       q.position.set((cx - SCREEN_W / 2) * k, (SCREEN_H / 2 - cy) * k,
                      -s.depth);
-      q.scale.set(w * k, h * k, 1);
+      q.rotation.set(0, 0, th);
+      q.scale.set(w * k * ((s.flags & 0x10) !== 0 ? -1 : 1),
+                  h * k * ((s.flags & 0x20) !== 0 ? -1 : 1), 1);
       q.visible = true;
       n += 1;
     }

@@ -9,10 +9,15 @@
  * update and never runs again. See {@link ScriptedScenerySelector} for the
  * jump table.
  *
- * **Three of the twelve are ported.** Selector 4 is the pushable scenery in
- * `class33/pushable.ts` — stage 1's two chairs. Selector 5 is the sprite
- * effect stage 2 throws at a camera frame, in `class33/effect_cue.ts`.
- * Selector 1 is here: the object stage 5 block 2's room is held by, and stage
+ * **All twelve are ported.** Selector 2 is a model drawn until a flag or a
+ * camera frame, in `class33/draw_until_flag.ts`. Selector 3 throws one
+ * sprite on its first frame, in `class33/effect_first_frame.ts`. Selectors
+ * 6, 7, 10 and 11 are in `class33/cues.ts` and 8, 9 and 99 in
+ * `class33/strips.ts`, carried by the bundle's `class33_sub`. Selector 4 is
+ * the pushable scenery in `class33/pushable.ts` — stage 1's two chairs.
+ * Selector 5 is the sprite effect stage 2 throws at a camera frame, in
+ * `class33/effect_cue.ts`. Selector 1 is here: the object stage 5 block 2's
+ * room is held by, and stage
  * 2's two riders leave on:
  *
  * ```
@@ -57,28 +62,44 @@
  * `wait_enemies_alive <= 0` at step 2 op 50, a room a player could not clear
  * by shooting. That is what this module is for.
  *
- * ## What is not ported, by name
+ * ## How it is shot `[proved]`
  *
- * * **The other sub-handlers.** Selector 2's ten spawns already reach the
- *   player through the bundle's `props`; the rest are unread and the bundle
- *   carries no tail for them, so the director builds no object for them and
- *   they keep the nothing they had -- **including the hit slot**, which their
- *   dispatch arms claim in the engine like every other arm's. So while one of
- *   them would be alive, a skinned actor spawned after it can take a lower
- *   `obj+0x3C` in the port than in the game, and that index is its cel phase
- *   (`game/hit_slots.ts`).
- * * `RegisterForShotTest` (`FUN_00405160`), at `0x004334D0` in the tail of
- *   the draw. The carrier's sphere is `tail+0x08`, which is `0.1` on stage
- *   5's and `0.0` on stage 2's two, and `tail+0x04 != -1` puts stage 2's on
- *   the **mesh** test (`obj+0x34 |= 0x50`), `ShotTestMesh` in
- *   `combat/shot_test.ts`, which this class would reach by registering at
- *   that site with its blob and its matrix on the actor.
- * * Everything from `0x00433463` to `0x0043382F`, which is drawing: the two
- *   22-slot sprite loops at `obj+0x1354`/`+0x1358`, the 45-degree spin at
- *   `obj+0x135C`, and the five sub-models slot `0x1B0E` carries. It is in
- *   `hod2lib/rigs_data.ts` as `obj_4331d0` and the renderer already places
- *   it. **The decompiler shows none of it** — its pseudocode ends at
- *   `0x0043345E` with a `return` the code does not have, which is `L37`.
+ * The draw's model ends `MatrixStore(obj+0x150)` (`0x00433457`), then
+ * `obj+0x70..0x78` is `obj+0x40` through the camera block's matrix
+ * (`0x00433463`..`0x004334C7`) and `RegisterForShotTest` (`0x004334D0`) files
+ * the object -- before the car's parts, and on every frame the ride runs.
+ * The seat (`0x00433886`..`0x004338B7`) raises `0x80000001` and then either
+ * the mesh arm -- `tail+0x04 != -1`: `obj+0x34 |= 0x50` and the pointer on
+ * `obj+0x14C` -- or the sphere, `tail+0x08` on `obj+0x124` and `obj+0x128`.
+ * Stage 2's two boats (`0x4FD0`, `0x12590`) take the mesh arm, so a shot
+ * stops where it crosses the boat's blob, through the 2.5-scaled matrix
+ * (`ShotTestMesh`, `combat/shot_test.ts`); stage 5's car the sphere, 0.1
+ * units round the car's origin.
+ *
+ * **Bit 31 keeps it out of every other list.** Nothing in the class clears
+ * the `0x80000000` the seat raises, and `0x80008000` is what both
+ * moving-object collision passes (`coli.ts`) and the crowd push
+ * (`ColiTestSphereAgainstActors`) refuse, so a boat is never a floor or a
+ * wall and pushes nobody: it is in the shot test and nowhere else. And no
+ * routine of the class reads the hit bits `MarkActorShot` (`FUN_00404DB0`)
+ * raises -- every `[reg + 0x34]` operand in `0x00432FF0`..`0x00434400` is a
+ * store or a test of `0x10000000`, `0x40000000`, `0x200000`, `0x8000`, or
+ * the pusher's `0x18000000` -- so a hit marks it and that is all (the
+ * handler's `ownsShotResult`).
+ *
+ * ## The draw
+ *
+ * `[proved]` from the listing, `0x004332DA`..`0x0043382F`: the fire, the
+ * model, and either stage 5's car parts or the two sprite loops. The
+ * pseudocode once ended at `0x0043345E` with a `return` the code does not
+ * have (`L37`), and this module was written from it: it said the draw was
+ * the rig writer's and that the fire returned early. Both were wrong; the
+ * database decompiles the whole routine now, and the listing agrees with it
+ * line for line. Each `AssetDrawSlot` is recorded on
+ * `obj.scenery.draws` with the world matrix the stack held, and
+ * `render/slotmodels.ts` places them; nothing else draws this object. Before
+ * this was ported nothing drew it at all: stage 2 block 9's boat, slot
+ * `0x1A36` at scale 2.5, was missing from the river.
  */
 import type { Rng } from "../../core/rng";
 import { type Actor, ActorFlag, type ScriptedSceneryActor } from "../actor";
@@ -86,19 +107,41 @@ import { ActorDespawn } from "../despawn";
 import { SpawnSpriteEffect } from "../effects/sprite";
 import { G } from "../globals";
 import { ActorClaimHitSlot } from "../hit_slots";
+import { ColiStoreObjectMatrix } from "../coli";
+import { RegisterForShotTest } from "../combat/shot_test";
 import type { GameHost } from "../host";
 import {
   registerClass, type ActorDebug, type ClassFrame, type ClassHandler,
+  type ReplayCamera, type ReplaySpawnRecord,
 } from "../registry";
+import { T } from "../tables";
 import { SpawnClass } from "../spawn_class";
-import { vec3 } from "../vec";
+import { CameraBlockEye } from "../camera/view";
+import {
+  FtolS16, MatIdentity, type Mat, MatrixRotateX, MatrixRotateY,
+  MatrixRotateZ, MatrixScale, MatrixTranslate,
+} from "../matrix";
+import { vec3, VecToAngles } from "../vec";
 import { ScriptedEffectAtCameraCue33 } from "./effect_cue";
+import {
+  ScriptedEndingTrackSelect33, ScriptedSoundAndFlagAtCue33,
+  ScriptedSoundCues33, ScriptedSoundCues33FollowReplayCamera,
+  ScriptedSoundCues33ResumeFromReplay, ScriptedSpriteEffectOnce33,
+} from "./cues";
+import {
+  ScriptedBridgeCrashStrip33, ScriptedFireLoopUntilCue33,
+  ScriptedStaticSlotDraw33,
+} from "./strips";
+import { ScriptedPropDrawUntilFlag } from "./draw_until_flag";
+import { ScriptedEffectOnFirstFrame33 } from "./effect_first_frame";
 import { ScriptedPushableUpdate33, SCENERY_SKIP_COLLISION }
   from "./pushable";
 import { ScriptedScenerySelector } from "./state";
 
 export { ScriptedScenerySelector };
 export { ScriptedEffectAtCameraCue33 } from "./effect_cue";
+export { ScriptedPropDrawUntilFlag } from "./draw_until_flag";
+export { ScriptedEffectOnFirstFrame33 } from "./effect_first_frame";
 export { ScriptedPushableUpdate33 } from "./pushable";
 
 /**
@@ -158,6 +201,52 @@ const SLOT_B_YAW_BIAS = 0x4000;
 const SLOT_CAR_X_BIAS = 5.0;
 
 /**
+ * `MOV dword [ESI+0x118],0x3f800000` at `0x004339B3`, and `0x40200000` at
+ * `0x004339E1`/`0x004339F3` for the two scaled slots.
+ */
+const DRAW_SCALE = 1.0;
+const DRAW_SCALE_BOAT = 2.5;
+
+/** `obj+0x1354/+0x1358/+0x135C` as the seat writes them, `0x004338CE`. */
+const LOOP_A_FIRST = 0x24a;
+const LOOP_A_LAST = 0x25f;
+const LOOP_B_FIRST = 0x260;
+const LOOP_B_LAST = 0x275;
+
+/** `MOV EAX,0x1aab` / `MOV dword [EBP+0x136c],0x1ad2` at `0x004332B7`. */
+const FIRE_FIRST = 0x1aab;
+const FIRE_LAST = 0x1ad2;
+
+/**
+ * The two sprite loops' matrix after the object's: `PUSH 0x41c80000; PUSH 0;
+ * PUSH 0` then `MatrixScale(0x3f19999a, 0x3f000000, 0x3f333333)` at
+ * `0x0043352A`..`0x00433547`.
+ */
+const LOOP_Z = 25.0;
+const LOOP_SCALE: readonly [number, number, number] = [
+  Math.fround(0.6), 0.5, Math.fround(0.7)];
+
+/**
+ * Stage 5's car parts, `0x0043362B`..`0x00433813`: each under the object's
+ * `T RotZ RotY RotX`, then its own offset. The floats are the pushed raws.
+ */
+const CAR_PART_DOOR = 0x899;
+const CAR_PART_DOOR_AT: readonly [number, number, number] = [
+  Math.fround(-5.2664), Math.fround(8.3328), Math.fround(6.717)];  // 0xc0a88659..
+const CAR_PART_DOOR_PITCH = -0x2d3a;                                // PUSH 0xffffd2c6
+const CAR_PART_WHEEL = 0x8cb;
+const CAR_PART_WHEEL_Y = Math.fround(3.5437);                       // 0x4062cbfb
+const CAR_PART_WHEEL_FRONT_Z = Math.fround(17.0281);                // 0x4188398c
+const CAR_PART_WHEEL_BACK_Z = Math.fround(-12.384);                 // 0xc14624dd
+/** `ADD EDX,0x2000` at `0x004336E8` — the wheels' turn a frame. */
+const CAR_WHEEL_TURN_STEP = 0x2000;
+const CAR_PART_LEFT = 0x1b0a;
+const CAR_PART_RIGHT = 0x1b0d;
+const CAR_PART_SIDE_X = 10.0;                                       // 0x41200000
+const CAR_PART_SIDE_Y = Math.fround(6.216);                         // 0x40c6e979
+const CAR_PART_SIDE_Z = Math.fround(6.878);                         // 0x40dc1893
+
+/**
  * `ScriptedSceneryDispatch33` — `FUN_00432FF0`. Class 0x33's `Init`.
  *
  * The engine's switch installs one of twelve update pointers into `*obj`, and
@@ -215,13 +304,18 @@ export function ScriptedCarrierStepPath33(obj: ScriptedSceneryActor,
       obj.hitRadius = t.shot_radius;
       obj.bodyRadius = t.shot_radius;
     } else {
+      // ...and `obj+0x14C = tail+0x04`, which the port carries resolved.
       obj.flags |= 0x50;
+      obj.coliBlob = t.shot_blob ?? null;
     }
     s.slot = t.slot;
     s.pathSlot = t.path;
     s.pathEnd = t.path_end;
-    // `obj+0x1354/+0x1358/+0x135C = 0x24A/0x260/0` are the sprite cursors the
-    // draw tail cycles, and the draw is `render/`'s — see the module note.
+    // `0x004338CE`..`0x004338E2`: the two sprite loops' cursors and the
+    // wheels' turn, which the update's draw steps.
+    s.loopA = LOOP_A_FIRST;
+    s.loopB = LOOP_B_FIRST;
+    s.wheelTurn = 0;
     s.pathFrame = G.g_cam_path_frame - 1;
     if (s.slot === SLOT_STAGE5_CAR) events?.emit("sound.play", { id: SND_DRIVE });
     obj.sub += 1;
@@ -245,16 +339,16 @@ export function ScriptedCarrierStepPath33(obj: ScriptedSceneryActor,
   // `AND ECX, 0xFFFF` at `0x00433982`/`0x0043398F`/`0x004339A5`: the engine
   // masks each of the three on the way onto the object.
   obj.pitch = (p.pitch ?? 0) & 0xffff;
+  obj.roll = (p.roll ?? 0) & 0xffff;
   obj.yaw = (p.yaw ?? 0) & 0xffff;
-  // `obj+0x6C` (the roll) and `obj+0x118` (the uniform scale, 1.0 here and
-  // 2.5 for the two slots below) are written by the engine and read only by
-  // its own draw. The port has no field for either and the renderer takes
-  // both from the exported rig, so they are left out rather than invented.
+  // `MOV dword [ESI+0x118],0x3f800000` at `0x004339B3`, before the slot test.
+  s.drawScale = DRAW_SCALE;
 
-  if (s.slot === SLOT_SCALED_A) return;
+  if (s.slot === SLOT_SCALED_A) { s.drawScale = DRAW_SCALE_BOAT; return; }
   if (s.slot === SLOT_SCALED_B) {
     // **Not masked.** `MOV [ESI+0x68], ECX` at `0x004339EB` takes the *raw*
     // `ry` the routine kept in ECX before the `AND`, plus a quarter turn.
+    s.drawScale = DRAW_SCALE_BOAT;
     obj.yaw = (p.yaw ?? 0) + SLOT_B_YAW_BIAS;
     return;
   }
@@ -265,9 +359,11 @@ export function ScriptedCarrierStepPath33(obj: ScriptedSceneryActor,
  * `ScriptedCarrierUpdate33` — `FUN_004331D0`. One frame of the carrier.
  *
  * Read top to bottom, because the order is the behaviour: the two cues are
- * tested against the cursor the **previous** frame's ride left, the fire's
- * early return is what stops the ride, and the despawn arm is reached only by
- * falling past both.
+ * tested against the cursor the **previous** frame's ride left, the fire is
+ * drawn where the descriptor put it and the routine runs on, and then either
+ * the despawn arm or the ride and the draw. A burning carrier keeps riding
+ * until `tail+0x10` stops it, and leaves on its despawn cue with
+ * `CAR_FIRE_22_OFF`.
  *
  * The despawn cue is `g_cam_path_frame == tail+0x1C || g_cam_path_frame_2 ==
  * tail+0x1C`, camera blocks 0 and 2 by address (`0x004333D7`, `0x004333DF`),
@@ -284,6 +380,7 @@ export function ScriptedCarrierUpdate33(obj: ScriptedSceneryActor,
 
   // `MOV dword ptr [0x009a5c34], EBP` at `0x004331E1` — every frame, not once.
   G.g_carrier_object = obj.at;
+  s.draws.length = 0;
 
   // `MOV AL, byte ptr [EBX + 0x20]` / `CMP byte ptr [EAX + 0x9C7200], 0x1` at
   // `0x004331E7` — the flag index is used raw, with no "none" test in front of
@@ -317,21 +414,24 @@ export function ScriptedCarrierUpdate33(obj: ScriptedSceneryActor,
     s.effectFrames += 1;
     if (s.effectFrames === FIRE_DELAY_FRAMES) {
       obj.flags |= ActorFlag.FireLoop;
-      // `obj+0x1364/+0x1368 = 0x1AAB` and `obj+0x136C = 0x1AD2`, the first and
-      // last slots of the fire loop. Drawing, and `render/`'s.
+      s.fireSlot = FIRE_FIRST;
+      s.fireFirst = FIRE_FIRST;
+      s.fireLast = FIRE_LAST;
       f.events?.emit("sound.play", { id: SND_FIRE });
     }
-    // **The early return, and it is not a drawing detail.** Once the fire is
-    // up the routine never reaches `ScriptedCarrierStepPath33` again, so the
-    // cursor freezes and the object stops moving — and it never reaches the
-    // despawn arm either, so it stays on the field burning.
-    if (obj.flags & ActorFlag.FireLoop) return;
+    // `0x004332DA`: the fire is drawn and the routine **carries on** into
+    // the despawn test and the ride below -- `ADD ESP,0x8` at `0x004333B8`
+    // falls through to `0x004333BB`. The port returned here, on a reading of
+    // pseudocode that ended early, which froze a burning carrier and made
+    // `SND_FIRE_OFF` unreachable.
+    if (obj.flags & ActorFlag.FireLoop) Carrier33DrawFire(s, t.effect);
   }
 
   if (G.g_script_flags[t.despawn_flag] !== 1
       && G.g_cam_path_frame !== t.despawn_frame
       && G.g_cam_path_frame_2 !== t.despawn_frame) {
     ScriptedCarrierStepPath33(obj, f.host, f.events);
+    Carrier33Draw(obj, f.host);
     return;
   }
 
@@ -342,17 +442,145 @@ export function ScriptedCarrierUpdate33(obj: ScriptedSceneryActor,
 }
 
 /**
+ * `AssetDrawSlot` (`FUN_00418560`) under `m`, recorded rather than made.
+ * `[port-only]` as a function, as `Class26DrawSlot` is.
+ */
+function Carrier33DrawSlot(s: ScriptedSceneryActor["scenery"], m: Mat,
+                           slot: number): void {
+  s.draws.push({ slot, m: m.slice(0, 16) });
+}
+
+/** `MatrixStackPush; MatrixTranslate(pos); RotZ; RotY; RotX` — every draw's head. */
+function Carrier33ObjectMatrix(obj: ScriptedSceneryActor): Mat {
+  const m = MatIdentity();
+  MatrixTranslate(m, obj.pos.x, obj.pos.y, obj.pos.z);
+  MatrixRotateZ(m, obj.roll);
+  MatrixRotateY(m, obj.yaw);
+  MatrixRotateX(m, obj.pitch);
+  return m;
+}
+
+/**
+ * `ScriptedCarrierUpdate33`'s fire, `0x004332E7`..`0x004333B8`: the slot loop
+ * at the descriptor's effect point (`tail+0x24`), turned to face the camera
+ * block's eye in yaw alone (`MOV dword [ESP+0x40],0x0` zeroes the pitch
+ * `VecToAngles` gave). The cursor steps **before** it is drawn, so the first
+ * slot drawn is `0x1AAC`.
+ *
+ * `[port-only]` as a function: a stretch of the update, split out because
+ * the update runs it before the despawn test and the model after it.
+ */
+function Carrier33DrawFire(s: ScriptedSceneryActor["scenery"],
+                           at: readonly number[]): void {
+  const eye = CameraBlockEye(G.g_camera_index);
+  const ang = VecToAngles(eye.x - at[0], eye.y - at[1], eye.z - at[2]);
+  const m = MatIdentity();
+  MatrixTranslate(m, at[0], at[1], at[2]);
+  MatrixRotateY(m, FtolS16(ang.yaw));
+  MatrixRotateX(m, 0);
+  s.fireSlot += 1;
+  if (s.fireLast < s.fireSlot) s.fireSlot = s.fireFirst;
+  Carrier33DrawSlot(s, m, s.fireSlot);
+}
+
+/**
+ * `ScriptedCarrierUpdate33`'s draw after the ride, `0x004333F1`..`0x0043382F`,
+ * and the shot-test registration in the middle of it.
+ *
+ * The model is `obj+0x13F0` under `T RotZ RotY RotX Scale(obj+0x118)`
+ * (`NoOpStub` is handed the scale and does nothing). Then slot `0x1B0E`
+ * draws its five parts and returns; any other slot draws the two sprite loops
+ * 25 units along its own Z, scaled `(0.6, 0.5, 0.7)`, but only while
+ * `obj+0x1312` is 1 -- while the ride runs -- each loop stepped after it is
+ * drawn.
+ *
+ * `[port-only]` as a function, for the reason {@link Carrier33DrawFire} is.
+ */
+function Carrier33Draw(obj: ScriptedSceneryActor, host: GameHost): void {
+  const s = obj.scenery;
+  let m = Carrier33ObjectMatrix(obj);
+  MatrixScale(m, s.drawScale, s.drawScale, s.drawScale);
+  Carrier33DrawSlot(s, m, s.slot);
+  // `MatrixStore(obj+0x150)` at `0x00433457`, built on the identity -- the
+  // matrix `RegisterForShotTest`'s mesh arm leaves (`combat/shot_test.ts`).
+  ColiStoreObjectMatrix(obj, m);
+  // `obj+0x70..0x78 = g_camera_blocks[g_camera_index] * obj+0x40..0x48`
+  // (`0x00433463`..`0x004334C7`): the view-space point, which the port keeps
+  // in world space (`Actor.shotCentre`). Then the registration at
+  // `0x004334D0`.
+  obj.shotCentre.x = obj.pos.x;
+  obj.shotCentre.y = obj.pos.y;
+  obj.shotCentre.z = obj.pos.z;
+  RegisterForShotTest(obj, host);
+
+  if (s.slot === SLOT_STAGE5_CAR) {
+    m = Carrier33ObjectMatrix(obj);
+    MatrixTranslate(m, CAR_PART_DOOR_AT[0], CAR_PART_DOOR_AT[1],
+                    CAR_PART_DOOR_AT[2]);
+    MatrixRotateZ(m, 0);
+    MatrixRotateY(m, 0);
+    MatrixRotateX(m, CAR_PART_DOOR_PITCH);
+    Carrier33DrawSlot(s, m, CAR_PART_DOOR);
+
+    m = Carrier33ObjectMatrix(obj);
+    MatrixTranslate(m, 0, CAR_PART_WHEEL_Y, CAR_PART_WHEEL_FRONT_Z);
+    s.wheelTurn = (s.wheelTurn + CAR_WHEEL_TURN_STEP) | 0;
+    MatrixRotateX(m, s.wheelTurn);
+    Carrier33DrawSlot(s, m, CAR_PART_WHEEL);
+
+    m = Carrier33ObjectMatrix(obj);
+    MatrixTranslate(m, 0, CAR_PART_WHEEL_Y, CAR_PART_WHEEL_BACK_Z);
+    MatrixRotateX(m, s.wheelTurn);
+    Carrier33DrawSlot(s, m, CAR_PART_WHEEL);
+
+    m = Carrier33ObjectMatrix(obj);
+    MatrixTranslate(m, CAR_PART_SIDE_X, CAR_PART_SIDE_Y, CAR_PART_SIDE_Z);
+    Carrier33DrawSlot(s, m, CAR_PART_LEFT);
+
+    m = Carrier33ObjectMatrix(obj);
+    MatrixTranslate(m, -CAR_PART_SIDE_X, CAR_PART_SIDE_Y, CAR_PART_SIDE_Z);
+    Carrier33DrawSlot(s, m, CAR_PART_RIGHT);
+    return;
+  }
+
+  if (obj.sub !== 1) return;
+  m = Carrier33ObjectMatrix(obj);
+  MatrixTranslate(m, 0, 0, LOOP_Z);
+  MatrixScale(m, LOOP_SCALE[0], LOOP_SCALE[1], LOOP_SCALE[2]);
+  Carrier33DrawSlot(s, m, s.loopA);
+  s.loopA += 1;
+  if (LOOP_A_LAST < s.loopA) s.loopA = LOOP_A_FIRST;
+
+  m = Carrier33ObjectMatrix(obj);
+  MatrixTranslate(m, 0, 0, LOOP_Z);
+  MatrixScale(m, LOOP_SCALE[0], LOOP_SCALE[1], LOOP_SCALE[2]);
+  Carrier33DrawSlot(s, m, s.loopB);
+  s.loopB += 1;
+  if (LOOP_B_LAST < s.loopB) s.loopB = LOOP_B_FIRST;
+}
+
+/**
  * [port-only] The engine chooses between the twelve sub-handlers once, in the
  * `Init`, by writing one of them to `*obj`. The port has one table entry per
  * class, so the choice is a test on the selector here — the same shape
  * `MouseUpdate` has, and for the same reason. Each arm is the pointer the
  * dispatch's jump table installs for that selector: `0x004331D0` at
- * `0x0043301A`, `0x00433B70` at `0x00433044`, `0x00433B00` at `0x00433052`.
+ * `0x0043301A`, `0x00433A10` at `0x00433028`, `0x00433AC0` at `0x00433036`,
+ * `0x00433B70` at `0x00433044`, `0x00433B00` at `0x00433052`, and the seven
+ * in the switch.
  */
 export function ScriptedSceneryUpdate33(obj: Actor, f: ClassFrame): void {
   if (obj.cls !== SpawnClass.ScriptedScenery) return;
   if (obj.hp === ScriptedScenerySelector.Carrier) {
     ScriptedCarrierUpdate33(obj, f);
+    return;
+  }
+  if (obj.hp === ScriptedScenerySelector.DrawUntilFlag) {
+    ScriptedPropDrawUntilFlag(obj);
+    return;
+  }
+  if (obj.hp === ScriptedScenerySelector.EffectOnFirstFrame) {
+    ScriptedEffectOnFirstFrame33(obj, f);
     return;
   }
   if (obj.hp === ScriptedScenerySelector.Pushable) {
@@ -361,6 +589,26 @@ export function ScriptedSceneryUpdate33(obj: Actor, f: ClassFrame): void {
   }
   if (obj.hp === ScriptedScenerySelector.EffectAtCameraCue) {
     ScriptedEffectAtCameraCue33(obj, f);
+    return;
+  }
+  // `0x00433E30` at `0x00433060` .. `0x00434260` at `0x004330A6`, and
+  // `0x00433160` at `0x004330B3` for 99 -- `class33/cues.ts` and
+  // `class33/strips.ts`.
+  switch (obj.hp) {
+    case ScriptedScenerySelector.SpriteEffectOnce:
+      ScriptedSpriteEffectOnce33(obj, f); return;
+    case ScriptedScenerySelector.SoundCues:
+      ScriptedSoundCues33(obj, f); return;
+    case ScriptedScenerySelector.BridgeCrashStrip:
+      ScriptedBridgeCrashStrip33(obj, f); return;
+    case ScriptedScenerySelector.FireLoopUntilCue:
+      ScriptedFireLoopUntilCue33(obj, f); return;
+    case ScriptedScenerySelector.SoundAndFlagAtCue:
+      ScriptedSoundAndFlagAtCue33(obj, f); return;
+    case ScriptedScenerySelector.EndingTrackSelect:
+      ScriptedEndingTrackSelect33(obj, f); return;
+    case ScriptedScenerySelector.StaticSlotDraw:
+      ScriptedStaticSlotDraw33(obj); return;
   }
 }
 
@@ -398,6 +646,30 @@ function ScriptedSceneryDebug33(obj: Actor): ActorDebug {
       hot: false,
     };
   }
+  if (obj.class33Sub) {
+    const s = obj.scenery;
+    return {
+      summary: `selector ${obj.hp} · sub ${obj.sub} · frames ${s.frames}`
+        + ` · cue ${s.cue}`,
+      detail: [`slot 0x${s.slot.toString(16)}`
+               + ` · camera at ${G.g_cam_path_frame}`],
+      hot: false,
+    };
+  }
+  if (obj.hp === ScriptedScenerySelector.DrawUntilFlag) {
+    const t = obj.class33Prop;
+    return {
+      summary: `drawn until flag ${t?.despawn_flag ?? -1}`
+        + ` or camera frame ${t?.despawn_frame ?? -1}`,
+      detail: [`slot 0x${obj.scenery.slot.toString(16)}`
+               + ` · flag reads ${G.g_script_flags[t?.despawn_flag ?? 0] ?? 0}`
+               + ` · camera at ${G.g_cam_path_frame}`],
+      hot: false,
+    };
+  }
+  if (obj.hp === ScriptedScenerySelector.EffectOnFirstFrame) {
+    return { summary: "kind 0x62 on its first frame", hot: false };
+  }
   if (obj.hp !== ScriptedScenerySelector.Carrier) {
     return { summary: `selector ${obj.hp} · unported`, hot: false };
   }
@@ -420,10 +692,83 @@ function ScriptedSceneryDebug33(obj: Actor): ActorDebug {
   };
 }
 
+/**
+ * `[port-only]` -- a replay's question, `ClassHandler.outlivedByReplay`: has
+ * the replay gone past this record's own way out, so that at the landing
+ * address the engine's object is gone and must not be rebuilt?
+ *
+ * * **Selector 2** leaves on the first frame its flag reads 1 or block 0's
+ *   camera frame equals its word -- the two tests
+ *   `ScriptedPropDrawUntilFlag` (`FUN_00433A10`) makes every frame. A replay
+ *   raises the flag with the `set_script_flag` it steps over, and is asked
+ *   straight after, so the record goes then. Without it the replay rebuilt
+ *   the object at the landing, to leave on its first frame -- or not at all
+ *   when the flag did not survive to that frame, which on a seek into stage
+ *   2's block 9 it does not: the class-0x44 swing-then-break builder
+ *   (`class44/swing_then_break.ts`) writes `g_script_flags[0] = 0` from its
+ *   zero placer words on that first frame, and all five of stage 2's stood
+ *   for the rest of the stage. In the engine they left on the frame block 3
+ *   raised the flag, long before.
+ * * **Selector 3** has no test: `ScriptedEffectOnFirstFrame33`
+ *   (`FUN_00433AC0`) throws its sprite and leaves on the first frame it
+ *   runs, and a replay runs none -- so every record a replay has seen is
+ *   outlived. The one address this answers early is a landing between the
+ *   spawn instruction and the next instruction that yields a frame, where
+ *   the engine would still throw it; without the answer, every landing past
+ *   it threw the sprite on the landing frame instead.
+ *
+ * The other selectors' exits are not answered here.
+ */
+function ScriptedSceneryOutlivedByReplay33(rec: ReplaySpawnRecord): boolean {
+  if (rec.hp === ScriptedScenerySelector.EffectOnFirstFrame) return true;
+  if (rec.hp !== ScriptedScenerySelector.DrawUntilFlag) return false;
+  const t = (T.chars?.placements ?? []).find((p) => p.at === rec.at)
+    ?.class33_prop;
+  if (!t) return false;
+  return t.despawn_frame === G.g_cam_path_frame
+    || G.g_script_flags[t.despawn_flag] === 1;
+}
+
+/**
+ * `[port-only]` -- `ClassHandler.followReplayCamera`, for the one selector
+ * whose object outlives the camera frames it tests: 7 (`class33/cues.ts`).
+ */
+function ScriptedSceneryFollowReplayCamera33(
+    rec: ReplaySpawnRecord, cam: ReplayCamera,
+    state: Record<string, number>): void {
+  if (rec.hp !== ScriptedScenerySelector.SoundCues) return;
+  const t = (T.chars?.placements ?? []).find((p) => p.at === rec.at)
+    ?.class33_sub;
+  if (t?.selector !== 7) return;
+  ScriptedSoundCues33FollowReplayCamera(t.cues, cam, state);
+}
+
+/** `[port-only]` -- `ClassHandler.resumeFromReplay`, selector 7's. */
+function ScriptedSceneryResumeFromReplay33(
+    obj: Actor, state: Readonly<Record<string, number>>): void {
+  if (obj.cls !== SpawnClass.ScriptedScenery) return;
+  if (obj.hp !== ScriptedScenerySelector.SoundCues) return;
+  ScriptedSoundCues33ResumeFromReplay(obj, state);
+}
+
 export const ScriptedSceneryHandler: ClassHandler = {
   init: ScriptedSceneryInit33,
+  followReplayCamera: ScriptedSceneryFollowReplayCamera33,
+  resumeFromReplay: ScriptedSceneryResumeFromReplay33,
+  // The class's two registrations -- the carrier's at `0x004334D0` and the
+  // pushable's at `0x00433CC7`, the only calls of `RegisterForShotTest` in
+  // its routines (a rel32 scan of `0x00432FF0..0x00434400`) -- are made
+  // where the routines make them, so the pick is `game/`'s.
+  registersForShotTest: true,
+  // `MarkActorShot` and nothing else: no routine of the class reads the hit
+  // bits, so a shot on it must never reach the damage tables.
+  ownsShotResult: true,
   update: ScriptedSceneryUpdate33,
+  // `ScriptedSceneryDispatch33` installs the selector's routine, claims
+  // the hit slot and returns (`0x0043301A`..`0x004330BA`).
+  firstUpdateNextWalk: true,
   debug: ScriptedSceneryDebug33,
+  outlivedByReplay: ScriptedSceneryOutlivedByReplay33,
 };
 
 registerClass(SpawnClass.ScriptedScenery, ScriptedSceneryHandler);

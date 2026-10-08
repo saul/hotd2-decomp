@@ -141,6 +141,7 @@ function projection(): UiProjection {
     gameOver: { phase: 3, label: "GAME OVER" },
     net: null,
     netPeer: null,
+    originalItems: null,
   };
 }
 
@@ -552,8 +553,7 @@ console.log("\nEverything inside #viewport is React's:\n");
 // of them carries an id, so `web/tools/repo/player_dom.ts` cannot see them and this
 // is the only check there is that they exist at all.
 const HUD_NODES = ['class="hud-layer"', 'class="shutter shutter-top"',
-                   'class="shutter shutter-bottom"',
-                   'class="screen-message"'];
+                   'class="shutter shutter-bottom"'];
 
 for (const [when, html] of [["before a projection", cold],
                             ["and with one", warm]] as const) {

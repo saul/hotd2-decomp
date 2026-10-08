@@ -1,9 +1,9 @@
+import { Zombie1368Flag } from "../../src/game/class30/state";
 import type { CharactersJson } from "../../src/bundle";
 import { Rng } from "../../src/core/rng";
 import { Scope } from "../../src/core/scope";
 import { CameraFrame } from "../../src/core/camera";
 import type { Context, Tick } from "../../src/core/system";
-import { HingePose } from "../../src/render/hinge";
 import { Events } from "../../src/core/events";
 import { ticksOfAuthoredFrame } from "../../src/core/play_cursor";
 import { ActorSpawn, GameUpdate } from "../../src/game/director";
@@ -120,53 +120,6 @@ console.log("\nrain: DrawRainParticles' simulation half");
   RainResetParticles(rules, new Rng(7));
   check("and the same seed gives the same rain",
         JSON.stringify(G.g_rain_particles) === a);
-}
-
-// ---------------------------------------------------------------------------
-// `FUN_00473CF0`'s pose: `side` is a sign, and four hinges prove it matters
-// ---------------------------------------------------------------------------
-{
-  console.log("\nscripted scenery: the hinge pose");
-
-  // One key from stage 1's curve 0, frame 20 -- the slam judder, where the
-  // door has stopped swinging and the X and Z wobble peak. This is the frame
-  // the four odd hinges went berserk on, which is why it reads on screen as
-  // "spins at the end of the swing" rather than "opens to the wrong angle".
-  const slam = [9400, 16869, 9443];
-
-  check("side +1 leaves every angle as the curve wrote it",
-        JSON.stringify(HingePose({ side: 1 }, slam))
-        === JSON.stringify({ rx: 9400, ry: 16869, rz: 9443 }));
-
-  // `ADD ECX` becomes `SUB ECX` and the yaw gets a `NEG`; `obj+0x6C` is
-  // written from the same `ADD EDX,EAX` on both arms, so rz does not mirror.
-  check("side -1 mirrors rx and ry, and leaves rz alone",
-        JSON.stringify(HingePose({ side: -1 }, slam))
-        === JSON.stringify({ rx: -9400, ry: -16869, rz: 9443 }));
-
-  // The bug. `prop_06dc_0` and `prop_0724_0` in stage 1 carry +/-512 -- the
-  // amplitude of the wobble they do when shot -- and multiplying by that put
-  // 4.8 million BAMS, 73 turns, on the X axis of a door.
-  const big = HingePose({ side: 512 }, slam);
-  check("a magnitude never reaches the pose",
-        big.rx === 9400 && big.ry === 16869 && big.rz === 9443,
-        `rx=${big.rx} (${(big.rx / 65536).toFixed(1)} turns)`);
-  check("and its sign still mirrors, at 416 as at 1",
-        HingePose({ side: -416 }, slam).rx === -9400);
-
-  // `TEST EAX,EAX; JLE`: zero takes the negative arm. No shipped hinge is
-  // zero, but the exporter's `or 0` can produce one from an absent parameter.
-  check("zero takes the mirrored arm, as `JLE` does",
-        HingePose({ side: 0 }, slam).ry === -16869);
-
-  // Every angle stays inside a turn for every side the game ships. The four
-  // odd ones are stage 1's; the other 52 are +/-1.
-  const shipped = [1, -1, 512, -512, 416, -416];
-  check("no shipped side can drive an angle past one turn",
-        shipped.every((side) => {
-          const a = HingePose({ side }, slam);
-          return Math.abs(a.rx) < 0x10000 && Math.abs(a.ry) < 0x10000;
-        }));
 }
 
 // ---------------------------------------------------------------------------
@@ -537,18 +490,26 @@ console.log("\n`g_class_handlers`, filled by the classes themselves:");
     [SpawnClass.RankScaledEnemy, "0x21 rescue target"],
     [SpawnClass.ScriptedProp, "0x13 script-driven prop / the boat"],
     [SpawnClass.FlagStripProp, "0x12 slot strip on a flag / the bin's door"],
+    [SpawnClass.FloatingPropRow, "0x15 stage 2's floating planks"],
+    [SpawnClass.DynamicLight, "0x2B a scripted light"],
     [SpawnClass.CarriedZombie, "0x18 the zombie that rides it"],
     [SpawnClass.Vehicle, "0x26 subtype 2, the boat the player rides"],
+    [SpawnClass.PathRidingVehicle, "0x27 stage 2's two path riders"],
     [SpawnClass.PathRidingProp, "0x28 stage 1's two burning cars"],
+    [SpawnClass.SceneryBatch, "0x29 the floor decals"],
+    [SpawnClass.CutsceneSkipWatcher, "0x63 the cutscene-skip watcher"],
+    [SpawnClass.ScoreRouteSelect, "0x64 stage 6's route selector"],
     [SpawnClass.SetPieceProp, "0x24 set piece"],
     [SpawnClass.ScriptedHumanoid, "0x25 scripted humanoid"],
     [SpawnClass.Zombie, "0x30 zombie"],
     [SpawnClass.Thrower, "0x31 thrower"],
+    [SpawnClass.Boss5, "0x32 stage-5 boss"],
     [SpawnClass.ScriptedScenery, "0x33 scripted scenery / the carrier"],
     [SpawnClass.PropContainerPlacer, "0x41 prop container placer"],
     [SpawnClass.FlyingEnemy, "0x43 owl"],
     [SpawnClass.PropPlacer, "0x44 prop placer"],
     [SpawnClass.Boss3, "0x45 stage-3 boss"],
+    [SpawnClass.Emperor, "0x2D stage-6 boss"],
     [SpawnClass.HordeSpawner, "0x40 horde"],
     [SpawnClass.Worm, "0x42 worm"],
     [SpawnClass.Bat, "0x46 bat"],
@@ -558,6 +519,7 @@ console.log("\n`g_class_handlers`, filled by the classes themselves:");
     [SpawnClass.ChapterCard, "0x60 chapter card"],
     [SpawnClass.ResultCard, "0x61 result card"],
     [SpawnClass.ResultCardTally, "0x62 result card loader"],
+    [SpawnClass.ItemSelect, "0x6e trunk"],
   ];
   for (const [cls, name] of want) {
     check(`${name} registered itself`,
@@ -569,12 +531,13 @@ console.log("\n`g_class_handlers`, filled by the classes themselves:");
         && want.every(([c]) => PORTED_CLASSES.includes(c)),
         PORTED_CLASSES.map((c) => `0x${c.toString(16)}`).join(","));
   // The cat is 0x53 and now has one -- its sub-type 2 is a route-branch
-  // trigger -- and 0x40, the horde, and 0x42, the worm, have one too. Class
-  // 0x2D still has none: an unported class must stay absent rather than fall
-  // back to anything, because an `if` is what had the cat running the
-  // zombie's state machine.
+  // trigger -- and 0x40, the horde, and 0x42, the worm, have one too, and so
+  // does 0x2D, the stage-6 boss, 0x29, the floor decals, and 0x27, stage 2's
+  // path riders. Class 0x54, an ending-scene class, still has none: an
+  // unported class must stay absent rather than fall back to anything,
+  // because an `if` is what had the cat running the zombie's state machine.
   check("a class with no module has no row",
-        g_class_handlers[SpawnClass.LargeCreature] === undefined);
+        g_class_handlers[0x54 as SpawnClass] === undefined);
 
   // Loud, not last-one-wins. A row silently overwritten by a second module is
   // a class whose behaviour depends on evaluation order.
@@ -1082,7 +1045,7 @@ console.log("\nthe strike anchor and the cooldown it gates:");
   {
     clear();
     const z = zombie("cooling, never swung", { cooldown: 10 });
-    z.zom.hasCooldown = true;
+    z.zom.flags1368 |= Zombie1368Flag.Cooldown;
     ZombieStateHoldAtRange(z, new Rng(3), NULL_HOST);
     check("a cooldown does not run down for an actor that has never swung",
           z.cooldown === 10, String(z.cooldown));
@@ -1090,20 +1053,22 @@ console.log("\nthe strike anchor and the cooldown it gates:");
   {
     clear();
     const z = zombie("cooling", { cooldown: 2 });
-    z.zom.hasCooldown = true;
+    z.zom.flags1368 |= Zombie1368Flag.Cooldown;
     z.flags2 |= ZombieFlag2.StrikeAnchor;
     ZombieStateHoldAtRange(z, new Rng(3), NULL_HOST);
     check("...and does for one that has", z.cooldown === 1, String(z.cooldown));
-    check("...with the latch still armed at one", z.zom.hasCooldown,
-          String(z.zom.hasCooldown));
+    check("...with the latch still armed at one",
+          (z.zom.flags1368 & Zombie1368Flag.Cooldown) !== 0,
+          String(z.zom.flags1368));
     ZombieStateHoldAtRange(z, new Rng(3), NULL_HOST);
     check("...and the latch disarms itself as the counter runs out",
-          z.cooldown === 0 && !z.zom.hasCooldown, `${z.cooldown}/${z.zom.hasCooldown}`);
+          z.cooldown === 0 && !(z.zom.flags1368 & Zombie1368Flag.Cooldown),
+          `${z.cooldown}/${z.zom.flags1368}`);
   }
   {
     clear();
     const z = zombie("cooling and idling", { cooldown: 30, motion: 12 });
-    z.zom.hasCooldown = true;
+    z.zom.flags1368 |= Zombie1368Flag.Cooldown;
     z.flags2 |= ZombieFlag2.StrikeAnchor;
     z.yaw = 0x4000;
     ZombieStateHoldAtRange(z, new Rng(3), NULL_HOST);
@@ -1117,7 +1082,7 @@ console.log("\nthe strike anchor and the cooldown it gates:");
     const z = zombie("retreating with a cooldown",
                      { state: ZombieState.BackOff, cooldown: 50,
                        pos: vec3(0, 0, INNER + 15) });
-    z.zom.hasCooldown = true;
+    z.zom.flags1368 |= Zombie1368Flag.Cooldown;
     z.flags2 |= ZombieFlag2.StrikeAnchor;
     ZombieStateBackOff(z, 1 / 60, new Rng(2));
     check("the retreat leaves an armed cooldown alone",
@@ -1145,7 +1110,7 @@ console.log("\nthe strike anchor and the cooldown it gates:");
     const z = zombie("cued attacker",
                      { state: ZombieState.Strike, sub: StrikeSub.Lunge,
                        attack: 1, pos: vec3(0, 0, atk.distance + 20) });
-    z.zom.hasCooldown = true;
+    z.zom.flags1368 |= Zombie1368Flag.Cooldown;
     // The end of the attack cry: `ZombieStateStrike` (`FUN_00455A40`) calls
     // `ActorPlayHitVoice(obj, 3)` at `0x00455B8A`, on the frame the strike
     // clip is set. The routine itself is checked above; this is the wiring,

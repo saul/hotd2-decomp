@@ -37,7 +37,7 @@ import { ActorSetPartVisibility } from "../model_draw";
 import {
   ReleaseEnemyAliveCount, ReleaseEnemyPresentCount,
 } from "../combat/counts";
-import { ChooseDeathMotionDirectional } from "../combat/resolve_hit";
+import { DeathArcMotion } from "../combat/resolve_hit";
 import { ReleaseAttackSlot } from "../combat/permits";
 import { QueryGroundHeightAt } from "../coli";
 import { ActorDespawn } from "../despawn";
@@ -45,12 +45,13 @@ import { G } from "../globals";
 import { CameraSlotVacate } from "../camera/slots";
 import type { GameHost } from "../host";
 import { SpawnGroundRingEffect } from "../effects/ring_effect";
-import { MotionOf, MotionPlayFrame, MotionPlayLength } from "../tables";
+import { MotionPlayFrame, MotionPlayLength, T } from "../tables";
 import {
   ZombieDeathEffectCueTick, ZombieDeathLandingEffect,
   ZombieInstallDeathEffectCues,
 } from "./death_effects";
 import { ActorSetMotionBlended } from "./motion_cue";
+import { Zombie1368Flag } from "./state";
 import { ZombieReleaseWeaponLoopSe } from "./weapon_loop";
 import { GAME_HZ, MotionFade, ZombieState } from "./states";
 
@@ -108,6 +109,72 @@ const DEATH_CLIP_COND4 = 0x404;
 const DEATH_CLIP_COND4_ALT = 0x404 + 0x16;
 /** Body conditions 5 and 6, and character types 0xF..0x11 while carried. */
 const DEATH_CLIP_COND56 = 0x3db;
+/** The four kill-move deaths, by the `obj+0x1368` bit that selects each. */
+const DEATH_CLIP_KILL_1AC = 0x1ac;
+const DEATH_CLIP_KILL_1A5 = 0x1a5;
+const DEATH_CLIP_KILL_279 = 0x279;
+const DEATH_CLIP_KILL_229 = 0x229;
+/** `ChooseDeathMotionDirectional`'s remap pairs: `0x3D9<->0x3DB` and so on. */
+const DEATH_PAIR_FIRST: readonly number[] = [0x3d9, 0x3da, 0x3de];
+const DEATH_PAIR_SECOND: readonly number[] = [0x3db, 0x3dc, 0x3dd];
+/** The two side clips bit 4 re-draws, `CMP EAX, 0x3DF` / `CMP EAX, 0x3E0`. */
+const DEATH_SIDE_LO = 0x3df;
+const DEATH_SIDE_HI = 0x3e0;
+
+/**
+ * `ChooseDeathMotionDirectional` — `FUN_00456220`. The directional death, set
+ * on the base track, then remapped.
+ *
+ * ```
+ * 00456248  rel = (g_camera_block_yaw_bams[g_camera_index] - obj+0x68) & 0xFFFF
+ *           four inclusive arcs in a row, each ActorSetMotionBlended(m, 0, 5):
+ *           0x4000 -> 0x3E0; 0xC000 -> 0x3DF; 0x0000 -> [0x0059309C][rand()%4];
+ *           0x8000 -> [0x00593084][rand()%6]
+ * 0045632a  if (obj+0x136C & 4) and obj+0x1B4 in 0x3DF..0x3E0:
+ *               obj+0x1B4 = [0x00593084][rand() % 6]
+ * 00456361  ECX = obj+0x136C
+ *           if (CL & 1): 0x3D9 -> 0x3DB, 0x3DA -> 0x3DC, 0x3DE -> 0x3DD
+ *           if (CL & 2): 0x3DB -> 0x3D9, 0x3DC -> 0x3DA, 0x3DD -> 0x3DE
+ * ```
+ *
+ * `[proved]` from the disassembly. The arcs are `DeathArcMotion`
+ * (`combat/resolve_hit.ts`), which returns the last arc's clip with the
+ * draws taken in the same order; setting it once is the engine's two sets on
+ * a boundary heading, because the second snapshots the pose the first did
+ * not change and loads its own clip into slot B.
+ *
+ * **The remaps are stores, not sets.** They write `obj+0x1B4` and nothing
+ * else, straight after a blend that has loaded slot B from the arc's clip and
+ * holds the cursor: the actor dissolves into that clip's start pose and then
+ * plays the remapped one from cursor 1. The port keeps what was loaded as
+ * {@link Actor.fadeInto}. Bit 4's draw is a second `rand()`, taken after the
+ * arc's own; bits 1 and 2 are applied in that order, so with both up a
+ * `0x3D9` goes to `0x3DB` and back.
+ */
+export function ChooseDeathMotionDirectional(obj: ZombieActor, rng: Rng): void {
+  const m = DeathArcMotion(obj, rng);
+  if (m === undefined) return;
+  ActorSetMotionBlended(obj, m, 0, MotionFade.Quick);
+  const loaded = obj.motion;
+  const back = T.chars?.deaths?.back;
+  if ((obj.flags2 & ZombieFlag2.DeathNoSideClip)
+      && obj.motion >= DEATH_SIDE_LO && obj.motion <= DEATH_SIDE_HI
+      && back?.length) {
+    obj.motion = back[rng.int(back.length)]!;
+  }
+  const bits = obj.flags2;
+  if (bits & ZombieFlag2.LetGo) {
+    const i = DEATH_PAIR_FIRST.indexOf(obj.motion);
+    if (i >= 0) obj.motion = DEATH_PAIR_SECOND[i]!;
+  }
+  if (bits & ZombieFlag2.DeathPairToFirst) {
+    const i = DEATH_PAIR_SECOND.indexOf(obj.motion);
+    if (i >= 0) obj.motion = DEATH_PAIR_FIRST[i]!;
+  }
+  if (obj.motion !== loaded && obj.fadeFrom) {
+    obj.fadeInto = { motion: loaded, ticks: obj.playTicks };
+  }
+}
 
 /** `obj+0x130C` — the body conditions `ChooseDeathMotion` branches on. */
 const COND_FOUR = 4;
@@ -148,23 +215,21 @@ const CHAR_CARRIED_DEATH_HI = 0x11;
  * `AND EAX, 0x16`, `ADD EAX, 0x404` — so it is 0x404 on an even draw and
  * 0x41A on an odd one, not a range.
  *
- * [diverges] Two things the engine does here have no port. The four
- * destroyed-part arms read `obj+0x1368` bits 0x8/0x10/0x40/0x80, which
- * `ZombieStateTargetMotionScript` and `ZombieStateDragTarget` set from a
- * kill-move clip id the port does not model — so those bits are never up and
- * the arms are unreachable rather than omitted. And the exe's directional pick
- * sets the base motion itself and then remaps it through `obj+0x136C` bits 1,
- * 2 and 4; the port's `ChooseDeathMotionDirectional` returns the id and has
- * never had the remap.
+ * **The kill-move deaths.** Past the held-weapon arm, four tests of
+ * `obj+0x1368` (`0x004560FB`..`0x00456145`) give a captor killed in the
+ * middle of a maul the death that goes with the clip it was playing: bit 8
+ * clip `0x1AC`, 0x10 `0x1A5`, 0x40 `0x279`, 0x80 `0x229`, each at fade 5
+ * from cursor 0. `ZombieStateTargetMotionScript` raises the bit as a maul
+ * entry starts on its clip, and `ZombieStateDragTarget` raises 0x10 as the
+ * drag starts; nothing lowers one -- see {@link Zombie1368Flag}. These arms
+ * used to be missing, declared as unreachable, because nothing in the port
+ * raised the bits; a captor shot mid-maul fell by the directional pick.
  */
 export function ChooseDeathMotion(obj: ZombieActor, rng: Rng): void {
   const play = (motion: number, frame = 0): void => {
     ActorSetMotionBlended(obj, motion, frame, MotionFade.Quick);
   };
-  const directional = (): void => {
-    const m = ChooseDeathMotionDirectional(obj, rng);
-    if (m !== undefined && MotionOf(obj, m)) play(m);
-  };
+  const directional = (): void => ChooseDeathMotionDirectional(obj, rng);
   // The shared tail at `0x0045620A`: the cue list for whichever clip is now
   // playing, then `AND AH, 0xbf` on `obj+0x34`.
   const done = (): void => {
@@ -197,10 +262,13 @@ export function ChooseDeathMotion(obj: ZombieActor, rng: Rng): void {
     play(DEATH_CLIP_HOLDING_WEAPON);
     return done();
   }
-  // The four destroyed-part arms would go here -- `obj+0x1368` bits 0x8,
-  // 0x10, 0x40 and 0x80 giving clips 0x1AC, 0x1A5, 0x279 and 0x229. This
-  // routine's declared divergence, above, says why: no ported routine raises
-  // any of them.
+  // `MOV EAX, [ESI+0x1368]` at `0x004560FB`, then `TEST AL` with 0x8, 0x10,
+  // 0x40 and 0x80 in that order: the first bit up names the clip.
+  const kill = obj.zom.flags1368;
+  if (kill & Zombie1368Flag.DeathClip1AC) { play(DEATH_CLIP_KILL_1AC); return done(); }
+  if (kill & Zombie1368Flag.DeathClip1A5) { play(DEATH_CLIP_KILL_1A5); return done(); }
+  if (kill & Zombie1368Flag.DeathClip279) { play(DEATH_CLIP_KILL_279); return done(); }
+  if (kill & Zombie1368Flag.DeathClip229) { play(DEATH_CLIP_KILL_229); return done(); }
 
   if (obj.charType === CHAR_KEEPS_CLIP) {
     if (obj.flags2 & ZombieFlag2.DeathMotionVariant) return done();
@@ -354,15 +422,14 @@ export function ZombieStateDeath6(obj: ZombieActor, rng: Rng, host?: GameHost,
  * above only leaves once it has reached `play_length - 1`, so this is what
  * keeps the corpse a frame short of the wrap rather than one past it.
  *
- * `obj+0x34 &= ~1` is transcribed as a comment and not as a write, on the same
- * terms as `ThrowerLeave`: bit 0 of the flag word is what
- * `RankEnemiesByDistance` (`FUN_004090B0`) tests before it writes a rank, and
- * the port's `RegisterForDistanceRank` stands in for it with `!dead`, which a
- * corpse already fails. `[proved]` for the test, `[open]` for the bit's name.
+ * `obj+0x34 &= ~1` is {@link ActorFlag.Live}: `RankEnemiesByDistance`
+ * (`FUN_004090B0`) tests it before it writes a rank, and the wake
+ * `AttachedEffectThink` (`FUN_004083D0`) draws dies the frame it goes. It used
+ * to be transcribed as a comment only, while nothing in the port read it.
  */
 export function ZombieEnterCorpseState(obj: ZombieActor): void {
   obj.flags2 &= ~(ZombieFlag2.CollideWorld | ZombieFlag2.CollideActors);
-  obj.flags = (obj.flags & ~ActorFlag.Airborne)
+  obj.flags = (obj.flags & ~(ActorFlag.Airborne | ActorFlag.Live))
             | ActorFlag.PoseFrozen | CORPSE_UNREAD_BIT;
   if (!(obj.flags38 & CountFlag.KeepCounted)) ReleaseEnemyPresentCount(obj);
   obj.playTicks -= 1;
@@ -409,24 +476,58 @@ function ZombieCorpseLeave(obj: ZombieActor): void {
   ActorDespawn(obj);
 }
 
+/** `rand() % 17 >> 4` -- 1 once in seventeen, 0 otherwise. */
+const CORPSE_POSE_SPREAD = 17;
+const CORPSE_POSE_SHIFT = 4;
 /**
- * The pose pin both corpse states call every frame — `ZombieCorpsePoseFrame`
- * (`FUN_00454E00`).
- *
- * [diverges] Not ported, and it needs an exporter change rather than a
- * reading. The routine writes `obj+0x194` from a table chosen by the clip:
- * `DAT_0059301C` covers the eight directional deaths 0x3D9..0x3E0 and five
- * special cases sit at `DAT_0059305C` (0x3F8), `DAT_00593064` (0x1DF),
- * `DAT_0059306C` (0x41A), `DAT_00593074` (0x404) and `DAT_0059307C` (0x3F7),
- * each a pair picked with `rand() % 17 >> 4` — the same once-in-seventeen
- * idiom `ThrowerCorpsePoseFrame` uses against class 0x31's own table at
- * `0x00592AC0`. **None of the class-0x30 table is exported** yet.
- *
- * What it costs is only *which* frame of the death clip the body holds:
- * `ZombieEnterCorpseState` raises {@link ActorFlag.PoseFrozen}, so the corpse
- * is frozen either way, on the clip's last frame here rather than on the
- * authored one.
+ * `ZombieCorpsePoseFrame`'s switch: the clip, and the word of the counter
+ * table (`hod2lib/combat.ts`'s `CORPSE_POSE_COUNTERS`, the bundle's
+ * `deaths.corpse`) its pair starts at. The directional deaths are the
+ * `LEA ECX, [EDX + EAX*2 - 0x7B2]` arm and are worked out below.
  */
+const CORPSE_POSE_PAIRS: Readonly<Record<number, number>> = {
+  0x3f8: 16,   // 0x0059305C
+  0x1df: 18,   // 0x00593064
+  0x41a: 20,   // 0x0059306C
+  0x404: 22,   // 0x00593074
+  0x3f7: 24,   // 0x0059307C
+};
+const CORPSE_DIRECTIONAL_LO = 0x3d9;
+const CORPSE_DIRECTIONAL_HI = 0x3e0;
+
+/**
+ * `ZombieCorpsePoseFrame` — `FUN_00454E00`. The frame a corpse lies on.
+ *
+ * ```
+ * m = obj+0x1B4
+ * 0x3D9..0x3E0: obj+0x194 = [0x0059301C][2 * (m - 0x3D9) + (rand()%17 >> 4)]
+ * 0x3F8: [0x0059305C][..]   0x1DF: [0x00593064][..]   0x41A: [0x0059306C][..]
+ * 0x404: [0x00593074][..]   0x3F7: [0x0059307C][..]   anything else: nothing
+ * ```
+ *
+ * `[proved]` from the disassembly. It writes the track's **counter**, which
+ * the corpse's {@link ActorFlag.PoseFrozen} keeps the class from stepping, so
+ * the draw poses `counter % (play + 1)`: the table's frame, and once in
+ * seventeen frames the pair's other one -- the same once-in-seventeen idiom
+ * `ThrowerCorpsePoseFrame` uses against class 0x31's table. Both corpse
+ * states call it on every frame but their last. A clip with no row -- the
+ * kill-move deaths, `0x3F9` -- keeps the counter the death left, and draws no
+ * `rand()`.
+ *
+ * This used to be unported, declared a divergence, because the table was not
+ * in the bundle: every corpse lay on its clip's last frame.
+ */
+export function ZombieCorpsePoseFrame(obj: ZombieActor, rng: Rng): void {
+  const m = obj.motion;
+  const base = m >= CORPSE_DIRECTIONAL_LO && m <= CORPSE_DIRECTIONAL_HI
+    ? 2 * (m - CORPSE_DIRECTIONAL_LO) : CORPSE_POSE_PAIRS[m];
+  if (base === undefined) return;
+  const table = T.chars?.deaths?.corpse;
+  if (!table?.length) return;               // an older bundle: no table
+  const word = table[base + (rng.int(CORPSE_POSE_SPREAD) >> CORPSE_POSE_SHIFT)];
+  if (word === undefined) return;
+  obj.playTicks = word;
+}
 
 /**
  * `ZombieStateCorpseSink` — `FUN_00454F20`, class 0x30 state 7.
@@ -436,14 +537,18 @@ function ZombieCorpseLeave(obj: ZombieActor): void {
  * `ZombiePushOutOfWorldAndActors` skips its ground snap on — without it the
  * floor would put the body back every frame.
  */
-export function ZombieStateCorpseSink(obj: ZombieActor, dt: number): void {
+export function ZombieStateCorpseSink(obj: ZombieActor, dt: number,
+                                      rng: Rng): void {
   if (obj.sub === 0) ZombieCorpseBegin(obj);
   else if (obj.sub !== 1) return;
 
   const frames = dt * GAME_HZ;
   obj.zom.corpseTimer -= frames;
   obj.pos.y -= CORPSE_SINK * frames;
+  // `TEST EAX, EAX; JG 0x00454FC2`: the pose on every frame the count is
+  // still up, the leaving on the one it is not.
   if (obj.zom.corpseTimer < 1) ZombieCorpseLeave(obj);
+  else ZombieCorpsePoseFrame(obj, rng);
 }
 
 /**
@@ -475,7 +580,8 @@ export function ZombieStateCorpseSink(obj: ZombieActor, dt: number): void {
  * that alpha and `obj+0x136C` bit 2 for its hook to draw at — so the two are
  * not the same answer to one routine.
  */
-export function ZombieStateCorpseBlink(obj: ZombieActor, dt: number): void {
+export function ZombieStateCorpseBlink(obj: ZombieActor, dt: number,
+                                       rng: Rng): void {
   if (obj.sub === 0) ZombieCorpseBegin(obj);
   else if (obj.sub !== 1) return;
 
@@ -488,7 +594,11 @@ export function ZombieStateCorpseBlink(obj: ZombieActor, dt: number): void {
 
   const frames = dt * GAME_HZ;
   obj.zom.corpseTimer -= frames;
-  if (obj.zom.corpseTimer >= 1) return;
+  // `JG 0x004550CB`, the pose, as the sink has it.
+  if (obj.zom.corpseTimer >= 1) {
+    ZombieCorpsePoseFrame(obj, rng);
+    return;
+  }
   obj.motionFlags &= ~MotionFlag.Drawn;
   ActorSetPartVisibility(obj, 0);
   ZombieCorpseLeave(obj);

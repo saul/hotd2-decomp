@@ -12,9 +12,10 @@ import { NULL_HOST, type GameHost } from "../../src/game/host";
 import {
   CarriedPropRoutine, MarkCarriedPropShot, type CarriedProp,
 } from "../../src/game/carried_prop";
+import { CarriedPropIsOnScreen } from "../../src/game/combat/permits";
 import {
-  MatIdentity, MatrixRotateX, MatrixRotateY, MatrixRotateZ, MatrixToEulerZYX,
-  VecAimXAxisYThenZ,
+  MatIdentity, MatrixGetAngles, MatrixRotateX, MatrixRotateY, MatrixRotateZ,
+  MatrixToEulerBams, MatrixToEulerZYX, RotXZY, RotYXZ, VecAimXAxisYThenZ,
 } from "../../src/game/matrix";
 import { CameraTargetsClear, waitTargetsClear }
   from "../../src/script/waits/targets";
@@ -29,7 +30,6 @@ import { SpawnClass } from "../../src/game/spawn_class";
 import { syncCharacterSpawns, type CharacterPool } from "../../src/app/systems";
 import {
   CARRIER_RIDERS_DONE_BIT, CarrierBakeWorldPose, CarrierInverseTransformPoint,
-  MatrixGetAngles, MatrixToEulerBams, RotXZY, RotYXZ,
 } from "../../src/game/carrier";
 import { bamsDelta } from "../../src/core/bams";
 import { GameMode } from "../../src/game/game_mode";
@@ -42,13 +42,17 @@ import {
   GUN_LIGHT_FIRST, RenderLightType, SceneLightArrayUpdate, SetPlayerAimFromPointer,
 } from "../../src/game/scene_lights";
 import { VecToAngles } from "../../src/game/vec";
-import { ActorDrawsUnderSecondaryLights } from "../../src/game/light_sets";
+import {
+  ActorDrawsUnderSecondaryLights, PushSceneLightStateToDevice,
+} from "../../src/game/light_sets";
 import {
   EntityLightReleaseSlot, FLICKER_BROKEN, FLICKER_DEBRIS_COUNT, FLICKER_FADE_FRAMES,
   PlaceFlickerLightProp48, PropUpdateType48FlickerLight, SFX_FLICKER_BREAK,
 } from "../../src/game/class41/type48";
 import { ZombieAux } from "../../src/game/actor";
-import { SpawnSlotActors } from "../../src/game/director";
+import { makeCivilianState } from "../../src/game/class10/state";
+import { RunPendingInits, SpawnSlotActors } from "../../src/game/director";
+import { ActorRunInit, SpawnFromDescriptor } from "../../src/game/spawn";
 import {
   check, motion, TYPE, CHARS, SCENE_MAJOR_PLAYING, spawnZombie, scene,
   EnterPlay,
@@ -327,6 +331,200 @@ console.log("\nclass 0x30 state 37, release 3 — stage 1's barrel over the civi
         !!p && (p.pivot.x !== 0 || p.pivot.y !== 0 || p.pivot.z !== 0)
         && (p.spin[0] !== 512 || p.spin[1] !== 0 || p.spin[2] !== 0),
         p ? `pivot ${JSON.stringify(p.pivot)} spin ${p.spin}` : "no prop");
+  // `CarriedPropThrowAtTarget` ends `if (CarriedPropIsOnScreen(obj)) {...}
+  // else ActorDespawn(obj)` (`0x00443520`): the barrel falls out of the
+  // frame and is gone that frame. With the identity camera the view point is
+  // the world point, so "off screen" is below `-z * 240 / 640.2`.
+  let lastOn = true, gone = -1, lastY = 0;
+  for (let f = 0; f < 400 && gone < 0; f++) {
+    GameUpdate(1 / 60, DROP_HOST, rng, events);
+    const q = G.g_carried_props[0];
+    if (!q) { gone = f; break; }
+    lastOn = CarriedPropIsOnScreen(q);
+    lastY = q.shotPoint.y;
+  }
+  check("...and is despawned the first frame it has fallen out of the frame",
+        gone >= 0 && lastOn && G.g_carried_props.length === 0,
+        `gone ${gone} last on-screen ${lastOn} last view y ${lastY.toFixed(2)}`);
+}
+
+console.log("\nclass 0x30 state 37 — stage 1's barrel shot out of the carrier's hands:");
+{
+  // `CarriedPropHeldUpdate` (`FUN_00442820`) runs `CarriedPropCheckShot` at
+  // `0x00442935`, straight after `RegisterForShotTest`: the barrel is shot to
+  // pieces in the hands, and `ZombieStateCarryProp`'s sub 2 sees hp < 1 and
+  // drops to sub 4 without ever letting go of it.
+  const HOLD_TYPE: CharacterType = {
+    ...TYPE,
+    motions: {
+      ...TYPE.motions,
+      "271": motion(20, 0, 38), "265": motion(20, 0, 38),
+      "266": motion(20, 0, 38), "270": motion(20),
+    },
+  };
+  const holdScript: TargetScriptJson = {
+    state: ZombieState.CarryProp,
+    head: { prop_type: 0, behaviour: 1, release: 3, offset: [0, 2, 0],
+            spin: [512, 0, 0], launch: [0, -1.5, 0],
+            motion: 271, frame: 0, loops: 2, mode: -2 },
+    entries: [{ motion: 265, frame: 0, loops: 1, mode: -1 },
+              { motion: 266, frame: 0, loops: 1, mode: 15 }],
+  };
+  const retire: TargetScriptJson = {
+    state: ZombieState.RetireOffScreen,
+    head: { point: [0, 0, -60], motion: 270, frame: 0, loops: 1, mode: 0 },
+    entries: [],
+  };
+  const identity = MatIdentity();
+  const HOLD_HOST: GameHost = {
+    ...NULL_HOST,
+    boneMatrix: (at, bone, out) => {
+      const z = ActorByAt(at);
+      if (!z || (bone !== 4 && bone !== 7)) return false;
+      const m = MatIdentity();
+      m[12] = z.pos.x + (bone === 4 ? -1 : 1); m[13] = z.pos.y + 10;
+      m[14] = z.pos.z;
+      for (let i = 0; i < 16; i++) out[i] = m[i];
+      return true;
+    },
+    cameraMatrices: (w2v, v2w) => {
+      for (let i = 0; i < 16; i++) { w2v[i] = identity[i]; v2w[i] = identity[i]; }
+      return true;
+    },
+  };
+  const rng = new Rng(13);
+  ResetGameGlobals();
+  EnterPlay();
+  SetGameTables({ ...CHARS, types: { "1": HOLD_TYPE } } as unknown as CharactersJson);
+  G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+  G.g_scene_state_major = SCENE_MAJOR_PLAYING;
+  G.g_app_state = AppState.InPlay;
+  const z = spawnZombie(0x3c7c, 1, "barrel man", {
+    initialState: ZombieState.CarryProp,
+    attackState: ZombieState.RetireOffScreen,
+    script: { target: holdScript, attack: retire },
+  }, rng);
+  z.visible = true;
+  z.pos = vec3(0, 0, -60);
+  const events = new Events();
+  const sounds: number[] = [];
+  events.on("sound.play", (e) => sounds.push(e.id));
+  const slots: number[] = [];
+  let shots = 0, broke = -1, released = false, leftState = -1;
+  for (let f = 0; f < 120; f++) {
+    GameUpdate(1 / 60, HOLD_HOST, rng, events);
+    const p = G.g_carried_props[0];
+    if (p && p.routine !== CarriedPropRoutine.Held
+        && p.routine !== CarriedPropRoutine.Break) released = true;
+    if (p?.routine === CarriedPropRoutine.Break && broke < 0) broke = f;
+    if (leftState < 0 && z.state !== ZombieState.CarryProp) leftState = f;
+    // Two hits, a few frames apart, both while it is still in the hands.
+    if (f >= 10 && (f % 5) === 0 && shots < 2
+        && p?.routine === CarriedPropRoutine.Held && p.shootable) {
+      slots.push(p.slot);
+      MarkCarriedPropShot(p, 0);
+      shots++;
+    }
+  }
+  check("the held barrel takes both shots", shots === 2, `shots ${shots}`);
+  check("...the first steps its draw slot from 0x19E9 to 0x19E7 and plays 0x1D16A9",
+        slots.join(",") === `${0x19e9},${0x19e7}` && sounds.includes(0x001d16a9),
+        slots.map((x) => x.toString(16)).join(","));
+  check("...the second breaks it in the hands and plays 0x2216A9",
+        broke >= 0 && sounds.includes(0x002216a9), `broke ${broke}`);
+  check("...so it is never released into the drop", !released);
+  check("the carrier's sub 2 sees hp < 1, drops to sub 4 and ends its script",
+        leftState > broke && leftState <= broke + 2,
+        `broke ${broke} left state 37 on ${leftState}, state ${z.state}`);
+  check("...and the break runs its clip and despawns",
+        G.g_carried_props.length === 0, `props ${G.g_carried_props.length}`);
+}
+
+console.log("\nCarriedPropCheckShot's break tail -- the civilian's shot script, the hit count:");
+{
+  // `CarriedPropCheckShot` (`FUN_004423F0`): the hit count is taken only
+  // while `g_accuracy_stats_suppressed` is 0, and the break's shared tail
+  // (`0x004426F6`) zeroes `sub+0x4C` of a live target's `+0x1310` block --
+  // for stage 1's barrel man, the civilian's `onShot`.
+  const TYPE_B: CharacterType = {
+    ...TYPE,
+    motions: { ...TYPE.motions, "271": motion(20, 0, 38), "270": motion(20) },
+  };
+  const script: TargetScriptJson = {
+    state: ZombieState.CarryProp,
+    head: { prop_type: 0, behaviour: 1, release: 3, offset: [0, 2, 0],
+            spin: [512, 0, 0], launch: [0, -1.5, 0],
+            motion: 271, frame: 0, loops: 4, mode: -2 },
+    entries: [],
+  };
+  const identity = MatIdentity();
+  const HOST: GameHost = {
+    ...NULL_HOST,
+    boneMatrix: (at, bone, out) => {
+      const z = ActorByAt(at);
+      if (!z || (bone !== 4 && bone !== 7)) return false;
+      const m = MatIdentity();
+      m[12] = z.pos.x + (bone === 4 ? -1 : 1); m[13] = z.pos.y + 10;
+      m[14] = z.pos.z;
+      for (let i = 0; i < 16; i++) out[i] = m[i];
+      return true;
+    },
+    cameraMatrices: (w2v, v2w) => {
+      for (let i = 0; i < 16; i++) { w2v[i] = identity[i]; v2w[i] = identity[i]; }
+      return true;
+    },
+  };
+  const run = (suppressed: number, victimDead: boolean) => {
+    const rng = new Rng(31);
+    ResetGameGlobals();
+    EnterPlay();
+    SetGameTables({ ...CHARS, types: { "1": TYPE_B } } as unknown as CharactersJson);
+    G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    G.g_scene_state_major = SCENE_MAJOR_PLAYING;
+    G.g_app_state = AppState.InPlay;
+    G.g_accuracy_stats_suppressed = suppressed;
+    // The civilian the barrel man was built for: only its `+0x1310` block
+    // is under test, so a held actor carries one by hand.
+    const victim = ActorSpawn(0x3c38, SpawnClass.Zombie, 1, "civilian");
+    victim.civ = makeCivilianState();
+    victim.civ.onShot = 0x0ced1234;
+    victim.civ.onShotScript = 2;
+    if (victimDead) victim.flags |= ActorFlag.Dead;
+    const z = spawnZombie(0x3c7c, 1, "barrel man", {
+      initialState: ZombieState.CarryProp,
+      attackState: ZombieState.RetireOffScreen,
+      script: { target: script, attack: null }, targetAt: victim.at,
+    }, rng);
+    z.visible = true;
+    z.pos = vec3(0, 0, -60);
+    const hits0 = G.g_player_hit_count[0];
+    let shots = 0, broke = false;
+    for (let f = 0; f < 80 && !broke; f++) {
+      GameUpdate(1 / 60, HOST, rng, new Events());
+      const p = G.g_carried_props[0];
+      if (p?.routine === CarriedPropRoutine.Break) broke = true;
+      else if (f >= 10 && p?.routine === CarriedPropRoutine.Held && p.shootable) {
+        MarkCarriedPropShot(p, 0);
+        shots++;
+      }
+    }
+    return { broke, shots, hits: G.g_player_hit_count[0] - hits0, civ: victim.civ,
+             pooled: ActorByAt(victim.at) === victim };
+  };
+  const a = run(0, false);
+  check("shot to pieces with the counter live: both hits counted",
+        a.broke && a.shots === 2 && a.hits === 2,
+        `broke ${a.broke} shots ${a.shots} hits ${a.hits}`);
+  check("...and the live civilian's shot script is taken away (+0x4C = 0)",
+        a.civ.onShot === 0 && a.civ.onShotScript === -1,
+        `onShot ${a.civ.onShot.toString(16)} script ${a.civ.onShotScript}`);
+  const b = run(1, true);
+  check("with g_accuracy_stats_suppressed up, neither hit is counted",
+        b.broke && b.shots === 2 && b.hits === 0,
+        `broke ${b.broke} shots ${b.shots} hits ${b.hits}`);
+  check("...and a dead civilian's (0x4000000) shot script is left alone",
+        b.pooled && b.civ.onShot === 0x0ced1234 && b.civ.onShotScript === 2,
+        `pooled ${b.pooled} onShot ${b.civ.onShot.toString(16)} script ${b.civ.onShotScript}`);
 }
 
 console.log("\na civilian's captors are made with it, though the script never lists them:");
@@ -410,7 +608,7 @@ console.log("\nthe gun lights:");
     presentEnemies: () => null,
     aliveCivilians: () => null, cameraFree: () => null,
     scriptFlagRaised: () => null,
-    showMessage: () => null, endDialogue: () => undefined,
+    showMessage: () => null,
   });
   w.tick(1 / 60);
   check("evt 0x14 and 0x15 write g_scene_lighting and g_entity_spotlights_on",
@@ -703,8 +901,8 @@ console.log("\nclass 0x30 state 37, release 5 — stage 2's rolling barrels, the
 // -- light block 1: LightsUseSecondarySet --------------------------------------
 //
 // `LightsUseSecondarySet` (`FUN_0041DC70`) lights every character with light
-// block 1, which evt 0x19 and 0x24/0x25/0x27 write. The walker used to drop
-// those as no-ops.
+// block 1, which evt 0x19 and 0x24/0x25/0x27 write -- into `G`'s
+// `g_scene_light_block1`, where the engine keeps it.
 console.log("\nlight block 1 (the characters' light):");
 {
   ResetGameGlobals();
@@ -736,26 +934,32 @@ console.log("\nlight block 1 (the characters' light):");
     presentEnemies: () => null,
     aliveCivilians: () => null, cameraFree: () => null,
     scriptFlagRaised: () => null,
-    showMessage: () => null, endDialogue: () => undefined,
+    showMessage: () => null,
   });
-  check("both blocks start at LightBlockInit's ambient, 0.7",
-        w.light.ambient === 0.7 && w.lightSecondary.ambient === 0.7);
+  const B0 = G.g_scene_light_block0;
+  const B1 = G.g_scene_light_block1;
+  check("both blocks start at LightBlockInit's ambient, 0.7f",
+        B0.channels[10] === Math.fround(0.7) && B1.channels[10] === Math.fround(0.7));
   w.tick(1 / 60);
   check("...and 0x27 leaves block 1's ambient tweening, not set",
-        w.lightBlock1.tweens[10]?.to === 0.3 && w.lightSecondary.ambient === 0.7);
-  // The script ends after the four instructions, and a finished walker runs
-  // no more frames; step the block the way `PushSceneLightStateToDevice`
-  // would for the four frames the tween asks for.
-  w.lightBlock1.step(4);
-  const b1 = w.lightSecondary;
-  check("evt 0x19 sets block 1's direction, not block 0's",
-        b1.pitchDeg === 270 && w.light.pitchDeg === 0,
-        `b1 ${b1.pitchDeg} b0 ${w.light.pitchDeg}`);
+        G.g_light_tween_block1[10]?.to === 0.3
+        && B1.channels[10] === Math.fround(0.7));
+  // The script ends after the four instructions; `PushSceneLightStateToDevice`
+  // is the scene list's own task and steps the tween whatever the script is
+  // doing -- four frames of it.
+  for (let i = 0; i < 4; i++) PushSceneLightStateToDevice(1);
+  check("evt 0x19 sets block 1's direction -- 270 degrees, 0xC000 BAMS -- "
+        + "not block 0's",
+        B1.pitch === 0xc000 && B0.pitch === 0, `b1 ${B1.pitch} b0 ${B0.pitch}`);
   check("evt 0x24 sets block 1's colour, 0x20 block 0's",
-        b1.rgb[0] === 0.8 && w.light.rgb[0] === 0.5,
-        `b1 ${b1.rgb[0]} b0 ${w.light.rgb[0]}`);
+        B1.channels[6] === 0.8 && B0.channels[6] === 0.5,
+        `b1 ${B1.channels[6]} b0 ${B0.channels[6]}`);
   check("evt 0x27 tweens block 1's ambient to its target",
-        Math.abs(b1.ambient - 0.3) < 1e-9, `${b1.ambient}`);
+        Math.abs(B1.channels[10] - 0.3) < 1e-9, `${B1.channels[10]}`);
+  check("...and the push leaves block 0's colour and ambient on the device",
+        G.g_render_light_colour[0] === 0.5
+        && G.g_render_ambient === Math.fround(0.7),
+        `${G.g_render_light_colour} ${G.g_render_ambient}`);
   const z = spawnZombie(0x3000, 1, "z");
   check("a zombie draws under block 1 (ZombieAdvanceMotion's first call)",
         ActorDrawsUnderSecondaryLights(z));
@@ -1070,8 +1274,9 @@ console.log("stage 3 block 0's boat, and the riders it carries to the wall:");
     }],
   } as unknown as CharactersJson);
   SpawnSlotActors([{ at: BOAT, class: SpawnClass.ScriptedProp,
-                     pos: [-1055, -26.25, -1620] as [number, number, number] }],
-                  rng);
+                     pos: [-1055, -26.25, -1620] as [number, number, number] }]);
+  // The `Init`s are the frame walk's (`SpawnFromDescriptor`); run them here.
+  RunPendingInits(rng);
   const boat = ActorByAt(BOAT);
   if (!boat) throw new Error("no boat");
   check("stage 3's boat is built with its record's flags word: 0x8000 | 1",
@@ -1212,4 +1417,71 @@ console.log("stage 3 block 0's boat, and the riders it carries to the wall:");
   check("MatrixGetAngles takes a RotY·RotX·RotZ pose back, elevation signed",
         Math.abs(g.x - 0x800) <= 1 && Math.abs(g.y - 0x2000) <= 1
         && Math.abs(g.z - 0x400) <= 1, `${g.x} ${g.y} ${g.z}`);
+}
+
+console.log("\nclass 0x13, g_prop_behaviours[6] and [7] -- the launch and the path ride:");
+{
+  // `PropBehaviourLaunchWithAccel` (`FUN_0043FFC0`): the Init's one call
+  // (`CALL dword ptr [EAX]` at `0x0043FE72`) turns the operand block's two
+  // vectors by `RotX(+0x64) RotZ(+0x6C) RotY(+0x68)` and falls into the
+  // integrate, `pos += vel` and then `vel += acc`. A half turn about Y alone
+  // takes (x, y, z) to (-x, y, -z) whichever way the engine's RotY turns,
+  // and a half turn about X or Z would not.
+  const rng = new Rng(61);
+  ResetGameGlobals();
+  const frame: ClassFrame = { dt: 1 / 60, rng, host: NULL_HOST };
+  const launch = SpawnFromDescriptor(0x7000, SpawnClass.ScriptedProp, -1,
+                                     "launch", {
+    class13: { slot: 0x1234, cam_path: 0xffff, cam_frame: 0xffff, scale: 1,
+               behaviour: 6, selector: 0x3f800000,
+               operand: [1, 2, 3, 0, -0.5, 0.25] },
+    pos: vec3(10, 20, 30), yaw: 0x8000, pitch: 0, roll: 0,
+  });
+  ActorRunInit(launch, rng, undefined, NULL_HOST);
+  const near = (a: number, b: number) => Math.abs(a - b) < 1e-4;
+  const at = (o: Actor, x: number, y: number, z: number) =>
+    near(o.pos.x, x) && near(o.pos.y, y) && near(o.pos.z, z);
+  // v = (-1, 2, -3), a = (0, -0.5, -0.25): one step at the Init.
+  check("behaviour 6: the Init turns the velocity and steps once",
+        at(launch, 9, 22, 27) && near(launch.vel.x, -1)
+        && near(launch.vel.y, 1.5) && near(launch.vel.z, -3.25),
+        `pos ${JSON.stringify(launch.pos)} vel ${JSON.stringify(launch.vel)}`);
+  ScriptedPropUpdate13(launch, frame);
+  ScriptedPropUpdate13(launch, frame);
+  // Three steps: 10 - 3 = 7; 20 + 6 - 1.5 = 24.5; 30 - 9 - 0.75 = 20.25.
+  check("...and every update integrates, position before velocity",
+        at(launch, 7, 24.5, 20.25) && near(launch.vel.y, 0.5),
+        `pos ${JSON.stringify(launch.pos)} vel ${JSON.stringify(launch.vel)}`);
+
+  // `PropBehaviourRideObjectPath` (`FUN_004400D0`): seated on the `op_` path
+  // the operand block's first dword names, at `g_cam_path_frame`, from the
+  // Init's call on, until the frame reaches `g_cam_path_length[path]`; then
+  // held where the last seat left it.
+  const seen: [number, number][] = [];
+  const host: GameHost = {
+    ...NULL_HOST,
+    objectPath: (slot, fr) => {
+      seen.push([slot, fr]);
+      return { x: fr, y: 2 * fr, z: -fr, pitch: 0x100, yaw: 0x200, roll: 0x300 };
+    },
+  };
+  const pf: ClassFrame = { dt: 1 / 60, rng, host };
+  G.g_cam_path_frame = 3;
+  const ride = SpawnFromDescriptor(0x7100, SpawnClass.ScriptedProp, -1, "ride", {
+    class13: { slot: 0x1234, cam_path: 0xffff, cam_frame: 0xffff, scale: 1,
+               behaviour: 7, selector: 0x176, path_length: 5 },
+    pos: vec3(100, 100, 100),
+  });
+  ActorRunInit(ride, rng, undefined, host);
+  check("behaviour 7: the Init's call already seats it on path 0x176 at the frame",
+        at(ride, 3, 6, -3) && ride.yaw === 0x200
+        && seen.length === 1 && seen[0][0] === 0x176,
+        `pos ${JSON.stringify(ride.pos)} calls ${JSON.stringify(seen)}`);
+  G.g_cam_path_frame = 5;
+  ScriptedPropUpdate13(ride, pf);
+  G.g_cam_path_frame = 7;
+  ScriptedPropUpdate13(ride, pf);
+  check("...rides to g_cam_path_length[path] and holds there past it",
+        at(ride, 5, 10, -5) && seen.length === 2,
+        `pos ${JSON.stringify(ride.pos)} calls ${seen.length}`);
 }

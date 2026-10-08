@@ -96,6 +96,18 @@ Slot state lives in a 16-byte record at `0x009A66A0`:
 So slot-granular streaming genuinely exists: `FUN_00418820` seeks into a pol
 file and reads one model, without loading the rest.
 
+**[proved]** The flags word's `0x8000` is the **resident bit** every draw
+tests (`AssetDrawSlot` wants `0x8000` and `1`). For a whole file it follows
+the file: `PolFileJobBindSlot` (`0x00418EC0`) sets it slot by slot as the
+load's last state binds them, one a step, and only then marks the file
+loaded -- byte `+8` of its `g_pol_file_records` entry (`0x009C7320`, stride
+`0xC`; 0 free, 3 loading, 4 loaded); `AssetJobPolFileFree` (`0x00419020`)
+clears it from every slot of the file in its first step, over the file's
+list at `g_pol_file_slot_lists` (`0x004E794C`). A load of a file not free and
+a free of a file not loaded are dropped. The port keeps that state byte for
+the files opcodes `0x52`/`0x53` load and free, completing each job where it
+is queued (`web/src/game/pol_files.ts`); class 0x41 constructor 26 reads it.
+
 ---
 
 ## What the event script actually does
@@ -234,7 +246,7 @@ mode-2.
 ### Game mode 1 is Original Mode — [proved]
 
 `g_GameMode` (`0x009CA08C`) is the mode-select menu index, written in
-`FUN_00496960` from the cursor `DAT_009A2226` for entries 0–3 and reset to 0
+`FUN_00496960` from the cursor `g_title_menu_cursor` (`0x009A2226`) for entries 0–3 and reset to 0
 everywhere a game starts from elsewhere.
 
 **Mode 1 shares the region tables and changes only the id tables.** Region
@@ -500,18 +512,18 @@ where its routine puts it and once where the model's own coordinates do.
 | Disposition | Slots |
 |---|---|
 | **Backdrop** -- `render/backdrop.ts` sets these stage nodes itself, every frame (9) | `0x17A0`, `0x17A1`, `0x18A3`, `0x18A5`..`0x18A8`, `0x1AFF`, `0x1B00` |
-| **Canal water** -- class 0x41 type 1's task, through `StageScene.setWaterSlots` (6) | `0x13A0`, `0x13AD`, `0x13AE`, `0x13B0`, `0x13B2`, `0x183C` |
+| **Canal water** -- class 0x41 type 1's task, through `StageScene.setWaterSlots` (6); `0x13B2` and `0x13B0` also by `RegionDrawResidentSet` itself beside slot `0x1828` in stage 3's regions 2 and 3 ([`water.md`](water.md)) | `0x13A0`, `0x13AD`, `0x13AE`, `0x13B0`, `0x13B2`, `0x183C` |
 | **Ported with this change** (6) | `0x189B`, `0x189D` (class 0x44 selector 12, `SlideOnFlagUpdate`); `0x1986` (selector 9, `FlagLiftedPropUpdate`); `0x1384` (class 0x41 constructor 47, `PropUpdateType47`); `0x0954`, `0x0956` (class 0x13's own draw of its slot, posed by carrier selectors 4/7, `CarrierPropRoutine4`, and 5/8, `CarrierPropRoutine5`, stage 4 blocks 23/25/27/29) |
 | **Ported before; its model now travels** (1) | `0x1853` (class 0x44 selector 17, `StoryModeSwitchUpdate`) |
 | **Original Mode and civilian items** -- the item draws, from `slots_breakable` (40) | `0x107C`..`0x1084`, `0x1086`..`0x1088`, `0x108A`..`0x1092`, `0x1094`, `0x1096`..`0x109C`, `0x109E`, `0x109F`, `0x10A3`..`0x10AB` |
 | **Civilian attachments** -- the character layer (20) | `0x0F94`, `0x11CE`, `0x11CF`, `0x11D0`, `0x11D1`, `0x11D3`, `0x11D7`, `0x11DC`, `0x11DE`, `0x11DF`, `0x11E5`, `0x11E7`, `0x11E8`, `0x11EB`, `0x11EE`, `0x11F2`, `0x11F3`, `0x11F6`, `0x11F9`, `0x11FB` |
-| **Hinges** -- `HingeUpdate`, in `render/props.ts` (6) | `0x01DC`, `0x07E7`, `0x1856`, `0x1866`, `0x186C`, `0x1899` |
+| **Hinges** -- `HingeUpdate` (`0x00473CF0`), `game/class44/hinge.ts`, drawn from its recorded draws (6) | `0x01DC`, `0x07E7`, `0x1856`, `0x1866`, `0x186C`, `0x1899` |
 | **Class 0x44 doors** -- selectors 11 and 13 (5) | `0x0A58`, `0x0D21`, `0x0D22`, `0x1892`, `0x189A` |
 | **Generic and breakable props** -- class 0x41 (13) | `0x0A64`, `0x0A67`, `0x0A68`, `0x0A6B`, `0x0A6D`, `0x1852`, `0x185C`, `0x185D`, `0x189C`, `0x189E`..`0x18A1` |
 | **Rigs** (4) | `0x185B` (`obj_48f050`), `0x1871` (`obj_470b70`), `0x1913` (`obj_48f560`), `0x1A37` (`obj_484ff0_props`) |
 | **Actor and effect slots** (8) | `0x07ED`, `0x07EE` (the boss banner; `0x07ED` is also `ScriptedHumanoidBoneDrawHook`'s clip-`0x14B` and clip-`0x32A` model, stage 1 block 1, which loads it itself at step 4 op 2); `0x094F`, `0x0952`, `0x0953` (class 0x13 carrier selectors 2/9); `0x1383`, `0x13A2` (`slots_actor`); `0x1850` (`slots_effect`) |
-| **Ported after the stand-in went** (8) | `0x07E9`, `0x07EB`, `0x0D36`, `0x190C`, `0x1914`, `0x1915` -- class 0x26 subtypes 6/7, `Class26Subtype67Update` (`0x0048F930`) into `Class26Subtype67Draw` (`0x0048FB40`) / `Class26Subtype67DrawOrKill` (`0x0048FD00`), stage 6 block 12, drawn from the recorded draws by `render/slotmodels.ts`. `0x10E3` -- `ScriptedHumanoidBoneDrawHook` (`0x00485260`)'s clip-`0x34C` arms, stage 4 blocks 23/25, `render/characters/humanoid_hook.ts`. `0x10AE` -- **class 0x44 selector 14**, `PropDrawOnlySelector14` (`0x004758E0`): the slot is the descriptor tail's `+0x04`, which is why no instruction names it; stage 3's three spawns and stage 4's two |
-| **Nothing draws it on its own** (3) | `0x1085`, `0x11ED`, `0x1730` (the chapter card's, and the selector-12 arm for slot `0x189C` that no spawn takes) |
+| **Ported after the stand-in went** (9) | `0x1730` -- **the chapter card's** stage-6 arm, `ChapterCardInstall` (`0x004342E0`) sub 1: a white 32x32 quad under identity, `T(0, 0, -30)`, `RotY(0x8000)`, scale 2 -- the card's background -- drawn by `render/view_slots.ts` from the recorded draw. `0x07E9`, `0x07EB`, `0x0D36`, `0x190C`, `0x1914`, `0x1915` -- class 0x26 subtypes 6/7, `Class26Subtype67Update` (`0x0048F930`) into `Class26Subtype67Draw` (`0x0048FB40`) / `Class26Subtype67DrawOrKill` (`0x0048FD00`), stage 6 block 12, drawn from the recorded draws by `render/slotmodels.ts`. `0x10E3` -- `ScriptedHumanoidBoneDrawHook` (`0x00485260`)'s clip-`0x34C` arms, stage 4 blocks 23/25, `render/characters/humanoid_hook.ts`. `0x10AE` -- **class 0x44 selector 14**, `PropDrawOnlySelector14` (`0x004758E0`): the slot is the descriptor tail's `+0x04`, which is why no instruction names it; stage 3's three spawns and stage 4's two |
+| **Nothing draws it on its own** (2) | `0x1085`, `0x11ED` (the selector-12 arm for slot `0x189C` that no spawn takes) |
 | **`[open]`** (1) | `0x18AD` (`st5_01b.bin[8]`, stage 6 block 12, and `endevtbl.bin`'s three loads): see below |
 
 **`0x18AD` is drawn by nothing found.** Searched: every instruction

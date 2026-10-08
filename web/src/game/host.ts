@@ -67,7 +67,16 @@ export type ShotPick =
        */
       mesh?: { surface: number; normal: Vec3 };
     }
-  | { kind: "prop"; propId: number; point: Vec3 }
+  | {
+      kind: "prop"; propId: number; point: Vec3;
+      /**
+       * A prop shot through its own collision mesh (`ShotTestMesh`,
+       * `FUN_00404A00`), which only ever arrives from the registration list:
+       * the quad's surface and its normal, for `MarkActorShot`'s world
+       * impact, as on an actor. Absent for `render/`'s sphere pick.
+       */
+      mesh?: { surface: number; normal: Vec3 };
+    }
   /**
    * One of `znjoe`'s released creatures — `G.g_body_creatures`, identified by
    * its `id`.
@@ -100,6 +109,15 @@ export type ShotPick =
      * candidate from the registration list.
      */
     t?: number;
+    /**
+     * The radius of the sphere the shot entered, whose centre is `point`:
+     * `obj+0x124` for a thing hit whole, the bone record's `+0x78` for a
+     * bone. `MarkActorShot` (`FUN_00404DB0`) reads it back to put GRENADE's
+     * blast on the sphere's near side -- see `MarkActorShotBlast`. Absent for
+     * a collision-mesh hit, whose `point` is the hit itself, and for a
+     * breakable prop.
+     */
+    radius?: number;
   };
 
 export interface GameHost {
@@ -183,6 +201,17 @@ export interface GameHost {
    */
   boneMatrix?(at: number, bone: number, out: number[]): boolean;
   /**
+   * One bone's world matrix **as the pose left it**, before the class's
+   * node hook rewrote the record: what `SkeletonEmitNode` (`FUN_004114C0`)
+   * `MatrixStore`s at `+0x28` just before it calls the hook, and what the
+   * hook reads there. The same as {@link GameHost.boneMatrix} for every bone
+   * a hook leaves alone; different for a civilian's turned head, whose
+   * `CivilianDrawBonePart` (`FUN_0048D1F0`) stores the turn over the pose and
+   * reads the pose to turn it. Optional and false when the actor is not
+   * posed.
+   */
+  bonePoseMatrix?(at: number, bone: number, out: number[]): boolean;
+  /**
    * The two matrices of the camera block `g_camera_index` names:
    * `g_camera_world_to_view` (`0x009A6000`, the block's `+0x00`) and its
    * inverse `g_camera_blocks` (`0x009A6040`, `+0x40`), each `+ index *
@@ -234,6 +263,18 @@ export interface GameHost {
    * in `game/` — which is the same missing piece the headless replay needs.
    */
   pickShot?(ray: ShotRay): ShotPick | null;
+
+  /**
+   * `GetTickCount` -- the platform's millisecond clock, `CALL dword ptr
+   * [0x004C4088]` in `BossModeClockStart` (`FUN_0049DF00`) and
+   * `BossModeClockRead` (`FUN_0049DF20`), Boss Mode's fight clock. A wall
+   * clock is the platform's to answer, not the port's; the engine's clock is
+   * one too, so a replay or a restored snapshot measures a different time,
+   * as the game's own would. Optional: a host without one reads 0, and a
+   * clock that never moves. Nothing the port runs reaches it -- no bundle is
+   * a Boss Mode stage.
+   */
+  tickCount?(): number;
 }
 
 /*

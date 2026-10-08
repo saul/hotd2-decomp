@@ -181,6 +181,9 @@ export const CarriedZombieHandler: ClassHandler = {
   ...EnemyZombieHandler,
   init: CarriedZombieInit18,
   update: CarriedZombieUpdate18,
+  // `CarriedZombieInit18` installs `CarriedZombieUpdate18` over what
+  // `EnemyZombieInit` left and returns (`0x0045CD79`).
+  firstUpdateNextWalk: true,
   debug: CarriedZombieDebug,
 };
 

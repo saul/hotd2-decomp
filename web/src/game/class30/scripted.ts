@@ -16,6 +16,7 @@
  * permit system offers, and they do it with the same inlined routine — see
  * {@link ZombieScriptedPickPlayer}.
  */
+import { Zombie1368Flag } from "./state";
 import { SecondsToTicks } from "../tables";
 import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
@@ -193,7 +194,7 @@ export function ZombieStateWaitForCameraFrame(obj: ZombieActor, dt: number,
   if (obj.zom.holdFrames >= 1) return;
   // `obj+0x1368 |= 1` — the flag that lets `ZombieStateHoldAtRange` keep a
   // cooldown instead of zeroing it — and the cooldown itself.
-  obj.zom.hasCooldown = true;
+  obj.zom.flags1368 |= Zombie1368Flag.Cooldown;
   obj.cooldown = t?.cooldown ?? 0;
   obj.state = ZombieState.Strike;
   obj.sub = 0;

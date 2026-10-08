@@ -117,15 +117,18 @@ import { T } from "../tables";
 import { BAMS } from "../vec";
 import { MatrixTranslate } from "../matrix";
 import { SpawnPropHitEffectScaled } from "../effects/sprite";
-import { HiddenItemCopy, ReleaseHiddenItem } from "../class41/items";
+import {
+  HiddenItemCopy, ReleaseHiddenItem, SpawnExtraLifePickup,
+} from "../class41/items";
 import { ActorDespawnProp, BreakablePropAwardHit } from "../class41/prop";
 import {
   PropDrawBegin, PropDrawSlot, PropMatrixPush, PropMatrixTRzRyRx,
 } from "../class41/prop_draw";
 import {
-  BreakableFlag, BreakableState, makeBreakableProp, PropFamily,
+  BreakableFlag, BreakableState, ItemSet, makeBreakableProp, PropFamily,
   type BreakableProp,
 } from "../class41/prop_state";
+import { GameMode } from "../game_mode";
 
 /**
  * `FSUB float [0x00568FF8]` (`0x40EB3333`, 7.35): how far the container's
@@ -602,6 +605,19 @@ function FallingContainerBreak(p: BreakableProp, rng: Rng,
   // routine writes `+0x1A0` only when the countdown empties; the object is
   // despawned on the next line either way.
   p.y = p.floorY;
+  // Original Mode's FIRST AID KIT (`0x0046A963`..`0x0046A9B9`): with
+  // `g_original_first_aid` up the set is the extra life's (`+0x194 = 1`),
+  // `+0x11C` takes the lifetime byte for the life to inherit, the life comes
+  // out in place of the release switch, and `+0x11C = 1` before the
+  // despawn.
+  if (G.g_GameMode === GameMode.Original && G.g_original_first_aid !== 0) {
+    p.itemSet = ItemSet.ExtraLife;
+    p.hp = p.lifetime;
+    SpawnExtraLifePickup(p, events);
+    p.hp = 1;
+    ActorDespawnProp(p);
+    return;
+  }
   ReleaseHiddenItem(p, rng, events, HiddenItemCopy.Falling, 0,
                     FALLING_STORY_ITEM_RISE);
   ActorDespawnProp(p);

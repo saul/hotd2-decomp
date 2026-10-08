@@ -47,7 +47,9 @@ import { CarrierTransformPoint } from "../../src/game/carrier";
 import { GameMode } from "../../src/game/game_mode";
 import { vec3, type Vec3 } from "../../src/game/vec";
 import { EffectCode, ResolveHit } from "../../src/game/combat/resolve_hit";
-import { SpawnSlotActor } from "../../src/game/director";
+import { RunPendingInits, SpawnSlotActor } from "../../src/game/director";
+import { UpdateCameraEnemySlots } from "../../src/game/camera/slots";
+import { SelectCameraLookAtTarget } from "../../src/game/camera/select_target";
 import {
   check, motion, CHARS, SCENE_MAJOR_PLAYING, spawnZombie, openShutter, scene,
   EnterPlay, JoinPlayerTwo, run, coliQuad,
@@ -435,6 +437,110 @@ console.log("\nznjoe's creature:");
     check("...and a reset empties it",
           (ResetGameGlobals(), G.g_body_creatures.length === 0));
   }
+
+  // -- 6. the camera -------------------------------------------------------
+  //
+  // `SpawnBodyCreature` ends `RegisterEnemySlot` (`0x0043E77B`); every flying
+  // frame `BodyCreatureUpdate` writes `obj+0x100` through the camera block's
+  // view-to-world matrix (`0x009A6040 + index * 0x1A4`, `0x0043EAF3`) and
+  // calls `RegisterForCameraTracking` (`0x0043EEF1`); both ways out of the
+  // flight free the slot (`0x0043EC4E`, `0x0043EDAD`). `obj+0x121` is the
+  // player it flies at, so the fill deals it a permit slot.
+  {
+    const rng = new Rng(18);
+    const { joe, events } = joeScene(rng);
+    joe.lookAt = vec3(1, 2, 3);
+    const c = SpawnBodyCreature(joe);
+    check("a new creature is enrolled straight into the first general slot",
+          c.cameraSlot === 2 && G.g_enemy_slots[2].occupied === 1
+          && G.g_enemy_slots[2].creature === c.id,
+          `slot ${c.cameraSlot} ${JSON.stringify(G.g_enemy_slots[2])}`);
+    check("...with the host's camera point as its own",
+          c.lookAt.x === 1 && c.lookAt.y === 2 && c.lookAt.z === 3
+          && c.lookAt !== joe.lookAt, JSON.stringify(c.lookAt));
+
+    // A view-to-world matrix that is not the identity, and a world-to-view
+    // one that is not its inverse, so only the right matrix gives the
+    // numbers: x' = z + 10, y' = y + 20, z' = 30 - x.
+    G.g_camera_index = 0;
+    G.g_camera_view_to_world = [0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 0,
+                                10, 20, 30, 1];
+    G.g_camera_eye = vec3(0, 0, 0);
+    G.g_camera_candidates = [];
+    G.g_camera_candidate_count = 0;
+    BodyCreatureUpdate(c, rng, JOE_HOST, events);       // launch
+    // The launch point is (0, 6.5, -40) in camera space (section 3).
+    check("the launch frame registers it with the camera, at its position "
+          + "carried out of camera space by the view-to-world matrix",
+          c.state === BodyCreatureState.Fly
+          && c.lookAt.x === -30 && c.lookAt.y === 26.5 && c.lookAt.z === 30,
+          JSON.stringify(c.lookAt));
+    // `|obj+0x40 - g_camera_eye| * 10`, with `obj+0x40` in camera space:
+    // sqrt(6.5^2 + 40^2) = 40.52 -> 405.
+    check("...keyed on its camera-space position against the eye, as the "
+          + "engine sums it",
+          G.g_camera_candidate_count === 1
+          && G.g_camera_candidates[0].creature === c.id
+          && G.g_camera_candidates[0].key === 405,
+          JSON.stringify(G.g_camera_candidates));
+    UpdateCameraEnemySlots();
+    check("...and the next fill deals it slot 0, as a permit holder: its "
+          + "`obj+0x121` is the player it flies at",
+          c.target === 0 && c.cameraSlot === 0
+          && G.g_enemy_slots[0].creature === c.id
+          && G.g_enemy_slots[2].occupied === 0,
+          `slot ${c.cameraSlot}`);
+    G.g_camera_lookat_target = vec3(0, 0, 0);
+    SelectCameraLookAtTarget();
+    const look = G.g_camera_lookat_target;
+    check("...so the camera looks at it alone",
+          look.x === -30 && look.y === 26.5 && look.z === 30,
+          JSON.stringify(look));
+
+    // Shot, a few frames into the flight: the slot goes, and the routine
+    // returns before the draw and the tail -- no registration, and the cel
+    // drawn is still last frame's (the shot arm has reset `obj+0x1330`).
+    for (let i = 0; i < 3; i++) {
+      UpdateCameraEnemySlots();
+      BodyCreatureUpdate(c, rng, JOE_HOST, events);
+    }
+    UpdateCameraEnemySlots();
+    const cel = c.slot;
+    MarkBodyCreatureShot(c, 0);
+    BodyCreatureUpdate(c, rng, JOE_HOST, events);
+    check("shot, it frees its slot and is not registered that frame",
+          c.state === BodyCreatureState.FallShot && c.cameraSlot === 0
+          && G.g_enemy_slots[0].occupied === 0
+          && G.g_camera_candidate_count === 0,
+          `occupied ${G.g_enemy_slots[0].occupied} `
+          + `candidates ${G.g_camera_candidate_count}`);
+    check("...nor does the shot frame reach the draw",
+          cel !== 0x1d31 && c.slot === cel, `${cel} -> ${c.slot}`);
+    BodyCreatureUpdate(c, rng, JOE_HOST, events);
+    check("...and a falling creature registers no more",
+          G.g_camera_candidate_count === 0,
+          String(G.g_camera_candidate_count));
+  }
+  {
+    // Not shot: the slot goes on the frame it reaches the player.
+    const rng = new Rng(19);
+    const { joe, events } = joeScene(rng);
+    const c = SpawnBodyCreature(joe);
+    let freedOnHit = false;
+    for (let i = 0; i < 120 && c.state !== BodyCreatureState.FallAfterHit;
+         i++) {
+      UpdateCameraEnemySlots();
+      const slot = c.cameraSlot;
+      const was = slot >= 0 ? G.g_enemy_slots[slot].occupied : 0;
+      BodyCreatureUpdate(c, rng, JOE_HOST, events);
+      if ((c.state as BodyCreatureState) === BodyCreatureState.FallAfterHit) {
+        freedOnHit = was === 1 && G.g_enemy_slots[slot].occupied === 0;
+      }
+    }
+    check("a creature that reaches the player frees its slot on that frame",
+          c.state === BodyCreatureState.FallAfterHit && freedOnHit,
+          `state ${BodyCreatureState[c.state]} freed ${freedOnHit}`);
+  }
 }
 
 // -- stage 3's two boats: what stands on one, and what rides the other -------
@@ -487,6 +593,14 @@ console.log("stage 3's boats -- the one the player rides and the one that "
   check("...and the pose is the path's, two units up",
         boat.pos.x === 100 && boat.pos.y === -17 && boat.pos.z === 200,
         `${boat.pos.x},${boat.pos.y},${boat.pos.z}`);
+  // The passes walk `g_coli_dynamic_list`, last frame's registrations, which
+  // `ProcessPlayerShots` publishes before any actor runs: the boat files
+  // itself at `0x0048EE9C` on this tick and is met from the next.
+  check("...but the probe still falls through: the list is last frame's",
+        QueryGroundHeightAt(115, -10, 200) === -999
+        && G.g_shot_test_list.some((e) => e.at === boat.at
+                                          && e.flags === boat.flags));
+  GameUpdate(1 / 60, host, rng);
   // Local (0, -2, 15) is world (100 + 15, -17 - 2, 200) under a quarter turn
   // of RotY: x' = x cos + z sin.
   const deck = QueryGroundHeightAt(115, -10, 200);
@@ -606,6 +720,8 @@ console.log("stage 3's boats -- the one the player rides and the one that "
     syncSpawns: () => [],
   };
   syncCharacterSpawns(pool, listed);
+  // The `Init`s are the frame walk's (`SpawnFromDescriptor`); run them here.
+  RunPendingInits(rng);
   const rider = G.g_object_list.find((o) => o.at === 2780);
   const boatObj = G.g_object_list.find((o) => o.at === 3184);
   check("the boat and its rider are both made",
@@ -1274,6 +1390,8 @@ console.log("\nclass 0x40, the horde:");
     syncSpawns: (_s, made) => { order.push(...made.map((a) => a.at)); return []; },
   };
   syncCharacterSpawns(pool, listed);
+  // The `Init`s are the frame walk's (`SpawnFromDescriptor`); run them here.
+  RunPendingInits(rng);
   const child = G.g_object_list.find((o) => o.at === 0xa174);
   check("a civilian's class-0x18 child is made although no spawn lists it",
         !!child, order.map((x) => x.toString(16)).join());
@@ -1762,7 +1880,10 @@ console.log("\nclass 0x42, the worm:");
           && !WormCountsForEnemyGate({ at: LONE_AT, class: 0x42, hp: 1 }));
     // ...and the script's spawn reaches `PlaceWormBatch` through the
     // director, which runs the members from the next frame's task walk.
-    SpawnSlotActor({ at: COG_AT, class: 0x42, pos: [-924, 74.8, -1336] }, rng);
+    SpawnSlotActor({ at: COG_AT, class: 0x42, pos: [-924, 74.8, -1336] });
+    // The placer's `Init` is the frame walk's; run it ahead of the frame so
+    // the member it builds can be read before its first update.
+    RunPendingInits(rng);
     const m = member(COG_AT, 1);
     const before = m ? worm(m).orbit : 0;
     run(1, rng, new Events());

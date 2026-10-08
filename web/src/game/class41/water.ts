@@ -10,9 +10,10 @@
  * texture as it does. No region names those tiles as something to draw: the
  * script loads them with opcode 0x50, and a slot that is only *loaded* is
  * drawn by nothing unless something calls `AssetDrawSlot` on it
- * (`RegionDrawResidentSet`, `FUN_00401260`, walks the current region's list
- * and nothing else). So stage 2's block 16 stood on a dock over no water at
- * all.
+ * (`RegionDrawResidentSet`, `FUN_00401260`, walks the current region's list,
+ * and beside one entry of stage 3's regions 2 and 3 draws two of these tiles
+ * itself -- `render/stagescene.ts`). So stage 2's block 16 stood on a dock
+ * over no water at all.
  *
  * The tile is `g_water_surface_slots` (`0x00593DA4`) indexed by the placer's
  * `obj+0x1F4`, the one table in this that is image data; the exporter resolves
@@ -179,7 +180,7 @@ const s8 = (v: number): number => (v << 24) >> 24;
  */
 export function PlaceWaterSurface(obj: Actor): WaterSurface | null {
   const pl = T.breakables?.placements?.find(
-    (q) => q.at === obj.at && q.container === "water_surface");
+    (q) => q.at === obj.descAt && q.container === "water_surface");
   if (!pl || pl.slot === undefined) return null;
   const index = obj.charType & 0xff;
   const w: WaterSurface = {
@@ -232,9 +233,10 @@ export function PlaceWaterSurface(obj: Actor): WaterSurface | null {
  * one frame. Transcribed as it is.
  *
  * [diverges] `resident` is the slot table's `+0xD` bit 0x80, which the port
- * does not keep: opcodes 0x52..0x58 are whole-file asset traffic it treats as
- * already done. So the walk runs
- * whether or not the tile is loaded. Every shipped placement follows the load
+ * keeps only for the files opcodes 0x52 and 0x53 load and free
+ * (`game/pol_files.ts`) -- not for the scene's own loads, nor for opcode
+ * 0x50's single slots, and a tile can come by any of the three. So the walk
+ * runs whether or not the tile is loaded. Every shipped placement follows the load
  * of its tile except block 16 step 10's, whose `komono_boss2.bin` arrives at
  * step 13, and the only effect is three steps of ripple phase on a tile that
  * is not drawn yet. `render/water_surfaces.ts` does honour the residency the

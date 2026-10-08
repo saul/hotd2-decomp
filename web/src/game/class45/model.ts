@@ -38,6 +38,7 @@ import {
   MatrixTranslate, type Mat,
 } from "../matrix";
 import { ApplyRootMotion } from "../root_motion";
+import { DrawSkinnedModelAndShadow } from "../skeleton";
 import { MatrixInterpolateSwingTwist, type Mat3 } from "../class44/swing_twist";
 import { BoneHitCentre, CharacterTypeOf, MotionOf, MotionPlayLength }
   from "../tables";
@@ -357,6 +358,9 @@ export function Boss3DrawModel(obj: Boss3Actor): void {
   // heads' and the body's is `PoseHookNone`: they are drawn by
   // `Boss3DrawBoneParts` instead.
   if (obj.boss3.poseHook !== Boss3PoseHook.None) obj.boss3.drawn = true;
+  // ...and the draw's ground shadow, under `g_cur_actor`: each of the five
+  // routines that call this has pointed it at `obj` on its first line.
+  DrawSkinnedModelAndShadow(obj);
 }
 
 /** Bone `b`'s record in the bundle's list, and its parent's bone number. */

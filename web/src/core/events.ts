@@ -14,7 +14,7 @@ export interface EventMap {
   /** `PlayerTakeDamage` ran: one life gone, and why. */
   "player.damaged": {
     /** What delivered it. `PlayerTakeDamage` does not care, but the feed does. */
-    source: "strike" | "thrown";
+    source: "strike" | "thrown" | "civilian";
     /** The attacker's spawn address, or -1. */
     at: number;
     /** The attacker's display name. */
@@ -39,6 +39,11 @@ export interface EventMap {
    * browser keeps things. The state is `G`'s; this only says "now".
    */
   "profile.save": { profile: ProfileBlock };
+  /**
+   * `[port-only]` -- the trunk closed with these items in each player's two
+   * slots (`G.g_original_last_choice`), for the page to keep.
+   */
+  "original.choice": { slots: number[][] };
   /** `ScoreAddForPlayer` ran. Negative `points` is a penalty. */
   "player.score": { player: number; points: number; score: number };
   /**
@@ -94,18 +99,6 @@ export interface EventMap {
   "civilian.rescued": { at: number; player: number; score: number };
   /** A civilian was shot: a life, and -100 twice. */
   "civilian.shot": { at: number; player: number };
-  /**
-   * Op 0x1D — `EvtOpPlayDialogue2D`. The same message groups evt op 0x2D
-   * plays, so the host routes it to the subtitle and voice path rather than
-   * treating it as a bare sound.
-   */
-  "civilian.dialogue": { at: number; group: number };
-  /**
-   * `EvtOpPlayDialogue2D` called by a class that is not a civilian -- the
-   * stage-3 boss's body plays group `0x83` as it passes path point `0x3C`.
-   * The same message groups again, so the host routes it the same way.
-   */
-  "actor.dialogue": { at: number; group: number };
 
   // -- class 0x41, the breakable props -----------------------------------
   /** First shot: the prop swapped to its broken model and shook. */

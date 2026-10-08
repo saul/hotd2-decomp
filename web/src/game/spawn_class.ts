@@ -37,12 +37,29 @@ export enum SpawnClass {
    * stage 4 and the only writer of `g_script_flags[32]` in the game.
    */
   Boss4 = 0x19,
-  /** `FUN_00441750` — row spawner for floating props. */
+  /**
+   * `Class32Init` (`FUN_0047F5F0`) — **the stage-5 boss**, character type
+   * `0x4B` (`boss5.bin` with four `boss5b.bin` nodes, fifteen in all), 450
+   * hit points. One descriptor, spawned by stage 5's blocks 7 and 9 (block 9
+   * is the Boss Mode entry). It increments both enemy counters, throws
+   * projectiles that are actors of its own, and raises `g_script_flags[24]`
+   * and `[30]` on its way out -- the gate stage 5's two
+   * `wait_script_flag 30`s wait on. Ported (`game/class32/`).
+   */
+  Boss5 = 0x32,
+  /**
+   * `FloatingPropRowSpawn` (`FUN_00441750`) — **a row of floating planks** in
+   * stage 2's boss arena: it builds `N` planks running `FloatingPropUpdate`
+   * (`FUN_004418C0`), which ride the class-0x16 water, tip under the boss's
+   * feet and leave on a script flag, and kills itself. **Ported**
+   * (`game/class15/`).
+   */
   FloatingPropRow = 0x15,
   /**
    * `WaterFieldCreate` (`FUN_00442290`) — creates the water-wave field the
    * stage-2 boss's summons are seated under, with the spawn's `y` as its
-   * plane, and kills itself. Four spawns, stage 2 blocks 35, 37, 39 and 41.
+   * plane, and kills itself. Six spawns, stage 2 blocks 16, 20, 35, 37, 39
+   * and 41.
    * **Ported** (`game/class16/`).
    */
   WaterWaveField = 0x16,
@@ -80,7 +97,12 @@ export enum SpawnClass {
    * **Ported** — `game/class23/`.
    */
   JudgmentCompanion = 0x23,
-  /** `FUN_004329D0` — path-riding vehicle; swaps model and lights a flame. */
+  /**
+   * `PathRidingVehicleUpdate` (`FUN_004329D0`) — stage 2 block 0's two
+   * objects that ride `op_st2` `0x149`/`0x14A` at the camera's frame, swap
+   * slot `0x2B` for `0x33` at frame `0xBE` and then hold and draw two cel
+   * loops until `g_script_flags[0]`. **Ported** — `game/class27/`.
+   */
   PathRidingVehicle = 0x27,
   /** `FUN_00432610` — path-riding prop. */
   PathRidingProp = 0x28,
@@ -92,12 +114,20 @@ export enum SpawnClass {
   Vehicle = 0x26,
   /** `FUN_00432C80` — static scenery batch. */
   SceneryBatch = 0x29,
-  /** `FUN_00432D40` — the handler is `JMP ActorKill`. It dies on sight. */
+  /** `Class2AHandlerKill` (`FUN_00432D40`) — the handler is `JMP ActorKill`. It dies on sight. */
   DeadClass = 0x2a,
-  /** `FUN_00438060` — scripted dynamic light source. */
+  /**
+   * `DynamicLightInit` (`FUN_00438060`) — **a scripted light**: one
+   * `g_entity_lights` entry held until a flag or a camera cue, the routine
+   * chosen by `obj+0x11C`. **Ported** (`game/class2B/`).
+   */
   DynamicLight = 0x2b,
-  /** `FUN_00426A70` — large multi-part creature. */
-  LargeCreature = 0x2d,
+  /**
+   * `Class2DClassHandler` (`FUN_00426A70`) — the stage-6 boss, `boss6.bin`.
+   * Named for its own banner: `g_class2d_banner_record`'s first name sprite
+   * (`0xBF`) reads EMPEROR. Ported (`game/class2D/`).
+   */
+  Emperor = 0x2d,
   /** `EnemyZombieInit` (`FUN_00452DA0`) — the zombie. Ported. */
   Zombie = 0x30,
   /** `EnemyThrowerInit` (`FUN_00449620`) — humanoid enemy, four subtypes. Ported. */
@@ -217,4 +247,18 @@ export enum SpawnClass {
    * watcher; writes no script flag.
    */
   CutsceneSkipWatcher = 0x63,
+  /**
+   * `ScoreRouteSelect64` (`FUN_00435FB0`) -- stage 6's route selector,
+   * `spawn_simple` in blocks 3, 5 and 9. Ported (`game/class64/`).
+   */
+  ScoreRouteSelect = 0x64,
+  /**
+   * `ItemSelectUpdate` (`FUN_00488820`) — **Original Mode's trunk**, where
+   * each player takes up to two of the items they have collected. The last
+   * row of `g_class_handler_pairs` (`0x00593358`, `{0x6E, 0x00488820}`), and
+   * spawned once in the game: `spawn_simple` at `st1evtbl.bin` `0x9D4`, in
+   * block 0 step 5, which `EvtLoadBlockProgram` (`FUN_0045EBC0`) enters in
+   * Original Mode only. Its name is the track it plays, `ITEM_SELECT.wav`.
+   */
+  ItemSelect = 0x6e,
 }

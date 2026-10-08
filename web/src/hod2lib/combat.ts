@@ -853,13 +853,27 @@ export function difficultyTables(tables: ExeTables): Record<string, unknown> {
   };
 }
 
+/**
+ * `ZombieCorpsePoseFrame` (`FUN_00454E00`)'s play counters, the 26 words at
+ * `0x0059301C`: two per clip, the second taken once in seventeen frames
+ * (`rand() % 17 >> 4`). Words 0..15 are the directional deaths 0x3D9..0x3E0,
+ * indexed `2 * (clip - 0x3D9)` (`LEA ECX, [EDX + EAX*2 - 0x7B2]` at
+ * `0x00454E6A`); then `0x0059305C` for 0x3F8, `0x00593064` 0x1DF,
+ * `0x0059306C` 0x41A, `0x00593074` 0x404 and `0x0059307C` 0x3F7 -- which
+ * clip reads which pair is the routine's switch, and stays in `game/`. The
+ * block ends where `DEATH_BACK`'s table begins. `[proved]`
+ */
+export const CORPSE_POSE_COUNTERS = 0x0059301c;
+export const CORPSE_POSE_COUNTER_WORDS = 26;
+
 /** The directional death set. See {@link DEATH_FRONT}. */
 export function deathMotions(tables: ExeTables): Record<string, number[]> {
   const rd = (base: number, n: number): number[] => {
     const o = tables.v2r(base);
     return o === null ? [] : u32s(tables.data, o, n);
   };
-  return { front: rd(DEATH_FRONT, 4), back: rd(DEATH_BACK, 6) };
+  return { front: rd(DEATH_FRONT, 4), back: rd(DEATH_BACK, 6),
+           corpse: rd(CORPSE_POSE_COUNTERS, CORPSE_POSE_COUNTER_WORDS) };
 }
 
 /**

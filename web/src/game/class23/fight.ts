@@ -18,6 +18,7 @@ import { ScoreAddForPlayer } from "../combat/score";
 import { RegisterForShotTest } from "../combat/shot_test";
 import { GameMode } from "../game_mode";
 import { ActorByAt, G } from "../globals";
+import { DrawSkinnedModelAndShadow } from "../skeleton";
 import { CameraBlockEye } from "../camera/view";
 import { ActorReleaseHitSlot } from "../hit_slots";
 import type { GameHost } from "../host";
@@ -36,7 +37,7 @@ import type { SpriteEffect } from "../effects/sprite";
 import { Class22FaceCamera } from "../class22/paths";
 import {
   Class22PlaySound, Class22StrikePlayers,
-  JudgmentReleaseEnemySlot, ORIGINAL_WEAPON_SCALE,
+  JudgmentReleaseEnemySlot,
 } from "../class22/shot";
 import {
   ARENA0_X_MIN, ARENA0_Z_MAX, ARENA0_Z_MIN, ARENA1_X_MAX, ARENA1_X_MIN,
@@ -135,8 +136,10 @@ function Flier(obj: JudgmentCompanionActor): Actor | undefined {
 export function Class23Draw(obj: JudgmentCompanionActor,
                             host: GameHost): void {
   obj.alpha = 1;
+  G.g_cur_actor = obj.at;
   Class22SampleCursor(obj, obj.companion);
   JudgmentEmitTrackedBone(obj, host);
+  DrawSkinnedModelAndShadow(obj);
 }
 
 /** `Class23Draw(obj); obj+0x194++` — the tail most paths end in. `[port-only]` as a function. */
@@ -392,10 +395,10 @@ export function Class23TakeShots(obj: JudgmentCompanionActor,
           }
           if (G.g_GameMode === GameMode.Original) {
             // `CMP [EBX], 0xBF800000; JNZ` -> `FADD [0x004E30F0]` 2.0, else
-            // `FADD [EBX]`. The float is 1.0 in every reachable state --
-            // see `ORIGINAL_WEAPON_SCALE`.
-            acc = Math.fround(ORIGINAL_WEAPON_SCALE === -1.0
-              ? acc + 2.0 : acc + ORIGINAL_WEAPON_SCALE);
+            // `FADD [EBX]`: `EBX` the player's
+            // `g_original_weapon_damage_scale`, stepped by `0x14`.
+            const scale = Math.fround(G.g_original_weapon_damage_scale[p] ?? 1);
+            acc = Math.fround(scale === -1.0 ? acc + 2.0 : acc + scale);
           } else {
             acc = Math.fround(acc + 1.0);
           }

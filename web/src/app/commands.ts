@@ -43,7 +43,6 @@ import type { FogMode, SceneFog } from "../render/fog";
 import type { TextureFilter } from "../render/texfilter";
 import type { SceneLighting } from "../render/lighting";
 import type { SpawnLayer } from "../render/overlays";
-import type { PropLayer } from "../render/props";
 import type { Rain } from "../render/rain";
 import type { RigLayer } from "../render/rigs";
 import type { Shooting } from "../render/shooting";
@@ -98,7 +97,6 @@ export interface PlayerCommands {
   readonly rain: Rain;
   readonly rigs: RigLayer;
   readonly chars: CharacterLayer;
-  readonly props: PropLayer;
   readonly breakables: BreakableLayer;
   /** The shot effects, for the muzzle-flash toggle. */
   readonly effects: EffectLayer;
@@ -137,6 +135,8 @@ export interface PlayerCommands {
   restartRun(stage: number): void;
   /** The menu's Options. See the `openOptions` command. */
   openOptions(): void;
+  /** Debug: every Original Mode item saved, or a fresh profile's three. */
+  originalItems(action: "giveAll" | "reset"): void;
   /** A stage the menu chose, loaded and -- once started -- running. */
   loadAndPlay(): void;
   poseFromSlot(slot: number, frame: number): void;
@@ -227,9 +227,15 @@ export function runCommand(p: PlayerCommands, c: UiCommand): void {
       p.loadAndPlay();
       return;
     case "setOriginal":
+      // A new run rather than a different picture of this one. On, it starts
+      // at the top of stage 1, where Original Mode's trunk hands out the
+      // items; off, Arcade starts the stage being played from its entry.
+      // Either way the address goes: it is a place in one mode's script, and
+      // kept across the switch it replayed Original's stage 1 into the middle
+      // of its opening with the trunk spawned on the way and still open.
       p.state.original = c.on;
-      p.pushUrl();
-      p.loadAndPlay();
+      p.state.entry = undefined;
+      p.restartRun(c.on ? 1 : p.state.stage);
       return;
     case "setMode":    p.setMode(c.mode); return;
     case "play":       p.play(); return;
@@ -240,6 +246,7 @@ export function runCommand(p: PlayerCommands, c: UiCommand): void {
     case "restartStage": p.restartRun(p.state.stage); return;
     case "restartFromStageOne": p.restartRun(1); return;
     case "openOptions": p.openOptions(); return;
+    case "originalItems": p.originalItems(c.action); return;
     case "branchHover":
       p.branchHover = c.over;
       return;
@@ -347,9 +354,7 @@ export function applyToggle(p: PlayerCommands, name: ToggleName,
       return;
     case "spawns":       p.spawns.setVisible(on); return;
     case "chars":        p.chars.setEnabled(on); return;
-    case "props":        p.props.setEnabled(on); return;
     case "breakables":   p.breakables.setEnabled(on); return;
-    case "propBoxes":    p.props.setDebugVisible(on); return;
     // Both of these are about what is *drawn*, not about what the game does:
     // the port spawns the same records and marks the same materials either
     // way, so neither changes a snapshot.

@@ -23,6 +23,7 @@
 import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
 import { G } from "../globals";
+import { ColiDynamicListRemove } from "../coli";
 import { CameraBlockYaw } from "../camera/view";
 import { GameMode } from "../game_mode";
 import { BREAKABLE_STANDING_RISE, PropRegisterForShotTest }
@@ -32,10 +33,12 @@ import { BAMS } from "../vec";
 import {
   BreakableGroupMembers, BreakablePropAt, MsvcRand, SetBreakableMemberSlot,
 } from "./group";
-import { HiddenItemCopy, ReleaseHiddenItem } from "./items";
 import {
-  BreakableFlag, BreakableSlot, BreakableState, HIT_FLAG_MASK, PropFamily,
-  type BreakableProp,
+  HiddenItemCopy, ReleaseHiddenItem, SpawnExtraLifePickup,
+} from "./items";
+import {
+  BreakableFlag, BreakableSlot, BreakableState, HIT_FLAG_MASK, ItemSet,
+  PropFamily, type BreakableProp,
 } from "./prop_state";
 import { BreakablePropSpawnShatter, type ShatterCamera } from "./shatter";
 import {
@@ -228,12 +231,21 @@ export function BreakableEffectUpdate(p: BreakableProp): void {
 /**
  * `ActorDespawn` (`FUN_00409CC0`) as a prop sees it: flagged dead, taken out
  * of its member slot, and dropped from the pool by `BreakablePropPoolUpdate`.
- * A prop-shaped wrapper, not a port of the shared routine — that one clears a
- * light slot at `+0x3C` which a prop never holds.
+ * A prop-shaped wrapper, not a port of the shared routine. That one's third
+ * line gives back a **hit slot**, `g_hit_slots[obj+0x3C]` when `obj+0x38`
+ * bit `0x40` says one was claimed (`0x00409CDE`..`0x00409CF5`) -- an earlier
+ * note here called `+0x3C` a light slot -- and the prop record carries no hit
+ * slot, so whether a class-0x44 prop ever claims one is not settled here.
+ *
+ * The routine's second line, `ColiDynamicListRemove` (`FUN_00405220`) at
+ * `0x00409CD3`, makes a hole of the entry a prop shot through its mesh filed
+ * last frame (`PropRegisterForShotTestMesh`), found by the prop's id; a prop
+ * that never filed one has nothing to find.
  */
 export function ActorDespawnProp(p: BreakableProp): void {
   p.dead = true;
   p.flags = (p.flags & ~BreakableFlag.Live) | 0x80018000;
+  ColiDynamicListRemove({ at: p.at, prop: p.id });
   if (G.g_breakable_members[p.group * 9 + p.member] === p.id) {
     SetBreakableMemberSlot(p.group, p.member, 0);
   }
@@ -453,6 +465,15 @@ function BreakDestroy(p: BreakableProp, level: number, rng: Rng,
   p.effectPrevFrame = 0;
   p.family = PropFamily.Effect;
   p.hp = p.lifetime;
+  // Original Mode's FIRST AID KIT, in front of the release switch
+  // (`0x004648CA`..`0x004648F2`): with `g_original_first_aid` up the prop's
+  // item set is the extra life's (`+0x195 = 1`) and the life comes out at
+  // once, whatever the set and its countdown said.
+  if (G.g_GameMode === GameMode.Original && G.g_original_first_aid !== 0) {
+    p.itemSet = ItemSet.ExtraLife;
+    SpawnExtraLifePickup(p, events);
+    return false;
+  }
   ReleaseHiddenItem(p, rng, events, HiddenItemCopy.Group);
   return false;
 }

@@ -153,6 +153,76 @@ export function makeHeadAimWords(): HeadAimWords {
 }
 
 /**
+ * `obj+0x1368`'s bits, as class 0x30 uses them -- {@link ZombieTail.flags1368}.
+ *
+ * Every class-0x30 instruction that names the word, from the sweep of `[reg +
+ * 0x1368]` operands over the image: `EnemyZombieInitByCharType`,
+ * `EnemyZombieUpdate`, `ZombieDrawBonePart`, `ZombieSubmitSlotByLighting`,
+ * `ZombieStateHoldAtRange`, `ZombieStateStrike`, `ZombieStateBackOff`,
+ * `ChooseDeathMotion`, `ActorCheckWaterEntry`, `ZombieStateWaitForCameraFrame`,
+ * `ZombieStateTargetMotionScript` and `ZombieStateDragTarget`. Nothing else in
+ * the class reads or writes it, and the allocation zeroes it.
+ */
+export enum Zombie1368Flag {
+  /**
+   * **The actor is allowed a cooldown.** `ZombieStateWaitForCameraFrame`
+   * (state 19) is the only thing in the class that sets it (`00457731`, `OR
+   * AL, 0x1`), and it arms **once**: `ZombieStateHoldAtRange` clears it again
+   * when the countdown expires (`004557ff 24fe`). Three routines read it —
+   * `ZombieStateHoldAtRange` (`004557dc a801`), `ZombieStateStrike`
+   * (`00455b24 f6866813000001`, which skips the lunge while it is up) and
+   * `ZombieStateBackOff` (`00455d96 f6866813000001`, which then leaves the
+   * head's `cooldown` alone).
+   */
+  Cooldown = 0x1,
+  /**
+   * **The actor has entered the water.** `ActorCheckWaterEntry` (`FUN_00456920`)
+   * raises it (`OR AL, 0x2` at `0x004569A1`) after it spawns the two attached
+   * effects, and tests it first (`TEST byte ptr [ESI + 0x1368], 0x2` at
+   * `0x00456925`), so it happens once a life; `EnemyZombieUpdate`
+   * (`FUN_004533F0`) reads it (`0x00453486`) and skips the footstep cue, so
+   * an actor in the water makes no footfalls.
+   */
+  InWater = 0x2,
+  /**
+   * The death of a captor killed in a maul on clip `0x1AB`:
+   * `ZombieStateTargetMotionScript` raises it (`0x0045AE65` in sub 1,
+   * `0x0045AFDB` in sub 0) and `ChooseDeathMotion` (`FUN_004560B0`) gives
+   * the actor clip `0x1AC` for it (`TEST AL, 0x8` at `0x00456101`).
+   */
+  DeathClip1AC = 0x8,
+  /**
+   * ...on clip `0x1A3` or `0x1A7`, or dragging: raised at `0x0045AE6F` and
+   * `0x0045AFAA` by the maul, and at `0x0045C0ED` (`OR EDX, 0x10`) by
+   * `ZombieStateDragTarget`'s sub 0. Death clip `0x1A5` (`0x00456113`).
+   */
+  DeathClip1A5 = 0x10,
+  /**
+   * **Every bone is drawn at `obj+0x138C`.** `ZombieSubmitSlotByLighting`
+   * (`FUN_00453AE0`) tests it at `0x00453B07` (`TEST byte ptr [EAX +
+   * 0x1368], CL` with `CL = 0x20`) and draws the slot through
+   * `AssetDrawSlotWithAlpha` (`FUN_004185A0`) at `obj+0x138C` while it is up
+   * -- unless the light-array arm before it took the draw.
+   * `EnemyZombieInitByCharType` (`FUN_00452FD0`) raises it for character
+   * types 9 (`0x00453180`) and 0x12 (`0x004531C4`); the only writer that
+   * drops it is `ZombieDrawBonePart`'s `0x1C6C` arm when `znele`'s fade-in is
+   * done (`AND ECX, 0xffffffdf` at `0x004536CE`). The same bit is the arm's
+   * own test (`TEST CL, 0x20` at `0x0045366D`). `[proved]`
+   */
+  FadeDraw = 0x20,
+  /**
+   * The maul on clip `0x277` (`OR AL, 0x40` at `0x0045AFC7`, sub 0 only);
+   * death clip `0x279` (`0x0045612C`).
+   */
+  DeathClip279 = 0x40,
+  /**
+   * The maul on clip `0x234` (`OR AL, 0x80` at `0x0045AFD1`, sub 0 only);
+   * death clip `0x229` (`0x00456145`).
+   */
+  DeathClip229 = 0x80,
+}
+
+/**
  * Class 0x30's own words. See the file comment.
  */
 export interface ZombieTail extends HeadAimWords {
@@ -212,7 +282,7 @@ export interface ZombieTail extends HeadAimWords {
    *
    * Aliases {@link throwDelay} and {@link corpseTimer} **within this class**,
    * and the head's `arcFrames` — see the note at the top of this file. Outside
-   * it, class 0x24's `slideTimer` and class 0x25's `hum.bonePropMode`.
+   * it, class 0x24's `slideTimer` and class 0x25's `hum.faceMode`.
    *
    * **A trap, until class 0x24 grows its arm:** `obj.holdFrames` still
    * compiles on a zombie, because the head keeps a field of that name for
@@ -252,7 +322,7 @@ export interface ZombieTail extends HeadAimWords {
    * The same word is the head's `arcTotal` — which
    * `ZombieStateDeathKnockbackArc` (`FUN_004550E0`) turns into its own fall
    * counter once the arc is spent — and, outside this class, class 0x25's
-   * `hum.bonePropFrame` and class 0x31's arc duration.
+   * `hum.faceFrame` and class 0x31's arc duration.
    */
   backoffFrames: number;      // +0x1334, aliases `arcTotal`
   /**
@@ -296,56 +366,24 @@ export interface ZombieTail extends HeadAimWords {
    */
   resumeSub: number;          // +0x1358, aliases `allowance`
   /**
-   * `obj+0x1368` bit 0 — **the actor is allowed a cooldown**.
+   * `obj+0x1368` — **class 0x30's third flags word**, every bit of it; see
+   * {@link Zombie1368Flag} for each bit, its writers and its readers.
    *
-   * `ZombieStateWaitForCameraFrame` (state 19) is the only thing in the class
-   * that sets it (`00457731`, `OR AL, 0x1`), and it arms **once**:
-   * `ZombieStateHoldAtRange` clears it again when the countdown expires
-   * (`004557ff 24fe`). Three routines read it — `ZombieStateHoldAtRange`
-   * (`004557dc a801`), `ZombieStateStrike` (`00455b24 f6866813000001`, which
-   * skips the lunge while it is up) and `ZombieStateBackOff`
-   * (`00455d96 f6866813000001`, which then leaves the head's `cooldown`
-   * alone).
-   *
-   * A separate field and not a bit of `reactBone`, which is the same offset:
-   * class 0x31 reads `obj+0x1368` as the bone that was hit, and that is the
-   * polymorphism trap this arm makes unreachable rather than merely noted.
-   *
-   * [diverges] For class 0x30 the whole dword is a **flags word** and the port
-   * models one bit of it as this boolean. The other six bits class 0x30
-   * provably touches have no port:
-   *
-   * * `0x2` — entered water. `ActorCheckWaterEntry` sets it (0x00456998) and
-   *   tests it (0x00456925); `EnemyZombieUpdate` reads it (0x00453486).
-   * * `0x8` / `0x10` / `0x40` / `0x80` — kill-move death-clip selectors, read
-   *   back by `ChooseDeathMotion` to pick the matching death.
-   *   `ZombieStateTargetMotionScript` sets one per motion id, and **it is not
-   *   the only writer**: `0x0045C0ED` is `OR EDX, 0x10` inside
-   *   `ZombieStateDragTarget`'s sub 0, so a captor killed mid-drag is meant to
-   *   take motion `0x1A5`. This note used to name one state; `functions.tsv`'s
-   *   `ChooseDeathMotion` row names both.
-   *
-   * Bit `0x20` has a port now, as a second boolean: {@link fadeDraw}.
-   *
-   * Making this a word is a job of its own; the gap is recorded rather than
-   * half-fixed. The arm is what splits it from `reactBone`.
+   * On the arm and not in the head because class 0x31 reads the same offset
+   * as the bone that was hit (`reactBone`), and that is the polymorphism trap
+   * this arm makes unreachable rather than merely noted. It used to be two
+   * booleans, bit 0 and bit 0x20, with the other five bits class 0x30
+   * provably touches declared unported; the word is the engine's shape, and
+   * every bit it has now has its writers and its readers.
    */
-  hasCooldown: boolean;       // +0x1368 bit 0, also class 0x31 `reactBone`
+  flags1368: number;          // +0x1368, also class 0x31 `reactBone`
   /**
-   * `obj+0x1368` bit `0x20` — **every bone is drawn at `obj+0x138C`**.
-   *
-   * `[proved]`. `ZombieSubmitSlotByLighting` (`FUN_00453AE0`) tests it at
-   * `0x00453B07` (`TEST byte ptr [EAX + 0x1368], CL` with `CL = 0x20`) and
-   * draws the slot through `AssetDrawSlotWithAlpha` (`FUN_004185A0`) at
-   * `obj+0x138C` while it is up -- unless the light-array arm before it took
-   * the draw. `EnemyZombieInitByCharType` (`FUN_00452FD0`) raises it for
-   * character types 9 (`0x00453180`) and 0x12 (`0x004531C4`); the only
-   * writer that drops it is `ZombieDrawBonePart`'s `0x1C6C` arm when `znele`'s
-   * fade-in is done (`AND ECX, 0xffffffdf` at `0x004536CE`). The same bit is
-   * the arm's own test (`TEST CL, 0x20` at `0x0045366D`). A separate boolean
-   * for the reason {@link hasCooldown} is.
+   * `obj+0x1314`, a `s16` — the play cursor `ZombiePlayMotionFrameSe`
+   * (`FUN_00452A10`) last sounded on, so a cue sounds once however many
+   * frames the cursor sits on it. Its only reader and writer (`0x00452C59`,
+   * `0x00452C74`); zero from the allocation and never cleared. `[proved]`
    */
-  fadeDraw: boolean;          // +0x1368 bit 0x20
+  seFrame: number;            // +0x1314
   /**
    * `obj+0x1388` — how far `ZombieDrawBonePart`'s fade arms move the alpha
    * per node drawn: `0x3C888889` (1/60) for the twin, `0x3D088889` (1/30)
@@ -476,8 +514,8 @@ export function makeZombieTail(): ZombieTail {
     targetLoops: 0,
     targetCue: 0,
     resumeSub: 0,
-    hasCooldown: false,
-    fadeDraw: false,
+    flags1368: 0,
+    seFrame: 0,
     fadeStep: 0,
     fadeDelay: 0,
     twinHost: -1,

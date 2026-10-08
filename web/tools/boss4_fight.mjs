@@ -91,7 +91,6 @@ const mkHost = () => ({
   aliveCivilians: () => G.g_civilians_alive,
   scriptFlagRaised: (i) => (G.g_script_flags[i] ?? 0) !== 0,
   cameraFree: () => true, showMessage: () => null,
-  endDialogue: () => undefined,
 });
 
 const stage = 4;
@@ -174,7 +173,7 @@ for (const [name, block, lastPhase] of CASES) {
     if (walker.branch) walker.takeBranch(walker.branch.targets[0]);
     syncPortGlobals(walker, false, ctx.view.eye);
     seat();
-    syncCharacterSpawns(pool, walker.spawns, ctx.events);
+    syncCharacterSpawns(pool, walker.spawns);
     const boss = G.g_object_list.find((o) => o.cls === 0x19 && !o.despawned);
     if (boss) seen.boss = boss;
     // Player 0's head shot, as `MarkActorShot` leaves it.

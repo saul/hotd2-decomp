@@ -14,8 +14,8 @@
 /** The view toggles. One name per checkbox, so adding one is adding a case. */
 export type ToggleName =
   | "allRegions" | "rails" | "aimRails" | "unported" | "stuck" | "coli"
-  | "boxes" | "rigs" | "sky" | "hud" | "spawns" | "chars" | "props"
-  | "breakables" | "propBoxes"
+  | "boxes" | "rigs" | "sky" | "hud" | "spawns" | "chars"
+  | "breakables"
   | "muzzle" | "redBlood" | "branchPause" | "perf" | "netStats" | "fps";
 
 export type UiCommand =
@@ -115,7 +115,12 @@ export type UiCommand =
   /** Leave the session, whichever end this is. */
   | { kind: "netLeave" }
   /** Ask the host for a keyframe: the overlay's repair button. */
-  | { kind: "netResync" };
+  | { kind: "netResync" }
+  /**
+   * `[port-only]` debug: Original Mode's saved items -- every one of the 33,
+   * or back to the three a fresh profile holds -- saved at once.
+   */
+  | { kind: "originalItems"; action: "giveAll" | "reset" };
 
 /** What a panel is handed to talk back with. */
 export type Dispatch = (c: UiCommand) => void;

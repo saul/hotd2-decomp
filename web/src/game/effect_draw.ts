@@ -65,6 +65,23 @@ export function EffectDefFor(effect: number, motion: number):
   return byId && byId.motion === motion ? byId : null;
 }
 
+/**
+ * `[port-only]` -- `g_motion_play_length[motion]` (`0x004E07D0`), out of
+ * whichever of the bundle's effect records carries that motion. The engine's
+ * table is indexed by the motion alone, and so is this: an owner that
+ * rewrites its block's effect id between draws asks for the clock of the
+ * motion it holds, whatever effect it last drew. Null when no record the
+ * bundle carries is on that motion.
+ */
+export function EffectMotionPlayLength(motion: number): number | null {
+  const all = T.breakables?.effects;
+  if (!all) return null;
+  for (const def of Object.values(all)) {
+    if (def.motion === motion) return def.play_length;
+  }
+  return null;
+}
+
 /** `EffectDrawNode`'s smoke puff: the one slot the walk rescales at random. */
 const EFFECT_SMOKE_PUFF_SLOT = 0x10ce;
 /**

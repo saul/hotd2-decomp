@@ -17,6 +17,12 @@
  * into the port, so the call is recorded into `G.g_view_slot_draws` --
  * cleared at the head of every frame's player walk with the screen sprites --
  * and `render/effects.ts` draws whatever the list holds, in its camera group.
+ *
+ * One site turns the model between the translate and the scale: the chapter
+ * card's scene-5 arm, `MatrixTranslate(0, 0, -30); MatrixRotateY(0x8000);
+ * MatrixScale(2, 2, 2)` (`0x0043476C`..`0x00434793`). A turn after the
+ * translate and before the scale is the node's own rotation, which is how
+ * three.js composes `T R S`.
  */
 import { G } from "./globals";
 
@@ -35,13 +41,52 @@ export interface ViewSlotDraw {
   z: number;
   /** `MatrixScale`'s, one value for all three axes at every caller. */
   scale: number;
+  /**
+   * `MatrixRotateY`'s BAMS argument, between the translate and the scale, at
+   * the one site that has one; 0 -- no call -- everywhere else.
+   */
+  yaw: number;
 }
 
 /**
- * The five calls above, recorded. `[port-only]` as a function: the engine
- * writes them out at each site; every argument is the site's own.
+ * The five calls above, recorded -- six with a `MatrixRotateY`, whose angle
+ * is `yaw`. `[port-only]` as a function: the engine writes them out at each
+ * site; every argument is the site's own.
  */
 export function DrawSlotInView(slot: number, x: number, y: number, z: number,
-                               scale: number): void {
-  G.g_view_slot_draws.push({ slot, x, y, z, scale });
+                               scale: number, yaw = 0): void {
+  G.g_view_slot_draws.push({ slot, x, y, z, scale, yaw });
+}
+
+/**
+ * One `AssetDrawSlot` under a matrix built from the stack's base -- the view
+ * -- by `MatrixTranslate`/`MatrixRotate*`: a model placed in the **world**.
+ *
+ * `[port-only]` as a record. `m` is what the routine built on top of the
+ * view, in the matrix stack's own row-vector layout (`game/matrix.ts`), which
+ * is three.js's `Matrix4.elements` as it stands.
+ */
+export interface WorldSlotDraw {
+  slot: number;
+  m: number[];
+  /**
+   * The draw layer `SetDrawLayerNibble` (`FUN_004A79F0`) had set around the
+   * call, for the routines that set one: the ground shadow's `0xD`
+   * (`game/ground_shadow.ts`). Absent: the renderer's own default for the
+   * list.
+   */
+  layer?: number;
+}
+
+/**
+ * `AssetDrawSlot` (`FUN_00418560`) on a world matrix, recorded for
+ * `render/view_slots.ts`. `[port-only]` as a function, as
+ * {@link DrawSlotInView} is. The trunk's two models are among its callers
+ * (`ItemSelectUpdate`, `FUN_00488820`), and so is every ground shadow
+ * (`ActorDrawGroundShadow`, `FUN_0040A620`), which passes its layer.
+ */
+export function DrawSlotInWorld(slot: number, m: readonly number[],
+                                layer?: number): void {
+  G.g_world_slot_draws.push(layer === undefined ? { slot, m: [...m] }
+                                                : { slot, m: [...m], layer });
 }

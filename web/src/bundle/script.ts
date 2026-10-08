@@ -178,9 +178,19 @@ export interface OpJson {
 }
 
 export interface StepJson {
+  /** The engine's step number, `EvtGetStep`'s index -- the list's position. */
   index: number;
+  /** The stream's offset in its file (`comevtbl.bin` when `com`); -1 for `end`. */
   at: number;
   ops: OpJson[];
+  /** The stream is in the shared `comevtbl.bin` buffer, not the stage's table. */
+  com?: boolean;
+  /**
+   * The table word is `-1`: `EvtAdvanceStepOrRoute` (`FUN_0045F000`) follows
+   * the route on landing here. Only present before a later step an entry
+   * reaches by index -- Original Mode's step 5 of stage 1 block 0.
+   */
+  end?: boolean;
 }
 
 export interface BlockJson {

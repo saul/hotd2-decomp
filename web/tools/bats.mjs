@@ -82,7 +82,7 @@ for (const [name, stage, block, step, entry] of CASES) {
     presentEnemies: () => G.g_enemies_present,
     aliveCivilians: () => G.g_civilians_alive,
     scriptFlagRaised: (i) => (G.g_script_flags[i] ?? 0) !== 0,
-    cameraFree: () => true, showMessage: () => null, endDialogue() {},
+    cameraFree: () => true, showMessage: () => null,
   }, { seed: 1 });
   if (!seekTo(walker, block, step, 0, 500000, entry)) {
     check(`${name}: seek`, false, `${walker.block}/${walker.step}`);
@@ -115,8 +115,8 @@ for (const [name, stage, block, step, entry] of CASES) {
       reqs.push({ at: sp.at, motion: pl.motion,
                   pos: { x: pos[0], y: pos[1], z: pos[2] } });
     }
-    SpawnScriptedCharacters(reqs, rng);
-    SpawnSlotActors(fresh, rng);
+    SpawnScriptedCharacters(reqs);
+    SpawnSlotActors(fresh);
     const bs = G.g_object_list.filter((o) => isBody(o) && !o.despawned);
     if (!seated && bs.length) {
       const a = bs[0];
@@ -124,17 +124,24 @@ for (const [name, stage, block, step, entry] of CASES) {
       seated = true;
     }
     G.g_camera_block_eye = vec3(eye.x, eye.y, eye.z);
-    for (const o of bs) {
+    SeatHarnessEye(eye);
+    GameUpdate(1 / 60, NULL_HOST, rng, events);
+    if (state0 === null) state0 = [...G.g_player_state];
+    // **After the frame**: a script's spawn is linked by the script phase and
+    // its `Init` -- which writes the bat's sub-type, or builds the bats and
+    // kills a placer -- runs in the frame's walk (`SpawnFromDescriptor`,
+    // `game/spawn.ts`).
+    for (const o of G.g_object_list) {
+      if (!isBody(o) || o.despawned) continue;
       if (!seen.has(o.at)) {
         seen.add(o.at);
         bySub.set(o.bat.subtype, (bySub.get(o.bat.subtype) ?? 0) + 1);
       }
       live.set(o.at, o);
     }
-    peak = Math.max(peak, bs.length);
-    SeatHarnessEye(eye);
-    GameUpdate(1 / 60, NULL_HOST, rng, events);
-    if (state0 === null) state0 = [...G.g_player_state];
+    peak = Math.max(peak,
+                    G.g_object_list.filter((o) => isBody(o)
+                                                 && !o.despawned).length);
     for (const [at, o] of live) {
       if (!o.despawned) continue;
       live.delete(at);

@@ -73,6 +73,7 @@ import {
 }
   from "../game/class13/state";
 import type { VehicleTail } from "../game/class26/state";
+import { Class32Routine } from "../game/class32/state";
 import { setAssetDrawAlpha } from "./draw_order";
 
 /**
@@ -138,6 +139,9 @@ function setDrawAlpha(c: Object3D, alpha: number | null): void {
  */
 const CHAIN = -1;
 
+/** `SetDrawLayerNibble(8)`, the world's layer: `renderOrder` 0. */
+const WORLD_LAYER = 8;
+
 /** Templates come from the hidden `slots_actor` rig the exporter emits. */
 const SLOT_PART = /_slot_([0-9a-f]{4})$/;
 const SLOT_RIG = "slots_actor";
@@ -162,12 +166,10 @@ function DrawSlotFor(a: Actor): number | null {
       // and the arm below places one model per entry. `-1` says so.
       return -1;
     case SpawnClass.WaterEnemy:
-      // A chain: `FishDraw` (`FUN_00439860`) and `FishSwimAwayTick`
-      // (`FUN_00439C20`) draw `sub+0x6E` -- `fish.bin`'s twenty-frame swim
-      // strip, or entry 0 or 1 once it is a corpse -- under a matrix of each
-      // state's own, and a **flattened silhouette** of it on the water while
-      // `sub+0x6A` bit 2 is up and the fish is below the surface.
-      // `render/fish.ts` composes them, in world space.
+      // A chain too: `FishDraw` (`FUN_00439860`) draws `sub+0x6E` -- the swim
+      // strip, or a corpse -- under the sub-block's own angles, and a
+      // **flattened silhouette** of it on the water when it is drawn solid
+      // and below the surface. `render/fish.ts` composes both.
       return CHAIN;
     case SpawnClass.ScriptedProp:
       // `obj+0x1F4`, straight off the descriptor tail. One slot, drawn under
@@ -183,9 +185,10 @@ function DrawSlotFor(a: Actor): number | null {
     case SpawnClass.ScriptedScenery:
       // `obj+0x13F0`, which `ScriptedPushableUpdate33` (`FUN_00433B70`) seeds
       // from its descriptor tail and never changes. Selector 1's draw is a
-      // whole chain of sprite loops and sub-models the rig writer already
-      // exports, so it is deliberately not here: `a.scenery.slot` is non-zero
-      // only once a selector-4 object has seeded itself.
+      // fire, the model and a chain of sprite loops or sub-models, recorded
+      // by `game/class33/` and placed by {@link drawCarrier33}, so it is not
+      // here: `a.scenery.slot` is non-zero only once a selector-4 object has
+      // seeded itself.
       return a.hp === ScriptedScenerySelector.Pushable
         ? (a.scenery.slot || null) : null;
     case SpawnClass.HordeSpawner:
@@ -369,10 +372,10 @@ export class SlotModelLayer implements System<RenderContext> {
   private readonly _hordeParts: HordePart[] = [];
   /** Scratch for class 0x42's chain. */
   private readonly _wormParts: WormPart[] = [];
+  /** Scratch for {@link FishDrawParts}. */
+  private readonly _fishParts: FishPart[] = [];
   /** Scratch for class 0x26's chain. */
   private readonly _vehicleParts: VehiclePart[] = [];
-  /** Scratch for class 0x51's chain. */
-  private readonly _fishParts: FishPart[] = [];
   private enabled = true;
 
   constructor() {
@@ -523,12 +526,24 @@ export class SlotModelLayer implements System<RenderContext> {
         live.node.position.set(a.pos.x, a.pos.y, a.pos.z);
         live.node.rotation.set(a.pitch * BAMS_TO_RAD, a.yaw * BAMS_TO_RAD,
                                a.roll * BAMS_TO_RAD, "XZY");
+        if (a.cls === SpawnClass.ScriptedProp) {
+          // `AssetDrawSlotWithAlpha(obj+0x1F4, sub+0x18)` whenever the alpha
+          // is not 1.0 (`0x0043FF2F`..`0x0043FF62`), in the layer the
+          // behaviour left -- carrier selector 3's 9; the world's 8 keeps
+          // the template's order, as `extra` does.
+          const t = a.prop13;
+          setDrawAlpha(live.node, t.alpha === 1 ? null : t.alpha);
+          if (t.drawLayer !== WORLD_LAYER) {
+            live.node.renderOrder = t.drawLayer - WORLD_LAYER;
+          }
+        }
       } else if (a.cls === SpawnClass.HordeSpawner
                  || a.cls === SpawnClass.Worm
                  || a.cls === SpawnClass.Vehicle
                  || a.cls === SpawnClass.WaterEnemy) {
-        // `render/horde.ts` and `render/worm.ts` hand back world-space
-        // matrices, and class 0x26's routines recorded them.
+        // `render/horde.ts`, `render/worm.ts` and `render/fish.ts` hand back
+        // world-space matrices, scale included, and class 0x26's routines
+        // recorded them.
         live.node.visible = true;
         live.node.position.set(0, 0, 0);
         live.node.rotation.set(0, 0, 0);
@@ -550,9 +565,12 @@ export class SlotModelLayer implements System<RenderContext> {
     }
 
     this.drawCarrierEffects(seen);
+    this.drawCarrier33(seen);
     this.drawPropStrips(seen);
     this.drawBoss2Flipbooks(ctx, seen);
     this.drawLandingRings(seen);
+    this.drawAttachedEffects(seen);
+    this.drawBoss5Draws(seen);
 
     for (const [key, l] of this.extras) {
       if (seen.has(key)) continue;
@@ -574,10 +592,15 @@ export class SlotModelLayer implements System<RenderContext> {
   /**
    * A node for one of a routine's extra draws, re-cloned when its slot moves
    * on, and placed by the matrix the routine composed. `alpha` is
-   * `AssetDrawSlotWithAlpha`'s, and absent for `AssetDrawSlot`.
+   * `AssetDrawSlotWithAlpha`'s, and absent for `AssetDrawSlot`; `light` is
+   * the colour `SetRenderLightColour` gave the draw, which
+   * `render/lighting.ts` reads off the node; `layer` is the
+   * `SetDrawLayerNibble` it was made in, the world's own 8 when absent.
    */
   private extra(key: string, slot: number, m: Matrix4,
-                seen: Set<number | string>, alpha: number | null = null): void {
+                seen: Set<number | string>, alpha: number | null = null,
+                light: readonly number[] | null = null,
+                layer: number | null = null): void {
     if (this.residency && !this.residency.slotResident(slot)) return;
     let live = this.extras.get(key);
     if (!live || live.slot !== slot) {
@@ -592,7 +615,65 @@ export class SlotModelLayer implements System<RenderContext> {
     live.node.matrix.copy(m);
     live.node.visible = true;
     setDrawAlpha(live.node, alpha);
+    if (light) live.node.userData.hod2_light_colour = [...light];
+    else delete live.node.userData.hod2_light_colour;
+    // The port spells a layer as `renderOrder`, the world's 8 being 0 --
+    // `render/draw_order.ts`. A draw in the world's own layer keeps the
+    // template's, and a key is always the same routine's draw.
+    if (layer !== null) live.node.renderOrder = layer - WORLD_LAYER;
     seen.add(key);
+  }
+
+  /**
+   * Class 0x32's draws that are not its skeleton: each projectile's, and
+   * each task's, on the frames the port says they drew -- the slot, the
+   * world matrix, the light colour, the alpha and the layer the routine
+   * recorded (`game/class32/projectile.ts`, `game/class32/tasks.ts`).
+   *
+   * * **projectile** (`Class32ProjectileDispatchAndDraw`, `FUN_0047EFA0`):
+   *   `T RotZ RotY RotX Scale(p+0x118)` and `SetRenderLightColour(1, v, v)`.
+   * * **afterimage**, **trail**, **hands**: `T RotZ RotY RotX`, the trail
+   *   scaled, each under its own colour.
+   * * **body loop**: the boss's own matrix raised 15, at `a * 0.5`, in
+   *   layer 9.
+   * * **death burst** and **exit effect**: no colour of their own; the
+   *   record carries the one the draw before them left in the register.
+   */
+  private drawBoss5Draws(seen: Set<number | string>): void {
+    for (const a of G.g_object_list) {
+      if (a.despawned || a.cls !== SpawnClass.Boss5) continue;
+      const t = a.boss5;
+      if (t.routine !== Class32Routine.Projectile || !t.draw) continue;
+      _m.fromArray(t.draw.m);
+      this.extra(`c32p:${a.at}`, t.slot, _m, seen, null, t.draw.light);
+    }
+    for (const task of G.g_class32_tasks) {
+      const d = task.draw;
+      if (task.killed || !d) continue;
+      _m.fromArray(d.m);
+      this.extra(`c32t:${task.id}`, d.slot, _m, seen, d.alpha, d.light,
+                 d.layer);
+    }
+  }
+
+  /**
+   * Class 0x33's recorded draws, every one of them: `ScriptedCarrierUpdate33`
+   * (`FUN_004331D0`) records each `AssetDrawSlot` it makes with its world
+   * matrix (`game/class33/`) -- the fire, the model at `obj+0x118`'s scale,
+   * and stage 5's car parts or the two sprite loops -- and so do selectors 8,
+   * 9 and 99 (`class33/strips.ts`) and selector 2's one model,
+   * `ScriptedPropDrawUntilFlag` (`FUN_00433A10`), recorded the same way on the
+   * frames it draws. Selector 4 records none; its one slot is
+   * {@link DrawSlotFor}'s.
+   */
+  private drawCarrier33(seen: Set<number | string>): void {
+    for (const a of G.g_object_list) {
+      if (a.despawned || a.cls !== SpawnClass.ScriptedScenery) continue;
+      a.scenery.draws.forEach((d, i) => {
+        _m.fromArray(d.m);
+        this.extra(`c33:${i}:${a.at}`, d.slot, _m, seen);
+      });
+    }
   }
 
   /**
@@ -738,6 +819,24 @@ export class SlotModelLayer implements System<RenderContext> {
   }
 
   /**
+   * The wakes class 0x30 leaves in the water, as `AttachedEffectThink`
+   * (`FUN_004083D0`) drew them this frame: `T(p) RotY(yaw) Scale(sx, 1, sz)`
+   * and slot `0x1A78 + n % 0x32` through `AssetDrawSlotWithAlpha` -- every
+   * number off the task's record. See `game/effects/attached_effect.ts`.
+   */
+  private drawAttachedEffects(seen: Set<number | string>): void {
+    for (const e of G.g_attached_effects) {
+      const d = e.drawn;
+      if (!d) continue;
+      _m.identity();
+      mTranslate(_m, d.x, d.y, d.z);
+      mRotY(_m, d.yaw);
+      mScale(_m, d.sx, 1, d.sz);
+      this.extra(`wake:${e.id}`, d.slot, _m, seen, d.alpha);
+    }
+  }
+
+  /**
    * One group holding every model in a **chain** class's draw, placed.
    *
    * The group is the actor root; each child carries the matrix
@@ -747,17 +846,17 @@ export class SlotModelLayer implements System<RenderContext> {
    * the matrices are rewritten every frame either way, because the angles do.
    */
   private chain(a: Actor, live: Live | undefined): Live | null {
+    const resident = (slot: number): boolean =>
+      !this.residency || this.residency.slotResident(slot);
     const parts: (OwlPart | HordePart | WormPart | VehiclePart | FishPart)[] =
       a.cls === SpawnClass.HordeSpawner
         ? HordeDrawParts(a, this._hordeParts)
         : a.cls === SpawnClass.Worm ? WormDrawParts(a, this._wormParts)
+          : a.cls === SpawnClass.WaterEnemy
+            ? FishDrawParts(a, this._fishParts, resident)
           : a.cls === SpawnClass.Vehicle
-            ? VehicleDrawParts(a, this._vehicleParts,
-                               (slot) => !this.residency
-                                 || this.residency.slotResident(slot))
-            : a.cls === SpawnClass.WaterEnemy
-              ? FishDrawParts(a, this._fishParts)
-              : OwlBodyChain(a, this._parts);
+            ? VehicleDrawParts(a, this._vehicleParts, resident)
+            : OwlBodyChain(a, this._parts);
     if (!parts.length) {
       // Nothing drawn this frame -- a member that is not drawing its shadow.
       // Hide what the last frame drew rather than leave it standing.
@@ -839,9 +938,11 @@ export class SlotModelLayer implements System<RenderContext> {
    *
    * Returns the nearest hit along the ray, or `null`.
    */
-  pickSphere(ray: Ray): { at: number; point: Vector3; t: number } | null {
+  pickSphere(ray: Ray):
+      { at: number; point: Vector3; t: number; radius: number } | null {
     if (!this.enabled) return null;
-    let best: { at: number; point: Vector3; t: number } | null = null;
+    let best: { at: number; point: Vector3; t: number; radius: number }
+      | null = null;
     for (const a of G.g_object_list) {
       if (a.dead || a.hitRadius <= 0) continue;
       // A class that registers the engine's way is `game/`'s to test.
@@ -855,7 +956,7 @@ export class SlotModelLayer implements System<RenderContext> {
       if (t <= 0) continue;                      // behind the muzzle
       if (ray.distanceSqToPoint(this._c) > a.hitRadius * a.hitRadius) continue;
       if (!best || t < best.t) {
-        best = { at: a.at, point: this._c.clone(), t };
+        best = { at: a.at, point: this._c.clone(), t, radius: a.hitRadius };
       }
     }
     return best;

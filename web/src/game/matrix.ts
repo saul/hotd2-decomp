@@ -20,6 +20,7 @@
  * sign convention recovered by reasoning is exactly what `L1` and `L2` are
  * about, and these are short enough to copy.
  */
+import { BAMS_TO_RAD } from "../core/bams";
 import type { Vec3 } from "./vec";
 
 /** Sixteen floats, `g_MatrixStackTop`'s own layout. */
@@ -54,6 +55,17 @@ export function MatrixTranslate(m: Mat, x: number, y: number, z: number): void {
   m[13] = z * m[9] + y * m[5] + x * m[1] + m[13];
   m[14] = z * m[10] + y * m[6] + x * m[2] + m[14];
   m[15] = z * m[11] + y * m[7] + x * m[3] + m[15];
+}
+
+/**
+ * `MatrixClearRotation` — `FUN_004A9F70`. The top's 3x3 back to the
+ * identity -- elements 0, 5 and 10 to 1.0, 1, 2, 4, 6, 8 and 9 to 0 -- its
+ * translation kept: on the view matrix the walk left on the stack, a
+ * billboard at that point. `[proved]`
+ */
+export function MatrixClearRotation(m: Mat): void {
+  m[10] = 1; m[5] = 1; m[0] = 1;
+  m[9] = 0; m[8] = 0; m[6] = 0; m[4] = 0; m[2] = 0; m[1] = 0;
 }
 
 /** `MatrixRotateX` — `FUN_004A99F0`. Rows 1 and 2. */
@@ -329,4 +341,132 @@ export function VecAngleBetween(ax: number, ay: number, az: number,
   const s = Math.sqrt((bz * bz + by * by + bx * bx)
                       * (az * az + ay * ay + ax * ax) - dot * dot);
   return FtolS16(Math.atan2(s, dot) * RADIANS_TO_BAMS);
+}
+
+// -- 3x3 rotations, and the two decompositions that read angles back -------
+//
+// Moved here from `game/carrier.ts`, whose step off (`CarrierBakeWorldPose`)
+// was their first reader: they are matrix routines, and `render/` may call
+// them as such.
+
+/** A 3x3 rotation, row-major, acting on column vectors. `[port-only]`. */
+export type Rot3 = [number, number, number, number, number, number,
+                    number, number, number];
+
+/** `0x004C4378`, radians to BAMS: the double every angle read-back multiplies by. */
+const RAD_TO_BAMS_F64 = 65536 / (2 * Math.PI);
+
+/** `__ftol` then `MOVSX AX`: truncate, keep the low sixteen bits, signed. */
+function s16(v: number): number {
+  return (Math.trunc(v) << 16) >> 16;
+}
+
+/** `a·b`, two {@link Rot3}s. `[port-only]`. */
+export function mul3(a: Rot3, b: Rot3): Rot3 {
+  const o = new Array(9).fill(0) as Rot3;
+  for (let r = 0; r < 3; r++) {
+    for (let c = 0; c < 3; c++) {
+      o[r * 3 + c] = a[r * 3] * b[c] + a[r * 3 + 1] * b[3 + c]
+        + a[r * 3 + 2] * b[6 + c];
+    }
+  }
+  return o;
+}
+/** A {@link Rot3} about x, BAMS. `[port-only]`. */
+export function rotX(b: number): Rot3 {
+  const c = Math.cos(b * BAMS_TO_RAD), s = Math.sin(b * BAMS_TO_RAD);
+  return [1, 0, 0, 0, c, -s, 0, s, c];
+}
+/** A {@link Rot3} about y, BAMS. `[port-only]`. */
+export function rotY(b: number): Rot3 {
+  const c = Math.cos(b * BAMS_TO_RAD), s = Math.sin(b * BAMS_TO_RAD);
+  return [c, 0, s, 0, 1, 0, -s, 0, c];
+}
+/** A {@link Rot3} about z, BAMS. `[port-only]`. */
+export function rotZ(b: number): Rot3 {
+  const c = Math.cos(b * BAMS_TO_RAD), s = Math.sin(b * BAMS_TO_RAD);
+  return [c, -s, 0, s, c, 0, 0, 0, 1];
+}
+/** `m·(x, y, z)`. `[port-only]`. */
+export function apply3(m: Rot3, x: number, y: number, z: number):
+    [number, number, number] {
+  return [m[0] * x + m[1] * y + m[2] * z, m[3] * x + m[4] * y + m[5] * z,
+          m[6] * x + m[7] * y + m[8] * z];
+}
+
+/**
+ * `RotX(p); RotZ(r); RotY(y)` — every actor pose's composition, as one
+ * matrix. `[port-only]`: the engine builds it on the stack.
+ */
+export function RotXZY(pitch: number, roll: number, yaw: number): Rot3 {
+  return mul3(mul3(rotX(pitch), rotZ(roll)), rotY(yaw));
+}
+
+/**
+ * `MatrixToEulerBams` — `FUN_00401AE0`, with `FUN_00401800` inline. Takes a
+ * `RotX; RotZ; RotY` pose back off a rotation:
+ *
+ * ```
+ * u = M·(0,1,0);  pitch = s16(atan2(u.z, u.y) * K);
+ * cr = ((pitch + 0x2000) & 0x4000) ? u.z / sin(pitch) : u.y / cos(pitch);
+ * roll = -s16(atan2(u.x, cr) * K);
+ * v = RotZ(-roll)·RotX(-pitch)·M·(0,0,1);  yaw = s16(atan2(v.x, v.z) * K);
+ * ```
+ */
+export function MatrixToEulerBams(m: Rot3):
+    { pitch: number; yaw: number; roll: number } {
+  const u = apply3(m, 0, 1, 0);
+  const pitch = s16(Math.atan2(u[2], u[1]) * RAD_TO_BAMS_F64);
+  const cr = ((pitch + 0x2000) & 0x4000) === 0
+    ? u[1] / Math.cos(pitch * BAMS_TO_RAD)
+    : u[2] / Math.sin(pitch * BAMS_TO_RAD);
+  const roll = -s16(Math.atan2(u[0], cr) * RAD_TO_BAMS_F64);
+  const f = apply3(m, 0, 0, 1);
+  const v = apply3(mul3(rotZ(-roll), rotX(-pitch)), f[0], f[1], f[2]);
+  const yaw = s16(Math.atan2(v[0], v[2]) * RAD_TO_BAMS_F64);
+  return { pitch, yaw, roll };
+}
+
+/**
+ * `MatrixGetAngles` — `FUN_004018E0`. The other decomposition,
+ * `M = RotY(y)·RotX(x)·RotZ(z)`: the heading and elevation of `M·(0,0,1)`
+ * through `VecToAngles`, then the roll off `M·(1,0,0)` with those two undone
+ * (`RotX(-x); RotY(-y)`).
+ *
+ * The elevation is `VecToAngles` (`FUN_004016B0`) exactly, `[proved]` from
+ * its instructions: `FLD x; FLD z; FPATAN` is the heading, `__ftol`'d to an
+ * s16; the horizontal length is `z / cos(heading)` or, when
+ * `(heading + 0x2000) & 0x4000`, `x / sin(heading)` (`FCOS; FDIVR [z]` /
+ * `FSIN; FDIVR [x]` at `0x004016E7`..`0x004016F1`) -- not a `hypot`; and the
+ * elevation is `NEG` of the s16 of `atan2(y, length)` (`0x0040170F`). This
+ * said `[likely]` and used `hypot`, which is the same up to the heading's
+ * truncation.
+ */
+export function MatrixGetAngles(m: Rot3): { x: number; y: number; z: number } {
+  const f = apply3(m, 0, 0, 1);
+  const y = s16(Math.atan2(f[0], f[2]) * RAD_TO_BAMS_F64);
+  const len = ((y + 0x2000) & 0x4000) === 0
+    ? f[2] / Math.cos(y * BAMS_TO_RAD) : f[0] / Math.sin(y * BAMS_TO_RAD);
+  const x = -s16(Math.atan2(f[1], len) * RAD_TO_BAMS_F64);
+  const r = apply3(m, 1, 0, 0);
+  const v = apply3(mul3(rotX(-x), rotY(-y)), r[0], r[1], r[2]);
+  const z = s16(Math.atan2(v[1], v[0]) * RAD_TO_BAMS_F64);
+  return { x, y, z };
+}
+
+/** `RotY(y); RotX(x); RotZ(z)`, `MatrixGetAngles`' own order. `[port-only]`. */
+export function RotYXZ(y: number, x: number, z: number): Rot3 {
+  return mul3(mul3(rotY(y), rotX(x)), rotZ(z));
+}
+
+/**
+ * `RotZ(z); RotY(y); RotX(x)` -- the order an object pose is drawn in when
+ * the routine rotates `obj+0x6C`, `+0x68`, `+0x64` in that sequence, as
+ * `St2CarDraw` (`FUN_00452320`) does, and the order `RescueTargetHeldState`
+ * (`FUN_00451980`) builds from the actor's own angles before handing the
+ * matrix to `MatrixGetAngles`. `[port-only]`: the engine builds it on the
+ * stack.
+ */
+export function RotZYX(z: number, y: number, x: number): Rot3 {
+  return mul3(mul3(rotZ(z), rotY(y)), rotX(x));
 }

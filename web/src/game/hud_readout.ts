@@ -40,7 +40,8 @@
 import type { Events } from "../core/events";
 import { GameMode } from "./game_mode";
 import { G, ScreenFurniture } from "./globals";
-import { HudSprite, LAMP_CELS, ORIGINAL_AMMO_HUD_ROWS } from "./hud_sprites";
+import { HudSprite, LAMP_CELS } from "./hud_sprites";
+import { T } from "./tables";
 import { DrawScreenSprite } from "./screen_sprite";
 
 /** `ETC\vo_RELOAD_16.wav` -- the dry trigger's voice. */
@@ -58,10 +59,13 @@ export const RELOAD_PROMPT_SECOND_LINE = 120;
  */
 function DrawAmmoReadout(player: number, s: number): void {
   const original = G.g_GameMode === GameMode.Original;
-  const row = original
-    ? ORIGINAL_AMMO_HUD_ROWS[G.g_original_fire_mode[player]]
-      ?? ORIGINAL_AMMO_HUD_ROWS[0]
-    : ORIGINAL_AMMO_HUD_ROWS[0];
+  // `g_original_ammo_hud_rows` (`0x004ECA20`), by fire mode in Original Mode;
+  // the arcade bullet, `HudSprite.Bullet`, with no spacing otherwise -- the
+  // table's row 0, which is what the Arcade arm draws. A bundle written
+  // before the block has no rows and draws the arcade bullet.
+  const rows = T.originalMode?.ammo_hud_rows;
+  const row = (original ? rows?.[G.g_original_fire_mode[player]] : undefined)
+    ?? { sprite: HudSprite.Bullet, spacing: 0, dy: 0 };
   const ammo = G.g_player_ammo[player];
   const y = row.dy + 364;
   // Player 1 counts rightwards from 24; player 2 leftwards from 592. The

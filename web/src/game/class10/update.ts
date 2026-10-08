@@ -25,6 +25,9 @@ import { CivilianRunScript } from "./script";
 import { CivilianCheckShot } from "./shot";
 import { CivilianStepScript } from "./step";
 import { CivilianStepTurnToTarget } from "./turn";
+import { DrawSkinnedModelAndShadow } from "../skeleton";
+import { ActorRunNodeDrawHooks } from "../model_draw";
+import { CivilianDrawBonePart } from "./head";
 
 /**
  * `CivilianUpdate` — `FUN_0048A920`. One frame of a civilian.
@@ -38,6 +41,9 @@ import { CivilianStepTurnToTarget } from "./turn";
 export function CivilianUpdate(obj: Actor, f: ClassFrame): void {
   const sub = obj.civ;
   if (!sub) return;
+  // `MOV [0x009a26a0], ESI` at `0x0048A930`: the update names itself, and
+  // the draw's shadow is drawn for that name.
+  G.g_cur_actor = obj.at;
   // `CivilianUpdateOnCarrier` (`FUN_0048B140`) is this routine with the
   // carrier's matrix pushed around it. The push is `game/carrier.ts`'s and
   // the world point it produces is published for the renderer; everything
@@ -64,8 +70,18 @@ export function CivilianUpdate(obj: Actor, f: ClassFrame): void {
 
   // `DrawSkinnedModelAndShadow` (`FUN_00411090`) at `0x0048AA02`. The pose is
   // the renderer's; what the draw runs that is the game's is the pose hook at
-  // `model+0x115C`, which reads the sphere the switch below left last frame.
+  // `model+0x115C`, which reads the sphere the switch below left last frame,
+  // and the ground shadow it ends with, under `g_cur_actor` -- this actor
+  // since `0x0048A930`.
   PoseHookGrowAndPushOutOfWorld(obj);
+  // ...and the node hook `CivilianInit` installed at `model+0x1158`, on every
+  // node the walk draws: the head's turn and its mouth, `class10/head.ts`.
+  // [port-only] The renderer's cue starts each walk down: `SkeletonEmitNode`
+  // stores the pose in the record before its gate, so a head the walk does
+  // not draw is the clip's, and only the hook raises it again.
+  sub.headLookTurned = false;
+  ActorRunNodeDrawHooks(obj, CivilianDrawBonePart, f);
+  DrawSkinnedModelAndShadow(obj);
 
   // The loop counter. The clip clock itself is `ActorAdvanceMotion`'s; this is
   // the part class 0x10 owns — how many more times it may come round.
@@ -77,14 +93,22 @@ export function CivilianUpdate(obj: Actor, f: ClassFrame): void {
 
   CivilianCheckShot(obj, f);
 
-  // The queued sound, and the list op 0x22 left behind it.
-  if (sub.soundDelay !== 0) {
+  // The queued sound, and the list op 0x22 left behind it: `CMP [EAX+0x88],
+  // EBX; JZ; CMP dword ptr [0x009c8e98], 0xA; JZ` at `0x0048AD1C` -- the
+  // count holds while `g_app_state` is 10, as op 0x1B's shutter write does.
+  if (sub.soundDelay !== 0
+      && G.g_app_state !== CIV_SOUND_HELD_APP_STATE) {
     sub.soundDelay -= 1;
     if (sub.soundDelay === 0) {
       f.events?.emit("sound.play", { id: sub.soundId });
       const next = sub.sounds.shift();
       if (next) { sub.soundId = next[0]; sub.soundDelay = next[1]; }
     }
+  }
+  // Op 0x2B's countdown, `0x0048AD97`..`0x0048ADA4`: stepped, and read by
+  // nothing else -- see `CivilianOp.InPlayOnly`.
+  if (sub.inPlayCountdown !== 0) {
+    sub.inPlayCountdown = ((sub.inPlayCountdown - 1) << 16) >> 16;
   }
 
   // `PUSH 0x40800000; CALL 0x00409B70`, bytes `6800008040` at `0x0048ADAB`,
@@ -104,6 +128,9 @@ export function CivilianUpdate(obj: Actor, f: ClassFrame): void {
   // except the two that despawn.
   if (!obj.despawned) CivilianReleaseCaptors(obj);
 }
+
+/** `CMP dword ptr [0x009c8e98], 0xA` at `0x0048AD26`: the sound queue holds. */
+const CIV_SOUND_HELD_APP_STATE = 10;
 
 /** `PUSH 0x40800000` at `0x0048ADAB`: `ActorRegisterCameraPoint`'s 4.0. */
 export const CIVILIAN_CAMERA_RISE = 4.0;
@@ -351,15 +378,19 @@ export function CivilianReleaseCaptors(obj: Actor): void {
  * only, so a rescued civilian stood where her script left her for the rest of
  * the stage.
  *
- * [diverges] The skip arm is not ported: `g_cutscene_skipping`
- * (`0x009A2230`) has no field in `G` -- the port's skip is the walker's own --
- * so a skipped cut scene does not remove the civilian early.
- * `class41/type13.ts` and `class21/index.ts` leave their own skip arms out for
- * the same reason.
+ * The skip arm (`0x0048AF8E`): with `g_cutscene_skipping` (`0x009A2230`) up
+ * and {@link CivilianWait.SkipKeepsRemoval} clear, the countdown is set to 1
+ * (`MOV word [ECX+0x2A],DI` at `0x0048B0C4`) and the other arms are passed
+ * over; on the next frame the countdown takes her off.
  */
 function CivilianCheckRemoval(obj: Actor, host: GameHost): void {
   const sub = obj.civ;
   if (!sub) return;
+  if (G.g_cutscene_skipping !== 0
+      && (sub.wait & CivilianWait.SkipKeepsRemoval) === 0) {
+    sub.removeDelay = 1;
+    return;
+  }
   if (sub.removeDelay !== 0) {
     sub.removeDelay -= 1;
     if (sub.removeDelay !== 0) return;

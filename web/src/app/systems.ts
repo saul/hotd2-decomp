@@ -24,14 +24,13 @@ import { CameraFrame } from "../core/camera";
 import type { Walker } from "../script/walker";
 import {
   RetireUnlistedActor, SpawnPropContainers, SpawnScriptedCharacters,
-  SlotActorsForgetUnlisted, SpawnSlotActor,
+  SlotActorsForgetUnlisted, SpawnSiteKeys, SpawnSlotActor,
   type CharacterSpawnRequest, type ScriptSpawn,
 } from "../game/director";
 import type { Actor } from "../game/actor";
 import { SpawnHordePlacers } from "../game/class40";
 import { T } from "../game/tables";
 import type { Rng } from "../core/rng";
-import type { Events } from "../core/events";
 
 const _p = { x: 0, y: 0, z: 0 };
 
@@ -40,6 +39,8 @@ export interface HostBackend {
   boneWorld(at: number, bone: number, out: Vec3): boolean;
   /** One bone's world matrix, `Matrix4.elements`. See `GameHost.boneMatrix`. */
   boneMatrix?(at: number, bone: number, out: number[]): boolean;
+  /** The same before a node hook turned it. See `GameHost.bonePoseMatrix`. */
+  bonePoseMatrix?(at: number, bone: number, out: number[]): boolean;
   /** One bone's hit sphere in world space. See `GameHost.boneSphere`. */
   boneSphereWorld?(at: number, bone: number, out: Vec3): number | null;
   setBoneSlot(at: number, bone: number, slot: number): void;
@@ -96,6 +97,8 @@ export class GameSystem implements System {
       this.backend?.boneWorld(at, bone, out) ?? false,
     boneMatrix: (at, bone, out) =>
       this.backend?.boneMatrix?.(at, bone, out) ?? false,
+    bonePoseMatrix: (at, bone, out) =>
+      this.backend?.bonePoseMatrix?.(at, bone, out) ?? false,
     boneSphere: (at, bone, out) =>
       this.backend?.boneSphereWorld?.(at, bone, out) ?? null,
     // The two matrices of the camera block `g_camera_index` names, as
@@ -115,6 +118,8 @@ export class GameSystem implements System {
     // A `cp_` path by global slot, for the port's own `CamEvalPath7` calls --
     // the game-over fly-over's. The curves are the camera bundle's.
     camPath: (slot) => this.paths?.paths.get(slot) ?? null,
+    // `GetTickCount`, for Boss Mode's clock: milliseconds, a `DWORD`.
+    tickCount: () => Math.floor(performance.now()) >>> 0,
     // The camera looks down its own local -Z, which is where the player is.
     aimPoint: (ahead, out) => {
       _p.x = 0; _p.y = 0; _p.z = -ahead;
@@ -300,15 +305,14 @@ export class CharacterBindSystem implements System {
  * Three steps in three layers, and the split is the point of step 21. The
  * renderer says which adopted hierarchies the script is currently asking for
  * and where the exporter put them (`readySpawns`); the port builds the
- * objects, reading the descriptor tail and running each class's `Init`
- * (`SpawnScriptedCharacters`); the renderer binds its nodes to what came back
- * and hands over the ones the script has stopped listing, which the port
- * retires. `render/characters.ts` used to do all three, which put
+ * objects from the descriptor tail (`SpawnScriptedCharacters`), whose class
+ * `Init`s the frame's task walk runs; the renderer binds its nodes to what
+ * came back and hands over the ones the script has stopped listing, which the
+ * port retires. `render/characters.ts` used to do all three, which put
  * `SpawnFromDescriptor`'s decisions in a layer no headless test can reach.
  */
 export function syncCharacterSpawns(chars: CharacterPool,
-                                    spawns: readonly ScriptSpawn[],
-                                    events?: Events): void {
+                                    spawns: readonly ScriptSpawn[]): void {
   // **In the script's order**, the character spawns and the ones the
   // character pool can never make (their model is an asset slot and they have
   // no character type — see `SpawnSlotActors`) interleaved. The engine's
@@ -336,7 +340,7 @@ export function syncCharacterSpawns(chars: CharacterPool,
   const make = (r: CharacterSpawnRequest): void => {
     if (done.has(r.at)) return;
     done.add(r.at);
-    made.push(...SpawnScriptedCharacters([r], chars.rng, events));
+    made.push(...SpawnScriptedCharacters([r]));
     for (const c of reqs) {
       if (c.parentAt === r.at && !listed.has(c.at)) make(c);
     }
@@ -345,12 +349,13 @@ export function syncCharacterSpawns(chars: CharacterPool,
   // Class 0x40's placers are built per instruction rather than per address,
   // ahead of the rest -- see `SpawnHordePlacers`. They read nothing another
   // spawn leaves behind, so building them first changes nothing they do.
-  SpawnHordePlacers(spawns, T.chars?.placements ?? [], chars.rng);
-  for (const s of spawns) {
+  SpawnHordePlacers(spawns, T.chars?.placements ?? []);
+  const keys = SpawnSiteKeys(spawns);
+  spawns.forEach((s, i) => {
     const r = ready.get(s.at);
     if (r) make(r);
-    else SpawnSlotActor(s, chars.rng);
-  }
+    else SpawnSlotActor(s, keys[i]);
+  });
   for (const r of reqs) make(r);
   for (const a of chars.syncSpawns(spawns, made)) RetireUnlistedActor(a);
 }
@@ -405,7 +410,8 @@ export function syncPortGlobals(w: Walker, freeRoam: boolean,
   // There is one array, in `game/globals.ts`, and both halves write it.
   // The spawn opcode places a group the moment it runs, so this is only the
   // safety net for a spawn list restored by a snapshot load rather than by
-  // an instruction. It is idempotent — `ActorByAt` refuses a second one.
+  // an instruction. It is idempotent -- each listed spawn instruction is
+  // built once (`g_prop_placers_built`).
   SpawnPropContainers(w.spawns);
 }
 

@@ -39,7 +39,7 @@ has just finished -- so the car is parked, not moving, and `obj+0x1320` is
 cleared so its wheels and dust trails stop being drawn.
 
 The same shot also calls `CamEvalObjectPath6(0xFF, ...)`, but keeps only
-`local_8` (`rot_y`) and writes it to `obj+0x1334`, the occupants' yaw. Slot
+`local_8` (`rot_y`) and writes it to `obj+0x1334`, the doors' yaw. Slot
 `0xFF`'s **position channels are never read.** That is why its `pos_*` keys
 span frames 0..110 while its `rot_*` keys span 100..150: the two are not
 sampled together, and nothing in the file says they should be.
@@ -71,8 +71,8 @@ Two other stop rules a route may carry:
   `if (obj+0x1320 != 0)`, so a parked or finished object does not draw it. The
   stage-1 vehicle's four dust trails are the case.
 * `RigPart.path_rotation` -- a part rotation driven from a path channel on the
-  routine's *own* clock rather than the camera frame. The stage-1 occupants'
-  yaw is `op_st1` 2's `rot_y` less `0x4000`, sampled at
+  routine's *own* clock rather than the camera frame. The stage-1 vehicle's
+  doors' yaw is `op_st1` 2's `rot_y` less `0x4000`, sampled at
   `clamp(frame, 0, 0x31) + 100`.
 
 ## How a rig is bound to a stage
@@ -115,8 +115,9 @@ because a cross-stage gate could never fire.
 | `0x00470080` | `obj_470080` | `0x196`–`0x198` | actor state 406; slot is runtime, nothing to place |
 | `0x00416B00` | `obj_416b00` | `0x194` | `PlayerShotEffectsThink`: the three per-shot rings, all runtime. **Not placed** -- see below |
 | `0x00452320` | `obj_452320` | `0x148`, `0x14D`, `0x14E`, `0x19A`–`0x1A1` | **[proved] a car** — the stage-2 opening vehicle. See below. |
-| `0x00432840` | `obj_432840` | `0x145`, `0x146`, `0x149`, `0x14A` | class `0x28`; route chosen by `obj+0x11C`, **not** by camera path. Posed by the port's actor (`game/class28/`) |
-| `SUB_004331D0` | `obj_4331d0` | — | class `0x33`, 9 draw sites; **not placed**, see below |
+| `0x00432840` | `obj_432840` | `0x145`, `0x146` | class `0x28`; route chosen by `obj+0x11C`, **not** by camera path. Posed by the port's actor (`game/class28/`). The table's other two rows, `0x149`/`0x14A`, are class `0x27`'s (below), not this rig's |
+| `PathRidingVehicleDraw` `0x00432B10` | — | `0x149`, `0x14A` | class `0x27`, stage 2 block 0's two objects; no rig. `PathRidingVehicleUpdate` (`0x004329D0`) reads `g_class28_route_table` as dwords from row 2 (`0x00589AE8`); the port's actor (`game/class27/`) poses it and records every draw with its world matrix (`DrawSlotInWorld`) |
+| `SUB_004331D0` | `obj_4331d0` | — | class `0x33`, 9 draw sites; **not placed** -- the routine is ported in `game/class33/`, which draws the carrier from its descriptor |
 
 ### The stage-2 car, and why the 9-vs-22 split nearly lost it
 
@@ -199,6 +200,13 @@ So `obj+0x1390` is a **per-class parameter block distinct from the evt
 descriptor**, and `[open]` where it lives. Without it neither rig has a route,
 so neither is placed.
 
+**Superseded for class `0x33`.** The check above read `+0x0C` from the
+descriptor's head. `SpawnFromDescriptor` (`FUN_00408A20`) sets `obj+0x1390 =
+descriptor + 0x24` (`docs/formats/spawns.md`, *The three spawn allocators*),
+and at `descriptor + 0x24 + 0x0C` the three carriers carry op_ slots 336, 338
+and 382. The carrier is not placed as a rig because `game/class33/` runs
+`ScriptedCarrierUpdate33` and records its draws.
+
 Gating `obj_484ff0_props` by stage bounding box instead was tried and
 rejected: levels span thousands of units, so the box accepts the props in
 **every** stage. Six wrong placements are worse than none, so the exporter
@@ -216,7 +224,8 @@ unless the source column says otherwise.
 | `0x00426A70` | `0x185` | literal, `g_GameMode == 3` | `FUN_00428F70` → `FUN_00411090` | no — class `0x2D` |
 | `0x00429530` | `0x188`–`0x18F` | `obj+0x1350 + 0x188` | same object as above | no |
 | `0x0042C490` | `0x192`/`0x193` | `obj+0x1350 = rand() & 1` | `FUN_0042C5A0` | no |
-| `0x00432610` | `0x145`,`0x146`,`0x149`,`0x14A` | table `0x00589AE0` | `0x00432840` | **yes** — 3 slots |
+| `0x00432610` | `0x145`,`0x146` | table `0x00589AE0`, rows 0 and 1 | `0x00432840` | **yes** — 3 slots |
+| `0x004329D0` | `0x149`,`0x14A` | the same table's rows 2 and 3, as dwords from `0x00589AE8` | `0x00432B10` | no — class `0x27`, `game/class27/` |
 | `0x00433860` | spawn param | `spawnParams[3]` | `SUB_004331D0` | **yes** — 9 slots, the largest found |
 | `0x00440130` | `0x151`,`0x15E`–`0x161`,`0x175`–`0x177` | pure setter; callers pass literals | each caller draws | small |
 | `0x0044E5D0` | `0x14F` | literal | `FUN_00449EF0` | no — class `0x31` |
@@ -225,7 +234,7 @@ unless the source column says otherwise.
 | `0x004522A0` | `0x153` | literal | `FUN_00452320` | **yes** (same rig); `St2CarHeldUpdate`, ported |
 | `0x004525C0` | `0x00565EF4[obj+0x4D4]` | table | `FUN_00451FF0` | no |
 | `0x00452930` | same table | table | `FUN_00452320` | **yes** (same rig) |
-| `0x004659D0` / `0x00465BC0` | `0xFD`/`0xFE`/`0xFF` | literals | **nothing** | n/a — a 0x88-byte invisible controller that uses the path only to derive a texture/material scroll rate |
+| `Type3UvScrollInit` / `Type3UvScrollUpdate` (`0x004659D0` / `0x00465BC0`) | `0xFD`/`0xFE`/`0xFF` | literals | **nothing** | n/a — class 0x41 constructor 3's 0x88-byte task: it draws nothing, and uses the path only to scroll the UVs of the stage-1 vehicle's `0x157E`/`0x157D`/`0x157B` (see `docs/formats/spawns.md`) |
 | `0x0047F5F0` | `0x180` | literal, `g_GameMode == 3` | `FUN_0047FE40` | no — class `0x32` |
 | `0x00480050` | `0x180` | state 0 of `0x00596738` | same object | no |
 | `0x004842A0` | `0x156`–`0x15C` | script opcode `0x0B` → `obj+0x135C` | `FUN_00484FF0` | small — class `0x25` |

@@ -62,13 +62,18 @@
  * (`FUN_00408370`), `game/effects/ring_effect.ts`. The surface ring is only
  * ever `FishStateSink`'s; the deaths make the ring task.
  *
- * The draw is `render/`'s: `FishDraw` (`FUN_00439860`) and
- * `FishSwimAwayTick`'s own are composed in `render/fish.ts`, from this
- * block -- each state's turn, the 0.4 drop of a bobbing fish, the 0.3 scale
- * (`0x00439AC9`, `0x00439CF8`), the alpha of one fading in, and the
- * **flattened silhouette** on the water that a solid fish (`sub+0x6A` bit 2,
- * the descriptor's `tail+0x0C` of 0) casts while it is below the surface.
- * The drawn yaw and pitch are `sub+0x50`/`sub+0x58`, never `obj+0x68`.
+ * ## The draw
+ *
+ * `render/fish.ts`'s, as a chain of `render/slotmodels.ts`: `FishDraw`
+ * (`FUN_00439860`) turns the model by **the sub-block's** angles --
+ * `RotY(sub+0x50)`, then `RotX` of `sub+0x58` or of the lunge's progress --
+ * and never by `obj+0x68`, which no routine of this class writes. The layer
+ * used to draw the fish by `obj+0x68` alone, so every fish in the game swam,
+ * bobbed and leapt side-on at whatever yaw its descriptor had (0 for all of
+ * them) and never pitched. The `MatrixScale(0.3, 0.3, 0.3)` at `0x00439AC9`
+ * and `0x00439CF8` is in the same matrices now, and so is the flattened
+ * silhouette the solid-drawn fish casts on the water from below it.
+ * `FishSwimAwayTick` draws for itself, and writes down what it drew.
  *
  * `obj+0x124` is not scaled with it. The shot sphere is 2.1 whatever the draw
  * does, which is the engine's arrangement too.
@@ -188,17 +193,12 @@ export const FISH_FLUNG_FRAMES = 0x1900;
 export const FISH_SUMMON_WATER_LEVEL = -24.9;
 export const FISH_SUMMON_LIFETIME = 0x50;
 /**
- * `FishBeginSwimAway`'s two literals: `PUSH 0x3C` at `FishStateBob`'s call,
- * into `sub+0x7C`, and `MOV dword ptr [EAX+0x28], 0x3ECCCCCD` -- 0.4f, the
- * silhouette's size and the countdown `FishSwimAwayTick` spends.
+ * `FishBeginSwimAway`'s two literals -- the scale the float32 `0x3ECCCCCD`
+ * it stores into `sub+0x28`, which `FishSwimAwayTick` then shrinks.
  */
 export const FISH_SWIM_AWAY_FRAMES = 0x3c;
 export const FISH_SWIM_AWAY_SCALE = Math.fround(0.4);
-/**
- * `FSUB float ptr [0x004C4CC0]` (`0ad7233c`, 0.01f) at `0x00439D4A`: what
- * `FishSwimAwayTick` takes off `sub+0x28` a frame once `sub+0x7C` frames
- * have passed.
- */
+/** `FSUB float ptr [0x004C4CC0]` in `FishSwimAwayTick`: 0.01 as a float32. */
 export const FISH_SWIM_AWAY_SHRINK = Math.fround(0.01);
 
 /**
@@ -843,11 +843,9 @@ export function FishStateSink(obj: Actor, f: ClassFrame): void {
  *
  * The way out for a fish that wanted to leap and found all four slots taken.
  * It is already out of both counters by the time this runs, so it is scenery:
- * `sub+0x64 = 0`, `sub+0x7C = frames`, `sub+0x28 = 0.4` and
- * `*obj = FishSwimAwayTick` (`0x00439BFF`..`0x00439C10`). The state word is
- * left where it was; the object's routine is what changes, so from the next
- * frame nothing of `FishUpdate` runs -- no shot check, no registration for
- * the shot test or the camera.
+ * the timer to zero, `frames` into `sub+0x7C`, `sub+0x28 = 0.4` -- the
+ * silhouette's scale -- and `*obj = FishSwimAwayTick` (`0x00439C10`), which
+ * is the whole of its update from here on. `[proved]`
  */
 export function FishBeginSwimAway(obj: Actor, frames: number): void {
   const sub = Tail(obj);
@@ -859,27 +857,26 @@ export function FishBeginSwimAway(obj: Actor, frames: number): void {
 }
 
 /**
- * `FishSwimAwayTick` — `FUN_00439C20`. The whole of what the fish is after
- * {@link FishBeginSwimAway}, and **it despawns**:
+ * `FishSwimAwayTick` — `FUN_00439C20`. The installed update of a fish that
+ * swims off: no shot check, no camera, no state.
  *
- * ```
- * 00439c2e  obj+0x44 = sub+0x04; obj+0x40 += sub+0x1C; obj+0x48 += sub+0x24
- * 00439c46  the draw -- the surface silhouette at sub+0x28 when sub+0x6A
- *           bit 2 is up, the model at 0.3 otherwise (render/fish.ts)
- * 00439d23  sub+0x6E++, wrapping past sub+0x70 to sub+0x72
- * 00439d39  if (++sub+0x64 >= sub+0x7C) {
- * 00439d47      sub+0x28 -= 0.01                 ; FST, the stored float
- * 00439d53      if (sub+0x28 <= 0.0) ActorDespawn(obj)   ; FCOMP; TEST AH,0x41
- *           }
+ * ```c
+ * obj+0x44 = sub+0x04;  obj+0x40 += sub+0x1C;  obj+0x48 += sub+0x24;
+ * ...the draw -- render/fish.ts...
+ * if (++sub+0x6E > sub+0x70) sub+0x6E = sub+0x72;       // the strip
+ * if (++sub+0x64 >= sub+0x7C) {                          // the count
+ *     sub+0x28 -= 0.01;                                  // the silhouette
+ *     if (sub+0x28 <= 0.0) ActorDespawn(obj);
+ * }
  * ```
  *
- * So the fish drifts off at the surface for `sub+0x7C` frames -- 60, from
- * {@link FishStateBob} -- and then its size runs out a hundredth at a time.
- * This file and `functions.tsv` said the count was never read and the object
- * never removed: the decompiler's body stops at the `MatrixStackPop` in the
- * middle, and the countdown is after it (`L89`, `LXX`). The comparison is made on
- * the value before it is stored, `FST` leaving the unrounded difference in
- * `ST0`.
+ * `[proved]`, `0x00439D23`..`0x00439D61`. This said nothing ever removed the
+ * fish -- "`sub+0x7C` is never read, and there is no despawn of any kind" --
+ * because the pseudocode it was read from stopped at the draw's
+ * `MatrixStackPop` (L89): after `FishBeginSwimAway`'s 0x3C frames the
+ * silhouette shrinks by 0.01 a frame from 0.4 and the fish goes forty frames
+ * later. It steps the strip **after** the draw, so the draw record is taken
+ * first.
  */
 export function FishSwimAwayTick(obj: Actor): void {
   const sub = Tail(obj);
@@ -887,16 +884,18 @@ export function FishSwimAwayTick(obj: Actor): void {
   obj.pos.y = sub.homeY;
   obj.pos.x += sub.vx;
   obj.pos.z += sub.vz;
-  // The draw is `render/fish.ts`'s; what it drew is written down here,
-  // because the next lines step both.
-  sub.drawnFrame = sub.frame;
-  sub.drawnScale = sub.dx;
+  sub.swimDrawFrame = sub.frame;
+  sub.swimDrawScale = sub.dx;
   FishAdvanceStrip(sub);
   sub.timer += 1;
-  if (sub.timer < sub.riseFrames) return;
-  const left = sub.dx - FISH_SWIM_AWAY_SHRINK;
-  sub.dx = Math.fround(left);
-  if (!(left > 0)) ActorDespawn(obj);
+  if (sub.timer >= sub.riseFrames) {
+    // `FSUB float ptr [0x004C4CC0]` (0.01 as a float32), `FST` back to the
+    // float, then `FCOMP [0x004C436C]` (0.0) on what is still on the stack,
+    // `TEST AH, 0x41`: below or equal.
+    const left = sub.dx - FISH_SWIM_AWAY_SHRINK;
+    sub.dx = Math.fround(left);
+    if (left <= 0) ActorDespawn(obj);
+  }
 }
 
 // -- being shot ------------------------------------------------------------
@@ -1042,11 +1041,10 @@ export function FishRunState(obj: Actor, f: ClassFrame): void {
  * it runs this routine to its end, as the engine's does.
  */
 export function FishUpdate(obj: Actor, f: ClassFrame): void {
-  const sub = Tail(obj);
-  if (sub?.swimAway) {
-    FishSwimAwayTick(obj);
-    return;
-  }
+  // [port-only] `obj+0x00` after `FishBeginSwimAway`: the tick is the whole
+  // update -- no shot check, no camera. It used to be an arm of
+  // `FishRunState`, behind this routine's shot check and its registration.
+  if (Tail(obj)?.swimAway) { FishSwimAwayTick(obj); return; }
   FishCheckShot(obj, f);
   FishRunState(obj, f);
   if (obj.despawned) return;
@@ -1180,6 +1178,8 @@ export function SpawnWaterEnemyAt(x: number, y: number, z: number, lifetime: num
 const handler: ClassHandler = {
   init: FishInit,
   update: FishUpdate,
+  // `FishInit` installs `FishUpdate` and returns (`0x0043862F`).
+  firstUpdateNextWalk: true,
   updatesWhenDead: true,
   ownsShotResult: true,
   // `FishProjectToScreen` files it the engine's way, in states 0 to 3 only.

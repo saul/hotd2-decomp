@@ -464,11 +464,19 @@ export interface CharacterPlacement {
    * pair that despawns it, `scale` is applied only when it is not 1.0, and
    * `behaviour` indexes `g_prop_behaviours` (`0x005926A8`). `selector` is the
    * first dword of the behaviour's operand block and means something only for
-   * behaviour 8, `CarrierPropSelectRoutine`.
+   * behaviour 8, `CarrierPropSelectRoutine`, and 7,
+   * `PropBehaviourRideObjectPath`, whose `op_` path it is.
+   *
+   * `operand` is behaviour 6's (`PropBehaviourLaunchWithAccel`) whole operand
+   * block, two f32 vectors -- the velocity and the acceleration -- and is
+   * present only on that behaviour. `path_length` is
+   * `g_cam_path_length[selector]` (`0x00576D38`), present only on behaviour 7.
    */
   class13?: {
     slot: number; cam_path: number; cam_frame: number;
     scale: number; behaviour: number; selector: number;
+    operand?: number[];
+    path_length?: number;
   } | null;
   /**
    * Class 0x12's tail — a slot strip a script flag starts, every field
@@ -485,6 +493,23 @@ export interface CharacterPlacement {
     slot: number; delay: number; coli: string | null; behaviour: number;
     cam_path: number; cam_frame: number; first: number; last: number;
     flag: number; step: number; scale: number;
+  } | null;
+  /**
+   * Class 0x15's tail — a row of floating planks, every field
+   * `FloatingPropRowSpawn` (`FUN_00441750`) reads out of it. `count` planks
+   * (`+0x24`, s8) at `delta` (`+0x18..+0x20`) apart, each drawing `slot`
+   * (`+0x00`) with `coli` (`+0x04`, the `coli.blobs` key, `null` for -1) as
+   * its mesh; the last `keep` (`+0x25`) never leave on `flag` (`+0x12`), the
+   * rest leave `delay_step` (`+0x26`) frames apart once it is up;
+   * `cam_path`/`cam_frame` (`+0x0A`/`+0x0C`) kill every one. `word_0e` and
+   * `word_10` are copied into the plank and read by nothing. See
+   * `game/class15/`.
+   */
+  class15?: {
+    slot: number; coli: string | null; behaviour: number;
+    cam_path: number; cam_frame: number; word_0e: number; word_10: number;
+    flag: number; delta: [number, number, number]; count: number;
+    keep: number; delay_step: number;
   } | null;
   /**
    * Class 0x18's three — the class-0x30 state a rider leaves the carrier from,
@@ -542,6 +567,17 @@ export interface CharacterPlacement {
    */
   class45?: { subtype: number } | null;
   /**
+   * Class 0x2D's tail, `obj+0x1390`: `subtype` (`+0x01`, s8) -- 0 stage 5's
+   * cameo, 1 the stage-6 fight -- `clip` (`+0x02`), `counter` (`+0x04`),
+   * `kill_path` and `kill_frame` (`+0x06`, `+0x08`: the cameo's exit),
+   * `fight_hp`, `round2_hp` and `round3_hp` (`+0x0A`, `+0x0C`, `+0x0E`),
+   * each a `s16`. See `game/class2D/` and `docs/re/boss-emperor.md`.
+   */
+  class2d?: {
+    subtype: number; clip: number; counter: number; kill_path: number;
+    kill_frame: number; fight_hp: number; round2_hp: number; round3_hp: number;
+  } | null;
+  /**
    * Class 0x40's descriptor: `desc+0x25`, the selector. See
    * `game/class40/state.ts`.
    */
@@ -551,6 +587,13 @@ export interface CharacterPlacement {
    * 1 the lone drop, 2 the large batch. See `game/class42/state.ts`.
    */
   class42?: { subtype: number } | null;
+  /**
+   * Class 0x29's tail -- `SceneryBatchUpdate29` (`FUN_00432C80`) kills the
+   * object on the first frame camera path `kill_path` is at or past
+   * `kill_frame`. The list it draws is the placement's `hp`. See
+   * `game/class29/`.
+   */
+  class29?: { kill_path: number; kill_frame: number } | null;
   /**
    * The placement this one rides, when it is a child rather than a descriptor.
    *
@@ -708,6 +751,36 @@ export interface CharacterPlacement {
     angles: [number, number, number];
   } | null;
   /**
+   * Class 0x32's tail — the stage-5 boss, as its routines read it through
+   * `obj+0x1390`: `Class32Init` (`FUN_0047F5F0`) takes the character type
+   * (`+0x00`, s8) and the state it starts in (`+0x02`, s8);
+   * `Class32ChargeShotBone` (`FUN_0047CE10`) the damage a hit does (`+0x04`,
+   * s8); `Class32SpawnProjectile` (`FUN_0047EE30`) a projectile's hit points
+   * (`+0x10`), its trail interval (`+0x12`) and a held one's (`+0x1A`), all
+   * s8; `Class32ProjectileStateGather` its size-to-radius factor (`+0x14`,
+   * f32); states 6, 8 and 10 the afterimage interval (`+0x19`, s8);
+   * `Class32ProjectileStateBurst` the burst's frames and its end brightness
+   * (`+0x1C`, `+0x20`, i32); `Class32StateDeathRetire`'s unreachable sub 1
+   * its speed (`+0x28`, f32); and `Class32StateDeathSequence` its frames and
+   * the bursts' interval (`+0x2C`, `+0x34`, i32). Nothing else of the tail is
+   * read.
+   */
+  class32?: {
+    char_type: number;
+    state: number;
+    damage: number;
+    projectile_hp: number;
+    trail_interval: number;
+    projectile_radius: number;
+    afterimage_interval: number;
+    held_trail_interval: number;
+    burst_frames: number;
+    burst_bright: number;
+    retire_speed: number;
+    death_frames: number;
+    death_burst_interval: number;
+  } | null;
+  /**
    * Class 0x33 **selector 1's** tail — the object `g_carrier_object` points
    * at while one exists.
    *
@@ -728,6 +801,12 @@ export interface CharacterPlacement {
   class33?: {
     slot: number;
     shot_mesh: number;
+    /**
+     * {@link shot_mesh} resolved to its `coli.blobs` key -- the blob
+     * `ShotTestMesh` traces stage 2's two boats through -- or `null` for
+     * `-1` and for a pointer that lands on no blob.
+     */
+    shot_blob?: string | null;
     shot_radius: number;
     path: number;
     path_end: number;
@@ -778,12 +857,62 @@ export interface CharacterPlacement {
   class33_cue?: {
     cue: number;
   } | null;
+  /**
+   * Class 0x33 **selectors 6 to 11 and 99** — each its own reading of the
+   * descriptor tail, tagged with the selector that reads it (which is the
+   * placement's `hp`). Never set beside {@link class33}, {@link class33_push},
+   * {@link class33_cue} or {@link class33_prop}.
+   *
+   * * 6, `ScriptedSpriteEffectOnce33`: `tail+0x0C` kind, `+0x10` face-camera
+   *   mode, `+0x14` player.
+   * * 7, `ScriptedSoundCues33`: 8-byte records `{s16 mode, s16 frame, u32
+   *   sound}` up to and including the first whose mode is neither 0 nor 1,
+   *   which never fires and so is as far as the routine ever reads. That last
+   *   record carries no `sound`: its `+0x04` is never read, and on the one
+   *   shipped spawn it is the next descriptor's class.
+   * * 9, `ScriptedFireLoopUntilCue33`: the first record's mode and frame.
+   * * 10, `ScriptedSoundAndFlagAtCue33`: the first record, and `tail+0x08`'s
+   *   `s16` flag.
+   * * 8 and 11 read no tail; 99, `ScriptedStaticSlotDraw33`, reads `tail+0x00`.
+   */
+  class33_sub?:
+    | { selector: 6; kind: number; face: number; player: number }
+    | { selector: 7;
+        cues: { mode: number; frame: number; sound?: number }[] }
+    | { selector: 8 }
+    | { selector: 9; mode: number; frame: number }
+    | { selector: 10; mode: number; frame: number; sound: number;
+        flag: number }
+    | { selector: 11 }
+    | { selector: 99; slot: number }
+    | null;
+  /**
+   * Class 0x33 **selector 2's** tail — `ScriptedPropDrawUntilFlag`
+   * (`FUN_00433A10`): `slot` is `tail+0x00`, the `AssetDrawSlot` id it copies
+   * to `obj+0x13F0`; `despawn_frame` the `i32` at `tail+0x0C`, compared with
+   * `g_cam_path_frame` as an integer (every shipped one is `-1`, carried as
+   * it is); `despawn_flag` the byte at `tail+0x11`, a script flag that takes
+   * it off the field when it reads 1. One of the class's five mutually
+   * exclusive blocks. Selector 3 reads no tail, so its placement carries none.
+   */
+  class33_prop?: {
+    slot: number;
+    despawn_frame: number;
+    despawn_flag: number;
+  } | null;
 }
 
 /** The directional death set — see docs/formats/combat.md. */
 export interface DeathSet {
   front: number[];
   back: number[];
+  /**
+   * `ZombieCorpsePoseFrame` (`FUN_00454E00`)'s 26 play counters at
+   * `0x0059301C`, as the table holds them: a pair per clip, in the order
+   * `hod2lib/combat.ts`'s `CORPSE_POSE_COUNTERS` lists. Absent in a bundle
+   * older than the routine's port.
+   */
+  corpse?: number[];
 }
 
 /** A sound id paired with the filename `g_se_name_list` gives it. */
@@ -1100,6 +1229,28 @@ export interface Class14Json {
 }
 
 /**
+ * Class 0x32's `.rdata` — the stage-5 boss. Every table is read by an
+ * instruction of the class, by the boss's rank (0..16) where it has
+ * seventeen rows; `web/src/hod2lib/class32.ts` has the addresses.
+ */
+export interface Class32Json {
+  /** `g_class32_phases` — `[state, floor]` per phase row. */
+  phases: [number, number][];
+  /** `g_class32_hop_offsets` — four offsets from the eye. */
+  hop_offsets: [number, number, number][];
+  /** `g_class32_hop_frames` — by rank. */
+  hop_frames: number[];
+  /** `g_class32_circle_offsets` — four offsets from the eye. */
+  circle_offsets: [number, number, number][];
+  /** `g_class32_rank_rows` — `[circle_frames, circle_hold, circle_laps, lunge_frames]` by rank. */
+  rank_rows: [number, number, number, number][];
+  /** `g_class32_projectile_frames` — by rank. */
+  projectile_frames: number[];
+  /** `g_class32_barrage_rows` — `[scatter_base, scatter_spread, max_live, aimed_count]` by rank. */
+  barrage_rows: [number, number, number, number][];
+}
+
+/**
  * One row of `g_actor_attachment_records` — `0x004EC4C0`, 81 of them.
  *
  * `bone` is `-1` for a row whose pointer does not resolve; the row is kept so
@@ -1187,6 +1338,24 @@ export interface CharactersJson {
    * which is the port's reader. Absent in a bundle older than that port.
    */
   player_hand_slots?: number[];
+  /**
+   * `g_civilian_mouth_tables` — `0x0056B950`: six lists of signed cels, one
+   * per mouth mode, which `CivilianDrawBonePart` (`FUN_0048D1F0`) adds to a
+   * civilian's head slot as she talks. Mode 6 is "no cel" and has no row.
+   * Absent in a bundle older than the port of the mouth.
+   */
+  civilian_mouth_tables?: number[][];
+  /**
+   * `g_class25_face_cels` — `0x00596C80`, thirteen cels: the ramp
+   * `ScriptedHumanoidBoneDrawHook` (`FUN_00485260`) adds to a scripted
+   * humanoid's head base to talk and to blink. Absent in an older bundle.
+   */
+  humanoid_face_cels?: number[];
+  /**
+   * `g_class25_face_cels_two` — `0x00596C90`, thirteen cels of two values:
+   * character type 0x36's mouth in the same hook. Absent in an older bundle.
+   */
+  humanoid_face_cels_two?: number[];
   /** `DAT_004C84A8` — bone → reaction group: head, torso, each limb. */
   reaction_groups: number[];
   approach: ApproachJson;
@@ -1196,6 +1365,11 @@ export interface CharactersJson {
   class31?: Class31Json;
   /** Class 0x14's own tables — see {@link Class14Json}. */
   class14?: Class14Json | Record<string, never>;
+  /**
+   * Class 0x32's own tables — see {@link Class32Json}. Empty when the bundle
+   * was written without an executable.
+   */
+  class32?: Class32Json | Record<string, never>;
   /**
    * Class 0x42's own tables — see {@link Class42Json}. Written only for a
    * stage that spawns the class, which is stage 2.

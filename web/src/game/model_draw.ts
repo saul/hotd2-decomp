@@ -42,6 +42,8 @@
  */
 import type { CharacterBone, CharacterType } from "../bundle";
 import { ActorFlag, MotionFlag, type Actor } from "./actor";
+import { ActorDrawGroundShadow, type GroundShadowCaster }
+  from "./ground_shadow";
 import { SkeletonNodeDrawSuppressed } from "./parts";
 import type { ClassFrame } from "./registry";
 import { CharacterTypeOf } from "./tables";
@@ -196,7 +198,7 @@ function emitNodeHook(obj: Actor, type: CharacterType, index: number,
 export const PART_ALPHA_CHAR_TYPES: readonly number[] = [0x09, 0x12, 0x17, 0x18];
 
 /** `ActorDrawShadow`'s ellipse, `MatrixScale(w, 1.0, d)` over slot `0x10D0`. */
-export interface ShadowEllipse {
+interface ShadowEllipse {
   /** x scale — `11.0`, or `50.0` for the two large types. */
   w: number;
   /** z scale — `10.0`, or `30.0`. */
@@ -209,6 +211,17 @@ const SHADOW_SMALL: ShadowEllipse = { w: 11, d: 10 };
 const SHADOW_LARGE: ShadowEllipse = { w: 50, d: 30 };
 /** The two types that get {@link SHADOW_LARGE} — `CMP AX, 0x44` / `0x47`. */
 const SHADOW_LARGE_TYPES: readonly number[] = [0x44, 0x47];
+
+/**
+ * What `ActorDrawShadow` reads off `g_cur_actor`: `obj+0x34`, `obj+0x40..48`,
+ * `obj+0x1F4` and `obj+0x1F8` -- an {@link Actor}, or a player's body
+ * (`game/player_body.ts`), which is the same 0x13F4-byte object the port
+ * keeps apart.
+ */
+export interface ShadowCaster extends GroundShadowCaster {
+  charType: number;
+  motionFlags: number;
+}
 
 /**
  * `ActorDrawShadow` — `FUN_0040A590`, the gate and the size.
@@ -224,15 +237,17 @@ const SHADOW_LARGE_TYPES: readonly number[] = [0x44, 0x47];
  * then `ActorDrawGroundShadow(obj, w, d)` (`FUN_0040A620`) — the second
  * argument is the x scale, pushed after the third. `[proved]`
  *
- * Returns the ellipse the engine would draw, or `null` for none. **The port
- * does not draw a character's ground shadow** — no class calls this yet and
- * `render/` has no disc for it — so this is the gate, transcribed and tested,
- * for the renderer to be handed when it does. What it answers is the second
- * reader of the two bits every hiding state writes: a blinking corpse's
- * shadow blinks with it, and a captor held off screen has none.
+ * Its one caller is `DrawSkinnedModelAndShadow` (`FUN_00411090`), on
+ * `g_cur_actor` -- 52 call sites in the image, every skinned draw there is.
+ * What it answers is the second reader of the two bits every hiding state
+ * writes: a blinking corpse's shadow blinks with it, and a captor held off
+ * screen has none. `top` is passed on: see `ActorDrawGroundShadow`.
  */
-export function ActorDrawShadow(obj: Actor): Readonly<ShadowEllipse> | null {
-  if ((obj.flags & ActorFlag.NoShadow) !== 0) return null;
-  if ((obj.motionFlags & MotionFlag.Drawn) === 0) return null;
-  return SHADOW_LARGE_TYPES.includes(obj.charType) ? SHADOW_LARGE : SHADOW_SMALL;
+export function ActorDrawShadow(obj: ShadowCaster,
+                                top: ArrayLike<number> | null = null): void {
+  if ((obj.flags & ActorFlag.NoShadow) !== 0) return;
+  if ((obj.motionFlags & MotionFlag.Drawn) === 0) return;
+  const e = SHADOW_LARGE_TYPES.includes(obj.charType) ? SHADOW_LARGE
+                                                      : SHADOW_SMALL;
+  ActorDrawGroundShadow(obj, obj.motionFlags, e.w, e.d, top);
 }

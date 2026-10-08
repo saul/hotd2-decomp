@@ -1,5 +1,5 @@
 /**
- * Class 0x16 -- **the water-wave field**, and the one routine that reads it.
+ * Class 0x16 -- **the water-wave field**, and the routine that reads it.
  *
  * `WaterFieldCreate` (`FUN_00442290`) is the class's whole handler: it points
  * `g_water_wave_field` (`0x007DCC4C`) at a fresh 0x2C-byte block with no
@@ -8,12 +8,14 @@
  * `WaterFieldSampleHeight` (`FUN_00442390`) is the surface height at a point:
  * the plane plus every live source's wave.
  *
- * Four shipped spawns, all stage 2's boss blocks: 35 and 39 at
- * `y = -25.5007` with two sources after them, 37 and 41 at `y = -25.0` with
- * none. Stage 5's cameo places none, and its boss never summons. Its readers
- * are all class 0x14's: the two summoning rounds seat each fish under the
+ * Two descriptors, all stage 2's boss blocks: evt 83976 at `y = -25.5007`
+ * with two sources after it, spawned by blocks 16 and 20 (the two run-ups into
+ * the arena) and 35 and 39, and evt 87584 at `y = -25.0` with none, by 37 and
+ * 41. Stage 5's cameo places none, and its boss never summons. Its readers
+ * are class 0x14's -- the two summoning rounds seat each fish under the
  * surface this returns, `Class14StateScriptedBreak` stands the boss on it, and
- * the deaths ride it.
+ * the deaths ride it -- and class 0x15's planks, `FloatingPropUpdate`
+ * (`FUN_004418C0`), which float on it, each spawned two ops after the field.
  */
 import { CountFlag, type Actor } from "../actor";
 import { ActorDespawn } from "../despawn";
@@ -72,7 +74,8 @@ export function WaterFieldSampleHeight(p: Vec3): number {
   const field = G.g_water_wave_field;
   // [port-only] The engine dereferences the pointer unconditionally. No
   // shipped block reaches a sampler without a field -- stage 5's boss is the
-  // only class-0x14 spawn with none, and none of its states samples -- so
+  // only class-0x14 spawn with none, and none of its states samples; every
+  // class-0x15 row follows a field in its own step -- so
   // this is a guard against a port state the game cannot enter, not a value
   // the game has.
   if (!field) return 0;

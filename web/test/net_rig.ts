@@ -179,7 +179,7 @@ export function buildHost(stage: number) {
     onFeed: () => undefined, onBranch: () => undefined, playSound: () => undefined,
     aliveEnemies: () => null, presentEnemies: () => null, aliveCivilians: () => null,
     scriptFlagRaised: () => null, cameraFree: () => null,
-    showMessage: () => null, endDialogue: () => undefined,
+    showMessage: () => null,
   });
   scriptSys.walker = walker;
   ctx.walker = walker;
@@ -210,7 +210,7 @@ export function buildHost(stage: number) {
         if (b1) w.takeBranch(b1.targets[0]);
       }
       syncPortGlobals(w, false, ctx.view.eye);
-      syncCharacterSpawns(pool as never, w.spawns, ctx.events);
+      syncCharacterSpawns(pool as never, w.spawns);
       G.g_pad_state = padLatch;
       padLatch = 0;
       world.update(ctx, LIVE);

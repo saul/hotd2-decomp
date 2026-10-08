@@ -49,6 +49,10 @@ import {
   MatrixRotateZ, MatrixScale, MatrixToEulerZYX, MatrixTransformPoint,
   MatrixTranslate, type Mat,
 } from "./matrix";
+import { CarrierMatrixCompose } from "./carrier";
+import { ActorByAt, G } from "./globals";
+import { ActorDrawShadow, DrawRecordSlot } from "./model_draw";
+import { SkeletonNodeDrawSuppressed } from "./parts";
 import { CharacterTypeOf, MotionOf, MotionPlayLength } from "./tables";
 import type { Vec3 } from "./vec";
 
@@ -126,6 +130,15 @@ export interface SkeletonModel {
   order: number;
   /** `+0x1160..+0x1168` — the root-motion baseline. */
   baseline: number[];
+  /**
+   * `+0x1158` — the node draw hook, as the address the class's `Init`
+   * stores there (`obj+0x12EC`): `NoOpStub` (`0x0041EBB0`) for class 0x14,
+   * whose draw is its own routine's, and `Class32DrawBonePart`
+   * (`0x0047F780`) for class 0x32. {@link SkeletonEmitNode} calls the one
+   * {@link RegisterSkeletonNodeHook} filed under that address. A number, so
+   * the block survives a snapshot.
+   */
+  hook: number;
   /** The bone records, indexed by bone. */
   bones: SkeletonBone[];
   /**
@@ -144,13 +157,29 @@ export function MakeSkeletonModel(bones: number, order: number): SkeletonModel {
     counter: 0, cursor: 0, prevFrame: 0, frame: 0, motion: 0,
     weightOrigin: 0, weightDiv: 0, flags: 0,
     rootA: [0, 0, 0], rootB: [0, 0, 0], rootCur: [0, 0, 0],
-    order, baseline: [0, 0, 0],
+    order, baseline: [0, 0, 0], hook: 0,
     bones: Array.from({ length: bones }, () => ({
       a: [0, 0, 0], sa: [0, 0, 0], sb: [0, 0, 0], mat: MatIdentity(),
       hit: [0, 0, 0],
     })),
     rootMat: MatIdentity(),
   };
+}
+
+/**
+ * `[port-only]` The node draw hooks a class installs at `model+0x1158`, by
+ * the address it stores. The engine calls through the pointer; the port
+ * keeps the address in the block and looks the routine up here, which the
+ * class's own module fills (so this file imports no class).
+ */
+const NODE_HOOKS = new Map<number, (obj: Actor, bone: number,
+                                    slot: number) => void>();
+
+/** `[port-only]` File a class's node draw hook under the address its `Init` stores. */
+export function RegisterSkeletonNodeHook(
+    address: number, hook: (obj: Actor, bone: number, slot: number) => void):
+    void {
+  NODE_HOOKS.set(address, hook);
 }
 
 /** The skeleton tree of the actor's type, from the bundle's bone table. */
@@ -584,6 +613,17 @@ function SkeletonEmitNode(obj: Actor, skel: SkeletonModel, tree: SkeletonTree,
   MatrixRotateX(top, a[0]);
   R.a = a;
   MatCopy(R.mat, top);
+  // `CALL dword ptr [EDX + 0x1158]` at `0x00411523` -- the node draw hook,
+  // while the record has a slot, the model is drawn and
+  // `SkeletonNodeDrawSuppressed` does not veto it. **Before** this node's own
+  // hit centre and camera point below: a hook that reads a record's `+0x68`
+  // reads this frame's for the nodes the walk has already passed and the
+  // last frame's for this node and the ones after it.
+  const slot = DrawRecordSlot(obj, bone);
+  if (slot !== 0 && (obj.motionFlags & MotionFlag.Drawn)
+      && !SkeletonNodeDrawSuppressed(obj, bone, slot)) {
+    NODE_HOOKS.get(skel.hook)?.(obj, bone, slot);
+  }
   // `CMP [R], 0` (the record has a slot) `&& model+0x64 & 1` (drawn): the
   // tracked bone's world translation into `obj+0x100`, then the hit centre.
   // Bone 1 for a type outside 0..0x14; the humanoid rules for 2 and 9 do not
@@ -631,14 +671,53 @@ function SkeletonDrawWalk(obj: Actor, skel: SkeletonModel): void {
 }
 
 /**
- * `DrawSkinnedModelAndShadow` — `FUN_00411090`. `MatrixStackPush;
- * SkeletonDrawWalk; MatrixStackPop; ActorDrawShadow` -- the pose, and a
- * shadow the renderer draws. Does nothing for an actor without the block.
+ * `DrawSkinnedModelAndShadow` — `FUN_00411090`. Four calls:
+ *
+ * ```
+ * 00411092  CALL 0x004a9880        ; MatrixStackPush(0)
+ * 004110a6  CALL 0x004110d0        ; SkeletonDrawWalk(model, pos, nodes)
+ * 004110ad  CALL 0x004a9840        ; MatrixStackPop(1)
+ * 004110b2  MOV  EAX, [0x009a26a0] ; g_cur_actor
+ * 004110b8  CALL 0x0040a590        ; ActorDrawShadow(g_cur_actor)
+ * ```
+ *
+ * `[proved]`. The pose is this file's for an actor that carries the
+ * engine's model block and `render/`'s for every other; the shadow is
+ * {@link ActorDrawShadow}'s for all of them, and it is **`g_cur_actor`'s**,
+ * not the model's owner's. At each of the 52 call sites in the image the
+ * routine that calls it, or the update that called that, has just pointed
+ * `g_cur_actor` at the object it draws -- class 0x22's and class 0x2D's
+ * sub-actors are pointed at by name before their own draws -- so the two are
+ * the same object everywhere the port reaches.
+ *
+ * **What is on the stack above the view** is the caller's, and the disc is
+ * drawn under it. Every call site makes the call with nothing pushed except
+ * three that ride: `CivilianUpdateOnCarrier` (`FUN_0048B140`) and
+ * `CarriedZombieUpdate18` (`FUN_0045CD90`) push the carrier's `T Rx Rz Ry`
+ * around the whole update, and `Boss4AdvanceMotionAndDrawHeldProps`
+ * (`FUN_00492620`) around its draw while the boss is on one. The port's
+ * stand-in for that push is the rider's {@link Actor.carrierAt}, which is
+ * set exactly while each of the three is in the carrier's frame; the
+ * composition is `game/carrier.ts`'s.
  */
 export function DrawSkinnedModelAndShadow(obj: Actor): void {
-  if (!obj.skel) return;
-  SkeletonDrawWalk(obj, obj.skel);
-  obj.motion = obj.skel.motion;
+  if (obj.skel) {
+    SkeletonDrawWalk(obj, obj.skel);
+    obj.motion = obj.skel.motion;
+  }
+  // `[port-only]` the pointer's lookup: the engine's `g_cur_actor` is the
+  // object, the port's is its spawn address. And `ActorKill`'s `_longjmp`:
+  // the engine's update ends at a despawn, so a despawned object's update
+  // draws nothing more; the port's runs on, and stops drawing here.
+  const cur = G.g_cur_actor === obj.at ? obj : ActorByAt(G.g_cur_actor);
+  if (!cur || cur.despawned) return;
+  const carrier = cur.carrierAt >= 0 ? ActorByAt(cur.carrierAt) : undefined;
+  let top: Mat | null = null;
+  if (carrier && !carrier.despawned) {
+    top = MatIdentity();
+    CarrierMatrixCompose(top, carrier);
+  }
+  ActorDrawShadow(cur, top);
 }
 
 /**

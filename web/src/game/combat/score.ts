@@ -8,25 +8,57 @@
  */
 import type { Events } from "../../core/events";
 import { G } from "../globals";
+import { GameMode } from "../game_mode";
 
 /**
  * `ScoreAddForPlayer` — `FUN_004156C0`. Add `points` to one player's running
  * total, `g_player_score` (`0x009A5C6C`), **floored at zero**: a penalty
  * never takes a score below 0.
  *
- * `[diverges]` In Original Mode the engine doubles `points` while the byte at
- * `0x009A2243 + player*0x14` is 2 -- the fourth byte of the Original Mode
- * block `g_original_item_slots` starts, which the port does not carry. The
- * score popup it also drives is the HUD's.
+ * In Original Mode `points` is doubled first while the player's
+ * `g_original_score_multiplier` (`0x009A2243 + player*0x14`) is 2 -- DOUBLE
+ * SCORE's -- penalties included, since the test is on the byte and not the
+ * sign.
  */
 export function ScoreAddForPlayer(player: number, points: number,
                                   events?: Events): void {
   if (player < 0 || player >= G.g_player_score.length) return;
+  if (G.g_GameMode === GameMode.Original
+      && G.g_original_score_multiplier[player] === 2) {
+    points = points * 2;
+  }
   G.g_player_score[player] += points;
   if (G.g_player_score[player] < 0) G.g_player_score[player] = 0;
   events?.emit("player.score", {
     player, points, score: G.g_player_score[player],
   });
+}
+
+/**
+ * The score floors `ScoreRankForPlayer` steps down through: `CMP EAX, imm`
+ * at `0x0043621C`, `26`, `33`, `40`, `4D` and `5A`, each a `JL` past its
+ * rank, and the last rank's `CMP EAX, 0x5DC0` / `SETL` at `0x00436269`.
+ */
+const SCORE_RANK_FLOORS = [80000, 72000, 64000, 56000, 46000, 36000] as const;
+const SCORE_RANK_LAST_FLOOR = 24000;
+
+/**
+ * `ScoreRankForPlayer` — `FUN_00436200`. A player's score as a rank, 0 the
+ * best: one rank for each of {@link SCORE_RANK_FLOORS} the score is not below,
+ * then 6, or 7 below {@link SCORE_RANK_LAST_FLOOR}. Signed compares.
+ *
+ * `mode` is the routine's second argument and the routine does test it
+ * (`CMP ECX, 0x1` at `0x00436211`), but its two arms, `0x0043621C` and
+ * `0x00436277`, are the same seven compares against the same seven
+ * immediates, instruction for instruction -- so it changes nothing and the
+ * port has one copy of them. Kept as a parameter because both callers pass it.
+ */
+export function ScoreRankForPlayer(player: number, _mode: number): number {
+  const score = G.g_player_score[player];
+  for (let rank = 0; rank < SCORE_RANK_FLOORS.length; rank++) {
+    if (score >= SCORE_RANK_FLOORS[rank]) return rank;
+  }
+  return SCORE_RANK_FLOORS.length + (score < SCORE_RANK_LAST_FLOOR ? 1 : 0);
 }
 
 /*

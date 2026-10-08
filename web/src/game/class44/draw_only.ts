@@ -116,3 +116,52 @@ export function PropDrawOnlySelector14(p: BreakableProp): void {
   MatrixScale(m, p.restX, p.restY, p.restZ);
   PropDrawSlot(p, m, p.slot);
 }
+
+/**
+ * `PropBuildSlotStripLoop` — `FUN_00473370`. `g_class44_subtypes[10]`.
+ *
+ * Five spawns, all stage 3's (`0x9164`..`0x9274`, blocks 11 and 15): the
+ * object class 0x41 type 31 builds, from a class-0x44 descriptor --
+ * `ActorAlloc(PropDrawOnlyType31, 0x378)`, so it runs
+ * `class41/draw_only.ts`'s routine, a slot strip played as a loop.
+ *
+ * ```c
+ * obj->+0x19C..0x1A4 = desc->+0x40..0x48;  obj->+0x1D0 = desc->+0x68;
+ * obj->+0x196 = (u8)g_evt_step_index;  obj->+0x197 = 0;
+ * obj->+0x2A4 = desc->+0x6C;                          // the strip's last cursor
+ * obj->+0x11C = (u16)tail->+0x00;                     // the lifetime, in steps
+ * obj->+0x28C = (u16)tail->+0x04;                     // the strip's first slot
+ * obj->+0x1A8..0x1B0 = tail->+0x14..0x1C;             // the scale, three f32
+ * ```
+ *
+ * `[proved]`. Unlike `PlaceGenericProp`'s arm for type 31 it writes neither
+ * `obj+0x1CC` nor `obj+0x1D4`, so the pitch and roll the routine rotates by
+ * stay zero, and the scale is the descriptor's rather than 1.0. The shipped
+ * five draw `0x1874`..`0x1891` with a lifetime of 0 -- gone at the first step
+ * boundary. All five are placed in block 11 (and again in block 15), and in
+ * scene 2's block 11 the routine draws its second strip,
+ * `0x1797`..`0x179D`, twice more.
+ */
+export function PropBuildSlotStripLoop(pl: BreakablePlacement): BreakableProp {
+  const p = makeBreakableProp(G.g_breakable_next_id++, 0, 0);
+  p.family = PropFamily.DrawOnlyType31;
+  p.at = pl.at;
+  p.state = BreakableState.Standing;
+  p.x = Math.fround(pl.pos?.[0] ?? 0);
+  p.y = Math.fround(pl.pos?.[1] ?? 0);
+  p.z = Math.fround(pl.pos?.[2] ?? 0);
+  p.yaw = pl.yaw ?? 0;
+  p.lastStepIndex = G.g_evt_step_index;
+  p.stepsElapsed = 0;
+  // `obj+0x2A4` is the strip's last cursor here, and `obj+0x2A0` its cursor
+  // -- the fields `PropDrawOnlyType31` reads as `removeFlag`/`storyItem`.
+  p.removeFlag = pl.roll ?? 0;
+  p.storyItem = 0;
+  p.lifetime = pl.lifetime_evt_steps;
+  p.slot = pl.slot ?? 0;
+  p.restX = Math.fround(pl.scale?.[0] ?? 0);
+  p.restY = Math.fround(pl.scale?.[1] ?? 0);
+  p.restZ = Math.fround(pl.scale?.[2] ?? 0);
+  p.hitRadius = 0;
+  return p;
+}

@@ -134,7 +134,7 @@ const mkHost = () => ({
   aliveCivilians: () => G.g_civilians_alive,
   scriptFlagRaised: (i) => (G.g_script_flags[i] ?? 0) !== 0,
   cameraFree: () => G.g_camera_free !== 0,
-  showMessage: () => null, endDialogue: () => undefined,
+  showMessage: () => null,
 });
 
 for (const [name, stage, block, step] of CASES) {
@@ -216,8 +216,8 @@ for (const [name, stage, block, step] of CASES) {
       reqs.push({ at: s.at, motion: pl.motion ?? 0,
                   pos: { x: pos[0], y: pos[1], z: pos[2] } });
     }
-    SpawnScriptedCharacters(reqs, ctx.rng);
-    SpawnSlotActors(walker.spawns, ctx.rng);
+    SpawnScriptedCharacters(reqs);
+    SpawnSlotActors(walker.spawns);
   };
   seat();
 

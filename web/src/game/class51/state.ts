@@ -44,6 +44,16 @@ export enum FishState {
   Sink = 5,
 }
 
+/**
+ * `[port-only]` — `sub+0x62` never takes this value.
+ *
+ * `FishBeginSwimAway` (`FUN_00439BF0`) leaves the state where it was and
+ * writes `*obj = FishSwimAwayTick` instead, which is a thing a
+ * {@link ClassHandler} with one `update` cannot do. This flag stands in for
+ * that write and nothing else. It and the two swim-away draw records are the
+ * only fields in the block the engine has no room for.
+ */
+
 /** `sub+0x6A` — the three bits the class keeps there. */
 export enum FishFlag {
   /**
@@ -142,25 +152,20 @@ export interface FishTail {
   /** `sub+0x80` — sub-type 2's sideways swing, ±2, drawn once per lunge. */
   swing: number;            // +0x80
   /**
-   * `[port-only]` — `FishBeginSwimAway` (`FUN_00439BF0`) has installed
-   * `FishSwimAwayTick` (`FUN_00439C20`) at `*obj`.
-   *
-   * The engine leaves `sub+0x62` where it was and swaps the object's routine
-   * instead, which a `ClassHandler` with one `update` cannot do; this flag
-   * stands in for that write and nothing else, and `FishUpdate` reads it
-   * first. It and the two below are the only fields the engine has no room
-   * for.
+   * `[port-only]` — `FishBeginSwimAway` has installed `FishSwimAwayTick`.
+   * See the note above {@link FishTail}.
    */
   swimAway: boolean;
   /**
-   * `[port-only]` -- the strip frame (`sub+0x6E`) and the size (`sub+0x28`)
-   * `FishSwimAwayTick` drew with this frame. The routine draws in the middle
-   * and steps both after, so what the frame shows is not what the block
-   * holds at its end; `render/fish.ts` reads these for a fish swimming away,
-   * as `render/worm.ts` reads the worm's own record of its draws.
+   * `[port-only]` — the strip frame and the silhouette scale
+   * `FishSwimAwayTick` (`FUN_00439C20`) drew with, before it stepped both.
+   * The engine draws inside the tick, between the move and the steps; the
+   * port's draw is `render/fish.ts`, after the tick, so the tick writes down
+   * what its draw read -- the arrangement `game/class42/`'s `drawnBody`
+   * has for the same reason.
    */
-  drawnFrame: number;
-  drawnScale: number;
+  swimDrawFrame: number;
+  swimDrawScale: number;
 }
 
 /**
@@ -180,6 +185,6 @@ export function makeFishTail(): FishTail {
     state: FishState.Rise, timer: 0, bobPhase: 0, flags: 0, subtype: 0,
     frame: 0, lastFrame: 0, firstFrame: 0, lungeStep: 0, slot: -1,
     bobCycles: 0, bobCycle: 0, riseFrames: 0, lungeFrames: 0, swing: 0,
-    swimAway: false, drawnFrame: 0, drawnScale: 0,
+    swimAway: false, swimDrawFrame: 0, swimDrawScale: 0,
   };
 }

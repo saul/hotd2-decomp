@@ -37,9 +37,11 @@ export interface DistanceRankEntry {
 }
 
 /**
- * `[port-only]` -- `obj+0x34 & 1`, the bit both rank routines test first. The
- * port does not model it; "in the pool and drawn" is its stand-in, as it was
- * when the registration test lived here.
+ * `[port-only]` -- `obj+0x34 & 1`, the bit both rank routines test first.
+ * The port keeps it as `ActorFlag.Live` at every spawn and despawn and at a
+ * class-0x30 corpse, but not yet at every clear the other classes make, so
+ * "in the pool and drawn" is still its stand-in here, as it was when the
+ * registration test lived here.
  */
 function RankLive(obj: Actor | undefined): obj is Actor {
   return obj !== undefined && !obj.despawned && obj.visible;

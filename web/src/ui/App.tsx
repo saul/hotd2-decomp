@@ -78,12 +78,11 @@ const TOGGLE_KEYS: ReadonlyMap<string, ToggleSpec> =
 export interface UiHost {
   canvas: HTMLCanvasElement;
   viewport: HTMLElement;
-  /** `.hud-layer` and its four children; see `hud/hud.ts`. */
+  /** `.hud-layer` and its three children; see `hud/hud.ts`. */
   hud: {
     root: HTMLElement;
     top: HTMLElement;
     bottom: HTMLElement;
-    message: HTMLElement;
     screen: HTMLCanvasElement;
   };
   /** `.crosshair`; see `render/shooting.ts`. */
@@ -179,7 +178,6 @@ function Page(
   const hud = useRef<HTMLDivElement>(null);
   const shutterTop = useRef<HTMLDivElement>(null);
   const shutterBottom = useRef<HTMLDivElement>(null);
-  const message = useRef<HTMLDivElement>(null);
   const screen = useRef<HTMLCanvasElement>(null);
   const crosshair = useRef<HTMLDivElement>(null);
 
@@ -193,15 +191,14 @@ function Page(
   // are all present; if that ever stops being true this fires never rather
   // than half.
   useEffect(() => {
-    const [c, v, h, t, b, m, s, x] = [
+    const [c, v, h, t, b, s, x] = [
       canvas.current, viewport.current, hud.current, shutterTop.current,
-      shutterBottom.current, message.current, screen.current,
-      crosshair.current,
+      shutterBottom.current, screen.current, crosshair.current,
     ];
-    if (c && v && h && t && b && m && s && x) {
+    if (c && v && h && t && b && s && x) {
       onHost({
         canvas: c, viewport: v, crosshair: x,
-        hud: { root: h, top: t, bottom: b, message: m, screen: s },
+        hud: { root: h, top: t, bottom: b, screen: s },
       });
     }
   }, [onHost]);
@@ -273,7 +270,7 @@ function Page(
               the classes do -- which is the property that keeps it mounted
               for the session. */}
           <Viewport refs={{ host: viewport, hud, shutterTop, shutterBottom,
-                            message, screen, crosshair }}>
+                            screen, crosshair }}>
             <canvas id="view" ref={canvas} />
             {/* The boundary goes round the overlay and never round
                 `#viewport` or `#view`: `app/` was handed those two for the

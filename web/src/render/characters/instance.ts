@@ -6,7 +6,7 @@
  * whose state is the port's and goes in the snapshot — or three.js nodes,
  * which are the renderer's and do not.
  */
-import type { Group, Mesh, Object3D } from "three";
+import type { Group, Matrix4, Mesh, Object3D } from "three";
 import type { Actor } from "../../game/actor";
 import type { BakedMotion, CharacterType } from "../../bundle";
 import type { CelRunNode } from "./cels";
@@ -38,6 +38,12 @@ export interface GoreSwap {
   keep: Mesh | null;
   /** Nodes the swap parented to the bone. Removed when it is undone. */
   added: Object3D[];
+  /**
+   * A multi-primitive bone's own primitives the first swap hid, shown again
+   * when it is undone. Absent for a single-primitive bone, which hides
+   * nothing.
+   */
+  hidden?: Object3D[];
 }
 
 export interface Instance {
@@ -82,6 +88,15 @@ export interface Instance {
    */
   slots?: Record<string, number>;
   /**
+   * The model each bone's node shows **instead of** its record this frame,
+   * by bone, as `a.nodeDrawSlot` says a class's node hook drew it -- a
+   * talking head's mouth cel. Render bookkeeping like {@link slots}, and kept
+   * apart from it because the record underneath has not changed: when the
+   * hook draws the record again the node goes back to {@link slots}' model,
+   * or to its own.
+   */
+  drawnSlots?: Record<number, number>;
+  /**
    * The class-0x10 civilian that built this actor, for the fifty captors whose
    * descriptors the walker never sees. They come and go with their parent.
    */
@@ -106,6 +121,13 @@ export interface Instance {
    * `headAimed` and yaw. See `render/characters/head_aim.ts`.
    */
   headTurn?: HeadTurn;
+  /**
+   * A civilian's head as this frame posed it, before `CivilianDrawBonePart`
+   * (`FUN_0048D1F0`) stored its turn over it: the record the hook reads,
+   * which `GameHost.bonePoseMatrix` hands the port. See
+   * `render/characters/civilian_head.ts`.
+   */
+  headPose?: Matrix4;
   /**
    * The exporter's `part<i>_<slot>` nodes — the vertex-blended parts, which
    * are not bones — by part index. Found once by name; render bookkeeping.
@@ -180,4 +202,17 @@ export interface Instance {
   resultLife?: Object3D | null;
   /** The figure's scaled nodes' meshes carry their push and pop. */
   resultScaleHooked?: boolean;
+  /**
+   * The models `Class32DrawBonePart` (`FUN_0047F780`) draws on a class-0x32
+   * node besides the node's own, by `"<bone>:<index in the node's draws>"`,
+   * with the slot each was cloned for. Render bookkeeping, rebuilt from
+   * `Boss5Tail.nodeDraws` every frame. See `render/characters/boss5.ts`.
+   */
+  boss5Draws?: Map<string, { node: Object3D; slot: number }>;
+  /**
+   * The golden frog's score strip, the slot it was cloned for and the clone
+   * (null when the bundle has no template for it). Render bookkeeping. See
+   * `render/characters/golden_frog.ts`.
+   */
+  frogStrip?: { slot: number; node: Object3D | null };
 }

@@ -48,7 +48,8 @@ import type { Rng } from "../../core/rng";
 import { ticksOfAuthoredFrame } from "../../core/play_cursor";
 import type { Actor, SetPiecePropActor } from "../actor";
 import { ActorBindPartList } from "../attachments";
-import { G } from "../globals";
+import { G, ScreenFurniture } from "../globals";
+import { DrawSkinnedModelAndShadow } from "../skeleton";
 import {
   registerClass, type ClassFrame, type ClassHandler,
 } from "../registry";
@@ -244,12 +245,16 @@ export function SetPiecePropUpdate(obj: SetPiecePropActor, f: ClassFrame): void 
       break;
   }
 
-  // `SetPiecePropDrawAndTick`'s tail — `if (obj+0x1324 == 0) obj+0x194++` —
-  // is `ActorAdvanceMotion`, which returns early on `frozen`. Nothing to do
-  // here but leave the flag where the states put it. The routine's chapter-
-  // card test (`ScreenFurniture.ChapterCard`, `0x004834FB`) is no gate on
-  // this: its `JNZ 0x00483520` steps over the skeleton draw alone, so the
-  // tick runs while a card is up. The draw is the renderer's.
+  // `SetPiecePropDrawAndTick` (`FUN_004834F0`): the skeleton draw, which is
+  // the renderer's but for its ground shadow, under `g_cur_actor` -- every
+  // state of the six points it at the prop on its first line. Its
+  // chapter-card test (`TEST AL, 0x20` at `0x004834FB`) steps over that draw
+  // alone: the `JNZ 0x00483520` lands on the tick, so the clock runs while a
+  // card is up. The tick -- `if (obj+0x1324 == 0) obj+0x194++` -- is
+  // `ActorAdvanceMotion`, which returns early on `frozen`.
+  if ((G.g_screen_furniture_flags & ScreenFurniture.ChapterCard) === 0) {
+    DrawSkinnedModelAndShadow(obj);
+  }
 
   // Three of the six freeze again on the motion's last frame.
   if (obj.prop.selector === SetPieceState.DropToGround

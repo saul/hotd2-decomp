@@ -76,6 +76,19 @@ export function envMapped(s: Strip): boolean {
 }
 
 /**
+ * Whether `ModelUVsFromViewNormals` (`FUN_004AA400`) rewrites this mesh's
+ * UVs when a routine calls `AssetSlotUVsFromViewNormals` (`FUN_00418660`) on
+ * its slot: the model's flag word (`+0x04`) lacks `0x10`, and the strip sets
+ * bit 8. The routine tests each strip; no mesh in the game mixes bit-8 strips
+ * with others (all 2,976 sit in meshes whose every strip sets it), so a mesh
+ * answers for its strips. See `docs/formats/nl1.md`.
+ */
+export function envUvRewritten(model: Model, mesh: Mesh): boolean {
+  return (model.globalFlag & 0x10) === 0 && mesh.strips.length > 0
+    && mesh.strips.every(envMapped);
+}
+
+/**
  * One mesh of a model, with its PowerVR2 render state decoded.
  *
  * A class rather than a record because it is twenty-odd accessors over four
@@ -110,7 +123,38 @@ export class Mesh {
     readonly shading: number,
     readonly baseColour: Vec4,          // A R G B
     readonly offsetColour: Vec4,
+    /**
+     * `+0x28`, the scale `D3DMATERIAL7.ambient` is built with:
+     * `WalkMeshChainAndDraw` (`FUN_004A7EF0`) sets the material's ambient to
+     * this times the base colour, per channel (`0x007E78E0..E8 =
+     * mesh[10] * mesh[0xC..0xE]`), and its diffuse to the base colour
+     * itself. Read as a plain float, which is how the exe reads it. `[proved]`
+     */
+    readonly texAmbient: number = 1,
   ) {}
+
+  /**
+   * `D3DMATERIAL7.power`: `1 << shading` when the shading word at `+0x24` is
+   * at least 1, else 0 -- `(int)mesh[9] < 1` stores 0.0, otherwise
+   * `(float)(1 << (mesh[9] & 31))`, and a power of 0.0 zeroes the specular
+   * too (`0x004A8034`..`0x004A805B`). So the "shading mode" word is the
+   * specular exponent's log2 on this port, and -1/0 mean no highlight.
+   * `[proved]`
+   */
+  get specularPower(): number {
+    return this.shading < 1 ? 0 : 2 ** (this.shading & 31);
+  }
+
+  /**
+   * `D3DMATERIAL7.specular`: the offset colour's R, G, B (`+0x40..+0x48`)
+   * whenever {@link specularPower} is non-zero, and black otherwise. The
+   * offset alpha (`+0x3C`, a palette index on PAL meshes) is not read.
+   * `[proved]`
+   */
+  get specularColour(): [number, number, number] {
+    if (this.specularPower === 0) return [0, 0, 0];
+    return [this.offsetColour[1], this.offsetColour[2], this.offsetColour[3]];
+  }
 
   get textureWidth(): number { return 8 << ((this.tsp >> 3) & 7); }
   get textureHeight(): number { return 8 << (this.tsp & 7); }
@@ -371,6 +415,7 @@ export function parse(b: Uint8Array, off = 0, strict = false): Model {
       vec3(b, hdr + 0x10), rf32(b, hdr + 0x1c), texId, shading,
       [0, 1, 2, 3].map((i) => rf32(b, hdr + 0x2c + 4 * i)) as Vec4,
       [0, 1, 2, 3].map((i) => rf32(b, hdr + 0x3c + 4 * i)) as Vec4,
+      rf32(b, hdr + 0x28),
     );
 
     pos = hdr + MESH_HEADER;

@@ -11,6 +11,9 @@
 import { RequestAppState } from "./app_state";
 import { CreditCount, CreditsAvailable } from "./credits";
 import { GameMode } from "./game_mode";
+import {
+  CH_AMBIENT, CH_FOG_FAR, CH_FOG_NEAR, CH_FOG_R, CH_LIGHT_R,
+} from "./light_block";
 import { AppState, G } from "./globals";
 import { PlayerState, RunPhase } from "./player_state";
 import { IsDemoRun, PlayerResumeContinue, g_player_state_handlers }
@@ -141,12 +144,13 @@ export function ResetDamageRank(): void {
 /**
  * `ResetGameOnStart` — `FUN_0045FEF0`, run phase 0, the rank half.
  *
- * `[diverges]` The rest of the routine -- the scene and block index, the
- * Original Mode loadout, the civilian and route tallies, `LoadSceneAndReset`
- * -- is the app's stage load, which the port has already done by the time the
- * first frame runs. The engine spends this frame on the load and runs the
- * tasks on the next; the port runs phase 2 on the same frame, so a game's
- * first frame is the one it always was.
+ * `[diverges]` The rest of the routine -- the scene and block index,
+ * `LoadSceneAndReset` -- is the app's stage load, which the port has already
+ * done by the time the first frame runs; the Original Mode loadout and the
+ * civilian and route tallies are `ResetGameGlobals`' new-game arm, because
+ * the player enters play there. The engine spends this frame on the load and
+ * runs the tasks on the next; the port runs phase 2 on the same frame, so a
+ * game's first frame is the one it always was.
  */
 export function ResetGameOnStart(walk: () => void): void {
   ResetDamageRank();
@@ -242,12 +246,38 @@ export function RunPhaseContinueCountdown(walk: () => void): void {
   }
 }
 
+/** `0xC4160000`, `0x44E10000`: the red fog's near and far. */
+const NO_CONTINUE_FOG_NEAR = -600;
+const NO_CONTINUE_FOG_FAR = 1800;
+/** `0x3F800000`, `0x3E4CCCCD`, `0x3DCCCCCD`: both blocks' light colour. */
+const NO_CONTINUE_LIGHT = [1.0, Math.fround(0.2), Math.fround(0.1)];
+
 /**
- * `RunPhaseNoContinue` — `FUN_00460250`, phase 11. Turns the fog red (the
- * renderer's, not carried), zeroes the frame count, steps to phase 12 and
- * falls straight into it.
+ * `RunPhaseNoContinue` — `FUN_00460250`, phase 11.
+ *
+ * ```
+ * block 0: fog colour (255, 0, 0), fog near -600, far 1800,
+ *          colour (1.0, 0.2, 0.1)
+ * block 1: colour (1.0, 0.2, 0.1), ambient 1.0
+ * g_no_continue_frames = 0; g_nRunPhase += 1; RunPhaseNoContinueWait()
+ * ```
+ *
+ * Each block word is stored with its tween slot's `cur` beside it and no
+ * slot's `enabled` word touched; the port's `cur` is the word itself.
  */
 export function RunPhaseNoContinue(walk: () => void): void {
+  const c0 = G.g_scene_light_block0.channels;
+  c0[CH_FOG_R] = 0xff;
+  c0[CH_FOG_R + 1] = 0;
+  c0[CH_FOG_R + 2] = 0;
+  c0[CH_FOG_NEAR] = NO_CONTINUE_FOG_NEAR;
+  c0[CH_FOG_FAR] = NO_CONTINUE_FOG_FAR;
+  const c1 = G.g_scene_light_block1.channels;
+  for (let i = 0; i < 3; i++) {
+    c0[CH_LIGHT_R + i] = NO_CONTINUE_LIGHT[i];
+    c1[CH_LIGHT_R + i] = NO_CONTINUE_LIGHT[i];
+  }
+  c1[CH_AMBIENT] = 1.0;
   G.g_no_continue_frames = 0;
   G.g_nRunPhase += 1;
   RunPhaseNoContinueWait(walk);

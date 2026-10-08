@@ -166,12 +166,14 @@ const TYPE53_STRIP_B_SCALE = 7.0;
  *
  * The scene-2 block-11 pair is a seven-frame strip on the scene clock, the
  * first 55.125 below the prop's own draw and the second turned half round and
- * 3.0 further along, both under the prop's scale. **No shipped spawn reaches
- * it** `[proved]` from the bundle's route table: scene 2 is stage 3, whose
- * three type-31 spawns are placed in block 4, and block 4 routes only to 5
- * or 10, which both go to 6 and then to block 13's end; block 11 is reached
- * only along `0 -> 1 -> 2 -> 11`. It is transcribed anyway, because it is the
- * routine; its slots `0x1797..0x179D` do not travel in the bundle.
+ * 3.0 further along, both under the prop's scale. **No class-0x41 spawn
+ * reaches it** `[proved]` from the bundle's route table: scene 2 is stage 3,
+ * whose three type-31 spawns are placed in block 4, and block 4 routes only
+ * to 5 or 10, which both go to 6 and then to block 13's end. **Class 0x44
+ * selector 10's do**: `PropBuildSlotStripLoop` (`FUN_00473370`) hands
+ * `ActorAlloc` this routine, and its five stage-3 descriptors are placed in
+ * block 11 (and again in block 15; `class44/draw_only.ts`). So the slots
+ * `0x1797..0x179D` travel with scene 2's bundle.
  *
  * No `AND` on `obj+0x34` and no `RegisterForShotTest`.
  * `MaxOfThreeToNoOpStub` (`FUN_00461C20`) hands the largest of its three

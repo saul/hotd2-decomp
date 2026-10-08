@@ -94,7 +94,6 @@ const walker = new Walker(script, {
   scriptFlagRaised: (i) => (G.g_script_flags[i] ?? 0) !== 0,
   cameraFree: () => true,
   showMessage: () => null,
-  endDialogue() {},
 }, { seed: 1 });
 
 seekTo(walker, block, step, 1);

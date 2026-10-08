@@ -10,6 +10,7 @@
 import { i16 } from "./bytes";
 import type { EvtFile, Spawn } from "./evt";
 import type { TargetScript } from "./actorscript";
+import { ZombieState } from "../game/class30/states";
 
 /**
  * Where a class's `Init` reads its **attachment list** pointer from, inside
@@ -163,6 +164,30 @@ export const ENTRY_TAIL_STATES: Record<number, string> = {
   /** `ZombieStateDelayedStrikeInPlace`: s16 delay `+0x04`. */
   32: "delayed_strike",
 };
+
+/**
+ * **The state that reads a class-0x30 spawn's tail past byte 3**, given the
+ * classes running `g_class30_states` and the tail's initial and attack bytes.
+ *
+ * That is the state the spawn starts in, with one exception.
+ * `ZombieStateRideCarrier` (`FUN_00458960`, state 29), the passenger, reads
+ * nothing of the tail but byte 3. It hands over with
+ * `MOVSX CX, byte [EBX + 0x3]; MOV [ESI + 0x1310], CX` at `0x00458A48`, so for
+ * a spawn that starts there every entrance word in the tail is its attack
+ * state's. Stage 2's six boat riders are those spawns: three hand over to
+ * state 26 (`ZombieStateDelayedLeap`, `FUN_004581A0`) and three to state 30
+ * (`ZombieStateArcScriptedEntrance`, `FUN_00458A70`). Keyed on the initial
+ * state, neither decode ran, so the riders had no leap and no arc and walked
+ * straight off their boats.
+ *
+ * Class 0x18 runs the same table (`CarriedZombieUpdate18` calls
+ * `EnemyZombieUpdate`), so the rule is the state's and holds for both.
+ */
+export function entranceTailState(cls: number, initial: number,
+                                  attack: number): number {
+  const zombie = cls === 0x30 || cls === 0x18;
+  return zombie && initial === ZombieState.RideCarrier ? attack : initial;
+}
 
 /**
  * The tail one of {@link ENTRY_TAIL_STATES} reads, or null.
@@ -385,6 +410,8 @@ export class Placement {
   class13: Record<string, unknown> | null = null;
   /** Class 0x12's tail -- the slot strip, its flag, delay and despawn cue. */
   class12: Record<string, unknown> | null = null;
+  /** Class 0x15's tail -- the row of floating planks; see `class15Tail`. */
+  class15: Record<string, unknown> | null = null;
   /** Class 0x18's three -- the state it leaves from and the camera cue. */
   class18: Record<string, unknown> | null = null;
   /** Class 0x26 subtype 2's collision blob -- the boat the player rides. */
@@ -408,6 +435,8 @@ export class Placement {
   class40: Record<string, unknown> | null = null;
   /** Class 0x42's sub-type, `desc+0x25`. See `class42Tail`. */
   class42: Record<string, unknown> | null = null;
+  /** Class 0x29's kill cue, `tail+0x00`/`+0x02`. See `class29Tail`. */
+  class29: Record<string, unknown> | null = null;
   /**
    * The placement this one rides, when it is not a descriptor of its own.
    *
@@ -449,6 +478,8 @@ export class Placement {
   class22: Record<string, unknown> | null = null;
   /** Class 0x23's tail -- JUDGMENT's walker. See `characters.class23Tail`. */
   class23: Record<string, unknown> | null = null;
+  /** Class 0x32's tail -- the stage-5 boss. See `class32.class32Tail`. */
+  class32: Record<string, unknown> | null = null;
   /**
    * Class 0x16 -- the wave field. A marker (`{}`): `WaterFieldCreate` reads
    * no tail, only the spawn's own `y`.
@@ -461,6 +492,13 @@ export class Placement {
    * which of six inits the stage-3 boss's actor runs. See `game/class45/`.
    */
   class45: Record<string, unknown> | null = null;
+  /**
+   * Class 0x2D's tail, `obj+0x1390` -- `{subtype, clip, counter, kill_path,
+   * kill_frame, fight_hp, round2_hp, round3_hp}`, which
+   * `Class2DClassHandler` (`FUN_00426A70`) and the stage-6 boss's states read
+   * through the pointer. See `class2dTail` and `game/class2D/`.
+   */
+  class2d: Record<string, unknown> | null = null;
   /**
    * Class 0x33 **selector 1's** tail -- the draw slot, the `op_` path it
    * rides, and the four cues that raise its two `obj+0x34` bits and take it
@@ -483,6 +521,17 @@ export class Placement {
    * on the same placement as {@link class33} or {@link class33_push}.
    */
   class33_cue: Record<string, unknown> | null = null;
+  /**
+   * Class 0x33 **selectors 6 to 11 and 99**'s tails, each tagged with its
+   * selector -- `class33SubTail`. Never set beside the other blocks.
+   */
+  class33_sub: Record<string, unknown> | null = null;
+  /**
+   * Class 0x33 **selector 2's** tail -- the draw slot, and the camera frame
+   * and script flag `ScriptedPropDrawUntilFlag` leaves on. Selector 2 only,
+   * and never set beside any of the others.
+   */
+  class33_prop: Record<string, unknown> | null = null;
   /**
    * The spawn's attachment list -- `obj+0x1170`, ids into
    * `g_actor_attachment_records`.
@@ -550,6 +599,7 @@ export class Placement {
     if (this.class20) d.class20 = this.class20;
     if (this.class13) d.class13 = this.class13;
     if (this.class12) d.class12 = this.class12;
+    if (this.class15) d.class15 = this.class15;
     if (this.class18) d.class18 = this.class18;
     if (this.class26) d.class26 = this.class26;
     if (this.class19) d.class19 = this.class19;
@@ -559,6 +609,7 @@ export class Placement {
     if (this.class46) d.class46 = this.class46;
     if (this.class40) d.class40 = this.class40;
     if (this.class42) d.class42 = this.class42;
+    if (this.class29) d.class29 = this.class29;
     if (this.parent_at !== null) d.parent_at = this.parent_at;
     if (this.synthetic) d.synthetic = true;
     if (this.player_body !== null) d.player_body = this.player_body;
@@ -570,10 +621,14 @@ export class Placement {
     if (this.class17 !== null) d.class17 = this.class17;
     if (this.class22) d.class22 = this.class22;
     if (this.class23) d.class23 = this.class23;
+    if (this.class32) d.class32 = this.class32;
     if (this.class45) d.class45 = this.class45;
+    if (this.class2d) d.class2d = this.class2d;
     if (this.class33) d.class33 = this.class33;
     if (this.class33_push) d.class33_push = this.class33_push;
     if (this.class33_cue) d.class33_cue = this.class33_cue;
+    if (this.class33_sub) d.class33_sub = this.class33_sub;
+    if (this.class33_prop) d.class33_prop = this.class33_prop;
     if (this.attachments.length) d.attachments = [...this.attachments];
     return d;
   }

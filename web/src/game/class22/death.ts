@@ -16,6 +16,7 @@
  * The orbit at the routine's tail sits past a `MatrixStackPop` Ghidra
  * believes does not return (L35), and was read from the instruction stream.
  */
+import { EvtOpPlayDialogue2D } from "../dialogue";
 import type { JudgmentActor } from "../actor";
 import { ActorSetMotion } from "../class30/motion_cue";
 import { CamBlockSetAnglesFromLookAt, CameraPoseBlock } from "../camera/path";
@@ -259,9 +260,8 @@ function Class22DeathStartFall(obj: JudgmentActor, f: ClassFrame): void {
   const t = obj.judgment;
   if (obj.playTicks >= FALL_START_FRAME) {
     if (t.variant === Class22Variant.Stage1) {
-      // `EvtOpPlayDialogue2D(0x1D)` -- evt op 0x2D's handler, raised the way
-      // every caller of it is raised in the port.
-      f.events?.emit("civilian.dialogue", { at: obj.at, group: DYING_LINE });
+      // `EvtOpPlayDialogue2D(0x1D)` (`FUN_00435B80`) -- evt op 0x2D's handler.
+      EvtOpPlayDialogue2D(DYING_LINE, f.events);
     }
     t.node2Mode = NODE2_FALLING;
     obj.vel.y = 0;

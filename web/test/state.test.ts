@@ -104,7 +104,6 @@ const mkHost = (): WalkerHost => ({
   scriptFlagRaised: () => null,
   cameraFree: () => null,
   showMessage: () => null,
-  endDialogue: () => undefined,
 });
 
 const LIVE: Tick = { dt: TICK, frames: 1, wall: TICK, frozen: false };
@@ -383,6 +382,48 @@ console.log("\nThe drive seam is a metronome and nothing else:\n");
   check("one rAF never runs more than the cap", h.take() === 64,
         `take() said ${h.take()}`);
 }
+{
+  // The stop condition: asked after every frame, and the frame it answers
+  // true on is the last one run -- the rest of what was booked is dropped,
+  // so the driver's promise settles on that frame and the next rAF owes
+  // nothing.
+  let stepped = 0;
+  const h = new Harness({
+    stepOneFrame: () => { stepped++; },
+    wake: () => undefined,
+    get walker() { return null; },
+    rng: new Rng(1),
+  });
+  let asked = 0;
+  let settled = -1;
+  const p = h.advance(100, () => ++asked === 5).then((n) => { settled = n; });
+  check("a stop condition cuts the pump on the frame it holds",
+        h.pump() === 5 && stepped === 5, `stepped ${stepped}`);
+  check("...having been asked once a frame", asked === 5, `${asked} asks`);
+  await p;
+  check("...and the rest of the booking is dropped, not owed",
+        settled === 5 && !h.wants && h.take() === 0, `settled ${settled}`);
+  const q = h.advance(3);
+  check("a later advance without one is not stopped by the old one",
+        h.pump() === 3 && asked === 5, `${asked} asks`);
+  await q;
+}
+{
+  // A finished stage ends the rAF's share -- as it ends the undriven
+  // accumulator's drain -- and the rest stays owed to the next rAF.
+  let stepped = 0;
+  const h = new Harness({
+    stepOneFrame: () => ++stepped < 3,
+    wake: () => undefined,
+    get walker() { return null; },
+    rng: new Rng(1),
+  });
+  void h.advance(10);
+  check("a finished stage ends the rAF's share on its frame",
+        h.pump() === 3 && stepped === 3, `stepped ${stepped}`);
+  check("...and the rest is still owed", h.take() === 7 && h.wants,
+        `take() said ${h.take()}`);
+}
 
 console.log("\nStepping past a wait steps past it:\n");
 for (const stage of STAGES) {
@@ -647,8 +688,8 @@ console.log("\nThe shutter and the caption are script state:\n");
           r.walker.shutterState === 4 && !r.walker.firingGate,
           `state ${r.walker.shutterState}, gate ${r.walker.firingGate}`);
 
-    check("the caption countdown is in the slice too",
-          "captionGroup" in slice && "captionFrames" in slice);
+    check("the subtitle is not the walker's: its task is G's",
+          !("captionGroup" in slice) && !("captionFrames" in slice));
 
     // Step 28 moved the HUD strip's shutter row out of `hud/`, where it had
     // its own copy of the label table, and into `app/projection/hud.ts`, where

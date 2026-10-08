@@ -28,12 +28,12 @@ import { RailLayer } from "../render/overlays";
 import { attachTo, ownResources } from "../render/scope3d";
 import { Walker } from "../script/walker";
 import { G } from "../game/globals";
-import { seekTo as seekWalkerTo } from "../script/seek";
+import { seekToward } from "../script/seek";
 import { PlayerTasksDrawWithoutAFrame } from "../game/player_shell";
 import { treeProjection } from "./projection/script";
-import { screenMessage } from "./projection/message";
 import { makeWalkerHost } from "./walker_host";
 import { LoadMeter } from "./load_meter";
+import { stageSoundIds } from "../audio/precache";
 import type { Player } from "./main";
 import type { PlayerState } from "./urlstate";
 import type { ScriptJson } from "../bundle/stage";
@@ -132,6 +132,19 @@ export async function loadStageInto(p: Player): Promise<void> {
   const src = sourceOf(slot.from);
   const bundle = await loadStage(src, entry, (loaded, total) => meter.bytes(loaded, total));
   if (superseded()) return;
+  // `SoundStopAll` (`FUN_0041D350`) -- what `MarkSceneOver` and
+  // `ResetGameOnStart` both call on the way into the next scene -- so the
+  // last stage's music, voice and SE do not carry over into this one. Then
+  // the new stage's tables, and its sounds fetched and decoded under the
+  // loading screen, alongside the parse and the build: `audio/precache.ts`.
+  p.bgm.stopAll();
+  p.bgm.prepare();
+  p.bgm.setTable(bundle.script.bgm, entry.game_mode);
+  p.bgm.setSoundTables(bundle.script.sound);
+  let soundsLoaded: [number, number] = [0, 0];
+  const sounds = p.bgm.precache(stageSoundIds(bundle.script), (d, t) => {
+    soundsLoaded = [d, t];
+  });
   p.paths = new CamPaths(bundle.cam);
   // The same curves, for the port's `CamEvalPath7`: every camera routine in
   // `game/camera/` evaluates them there, with no renderer attached.
@@ -189,8 +202,12 @@ export async function loadStageInto(p: Player): Promise<void> {
   // (`FUN_004603B0`) steps `g_scene_index` before `LoadSceneAndReset` runs,
   // and `ResetSceneOnEnter` zeroes *that* scene's rescue count.
   G.g_scene_index = bundle.script.scene ?? 0;
+  // A stage step carries the run's player block in; anything else -- a page
+  // load, a link, the picker, a restart -- is a new run.
+  const newRun = p.game.carry === null;
   p.world.attach(p.ctx);
   p.applyGameTables(bundle.script);
+  if (newRun) p.startRunItems(bundle.script);
   // Characters are already in the stage glTF, one hierarchy per spawn;
   // this adopts them and takes over the pose.
   // The object paths class 0x25 rides live in the camera bundle; the
@@ -206,9 +223,6 @@ export async function loadStageInto(p: Player): Promise<void> {
   p.spawns.setPosed(p.chars.posed);
   // The two player bodies are the game-over screen's, not the script's.
   p.gameOverScene.build(p.ctx.scope, p.chars, p.effects);
-  // Doors, shutters and the vans they hang off; driven by the script's
-  // own flags, so nothing here needs a clock of its own.
-  p.props.build(p.scene3d.root, p.ctx.scope, bundle.script.props);
   // Class 0x41's props are built at run time, so only the templates are
   // adopted here; the nodes follow `G.g_breakable_props`.
   p.breakables.adopt(p.scene3d.root);
@@ -221,10 +235,16 @@ export async function loadStageInto(p: Player): Promise<void> {
   p.chars.slotModels = p.slotModels;
   // ...and the canal water, which draws the stage's own tiles where it has
   // them and clones the rest from the same rig.
+  p.regionDraw.scene = p.scene3d;
   p.waterSurfaces.scene = p.scene3d;
   p.waterSurfaces.templates = p.slotModels;
   p.waterSurfaces.textures = p.texFilter;
   p.waterSurfaces.props = p.breakables;
+  p.type26Ripples.templates = p.slotModels;
+  p.type26Ripples.textures = p.texFilter;
+  // ...and the car reflection's shells, which are the vehicle rig's parts.
+  p.uvScroll.adopt(p.scene3d.root);
+  p.uvScroll.textures = p.texFilter;
   // ...and once more for the shot effects. `chars` owns the bones, and the
   // blood is glued to one for its whole life -- see `render/effects.ts`.
   p.effects.adopt(p.scene3d.root);
@@ -235,7 +255,6 @@ export async function loadStageInto(p: Player): Promise<void> {
   p.chars.effects = p.effects;
   p.shooting.reset();
   p.shooting.setTables(bundle.script.characters?.combat);
-  p.dialogue = bundle.script.sound ?? null;
   p.bullets.source = p.chars;
   p.scene.add(p.bullets.group);
   // Same template source as the weapons: the head that flies is a bone model
@@ -271,15 +290,11 @@ export async function loadStageInto(p: Player): Promise<void> {
   // in the player.
   // `branchPause` is the sidebar's debug aid, read at every branch; the
   // toggles above were applied before this walker existed.
-  p.walker = new Walker(bundle.script, makeWalkerHost(p, bundle.script),
+  p.walker = new Walker(bundle.script, makeWalkerHost(p),
                         { branchPause: p.toggles.branchPause });
   p.script.walker = p.walker;
 
-  // The dialogue table for the stage. The walker carries the group; the words
-  // are bundle data and belong here.
-  p.hudLayer.messages =
-    (g) => screenMessage(bundle.script.sound?.messages?.[String(g)]?.[0] ?? null);
-  // ...and the screen sprites' images -- the HUD's, the game-over logo's and
+  // The screen sprites' images -- the HUD's, the game-over logo's and
   // the route map's -- which are bundle data in the same way.
   const hudSprites = bundle.script.screen_sprites ?? {};
   p.hudLayer.spriteImages = (id) => {
@@ -287,13 +302,6 @@ export async function loadStageInto(p: Player): Promise<void> {
     return s ? { w: s.w, h: s.h, url: s.png } : null;
   };
   p.deepSprites.images = p.hudLayer.spriteImages;
-  // `SoundStopAll` (`FUN_0041D350`) -- what `MarkSceneOver` and
-  // `ResetGameOnStart` both call on the way into the next scene -- so the
-  // last stage's music, voice and SE do not carry over into this one.
-  p.bgm.stopAll();
-  p.bgm.prepare();
-  p.bgm.setTable(bundle.script.bgm, entry.game_mode);
-  p.bgm.setSoundTables(bundle.script.sound);
   p.treeProj = treeProjection(bundle.script);
   p.clearFeed();
 
@@ -332,6 +340,15 @@ export async function loadStageInto(p: Player): Promise<void> {
   // -- a belief that had looked only at `bgm_entry_play` -- so the music
   // opened a step early and the script's own `se_play` of the same track,
   // which in the engine starts it from the top, found it already playing.
+  // The stage's sounds, if they are not in yet: the bar counts them in.
+  meter.begin("sounds");
+  const tick = setInterval(() => meter.count(...soundsLoaded), 100);
+  try {
+    await sounds;
+  } finally {
+    clearInterval(tick);
+  }
+  if (superseded()) return;
   // The shader programs, while the loading screen still covers the cost.
   meter.begin("shaders");
   await afterPaint();
@@ -404,15 +421,24 @@ function applyIncomingState(p: Player): void {
   if (p.state.slot !== undefined) {
     p.poseFromSlot(p.state.slot, p.state.frame ?? 0);
   } else if (p.state.block !== undefined) {
-    const arrived = seekWalkerTo(w, p.state.block, p.state.step ?? 1,
-                           p.state.op ?? 0, undefined, entry);
-    if (!arrived) {
+    const [block, step, op] =
+      [p.state.block, p.state.step ?? 1, p.state.op ?? 0];
+    const r = seekToward(w, block, step, op, undefined, entry);
+    if (!r.arrived && r.entered) {
+      // A block the run reaches, at a step it never sits on: `step=0`, which
+      // only a scene load in Training, Boss Mode or the attract demo runs.
+      // The replay stopped as it left the block, so go to where the run
+      // entered it -- through `Player.seekTo`, whose reset clears what this
+      // replay wrote to `G`.
+      // Before this the replay ran to the end of the scene and the first
+      // frame of play loaded the next stage. See `seekTo` in `script/seek.ts`.
+      p.seekTo(block, r.entered[0], r.entered[1]);
+      p.noteSeekMiss(block, step, op);
+    } else if (!r.arrived) {
       // The address is not on any route the script can take from the entry
       // block -- a stale link, or a branch this run did not take. Say so
       // rather than silently presenting whatever the replay ran into.
-      console.warn(`no route to ${p.state.block}/${p.state.step ?? 1}` +
-                   `/${p.state.op ?? 0}; showing ${w.block}/${w.step}` +
-                   `/${w.opIndex}`);
+      p.noteSeekMiss(block, step, op);
     }
     // The replay runs no frame, so the HUD readouts -- which the engine
     // draws every frame -- would be the reset's empty list.

@@ -99,7 +99,7 @@ for (const [name, stage, block, step, forceFlag] of CASES) {
     presentEnemies: () => G.g_enemies_present,
     aliveCivilians: () => G.g_civilians_alive,
     scriptFlagRaised: (i) => (G.g_script_flags[i] ?? 0) !== 0,
-    cameraFree: () => true, showMessage: () => null, endDialogue() {},
+    cameraFree: () => true, showMessage: () => null,
   }, { seed: 1 });
   if (!seekTo(walker, block, step, 0, 500000)) {
     check(`${name}: seek`, false, `${walker.block}/${walker.step}`);
@@ -121,8 +121,8 @@ for (const [name, stage, block, step, forceFlag] of CASES) {
       reqs.push({ at: s.at, motion: pl.motion,
                   pos: { x: pos[0], y: pos[1], z: pos[2] } });
     }
-    SpawnScriptedCharacters(reqs, rng);
-    SpawnSlotActors(here(), rng);
+    SpawnScriptedCharacters(reqs);
+    SpawnSlotActors(here());
   };
   const states = new Set();
   let seated = false;

@@ -122,6 +122,17 @@ pose(inst: Instance): void {
       return;
     }
   }
+  // Slot B, when a store under the fade moved `obj+0x1B4` off the clip the
+  // fade was loaded from -- see `Actor.fadeInto`. The pose dissolves into
+  // what was loaded; `m` is what plays once the fade lets go.
+  const into = inst.a.fadeInto;
+  const im = into ? inst.type.motions[String(into.motion)] : undefined;
+  if (into && im && im.frames > 0
+      && this.blendFromFade(inst, im,
+                            authoredFrameOfTicks(into.ticks, im.fps, im.frames))) {
+    this.poseOverlay(inst);
+    return;
+  }
   if (!this.blendFromFade(inst, m, f)) this.apply(inst, m, f);
   this.poseOverlay(inst);
 }

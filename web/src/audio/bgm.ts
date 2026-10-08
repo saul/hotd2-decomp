@@ -47,6 +47,7 @@ import {
   bgmStreamFill, bgmStreamLayout, wavStreamHeader,
 } from "./stream";
 import type { FillIn, FillOut } from "./bgm_fill_worker";
+import { decodeAac, SOUND_INDEX_FORMAT, type SoundIndex } from "./aac";
 
 /** `id >> 28`. */
 export const NS_SE = 0;
@@ -255,8 +256,15 @@ export class Bgm {
    * frame that started it and be findable again to stop -- and keyed by id
    * because the engine's own bookkeeping is the id too: `SoundStopAllLoopingSe`
    * takes no argument and stops every one of them.
+   *
+   * **A buffer looped whole, not an `<audio loop>` element**, since the AAC
+   * set (`audio/aac.ts`): an element plays the file, and an AAC file starts
+   * with the encoder's 2,112 samples of priming, which an element would put
+   * in every pass. The buffer is the decode with the priming cut off, so it
+   * wraps without a gap, as the engine's static DirectSound loop does. The
+   * node is null until the clip has loaded.
    */
-  private readonly loops = new Map<number, HTMLAudioElement>();
+  private readonly loops = new Map<number, { node: AudioBufferSourceNode | null }>();
 
   setSoundTables(sound: SoundJson | undefined): void {
     // A new scene's tables replace the old ones, and a loop started under the
@@ -310,7 +318,6 @@ export class Bgm {
   setMuted(m: boolean): void {
     this._muted = m;
     this.applyGain();
-    for (const el of this.loops.values()) el.muted = m;
     if (!m) this.resume();
     this.emit();
   }
@@ -318,9 +325,6 @@ export class Bgm {
   setVolume(v: number): void {
     this._volume = Math.max(0, Math.min(1, v));
     this.applyGain();
-    for (const el of this.loops.values()) {
-      el.volume = Math.min(1, this._volume * SFX_GAIN);
-    }
     this.emit();
   }
 
@@ -484,6 +488,19 @@ export class Bgm {
   /** The fetch and the fill, with no cache on either side. */
   private async decodeUncached(file: string,
                                loop: boolean): Promise<AudioBuffer | null> {
+    // The AAC set has the track already as the period its stream plays
+    // (`tools/sounds.ts`), so a decode is the whole job.
+    const index = await this.soundIndex();
+    const e = index?.files[`bgm/${file.toLowerCase()}#${loop ? "loop" : "once"}`];
+    if (index && e?.file) {
+      try {
+        const r = await fetch(e.file);
+        if (!r.ok) return null;
+        return await decodeAac(await r.arrayBuffer(), e, index.priming);
+      } catch {
+        return null;
+      }
+    }
     let bytes: ArrayBuffer;
     try {
       const r = await fetch(soundUrl("bgm", file));
@@ -595,8 +612,13 @@ export class Bgm {
    * it after those. Resolves when every one has loaded or failed; a 404 -- the
    * 36 `_OFF` names that never shipped -- is a failure that costs nothing.
    *
-   * Looping SE are skipped: they play through an `<audio>` element
-   * (`startLoopingSe`), which streams and starts at once.
+   * **With the AAC set the whole of `clips.pack` comes too** -- every effect
+   * and voice line in the game, 14 MB, once a session -- so the sounds the
+   * gameplay code raises, which no data names (`audio/precache.ts`), are on
+   * the device as well and cost a decode on first play rather than a fetch.
+   * The ones the data names are decoded here as well. The service worker
+   * keeps the pack and the tracks as they arrive (`public/sw.js`), so a stage
+   * played once plays with every sound offline.
    */
   async precache(ids: readonly number[],
                  progress?: (done: number, total: number) => void):
@@ -610,6 +632,8 @@ export class Bgm {
     const clips = new Map<string, () => Promise<AudioBuffer | null>>();
     const tracks = new Map<string, () => Promise<AudioBuffer | null>>();
     const jobs: (() => Promise<unknown>)[] = [];
+    // First, so the pack's one long download is not queued behind anything.
+    jobs.push(() => this.soundIndex().then((i) => i && this.packBytes(i)));
     for (const id of ids) {
       const a = routeSoundId(id, this.table, this.useArTable, this.sound);
       if (a.kind === "bgm") {
@@ -618,7 +642,7 @@ export class Bgm {
         const job = once(() => this.decodeUncached(a.file, a.loop));
         tracks.set(key, job);
         jobs.push(job);
-      } else if ((a.kind === "se" && a.loop === null) || a.kind === "voice") {
+      } else if (a.kind === "se" || a.kind === "voice") {
         const url = soundUrl(a.kind, a.file);
         if (clips.has(url)) continue;
         const job = once(() => this.fetchClip(url));
@@ -658,22 +682,37 @@ export class Bgm {
    * looping id in the shipped code guards it. `EnemyZombieInitByCharType`
    * plays the chainsaw only while `g_weapon_loop_holders` is 0, which is the
    * refcount that makes the loop one per scene. The guard is here as well
-   * because a second element on the same file is audible and the engine's
+   * because a second source on the same clip is audible and the engine's
    * channel allocator is not modelled.
    */
   private startLoopingSe(id: number, file: string): void {
     // Unlike `oneShot`, this does **not** refuse while muted: a one-shot missed
     // is gone, and a loop missed would stay missing for the rest of the scene
     // because the only thing that would start it again is another actor's init.
-    // The element is created muted and `setMuted` lifts it.
+    // It sounds through the master gain, which is what mutes it.
     if (this.loops.has(id)) return;
-    const el = new Audio();
-    el.loop = true;
-    el.src = soundUrl("se", file);
-    el.volume = Math.min(1, this._volume * SFX_GAIN);
-    el.muted = this._muted;
-    this.loops.set(id, el);
-    void el.play().catch(() => {});
+    const loop: { node: AudioBufferSourceNode | null } = { node: null };
+    this.loops.set(id, loop);
+    void this.clip(soundUrl("se", file)).then((buffer) => {
+      // Stopped, or stopped and started again, while it loaded.
+      if (!buffer || this.loops.get(id) !== loop) return;
+      const { ctx, sfx } = this.graph();
+      const node = ctx.createBufferSource();
+      node.buffer = buffer;
+      node.loop = true;
+      node.connect(sfx);
+      node.start();
+      loop.node = node;
+      this.resume();
+    });
+  }
+
+  private stopLoop(loop: { node: AudioBufferSourceNode | null }): void {
+    const n = loop.node;
+    loop.node = null;
+    if (!n) return;
+    try { n.stop(); } catch { /* never started */ }
+    n.disconnect();
   }
 
   /**
@@ -691,10 +730,9 @@ export class Bgm {
    */
   syncLoopingSe(ids: readonly number[]): void {
     const want = new Set(ids);
-    for (const [id, el] of [...this.loops]) {
+    for (const [id, loop] of [...this.loops]) {
       if (want.has(id)) continue;
-      el.pause();
-      el.currentTime = 0;
+      this.stopLoop(loop);
       this.loops.delete(id);
     }
     for (const id of ids) {
@@ -708,10 +746,7 @@ export class Bgm {
    * stop id names which loop it was authored for and stops every one of them.
    */
   stopAllLoopingSe(): void {
-    for (const el of this.loops.values()) {
-      el.pause();
-      el.currentTime = 0;
-    }
+    for (const loop of this.loops.values()) this.stopLoop(loop);
     this.loops.clear();
   }
 
@@ -760,8 +795,26 @@ export class Bgm {
     return p;
   }
 
-  /** One clip off the network, decoded; null for a 404 or a bad file. */
+  /**
+   * One clip, decoded: out of the AAC pack when there is one and it holds the
+   * clip, off the network as a WAV otherwise. Null for a 404 or a bad file.
+   */
   private async fetchClip(url: string): Promise<AudioBuffer | null> {
+    const index = await this.soundIndex();
+    const e = index?.files[decodeURIComponent(url)];
+    // The set holds every clip the install has, so one it lacks is one of the
+    // `_OFF` names that never shipped: nothing to fetch.
+    if (index && !e) return null;
+    if (index && e?.pack) {
+      const pack = await this.packBytes(index);
+      if (!pack) return null;
+      try {
+        return await decodeAac(pack.slice(e.pack[0], e.pack[0] + e.pack[1]), e,
+                               index.priming);
+      } catch {
+        return null;
+      }
+    }
     try {
       const r = await fetch(url);
       if (!r.ok) return null;
@@ -770,6 +823,40 @@ export class Bgm {
       return null;
     }
   }
+
+  /**
+   * `sounds.json`, the AAC set's index, once a session -- or null where there
+   * is none (a dev server with no `extract/sound/`, a site staged without
+   * it), and the page plays the WAVs as before.
+   */
+  private soundIndex(): Promise<SoundIndex | null> {
+    return this.indexLoad ??= (async () => {
+      try {
+        const r = await fetch("sounds.json");
+        if (!r.ok) return null;
+        const i = await r.json() as SoundIndex;
+        return i.format === SOUND_INDEX_FORMAT && i.codec === "aac" ? i : null;
+      } catch {
+        return null;
+      }
+    })();
+  }
+
+  private indexLoad: Promise<SoundIndex | null> | null = null;
+
+  /** `clips.pack`, once a session; null if it would not load. */
+  private packBytes(index: SoundIndex): Promise<ArrayBuffer | null> {
+    return this.packLoad ??= (async () => {
+      try {
+        const r = await fetch(index.pack);
+        return r.ok ? await r.arrayBuffer() : null;
+      } catch {
+        return null;
+      }
+    })();
+  }
+
+  private packLoad: Promise<ArrayBuffer | null> | null = null;
 
   private release(v: { node: AudioBufferSourceNode }): void {
     v.node.onended = null;

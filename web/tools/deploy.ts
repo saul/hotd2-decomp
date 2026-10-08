@@ -117,6 +117,7 @@ const TYPES: Record<string, string> = {
   html: "text/html; charset=utf-8", js: "text/javascript", css: "text/css",
   json: "application/json", webmanifest: "application/manifest+json", map: "application/json",
   glb: "model/gltf-binary", png: "image/png", svg: "image/svg+xml", wav: "audio/wav",
+  m4a: "audio/mp4",
   bin: "application/octet-stream", woff2: "font/woff2", ico: "image/x-icon",
 };
 

@@ -1437,6 +1437,25 @@ export interface ActorBase {
    */
   initPending: boolean;
   /**
+   * Not the engine's: the `Init` has run and installed the update, and the
+   * update has **not been called yet** -- the rest of the walk the `Init` ran
+   * on, for a class whose `Init` installs and returns
+   * (`ClassHandler.firstUpdateNextWalk`).
+   *
+   * The engine needs no such bit because its draw is the update's: a zombie
+   * is drawn by `DrawSkinnedModelAndShadow` (`FUN_00411090`) inside
+   * `EnemyZombieUpdate`, so on the walk `EnemyZombieInit` only installed that
+   * update, nothing drew it. The port's renderer draws every pooled actor
+   * after the walk, so it is told: while this is up the actor is not shown.
+   * Without it, stage 1's grab zombie (`0x3840`) was drawn for one frame
+   * standing in the clip its `Init` set, eleven units up, before its first
+   * update put it on its submerged one.
+   *
+   * `SceneTaskWalk` raises it and drops it on the next walk that reaches the
+   * actor.
+   */
+  firstUpdatePending: boolean;
+  /**
    * `obj+0x1F4` — the character type, **s16**, and the head's real type tag.
    *
    * It lives inside the embedded model record: `ActorSetMotion`
@@ -2941,6 +2960,7 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     killedBy: -1,
     despawned: false,
     initPending: false,
+    firstUpdatePending: false,
     radius: 0,
     bodyRadius: 0,
     pushedBy: -1,

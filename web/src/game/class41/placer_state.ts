@@ -79,6 +79,30 @@ export interface PropContainerTail {
   drawDir: [number, number, number];
   /** {@link PropContainerRoutine.GoldenFrog}'s words; null on anything else. */
   frog: GoldenFrogWords | null;
+  /**
+   * `[port-only]` What a **replay** has shown the prop this placer will build,
+   * before it is built; null until it has shown it a frame. See
+   * {@link ReplayStepWords}.
+   */
+  replay: ReplayStepWords | null;
+}
+
+/**
+ * `[port-only]` The step words a placed prop would hold at a seek's landing.
+ *
+ * In play the placer runs on its first frame and the prop it builds counts
+ * changes of `g_evt_step_index` against its own latch once a frame from then
+ * on. A replay runs no frames, so the placer is still unrun when the seek
+ * lands, and the prop it builds then has counted nothing. These are the words
+ * the replay counted for it instead -- `ClassHandler.followReplayFrame` -- and
+ * the placer hands them to the prop it builds. Only the routines that have a
+ * replay twin get them: `class41/flag_prop.ts`.
+ */
+export interface ReplayStepWords {
+  /** `+0x196` -- `(u8)g_evt_step_index` when the prop last saw it change. */
+  stepSeen: number;
+  /** Changes counted since the prop was placed: its `+0x197` and `+0x2A4`. */
+  steps: number;
 }
 
 /**
@@ -87,7 +111,7 @@ export interface PropContainerTail {
  */
 export function makePropContainerTail(): PropContainerTail {
   return { routine: PropContainerRoutine.Placer, drawDir: [0, 0, 1],
-           frog: null };
+           frog: null, replay: null };
 }
 
 /** `[port-only]` -- `ActorClearGameFields`' zero for the frog's words. */

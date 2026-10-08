@@ -40,6 +40,27 @@
  * So the gate opens on its own in every configuration; shooting the prop only
  * changes how long it takes and what it drops on the way.
  *
+ * ## A seek, and the step it counts
+ *
+ * The middle row is a count of step changes the prop *saw*, and a replay runs
+ * no frames to show it any. The placer enters the pool when its instruction
+ * runs and places the prop on its first frame, which for a replay is the
+ * first frame after the landing -- so a seek to block 2 step 6 or 7 in
+ * Original Mode built it with `+0x2A4` at 0 and `+0x196` at the landing step.
+ * Step 7's gate waits for this flag before the step can change again, so the
+ * prop never saw a second change and the stage parked there until the prop
+ * was shot -- the ride arm raised it 290 frames later, which is how a
+ * playthrough's spray at a parked flag gate got past -- while a run played
+ * through from step 5 passes on step 7's first frame. A seek to step 8 put
+ * back a prop play had despawned at that change. A reload is a seek, so a
+ * player reloading there met it; nobody playing through could. `L97` is the
+ * shape.
+ *
+ * {@link PropType75FollowReplayFrame} is that count, kept for the prop while
+ * the replay runs, and {@link PropType75ResumeFromReplay} hands it to the
+ * prop the placer builds. It is a twin of the head and the step arm and of
+ * nothing else: a replay fires no shot, so the shot and ride arms cannot run.
+ *
  * ## What it draws, and where
  *
  * Every frame, shot or not, the tail evaluates `op_` path 0x178 at the
@@ -69,6 +90,7 @@ import { PropDrawBegin, PropDrawSlot, PropMatrixPush, PropMatrixTRzRyRx }
 import {
   BreakableFlag, PropCuePhase, type BreakableProp,
 } from "./prop_state";
+import type { PropContainerTail } from "./placer_state";
 import { PropRegisterAtOrigin } from "./shot_test";
 
 /**
@@ -242,4 +264,57 @@ export function PropUpdateType75(p: BreakableProp, rng: Rng,
   // are latched on `obj+0x192`. The point is its own origin: the sphere does
   // not fly with the model.
   PropRegisterAtOrigin(p);
+}
+
+/**
+ * `[port-only]` One frame of {@link PropUpdateType75} as a replay stands in
+ * for it, for the prop *t*'s placer will build: the head and the step arm,
+ * counted into `t.replay` -- see {@link ClassHandler.followReplayFrame}.
+ * Returns false once play would have despawned the prop, which is the
+ * caller's to carry out on the placer.
+ *
+ * The first frame shown is the placer's own, and the prop runs on it too
+ * (`ActorAlloc` appends it to the walk behind the placer): `PlaceGenericProp`
+ * latches `+0x196 = (u8)g_evt_step_index` and zeroes `+0x197`
+ * (`0x00461D61`..`0x00461D6C`), `ActorClearGameFields` has zeroed `+0x2A4`,
+ * and case `0x4B` writes only the radius, so the prop sees no change on it. The head runs on it, and in any mode but
+ * Original it is the prop's whole life.
+ *
+ * `obj+0x192` is 0 throughout: a replay fires no shot. `+0x197` and `+0x2A4`
+ * start at 0 together and are incremented in the same arm, so one count is
+ * both.
+ */
+export function PropType75FollowReplayFrame(t: PropContainerTail,
+                                            lifetime: number): boolean {
+  if (G.g_GameMode !== GameMode.Original) {
+    G.g_script_flags[PROP75_SCRIPT_FLAG] = 1;
+    return false;
+  }
+  if (t.replay === null) {
+    t.replay = { stepSeen: G.g_evt_step_index, steps: 0 };
+    return true;
+  }
+  const w = t.replay;
+  if (G.g_evt_step_index !== w.stepSeen) {
+    w.steps += 1;
+    if (w.steps === PROP75_FLAG_STEP) {
+      G.g_script_flags[PROP75_SCRIPT_FLAG] = 1;
+    }
+    if (lifetime < w.steps) return false;
+    w.stepSeen = G.g_evt_step_index;
+  }
+  return true;
+}
+
+/**
+ * `[port-only]` Seat what {@link PropType75FollowReplayFrame} counted on the
+ * prop the placer has just built: the latch `+0x196`, the lifetime's `+0x197`
+ * and the flag's `+0x2A4`. The first frame after the landing is then the
+ * frame play would have run there, change and all.
+ */
+export function PropType75ResumeFromReplay(
+    p: BreakableProp, w: Readonly<{ stepSeen: number; steps: number }>): void {
+  p.lastStepIndex = w.stepSeen;
+  p.stepsElapsed = w.steps;
+  p.removeFlag = w.steps;
 }

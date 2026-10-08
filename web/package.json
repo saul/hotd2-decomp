@@ -60,6 +60,7 @@
     "civ_speech": "node tools/run_test.mjs tools/civ_speech.mjs",
     "civilians": "node tools/run_test.mjs tools/civilians.mjs",
     "civ_gives": "node tools/run_test.mjs tools/civ_gives.mjs",
+    "replay_frames": "node tools/run_test.mjs tools/replay_frames.mjs",
     "loops": "node tools/loops.mjs",
     "bgm-loop": "node tools/bgm_loop.mjs",
     "offline-check": "node tools/offline_check.mjs",

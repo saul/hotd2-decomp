@@ -422,6 +422,14 @@ export const CHECKS: readonly Check[] = [
       + "with the stage's own camera; the only check that reaches a give, which"
       + " `civilians` cannot with its camera parked five thousand units away",
         NEEDS_BUNDLE),
+  check("replay_frames", ["npm", "run", "--silent", "replay_frames"],
+        "that a seek between a step-counting prop's spawn and the gate it "
+      + "opens leaves the prop as play would have -- class 0x41 type 75's "
+      + "`+0x196`, `+0x197` and `+0x2A4` on landing, gone once its lifetime "
+      + "has run, and stage 4's `wait_script_flag 20` passing as many frames "
+      + "after the landing as after play entered that step; the only check "
+      + "that compares a seek's rebuild with the run it stands in for",
+        NEEDS_BUNDLE),
   check("props43", ["npm", "run", "--silent", "props43"],
         "where in a real script a class-0x41 prop is actually placed, and that "
       + "it takes a frame of `GameUpdate` to appear -- the only check that "

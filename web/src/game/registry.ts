@@ -373,6 +373,24 @@ export interface ClassHandler {
    */
   resumeFromReplay?(obj: Actor, state: Readonly<Record<string, number>>): void;
   /**
+   * `[port-only]` A frame of play, as a replay stands in for it, shown to a
+   * listed spawn record whose object tests `g_evt_step_index` against a latch
+   * of its own once a frame -- so that the object a seek leaves behind has
+   * counted the step changes play would have shown it, and done what it does
+   * on them.
+   *
+   * Asked at every wait the replay steps over, before the wait's
+   * postcondition, and only while replaying: in play the script sits on a
+   * wait for at least the frame it yields on, in the step the replay is in,
+   * and every object runs that frame. A step the script runs through without
+   * waiting is one no object sees either.
+   *
+   * Class 0x41's type 75 is why it exists: it raises the flag stage 4's
+   * block 2 step 7 waits on at its *second* step change, and a seek that
+   * landed on that step rebuilt it with none counted (`class41/flag_prop.ts`).
+   */
+  followReplayFrame?(rec: ReplaySpawnRecord): void;
+  /**
    * Describe one of this class's actors for the debug sidebar.
    *
    * Optional, and read-only by contract: it runs every frame the panel is

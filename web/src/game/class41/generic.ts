@@ -500,6 +500,19 @@ export const GENERIC_FAMILY: Partial<Record<number, PropFamily>> = {
 };
 
 /**
+ * The `obj+0x11C` {@link PlaceGenericProp} leaves on the prop it builds from
+ * *pl*: the placer's own `+0x11C`, or its `+0x1F4` for the four types in
+ * {@link GENERIC_LIFETIME_FROM_1F4}. `[port-only]` as a function, so that a
+ * replay counting a prop's steps before it is built (`ClassHandler.
+ * followReplayFrame`) measures against the same word.
+ */
+export function GenericPropLifetime(pl: BreakablePlacement): number {
+  return GENERIC_LIFETIME_FROM_1F4.has(pl.type ?? 0)
+    ? (pl.field_1f4 ?? 0)
+    : (pl.lifetime_evt_steps ?? 0);
+}
+
+/**
  * `PlaceGenericProp` — `FUN_00461CF0`.
  *
  * The prologue, which every type gets, then the arm of the switch for the
@@ -525,9 +538,7 @@ export function PlaceGenericProp(pl: BreakablePlacement,
   // that word has; for the four in {@link GENERIC_LIFETIME_FROM_1F4} the
   // switch arm replaces it with the placer's `+0x1F4`. `+0x199` is not
   // involved: this family measures against `+0x11C`.
-  p.lifetime = GENERIC_LIFETIME_FROM_1F4.has(type)
-    ? (pl.field_1f4 ?? 0)
-    : (pl.lifetime_evt_steps ?? 0);
+  p.lifetime = GenericPropLifetime(pl);
   // `ActorClearGameFields` (`FUN_004A73D0`) zeroes the object from `+0x34`
   // up, so `+0x2A0` and `+0x2A4` start at zero for every one of these; the
   // struct's own defaults are the group props' and the story switch's -1.

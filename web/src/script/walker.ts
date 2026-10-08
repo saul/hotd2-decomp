@@ -1106,6 +1106,10 @@ export class Walker {
       this.opIndex = 0;
       return;
     }
+    // The frame play spent on this wait, for the objects that count step
+    // changes on their own -- before the postcondition, which is what the
+    // condition coming true leaves and comes after the frame.
+    this.followReplayFrames();
     // A yield is a wait whose condition already held on its first visit, and
     // stepping over it is the same claim as stepping over any other: the game
     // is past the instruction, with the world it leaves. So it takes the
@@ -1165,6 +1169,19 @@ export class Walker {
       const outlived = g_class_handlers[s.class as SpawnClass]?.outlivedByReplay;
       return !outlived?.({ ...s, armOut: this.replayArms.get(s.block) });
     });
+  }
+
+  /**
+   * Show a frame of play to every listed spawn whose class counts step
+   * changes for itself -- {@link ClassHandler.followReplayFrame}. Replay only;
+   * called from {@link stepOverWait}, where play would have spent one.
+   */
+  private followReplayFrames(): void {
+    if (!this.replaying) return;
+    for (const s of this.spawns) {
+      g_class_handlers[s.class as SpawnClass]?.followReplayFrame?.(
+        { ...s, armOut: this.replayArms.get(s.block) });
+    }
   }
 
   /**

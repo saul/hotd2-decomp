@@ -122,7 +122,7 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
   "game/class41/lifetime.ts": "8c21e506bc97a15e060d76c1e94e238451c8a2ac54cb444707091b46fce93b77",
   "game/class41/object_path.ts": "1ca20c237b71116ea5f53c4dd1dc8276c80b41846add3c4654d2dde96c9038f4",
   "game/class41/original_item.ts": "62be303b53aaf67a85df310a9b299eb93ce423eab3d4610064afb47d88fa522e",
-  "game/class41/placer_state.ts": "b5463d4f1f6d4e7c2ebb347f888f2404c48d57a21f4c0d74dc40d03242911a43",
+  "game/class41/placer_state.ts": "b289c66fb73a1a12dca1888b7c8664a362046b64734e27c08413225b751718d7",
   "game/class41/prop.ts": "305ff56351e390775b3e2401536dc1e464ed98f5bee20b90e547f966c1268ab5",
   "game/class41/prop_draw.ts": "e5bce3f14ac36dcd1e2fe7f2be9df0ac8b099750c8d8b5aadeb4efc9548d1e7a",
   "game/class41/prop_state.ts": "bcf1982a4675cd9de202041c4c95ab2e6b43ee0f77e2568d2a3a0c778a38b1b7",
@@ -198,7 +198,7 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
   "game/player_gun.ts": "7085d689cc5c3847ce0c5e12d14f20b26ea627627dbb8a841c2672076500eb80",
   "game/player_shell.ts": "7b6dc8ddf137d8448616b1a9ef923224c577bd6e61945552805c487c7494f302",
   "game/player_state.ts": "33003a26aa7f5e6a26e53136223dfcbc88427a32f200d665f3ca9245d5102836",
-  "game/registry.ts": "d4240799eccb6b69be0db36d16e3391f17294a35937dcb047d2c890efb5bb6e1",
+  "game/registry.ts": "225f9fc8cedbaa5057fffd8192bd4551fe736694388e4080384f8eda0a544937",
   "game/root_motion.ts": "14cfd3e2fd1fe3a2190eff58f24b7ed93e30969ea0856cc7e135094a0b4c4424",
   "game/scene_lights.ts": "8ca1fe2e58b8e9e0ca9e46115a29d81cd93d5f74464a723e9aa37c244dd3d6f9",
   "game/screen_sprite.ts": "962a830c367d9869d3b6813fdf8897c7b5898f77c9835d1d45987f386ee6dcd7",
@@ -227,4 +227,4 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
 };
 
 /** One digest over {@link BUILDER_FILES}, in filename order. */
-export const BUILDER_HASH = "ee8bef3a67631fceffb92e8c6bc882fce0fd292cb2bfcf15a1bb0cd19e730f84";
+export const BUILDER_HASH = "95268470250891156f51aacb8ecac7ec0ab5d2287ffdc90ecfa985574ad2fe79";

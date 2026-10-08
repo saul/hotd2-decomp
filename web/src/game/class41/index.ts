@@ -26,13 +26,14 @@
 import type { Actor } from "../actor";
 import { G } from "../globals";
 import {
-  registerClass, type ClassFrame, type ClassHandler, type SpawnRecord,
+  registerClass, type ClassFrame, type ClassHandler, type ReplaySpawnRecord,
+  type SpawnRecord,
 } from "../registry";
 import { SpawnClass } from "../spawn_class";
 import { T } from "../tables";
 import { PlaceBreakableGroup } from "./group";
 import { PlaceKindedProp } from "./kinded";
-import { PlaceGenericProp } from "./generic";
+import { GenericPropLifetime, PlaceGenericProp } from "./generic";
 import { PlaceChainSegments } from "./chain";
 import { PlaceFragmentProps } from "./type40";
 import { PlaceTable38Props } from "./type38";
@@ -41,7 +42,10 @@ import { PlaceTable44Props } from "./type44";
 import { PlaceTable50Props } from "./type50";
 import { PlaceTable66Props } from "./type66";
 import { PlaceType47Prop } from "./type47";
-import { PROP75_SCRIPT_FLAG, PROP75_TYPE } from "./flag_prop";
+import {
+  PROP75_SCRIPT_FLAG, PROP75_TYPE, PropType75FollowReplayFrame,
+  PropType75ResumeFromReplay,
+} from "./flag_prop";
 import { FLICKER_LIGHT_TYPE, PlaceFlickerLightProp48 } from "./type48";
 import { PlaceWaterSurface } from "./water";
 import { PlaceType3UvScrollTask } from "./type03";
@@ -376,6 +380,13 @@ function PlaceGenericPropFor(obj: Actor, f: ClassFrame): void {
   const at = G.g_breakable_props.length;
   const p = PlaceGenericProp(pl, f.rng);
   G.g_breakable_props.splice(at, 0, p);
+  // `[port-only]` A seek's rebuild: the step changes a replay counted for
+  // this prop before the placer could run -- see
+  // `PropContainerFollowReplayFrame`.
+  if (obj.cls === SpawnClass.PropContainerPlacer && obj.placer.replay
+      && p.kind === PROP75_TYPE) {
+    PropType75ResumeFromReplay(p, obj.placer.replay);
+  }
 }
 
 /**
@@ -421,6 +432,29 @@ export function PropContainerRaisesScriptFlag(
   const pl = T.breakables?.placements?.find(
     (q) => q.at === rec.at && q.container === "generic");
   return pl?.type === PROP75_TYPE ? PROP75_SCRIPT_FLAG : undefined;
+}
+
+/**
+ * `[port-only]` -- `ClassHandler.followReplayFrame`, for the one generic type
+ * whose routine has a replay twin: 75 (`class41/flag_prop.ts`). Its prop
+ * counts step changes from the frame its placer runs, and that frame does not
+ * come in a replay, so the count goes on the placer -- which entered the pool
+ * when its instruction ran (`script/ops/spawn.ts`) -- until it builds the
+ * prop. Where play would have despawned the prop the placer goes instead,
+ * as `retireGated` takes an enemy placer: nothing is left to build.
+ */
+function PropContainerFollowReplayFrame(rec: ReplaySpawnRecord): void {
+  if (rec.at === undefined) return;
+  const pl = T.breakables?.placements?.find(
+    (q) => q.at === rec.at && q.container === "generic");
+  if (pl?.type !== PROP75_TYPE) return;
+  // By its descriptor, as `retireGated` finds one: a re-spawn's placer has a
+  // pool address of its own.
+  const obj = G.g_object_list.find((o) => o.descAt === rec.at && !o.dead);
+  if (obj?.cls !== SpawnClass.PropContainerPlacer) return;
+  if (!PropType75FollowReplayFrame(obj.placer, GenericPropLifetime(pl))) {
+    ActorKillPlacer(obj);
+  }
 }
 
 /**
@@ -481,6 +515,7 @@ export const PropContainerPlacerHandler: ClassHandler = {
   ownsShotResult: true,
   raisesScriptFlag: PropContainerRaisesScriptFlag,
   countsForEnemyGate: PropContainerCountsForEnemyGate,
+  followReplayFrame: PropContainerFollowReplayFrame,
 };
 
 /**

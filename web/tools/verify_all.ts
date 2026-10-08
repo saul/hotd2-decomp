@@ -206,10 +206,10 @@ export const CHECKS: readonly Check[] = [
       + "and of the render layers following a state they did not make",
         NEEDS_BUNDLE, LANE_BROWSER),
   check("loops", ["npm", "run", "--silent", "loops"],
-        "that the looping sound effects reach an <audio> element, wrap rather "
-      + "than running out, and are still there when the stage is reached by a "
-      + "deep link -- the only check in the tree that measures the mixer rather"
-      + " than the intent",
+        "that the looping sound effects reach Web Audio as a looped buffer of "
+      + "the file's length, wrap rather than running out, and are still there "
+      + "when the stage is reached by a deep link -- the only check in the tree"
+      + " that measures the mixer rather than the intent",
         NEEDS_BUNDLE, LANE_BROWSER),
   check("test:r2site", ["npm", "run", "--silent", "test:r2site"],
         "the deployed site's Worker, against a bucket in a Map: the 304s, the "
@@ -224,8 +224,9 @@ export const CHECKS: readonly Check[] = [
   check("bgm_loop", ["npm", "run", "--silent", "bgm-loop"],
         "that the page's music is the engine's stream -- the buffer the "
       + "script's own track reaches Web Audio as is one period of the file from"
-      + " its first sample to end of file, looped, sample for sample -- and "
-      + "that it is audible",
+      + " its first sample to end of file, looped, sample for sample from the "
+      + "WAVs and within the codec's residual from the AAC set -- and that it "
+      + "is audible",
         NEEDS_BUNDLE, LANE_BROWSER),
   check("keys", ["npm", "run", "--silent", "keys"],
         "that the page's keys do what the `?` list says when pressed -- test:ui"

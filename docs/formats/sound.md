@@ -259,7 +259,11 @@ the first sample, but it stopped at the end of the `data` chunk and it put
 **8.4 ms of digital silence** at the seam of `ST1.WAV` (Chrome, headless). The
 player now builds one period of the stream -- one pass, or two where a pass is
 half a frame over -- and loops it in Web Audio; `web/tools/bgm_loop.mjs` renders
-the wrap and finds every sample the stream's own.
+the wrap and finds every sample the stream's own. With the AAC set served
+(`tools/sounds.ts`, lossy by declaration) it holds the period's length and the
+seam as exactly, and the samples to the stream within the codec's residual:
+0.96-1.52% of the signal's power for stage 1's tracks, against 46% or more for
+a copy one frame late or with its channels swapped.
 
 ### The three one-shots
 

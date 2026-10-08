@@ -26,6 +26,17 @@
  *    replay of the playing track restarts it, `0x80000002` leaves the music
  *    alone and `0x80000000` stops it.
  *
+ * **Two sound paths.** With the AAC set served (`npm run sounds`,
+ * `/sounds.json`) the track is a decode of a 96 kbit/s copy of that same
+ * period (`audio/aac.ts`), which `tools/sounds.ts` declares lossy. So its
+ * length, its loop, its seam and the dispatch are held exactly as on the WAV
+ * path, and its samples are held to the stream by **residual power** -- the
+ * energy of the difference over the energy of the signal, at the same
+ * frames -- under {@link AAC_RESIDUAL}. A WAV-path page is still held bit for
+ * bit. The track is found by its length, the period's frame count at 22,050
+ * Hz, because on the AAC path every clip is a constructed buffer too and
+ * "the first stereo buffer not decoded" was the rain.
+ *
  * And the level: an `AnalyserNode` between the mixer and the destination.
  * L29 -- a peak of exactly 0.000 with another headless Chrome on the machine
  * is contention, not evidence; re-run alone before believing it.
@@ -97,6 +108,17 @@ const TAP = () => {
   };
 };
 
+/**
+ * The AAC copy's ceiling: residual power over signal power, across the frames
+ * compared. Measured at the frames this check compares (2026-10-08, Chrome,
+ * stage 1's three tracks): the copy as served is 0.96-1.52%; the same buffer
+ * held to the stream one frame late is 50-68%, with its channels swapped
+ * 46-55%, 64 frames late 153-190%, and carrying its 2,112 frames of priming
+ * 207-243%. Five percent is three times the codec's worst and a ninth of the
+ * smallest fault.
+ */
+const AAC_RESIDUAL = 0.05;
+
 let failures = 0;
 const check = (name, ok, detail = "") => {
   if (!ok) failures++;
@@ -138,10 +160,40 @@ function probes(e) {
   return [...set].sort((a, b) => a - b);
 }
 
-async function compare(page, i, file, loop, label) {
+/** Is the page on the AAC set? The index answers from the same server. */
+async function aacServed(page) {
+  const r = await fetch(new URL("/sounds.json", page.url()).href).catch(() => null);
+  return Boolean(r?.ok);
+}
+
+/** Residual power over signal power, `got` against `want`, both channels. */
+function residual(got, want) {
+  let d = 0, w = 0;
+  for (let j = 0; j < got.length; j++) {
+    for (let c = 0; c < 2; c++) {
+      d += (got[j][c] - want[j][c]) ** 2;
+      w += want[j][c] ** 2;
+    }
+  }
+  return w ? d / w : (d ? Infinity : 0);
+}
+
+/**
+ * The start that carries `file`, from index `from` on: the first buffer one
+ * period of the stream long at 22,050 Hz. Waits up to `ms` for it. -1 if none.
+ */
+async function trackStart(page, file, loop, from, ms) {
   const url = new URL(`/bgm/${encodeURIComponent(file)}`, page.url()).href;
   const bytes = new Uint8Array(await (await fetch(url)).arrayBuffer());
   const e = expected(bytes, loop);
+  const pred = `window.__bgm.starts.findIndex((s, k) => k >= ${from} `
+    + `&& s.frames === ${e.frames} && s.rate === 22050)`;
+  await waitFor(page, `${pred} >= 0`, ms);
+  return { i: await page.evaluate(pred), bytes, e };
+}
+
+async function compare(page, i, bytes, e, file, loop, label) {
+  const aac = await aacServed(page);
   const s = await page.evaluate((k) => {
     const x = window.__bgm.starts[k];
     return { frames: x.frames, rate: x.rate, loop: x.loop,
@@ -156,23 +208,44 @@ async function compare(page, i, file, loop, label) {
         `${s.frames} frames at ${s.rate} Hz`);
   const at = probes(e);
   const got = await page.evaluate(([k, f]) => window.__bgmFrames(k, f), [i, at]);
-  let bad = null;
-  for (let j = 0; j < at.length && !bad; j++) {
-    const want = e.frame(at[j]);
-    if (got[j][0] !== want[0] || got[j][1] !== want[1]) {
-      bad = `frame ${at[j]}: ${got[j].map((v) => v * 32768)} want ${want.map((v) => v * 32768)}`;
+  if (aac) {
+    const r = residual(got, at.map((f) => e.frame(f)));
+    check(`${label}: ...and ${at.length} frames across it are the stream's from `
+          + `its first sample to end of file, tail and all, to the AAC copy's `
+          + `residual (${(r * 100).toFixed(2)}% of the signal's power)`,
+          r < AAC_RESIDUAL, `${(r * 100).toFixed(2)}% >= ${AAC_RESIDUAL * 100}%`);
+  } else {
+    let bad = null;
+    for (let j = 0; j < at.length && !bad; j++) {
+      const want = e.frame(at[j]);
+      if (got[j][0] !== want[0] || got[j][1] !== want[1]) {
+        bad = `frame ${at[j]}: ${got[j].map((v) => v * 32768)} want ${want.map((v) => v * 32768)}`;
+      }
     }
+    check(`${label}: ...and ${at.length} frames across it are the file's bytes `
+          + "from its first sample to end of file, tail and all", !bad, bad ?? "");
   }
-  check(`${label}: ...and ${at.length} frames across it are the file's bytes `
-        + "from its first sample to end of file, tail and all", !bad, bad ?? "");
   if (loop && e.passes === 2) {
     // The half-frame shift, stated rather than implied: the first frame of
-    // the second pass carries the first LEFT sample in the RIGHT channel.
+    // the second pass carries the first LEFT sample in the RIGHT channel. On
+    // the AAC copy one sample says nothing, so a window from that frame on is
+    // held to the stream -- the shifted stream, which a copy without the
+    // shift misses by its whole power.
     const k = Math.floor(e.P / 4);
-    const [f] = await page.evaluate(([x, y]) => window.__bgmFrames(x, y), [i, [k]]);
-    check(`${label}: ...the second pass starts in the right channel `
-          + `(frame ${k}), as a ${e.P % 4}-over pass puts it`,
-          f[1] === e.frame(0)[0], `${f.map((v) => v * 32768)}`);
+    if (aac) {
+      const win = Array.from({ length: 2048 }, (_, j) => k + j);
+      const g = await page.evaluate(([x, y]) => window.__bgmFrames(x, y), [i, win]);
+      const r = residual(g, win.map((f) => e.frame(f)));
+      check(`${label}: ...the second pass starts in the right channel `
+            + `(frames ${k}..+2048), as a ${e.P % 4}-over pass puts it `
+            + `(${(r * 100).toFixed(2)}% residual)`,
+            r < AAC_RESIDUAL, `${(r * 100).toFixed(2)}%`);
+    } else {
+      const [f] = await page.evaluate(([x, y]) => window.__bgmFrames(x, y), [i, [k]]);
+      check(`${label}: ...the second pass starts in the right channel `
+            + `(frame ${k}), as a ${e.P % 4}-over pass puts it`,
+            f[1] === e.frame(0)[0], `${f.map((v) => v * 32768)}`);
+    }
   }
   if (loop) {
     // The wrap itself, rendered: the very buffer the page plays, looped by
@@ -235,9 +308,11 @@ async function scenario(url, label, body) {
   }
   // `_OFF` is the one exemption, as in `tools/audio.mjs`: a looping SE's stop
   // id plays its own name, and none of the 36 `_OFF` files ship -- a 404 by
-  // design (`web/tools/checks/looping_se.ts`). Anything else the page complains of is
-  // counted.
-  const faults = state.faultLines.filter((l) => !/_OFF\.wav/i.test(l));
+  // design (`web/tools/checks/looping_se.ts`). So is `/sounds.json` on a server
+  // with no AAC set: the page asks, and plays the WAVs on the 404
+  // (`vite.config.ts`). Anything else the page complains of is counted.
+  const faults = state.faultLines.filter((l) => !/_OFF\.wav/i.test(l)
+    && !/\/sounds\.json\)$/.test(l));
   check(`${label}: the page raised no errors`, faults.length === 0,
         faults.join(" | "));
 }
@@ -245,12 +320,11 @@ async function scenario(url, label, body) {
 // -- 1. from the top ----------------------------------------------------------
 await scenario("?stage=1&mode=play", "from the top", async (page) => {
   await page.keyboard.press("Space");
-  const ok = await waitFor(page, () => window.__bgm.starts.some((s) => s.channels === 2), 120_000);
-  check("from the top: the script's se_play starts the track", ok,
-        "no buffer started in 120 s");
-  if (!ok) return;
-  const i = await page.evaluate(() => window.__bgm.starts.findIndex((s) => s.channels === 2));
-  await compare(page, i, "ST1.WAV", true, "from the top");
+  const { i, bytes, e } = await trackStart(page, "ST1.WAV", true, 0, 120_000);
+  check("from the top: the script's se_play starts the track", i >= 0,
+        "no buffer one period of ST1.WAV long started in 120 s");
+  if (i < 0) return;
+  await compare(page, i, bytes, e, "ST1.WAV", true, "from the top");
   await page.waitForTimeout(1500);
   const peak = await page.evaluate(() => window.__bgm.peak);
   check(`from the top: it is audible (peak ${peak.toFixed(3)})`, peak > 0.01,
@@ -259,13 +333,10 @@ await scenario("?stage=1&mode=play", "from the top", async (page) => {
 
 // -- 2. by a deep link past the se_play ---------------------------------------
 await scenario("?stage=1&mode=play&block=0&step=3&op=40", "deep link", async (page) => {
-  const ok = await waitFor(page, () => window.__bgm.starts.some((s) => s.channels === 2), 20_000);
-  check("deep link: the seek puts the script's track back", ok,
-        "no buffer started in 20 s");
-  if (ok) {
-    const i = await page.evaluate(() => window.__bgm.starts.findIndex((s) => s.channels === 2));
-    await compare(page, i, "ST1.WAV", true, "deep link");
-  }
+  const { i, bytes, e } = await trackStart(page, "ST1.WAV", true, 0, 20_000);
+  check("deep link: the seek puts the script's track back", i >= 0,
+        "no buffer one period of ST1.WAV long started in 20 s");
+  if (i >= 0) await compare(page, i, bytes, e, "ST1.WAV", true, "deep link");
 });
 
 // -- 3. the dispatch, on a Bgm of the page's own --------------------------------
@@ -284,7 +355,10 @@ await scenario("?stage=1&original=1", "by id", async (page) => {
 
   await page.evaluate(() => window.__mine.play(0x10000009));
   check("by id: 0x10000009 starts", await started(n0 + 1));
-  await compare(page, n0, "OVR_AR.WAV", false, "by id");
+  const ovr = await trackStart(page, "OVR_AR.WAV", false, n0, 20_000);
+  check("by id: ...and what it starts is OVR_AR.WAV's one pass", ovr.i === n0,
+        `start ${ovr.i}, expected ${n0}`);
+  if (ovr.i >= 0) await compare(page, ovr.i, ovr.bytes, ovr.e, "OVR_AR.WAV", false, "by id");
 
   await page.evaluate(() => window.__mine.play(0x10000001));
   await started(n0 + 2);
@@ -294,7 +368,10 @@ await scenario("?stage=1&original=1", "by id", async (page) => {
   check("by id: playing the track that is playing restarts it -- the old "
         + "buffer stopped, a new one started", again && st[1] === true && st[2] === false,
         JSON.stringify(st));
-  await compare(page, n0 + 2, "ST1_AR.WAV", true, "by id");
+  const st1 = await trackStart(page, "ST1_AR.WAV", true, n0 + 2, 20_000);
+  check("by id: ...and the restart is ST1_AR.WAV's period", st1.i === n0 + 2,
+        `start ${st1.i}, expected ${n0 + 2}`);
+  if (st1.i >= 0) await compare(page, st1.i, st1.bytes, st1.e, "ST1_AR.WAV", true, "by id");
 
   await page.evaluate(() => window.__mine.play(0x80000002));
   const afterVoice = await page.evaluate((k) => window.__bgm.starts[k].stopped, n0 + 2);

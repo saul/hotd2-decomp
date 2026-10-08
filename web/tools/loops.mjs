@@ -11,11 +11,20 @@
  * link past the `se_play` that starts it gave silence for the rest of the
  * scene.
  *
- * So it taps `window.Audio` before the app boots, records every element the
- * page makes, and samples `loop`, `paused` and `currentTime` four times a
- * second. A loop that never starts, never wraps, or stops early is visible in
- * the cursor. Each run stops sampling once what it asks has been seen -- the
- * wrap, the element -- and otherwise samples for as long as it always did.
+ * So it taps Web Audio before the app boots -- every `AudioBufferSourceNode`
+ * the page starts, with its buffer's length, its `loop` flag and when it
+ * started -- and samples four times a second. A loop that never starts, never
+ * wraps, or stops early is visible in what it records. Each run stops sampling
+ * once what it asks has been seen -- the wrap, the node -- and otherwise
+ * samples for as long as it always did.
+ *
+ * **A node, not an element.** Since the AAC set (`audio/aac.ts`) a looping SE
+ * is a buffer looped whole (`Bgm.loops`), on the WAV path and the AAC one
+ * alike, and this used to tap `window.Audio` -- so it found no element on
+ * either and failed on both. The rain is told from the other looped buffer,
+ * the music, by its **length**: the WAV's data frames over its rate, which is
+ * what the index records for the AAC copy and what a WAV decode keeps however
+ * it resamples.
  *
  * Two runs, because the difference between them *was* the bug: the same stage
  * from the top and from a deep link past the instruction that starts the loop.
@@ -31,19 +40,51 @@ const DEEP_LINK = "?stage=1&mode=play&block=0&step=3&op=10";
 
 const TAP = () => {
   const seen = [];
-  const Native = window.Audio;
-  window.Audio = function Tapped(...a) {
-    const el = new Native(...a);
-    seen.push(el);
-    return el;
+  const start = AudioBufferSourceNode.prototype.start;
+  AudioBufferSourceNode.prototype.start = function (...a) {
+    const rec = { node: this, dur: this.buffer?.duration ?? 0, loop: this.loop,
+                  t0: this.context.currentTime, done: false };
+    this.addEventListener("ended", () => { rec.done = true; });
+    seen.push(rec);
+    return start.apply(this, a);
   };
-  window.Audio.prototype = Native.prototype;
-  window.__snap = () => seen.map((e) => ({
-    src: e.src.replace(/^.*\/(se|bgm|voice)\//i, "$1/"),
-    loop: e.loop, paused: e.paused,
-    t: Number(e.currentTime.toFixed(2)),
-  })).filter((e) => e.src);
+  const stop = AudioScheduledSourceNode.prototype.stop;
+  AudioScheduledSourceNode.prototype.stop = function (...a) {
+    const rec = seen.find((r) => r.node === this);
+    if (rec) rec.done = true;
+    return stop.apply(this, a);
+  };
+  window.__snap = () => seen.map((r) => ({
+    dur: r.dur, loop: r.loop, done: r.done,
+    played: Number((r.node.context.currentTime - r.t0).toFixed(2)),
+  }));
 };
+
+/**
+ * The rain's length in seconds, as the page's server holds it: the AAC
+ * index's true frame count when there is an index, else the WAV's own data
+ * chunk. Either way the frames the engine's static buffer holds.
+ */
+async function loopSeconds(origin) {
+  const key = `se/stage1_se/${LOOP_FILE.toLowerCase()}`;
+  const index = await fetch(new URL("/sounds.json", origin)).catch(() => null);
+  if (index?.ok) {
+    const e = (await index.json()).files?.[key];
+    if (e) return { seconds: e.frames / e.rate, via: "sounds.json" };
+  }
+  const b = new Uint8Array(await (await fetch(new URL(`/${key}`, origin)))
+    .arrayBuffer());
+  const v = new DataView(b.buffer);
+  let rate = 0, align = 0, data = 0;
+  for (let p = 12; p + 8 <= b.length;) {
+    const id = String.fromCharCode(...b.subarray(p, p + 4));
+    const n = v.getUint32(p + 4, true);
+    if (id === "fmt ") { rate = v.getUint32(p + 12, true); align = v.getUint16(p + 20, true); }
+    if (id === "data") { data = n; break; }
+    p += 8 + n + (n & 1);
+  }
+  return { seconds: data / align / rate, via: "the WAV" };
+}
 
 let failures = 0;
 const check = (name, ok, detail = "") => {
@@ -59,41 +100,41 @@ async function run(label, url, seconds, seen) {
     url, size: "1280x800", headless: !process.argv.includes("--head"),
     quiet: true, init: TAP,
   });
-  const cursors = [];
+  const samples = [];
   try {
     await waitForLoad(page);
+    const { seconds: want, via } = await loopSeconds(page.url());
     // The gesture and the unmute in one real click: browsers block playback
     // until a gesture, and the store cannot supply one.
     await page.locator("button.sound").click();
     await page.evaluate(() => document.activeElement?.blur?.());
     await page.keyboard.press("Space");
-    for (let s = 0; s < seconds * RATE && !seen(cursors); s++) {
+    for (let s = 0; s < seconds * RATE && !seen(samples); s++) {
       await page.waitForTimeout(1000 / RATE);
       const snap = await page.evaluate(() => window.__snap());
-      // Lowercased: `audio/bgm.ts`'s `soundUrl` asks for every file that way.
-      const el = snap.find((e) => e.loop
-        && e.src.toLowerCase().includes(LOOP_FILE.toLowerCase()));
-      cursors.push(el ? { t: el.t, paused: el.paused } : null);
+      // Half a frame of the slower rate either side: a WAV decode resamples
+      // to the context's rate and keeps the duration, not the frame count.
+      const el = snap.find((e) => e.loop && Math.abs(e.dur - want) < 0.002);
+      samples.push(el ? { played: el.played, dur: el.dur, done: el.done } : null);
     }
+    console.log(`\n  ${label}: the rain is ${want.toFixed(4)} s (${via}); `
+      + samples.map((c) => (c ? (c.done ? "x" : c.played) : "-")).join(" "));
   } finally {
     await close();
   }
-  console.log(`\n  ${label}: ${cursors.map((c) => (c ? c.t : "-")).join(" ")}`);
-  return cursors;
+  return samples;
 }
 
-// From the top: the loop starts, and the cursor **goes backwards** at least
-// once, which is the only direct evidence that it wrapped rather than stopped.
-const wrapped = (cs) => {
-  const t = cs.filter((c) => c !== null).map((c) => c.t);
-  return t.some((x, i) => i > 0 && x < t[i - 1]);
-};
+// From the top: the loop starts, and is still sounding after more than one
+// pass of its buffer -- the only direct evidence that it wrapped rather than
+// stopped.
+const wrapped = (cs) => cs.some((c) => c !== null && !c.done && c.played > c.dur * 1.5);
 const top = await run("from the top", FROM_TOP, 6, wrapped);
 check("playing from the top starts the loop",
-      top.some((c) => c !== null), "no looping element for the ambience");
-const live = top.filter((c) => c !== null).map((c) => c.t);
-check("...and it wraps rather than running out",
-      live.some((t, i) => i > 0 && t < live[i - 1]), live.join(" "));
+      top.some((c) => c !== null), "no looped buffer of the rain's length");
+check("...and it wraps rather than running out", wrapped(top),
+      top.filter((c) => c).map((c) => `${c.played}/${c.dur.toFixed(2)}${c.done ? " stopped" : ""}`)
+        .join(" "));
 
 // The deep link: the `se_play` is stepped over by the replay, so this is the
 // one the walker's record has to reconstitute.

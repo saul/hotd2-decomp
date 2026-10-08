@@ -31,7 +31,8 @@ import { join } from "node:path";
 import { BUNDLE_FORMAT, writeManifest } from "../src/hod2lib/bundle";
 import { decompress, decompressFile, LZError } from "../src/hod2lib/lz";
 import { bundleJson, resolveCase, segments } from "../src/hod2lib/io";
-import { crc32 } from "../src/hod2lib/png";
+import { crc32, encodeRgba } from "../src/hod2lib/png";
+import { decodeRgba } from "../src/render/png_textures";
 import { zipBlob } from "../src/app/install/zip";
 import { RIGS } from "../src/hod2lib/rigs_data";
 import { holdFrameOf } from "../src/hod2lib/rigs";
@@ -539,6 +540,80 @@ console.log("\nclass 0x13's tail carries what behaviours 6 and 7 read:");
   check("...and no other behaviour carries either",
         eight.operand === undefined && eight.path_length === undefined,
         JSON.stringify(eight));
+}
+
+console.log("\nPNG: the page's decoder keeps the colour under alpha 0");
+{
+  // `render/png_textures.ts` decodes every stage image with `decodeRgba`
+  // because WebKit's own decoder loses a transparent texel's colour, and the
+  // opaque pass draws that colour. So the round trip has to give back the
+  // exporter's bytes exactly, alpha-0 texels included.
+  const { deflateSync } = await import("node:zlib");
+  const deflate = async (d: Uint8Array, level: number) =>
+    new Uint8Array(deflateSync(d, { level }));
+  const w = 3, h = 2;
+  const px = new Uint8Array([
+    200, 100, 50, 0,    10, 20, 30, 255,   0, 0, 0, 0,
+    255, 0, 0, 0,       1, 2, 3, 128,      90, 180, 45, 7,
+  ]);
+  const back = await decodeRgba(await encodeRgba(w, h, px, deflate));
+  check("encodeRgba -> decodeRgba gives the bytes back, colour under alpha 0 "
+        + "and all", !!back && back.width === w && back.height === h
+        && back.data.every((v, i) => v === px[i]),
+        back ? Array.from(back.data).join() : "null");
+
+  // Every row filter, written by hand from the PNG spec's definitions, so a
+  // re-encoded image -- not only the exporter's filter 0 -- still reads.
+  const W = 2, H = 5, stride = W * 4;
+  const img = new Uint8Array(W * H * 4).map((_, i) => (i * 37 + 11) & 0xff);
+  const raw = new Uint8Array(H * (stride + 1));
+  for (let y = 0; y < H; y++) {
+    const f = y;                               // rows use filters 0..4
+    raw[y * (stride + 1)] = f;
+    for (let x = 0; x < stride; x++) {
+      const at = (yy: number, xx: number) =>
+        yy >= 0 && xx >= 0 ? img[yy * stride + xx] : 0;
+      const a = at(y, x - 4), b = at(y - 1, x), c = at(y - 1, x - 4);
+      const pa = Math.abs(b - c), pb = Math.abs(a - c), pc = Math.abs(a + b - 2 * c);
+      const pred = [0, a, b, (a + b) >> 1,
+                    pa <= pb && pa <= pc ? a : pb <= pc ? b : c][f];
+      raw[y * (stride + 1) + 1 + x] = (img[y * stride + x] - pred) & 0xff;
+    }
+  }
+  const chunk = (tag: string, body: Uint8Array): Uint8Array => {
+    const t = new TextEncoder().encode(tag);
+    const out = new Uint8Array(12 + body.length);
+    const dv = new DataView(out.buffer);
+    dv.setUint32(0, body.length);
+    out.set(t, 4);
+    out.set(body, 8);
+    const tb = new Uint8Array(4 + body.length);
+    tb.set(t); tb.set(body, 4);
+    dv.setUint32(8 + body.length, crc32(tb));
+    return out;
+  };
+  const ihdr = (ct: number) => {
+    const b = new Uint8Array(13);
+    const dv = new DataView(b.buffer);
+    dv.setUint32(0, W); dv.setUint32(4, H);
+    b[8] = 8; b[9] = ct;
+    return chunk("IHDR", b);
+  };
+  const file = (ct: number) => {
+    const parts = [new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+                   ihdr(ct), chunk("IDAT", new Uint8Array(deflateSync(raw))),
+                   chunk("IEND", new Uint8Array(0))];
+    const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+    let at = 0;
+    for (const p of parts) { out.set(p, at); at += p.length; }
+    return out;
+  };
+  const filtered = await decodeRgba(file(6));
+  check("rows filtered Sub, Up, Average and Paeth decode to the image",
+        !!filtered && filtered.data.every((v, i) => v === img[i]),
+        filtered ? Array.from(filtered.data.slice(0, 16)).join() : "null");
+  check("...and a PNG of another shape is left to the browser (null)",
+        (await decodeRgba(file(3))) === null);
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

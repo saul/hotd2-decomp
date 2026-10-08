@@ -1050,6 +1050,25 @@ export function stagePlacesResultCard(prog: Program): boolean {
   return false;
 }
 
+/** Class 0x60, the chapter card: `spawn_simple 0x00977234`'s record. */
+const CLASS60 = 0x60;
+
+/**
+ * Whether this stage's script places the chapter card -- a `spawn_simple`
+ * whose record is class 0x60. Every stage does, in its first block.
+ */
+export function stagePlacesChapterCard(prog: Program): boolean {
+  for (const b of prog.liveBlocks()) {
+    for (const st of b.steps) {
+      for (const o of st.ops) {
+        const simple = (o.detail.simple as { class: number }[]) ?? [];
+        if (simple.some((r) => r.class === CLASS60)) return true;
+      }
+    }
+  }
+  return false;
+}
+
 /**
  * The template rows the result card's figures are drawn from, one per
  * character type the card can stand in this stage.

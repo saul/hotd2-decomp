@@ -50,7 +50,8 @@ const GAME: ShortcutGroup = {
     { codes: [], cap: "Click", by: "pointer", what: "Shoot" },
     { codes: [], cap: "Right-click", by: "pointer",
       what: "Reload — a pull off the screen, as the arcade gun does it" },
-    { codes: ["KeyR"], cap: "R", by: "app", what: "Reload" },
+    { codes: ["KeyR"], cap: "R", by: "app",
+      what: "Reload — also cuts a chapter card short" },
     { codes: ["Space"], cap: "Space", by: "app", what: "Play / pause" },
     { codes: ["Enter", "NumpadEnter"], cap: "Enter", by: "app",
       what: "Start — continue, skip a cutscene where the game allows it, "

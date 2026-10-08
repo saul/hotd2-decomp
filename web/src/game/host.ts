@@ -263,6 +263,18 @@ export interface GameHost {
    * in `game/` — which is the same missing piece the headless replay needs.
    */
   pickShot?(ray: ShotRay): ShotPick | null;
+
+  /**
+   * `GetTickCount` -- the platform's millisecond clock, `CALL dword ptr
+   * [0x004C4088]` in `BossModeClockStart` (`FUN_0049DF00`) and
+   * `BossModeClockRead` (`FUN_0049DF20`), Boss Mode's fight clock. A wall
+   * clock is the platform's to answer, not the port's; the engine's clock is
+   * one too, so a replay or a restored snapshot measures a different time,
+   * as the game's own would. Optional: a host without one reads 0, and a
+   * clock that never moves. Nothing the port runs reaches it -- no bundle is
+   * a Boss Mode stage.
+   */
+  tickCount?(): number;
 }
 
 /*

@@ -25,6 +25,7 @@
  * sprite, and `hud/` draws the list.
  */
 import { AppState, G } from "./globals";
+import { CAPTION_MODE, CAPTION_MODE_CAPTIONED } from "./caption_mode";
 import { CreditCount, CreditTiersUpdate } from "./credits";
 import { GameMode } from "./game_mode";
 import {
@@ -69,14 +70,6 @@ export enum CreditPromptDrawer {
 }
 
 /**
- * `g_wCaptionMode` (`0x009C911E`) as this build leaves it: its one writer
- * stores 2 (see `hud/hud.ts`), so `CreditPromptMessageIndex`'s `== 1` arm is
- * never taken. A named constant rather than a field because nothing the port
- * runs can change it.
- */
-export const CAPTION_MODE: number = 2;
-
-/**
  * `CreditPromptMessageIndex` — `FUN_00406D60`. Which row of
  * `g_credit_prompt_messages` the line shows, from the prompted player's
  * credit tier (`CreditTiersUpdate`): 0 "INSERT COIN(S)" at no credit, 1
@@ -89,7 +82,7 @@ export function CreditPromptMessageIndex(blinkArm: number): number {
     ? 2 : G.g_credit_tier[G.g_credit_prompt_player] ?? 0;
   if (tier === 0) return 0;
   if (tier === 1) {
-    if (blinkArm !== 0 && CAPTION_MODE === 1
+    if (blinkArm !== 0 && CAPTION_MODE === CAPTION_MODE_CAPTIONED
         && (G.g_credit_blink_clock & 0x40) !== 0) return 2;
     return 1;
   }

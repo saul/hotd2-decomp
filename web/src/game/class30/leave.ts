@@ -8,14 +8,17 @@
  * earlier revision of this note said it "assigns no state", having read its
  * three calls and not their bodies, and its second call
  * (`ZombieSplitUpdateSelf`, `FUN_0045DA60`) writes state 0x32. See
- * `class30/split.ts`. What this covers is the port's gap: a state index the
- * port has not read, reached because the descriptor named it. The engine has
- * no such case.
+ * `class30/split.ts`. What this covers is the port's gap: a zeroed attack
+ * entry the bundle has no row for, which `ZombieStateStrike` and
+ * `ZombieStateLeapStrike` hand here -- see `ZombiePickAttack`. The engine has
+ * no such case: it dereferences the zeroed entry and swings at nothing.
  *
- * **It no longer covers state 10.** That index was reaching this through the
- * dispatch's `default` on the strength of the same wrong citation, and
- * `g_class30_states[10]` is `ZombieReleaseAndDespawn` (`FUN_00455490`), which
- * despawns. `class30/index.ts` has the case now; see {@link ZombieState.Leave}.
+ * **It no longer covers any state index.** State 10 was reaching this
+ * through the dispatch's `default` on the strength of the same wrong
+ * citation, and `g_class30_states[10]` is `ZombieReleaseAndDespawn`
+ * (`FUN_00455490`), which despawns; state 0, the engine's no-op, reached it
+ * the same way. The dispatch has an arm for every entry of the table now and
+ * no `default` at all; see `class30/index.ts`.
  *
  * It routes to `ZombieStateWaitTurn` rather than anywhere terminal, because
  * that state has a way back into the loop, and it releases the permit first:

@@ -33,6 +33,7 @@ import type { FishBloodCloud, FishSurfaceRing, FishWaterSplash }
 import type { OwlFeather, OwlGroundRing, OwlWaterSplash }
   from "./effects/owl";
 import type { RingEffect } from "./effects/ring_effect";
+import type { AttachedEffect } from "./effects/attached_effect";
 import type { WaterRing } from "./effects/water_ring";
 import type { WaterSurface, WaterSurfaceUv } from "./class41/water";
 import type { DialogueTask } from "./dialogue";
@@ -1658,6 +1659,14 @@ export const G = {
   g_ring_effects: [] as RingEffect[],
   /** `[port-only]` — the seven pools' ids, one sequence between them. */
   g_creature_effect_seq: 0,
+  /**
+   * `[port-only]` — the wake tasks `SpawnAttachedEffect` (`FUN_00408770`)
+   * has allocated, two for each class-0x30 actor that has gone into the
+   * water. See `game/effects/attached_effect.ts`.
+   */
+  g_attached_effects: [] as AttachedEffect[],
+  /** `[port-only]` — {@link AttachedEffect.id}'s sequence. */
+  g_attached_effect_seq: 0,
   /**
    * `[port-only]` — the blood `SpawnBloodSpray` (`FUN_00407310`) and
    * `SpawnBoneHitSprite` (`FUN_00407200`) have allocated. Each one holds an
@@ -3468,6 +3477,8 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   G.g_fish_surface_rings = [];
   G.g_ring_effects = [];
   G.g_creature_effect_seq = 0;
+  G.g_attached_effects = [];
+  G.g_attached_effect_seq = 0;
   // The shutter's task is one of the list the scene load builds, so its
   // counter starts again at 0 -- `HudShutterTaskCreate`, at `0x00460733`.
   HudShutterTaskCreate();

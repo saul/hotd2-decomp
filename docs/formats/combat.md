@@ -873,15 +873,34 @@ read, so the two are independent.
 | `obj+0x130C == 4` | 0x404 or 0x41A at random, or 0x3DA |
 | `obj+0x130C` 5 or 6, and `!(obj+0x136C & 7)` | 0x3DB |
 | `obj->flags & 0x1000000` | 0x3F9 |
-| `obj+0x1368 & 0x08` | 428 |
-| `obj+0x1368 & 0x10` | 421 |
-| `obj+0x1368 & 0x40` | 633 |
-| `obj+0x1368 & 0x80` | 553 |
+| `obj+0x1368 & 0x08` | 428 (0x1AC) |
+| `obj+0x1368 & 0x10` | 421 (0x1A5) |
+| `obj+0x1368 & 0x40` | 633 (0x279) |
+| `obj+0x1368 & 0x80` | 553 (0x229) |
+| character type 10 with `obj+0x136C & 0x8000` | none: it keeps its clip |
+| character types 0xF..0x11 with `obj+0x136C & 0x100000` | 0x3DB |
 | otherwise | the directional pick above |
 
 `obj+0x1368` is **not** the destroyed-zone mask — that is `obj+0x1318`, a
-different field 0x50 bytes earlier. What sets `obj+0x1368`'s bits 3, 4, 6 and 7
-is `[open]`.
+different field 0x50 bytes earlier. Its bits 3, 4, 6 and 7 are the
+**kill-move deaths**: `ZombieStateTargetMotionScript` (`FUN_0045AAA0`) raises
+one as a maul entry starts, by the clip it just set -- in sub 0 (the first
+entry) `0x1AB` -> 8, `0x1A3`/`0x1A7` -> 0x10, `0x234` -> 0x80, `0x277` ->
+0x40; in sub 1 (every later entry) only the first three -- and
+`ZombieStateDragTarget` raises 0x10 as the drag starts (`0x0045C0ED`).
+Nothing lowers them, so a captor keeps the death of the first kill-move it
+began. `[proved]`
+
+The directional pick is not the end of the routine either. After the arc's
+`ActorSetMotionBlended`, `FUN_00456220` rewrites `obj+0x1B4` by
+`obj+0x136C`'s low three bits (the descriptor's `+0x20` word): bit 4 re-draws a
+side death (0x3DF/0x3E0) from the `0x8000` table with a second `rand()`; bit 1
+maps 0x3D9/0x3DA/0x3DE to 0x3DB/0x3DC/0x3DD; bit 2 maps them back, applied
+after bit 1. They are stores, not sets: the fade dissolves into the arc's clip
+(slot B was loaded from it) and the remapped one plays from cursor 1. The
+maul on clip 0xB2 or 0xB7 raises bit 2 with `0x100000`, and sets the arc
+record's target 25 units along the facing on the ground, so a captor shot in
+it is thrown by state 9. `[proved]`
 
 ## 7. Reacting — the stumble
 
@@ -1084,16 +1103,35 @@ this way. `ThrowerStateHitReaction` makes the same two calls for class 0x31
 
 ### Body condition — `ActorUpdateBodyCondition`
 
-`obj+0x130C` is derived by `FUN_00454270` from which parts are gone, and it
-feeds the death pick as well as the stumble: with `obj+0x136C & 0x40` set and
-**both arm zones destroyed** (`obj+0x1318` bits 1 and 2, from
-`RemoveBoneSubtree`) it becomes 5 — and `ChooseDeathMotion` gives condition 5
-its own death, motion 0x3DB. So the destroyed-zone mask does reach the death
-after all, just not through `obj+0x1368`.
+`obj+0x130C` is derived by `FUN_00454270` from which hand props are left, on
+every shot that lands with result 1, 3 or 4 (`ActorShotFeedback`'s jump table
+at `0x0045425C`; its one caller is `ZombieOnShot`, so class 0x30 and 0x18
+alone). `obj+0x4DC` and `obj+0x68C` are bones 5 and 8's draw records' slots
+(`obj+0x20C + bone*0x90`, `+0`) -- zero once `RemoveBoneSubtree` has taken the
+bone off -- compared against literal props by character type:
 
-The rest of `FUN_00454270` reads `obj+0x4DC` and `obj+0x68C` against literal
-asset slots, and what those two fields are is `[open]`. For every character in
-the six stages, conditions 0, 1, 2 and 4 select the same row.
+| type | right (bone 5) | left (bone 8) | writes |
+|---|---|---|---|
+| 1 `znassb` | `0x1BA9` | `0x1BA5` | 0 when neither is held |
+| 2 `znchain` | `0x1BD2` | `0x1BCC` | the count, 0..2; at 0 also `ZombieReleaseWeaponLoopSe` |
+| 0xE `znken` | `0x1E55` | -- | 0 when the right is not held |
+| 0x13/0x14 | `0x1ECE`, `0x1EF9` | `0x1ECA`, `0x1EF5` | 0 when none is held; 7 and 5 stick |
+
+Then, for every type: with `obj+0x136C & 0x40` set, condition 0, and **both
+arm zones destroyed** (`obj+0x1318` against `1 << g_bone_damage_zone[5]` and
+`[8]`) it becomes 5 and the bit drops -- and `ChooseDeathMotion` gives
+condition 5 motion 0x3DB unless one of `obj+0x136C`'s low three bits is up.
+One shipped class-0x30 descriptor carries 0x40 in its `+0x20` word, which is
+where the bit comes from on this class. So the destroyed-zone mask does reach
+the death after all, just not through `obj+0x1368`. `[proved]`
+
+Shooting the saw out of a `znchain`'s hands is the second place its
+`CHAIN_SAW_22` loop stops, beside dying. The port calls the routine from
+`ZombieOnShot` (`game/class30/on_shot.ts`), where the engine's frame has it.
+`ActorBodyConditionFromHands` (`FUN_00455920`) is its sibling in the hub, with
+its own types and its misread operand; see `game/class30/condition.ts`. For
+every character in the six stages, conditions 0, 1, 2 and 4 select the same
+row.
 
 ## 8. The gore swap — `ResolveDamagedPartSphere`
 

@@ -320,5 +320,29 @@ console.log("\nthe stumble is on bone 1's subtree and nowhere else\n");
         `angle ${q(half, 1).angleTo(mid)}`);
 }
 
+console.log("\na fade dissolves into slot B, which a later store does not reload\n");
+{
+  // `ChooseDeathMotionDirectional` (`FUN_00456220`) blends to a clip, then
+  // writes a remapped id over `obj+0x1B4`; slot B keeps the first clip's
+  // start pose until the fade lets go. `Actor.fadeInto` is what was loaded.
+  const poser = new Poser();
+  const fade = { fadeFrom: { motion: 923, ticks: 12 } as Actor["fadeFrom"],
+                 fade: 3, fadeLen: 6 };
+  const loaded = instance(CLIPS, { motion: 1022, playTicks: 0, ...fade });
+  const stored = instance(CLIPS, {
+    motion: 975, playTicks: 0, ...fade,
+    fadeInto: { motion: 1022, ticks: 0 },
+  });
+  const plain = instance(CLIPS, { motion: 975, playTicks: 0, ...fade });
+  poser.pose(loaded);
+  poser.pose(stored);
+  poser.pose(plain);
+  const q = (i: Instance, b: number) => i.bones.get(b)!.quaternion;
+  check("the pose dissolves into the loaded clip, not the one stored after",
+        q(stored, 1).equals(q(loaded, 1)) && q(stored, 3).equals(q(loaded, 3))
+        && !q(stored, 1).equals(q(plain, 1)),
+        `${q(stored, 1).angleTo(q(loaded, 1))}`);
+}
+
 console.log(failures ? `\n${failures} failed` : "\nall passed");
 process.exit(failures ? 1 : 0);

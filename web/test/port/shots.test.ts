@@ -6,7 +6,7 @@ import { CameraActorTick } from "../../src/game/camera/actor";
 import { CameraBlockViewToWorld } from "../../src/game/camera/view";
 import { CameraBlocksReset, CheckpointResetCamera }
   from "../../src/game/camera/actions";
-import { ChooseDeathMotionDirectional } from "../../src/game/combat/resolve_hit";
+import { DeathArcMotion } from "../../src/game/combat/resolve_hit";
 import { FishSpawnWaterSplash, WaterSplashUpdate }
   from "../../src/game/effects/fish";
 import { OwlResolveShot } from "../../src/game/class43";
@@ -239,7 +239,7 @@ console.log("\nthe camera block's yaw (0x009A60D0) and its readers:");
       camera(block);
       z.yaw = yaw;
       const r = new Rng(seed);
-      return { m: ChooseDeathMotionDirectional(z, r), state: r.state };
+      return { m: DeathArcMotion(z, r), state: r.state };
     };
     const drawn = (seed: number, n: number) => {
       const r = new Rng(seed);

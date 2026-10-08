@@ -1,3 +1,4 @@
+import { Zombie1368Flag } from "../../src/game/class30/state";
 import type { CharactersJson } from "../../src/bundle";
 import { Rng } from "../../src/core/rng";
 import { Scope } from "../../src/core/scope";
@@ -1044,7 +1045,7 @@ console.log("\nthe strike anchor and the cooldown it gates:");
   {
     clear();
     const z = zombie("cooling, never swung", { cooldown: 10 });
-    z.zom.hasCooldown = true;
+    z.zom.flags1368 |= Zombie1368Flag.Cooldown;
     ZombieStateHoldAtRange(z, new Rng(3), NULL_HOST);
     check("a cooldown does not run down for an actor that has never swung",
           z.cooldown === 10, String(z.cooldown));
@@ -1052,20 +1053,22 @@ console.log("\nthe strike anchor and the cooldown it gates:");
   {
     clear();
     const z = zombie("cooling", { cooldown: 2 });
-    z.zom.hasCooldown = true;
+    z.zom.flags1368 |= Zombie1368Flag.Cooldown;
     z.flags2 |= ZombieFlag2.StrikeAnchor;
     ZombieStateHoldAtRange(z, new Rng(3), NULL_HOST);
     check("...and does for one that has", z.cooldown === 1, String(z.cooldown));
-    check("...with the latch still armed at one", z.zom.hasCooldown,
-          String(z.zom.hasCooldown));
+    check("...with the latch still armed at one",
+          (z.zom.flags1368 & Zombie1368Flag.Cooldown) !== 0,
+          String(z.zom.flags1368));
     ZombieStateHoldAtRange(z, new Rng(3), NULL_HOST);
     check("...and the latch disarms itself as the counter runs out",
-          z.cooldown === 0 && !z.zom.hasCooldown, `${z.cooldown}/${z.zom.hasCooldown}`);
+          z.cooldown === 0 && !(z.zom.flags1368 & Zombie1368Flag.Cooldown),
+          `${z.cooldown}/${z.zom.flags1368}`);
   }
   {
     clear();
     const z = zombie("cooling and idling", { cooldown: 30, motion: 12 });
-    z.zom.hasCooldown = true;
+    z.zom.flags1368 |= Zombie1368Flag.Cooldown;
     z.flags2 |= ZombieFlag2.StrikeAnchor;
     z.yaw = 0x4000;
     ZombieStateHoldAtRange(z, new Rng(3), NULL_HOST);
@@ -1079,7 +1082,7 @@ console.log("\nthe strike anchor and the cooldown it gates:");
     const z = zombie("retreating with a cooldown",
                      { state: ZombieState.BackOff, cooldown: 50,
                        pos: vec3(0, 0, INNER + 15) });
-    z.zom.hasCooldown = true;
+    z.zom.flags1368 |= Zombie1368Flag.Cooldown;
     z.flags2 |= ZombieFlag2.StrikeAnchor;
     ZombieStateBackOff(z, 1 / 60, new Rng(2));
     check("the retreat leaves an armed cooldown alone",
@@ -1107,7 +1110,7 @@ console.log("\nthe strike anchor and the cooldown it gates:");
     const z = zombie("cued attacker",
                      { state: ZombieState.Strike, sub: StrikeSub.Lunge,
                        attack: 1, pos: vec3(0, 0, atk.distance + 20) });
-    z.zom.hasCooldown = true;
+    z.zom.flags1368 |= Zombie1368Flag.Cooldown;
     // The end of the attack cry: `ZombieStateStrike` (`FUN_00455A40`) calls
     // `ActorPlayHitVoice(obj, 3)` at `0x00455B8A`, on the frame the strike
     // clip is set. The routine itself is checked above; this is the wiring,

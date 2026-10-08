@@ -906,6 +906,13 @@ export interface CharacterPlacement {
 export interface DeathSet {
   front: number[];
   back: number[];
+  /**
+   * `ZombieCorpsePoseFrame` (`FUN_00454E00`)'s 26 play counters at
+   * `0x0059301C`, as the table holds them: a pair per clip, in the order
+   * `hod2lib/combat.ts`'s `CORPSE_POSE_COUNTERS` lists. Absent in a bundle
+   * older than the routine's port.
+   */
+  corpse?: number[];
 }
 
 /** A sound id paired with the filename `g_se_name_list` gives it. */

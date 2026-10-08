@@ -18,6 +18,7 @@
  * stand against, because the walk is what the *other* seven state-33 spawns
  * do.
  */
+import { Zombie1368Flag } from "./state";
 import type { Events } from "../../core/events";
 import { ActorFlag, ZombieAux, ZombieFlag2, type ZombieActor } from "../actor";
 import { SPAWN_RIDE_CARRIER, ZombieAttachToCarrier } from "./carrier";
@@ -259,7 +260,7 @@ const ZNELE_FADING_FLAGS = ActorFlag.NoHeadAim | ActorFlag.NoShotTest
  */
 function ZombieInitTwinFade(obj: ZombieActor): void {
   obj.flags2 &= ~FADE_NO_PUSH;
-  obj.zom.fadeDraw = true;
+  obj.zom.flags1368 |= Zombie1368Flag.FadeDraw;
   obj.alpha = TWIN_ALPHA;
   obj.zom.fadeStep = TWIN_FADE_STEP;
   obj.zom.fadeDelay = FADE_DELAY;
@@ -289,7 +290,7 @@ function ZombieInitTwinFade(obj: ZombieActor): void {
 function ZombieInitZneleFade(obj: ZombieActor, events?: Events): void {
   obj.flags |= ZNELE_FADING_FLAGS;
   obj.flags2 &= ~FADE_NO_PUSH;
-  obj.zom.fadeDraw = true;
+  obj.zom.flags1368 |= Zombie1368Flag.FadeDraw;
   obj.alpha = 0;
   obj.zom.fadeStep = ZNELE_FADE_STEP;
   obj.zom.fadeDelay = FADE_DELAY;

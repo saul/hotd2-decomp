@@ -43,7 +43,7 @@ import { ThrowerTryEnterState } from "../../src/game/class31/router";
 import {
   ThrowerStateBlinkInThreeHops, ThrowerStateRideObjectPath,
 } from "../../src/game/class31/scripted";
-import { EnemyZombieUpdate, ZombieEntryState } from "../../src/game/class30";
+import { EnemyZombieUpdate } from "../../src/game/class30";
 import { ZombieOnShot } from "../../src/game/class30/on_shot";
 import { HIT_SLOT_CLAIMED } from "../../src/game/hit_slots";
 import { ZombiePushOutOfWorldAndActors } from "../../src/game/class30/ground";
@@ -138,6 +138,28 @@ console.log("\nclass 0x30 state 26: the arc alone moves the leap:");
           `motion ${z.motion}`);
   }
   {
+    // `0x004583EF`: the landing gives the ground snap back only to an actor
+    // not riding the carrier. With no carrier in the scene the seat moves
+    // nothing, so the leap is the same leap.
+    const run = (seated: boolean) => {
+      const z = leaper();
+      if (seated) z.flags2 |= ZombieFlag2.AttachedToCarrier;
+      const rng = new Rng(5);
+      for (let f = 0; f < 400 && z.sub < 4; f++) {
+        EnemyZombieUpdate(z, { dt: 1 / 60, rng, host: NULL_HOST });
+        ActorAdvanceMotion(z, 1 / 60);
+      }
+      return z;
+    };
+    const free = run(false);
+    const seated = run(true);
+    check("the landing clears Airborne, except under a carrier seat",
+          free.sub >= 4 && (free.flags & ActorFlag.Airborne) === 0
+          && seated.sub >= 4 && (seated.flags & ActorFlag.Airborne) !== 0,
+          `free ${free.sub}/${free.flags & ActorFlag.Airborne} seated `
+          + `${seated.sub}/${seated.flags & ActorFlag.Airborne}`);
+  }
+  {
     // Shot out of the air: the limp is exactly what it is for.
     const z = leaper();
     const rng = new Rng(5);
@@ -158,13 +180,9 @@ console.log("\nclass 0x30 state 26: the arc alone moves the leap:");
 console.log("\nclass 0x30 state 33: the stationary thrower:");
 {
   // `ZombieStateStandAndThrow` is the only class-0x30 state that never moves
-  // the actor. The port had no state 33, so `ZombieEntryState` folded it into
-  // `AttackRun` and stage 1's axe man -- character type 0x13, whose asset file
-  // is `tutorial.bin` -- charged the camera.
-  check("a state-33 spawn starts in StandAndThrow, not AttackRun",
-        ZombieEntryState(ZombieState.StandAndThrow)
-          === ZombieState.StandAndThrow,
-        String(ZombieEntryState(ZombieState.StandAndThrow)));
+  // the actor. The port had no state 33, so an entry router since deleted
+  // folded it into `AttackRun` and stage 1's axe man -- character type 0x13,
+  // whose asset file is `tutorial.bin` -- charged the camera.
 
   /** `obj+0x34` bit 0x20000 — see `ActorInitFlags` and `class30/ground.ts`. */
   const GROUND_SNAP_EXEMPT = 0x20000;
@@ -186,6 +204,10 @@ console.log("\nclass 0x30 state 33: the stationary thrower:");
     z.pos = vec3(0, 0, 60);
     return z;
   };
+
+  check("a state-33 spawn starts in StandAndThrow, not AttackRun",
+        thrower().state === ZombieState.StandAndThrow,
+        String(thrower().state));
 
   {
     const z = thrower();
@@ -719,6 +741,14 @@ console.log("\nActorBodyConditionFromHands:");
   const TYPE_AXE = {
     ...TYPE,
     type: 0x14, name: "znonoopa", file: "znonoopa.bin",
+    // The hands' draw records start on the props the kit names, as the
+    // shipped skeleton's do (bone 5 `0x1EF9`, bone 8 `0x1EF5`): the body
+    // condition routines read the records, not the kit.
+    bones: [...TYPE.bones.filter((b) => b.bone !== 5),
+            { bone: 5, part: "r_hand", slot: 7929, offset: [0, 0, 0],
+              parent: 0, damage_rank: [], steps: [] },
+            { bone: 8, part: "l_hand", slot: 7925, offset: [0, 0, 0],
+              parent: null, damage_rank: [], steps: [] }],
     attacks: { ...TYPE.attacks, "1": MELEE, "2": MELEE },
     attack_picks: { ...TYPE.attack_picks,
                     "1": new Array(80).fill(0), "2": new Array(80).fill(0) },
@@ -830,6 +860,16 @@ console.log("\nActorBodyConditionFromHands:");
     ActorBodyConditionFromHands(empty);
     check("a thrown right hand takes it to zero", empty.condition === 0,
           String(empty.condition));
+
+    // A severed arm takes the hand's record to 0 -- `RemoveBoneSubtree`
+    // (`FUN_00409AF0`) zeroes every record under it -- and the port keeps that
+    // as `removed`, not as a slot. The routine read an absent slot as the
+    // kit's held prop, so a hand cut off with its arm still counted.
+    const severed = axeman(8);
+    severed.removed.push(5);
+    ActorBodyConditionFromHands(severed);
+    check("a hand severed with its arm counts as empty", severed.condition === 0,
+          String(severed.condition));
 
     // Character type 1 has no 1-or-2 row, so the routine only ever writes 0.
     ResetGameGlobals();

@@ -18,6 +18,7 @@
  * different attack in the first place: `char_adv00` with a head draws attack 2,
  * and with the head shot off draws attack 3.
  */
+import { Zombie1368Flag } from "./state";
 import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
 import type { AttackJson } from "../../bundle";
@@ -194,7 +195,7 @@ export function ZombieStateStrike(obj: ZombieActor, rng: Rng,
     //
     // so a camera-cued (state-19) attacker swings from wherever the cue left
     // it standing, at whatever range that is, instead of walking in first.
-    if (dist2d(obj.pos, obj.target) > atk.distance && !obj.zom.hasCooldown) {
+    if (dist2d(obj.pos, obj.target) > atk.distance && !(obj.zom.flags1368 & Zombie1368Flag.Cooldown)) {
       // Still short: play the lunge. Its own root motion is what closes the
       // gap -- the state writes no velocity.
       //

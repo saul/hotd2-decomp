@@ -13,6 +13,7 @@
  * it does that is state is the head aim, the two fade clocks, and which draw
  * each node gets, and that is why it is ported here.
  */
+import { Zombie1368Flag } from "./state";
 import { ActorFlag, ZombieFlag2, type Actor } from "../actor";
 import { G } from "../globals";
 import type { ClassFrame } from "../registry";
@@ -172,7 +173,7 @@ export function ZombieDrawWithEnlargedHead(obj: Actor, bone: number,
  */
 function ZombieFadeInNode(obj: HookedZombie, f: ClassFrame): void {
   const z = obj.zom;
-  if (!z.fadeDraw) return;
+  if (!(z.flags1368 & Zombie1368Flag.FadeDraw)) return;
   let done = false;
   z.fadeDelay = Math.fround(z.fadeDelay - FADE_DELAY_STEP);
   if (z.fadeDelay < 0) {
@@ -180,7 +181,7 @@ function ZombieFadeInNode(obj: HookedZombie, f: ClassFrame): void {
     if (obj.alpha > 1.0) done = true;
   }
   if ((obj.flags & ActorFlag.Committed) === 0 && !done) return;
-  z.fadeDraw = false;
+  z.flags1368 &= ~Zombie1368Flag.FadeDraw;
   obj.flags2 |= FADE_IN_DONE_PUSH;
   obj.flags &= ~FADE_IN_DONE_CLEARS;
   obj.alpha = 1.0;
@@ -235,5 +236,5 @@ export function ZombieSubmitSlotByLighting(obj: HookedZombie): number | null {
       && G.g_scene_lighting !== 0) {
     return null;
   }
-  return obj.zom.fadeDraw ? obj.alpha : null;
+  return obj.zom.flags1368 & Zombie1368Flag.FadeDraw ? obj.alpha : null;
 }

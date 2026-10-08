@@ -338,7 +338,7 @@ export function uncitedExports(t: PortTree): string[] {
  * with Ghidra beside them and cites what it ports; it may never rise. A new
  * export must declare which kind it is.
  */
-export const UNCITED_BASELINE = 79;
+export const UNCITED_BASELINE = 78;
 
 export function checkUncitedExports(t: PortTree, out: Findings): void {
   const uncited = uncitedExports(t);

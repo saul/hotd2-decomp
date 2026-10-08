@@ -607,7 +607,8 @@ export const CHECKS: readonly Check[] = [
      + "of the split bit and no way into its state, each beside a control "
      + "that must be found -- which is the whole of the case for the port "
      + "not transcribing the split, and the only check that can say when "
-     + "that case stops holding"),
+     + "that case stops holding; and the same census for states 16 and 28, "
+     + "the class-0x30 dispatch's other two arms with no body"),
   game("zskamere_aside",
        "that no `zskamere` (class 0x31, type 0x17) can reach "
      + "`ThrowerStateLeapAside` (`FUN_0044B880`), whose type-0x17 arm hands "

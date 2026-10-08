@@ -23,6 +23,7 @@
  *   at `0x004558D2` is the **only** occurrence of the id anywhere in `.text`.
  *   See {@link ZOMBIE_HOLD_GROAN}.
  */
+import { Zombie1368Flag } from "./state";
 import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
 import { ZombieFlag2, type ZombieActor } from "../actor";
@@ -177,11 +178,11 @@ export function ZombieStateHoldAtRange(obj: ZombieActor, rng: Rng,
   // claim gate below tests `obj+0x133C` again, and the idle and the turn at
   // the bottom of this state run on every frame of the wait. An early return
   // here is why a cooling zombie played no idle and never turned to face you.
-  if (!obj.zom.hasCooldown) {
+  if (!(obj.zom.flags1368 & Zombie1368Flag.Cooldown)) {
     obj.cooldown = 0;
   } else if (obj.flags2 & ZombieFlag2.StrikeAnchor) {
     obj.cooldown -= 1;
-    if (obj.cooldown < 1) obj.zom.hasCooldown = false;
+    if (obj.cooldown < 1) obj.zom.flags1368 &= ~Zombie1368Flag.Cooldown;
   }
 
   // The hub's own four tests, and then **the claim itself** -- not a reading

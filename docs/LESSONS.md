@@ -356,6 +356,20 @@ the object inline, and the shot-test table called it `[open]` until the
 image for the routine's address as an immediate** (`68 <addr>`), and follow
 every allocation that pushes it.
 
+**L114 -- An offset off a typed pointer in the decompilation is in elements,
+not bytes.** `CivilianUpdate`'s sphere switch reads
+`MatrixMultiply(g_cur_actor_model + 0x70)`, and `g_cur_actor_model` is an
+`int *`, so that is byte `+0x1C0` -- `ADD ECX, 0x1C0` at `0x0048AE24` says so.
+Read as bytes, `+0x70`, `+0x4C`, `+0x244` and `+0x1D8` land between the bone
+draw records, and the port recorded three of the switch's four arms as
+"matrices the pose leaves behind, which `game/` cannot reach" -- an `[open]`
+that hid the default arm, so most civilians were never measured where the
+engine measures them. Scaled by four they are bones 2, 1, 15 and 12, at
+`model+0xA0 + bone*0x90`, and `GameHost.boneWorld` had answered them all
+along. **Before calling an offset unreachable, look at the variable's type in
+the decompilation, and read the `ADD`/`LEA` in the listing: the instruction
+carries the byte offset and the pseudocode does not.**
+
 
 ## Transcribing behaviour into the port
 

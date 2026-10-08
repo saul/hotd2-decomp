@@ -1,51 +1,10 @@
 /**
- * The scenery the script drives: props, backdrops, camera rigs and rain.
+ * The scenery the script drives: backdrops, camera rigs and rain.
  *
  * Part of the bundle the exporter writes; see docs/formats/ for each block.
  */
 
 import type { MessageVariant } from "./sound";
-
-export interface PropHinge {
-  name: string;
-  kind: "hinge";
-  at: number;
-  /** The class-0x44 builder that made it: 1, 2 or 4. */
-  selector: number;
-  slot: number;
-  /**
-   * `obj+0x1DC`. Its **sign** mirrors the swing so a pair opens outward; its
-   * magnitude is the amplitude of the wobble the prop does when it is shot,
-   * and must never scale the pose — see `render/hinge.ts`. Four of the game's
-   * 56 hinges carry ±512 or ±416, so ±1 is not safe to assume.
-   */
-  side: number;
-  curve: number;
-  /** BAMS mounting angle, separate from the swing. */
-  base_yaw: number;
-  /** Script flag that starts the swing. */
-  open_flag: number;
-  /** Script flag that deletes it, or −1. */
-  remove_flag: number;
-}
-
-/** A class-0x33 selector-2 prop: drawn until a flag or a camera frame. */
-export interface PropStatic {
-  name: string;
-  kind: "static";
-  at: number;
-  slot: number;
-  remove_flag: number;
-  remove_frame: number | null;
-}
-
-export interface PropsJson {
-  hinges: PropHinge[];
-  statics: PropStatic[];
-  /** Curve id → `[rx, ry, rz]` in BAMS, one per frame. */
-  curves: Record<string, number[][]>;
-  note: string;
-}
 
 /** One row of `g_looping_se_ids` / `g_looping_se_stop_ids`, paired by index. */
 export interface LoopingSe {
@@ -223,18 +182,53 @@ export interface BreakablePlacement {
    * `slot` is the tile, already looked up in `g_water_surface_slots`
    * (`0x00593DA4`) by `field_1f4`, and `lifetime_evt_steps` is the
    * descriptor's `+0x11C`. See `game/class41/water.ts`.
+   *
+   * `table16`, `type17`, `table29` and `type37` are constructors 16, 17, 29
+   * and 37 (`PlaceTable16Props`, `PlaceType17Props`, `PlaceTable29Props`,
+   * `PlaceType37PropPair`). The two table constructors read only the step
+   * lifetime of the descriptor, and their rows ride in
+   * {@link BreakablesJson.type16_xz} and {@link BreakablesJson.type29_xyz};
+   * `type17` reads the point; `type37` the point, `yaw`, `set_size`,
+   * `field_1f4` (the item set) and the lifetime, and names the effect and
+   * motion its break draws. See `game/class41/type16.ts` and its siblings.
+   * `type42`, `type52`, `type55`, `type61` and `type65` are constructors 42,
+   * 52, 55, 61 and 65 (`PlaceType42Prop`, `PlaceType52VanDoors`,
+   * `PlaceType55Particles`, `PlaceType61Figures`, `PlaceType65Particles`):
+   * `pos`, `yaw` and `lifetime_evt_steps` are the descriptor's own, and 55
+   * and 61 carry the table of the image each reads, {@link offsets} and
+   * {@link char_types}. See `game/class41/type42.ts` and its neighbours.
+   *
+   * `golden_frog` is constructor 68 (`PlaceGoldenFrogFromLessonTable`),
+   * whose three places a lesson ride in {@link BreakablePlacement.xz}; it
+   * reads the placer's `+0x44` and `+0x11C` besides. See
+   * `game/class41/golden_frog.ts`.
+   *
+   * `ripple` is constructor 26 (`PlaceType26RippleTask`), the warehouse
+   * water: it reads only the lifetime, and carries the slot its task draws
+   * and the `pol/` file that slot belongs to ({@link BreakablePlacement.pol}).
+   * See `game/class41/type26.ts`.
    */
   container: "group" | "kinded" | "falling" | "generic"
     | "chain" | "fragment" | "story_switch" | "script_flag_effect"
     | "rising_door" | "rise_to_height" | "slide_on_flag" | "flag_lifted"
     | "flicker_light" | "table38" | "table39" | "table44" | "table50"
     | "table66" | "water_surface" | "type47"
-    | "draw_only_14";
+    | "table16" | "type17" | "table29" | "type37"
+    | "draw_only_14"
+    | "hinge" | "van_doors" | "hinge_scaled"
+    | "flag_slot_effect" | "effect_handoff" | "swing_then_break"
+    | "scaled_slot_effect" | "effect_collapse" | "slot_strip_loop"
+    | "kinded_44" | "uv_scroll"
+    | "type42" | "type52" | "type55" | "type61" | "type65"
+    | "golden_frog" | "ripple";
   /** How many evt blocks it lives for. */
   lifetime_evt_steps: number;
   /** `group` only — the row of `g_breakable_group_ptrs` to build. */
   group?: number;
-  /** `kinded` and `falling` — the object kind in the orientation word. */
+  /**
+   * `kinded`, `kinded_44` and `falling` — the object kind in the orientation
+   * word.
+   */
   kind?: number;
   /**
    * `rising_door` — the script flag that starts the rise, `obj+0x2A0`.
@@ -255,10 +249,12 @@ export interface BreakablePlacement {
    */
   rise?: number;
   /**
-   * `rise_to_height` only — the i32 at tail `+0x08`, which the constructor
-   * stores to `obj+0x14C` and the update tests against `-1` twice: to choose
-   * `ActorDespawn` over `ActorKill` on the remove flag, and to register for
-   * the shot test. `-1` in every shipped spawn.
+   * The i32 at tail `+0x08`, which the constructor stores to `obj+0x14C`
+   * and the update tests against `-1`: to choose `ActorDespawn` over
+   * `ActorKill` on the remove flag, and to register for the shot test. Every
+   * class-0x44 selector that reads it: 0 to 7, 12, 13 and 17 (the switch
+   * tests it at placement); each also carries it resolved, as
+   * {@link coli_blob}.
    */
   coli?: number;
   /**
@@ -300,24 +296,88 @@ export interface BreakablePlacement {
    * builds from.
    */
   field_1f4?: number;
+  /**
+   * `golden_frog` -- `g_golden_frog_lesson_xz` (`0x0059579C`), fifteen raw
+   * `[s16 x, s16 z]` rows, three a lesson for `g_training_lesson` 0..4. The
+   * `* 0.1` is the constructor's.
+   */
+  xz?: [number, number][];
+  /**
+   * `ripple` -- the index of the `pol/` file the task's slot belongs to, the
+   * file whose state answers the slot's resident bit (`game/pol_files.ts`).
+   */
+  pol?: number;
   slot?: number;
   /**
    * `generic` and `draw_only_14` — the other two orientation words, which
-   * really are angles.
+   * really are angles. `slot_strip_loop` carries `roll` only, as the strip's
+   * last cursor.
    */
   pitch?: number;
   roll?: number;
   /**
-   * `draw_only_14` only — the tail's three f32 at `+0x08`, `+0x0C`, `+0x10`,
-   * which `PropBuildDrawOnlySelector14` (`FUN_004736D0`) copies to
-   * `obj+0x1A8`..`+0x1B0` and its update hands to `MatrixScale`.
+   * Three f32 of scale from the tail, which the builder copies to
+   * `obj+0x1A8`..`+0x1B0` and the update hands to `MatrixScale`: at
+   * `+0x08` for `draw_only_14` (`PropBuildDrawOnlySelector14`,
+   * `FUN_004736D0`), at `+0x14` for `hinge_scaled`, `swing_then_break`,
+   * `scaled_slot_effect` and `slot_strip_loop`, and at `+0x14` for
+   * `effect_collapse`, whose object keeps it at `+0x1A0`.
    */
   scale?: [number, number, number];
+  /**
+   * The class-0x44 hinges and their neighbours -- `hinge`, `van_doors` and
+   * `hinge_scaled` (selectors 1, 2 and 4, run by `HingeUpdate`,
+   * `FUN_00473CF0`), `effect_handoff` (5), `swing_then_break` (6) and
+   * `scaled_slot_effect` (7):
+   *
+   * * `curve` -- the u16 at tail `+0x00`, `obj+0x290`: which swing curve.
+   * * `side` -- `obj+0x1DC`, the i32 at tail `+0x10` (selectors 1 and 5) or
+   *   `+0x0C` (4, 6, 7). Its **sign** picks the way the swing goes and its
+   *   magnitude is the shot wobble's amplitude.
+   * * `wobble_phase` -- `obj+0x1E8`, the i32 at tail `+0x14` (selectors 1, 2
+   *   and 5).
+   * * `field_2ac` -- `obj+0x2AC`, the signed byte at tail `+0x12` (selectors
+   *   6 and 7), which no routine of theirs reads.
+   *
+   * `slot`, `coli`, `open_flag`, `remove_flag` and `scale` as for the
+   * selectors above.
+   *
+   * `story_switch` (selector 17, `PlaceStoryModeSwitch`, `FUN_00473A70`)
+   * carries `curve` as the **signed byte** at tail `+0x00` (`obj+0x194`, an
+   * index into `g_pHingeCurvesXYZ`), `side` from the i32 at `+0x0C` and
+   * `scale` from `+0x14`.
+   */
+  curve?: number;
+  side?: number;
+  wobble_phase?: number;
+  field_2ac?: number;
+  /**
+   * `effect_collapse` only — keys 0x22 and 0x23 of motion 0x1D3 as
+   * `EffectCollapseUpdate` (`FUN_004748C0`) reads them: 73 entries each,
+   * one past effect 0x10's 72 bones, at the addresses
+   * `EffectFrameTranslations`/`EffectFrameRotations` return. `t_bits` are the
+   * translations' raw 32-bit patterns (the 73rd is rotation shorts), `r` the
+   * rotations as signed shorts.
+   */
+  collapse_keys?: { key: number; t_bits: number[]; r: number[] }[];
+  /**
+   * `script_flag_effect` and `flag_slot_effect` — the three signed shorts
+   * `ScriptFlagEffectUpdate` (`FUN_00473B90`) and `FlagSlotEffectUpdate`
+   * (`FUN_00474120`) load into `obj+0x64..0x6C` at each play cursor
+   * `0 .. play_length - 2`: `EffectFrameRotations` of the raw cursor, entry
+   * `obj+0x2A0` (the capture bone, or selector 3's open flag), read where
+   * the routine reads in the bank's file. `null` where those bytes are past
+   * the end of the file -- the engine's heap, not data
+   * (`docs/formats/mot.md`).
+   */
+  rotation_entries?: ([number, number, number] | null)[];
   /** The item set it belongs to, 0 for none. */
   item_set?: number;
   /** How many props share that set; the countdown is seeded from it. */
   set_size?: number;
-  /** `falling` only — the `g_GameMode == 1` drop, `-1` for none. */
+  /**
+   * `falling` and `kinded_44` — the `g_GameMode == 1` drop, `-1` for none.
+   */
   story_item?: number;
   /**
    * `chain` only — the group id `PlaceChainSegments` stamps on all twenty
@@ -338,14 +398,19 @@ export interface BreakablePlacement {
   branch_flag?: number;
   remove_flag?: number;
   /**
-   * `story_switch` only — the descriptor's `+0x08`, which decides **how it is
-   * shot**. `-1` sends it to `ShotTestSphere` with a radius of 8 and a centre
-   * the routine never writes, so it answers any shot on screen; anything else
-   * sets `obj+0x34` bit 4 and sends it to `ShotTestMesh`, which the prop pool
-   * does not reach. Every shipped switch names one. See
-   * `game/class41/shot_test.ts`.
+   * Every class-0x44 placement that carries {@link coli} — the `coli.blobs`
+   * key the tail's `+0x08` points at, which the constructor stores to
+   * `obj+0x14C`: the collision mesh `ShotTestMesh` (`FUN_00404A00`) traces a
+   * shot against, and the moving-object collision passes a ground probe or
+   * a body's push. `null` for `-1` -- which for the switch is the sphere arm
+   * instead (radius 8, a centre the routine never writes) -- and for a
+   * pointer that lands on no blob. Every shipped switch names one, and so
+   * do six hinges, two selector-12 doors, stage 1's selector-3 effect and
+   * both its window halves (selector 0); stage 2's hinge `0xFFD0` and
+   * selector-5 handoff `0x10018` carry stage 1's door pointer, which in
+   * stage 2 lands on no blob. The raw word is {@link coli}. See `game/class44/story_switch.ts` and `hinge.ts`.
    */
-  volume?: number;
+  coli_blob?: string | null;
   /**
    * `story_switch` only — the four Original Mode item ids that throw the
    * switch without a shot. `-1` in the first means it has no key and any shot
@@ -373,6 +438,20 @@ export interface BreakablePlacement {
    * draws, so `web/tools/checks/prop_slots.ts` can hold the bundle to them.
    */
   slots?: number[];
+  /**
+   * `type55` only -- `g_type55_particle_offsets` (`0x00594F2A`), all
+   * forty-eight rows, each `[x, y, z]` as the image's s16s:
+   * `PlaceType55Particles` (`FUN_00463FE0`) scales them by 0.001 into each
+   * piece's start and speed.
+   */
+  offsets?: [number, number, number][];
+  /**
+   * `type61` only -- `g_type61_figure_types` (`0x0059504C`), the nine s8
+   * character types `PlaceType61Figures` (`FUN_004641F0`) gives its figures,
+   * in order. Each figure's own row in `characters.placements` is synthetic
+   * and carries the same type.
+   */
+  char_types?: number[];
 }
 
 /**
@@ -436,6 +515,19 @@ export interface ShatterPiecesJson {
   angles: [number, number, number][];
 }
 
+/**
+ * One `g_item_pickup_slot` record (`0x00595058`, stride `0xC`), raw: the
+ * slot the score pickup is drawn with, the points it pays
+ * (`g_item_score_table`, the s16 at `+2`), the scale it is drawn at (`+4`)
+ * and how far above its prop it is let out (`g_item_pickup_y_offset`, `+8`).
+ */
+export interface ItemPickupRowJson {
+  slot: number;
+  score: number;
+  scale: number;
+  y_offset: number;
+}
+
 export interface BreakablesJson {
   /** All nine groups, indexed by group id. */
   groups: BreakableMember[][];
@@ -448,6 +540,28 @@ export interface BreakablesJson {
    * container's two pieces settle against, already scaled by 0.001.
    */
   fragment_hull: [number, number, number][];
+  /**
+   * `g_type16_prop_xz` (`0x00593D20`) -- six raw `[s16 x, s16 z]` rows, the
+   * points class 0x41 constructor 16 places its objects at, in tenths.
+   */
+  type16_xz?: [number, number][];
+  /**
+   * `g_type29_prop_xyz` (`0x00593D38`) -- nine `[x, y, z]` f32 rows, one per
+   * object class 0x41 constructor 29 builds.
+   */
+  type29_xyz?: [number, number, number][];
+  /**
+   * `g_type37_hull_points` (`0x00593E40`) -- eight raw `[s16 x, y, z]`
+   * corners, in thousandths, that constructor 37's objects fall onto and
+   * pivot on.
+   */
+  type37_hull?: [number, number, number][];
+  /**
+   * `g_item_pickup_slot` (`0x00595058`) -- the score pickup's `0xC`-byte
+   * record for each kind the release switch hands `SpawnScorePickup`
+   * (`FUN_004723F0`): 2 and 5..8, keyed by the kind.
+   */
+  item_pickups?: Record<string, ItemPickupRowJson>;
   /** What a stacked group prop's fifteen shatter pieces are made of. */
   shatter: ShatterPiecesJson;
   /** `g_prop_kind_params`, indexed by kind. */
@@ -478,6 +592,12 @@ export interface BreakablesJson {
    * literal, and read it from here.
    */
   hinge_curves_xyz?: Record<string, number[][]>;
+  /**
+   * `g_pHingeCurvesYaw` (`0x005960C8`) by curve index -- 1 and 4, the ones
+   * whose pointer is not null -- each a u16 BAMS yaw per frame. `HingeUpdate`
+   * reads every curve but 0, 2 and 3 from here.
+   */
+  hinge_curves_yaw?: Record<string, number[]>;
 }
 
 /** One `g_original_item_tables` row: four item ids and their weights. */
@@ -568,7 +688,11 @@ export interface CivilianCmdJson {
   args: number[];
   /** Indices into {@link CiviliansJson.scripts} for a pointer operand. */
   scripts?: number[];
-  /** Ops 5, 6 and 0x26: the three floats the operand points at. */
+  /**
+   * Ops 5, 6 and 0x26: the three floats the operand points at. Op 0x24 in
+   * the head look's point modes (4 and 5): the three its second operand
+   * points at.
+   */
   point?: [number, number, number] | null;
   /** Op 5's approach radius, op 0x16's target scale — the operand as a float. */
   radius?: number;
@@ -659,5 +783,12 @@ export interface HumanoidProgramJson {
   flags2: number;
   motion: number;
   phase: number;
+  /**
+   * The index in `cmds` of the block's first command, `blk + 8`, which
+   * `ScriptedHumanoidInit` (`FUN_004840D0`) points the cursor at. `cmds` is
+   * in address order and a program can jump back into commands stored before
+   * its block, so this is not always 0.
+   */
+  entry: number;
   cmds: HumanoidCmdJson[];
 }

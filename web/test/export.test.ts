@@ -31,10 +31,15 @@ import { join } from "node:path";
 import { BUNDLE_FORMAT, writeManifest } from "../src/hod2lib/bundle";
 import { decompress, decompressFile, LZError } from "../src/hod2lib/lz";
 import { bundleJson, resolveCase, segments } from "../src/hod2lib/io";
-import { crc32 } from "../src/hod2lib/png";
+import { crc32, encodeRgba } from "../src/hod2lib/png";
+import { decodeRgba } from "../src/render/png_textures";
 import { zipBlob } from "../src/app/install/zip";
 import { RIGS } from "../src/hod2lib/rigs_data";
 import { holdFrameOf } from "../src/hod2lib/rigs";
+import { entranceTailState } from "../src/hod2lib/placement";
+import { class13Tail } from "../src/hod2lib/characters";
+import { SPAWN_HEADER, Spawn, type EvtFile } from "../src/hod2lib/evt";
+import type { ExeTables } from "../src/hod2lib/exetab";
 
 let failures = 0;
 function check(name: string, ok: boolean, detail = ""): void {
@@ -322,6 +327,35 @@ console.log("\na rig route parked on its path:");
         String(holdFrameOf({ slot: 1, frame: "(age % 24)" })));
 }
 
+// -- which state reads a class-0x30 tail ------------------------------------
+
+/**
+ * `ZombieStateRideCarrier` (`FUN_00458960`) reads only the tail's byte 3 and
+ * hands the actor to that state at `0x00458A48`, so a passenger's entrance
+ * tail is decoded for its **attack** state. Stage 2's boat riders start in 29
+ * and hand over to 30 and 26; keyed on 29, their arcs and leaps were never
+ * decoded and they walked off the boats. Spawns that start in any other state
+ * keep their own: stage 4's three state-30 spawns, whose attack byte is 0.
+ */
+console.log("\nthe state that reads a class-0x30 tail:");
+{
+  check("a passenger's tail is its attack state's: 29 handing to 30",
+        entranceTailState(0x30, 29, 30) === 30,
+        String(entranceTailState(0x30, 29, 30)));
+  check("...and 29 handing to 26",
+        entranceTailState(0x30, 29, 26) === 26,
+        String(entranceTailState(0x30, 29, 26)));
+  check("a spawn that starts in its entrance keeps it: 30 with attack 0",
+        entranceTailState(0x30, 30, 0) === 30,
+        String(entranceTailState(0x30, 30, 0)));
+  check("class 0x18 runs the same table, so the same rule",
+        entranceTailState(0x18, 29, 47) === 47,
+        String(entranceTailState(0x18, 29, 47)));
+  check("a class that is not a zombie keeps its byte as it is",
+        entranceTailState(0x31, 29, 30) === 29,
+        String(entranceTailState(0x31, 29, 30)));
+}
+
 // -- a texture's alpha is the bank's, whatever the mesh's IgnoreTexAlpha -----
 
 /**
@@ -465,6 +499,121 @@ console.log("\na texture's alpha is the bank's, not the mesh's:");
         + "first match's",
         factors.length === 3 && factors[0] === "1,1,1,1"
         && factors[2] === "0,0,0,1", JSON.stringify(factors));
+}
+
+console.log("\nclass 0x13's tail carries what behaviours 6 and 7 read:");
+{
+  // `PropBehaviourLaunchWithAccel` (`FUN_0043FFC0`) reads six floats from
+  // the operand block at tail `+0x14`; `PropBehaviourRideObjectPath`
+  // (`FUN_004400D0`) its first dword as a path slot and
+  // `g_cam_path_length[slot]` (`CMP EDX, [EDI*4 + 0x576D38]`). A
+  // hand-built descriptor, every operand word different, so each field can
+  // only have come from one offset.
+  const tail = (behaviour: number, words: number[]): Spawn => {
+    const raw = new Uint8Array(SPAWN_HEADER + 0x14 + 4 * words.length);
+    const dv = new DataView(raw.buffer);
+    dv.setUint32(0, 0x13, true);
+    dv.setUint16(SPAWN_HEADER + 0x00, 0x1234, true);
+    dv.setFloat32(SPAWN_HEADER + 0x0c, 1, true);
+    dv.setUint32(SPAWN_HEADER + 0x10, behaviour, true);
+    words.forEach((w, k) => dv.setFloat32(SPAWN_HEADER + 0x14 + 4 * k, w, true));
+    return new Spawn(0, 0x0c, 0x13, 0, [0, 0, 0], [0, 0, 0], 0, 0,
+                     { raw } as unknown as EvtFile);
+  };
+  const lengths: number[] = [];
+  const tables = {
+    camPathLength: (slot: number) => { lengths.push(slot); return 240; },
+  } as unknown as ExeTables;
+  const six = class13Tail(tail(6, [1.5, -2, 3.25, 0.125, -0.5, 0.75]), tables);
+  check("behaviour 6 carries the operand block's six floats, in order",
+        JSON.stringify(six.operand) === "[1.5,-2,3.25,0.125,-0.5,0.75]"
+        && six.path_length === undefined && lengths.length === 0,
+        JSON.stringify(six));
+  const raw7 = tail(7, [0]);
+  new DataView(raw7.evt!.raw.buffer).setUint32(SPAWN_HEADER + 0x14, 0x176, true);
+  const seven = class13Tail(raw7, tables);
+  check("behaviour 7 carries g_cam_path_length at the first dword's slot",
+        seven.selector === 0x176 && seven.path_length === 240
+        && lengths.join() === String(0x176) && seven.operand === undefined,
+        JSON.stringify(seven));
+  const eight = class13Tail(tail(8, [0]), tables);
+  check("...and no other behaviour carries either",
+        eight.operand === undefined && eight.path_length === undefined,
+        JSON.stringify(eight));
+}
+
+console.log("\nPNG: the page's decoder keeps the colour under alpha 0");
+{
+  // `render/png_textures.ts` decodes every stage image with `decodeRgba`
+  // because WebKit's own decoder loses a transparent texel's colour, and the
+  // opaque pass draws that colour. So the round trip has to give back the
+  // exporter's bytes exactly, alpha-0 texels included.
+  const { deflateSync } = await import("node:zlib");
+  const deflate = async (d: Uint8Array, level: number) =>
+    new Uint8Array(deflateSync(d, { level }));
+  const w = 3, h = 2;
+  const px = new Uint8Array([
+    200, 100, 50, 0,    10, 20, 30, 255,   0, 0, 0, 0,
+    255, 0, 0, 0,       1, 2, 3, 128,      90, 180, 45, 7,
+  ]);
+  const back = await decodeRgba(await encodeRgba(w, h, px, deflate));
+  check("encodeRgba -> decodeRgba gives the bytes back, colour under alpha 0 "
+        + "and all", !!back && back.width === w && back.height === h
+        && back.data.every((v, i) => v === px[i]),
+        back ? Array.from(back.data).join() : "null");
+
+  // Every row filter, written by hand from the PNG spec's definitions, so a
+  // re-encoded image -- not only the exporter's filter 0 -- still reads.
+  const W = 2, H = 5, stride = W * 4;
+  const img = new Uint8Array(W * H * 4).map((_, i) => (i * 37 + 11) & 0xff);
+  const raw = new Uint8Array(H * (stride + 1));
+  for (let y = 0; y < H; y++) {
+    const f = y;                               // rows use filters 0..4
+    raw[y * (stride + 1)] = f;
+    for (let x = 0; x < stride; x++) {
+      const at = (yy: number, xx: number) =>
+        yy >= 0 && xx >= 0 ? img[yy * stride + xx] : 0;
+      const a = at(y, x - 4), b = at(y - 1, x), c = at(y - 1, x - 4);
+      const pa = Math.abs(b - c), pb = Math.abs(a - c), pc = Math.abs(a + b - 2 * c);
+      const pred = [0, a, b, (a + b) >> 1,
+                    pa <= pb && pa <= pc ? a : pb <= pc ? b : c][f];
+      raw[y * (stride + 1) + 1 + x] = (img[y * stride + x] - pred) & 0xff;
+    }
+  }
+  const chunk = (tag: string, body: Uint8Array): Uint8Array => {
+    const t = new TextEncoder().encode(tag);
+    const out = new Uint8Array(12 + body.length);
+    const dv = new DataView(out.buffer);
+    dv.setUint32(0, body.length);
+    out.set(t, 4);
+    out.set(body, 8);
+    const tb = new Uint8Array(4 + body.length);
+    tb.set(t); tb.set(body, 4);
+    dv.setUint32(8 + body.length, crc32(tb));
+    return out;
+  };
+  const ihdr = (ct: number) => {
+    const b = new Uint8Array(13);
+    const dv = new DataView(b.buffer);
+    dv.setUint32(0, W); dv.setUint32(4, H);
+    b[8] = 8; b[9] = ct;
+    return chunk("IHDR", b);
+  };
+  const file = (ct: number) => {
+    const parts = [new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+                   ihdr(ct), chunk("IDAT", new Uint8Array(deflateSync(raw))),
+                   chunk("IEND", new Uint8Array(0))];
+    const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+    let at = 0;
+    for (const p of parts) { out.set(p, at); at += p.length; }
+    return out;
+  };
+  const filtered = await decodeRgba(file(6));
+  check("rows filtered Sub, Up, Average and Paeth decode to the image",
+        !!filtered && filtered.data.every((v, i) => v === img[i]),
+        filtered ? Array.from(filtered.data.slice(0, 16)).join() : "null");
+  check("...and a PNG of another shape is left to the browser (null)",
+        (await decodeRgba(file(3))) === null);
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

@@ -180,6 +180,7 @@ departs from the exe it says so with a greppable `[diverges]` and a reason.
 | `npm run status` | **every number** — coverage, divergences, ratchets — measured from the tree when you ask |
 | [`docs/LESSONS.md`](docs/LESSONS.md) | **the traps this project has already paid for**, cited by id. Read before your first edit |
 | [`docs/PLAYER.md`](docs/PLAYER.md) | the player's shape: layers, porting rules, save state, the bundle, netplay, hosting, checks |
+| [`docs/UNPORTED.md`](docs/UNPORTED.md) | the spawn classes and sub-handlers the port does not run yet, and where the game spawns them |
 | [`docs/formats/`](docs/formats/) | byte-exact specifications, one per format, and the bundle |
 | [`docs/re/`](docs/re/) | subsystems and bosses read out of the exe; [`addresses.md`](docs/re/addresses.md) is the map; [`method.md`](docs/re/method.md) is how |
 | `ghidra/annotations/*.tsv` | **the names** — the source of truth for both halves, sorted by address |
@@ -188,7 +189,7 @@ departs from the exe it says so with a greppable `[diverges]` and a reason.
 ## Layout
 
 ```
-docs/           LESSONS, PLAYER
+docs/           LESSONS, PLAYER, UNPORTED
 docs/formats/   byte-exact format specs
 docs/re/        what was read out of the exe, by subsystem
 ghidra/         headless driver + GhidraScripts; annotations/ holds every

@@ -103,7 +103,7 @@ const mkHost = (): WalkerHost => ({
   presentEnemies: () => null,
   aliveCivilians: () => null, cameraFree: () => null,
   scriptFlagRaised: () => null,
-  showMessage: () => null, endDialogue: () => undefined,
+  showMessage: () => null,
 });
 
 const DRIVEN: Tick = { dt: TICK, frames: 1, wall: TICK, frozen: false };

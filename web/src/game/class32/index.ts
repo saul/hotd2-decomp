@@ -272,6 +272,8 @@ function Class32Debug(obj: Actor): ActorDebug {
 export const Boss5Handler: ClassHandler = {
   init: Class32Init,
   update: Class32RunRoutine,
+  // `Class32Init` installs `Class32Update` and returns (`0x0047F76F`).
+  firstUpdateNextWalk: true,
   // The death is three states of the class's own; the class never sets
   // `obj.dead`, so this is a declaration of intent rather than a path taken.
   updatesWhenDead: true,

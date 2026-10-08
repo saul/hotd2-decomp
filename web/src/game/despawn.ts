@@ -8,10 +8,8 @@
  * is what the actor does, the sweep is the port's backstop for the actors that
  * arrive at one by a route the engine does not have.
  */
-import { ActorFlag, type Actor } from "./actor";
-
-/** `OR EAX, 0x80018000` at `0x00409CCB`. Bit 31 has no reader in the port. */
-const DESPAWN_FLAGS = 0x80018000 | 0;
+import type { Actor } from "./actor";
+import { ColiDynamicListRemove } from "./coli";
 import { ReleaseAttackSlot } from "./combat/permits";
 import {
   ReleaseEnemyAliveCount, ReleaseEnemyPresentCount,
@@ -20,23 +18,42 @@ import { ActorReleaseHitSlot } from "./hit_slots";
 import { ActorIsEnemy, DeadSweep, g_class_handlers } from "./registry";
 
 /**
+ * `ActorDespawn`'s `OR EAX, 0x80018000` (`0x00409CCB`): bit 31, which with
+ * `0x8000` is the `0x80008000` every moving-object pass refuses, `0x10000`
+ * (`ActorFlag.NoCameraTrack`) and `0x8000` (`ActorFlag.NoShotTest`). A
+ * literal: this module sits inside `actor.ts`'s import cycle (L56).
+ */
+const ACTOR_DESPAWN_FLAGS = 0x80018000 | 0;
+
+/**
  * `ActorDespawn` — `FUN_00409CC0`. Take an object out of the pool.
  *
- * The engine unlinks it from the list `g_cur_actor` walks and frees it. Here
- * it is a flag, for the same reason `g_object_list` is a list rather than a
- * linked pool: an index is easier to snapshot than a pointer, and the actor
- * has to stay addressable for the one frame the renderer needs to notice.
+ * ```
+ * 00409CC6  obj+0x34 = (obj+0x34 & ~1) | 0x80018000   ; AND AL,0xFE / OR
+ * 00409CD3  ColiDynamicListRemove(obj)
+ * 00409CDE  if (obj+0x38 & 0x40 && obj+0x3C != -1)    ; the hit slot
+ *               g_hit_slots[obj+0x3C] = 0, obj+0x3C = -1
+ * 00409CFC  ActorKill()                               ; does not return
+ * ```
+ *
+ * `[proved]`, the whole routine. The engine's `ActorKill` (`FUN_004A7040`)
+ * unlinks it from the list `g_cur_actor` walks and frees it. Here that is a
+ * flag, for the same reason `g_object_list` is a list rather than a linked
+ * pool: an index is easier to snapshot than a pointer, and the actor has to
+ * stay addressable for the one frame the renderer needs to notice. Which is
+ * also why the flags word matters here: the actor is still in the pool for
+ * the rest of the frame, and every reader that refuses `0x80008000`, `0x8000`
+ * or `0x10000` refuses it as the engine's would refuse the freed block.
  */
 export function ActorDespawn(obj: Actor): void {
-  // `0x00409CC6`..`0x00409CD0`, the routine's first store: the live bit down
-  // and `0x80018000` up -- `NoShotTest`, `NoCameraTrack` and bit 31.
-  obj.flags = (obj.flags & ~ActorFlag.Live) | DESPAWN_FLAGS;
+  obj.flags = (obj.flags & ~1) | ACTOR_DESPAWN_FLAGS;
+  ColiDynamicListRemove({ at: obj.at });
+  // The `g_hit_slots` entry goes back before `ActorKill`. See
+  // `game/hit_slots.ts`.
+  ActorReleaseHitSlot(obj);
   obj.despawned = true;
   obj.visible = false;
   obj.action = null;
-  // Three lines of the engine's own `ActorDespawn`, at `0x00409CEA`: the
-  // `g_hit_slots` entry goes back before `ActorKill`. See `game/hit_slots.ts`.
-  ActorReleaseHitSlot(obj);
 }
 
 /**

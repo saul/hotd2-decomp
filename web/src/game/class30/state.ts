@@ -282,7 +282,7 @@ export interface ZombieTail extends HeadAimWords {
    *
    * Aliases {@link throwDelay} and {@link corpseTimer} **within this class**,
    * and the head's `arcFrames` — see the note at the top of this file. Outside
-   * it, class 0x24's `slideTimer` and class 0x25's `hum.bonePropMode`.
+   * it, class 0x24's `slideTimer` and class 0x25's `hum.faceMode`.
    *
    * **A trap, until class 0x24 grows its arm:** `obj.holdFrames` still
    * compiles on a zombie, because the head keeps a field of that name for
@@ -322,7 +322,7 @@ export interface ZombieTail extends HeadAimWords {
    * The same word is the head's `arcTotal` — which
    * `ZombieStateDeathKnockbackArc` (`FUN_004550E0`) turns into its own fall
    * counter once the arc is spent — and, outside this class, class 0x25's
-   * `hum.bonePropFrame` and class 0x31's arc duration.
+   * `hum.faceFrame` and class 0x31's arc duration.
    */
   backoffFrames: number;      // +0x1334, aliases `arcTotal`
   /**

@@ -148,7 +148,7 @@ function play(bundle, at) {
     aliveCivilians: () => G.g_civilians_alive,
     scriptFlagRaised: (i) => (G.g_script_flags[i] ?? 0) !== 0,
     cameraFree: () => G.g_camera_free !== 0,
-    showMessage: () => null, endDialogue: () => undefined,
+    showMessage: () => null,
   }, { seed: 1 });
   scriptSys.walker = walker;
   ctx.walker = walker;

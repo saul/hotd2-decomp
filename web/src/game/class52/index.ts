@@ -396,6 +396,9 @@ function MouseDebug(obj: Actor): ActorDebug {
 export const MouseHandler: ClassHandler = {
   init: MouseInit,
   update: MouseUpdate,
+  // `MouseInit` installs `MouseBranchTriggerUpdate` or
+  // `MouseWanderUpdate` and returns (`0x0043F57A`, `0x0043F5B2`).
+  firstUpdateNextWalk: true,
   // The class reads `obj+0x34` bit 3 itself and has no hit points at all —
   // `ResolveHit` would look up a damage row it has no entry in.
   ownsShotResult: true,

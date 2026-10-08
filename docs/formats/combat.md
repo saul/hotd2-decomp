@@ -134,9 +134,15 @@ registered sends a per-bone actor to the whole arm.
 `+0x34` when the character's skeleton has root nodes (`0x004105CC`..
 `0x004105E2`). A linear sweep of `.text` finds no other instruction that sets
 the bit. Every skinned class's `Init` points `g_cur_actor` at itself before it
-builds, so civilians, zombies, throwers and every boss carry it. Six builders
+builds, so civilians, zombies, throwers and every boss carry it. Four builders
 clear it again with `AND 0x7F` straight after: `PlaceBats`, `SpawnBatWings`,
-`CatInit`, `SpawnGoldenFrog`, and `0x00463E50` / `0x004641F0` (class 0x41).
+`CatInit` and `SpawnGoldenFrog`. Class 0x41's two skinned constructors do
+**not**: their `AND DL,0x7F; OR EDX,0x80080000` is on the *placer's* `+0x34`
+(`EBX`/`EAX` loaded from the argument at `0x00463E8F` and `0x004642FD`), which
+dies the same frame. Constructor 68 (`0x00463E50`) takes the bit off its frog
+all the same, by writing `MOV [ESI+0x34], 1` over the word at `0x00463F43`;
+`PlaceType61Figures` (`0x004641F0`) writes nothing after the build, so its nine
+figures keep it -- and register for no shot test to use it in.
 
 ### Per bone — `FUN_00404700` → `FUN_00404750` → `FUN_004047D0`
 
@@ -309,8 +315,53 @@ Who reaches it, over every shipped record (`[proved]` writers: every store to
 | `0x26` subtype 2 | `Class26Subtype2Update` `0x0048EB0E` (`|= 0x51`), `0x0048EB16` | `0x0048EE9C` | stage 3's boat |
 | `0x33` selector 1 | `ScriptedCarrierStepPath33` `0x0043389A` (`|= 0x50` when `tail+0x04 != -1`), `0x004338A3` | `ScriptedCarrierUpdate33` `0x004334D0` | stage 2's two name a mesh; stage 5's names none |
 | `0x33` selector 4 | `ScriptedPushableUpdate33` `0x00433BC9`, when `tail+0x04 != -1` | `0x00433CC7` | stage 1's two name none and carry `0x8000` |
-| `0x44` 0-7, 11-13 | each builder, `|= 0x51` unconditionally, `+0x14C` from the descriptor | selector 0's `ScriptFlagEffectUpdate` `0x00473CDF`; 1, 2, 4's `HingeUpdate` `0x0047410B`; 3's `0x00474120` at `0x0047422F`; 6's `0x00474470` at `0x00474760`; 7's `0x00474770` at `0x004748B6`; 12's `0x004755B0` at `0x004757E0`; 13's `0x004757F0` at `0x004758C7`. **11's `RisingDoorUpdate` never registers**, and 5's `0x00474240` has no call of its own (it copies its blob to an object it makes, whose routine is `[open]`) | 0: 2, 1: 37, 2: 3 (two doors each), 3: 2, 4: 13, 5-7: 1 each, 11: 2, 12: 8, 13: 13 |
-| `0x44` 17 | `PlaceStoryModeSwitch` `0x00473ADB`, when `desc+0x08 != -1` | `StoryModeSwitchUpdate` `0x004753D7` | all nine name a volume |
+| `0x44` 0-7, 11-13 | each builder, `|= 0x51` unconditionally, `+0x14C` from the descriptor | selector 0's `ScriptFlagEffectUpdate` `0x00473CDF`; 1, 2, 4's `HingeUpdate` `0x0047410B`; 3's `FlagSlotEffectUpdate` (`0x00474120`) at `0x0047422F`; 6's `SwingThenBreakUpdate` (`0x00474470`) at `0x00474760`; 7's `ScaledSlotEffectUpdate` (`0x00474770`) at `0x004748B6`; 12's `0x004755B0` at `0x004757E0`; 13's `0x004757F0` at `0x004758C7`. **11's `RisingDoorUpdate` never registers**, and 5's `EffectHandoffUpdate` (`0x00474240`) has no call of its own: it copies its blob to the `HingeUpdate` object it makes | 0: 2, 1: 37, 2: 3 (two doors each), 3: 2, 4: 13, 5-7: 1 each, 11: 2, 12: 8, 13: 13 |
+| `0x44` 17 | `PlaceStoryModeSwitch` `0x00473ADB`, when `desc+0x08 != -1` | `StoryModeSwitchUpdate` `0x004753D7` | all nine name a blob; three are drawn at a scale, so their `obj+0x150` is not a rotation |
+
+In the port these are picked through the list: class 0x12's door and class
+0x33's carrier, actors -- stage 2's two boats through their blobs
+(`coli2.bin:31784`, `:40456`) and the 2.5-scaled matrix, stage 5's car by
+its 0.1 sphere; the carrier's `0x80000001` keeps it out of the
+moving-object passes and the crowd push, and a hit only marks it -- and the
+class-0x44 props, which the pool files by their id
+(`ShotTestEntry.prop`, `PropRegisterForShotTestMesh` in
+`game/class41/shot_test.ts`) -- the story-mode switch, and the hinges (1, 2,
+4, and the one 5 hands off to) and selectors 6, 7, 12 and 13, each with its
+`MatrixStore(obj+0x150)` where the routine makes it. The exporter carries
+every class-0x44 `+0x08` resolved as `coli_blob`; the shipped ones that
+resolve are the nine switches, six hinges (stage 1 `0x2C2C`; stage 2
+`0x548C`, `0x8368`, `0x83B0`, `0xD2F0`, `0xD334`), the two selector-12 doors
+of stage 6 (`0x0B00`, `0x0B48`), selector 3's stage-1 effect (`0x3ACC`) and
+both halves of selector 0's window. Stage 2's hinge `0xFFD0` and selector-5
+handoff `0x10018` carry `0x0CECFBE0`, stage 1's door blob, which in stage 2
+is `coli2.bin+3040`, inside a quad's vertices (a group count of
+3,297,643,553): both register, what the engine's traces do with it is
+`[open]`, and the port's resolves to no blob. Selectors 0 and 3 are filed
+through the matrix their effect draw **captures** (`EffectDrawWithCapture`
+stores the node whose bone is the capture bone at `obj+0x338`, and the
+routine copies it over `obj+0x150`). The three angles `ShotTestMesh` turns
+their normal by are `EffectFrameRotations` at the raw cursor, entry
+`obj+0x2A0`, which the exporter reads where the routine reads them
+(`rotation_entries`); from cursor 101 (selector 0, motion 471, the last block
+of `komono_niwa.bin`) and 66 (selector 3, motion 470, entry 30 of the only
+block of `komono_man.bin`) those reads are past the end of the file -- the
+run's own heap, not data (`mot.md`, "What lies after a bank in memory") --
+and the port reads zero there, its one declared divergence in this path
+(`EffectFrameRotationsEntry`, `game/class44/script_flag_effect.ts`). The
+trace takes a point into the object
+through the **general** inverse of `obj+0x150`, as `MatrixInvert`
+(`FUN_004A8D20`) does, because the switch's draw scales: stage 1's door by
+(1.02, 1.04, 1) and stage 2's two keyed doors by (0.8878, 0.8197, 1) and
+(0.77, 0.7154, 1).
+
+The same registrations are the moving-object collision passes' only input:
+`ColiTraceSegmentAllSets` (`FUN_004053B0`) and `ColiTestSphereAgainstFullSet`
+(`FUN_004057F0`) walk `g_coli_dynamic_list`, last frame's copy of the list,
+and take an entry whose object has `+0x14C != -1`, bits `0x10` and `0x40` and
+nothing of `0x80008000`, reading the object's live word and matrix. A hit
+there is ranked against the static sets on its **world** distance
+(`ColiRecordHitCandidate`, `FUN_00405680`), so a scaled switch is measured
+where it stands. The port's passes walk the same list (`game/coli.ts`).
 
 The per-bone classes' registration sites `[proved]`:
 
@@ -1733,6 +1784,18 @@ passes over that 16-bit key — nearest first — and `UpdateCameraEnemySlots`
 then deals them out: permit holders into slots **0 and 1**, everyone else from
 slot 2 (`ClaimCameraEnemySlot` fills 2..13).
 
+"Permit holder" is the byte `obj+0x121` not being `0xFF`, read off whatever
+object registered. The creature a `znjoe` releases keeps the player it flies
+at there, so `BodyCreatureUpdate` (`FUN_0043E880`) -- which registers on the
+launch frame and on every flying frame (`0x0043EEF1`), its `obj+0x100` the
+camera-space position put through the block's view-to-world matrix
+(`0x009A6040 + index * 0x1A4`, so a world point) -- is dealt slot 0 or 1, and
+`SelectCameraLookAtTarget` can hold the view on it alone. It is also enrolled
+straight into a general slot by `RegisterEnemySlot` from `SpawnBodyCreature`
+(`0x0043E77B`), and frees its slot when shot (`0x0043EC4E`) or when it reaches
+the player (`0x0043EDAD`). Its key is its camera-space `obj+0x40` measured
+against the world eye -- the engine's sum, as it stands. `[proved]`
+
 ### The turn rate
 
 `ComputeLookAtAngleError` clamps the angle between where the camera looks and
@@ -1885,6 +1948,16 @@ the objects that called `RegisterForShotTest` on the previous frame (in front
 of the eye or a mesh, `0x8000` clear), each measured at the `obj+0x12C` its
 class had left when it registered, and refused on its **live** `obj+0x34` for
 `0x80008000` or `0x10`. A body behind the camera pushes nobody.
+
+**A despawn leaves a hole.** `ActorDespawn` (`FUN_00409CC0`) raises
+`0x80018000` and then calls `ColiDynamicListRemove` (`FUN_00405220`,
+`0x00409CD3`), which zeroes the object word and the flags word of the first
+entry naming the object and leaves the count -- so the entry is still there,
+naming nothing. All three walkers of the list test the object word first and
+step over a zero: `ColiTraceSegmentAllSets` at `0x00405405`,
+`ColiTestSphereAgainstFullSet` at `0x00405832`, this one at `0x00405B60`.
+What it protects is the pointer: `ActorKill` frees the block, and the same
+walk can allocate it again. `[proved]`
 
 For each candidate inside `r + obj+0x128` (a zero `obj+0x128` is filled from
 `obj+0x124` and stored back), the routine takes two surface points —
@@ -2108,6 +2181,79 @@ gone after 180 frames, or once within 1.2 of the target on every axis
 It scores nothing. The landing raises `0x400C000` — `0x4000000` and `0x8000`
 among it — so a weapon that has landed is out of the shot test and cannot be
 deflected. `[proved]`
+
+### Its shadow, its hit slot and the camera
+
+Three more calls make the weapon an object like any other, and each is past a
+`MatrixStackPop` or at the very top of a routine:
+
+* **A hit slot.** `SpawnThrownWeapon` opens with `ActorClaimHitSlot`
+  (`FUN_00409270`, at `0x004504FE`), so a knife in the air holds one of the
+  fourteen `g_hit_slots` entries until `ActorDespawn` gives it back -- and an
+  actor spawned meanwhile is dealt the next one, which is the phase of a
+  class-0x30 bone's cel animation.
+* **The ground shadow.** Every frame it draws, after `RegisterForShotTest`,
+  `ThrownWeaponUpdate` calls `ActorDrawGroundShadowWithSize(obj, 5.0, 5.0)`
+  (`FUN_0040A600`, at `0x004508BA`): slot `0x10D0` in draw layer `0xD`, at
+  `T(x, h + 0.1, z) S(5, 1, 5)`, `h` the floor `QueryGroundHeightAt` finds from
+  three units above the weapon (its `obj+0x1F8` is 5, bit 2 up) -- or
+  `g_camera_fixed_eye_y` in `g_app_state` 0xD. `ActorDrawGroundShadow`
+  (`FUN_0040A620`) is the routine; the skinned actors reach it through
+  `ActorDrawShadow` at a size by character type -- see *Every character's
+  ground shadow* below.
+* **A camera candidate.** In state 0 -- the flight, and the ninety frames
+  stuck to the screen -- it copies its position to `obj+0x100` and calls
+  `RegisterForCameraTracking` (`0x00450917`), as `SpawnThrownWeapon` did once
+  already (`0x00450771`). It holds its thrower's permit in `obj+0x121`, so
+  `UpdateCameraEnemySlots` deals it slot 0 or 1 and the camera looks at it,
+  or at its midpoint with the other permit holder -- the thrower, left holding
+  0, among them. Shot down, in state 1, it is not offered. `[proved]`
+
+Class 0x30's weapon makes the same three: `ZombieThrowHandWeapon` claims at
+`0x0045A25F` and files itself at `0x0045A4DD` with its point lifted 1.5 --
+every weapon, axe or blade (`FADD [0x004C4CB8]` at `0x0045A4B7`, no test in
+front of it) -- and `ZombieThrownWeaponUpdate` draws the same 5-by-5 shadow
+(`0x0045A622`) and files the weapon in states 1 and 2 (`0x0045A676`), lifting
+the point 1.5 for the axe (`0x249`) alone. `[proved]`
+
+### Every character's ground shadow
+
+`DrawSkinnedModelAndShadow` (`FUN_00411090`) is four calls, and the fourth,
+past the `MatrixStackPop` Ghidra marks no-return, is
+`ActorDrawShadow(g_cur_actor)` (`FUN_0040A590`, `0x004110B8`). A byte scan of
+`.text` finds **52** calls to it (Ghidra's xrefs miss `0x0042F450`), so every
+skinned draw in the game ends in a disc:
+
+* **Whose.** `g_cur_actor`'s, not the model's owner's -- but every caller,
+  or the update that reached it, has just stored the drawn object there:
+  `EnemyZombieUpdate` at `0x004533FC`, `EnemyThrowerUpdate` at `0x0044991B`,
+  `CivilianUpdate` at `0x0048A930`, and so on; class 0x22's and class 0x2D's
+  sub-actors are stored by name before their own draws (`0x0049D817`,
+  `0x0042C692`), and a player's body by the camera hook that draws it
+  (`0x0041514B`, `0x004151F5`).
+* **The gate.** Nothing when `obj+0x34` bit `0x80000` is up or `obj+0x1F8`
+  bit 0 -- the skeleton's own draw gate -- is down, so a hidden or blinking
+  actor's shadow goes with it. Never cast at all: bats and their wings
+  (`0x80000` / `0x80001`), class 0x22's and 0x2D's sub-actors (`0x88000` at
+  `0x0049B1BC` and `0x0042C17F`), the game-over route map's figures
+  (`0x0046146C`, `0x0046188B`), a class-0x30 twin and corpse.
+* **The size.** `MatrixScale(11, 1, 10)` -- or `(50, 1, 30)` for character
+  types `0x44` and `0x47`, JUDGMENT's walker and the Hierophant -- over slot
+  `0x10D0` at `T(x, h + 0.1, z)` in draw layer `0xD`, `h` the floor traced
+  from three above while `obj+0x1F8` bit 2 is up (classes 0x30, 0x31, 0x11,
+  0x22, 0x23, the stage-3 bystander, the stage-6 boss and its children) and
+  the actor's own height otherwise.
+* **The frame.** On whatever the caller has pushed above the view. Three
+  callers ride: `CivilianUpdateOnCarrier` (`FUN_0048B140`) and
+  `CarriedZombieUpdate18` (`FUN_0045CD90`) push the carrier's `T Rx Rz Ry`
+  around the whole update, and `Boss4AdvanceMotionAndDrawHeldProps`
+  (`FUN_00492620`) around its draw while the boss is on one, so a rider's
+  disc lies in its carrier's frame, under the rider.
+
+The port records each disc as one world draw in `G.g_world_slot_draws`
+(`ActorDrawGroundShadow`, `game/ground_shadow.ts`), the thrown weapons'
+included, and `render/view_slots.ts` draws the list; every stage bundle
+carries `0x10D0` in its `slots_effect` rig.
 
 ### Class 0x30's weapon
 
@@ -3417,7 +3563,7 @@ the evt's `hp` field is what picks it. It writes itself into `g_carrier_object`
 | bit | raised at | read by |
 |---|---|---|
 | `0x10000000` | `0x00433203`, when `g_script_flags[tail+0x20] == 1` or `(s32)tail+0x18 == obj+0x1370` | `ZombieStateRideCarrier` (class 0x30 state 29) — the ride is over |
-| `0x40000000` | `0x00433280`, once `tail+0x14` is not `-1.0f` and `obj+0x1370` has passed it | `ZombieStateDelayedStrikeInPlace` (state 32) at `0x0045EAFE` — give up to state 10 after `0x14` frames |
+| `0x40000000` | `0x00433280`, on the frame `obj+0x1370` **equals** `tail+0x14` (`FCOMP` / `TEST AH,0x40`), when that is not `-1.0f` | `ZombieStateDelayedStrikeInPlace` (state 32) at `0x0045EAFE` — give up to state 10 after `0x14` frames |
 
 Both reads are `[EAX + 0x34]`. **Not `obj+0x136C`**: `0x40000000` there is
 `ZombieFlag2.CollideActors`, half of the `|= 0x60000000` that `EnemyZombieInit`

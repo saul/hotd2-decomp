@@ -12,7 +12,7 @@
 import type { CamJson } from "./cameras";
 import type { StageEntry } from "./manifest";
 import type { CharactersJson } from "./characters";
-import type { BackdropJson, BreakablesJson, PropsJson, RainJson, RigsJson,
+import type { BackdropJson, BreakablesJson, RainJson, RigsJson,
               CiviliansJson, HumanoidProgramJson, SetPieceParamsJson,
               SoundJson } from "./scene";
 import type { BlockJson, ColiJson, RegionEntryJson } from "./script";
@@ -62,7 +62,6 @@ export interface ScriptJson {
   backdrop?: BackdropJson;
   rigs?: RigsJson;
   characters?: CharactersJson;
-  props?: PropsJson;
   breakables?: BreakablesJson;
   /** Class 0x24's parameter tail, keyed by spawn address. */
   set_pieces?: Record<string, SetPieceParamsJson>;
@@ -88,6 +87,12 @@ export interface ScriptJson {
    * with no text.
    */
   options?: OptionsJson;
+  /**
+   * `g_subtitle_glyphs` (`0x0055E054`), s16[128]: the screen sprite
+   * `DrawTextCentred` (`FUN_00436850`) draws for each character code, 0 for
+   * none. Absent in a bundle written before it, which draws no subtitles.
+   */
+  subtitle_glyphs?: number[];
   /**
    * Original Mode's `.rdata` -- the weapon records, fire and ammo-readout
    * rows, and the trunk's tables. See `ExeTables.originalModeTables` in the
@@ -367,6 +372,14 @@ export interface GameOverJson {
   route_waypoints: number[][][][];
   /** `0x0059351C`: `[stage][16]` blocks, -1 ending each. */
   default_route: number[][];
+  /** `0x00579E98`: a body's x in the eye's frame, by `p + attackers * 2 - 2`. */
+  entity_offsets: number[];
+  /** `g_st1_vehicle_seat_x`, `0x004EC8D8`: by `p + players * 2`. */
+  seat_x: number[];
+  /** `g_player_stand_points`, `0x004EC8F0`: `[x, y, z]` by `p - 2 + players * 2`. */
+  stand_points: number[][];
+  /** `g_player_stand_motions`, `0x004EC91C`: by `p + players * 2`. */
+  stand_motions: number[];
 }
 
 export interface HudSpriteImage {

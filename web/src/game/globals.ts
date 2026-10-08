@@ -25,8 +25,8 @@ import type { ShotFlash, ShotTracer, ShotWeaponEffect }
 import { makeShotFlashRing, makeShotTracerRing, makeShotWeaponRing }
   from "./effects/shot_effects";
 import type { SpriteEffect } from "./effects/sprite";
-import { makeDamageOverlays, PlayerCameraHook, type DamageOverlay }
-  from "./effects/damage_overlay";
+import { makeDamageOverlays, PlayerCameraHook, PlayerEntityHook,
+  type DamageOverlay } from "./effects/damage_overlay";
 import type { PropStripEffect } from "./effects/prop_strip";
 import type { FishBloodCloud, FishSurfaceRing, FishWaterSplash }
   from "./effects/fish";
@@ -36,10 +36,14 @@ import type { RingEffect } from "./effects/ring_effect";
 import type { AttachedEffect } from "./effects/attached_effect";
 import type { WaterRing } from "./effects/water_ring";
 import type { WaterSurface, WaterSurfaceUv } from "./class41/water";
+import type { DialogueTask } from "./dialogue";
+import type { Type3SlotUv, Type3UvScrollTask } from "./class41/type03";
+import type { Type26ModelState, Type26RippleTask } from "./class41/type26";
 import type { St2Car } from "./class21/car";
 import type { Actor } from "./actor";
 import type { OriginalItemBanner } from "./class41/item_banner";
 import type { LifeGrantedMarker } from "./class10/life_marker";
+import type { CivilianHitMarker } from "./class10/hit_marker";
 import type { BreakableProp, PropFinalDraw } from "./class41/prop_state";
 import type { PropShatter } from "./class41/shatter";
 import type { ShotRequest } from "./combat/shot";
@@ -72,6 +76,7 @@ import { makeEntityLights } from "./entity_light";
 import { LightBlockSetDirection, makeLightBlock, makeLightTweens }
   from "./light_block";
 import { PlayerState, PlayerTask, RunPhase } from "./player_state";
+import { PlayerBodiesCreate } from "./player_body";
 import { AdvanceToNextScene, PlayerBlockBoot, PlayerBlockRestore,
   PlayerStartGameFromTitle, PlayerTasksCreate, PlayerTasksRunFirstTurn,
   type PlayerBlock }
@@ -1239,6 +1244,21 @@ export const G = {
   // before `effects/damage_overlay.ts` has finished loading whenever that
   // module is the one imported first, and its enum is not there yet.
   g_player_camera_hook: [0, 0] as PlayerCameraHook[],
+  /**
+   * `g_player_entity_hook` — 0x009A5CE0 + player*0x130, the block's `+0x80`.
+   * What `PlayerUpdateInPlay` calls first: `PlayerEnterPlay`'s row, the
+   * scene-state installers and `EvtActionSetUpdateRoutine12` write it, and
+   * the routines that one installs chain to their successors. See
+   * `game/player_body.ts`. `PlayerEntityHook.None`, spelled as its value, for
+   * the reason `g_player_camera_hook` gives.
+   */
+  g_player_entity_hook: [0, 0] as PlayerEntityHook[],
+  /**
+   * `g_player_flags` — 0x009A5D8C + player*0x130, the block's `+0x12C`. Bit 0:
+   * `PlayerHookDrawBody` draws the body. Bit 1: cleared by three writers,
+   * read by nothing the port has.
+   */
+  g_player_flags: [0, 0],
   /** `g_damage_overlays` — 0x009A26C0, one 0x14-byte record per player. */
   g_damage_overlays: makeDamageOverlays() as DamageOverlay[],
   /**
@@ -1303,6 +1323,16 @@ export const G = {
    * step as the engine's does: `ResetGameGlobals` leaves it.
    */
   g_civilians_rescued_total: 0,
+  /**
+   * `g_civilians_seen_total` — 0x009A21BA, u16. Every civilian the run has
+   * created: `CivilianInit` raises it for a counted one (`0x0048A714`),
+   * `RescueTargetInit` outside Training (`0x004517E8`) and
+   * `PropUpdateType19` as its knocking gives up (`0x00469161`).
+   * `ResetGameOnStart` zeroes it (`0x0045FF64`) and nothing else does. Its
+   * one reader is class 0x64's route selector (`0x004360C8`), against
+   * {@link g_civilians_rescued_total}.
+   */
+  g_civilians_seen_total: 0,
   /**
    * `g_civilians_rescued_by_scene` — 0x009C89C0, s16 per scene. The rescues
    * in each scene; `ResetSceneOnEnter` zeroes this scene's and
@@ -1494,6 +1524,13 @@ export const G = {
    * `[port-only]` — the canal water tasks `PlaceWaterSurface`
    * (`FUN_00462F70`, class 0x41 type 1) has allocated. `game/class41/water.ts`.
    */
+  /**
+   * `[port-only]` — the subtitle tasks `EvtOpPlayDialogue2D` (`FUN_00435B80`)
+   * has allocated. `game/dialogue.ts`.
+   */
+  g_dialogue_tasks: [] as DialogueTask[],
+  /** `[port-only]` — see {@link DialogueTask.id}. */
+  g_dialogue_task_seq: 0,
   g_water_surfaces: [] as WaterSurface[],
   /** `[port-only]` — see {@link WaterSurface.id}. */
   g_water_surface_seq: 0,
@@ -1511,6 +1548,41 @@ export const G = {
    * per slot the walk has run on. See {@link WaterSurfaceUv}.
    */
   g_water_surface_uv: [] as WaterSurfaceUv[],
+  /**
+   * `[port-only]` — the tasks `PlaceType3UvScrollTask` (`FUN_00462DF0`,
+   * class 0x41 constructor 3) has allocated. `game/class41/type03.ts`.
+   */
+  g_type3_tasks: [] as Type3UvScrollTask[],
+  /** `[port-only]` — see {@link Type3UvScrollTask.id}. */
+  g_type3_task_seq: 0,
+  /**
+   * `[port-only]` in shape — what `Type3UvScrollInit` (`FUN_004659D0`) and
+   * `Type3UvScrollUpdate` (`FUN_00465BC0`) have done to the stage-1 car's
+   * three reflection shells, which the engine rewrites in place. See
+   * {@link Type3SlotUv}.
+   */
+  g_type3_slot_uv: [] as Type3SlotUv[],
+  /**
+   * `g_pol_file_records` — `0x009C7320`, one `0xC`-byte record per `pol/`
+   * file: `+0` its memory, `+4`/`+6` the loaded list's links, `+8` the state
+   * byte, which is what this keeps, by file index: 0 free, 3 loading, 4
+   * loaded. Written by the asset jobs opcodes `0x52` and `0x53` queue; see
+   * `game/pol_files.ts`.
+   */
+  g_pol_file_state: [] as number[],
+  /**
+   * `[port-only]` — the tasks `PlaceType26RippleTask` (`FUN_00463230`,
+   * class 0x41 constructor 26) has allocated. `game/class41/type26.ts`.
+   */
+  g_type26_tasks: [] as Type26RippleTask[],
+  /** `[port-only]` — see {@link Type26RippleTask.id}. */
+  g_type26_task_seq: 0,
+  /**
+   * `[port-only]` in shape — what `Type26RippleUpdate` (`FUN_00469C80`) has
+   * done to the model of slot `0x197F`, which the engine rewrites in place,
+   * or null where it has done nothing. See {@link Type26ModelState}.
+   */
+  g_type26_model: null as Type26ModelState | null,
   /**
    * `[port-only]` — the owl's and the fish's effect tasks, and the ring task
    * the fish's corpse leaves on the water: `game/effects/owl.ts`,
@@ -1975,7 +2047,8 @@ export const G = {
    * sources that have ticked and eight wave sources, which class 0x17's
    * spawns add (`game/class16/`, `game/class17/`).
    * `WaterFieldSampleHeight` (`FUN_00442390`) is the surface at a point, and
-   * the stage-2 boss is its only reader. Null until a class-0x16 spawn runs.
+   * the stage-2 boss and class 0x15's planks are its readers. Null until a
+   * class-0x16 spawn runs.
    */
   g_water_wave_field: null as WaterWaveField | null,
   /**
@@ -1984,7 +2057,8 @@ export const G = {
    * as `Class14AdvanceMotionAndPublishPoints` (`FUN_00476AD0`) publishes them
    * every frame the stage-2 boss's feet are live. The strengths come from the
    * clip's contact cue; the y-follow reads `[0]` and `[1]` to decide which
-   * foot is planted.
+   * foot is planted, and `FloatingPropUpdate` (`FUN_004418C0`, class 0x15)
+   * tips and sinks a plank under each live one.
    */
   g_class14_foot_contacts: [
     { strength: 0, x: 0, y: 0, z: 0 }, { strength: 0, x: 0, y: 0, z: 0 },
@@ -2012,16 +2086,24 @@ export const G = {
    */
   g_summoned_actor_at: -1,
   /**
-   * `[port-only]` — the spawn addresses `SpawnSlotActors` has already built.
+   * `[port-only]` — the spawn instructions `SpawnSlotActors` has already
+   * built, by `SpawnSiteKeys`' key.
    *
    * There is no such list in the engine, and there cannot be: the spawn opcode
-   * builds an object once, in the step that holds it, and never looks again.
-   * The port materialises slot-drawn actors from the walker's live spawn list
-   * every frame, so it needs to remember which of them it has made — otherwise
-   * an actor that despawns under its own state machine comes straight back.
-   * An entry is dropped when the script stops listing that spawn.
+   * builds an object every time it runs, in the step that holds it, and never
+   * looks again. The port materialises slot-drawn actors from the walker's
+   * live spawn list every frame, so it needs to remember which entries it has
+   * made — otherwise an actor that despawns under its own state machine comes
+   * straight back. **Keyed by instruction, not by descriptor**: a descriptor
+   * a second instruction names again is a second object, as it is in the
+   * engine. An entry is dropped when the script stops listing it.
    */
-  g_slot_actors_built: [] as number[],
+  g_slot_actors_built: [] as string[],
+  /**
+   * `[port-only]` — the same, for the class-0x41/0x44 placers
+   * `SpawnPropContainers` builds when a spawn instruction runs.
+   */
+  g_prop_placers_built: [] as string[],
 
   // -- the owls, class 0x43 ----------------------------------------------
   /**
@@ -2210,6 +2292,20 @@ export const G = {
    * `Type67MountedPartUpdate` finds its parent through.
    */
   g_prop67_by_index: [0, 0, 0] as number[],
+  /**
+   * `g_type37_pair` — `0x007DCDC4`, two object pointers: the pair
+   * `PlaceType37PropPair` last built, as prop ids (0 for none). Each object's
+   * `PropUpdateType37` writes itself back into its own entry every frame, and
+   * reaches the other through `[1]`. One pair of entries for every pair the
+   * scripts place.
+   */
+  g_type37_pair: [0, 0] as number[],
+  /**
+   * `g_type37_hits_left` — `0x007DCD05`, s8. `PlaceType37PropPair` writes 2
+   * and each object's first hit takes one off: at 2 a hit on object 0 knocks
+   * object 1 down, and the hit that reaches 0 lets the pair's item out.
+   */
+  g_type37_hits_left: 0,
   /**
    * `[port-only]` in shape — what `PropUpdateType45` (`FUN_0046DAB0`) has
    * done to the four banner models it bends in place (`TYPE45_WAVE_SLOTS`):
@@ -2413,7 +2509,8 @@ export const G = {
   g_stage_unloaded: 0,
   /**
    * `0x009A5CD8 + p*0x130` -- each player's body actor, `PlayerBodiesCreate`'s
-   * (`FUN_00416450`). Empty until a game-over fly-over builds them; see
+   * (`FUN_00416450`): made afresh with every task list that has the camera
+   * tasks in it -- each scene's, and the game-over fly-over's. See
    * `game/player_body.ts`.
    */
   g_player_bodies: [] as PlayerBody[],
@@ -2548,7 +2645,9 @@ export const G = {
   g_civilian_carrier: -1,
 
   /**
-   * `g_hit_slots` — `0x009C88C0`. Fourteen entries, an actor's `at` or `-1`.
+   * `g_hit_slots` — `0x009C88C0`. Fourteen entries, an actor's `at` or `-1`
+   * -- or, for class 0x31's thrown weapon, `ThrownWeaponHitSlotOwner` of its
+   * id (`game/thrown_weapon.ts`), which is below `-1`.
    *
    * `ActorClaimHitSlot` (`FUN_00409270`) hands out the indices and
    * `ActorDespawn` (`FUN_00409CC0`) gives them back; `game/hit_slots.ts` is
@@ -2751,6 +2850,32 @@ export const G = {
    * accordingly when `g_max_attackers` is 1.
    */
   g_active_player: 0,
+  /**
+   * `g_nSkipRequested` — 0x009A1A18, a byte. Start pressed inside a skippable
+   * region with the firing gate down: the player-update routines
+   * (`FUN_00414940`, `FUN_00414B90`) raise it, and the skip watcher, class
+   * 0x63, takes it (`game/class63/`).
+   */
+  g_nSkipRequested: 0,
+  /**
+   * `g_nEvtSkippableRegion` — 0x009A2D7C. Set and cleared by
+   * `set_skippable_region` (evt 0x2C); while it is clear the skip watcher
+   * kills itself.
+   */
+  g_nEvtSkippableRegion: 0,
+  /**
+   * `g_nEvtSkipFlag` — 0x009A2D74. Raised by `CheckCutsceneSkipRequest`
+   * (`FUN_00435F40`) and cleared only by `set_skippable_region(0)`: every
+   * skippable wait passes and every dialogue goes quiet while it is up.
+   */
+  g_nEvtSkipFlag: 0,
+  /**
+   * `g_cutscene_skipping` — 0x009A2230. Raised with {@link g_nEvtSkipFlag}
+   * by `CheckCutsceneSkipRequest`, cleared by `FinishCutsceneSkip`
+   * (`FUN_00435FA0`) on the watcher's next run and by
+   * `set_skippable_region(1)`.
+   */
+  g_cutscene_skipping: 0,
 
   // -- game mode ---------------------------------------------------------
   /**
@@ -2878,6 +3003,15 @@ export const G = {
    */
   g_original_item_slots: [[-1, -1], [-1, -1]] as number[][],
   /**
+   * `[port-only]` -- the two slots each player last left the trunk with
+   * (`ItemSelectFinish`), kept by the page across loads. The engine has no
+   * such word: it cannot reach stage 1 past the trunk without the trunk. The
+   * port can -- a seek or a deep link replays the script over it -- and
+   * `ItemSelectPassedBySeek` (`game/class6e/`) gives a trunk passed that way
+   * these items rather than none. No reset writes it.
+   */
+  g_original_last_choice: [[-1, -1], [-1, -1]] as number[][],
+  /**
    * `g_original_items_taken` — 0x009C90C0, one byte per Original Mode item
    * id, 33 of them: how many of each the player has to take out of the
    * trunk. The pickups count one in, capped at 0x63; the trunk takes one out
@@ -2923,6 +3057,13 @@ export const G = {
    */
   g_life_granted_markers: [] as LifeGrantedMarker[],
   /**
+   * The markers `SpawnCivilianHitMarker` (`FUN_0048E080`) allocates when a
+   * civilian is shot, in allocation order: every one that drew this frame.
+   * [port-only] as a list: each is a 0x1314-byte task in the engine. See
+   * `game/class10/hit_marker.ts`.
+   */
+  g_civilian_hit_markers: [] as CivilianHitMarker[],
+  /**
    * `g_chain_segments` — 0x007DCD18, `[group * 0x14 + segment]`.
    *
    * The twenty-segment chains `PlaceChainSegments` builds, by prop id rather
@@ -2960,6 +3101,17 @@ export const G = {
    * inventory of the sixteen writers and which are Original-Mode-only.
    */
   g_script_branch_var: 0,
+  /**
+   * `g_story_switch_thrown` — `0x009A26EC`, a byte. **One story-mode switch
+   * kicked open opens every other one standing**: `StoryModeSwitchUpdate`
+   * (`FUN_00474F30`) throws an unthrown switch when it is non-zero, and the
+   * first switch thrown by a shot raises it. `PlaceStoryModeSwitch`
+   * (`FUN_00473A70`) writes it 0. Those four instructions are the whole of
+   * its use: the bytes `ec269a00` occur in the image at `0x00473B83`,
+   * `0x004752BA`, `0x004752CA` and `0x004752EA` and nowhere else, and no
+   * named table's extent covers it. `[proved]` See `class44/story_switch.ts`.
+   */
+  g_story_switch_thrown: 0,
 
   // -- thrown weapons ----------------------------------------------------
   /**
@@ -3048,8 +3200,8 @@ export type Globals = typeof G;
  * the civilian and route tallies -- as the app's stage load. Of the run
  * totals it owns, `g_civilians_rescued_total`, `g_civilians_rescued_by_scene`
  * and `g_rescued_char_types` are zeroed by `ResetGameGlobals`' new-game arm
- * and left by a stage step, as the engine leaves them;
- * `g_civilians_seen_total` is not in `G`. This said the port had
+ * and left by a stage step, as the engine leaves them, and so is
+ * `g_civilians_seen_total`. This said the port had
  * no equivalent at all, as an open question, before `run_phase.ts`.
  *
  * **The engine's body, line for line, and what the port does with each.** This
@@ -3236,9 +3388,22 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   G.g_water_ring_seq = 0;
   // The water tasks go with the scene's list, and the tiles they rewrote go
   // with the scene's assets.
+  // The subtitle tasks are the scene list's too.
+  G.g_dialogue_tasks = [];
+  G.g_dialogue_task_seq = 0;
   G.g_water_surfaces = [];
   G.g_water_surface_seq = 0;
   G.g_water_surface_uv = [];
+  // ...and the car reflection's task and the shells it rewrote, the same way.
+  G.g_type3_tasks = [];
+  G.g_type3_task_seq = 0;
+  G.g_type3_slot_uv = [];
+  // ...and the warehouse water's task and the model it rewrote; and every
+  // whole file the script loaded goes with the scene.
+  G.g_type26_tasks = [];
+  G.g_type26_task_seq = 0;
+  G.g_type26_model = null;
+  G.g_pol_file_state = [];
   // ...and the stage-2 car, a task like them: no class 0x21, no car.
   G.g_st2_cars = [];
   G.g_st2_car_seq = 0;
@@ -3397,6 +3562,7 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   G.g_water_wave_field = null;
   G.g_summoned_actor_at = -1;
   G.g_slot_actors_built = [];
+  G.g_prop_placers_built = [];
   G.g_class43_attack_token = -1;
   G.g_bat_members = [];
   // The splash is a task, and the scene's task list goes with the scene.
@@ -3423,6 +3589,8 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   G.g_prop_shatters = [];
   G.g_prop_final_draws = [];
   G.g_prop67_by_index = [0, 0, 0];
+  G.g_type37_pair = [0, 0];
+  G.g_type37_hits_left = 0;
   G.g_prop45_wave_clock = [-1, -1, -1, -1];
   G.g_prop45_wave_clock_drawn = [-1, -1, -1, -1];
   G.g_prop_shatter_seq = 1;
@@ -3442,6 +3610,8 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   G.g_original_item_banners = [];
   // ...and the life markers, which are tasks on the same list.
   G.g_life_granted_markers = [];
+  // ...and the markers a shot civilian leaves (`SpawnCivilianHitMarker`).
+  G.g_civilian_hit_markers = [];
   G.g_chain_segments = [];
   G.g_scene_index = 0;
   G.g_camera_block_eye = vec3();
@@ -3481,6 +3651,11 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   if (carry) {
     PlayerBlockRestore(carry);
     AdvanceToNextScene();
+    // The list's fifth call, `CameraUpdateTaskCreate` (`FUN_00414F20`),
+    // makes the bodies; the sixth makes the player tasks that run them. Here
+    // and not beside `CameraActorInit` above because the body's type reads
+    // the carried block's Original Mode character.
+    PlayerBodiesCreate();
     PlayerTasksCreate();
     PlayerTasksRunFirstTurn();
   } else {
@@ -3496,12 +3671,14 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
     // first twelve bytes of each scene's twenty -- the rest are only ever read
     // after this run has written them, so zeroing all of it reads the same).
     G.g_civilians_rescued_total = 0;
+    G.g_civilians_seen_total = 0;
     G.g_civilians_rescued_by_scene = [0, 0, 0, 0, 0, 0];
     G.g_rescued_char_types = new Array<number>(60).fill(0);
     // ...and its loadout half, `CALL ResetOriginalModeLoadout` at
     // `0x0045FF48`: in every mode, before the player task enters play and
     // reads the magazine (`PlayerEnterPlay`).
     ResetOriginalModeLoadout();
+    PlayerBodiesCreate();
     PlayerStartGameFromTitle(G.g_GameMode);
   }
   // The player turn taken above is the port's sequencing, not a frame the

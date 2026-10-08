@@ -18,7 +18,9 @@ import {
 import {
   bgmRingBytes, bgmStreamLayout, bgmStreamSamples, wavStreamHeader,
 } from "../src/audio/stream";
-import type { BgmJson, SoundJson } from "../src/bundle";
+import type { BgmJson, ScriptJson, SoundJson } from "../src/bundle";
+import { AAC_PRIMING, aacTrim } from "../src/audio/aac";
+import { stageSoundIds } from "../src/audio/precache";
 
 let failures = 0;
 function check(name: string, ok: boolean, detail = ""): void {
@@ -251,6 +253,73 @@ check("a track is lowercased too",
 check("and a name that needs escaping is escaped per segment",
       soundUrl("voice", "ST1\\A B#.wav") === "voice/st1/a%20b%23.wav",
       soundUrl("voice", "ST1\\A B#.wav"));
+
+console.log("\nthe AAC set: where a decode's real samples are");
+{
+  // `afconvert`'s AAC: 2,112 frames of priming, then the sound, then padding
+  // to a whole 1,024-frame AAC frame. A one-second clip at 22,050 Hz.
+  const N = 22050, P = AAC_PRIMING;
+  const whole = Math.ceil((N + P) / 1024) * 1024;
+  const neither = aacTrim(whole, N, P);
+  check("a decode that kept the priming is cut after it",
+        neither.lead === P && neither.length === N, JSON.stringify(neither));
+  const padded = aacTrim(whole - P, N, P);
+  check("one that dropped it and kept the padding is cut at the start -- "
+        + "ffmpeg's, measured", padded.lead === 0 && padded.length === N,
+        JSON.stringify(padded));
+  const exact = aacTrim(N, N, P);
+  check("and one that dropped both is taken whole",
+        exact.lead === 0 && exact.length === N, JSON.stringify(exact));
+  check("the padding can never pass for priming: it is under one AAC frame",
+        aacTrim(N + 1023, N, P).lead === 0);
+}
+
+console.log("\nthe sounds a stage's data names (audio/precache.ts)");
+{
+  const op = (name: string, extra: Record<string, number>) =>
+    ({ i: 0, at: 0, op: 0, name, cat: "audio", ...extra });
+  const script = {
+    blocks: [{ index: 0, at: 0, route: { kind: "end", next: [] }, steps: [{
+      index: 0, at: 0, ops: [
+        op("bgm_entry_play", { track: 0x10000001 }),
+        op("se_play", { sound: 0x2a }),
+        op("play_dialogue", { message_group: 7 }),
+        op("se_play_3d", { sound: 0x2b }),
+        op("se_play", { sound: 0 }),
+      ],
+    }] }],
+    sound: { se: {}, voice: {}, messages: {
+      7: [{ voice: 0x20000005 }, null, { voice: 0x20000006 }],
+      9: [{ voice: 0x20000009 }, null, null],
+      11: [{ voice: 0x2000000b }, null, null],
+    } },
+    civilians: {
+      entries: [0, 2],
+      scripts: [
+        // spawned: plays group 9 and jumps to stream 1
+        [{ op: 0x1d, args: [9] }, { op: 0x21, args: [0x30, 0], scripts: [1] }],
+        [{ op: 0x22, args: [], sounds: [[0x31, 4], [0x32, 8]] }],
+        // in the table, but no spawn of this stage reaches it
+        [{ op: 0x1d, args: [11] }],
+      ],
+      items: [],
+      spawns: { 100: { script: 0 } },
+    },
+    humanoids: { 200: { cmds: [{ op: 13, mode: 0, a: 0x0007, b: 0x2000 }] } },
+  } as unknown as ScriptJson;
+  const ids = stageSoundIds(script);
+  const hex = ids.map((x) => x.toString(16)).join(",");
+  check("the script's track, effects and every variant of its dialogue, in "
+        + "the order it names them",
+        hex.startsWith("10000001,2a,20000005,20000006,2b"), hex);
+  check("...the civilian streams a spawn reaches, through their operands",
+        [0x20000009, 0x30, 0x31, 0x32].every((x) => ids.includes(x)), hex);
+  check("...and not a stream only the exe's table holds",
+        !ids.includes(0x2000000b), hex);
+  check("...class 0x25's op 13 as one dword, a low and b high",
+        ids.includes(0x20000007), hex);
+  check("...and never the id 0 that means nothing", !ids.includes(0), hex);
+}
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");
 process.exit(failures ? 1 : 0);

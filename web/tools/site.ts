@@ -20,7 +20,18 @@
  *     icons/                   the favicon and Home Screen icons, David's face
  *                              out of the install's exe (`lib/app_icon.ts`)
  *     bundle/                  the export, as `serverSource` fetches it
- *     bgm/ se/ voice/          the install's `sound/`, **lowercased**
+ *     sounds.json, clips.pack  the install's sounds as AAC (`tools/sounds.ts`):
+ *     bgm/*.m4a                every effect and voice in one pack, and the
+ *                              music a track a file
+ *
+ * or, with `--wav`, the install's `sound/` as it is, **lowercased**:
+ *
+ *     bgm/ se/ voice/          the WAVs, 368 MB
+ *
+ * The AAC set is what the page downloads a stage's worth of at once, and
+ * what the service worker keeps for offline play; `tools/sounds.ts` says what
+ * is encoded and why. It is encoded into `extract/sound/` (incrementally:
+ * a second staging encodes nothing) and copied from there.
  *
  * Lowercased because the dev server resolves a sound's name case-insensitively
  * and a static host cannot -- an S3 key is exact, and the exe's tables do not
@@ -66,7 +77,8 @@ const USAGE = `usage: npm run site -- [options]
   --out <dir>        where to stage it (default: extract/site)
   --gzip             store the bundle gzip-compressed; the host must send
                      Content-Encoding: gzip (--sync does)
-  --no-sound         leave the sounds out (about 370 MB)
+  --no-sound         leave the sounds out
+  --wav              stage the install's WAVs (368 MB) rather than the AAC set
   --allow-stale      stage stages an older exporter wrote
   --check            serve the staged site case-sensitively and play stage 1
   --sync <s3-url>    upload it with the AWS CLI: s3://bucket/prefix
@@ -78,6 +90,7 @@ interface Args {
   out: string;
   gzip: boolean;
   sound: boolean;
+  wav: boolean;
   allowStale: boolean;
   check: boolean;
   sync: string;
@@ -100,7 +113,7 @@ const WEB = join(REPO, "web");
 function parseArgs(argv: string[]): Args {
   const a: Args = {
     bundle: BUNDLE_ROOT, gameDir: "", out: join(REPO, "extract", "site"),
-    gzip: false, sound: true, allowStale: false, check: false, sync: "",
+    gzip: false, sound: true, wav: false, allowStale: false, check: false, sync: "",
     dryrun: false,
   };
   for (let i = 0; i < argv.length; i++) {
@@ -116,6 +129,7 @@ function parseArgs(argv: string[]): Args {
       case "--out": a.out = resolve(val()); break;
       case "--gzip": a.gzip = true; break;
       case "--no-sound": a.sound = false; break;
+      case "--wav": a.wav = true; break;
       case "--allow-stale": a.allowStale = true; break;
       case "--check": a.check = true; break;
       case "--sync": a.sync = val(); break;
@@ -254,8 +268,41 @@ function stageIcons(a: Args, m: Manifest): void {
   console.log(`  icons: ${Object.keys(APP_ICONS).length}, ${from}`);
 }
 
+/** Where `npm run sounds` keeps the AAC set between stagings. */
+const SOUND_DIR = join(REPO, "extract", "sound");
+
+/**
+ * The AAC set: encode what is not encoded yet, then stage the index, the
+ * pack and the tracks -- and nothing of the WAVs a `--wav` staging left.
+ */
+function stageAac(a: Args, m: Manifest): void {
+  const gameDir = a.gameDir || m.game_dir;
+  const r = spawnSync("node", ["tools/run_ts.mjs", "tools/sounds.ts",
+                               "--game-dir", gameDir, "--bundle", a.bundle,
+                               "--out", SOUND_DIR],
+                      { cwd: WEB, stdio: ["ignore", "inherit", "inherit"] });
+  if (r.status !== 0) fail("encoding the sounds failed");
+  const index = JSON.parse(readFileSync(join(SOUND_DIR, "sounds.json"), "utf8")) as
+    { pack: string; files: Record<string, { file?: string }> };
+  const tracks = Object.values(index.files).map((e) => e.file)
+    .filter((f): f is string => !!f);
+  const files = ["sounds.json", index.pack, ...tracks];
+  let bytes = 0;
+  let n = 0;
+  for (const rel of files) {
+    const b = stageFile(join(SOUND_DIR, rel), join(a.out, rel), false);
+    if (b) { bytes += b; n++; }
+  }
+  for (const k of ["se", "voice"]) rmSync(join(a.out, k), { recursive: true, force: true });
+  const pruned = prune(join(a.out, "bgm"),
+                       new Set(tracks.map((t) => t.slice("bgm/".length))));
+  console.log(`  sounds (AAC): ${files.length} files, ${n} staged (${mb(bytes)})`
+    + (pruned ? `, ${pruned} removed` : ""));
+}
+
 /** `sound/SE` -> `se`, and the same for every segment below it. */
 function stageSounds(a: Args, m: Manifest): void {
+  for (const f of ["sounds.json", "clips.pack"]) rmSync(join(a.out, f), { force: true });
   const gameDir = a.gameDir || m.game_dir;
   const root = join(gameDir, "sound");
   if (!existsSync(root)) {
@@ -310,8 +357,15 @@ function sync(a: Args, gzip: boolean): void {
     ...["bgm", "se", "voice"].filter((k) => existsSync(join(a.out, k)))
       .map((k) => ["s3", "sync", join(a.out, k), `${dst}/${k}`, "--delete",
                    "--cache-control", "public, max-age=604800",
-                   "--content-type", "audio/wav",
+                   "--content-type", existsSync(join(a.out, "sounds.json"))
+                     ? "audio/mp4" : "audio/wav",
                    ...(gzip && k === "voice" ? ["--content-encoding", "gzip"] : [])]),
+    // The AAC set's index and pack, revalidated like the bundle: a re-encode
+    // changes them in place.
+    ...["sounds.json", "clips.pack"].filter((f) => existsSync(join(a.out, f)))
+      .map((f) => ["s3", "cp", join(a.out, f), `${dst}/${f}`, "--cache-control", "no-cache",
+                   "--content-type", f.endsWith(".json") ? "application/json"
+                     : "application/octet-stream"]),
     ["s3", "sync", join(a.out, "assets"), `${dst}/assets`, "--delete",
      "--cache-control", "public, max-age=31536000, immutable"],
     ["s3", "sync", join(a.out, "icons"), `${dst}/icons`, "--delete",
@@ -342,7 +396,7 @@ const before = readRecord(a.out);
 const restage = before !== null && before.gzip !== a.gzip;
 // Staging skips a file whose copy is newer than its source, so a change of
 // compression has to start the directory again.
-if (before !== null && (before.voiceGzip ?? false) !== a.gzip) {
+if (before !== null && (before.voiceGzip ?? false) !== (a.gzip && a.wav)) {
   rmSync(join(a.out, "voice"), { recursive: true, force: true });
 }
 
@@ -350,13 +404,16 @@ console.log(`site: staging into ${a.out}`);
 buildPage(a.out);
 stageIcons(a, m);
 stageBundle(a, restage);
-if (a.sound) {
+if (a.sound && a.wav) {
   stageSounds(a, m);
+} else if (a.sound) {
+  stageAac(a, m);
 } else {
   for (const k of ["bgm", "se", "voice"]) rmSync(join(a.out, k), { recursive: true, force: true });
+  for (const f of ["sounds.json", "clips.pack"]) rmSync(join(a.out, f), { force: true });
 }
 const record: SiteRecord = {
-  gzip: a.gzip, voiceGzip: a.gzip, sound: a.sound, bundle: a.bundle,
+  gzip: a.gzip, voiceGzip: a.gzip && a.wav, sound: a.sound, bundle: a.bundle,
   staged: new Date().toISOString(),
 };
 writeFileSync(join(a.out, "site.json"), JSON.stringify(record, null, 1));

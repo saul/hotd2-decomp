@@ -24,8 +24,49 @@
  * nowhere near JUDGMENT. `docs/formats/pipeline.md` lists every model that
  * rule drew and what really draws each.
  *
- * The one exception is class 0x41's canal water, whose task draws the
- * stage's own tile while it is resident -- see {@link setWaterSlots}.
+ * Two routines draw such a model as the stage's own node: class 0x41's water
+ * task, which draws a canal tile while it is resident (see
+ * {@link setWaterSlots}), and this routine itself, which draws stage 3's
+ * two canal tiles beside one region entry (see {@link RegionEntryAlsoDraws}).
+ *
+ * ## What `RegionDrawResidentSet` does besides walking the list
+ *
+ * `RegionDrawResidentSet` (`FUN_00401260`), read whole from the disassembly
+ * `[proved]`:
+ *
+ * ```
+ * if (g_screen_furniture_flags & 0x20) return;          // 0x00401268
+ * for (each table index i in the current region's list) {
+ *   slot = table[i].slot;  push;
+ *   if (slot == 0x1828) {                                // 0x004012B7
+ *     if (region == 2 || region == 3) {
+ *       push; AssetDrawSlot(0x13B2); AssetDrawSlot(0x13B0); pop;
+ *     }
+ *   } else if (slot == 0x1918) {
+ *     if (g_scene_index == 9) MatrixTranslate(0, 9, 0);
+ *   } else if (slot == 0x1A56 && region == 8 && i == 0x16) {
+ *     skip its own draw;
+ *   }
+ *   bounding sphere, frustum test, and the draw by table[i].mode; pop;
+ * }
+ * ```
+ *
+ * The port has the first two. Bit `0x20` is `ChapterCardInstall`'s
+ * (`ScreenFurniture.ChapterCard`): while a chapter card is up no region model
+ * is drawn ({@link setChapterCard}). And `0x1828` is `st3_08[2]`, first in
+ * stage 3's regions 2 and 3, which are the boat's two canal cut scenes
+ * (block 0 step 2 and block 7 step 2): the canal under the boat is
+ * `st1_1[14]` and `st1_1[12]`, which no region lists and no water task draws
+ * until the script has left the region. Without this arm the canal there was
+ * empty.
+ *
+ * The other two arms do not reach the port. `0x1918` (`st6_01[14]`, stage
+ * 6's regions 12 and 13) moves only under scene index 9, which no bundle
+ * is. `0x1A56` (`st4_06[4]`) is listed twice in stage 4's region 8, at table
+ * index `0x16` with draw mode 1 and at `0x25` with mode 0, so the arm leaves
+ * one draw under the default light; the bundle carries one draw mode per
+ * model (the largest of its entries'), so that model is drawn once here as
+ * it is there, but in the scene light array's mode.
  */
 
 import {
@@ -37,9 +78,33 @@ import {
   Vector3,
 } from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { useStraightPngTextures } from "./png_textures";
 import type { ScriptJson } from "../bundle";
+import type { System } from "../core/system";
+import { G, ScreenFurniture } from "../game/globals";
 import { prepareDrawCommands } from "./draw_order";
 import { subtreeResources } from "./scope3d";
+
+/**
+ * The slots `RegionDrawResidentSet` (`FUN_00401260`) draws beside a region
+ * entry, besides the entry's own model: `AssetDrawSlot(0x13B2)` then
+ * `AssetDrawSlot(0x13B0)` -- stage 3's canal tiles `st1_1[14]` and
+ * `st1_1[12]` -- for entry slot `0x1828` while the current region is 2 or 3
+ * (`0x004012B7`..`0x00401333`). Not frustum-tested, and drawn whether or not
+ * the entry itself is; `AssetDrawSlot` skips a slot that is not resident.
+ *
+ * Neither tile is ever drawn by this and by a water task on the same frame:
+ * both cut scenes leave region 2 or 3 (block 0 step 2 op 40, block 7 step 2
+ * op 42) before the script places the task (ops 56 and 47), in both modes'
+ * scripts. So one node drawn once is the engine's picture.
+ */
+export function RegionEntryAlsoDraws(entrySlot: number,
+                                     region: number): readonly number[] {
+  if (entrySlot === 0x1828 && (region === 2 || region === 3)) {
+    return [0x13b2, 0x13b0];
+  }
+  return [];
+}
 
 export interface ModelInfo {
   node: Object3D;
@@ -83,6 +148,8 @@ export class StageScene {
    */
   private waterOwned: ReadonlySet<number> = new Set();
   private waterDrawn: ReadonlySet<number> = new Set();
+  /** `g_screen_furniture_flags & 0x20`, as {@link setChapterCard} last had it. */
+  private chapterCard = false;
 
   /**
    * The stage, parsed from its glTF's bytes -- which the loader has already
@@ -95,7 +162,10 @@ export class StageScene {
    * loading bar's movement then is a compositor animation.
    */
   static async load(geometry: ArrayBuffer, script: ScriptJson): Promise<StageScene> {
-    const gltf = await new GLTFLoader().parseAsync(geometry, "");
+    // The images through the page's own PNG decoder: see `png_textures.ts`
+    // for what a browser's decoder does to a transparent texel's colour.
+    const gltf = await useStraightPngTextures(new GLTFLoader())
+      .parseAsync(geometry, "");
     // Before anything clones a node: every layer that draws a stage model
     // copies it, and the copies must carry the engine's draw state and the
     // primitive marks the translucent sort groups by. See `draw_order.ts`.
@@ -187,6 +257,18 @@ export class StageScene {
     this.refresh();
   }
 
+  /**
+   * `g_screen_furniture_flags & 0x20` (`ScreenFurniture.ChapterCard`), which
+   * `RegionDrawResidentSet` tests before anything else: while it is up the
+   * routine returns at once and no region model is drawn. The models other
+   * routines draw -- the water task's tiles -- are not this routine's.
+   */
+  setChapterCard(up: boolean): void {
+    if (up === this.chapterCard) return;
+    this.chapterCard = up;
+    this.refresh();
+  }
+
   /** Bounding sphere of one region, for framing the camera on it. */
   regionSphere(r: number, out = new Sphere()): Sphere {
     const box = new Box3();
@@ -221,8 +303,8 @@ export class StageScene {
    * `0x51`, and a slot this stage holds a model for and no region lists is
    * one the script streams that way -- resident while loaded, and not before
    * or after. Any other slot is taken as resident: a region's models are
-   * this class's own business, and whole-file loads (`0x52`) are not
-   * tracked.
+   * this class's own business, and whole-file loads (`0x52`) are the
+   * port's (`game/pol_files.ts`), which this does not read.
    */
   slotResident(slot: number): boolean {
     const m = this.bySlot.get(slot);
@@ -254,8 +336,17 @@ export class StageScene {
     const all = this.mode === "all";
     for (const m of this.models) m.node.visible = all;
     if (all) return;
-    for (const m of this.byRegion.get(this.currentRegion) ?? []) {
-      m.node.visible = true;
+    // `RegionDrawResidentSet`: nothing while the chapter card is up; else
+    // the current region's entries, and what an entry draws beside itself.
+    if (!this.chapterCard) {
+      for (const m of this.byRegion.get(this.currentRegion) ?? []) {
+        m.node.visible = true;
+        if (m.slot === null) continue;
+        for (const s of RegionEntryAlsoDraws(m.slot, this.currentRegion)) {
+          const also = this.bySlot.get(s);
+          if (also && this.slotResident(s)) also.node.visible = true;
+        }
+      }
     }
     // A model no region lists is drawn by whatever routine draws its slot, in
     // that routine's layer -- never here, loaded or not (see the file comment).
@@ -320,3 +411,22 @@ function countTriangles(node: Object3D): number {
 }
 
 export const WORLD_UP = new Vector3(0, 1, 0);
+
+/**
+ * `RegionDrawResidentSet`'s one per-frame input the walker does not hand the
+ * scene: the chapter card's bit of `g_screen_furniture_flags`, read once a
+ * frame out of `G` and given to the stage when it changes.
+ */
+export class RegionDrawGate implements System {
+  readonly id = "render.region_draw";
+  scene: StageScene | null = null;
+
+  update(): void {
+    this.scene?.setChapterCard(
+      (G.g_screen_furniture_flags & ScreenFurniture.ChapterCard) !== 0);
+  }
+
+  resync(): void {
+    this.update();
+  }
+}

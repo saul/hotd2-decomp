@@ -67,6 +67,7 @@ import type { RenderContext } from "./context";
 import { BAMS_TO_RAD } from "../core/bams";
 import type { Scope } from "../core/scope";
 import { prepareFogMaterial } from "./fog";
+import { unlitMaterial } from "./lighting";
 
 /** The scale the draw applies. Negative Z is deliberate. */
 const DOME_SCALE = new Vector3(1.2, 1.2, -1.2);
@@ -172,7 +173,9 @@ export class Backdrop implements System<RenderContext> {
           if (!m) continue;
           // Cloned, because these materials are shared with ordinary geometry
           // and the depth change must not leak into it.
-          const clone = (m as Material).clone();
+          // The unlit material, never a lit twin: see `unlitMaterial`.
+          // The dome is a lighting root, so the swap twins the clone.
+          const clone = unlitMaterial(m as Material).clone();
           clone.depthWrite = false;
           // The clone is made *after* `sceneFog.prepare` has walked the stage
           // tree, and `Material.copy` does not carry `onBeforeCompile` -- so

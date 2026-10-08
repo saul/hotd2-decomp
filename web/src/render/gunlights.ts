@@ -77,7 +77,7 @@ import type { RenderContext } from "./context";
 import {
   copyDrawState, setUnfadedMaterial, unfadedMaterial,
 } from "./draw_order";
-import type { SceneLighting } from "./lighting";
+import { unlitMaterial, type SceneLighting } from "./lighting";
 
 /**
  * The two questions this layer asks the port, answered by `app/`.
@@ -123,8 +123,11 @@ const GUN_LIGHTS = 2;
 const LIGHTS_BEGIN = patchLightsBegin(ShaderChunk.lights_fragment_begin);
 
 /**
- * The point lights the rest of `g_entity_lights` can hold — class 0x41 type
- * 48's lamp claims one through `EntityLightAcquireSlot`, from entry 3 up.
+ * The lights the rest of `g_entity_lights` can hold, from entry 3 up, each
+ * claimed through `EntityLightAcquireSlot`: points -- class 0x41 type 48's
+ * lamp, class 0x2B selector 0 -- and spots -- class 0x2B selectors 1 and 2,
+ * stage 4 block 10's and stage 5 block 0's (`game/class2B/`). Each entry
+ * gets one of each kind here and shows the one its `type` names.
  */
 const ENTITY_POINT_FIRST = 3;
 
@@ -221,6 +224,8 @@ export class GunLights implements System<RenderContext> {
   private readonly spots: SpotLight[] = [];
   /** Entries 3..15 of `g_entity_lights` that are D3D point lights. */
   private readonly points: PointLight[] = [];
+  /** Entries 3..15 of `g_entity_lights` that are D3D spot lights. */
+  private readonly entitySpots: SpotLight[] = [];
   /** Meshes under a `draw_mode` 1 region node. */
   private regionLit: Mesh[] = [];
   /**
@@ -231,6 +236,15 @@ export class GunLights implements System<RenderContext> {
   private characters = new Map<number, Object3D>();
   /** The spawn addresses whose meshes the light holds now. */
   private litCharacters = new Set<number>();
+  /**
+   * Nodes another layer draws through the scene light array this frame --
+   * `AssetDrawSlotWithAlphaSceneLights` (`FUN_00418620`) and its twin are
+   * the light's, whichever routine makes the call. `render/type26_ripple.ts`
+   * hands its water in; the app wires it.
+   */
+  sceneLitNodes: () => readonly Object3D[] = () => [];
+  /** The nodes from {@link sceneLitNodes} the light holds now. */
+  private litNodes = new Set<Object3D>();
   /** Unlit material -> its gun-lit twin, built once per stage. */
   private readonly twins = new Map<Material, Material>();
   /** Mesh -> the material it had before the gun light took it. */
@@ -258,13 +272,20 @@ export class GunLights implements System<RenderContext> {
       this.group.add(sp, sp.target);
     }
     for (let i = ENTITY_POINT_FIRST; i < 16; i++) {
-      // No shadow: a cube map per lamp is six passes, and the one lamp the
-      // game ships hangs in a room the torch already shadows.
+      // No shadow: a cube map per lamp is six passes, and the two point lights
+      // the game ships hang in rooms the torch already shadows.
       const pt = new PointLight(0xffffff, 0, 0, 2);
       pt.name = `entity_light_${i}`;
       pt.visible = false;
       this.points.push(pt);
       this.group.add(pt);
+      // No shadow either, for the same reason, and the gun lights' hard cone
+      // with its presentation-only soft rim (see the header).
+      const sp = new SpotLight(0xffffff, 0, 0, Math.PI / 16, PENUMBRA, 0);
+      sp.name = `entity_spot_${i}`;
+      sp.visible = false;
+      this.entitySpots.push(sp);
+      this.group.add(sp, sp.target);
     }
     scene.add(this.group);
   }
@@ -382,6 +403,30 @@ export class GunLights implements System<RenderContext> {
       pt.decay = 2;
       pt.position.set(e.pos.x, e.pos.y, e.pos.z);
     }
+    // ...and the spots. Class 0x2B's two write `att0` and nothing past it,
+    // `theta` and not `phi`, a grey diffuse and a 65536 range: the gun
+    // light's terms exactly, so the gun light's mapping -- the half-angle,
+    // `diffuse / att0` and no fall with distance.
+    for (let k = 0; k < this.entitySpots.length; k++) {
+      const sp = this.entitySpots[k];
+      const idx = ENTITY_POINT_FIRST + k;
+      const e = G.g_entity_lights[idx];
+      const on = !!e && e.type === RenderLightType.Spot && this.source.live(idx);
+      sp.visible = on;
+      if (!on) continue;
+      any = true;
+      const peak = Math.max(e.diffuse[0], e.diffuse[1], e.diffuse[2], 1e-6);
+      sp.color.setRGB(e.diffuse[0] / peak, e.diffuse[1] / peak,
+                      e.diffuse[2] / peak);
+      sp.intensity = (Math.PI * peak) / Math.max(e.att0, 1e-6);
+      sp.angle = e.theta / 2;
+      sp.distance = 0;
+      sp.decay = 0;
+      sp.position.set(e.pos.x, e.pos.y, e.pos.z);
+      sp.target.position.set(e.pos.x + e.dir.x, e.pos.y + e.dir.y,
+                             e.pos.z + e.dir.z);
+      sp.target.updateMatrixWorld();
+    }
     const [r, g, b] = G.g_light_array_ambient;
     gunAmbient.value.setRGB(r, g, b);
 
@@ -389,6 +434,7 @@ export class GunLights implements System<RenderContext> {
       if (this.active) this.restoreAll(base);
       this.active = false;
       this.litCharacters.clear();
+      this.litNodes.clear();
       return;
     }
     if (!this.active) {
@@ -416,11 +462,36 @@ export class GunLights implements System<RenderContext> {
       });
     }
     this.litCharacters = want;
+    // ...and the nodes another layer drew through the light array, the same
+    // way: every frame, the ones it hands over now.
+    const nodes = new Set(this.sceneLitNodes());
+    for (const n of this.litNodes) {
+      if (nodes.has(n)) continue;
+      n.traverse((o) => {
+        if ((o as Mesh).isMesh) this.restore(o as Mesh, base);
+      });
+    }
+    for (const n of nodes) {
+      n.traverse((o) => {
+        if ((o as Mesh).isMesh) this.light(o as Mesh);
+      });
+    }
+    this.litNodes = nodes;
   }
 
-  private twinOf(m: Material): Material {
-    if (m.userData?.gunLit) return m;
-    if (!lightable(m)) return m;
+  /**
+   * The gun-lit twin of what a mesh wears -- built from its **unlit** base,
+   * never from the scene-lit twin "+ scene light" has on it. That twin keeps
+   * the device equation in its `onBeforeCompile` (`render/lighting.ts`),
+   * which strips `lights_fragment_begin`, where three.js evaluates the spots
+   * and their shadows: chained under this one's patch it left the patch
+   * nothing to replace, and every gun-lit mesh drew the plain scene light
+   * under the `gunlit` program key -- no torch, no shadow (`L110`).
+   */
+  private twinOf(worn: Material): Material {
+    if (worn.userData?.gunLit) return worn;
+    const m = unlitMaterial(worn);
+    if (!lightable(m)) return worn;
     let t = this.twins.get(m);
     if (!t) {
       t = makeGunLitMaterial(m);

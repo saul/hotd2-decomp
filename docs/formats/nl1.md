@@ -59,14 +59,14 @@ Meshes begin at `0x18`.
 | `+0x18` | `f32` | mesh centroid z | |
 | `+0x1C` | `f32` | mesh radius | |
 | `+0x20` | `s32` | **texture ID** | index into the paired `tex/` bank; `-1` = untextured |
-| `+0x24` | `s32` | **shading mode** | selects the vertex layout — see below |
-| `+0x28` | `f32` | texture ambient | **bit 0 is a flag**, not float data |
+| `+0x24` | `s32` | **shading mode** | selects the vertex layout — see below; on the PC port, `>= 1` is also the specular exponent's log2 |
+| `+0x28` | `f32` | texture ambient | **bit 0 is a flag**, not float data; the PC port's material ambient is this × the base colour |
 | `+0x2C` | `f32` | base colour A | |
 | `+0x30` | `f32` | base colour R | |
 | `+0x34` | `f32` | base colour G | |
 | `+0x38` | `f32` | base colour B | |
 | `+0x3C` | `f32` | offset colour A | **doubles as the palette index** for PAL4/PAL8 |
-| `+0x40` | `f32` | offset colour R | |
+| `+0x40` | `f32` | offset colour R | `+0x40..+0x48` are the PC port's specular colour — [`materials.md`](materials.md), *The material and the light equation* |
 | `+0x44` | `f32` | offset colour G | |
 | `+0x48` | `f32` | offset colour B | |
 | `+0x4C` | `u32` | `mesh_data_size` | bytes of geometry that follow |

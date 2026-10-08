@@ -8,7 +8,8 @@
  * instructions) take behaviour 8, which is an installer rather than a
  * behaviour. This said "the other eighteen", counting descriptors on one side
  * and instructions on the other. `trnevtbl.bin` holds a sixteenth descriptor,
- * on behaviour 9 (`0x00445050`, unread).
+ * on behaviour 9, `TrainingPropKeepAloft` -- Training's, which the port does
+ * not have, and so not ported.
  *
  * ```
  * ScriptedPropInit13 (FUN_0043FE10)
@@ -49,13 +50,15 @@
  * They used to be declared a divergence, for want of their slots in the
  * bundle.
  *
- * `FUN_004459C0`, the on-screen test state 6 uses to decide when to despawn,
- * projects the shot radius through `g_projection_distance_px / obj+0x78` and
- * compares it against the viewport. It is **not** ported, in either routine
- * that reaches it, so the boat holds state 6 and the descriptor's own cue is
- * what removes it; each of the two declares that at its own `case`.
+ * State 6 leaves through a screen test, `CarriedPropIsOnScreen`
+ * (`FUN_004459C0`): the sphere of radius `obj+0x124` (40.0) at the
+ * view-space point `obj+0x70`, which `ScriptedPropUpdate13`'s draw took the
+ * frame before, projected at `g_projection_distance_px` against a 640x480
+ * frame. Off it, the boat raises `0x4000000` on itself and goes to state 7,
+ * which despawns it. Both routines that reach it run it.
  */
-import type { Actor } from "../actor";
+import { ActorFlag, type Actor } from "../actor";
+import { CarriedPropIsOnScreen } from "../combat/permits";
 import { ActorDespawn } from "../despawn";
 import { G } from "../globals";
 import { CameraBlockYaw } from "../camera/view";
@@ -65,6 +68,7 @@ import {
 import { SpawnClass } from "../spawn_class";
 import { CarrierPropRoutine0 } from "./routine0";
 import { CarrierPropRoutine2 } from "./routine2";
+import { CarrierPropRoutine3 } from "./routine3";
 import { CarrierPropRoutine4 } from "./routine4";
 import { CarrierPropRoutine5 } from "./routine5";
 import { QueryGroundHeightAt } from "../coli";
@@ -76,8 +80,15 @@ import { vec3, VecToAngles } from "../vec";
 import {
   CARRIER1_STRIP_FIRST, CARRIER1_STRIP_LAST, CARRIER_GROUND_WAKE_DRAW,
   CARRIER_WAKE_FIRST,
-  CARRIER_WAKE_LAST, CarrierState, type ScriptedPropTail,
+  CARRIER_WAKE_LAST, CarrierState, PropBehaviourState, type ScriptedPropTail,
 } from "./state";
+import { NULL_HOST, type GameHost } from "../host";
+import type { Rng } from "../../core/rng";
+import type { Events } from "../../core/events";
+import {
+  MatIdentity, MatrixRotateX, MatrixRotateY, MatrixRotateZ,
+  MatrixTransformPoint,
+} from "../matrix";
 
 /** `ActorAllocSub(0x18)`'s `ride+0x04`, and the range it wraps in. */
 const WAKE_CEL_FIRST = CARRIER_WAKE_FIRST;
@@ -98,6 +109,21 @@ export const SFX_CARRIER_BOW = 0xb16a9;
  * state 6 makes, `FUN_004459C0`, which pads the projection by it.
  */
 const CARRIER_HIT_RADIUS = 40.0;
+const _view = vec3();
+
+/**
+ * `CarriedPropIsOnScreen(obj)` (`FUN_004459C0`) as states 6 of routines 1
+ * and 6 call it, at `0x00440712` and `0x004416F2`. `[port-only]` as a
+ * function: the port keeps `obj+0x70` in world space ({@link
+ * Actor.shotCentre}, which {@link ScriptedPropUpdate13} writes where the
+ * draw does) and takes it into the camera's space here, as
+ * `RegisterForShotTest` does. With no camera there is no frame to leave, and
+ * the carrier stays, as `CarriedPropDeflectedFlight` keeps its prop.
+ */
+function CarrierIsOnScreen(obj: Actor, f: ClassFrame): boolean {
+  if (!f.host.viewSpaceOfPoint?.(obj.shotCentre, _view)) return true;
+  return CarriedPropIsOnScreen({ shotPoint: _view, radius: obj.hitRadius });
+}
 /** The two `op_` object paths `CarrierPropRoutine1` rides. */
 export const CARRIER_PATH_MOOR = 0x15e;
 export const CARRIER_PATH_RUN = 0x15f;
@@ -140,15 +166,16 @@ const CARRIER6_FRAME_BOW_EFFECT = 0x6a4;
 
 /**
  * `g_prop_behaviours` — `0x005926A8`, ten entries indexed by the descriptor's
- * `tail+0x10`.
+ * `tail+0x10`, read from the table's forty bytes.
  *
  * Entry 0 is `NoOpStub` and is what a static prop takes; entry 8 is
- * {@link CarrierPropSelectRoutine}. Entries 1, 3, 4 and 5 are the carried
- * props' — class 0x30 state 37's barrels, which reach the table through the
- * state-37 script rather than through a class-0x13 descriptor; 1 and 4 are
- * ported in `game/carried_prop.ts`, and so is 2, the stage-4 boss's. The
- * rest — `0x0043FFC0`, `0x004400D0` and `0x00445050` — are not read.
- * `[open]`
+ * {@link CarrierPropSelectRoutine}. Entries 1 to 5 are the carried props' —
+ * class 0x30 state 37's barrels, which reach the table through the state-37
+ * script's `+0x04` and `+0x08` rather than through a class-0x13 descriptor,
+ * and the stage-4 boss's — all ported in `game/carried_prop.ts`. 6 and 7 are
+ * descriptor behaviours, ported here, that no shipped descriptor selects, and
+ * 9 is Training's only. `[proved]`: every class-0x12, 0x13 and 0x15 descriptor any `evt/`
+ * word points at takes 0, 8 or 9, and every state-37 script 1 then 3, 4 or 5.
  */
 export enum PropBehaviour {
   /** `NoOpStub` (`0x0041EBB0`) — a static prop, drawn and nothing else. */
@@ -160,14 +187,24 @@ export enum PropBehaviour {
    * The stage-4 boss's props; `Boss4SpawnHeldProp` is its only allocator.
    */
   CarriedPropHeldInBone8 = 2,
-  /** `CarriedPropThrowAtTarget` (`FUN_004432D0`) — not ported. */
+  /** `CarriedPropThrowAtTarget` (`FUN_004432D0`) — `game/carried_prop.ts`. */
   CarriedPropThrowAtTarget = 3,
   /** `CarriedPropThrowAtCamera` (`FUN_00443B90`) — `game/carried_prop.ts`. */
   CarriedPropThrowAtCamera = 4,
-  /** `CarriedPropRollAtCamera` (`FUN_00443DC0`) — not ported. */
+  /** `CarriedPropRollAtCamera` (`FUN_00443DC0`) — `game/carried_prop.ts`. */
   CarriedPropRollAtCamera = 5,
+  /** {@link PropBehaviourLaunchWithAccel}. No shipped descriptor takes it. */
+  LaunchWithAccel = 6,
+  /** {@link PropBehaviourRideObjectPath}. No shipped descriptor takes it. */
+  RideObjectPath = 7,
   /** `CarrierPropSelectRoutine` (`FUN_00440190`). */
   SelectCarrierRoutine = 8,
+  /**
+   * `TrainingPropKeepAloft` (`FUN_00445050`) — Training's object, kept in the
+   * air by shooting it; `trnevtbl.bin`'s descriptor `0x5400` is its only
+   * selector, and the port has no Training. Not ported.
+   */
+  TrainingPropKeepAloft = 9,
 }
 
 /** The tail, when this actor has one. */
@@ -189,7 +226,8 @@ function Tail(obj: Actor): ScriptedPropTail | null {
  * behind `NoOpStub`, the only ones a static prop ever has. Stage 2's five
  * static props all carry a pitch; see `PlacementOrientation`.
  */
-export function ScriptedPropInit13(obj: Actor): void {
+export function ScriptedPropInit13(obj: Actor, _rng?: Rng, _events?: Events,
+                                   host?: GameHost): void {
   const sub = Tail(obj);
   const p = obj.class13;
   if (!sub || !p) return;
@@ -200,13 +238,90 @@ export function ScriptedPropInit13(obj: Actor): void {
   // `sub+0x18 = 1.0f` in the Init; no ported behaviour writes it.
   sub.alpha = 1;
   sub.behaviour = p.behaviour;
+  // `sub+0x08 = tail + 0x14`: the operand block, which the port keeps as the
+  // words its readers read -- the first dword, behaviour 6's six floats, and
+  // the table entry behaviour 7 indexes with the first dword.
   sub.selector = p.selector;
+  sub.operand = p.operand ? [...p.operand] : [];
+  sub.pathLength = p.path_length ?? 0;
   sub.state = CarrierState.Begin;
   // `obj+0x3C = -1`.
   obj.motion = -1;
+  // `CALL dword ptr [EAX]` at `0x0043FE72`: the behaviour, once.
   if (sub.behaviour === PropBehaviour.SelectCarrierRoutine) {
     CarrierPropSelectRoutine(obj, sub);
+  } else if (sub.behaviour === PropBehaviour.LaunchWithAccel) {
+    PropBehaviourLaunchWithAccel(obj, sub);
+  } else if (sub.behaviour === PropBehaviour.RideObjectPath) {
+    // `[port-only]`: the app's paused-seek `Init` has no host to hand over,
+    // and a host with no paths leaves the prop where it is.
+    PropBehaviourRideObjectPath(obj, sub, { host: host ?? NULL_HOST });
   }
+}
+
+/**
+ * `PropBehaviourLaunchWithAccel` — `FUN_0043FFC0`. `g_prop_behaviours[6]`.
+ *
+ * ```
+ * case 0: Push; LoadIdentity; RotX(obj+0x64); RotZ(obj+0x6C); RotY(obj+0x68)
+ *         obj+0x4C..0x54 = M * operand[0..2]; obj+0x58..0x60 = M * operand[3..5]
+ *         Pop; sub+0x0C++                        ; and on into case 1
+ * case 1: obj+0x40 += obj+0x4C; obj+0x4C += obj+0x58   (x, y, z each)
+ * default: return
+ * ```
+ *
+ * A launch along the record's own facing with a constant acceleration, for
+ * as long as the prop lives; nothing here despawns it. The state-0 fall
+ * through is `JZ 0x0043FFEA` running into `0x00440090` past `INC word ptr
+ * [EBX + 0xC]` (`0x0044008C`). No shipped descriptor selects it `[proved]`.
+ */
+export function PropBehaviourLaunchWithAccel(obj: Actor,
+                                             sub: ScriptedPropTail): void {
+  if (sub.state === PropBehaviourState.Begin) {
+    const m = MatIdentity();
+    MatrixRotateX(m, obj.pitch);
+    MatrixRotateZ(m, obj.roll);
+    MatrixRotateY(m, obj.yaw);
+    const o = sub.operand;
+    const v = { x: 0, y: 0, z: 0 }, a = { x: 0, y: 0, z: 0 };
+    MatrixTransformPoint(m, { x: o[0], y: o[1], z: o[2] }, v);
+    MatrixTransformPoint(m, { x: o[3], y: o[4], z: o[5] }, a);
+    obj.vel.x = v.x; obj.vel.y = v.y; obj.vel.z = v.z;
+    obj.accX = a.x; obj.accY = a.y; obj.accZ = a.z;
+    sub.state = PropBehaviourState.Running;
+  } else if (sub.state !== PropBehaviourState.Running) {
+    return;
+  }
+  obj.pos.x += obj.vel.x;
+  obj.pos.y += obj.vel.y;
+  obj.pos.z += obj.vel.z;
+  obj.vel.x += obj.accX;
+  obj.vel.y += obj.accY;
+  obj.vel.z += obj.accZ;
+}
+
+/**
+ * `PropBehaviourRideObjectPath` — `FUN_004400D0`. `g_prop_behaviours[7]`.
+ *
+ * ```
+ * path = *(sub+0x08)                            ; the operand block's first dword
+ * case 0: sub+0x0C = 1                          ; INC ECX; and on into case 1
+ * case 1: PropSeatOnObjectPath(obj, path, g_cam_path_frame)
+ *         if (g_cam_path_frame >= g_cam_path_length[path]) sub+0x0C++
+ * default: return                               ; held at the last seat
+ * ```
+ *
+ * No shipped descriptor selects it `[proved]`.
+ */
+export function PropBehaviourRideObjectPath(obj: Actor, sub: ScriptedPropTail,
+                                            f: Pick<ClassFrame, "host">): void {
+  if (sub.state === PropBehaviourState.Begin) {
+    sub.state = PropBehaviourState.Running;
+  } else if (sub.state !== PropBehaviourState.Running) {
+    return;
+  }
+  PropSeatOnObjectPath(obj, sub.selector, G.g_cam_path_frame, f);
+  if (sub.pathLength <= G.g_cam_path_frame) sub.state = PropBehaviourState.Ended;
 }
 
 /**
@@ -214,11 +329,12 @@ export function ScriptedPropInit13(obj: Actor): void {
  *
  * Sets `g_civilian_carrier` and then overwrites `sub+0x00` with one of seven
  * routines chosen through the jump table at `0x004401E4` — see
- * {@link g_carrier_prop_routines}. Selectors 0, 1 and 6 are ported (stage
- * 2's block-16 boat and stage 3's two), and 2 and 9 (`FUN_004408A0`,
- * `class13/routine2.ts`, the stage-4 boss's transport); the other three
- * routines — `0x00440AD0` (3), `0x00440C20` (4 and 7) and `0x00441000` (5
- * and 8), all stage 4's — are unread. `[open]`
+ * {@link g_carrier_prop_routines}, all ten selectors ported: 0, 1 and 6
+ * (stage 2's block-16 boat and stage 3's two), and stage 4's -- 2 and 9
+ * (`FUN_004408A0`, the boss's transport), 3 (`FUN_00440AD0`, the monitor),
+ * 4 and 7 (`FUN_00440C20`) and 5 and 8 (`FUN_00441000`), the set models.
+ * Read off the table at `0x004401E4`: `0x004401B1`, `B8`, `DB`, `BF`, `CD`,
+ * `D4`, `C6`, `CD`, `D4`, `DB`.
  *
  * The carrier global is written **whatever the selector**, because the engine
  * writes it before it dispatches, and a rider placed after an unported carrier
@@ -239,7 +355,7 @@ export function CarrierPropSelectRoutine(obj: Actor,
  * path should look like.
  */
 export function PropSeatOnObjectPath(obj: Actor, slot: number, frame: number,
-                                     f: ClassFrame): void {
+                                     f: Pick<ClassFrame, "host">): void {
   const p = f.host.objectPath?.(slot, frame);
   if (!p) return;
   obj.pos.x = p.x;
@@ -401,16 +517,13 @@ export function CarrierPropRoutine1(obj: Actor, f: ClassFrame): void {
           && G.g_cam_path_frame >= CARRIER_PATH_END) {
         sub.state = CarrierState.WakeSpent;
       }
-      // `if (FUN_004459C0(obj) == 0) { obj+0x34 |= 0x4000000; state = 7; }`
-      // is the engine's exit from here, and it is a **screen** test: the
-      // routine projects the shot radius at `obj+0x124` through
-      // `g_projection_distance_px / obj+0x78` and compares it against the
-      // viewport. That is a rendering question the port has no answer to on a
-      // headless frame, and answering it wrongly despawns the boat while it is
-      // still on screen. It is left unported, which costs nothing: the
-      // descriptor's own cue removes the object anyway — stage 3's boat on
-      // camera path 130 frame 170, well after the path it rides has run out.
-      // [diverges]
+      // `0x00440707`..`0x00440733`: state 6, on the frame it is reached too,
+      // asks the screen test; off the frame, `obj+0x34 |= 0x4000000` and
+      // state 7, then the shared tail all the same.
+      if (sub.state === CarrierState.WakeSpent && !CarrierIsOnScreen(obj, f)) {
+        obj.flags |= ActorFlag.Dead;
+        sub.state = CarrierState.Gone;
+      }
       break;
     }
 
@@ -516,14 +629,18 @@ export function CarrierPropRoutine6(obj: Actor, f: ClassFrame): void {
     case CarrierState.WakeSpent:
       // `0x004415FC`: the strip drawn at the carrier's `Translate(0, 0, -2)`
       // and stepped, then `state == 5 && g_cam_path_frame >=
-      // g_cam_path_length[0x161]` moves it to 6, and 6's screen test is the
-      // same unported exit as routine 1's. [diverges]
+      // g_cam_path_length[0x161]` moves it to 6, and 6's screen test is
+      // routine 1's exit, at `0x004416E7`..`0x00441713`.
       sub.stripDrawn = sub.stripCel;
       sub.stripCel += 1;
       if (sub.stripCel > STRIP_CEL_LAST) sub.stripCel = STRIP_CEL_FIRST;
       if (sub.state === CarrierState.Wake
           && G.g_cam_path_frame >= CARRIER6_PATH_END) {
         sub.state = CarrierState.WakeSpent;
+      }
+      if (sub.state === CarrierState.WakeSpent && !CarrierIsOnScreen(obj, f)) {
+        obj.flags |= ActorFlag.Dead;
+        sub.state = CarrierState.Gone;
       }
       break;
     case CarrierState.Gone:
@@ -538,12 +655,18 @@ export function CarrierPropRoutine6(obj: Actor, f: ClassFrame): void {
  *
  * The despawn cue first — `g_active_cam_path` and `g_cam_path_frame` both
  * equal to the pair the descriptor named — then the behaviour. The draw that
- * follows it in the engine is `render/slotmodels.ts`'s.
+ * follows it in the engine is `render/slotmodels.ts`'s, at the alpha
+ * `sub+0x18` and the layer the behaviour left; what the draw writes back into
+ * the object is here: `MatrixGetTranslation` into `obj+0x70`
+ * (`0x0043FF8E`..`0x0043FF94`), the point routines 1 and 6 test against the
+ * screen on the next frame. A behaviour that despawns or kills its object
+ * does not return to the draw (`L72`).
  *
  * The behaviour runs **before** the draw (`CALL [EDI]` at `0x0043FEC9`, the
  * matrix from `0x0043FEDE`), so the record's angles are drawn only where the
- * behaviour writes none: behaviour 0, and carrier selector 3 (`0x00440AD0`,
- * which never stores to the object), both for life. Every other carrier
+ * behaviour writes none: behaviour 0, and carrier selector 3's
+ * `CarrierPropRoutine3` (`FUN_00440AD0`), which never stores to the object,
+ * both for life. Every other carrier
  * routine falls from state 0 into {@link PropSeatOnObjectPath} on its first
  * call, and its first draw is already on the path. `[proved]`
  */
@@ -555,8 +678,19 @@ export function ScriptedPropUpdate13(obj: Actor, f: ClassFrame): void {
     ActorDespawn(obj);
     return;
   }
-  if (sub.behaviour !== PropBehaviour.SelectCarrierRoutine) return;
-  g_carrier_prop_routines[sub.selector]?.(obj, f);
+  if (sub.behaviour === PropBehaviour.SelectCarrierRoutine) {
+    g_carrier_prop_routines[sub.selector]?.(obj, f);
+    if (obj.despawned) return;
+  } else if (sub.behaviour === PropBehaviour.LaunchWithAccel) {
+    PropBehaviourLaunchWithAccel(obj, sub);
+  } else if (sub.behaviour === PropBehaviour.RideObjectPath) {
+    PropBehaviourRideObjectPath(obj, sub, f);
+  }
+  // `T(obj+0x40)` is the matrix's translation before the turns and the
+  // scale, so the point is the position; the port keeps it in world space.
+  obj.shotCentre.x = obj.pos.x;
+  obj.shotCentre.y = obj.pos.y;
+  obj.shotCentre.z = obj.pos.z;
 }
 
 /**
@@ -570,6 +704,7 @@ export const g_carrier_prop_routines: Partial<Record<number,
   [CARRIER_ROUTINE_PORTED]: CarrierPropRoutine1,
   // `FUN_004408A0` is installed for both: 9 is 2 arriving parked.
   2: CarrierPropRoutine2,
+  3: CarrierPropRoutine3,
   // `FUN_00440C20` for 4 and 7, `FUN_00441000` for 5 and 8: 7 and 8 are 4
   // and 5 arriving already seated.
   4: CarrierPropRoutine4,
@@ -599,6 +734,9 @@ function ScriptedPropDebug(obj: Actor): ActorDebug {
 export const ScriptedPropHandler: ClassHandler = {
   init: ScriptedPropInit13,
   update: ScriptedPropUpdate13,
+  // `ScriptedPropInit13` calls the behaviour once, installs
+  // `ScriptedPropUpdate13` and returns (`0x0043FE7E`).
+  firstUpdateNextWalk: true,
   // `ScriptedPropInit13` writes no `obj+0x11C` and the update reads no hit
   // bit. Nothing marks it either: the record's `0x8000` keeps it out of
   // `RegisterForShotTest`'s list (`0x00405168`) for its whole life, which is

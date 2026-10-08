@@ -327,6 +327,12 @@ function FigureTurn(fig: RouteFigure, dir: number): void {
  * the renderer's. The counter steps whether or not a fade is running, and a
  * fade holds the incoming clip on its start frame until it is done, as the
  * port's `ActorAdvanceMotion` has it.
+ *
+ * The draw's last call, the ground shadow (`ActorDrawShadow`, `FUN_0040A590`,
+ * on `g_cur_actor` -- each tick points it at its figure first), draws
+ * nothing for either figure: both spawners raise `obj+0x34` bit `0x80000`
+ * (`OR EAX, 0x80000` at `0x0046146C` and `0x0046188B`). `[proved]` The disc
+ * a figure stands on is the screen's own `0x145B`, above.
  */
 function FigureDrawAndStep(fig: RouteFigure, vx: number, vy: number): void {
   fig.view.x = vx;

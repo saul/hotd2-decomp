@@ -57,14 +57,24 @@ export function DrawSlotInView(slot: number, x: number, y: number, z: number,
 export interface WorldSlotDraw {
   slot: number;
   m: number[];
+  /**
+   * The draw layer `SetDrawLayerNibble` (`FUN_004A79F0`) had set around the
+   * call, for the routines that set one: the ground shadow's `0xD`
+   * (`game/ground_shadow.ts`). Absent: the renderer's own default for the
+   * list.
+   */
+  layer?: number;
 }
 
 /**
  * `AssetDrawSlot` (`FUN_00418560`) on a world matrix, recorded for
  * `render/view_slots.ts`. `[port-only]` as a function, as
- * {@link DrawSlotInView} is. The trunk's two models are its callers
- * (`ItemSelectUpdate`, `FUN_00488820`).
+ * {@link DrawSlotInView} is. The trunk's two models are among its callers
+ * (`ItemSelectUpdate`, `FUN_00488820`), and so is every ground shadow
+ * (`ActorDrawGroundShadow`, `FUN_0040A620`), which passes its layer.
  */
-export function DrawSlotInWorld(slot: number, m: readonly number[]): void {
-  G.g_world_slot_draws.push({ slot, m: [...m] });
+export function DrawSlotInWorld(slot: number, m: readonly number[],
+                                layer?: number): void {
+  G.g_world_slot_draws.push(layer === undefined ? { slot, m: [...m] }
+                                                : { slot, m: [...m], layer });
 }

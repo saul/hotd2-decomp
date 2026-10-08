@@ -12,6 +12,7 @@
  * clip itself, and eight of the words it writes the step puts back before it
  * returns -- see `CivilianStepScript`.
  */
+import { EvtOpPlayDialogue2D } from "../dialogue";
 import { ActorFlag, MotionFlag, type Actor } from "../actor";
 import type { Rng } from "../../core/rng";
 import { ScoreAddForPlayer } from "../combat/score";
@@ -23,8 +24,8 @@ import { CivilianAddHeldItem, CivilianAddPickedItem, CivilianPickHeldItem }
   from "./items";
 import { CivilianCallHookInstall } from "./hooks";
 import { ActorStorePlayCursor } from "../motion";
-import { AsFloat, CivilianFrameHook, CivilianHookInstall, CivilianOp,
-         CivilianWait, CmdAt } from "./ops";
+import { AsFloat, CivilianFrameHook, CivilianHeadLook, CivilianHookInstall,
+         CivilianOp, CivilianWait, CmdAt } from "./ops";
 import { CivilianApplyMotionPose } from "./pose";
 
 /** What a rescue pays — `ScoreAddForPlayer`'s operand. */
@@ -166,14 +167,12 @@ export function CivilianRunScript(obj: Actor, script: number, pc: number,
       case CivilianOp.PlayDialogue:
         // `EvtOpPlayDialogue2D` (`FUN_00435B80`) — the *same* call evt op 0x2D
         // makes, and all 36 operands the shipped streams use are real message
-        // groups, so a civilian's line goes through the player's own subtitle
-        // and voice path rather than out as a bare sound id.
+        // groups, so a civilian's line is a subtitle task and a voice like
+        // the script's.
         //
         // The engine gates it on the removal countdown, so a civilian already
         // walking off stays quiet.
-        if (sub.removeDelay === 0) {
-          f?.events?.emit("civilian.dialogue", { at: obj.at, group: a[0] });
-        }
+        if (sub.removeDelay === 0) EvtOpPlayDialogue2D(a[0], f?.events);
         break;
       case CivilianOp.SetResume:
         sub.resume = a[0]; sub.resumeScript = c.scripts?.[0] ?? -1; break;
@@ -250,20 +249,43 @@ export function CivilianRunScript(obj: Actor, script: number, pc: number,
           G.g_bHudShutterState = a[0] & 0xff;
         }
         break;
-      // Unread. Named so the stream stays legible and so a later reading has
-      // somewhere to land; deliberately no behaviour.
+      // The head look, which `CivilianDrawBonePart`'s bone-2 arm reads
+      // (`class10/head.ts`). `MOV [EAX+0x8c], EDX` at `0x0048C047`; for a 2,
+      // `CMP word ptr [EAX+0x1e], BP` -- the child count, `EBP` the routine's
+      // zero -- and the first child into `sub+0x90` at `0x0048C069`, or
+      // `MOV [EAX+0x8c], EBP` at `0x0048C079` with none.
       //
-      // **These three used to fall through into `SetScale`'s body** and write
-      // its operand into `obj.scale`, which is `model+0x116C` and the factor
-      // `SkeletonApplyRootMotion` (`FUN_00410C50`) multiplies the root delta
-      // by. Their operands are small integers -- 1, 2, 5, 200 -- and
-      // {@link AsFloat} reinterprets a dword's bits, so the scale came out a
-      // denormal around 1e-45 and every step the clip authored was multiplied
-      // to nothing. 125 commands in the shipped streams run one of the four
-      // this case used to hold.
-      case CivilianOp.SetAttachMode:
-      case CivilianOp.SetAttachTarget:
-      case CivilianOp.SetPairA:
+      // **These used to fall through into `SetScale`'s body**, with op 0x25,
+      // and write its operand into `obj.scale`, which is `model+0x116C` and
+      // the factor `SkeletonApplyRootMotion` (`FUN_00410C50`) multiplies the
+      // root delta by. Their operands are small integers -- 1, 2, 5, 200 --
+      // and {@link AsFloat} reinterprets a dword's bits, so the scale came out
+      // a denormal around 1e-45 and every step the clip authored was
+      // multiplied to nothing.
+      case CivilianOp.SetHeadLook:
+        sub.headLook = a[0];
+        if (sub.headLook === CivilianHeadLook.Captor) {
+          if (sub.childCount !== 0) sub.headLookTarget = sub.children[0];
+          else sub.headLook = CivilianHeadLook.Off;
+        }
+        break;
+      // `MOV [EAX+0x8c], ECX` / `MOV [EAX+0x90], EDX` at `0x0048C092` and
+      // `0x0048C0A0`: both words as they are. The floats a point mode's
+      // address holds came across with the command.
+      case CivilianOp.SetHeadLookTarget:
+        sub.headLook = a[0];
+        sub.headLookTarget = a[1];
+        if (c.point) {
+          sub.headLookPoint = { x: c.point[0], y: c.point[1], z: c.point[2] };
+        }
+        break;
+      // The mouth: `MOV [EAX+0xa4], ECX` / `MOV [EAX+0xa8], EDX` /
+      // `MOV [ECX+0xa0], EBP` at `0x0048C0B6`..`0x0048C0D0`, `EBP` the zero
+      // the routine cleared on entry. The draw hook does the rest.
+      case CivilianOp.SetMouth:
+        sub.mouthFrames = a[0];
+        sub.mouthTable = a[1];
+        sub.mouthFrame = 0;
         break;
       // `MOV dword ptr [g_cur_actor_model + 0x116c], param_2[1]` -- the
       // operand is stored **verbatim** into a float field, so it is a float

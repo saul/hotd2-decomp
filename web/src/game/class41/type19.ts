@@ -344,10 +344,9 @@ export function PropUpdateType19(p: BreakableProp, rng: Rng,
           if (G.g_enemies_present > 0) G.g_enemies_present -= 1;
           p.routinePhase = Type19Phase.Retired;
           events?.emit("sound.play", { id: SFX_TYPE19_GIVE_UP });
-          // [diverges] `INC word [0x009A21BA]` -- `g_civilians_seen_total`,
-          // the run tally `CivilianInit` also raises. The port has no run
-          // and `G` does not carry it (see `ResetGameGlobals`), so the count
-          // is not kept.
+          // `INC word [0x009A21BA]` -- `g_civilians_seen_total`, the run
+          // tally `CivilianInit` also raises, and class 0x64's route reads.
+          G.g_civilians_seen_total = (G.g_civilians_seen_total + 1) & 0xffff;
         }
       }
       break;

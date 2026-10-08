@@ -10,7 +10,7 @@ import { ThrowerFlag, ZombieFlag2, type Actor } from "../actor";
 import { G } from "../globals";
 import { IsPlayerAttackable } from "./player";
 import type { GameHost } from "../host";
-import { vec3 } from "../vec";
+import { vec3, type Vec3 } from "../vec";
 
 /**
  * `g_projection_distance_px` — 0x009A2D70, and a 640x480 frame.
@@ -125,6 +125,46 @@ export function ActorBoundsOnScreen(obj: Actor, host: GameHost): boolean {
       && (-BOUNDS_HALF_W < a || -BOUNDS_HALF_W < c)
       && (b < SCREEN_HALF_H || d < SCREEN_HALF_H)) {
     return !(b <= -SCREEN_HALF_H && d <= -SCREEN_HALF_H);
+  }
+  return false;
+}
+
+/**
+ * `CarriedPropIsOnScreen` — `FUN_004459C0`. Is the sphere at the view-space
+ * point `obj+0x70..0x78`, radius `obj+0x124`, anywhere on a 640x480 frame?
+ *
+ * {@link ActorBoundsOnScreen}'s arithmetic on another point: off at or
+ * behind the eye (`0.0 <= z`), else the near edge of the sphere on each axis
+ * and the centre, both projected at `g_projection_distance_px`, against the
+ * literals `320.0`, `-320.0`, `240.0` and `-240.0`
+ * (`0x004C49CC`, `0x004D1D10`, `0x004C49C8`, `0x004C4D00`).
+ *
+ * The name is its first caller's and the routine knows nothing of props: its
+ * five callers are three carried-prop routines (`game/carried_prop.ts`), which
+ * hand it the point their own draw took under the camera, and the state-6
+ * exits of `CarrierPropRoutine1` (`FUN_004403D0`) and `CarrierPropRoutine6`
+ * (`FUN_004413C0`), whose point is the one `ScriptedPropUpdate13`
+ * (`FUN_0043FE90`) took on the frame before. It lives here, beside the other
+ * two screen tests, so that both callers' modules can reach it without an
+ * import cycle (`L56`). `p.shotPoint` is in the camera's own space, `-z` in
+ * front.
+ */
+export function CarriedPropIsOnScreen(
+  p: { readonly shotPoint: Vec3; readonly radius: number },
+): boolean {
+  const { x, y, z } = p.shotPoint;
+  if (0 <= z) return false;
+  const r = p.radius;
+  const ex = x <= 0 ? -x - r : r - x;
+  const ey = y <= 0 ? -y - r : r - y;
+  const k = PROJECTION_DISTANCE_PX / z;
+  const sx = k * ex, sy = k * ey;
+  const cx = -((PROJECTION_DISTANCE_PX * x) / z);
+  const cy = -((PROJECTION_DISTANCE_PX * y) / z);
+  if (((sx < BOUNDS_HALF_W || cx < BOUNDS_HALF_W)
+       && (-BOUNDS_HALF_W < sx || -BOUNDS_HALF_W < cx))
+      && (sy < SCREEN_HALF_H || cy < SCREEN_HALF_H)) {
+    return !(sy <= -SCREEN_HALF_H && cy <= -SCREEN_HALF_H);
   }
   return false;
 }

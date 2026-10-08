@@ -21,6 +21,11 @@
  *   eleven `Init`s and three updates put their object straight into the first
  *   free slot from 2, bypassing the sort, until the next fill clears it.
  *
+ * Three kinds of candidate are not {@link Actor}s in the port -- the carried
+ * props, the thrown weapons and the body creatures -- and each has a
+ * registration of its own that files it by id; the fill treats them as the
+ * engine does, by their `obj+0x121`.
+ *
  * So the table has **holes** -- slot 2 is empty whenever the nearest
  * candidate holds a permit -- and the camera drivers read slots 0..3 by index
  * (`SelectCameraLookAtTarget`, `CameraDriverSelectMode`,
@@ -76,7 +81,8 @@ export function RegisterForCameraTracking(obj: Actor): void {
   if (obj.flags & ActorFlag.NoCameraTrack) return;
   if (G.g_camera_candidate_count >= CAMERA_MAX_CANDIDATES) return;
   G.g_camera_candidates.push({ key: CameraCandidateKey(obj.pos),
-                               at: obj.at, prop: null });
+                               at: obj.at, prop: null, thrown: null,
+                               creature: null });
   G.g_camera_candidate_count += 1;
 }
 
@@ -90,7 +96,45 @@ export function RegisterPropForCameraTracking(id: number, flags: number,
                                               pos: Vec3): void {
   if (flags & ActorFlag.NoCameraTrack) return;
   if (G.g_camera_candidate_count >= CAMERA_MAX_CANDIDATES) return;
-  G.g_camera_candidates.push({ key: CameraCandidateKey(pos), at: 0, prop: id });
+  G.g_camera_candidates.push({ key: CameraCandidateKey(pos), at: 0, prop: id,
+                               thrown: null, creature: null });
+  G.g_camera_candidate_count += 1;
+}
+
+/**
+ * The same routine again, called on a thrown weapon -- `SpawnThrownWeapon`
+ * (`FUN_004504E0`) at `0x00450771` and `ThrownWeaponUpdate` (`FUN_00450780`)
+ * at `0x00450917`, each after copying the position to `obj+0x100`.
+ * `[port-only]` as a third function, because the weapons are records in
+ * `G.g_thrown_weapons` and not {@link Actor}s. The key is the weapon's own
+ * `obj+0x40`, as for everything else; the slot fill reads its `obj+0x121`.
+ */
+export function RegisterThrownWeaponForCameraTracking(
+    w: { id: number; flags: number; pos: Vec3 }): void {
+  if (w.flags & ActorFlag.NoCameraTrack) return;
+  if (G.g_camera_candidate_count >= CAMERA_MAX_CANDIDATES) return;
+  G.g_camera_candidates.push({ key: CameraCandidateKey(w.pos), at: 0,
+                               prop: null, thrown: w.id, creature: null });
+  G.g_camera_candidate_count += 1;
+}
+
+/**
+ * The same routine once more, called on a body creature --
+ * `BodyCreatureUpdate` (`FUN_0043E880`) at `0x0043EEF1`, after it has
+ * written `obj+0x100`. `[port-only]` as a fourth function, because the
+ * creatures are records in `G.g_body_creatures` and not {@link Actor}s.
+ *
+ * The key is the creature's `obj+0x40` as it is for everything else, and for
+ * this object that is a point **in camera space** measured against the
+ * gameplay eye, which is in the world: the engine's own sum, transcribed as
+ * it stands. The slot fill reads its `obj+0x121`.
+ */
+export function RegisterBodyCreatureForCameraTracking(
+    c: { id: number; flags: number; pos: Vec3 }): void {
+  if (c.flags & ActorFlag.NoCameraTrack) return;
+  if (G.g_camera_candidate_count >= CAMERA_MAX_CANDIDATES) return;
+  G.g_camera_candidates.push({ key: CameraCandidateKey(c.pos), at: 0,
+                               prop: null, thrown: null, creature: c.id });
   G.g_camera_candidate_count += 1;
 }
 
@@ -154,6 +198,51 @@ export function UpdateCameraEnemySlots(): void {
       s.prop = e.prop;
       continue;
     }
+    if (e.thrown !== null) {
+      // A thrown weapon's `obj+0x121` is the permit it took from its thrower
+      // (`SpawnThrownWeapon`, `0x004506C4`), so while it holds one it is
+      // dealt a permit slot like any attacker. Its `obj+0x120` is written
+      // too, and nothing in either weapon family reads it back.
+      const w = G.g_thrown_weapons.find((x) => x.id === e.thrown);
+      if (!w) continue;
+      if (w.attackPermit !== -1) {
+        for (let s = 0; s < CAMERA_ATTACK_SLOTS; s++) {
+          if (slots[s].occupied) continue;
+          slots[s].occupied = 1;
+          slots[s].thrown = w.id;
+          break;
+        }
+      } else {
+        const s = slots[rank + CAMERA_ATTACK_SLOTS];
+        s.occupied = 1;
+        s.thrown = w.id;
+      }
+      continue;
+    }
+    if (e.creature !== null) {
+      // A body creature's `obj+0x121` is the player it flies at -- zero from
+      // `ActorClearGameFields` (`FUN_004A73D0`) until the launch writes 0 or
+      // 1 (`0x0043E9FF`, `0x0043EA0E`, `0x0043EA2A`) -- and never `0xFF`, so
+      // the permit arm is the one it takes. Its `obj+0x120` is read back by
+      // its own two slot vacates.
+      const c = G.g_body_creatures.find((x) => x.id === e.creature);
+      if (!c) continue;
+      if (c.target !== -1) {
+        for (let s = 0; s < CAMERA_ATTACK_SLOTS; s++) {
+          if (slots[s].occupied) continue;
+          slots[s].occupied = 1;
+          slots[s].creature = c.id;
+          c.cameraSlot = s;
+          break;
+        }
+      } else {
+        const s = rank + CAMERA_ATTACK_SLOTS;
+        slots[s].occupied = 1;
+        slots[s].creature = c.id;
+        c.cameraSlot = s;
+      }
+      continue;
+    }
     const obj = ActorByAt(e.at);
     if (!obj) continue;
     if (obj.attackPermit !== -1) {
@@ -191,6 +280,30 @@ export function RegisterEnemySlot(obj: Actor): void {
     slot.occupied = 1;
     slot.at = obj.at;
     slot.prop = null;
+    slot.thrown = null;
+    slot.creature = null;
+    return;
+  }
+}
+
+/**
+ * The same routine, called on a body creature: `SpawnBodyCreature`
+ * (`FUN_0043E720`) writes `obj+0x120 = 0xFF` and calls it at `0x0043E77B`.
+ * `[port-only]` as a second function, for the reason
+ * {@link RegisterBodyCreatureForCameraTracking} is one.
+ */
+export function RegisterBodyCreatureEnemySlot(
+    c: { id: number; cameraSlot: number }): void {
+  c.cameraSlot = -1;
+  for (let s = CAMERA_ATTACK_SLOTS; s < CAMERA_SLOTS - 2; s++) {
+    const slot = G.g_enemy_slots[s];
+    if (!slot || slot.occupied) continue;
+    c.cameraSlot = s;
+    slot.occupied = 1;
+    slot.at = 0;
+    slot.prop = null;
+    slot.thrown = null;
+    slot.creature = c.id;
     return;
   }
 }
@@ -215,7 +328,7 @@ export function ReleaseCameraEnemySlot(obj: Actor): void {
  * The occupied byte alone, and `obj+0x120` left as it was: a stale index
  * clears whatever the last fill put there, which the engine does too.
  */
-export function CameraSlotVacate(obj: Actor): void {
+export function CameraSlotVacate(obj: { cameraSlot: number }): void {
   const slot = obj.cameraSlot >= 0 ? G.g_enemy_slots[obj.cameraSlot] : undefined;
   if (slot) slot.occupied = 0;
 }
@@ -226,14 +339,18 @@ export function CameraSlotVacate(obj: Actor): void {
  */
 export function CameraSlotActor(i: number): Actor | undefined {
   const slot = G.g_enemy_slots[i];
-  if (!slot || !slot.occupied || slot.prop !== null) return undefined;
+  if (!slot || !slot.occupied || slot.prop !== null || slot.thrown !== null
+      || slot.creature !== null) {
+    return undefined;
+  }
   return ActorByAt(slot.at);
 }
 
 /**
  * What `SelectCameraLookAtTarget` reads off the object in slot `i`: its
  * `obj+0x100` and its `obj+0x121`. A carried prop answers with its own camera
- * point and no permit. `[port-only]`, for the same reason as
+ * point and no permit; a thrown weapon with its own point and the permit it
+ * carries; a body creature with its own point and the player it flies at. `[port-only]`, for the same reason as
  * {@link CameraSlotActor}.
  */
 export function CameraSlotObject(i: number):
@@ -243,6 +360,14 @@ export function CameraSlotObject(i: number):
   if (slot.prop !== null) {
     const p = G.g_carried_props.find((q) => q.id === slot.prop);
     return p ? { lookAt: p.lookAt, attackPermit: -1 } : undefined;
+  }
+  if (slot.thrown !== null) {
+    const w = G.g_thrown_weapons.find((q) => q.id === slot.thrown);
+    return w ? { lookAt: w.lookAt, attackPermit: w.attackPermit } : undefined;
+  }
+  if (slot.creature !== null) {
+    const c = G.g_body_creatures.find((q) => q.id === slot.creature);
+    return c ? { lookAt: c.lookAt, attackPermit: c.target } : undefined;
   }
   return ActorByAt(slot.at);
 }

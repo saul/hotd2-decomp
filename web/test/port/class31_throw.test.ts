@@ -7,7 +7,7 @@ import { CameraActorTick, CameraUpdateTick } from "../../src/game/camera/actor";
 import { EvtEnterSceneState } from "../../src/game/camera/hooks";
 import { DeathArcMotion } from "../../src/game/combat/resolve_hit";
 import {
-  ActorByAt, AppState, G, ResetGameGlobals,
+  ActorByAt, AppState, G, HIT_SLOT_NONE, ResetGameGlobals,
 } from "../../src/game/globals";
 import { NULL_HOST, type GameHost, type ShotPick } from "../../src/game/host";
 import {
@@ -27,19 +27,27 @@ import { ZombieStateStrike } from "../../src/game/class30/strike";
 import { ZombieStateStandAndThrow } from "../../src/game/class30/stand_throw";
 import {
   DeflectSub, FlySub, ThrownWeaponPoolUpdate, ThrownWeaponState,
-  THROWN_WEAPON_AFTERIMAGE_PERIOD, THROWN_WEAPON_SPIN,
+  THROWN_WEAPON_AFTERIMAGE_PERIOD, THROWN_WEAPON_SHADOW_SIZE,
+  THROWN_WEAPON_SPIN,
   ZslmanBladeAfterimageFade, ZslmanBladeEmitAfterimage,
 } from "../../src/game/class31/projectile";
 import {
-  ZombieThrownWeaponBeginArc, ZombieThrownWeaponState, ZOMBIE_BLADE_SPIN,
-  ZOMBIE_WEAPON_ROLL,
+  ZombieThrownWeaponBeginArc, ZombieThrownWeaponState, ZOMBIE_AXE_SLOT,
+  ZOMBIE_BLADE_SPIN, ZOMBIE_WEAPON_ROLL,
 } from "../../src/game/class30/thrown_weapon";
 import { ZombieThrowHandWeapon } from "../../src/game/class30/throw";
 import {
-  ThrownWeaponAlloc, ThrownWeaponFlag, ThrownWeaponRoutine,
-  THROWN_WEAPON_DRAW_FLAGS, THROWN_WEAPON_SPAWN_FLAGS,
+  ThrownWeaponAlloc, ThrownWeaponFlag, ThrownWeaponHitSlotOwner,
+  ThrownWeaponRoutine, THROWN_WEAPON_DRAW_FLAGS, THROWN_WEAPON_SPAWN_FLAGS,
   type ThrownWeapon, type ThrownWeaponFrame,
 } from "../../src/game/thrown_weapon";
+import {
+  ActorDrawGroundShadow, GROUND_SHADOW_LAYER, GROUND_SHADOW_SLOT,
+} from "../../src/game/ground_shadow";
+import type { WorldSlotDraw } from "../../src/game/view_slot";
+import {
+  CameraSlotObject, UpdateCameraEnemySlots,
+} from "../../src/game/camera/slots";
 import {
   ActorFlag, DamageZone, ThrowerFlag, ZombieFlag2,
 } from "../../src/game/actor";
@@ -1892,4 +1900,387 @@ console.log("coli/, the game's own collision:");
         ColiTestSphereAgainstFullSet(28, 10, 45, 5)
         && Math.abs(G.g_coli_hit_depth - 3) < 1e-4,
         `depth ${G.g_coli_hit_depth}`);
+}
+
+console.log("class 0x31's weapon: its ground shadow, its camera candidacy, "
+            + "its hit slot:");
+{
+  // `ThrownWeaponUpdate` (`FUN_00450780`), past the shot-test registration:
+  //
+  //   004508af  PUSH 0x40a00000 / PUSH 0x40a00000 / PUSH ESI
+  //   004508ba  CALL 0x0040a600      ; ActorDrawGroundShadowWithSize(obj, 5, 5)
+  //   004508f1  CMP word [ESI+0x1310], 0 / JNZ
+  //   004508fb  obj+0x100 = obj+0x40
+  //   00450917  CALL 0x00408ec0      ; RegisterForCameraTracking(obj)
+  //
+  // and `SpawnThrownWeapon` (`FUN_004504E0`) opens with `ActorClaimHitSlot`
+  // (`0x004504FE`) and closes with the same registration (`0x00450771`). The
+  // port made none of the four calls.
+  const flip = MatIdentity();
+  MatrixRotateY(flip, 0x8000);
+  const cam = { w2v: flip, v2w: flip };
+  const frame = (): ThrownWeaponFrame => ({
+    cam, host: NULL_HOST, rng: new Rng(3),
+  });
+  const knife = (): ThrownWeapon => {
+    const w = ThrownWeaponAlloc(ThrownWeaponRoutine.Thrower);
+    w.slot = 0x1f91;
+    w.hand = 5;
+    w.charType = 0x16;
+    w.tilt = 0x600;
+    w.flags = THROWN_WEAPON_SPAWN_FLAGS;
+    w.drawFlags = THROWN_WEAPON_DRAW_FLAGS;
+    w.spinRate = THROWN_WEAPON_SPIN;
+    w.attackPermit = 0;
+    w.pos = vec3(3, 18, 44);
+    w.target = vec3(3, 18, 4);
+    G.g_thrown_weapons.push(w);
+    return w;
+  };
+  const at = (m: readonly number[] | null, p: Vec3): Vec3 => {
+    const out = vec3();
+    MatrixTransformPoint(m ?? MatIdentity(), p, out);
+    return out;
+  };
+  const near = (a: Vec3, b: Vec3): boolean =>
+    Math.abs(a.x - b.x) < 1e-4 && Math.abs(a.y - b.y) < 1e-4
+    && Math.abs(a.z - b.z) < 1e-4;
+  // The disc this frame drew, as `ActorDrawGroundShadow` recorded it.
+  const shadowDrawn = (): WorldSlotDraw | null =>
+    G.g_world_slot_draws.find((d) => d.slot === GROUND_SHADOW_SLOT) ?? null;
+
+  // -- the shadow: on the floor traced from three units above --------------
+  {
+    ResetGameGlobals();
+    EnterPlay();
+    // A ledge at y = 20, fifty units each way, over the street at y = 0, and
+    // the knife flying inside it at y = 18: two under the ledge, so only a probe that starts **three** above
+    // the knife (`FADD [0x004C49C0]`, 3.0) finds the ledge rather than the
+    // street.
+    const prevColi = T.coli;
+    const prevSet = G.g_coli_full_set;
+    T.coli = { files: ["test"], blobs: { hi: coliQuad([0, 1, 0, -20], 1,
+        [-50, 20, 50, 50, 20, 50, 50, 20, -50, -50, 20, -50], 61),
+      floor: FLOOR_BLOB } };
+    G.g_coli_full_set = ["hi", "floor"];
+    G.g_camera_fixed_eye_y = -999;
+    const w = knife();
+    G.g_world_slot_draws = [];
+    ThrownWeaponPoolUpdate(frame());
+    // `MatrixTranslate(x, h + 0.1, z); MatrixScale(5, 1, 5)` on top of the
+    // view, so a world matrix; h the ledge: 20.1 as an f32.
+    const h = Math.fround(20 + 0.10000000149011612);
+    const shadow = shadowDrawn();
+    check("a flying knife draws its shadow on the floor traced from three "
+          + "above it, lifted 0.1, in layer 0xD", shadow !== null
+          && shadow.layer === GROUND_SHADOW_LAYER
+          && near(at(shadow.m, vec3(0, 0, 0)), vec3(w.pos.x, h, w.pos.z)),
+          JSON.stringify(shadow && at(shadow.m, vec3(0, 0, 0))));
+    const o = at(shadow?.m ?? null, vec3(0, 0, 0));
+    const len = (p: Vec3): number => {
+      const q = at(shadow?.m ?? null, p);
+      return Math.hypot(q.x - o.x, q.y - o.y, q.z - o.z);
+    };
+    check("...five across, one high and five deep",
+          Math.abs(len(vec3(1, 0, 0)) - THROWN_WEAPON_SHADOW_SIZE) < 1e-5
+          && Math.abs(len(vec3(0, 1, 0)) - 1) < 1e-5
+          && Math.abs(len(vec3(0, 0, 1)) - THROWN_WEAPON_SHADOW_SIZE) < 1e-5,
+          `${len(vec3(1, 0, 0))} ${len(vec3(0, 1, 0))} ${len(vec3(0, 0, 1))}`);
+    // The blink's off half: `obj+0x1F8` bit 0 down draws neither.
+    w.drawFlags &= ~1;
+    G.g_world_slot_draws = [];
+    ThrownWeaponPoolUpdate(frame());
+    check("...and none on a frame the knife is not drawn",
+          shadowDrawn() === null && w.draw === null);
+    T.coli = prevColi;
+    G.g_coli_full_set = prevSet;
+  }
+  // -- the routine's three heights and its two refusals -------------------
+  {
+    ResetGameGlobals();
+    G.g_camera_fixed_eye_y = -7;
+    const obj = { flags: 0, pos: vec3(1, 2, 3) };
+    const drawn = (drawWord: number, o = obj): readonly number[] | null => {
+      G.g_world_slot_draws = [];
+      ActorDrawGroundShadow(o, drawWord, 11, 10, null);
+      return shadowDrawn()?.m ?? null;
+    };
+    const m1 = drawn(1);
+    check("ActorDrawGroundShadow without bit 2 sits at the object's own y",
+          m1 !== null
+          && near(at(m1, vec3(0, 0, 0)), vec3(1, Math.fround(2.1), 3)),
+          JSON.stringify(at(m1, vec3(0, 0, 0))));
+    G.g_app_state = 0x0d as AppState;
+    const m2 = drawn(5);
+    check("...on g_camera_fixed_eye_y in app state 0xD, whatever the bits say",
+          m2 !== null
+          && near(at(m2, vec3(0, 0, 0)), vec3(1, Math.fround(-7 + 0.1), 3)),
+          JSON.stringify(at(m2, vec3(0, 0, 0))));
+    G.g_app_state = AppState.InPlay;
+    check("...and none for obj+0x34 bit 0x80000 or obj+0x1F8 bit 0 clear",
+          drawn(5, { flags: ActorFlag.NoShadow, pos: obj.pos }) === null
+          && drawn(4) === null);
+  }
+
+  // -- the camera: a knife in flight is a candidate, and holds a permit slot
+  {
+    ResetGameGlobals();
+    EnterPlay();
+    HoldCameraAt(vec3(0, 15, 0));
+    CameraUpdateTick();
+    const w = knife();
+    ThrownWeaponPoolUpdate(frame());
+    const mine = G.g_camera_candidates.filter((c) => c.thrown === w.id);
+    // `ftol(|obj+0x40 - g_camera_eye| * 10)`.
+    const key = Math.trunc(Math.hypot(w.pos.x - G.g_camera_eye.x,
+                                      w.pos.y - G.g_camera_eye.y,
+                                      w.pos.z - G.g_camera_eye.z) * 10);
+    check("a knife in state 0 offers itself to the camera, keyed on its "
+          + "distance to g_camera_eye", mine.length === 1
+          && mine[0]!.key === key, JSON.stringify(mine));
+    check("...from obj+0x100, which it set to its position",
+          near(w.lookAt, w.pos), JSON.stringify(w.lookAt));
+    UpdateCameraEnemySlots();
+    const slot = G.g_enemy_slots.findIndex((s) => s.thrown === w.id);
+    const seen = CameraSlotObject(slot);
+    check("...and, holding its thrower's permit, the fill deals it slot 0",
+          slot === 0 && seen !== undefined && seen.attackPermit === 0
+          && near(seen.lookAt, w.pos), `slot ${slot}`);
+    // Shot down: state 1 runs and offers nothing.
+    w.state = ThrownWeaponState.Deflected;
+    w.sub = DeflectSub.Struck;
+    ThrownWeaponPoolUpdate(frame());
+    check("a knife that has been shot down is no candidate",
+          !G.g_camera_candidates.some((c) => c.thrown === w.id));
+  }
+
+  // -- through the thrower: the launch claims a hit slot and registers -----
+  {
+    const HANDS = [
+      { bone: 5, motion: 8, release_frame: 6, range: 20, overlay_kind: 6,
+        cancel_mask: 2, held: 8098, bare: 8095, projectile: 0x1f91 },
+      { bone: 8, motion: 9, release_frame: 6, range: 20, overlay_kind: 6,
+        cancel_mask: 4, held: 8094, bare: 8091, projectile: 0x1f90 },
+    ];
+    const TYPE_ZSASS = {
+      ...TYPE31, type: 0x16,
+      motions: { ...TYPE31.motions, "8": motion(24), "9": motion(24),
+                 "5": motion(20) },
+      throw: { hands: { "0": HANDS }, spin: 0x600, speed: 1.2, aim_ahead: 4,
+               aim_side: 0.6, stick_frames: 30, blink_frames: 60 },
+    } as unknown as CharacterType;
+    ResetGameGlobals();
+    SetGameTables({ ...CHARS31, types: { "1": TYPE, "22": TYPE_ZSASS } } as
+                  unknown as CharactersJson);
+    G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    G.g_scene_state_major = SCENE_MAJOR_PLAYING;
+    EnterPlay();
+    G.g_camera_yaw_bams = 0;
+    const z = ActorSpawn(0x9300, SpawnClass.Thrower, 0x16, "zsass", {
+      initialState: ThrowerState.StandAndDecide, condition: 0,
+    });
+    z.visible = true;
+    z.hp = 100;
+    z.pos = vec3(0, 0, 60);
+    z.state = ThrowerState.Throw;
+    z.sub = 0;
+    const rng = new Rng(29);
+    let w = G.g_thrown_weapons[0];
+    for (let i = 0; i < 300 && !w; i++) {
+      GameUpdate(1 / 60, CAM_HOST, rng);
+      w = G.g_thrown_weapons[0];
+    }
+    check("zsass lets a knife go", w !== undefined);
+    if (w) {
+      // `ActorClaimHitSlot` at `0x004504FE`: the first free entry after the
+      // thrower's own.
+      check("...which claims the next g_hit_slots entry after its thrower's",
+            w.hitSlot === z.hitSlot + 1 && (w.flags38 & 0x40) !== 0
+            && G.g_hit_slots[w.hitSlot] === ThrownWeaponHitSlotOwner(w.id),
+            `weapon ${w.hitSlot} thrower ${z.hitSlot} `
+            + `table ${G.g_hit_slots.join(",")}`);
+      // The launch registers once (`0x00450771`) and the weapon's own first
+      // frame, the same walk, once more (`0x00450917`).
+      const id = w.id;
+      check("...and is offered to the camera twice on the frame it is made",
+            G.g_camera_candidates.filter((c) => c.thrown === id).length === 2,
+            JSON.stringify(G.g_camera_candidates));
+      const slot = w.hitSlot;
+      for (let i = 0; i < 400 && G.g_thrown_weapons.includes(w); i++) {
+        GameUpdate(1 / 60, CAM_HOST, rng);
+      }
+      check("...and gives the entry back when it despawns",
+            !G.g_thrown_weapons.includes(w)
+            && G.g_hit_slots[slot] === HIT_SLOT_NONE
+            && w.hitSlot === HIT_SLOT_NONE,
+            `in pool ${G.g_thrown_weapons.includes(w)} `
+            + `entry ${G.g_hit_slots[slot]}`);
+    }
+  }
+}
+
+console.log("class 0x30's weapon: the same three calls:");
+{
+  // `ZombieThrowHandWeapon` (`FUN_0045A240`) opens with `ActorClaimHitSlot`
+  // (`0x0045A25F`) and closes with `obj+0x104 = y + 1.5` -- for every weapon
+  // -- and `RegisterForCameraTracking` (`0x0045A4DD`); `ZombieThrownWeaponUpdate`
+  // (`FUN_0045A4F0`) draws the 5-by-5 shadow (`0x0045A622`) and, in states 1
+  // and 2, files `obj+0x100` -- lifted 1.5 for the axe alone -- with the
+  // camera (`0x0045A676`).
+  const flip = MatIdentity();
+  MatrixRotateY(flip, 0x8000);
+  const frame = (): ThrownWeaponFrame => ({
+    cam: { w2v: flip, v2w: flip }, host: NULL_HOST, rng: new Rng(5),
+  });
+  const ZNASSB = {
+    ...TYPE,
+    zombie_throw: {
+      ...TYPE.zombie_throw, straight: false,
+      hands: [
+        { bone: 5, held: 0x1ba9, bare: 0x1bac, weapon_bone: 6,
+          projectile: 0x1b8d },
+        { bone: 8, held: 0x1ba5, bare: 0x1ba8, weapon_bone: 9,
+          projectile: 0x1b8c },
+      ],
+    },
+  } as unknown as CharacterType;
+  const throwOne = (type: CharacterType) => {
+    ResetGameGlobals();
+    SetGameTables({ ...CHARS, types: { "1": type } } as unknown as
+                  CharactersJson);
+    G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    G.g_scene_state_major = SCENE_MAJOR_PLAYING;
+    EnterPlay();
+    G.g_camera_fixed_eye_y = -3;
+    const z = spawnZombie(0x7900, 1, "thrower", {
+      initialState: ZombieState.StandAndThrow, condition: 8,
+      standThrow: { delay_two_hands: 0, delay_one_hand: 0,
+                    delay_after_throw: 2, exit_state: 0, walk_distance: 5 },
+    });
+    z.visible = true;
+    z.hp = z.maxHp = 100;
+    z.pos = vec3(2, 0, 40);
+    z.attackPermit = 0;
+    G.g_attack_permits[0] = z.at;
+    ZombieThrowHandWeapon(z, 5, NULL_HOST);
+    return { z, w: G.g_thrown_weapons[0]! };
+  };
+  const filed = (id: number) =>
+    G.g_camera_candidates.filter((c) => c.thrown === id);
+  const lift = (y: number): number => Math.fround(y + 1.5);
+
+  // -- the axe --------------------------------------------------------------
+  {
+    const { z, w } = throwOne(TYPE);
+    check("the axe claims the g_hit_slots entry after its thrower's",
+          w.slot === ZOMBIE_AXE_SLOT && z.hitSlot !== HIT_SLOT_NONE
+          && w.hitSlot === z.hitSlot + 1 && (w.flags38 & 0x40) !== 0
+          && G.g_hit_slots[w.hitSlot] === ThrownWeaponHitSlotOwner(w.id),
+          `weapon ${w.hitSlot} thrower ${z.hitSlot} `
+          + `table ${G.g_hit_slots.join(",")}`);
+    const key = Math.trunc(Math.hypot(w.pos.x - G.g_camera_eye.x,
+                                      w.pos.y - G.g_camera_eye.y,
+                                      w.pos.z - G.g_camera_eye.z) * 10);
+    check("...and is filed with the camera at the launch, its point 1.5 up "
+          + "and its key from the unlifted position",
+          filed(w.id).length === 1 && filed(w.id)[0]!.key === key
+          && w.lookAt.y === lift(w.pos.y) && w.lookAt.x === w.pos.x
+          && w.lookAt.z === w.pos.z,
+          `${JSON.stringify(filed(w.id))} lookAt ${JSON.stringify(w.lookAt)}`);
+    ThrownWeaponPoolUpdate(frame());
+    check("in flight (state 1) it files again, the axe's point still 1.5 up",
+          w.state === ZombieThrownWeaponState.Straight
+          && filed(w.id).length === 2 && w.lookAt.y === lift(w.pos.y),
+          `state ${w.state} filed ${filed(w.id).length} `
+          + `lookAt.y ${w.lookAt.y} y ${w.pos.y}`);
+    const o = vec3();
+    const disc = G.g_world_slot_draws.filter(
+      (d) => d.slot === GROUND_SHADOW_SLOT).pop();
+    MatrixTransformPoint(disc?.m ?? MatIdentity(), vec3(0, 0, 0), o);
+    const want = vec3(w.pos.x, Math.fround(-3 + 0.1), w.pos.z);
+    check("...and draws its shadow 0.1 over the floor under it",
+          disc !== undefined && Math.abs(o.x - want.x) < 1e-4
+          && Math.abs(o.y - want.y) < 1e-4 && Math.abs(o.z - want.z) < 1e-4,
+          JSON.stringify(o));
+    const slot = w.hitSlot;
+    for (let i = 0; i < 400 && G.g_thrown_weapons.includes(w); i++) {
+      ThrownWeaponPoolUpdate(frame());
+    }
+    check("...and gives the entry back when it despawns",
+          !G.g_thrown_weapons.includes(w)
+          && G.g_hit_slots[slot] === HIT_SLOT_NONE,
+          `in pool ${G.g_thrown_weapons.includes(w)} `
+          + `entry ${G.g_hit_slots[slot]}`);
+  }
+
+  // -- znassb's blade -------------------------------------------------------
+  {
+    const { w } = throwOne(ZNASSB);
+    check("a blade's launch point is lifted 1.5 as well",
+          w.slot === 0x1b8d && filed(w.id).length === 1
+          && w.lookAt.y === lift(w.pos.y), `lookAt.y ${w.lookAt.y}`);
+    ThrownWeaponPoolUpdate(frame());
+    check("...but in flight (state 2) a blade's point is not lifted",
+          w.state === ZombieThrownWeaponState.Arc
+          && filed(w.id).length === 2 && w.lookAt.y === w.pos.y,
+          `state ${w.state} lookAt.y ${w.lookAt.y} y ${w.pos.y}`);
+    w.state = ZombieThrownWeaponState.ShotDown;
+    w.sub = 0;
+    G.g_camera_candidates = [];
+    G.g_camera_candidate_count = 0;
+    ThrownWeaponPoolUpdate(frame());
+    check("shot down (state 3) it is not filed", filed(w.id).length === 0);
+  }
+}
+
+console.log("\na knife stuck to the screen: its point follows the camera, its angles do not");
+{
+  // BUGS.md asked whether a lodged knife should turn with the camera. In the
+  // exe it does not. `ThrownWeaponFlyToTarget` (`FUN_0044FD40`)'s stick and
+  // blink arms (`0x0044FF7D`, `0x0044FFC5`) re-aim the **point** every frame
+  // -- `AimThrownWeapon` (`FUN_004503D0`) into `obj+0x13C0..C8`, copied to
+  // `obj+0x40..0x48` -- and write none of `obj+0x64`/`+0x68`/`+0x6C`, which
+  // the landing set once; `ThrownWeaponUpdate` (`FUN_00450780`) draws them as
+  // world angles under the current camera. So when the camera yaws, the knife
+  // stays on the same spot of the screen and turns against it. `[proved]`
+  // This pins that, so it is not "fixed" into something the game never did.
+  const look = (yaw: number) => {
+    const w2v = MatIdentity();
+    MatrixRotateY(w2v, yaw);
+    const v2w = MatIdentity();
+    MatrixRotateY(v2w, (-yaw) & 0xffff);
+    return { w2v, v2w };
+  };
+  ResetGameGlobals();
+  G.g_max_attackers = 1;
+  const w = ThrownWeaponAlloc(ThrownWeaponRoutine.Thrower);
+  w.slot = 0x1fe1;
+  w.hand = 8;
+  w.flags = THROWN_WEAPON_SPAWN_FLAGS;
+  w.drawFlags = THROWN_WEAPON_DRAW_FLAGS;
+  w.spinRate = THROWN_WEAPON_SPIN;
+  w.attackPermit = 0;
+  w.pos = vec3(0, 5, 54);
+  w.target = vec3(0, 0, -4);
+  G.g_thrown_weapons.push(w);
+  let cam = look(0);
+  const frame = (): ThrownWeaponFrame => ({ cam, host: NULL_HOST,
+                                            rng: new Rng(9) });
+  for (let n = 0; n < 200 && w.sub !== FlySub.Stick; n++) {
+    ThrownWeaponPoolUpdate(frame());
+  }
+  const landed = { rx: w.rx, ry: w.ry, rz: w.rz };
+  // The camera turns a quarter, and the weapon runs on stuck.
+  cam = look(0x4000);
+  ThrownWeaponPoolUpdate(frame());
+  const want = vec3();
+  MatrixTransformPoint(cam.v2w, vec3(0, 0, -4), want);
+  check("stuck, the knife's point is four units down the camera that turned",
+        w.sub === FlySub.Stick && Math.abs(w.pos.x - want.x) < 1e-4
+        && Math.abs(w.pos.z - want.z) < 1e-4,
+        `sub ${w.sub} pos ${w.pos.x.toFixed(2)},${w.pos.z.toFixed(2)} `
+        + `want ${want.x.toFixed(2)},${want.z.toFixed(2)}`);
+  check("...and its three angles are the landing's, unturned",
+        w.rx === landed.rx && w.ry === landed.ry && w.rz === landed.rz,
+        `${w.rx},${w.ry},${w.rz} vs ${landed.rx},${landed.ry},${landed.rz}`);
 }

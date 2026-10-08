@@ -69,6 +69,9 @@ import { ActorDespawn } from "../despawn";
 import { ActorByAt, G, HIT_SLOT_NONE } from "../globals";
 import { CameraBlockYaw } from "../camera/view";
 import { ActorSetMotionBlended } from "./motion_cue";
+import {
+  DRAG_KILL_MOTION, DRAG_LATE_MOTION, DRAG_MOTION, DRAG_SETTLE_MOTION,
+} from "./drag_clips";
 import { MotionPlayFrame, MotionPlayLength, SecondsToTicks } from "../tables";
 import { ZombieState } from "./states";
 import { SpawnClass } from "../spawn_class";
@@ -97,20 +100,16 @@ const POINT_ARRIVE = 5;
 /** `ZombieStateTargetLostPause`: `rand() % 11 + 10` frames of standing. */
 const LOST_PAUSE_MIN = 10;
 const LOST_PAUSE_SPREAD = 11;
-/** `ZombieStateDragTarget`'s three clips — the drag, the kill, the aftermath. */
-const DRAG_MOTION = 0x1a4;
-const DRAG_KILL_MOTION = 0x1a8;
-const DRAG_LATE_MOTION = 0x1aa;
 /**
- * `ZombieStateDragTarget` sub 2's cue and clip: at cursor `0x2D` it blends to
- * `0x1B0` over ten frames (`0x0045C242`, `0x0045C24C`, `0x0045C262`).
+ * `ZombieStateDragTarget` sub 2's cue: at cursor `0x2D` it blends to
+ * `DRAG_SETTLE_MOTION` over ten frames (`0x0045C242`, `0x0045C24C`,
+ * `0x0045C262`). Its clips are in `./drag_clips`, which the exporter bakes.
  *
  * The cue is read off **whichever kill clip sub 1 started**, not off `0x1B0`:
  * the compare at `0x0045C23F` is against the track's live cursor and the clip
  * is only written after it fires.
  */
 const DRAG_SETTLE_CUE = 0x2d;
-const DRAG_SETTLE_MOTION = 0x1b0;
 /** Sub 3 turns `obj+0x68` toward this and never leaves — `0x0045C281`. */
 const DRAG_SETTLE_YAW = 0x2000;
 /**

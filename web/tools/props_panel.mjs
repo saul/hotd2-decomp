@@ -18,10 +18,12 @@
  * **It does not.** Three separate facts came out of it, and each is one of the
  * assertions below, because all three read as "the props are gone":
  *
- *  1. `props 0 / 0` is `render/props.ts` — the scripted scenery, the hinged
- *     doors and their statics. Stage 3's bundle has **zero** of each, so that
- *     row is correct and has nothing to do with class 0x41. Two rows, two
- *     subjects, one word.
+ *  1. `props 0 / 0` was `render/props.ts` — class 0x33 selector 2's
+ *     scripted statics, which stage 3 has none of — and had nothing to do
+ *     with class 0x41: two rows, two subjects, one word. That layer is gone
+ *     (selector 2 is a game object, `game/class33/draw_until_flag.ts`, drawn
+ *     as a slot model), so the panel must have no `props` row left to be
+ *     misread.
  *  2. At `block=0&step=3` the seek lands at **op 0**, and the step places its
  *     props with `spawn_placed` at ops 10 and 11 — behind
  *     `wait_enemies_alive <= 0` at op 8. There is a room to clear first, so
@@ -110,8 +112,9 @@ console.log("\nA deep link before the placer — the room is not cleared:\n");
     check("the drive harness is installed and the seek arrived at op 0",
           n?.a === "0/3/0", `walker at ${n?.a ?? "?"}`);
     const r = await rows(page);
-    check("`props` is the scene-prop layer, and stage 3 has none of those",
-          row(r, "props") === "0 / 0", row(r, "props"));
+    check("there is no `props` row to be read as class 0x41's: the "
+          + "selector-2 layer it named is gone",
+          row(r, "props") === "(no row)", row(r, "props"));
     check("`breakables` says none placed, because op 10 has not run",
           row(r, "breakables") === "none placed", row(r, "breakables"));
     // Nothing must move without a frame being asked for, or the two reads

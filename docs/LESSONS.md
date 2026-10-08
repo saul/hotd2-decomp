@@ -343,6 +343,19 @@ the sound kind "written by no instruction". **Before recording who writes a
 field, take every reference to it, DATA included, and read each
 instruction.**
 
+**LXX -- An update routine runs for every `ActorAlloc` handed its address,
+not for the table that names it.** `PropDrawOnlyType31` (`FUN_0046A1C0`)'s
+scene-2 block-11 strip was written up `[proved]` unreachable: every class-0x41
+type-31 spawn in stage 3 is placed in block 4, which never routes to 11. True
+of `g_class41_updates[31]`, and beside the point -- class 0x44 selector 10's
+`PropBuildSlotStripLoop` (`FUN_00473370`) does `PUSH 0x46A1C0` into
+`ActorAlloc` too, and all five of its stage-3 spawns are placed in block 11.
+The same shape hid which routine selector 5's hinge runs: its update allocates
+the object inline, and the shot-test table called it `[open]` until the
+`PUSH 0x473CF0` was read. **Before saying who reaches an arm, search the
+image for the routine's address as an immediate** (`68 <addr>`), and follow
+every allocation that pushes it.
+
 
 ## Transcribing behaviour into the port
 
@@ -921,7 +934,116 @@ find which task writes it and whether that task runs before or after the
 object's first call**, and a test of what an `Init` does is a test of the
 frame, not of the spawn.
 
-**LXX -- A fixture's type number is a real character type to every routine
+**L105 -- An action the port only retires is behaviour it does not have.**
+"The player isn't rendered in the car at the start of stage 1, maybe render
+order" sent the reading to the stage-1 vehicle's rig, whose two seat-height
+parts were noted "[likely] an occupant" -- from their shape and where they
+sit. They are the car's doors: 52 vertices each, swung about Y only once the
+car is parked, the passenger's only with two players. The occupant is the
+player's own body, which no rig draws: stage 1's `queue_event` with selector
+0x12 (`EvtActionSetUpdateRoutine12`) installs a `+0x80` player hook that seats
+it on the car's route every frame and raises the flag `PlayerHookDrawBody`
+draws by. The port dispatched selectors 0x10 and 0x12 to one handler that
+retired the action, under a comment saying the body "is not drawn" -- true of
+the port, and so the reason the bug existed rather than a fact about the game.
+**When the script queues an action, a selector or an opcode the port handles
+by retiring it, read the exe's handler before believing it does nothing**;
+and a part named for what it looks like is a guess about what draws the rest.
+
+**L106 -- A program turned into a list keeps its edges and can lose its
+start.** The exporter turns each class-0x25 program into an address-sorted
+command list with its jumps as indices, so that "the next command" stays
+`pc + 1`. The port then started every program at index 0, and for 13 of the
+137 that is not where it starts: a player-2 figure whose `op 15` jumps back
+into player 1's commands, stored before its own block, lists those first. So
+the figure ran player 1's tail, never reached the `op 10` that should have
+removed it, and both player characters stood in the same spot. The `op 10`
+fix before it (B21) was right and was tested at index 0 only. **When code
+becomes data with its addresses replaced, carry the entry point as data too**,
+and test a program whose entry is not its first element.
+
+**L107 -- A join key that reaches the bundle by two routes is lost when one
+route moves.** The Arcade bullet, sprite `0xA74`, came into every bundle as
+row 0 of the Original Mode ammo table, which `HUD_READOUT_SPRITES` spread in.
+When that table moved to `.rdata` read only for Original stages, the row went
+with it, and every Arcade stage shipped no bullet for a week: the readout drew
+an id with no image, which the HUD skips without a word, and Original Mode --
+where the row still arrived -- looked fine. **When a list of what to export
+is split, check every id each reader can draw is still in every bundle that
+reader runs in** (`tools/checks/original_mode.ts` now does, per stage), not
+just the bundle the change was about.
+
+**L108 -- When the exe's arithmetic is on framebuffer bytes, do it on bytes;
+converting its inputs into three.js's light model fixes only the inputs
+someone thought to convert.** The fog and the scene light were each "fixed"
+by putting the engine's numbers through sRGB->linear so three.js's linear
+pipeline would land near the device's byte sum. The fog came out right. The
+light kept three other faults the conversion could not see: three.js's
+`BRDF_Lambert` divides by pi, so the light and ambient were drawn at a third of
+their strength (`render/gunlights.ts` had already found that and fed its own
+lights in times pi); `GLTFLoader` adopts glTF's `baseColorFactor` as linear,
+so the baked shading of a fifth of the meshes was washed out; and D3D7 sums
+the light per vertex and clamps it, with a material ambient and a highlight
+three.js's Lambert does not have. **Write the device's equation in the shader,
+on the bytes -- encode the texel, compute, decode -- and hand it the engine's
+numbers unconverted.** Each of `D3DMATERIAL7`'s terms is then one uniform with
+one exe address behind it, and there is no model left to disagree with.
+
+**L110 -- A material that lives in a hook is lost by every clone, and the
+clone fails silently.** `Material.clone` copies a material's properties and
+neither its `onBeforeCompile` nor its `customProgramCacheKey`, and the
+scene light's twins (`render/lighting.ts`) keep the whole device equation in
+those two. Five layers clone a mesh's material to change it -- the canal
+water's bilinear filter, class 0x41 type 3's alpha, the warehouse water, the
+rain, the dome -- and the water layer's first clone happened after the swap
+had put the twin on: a stock Lambert, in a scene with no three.js lights,
+drew stage 3's canal black from the change that moved the light into the
+hook until a player reported it. **When state moves into a hook, find every
+`clone()` of the materials that carry it** (`rg '\.clone\(\)' src/render`);
+here each one now clones `unlitMaterial(worn)`, and the swap twins the copy.
+`render/draw_order.ts`'s `fadedCopy` is the other answer, copying the two
+across, and was already right. **Chaining is the same trap from the other
+side**: `render/gunlights.ts` built its own twin over the scene twin and called
+the scene twin's hook first, which had already stripped the chunk the gun
+light's patch rewrites -- the torch and its shadows drew nothing until a player
+reported it. A layer that builds its own twin builds it from
+`unlitMaterial(worn)` too.
+
+**L109 -- A transpose standing in for an inverse is a claim that nothing
+scales, and it holds only for the callers it was written for.** `coli.ts`
+took a world point into an object's space as `R^T (p - t)`, under a comment
+saying the matrix is rigid -- true of every shipped object it had, class
+0x12's door, class 0x15's planks and stage 3's boat (class 0x12 can scale,
+and none of its doors with a blob does). The engine inverts `obj+0x150` with
+`MatrixInvert` (`FUN_004A8D20`), the general cofactor inverse, and the first
+prop shot through its mesh, the story-mode switch, draws with
+`MatrixScale(obj+0x1A8..)` before its `MatrixStore`: stage 2's keyed doors at
+(0.8878, 0.8197, 1) and (0.77, 0.7154, 1). Through the transpose a shot
+squarely on one of those doors came back 1.25 units off the face, and the
+test that pinned it was a hit point checked against the door's own scaled
+matrix, at a scale that is not one (`L48`'s rule with the scale in place of
+the turn). **When a port routine replaces the engine's general primitive with
+a cheaper special case, the special case is a divergence whose inputs must be
+named** -- here, every `MatrixScale` before a `MatrixStore(obj+0x150)` -- and
+a new caller is the moment to check them, not the moment to inherit them.
+
+**L112 -- Three angles are a pose only together with their order, and a
+routine that copies a triple between two orders converts it or is wrong.**
+Class 0x25 copies an object path's `rx, ry, rz` onto the actor, and the draw
+turns the body `RotX; RotZ; RotY` while the path means `RotZ; RotY; RotX`.
+`op_st3` 340 is `(~0x3C00, -0x4000, -0x4000)`: an upright boat in its own
+order, a body on its side in the draw's. The port's note read the `rot_x` as
+the deck's pitch ("the riders pitch with the deck they stand on"), and stage
+3's passengers lay through the hull until the path's angles fell near zero at
+frame 1020, where every order agrees, and appeared to roll in. The tail had
+the conversion all along -- `MatrixRotateZ; RotateY; RotateX` then
+`MatrixToEulerBams` at `0x00484C32` -- behind the offset record's yaw test,
+and the port had transcribed the add after it without the call before it.
+**A large angle in a triple is not a tilt until you know the order it is
+in**, and a test of a copied triple has to be at angles where the orders
+disagree (two non-zero), which `L48` says of identity inputs.
+
+**L113 -- A fixture's type number is a real character type to every routine
 that switches on one.** The port tests' generic zombie is character type 1,
 and its hand bone drew slot 5, a number made up for the sever cascade. Type 1
 is `znassb`, and `ActorUpdateBodyCondition` (`FUN_00454270`), once ported,
@@ -1296,6 +1418,17 @@ byte "written nowhere in the image" that `CameraResetForPathShot` writes at
 when. The longer copy is not necessarily the newer one, and a name nobody
 exported may be one nobody merged.**
 
+**L111 -- A seek that misses must stop where it can prove the miss, and a
+second replay is not a seek.** `?stage=1&block=2&step=0` opened stage 2: the
+engine enters a routed block at step 1 and never runs step 0 in Arcade or
+Original play, so the replay looked for 2/0/0 to the end of the scene, returned
+`false` with the walker `finished`, and the first frame of play loaded the next
+stage. `L44`'s "silent and total" again, from a well-formed address. The first
+fix replayed a second time to the block's entry from inside `seekTo` -- on the
+`G` the first pass had left, flags and route history from the rest of the stage
+included, because `Walker.reset` clears none of it. **A seek's precondition is
+the caller's whole reset, so a re-seek goes back through the caller.**
+
 ## Believing what you are looking at
 
 **L17 — A negative result from one agent is not a fact.** Two agents reported
@@ -1589,3 +1722,20 @@ camera-facing strip, on a shot that never shows it so. A picture taken at a seek
 of the seek unless every object in it is stateless or was spawned after the
 address; **to see a state machine's later state, drive frames from its
 spawn**, and read the pool (`G.g_object_list`) before trusting the frame.
+
+**L111 -- A replay that stands in for a wait's frames has to run every task
+those frames run, not the ones it was written for.** The seek steps over each
+wait by running the camera's tasks (3 and 5) for the frames the wait spans,
+and that was the whole of it: task 2, `PushSceneLightStateToDevice`, which
+steps the light blocks' tweens, never ran. A set on a channel leaves its tween
+armed (`ApplyLightChannelOperand`), so every tween a replay met stayed live
+past every later set, and the first frames after the landing walked the light
+back to wherever the tween had been going. Stage 1's opening fades its fog to
+black at `1..1`, waits twenty frames and sets it back; every seek past it --
+`?stage=1&block=2&step=1&op=0` among them -- drew a field of fog with no world,
+and every stage had its own. It read as a missing region or a camera facing
+nothing; the sidebar's `fog planar 2..2` said it from the first look. **When a
+port runs some of a frame's tasks to stand in for frames it skips, list the
+scene's task list (`camera/actor.ts`) beside it and say why each one left out
+holds no state across the gap** -- `L97` is the same shape for an object's
+own frames.

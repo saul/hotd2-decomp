@@ -34,3 +34,25 @@ export function drawLifeMarkers(h: LifeMarkerHost, seen: Set<string>): void {
     setSlotAlpha(node, m.drawnAlpha);
   });
 }
+
+/**
+ * `CivilianHitMarkerUpdate` (`FUN_0048E190`), drawn: the marker a shot
+ * civilian leaves. The port re-places it in this frame's view every tick and
+ * leaves the point and the draw it used on the record
+ * (`game/class10/hit_marker.ts`), so the node hangs off the view group, as
+ * the life marker's does: `MatrixLoadIdentity; MatrixTranslate(v);
+ * MatrixScale(s)`.
+ */
+export function drawCivilianHitMarkers(h: LifeMarkerHost,
+                                       seen: Set<string>): void {
+  G.g_civilian_hit_markers.forEach((m, i) => {
+    const key = `chm${i}`;
+    const node = h.node(key, m.slot, h.view);
+    if (!node) return;
+    seen.add(key);
+    node.position.set(m.drawnAt.x, m.drawnAt.y, m.drawnAt.z);
+    node.quaternion.identity();
+    node.scale.setScalar(m.scale);
+    setSlotAlpha(node, m.drawnAlpha);
+  });
+}

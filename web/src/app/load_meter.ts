@@ -1,9 +1,11 @@
 /**
  * How far a stage load has got, for the loading screen.
  *
- * A load is four steps: the download (the stage glTF, its script and its
+ * A load is five steps: the download (the stage glTF, its script and its
  * cameras, fifty to ninety megabytes, all three at once), three.js's parse of
- * the glTF, building the stage's layers from it, and compiling the shaders.
+ * the glTF, building the stage's layers from it, the stage's sounds
+ * (`audio/precache.ts`, fetched beside the parse and the build, and waited for
+ * here), and compiling the shaders.
  * Only the download can count as it goes; the parse holds the main thread
  * throughout, and the last two are short. So the bar moves with the bytes,
  * waits through the parse, and finishes.
@@ -17,12 +19,15 @@
  */
 import type { LoadingProjection } from "../ui/projection";
 
-export type LoadStep = "download" | "unpack" | "build" | "shaders";
+export type LoadStep = "download" | "unpack" | "build" | "sounds" | "shaders";
 
 const STEPS: Record<LoadStep, { label: string; from: number; share: number }> = {
   download: { label: "Downloading", from: 0, share: 0.5 },
-  unpack: { label: "Unpacking the stage", from: 0.5, share: 0.4 },
-  build: { label: "Building the stage", from: 0.9, share: 0.07 },
+  unpack: { label: "Unpacking the stage", from: 0.5, share: 0.37 },
+  build: { label: "Building the stage", from: 0.87, share: 0.05 },
+  // The sounds start loading when the download ends and run beside the two
+  // steps above; this is whatever is left of them when the build is done.
+  sounds: { label: "Loading sounds", from: 0.92, share: 0.05 },
   shaders: { label: "Compiling shaders", from: 0.97, share: 0.03 },
 };
 
@@ -53,6 +58,12 @@ export class LoadMeter {
     const label = STEPS[this.step].label;
     this.report(total ? loaded / total : 0, total
       ? `${label} · ${mb(loaded)} of ${mb(total)} MB` : `${label} · ${mb(loaded)} MB`);
+  }
+
+  /** A step that counts things rather than bytes: `done` of `total`. */
+  count(done: number, total: number): void {
+    const label = STEPS[this.step].label;
+    this.report(total ? done / total : 0, `${label} · ${done} of ${total}`);
   }
 
   private report(fraction: number, detail: string): void {

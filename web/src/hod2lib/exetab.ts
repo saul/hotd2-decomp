@@ -83,10 +83,14 @@ export const BANK_PALETTE_INDEX: ReadonlyMap<number, number> =
  * And palette 0x1B for `0x1B5`, `scr_item_all`, jump-table entry 18 (byte
  * `0x0041CBFE`), `MOV EAX, 0x1B` at `0x0041CA8E`: the trunk's list of item
  * names, `g_original_item_list_sprites` (`0x5F9..0x61A`).
+ *
+ * And palette 0 for `0x17B`, `scr_jimaku_e`, the subtitles' font: its byte
+ * (`0x0041CBC4`) is 21, the default arm, `XOR EAX, EAX` at `0x0041CB32`.
+ * `DrawTextCentred` (`FUN_00436850`) draws every glyph from it.
  */
 export const BANK_PALETTE_CONST: ReadonlyMap<number, number> = new Map([
   [0x177, 10], [0x186, 10], [0x187, 10], [0x188, 10], [0x189, 10],
-  [0x18a, 10], [0x18b, 10], [0x156, 0x14], [0x1b5, 0x1b],
+  [0x18a, 10], [0x18b, 10], [0x156, 0x14], [0x1b5, 0x1b], [0x17b, 0],
   ...Array.from({ length: 0x1b5 - 0x193 },
                 (_, i): [number, number] => [0x193 + i, 0x14]),
 ]);
@@ -712,6 +716,13 @@ export class ExeTables {
             d.point = this.civPoint(args[0]);
           } else if (op === 6) {
             d.point = this.civPoint(args[0]);
+          }
+          // Op 0x24's second dword is `sub+0x90`, and the head look's two
+          // point modes read it as three floats: `MOV EDX,[EAX+0x90]; MOV
+          // EAX,[EDX]` at `0x0048D3DA` (4) and `0x0048D3F5` (5). The other
+          // modes read it as an object or not at all.
+          if (op === 0x24 && (args[0] === 4 || args[0] === 5)) {
+            d.point = this.civPoint(args[1]);
           }
           if (op === 5) d.radius = asFloatBits(args[1]);
           if (op === 0x16) d.radius = asFloatBits(args[0]);
@@ -1474,6 +1485,22 @@ export class ExeTables {
    * * `default_route` -- `0x0059351C`, s8[6][16]: the route
    *   `GameOverRouteMapArm` (`FUN_00460F00`) copies over an empty history.
    *
+   * And the bodies' tables in play, which travel in the same block because
+   * the same two bodies are what they place:
+   *
+   * * `entity_offsets` -- `0x00579E98`, f32[4], indexed
+   *   `p + g_max_attackers * 2 - 2`: the x a body sits at in the gameplay
+   *   eye's frame (`PlacePlayerEntityFromViewPose`, `FUN_004159A0`, which
+   *   indexes from `0x00579E90`, two code pointers earlier).
+   * * `seat_x` -- `g_st1_vehicle_seat_x`, `0x004EC8D8`, f32[6], indexed
+   *   `p + g_players_in_play * 2`: the seat's x in the stage-1 vehicle
+   *   (`PlayerHookRideSt1Vehicle`, `FUN_00415BD0`).
+   * * `stand_points` -- `g_player_stand_points`, `0x004EC8F0`, four
+   *   `{f32 x, y, z}`, indexed `p - 2 + g_players_in_play * 2`
+   *   (`PlayerHookStandAtScenePoint`, `FUN_00415E40`).
+   * * `stand_motions` -- `g_player_stand_motions`, `0x004EC91C`, s16[6],
+   *   indexed `p + g_players_in_play * 2` (the same routine).
+   *
    * All `[proved]` from the routines named.
    */
   gameOverTables(): Record<string, unknown> {
@@ -1489,6 +1516,8 @@ export class ExeTables {
       const v = this.data[r];
       return v >= 0x80 ? v - 0x100 : v;
     };
+    const f32s = (va: number, n: number) =>
+      Array.from({ length: n }, (_u, i) => this.rf32(va + i * 4) ?? 0);
     const offsets = Array.from({ length: 4 }, (_u, i) =>
       [this.rf32(0x00579ea8 + i * 12) ?? 0,
        this.rf32(0x00579ea8 + i * 12 + 8) ?? 0]);
@@ -1509,6 +1538,12 @@ export class ExeTables {
       route_tiles: Array.from({ length: 4 }, (_u, i) => s16(0x005679fc + i * 2)),
       route_waypoints: waypoints,
       default_route: route,
+      entity_offsets: f32s(0x00579e98, 4),
+      seat_x: f32s(0x004ec8d8, 6),
+      stand_points: Array.from({ length: 4 }, (_u, i) =>
+        f32s(0x004ec8f0 + i * 12, 3)),
+      stand_motions: Array.from({ length: 6 }, (_u, i) =>
+        s16(0x004ec91c + i * 2)),
     };
   }
 
@@ -1678,6 +1713,21 @@ export class ExeTables {
           return v >= 0x8000 ? v - 0x10000 : v;
         }),
     };
+  }
+
+  /**
+   * `g_subtitle_glyphs` -- `0x0055E054`, s16[128]: the screen sprite of each
+   * character code `DrawTextCentred` (`FUN_00436850`) draws, `MOVSX EAX,word
+   * [ECX*2 + 0x55e054]` with `ECX` the character's signed byte. A 0 draws
+   * nothing. Only `0..0x7F` is carried: the shipped lines are ASCII, and a
+   * byte past `0x7F` would index before the table. `~` never reads it -- the
+   * routine draws `0x62D` for it.
+   */
+  subtitleGlyphs(): number[] {
+    return Array.from({ length: 0x80 }, (_u, i) => {
+      const v = this.ru16(0x0055e054 + i * 2) ?? 0;
+      return v >= 0x8000 ? v - 0x10000 : v;
+    });
   }
 
   /**

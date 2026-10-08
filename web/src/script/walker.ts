@@ -33,6 +33,7 @@ import { CameraReplayFor, CameraReplaySettle, CameraReplayUntil }
   from "../game/camera/actor";
 import { SpawnClass } from "../game/spawn_class";
 import { ITEM_SELECT_RESUME_STEP } from "../game/class6e/state";
+import { ItemSelectPassedBySeek } from "../game/class6e";
 
 /** `wait_enemies_present` -- `EvtOpWaitEnemiesPresent43`. */
 const WAIT_ENEMIES_PRESENT_OP = 0x43;
@@ -77,6 +78,12 @@ export interface ActiveSpawn extends SpawnJson {
   step: number;
   opIndex: number;
   opcode: number;
+  /**
+   * `[port-only]` A class's replay scratch for this record -- see
+   * `ClassHandler.followReplayCamera`. Absent until a replay shows the record
+   * a camera.
+   */
+  replay?: Record<string, number>;
 }
 
 /**
@@ -312,15 +319,12 @@ export interface WalkerHost {
    */
   gameplayLive?(): boolean | null;
   /**
-   * evt `0x2D`: start a dialogue group's voice, and say how long it runs.
-   *
-   * The **countdown** is the walker's, because it is script state that has to
-   * survive a snapshot; what the host supplies is the duration, which is
-   * bundle data, and the feed note, which needs the words.
+   * evt `0x2D`: `EvtOpPlayDialogue2D` (`FUN_00435B80`), made with the host's
+   * events bus for the voice. The subtitle task it allocates is `G`'s
+   * (`game/dialogue.ts`); what comes back is the feed note, or null when
+   * nothing was said.
    */
-  showMessage(group: number): { frames: number; note?: string } | null;
-  /** Cut a dialogue short, as raising the skip flag does. */
-  endDialogue(): void;
+  showMessage(group: number): { note?: string } | null;
 }
 
 /**
@@ -410,7 +414,7 @@ export interface OpImpl {
 export const WALKER_RESTORED_KEYS = [
   "block", "step", "opIndex", "region", "groundY", "backdropPreset",
   "backdropMode", "shutterState", "shutterPrev", "shutterCounter",
-  "captionGroup", "captionFrames", "firingGate",
+  "firingGate",
   "skippable", "skipRequested", "rain", "gunLights", "sceneLighting",
   "sceneAmbient",
   "branchChoice", "parked", "fogSet", "checkpointBlock", "branchPreview",
@@ -511,61 +515,40 @@ export class Walker {
   get firingGate(): boolean { return this.shutter.firingGate; }
   set firingGate(v: boolean) { this.shutter.firingGate = v; }
   /**
-   * evt 0x2D: the subtitle task's own fields.
-   *
-   * `DrawDialogueSubtitleTask` (`FUN_00435AA0`) holds the variant at `+0x34`,
-   * the frames remaining at `+0x36` and the line index at `+0x38`. The first
-   * two are here; the line index is **derived**, because it is a function of
-   * the countdown — the task steps it when `frames` drops below the current
-   * line's `end_frame`, and those are fixed data, so counting the lines whose
-   * `end_frame` still exceeds the countdown gives the same answer without
-   * putting the dialogue table in the save state.
+   * `g_nEvtSkippableRegion` (`DAT_009A2D7C`) -- set by `set_skippable_region`
+   * (0x2C). Non-zero means the script has opened a region the player is
+   * allowed to skip out of. An accessor over `G`, like {@link branchChoice}:
+   * the engine has one global, and the skip watcher (class 0x63) reads it.
    */
-  captionGroup = -1;
-  captionFrames = 0;
+  get skippable(): boolean { return G.g_nEvtSkippableRegion !== 0; }
+  set skippable(v: boolean) { G.g_nEvtSkippableRegion = v ? 1 : 0; }
   /**
-   * `DAT_009A2D7C` -- set by `set_skippable_region` (0x2C). Non-zero means the
-   * script has opened a region the player is allowed to skip out of.
-   */
-  skippable = false;
-  /**
-   * `DAT_009A2D74` -- the skip flag every wait opcode tests.
+   * `g_nEvtSkipFlag` (`DAT_009A2D74`) -- the skip flag every wait opcode tests.
+   * An accessor over `G`.
    *
-   * The whole chain is live in the retail game:
+   * The whole chain is live in the retail game, and it is the game's here:
    *
-   * 1. `set_skippable_region(1)` opens the window (`DAT_009A2D7C`).
+   * 1. `set_skippable_region(1)` opens the window ({@link skippable}).
    * 2. Both player-update routines (`FUN_00414940`, `FUN_00414B90`) poll Start
-   *    while that is set and the firing gate `g_nFiringGate` is down:
-   *    `if (mask[player] & _DAT_009C9028) DAT_009A1A18 = 1;`
-   * 3. A standing task, `SkipWatchTask` at `0x00435F40`, sees the request and
-   *    raises this flag:
-   *
-   * ```c
-   * if (g_skippable_region == 0) { task_end(); return; }
-   * if (g_skip_requested) {
-   *     if (cam_end != cam_frame) cam_end = cam_frame;   // finish the move
-   *     g_skip_requested = 0;
-   *     g_skip_flag = 1;
-   *     DAT_009A2230 = 1;
-   *     AssetDrainAllJobs();                             // force the streaming
-   *     *task = SkipEndTask;                             // clears 2230, ends
-   * }
-   * ```
-   *
+   *    while that is set and the firing gate is down and raise
+   *    `g_nSkipRequested` -- {@link requestSkip}, the port's input seam.
+   * 3. The skip watcher, class 0x63, which `spawn_simple` places at the top of
+   *    most steps, sees the request in `CheckCutsceneSkipRequest`
+   *    (`FUN_00435F40`): it ends the camera move where it stands and raises
+   *    this flag and `g_cutscene_skipping` (`game/class63/`).
    * 4. With the flag up, `queue_event` drops its action, `0x0D`, `0x3A` and
-   *    `0x3B` suppress, `0x2D` says nothing and any subtitle already on screen
-   *    ends, and `0x40`, `0x41` and `0x42` pass straight through -- so the
-   *    interpreter races to the end of the region.
+   *    `0x3B` suppress, `0x2D` says nothing and a subtitle already on screen
+   *    ends (`game/dialogue.ts`), and `0x40`, `0x41` and `0x42` pass straight
+   *    through -- so the interpreter races to the end of the region.
    * 5. `set_skippable_region(0)` clears the flag again.
    *
-   * That task is reached only through a function pointer in the table at
-   * `0x005934E4`, so nothing calls it directly and a plain xref search on the
-   * flag finds only writers that store 0. An earlier revision of this comment
-   * concluded from exactly that search that the feature was "one assignment
-   * short of working". It is not: it ships working, and this is a
-   * transcription of it rather than a repair.
+   * The watcher is reached only through function pointers, so a plain xref
+   * search on the flag finds only writers that store 0. An earlier revision
+   * of this comment concluded from exactly that search that the feature was
+   * "one assignment short of working". It is not: it ships working.
    */
-  skipRequested = false;
+  get skipRequested(): boolean { return G.g_nEvtSkipFlag !== 0; }
+  set skipRequested(v: boolean) { G.g_nEvtSkipFlag = v ? 1 : 0; }
   /** evt 0x1D: rain. Only stage 1 ever turns it on. */
   rain = false;
   /**
@@ -895,10 +878,13 @@ export class Walker {
     this.backdropPreset = -1;
     this.backdropMode = 0;
     this.shutter.reset();
-    this.captionGroup = -1;
-    this.captionFrames = 0;
     this.skippable = false;
     this.skipRequested = false;
+    // The skip's other two words, which the scene's own reset does not touch
+    // (`ResetSceneOnEnter` stores to none of the four): a seek arrives outside
+    // any skip.
+    G.g_nSkipRequested = 0;
+    G.g_cutscene_skipping = 0;
     this.rain = false;
     this.gunLights = false;
     this.sceneLighting = false;
@@ -953,7 +939,6 @@ export class Walker {
       backdropPreset: this.backdropPreset, backdropMode: this.backdropMode,
       shutterState: this.shutterState, firingGate: this.firingGate,
       shutterPrev: this.shutterPrev, shutterCounter: this.shutterCounter,
-      captionGroup: this.captionGroup, captionFrames: this.captionFrames,
       skippable: this.skippable,
       skipRequested: this.skipRequested, rain: this.rain,
       gunLights: this.gunLights, sceneLighting: this.sceneLighting,
@@ -1069,8 +1054,10 @@ export class Walker {
       // the instruction runs (`script/ops/spawn.ts`), and a replay runs no
       // frame to build the object. The gate is past, so what it counted is
       // gone -- the placer with it, before it can build and count again.
-      const placed = s.at === undefined ? undefined : ActorByAt(s.at);
-      if (placed && !placed.dead) {
+      // By its descriptor: a re-spawn's placer has a pool address of its own.
+      const placed = s.at === undefined ? undefined
+        : G.g_object_list.find((o) => o.descAt === s.at && !o.dead);
+      if (placed) {
         placed.dead = true;
         placed.visible = false;
       }
@@ -1104,10 +1091,15 @@ export class Walker {
     // the `-1` behind it are never run. A replay runs no frames for the trunk
     // to finish in, so stepping over its gate leaves the script where the
     // trunk does -- without this every seek in stage 1's opening ran off the
-    // end of block 0.
+    // end of block 0. The trunk the replay spawned is closed too, with the
+    // items last chosen (`ItemSelectPassedBySeek`): left in the pool it
+    // opened over wherever the seek landed and, once its menu was done, sent
+    // the script back to step 1.
     const trunk = this.simpleSpawns.findIndex(
       (s) => s.class === SpawnClass.ItemSelect);
     if (trunk >= 0 && this.wait.op.op === WAIT_ENEMIES_PRESENT_OP) {
+      const obj = ActorByAt(this.simpleSpawns[trunk].at);
+      if (obj && !obj.dead) ItemSelectPassedBySeek(obj);
       this.simpleSpawns.splice(trunk, 1);
       this.wait = null;
       this.step = ITEM_SELECT_RESUME_STEP;
@@ -1168,10 +1160,30 @@ export class Walker {
    */
   private retireOutlivedSpawns(): void {
     if (!this.replaying) return;
+    this.followReplayCamera();
     this.spawns = this.spawns.filter((s) => {
       const outlived = g_class_handlers[s.class as SpawnClass]?.outlivedByReplay;
       return !outlived?.({ ...s, armOut: this.replayArms.get(s.block) });
     });
+  }
+
+  /**
+   * Show the camera the replay has carried to every listed spawn whose class
+   * follows it -- {@link ClassHandler.followReplayCamera}. Replay only; called
+   * at the head of {@link retireOutlivedSpawns}, so at every instruction, wait
+   * and block change the replay makes.
+   */
+  private followReplayCamera(): void {
+    const cam = this.cam;
+    if (!cam) return;
+    for (const s of this.spawns) {
+      const follow = g_class_handlers[s.class as SpawnClass]
+        ?.followReplayCamera;
+      if (!follow) continue;
+      follow({ ...s, armOut: this.replayArms.get(s.block) },
+             { slot: cam.slot, startFrame: cam.startFrame, frame: cam.frame },
+             s.replay ??= {});
+    }
   }
 
   /**
@@ -1426,13 +1438,8 @@ export class Walker {
 
     // No shutter step: `HudDrawShutterState` is a task of the scene's own and
     // runs in `SceneTaskWalk`, after the players -- see `game/hud_shutter.ts`.
-    // The caption is a countdown in script frames, not in wall time: stepping
-    // onto a `play_dialogue` and having the line expire two seconds later
-    // while nothing is playing makes it unreadable.
-    if (this.captionFrames > 0) {
-      this.captionFrames = Math.max(0, this.captionFrames - dt * fps);
-      if (this.captionFrames === 0) this.captionGroup = -1;
-    }
+    // No caption step either: the subtitle is a task of the scene's, in
+    // `game/dialogue.ts`.
 
     // A wait in this VM is only the instruction at `g_evt_ip`, run again
     // every frame until it passes. If gameplay has moved the cursor since
@@ -1447,6 +1454,16 @@ export class Walker {
       if (b !== this.block || st !== this.step || ip !== this.opIndex) {
         this.wait = null;
       }
+    }
+    // A skippable wait opcode re-runs its skip test every frame, ahead of its
+    // own condition -- `0x40` and `0x41` open with `if (skip == 0)`, `0x42`
+    // with `if (skip != 0)` -- so a wait already pending goes on the first
+    // frame the flag is up, which is the frame after the skip watcher
+    // (`game/class63/`) raised it.
+    if (this.wait && this.skipRequested
+        && WAIT_RULES.get(this.wait.op.op)?.skippable) {
+      this.wait = null;
+      this.opIndex++;
     }
     if (this.wait) {
       const w = this.wait.policy;
@@ -1493,38 +1510,15 @@ export class Walker {
   }
 
   /**
-   * Press Start, and let `SkipWatchTask` do what it does.
-   *
-   * Everything here is transcribed from `0x00435F40`; see {@link skipRequested}
-   * for the chain. Returns false when the game would not have offered a skip.
+   * Press Start: `g_nSkipRequested = 1`, where the player-update routines
+   * (`FUN_00414940`, `FUN_00414B90`) raise it, under the same condition
+   * ({@link canSkip}). The skip itself is the watcher's, on this frame's walk
+   * -- see {@link skipRequested}. Returns false when the game would not have
+   * offered one.
    */
   requestSkip(): boolean {
     if (!this.canSkip) return false;
-    this.skipRequested = true;
-
-    // `if (g_cam_path_end_frame != g_cam_path_cursor) g_cam_path_end_frame =
-    // g_cam_path_cursor` (`CheckCutsceneSkipRequest`, `0x00435F40`). Note
-    // what this is *not*: the camera does not fast-forward to the end of its
-    // path. The play is ended where it stands -- `CamAdvancePathFrame`
-    // publishes the cursor and retires on its next call -- which lets
-    // `wait_queued_events_done` fall through. The stashed rail's words are
-    // not touched: a rail under way plays out.
-    if (G.g_cam_path_end_frame !== G.g_cam_path_cursor) {
-      G.g_cam_path_end_frame = G.g_cam_path_cursor;
-    }
-
-    // DrawDialogueSubtitleTask tests the flag every frame and ends the task,
-    // so a line already on screen goes at once rather than playing out.
-    this.captionGroup = -1;
-    this.captionFrames = 0;
-    this.host.endDialogue();
-
-    // The waits are re-run every frame, so one already pending is released
-    // the same way a new one is passed straight through.
-    if (this.wait && WAIT_RULES.get(this.wait.op.op)?.skippable) {
-      this.wait = null;
-      this.opIndex++;
-    }
+    G.g_nSkipRequested = 1;
     return true;
   }
 

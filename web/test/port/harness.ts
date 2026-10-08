@@ -43,6 +43,8 @@ import {
 import { type HumanoidProgram } from "../../src/game/class25";
 import { CamPaths } from "../../src/game/camera/curve";
 import { SetCameraPaths } from "../../src/game/tables";
+import { GROUND_SHADOW_SLOT } from "../../src/game/ground_shadow";
+import type { WorldSlotDraw } from "../../src/game/view_slot";
 
 export let failures = 0;
 export function check(name: string, ok: boolean, detail = ""): void {
@@ -52,6 +54,17 @@ export function check(name: string, ok: boolean, detail = ""): void {
     failures++;
     console.log(`  FAIL  ${name}${detail ? ` -- ${detail}` : ""}`);
   }
+}
+
+/**
+ * The ground shadows this frame drew under `a` -- slot `0x10D0` records in
+ * `G.g_world_slot_draws` whose translation is the object's own x and z, as
+ * `ActorDrawGroundShadow` (`FUN_0040A620`) puts it with nothing pushed above
+ * the view.
+ */
+export function shadowsUnder(a: { pos: Vec3 }): WorldSlotDraw[] {
+  return G.g_world_slot_draws.filter((d) => d.slot === GROUND_SHADOW_SLOT
+    && d.m[12] === a.pos.x && d.m[14] === a.pos.z);
 }
 
 // -- a stage's worth of tables, small enough to reason about ----------------
@@ -743,7 +756,7 @@ export function jettyScene(cmds: HumanoidProgram["cmds"], pos = vec3(-1325, -23,
   EnterPlay();
   SetGameTables(JETTY_CHARS, undefined, undefined, { "12288": {
     charType: 1, removePath: 100, removeFrame: 65, flags2: 1,
-    motion: motion0, phase: 0, cmds,
+    motion: motion0, phase: 0, entry: 0, cmds,
   } });
   G.g_active_cam_path = 79;
   G.g_cam_path_frame = 0;

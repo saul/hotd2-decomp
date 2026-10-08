@@ -14,14 +14,17 @@ import type { GameHost } from "../host";
 import { FtolS16 } from "../matrix";
 import { CharacterTypeOf } from "../tables";
 import {
-  ThrownWeaponAlloc, ThrownWeaponCameraOf, ThrownWeaponRoutine,
+  ThrownWeaponAlloc, ThrownWeaponCameraOf, ThrownWeaponClaimHitSlot,
+  ThrownWeaponRoutine,
   THROWN_WEAPON_DRAW_FLAGS, THROWN_WEAPON_HIT_RADIUS, THROWN_WEAPON_SPAWN_FLAGS,
 } from "../thrown_weapon";
+import { RegisterThrownWeaponForCameraTracking } from "../camera/slots";
 import { VecToAngles } from "../vec";
 import { STAND_THROW_CONDITION } from "./stand_throw";
 import {
   ZombieThrownWeaponAimAtCamera, ZombieThrownWeaponState, ZOMBIE_AXE_SLOT,
-  ZOMBIE_AXE_SPIN, ZOMBIE_BLADE_SPIN, ZOMBIE_WEAPON_ROLL,
+  ZOMBIE_AXE_SPIN, ZOMBIE_BLADE_SPIN, ZOMBIE_WEAPON_LOOK_LIFT,
+  ZOMBIE_WEAPON_ROLL,
 } from "./thrown_weapon";
 
 /**
@@ -58,7 +61,7 @@ const AFTERIMAGE_PERIOD = 7;
  * w+0x1312 = 0; w+0x1370 = thrower condition == 7 ? 1.5 : 1.0
  * w+0x1360 = g_max_attackers; ZombieThrownWeaponAimAtCamera(w)
  * VecToAngles(target - pos, flat) -> w+0x64, w+0x68; w+0x6C = 0x800
- * w+0x100 = pos + (0, 1.5, 0) for the axe; RegisterForCameraTracking(w)
+ * w+0x100 = pos + (0, 1.5, 0); RegisterForCameraTracking(w)
  * ```
  *
  * **The permit goes with the weapon** (`0x0045A3DD`..`0x0045A3EC`), and the
@@ -87,19 +90,24 @@ const AFTERIMAGE_PERIOD = 7;
  * `EnemyZombieInitByCharType`, at spawn. It was left out, declared a
  * divergence, for as long as the actor had no per-bone radius to zero.
  *
- * `[diverges]` Two things the weapon does in the engine are not done, both
- * because it is not an `Actor` here but a record in `G.g_thrown_weapons`. It
- * claims no hit slot (`ActorClaimHitSlot`, `0x0045A25F`): `g_hit_slots` holds
- * actors' `at`s, and the one thing that reads the table is a class-0x30
- * bone's cel phase, which a weapon's slot would only shift for actors that
- * claim after it. And the camera is not told (`RegisterForCameraTracking`),
- * because the candidate list takes actors only (`body_creature.ts` has the
- * same gap).
+ * **It claims a hit slot and is a camera candidate**, as class 0x31's weapon
+ * is (`SpawnThrownWeapon`, `FUN_004504E0`): `ActorClaimHitSlot`
+ * (`FUN_00409270`) at `0x0045A25F`, before anything else is written, and the
+ * routine's last act, `RegisterForCameraTracking` (`FUN_00408EC0`) at
+ * `0x0045A4DD`. The point it files is **lifted 1.5 for every weapon here**,
+ * axe or blade -- `FLD [ESI+0x44]; FADD [0x004C4CB8]; FSTP [ESI+0x104]` at
+ * `0x0045A4B4`..`0x0045A4D7`, with no test of the model in between -- where
+ * the weapon's own update lifts only the axe's. The key the candidate is
+ * sorted by is the unlifted `obj+0x40`. `[proved]` Both were left out, under a
+ * note that neither table could hold a record that is not an actor, until
+ * class 0x31's port gave them one; this note also said the lift was the
+ * axe's alone.
  */
 export function ZombieThrowHandWeapon(obj: ZombieActor, hand: number,
                                       host: GameHost,
                                       events?: Events): void {
   const w = ThrownWeaponAlloc(ThrownWeaponRoutine.Zombie);
+  ThrownWeaponClaimHitSlot(w);
   const kit = CharacterTypeOf(obj)?.zombie_throw;
   const h = kit?.hands.find((x) => x.bone === hand);
   if (h) {
@@ -138,6 +146,10 @@ export function ZombieThrowHandWeapon(obj: ZombieActor, hand: number,
   w.rx = FtolS16(a.pitch);
   w.ry = FtolS16(a.yaw);
   w.rz = ZOMBIE_WEAPON_ROLL;
+  w.lookAt.x = w.pos.x;
+  w.lookAt.y = Math.fround(w.pos.y + ZOMBIE_WEAPON_LOOK_LIFT);
+  w.lookAt.z = w.pos.z;
+  RegisterThrownWeaponForCameraTracking(w);
   G.g_thrown_weapons.push(w);
   events?.emit("enemy.threw", { at: obj.at, who: obj.name });
 }

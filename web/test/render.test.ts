@@ -72,17 +72,19 @@ const { LabelCache } = await import("../src/render/overlays");
 const { SceneFog } = await import("../src/render/fog");
 const { Backdrop } = await import("../src/render/backdrop");
 const { Rain } = await import("../src/render/rain");
+const { type26RippleHeight, type26RippleUvOffset } =
+  await import("../src/render/type26_ripple");
 const { Scope } = await import("../src/core/scope");
 const { ownResources, subtreeResources } = await import("../src/render/scope3d");
 const { FreeRoam, isTyping, ownsKey }
   = await import("../src/render/freeroam");
 const { RigLayer } = await import("../src/render/rigs");
 const { CamPaths } = await import("../src/game/camera/curve");
-const { AmbientLight, CanvasTexture, DirectionalLight, Group, Mesh,
+const { CanvasTexture, Color, Group, Mesh,
         MeshBasicMaterial, PerspectiveCamera, PlaneGeometry, Scene,
-        ShaderChunk } = await import("three");
-const { SceneLighting, lightDirection, DIFFUSE_SCALE, LIGHT_AMBIENT_SCALE }
-  = await import("../src/render/lighting");
+        ShaderChunk, ShaderLib } = await import("three");
+const { SceneLighting, lightDirection, DIFFUSE_SCALE, LIGHT_AMBIENT_SCALE,
+        PackRenderAmbient } = await import("../src/render/lighting");
 const { SlotModelLayer } = await import("../src/render/slotmodels");
 const { EffectLayer } = await import("../src/render/effects");
 const { BloodColourLayer } = await import("../src/render/bloodcolour");
@@ -277,6 +279,18 @@ console.log("\nthe fog colour is the game's colour");
   check("the default mode is the game's planar falloff",
         new SceneFog(new Scene()).fogMode === "planar",
         new SceneFog(new Scene()).fogMode);
+
+  // The clear is `SetClearColor(0x00598C58)`, black in play, and the fog
+  // never touches it: an uncovered pixel is black under any fog. The port
+  // used to paint it the fog colour -- stage 4's grey, stage 6's pale blue.
+  const scene = new Scene();
+  scene.background = new Color(0x123456);
+  const fogged = new SceneFog(scene);
+  fogged.update(walkerWith([197, 196, 255]));
+  const bg = scene.background as InstanceType<typeof Color>;
+  check("an uncovered pixel is the clear colour, black, not the fog colour",
+        scene.fog !== null && bg.r === 0 && bg.g === 0 && bg.b === 0,
+        `fog ${scene.fog ? "on" : "off"}, background #${bg.getHexString()}`);
 }
 
 console.log("\nthe fog range is `SetFogRange`'s pair, in either order");
@@ -393,60 +407,109 @@ console.log("\nthe scene light is the light SetLightingDefaultSingle builds");
   // the decompiler drops every FPU argument in it:
   //
   //   t = colour * ambient
-  //   D3DRENDERSTATE_AMBIENT = pack(t * 255)      <- TINTED by the colour
+  //   D3DRENDERSTATE_AMBIENT = pack(t * 255)      <- TINTED, truncated bytes
   //   light.diffuse          = t * 1.4            <- scaled by ambient too
   //   light.ambient          = colour * 0.3       <- and this one is not
   //
-  // The port had `diffuse = colour * 1.4` (no ambient) and
-  // `ambient = <scalar> + colour * 0.3` (untinted). Both are checked here
-  // against the engine's own default light colour, which is where the
-  // difference is loudest.
-  const srgbToLinear = (c: number) =>
-    c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
-  const near = (a: number, b: number) => Math.abs(a - b) < 1e-4;
+  // and the device sums the two ambients. All of it is in framebuffer bytes,
+  // so the uniforms carry the engine's numbers unconverted -- the port used
+  // to put them through sRGB->linear for three.js's Lambert, which then
+  // divided them by pi.
+  const near = (a: number, b: number) => Math.abs(a - b) < 1e-6;
+  type U = { value: { r: number; g: number; b: number } };
+  const terms = (l: unknown) => (l as { block0: { ambient: U; color: U } }).block0;
+
+  // `PackRenderAmbient` is the exe's own packing, `__ftol` truncating: at
+  // the engine's default light (1.0, 0.2, 0.1) and ambient 0.5 the three
+  // products are 127.5, 25.5 and 12.75, which the hardware saw as 127, 25, 12.
+  check("the ambient word truncates each byte under alpha 0xFF",
+        PackRenderAmbient(0.5, 0.1, 0.05) === 0xff7f190c,
+        PackRenderAmbient(0.5, 0.1, 0.05).toString(16));
+  // ...and does not clamp: OR 0xFFFFFF00 keeps a red past 255 to its low
+  // byte, and a green past 255 carries into red's.
+  check("...and a product past 1.0 carries into the next byte as the exe's would",
+        PackRenderAmbient(1.2, 0, 0) === 0xff320000
+        && PackRenderAmbient(0, 1.2, 0) === 0xff013200,
+        `${PackRenderAmbient(1.2, 0, 0).toString(16)} `
+        + `${PackRenderAmbient(0, 1.2, 0).toString(16)}`);
 
   const lights = new SceneLighting(new Scene());
-  const dir = lights.group.children.find(
-    (o) => (o as { isDirectionalLight?: boolean }).isDirectionalLight,
-  ) as InstanceType<typeof DirectionalLight>;
-  const amb = lights.group.children.find(
-    (o) => (o as { isAmbientLight?: boolean }).isAmbientLight,
-  ) as InstanceType<typeof AmbientLight>;
-  check("the layer has one directional light and one ambient",
-        !!dir && !!amb);
-
   // `FUN_00460250` seeds the scene light colour to exactly this.
   const rgb: [number, number, number] = [1.0, 0.2, 0.1];
   const a = 0.5;
   lights.set({ rgb, ambient: a, pitch: 0, yaw: 0 });
+  const t = terms(lights);
 
-  const wantDir = rgb.map((c) => srgbToLinear(c * a * DIFFUSE_SCALE));
-  check("diffuse is colour * ambient * 1.4, through the sRGB transfer",
-        near(dir.color.r, wantDir[0]) && near(dir.color.g, wantDir[1])
-        && near(dir.color.b, wantDir[2]),
-        `${dir.color.r},${dir.color.g},${dir.color.b} want ${wantDir}`);
-
-  const wantAmb = rgb.map((c) => srgbToLinear(c * (a + LIGHT_AMBIENT_SCALE)));
-  check("...and ambient is colour * (ambient + 0.3), tinted on both terms",
-        near(amb.color.r, wantAmb[0]) && near(amb.color.g, wantAmb[1])
-        && near(amb.color.b, wantAmb[2]),
-        `${amb.color.r},${amb.color.g},${amb.color.b} want ${wantAmb}`);
-
-  // The signature of the bug, stated as a property rather than a number: the
-  // engine's light is deep orange, so its ambient must stay deep orange. The
-  // old `ambient + colour*0.3` gave (0.8, 0.56, 0.53) -- near-grey.
-  check("...so a strongly tinted light keeps a strongly tinted ambient",
-        amb.color.g < amb.color.r * 0.2 && amb.color.b < amb.color.r * 0.1,
-        `r=${amb.color.r.toFixed(3)} g=${amb.color.g.toFixed(3)} `
-        + `b=${amb.color.b.toFixed(3)}`);
+  check("light.diffuse is colour * ambient * 1.4, as the engine's number",
+        near(t.color.value.r, 1.0 * a * DIFFUSE_SCALE)
+        && near(t.color.value.g, 0.2 * a * DIFFUSE_SCALE)
+        && near(t.color.value.b, 0.1 * a * DIFFUSE_SCALE),
+        JSON.stringify(t.color.value));
+  check("...and the ambient is the packed bytes plus colour * 0.3",
+        near(t.ambient.value.r, 127 / 255 + 1.0 * LIGHT_AMBIENT_SCALE)
+        && near(t.ambient.value.g, 25 / 255 + 0.2 * LIGHT_AMBIENT_SCALE)
+        && near(t.ambient.value.b, 12 / 255 + 0.1 * LIGHT_AMBIENT_SCALE),
+        JSON.stringify(t.ambient.value));
 
   // Turning the master brightness down must dim the directional light with
-  // it -- the property the port was missing entirely.
-  const wasR = dir.color.r;
+  // it.
+  const wasR = t.color.value.r;
   lights.set({ rgb, ambient: a / 2, pitch: 0, yaw: 0 });
   check("the ambient channel is a master brightness and dims the light too",
-        dir.color.r < wasR * 0.5,
-        `${wasR.toFixed(4)} -> ${dir.color.r.toFixed(4)}`);
+        near(t.color.value.r, wasR / 2),
+        `${wasR.toFixed(4)} -> ${t.color.value.r.toFixed(4)}`);
+
+  // The twin's program, against three's own Lambert source: every chunk the
+  // patch needs is found, three's light loop is gone, and the pixel is the
+  // device's `texel * colour + spec` on bytes.
+  const base = new MeshBasicMaterial();
+  base.userData = { pvr2: { tex_ambient: 0.75, specular: [0.5, 0.25, 0.125],
+                            specular_power: 32 } };
+  const mesh = new Mesh(new PlaneGeometry(1, 1), base);
+  const root = new Group();
+  root.add(mesh);
+  lights.build(root);
+  const twin = mesh.material as InstanceType<typeof MeshBasicMaterial>;
+  check("a scene-lit mesh draws a twin, not its unlit material",
+        twin !== base && twin.customProgramCacheKey() === "d3dlit",
+        twin.type);
+  const shader = {
+    vertexShader: ShaderLib.lambert.vertexShader,
+    fragmentShader: ShaderLib.lambert.fragmentShader,
+    uniforms: {} as Record<string, { value: unknown }>,
+  };
+  const warned: string[] = [];
+  const warn = console.warn;
+  console.warn = (m: string) => { warned.push(m); };
+  twin.onBeforeCompile(shader as never, undefined as never);
+  console.warn = warn;
+  check("every chunk the device's equation replaces is where it expects",
+        warned.length === 0, warned.join("; "));
+  check("...the light is summed per vertex, clamped, with the highlight",
+        shader.vertexShader.includes("vD3dColour = clamp( d3dC, 0.0, 1.0 );")
+        && shader.vertexShader.includes("pow( d3dNH, d3dPower )")
+        && shader.vertexShader.includes("d3dTexAmbient * diffuse * d3dLightAmbient"));
+  // The declared departure: the normal is renormalised. Taken literally, D3D
+  // leaves it at the inverse transpose's length, and `FishDraw`'s Scale(0.3)
+  // stretched the fish's normals 3.3 times and drew them white; the shipped
+  // game draws them coloured.
+  check("...on a unit normal, whatever scale the model is drawn under",
+        shader.vertexShader.includes(
+          "vec3 d3dN = normalize( normalMatrix * objectNormal );"));
+  check("...three.js's light loop, and its divide by pi, are gone",
+        !shader.fragmentShader.includes("#include <lights_fragment_begin>")
+        && !shader.fragmentShader.includes("reflectedLight.directDiffuse +"));
+  check("...and the pixel is texel * colour + specular, on bytes",
+        shader.fragmentShader.includes(
+          "clamp( d3dTexel * vD3dColour + vD3dSpecular, 0.0, 1.0 )")
+        && shader.fragmentShader.includes(
+          "hod2SrgbEncode( sampledDiffuseColor.rgb )"));
+  const u = shader.uniforms;
+  check("the program reads block 0's terms and the mesh's own material",
+        u.d3dLightAmbient === t.ambient && u.d3dLightColor === t.color
+        && u.d3dTexAmbient?.value === 0.75 && u.d3dPower?.value === 32
+        && (u.d3dSpecular?.value as { y: number }).y === 0.25,
+        Object.keys(u).join(","));
 
   // `BuildSceneLightDirection` (`0x0040E0B0`): rotate (0,0,1) by Y then X,
   // giving (cos p · sin y, −sin p, cos p · cos y), the direction the light
@@ -1699,7 +1762,7 @@ console.log("\nthe object-path seam carries six values");
  * `hod2_kind: "rig"` is the exporter's tag for **every** transcribed hierarchy
  * in a stage, and four layers own different sets of them — `RigLayer` the
  * `op_` path riders, `CharacterLayer` the `chr_` skeletons and their `gore_`
- * templates, `PropLayer` the `prop_` doors, `BreakableLayer` the slot
+ * templates, `PropLayer` (gone) the `prop_` statics, `BreakableLayer` the slot
  * templates. `RigLayer` used to adopt all of them and write `root.visible` on
  * every one once a frame; a rig with no route is ungated, so the first
  * instance of each character type was shown at its authored spawn point, in
@@ -2144,7 +2207,8 @@ console.log("\nclass 0x25's object-path draw is under the actor, not at it:");
   // descriptor word; the program is here because that is where the Init gets
   // it from.
   T.humanoids = { "4128": { charType: 59, removePath: 124, removeFrame: 0,
-                            flags2: 1, motion: 717, phase: 0, cmds: [] } };
+                            flags2: 1, motion: 717, phase: 0, entry: 0,
+                            cmds: [] } };
   ScriptedHumanoidInit(a);
   a.hum.pathSlot = 340;
   layer.update(ctx);
@@ -2471,6 +2535,42 @@ console.log("\nthe water ring is drawn from its record alone:");
   ResetGameGlobals();
 }
 
+console.log("\na ground shadow is drawn from the frame's record, in its layer:");
+{
+  const { ActorDrawShadow } = await import("../src/game/model_draw");
+  const root = new Obj3D();
+  const part = new Mesh(new PlaneGeometry(1, 1), new MeshBasicMaterial());
+  part.name = "slots_effect_fixed000_slot_10d0";
+  part.userData = { hod2_kind: "rig_part", hod2_rig: "slots_effect" };
+  root.add(part);
+  ResetGameGlobals();
+  const layer = new EffectLayer();
+  layer.adopt(root);
+  const camera = new PerspectiveCamera(41.1, 4 / 3, 0.8, 8000);
+  camera.updateMatrixWorld(true);
+  const ctx = { camera } as unknown as Parameters<typeof layer.update>[0];
+  // `ActorDrawShadow` (`FUN_0040A590`) on an ordinary character at its own
+  // height: `T(x, y + 0.1, z) Scale(11, 1, 10)`, slot 0x10D0, layer 0xD.
+  ActorDrawShadow({ flags: 0, motionFlags: 1, charType: 1,
+                    pos: { x: 4, y: 2, z: -6 } });
+  layer.update(ctx);
+  const disc = layer.group.children[0];
+  const e = disc?.matrix.elements ?? [];
+  check("the disc is placed at the matrix the draw recorded, in world space",
+        disc !== undefined && e[12] === 4 && e[13] === Math.fround(2 + 0.1)
+        && e[14] === -6 && e[0] === 11 && e[5] === 1 && e[10] === 10,
+        JSON.stringify(e));
+  // `SetDrawLayerNibble(0xD)` against the world's 8: drawn after the floor
+  // it lies on.
+  check("...in draw layer 0xD, five past the world's",
+        disc?.renderOrder === 0xd - 8, `${disc?.renderOrder}`);
+  G.g_world_slot_draws = [];
+  layer.update(ctx);
+  check("...and a frame that drew none has none",
+        layer.group.children.length === 0, `${layer.group.children.length}`);
+  ResetGameGlobals();
+}
+
 
 console.log("\nthe blood colour switch moves the map, not the shader:");
 {
@@ -2647,8 +2747,13 @@ console.log("\ncivilian attachments: the face swaps, the hair is added");
   const gore = new Object3D();
   gore.name = "gore_hito_gal_fixed000";
   gore.userData = { hod2_kind: "rig", hod2_rig: "gore_hito_gal" };
-  gore.add(template(0x0c7d));
+  const face = template(0x0c7d);
+  gore.add(face);
   gore.add(template(0x11dd));
+  // The same face one mouth cel open, `hito_kao_gal.bin[21]`, for the talking
+  // head below.
+  const mouth = template(0x0c7e);
+  gore.add(mouth);
   // A damaged torso, for the swaps below that no `setBoneSlot` announces.
   gore.add(template(0x0d00));
   root.add(gore);
@@ -2697,6 +2802,27 @@ console.log("\ncivilian attachments: the face swaps, the hair is added");
   check("a second frame adds nothing", head.children.length === before + 1,
         `${head.children.length}`);
 
+  // **A talking head.** `CivilianDrawBonePart` (`FUN_0048D1F0`) draws bone 2
+  // at its record plus a mouth cel and leaves the record alone; the port
+  // writes what it drew to `nodeDrawSlot`, and the layer shows that model
+  // until the hook draws the record again.
+  const faceGeom = head.geometry;
+  a.nodeDrawSlot[2] = 0x0c7e;
+  chars.update({} as never);
+  check("a head drawn as a mouth cel shows the cel's model",
+        head.geometry === (mouth as InstanceType<typeof Mesh>).geometry
+        && head.geometry !== faceGeom && a.boneSlot["2"] === 0x0c7d,
+        "head geometry is not the cel's");
+  check("...with the accessory still on it",
+        head.children.some((c) => c.name.includes("11dd")),
+        head.children.map((c) => c.name).join(","));
+  a.nodeDrawSlot[2] = 0x0c7d;
+  chars.update({} as never);
+  check("...and the face its record names once the hook draws the record",
+        head.geometry === faceGeom
+        && head.geometry === (face as InstanceType<typeof Mesh>).geometry,
+        "head geometry is not the face's");
+
   // And a snapshot carries it: the ids are on the actor, the nodes are not.
   chars.resync({} as never);
   chars.update({} as never);
@@ -2735,6 +2861,138 @@ console.log("\ncivilian attachments: the face swaps, the hair is added");
         head.visible && torn() === 0 && head.geometry !== headGeom,
         `head ${head.visible}, ${torn()} damaged torsos`);
 
+  stage.dispose();
+}
+
+/**
+ * **A talking head that is several meshes keeps its head.**
+ *
+ * Bug: "sometimes when characters are speaking their whole head disappears".
+ * glTF loads a bone node with more than one primitive as a `Group` of meshes
+ * -- every player character's head is one, nine meshes for `char_adv05` --
+ * and `swapGore` shows a cel on such a bone by hiding the bone's own meshes
+ * and hanging a clone of the cel beside them. When the hook drew the head's
+ * own record again, the layer called `restoreGore`, which took the clone off
+ * and **never showed the hidden meshes again**: after the first line, and
+ * after every blink, the head was gone. The same swap hid an accessory hung
+ * on the bone, which `ActorDrawAttachedParts` (`FUN_004124F0`) draws with no
+ * gate at all.
+ */
+console.log("\na multi-mesh head through a mouth cel and back: nothing goes missing");
+{
+  const { CharacterLayer } = await import("../src/render/characters");
+  const { RunPendingInits, SpawnScriptedCharacters } =
+    await import("../src/game/director");
+  const { G, ResetGameGlobals } = await import("../src/game/globals");
+  const { SetGameTables } = await import("../src/game/tables");
+  const { BoxGeometry, Mesh, MeshBasicMaterial, Object3D } =
+    await import("three");
+
+  const TYPE = {
+    type: 0x3d, name: "player_gold", file: "player_gold.bin", bone_count: 2,
+    actor_radius: 10,
+    bones: [
+      { bone: 1, part: "bone01_0d20", slot: 0x0d20, offset: [0, 0, 0],
+        parent: null, damage_rank: [], hit_radius: 2, steps: [] },
+      { bone: 2, part: "bone02_0d27", slot: 0x0d27, offset: [0, 0, 0],
+        parent: 0, damage_rank: [], hit_radius: 2, steps: [] },
+    ],
+    reactions: {}, attacks: {},
+    motions: {
+      "660": { bank: "people", frames: 1, fps: 30, root: [0, 0, 0],
+               rot: [0, 0, 0, 0, 0, 0, 0, 0, 0], play: 0 },
+    },
+  };
+  const RECORDS = [] as { bone: number; slot: number }[];
+  for (let i = 0; i < 0x40; i++) RECORDS.push({ bone: -1, slot: 0 });
+  RECORDS[0x33] = { bone: 2, slot: 0x11dd };
+  const PLACE = {
+    at: 0x8b74, class: 0x10, char_type: 0x3d, motion: 660, hp: 0, yaw: 0,
+    body_condition: 0, initial_state: 0, attack_state: 0, ring_set: 0,
+    attachments: [0x33],
+  };
+  const CHARS = {
+    types: { "61": TYPE }, placements: [PLACE],
+    attachments: RECORDS, attachment_replaces_below: 0x24,
+    approach: { rings: [{ inner: 25, mid: 38, outer: 51 }],
+                steps: { base: 2, mid_add: 3, outer_add: 4 },
+                ring_set_for_char0: 1 },
+    difficulty: { hp_delta: [0, 0, 0, 0, 0], hp_min: 1, hp_max: 300,
+                  initial_rank: [0, 0, 2, 0, 0], default: 2 },
+  };
+  const template = (slot: number): InstanceType<typeof Object3D> => {
+    const n = new Mesh(new BoxGeometry(1, 1, 1), new MeshBasicMaterial());
+    const s = slot.toString(16).padStart(4, "0");
+    n.name = `gore_player_gold_fixed000_gore_${s}`;
+    n.userData = { hod2_kind: "rig_part", hod2_rig: "gore_player_gold",
+                   hod2_part: `gore_${s}` };
+    return n;
+  };
+
+  const root = new Object3D();
+  const rig = new Object3D();
+  rig.name = "chr_player_gold_spawn000";
+  rig.userData = { hod2_kind: "rig", hod2_rig: "chr_player_gold",
+                   hod2_spawn_at: 0x8b74 };
+  const torso = new Object3D();
+  torso.name = "chr_player_gold_spawn000_bone01_0d20";
+  // The head as glTF loads a node with two primitives: a group of meshes.
+  const head = new Object3D();
+  head.name = "chr_player_gold_spawn000_bone02_0d27";
+  const face = new Mesh(new BoxGeometry(1, 1, 1), new MeshBasicMaterial());
+  const hair = new Mesh(new BoxGeometry(1, 1, 1), new MeshBasicMaterial());
+  head.add(face, hair);
+  torso.add(head);
+  rig.add(torso);
+  root.add(rig);
+  const gore = new Object3D();
+  gore.name = "gore_player_gold_fixed000";
+  gore.userData = { hod2_kind: "rig", hod2_rig: "gore_player_gold" };
+  gore.add(template(0x11dd));
+  gore.add(template(0x0d28));      // player_gold.bin[6], his first mouth cel
+  root.add(gore);
+
+  ResetGameGlobals();
+  SetGameTables(CHARS as never);
+  G.g_difficulty = 2;
+  const chars = new CharacterLayer();
+  const stage = new Scope("stage");
+  chars.build(root, stage, CHARS as never);
+  const made = SpawnScriptedCharacters(chars.readySpawns([{ at: 0x8b74 }]));
+  RunPendingInits();
+  const a = made[0];
+  a.visible = true;
+  chars.syncSpawns([{ at: 0x8b74 }], made);
+  chars.update({} as never);
+
+  const own = () => face.visible && hair.visible;
+  const hat = () => head.children.find((c) => c.name.includes("11dd"));
+  const cel = () => head.children.filter((c) => c.name.includes("0d28")
+                                           && c.visible).length;
+  check("the multi-mesh head shows its own meshes and its accessory",
+        own() && !!hat()?.visible, `own ${own()}, hat ${hat()?.visible}`);
+
+  a.nodeDrawSlot[2] = 0x0d28;
+  chars.update({} as never);
+  check("a mouth cel hides the head's own meshes and shows the cel",
+        !face.visible && !hair.visible && cel() === 1, `cel ${cel()}`);
+  check("...and leaves the accessory on",
+        !!hat()?.visible, `hat ${hat()?.visible}`);
+
+  a.nodeDrawSlot[2] = 0x0d27;
+  chars.update({} as never);
+  check("drawn as its record again, the head's own meshes come back",
+        own() && cel() === 0, `own ${own()}, cel ${cel()}`);
+  check("...with the accessory still on", !!hat()?.visible,
+        `hat ${hat()?.visible}`);
+
+  // Through it twice, as a blink does every hundred and fifty frames.
+  a.nodeDrawSlot[2] = 0x0d28;
+  chars.update({} as never);
+  a.nodeDrawSlot[2] = 0x0d27;
+  chars.update({} as never);
+  check("and a second time round", own() && cel() === 0 && !!hat()?.visible,
+        `own ${own()}, cel ${cel()}, hat ${hat()?.visible}`);
   stage.dispose();
 }
 
@@ -3801,7 +4059,7 @@ console.log("\nthe player's character survives its own op 10:");
   const HUMANOIDS = {
     [String(AT)]: {
       charType: 0x39, removePath: 129, removeFrame: 0, drawVariant: 0,
-      flags2: 2, motion: 890, phase: -1,
+      flags2: 2, motion: 890, phase: -1, entry: 0,
       cmds: [
         { op: HumanoidOp.WaitThenPlay, mode: -1, a: 0, b: 0 },
         { op: HumanoidOp.SetHandModel, mode: 1, a: 0, b: 0 },
@@ -4150,7 +4408,7 @@ console.log("\nthe shot: a class-0x25 humanoid is not in the shot test");
   // gun is live: held until camera path 79 reaches frame 100.
   SetGameTables(CHARS as never, undefined, undefined, { [String(AT)]: {
     charType: 15, removePath: 100, removeFrame: 65, flags2: 1, motion: 1024,
-    phase: 0, cmds: [{ op: 1, mode: -1, a: 0, b: 0 },
+    phase: 0, entry: 0, cmds: [{ op: 1, mode: -1, a: 0, b: 0 },
                      { op: 0, mode: 1, a: 79, b: 100 }],
   } } as never);
   const chars = new CharacterLayer();
@@ -4350,6 +4608,74 @@ console.log("\nclass 0x13's prop: the record's three angles, drawn RotX first");
         Math.abs(face[0]) < 1e-6 && Math.abs(face[1] + Math.sin(th)) < 1e-5
         && Math.abs(face[2] - Math.cos(th)) < 1e-5,
         face.map((v) => v.toFixed(4)).join(", "));
+  G.g_object_list.length = 0;
+  SetGameTables({ types: {}, placements: [] } as never);
+}
+
+console.log("\nclass 0x13's prop: the alpha and the layer the behaviour leaves");
+{
+  // `ScriptedPropUpdate13` (`FUN_0043FE90`) draws `AssetDrawSlotWithAlpha`
+  // whenever `sub+0x18` is not 1.0 (`0x0043FF2F`..`0x0043FF62`), in the
+  // layer the behaviour set -- carrier selector 3's 9 (`FUN_00440AD0`, every
+  // arm of states 1..6). Stage 4's monitor, `0x966`, at its dimmed 0.7.
+  const { RunPendingInits, SpawnSlotActors } =
+    await import("../src/game/director");
+  const { SetGameTables } = await import("../src/game/tables");
+  const { Rng } = await import("../src/core/rng");
+  const { BoxGeometry } = await import("three");
+  const { meshDrawAlpha } = await import("../src/render/draw_order");
+  await import("../src/game/classes");
+
+  const SLOT = 0x966;
+  const root = new Obj3D();
+  const part = new Obj3D();
+  part.name = `slots_actor_fixed000_slot_${SLOT.toString(16).padStart(4, "0")}`;
+  part.userData = { hod2_kind: "rig_part", hod2_rig: "slots_actor" };
+  part.add(new Mesh(new BoxGeometry(1, 1, 1), new MeshBasicMaterial()));
+  root.add(part);
+  ResetGameGlobals();
+  const layer = new SlotModelLayer();
+  layer.adopt(root);
+  const AT = 35916;
+  SetGameTables({
+    types: {}, placements: [{
+      at: AT, class: 0x13, char_type: -1, motion: null, hp: 0,
+      yaw: 0, init_flags: 0x8000,
+      class13: { slot: SLOT, cam_path: 180, cam_frame: 0, scale: 1,
+                 behaviour: 8, selector: 3 },
+    }],
+  } as never);
+  SpawnSlotActors([{ at: AT, class: SpawnClass.ScriptedProp,
+                     pos: [318.281982421875, 0, -353.91998291015625] }]);
+  RunPendingInits(new Rng(1));
+  const ctx = { paths: null } as unknown as Parameters<typeof layer.update>[0];
+  const a = G.g_object_list.find((o) => o.at === AT) as
+    { prop13: { alpha: number; drawLayer: number } } | undefined;
+  const meshOf = () => {
+    let m: InstanceType<typeof Mesh> | null = null;
+    layer.nodeFor(AT)?.traverse((o) => {
+      if ((o as InstanceType<typeof Mesh>).isMesh) m = o as InstanceType<typeof Mesh>;
+    });
+    return m as InstanceType<typeof Mesh> | null;
+  };
+  layer.update(ctx);
+  const before = layer.nodeFor(AT)?.renderOrder;
+  const m0 = meshOf();
+  check("a class-0x13 prop at alpha 1.0 in layer 8 draws plainly, in the "
+        + "template's order", !!a && !!m0 && meshDrawAlpha(m0) === null
+        && before === 0, `${before} ${m0 && meshDrawAlpha(m0)}`);
+  if (a) { a.prop13.alpha = Math.fround(0.7); a.prop13.drawLayer = 9; }
+  layer.update(ctx);
+  const m1 = meshOf();
+  check("...at 0.7 in layer 9 it is faded to 0.7 and ordered one layer on",
+        !!m1 && Math.abs((meshDrawAlpha(m1) ?? 0) - 0.7) < 1e-6
+        && layer.nodeFor(AT)?.renderOrder === 1,
+        `${m1 && meshDrawAlpha(m1)} ${layer.nodeFor(AT)?.renderOrder}`);
+  if (a) a.prop13.alpha = 1;
+  layer.update(ctx);
+  const m2 = meshOf();
+  check("...and back at 1.0 the fade is gone",
+        !!m2 && meshDrawAlpha(m2) === null);
   G.g_object_list.length = 0;
   SetGameTables({ types: {}, placements: [] } as never);
 }
@@ -4773,6 +5099,45 @@ console.log("\nthe bat's splash: thirty models, one a frame, on the water");
   deformHordeSheet(root, sheet);
   check("...and a frozen sheet is not reshaped", pos.getY(top) === before);
   G.g_object_list.length = 0;
+}
+
+console.log("\nthe gun light takes a scene-lit mesh with the torch's program, not the scene light's:");
+{
+  // `GunLights` built its twin from the material the mesh wore, which under
+  // "+ scene light" is the device-lit twin: chained under the gun light's
+  // patch, that twin's patch had already stripped `lights_fragment_begin`
+  // (the spot loop and its shadows) and rewritten the output, so the torch
+  // drew nothing and cast nothing.
+  const { GunLights } = await import("../src/render/gunlights");
+  const base = new MeshBasicMaterial();
+  base.userData = { pvr2: { tex_ambient: 0.75, specular: [0, 0, 0], specular_power: 0 } };
+  const mesh = new Mesh(new PlaneGeometry(1, 1), base);
+  const root = new Group();
+  root.add(mesh);
+  const scene = new Scene();
+  const lights = new SceneLighting(scene);
+  lights.build(root);
+  lights.beforeRender();
+  check("the mesh wears its scene-lit twin first",
+        (mesh.material as { customProgramCacheKey(): string })
+          .customProgramCacheKey() === "d3dlit");
+  const gun = new GunLights(scene, lights);
+  (gun as unknown as { light(m: unknown): void }).light(mesh);
+  const lit = mesh.material as InstanceType<typeof MeshBasicMaterial>;
+  const shader = {
+    vertexShader: ShaderLib.lambert.vertexShader,
+    fragmentShader: ShaderLib.lambert.fragmentShader,
+    uniforms: {} as Record<string, { value: unknown }>,
+  };
+  lit.onBeforeCompile(shader as never, undefined as never);
+  check("the gun-lit twin keeps three.js's spot loop, where the torch and its "
+        + "shadow are evaluated",
+        shader.fragmentShader.includes("NUM_SPOT_LIGHTS")
+        && shader.fragmentShader.includes("gunAmbient * PI"),
+        lit.userData?.gunLit ? "gunLit" : "not gunLit");
+  check("...and is not the scene light's device equation underneath",
+        !shader.fragmentShader.includes("vD3dColour")
+        && !shader.vertexShader.includes("d3dLightDir"));
 }
 
 console.log("\nthe gun lights are built off the camera this frame draws:");
@@ -5378,6 +5743,126 @@ console.log("\nthe stage's loaded models: loaded is not drawn (L54)");
         scene.slotResident(0x0100) && scene.slotResident(0x7777));
 }
 
+console.log("\nRegionDrawResidentSet: the canal it draws, and the chapter card's gate");
+
+{
+  // `RegionDrawResidentSet` (`0x00401260`): for entry slot 0x1828
+  // (`st3_08[2]`) while the region is 2 or 3 it draws 0x13B2 and 0x13B0 --
+  // `st1_1[14]` and `[12]`, the canal under the boat in stage 3's two cut
+  // scenes, which no region lists and no water task draws there. And it
+  // draws nothing while `g_screen_furniture_flags & 0x20` is up. The port
+  // had neither: stage 3's canal shot showed the boat over an empty frame.
+  const { StageScene, RegionDrawGate, RegionEntryAlsoDraws }
+    = await import("../src/render/stagescene");
+  const model = (slot: number, regions: number[] = []) => {
+    const m = new Group();
+    m.userData = { hod2_regions: regions, hod2_slot: slot, hod2_draw_mode: 0 };
+    m.add(new Mesh(new PlaneGeometry(1, 1), new MeshBasicMaterial()));
+    return m;
+  };
+  const tree = new Group();
+  const quay = model(0x1828, [2, 3, 5]);
+  const tile14 = model(0x13b2), tile12 = model(0x13b0);
+  const other = model(0x0200, [4]);
+  tree.add(quay, tile14, tile12, other);
+  const scene = StageScene.fromScene(tree, { regions: [0, 1, 2, 3, 4, 5] } as never);
+  scene.loadSlot(0x13b2);
+  scene.loadSlot(0x13b0);
+  scene.enterRegion(2);
+  check("region 2's 0x1828 entry draws both canal tiles beside itself",
+        quay.visible && tile14.visible && tile12.visible,
+        `${quay.visible} ${tile14.visible} ${tile12.visible}`);
+  scene.enterRegion(4);
+  check("...a region without the entry draws neither",
+        !tile14.visible && !tile12.visible && other.visible);
+  scene.enterRegion(5);
+  check("...nor does the entry in a region other than 2 or 3",
+        quay.visible && !tile14.visible && !tile12.visible);
+  scene.enterRegion(3);
+  scene.unloadSlot(0x13b0);
+  check("region 3 draws them too, and AssetDrawSlot skips the one unloaded "
+        + "(block 0 step 2 op 42 frees 0x13B0)",
+        tile14.visible && !tile12.visible);
+  check("the arm names exactly those two slots, in the exe's order",
+        RegionEntryAlsoDraws(0x1828, 2).join() === "5042,5040"
+        && RegionEntryAlsoDraws(0x1828, 4).length === 0
+        && RegionEntryAlsoDraws(0x1829, 2).length === 0);
+
+  // The gate, driven from `G` as the frame drives it.
+  ResetGameGlobals();
+  const gate = new RegionDrawGate();
+  gate.scene = scene;
+  G.g_screen_furniture_flags |= 0x20;
+  gate.update();
+  scene.setWaterSlots(new Set([0x13b2]), new Set([0x13b2]));
+  check("with the chapter card's bit up no region model is drawn, and "
+        + "nothing beside one",
+        !quay.visible && !other.visible && !tile12.visible);
+  check("...but a tile the water task draws is that task's, and still shows",
+        tile14.visible);
+  G.g_screen_furniture_flags &= ~0x20;
+  gate.update();
+  check("...and the region comes back the frame the bit goes down",
+        quay.visible);
+}
+
+console.log("\na layer's clone of a lit mesh is lit: the canal tiles under the water task");
+
+{
+  // `render/water_surfaces.ts` clones a tile's material for the bilinear
+  // filter `WaterSurfaceUpdate` turns on. It cloned whatever the mesh wore,
+  // and by its first frame the lighting swap had already put the tile in its
+  // device-lit twin: `Material.clone` keeps neither the twin's
+  // `onBeforeCompile` nor its program key, so the copy was a stock
+  // `MeshLambertMaterial` under a scene with no three.js lights -- black --
+  // and the swap left it, being no unlit material. Every stage-3 canal shot
+  // with a water task drew the canal black.
+  const { StageScene } = await import("../src/render/stagescene");
+  const { WaterSurfaceLayer } = await import("../src/render/water_surfaces");
+  const { unlitMaterial } = await import("../src/render/lighting");
+  const { DataTexture, LinearFilter } = await import("three");
+  ResetGameGlobals();
+  const base = new MeshBasicMaterial({ map: new DataTexture(new Uint8Array(4), 1, 1) });
+  base.userData = { pvr2: { tex_ambient: 0.75, specular: [0, 0, 0], specular_power: 0 } };
+  const tileMesh = new Mesh(new PlaneGeometry(10, 10), base);
+  const tile = new Group();
+  tile.userData = { hod2_regions: [], hod2_slot: 0x13b2, hod2_draw_mode: 0 };
+  tile.add(tileMesh);
+  const tree = new Group();
+  tree.add(tile);
+  const stage = StageScene.fromScene(tree, { regions: [0, 1, 2, 3, 4] } as never);
+  stage.loadSlot(0x13b2);
+  stage.enterRegion(4);
+  const lights = new SceneLighting(new Scene());
+  lights.build(stage.root);
+  const water = new WaterSurfaceLayer();
+  water.scene = stage;
+  G.g_water_surfaces = [{ id: 1, index: 7, lifetime: 10, seenStep: 0,
+                          stepChanges: 0, killFlag: 0x12, slot: 0x13b2,
+                          drawn: [0x13b2] }];
+  G.g_water_surface_uv = [{ slot: 0x13b2, sin: 0.5, cos: 0.25, frames: 3,
+                            zLimited: false }];
+  // The frame before the task's first: the swap has the tile in its lit twin.
+  lights.beforeRender();
+  const key = (m: unknown) => (m as { customProgramCacheKey(): string })
+    .customProgramCacheKey();
+  check("the tile wears its device-lit twin before the walk's first frame",
+        key(tileMesh.material) === "d3dlit");
+  // Two frames of the task: its bilinear clone, then the swap.
+  for (let i = 0; i < 2; i++) {
+    water.update();
+    lights.beforeRender();
+  }
+  const worn = tileMesh.material as InstanceType<typeof MeshBasicMaterial>;
+  check("after the water layer's clone the tile is still drawn by the device's "
+        + "light equation, not a stock Lambert",
+        key(worn) === "d3dlit", `${worn.type} ${key(worn)}`);
+  check("...and its texture is the bilinear copy the walk asked for",
+        worn.map !== base.map && worn.map?.minFilter === LinearFilter);
+  check("...whose unlit base is the clone, not the stage's own material",
+        unlitMaterial(worn) !== base && unlitMaterial(worn).type === "MeshBasicMaterial");
+}
+
 console.log("\nrigs: a part drawn behind a camera-path test");
 {
   // `FUN_0048F560`, stage 6's lift car: `AssetDrawSlot(0xAFE/0xAFF)` only
@@ -5577,7 +6062,7 @@ console.log("\nclass 0x26 subtypes 6/7: the recorded draws, where they were reco
   };
   const plain = matOf(kids[0]!);
   const lit = matOf(kids[1]!);
-  check("the plain draw gets the scene's Lambert twin",
+  check("the plain draw gets the scene's device-lit twin",
         plain?.type === "MeshLambertMaterial" && !plain.userData.lightColour,
         `${plain?.type} ${JSON.stringify(plain?.userData)}`);
   check("...and the lit one a twin keyed on its own colour",
@@ -5585,22 +6070,18 @@ console.log("\nclass 0x26 subtypes 6/7: the recorded draws, where they were reco
         && lit.userData.lightColour === "0.05,0.01,0|null|block",
         `${lit?.type} ${JSON.stringify(lit?.userData)}`);
   // Its terms are `SetLightingDefaultSingle`'s with the colour swapped: the
-  // block's ambient 0.5, so diffuse `C * 0.5 * 1.4` and ambient
-  // `C * (0.5 + 0.3)`, each through the sRGB transfer.
-  const cam = new PerspectiveCamera();
-  cam.updateMatrixWorld();
-  (lights as unknown as { refreshColoured(c: unknown): void })
-    .refreshColoured({ camera: cam });
+  // block's ambient 0.5, so diffuse `C * 0.5 * 1.4` and ambient the packed
+  // `C * 0.5` -- 6.375 truncated to 6 in red -- plus `C * 0.3`, all in the
+  // engine's own numbers. A set is filled the moment it is made.
   const set = (lights as unknown as {
     coloured: Map<string, { color: { value: { r: number; g: number } };
                             ambient: { value: { r: number; g: number } } }> })
     .coloured.get("0.05,0.01,0|null|block");
-  const lin = (c: number) =>
-    c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
   check("...on block 0's ambient with the draw's colour in place of the block's",
-        !!set && Math.abs(set.color.value.r - lin(0.05 * 0.5 * DIFFUSE_SCALE)) < 1e-6
-        && Math.abs(set.color.value.g - lin(0.01 * 0.5 * DIFFUSE_SCALE)) < 1e-6
-        && Math.abs(set.ambient.value.r - lin(0.05 * (0.5 + LIGHT_AMBIENT_SCALE))) < 1e-6,
+        !!set && Math.abs(set.color.value.r - 0.05 * 0.5 * DIFFUSE_SCALE) < 1e-6
+        && Math.abs(set.color.value.g - 0.01 * 0.5 * DIFFUSE_SCALE) < 1e-6
+        && Math.abs(set.ambient.value.r
+                    - (6 / 255 + 0.05 * LIGHT_AMBIENT_SCALE)) < 1e-6,
         JSON.stringify(set && [set.color.value, set.ambient.value]));
   // `AssetDrawSlot` (`FUN_00418560`) draws nothing that is not resident: a
   // recorded draw of a slot the script has unloaded is dropped, the rest
@@ -5733,17 +6214,11 @@ console.log("\nclass 0x32: the node hook's draws, and the light each was made un
         ud(child.material).secondaryLit === true
         && ud(child.material).lightColour === undefined,
         JSON.stringify(ud(child.material)));
-  const cam = new PerspectiveCamera();
-  cam.updateMatrixWorld();
-  (lights as unknown as { refreshColoured(c: unknown): void })
-    .refreshColoured({ camera: cam });
   const set = (lights as unknown as {
     coloured: Map<string, { color: { value: { r: number } } }> })
     .coloured.get("block1|1,0,0|null|block");
-  const lin = (c: number) =>
-    c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
   check("...whose diffuse is block 1's ambient 0.4, not block 0's 0.5",
-        !!set && Math.abs(set.color.value.r - lin(0.4 * DIFFUSE_SCALE)) < 1e-6,
+        !!set && Math.abs(set.color.value.r - 0.4 * DIFFUSE_SCALE) < 1e-6,
         JSON.stringify(set?.color.value));
 
   // The hook's models on the nodes: a single-primitive bone whose arm draws
@@ -5801,6 +6276,100 @@ console.log("\nclass 0x32: the node hook's draws, and the light each was made un
   check("...and a frame the walk drew nothing shows nothing",
         !b11.layers.isEnabled(0) && !own15.layers.isEnabled(0)
         && holders(b11).length === 0 && holders(b15).length === 0);
+}
+
+console.log("\nclass 0x41 constructor 61's figures: block 1, lit from the screen's right:");
+{
+  const { syncType61FigureLight } = await import("../src/render/characters/type61_figure");
+  const { Type61FigureUpdate } = await import("../src/game/class41/type61");
+  const { PropContainerRoutine } = await import("../src/game/class41/placer_state");
+  const mat = await import("../src/game/matrix");
+  const { Matrix4 } = await import("three");
+  // `Type61FigureUpdate` hands `SetRenderLightDirection` the world vector of
+  // `BuildSceneLightDirection(0, 0x4000)`, (1, 0, 0), which the device takes
+  // as view space. Driven through the game with a camera turned and pitched,
+  // the set the renderer builds must come out (1, 0, 0) in view space.
+  ResetGameGlobals();
+  const FIG_AT = 0x18302058;
+  const a = makeActor(FIG_AT, SpawnClass.PropContainerPlacer, 0x0a, "figure");
+  if (a.cls !== SpawnClass.PropContainerPlacer) throw new Error("not 0x41");
+  a.placer.routine = PropContainerRoutine.Type61Figure;
+  const v2w = mat.MatIdentity();
+  mat.MatrixTranslate(v2w, 100, 2600, -9500);
+  mat.MatrixRotateY(v2w, 0x3000);
+  mat.MatrixRotateX(v2w, 0x0800);
+  const w2v = mat.MatCopy(mat.MatIdentity(), v2w);
+  mat.MatrixInvert(w2v);
+  G.g_camera_view_to_world = v2w;
+  G.g_camera_world_to_view = w2v;
+  Type61FigureUpdate(a);
+  const root = new Obj3D();
+  root.userData = { hod2_spawn_at: FIG_AT };
+  const mesh = new Mesh(new PlaneGeometry(1, 1), new MeshBasicMaterial());
+  root.add(mesh);
+  type Inst = Parameters<typeof syncType61FigureLight>[0];
+  const inst = { at: FIG_AT, a, root } as unknown as Inst;
+  check("the figure's root is tagged with the direction its draw set",
+        syncType61FigureLight(inst)
+        && (root.userData.hod2_light_set as { dir: number[] }).dir.join()
+          === a.placer.drawDir.join()
+        && (root.userData.hod2_light_set as { rgb: unknown }).rgb === null);
+  const lights = new SceneLighting(new Scene());
+  lights.source = { secondary: (at: number) => at === FIG_AT };
+  lights.build(root);
+  lights.beforeRender();
+  const ud = (m: unknown) => (m as { userData: Record<string, unknown> }).userData;
+  check("...and drawn with a block-1 twin under a direction of its own",
+        ud(mesh.material).lightColour === "block1|block|null|dir",
+        JSON.stringify(ud(mesh.material)));
+  // The three.js camera as `render/camera.ts` places it: the view-to-world
+  // matrix's sixteen floats as they are.
+  const cam = new PerspectiveCamera();
+  new Matrix4().fromArray(v2w).decompose(cam.position, cam.quaternion, cam.scale);
+  cam.updateMatrixWorld(true);
+  // `update` rewrites every set's view-space direction from the camera, as
+  // the frame does before the render.
+  (lights as unknown as { update(c: unknown): void }).update({ camera: cam });
+  const set = (lights as unknown as {
+    coloured: Map<string, { dirView: { value: InstanceType<typeof Vector3> } }> })
+    .coloured.get("block1|block|null|dir");
+  const v = set?.dirView.value;
+  check("...which is view-space (1, 0, 0) with the camera turned",
+        !!v && Math.abs(v.x - 1) < 1e-5 && Math.abs(v.y) < 1e-5
+        && Math.abs(v.z) < 1e-5,
+        v ? v.toArray().join(",") : "no set");
+}
+
+console.log("\nthe warehouse water: the walk's heights and UVs, per vertex");
+{
+  // `Type26RippleUpdate` (`FUN_00469C80`): the height from the image's own
+  // constants -- the centre (-472.5158, -1230.6945) as f32, 400, the f64 0.1
+  // and 0x401338C8E0000000 -- at a vertex off both axes and a phase that is
+  // not zero.
+  const x = -503.7, z = -1188.2, phase = 0x1234;
+  const dx = x + Math.fround(472.5158), dz = z + Math.fround(1230.6945);
+  const b = Math.trunc((dx * dx + dz * dz) * 400 + phase);
+  check("a vertex's height is the rings about (-472.5, -1230.7) at the phase",
+        type26RippleHeight(x, z, phase) === Math.fround(
+          Math.sin(b * Math.PI * 2 / 65536) * 0.1 - 4.805453777313232));
+  // The UVs: the closed form against the walk's own adds, frame by frame, at
+  // ticks that cross the 16-bit wrap -- `u += sin((tick * 0x180 + ftol(x) *
+  // 600) & 0xFFFF) * 0.0004`, `v` the cosine of `z`'s.
+  let u = 0, v = 0, ss = 0, cc = 0;
+  for (let tick = 7; tick < 7 + 120; tick++) {
+    const t = ((tick * 0x180) & 0xffff) * Math.PI * 2 / 65536;
+    ss += Math.sin(t);
+    cc += Math.cos(t);
+    u += Math.sin(((tick * 0x180 + Math.trunc(x) * 600) & 0xffff)
+                  * Math.PI * 2 / 65536) * 0.0004;
+    v += Math.cos(((tick * 0x180 + Math.trunc(z) * 600) & 0xffff)
+                  * Math.PI * 2 / 65536) * 0.0004;
+  }
+  const [du, dv] = type26RippleUvOffset(
+    { sin: ss, cos: cc, frames: 120, phase: 0 }, x, z, [0, 0]);
+  check("...and its UVs, the two sums against the walk's adds",
+        Math.abs(du - u) < 1e-9 && Math.abs(dv - v) < 1e-9,
+        `${du} ${u} ${dv} ${v}`);
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

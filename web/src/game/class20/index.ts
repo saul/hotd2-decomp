@@ -69,6 +69,7 @@ import { ActorDespawn } from "../despawn";
 import { SpawnBoneHitSprite } from "../effects/blood";
 import { SpawnGroundRingEffect } from "../effects/ring_effect";
 import { G } from "../globals";
+import { DrawSkinnedModelAndShadow } from "../skeleton";
 import type { Rng } from "../../core/rng";
 import { ScoreAddForPlayer } from "../combat/score";
 import { authoredFrameHeld, ticksOfAuthoredFrame }
@@ -350,6 +351,9 @@ export function OneHitTargetUpdate(obj: Actor, f: ClassFrame): void {
   // The tail runs on the shot frame as well: the engine falls through from the
   // bone loop into it rather than returning.
   OneHitTargetStepIdle(a);
+  // `DrawSkinnedModelAndShadow` at `0x00449344`, on the shot frame too: the
+  // ground shadow under `g_cur_actor`, this target since `0x00449038`.
+  DrawSkinnedModelAndShadow(a);
   // `param_1[0xd] &= 0xfffffff7` -- the hit bit is consumed, every frame.
   a.flags &= ~ActorFlag.Hit;
   a.pendingHit = null;
@@ -393,6 +397,10 @@ export function OneHitTargetUpdate(obj: Actor, f: ClassFrame): void {
  * result was the same. It is not, and it can.
  */
 export function OneHitTargetPlayDeathClip(obj: OneHitTargetActor): void {
+  // `g_cur_actor = obj` (`0x0044938F`), then the draw first (`0x004493E0`):
+  // its shadow is the one thing of it that is the game's.
+  G.g_cur_actor = obj.at;
+  DrawSkinnedModelAndShadow(obj);
   const m = MotionOf(obj, obj.motion);
   if (!m || m.frames <= 0) {
     // No clip in this bundle. The engine cannot reach this -- every id indexes
@@ -446,6 +454,10 @@ export function OneHitTargetSinkAndDespawn(obj: OneHitTargetActor): void {
   // The engine's sink draws the model and never steps `obj+0x194`, so the body
   // goes down on the death clip's last pose. See {@link OneHitTargetPinLastFrame}.
   OneHitTargetPinLastFrame(obj);
+  // `g_cur_actor = obj` (`0x00449448`) and the draw (`0x00449490`), before
+  // the sink moves the body.
+  G.g_cur_actor = obj.at;
+  DrawSkinnedModelAndShadow(obj);
   obj.arcFrames -= 1;
   obj.pos.y -= CLASS20_SINK_PER_FRAME;
   if (obj.arcFrames === 0) ActorDespawn(obj);
@@ -479,6 +491,9 @@ export function OneHitTargetDebug(a: Actor): ActorDebug {
 export const OneHitTargetHandler: ClassHandler = {
   init: OneHitTargetInit,
   update: OneHitTargetUpdate,
+  // `OneHitTargetInit` installs `OneHitTargetHoldDrawn` or
+  // `OneHitTargetUpdate` and returns (`0x00448FFC`, `0x00449007`).
+  firstUpdateNextWalk: true,
   // The death chain is three states long and the last of them is what despawns
   // the body, so the director has to keep calling it after `dead` is set --
   // the same reason class 0x31 has this.

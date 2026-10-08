@@ -16,8 +16,8 @@
  * The 79 constructors are a grab-bag: the retail stages reach 74 of them, and
  * exactly one — type 0, `PlaceBreakableGroup` — is the container mechanism the
  * class is named for. Fifty are `PlaceGenericProp`, five are `NoOpStub`, and
- * of the other twenty-four the ones below are ported; the thirteen that are
- * not, with the spawns that place each, are listed in `docs/formats/spawns.md`
+ * of the other twenty-four the ones below are ported; the ones that are not,
+ * with the spawns that place each, are listed in `docs/formats/spawns.md`
  * (*Class 0x41's constructors: which are ported*). An unported type keeps its
  * slot in the table and does nothing, because an unimplemented type that
  * silently ran the *wrong* constructor is the same bug that had the cat
@@ -33,7 +33,7 @@ import { T } from "../tables";
 import { PlaceBreakableGroup } from "./group";
 import { PlaceKindedProp } from "./kinded";
 import { PlaceGenericProp } from "./generic";
-import { PlaceChainSegments } from "./triggers";
+import { PlaceChainSegments } from "./chain";
 import { PlaceFragmentProps } from "./type40";
 import { PlaceTable38Props } from "./type38";
 import { PlaceTable39Stacks } from "./type39";
@@ -44,6 +44,21 @@ import { PlaceType47Prop } from "./type47";
 import { PROP75_SCRIPT_FLAG, PROP75_TYPE } from "./flag_prop";
 import { FLICKER_LIGHT_TYPE, PlaceFlickerLightProp48 } from "./type48";
 import { PlaceWaterSurface } from "./water";
+import { PlaceType3UvScrollTask } from "./type03";
+import { PlaceTable16Props } from "./type16";
+import { PlaceType17Props } from "./type17";
+import { PlaceTable29Props } from "./type29";
+import { PlaceType37PropPair } from "./type37";
+import { PropContainerRoutine } from "./placer_state";
+import { PlaceType42Prop } from "./type42";
+import { PlaceType52VanDoors } from "./type52";
+import { PlaceType55Particles } from "./type55";
+import { PlaceType61Figures, Type61FigureUpdate } from "./type61";
+import { PlaceType65Particles } from "./type65";
+import {
+  GoldenFrogUpdate, PlaceGoldenFrogFromLessonTable,
+} from "./golden_frog";
+import { PlaceType26RippleTask } from "./type26";
 
 /**
  * `obj+0x130C` for this class — the constructor index, **not** the body
@@ -63,6 +78,12 @@ export enum PropContainerType {
    * spawn's position. See `class41/water.ts`.
    */
   WaterSurface = 1,
+  /**
+   * `PlaceType3UvScrollTask` (`FUN_00462DF0`) — the stage-1 car's moving
+   * reflection: a task that rewrites three shells' UVs and draws nothing.
+   * See `class41/type03.ts`.
+   */
+  UvScrollTask = 3,
   /** `PlaceKindedProp` (`FUN_00462E10`) — one prop, kind from `obj+0x6C`. */
   KindedProp = 4,
   /**
@@ -112,6 +133,64 @@ export enum PropContainerType {
    * descriptor's point. Stage 2's one spawn. See `class41/type47.ts`.
    */
   Type47Prop = 47,
+  /**
+   * `PlaceTable16Props` (`FUN_00462FE0`) -- six `dolam.bin` objects in stage
+   * 2's warehouse water, from `g_type16_prop_xz`. See `class41/type16.ts`.
+   */
+  Table16Props = 16,
+  /**
+   * `PlaceType17Props` (`FUN_004630B0`) -- three `bridge.bin` pieces falling
+   * from the placer's point. See `class41/type17.ts`.
+   */
+  Type17Props = 17,
+  /**
+   * `PlaceTable29Props` (`FUN_00463270`) -- nine `tokei_gear.bin` models from
+   * `g_type29_prop_xyz`, seven drawn. See `class41/type29.ts`.
+   */
+  Table29Props = 29,
+  /**
+   * `PlaceType37PropPair` (`FUN_004632F0`) -- two objects, one on the other,
+   * sharing an item set. See `class41/type37.ts`.
+   */
+  Type37PropPair = 37,
+  /**
+   * `PlaceType42Prop` (`FUN_004639D0`) — one model at its own coordinates
+   * until the step index is 2. Stage 2's one spawn. See `class41/type42.ts`.
+   */
+  Type42Prop = 42,
+  /**
+   * `PlaceType52VanDoors` (`FUN_00463D20`) — the van's two rear doors, drawn
+   * shut by type 12's routine. See `class41/type52.ts`.
+   */
+  Type52VanDoors = 52,
+  /**
+   * `PlaceType55Particles` (`FUN_00463FE0`) — eight hundred pieces released
+   * by script flag 0x31. Stage 6's one spawn. See `class41/type55.ts`.
+   */
+  Type55Particles = 55,
+  /**
+   * `PlaceType61Figures` (`FUN_004641F0`) — nine skinned figures standing
+   * until script flag 0. Stage 6's one spawn. See `class41/type61.ts`.
+   */
+  Type61Figures = 61,
+  /**
+   * `PlaceType65Particles` (`FUN_00464360`) — three hundred `garasu.bin`
+   * pieces falling for 300 frames. Stage 5's one spawn. See
+   * `class41/type65.ts`.
+   */
+  Type65Particles = 65,
+  /**
+   * `PlaceGoldenFrogFromLessonTable` (`FUN_00463E50`) -- a golden frog at
+   * one of three places `g_training_lesson` picks. Training only. See
+   * `class41/golden_frog.ts`.
+   */
+  GoldenFrogFromLessonTable = 68,
+  /**
+   * `PlaceType26RippleTask` (`FUN_00463230`) -- the task that ripples and
+   * draws the warehouse water, `komono_souko.bin[9]`. Stage 2's one spawn.
+   * See `class41/type26.ts`.
+   */
+  Type26RippleTask = 26,
 }
 
 /** What one class-0x41 constructor does. `undefined` where none is ported. */
@@ -135,14 +214,14 @@ export const g_class41_constructors:
   [PropContainerType.ChainSegments]: (obj, f) => {
     void f;
     const pl = T.breakables?.placements?.find(
-      (q) => q.at === obj.at && q.container === "chain");
+      (q) => q.at === obj.descAt && q.container === "chain");
     if (!pl) return;
     G.g_breakable_props.push(...PlaceChainSegments(pl));
   },
   [PropContainerType.FragmentProps]: (obj, f) => {
     void f;
     const pl = T.breakables?.placements?.find(
-      (q) => q.at === obj.at && q.container === "fragment");
+      (q) => q.at === obj.descAt && q.container === "fragment");
     if (!pl) return;
     G.g_breakable_props.push(...PlaceFragmentProps(pl));
   },
@@ -150,7 +229,7 @@ export const g_class41_constructors:
   [FLICKER_LIGHT_TYPE]: (obj, f) => {
     void f;
     const pl = T.breakables?.placements?.find(
-      (q) => q.at === obj.at && q.container === "flicker_light");
+      (q) => q.at === obj.descAt && q.container === "flicker_light");
     if (!pl) return;
     G.g_breakable_props.push(PlaceFlickerLightProp48(
       pl, obj.pos.x, obj.pos.y, obj.pos.z, obj.yaw));
@@ -158,42 +237,107 @@ export const g_class41_constructors:
   // The three table constructors copy the placer's `+0x11C` into every object
   // they build as its step lifetime; nothing else of the descriptor is read.
   [PropContainerType.Table38Props]: (obj) => {
-    G.g_breakable_props.push(...PlaceTable38Props(obj.at, obj.hp));
+    G.g_breakable_props.push(...PlaceTable38Props(obj.descAt, obj.hp));
   },
   [PropContainerType.Table39Stacks]: (obj, f) => {
-    G.g_breakable_props.push(...PlaceTable39Stacks(obj.at, obj.hp, f.rng));
+    G.g_breakable_props.push(...PlaceTable39Stacks(obj.descAt, obj.hp, f.rng));
   },
   [PropContainerType.Table44Props]: (obj) => {
-    G.g_breakable_props.push(...PlaceTable44Props(obj.at, obj.hp));
+    G.g_breakable_props.push(...PlaceTable44Props(obj.descAt, obj.hp));
   },
   // These two read `+0x1F4` as well: the table to build from. `+0x11C` is the
   // step lifetime every object copies, as for the three above.
   [PropContainerType.Table50Props]: (obj) => {
     G.g_breakable_props.push(
-      ...PlaceTable50Props(obj.at, obj.charType, obj.hp));
+      ...PlaceTable50Props(obj.descAt, obj.charType, obj.hp));
   },
   // `PlaceType47Prop` reads the position and nothing else.
   [PropContainerType.Type47Prop]: (obj) => {
     const pl = T.breakables?.placements?.find(
-      (q) => q.at === obj.at && q.container === "type47");
+      (q) => q.at === obj.descAt && q.container === "type47");
     if (!pl) return;
     G.g_breakable_props.push(PlaceType47Prop(pl));
   },
   [PropContainerType.Table66Props]: (obj) => {
     G.g_breakable_props.push(
-      ...PlaceTable66Props(obj.at, obj.charType, obj.hp));
+      ...PlaceTable66Props(obj.descAt, obj.charType, obj.hp));
+  },
+  // Constructors 16 and 29 build from image tables the bundle carries and
+  // read only the placer's `+0x11C`; 17 reads its point; 37 its point, its
+  // `+0x68`, `+0x64`, `+0x1F4` and `+0x11C`, which the placement carries.
+  [PropContainerType.Table16Props]: (obj, f) => {
+    G.g_breakable_props.push(...PlaceTable16Props(obj.descAt, obj.hp, f.rng));
+  },
+  [PropContainerType.Type17Props]: (obj) => {
+    G.g_breakable_props.push(
+      ...PlaceType17Props(obj.descAt, obj.pos.x, obj.pos.y, obj.pos.z));
+  },
+  [PropContainerType.Table29Props]: (obj) => {
+    G.g_breakable_props.push(...PlaceTable29Props(obj.descAt, obj.hp));
+  },
+  [PropContainerType.Type37PropPair]: (obj, f) => {
+    const pl = T.breakables?.placements?.find(
+      (q) => q.at === obj.descAt && q.container === "type37");
+    if (!pl) return;
+    G.g_breakable_props.push(...PlaceType37PropPair(pl, f.rng));
   },
   // The canal water. `+0x1F4` is a table index and `+0x11C` a lifetime in
   // step changes; the position is never read.
+  // Nothing of the placer is read.
+  [PropContainerType.UvScrollTask]: () => {
+    PlaceType3UvScrollTask();
+  },
   [PropContainerType.WaterSurface]: (obj) => {
     PlaceWaterSurface(obj);
   },
+  // `PlaceType42Prop` reads nothing of the placer.
+  [PropContainerType.Type42Prop]: (obj) => {
+    G.g_breakable_props.push(PlaceType42Prop(obj.descAt));
+  },
+  // `PlaceType52VanDoors` reads the placer's position, yaw and `+0x11C`.
+  [PropContainerType.Type52VanDoors]: (obj) => {
+    G.g_breakable_props.push(
+      ...PlaceType52VanDoors(obj.descAt, obj.pos, obj.yaw, obj.hp));
+  },
+  // `PlaceType55Particles` reads the placer's position, and a table of the
+  // image's that travels on the placement.
+  [PropContainerType.Type55Particles]: (obj, f) => {
+    const pl = T.breakables?.placements?.find(
+      (q) => q.at === obj.descAt && q.container === "type55");
+    if (!pl?.offsets) return;
+    G.g_breakable_props.push(
+      PlaceType55Particles(obj.descAt, obj.pos, pl.offsets, f.rng));
+  },
+  // `PlaceType61Figures` builds actors, not props: nine skinned figures in the
+  // object pool, their types a table of the image's on the placement.
+  [PropContainerType.Type61Figures]: (obj) => {
+    const pl = T.breakables?.placements?.find(
+      (q) => q.at === obj.descAt && q.container === "type61");
+    if (!pl?.char_types) return;
+    PlaceType61Figures(obj, pl.char_types);
+  },
+  // `PlaceType65Particles` copies the placer's position and never reads it.
+  [PropContainerType.Type65Particles]: (obj, f) => {
+    G.g_breakable_props.push(PlaceType65Particles(obj.descAt, obj.pos, f.rng));
+  },
+  // The warehouse water: `+0x11C` is the lifetime; nothing else is read.
+  [PropContainerType.Type26RippleTask]: (obj) => {
+    PlaceType26RippleTask(obj);
+  },
+  // A golden frog, an actor and not a prop: its three places travel on the
+  // placement, and the placer's `+0x44` and `+0x11C` are what it reads.
+  [PropContainerType.GoldenFrogFromLessonTable]: (obj, f) => {
+    const pl = T.breakables?.placements?.find(
+      (q) => q.at === obj.descAt && q.container === "golden_frog");
+    if (!pl?.xz) return;
+    PlaceGoldenFrogFromLessonTable(obj, pl.xz, f);
+  },
   [PropContainerType.KindedProp]: (obj, f) => {
     const pl = T.breakables?.placements?.find(
-      (q) => q.at === obj.at && q.container === "kinded");
+      (q) => q.at === obj.descAt && q.container === "kinded");
     if (!pl) return;
     G.g_breakable_props.push(PlaceKindedProp(
-      obj.at, pl.kind ?? 0, pl.item_set ?? 0, pl.set_size ?? 0,
+      obj.descAt, pl.kind ?? 0, pl.item_set ?? 0, pl.set_size ?? 0,
       pl.lifetime_evt_steps, obj.pos.x, obj.pos.y, obj.pos.z, obj.yaw,
       f.rng));
   },
@@ -223,7 +367,7 @@ export function PropContainerPlacerUpdate(obj: Actor, f: ClassFrame): void {
  */
 function PlaceGenericPropFor(obj: Actor, f: ClassFrame): void {
   const pl = T.breakables?.placements?.find(
-    (q) => q.at === obj.at && q.container === "generic");
+    (q) => q.at === obj.descAt && q.container === "generic");
   if (!pl) return;
   // `ActorAlloc` appends the prop to the task list **before** its arm
   // allocates anything, so the objects cases 8 and 0x43 hang off it come
@@ -303,9 +447,38 @@ export function PropContainerCountsForEnemyGate(rec: SpawnRecord): boolean {
   return pl?.type !== undefined && GENERIC_ENEMY_COUNTING_TYPES.has(pl.type);
 }
 
+/**
+ * `[port-only]` -- the task walk's call through `obj+0x00`, for the three
+ * routines a class-0x41 actor can be on: the placer's own, the one
+ * `PlaceType61Figures` (`FUN_004641F0`) hands each of its figures, or the
+ * golden frog's, which `SpawnGoldenFrog` (`FUN_004722A0`) and constructor 68
+ * hand the actors they make. See `class41/placer_state.ts`.
+ */
+export function PropContainerRun(obj: Actor, f: ClassFrame): void {
+  if (obj.cls !== SpawnClass.PropContainerPlacer) return;
+  switch (obj.placer.routine) {
+    case PropContainerRoutine.Placer: PropContainerPlacerUpdate(obj, f); break;
+    case PropContainerRoutine.Type61Figure: Type61FigureUpdate(obj); break;
+    case PropContainerRoutine.GoldenFrog: GoldenFrogUpdate(obj, f); break;
+  }
+}
+
 export const PropContainerPlacerHandler: ClassHandler = {
   init: PropContainerPlacerInit,
-  update: PropContainerPlacerUpdate,
+  update: PropContainerRun,
+  // A placer has no model and dies on its first frame; a constructor-61
+  // figure never steps `obj+0x194` (`Type61FigureUpdate` has no `INC` of
+  // it), so it holds frame 0 of its clip; the golden frog steps `obj+0x194`
+  // itself, and not on every frame (`GoldenFrogUpdate`). None is the
+  // director's to step.
+  advancesOwnMotion: true,
+  // The frog calls `RegisterForShotTest` (`FUN_00405160`) from its own
+  // update and reads `obj+0x34` bit 3 itself; a constructor-61 figure is
+  // drawn and never filed, so no shot finds one; the placer is gone before a
+  // shot can reach it. The props the constructors build are not actors and
+  // register through the prop pool (`class41/shot_test.ts`).
+  registersForShotTest: true,
+  ownsShotResult: true,
   raisesScriptFlag: PropContainerRaisesScriptFlag,
   countsForEnemyGate: PropContainerCountsForEnemyGate,
 };
@@ -326,6 +499,8 @@ export function ResetPropContainers(): void {
   G.g_breakable_next_id = 1;
   G.g_prop_final_draws = [];
   G.g_prop67_by_index = [0, 0, 0];
+  G.g_type37_pair = [0, 0];
+  G.g_type37_hits_left = 0;
   G.g_object_list = G.g_object_list.filter(
     (o) => o.cls !== SpawnClass.PropContainerPlacer);
 }
@@ -334,7 +509,6 @@ export { PlaceBreakableGroup };
 export * from "./kinded";
 export * from "./generic";
 export * from "./branch";
-export * from "./triggers";
 export * from "./type38";
 export * from "./type39";
 export * from "./type40";
@@ -356,6 +530,19 @@ export * from "./type72";
 export * from "./type74";
 export * from "./type76";
 export * from "./type77";
+export * from "./type16";
+export * from "./type17";
+export * from "./type29";
+export * from "./type37";
+export * from "./ctor_literals";
+export * from "./placer_state";
+export * from "./type42";
+export * from "./type52";
+export * from "./type55";
+export * from "./type61";
+export * from "./type65";
+export * from "./golden_frog";
+export * from "./type26";
 export {
   BreakableGroupMembers, BreakableMemberSlot, BreakablePropAt,
   BreakableGroupFloor, MsvcRand, PROP_TARGET_SETS, MEMBERS_PER_GROUP,

@@ -26,6 +26,7 @@ import { ActorSetMotionBlended } from "../class30/motion_cue";
 import { GameMode } from "../game_mode";
 import { G, HIT_SLOT_NONE } from "../globals";
 import { ActorRunNodeDrawHooks } from "../model_draw";
+import { DrawSkinnedModelAndShadow } from "../skeleton";
 import { ActorAdvanceMotion } from "../motion";
 import type { ClassFrame } from "../registry";
 import { ActorBuildSkinnedModel } from "../spawn";
@@ -139,6 +140,7 @@ export function ResultCardFigureUpdate(obj: ResultCardActor,
   obj.card.holdsLife = false;
   obj.card.partScale = false;
   ActorRunNodeDrawHooks(obj, ResultCardFigureDrawNode, f);
+  DrawSkinnedModelAndShadow(obj);
   // `INC dword ptr [EDI]` at `0x004357E6`, unless `obj+0x1324`.
   if (obj.frozen === 0) ActorAdvanceMotion(obj, f.dt);
 }

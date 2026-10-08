@@ -1,6 +1,7 @@
 /**
- * The game-over screen's world: the players' bodies on the fly-over, the
- * route map's figures, discs and footprints -- and nothing else.
+ * The players' bodies, and the game-over screen's world: the bodies on the
+ * fly-over, the route map's figures, discs and footprints -- and nothing
+ * else.
  *
  * Phase 0 of `GameOverRunPhase` (`FUN_00460960`) releases the stage -- every
  * pol slot back to the resident common set, every cam file out -- and every
@@ -14,7 +15,10 @@
  * is up, and put back as it was when it drops.
  *
  * * **The bodies** (`game/player_body.ts`): world space, drawn on the frames
- *   `PlayerHookDrawBodyUntilMotionEnd` drew them.
+ *   a hook drew them -- `PlayerHookDrawBodyUntilMotionEnd` on this screen,
+ *   and in play `PlayerHookDrawBody`, which the stage-1 car and stage 2
+ *   block 6 switch on. So the bodies are this layer's in play too, where
+ *   nothing else of this screen is.
  * * **The route map** (`game/route_map.ts`): view space. The figures, their
  *   ground discs (slot `0x145B`, turned a quarter about X and scaled 3) and the
  *   footprints (scaled 0.2) all sit about 100 in front of the eye, so they are
@@ -37,9 +41,12 @@ import { MotionFlag } from "../game/actor";
 import { G } from "../game/globals";
 import { PLAYER_BODY_AT, ROUTE_FIGURE_SHADOW_SLOT }
   from "../game/player_body_data";
+
+/** The bone `PlayerBodySetHandSlot` swaps: record 5, `obj+0x4DC`. */
+const BODY_HAND_BONE = 5;
 import type { CharacterLayer } from "./characters";
 import type { SceneLighting } from "./lighting";
-import type { Instance } from "./characters/instance";
+import type { GoreSwap, Instance } from "./characters/instance";
 import { Poser } from "./characters/pose";
 import type { RenderContext } from "./context";
 import type { EffectLayer } from "./effects";
@@ -58,6 +65,9 @@ export class GameOverScene implements System<RenderContext> {
   private readonly poser = new Poser();
   /** Each body hierarchy, claimed from the character layer, and its type. */
   private bodies: (Body | null)[] = [];
+  /** What each body's hand swap laid on, and the slot it shows. */
+  private hands: { gore: Map<number, GoreSwap>; slot: number }[] = [];
+  private chars: CharacterLayer | null = null;
   private homes: (Object3D | null)[] = [];
   /** The route map's group: camera space. */
   private readonly view = new Group();
@@ -83,7 +93,9 @@ export class GameOverScene implements System<RenderContext> {
    */
   build(scope: Scope, chars: CharacterLayer, effects: EffectLayer): void {
     this.effects = effects;
+    this.chars = chars;
     this.bodies = PLAYER_BODY_AT.map((at) => chars.claim(at));
+    this.hands = this.bodies.map(() => ({ gore: new Map(), slot: -1 }));
     this.homes = this.bodies.map((b) => b?.root.parent ?? null);
     for (const b of this.bodies) if (b) b.root.visible = false;
     scope.child("game-over").defer(() => {
@@ -91,6 +103,8 @@ export class GameOverScene implements System<RenderContext> {
       this.clearView();
       this.bodies = [];
       this.homes = [];
+      this.hands = [];
+      this.chars = null;
       this.effects = null;
     });
   }
@@ -98,6 +112,7 @@ export class GameOverScene implements System<RenderContext> {
   update(ctx: RenderContext): void {
     if (G.g_stage_unloaded === 0) {
       this.leave();
+      this.drawBodies(new Set());
       return;
     }
     this.enter();
@@ -135,7 +150,19 @@ export class GameOverScene implements System<RenderContext> {
       this.discs[i].visible = false;
     }
 
-    // The bodies, where no figure has borrowed them.
+    this.drawBodies(lent);
+    this.drawMarks();
+  }
+
+  /**
+   * The bodies, where no figure has borrowed them: at the cursor the draw
+   * posed, `T(pos) RotX(pitch) RotZ(roll) RotY(yaw)` -- `PlayerBodiesCreate`
+   * writes the order word `obj+0x1FC = 1` -- and with the hand
+   * `PlayerBodySetHandSlot` chose. A body whose type is not the one its row
+   * was exported on (an Original Mode costume) has no hierarchy here and is
+   * not drawn.
+   */
+  private drawBodies(lent: ReadonlySet<number>): void {
     for (let p = 0; p < this.bodies.length; p++) {
       if (lent.has(p)) continue;
       const node = this.bodies[p];
@@ -143,16 +170,23 @@ export class GameOverScene implements System<RenderContext> {
       const home = this.homes[p];
       if (home && node.root.parent !== home) home.add(node.root);
       const b = G.g_player_bodies[p];
-      const show = !!b && b.drawn !== 0
-        && this.poser.poseHeld(node, b.motion, b.playTicks,
+      const show = !!b && b.drawn !== 0 && b.charType === node.type.type
+        && this.poser.poseHeld(node, b.motion, b.cursor,
                                (b.motionFlags & MotionFlag.RootMotion) !== 0);
       node.root.visible = show;
       if (!show || !b) continue;
       node.root.position.set(b.pos.x, b.pos.y, b.pos.z);
-      node.root.rotation.set(0, b.yaw * BAMS_TO_RAD, 0);
+      node.root.rotation.set(b.pitch * BAMS_TO_RAD, b.yaw * BAMS_TO_RAD,
+                             b.roll * BAMS_TO_RAD, "XZY");
+      const hand = this.hands[p];
+      if (hand && hand.slot !== b.handSlot) {
+        const own = node.type.bones.find((x) => x.bone === BODY_HAND_BONE)
+          ?.slot ?? -1;
+        this.chars?.setClaimedBoneSlot(node, hand.gore, BODY_HAND_BONE,
+                                       b.handSlot, own);
+        hand.slot = b.handSlot;
+      }
     }
-
-    this.drawMarks();
   }
 
   /** The footprints, one clone each, re-made if the slot changes. */

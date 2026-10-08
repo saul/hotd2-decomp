@@ -48,13 +48,12 @@ import {
   CAT_TRIGGER_STOP_X, CatTriggerState, type CatTail,
 } from "../../src/game/class53";
 import { CAT_CLIPS, CAT_MOTIONS } from "../../src/game/class53/records";
-import {
-  PlaceChainSegments, PlaceStoryModeSwitch,
-} from "../../src/game/class41/triggers";
+import { PlaceChainSegments } from "../../src/game/class41/chain";
 import { PlaceFragmentProps } from "../../src/game/class41/type40";
 import {
-  STORY_SWITCH_FLAG_AT, STORY_SWITCH_SCRIPT_FLAG,
-} from "../../src/game/class41/branch";
+  PlaceStoryModeSwitch, STORY_SWITCH_FLAG_AT, STORY_SWITCH_SCRIPT_FLAG,
+  StoryModeSwitchPhase,
+} from "../../src/game/class44/story_switch";
 import { SetCameraPaths } from "../../src/game/tables";
 import { Class22SubActorAt } from "../../src/game/class22/records";
 import {
@@ -114,6 +113,20 @@ console.log("\nclass 0x21, the rescue target and stage 2's first fork:");
   const rFrame = (a: Actor, events: Events, rng: Rng,
                   host: GameHost = carHost) =>
     RescueTargetUpdate(a, { dt: 1 / 60, rng, host, events });
+
+  {
+    // `if (g_cutscene_skipping) { obj+0x1350 = 1; *obj = Held; }` at the
+    // ride's tail: a skip hands over wherever the ride has got to, here on
+    // frame 0x20, long before 0xBD.
+    const { a, events, rng } = rescueScene();
+    G.g_cam_path_frame = 0x20;
+    G.g_cutscene_skipping = 1;
+    rFrame(a, events, rng);
+    G.g_cutscene_skipping = 0;
+    check("a skipped cut scene hands the ride over at once, onto row 1",
+          a.rescue.state === RescueTargetState.Held && a.rescue.route === 1,
+          `state ${a.rescue.state} route ${a.rescue.route}`);
+  }
 
   {
     const { a, events, rng } = rescueScene();
@@ -353,7 +366,7 @@ console.log("\na replay does not rebuild a rescue target it has played past:");
     playSound: () => undefined, aliveEnemies: () => null,
     presentEnemies: () => null, aliveCivilians: () => null,
     cameraFree: () => null, scriptFlagRaised: () => null,
-    showMessage: () => null, endDialogue: () => undefined,
+    showMessage: () => null,
   };
   const fresh = () => {
     ResetGameGlobals();
@@ -588,7 +601,7 @@ console.log("\na replay does not rebuild JUDGMENT past its own way out:");
     playSound: () => undefined, aliveEnemies: () => null,
     presentEnemies: () => null, aliveCivilians: () => null,
     cameraFree: () => null, scriptFlagRaised: () => null,
-    showMessage: () => null, endDialogue: () => undefined,
+    showMessage: () => null,
   };
   // The shipped rows' cues: stage 5 `0xCF`/140, stage 1's fight `0x31`/400
   // (never reached -- block 14 plays `0x31` to 230), the cameo `0x22`/400.
@@ -1573,54 +1586,8 @@ console.log("\nthe branch writers: every route the game can choose:");
           String(other.length));
   }
 
-  // The story-mode switch: a scene-and-block table, a script flag, and a key.
-  {
-    propScene(rng);
-    G.g_scene_index = 1;
-    G.g_evt_block_index = 3;
-    const sw = PlaceStoryModeSwitch({ at: 0x4000, container: "story_switch",
-                                      lifetime_evt_steps: 1, branch_flag: 114,
-                                      remove_flag: 62, keys: [-1, -1, -1, -1],
-                                      pos: [0, 0, 0] });
-    G.g_breakable_props.push(sw);
-    hitAndTick(sw);
-    check("the switch opens scene 1 block 3", G.g_script_branch_var === 2,
-          String(G.g_script_branch_var));
-    G.g_script_branch_var = 0;
-    BreakablePropPoolUpdate(rng);
-    check("...once: `+0x2A0` goes to -1 with the route",
-          G.g_script_branch_var === 0 && sw.storyItem === -1,
-          `var ${G.g_script_branch_var} flag ${sw.storyItem}`);
-
-    propScene(rng);
-    G.g_scene_index = 1;
-    G.g_evt_block_index = 2;                       // not in the table
-    const sw2 = PlaceStoryModeSwitch({ at: 0x4001, container: "story_switch",
-                                       lifetime_evt_steps: 1, branch_flag: 114,
-                                       remove_flag: 62, keys: [-1, -1, -1, -1],
-                                       pos: [0, 0, 0] });
-    G.g_breakable_props.push(sw2);
-    hitAndTick(sw2);
-    check("...and a block the table does not name writes nothing",
-          G.g_script_branch_var === 0, String(G.g_script_branch_var));
-
-    // A switch that names a key is not thrown by a shot alone.
-    propScene(rng);
-    G.g_scene_index = 1;
-    G.g_evt_block_index = 3;
-    const keyed = PlaceStoryModeSwitch({ at: 0x4002, container: "story_switch",
-                                        lifetime_evt_steps: 1,
-                                        branch_flag: 115, remove_flag: 116,
-                                        keys: [0, 2, 5, 6], pos: [0, 0, 0] });
-    G.g_breakable_props.push(keyed);
-    hitAndTick(keyed);
-    check("a keyed switch refuses a player carrying nothing",
-          G.g_script_branch_var === 0, String(G.g_script_branch_var));
-    G.g_original_item_slots[0] = [5, -1];
-    hitAndTick(keyed);
-    check("...and opens for one carrying item 5", G.g_script_branch_var === 2,
-          String(G.g_script_branch_var));
-  }
+  // The story-mode switch's route, its key and its shot are class 0x44's,
+  // and `test/port/class44.test.ts` has them.
 
   // The switch's own removal flag, which is its lifetime -- `+0x11C` is a
   // literal 1 for this object and counting against it would retire every
@@ -1703,13 +1670,12 @@ console.log("\nthe branch writers: every route the game can choose:");
           flag() === 0, String(flag()));
 
     // `obj+0x192 == 0` -- unthrown. A thrown switch hands the flag to the
-    // second write, behind the mode gate and the item spawn, which is not
-    // ported: see `StoryModeSwitchUpdate`.
+    // second write, behind the mode gate and the item spawn (class44.test).
     propScene(rng, GameMode.Arcade);
     G.g_scene_index = SCENE;
     G.g_evt_block_index = BLOCK;
     const thrown = place();
-    thrown.branchLatched = true;
+    thrown.routinePhase = StoryModeSwitchPhase.Thrown;
     BreakablePropPoolUpdate(rng);
     check("a thrown switch stops raising it", flag() === 0, String(flag()));
 

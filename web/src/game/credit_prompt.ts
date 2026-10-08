@@ -74,7 +74,7 @@ export enum CreditPromptDrawer {
  * never taken. A named constant rather than a field because nothing the port
  * runs can change it.
  */
-const CAPTION_MODE: number = 2;
+export const CAPTION_MODE: number = 2;
 
 /**
  * `CreditPromptMessageIndex` — `FUN_00406D60`. Which row of

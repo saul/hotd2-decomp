@@ -262,9 +262,9 @@ const ORIGINAL_ITEM_SHADOW_SCALE_Y = 1.0;
  * ```
  *
  * `y` is a **world height**, not an offset: type 7 passes 38.0 for a prop
- * placed at 102. The one other maker of this object, `0x004699C0`
- * (`ChainSegmentUpdate`'s), builds it inline with its own position rule and is
- * not ported here.
+ * placed at 102. The one other maker of this object,
+ * `SpawnChainItemDrop` (`FUN_004699C0`), builds it with its own position rule
+ * and its item pick inline; it is in `class41/chain.ts`.
  *
  * The object is appended to the pool, which the pool's walk reaches on the
  * frame it is made — as `ActorAlloc`'s append to the task list does.

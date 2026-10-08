@@ -48,7 +48,8 @@ import { SpawnScriptedCharacters, SpawnSlotActors }
   from "../src/game/director.ts";
 import { G, ResetGameGlobals } from "../src/game/globals.ts";
 import { ActorIsEnemy, g_class_handlers } from "../src/game/registry.ts";
-import { SetCameraPaths, SetGameTables } from "../src/game/tables.ts";
+import { SetCameraPaths, SetDialogueTables, SetGameTables }
+  from "../src/game/tables.ts";
 import { SpawnClass } from "../src/game/spawn_class.ts";
 import { Walker } from "../src/script/walker.ts";
 import { seekTo } from "../src/script/seek.ts";
@@ -106,7 +107,7 @@ function play([name, bundle, block, step, killAt, frames]) {
     aliveCivilians: () => G.g_civilians_alive,
     scriptFlagRaised: (i) => (G.g_script_flags[i] ?? 0) !== 0,
     cameraFree: () => G.g_camera_free !== 0,
-    showMessage: () => null, endDialogue: () => undefined,
+    showMessage: () => null,
   }, { seed: 1 });
   scriptSys.walker = walker;
   ctx.walker = walker;
@@ -114,6 +115,7 @@ function play([name, bundle, block, step, killAt, frames]) {
   world.attach(ctx);
   SetGameTables(chars, script.breakables, script.set_pieces, script.humanoids,
                 script.coli, script.civilians);
+  SetDialogueTables(script.sound?.messages, script.subtitle_glyphs);
   SetCameraPaths(cam);
   G.g_players_in_play = 1;
   G.g_player_lives = [9999, 9999];
@@ -162,12 +164,18 @@ function play([name, bundle, block, step, killAt, frames]) {
   let f = 0;
   const log = (s) => { if (TRACE) console.log(`    f${String(f).padStart(4)}  ${s}`); };
   events.on("civilian.rescued", () => { t.rescue = f; log("rescued"); });
-  events.on("civilian.dialogue", (d) => {
-    const v = script.sound?.messages?.[String(d.group)]?.[0];
-    if (t.dialogue < 0) t.dialogue = f;
-    t.dialogueEnd = Math.max(t.dialogueEnd, f + (v?.frames ?? 0));
-    log(`dialogue ${d.group}, ${v?.frames ?? "?"} frames`);
-  });
+  // A line is a subtitle task `EvtOpPlayDialogue2D` allocated: watch the
+  // list for one this run has not seen.
+  const seenLines = new Set();
+  const watchDialogue = () => {
+    for (const d of G.g_dialogue_tasks) {
+      if (seenLines.has(d.id)) continue;
+      seenLines.add(d.id);
+      if (t.dialogue < 0) t.dialogue = f;
+      t.dialogueEnd = Math.max(t.dialogueEnd, f + d.frames);
+      log(`dialogue variant ${d.variant}, ${d.frames} frames`);
+    }
+  };
 
   let civ = null;
   let shutter = G.g_bHudShutterState;
@@ -180,6 +188,7 @@ function play([name, bundle, block, step, killAt, frames]) {
     seat();
     spawn();
     world.update(ctx, LIVE);
+    watchDialogue();
 
     for (const o of G.g_object_list) {
       if (o.despawned || before.has(o.at)) continue;

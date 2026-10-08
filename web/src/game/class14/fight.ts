@@ -11,6 +11,7 @@
  * `g_camera_eye_x/z` (`0x009C71E0`/`+8`) is `ClassFrame.eye`, the camera the
  * frame runs with, as every other class reads it.
  */
+import { EvtOpPlayDialogue2D } from "../dialogue";
 import { ActorFlag, type Boss2Actor } from "../actor";
 import { ActorPickTargetPlayer } from "../actor_target";
 import {
@@ -669,10 +670,9 @@ export function Class14StateLeapFromSide(obj: Boss2Actor, f: ClassFrame): void {
                 STRIP_SMALL, f);
       } else if (c === 0x2d) {
         // `EvtOpPlayDialogue2D` (`FUN_00435B80`) -- the same message groups
-        // evt op 0x2D plays, so it goes out on the host's dialogue path.
-        f.events?.emit("civilian.dialogue", {
-          at: obj.at, group: t.counter0 === 0 ? LINE_LEFT : LINE_RIGHT,
-        });
+        // evt op 0x2D plays.
+        EvtOpPlayDialogue2D(t.counter0 === 0 ? LINE_LEFT : LINE_RIGHT,
+                            f.events);
         obj.flags &= ~ActorFlag.NoCameraTrack;
       }
       if (obj.vel.y < 0) {

@@ -45,8 +45,10 @@
 import type { Events } from "../core/events";
 import type { Rng } from "../core/rng";
 import { ActorFlag } from "./actor";
+import { ColiDynamicListRemove } from "./coli";
 import type { ShotTestEntry } from "./combat/shot_test";
-import { G } from "./globals";
+import { G, HIT_SLOT_COUNT, HIT_SLOT_NONE } from "./globals";
+import { HIT_SLOT_CLAIMED } from "./hit_slots";
 import type { GameHost } from "./host";
 import {
   MatCopy, MatIdentity, MatrixRotateX, MatrixRotateY, MatrixRotateZ,
@@ -170,6 +172,13 @@ export interface ThrownWeapon {
   speed: number;
   /** `obj+0x40..0x48`. */
   pos: Vec3;
+  /**
+   * `obj+0x100..0x108` — the point the camera looks at when this weapon is in
+   * one of its slots: class 0x31's routines copy the position here just before
+   * `RegisterForCameraTracking` (`FUN_00408EC0`), and `SelectCameraLookAtTarget`
+   * (`FUN_00403050`) reads it. See `RegisterThrownWeaponForCameraTracking`.
+   */
+  lookAt: Vec3;
   /** `obj+0x4C..0x54`, units a frame. */
   vel: Vec3;
   /** `obj+0x58..0x60`, the arc's acceleration. */
@@ -186,6 +195,14 @@ export interface ThrownWeapon {
   view: Vec3;
   /** `obj+0x124`. */
   hitRadius: number;
+  /**
+   * `obj+0x38` — bit `0x40` is the claim `ActorClaimHitSlot` (`FUN_00409270`)
+   * raises, which `ActorDespawn` (`FUN_00409CC0`) reads back before it gives
+   * the slot up. See {@link ThrownWeaponClaimHitSlot}.
+   */
+  flags38: number;
+  /** `obj+0x3C` — the `g_hit_slots` index held, or -1. */
+  hitSlot: number;
   /** `obj+0x1344` — frames of flight left. */
   ttl: number;
   /**
@@ -298,6 +315,7 @@ export function ThrownWeaponAlloc(routine: ThrownWeaponRoutine): ThrownWeapon {
     hand: 0, spinRate: 0, tilt: 0, maxAttackers: 0, speed: 0,
     pos: { x: 0, y: 0, z: 0 }, vel: { x: 0, y: 0, z: 0 },
     acc: { x: 0, y: 0, z: 0 }, rx: 0, ry: 0, rz: 0,
+    lookAt: { x: 0, y: 0, z: 0 }, flags38: 0, hitSlot: 0,
     view: { x: 0, y: 0, z: 0 }, hitRadius: 0, ttl: 0, timer: 0,
     target: { x: 0, y: 0, z: 0 }, afterimageTimer: 0, afterimagePeriod: 0,
     afterimages: 0, weapon: 0, light: 0, lightStep: 0, lightColour: null,
@@ -306,10 +324,16 @@ export function ThrownWeaponAlloc(routine: ThrownWeaponRoutine): ThrownWeapon {
 }
 
 /**
- * `ActorDespawn` (`FUN_00409CC0`) for a weapon: `obj+0x34 |= 0x80018000`, which
- * among other things is `RegisterForShotTest`'s refusal bit, and out of the
- * task list. `[port-only]` as a function: the engine calls the one routine for
- * every object.
+ * `ActorDespawn` (`FUN_00409CC0`) for a weapon: `obj+0x34 = (obj+0x34 & ~1) |
+ * 0x80018000` (`AND AL, 0xFE` / `OR EAX, 0x80018000` at `0x00409CC9`), which
+ * among other things is `RegisterForShotTest`'s refusal bit; the `g_hit_slots`
+ * entry back if `obj+0x38` bit `0x40` says one was claimed (`0x00409CDE`..
+ * `0x00409CF5`); and out of the task list. `[port-only]` as a function: the
+ * engine calls the one routine for every object.
+ *
+ * Between the two, `ColiDynamicListRemove` (`FUN_00405220`) at `0x00409CD3`
+ * makes a hole of the weapon's entry in last frame's `g_coli_dynamic_list`
+ * -- the entry its registration filed, found by the weapon's id.
  *
  * **Nothing after it runs.** `ActorDespawn` ends in `ActorKill`
  * (`FUN_004A7040`), which unlinks the running task, puts it on the free list
@@ -320,8 +344,53 @@ export function ThrownWeaponAlloc(routine: ThrownWeaponRoutine): ThrownWeapon {
  * where the jump lands. `[proved]`
  */
 export function ThrownWeaponDespawn(w: ThrownWeapon): void {
-  w.flags |= THROWN_WEAPON_DESPAWN_FLAGS;
+  w.flags = (w.flags & ~1) | THROWN_WEAPON_DESPAWN_FLAGS;
+  ColiDynamicListRemove({ at: w.from, thrown: w.id });
+  if ((w.flags38 & HIT_SLOT_CLAIMED) && w.hitSlot !== HIT_SLOT_NONE) {
+    G.g_hit_slots[w.hitSlot] = HIT_SLOT_NONE;
+    w.hitSlot = HIT_SLOT_NONE;
+  }
   w.despawned = true;
+}
+
+/**
+ * `ActorClaimHitSlot` (`FUN_00409270`) for a weapon -- `[port-only]` as a
+ * separate function, for the reason {@link RegisterThrownWeaponForShotTest}
+ * is one: the routine is the engine's one for every object, and the port's
+ * copy takes an `Actor`.
+ *
+ * ```c
+ * obj+0x3C = -1;
+ * for (i = 0; i < 14; i++)
+ *     if (g_hit_slots[i] == 0) { obj+0x38 |= 0x40; g_hit_slots[i] = obj;
+ *                                obj+0x3C = i; return; }
+ * ```
+ *
+ * `SpawnThrownWeapon` (`FUN_004504E0`) calls it on the new weapon at
+ * `0x004504FE`, before anything else is written, so a knife in the air holds
+ * one of the fourteen entries until it despawns, and an actor spawned while
+ * it flies is dealt the next one along -- which is the phase of every cel
+ * animation a class-0x30 bone plays (`game/hit_slots.ts`). `[proved]`
+ *
+ * The engine stores the task pointer. The port's table holds actors' `at`s,
+ * and a weapon has none, so it stores {@link ThrownWeaponHitSlotOwner} of
+ * its id: a value below `HIT_SLOT_NONE`, which no `at` can be. Nothing reads
+ * an entry but to ask whether it is free.
+ */
+export function ThrownWeaponClaimHitSlot(w: ThrownWeapon): void {
+  w.hitSlot = HIT_SLOT_NONE;
+  for (let i = 0; i < HIT_SLOT_COUNT; i++) {
+    if (G.g_hit_slots[i] !== HIT_SLOT_NONE) continue;
+    w.flags38 |= HIT_SLOT_CLAIMED;
+    G.g_hit_slots[i] = ThrownWeaponHitSlotOwner(w.id);
+    w.hitSlot = i;
+    return;
+  }
+}
+
+/** `[port-only]` What a weapon's `g_hit_slots` entry holds: `-2 - id`. */
+export function ThrownWeaponHitSlotOwner(id: number): number {
+  return HIT_SLOT_NONE - 1 - id;
 }
 
 /** `ActorDespawn`'s `OR dword ptr [obj+0x34], 0x80018000`. */

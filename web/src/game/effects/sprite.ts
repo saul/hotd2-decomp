@@ -115,7 +115,9 @@ export enum SpriteEffectKind {
    * `ZombieStrikeStartSplash` (`FUN_00456C50`) takes it over {@link Splash}
    * for state 0x17, and the wading clip `0xB8`'s two cues in
    * `ZombieStateSurfaceOnCameraCue` and `ZombieStateTargetMotionScript` throw
-   * it. Named for its scale and nothing else. `[proved]`
+   * it. Named for its scale and nothing else. `[proved]` Class 0x33's
+   * selector 3, `ScriptedEffectOnFirstFrame33`, throws one facing the camera
+   * on its first frame.
    */
   SplashLarge = 0x62,
   /** Exempt from the distance scale law altogether. */

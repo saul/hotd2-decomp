@@ -594,6 +594,34 @@ writes a 5 of its own before its first wait, and opens the bars later (stage
 `means` and `firing_gate`, so the player shows "5 — close, and disable firing"
 rather than "5".
 
+### `2D` — the dialogue, and its subtitle drawn glyph by glyph
+
+**[proved]** `EvtOpPlayDialogue2D` (`FUN_00435B80`): `variant =
+g_pDialogueVariants[group * 3 + cfg]` (`0x0058B6B8`), `cfg` being
+`g_active_player` -- 0 or 1 for one player alone, 2 for both -- except in
+`g_app_state` 10 and 11, which take 0. A variant of 0, or either skip flag
+up (`g_nEvtSkipFlag`, `g_cutscene_skipping`), says nothing. Otherwise the
+record's voice plays and a 0x3C-byte task, `DrawDialogueSubtitleTask`
+(`FUN_00435AA0`), takes `{variant, frames, line 0}`.
+
+The task counts `frames` down **before** testing it, ends on 0 or on either
+skip flag, and steps `line` while the frames left are below the current
+line's `end_frame` (the last line's is 0). It draws the line with
+`DrawTextCentred(x_offset, 384.0, text)` (`FUN_00436850`): `x = 320 -
+strlen * 5.6 + x_offset`, then per character a `DrawScreenSprite` at depth
+1.0 and **scale 0.7** (not a colour, as this was once read), advancing 11.2.
+The sprite is `g_subtitle_glyphs[c]` (`0x0055E054`, s16 by signed byte),
+`0x62D` for `~`; lowercase letters drop below the baseline by `b i l` 1, `f j
+t` 2, `g` 4, `p q y` 5, `d h k` 0, the rest 3 (jump table `0x004369BC`); only
+characters outside `a-z`, `A-Z` and `~` are tested for a 0 glyph. The glyphs
+are 16x32 PAL4 textures of `tex/scr_jimaku_e.bin`, bank `0x17B`, which
+`TexBankPaletteIndex`'s default arm gives palette 0. The other caption mode
+(`g_wCaptionMode == 1`, a sprite per variant) is never set in this build.
+
+Ported whole: `web/src/game/dialogue.ts`; the glyph table travels as
+`script.subtitle_glyphs`, the glyphs a shipped line uses as screen sprites.
+Civilians' op `0x1D` and three bosses call the same routine.
+
 ### `1D` — the rain, read out
 
 **[proved]** `FUN_004136A0`, in full:
@@ -804,9 +832,9 @@ null, and the sub-tables are laid out immediately **before** it:
 
 | Sel | Name | Effect |
 |---|---|---|
-| `0x10` | `set_player_flag` | `DAT_009A5EBC` bit 0 = op0, mirrored to `DAT_009A5D8C` |
+| `0x10` | `set_player_flag` | `g_player_flags` (`0x009A5D8C + p*0x130`) bit 0: player 1's = op0, then player 0's = player 1's. Bit 0 is what `PlayerHookDrawBody` draws the player's body by |
 | `0x11` | `scene_state` | `EvtEnterSceneState(current_major, op0)` — a transition in the 2-D state table at `0x00576C14` |
-| `0x12` | `set_update_routine` | `DAT_009A5CE0 = PTR_FUN_00579E90[op0]` (two routines exist) |
+| `0x12` | `set_update_routine` | both players' `+0x80` hook (`g_player_entity_hook`, `0x009A5CE0`) = `g_player_entity_routines[op0]`: 0 `PlayerHookEnterSt1Vehicle` (stage 1 block 0: the bodies ride in the car), 1 `PlayerHookStandAtScenePoint` (stage 2 block 6). See `web/src/game/player_body.ts` |
 | `0x13` | `set_continuation` | per-player continuation = `op0 ? LAB_00403290 : FUN_00420810`. **Defined but never used in shipped data** |
 | `0x14` | `set_global` | `DAT_009C6F00 = op0` |
 | `0x15` | `set_flag` | `DAT_009C6F33 = 1`; the operand is ignored |

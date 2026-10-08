@@ -42,6 +42,7 @@ import type { Actor } from "../actor";
 import { G } from "../globals";
 import { CameraBlockYaw } from "../camera/view";
 import { ActorClaimHitSlot } from "../hit_slots";
+import { RegisterForShotTest } from "../combat/shot_test";
 import {
   registerClass, type ActorDebug, type ClassFrame, type ClassHandler,
 } from "../registry";
@@ -173,7 +174,12 @@ function Class26StoreWorldMatrix(obj: Actor): void {
  * The `RegisterForShotTest` at `0x0048EE9C` is **past the no-return
  * `MatrixStackPop`** Ghidra ends the function on (`L35`); disassembling from
  * `0x0048EE34` is what finds it, and it is how the boat gets into the list
- * the collision passes walk.
+ * the collision passes walk. The port made no such call while those passes
+ * walked the actor pool; they walk the list now (`coli.ts`), so the boat is
+ * a floor from the frame after its first registration, as in the engine.
+ * The port's own shot pick still passes over class 0x26
+ * (`ShotTestPickedHere`, `combat/shot_test.ts`): the entry feeds the
+ * collision passes and the crowd push, which refuses its bit `0x10`.
  */
 export function Class26Subtype2Update(obj: Actor, f: ClassFrame): void {
   const v = VehicleTailOf(obj);
@@ -216,6 +222,16 @@ export function Class26Subtype2Update(obj: Actor, f: ClassFrame): void {
   // The draw's `MatrixStore(obj+0x150)`, which runs whether or not the switch
   // posed the boat this frame.
   Class26StoreWorldMatrix(obj);
+  // `0x0048EE34`..`0x0048EE9C`: `obj+0x70..0x78` is `obj+0x40` through the
+  // camera block's matrix -- the view-space point, which the port keeps in
+  // world space (`Actor.shotCentre`) -- and then `RegisterForShotTest(obj)`.
+  // The `0x51` sends it to the mesh arm, so the point is never read; the
+  // registration is what puts the boat in the moving-object collision
+  // passes, which walk last frame's list (`coli.ts`).
+  obj.shotCentre.x = obj.pos.x;
+  obj.shotCentre.y = obj.pos.y;
+  obj.shotCentre.z = obj.pos.z;
+  RegisterForShotTest(obj, f.host);
 }
 
 /**

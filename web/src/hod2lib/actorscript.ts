@@ -247,3 +247,30 @@ export function civilianItemSlots(block: CivBlock | null,
   }
   return out;
 }
+
+/**
+ * Every `g_civilian_mouth_tables` row class 0x10's script *entry* can name
+ * with op `0x25` -- its second operand, which `CivilianDrawBonePart`
+ * (`FUN_0048D1F0`) reads the head's cels from. The row the hook hands over to
+ * is the caller's to add: see `CIVILIAN_MOUTH_HANDOFF_FROM`.
+ */
+export function civilianMouthRows(block: CivBlock | null,
+                                  entry: number): number[] {
+  const scripts = block?.scripts ?? [];
+  const entries = block?.entries ?? [];
+  if (!(entry >= 0 && entry < entries.length)) return [];
+  const out = new Set<number>();
+  const seen = new Set<number>();
+  const pending = [entries[entry]];
+  while (pending.length) {
+    const i = pending.pop()!;
+    if (seen.has(i) || !(i >= 0 && i < scripts.length)) continue;
+    seen.add(i);
+    for (const c of scripts[i]) {
+      const row = c.args[1];
+      if (c.op === 0x25 && typeof row === "number") out.add(row);
+      for (const j of c.scripts ?? []) if (j >= 0) pending.push(j);
+    }
+  }
+  return [...out].sort((a, b) => a - b);
+}

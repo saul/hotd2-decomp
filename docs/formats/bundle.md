@@ -62,14 +62,29 @@ Since format 11 every stage's `characters.placements` also carries two
 **synthetic** rows with `player_body` set, at `0x20000000 + p`: the players'
 bodies, character types `0x39` and `0x3A` -- the game-over fly-over's bodies
 and the route map's figures -- with every clip that screen draws them on
-(`0x32C`, `0x338`, `0x339`, `0x358`, `0x35B` as each type has them). Nothing
-spawns from them; `render/game_over_scene.ts` claims their hierarchies from the
-character layer.
+(`0x32C`, `0x338`, `0x339`, `0x358`, `0x35B` as each type has them), and every
+clip the `+0x80` player hooks put them on in play: `0x322`, `0x34A`, `0x319`,
+`0x334` (stage 1's car) and `g_player_stand_motions`' `0x349`, `0x356`
+(stage 2 block 6), on both types. Nothing spawns from them;
+`render/game_over_scene.ts` claims their hierarchies from the character layer
+and draws them on the game-over screen and in play.
+
+A stage that places class 0x41 constructor 61 (stage 6's `0x2058`) carries
+nine more synthetic rows, one per figure `PlaceType61Figures` builds, at
+`0x18000000 | i << 20 | placer` (`Type61FigureAt`), class `0x41`, parented to
+the placer, each of the character type `g_type61_figure_types[i]` on the clip
+the constructor gives it (`Type61FigureClip`); the placer's own
+`breakables.placements` row, `type61`, carries the nine types, and
+constructor 55's, `type55`, the 48 rows of `g_type55_particle_offsets`. See
+`spawns.md`, *Class 0x41 constructors 42, 52, 55, 61 and 65*.
 
 Since format 12 `script.json` carries a `game_over` block -- the game-over
 screen's `.rdata`, read by `ExeTables.gameOverTables`: the
 bodies' types, start and fall clips, fall frames and stands; the route map's
-tile bases, waypoint table and default route -- and `screen_sprites` (the old
+tile bases, waypoint table and default route; and the bodies' tables in play,
+`entity_offsets` (`0x00579E98`), `seat_x` (`g_st1_vehicle_seat_x`),
+`stand_points` and `stand_motions` (`g_player_stand_points`,
+`g_player_stand_motions`) -- and `screen_sprites` (the old
 `hud_sprites`) holds the logo's and the route tiles' images beside the HUD's.
 The `.text` immediates that are join keys (the logo sprite ids, the figures'
 clips, the disc and footprint slots) live in `web/src/game/player_body_data.ts`,
@@ -116,6 +131,43 @@ draws behind an actor that has gone into the water
 the schema digest and the builder hash moved and no format bump: an older
 bundle reads, its corpses lie on their clips' last frames and it draws no
 wake.
+
+Every stage's `slots_effect` rig carries the ground shadow, `common.bin`
+200 (slot `0x10D0`): the last call of every skinned draw and of both thrown
+weapons' (`ActorDrawGroundShadow`, `FUN_0040A620`), drawn from
+`G.g_world_slot_draws` by `render/view_slots.ts` in its draw layer `0xD`.
+See `combat.md`, *Every character's ground shadow*.
+
+A class-0x29 placement -- the floor decals, stages 1 and 2 -- carries
+`class29: {kill_path, kill_frame}`, the two `s16`s at `desc+0x24`, and its
+`hp` is the list `SceneryBatchUpdate29` (`FUN_00432C80`) draws. The three
+lists themselves are `.data` literals in `web/src/game/class29/`, checked
+word for word by `web/tools/checks/prop_tables.ts`; the two slots they draw,
+`0x93C` and `0x93D`, ride the hidden `slots_effect` rig.
+
+A class-0x13 placement carries `class13: {slot, cam_path, cam_frame, scale,
+behaviour, selector}` (`class13Tail`), `selector` being the operand block's
+first dword (`desc+0x24+0x14`). Two optional fields ride with the two
+`g_prop_behaviours` entries that read more of it, and only on those:
+`operand`, the six f32 at `+0x14..+0x28` that `PropBehaviourLaunchWithAccel`
+(`FUN_0043FFC0`, behaviour 6) turns into a velocity and an acceleration, and
+`path_length`, `g_cam_path_length[selector]` (`0x00576D38`), the end
+`PropBehaviourRideObjectPath` (`FUN_004400D0`, behaviour 7) compares the
+camera frame with -- the image's table, read by the exporter
+(`ExeTables.camPathLength`) for the one slot the descriptor names. No
+shipped descriptor takes either behaviour, so no shipped bundle carries
+either field; the schema digest moved and no format bump.
+
+Every stage carries `subtitle_glyphs`, `g_subtitle_glyphs` (`0x0055E054`)
+as s16[128]: the screen sprite `DrawTextCentred` (`FUN_00436850`) draws for
+each character. `screen_sprites` carries the glyphs of the characters the
+shipped dialogue lines use, and `0x62D` for `~` -- `scr_jimaku_e.bin`, PAL4
+on palette 0. See `evt.md`, *`2D` -- the dialogue*.
+
+Class 0x41 constructor 3 -- stage 1 block 0's placer -- is a breakables
+placement with `container: "uv_scroll"` and nothing else: the task reads
+nothing of the placer. The three shells it rewrites are the `st1_vehicle`
+rig's own primitives, found by `hod2_slots` and `hod2_model`.
 
 Every stage carries `characters.class32` -- class 0x32's `.rdata`, read by
 `web/src/hod2lib/class32.ts` where the stage-5 boss's routines index it:

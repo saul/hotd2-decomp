@@ -1065,9 +1065,15 @@ function SceneTaskWalk(dt: number, host: GameHost,
       if (obj.despawned) continue;
       // ...and one that installs its update and returns has had this walk's
       // call: the update starts on the next. See
-      // `ClassHandler.firstUpdateNextWalk`.
-      if (g_class_handlers[obj.cls]?.firstUpdateNextWalk) continue;
+      // `ClassHandler.firstUpdateNextWalk`. Nothing drew it on this walk,
+      // which the renderer is told: see `Actor.firstUpdatePending`.
+      if (g_class_handlers[obj.cls]?.firstUpdateNextWalk) {
+        obj.firstUpdatePending = true;
+        continue;
+      }
     }
+    // [port-only] The walk has reached the update an `Init` installed.
+    obj.firstUpdatePending = false;
     // Every actor's clips run, handler or not: a class with no behaviour still
     // loops the motion the script gave it.
     if (obj.visible) {

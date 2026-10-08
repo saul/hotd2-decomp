@@ -998,9 +998,17 @@ console.log("the walk that runs an Init:");
     check("a zombie's Init walk runs its Init and not its update",
           !z.initPending && calls === 0,
           `initPending ${z.initPending}, ${calls} update(s)`);
+    // Nothing drew it on that walk -- the engine's draw is the update's -- so
+    // the renderer must not show it in the clip its `Init` set: stage 1's
+    // grab zombie stood eleven units up for one frame before its submerged
+    // clip began.
+    check("...so after that walk it is not to be drawn",
+          z.firstUpdatePending, `firstUpdatePending ${z.firstUpdatePending}`);
     GameUpdate(1 / 60, NULL_HOST, rng, events);
     check("...and the next walk runs the update, once", calls === 1,
           `${calls} update(s)`);
+    check("...after which it is drawn", !z.firstUpdatePending,
+          `firstUpdatePending ${z.firstUpdatePending}`);
   } finally {
     row.update = update;
   }

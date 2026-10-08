@@ -356,7 +356,21 @@ the object inline, and the shot-test table called it `[open]` until the
 image for the routine's address as an immediate** (`68 <addr>`), and follow
 every allocation that pushes it.
 
-**L114 -- A repair of the database is not a re-reading of what was written from
+**L114 -- An offset off a typed pointer in the decompilation is in elements,
+not bytes.** `CivilianUpdate`'s sphere switch reads
+`MatrixMultiply(g_cur_actor_model + 0x70)`, and `g_cur_actor_model` is an
+`int *`, so that is byte `+0x1C0` -- `ADD ECX, 0x1C0` at `0x0048AE24` says so.
+Read as bytes, `+0x70`, `+0x4C`, `+0x244` and `+0x1D8` land between the bone
+draw records, and the port recorded three of the switch's four arms as
+"matrices the pose leaves behind, which `game/` cannot reach" -- an `[open]`
+that hid the default arm, so most civilians were never measured where the
+engine measures them. Scaled by four they are bones 2, 1, 15 and 12, at
+`model+0xA0 + bone*0x90`, and `GameHost.boneWorld` had answered them all
+along. **Before calling an offset unreachable, look at the variable's type in
+the decompilation, and read the `ADD`/`LEA` in the listing: the instruction
+carries the byte offset and the pseudocode does not.**
+
+**L115 -- A repair of the database is not a re-reading of what was written from
 it, and a negative is what the cut pseudocode wrote best.** `L89` put back the
 bodies 1,085 flow overrides had cut, and every row, comment and `[open]`
 written from the cut pseudocode stayed as it was. `FishBeginSwimAway`'s row
@@ -1078,6 +1092,20 @@ router the port had invented, where the engine's byte 0 is `NoOpStub`.
 `bones[].slot` against the real skeleton, a start state against the real
 descriptor -- or pick a type number no routine switches on**, and when a new
 port breaks old fixtures, check the fixture against the data before the port.
+
+**L114 -- Moving when an update runs moves when the actor is drawn.** The
+engine draws an actor from inside its update (`DrawSkinnedModelAndShadow` in
+`EnemyZombieUpdate`), so a walk that runs no update draws nothing. The port's
+renderer draws every pooled actor after the walk, whatever ran. `c006e697`
+moved fourteen classes' first update to the walk after their `Init`, which is
+right, and left the renderer drawing them on the `Init` walk in the clip the
+`Init` set. Stage 1's grab zombie stood eleven units up for one frame above the
+barrier before its submerged clip began. The game state was right on every
+tick and every test passed. **When a change makes an update skip a walk, ask
+what the renderer shows on that walk** (`Actor.firstUpdatePending` is the
+answer for the `Init` walk). And a one-frame transient is invisible to
+screenshots taken at intervals: step the page under `?drive=1` and read a
+drawn quantity -- `Actor.lookAt` is bone 1 as last drawn -- every tick.
 
 ---
 

@@ -574,7 +574,11 @@ export class CharacterLayer implements System {
       // as "the draw ran": see `alphaGatesWholeActor`.
       // Class 0x45's routines say for themselves whether they drew the
       // skeleton this frame -- see `render/characters/boss3.ts`.
+      // ...and not on the walk its `Init` ran without its update: the
+      // engine draws inside the update, so that walk drew nothing
+      // (`Actor.firstUpdatePending`).
       const show = this.enabled && inst.a.visible
+        && !inst.a.firstUpdatePending
         && (!alphaGatesWholeActor(inst) || inst.a.alpha > 0)
         && boss3Drawn(inst);
       inst.root.visible = show;
@@ -1404,6 +1408,7 @@ export class CharacterLayer implements System {
       applyDrawGates(inst);
       applyHeadAim(inst);
       inst.root.visible = this.enabled && inst.a.visible
+        && !inst.a.firstUpdatePending
         && (!alphaGatesWholeActor(inst) || inst.a.alpha > 0)
         && boss3Drawn(inst);
       if (poseBoss3(inst)) {

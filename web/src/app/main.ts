@@ -163,9 +163,9 @@ import { ProfileBoot } from "../game/profile";
 import { readOriginalChoice, readProfile, writeOriginalChoice, writeProfile }
   from "./profile_store";
 import { OptionsPad, OptionsTap } from "../game/options/list";
-import { SetBoss4Tables, SetClass2DTables, SetGameOverTables, SetGameTables,
-         SetOptionsTables, SetOriginalModeTables, SetResultCardTables,
-         SetDialogueTables }
+import { SetBoss4Tables, SetChapterCardTables, SetClass2DTables,
+         SetDialogueTables, SetGameOverTables, SetGameTables,
+         SetOptionsTables, SetOriginalModeTables, SetResultCardTables }
   from "../game/tables";
 import { PressKind, type Press } from "../core/net/protocol";
 import { NetSession, type NetRole } from "./net/session";
@@ -1233,6 +1233,7 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     SetBoss4Tables(script.boss4, script.carrier_door_yaw);
     SetClass2DTables(script.class2d);
     SetResultCardTables(script.result_card);
+    SetChapterCardTables(script.chapter_card);
   }
 
   /**
@@ -1838,6 +1839,11 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
         }
         return;
       case PressKind.Offscreen:
+        // The reload is also B in the pad word -- the mouse's right button
+        // (`MouseReadButtons`, `FUN_0041F370`) and Right Ctrl
+        // (`KeyboardReadAsPad`, `FUN_0041F1A0`) are `0x2` -- which is the bit
+        // the chapter card's skip tests (`TEST AL, 0x2` at `0x0043481B`).
+        this.padLatch |= 0x2 * shift;
         if (this.gameRunning && !this.frozen) QueueOffscreenPull(player);
         return;
       case PressKind.Start:

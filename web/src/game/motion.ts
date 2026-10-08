@@ -121,6 +121,7 @@ export function ActorAdvanceMotion(obj: Actor, dt: number): void {
       // from the frame after the one it was held on.
       run = -obj.fade;
       obj.fadeFrom = null;
+      obj.fadeInto = null;
       obj.fade = 0;
     } else {
       run = 0;

@@ -120,7 +120,7 @@ function unionRejectsCrossClassReads(a: Actor, h: HumanoidActor,
   // @ts-expect-error `obj+0x1338` — frames since the last shove
   void a.shoveTimer;
   // @ts-expect-error `obj+0x1368` bit 0, which class 0x31 reads as `reactBone`
-  void a.hasCooldown;
+  void a.flags1368;
   // @ts-expect-error `obj+0x1398` — the captor script cursor
   void a.scriptPc;
   // @ts-expect-error ...and which of the two blobs it is walking

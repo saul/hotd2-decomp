@@ -24,7 +24,7 @@
  */
 import type { Events } from "../core/events";
 import type { MessageVariant } from "../bundle/sound";
-import { CAPTION_MODE } from "./credit_prompt";
+import { CAPTION_MODE, CAPTION_MODE_CAPTIONED } from "./caption_mode";
 import { SUBTITLE_TILDE_SPRITE } from "./dialogue_data";
 import { G } from "./globals";
 import { DrawScreenSprite } from "./screen_sprite";
@@ -146,7 +146,7 @@ export function EvtOpPlayDialogue2D(group: number,
  * The countdown is the line's clock: `end_frame` is the frames still left
  * when a line gives way, and the last line's is 0, so it holds to the end
  * and the index never passes it. The sprite arm is the build's other caption
- * mode; `g_wCaptionMode` is 2 here (`credit_prompt.ts`), so it is never
+ * mode; `g_wCaptionMode` is 2 here (`caption_mode.ts`), so it is never
  * taken, and the line is always drawn as text.
  */
 export function DrawDialogueSubtitleTask(t: DialogueTask): boolean {
@@ -157,7 +157,7 @@ export function DrawDialogueSubtitleTask(t: DialogueTask): boolean {
   }
   const v = T.dialogueVariants[t.variant];
   if (!v) return false;
-  if (CAPTION_MODE === 1) {
+  if (CAPTION_MODE === CAPTION_MODE_CAPTIONED) {
     if (v.sprite === 0) return false;
     DrawScreenSprite(v.sprite, v.x, v.y, 1, 1, 1, 7, 0);
     return true;

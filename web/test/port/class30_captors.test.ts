@@ -1,3 +1,4 @@
+import { Zombie1368Flag } from "../../src/game/class30/state";
 import { Rng } from "../../src/core/rng";
 import { Events } from "../../src/core/events";
 import { authoredFrameOfTicks } from "../../src/core/play_cursor";
@@ -28,7 +29,7 @@ import {
   ActorFlag, ActorUpdateBoundingSphere, CountFlag, ThrowerFlag, ZombieFlag2,
   type Actor, type ZombieActor,
 } from "../../src/game/actor";
-import { EnemyZombieUpdate, ZOMBIE_CAMERA_RISE, ZombieEntryState }
+import { EnemyZombieUpdate, ZOMBIE_CAMERA_RISE }
   from "../../src/game/class30";
 import { ThrowerPlaceCollisionSphere, ThrowerPushOutOfWorld }
   from "../../src/game/class31/collide";
@@ -570,7 +571,7 @@ console.log("\nclass 0x30's placement: the ground snap and the two entrances:");
     const z = scene30();
     z.pos = vec3(0, -5, 0);
     z.emerge = { delay: 30, motion: 12 };
-    z.state = ZombieEntryState(ZombieState.Emerge);
+    z.state = ZombieState.Emerge;
     check("state 27 is an entrance, not a synonym for AttackRun",
           z.state === ZombieState.Emerge, `state ${z.state}`);
     EnemyZombieUpdate(z, { dt: 1 / 60, rng, host: NULL_HOST });
@@ -603,7 +604,7 @@ console.log("\nclass 0x30's placement: the ground snap and the two entrances:");
   {
     const z = scene30();
     z.emerge = { delay: 0, motion: 12 };
-    z.state = ZombieEntryState(ZombieState.Emerge);
+    z.state = ZombieState.Emerge;
     EnemyZombieUpdate(z, { dt: 1 / 60, rng, host: NULL_HOST });
     check("a zero-delay emerge plays its clip on the spawn frame",
           z.motion === 12 && z.sub === 2, `motion ${z.motion} sub ${z.sub}`);
@@ -611,7 +612,7 @@ console.log("\nclass 0x30's placement: the ground snap and the two entrances:");
     const w = scene30();
     w.emerge = { delay: 15, motion: 12 };
     w.attackState = 1;
-    w.state = ZombieEntryState(ZombieState.Emerge);
+    w.state = ZombieState.Emerge;
     G.g_world_slot_draws = [];
     EnemyZombieUpdate(w, { dt: 1 / 60, rng, host: NULL_HOST });
     // Both gates: `obj+0x1F8 &= ~1` for the skeleton and
@@ -656,7 +657,7 @@ console.log("\nclass 0x30's placement: the ground snap and the two entrances:");
     // Well out of the rings, so the run is still the run when its fade ends.
     z.pos = vec3(0, 0, 150);
     z.allowance = 8;
-    z.state = ZombieEntryState(ZombieState.Emerge);
+    z.state = ZombieState.Emerge;
     const em = MotionOf(z, 700)!;
     const step = () => {
       ActorAdvanceMotion(z, 1 / 60);
@@ -728,7 +729,7 @@ console.log("\nclass 0x30's placement: the ground snap and the two entrances:");
     const z = scene30();
     z.pos = vec3(0, -5, 0);
     z.emerge = { delay: 30, motion: 12 };
-    z.state = ZombieEntryState(ZombieState.Emerge);
+    z.state = ZombieState.Emerge;
     EnemyZombieUpdate(z, { dt: 1 / 60, rng, host: NULL_HOST });
     check("sub 0 raises both of the bits `OR DH, 0x21` names",
           (z.flags & (ActorFlag.ShotImmune | ActorFlag.NoHitReaction))
@@ -783,7 +784,7 @@ console.log("\nclass 0x30's placement: the ground snap and the two entrances:");
     const z = scene30();
     z.pos = vec3(0, -5, 0);
     z.emerge = { delay: 30, motion: 12 };
-    z.state = ZombieEntryState(ZombieState.Emerge);
+    z.state = ZombieState.Emerge;
     EnemyZombieUpdate(z, { dt: 1 / 60, rng, host: NULL_HOST });
     check("sub 0 raises obj+0x136C 0x100002",
           (z.flags2 & 0x100002) === 0x100002 && (z.flags2 & 0x10) === 0,
@@ -801,7 +802,7 @@ console.log("\nclass 0x30's placement: the ground snap and the two entrances:");
     const alt = scene30();
     alt.flags |= 0x200000;
     alt.emerge = { delay: 30, motion: 12 };
-    alt.state = ZombieEntryState(ZombieState.Emerge);
+    alt.state = ZombieState.Emerge;
     EnemyZombieUpdate(alt, { dt: 1 / 60, rng, host: NULL_HOST });
     check("...with obj+0x34 0x200000 it clears that and raises 0x10 instead",
           (alt.flags & 0x200000) === 0 && (alt.flags2 & 0x10) !== 0
@@ -812,7 +813,7 @@ console.log("\nclass 0x30's placement: the ground snap and the two entrances:");
     // What the bit is for: shot dead while the clip lifts it out.
     const shot = scene30();
     shot.emerge = { delay: 0, motion: 12 };
-    shot.state = ZombieEntryState(ZombieState.Emerge);
+    shot.state = ZombieState.Emerge;
     EnemyZombieUpdate(shot, { dt: 1 / 60, rng, host: NULL_HOST });
     shot.dead = true;
     shot.flags |= ActorFlag.Dead;
@@ -1239,8 +1240,8 @@ console.log("\nclass 0x30 state 15, the scripted walk-in:");
   // fifty of the game's walk-in spawns turned to face the camera on their
   // first frame instead of walking the entrance the level was built for.
   check("a state-15 spawn starts in WalkDistance, not AttackRun",
-        ZombieEntryState(ZombieState.WalkDistance) === ZombieState.WalkDistance,
-        String(ZombieEntryState(ZombieState.WalkDistance)));
+        walker(8).state === ZombieState.WalkDistance,
+        String(walker(8).state));
 
   {
     const z = walker(8);
@@ -1738,25 +1739,6 @@ console.log("\nclass 0x30's twelve entrance states — do the waits end?");
   // against the real bundle; this checks the shapes against data written here,
   // where a cue can be put exactly on and exactly past its frame.
 
-  // **The entry router passes every shipped entrance through now.** It used to
-  // fold 37 of the 54 states into `AttackRun`, which is what sent a zombie
-  // scripted to drown you jogging across the room instead.
-  for (const st of [ZombieState.SurfaceOnCameraCue, ZombieState.RunInPlaceTimed,
-                    ZombieState.HoldClipThenBranch,
-                    ZombieState.WaitCameraFrameThenBranch,
-                    ZombieState.WaitForCameraFrame,
-                    ZombieState.WaitScriptFlagThenBranch,
-                    ZombieState.ScriptedGrabAndDespawn, ZombieState.LeapToPoint,
-                    ZombieState.RideCarrier, ZombieState.ArcScriptedEntrance,
-                    ZombieState.WaitScriptFlagThenEnter,
-                    ZombieState.DelayedStrikeInPlace]) {
-    check(`a state-${st} spawn starts there, not in AttackRun`,
-          ZombieEntryState(st) === st, String(ZombieEntryState(st)));
-  }
-  check("...and a state nothing ships still falls back to AttackRun",
-        ZombieEntryState(53) === ZombieState.AttackRun,
-        String(ZombieEntryState(53)));
-
   const spawn = (init: number, entry: unknown, exit = ZombieState.AttackRun) => {
     ResetGameGlobals();
     EnterPlay();
@@ -1783,6 +1765,25 @@ console.log("\nclass 0x30's twelve entrance states — do the waits end?");
       ActorAdvanceMotion(z, 1 / 60);
     }
   };
+
+  // **`EnemyZombieInit` takes the descriptor's byte as it stands**
+  // (`0x00452F36`). A router used to fold 37 of the 54 states into
+  // `AttackRun`, which is what sent a zombie scripted to drown you jogging
+  // across the room instead; it is gone, and every entrance lands where its
+  // byte says.
+  for (const st of [ZombieState.SurfaceOnCameraCue, ZombieState.RunInPlaceTimed,
+                    ZombieState.HoldClipThenBranch,
+                    ZombieState.WaitCameraFrameThenBranch,
+                    ZombieState.WaitForCameraFrame,
+                    ZombieState.WaitScriptFlagThenBranch,
+                    ZombieState.ScriptedGrabAndDespawn, ZombieState.LeapToPoint,
+                    ZombieState.RideCarrier, ZombieState.ArcScriptedEntrance,
+                    ZombieState.WaitScriptFlagThenEnter,
+                    ZombieState.DelayedStrikeInPlace]) {
+    const z = spawn(st, null);
+    check(`a state-${st} spawn starts there, not in AttackRun`,
+          z.state === st, String(z.state));
+  }
 
   // -- state 17: hold a clip for N frames, then branch ---------------------
   {
@@ -1915,8 +1916,8 @@ console.log("\nclass 0x30's twelve entrance states — do the waits end?");
           z.state === ZombieState.Strike && z.attackPermit >= 0,
           `${z.state}/${z.attackPermit}`);
     check("...arming the cooldown, which no other class-0x30 state does",
-          z.zom.hasCooldown && z.cooldown === 90,
-          `${z.zom.hasCooldown}/${z.cooldown}`);
+          (z.zom.flags1368 & Zombie1368Flag.Cooldown) !== 0 && z.cooldown === 90,
+          `${z.zom.flags1368}/${z.cooldown}`);
   }
   {
     // A failed claim is not an error — the actor takes the descriptor's branch.
@@ -1926,8 +1927,8 @@ console.log("\nclass 0x30's twelve entrance states — do the waits end?");
     G.g_cam_path_frame = 10;
     run(z, 3);
     check("...and a state-19 spawn that does not claim just branches",
-          z.state === ZombieState.AttackRun && !z.zom.hasCooldown,
-          `${z.state}/${z.zom.hasCooldown}`);
+          z.state === ZombieState.AttackRun && !(z.zom.flags1368 & Zombie1368Flag.Cooldown),
+          `${z.state}/${z.zom.flags1368}`);
   }
 
   // -- state 31: it counts itself into the game ---------------------------

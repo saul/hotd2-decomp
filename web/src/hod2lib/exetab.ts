@@ -80,6 +80,11 @@ export const BANK_PALETTE_INDEX: ReadonlyMap<number, number> =
  * item pictures `OriginalItemBannerUpdate` (`FUN_00475D00`) draws, one bank
  * per `g_original_item_records[id].sprite` (`0x5BD..0x5DE`).
  *
+ * And palette 0xB for the six chapter banks `scr_chapter_st1`..`st6`
+ * (`0x18C..0x191`), which the byte table sends to jump-table entry 16,
+ * `MOV EAX, 0xB` at `0x0041CA20`: the chapter card's title sprites,
+ * `ChapterTitleDraw` (`FUN_00436AD0`).
+ *
  * And palette 0x1B for `0x1B5`, `scr_item_all`, jump-table entry 18 (byte
  * `0x0041CBFE`), `MOV EAX, 0x1B` at `0x0041CA8E`: the trunk's list of item
  * names, `g_original_item_list_sprites` (`0x5F9..0x61A`).
@@ -91,6 +96,8 @@ export const BANK_PALETTE_INDEX: ReadonlyMap<number, number> =
 export const BANK_PALETTE_CONST: ReadonlyMap<number, number> = new Map([
   [0x177, 10], [0x186, 10], [0x187, 10], [0x188, 10], [0x189, 10],
   [0x18a, 10], [0x18b, 10], [0x156, 0x14], [0x1b5, 0x1b], [0x17b, 0],
+  [0x18c, 0xb], [0x18d, 0xb], [0x18e, 0xb], [0x18f, 0xb], [0x190, 0xb],
+  [0x191, 0xb],
   ...Array.from({ length: 0x1b5 - 0x193 },
                 (_, i): [number, number] => [0x193 + i, 0x14]),
 ]);
@@ -1712,6 +1719,45 @@ export class ExeTables {
           const v = this.ru16(0x00567990 + i * 2) ?? 0;
           return v >= 0x8000 ? v - 0x10000 : v;
         }),
+    };
+  }
+
+  /**
+   * The chapter card's `.rdata`, for `script.json`'s `chapter_card` block:
+   * the four tables its variant arms index, each only as long as the index
+   * that reads it (L6).
+   *
+   * * `boss_mode_backdrop_sprites` -- `0x0055DD50`, s16, one per scene:
+   *   `MOVSX EAX, word ptr [EDX*2 + 0x55dd50]` at `0x004349CC`, `EDX` the
+   *   scene index (`BossModeChapterCardUpdate`, `FUN_00434920`).
+   * * `boss_mode_backdrop_flags` -- `0x0055DD5C`, u8, one per scene: `MOV
+   *   DL, byte ptr [ECX + 0x55dd5c]` at `0x00434A28`.
+   * * `attract11_frames` and `attract11_flash_frames` -- `0x0055DD64` and
+   *   `0x0055DD70`, s16[5]: `MOVSX EDX, word ptr [EDX*2 + 0x55dd64]` /
+   *   `0x55dd70` at `0x00434E61` / `0x00434E24`, `EDX` being
+   *   `(g_frame_counter % 10) >> 1` (`AttractScene11ChapterCardUpdate`,
+   *   `FUN_00434DA0`).
+   */
+  chapterCardTables(): Record<string, unknown> {
+    const s16 = (va: number): number => {
+      const v = this.ru16(va) ?? 0;
+      return v >= 0x8000 ? v - 0x10000 : v;
+    };
+    const u8 = (va: number): number => {
+      const r = this.v2r(va);
+      return r === null ? 0 : this.data[r];
+    };
+    const SCENES = 6;
+    const FRAMES = 5;
+    return {
+      boss_mode_backdrop_sprites: Array.from({ length: SCENES },
+        (_u, i) => s16(0x0055dd50 + i * 2)),
+      boss_mode_backdrop_flags: Array.from({ length: SCENES },
+        (_u, i) => u8(0x0055dd5c + i)),
+      attract11_frames: Array.from({ length: FRAMES },
+        (_u, i) => s16(0x0055dd64 + i * 2)),
+      attract11_flash_frames: Array.from({ length: FRAMES },
+        (_u, i) => s16(0x0055dd70 + i * 2)),
     };
   }
 

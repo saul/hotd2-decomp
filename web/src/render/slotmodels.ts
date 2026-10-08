@@ -567,6 +567,7 @@ export class SlotModelLayer implements System<RenderContext> {
     this.drawPropStrips(seen);
     this.drawBoss2Flipbooks(ctx, seen);
     this.drawLandingRings(seen);
+    this.drawAttachedEffects(seen);
     this.drawBoss5Draws(seen);
 
     for (const [key, l] of this.extras) {
@@ -812,6 +813,24 @@ export class SlotModelLayer implements System<RenderContext> {
       mRotY(_m, r.yaw);
       mScale(_m, r.scale.x, r.scale.y, r.scale.z);
       this.extra(`ring:${a.at}`, LANDING_RING_SLOT, _m, seen, 1.0 - r.fade);
+    }
+  }
+
+  /**
+   * The wakes class 0x30 leaves in the water, as `AttachedEffectThink`
+   * (`FUN_004083D0`) drew them this frame: `T(p) RotY(yaw) Scale(sx, 1, sz)`
+   * and slot `0x1A78 + n % 0x32` through `AssetDrawSlotWithAlpha` -- every
+   * number off the task's record. See `game/effects/attached_effect.ts`.
+   */
+  private drawAttachedEffects(seen: Set<number | string>): void {
+    for (const e of G.g_attached_effects) {
+      const d = e.drawn;
+      if (!d) continue;
+      _m.identity();
+      mTranslate(_m, d.x, d.y, d.z);
+      mRotY(_m, d.yaw);
+      mScale(_m, d.sx, 1, d.sz);
+      this.extra(`wake:${e.id}`, d.slot, _m, seen, d.alpha);
     }
   }
 

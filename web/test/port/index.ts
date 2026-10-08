@@ -52,6 +52,9 @@
  *   registry          `g_class_handlers`, `ActorDeadSweep`, the shot queue,
  *                     the strike anchor; the rain
  *   class30_death     class 0x30's death chain, fades and `ZombieOnShot`
+ *   class30_gaps      class 0x30's dispatch entry for entry, its two hooks
+ *                     after the draw, the body condition a shot leaves, the
+ *                     kill-move and remapped deaths, the corpse's pose
  *   script            the walker's waits and the camera path
  *   shots             the character's size, severed heads, the camera block's
  *                     yaw, the voices, the shot effects, the firing gate
@@ -101,6 +104,7 @@ import "./player.test";
 import "./class30_states.test";
 import "./registry.test";
 import "./class30_death.test";
+import "./class30_gaps.test";
 import "./script.test";
 import "./shots.test";
 import "./cards.test";

@@ -99,6 +99,10 @@ import { OPTIONS_SCREEN_SPRITES, SCREEN_IDLE_DIM_SLOT }
 // immediates in `ResultCardInstall`.
 import { RESULT_CARD_SPRITES, RESULT_GLYPH_SLOTS }
   from "../game/class61/state";
+// And the chapter card's: its title sprites and stage 6's model are
+// immediates in `ChapterCardInstall`, by scene.
+import { ChapterCardSlotsOf, ChapterCardSpritesOf }
+  from "../game/class60/state";
 // The trunk's sprites and models: class 0x6E's immediates.
 import { ITEM_SELECT_SLOTS, ITEM_SELECT_SPRITES } from "../game/class6e/state";
 import { SpawnClass } from "../game/spawn_class";
@@ -112,7 +116,7 @@ import { WEAPON_FIRST_SLOT, WEAPON_LAST_FRAME }
   from "../game/effects/shot_effects";
 import { SpriteEffectKind } from "../game/effects/sprite";
 import { charactersJson, resolveForStage as resolveCharacters,
-         stagePlacesResultCard } from "./characters";
+         stagePlacesChapterCard, stagePlacesResultCard } from "./characters";
 import * as charmotion from "./charmotion";
 import * as colilib from "./coli";
 import { class42Tables } from "./class42";
@@ -1765,6 +1769,10 @@ async function effectDefJson(stage: Stage, effect: number, motion: number,
  * and not a `BreakableProp`: it is registered for the shot test by
  * `RegisterForShotTest` with a radius at `obj+0x124`, not by a bounding box.
  */
+/** `0x1A78 + ftol(obj+0x1370) % 0x32` -- `water.bin` 13..62. */
+const ATTACHED_EFFECT_SLOTS: number[] =
+  Array.from({ length: 0x32 }, (_, i) => 0x1a78 + i);
+
 export const ACTOR_SLOTS: Record<number, number[]> = {
   // `fish.bin` 3..22 -- the twenty-frame swim strip class 0x51 flips through
   // -- then entries 0, 1 and 2: the flung corpse, the sunk one, and the ripple
@@ -1822,6 +1830,13 @@ export const ACTOR_SLOTS: Record<number, number[]> = {
   // 0x40's slots: the ripple `0x1A38` and the strip `0x15E4..0x1601`.
   0x42: [...Array.from({ length: 0x88f - 0x85a + 1 }, (_, i) => 0x85a + i),
          0x1a38, ...Array.from({ length: 30 }, (_, i) => 0x15e4 + i)],
+  // Classes 0x30 and 0x18 (whose update is `EnemyZombieUpdate` too): the
+  // wake `ActorCheckWaterEntry` (`FUN_00456920`) leaves on an actor that
+  // wades in -- `AttachedEffectThink` (`FUN_004083D0`) draws
+  // `AssetDrawSlotWithAlpha(0x1A78 + n % 0x32)`, `water.bin` 13..62, a
+  // fifty-cel cycle. See `game/effects/attached_effect.ts`.
+  0x30: ATTACHED_EFFECT_SLOTS,
+  0x18: ATTACHED_EFFECT_SLOTS,
   // Class 0x32, the stage-5 boss: every model its projectiles and its tasks
   // draw, in the world and under a light colour of their own, which
   // `render/slotmodels.ts` draws. The afterimage (`Class32AfterimageTick`,
@@ -2380,7 +2395,8 @@ export async function actorSlotEntry(
     routine: "asset-slot actor draws (classes 0x13, 0x14, 0x32, 0x40, 0x42, "
       + "0x43, 0x51, 0x52; class 0x25 variant 3; "
       + "class 0x26 subtypes 6 and 7; "
-      + "class 0x33 selectors 1 and 4; class 0x41 type 1's water tiles)",
+      + "class 0x33 selectors 1 and 4; class 0x41 type 1's water tiles; the "
+      + "wake classes 0x30 and 0x18 leave in the water)",
     worldSpace: false,
     parts: parts.map(([p]) => p),
     note: "actor models drawn by asset slot; hidden, cloned per live actor",
@@ -3040,6 +3056,10 @@ export async function buildStage(stage: Stage, sink: BundleSink,
     // ...and the result card's `result.bin` glyphs, drawn in view space by
     // `render/view_slots.ts`, for a stage that places the card.
     ...(prog && stagePlacesResultCard(prog) ? RESULT_GLYPH_SLOTS : []),
+    // ...and the chapter card's scene-5 model, drawn in view space by
+    // `render/view_slots.ts`, for a stage that places the card.
+    ...(prog && stagePlacesChapterCard(prog)
+      ? ChapterCardSlotsOf(stage.scene) : []),
     // ...and the trunk and its lid, `car_org.bin` 1 and 2, drawn in the world
     // by `render/view_slots.ts`, where the trunk is spawned.
     ...(trunk ? ITEM_SELECT_SLOTS : []),
@@ -3118,6 +3138,9 @@ export async function buildStage(stage: Stage, sink: BundleSink,
   // is: the figures' records and lists, their attachment lists, the glyph
   // strings, the life bonus and the accuracy bonus.
   scriptJson.result_card = tables.resultCardTables();
+  // The chapter card's: the Boss Mode backdrop and app state 0x0B's frames,
+  // the two arms of `ChapterCardInstall` that read a table.
+  scriptJson.chapter_card = tables.chapterCardTables();
   const routeTiles = (gameOver.route_tiles as number[]).flatMap((base) =>
     Array.from({ length: ROUTE_TILES_PER_SCREEN }, (_u, i) => base + i));
   // The options screen (app state 0x0C): one block for the whole game, as
@@ -3155,6 +3178,9 @@ export async function buildStage(stage: Stage, sink: BundleSink,
                                               stage.scene)),
      // The result card's frame, for a stage that places the card.
      ...(prog && stagePlacesResultCard(prog) ? RESULT_CARD_SPRITES : []),
+     // The chapter card's title, this scene's eight.
+     ...(prog && stagePlacesChapterCard(prog)
+       ? ChapterCardSpritesOf(stage.scene) : []),
      // Original Mode's bullets, `HudDrawAmmoAndReloadPrompt`'s row by fire
      // mode, for an Original stage.
      ...(stage.original

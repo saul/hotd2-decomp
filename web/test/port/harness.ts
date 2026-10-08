@@ -30,6 +30,7 @@ import {
 } from "../../src/game/actor";
 import { type ClassFrame } from "../../src/game/registry";
 import { SpawnClass } from "../../src/game/spawn_class";
+import { ZombieState } from "../../src/game/class30/states";
 import { GameMode } from "../../src/game/game_mode";
 import { vec3, type Vec3 } from "../../src/game/vec";
 import { EffectCode } from "../../src/game/combat/resolve_hit";
@@ -96,8 +97,13 @@ export const TYPE: CharacterType = {
       damage_rank: [], hit_radius: 2, hit_slot: 4,
       steps: [[0x11, EffectCode.Escalate, 3], [0x12, EffectCode.Escalate + 1, 3],
               [0x13, EffectCode.Escalate + 2, 3], [0x14, EffectCode.Sever, 3]] },
-    { bone: 5, part: "r_forearm", slot: 5, offset: [0, 0, 0], parent: 0,
-      damage_rank: [], hit_radius: 2, hit_slot: 5, steps: [] },
+    // Bone 5's slot is `znassb.bin`'s right-hand prop, `0x1BA9`: this type is
+    // number 1, and `ActorUpdateBodyCondition` (`FUN_00454270`) reads a type-1
+    // actor's bone 5 against that literal on every damaging shot and drops
+    // it to condition 0 when neither hand holds its prop. A made-up slot here
+    // disarmed every fixture zombie on its first hit.
+    { bone: 5, part: "r_forearm", slot: 0x1ba9, offset: [0, 0, 0], parent: 0,
+      damage_rank: [], hit_radius: 2, hit_slot: 0x1ba9, steps: [] },
     { bone: 1, part: "torso", slot: 1, offset: [0, 0, 0], parent: null,
       damage_rank: [], hit_radius: 3, hit_slot: 1,
       steps: [[0x21, EffectCode.Last, 3]] },
@@ -335,10 +341,17 @@ export const DRAW_FRAME: ClassFrame = {
  * states has to establish the class rather than assert it. The `throw` is
  * unreachable, and that is the point — a cast here would be the one place the
  * union could be lied to.
+ *
+ * **A fixture that names no start state means the attack run**, descriptor
+ * byte +2 = 1, the commonest the shipped spawns carry. `EnemyZombieInit`
+ * stores the byte as it stands (`0x00452F36`), so a missing one would be 0 --
+ * `NoOpStub`, an actor that never moves -- and a router in the port used to
+ * turn that 0 into 1, which every fixture here that names none leaned on.
  */
 export function spawnZombie(at: number, charType: number, name: string,
                      desc?: Partial<Actor>, rng?: Rng): ZombieActor {
-  const a = ActorSpawn(at, SpawnClass.Zombie, charType, name, desc, rng);
+  const a = ActorSpawn(at, SpawnClass.Zombie, charType, name,
+                       { initialState: ZombieState.AttackRun, ...desc }, rng);
   if (a.cls !== SpawnClass.Zombie) throw new Error("not class 0x30");
   return a;
 }

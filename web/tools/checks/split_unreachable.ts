@@ -38,6 +38,14 @@
  * It also re-reads `g_class30_states` (`0x00592AE8`) at 0x31..0x36, so the
  * state numbers above are the table's and not the port's (`L38`).
  *
+ * **And the two other entries the port's dispatch carries no body for**,
+ * states 16 (`ZombieStateRunPastPoint`, `FUN_00457360`) and 28
+ * (`ZombieStateDelayedPounce`, `FUN_004586E0`): the table is read at each and
+ * at the entries either side, no `MOV word [reg + 0x1310]` in the image stores
+ * either, and no descriptor or civilian order names either -- the same census
+ * as 0x32..0x35's. Entry 0 is read too, as `NoOpStub`, because the dispatch's
+ * arm for it is the engine's no-op and not a missing body.
+ *
  * The instruction sweep is `lib_x86.ts`'s, and the descriptors are the
  * exporter's own (`hod2lib/evt.ts`), civilian captors included.
  */
@@ -48,8 +56,18 @@ import { sweep } from "./lib_x86";
 
 const G_HIT_RESULT = 0x009a58f8;
 const G_CLASS30_STATES = 0x00592ae8;
-/** `g_class30_states[0x31..0x36]`, read out of the table. */
+/**
+ * `g_class30_states[0x31..0x36]`, read out of the table -- and entry 0, and
+ * 16 and 28 with the entries either side of each.
+ */
 const STATE_TABLE: Record<number, number> = {
+  0x00: 0x0041ebb0,   // NoOpStub, the engine's no-op
+  0x0f: 0x00457220,   // ZombieStateWalkDistance
+  0x10: 0x00457360,   // ZombieStateRunPastPoint
+  0x11: 0x004574d0,   // ZombieStateHoldClipThenBranch
+  0x1b: 0x004584e0,   // ZombieStateEmerge
+  0x1c: 0x004586e0,   // ZombieStateDelayedPounce
+  0x1d: 0x00458960,   // ZombieStateRideCarrier
   0x31: 0x0041ebb0,   // NoOpStub, the filler
   0x32: 0x0045e010,   // ZombieStateSplitLaunch
   0x33: 0x0045ded0,   // ZombieStateSplitHalfCollapse
@@ -59,6 +77,8 @@ const STATE_TABLE: Record<number, number> = {
 };
 /** The half-body family's states, none of which the data may name. */
 const SPLIT_STATES = new Set([0x32, 0x33, 0x34, 0x35]);
+/** The two entries outside that family the port carries no body for. */
+const NO_BODY_STATES = new Set([0x10, 0x1c]);
 const CLASS30_CODE: [number, number] = [0x00452da0, 0x0045ecc0];
 const SPLIT_ARMED = 0x1000000;
 const SPLIT_ARMED_WRITER = 0x0045e6a2;
@@ -99,7 +119,8 @@ function checkStateTable(c: Checker, exe: ExeTables): void {
     if (v !== want) wrong.push(`[${hex(Number(i))}] = ${hex(v ?? 0, 8)}`);
   }
   c.ok(!wrong.length,
-       `g_class30_states[0x31..0x36] is ${got.join(" ")}`
+       `g_class30_states[${Object.keys(STATE_TABLE)
+         .map((i) => hex(Number(i))).join(", ")}] is ${got.join(" ")}`
        + (wrong.length ? ` -- differs from the reading at ${wrong.join(", ")}` : ""));
 }
 
@@ -152,8 +173,10 @@ function checkStateLiterals(c: Checker, exe: ExeTables): void {
   const n32 = sites(0x32);
   const n34 = sites(0x34);
   const n35 = sites(0x35);
+  const n10 = sites(0x10);
+  const n1c = sites(0x1c);
   c.note(`literal state stores: 0x32 x${n32.length}, 0x34 x${n34.length}, `
-         + `0x35 x${n35.length}`);
+         + `0x35 x${n35.length}, 0x10 x${n10.length}, 0x1C x${n1c.length}`);
   // The controls: `ZombieSplitUpdateSelf` writes 0x32 at 0x0045DA76 and
   // `ZombieStateHoldAtRange` 0x34 at 0x0045587C.
   c.ok(n32.length === 1 && n32[0] === exe.v2r(0x0045da76 + 3)
@@ -161,6 +184,8 @@ function checkStateLiterals(c: Checker, exe: ExeTables): void {
        "the literal-state search finds its controls: 0x32 at 0x0045DA76 "
        + "alone, 0x34 at 0x0045587C alone");
   c.eq(n35.length, 0, "state 0x35 is never stored as a literal");
+  c.eq(n10.length, 0, "state 0x10 is never stored as a literal");
+  c.eq(n1c.length, 0, "state 0x1C is never stored as a literal");
 }
 
 function checkSplitArmedWriters(c: Checker, exe: ExeTables): void {
@@ -214,6 +239,7 @@ async function checkData(c: Checker, exe: ExeTables,
                          source: Awaited<ReturnType<typeof openGame>>["source"]):
     Promise<void> {
   const named: string[] = [];
+  const noBody: string[] = [];
   const bit15: string[] = [];
   const cond4 = new Map<number, number>();
   let records = 0;
@@ -233,6 +259,9 @@ async function checkData(c: Checker, exe: ExeTables,
       const attack = rec.param(3, "i8") ?? 0;
       if (SPLIT_STATES.has(init) || SPLIT_STATES.has(attack)) {
         named.push(`${where}: states ${init}/${attack}`);
+      }
+      if (NO_BODY_STATES.has(init) || NO_BODY_STATES.has(attack)) {
+        noBody.push(`${where}: states ${init}/${attack}`);
       }
       if (rec.descFlags & 0x8000) bit15.push(where);
       if (cond === 4) cond4.set(char, (cond4.get(char) ?? 0) + 1);
@@ -259,6 +288,13 @@ async function checkData(c: Checker, exe: ExeTables,
   const ordered = [...orders.keys()].filter((s) => SPLIT_STATES.has(s));
   c.ok(!ordered.length, "no civilian orders a half-body state"
        + (ordered.length ? ` -- ${ordered.map((s) => hex(s)).join(", ")}` : ""));
+  c.ok(!noBody.length,
+       "no class-0x30 descriptor names state 0x10 or 0x1C as initial or attack"
+       + (noBody.length ? ` -- ${noBody.slice(0, 4).join("; ")}` : ""));
+  const orderedNoBody = [...orders.keys()].filter((s) => NO_BODY_STATES.has(s));
+  c.ok(!orderedNoBody.length, "no civilian orders state 0x10 or 0x1C"
+       + (orderedNoBody.length
+         ? ` -- ${orderedNoBody.map((s) => hex(s)).join(", ")}` : ""));
   c.ok(!bit15.length,
        "no class-0x30 descriptor sets bit 15 of its +0x20 word"
        + (bit15.length ? ` -- ${bit15.slice(0, 4).join("; ")}` : ""));

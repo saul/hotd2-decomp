@@ -152,13 +152,15 @@ console.log("\nevery caller of the ring effects, where the exe calls it:");
     for (let i = 0; i < 200 && !a.despawned; i++) {
       ThrowerStateCorpseSink(a, 1 / 60, rng);
     }
-    // Not `NoCameraTrack`: `ActorDespawn` (`FUN_00409CC0`) raises
-    // `0x80018000` itself on its first line (`0x00409CCB`), so the bit is up
-    // after every despawn and says nothing about the exit. The slot does.
+    // `NoCameraTrack` is not a signal here: `ActorDespawn` (`FUN_00409CC0`)
+    // raises it on every despawn (`OR EAX, 0x80018000` at `0x00409CCB`), so
+    // it is up after this exit as after class 0x30's. The slot is the part
+    // only class 0x30's exit touches.
     check("the corpse's exit retires no count and keeps a slot it was not "
           + "told to give up",
           a.despawned && G.g_enemies_alive === alive
-          && G.g_enemies_present === 1 && G.g_enemy_slots[3]!.occupied === 1,
+          && G.g_enemies_present === 1 && G.g_enemy_slots[3]!.occupied === 1
+          && (a.flags & ActorFlag.Live) === 0,
           `alive ${G.g_enemies_alive}/${alive} present ${G.g_enemies_present} `
           + `slot ${G.g_enemy_slots[3]!.occupied}`);
     check("...but frees its hit slot",

@@ -35,9 +35,12 @@ import type { GameHost } from "../host";
 import {
   MatIdentity, MatrixRotateY, MatrixTransformPoint, MatrixTranslate,
 } from "../matrix";
-import { MotionPlayLength } from "../tables";
+import { MotionOf, MotionPlayFrame, MotionPlayLength } from "../tables";
 import { vec3 } from "../vec";
+import { TrackRootAtCursor } from "../root_motion";
+import { SpawnBothAttachedEffects } from "../effects/attached_effect";
 import { ZombieState } from "./states";
+import { Zombie1368Flag } from "./state";
 
 /** `CMP dword ptr [ESI+0x130C], 0x6` -- the body condition that wades. */
 export const COND_WADING = 6;
@@ -141,7 +144,10 @@ export function ZombieStrikeFrameSplash(obj: ZombieActor, rng: Rng,
   if (obj.flags2 & ZombieFlag2.OneShotFired) return;
   if (obj.condition !== COND_WADING) return;
   const motion = obj.action ? obj.action.motion : obj.motion;
-  const cursor = obj.action ? obj.action.ticks : obj.playTicks;
+  // The base track's cursor is the counter modulo the play length + 1, as the
+  // sampler computes it; this read the bare counter, which is the cursor only
+  // until the clip first wraps.
+  const cursor = obj.action ? obj.action.ticks : MotionPlayFrame(obj);
   if (cursor !== MotionPlayLength(obj, motion) - STRIKE_FRAME_SPLASH_LEAD) {
     return;
   }
@@ -155,6 +161,77 @@ export function ZombieStrikeFrameSplash(obj: ZombieActor, rng: Rng,
                     host, events);
   obj.flags2 |= ZombieFlag2.OneShotFired;
   events?.emit("sound.play", { id: SND_WADE_SPLASH });
+}
+
+/**
+ * `obj+0x204` -- `model+0x70`, the root's height as the draw just posed it.
+ *
+ * `[port-only]`. `SkeletonPoseRootFrame` (`FUN_00410920`) writes
+ * `model+0x6C..0x74` on every draw -- the track's root at its cursor, between
+ * two authored frames on an odd one, lerped from the fade's snapshot by the
+ * fade's weight while one holds -- and `ActorCheckWaterEntry` runs after that
+ * draw. The port has no model block for this class, so the same number is
+ * worked out of the clip the way the renderer poses it: the one-shot's while
+ * one runs, the base track's otherwise, and slot B's clip under a fade whose
+ * clip was stored over ({@link Actor.fadeInto}).
+ */
+function ZombiePoseRootHeight(obj: ZombieActor): number {
+  const act = obj.action;
+  const into = act ? null : obj.fadeInto;
+  const motion = act ? act.motion : into ? into.motion : obj.motion;
+  const m = MotionOf(obj, motion);
+  if (!m) return 0;
+  const play = MotionPlayLength(obj, motion);
+  const cursor = act ? act.ticks : into ? into.ticks : MotionPlayFrame(obj);
+  TrackRootAtCursor(m, play, cursor, _root);
+  const fade = obj.fadeFrom;
+  if (!fade || obj.fade <= 0 || obj.fadeLen <= 0) return _root.y;
+  let from = fade.root?.y;
+  if (from === undefined) {
+    const fm = MotionOf(obj, fade.motion);
+    if (!fm) return _root.y;
+    TrackRootAtCursor(fm, MotionPlayLength(obj, fade.motion), fade.ticks, _from);
+    from = _from.y;
+  }
+  const w = Math.min(1, Math.max(0, 1 - obj.fade / obj.fadeLen));
+  return from + (_root.y - from) * w;
+}
+
+const _root = vec3();
+const _from = vec3();
+
+/**
+ * `ActorCheckWaterEntry` — `FUN_00456920`, `g_class30_states[0x36]`, called
+ * through the table from `EnemyZombieUpdate` (`CALL dword ptr [0x00592BC0]`
+ * at `0x00453480`) after the draw, every frame of every class-0x30 and
+ * class-0x18 actor.
+ *
+ * ```
+ * 00456925  if (obj+0x1368 & 2) return                       ; once a life
+ * 00456943  g = QueryGroundHeightAt(x, y + 20, z)
+ * 00456954  if (g_coli_hit_surface != 0x37 && != 5) return   ; not water
+ * 0045695e  if (!(y < g)) return                              ; not under it
+ * 0045696c  if (obj+0x130C != 6 && !(obj+0x204 + y > g)) return
+ * 00456993  SpawnBothAttachedEffects(obj, g, obj+0x68)
+ * 004569a1  obj+0x1368 |= 2
+ * ```
+ *
+ * `[proved]`. An actor whose feet are under a water surface gets its wake
+ * once: body condition 6, the wading one, as soon as it is under at all; any
+ * other only while its root -- its hips, `obj+0x204` -- is still above the
+ * surface. {@link Zombie1368Flag.InWater} is also what silences
+ * `ZombiePlayMotionFrameSe` from then on.
+ */
+export function ActorCheckWaterEntry(obj: ZombieActor): void {
+  if (obj.zom.flags1368 & Zombie1368Flag.InWater) return;
+  const g = Math.fround(QueryGroundHeightAt(
+    obj.pos.x, obj.pos.y + SPLASH_PROBE_RISE, obj.pos.z));
+  if (!onWater()) return;
+  if (!(obj.pos.y < g)) return;
+  if (obj.condition !== COND_WADING
+      && !(ZombiePoseRootHeight(obj) + obj.pos.y > g)) return;
+  SpawnBothAttachedEffects(obj, g, obj.yaw);
+  obj.zom.flags1368 |= Zombie1368Flag.InWater;
 }
 
 /**

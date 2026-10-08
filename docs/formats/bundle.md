@@ -106,6 +106,18 @@ whatever a list's overflow records name) and `common.bin[199]` on the type's
 template. The renderer clones a template for each figure the card allocates;
 `web/tools/checks/result_card.ts` holds the block to the EXE.
 
+`script.json` also carries a `chapter_card` block -- the chapter card's
+`.rdata`, read by `ExeTables.chapterCardTables`: the four tables its two
+variant arms index, each as long as its index reaches --
+`boss_mode_backdrop_sprites` (`0x0055DD50`, s16 a scene),
+`boss_mode_backdrop_flags` (`0x0055DD5C`, u8 a scene), `attract11_frames` and
+`attract11_flash_frames` (`0x0055DD64`, `0x0055DD70`, s16[5]). The story card
+reads no table. Every stage places the card, and carries its scene's eight
+title sprites (`scr_chapter_st1..6`, palette `0xB`) in `screen_sprites`;
+stage 6 carries slot `0x1730` as an effect slot. The ids and the slot are
+`.text` immediates in `web/src/game/class60/state.ts`, which the exporter
+imports; `web/tools/checks/chapter_card.ts` holds all of it to the EXE.
+
 A stage that spawns class 0x42 -- the worm, stage 2 -- carries
 `characters.class42`: the class's `.rdata`, each table cut at the extent its
 reader's index reaches (`web/src/hod2lib/class42.ts`) -- the member offsets
@@ -117,6 +129,20 @@ effect-layout frames `MotionFrameRecord` (`FUN_00412FB0`) reads, sixty each,
 `desc+0x25`, and the hidden `slots_actor` rig carries `buyo.bin` 0..53
 (`0x85A..0x88F`). `web/tools/checks/worm.ts` holds the port's scalars to the
 EXE; see [`docs/re/worm.md`](../re/worm.md).
+
+`characters.deaths` carries `corpse` beside `front` and `back`: the 26 words
+at `0x0059301C` that `ZombieCorpsePoseFrame` (`FUN_00454E00`) writes into a
+class-0x30 corpse's play counter every frame -- a pair per clip, 0x3D9..0x3E0
+in order and then 0x3F8, 0x1DF, 0x41A, 0x404 and 0x3F7, the block ending where
+`back`'s table starts. Which clip reads which pair is the routine's switch
+and stays in `game/class30/death.ts`. And a stage that spawns class 0x30 or
+0x18 carries `water.bin` 13..62 (`0x1A78..0x1AA9`) in the hidden
+`slots_actor` rig: the fifty-cel wake `AttachedEffectThink` (`FUN_004083D0`)
+draws behind an actor that has gone into the water
+(`game/effects/attached_effect.ts`). An optional field and more models, so
+the schema digest and the builder hash moved and no format bump: an older
+bundle reads, its corpses lie on their clips' last frames and it draws no
+wake.
 
 Every stage's `slots_effect` rig carries the ground shadow, `common.bin`
 200 (slot `0x10D0`): the last call of every skinned draw and of both thrown

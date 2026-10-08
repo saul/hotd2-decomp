@@ -1,3 +1,4 @@
+import { Zombie1368Flag } from "../../src/game/class30/state";
 import type { CharactersJson, CharacterType } from "../../src/bundle";
 import { Rng } from "../../src/core/rng";
 import { Events } from "../../src/core/events";
@@ -825,9 +826,9 @@ console.log("\nclass 0x30's two fades: `znele` in, the twin out");
   const znele = spawnZombie(0x9400, 0x12, "znele",
                             { initialState: ZombieState.HoldClipThenBranch });
   check("`znele` is born at alpha 0, faded, with a hundred-draw wait",
-        znele.alpha === 0 && znele.zom.fadeDraw && znele.zom.fadeDelay === 100
+        znele.alpha === 0 && (znele.zom.flags1368 & Zombie1368Flag.FadeDraw) !== 0 && znele.zom.fadeDelay === 100
         && znele.zom.fadeStep === Math.fround(1 / 30),
-        `${znele.alpha} ${znele.zom.fadeDraw} ${znele.zom.fadeDelay}`);
+        `${znele.alpha} ${znele.zom.flags1368} ${znele.zom.fadeDelay}`);
   check("...out of both pushes, and shot-immune, untestable, unaimed",
         (znele.flags2 & pushes) === 0
         && (znele.flags & 0x48500) === 0x48500,
@@ -850,13 +851,13 @@ console.log("\nclass 0x30's two fades: `znele` in, the twin out");
   draw(znele, 28);
   const before = sounds.length;
   check("...twenty-nine steps are still under 1, still faded",
-        znele.zom.fadeDraw && znele.alpha < 1 && before === 0,
+        (znele.zom.flags1368 & Zombie1368Flag.FadeDraw) !== 0 && znele.alpha < 1 && before === 0,
         `${znele.alpha}`);
   const last = znele.alpha;
   draw(znele);
   check("the thirtieth passes 1.0 and ends it: pinned at 1, and the fade "
         + "node on is drawn plainly (the two before it at the 29th step)",
-        !znele.zom.fadeDraw && znele.alpha === 1
+        !(znele.zom.flags1368 & Zombie1368Flag.FadeDraw) && znele.alpha === 1
         && nodes(znele).join() === `${last},${last},,`, nodes(znele).join());
   check("...pushes back, shot test and immunity lowered, head aim still off",
         (znele.flags2 & pushes) === pushes
@@ -877,12 +878,12 @@ console.log("\nclass 0x30's two fades: `znele` in, the twin out");
                               flags: ActorFlag.Committed });
   draw(quick);
   check("a `znele` with `obj+0x34` 0x10000000 is done on its first draw",
-        !quick.zom.fadeDraw && quick.alpha === 1
+        !(quick.zom.flags1368 & Zombie1368Flag.FadeDraw) && quick.alpha === 1
         && nodes(quick).join() === "0,0,,", nodes(quick).join());
 
   const twin = spawnZombie(0x9410, 9, "twin");
   check("the twin is born at a quarter alpha, faded, stepping 1/60",
-        twin.alpha === 0.25 && twin.zom.fadeDraw
+        twin.alpha === 0.25 && (twin.zom.flags1368 & Zombie1368Flag.FadeDraw) !== 0
         && twin.zom.fadeStep === Math.fround(1 / 60)
         && (twin.flags2 & pushes) === 0, `${twin.alpha}`);
   draw(twin, 100);
@@ -905,7 +906,7 @@ console.log("\nclass 0x30's two fades: `znele` in, the twin out");
   G.g_scene_lighting = 1;
   draw(lit);
   check("a lit zombie's nodes are drawn solid through the light array",
-        nodes(lit).every((x) => x === null) && lit.zom.fadeDraw,
+        nodes(lit).every((x) => x === null) && (lit.zom.flags1368 & Zombie1368Flag.FadeDraw) !== 0,
         nodes(lit).join());
   G.g_scene_lighting = 0;
   draw(lit);

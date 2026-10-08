@@ -5863,6 +5863,32 @@ console.log("\na layer's clone of a lit mesh is lit: the canal tiles under the w
         unlitMaterial(worn) !== base && unlitMaterial(worn).type === "MeshBasicMaterial");
 }
 
+console.log("\nthe chapter card's model: half a turn about, in the eye's space:");
+
+{
+  // `MatrixLoadIdentity; MatrixTranslate(0, 0, -30); MatrixRotateY(0x8000);
+  // MatrixScale(2, 2, 2); AssetDrawSlot(0x1730)` -- the turn between the
+  // translate and the scale is the node's own rotation, and a half turn about
+  // y sends the model's +z to -z and its +x to -x.
+  const { drawViewSlots } = await import("../src/render/view_slots");
+  const { DrawSlotInView } = await import("../src/game/view_slot");
+  const view = new Group();
+  const node = new Obj3D();
+  ResetGameGlobals();
+  G.g_view_slot_draws = [];
+  DrawSlotInView(0x1730, 0, 0, -30, 2, 0x8000);
+  const seen = new Set<string>();
+  drawViewSlots({ node: () => { view.add(node); return node; }, view,
+                  world: new Group() }, seen);
+  node.updateMatrixWorld(true);
+  const p = new Vector3(1, 0, 1).applyMatrix4(node.matrixWorld);
+  check("the model's (1, 0, 1) lands at (-2, 0, -32): turned, scaled, then "
+        + "moved 30 ahead",
+        Math.abs(p.x + 2) < 1e-6 && Math.abs(p.y) < 1e-6
+        && Math.abs(p.z + 32) < 1e-6 && seen.size === 1,
+        `${p.x.toFixed(3)} ${p.y.toFixed(3)} ${p.z.toFixed(3)}`);
+}
+
 console.log("\nrigs: a part drawn behind a camera-path test");
 {
   // `FUN_0048F560`, stage 6's lift car: `AssetDrawSlot(0xAFE/0xAFF)` only

@@ -60,6 +60,7 @@ import { makeSetPiecePropTail, type SetPiecePropTail }
 import { makeThrowerTail, type ThrowerTail } from "./class31/state";
 import { makeZombieTail, type ZombieTail } from "./class30/state";
 import { makeResultCardTail, type ResultCardTail } from "./class61/state";
+import { makeChapterCardTail, type ChapterCardTail } from "./class60/state";
 import { makePropContainerTail, type PropContainerTail }
   from "./class41/placer_state";
 
@@ -170,6 +171,22 @@ export enum NodeDrawHookId {
 
 /** `obj+0x34` — the object's flag word. Only the bits the port reads. */
 export enum ActorFlag {
+  /**
+   * Bit `0x1` — **the object is live.** `ActorInitFlags` (`FUN_00408970`)
+   * raises it on every spawn (`OR ECX, 0x1` at `0x00408978`); `ActorDespawn`
+   * (`FUN_00409CC0`) drops it (`AND AL, 0xFE` at `0x00409CC9`), and in class
+   * 0x30 so does `ZombieEnterCorpseState` (`AND EAX, 0xFFFDFFFE` at
+   * `0x00456759`) -- the only class-0x30 instruction that does, by a sweep of
+   * every `AND` in the class's code with bit 0 clear in its immediate.
+   *
+   * Readers: `RankEnemiesByDistance` and `RegisterForDistanceRank`, which
+   * skip an object without it (the port stands in for that there -- see
+   * `combat/rank.ts`), and `AttachedEffectThink` (`FUN_004083D0`), whose wake
+   * dies the frame its actor loses it. The other classes' own clears are not
+   * transcribed, so the port's bit is the engine's on class 0x30 and at every
+   * despawn, and not yet on a dead actor of another class.
+   */
+  Live = 0x1,
   /**
    * `obj+0x34` bit `0x2000000`. Its only readers are the two strike connects,
    * `ActorStrikeConnect` (`FUN_00456490`) and `ThrowerStrikeConnect`
@@ -1005,9 +1022,11 @@ export enum ZombieFlag2 {
    *
    * That is the carrier states' reading and not the bit's only writer (`L3`):
    * `ZombieStateEmerge` raises it for the climb out of the water
-   * (`0x00458528`) and `ZombieStateStandAndThrow`'s sub 0 for an airborne
-   * body-condition-7 thrower (`0x00459104`). `ZombieOnShot` and
-   * `ChooseDeathMotion` read the bit whoever wrote it.
+   * (`0x00458528`), `ZombieStateStandAndThrow`'s sub 0 for an airborne
+   * body-condition-7 thrower (`0x00459104`), and
+   * `ZombieStateTargetMotionScript` for a maul on clip `0xB2` or `0xB7`
+   * (`0x0045ADFA`, `0x0045AF3F`), lowering it again at that clip's end.
+   * `ZombieOnShot` and `ChooseDeathMotion` read the bit whoever wrote it.
    */
   Carried = 0x100000,
   /**
@@ -1107,9 +1126,12 @@ export enum ZombieFlag2 {
    */
   WaitTurnVariant = 0x200000,
   /**
-   * Bit `0x8000` — `ChooseDeathMotion` picks death motion 0x3DB for character
-   * type 10 while it is up (`00456191 f6c480`), and `FUN_00457FB0` sets it
-   * (`00458120`). `[proved]`
+   * Bit `0x8000` — `ChooseDeathMotion` gives character type 10 **no** death
+   * clip while it is up (`00456191 f6c480`, `JNZ` to the shared tail past
+   * the `ActorSetMotionBlended`), so it dies on whatever it was playing; and
+   * `FUN_00457FB0` sets it (`00458120`). `[proved]` This note used to say the
+   * bit picked clip 0x3DB, which is what the annotation said; `class30/death.ts`
+   * has the listing that says otherwise.
    *
    * The same value as {@link ThrowerFlag.OffScreenPermit}: two classes, one
    * bit, different meanings.
@@ -1161,11 +1183,37 @@ export enum ZombieFlag2 {
    * its release and when its prop is destroyed, the same `& 0xFEFFFFFF` on
    * `obj+0x34` and `| 1` here both times. `ZombieStateStandAndThrow`'s sub 0
    * raises it too (`OR AL, 1` at `0x004590F4`), for a body-condition-7
-   * thrower whose spawn record does **not** set `HoldingWeapon`.
-   * `ChooseDeathMotion`'s directional arm reads `obj+0x136C` bits 1, 2 and 4;
-   * `[open]` what this one selects there.
+   * thrower whose spawn record does **not** set `HoldingWeapon`, and eight
+   * shipped descriptors carry it in their `+0x20` word, the low half of this
+   * one.
+   *
+   * What it selects: `ChooseDeathMotionDirectional` (`FUN_00456220`) maps a
+   * directional death `0x3D9`/`0x3DA`/`0x3DE` to `0x3DB`/`0x3DC`/`0x3DD`
+   * while it is up (`TEST CL, 0x1` at `0x00456367`), and `ChooseDeathMotion`
+   * (`FUN_004560B0`) sends body conditions 5 and 6 to that pick rather than
+   * to `0x3DB` whenever any of bits 1, 2 and 4 is up. `[proved]`
    */
   LetGo = 0x1,
+  /**
+   * Bit `0x2` — the other way round: `ChooseDeathMotionDirectional` maps
+   * `0x3DB`/`0x3DC`/`0x3DD` to `0x3D9`/`0x3DA`/`0x3DE` (`TEST CL, 0x2` at
+   * `0x004563A3`), after {@link LetGo}'s map, so with both up a `0x3D9` goes
+   * there and back. Twenty-one shipped descriptors carry it, and
+   * `ZombieStateTargetMotionScript` raises it with {@link Carried} as a maul
+   * on clip `0xB2` or `0xB7` starts (`OR EAX, 0x100002` at `0x0045ADFA` and
+   * `0x0045AF3F`). `[proved]`
+   */
+  DeathPairToFirst = 0x2,
+  /**
+   * Bit `0x4` — `ChooseDeathMotionDirectional` re-draws a side death (`0x3DF`
+   * or `0x3E0`) from the `0x8000` arc's table (`TEST byte ptr [EDI+0x136C],
+   * 0x4` at `0x0045632A`, `rand() % 6` into `0x00593084`), so the actor falls
+   * back or forward however it was facing. Four shipped descriptors carry
+   * it, and no `OR` in class 0x30's code (`0x00452DA0`..`0x0045ECC0`) raises
+   * it: the four with a 4 in their immediate write `obj+0x1F8` and `obj+0x34`.
+   * `[proved]`
+   */
+  DeathNoSideClip = 0x4,
   /**
    * Bit `0x100` — the other half of that gate, and **nothing the shipped game
    * runs raises it** on a class-0x30 actor. `[proved]` both ways a bit gets
@@ -2327,7 +2375,7 @@ export interface ActorBase {
    *   itself on a `0x1FB9` node;
    * * `ZombieSubmitSlotByLighting` (`FUN_00453AE0`) draws every class-0x30
    *   bone at it while `obj+0x1368` bit `0x20` is up
-   *   (`zom.fadeDraw`), which `EnemyZombieInitByCharType`
+   *   (`Zombie1368Flag.FadeDraw`), which `EnemyZombieInitByCharType`
    *   (`FUN_00452FD0`) raises for character types 9 and 0x12 with the alpha
    *   at 0.25 and 0, and `ZombieDrawBonePart` (`FUN_004534A0`) steps it --
    *   down to 0 on the twin's `0x1C7C` node, up to 1 on `znele`'s `0x1C6C`.
@@ -2488,6 +2536,21 @@ export interface ActorBase {
    */
   fadeFrom: { motion: number; ticks: number; records?: FadeRecord[];
               root?: FadeRoot } | null;
+  /**
+   * `[port-only]` -- the pose a cross-fade dissolves **into**, when it is
+   * not {@link motion}'s start frame: the clip and play cursor slot B was
+   * loaded from. `null` the rest of the time, which is almost all of it.
+   *
+   * `MotionStartOnTrack` (`FUN_004119F0`) loads slot B once, from the clip
+   * `ActorSetMotionBlended` is handed, and `SkeletonAdvancePlayCursor`
+   * (`FUN_004111A0`) reloads nothing while the fade bit holds. So a store to
+   * `obj+0x1B4` under a fade -- `ChooseDeathMotionDirectional`'s remaps, which
+   * write the id straight after the blend (`0x0045635B`, `0x00456381`..) --
+   * changes the clip that plays once the fade lets go and not the pose it
+   * dissolves into. The port's fade reads {@link motion} for that pose, so the
+   * writer puts the loaded one here. Cleared with the fade.
+   */
+  fadeInto: { motion: number; ticks: number } | null;
   /**
    * Frames of the cross-fade left. It starts at the fade length and the
    * fade is over when it goes **below zero**, so the incoming clip is held on
@@ -2735,6 +2798,7 @@ export type Actor =
   | (ActorBase & { cls: SpawnClass.ScriptedScenery;
                    scenery: ScriptedSceneryTail })
   | (ActorBase & { cls: SpawnClass.ResultCard; card: ResultCardTail })
+  | (ActorBase & { cls: SpawnClass.ChapterCard; chapter: ChapterCardTail })
   | (ActorBase & { cls: SpawnClass.CutsceneSkipWatcher; skipWatch: SkipWatchTail })
   | (ActorBase & { cls: SpawnClass.PropContainerPlacer;
                    placer: PropContainerTail })
@@ -2754,7 +2818,8 @@ export type Actor =
       | SpawnClass.HordeSpawner
       | SpawnClass.Worm | SpawnClass.ResultCard
       | SpawnClass.CutsceneSkipWatcher
-      | SpawnClass.PropContainerPlacer> });
+      | SpawnClass.PropContainerPlacer
+      | SpawnClass.ChapterCard> });
 
 /** An actor already narrowed to class 0x25, for that class's own routines. */
 export type HumanoidActor = Extract<Actor,
@@ -2806,6 +2871,9 @@ export type FishActor = Extract<Actor, { cls: SpawnClass.WaterEnemy }>;
 
 /** An actor already narrowed to class 0x61: the result card or a figure. */
 export type ResultCardActor = Extract<Actor, { cls: SpawnClass.ResultCard }>;
+
+/** An actor already narrowed to class 0x60, the chapter card. */
+export type ChapterCardActor = Extract<Actor, { cls: SpawnClass.ChapterCard }>;
 
 /**
  * An actor already narrowed to class 0x41: a placer, a constructor-61 figure
@@ -2986,6 +3054,7 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     playTicks: 0,
     cursorStore: null,
     fadeFrom: null,
+    fadeInto: null,
     fade: 0,
     fadeLen: 0,
     rootCursor: -1,
@@ -3098,6 +3167,9 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
   }
   if (cls === SpawnClass.ResultCard) {
     return { ...head, cls, card: makeResultCardTail() };
+  }
+  if (cls === SpawnClass.ChapterCard) {
+    return { ...head, cls, chapter: makeChapterCardTail() };
   }
   if (cls === SpawnClass.CutsceneSkipWatcher) {
     return { ...head, cls, skipWatch: makeSkipWatchTail() };

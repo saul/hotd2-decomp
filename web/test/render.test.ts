@@ -1981,9 +1981,25 @@ console.log("\nan asset-slot actor is drawn, and can be shot:");
   check("a live mouse gets a node", layer.describe().startsWith("1 drawn"),
         layer.describe());
 
-  // `ShotTestSphere` (`FUN_00404630`): one sphere, radius `obj+0x124`. A ray
-  // down -z hits it; one offset by more than the radius does not.
+  // **The mouse is `game/`'s to pick.** `MouseBranchTriggerUpdate` files
+  // itself through `ActorRegisterOriginInViewSpace` (`FUN_0043F950`) and
+  // `MouseWanderUpdate` never does, so the class sets `registersForShotTest`
+  // and this sphere test passes it over, drawn or not.
   const down = new Ray(new Vector3(0, 0, 0), new Vector3(0, 0, -1));
+  check("a drawn mouse is not in this layer's sphere test",
+        layer.pickSphere(down) === null);
+  G.g_object_list.length = 0;
+
+  // `ShotTestSphere` (`FUN_00404630`)'s else-arm, on a class that still comes
+  // through here: one sphere, radius `obj+0x124`. A ray down -z hits it; one
+  // offset by more than the radius does not.
+  const p13 = makeActor(0x1234, SpawnClass.ScriptedProp, -1, "prop");
+  if (p13.cls !== SpawnClass.ScriptedProp) throw new Error("not class 0x13");
+  p13.prop13.slot = MOUSE_FIRST_SLOT;
+  p13.hitRadius = MOUSE_HIT_RADIUS;
+  p13.pos = { x: 0, y: 0, z: -20 };
+  G.g_object_list.push(p13);
+  layer.update(ctx);
   const hit = layer.pickSphere(down);
   check("a ray through it is a hit", hit?.at === 0x1234,
         JSON.stringify(hit && { at: hit.at, t: hit.t }));
@@ -1999,14 +2015,13 @@ console.log("\nan asset-slot actor is drawn, and can be shot:");
 
   // A radius of zero is a class that never set one: not shootable, rather
   // than shootable at a point.
-  a.hitRadius = 0;
+  p13.hitRadius = 0;
   check("an actor with no radius is not in the sphere test",
         layer.pickSphere(down) === null);
-  a.hitRadius = MOUSE_HIT_RADIUS;
+  p13.hitRadius = MOUSE_HIT_RADIUS;
 
-  // The strip advances every frame, so the node is re-cloned; the actor
-  // leaving takes its node with it.
-  a.dead = true;
+  // The actor leaving takes its node with it.
+  p13.dead = true;
   layer.update(ctx);
   check("a dead actor loses its node", layer.describe().startsWith("0 drawn"),
         layer.describe());
@@ -6204,6 +6219,64 @@ console.log("\nScriptedHumanoidBoneDrawHook's extra models:");
   syncHumanoidHookDraws(inst, () => new Obj3D());
   check("...and is hidden once the motion no longer draws it",
         !!node && !node.visible);
+}
+
+console.log("\nOneHitTargetBoneDrawHook's carried models:");
+{
+  const { OneHitTargetHookDraws } =
+    await import("../src/render/characters/class20_hook");
+  const { syncHumanoidHookDraws }
+    = await import("../src/render/characters/humanoid_hook");
+  // Class 0x20's hook (`FUN_00449530`): bones 4, 7, 11 and 14 draw their
+  // node's first child's slot at that child's offset (`node+0x18`, the
+  // `Translate(child+4, +8, +0xC)` at `0x00449581`). A skeleton in the
+  // engine's order with `parent` an index: 4's first child is 5, and so on.
+  const bones = [
+    [1, 11, null], [2, 12, 0], [3, 13, 0], [4, 14, 2], [5, 15, 3],
+    [6, 16, 0], [7, 17, 5], [8, 18, 6], [9, 19, null], [10, 20, 8],
+    [11, 21, 9], [12, 22, 10], [13, 23, 8], [14, 24, 12], [15, 25, 13],
+  ].map(([bone, slot, parent], i) => ({
+    bone, slot, parent, part: "p", offset: [i + 0.5, -2 * i, 0.25] as
+      [number, number, number],
+  }));
+  const type = { bones } as unknown as Parameters<typeof OneHitTargetHookDraws>[0];
+  const d = OneHitTargetHookDraws(type);
+  const at = (m: number[]) => m.slice(12, 15).join(",");
+  check("four second models, on bones 4, 7, 11 and 14",
+        d.map((x) => x.bone).join() === "4,7,11,14" && d.every((x) => !x.world),
+        JSON.stringify(d.map((x) => x.bone)));
+  check("...each the first child's own slot -- 5's, 8's, 12's and 15's",
+        d.map((x) => x.slot).join() === "15,18,22,25",
+        JSON.stringify(d.map((x) => x.slot)));
+  // Bone 5 is index 4: its offset is (4.5, -8, 0.25), and nothing turns it.
+  check("...at that child's offset, with no turn of its own",
+        at(d[0]!.m) === "4.5,-8,0.25" && at(d[3]!.m) === "14.5,-28,0.25"
+        && d[0]!.m[0] === 1 && d[0]!.m[5] === 1 && d[0]!.m[10] === 1,
+        d.map((x) => at(x.m)).join(" | "));
+
+  // Hung under the carrying bone's node, so the picture is the bone's matrix
+  // times the child's translate, whatever the bone is doing.
+  const a = makeActor(0x52ec, SpawnClass.OneHitTarget, 7, "target");
+  const root = new Obj3D();
+  const four = new Obj3D();
+  four.position.set(3, -7, 11);
+  four.rotation.set(0.3, 1.1, -0.4);
+  root.add(four);
+  const nodes = new Map([4, 7, 11, 14].map((b) => [b, b === 4 ? four
+    : new Obj3D()]));
+  const inst = { a, type, bones: nodes } as unknown as
+    Parameters<typeof syncHumanoidHookDraws>[0];
+  syncHumanoidHookDraws(inst, () => new Obj3D());
+  root.updateWorldMatrix(true, true);
+  const hung = (inst as { hookDraws?: Map<string, InstanceType<typeof Obj3D>> })
+    .hookDraws?.get("4:15");
+  const want = new Vector3(4.5, -8, 0.25).applyMatrix4(four.matrixWorld);
+  const got = hung ? new Vector3().setFromMatrixPosition(hung.matrixWorld)
+    : null;
+  check("the carried model hangs under bone 4, at bone 4's matrix times the "
+        + "child's offset", !!hung && hung.parent === four && !!got
+        && got.distanceTo(want) < 1e-6,
+        got ? got.toArray().join(",") : "no node");
 }
 
 console.log("\nclass 0x32: the node hook's draws, and the light each was made under:");

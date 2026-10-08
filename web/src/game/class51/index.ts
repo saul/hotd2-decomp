@@ -43,6 +43,14 @@
  * only arm that asks the world for a floor — and sub-type 2 lunges from a
  * point a unit higher and swings sideways by ±2 on the way.
  *
+ * ## The shot test
+ *
+ * `FishProjectToScreen` (`FUN_00439B50`) is the class's one registration,
+ * and it files only a fish rising, bobbing, lunging or falling back (states 0
+ * to 3). A corpse is never a candidate, and nor is a fish swimming away,
+ * whose routine is no longer `FishUpdate` at all -- so a shot passes through
+ * both to whatever is behind them.
+ *
  * ## The effects
  *
  * Three tasks of the class's own -- the splash (`FishSpawnWaterSplash`,
@@ -77,6 +85,7 @@ import { CameraSlotVacate, RegisterEnemySlot, RegisterForCameraTracking }
   from "../camera/slots";
 import { QueryGroundHeightAt } from "../coli";
 import { ReleaseEnemyAliveCount, ReleaseEnemyPresentCount } from "../combat/counts";
+import { RegisterForShotTest } from "../combat/shot_test";
 import { PlayerTakeDamage } from "../combat/player";
 import { ScoreAddForPlayer } from "../combat/score";
 import { ActorDespawn } from "../despawn";
@@ -830,8 +839,7 @@ export function FishStateSink(obj: Actor, f: ClassFrame): void {
 }
 
 /**
- * `FishBeginSwimAway` — `FUN_00439BF0`, and `FishSwimAwayTick`
- * (`FUN_00439C20`) is what it installs.
+ * `FishBeginSwimAway` — `FUN_00439BF0`.
  *
  * The way out for a fish that wanted to leap and found all four slots taken.
  * It is already out of both counters by the time this runs, so it is scenery:
@@ -1017,13 +1025,20 @@ export function FishRunState(obj: Actor, f: ClassFrame): void {
  * g_cur_actor = obj;
  * FishCheckShot(obj);          // FUN_00438C10
  * FishRunState(obj);           // FUN_00438F10
- * FishDraw(obj);               // FUN_00439860 — render/
- * FishProjectToScreen(obj);    // FUN_00439B50 — render/
+ * FishDraw(obj);               // FUN_00439860 — render/fish.ts
+ * FishProjectToScreen(obj);    // FUN_00439B50
  * FishRegisterForCameraTracking(obj);  // FUN_00439D70
  * ```
  *
  * The shot is checked **before** the state runs, so the frame a fish is hit is
- * the frame its death state's first tick happens.
+ * the frame its death state's first tick happens. A state that despawns ends
+ * the routine there: `ActorDespawn` does not return to an actor's task
+ * (`L72`).
+ *
+ * `[port-only]` in one line: the test on {@link FishTail.swimAway} at the top
+ * is the port's reading of `*obj`, which {@link FishBeginSwimAway} points at
+ * {@link FishSwimAwayTick} in place of this routine. The frame that installs
+ * it runs this routine to its end, as the engine's does.
  */
 export function FishUpdate(obj: Actor, f: ClassFrame): void {
   // [port-only] `obj+0x00` after `FishBeginSwimAway`: the tick is the whole
@@ -1032,7 +1047,46 @@ export function FishUpdate(obj: Actor, f: ClassFrame): void {
   if (Tail(obj)?.swimAway) { FishSwimAwayTick(obj); return; }
   FishCheckShot(obj, f);
   FishRunState(obj, f);
-  if (!obj.despawned) FishRegisterForCameraTracking(obj);
+  if (obj.despawned) return;
+  FishProjectToScreen(obj, f.host);
+  FishRegisterForCameraTracking(obj);
+}
+
+/**
+ * `FishProjectToScreen` — `FUN_00439B50`. **The class's only registration
+ * for the shot test**, and only in states 0 to 3:
+ *
+ * ```
+ * 00439b58  state = sub+0x62; if (state != 0, 2, 1, 3) return
+ * 00439b79  Push; SetTop(g_camera_world_to_view[g_camera_index])
+ * 00439bc1  obj+0x70..0x78 = MatrixTransformPoint(obj+0x40..0x48); Pop
+ * 00439be3  RegisterForShotTest(obj)
+ * ```
+ *
+ * `[proved]`, and a scan of the class's code (`0x00438540`..`0x0043A100`) for
+ * `E8` calls to `RegisterForShotTest` (`FUN_00405160`),
+ * `ActorRegisterCameraPoint` (`FUN_00409B70`) and
+ * `ActorRegisterOriginInViewSpace` (`FUN_0043F950`) finds `0x00439BE3` and
+ * nothing else. So a corpse -- flung (4) or sinking (5) -- is never a
+ * candidate and a shot passes through it to whatever is behind, and nor is
+ * a fish swimming away, whose routine no longer calls this one. The port's
+ * pick used to test every fish with a node, corpses and leavers included.
+ *
+ * The port keeps `obj+0x70..0x78` in world space (`Actor.shotCentre`) and
+ * `RegisterForShotTest` takes the depth itself, so the point is the fish's
+ * own position -- its origin, not the drawn model's `-0.4` in states 0 and 1.
+ */
+export function FishProjectToScreen(obj: Actor, host: GameHost): void {
+  const sub = Tail(obj);
+  if (!sub) return;
+  if (sub.state !== FishState.Rise && sub.state !== FishState.Lunge
+      && sub.state !== FishState.Bob && sub.state !== FishState.FallBack) {
+    return;
+  }
+  obj.shotCentre.x = obj.pos.x;
+  obj.shotCentre.y = obj.pos.y;
+  obj.shotCentre.z = obj.pos.z;
+  RegisterForShotTest(obj, host);
 }
 
 /**
@@ -1128,6 +1182,8 @@ const handler: ClassHandler = {
   firstUpdateNextWalk: true,
   updatesWhenDead: true,
   ownsShotResult: true,
+  // `FishProjectToScreen` files it the engine's way, in states 0 to 3 only.
+  registersForShotTest: true,
   leave(obj: Actor): void {
     const sub = Tail(obj);
     ReleaseEnemyAliveCount(obj);

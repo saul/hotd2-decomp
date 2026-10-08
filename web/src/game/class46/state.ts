@@ -37,9 +37,11 @@ export enum BatSubtype {
    */
   Scatter = 1,
   /**
-   * `BatSwarmUpdate` (`FUN_0042ED50`). Eight bats, or ten with two players,
-   * that orbit the placer and then peel off at the camera one at a time. Two
-   * descriptors: stage 3 block 2 step 4 and stage 4 block 7 step 3.
+   * `BatSwarmUpdate` (`FUN_0042ED50`). Six bats, or eight with two players
+   * -- `((1 < g_players_in_play) - 1 & ~1) + 8` in `PlaceBats`, which reads
+   * like eight-or-ten and is not -- that orbit the placer and then peel off
+   * at the camera one at a time. Two descriptors: stage 3 block 2 step 4 and
+   * stage 4 block 7 step 3.
    */
   Swarm = 2,
 }

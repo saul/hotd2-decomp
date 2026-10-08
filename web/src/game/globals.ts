@@ -71,6 +71,7 @@ import { vec3 } from "./vec";
 import { makeCameraSlots, type CameraCandidate } from "./camera/slot_table";
 import { CameraActorInit } from "./camera/actions";
 import { MatIdentity } from "./matrix";
+import { makeChapterTitleParts } from "./class60/state";
 import { makeEntityLights } from "./entity_light";
 import { LightBlockSetDirection, makeLightBlock, makeLightTweens }
   from "./light_block";
@@ -128,6 +129,16 @@ export enum AppState {
    * alone for it, as for 6. `[proved]`
    */
   GameOver = 7,
+  /**
+   * The second attract scene: `AppStateDispatch` (`FUN_004608A0`) runs
+   * `RunAttractScene11` (`FUN_0041FB00`) in it, which sets `g_scene_index` to
+   * `0x0B` and `g_GameMode` to 0 and walks a task list of its own. The one
+   * state `ChapterCardInstall` (`FUN_004342E0`) tests by value: in it the
+   * card installs `AttractScene11ChapterCardUpdate` (`FUN_00434DA0`) instead
+   * of the story card (`CMP dword ptr [0x009c8e98], 0xb` at `0x00434311`).
+   * `[proved]`
+   */
+  AttractScene11 = 0x0b,
   /**
    * The options screen. `AppStateDispatch` (`FUN_004608A0`) runs
    * `OptionsRunPhase` (`FUN_004869E0`) in it, the title menu's OPTION row is
@@ -602,6 +613,52 @@ export const G = {
    */
   g_view_slot_draws: [] as ViewSlotDraw[],
   /**
+   * `g_chapter_title_parts` — `0x007DCAA0`. The chapter card's title
+   * animation: eight records whose scale and alpha `ChapterTitleDraw`
+   * (`FUN_00436AD0`) steps, record 0's frame counter and phase among them.
+   * Seeded by `ChapterTitleReset` (`FUN_00436A30`). See `game/class60/`.
+   */
+  g_chapter_title_parts: makeChapterTitleParts(),
+  /**
+   * `g_chapter_title_sprites` — `0x007DCBA0`. s16[8]: the sprite ids the
+   * title draws, written by `ChapterCardInstall` (`FUN_004342E0`)'s sub-0
+   * scene arm.
+   */
+  g_chapter_title_sprites: [0, 0, 0, 0, 0, 0, 0, 0] as number[],
+  /**
+   * `g_boss_mode_time` — `0x009C7060`. s32 sixtieths: the fight clock
+   * `BossModeChapterCardUpdate` (`FUN_00434920`) reads into it and draws.
+   * Nothing the port runs reaches it -- no bundle is a Boss Mode stage.
+   */
+  g_boss_mode_time: 0,
+  /**
+   * `g_boss_mode_clock_start` — `0x007DD174`. The platform's millisecond
+   * count when `BossModeClockStart` (`FUN_0049DF00`) last ran.
+   */
+  g_boss_mode_clock_start: 0,
+  /**
+   * `g_boss_mode_clock_base` — `0x007DD178`. Sixtieths
+   * `BossModeClockRead` (`FUN_0049DF20`) adds to what it measures.
+   */
+  g_boss_mode_clock_base: 0,
+  /**
+   * `g_boss_mode_entry` — `0x009A2268`. u8: the Boss Mode entry being
+   * played, the select screen's cursor. No screen of the port's writes it.
+   */
+  g_boss_mode_entry: 0,
+  /**
+   * `g_boss_mode_difficulty` — `0x009C8FB0`. s8: the Boss Mode select
+   * screen's second cursor, which `BossModeChapterCardUpdate` indexes
+   * `g_initial_damage_rank` with. No screen of the port's writes it.
+   */
+  g_boss_mode_difficulty: 0,
+  /**
+   * `g_mode_select_word` — `0x009A2BBC`. The Training select screen's block
+   * and the Boss Mode select screen's tenth row (1), whichever ran last;
+   * `TitleMenuRunPhase` zeroes it. No screen of the port's writes it.
+   */
+  g_mode_select_word: 0,
+  /**
    * `[port-only]` -- the asset slots this frame drew in the world, under a
    * matrix a routine built: see `game/view_slot.ts`. Cleared where
    * {@link g_view_slot_draws} is.
@@ -626,8 +683,8 @@ export const G = {
    * `g_boss_engaged` — `0x009CA0EA`. 1 while a boss fight is on: every boss
    * class raises it when it joins and drops it when it dies. Its one reader
    * is `BossModeChapterCardUpdate` (`FUN_00434920`), Boss Mode's fight clock,
-   * which the port does not run -- so the port writes it where the engine
-   * does and nothing reads it yet.
+   * which only a Boss Mode stage installs -- and no bundle is one -- so in
+   * play the port writes it where the engine does and nothing reads it.
    */
   g_boss_engaged: 0,
   /**
@@ -1180,10 +1237,13 @@ export const G = {
    */
   g_title_start_armed: 0,
   /**
-   * `g_pad_state` — 0x009C9028. Only the start and continue bits are fed:
+   * `g_pad_state` — 0x009C9028. Only the start, continue and B bits are fed:
    * `8` and `0x80000` are the two players' START that `PadStartPressed`
-   * (`FUN_00413230`) tests, `4` and `0x40000` what the continue screen reads.
-   * `[port-only]` The page raises a bit for one tick when START is pressed.
+   * (`FUN_00413230`) tests, `4` and `0x40000` what the continue screen reads,
+   * `2` and `0x20000` B -- the reload, the mouse's right button -- which the
+   * chapter card's skip and the game-over screen's cuts test.
+   * `[port-only]` The page raises a bit for one tick when the button goes
+   * down.
    */
   g_pad_state: 0,
   /**
@@ -3481,6 +3541,15 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   G.g_shot_hit_something = [0, 0];
   G.g_screen_sprite_draws = [];
   G.g_view_slot_draws = [];
+  // The chapter card's blocks and Boss Mode's clock: `.bss`, zero when the
+  // process loads and written only by the routines that own them -- the boot
+  // reset (`FUN_0040A920`) touches none of them. A fresh page is a fresh
+  // process.
+  G.g_chapter_title_parts = makeChapterTitleParts();
+  G.g_chapter_title_sprites = [0, 0, 0, 0, 0, 0, 0, 0];
+  G.g_boss_mode_time = 0;
+  G.g_boss_mode_clock_start = 0;
+  G.g_boss_mode_clock_base = 0;
   G.g_world_slot_draws = [];
   G.g_camera_is_tracking = 0;
   G.g_camera_lookat_target = vec3();

@@ -99,6 +99,10 @@ import { OPTIONS_SCREEN_SPRITES, SCREEN_IDLE_DIM_SLOT }
 // immediates in `ResultCardInstall`.
 import { RESULT_CARD_SPRITES, RESULT_GLYPH_SLOTS }
   from "../game/class61/state";
+// And the chapter card's: its title sprites and stage 6's model are
+// immediates in `ChapterCardInstall`, by scene.
+import { ChapterCardSlotsOf, ChapterCardSpritesOf }
+  from "../game/class60/state";
 // The trunk's sprites and models: class 0x6E's immediates.
 import { ITEM_SELECT_SLOTS, ITEM_SELECT_SPRITES } from "../game/class6e/state";
 import { SpawnClass } from "../game/spawn_class";
@@ -112,7 +116,7 @@ import { WEAPON_FIRST_SLOT, WEAPON_LAST_FRAME }
   from "../game/effects/shot_effects";
 import { SpriteEffectKind } from "../game/effects/sprite";
 import { charactersJson, resolveForStage as resolveCharacters,
-         stagePlacesResultCard } from "./characters";
+         stagePlacesChapterCard, stagePlacesResultCard } from "./characters";
 import * as charmotion from "./charmotion";
 import * as colilib from "./coli";
 import { class42Tables } from "./class42";
@@ -3040,6 +3044,10 @@ export async function buildStage(stage: Stage, sink: BundleSink,
     // ...and the result card's `result.bin` glyphs, drawn in view space by
     // `render/view_slots.ts`, for a stage that places the card.
     ...(prog && stagePlacesResultCard(prog) ? RESULT_GLYPH_SLOTS : []),
+    // ...and the chapter card's scene-5 model, drawn in view space by
+    // `render/view_slots.ts`, for a stage that places the card.
+    ...(prog && stagePlacesChapterCard(prog)
+      ? ChapterCardSlotsOf(stage.scene) : []),
     // ...and the trunk and its lid, `car_org.bin` 1 and 2, drawn in the world
     // by `render/view_slots.ts`, where the trunk is spawned.
     ...(trunk ? ITEM_SELECT_SLOTS : []),
@@ -3118,6 +3126,9 @@ export async function buildStage(stage: Stage, sink: BundleSink,
   // is: the figures' records and lists, their attachment lists, the glyph
   // strings, the life bonus and the accuracy bonus.
   scriptJson.result_card = tables.resultCardTables();
+  // The chapter card's: the Boss Mode backdrop and app state 0x0B's frames,
+  // the two arms of `ChapterCardInstall` that read a table.
+  scriptJson.chapter_card = tables.chapterCardTables();
   const routeTiles = (gameOver.route_tiles as number[]).flatMap((base) =>
     Array.from({ length: ROUTE_TILES_PER_SCREEN }, (_u, i) => base + i));
   // The options screen (app state 0x0C): one block for the whole game, as
@@ -3155,6 +3166,9 @@ export async function buildStage(stage: Stage, sink: BundleSink,
                                               stage.scene)),
      // The result card's frame, for a stage that places the card.
      ...(prog && stagePlacesResultCard(prog) ? RESULT_CARD_SPRITES : []),
+     // The chapter card's title, this scene's eight.
+     ...(prog && stagePlacesChapterCard(prog)
+       ? ChapterCardSpritesOf(stage.scene) : []),
      // Original Mode's bullets, `HudDrawAmmoAndReloadPrompt`'s row by fire
      // mode, for an Original stage.
      ...(stage.original

@@ -60,6 +60,7 @@ import { makeSetPiecePropTail, type SetPiecePropTail }
 import { makeThrowerTail, type ThrowerTail } from "./class31/state";
 import { makeZombieTail, type ZombieTail } from "./class30/state";
 import { makeResultCardTail, type ResultCardTail } from "./class61/state";
+import { makeChapterCardTail, type ChapterCardTail } from "./class60/state";
 import { makePropContainerTail, type PropContainerTail }
   from "./class41/placer_state";
 
@@ -2716,6 +2717,7 @@ export type Actor =
   | (ActorBase & { cls: SpawnClass.ScriptedScenery;
                    scenery: ScriptedSceneryTail })
   | (ActorBase & { cls: SpawnClass.ResultCard; card: ResultCardTail })
+  | (ActorBase & { cls: SpawnClass.ChapterCard; chapter: ChapterCardTail })
   | (ActorBase & { cls: SpawnClass.CutsceneSkipWatcher; skipWatch: SkipWatchTail })
   | (ActorBase & { cls: SpawnClass.PropContainerPlacer;
                    placer: PropContainerTail })
@@ -2735,7 +2737,8 @@ export type Actor =
       | SpawnClass.HordeSpawner
       | SpawnClass.Worm | SpawnClass.ResultCard
       | SpawnClass.CutsceneSkipWatcher
-      | SpawnClass.PropContainerPlacer> });
+      | SpawnClass.PropContainerPlacer
+      | SpawnClass.ChapterCard> });
 
 /** An actor already narrowed to class 0x25, for that class's own routines. */
 export type HumanoidActor = Extract<Actor,
@@ -2787,6 +2790,9 @@ export type FishActor = Extract<Actor, { cls: SpawnClass.WaterEnemy }>;
 
 /** An actor already narrowed to class 0x61: the result card or a figure. */
 export type ResultCardActor = Extract<Actor, { cls: SpawnClass.ResultCard }>;
+
+/** An actor already narrowed to class 0x60, the chapter card. */
+export type ChapterCardActor = Extract<Actor, { cls: SpawnClass.ChapterCard }>;
 
 /**
  * An actor already narrowed to class 0x41: a placer, a constructor-61 figure
@@ -3078,6 +3084,9 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
   }
   if (cls === SpawnClass.ResultCard) {
     return { ...head, cls, card: makeResultCardTail() };
+  }
+  if (cls === SpawnClass.ChapterCard) {
+    return { ...head, cls, chapter: makeChapterCardTail() };
   }
   if (cls === SpawnClass.CutsceneSkipWatcher) {
     return { ...head, cls, skipWatch: makeSkipWatchTail() };

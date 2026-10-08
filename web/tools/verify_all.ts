@@ -628,6 +628,15 @@ export const CHECKS: readonly Check[] = [
      + "the game's three class-0x42 descriptors are sub-types 1, 0 and 2, "
      + "and, with a bundle, that the shadow the port draws without the "
      + "scene light array is a black no light can change"),
+  game("chapter_card",
+       "that every sprite id, anchor point, dwell and model word the chapter "
+     + "card's port transcribes is the immediate at its instruction, found "
+     + "through the routine's own jump tables; that every float `title.ts` "
+     + "names by address is the `.rdata` float there; that the title's "
+     + "sprites resolve to paletted `scr_chapter` images with the palette "
+     + "`TexBankPaletteIndex` binds; that the variant arms' tables are where "
+     + "their instructions read; and, with a bundle, that each stage carries "
+     + "its scene's sprites, the block and stage 6 the card's model"),
   game("continue_screen",
        "that the continue screen the port draws -- the run's CONTINUE? and "
      + "digit, the two-player small ones, the small GAME OVER and the credit "

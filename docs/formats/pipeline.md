@@ -246,7 +246,7 @@ mode-2.
 ### Game mode 1 is Original Mode — [proved]
 
 `g_GameMode` (`0x009CA08C`) is the mode-select menu index, written in
-`FUN_00496960` from the cursor `DAT_009A2226` for entries 0–3 and reset to 0
+`FUN_00496960` from the cursor `g_title_menu_cursor` (`0x009A2226`) for entries 0–3 and reset to 0
 everywhere a game starts from elsewhere.
 
 **Mode 1 shares the region tables and changes only the id tables.** Region

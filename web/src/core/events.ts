@@ -14,7 +14,7 @@ export interface EventMap {
   /** `PlayerTakeDamage` ran: one life gone, and why. */
   "player.damaged": {
     /** What delivered it. `PlayerTakeDamage` does not care, but the feed does. */
-    source: "strike" | "thrown";
+    source: "strike" | "thrown" | "civilian";
     /** The attacker's spawn address, or -1. */
     at: number;
     /** The attacker's display name. */

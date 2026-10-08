@@ -98,6 +98,24 @@ console.log("\nclass 0x30's captor family — the zombies work on the civilian:"
   };
   const zFrame = (z: ZombieActor, events: Events) =>
     EnemyZombieUpdate(z, { dt: 1 / 60, rng, host: NULL_HOST, events });
+  /**
+   * A civilian stream that orders its captors in its **second** block, as
+   * every shipped op 0x1A is placed: `CivilianInit` runs the first block
+   * before it has written the child count (`sub+0x1E = 0` at `0x0048A473`,
+   * the script at `0x0048A5E2`, the count at `0x0048A775`), so an order there
+   * finds no children and is dropped. The opening `Free` word lets her first
+   * frame go on, and the second block's word of 0 is what stops the step
+   * there and runs it rather than walking past it (L85).
+   */
+  const orderStream = (order: number): CivilianCmdJson[][] => [[
+    { op: CivilianOp.Wait, args: [CivilianWait.Free] },
+    { op: CivilianOp.Wait, args: [0] },
+    { op: CivilianOp.SetChildCue, args: [order, 2] },
+    { op: CivilianOp.Wait, args: [0] },
+    { op: CivilianOp.End, args: [] },
+  ]];
+  const civFrame = (civ: Actor, events: Events) =>
+    CivilianUpdate(civ, { dt: 1 / 60, rng, host: NULL_HOST, events });
 
   // The bug this family fixes: an unmodelled captor state fell through
   // `ZombieEntryState` to `AttackRun` and the zombie went for the camera.
@@ -170,10 +188,11 @@ console.log("\nclass 0x30's captor family — the zombies work on the civilian:"
   {
     const { civ, z, events } = captorScene(
       ZombieState.AwaitCivilianOrder, 1, null,
-      [[{ op: CivilianOp.Wait, args: [CivilianWait.Free] },
-        { op: CivilianOp.SetChildCue, args: [ZombieState.OrderDie, 2] },
-        { op: CivilianOp.Wait, args: [0] },
-        { op: CivilianOp.End, args: [] }]]);
+      orderStream(ZombieState.OrderDie));
+    check("an order in the first block is dropped: the Init has no children yet",
+          civ.civ!.childOrder === 0 && civ.civ!.childCount === 1,
+          `order ${civ.civ!.childOrder} children ${civ.civ!.childCount}`);
+    civFrame(civ, events);
     check("the civilian's op 0x1A is an order to its captors, not a spare word",
           civ.civ!.childOrder === ZombieState.OrderDie
           && civ.civ!.childOrderFrames === 2,
@@ -222,10 +241,8 @@ console.log("\nclass 0x30's captor family — the zombies work on the civilian:"
     };
     const { civ, z, events } = captorScene(ZombieState.AwaitCivilianOrder,
       ZombieState.WalkPastPoint, ordered,
-      [[{ op: CivilianOp.Wait, args: [CivilianWait.Free] },
-        { op: CivilianOp.SetChildCue, args: [ZombieState.WalkToTarget, 2] },
-        { op: CivilianOp.Wait, args: [0] },
-        { op: CivilianOp.End, args: [] }]]);
+      orderStream(ZombieState.WalkToTarget));
+    civFrame(civ, events);                   // her second block: the order
     zFrame(z, events);                       // hides, takes the order
     zFrame(z, events);                       // and walks
     check("an ordered captor enters the state its civilian named",
@@ -263,10 +280,8 @@ console.log("\nclass 0x30's captor family — the zombies work on the civilian:"
     };
     const { civ, z, events } = captorScene(ZombieState.AwaitCivilianOrder,
       ZombieState.WalkPastPoint, ordered,
-      [[{ op: CivilianOp.Wait, args: [CivilianWait.Free] },
-        { op: CivilianOp.SetChildCue, args: [ZombieState.WalkToTarget, 2] },
-        { op: CivilianOp.Wait, args: [0] },
-        { op: CivilianOp.End, args: [] }]]);
+      orderStream(ZombieState.WalkToTarget));
+    civFrame(civ, events);                   // her second block: the order
     const skeleton = () => (z.motionFlags & MotionFlag.Drawn) !== 0;
     check("a captor awaiting the order starts drawn, skeleton and both parts",
           skeleton() && z.partVisible.join() === "1,1",

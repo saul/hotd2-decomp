@@ -220,7 +220,7 @@ export function PlayerTakeDamageTimed(player: number, latch: number,
   if (invulnFrames !== -1) G.g_player_invuln_frames[player] = invulnFrames;
   PlayerFloorLivesOffPath(player);
   events?.emit("player.damaged", {
-    source: "thrown",
+    source: "civilian",
     at: src?.at ?? -1,
     who: src?.name ?? "—",
     attack: -1,

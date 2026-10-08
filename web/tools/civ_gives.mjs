@@ -159,6 +159,9 @@ function play(bundle, at) {
   SetCameraPaths(cam);
   G.g_players_in_play = 1;
   G.g_GameMode = script.game_mode;
+  // ...and the title menu's cursor on the row that mode is, as the confirm
+  // that wrote `g_GameMode` left it: op 0x1F reads the cursor, not the mode.
+  G.g_title_menu_cursor = script.game_mode;
   if (!seekTo(walker, block, step, 0)) return { error: `seek ${block}/${step}` };
   world.resync(ctx);
 
@@ -297,15 +300,20 @@ check("the survey finds the five life-givers the exe's streams name "
 /**
  * The four whose item is only in the **second** arm of an op 0x1F
  * (`SetResumeByMode`) -- stage 2's `0x8510` (stream 27 -> 25 or 26), `0x1158C`
- * and `0x12098` (54 -> 52 or 53) and stage 4's `0x23F8` (82 -> 80 or 81) --
- * in both modes. `CivilianRunScript` takes that arm when `DAT_009A2226`
- * equals the switch's `DX` (`0x0048BF79`), which is `[open]`, and the port
- * takes the first; so these resume past their item and leave empty-handed.
- * A count that moves here is that reading landing, not this harness breaking.
+ * and `0x12098` (54 -> 52 or 53) and stage 4's `0x23F8` (82 -> 80 or 81).
+ * `CivilianRunScript` takes that arm when `g_title_menu_cursor` is 1, the
+ * ORIGINAL row (`0x0048BF79`), so an Arcade run resumes past the item and she
+ * leaves empty-handed -- the exe's stream, not a miss -- and an Original Mode
+ * run gives it.
  */
 const BEHIND_RESUME_BY_MODE = new Set([
   "stage2:8510", "stage2:1158c", "stage2:12098", "stage4:23f8",
-  "stage2_original:8510", "stage2_original:1158c", "stage2_original:12098",
+  // Not op 0x1F's: played from its spawn step, stage 4's block 2 step 7, in
+  // Original Mode the walker parks on the step's opening
+  // `wait_script_flag 20` and never reaches the `spawn_obj_c` that makes her
+  // (Arcade passes it by frame 140). No evt op and no civilian stream raises
+  // flag 20, so an actor does; which one, and why not in Original Mode from
+  // this seek, is `[open]`. Main's harness listed her here as op 0x1F's.
   "stage4_original:23f8",
 ]);
 
@@ -361,7 +369,8 @@ check("every life-giver in both modes hands the life over",
         `${r.bundle}:${r.at.toString(16)}`)),
       missed.join());
 check("...and every Original Mode item does too, but the four behind op "
-      + "0x1F's second arm",
+      + "0x1F's second arm in Arcade, and stage 4's 0x23F8 in Original Mode, "
+      + "which this seek never spawns",
       missed.length === BEHIND_RESUME_BY_MODE.size
       && missed.every((m) => BEHIND_RESUME_BY_MODE.has(m)),
       `missed ${missed.join()}`);

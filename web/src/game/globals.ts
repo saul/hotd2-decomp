@@ -2953,6 +2953,21 @@ export const G = {
    */
   g_GameMode: GameMode.Arcade as GameMode,
   /**
+   * `g_title_menu_cursor` — 0x009A2226, s16. The title menu's highlighted
+   * row, 0..7: rows 0..3 are the {@link GameMode} values and its confirm arm
+   * writes `g_GameMode = g_title_menu_cursor` for them
+   * (`TitleMenuUpdateAndSelect`, `FUN_00496960`).
+   *
+   * `[proved]` from all 19 references (an operand search and a byte search
+   * for `26229a00` agree): the boot reset (`FUN_0040A920`) and the attract
+   * screen's hand-over to the title (`FUN_004043C0`) zero it, the menu moves
+   * it, and nothing else writes it -- so through a game it stays on the row
+   * the player confirmed. Its one gameplay reader is class 0x10's op 0x1F,
+   * which takes Original Mode's stream on row 1. The port stands the confirm
+   * in with `PlayerStartGameFromTitle`, which writes it.
+   */
+  g_title_menu_cursor: 0,
+  /**
    * `g_training_lesson` — 0x009C9118. Which level of the chosen training
    * course is being played, 0..4; the course is {@link g_training_course}.
    *

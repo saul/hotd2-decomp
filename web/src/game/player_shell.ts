@@ -932,6 +932,10 @@ export function PlayerStartGameFromTitle(mode: number,
                                          f: PlayerFrame = TITLE_FRAME): void {
   RequestAppState(AppState.Title);
   CommitAppState();
+  // The confirm arm writes `g_GameMode = g_title_menu_cursor` for rows 0..3,
+  // so a game confirmed as `mode` was confirmed with the cursor on that row,
+  // and nothing moves it again until the title comes back round.
+  G.g_title_menu_cursor = mode;
   G.g_title_start_armed = 1;
   SetBothPlayerCounters(ModeStartCounterValue(mode));
   PlayerTasksCreate();

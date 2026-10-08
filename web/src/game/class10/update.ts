@@ -93,14 +93,22 @@ export function CivilianUpdate(obj: Actor, f: ClassFrame): void {
 
   CivilianCheckShot(obj, f);
 
-  // The queued sound, and the list op 0x22 left behind it.
-  if (sub.soundDelay !== 0) {
+  // The queued sound, and the list op 0x22 left behind it: `CMP [EAX+0x88],
+  // EBX; JZ; CMP dword ptr [0x009c8e98], 0xA; JZ` at `0x0048AD1C` -- the
+  // count holds while `g_app_state` is 10, as op 0x1B's shutter write does.
+  if (sub.soundDelay !== 0
+      && G.g_app_state !== CIV_SOUND_HELD_APP_STATE) {
     sub.soundDelay -= 1;
     if (sub.soundDelay === 0) {
       f.events?.emit("sound.play", { id: sub.soundId });
       const next = sub.sounds.shift();
       if (next) { sub.soundId = next[0]; sub.soundDelay = next[1]; }
     }
+  }
+  // Op 0x2B's countdown, `0x0048AD97`..`0x0048ADA4`: stepped, and read by
+  // nothing else -- see `CivilianOp.InPlayOnly`.
+  if (sub.inPlayCountdown !== 0) {
+    sub.inPlayCountdown = ((sub.inPlayCountdown - 1) << 16) >> 16;
   }
 
   // `PUSH 0x40800000; CALL 0x00409B70`, bytes `6800008040` at `0x0048ADAB`,
@@ -120,6 +128,9 @@ export function CivilianUpdate(obj: Actor, f: ClassFrame): void {
   // except the two that despawn.
   if (!obj.despawned) CivilianReleaseCaptors(obj);
 }
+
+/** `CMP dword ptr [0x009c8e98], 0xA` at `0x0048AD26`: the sound queue holds. */
+const CIV_SOUND_HELD_APP_STATE = 10;
 
 /** `PUSH 0x40800000` at `0x0048ADAB`: `ActorRegisterCameraPoint`'s 4.0. */
 export const CIVILIAN_CAMERA_RISE = 4.0;

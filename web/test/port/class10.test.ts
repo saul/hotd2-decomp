@@ -8,7 +8,8 @@ import { ActorAdvanceMotion } from "../../src/game/motion";
 import { UpdateSceneViewAndLight } from "../../src/game/camera/view";
 import { MotionFlag } from "../../src/game/actor";
 import { ScoreAddForPlayer } from "../../src/game/combat/score";
-import { G, HIT_SLOT_NONE, ResetGameGlobals } from "../../src/game/globals";
+import { AppState, G, HIT_SLOT_NONE, ResetGameGlobals } from "../../src/game/globals";
+import { GameMode } from "../../src/game/game_mode";
 import { NULL_HOST, type GameHost } from "../../src/game/host";
 import { SetGameTables } from "../../src/game/tables";
 import { QueryGroundHeightAt } from "../../src/game/coli";
@@ -472,7 +473,7 @@ console.log("\nclass 0x10, the civilian and the rescue:");
 
     const { a, events } = shotScene();
     withCamera();
-    a.civ!.cameraBone = 7;
+    a.civ!.hitBone = 7;
     const lives0 = G.g_player_lives[0];
     G.g_player_invuln_frames[0] = 0;
     a.flags |= 8 | 2;
@@ -2120,14 +2121,24 @@ console.log("\nclass 0x10, the head look -- ops 0x23/0x24 and CivilianDrawBonePa
   }
   // With a captor the head looks at the captor's head, and when the captor
   // is despawned -- its flags word's bit 0 gone -- the head goes home.
+  //
+  // In the **second** block: `CivilianInit` runs the first before it writes
+  // the child count (the script at `0x0048A5E2`, `sub+0x1E` at
+  // `0x0048A775`), so a mode 2 there finds no child and is mode 0. The
+  // opening `Free` word lets her first update go on into the block, after
+  // that frame's draw, so the turn starts on the second.
   {
-    const { a, kids, step } = scene([[cmd(CivilianOp.Wait, 0),
+    const { a, kids, step } = scene([[cmd(CivilianOp.Wait, CivilianWait.Free),
+                                      cmd(CivilianOp.Wait, 0),
                                       cmd(CivilianOp.SetHeadLook, 2),
                                       cmd(CivilianOp.Wait, 0),
                                       cmd(CivilianOp.End)]], [0x5000]);
     const c = a.civ!;
+    check("op 0x23 2 in the Init's first block would find no child yet",
+          c.childCount === 1 && c.headLook === 0,
+          `children ${c.childCount} mode ${c.headLook}`);
     kidHead.x = S; kidHead.y = 10 + 1.5; kidHead.z = S;
-    step(3);
+    step(4);
     check("op 0x23 2 looks at the first child's head",
           c.headLook === 2 && c.headLookTarget === 0x5000
           && c.headLookYaw === 0x300 && c.headLookPitch === 0,
@@ -2156,5 +2167,160 @@ console.log("\nclass 0x10, the head look -- ops 0x23/0x24 and CivilianDrawBonePa
     step(1, NULL_HOST);
     check("a shot civilian's head look becomes 6",
           a.civ?.headLook === 6, `mode ${a.civ?.headLook}`);
+  }
+}
+
+// The VM gaps the c10-civilian-vm audit found: the Init's order, ops 0x16,
+// 0x1F, 0x22 and 0x2B, and the sound queue's hold. Every number below is the
+// exe's, named beside it, and every setup starts from `ResetGameGlobals`.
+console.log("\nclass 0x10's Init order and the audit's ops:");
+{
+  const rng = new Rng(5);
+  const scene = (cmds: CivilianCmdJson[][],
+                 opts: { mode?: GameMode } = {}) => {
+    // The mode goes in before the reset, as the page's stage load does: a new
+    // run is started from the title with it (`PlayerStartGameFromTitle`).
+    G.g_GameMode = opts.mode ?? GameMode.Arcade;
+    ResetGameGlobals();
+    EnterPlay();
+    G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    G.g_scene_state_major = SCENE_MAJOR_PLAYING;
+    SetGameTables(CHARS, undefined, undefined, undefined, undefined, {
+      entries: [0], scripts: cmds, items: [],
+      // A removal cue on a path that never plays: -1 would match the reset's
+      // `g_active_cam_path` and count down on the first frame.
+      spawns: {
+        "16384": {
+          charType: 1, script: 0, removePath: 99, removeFrame: 0,
+          removeDelay: 0, children: [],
+        },
+      },
+    });
+    const a = ActorSpawn(0x4000, SpawnClass.Civilian, 1, "civilian",
+                         undefined, rng);
+    a.visible = true;
+    a.pos = vec3(0, 0, 0);
+    return { a, events: new Events() };
+  };
+  const step = (a: ReturnType<typeof ActorSpawn>, events: Events) =>
+    CivilianUpdate(a, { dt: 1 / 60, rng, host: NULL_HOST, events });
+  const cmd = (op: CivilianOp, ...args: number[]): CivilianCmdJson =>
+    ({ op, args });
+
+  // -- the Init's order: the script before the count -----------------------
+  // `CALL CivilianRunScript` at `0x0048A5E2`, `TEST dword ptr [ECX],
+  // 0x8000000` at `0x0048A705`: the word the test reads is the first block's.
+  // Nine shipped entry streams open on one carrying it (`0x08300000`, ...).
+  for (const word of [0, CivilianWait.Uncounted | 0x00300000]) {
+    G.g_GameMode = GameMode.Arcade;
+    ResetGameGlobals();
+    const before = G.g_civilians_seen_total;
+    scene([[cmd(CivilianOp.Wait, word), cmd(CivilianOp.End)]]);
+    const counted = word === 0 ? 1 : 0;
+    check(`a first block whose word is 0x${word.toString(16)} `
+          + `${counted ? "counts" : "does not count"} her as seen`,
+          G.g_civilians_seen_total === before + counted
+          && G.g_civilians_alive === 1,
+          `seen ${before} -> ${G.g_civilians_seen_total} `
+          + `alive ${G.g_civilians_alive}`);
+  }
+
+  // -- op 0x16: from the radius she has, over whole frames ----------------
+  // `FSUB [EDI+0x128]; FIDIV dword ptr [ESI-0x4]`. In the Init's first block
+  // `obj+0x128` is still `ActorClearGameFields`' zero -- the Init writes 1.0
+  // at `0x0048A6D6`, after the script -- so a 30-frame grow to 5 steps 5/30
+  // a frame, from 1. Two shipped first blocks run one.
+  {
+    const { a, events } = scene([[
+      cmd(CivilianOp.Wait, 0),
+      cmd(CivilianOp.SetRadiusRamp, 0x40a00000, 30),
+      cmd(CivilianOp.End),
+    ]]);
+    const s = Math.fround(5 / 30);
+    check("op 0x16 in the Init measures from obj+0x128's zero",
+          a.civ?.scaleStep === s && a.bodyRadius === 1,
+          `step ${a.civ?.scaleStep} radius ${a.bodyRadius}`);
+    step(a, events);
+    check("...and PoseHookGrowAndPushOutOfWorld takes one step of it",
+          a.bodyRadius === 1 + s, `radius ${a.bodyRadius}`);
+  }
+  {
+    const { a, events } = scene([[
+      cmd(CivilianOp.Wait, CivilianWait.Free),
+      cmd(CivilianOp.Wait, 0),
+      cmd(CivilianOp.SetRadiusRamp, 0x40a00000, 4),
+      cmd(CivilianOp.End),
+    ]]);
+    step(a, events);                       // her second block: (5 - 1) / 4
+    step(a, events);
+    check("op 0x16 later on ramps from the radius she has",
+          a.civ?.scaleStep === 1 && a.bodyRadius === 2,
+          `step ${a.civ?.scaleStep} radius ${a.bodyRadius}`);
+  }
+
+  // -- op 0x22's null pointer keeps the sound op 0x21 queued --------------
+  // `0x0048C034`: `MOV [EAX+0x58], EBP` and nothing more.
+  {
+    const { a, events } = scene([[
+      cmd(CivilianOp.Wait, 0),
+      cmd(CivilianOp.QueueSound, 0x20000014, 3),
+      cmd(CivilianOp.QueueSoundList, 0),
+      cmd(CivilianOp.End),
+    ]]);
+    const heard: number[] = [];
+    events.on("sound.play", (d) => heard.push(d.id));
+    for (let i = 0; i < 3; i++) step(a, events);
+    check("a null op 0x22 leaves op 0x21's sound to play",
+          heard.includes(0x20000014),
+          `heard ${heard.map((x) => x.toString(16))}`);
+  }
+  // ...and the queue holds while `g_app_state` is 10 (`0x0048AD26`).
+  {
+    const { a, events } = scene([[
+      cmd(CivilianOp.Wait, 0),
+      cmd(CivilianOp.QueueSound, 0x20000014, 2),
+      cmd(CivilianOp.End),
+    ]]);
+    G.g_app_state = 10;
+    step(a, events);
+    step(a, events);
+    check("the sound queue holds while g_app_state is 10",
+          a.civ?.soundDelay === 2, `delay ${a.civ?.soundDelay}`);
+    G.g_app_state = AppState.InPlay;
+  }
+
+  // -- op 0x1F: the title menu's row picks the stream ---------------------
+  // `CMP word ptr [0x009a2226], DX` with `DX = 1` (`0x0048BF79`): the cursor
+  // on the ORIGINAL row takes `cmd[2]`.
+  for (const mode of [GameMode.Arcade, GameMode.Original]) {
+    const { a } = scene([[
+      cmd(CivilianOp.Wait, 0),
+      { op: CivilianOp.SetResumeByMode, args: [0x1000, 0x2000],
+        scripts: [1, 2] },
+      cmd(CivilianOp.End),
+    ], [cmd(CivilianOp.Wait, 0), cmd(CivilianOp.End)],
+       [cmd(CivilianOp.Wait, 0), cmd(CivilianOp.End)]], { mode });
+    const want = mode === GameMode.Original ? 2 : 1;
+    check(`op 0x1F takes stream ${want} when the game was confirmed as mode `
+          + `${mode}`,
+          G.g_title_menu_cursor === mode && a.civ?.resumeScript === want
+          && a.civ?.resume === (want === 2 ? 0x2000 : 0x1000),
+          `cursor ${G.g_title_menu_cursor} resume ${a.civ?.resumeScript}`);
+  }
+
+  // -- op 0x2B: the countdown nothing reads, stepped ----------------------
+  // Stage 1's stream 39 runs `(5, 0, 3, 0x1E, 0x14)` in its first block.
+  {
+    const { a, events } = scene([[
+      cmd(CivilianOp.Wait, 0),
+      cmd(CivilianOp.InPlayOnly, 5, 0, 3, 0x1e, 0x14),
+      cmd(CivilianOp.End),
+    ]]);
+    const set = a.civ?.inPlayCountdown;
+    step(a, events);
+    step(a, events);
+    check("op 0x2B's s16 is set in play and counted down once a frame",
+          set === 5 && a.civ?.inPlayCountdown === 3,
+          `set ${set} count ${a.civ?.inPlayCountdown}`);
   }
 }

@@ -114,7 +114,7 @@ export function CivilianCheckShot(obj: Actor, f: ClassFrame): void {
   // The records are the renderer's pose here (`GameHost.boneWorld`); a host
   // that cannot pose her has no point, and the marker is only a draw, so it
   // is then not made.
-  const posed = f.host.boneWorld(obj.at, sub.cameraBone, _hit);
+  const posed = f.host.boneWorld(obj.at, sub.hitBone, _hit);
   // `obj+0x34` bits 1 and 2 name the shooter; neither, or both, is `rand()`'s
   // parity (`0x0048AC1F`..`0x0048AC32`).
   const two = obj.flags & 6;

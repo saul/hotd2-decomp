@@ -31,7 +31,7 @@ import { MatCopy, MatIdentity, MatrixGetTranslation, MatrixLoadIdentity,
          MatrixRotateY,
          MatrixTransformPoint, MatrixTranslate,
          RADIANS_TO_BAMS } from "../matrix";
-import { vec3 } from "../vec";
+import { LerpAngleShortWay, LerpWeightedByFractions, vec3 } from "../vec";
 import { CameraUpdateHook } from "./driver";
 import { CAMERA_INDEX_VIEW_ANGLES } from "./view";
 import { CAMERA_EYE_DROP, CameraPlayStashedPath,
@@ -141,30 +141,49 @@ const SCENE_STATE_CAMERA_HOOKS: Readonly<Record<number, CameraUpdateHook>> = {
 
 /**
  * `CameraFollowPlayerMidpoint` — `FUN_0040C9C0`, scene state (1,1): the
- * gameplay eye and its angles from the player bodies -- their midpoint with
- * two players, the active one's alone with one.
+ * gameplay eye and its angles from the player bodies -- with a player count
+ * other than 1 their midpoint, `LerpWeightedByFractions(a, b, 1, 1)` for the
+ * eye and `LerpAngleShortWay(a, b, 1, 1)` for each angle; with one, the
+ * `g_active_player`'s body as it stands. `[proved]`
  *
- * Both parts come out as constants, and the port writes them as such:
+ * Under the `PlaceEntity` hooks the bodies are where this put the eye, so it
+ * hands the eye back to itself: `PlacePlayerEntityFromViewPose` stands a body
+ * at `T(eye) Rz Ry Rx * (x, 0, 0)` with `x` 0 for one attacker and -3, 3 for
+ * two, and the camera's angles. It moves only when a script's routine has
+ * placed the bodies itself -- stage 1's opening (1,1), where the eye rides in
+ * the driver's seat, and stage 2 block 6's. The scene also enters (1,1) as it
+ * loads (`CameraActorInit`'s `EvtEnterSceneState(1, 1)`), where the bodies
+ * are freshly made at the origin with zero angles.
  *
- * * **The eye does not move.** `PlacePlayerEntityFromViewPose`
- *   (`FUN_004159A0`) puts each body at `T(g_camera_eye) Rz Ry Rx *
- *   (offset, 0, 0)` with the offset from `0x00579E90[player +
- *   g_max_attackers * 2]`, which reads `0.0, 0.0` for one player and
- *   `-3.0, 3.0` for two (`read_memory`). One player's body sits on the eye and
- *   two players' midpoint does, so the hook hands the eye back to itself.
- *   `[proved]`
- * * **The angles are zero.** They are the bodies' `+0x64..+0x6C`, which
- *   nothing writes after `PlayerBodiesCreate` allocates them (see
- *   `game/player_body.ts`).
- *
- * The scene enters (1,1) as it loads -- `CameraActorInit`'s
- * `EvtEnterSceneState(1, 1)` -- and leaves it at the script's first scene
- * state change, a few instructions in.
+ * The hook runs before the player tasks, so it reads the bodies the last
+ * frame's hooks left. `g_active_player` is -1 when nobody can be attacked,
+ * and the exe then reads the word before the first body's slot; that read
+ * is `[open]`, and the port leaves the eye as it is.
  */
 export function CameraFollowPlayerMidpoint(): void {
-  G.g_camera_pitch_bams = 0;
-  G.g_camera_yaw_bams = 0;
-  G.g_camera_roll_bams = 0;
+  const b0 = G.g_player_bodies[0];
+  const b1 = G.g_player_bodies[1];
+  if (G.g_players_in_play !== 1) {
+    if (!b0 || !b1) return;
+    G.g_camera_eye.x = Math.fround(LerpWeightedByFractions(b0.pos.x, b1.pos.x,
+                                                           1, 1));
+    G.g_camera_eye.y = Math.fround(LerpWeightedByFractions(b0.pos.y, b1.pos.y,
+                                                           1, 1));
+    G.g_camera_eye.z = Math.fround(LerpWeightedByFractions(b0.pos.z, b1.pos.z,
+                                                           1, 1));
+    G.g_camera_pitch_bams = LerpAngleShortWay(b0.pitch, b1.pitch, 1, 1);
+    G.g_camera_yaw_bams = LerpAngleShortWay(b0.yaw, b1.yaw, 1, 1);
+    G.g_camera_roll_bams = LerpAngleShortWay(b0.roll, b1.roll, 1, 1);
+    return;
+  }
+  const b = G.g_player_bodies[G.g_active_player];
+  if (!b) return;
+  G.g_camera_eye.x = b.pos.x;
+  G.g_camera_eye.y = b.pos.y;
+  G.g_camera_eye.z = b.pos.z;
+  G.g_camera_pitch_bams = b.pitch;
+  G.g_camera_yaw_bams = b.yaw;
+  G.g_camera_roll_bams = b.roll;
 }
 
 const _m = MatIdentity();

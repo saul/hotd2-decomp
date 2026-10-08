@@ -12,9 +12,10 @@
  * what the strip depicts.
  *
  * The whole routine is `0x0046B480`..`0x0046B5EC` — **not** the 0x840 bytes
- * up to `0x0046BCC0`: a second, unrelated routine at `0x0046B5F0` sits
- * between (its one reference is a `DATA` push in the constructor at
- * `0x004632F0`; it is not `g_class41_updates[37]`, which is `NoOpStub`). The pseudocode returns inside the loop at `MatrixStackPop`, which
+ * up to `0x0046BCC0`: a second, unrelated routine sits between --
+ * `PropUpdateType37` (`FUN_0046B5F0`), whose one reference is a `DATA` push in
+ * constructor 37 (`0x004632F0`); it is not `g_class41_updates[37]`, which is
+ * `NoOpStub`. See `class41/type37.ts`. The pseudocode returns inside the loop at `MatrixStackPop`, which
  * Ghidra marks no-return (`L35`); the reseed and the loop's tail are the
  * disassembly's:
  *

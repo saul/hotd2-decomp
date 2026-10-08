@@ -75,7 +75,6 @@ const walker = new Walker(script, {
   presentEnemies: () => G.g_enemies_present, aliveCivilians: () => null,
   scriptFlagRaised: () => null,
   cameraFree: () => null, setShutter: NOOP, showMessage: NOOP,
-  endDialogue: NOOP,
 });
 
 const rng = new Rng(7);

@@ -475,3 +475,79 @@ console.log("\nShotTestMesh: the boards stop the shot:");
   SetGameTables(CHARS);
   ResetGameGlobals();
 }
+
+// -- class 0x29: a batch of floor decals, until a camera cue ----------------
+
+console.log("\nclass 0x29 -- one of three lists drawn in the world, killed on "
+            + "its camera cue:");
+{
+  // Stage 2 block 11 step 5's spawn, evt 28076: list 2 (`0x00589C88`), until
+  // camera path 70 reaches frame 745. `SceneryBatchUpdate29` (`0x00432C80`)
+  // had no port, so the director built nothing for it and the blood beside
+  // the dead `hito_mario` was missing. Driven from the director's walker
+  // entry and `GameUpdate`; the cue is read off the camera globals the
+  // update reads.
+  const rng = new Rng(29);
+  ResetGameGlobals();
+  EnterPlay();
+  const AT = 28076;
+  const tables = (hp: number) => ({
+    ...CHARS,
+    placements: [{ at: AT, class: 0x29, char_type: -1, motion: null, hp,
+                   yaw: 0, class29: { kill_path: 70, kill_frame: 745 } }],
+  }) as unknown as CharactersJson;
+  SetGameTables(tables(2));
+  SpawnSlotActor({ at: AT, class: 0x29, hp: 2, pos: [0, 0, 0] });
+  const frame = (path: number, f: number) => {
+    G.g_active_cam_path = path;
+    G.g_cam_path_frame = f;
+    GameUpdate(1 / 60, NULL_HOST, rng);
+  };
+  // A world point through a recorded matrix: the stack's row-vector layout.
+  const at = (m: readonly number[], x: number, y: number, z: number) => [
+    m[0] * x + m[4] * y + m[8] * z + m[12],
+    m[1] * x + m[5] * y + m[9] * z + m[13],
+    m[2] * x + m[6] * y + m[10] * z + m[14]];
+  frame(70, 600);
+  const d = G.g_world_slot_draws;
+  check("list 2 draws its nine records, every one slot 0x93C or 0x93D",
+        d.length === 9 && d.every((r) => r.slot === 0x93c || r.slot === 0x93d),
+        d.map((r) => r.slot.toString(16)).join());
+  const o0 = at(d[0].m, 0, 0, 0);
+  check("...the first at the record's point, (-832.9, -6.75, -924.3) as f32",
+        Math.abs(o0[0] - Math.fround(-832.9)) < 1e-4
+          && Math.abs(o0[1] - Math.fround(-6.75)) < 1e-6
+          && Math.abs(o0[2] - Math.fround(-924.3)) < 1e-4, o0.join());
+  // The second record: yaw 0x2000 (45 degrees) and scale 3. Its model's +X
+  // lands 3 away, turned an eighth -- the RotY then Scale the routine makes.
+  const a = at(d[1].m, 0, 0, 0);
+  const b = at(d[1].m, 1, 0, 0);
+  const dx = b[0] - a[0], dy = b[1] - a[1], dz = b[2] - a[2];
+  check("...the second turned 0x2000 about Y and scaled 3",
+        Math.abs(Math.hypot(dx, dy, dz) - 3) < 1e-4 && Math.abs(dy) < 1e-6
+          && Math.abs(Math.abs(dx) - Math.abs(dz)) < 1e-4,
+        `${dx.toFixed(3)} ${dy.toFixed(3)} ${dz.toFixed(3)}`);
+  frame(71, 900);
+  check("another camera path at a later frame does not end it",
+        G.g_world_slot_draws.length === 9
+          && G.g_object_list.some((o) => o.at === AT && !o.despawned));
+  frame(70, 744);
+  check("...nor its own path a frame short of the cue",
+        G.g_world_slot_draws.length === 9);
+  frame(70, 745);
+  check("path 70 at frame 745 kills it before it draws",
+        G.g_world_slot_draws.length === 0
+          && G.g_object_list.some((o) => o.at === AT && o.despawned),
+        `${G.g_world_slot_draws.length} draws`);
+
+  // The default arm, declared: a selector outside 0..2 draws nothing.
+  ResetGameGlobals();
+  EnterPlay();
+  SetGameTables(tables(3));
+  SpawnSlotActor({ at: AT, class: 0x29, hp: 3, pos: [0, 0, 0] });
+  frame(70, 600);
+  check("a selector outside 0..2 draws nothing -- the default arm the port "
+        + "does not walk",
+        G.g_world_slot_draws.length === 0
+          && G.g_object_list.some((o) => o.at === AT && !o.despawned));
+}

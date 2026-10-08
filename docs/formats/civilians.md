@@ -334,9 +334,9 @@ Two consequences worth knowing, both the engine's:
 | `0x20` | `SetFlagIndex` | |
 | `0x21` | `QueueSound` | id, delay |
 | `0x22` | `QueueSoundList` | pointer to `(id, delay)` pairs, `0xFFFFFFFF`-terminated |
-| `0x23` | `SetAttachMode` | `[open]` |
-| `0x24` | `SetAttachTarget` | `[open]` |
-| `0x25` | `SetPairA` | `[open]` |
+| `0x23` | `SetHeadLook` | where the head looks, `sub+0x8C`; a 2 also takes the first child as the target, `sub+0x90`, or writes 0 with none (`0x0048C044`) -- see *The head look* below. It was `SetAttachMode` |
+| `0x24` | `SetHeadLookTarget` | the same, with the target given: `sub+0x8C`, `sub+0x90` (`0x0048C08C`). The shipped two are mode 5 and a pointer into `.data` -- `(20, 50, -20)` at `0x0056E028`, `(20, 20, -20)` at `0x0056E038`, both in stream 60 -- and the bundle carries the three floats as the command's `point` for modes 4 and 5. It was `SetAttachTarget` |
+| `0x25` | `SetMouth` | **she talks**: frames into `sub+0xA4`, a mouth row into `sub+0xA8`, and `sub+0xA0 = 0` (`0x0048C0B0`) -- see *The mouth* below. It was `SetPairA`, "which nothing read reads" |
 | `0x26` | `MoveOverFrames` | point (or `< 1` for the camera), frames |
 | `0x27` | `SetScale` | `model+0x116C` |
 | `0x28` | `SetCameraBone` | |
@@ -440,7 +440,7 @@ it ends.
 
 | Ids | Files | What happens |
 |---|---|---|
-| `0x00`–`0x23` | `hito_kao_*`, `etc_*_kao`; `0x02`, `0x03` and `0x0E` are `char_adv02`, `char_adv01` and `char_adv07` | `ActorBindPartList` writes the record's slot **over** `bone_records[bone].slot`. All 36 are bone 2. *Kao* (顔) is **face**: `hito_kao_gal.bin` alone holds 60 heads of the same 149 vertices and 234 triangles as `hito_gal`'s own, differing only in texture — three skins × twenty mouth positions. The skeleton's head is the default, not the character. |
+| `0x00`–`0x23` | `hito_kao_*`, `etc_*_kao`; `0x02`, `0x03` and `0x0E` are `char_adv02`, `char_adv01` and `char_adv07` | `ActorBindPartList` writes the record's slot **over** `bone_records[bone].slot`. All 36 are bone 2. *Kao* (顔) is **face**: `hito_kao_gal.bin` alone holds 60 heads of the same 149 vertices and 234 triangles as `hito_gal`'s own -- three faces of twenty slots each, and the slots after a face are its mouth shapes: `CivilianDrawBonePart` draws the face's slot **plus a cel** of 0 to 9 while she talks (see *The mouth*), and `0x0C6A` against `0x0C6C` moves 62 of the 149 vertices, all in the lower front of the face. What slots ten to nineteen of a face are is `[open]`: no table reaches them. The skeleton's head is the default, not the character. |
 | `0x24`–`0x50` | `etc_komono_*` | `ActorDrawAttachedParts` draws the record's slot **as well**, in the matrix of the record's bone. *Komono* (小物) is **small item**: hair and hats on bone 2, bags and aprons on bone 1, shoes on bones 12 and 15. |
 
 `ActorDrawAttachedParts` also scales bone 2 by `1.5, 1.0, 1.5` and bones 5, 8,
@@ -471,6 +471,100 @@ family**, with no exceptions: type `0x2E` (`hito_man`) takes `etc_komono_man`,
 `ActorReleasePartList` (`FUN_004124B0`) is the undo, and it releases the loads
 only — the overwritten bone slots are not put back, because the object is
 being torn down.
+
+### The mouth
+
+**Nothing in a civilian's motion moves her mouth.** `CivilianInit` installs
+`CivilianDrawBonePart` (`FUN_0048D1F0`) as the node draw hook (`MOV dword ptr
+[EAX + 0x1158], 0x48d1f0` at `0x0048A60B`), and for bone 2 it draws the head's
+record slot **plus a cel** out of `g_civilian_mouth_tables` (`0x0056B950`),
+six `{s8 *cels; s32 count}` rows. `[proved]`
+
+```
+if (sub+0xA8 != 6) {                      // CivilianInit writes 6
+    cel = rows[sub+0xA8].cels[sub+0xA0 % rows[sub+0xA8].count];
+    if (sub+0xA4 != 0) {
+        if (--sub+0xA4 == 0) {
+            if (sub+0xA8 == 2) { sub+0xA8 = 3; sub+0xA4 = count[3]; sub+0xA0 = 0; }
+            else sub+0xA0 = count[sub+0xA8] - 1;
+        } else sub+0xA0 += 1;
+    }
+}
+AssetDrawSlot(record + cel);
+```
+
+Op `0x25` writes the frames, the row and a zero cursor; the shipped streams
+name rows 0, 1, 2 and 5. The cel is read **before** the step. Row 2 hands over
+to row 3 -- `5 5 5 6 6 6 7 7 7 8 8 8 9` -- for its own thirteen frames, and
+every other row, row 3 included, parks its cursor on its last cel and holds it
+until the next op `0x25`: rows 0, 1, 4 and 5 end on 0, the face's own slot,
+and row 3 on 9. The count is of **drawn** frames: the hook runs only for a
+node `SkeletonEmitNode` draws. The record itself is never written.
+
+| Row | At | Count | Cels |
+|---|---|---|---|
+| 0 | `0x0056B88C` | 21 | `1 2 3 3 2 1 0 0 1 2 2 1 2 3 4 4 3 2 1 0 0` |
+| 1 | `0x0056B8A4` | 38 | `1 1 2 2 3 3 3 3 2 2 1 1 1 1 2 2 2 2 1 1 2 2 3 3 4 4 4 4 3 3 2 2 1 1 0 0 0 0` |
+| 2 | `0x0056B8CC` | 34 | `1 1 1 2 2 2 3 3 3 3 2 2 2 1 1 1 1 2 2 2 2 1 1 1 2 2 2 3 3 3 4 4 4 4`, then row 3 |
+| 3 | `0x0056B8F0` | 13 | `5 5 5 6 6 6 7 7 7 8 8 8 9` |
+| 4 | `0x0056B900` | 20 | `1` ten times, then `0` ten times |
+| 5 | `0x0056B914` | 56 | `1 1 2 2 3 3 3 3 2 2 1 1 1 1 2 2 2 2 1 1 0 0 0 0 1 1 2 2 3 3 4 4 5 5 6 6 7 7 7 7 6 6 5 5 4 4 3 3 2 2 1 1 0 0 0 0` |
+
+The bundle carries the rows as `characters.civilian_mouth_tables`, and the
+exporter puts every `record + cel` a spawn's script can reach on her type's
+hidden template. Ported in `game/class10/head.ts`.
+
+### The head look
+
+The same arm turns the head first, while `sub+0x8C` is not 0. `[proved]` from
+`0x0048D244..0x0048D7DA`:
+
+```
+target (world) by sub+0x8C:
+  1  g_camera_eye + (0, 15.0, 0)                       0x004C4398
+  2  the translation of (sub+0x90)->+0x354             the child's bone-2 record
+       sub+0x1E && child+0x34 & 0x4000000  ->  sub+0x90 = sub+0x60[0]
+       !(child+0x34 & 1)                   ->  sub+0x8C = 6
+  3  g_camera_lookat_target
+  4  *(vec3 *)sub+0x90
+  5  [carrier T Rx Rz Ry] T(obj+0x40) Rx(+0x64) Rz(+0x6C) Ry(+0x68) * *(vec3 *)sub+0x90
+  -  anything else: the head's own view-space translation (no stream uses it)
+P    = MatrixGetAngles(record1^-1 * record2)            the head's pose off bone 1
+want = sub+0x8C == 6 ? (P.x, P.y)
+     : VecToAngles(d.x, d.y - 1.5, d.z), d = rot(record1)^-1 (target - head)
+want.x clamped to -0x2000..0x1800, want.y to -0x3800..0x3800   (s16 compares)
+AngleApproachInPlace(sub+0x94, want.x - P.x, 0x100)    FUN_0048D9B0
+AngleApproachInPlace(sub+0x98, want.y - P.y, 0x100)
+AngleApproachInPlace(sub+0x9C, 0,            0x100)
+all three 0:  sub+0x8C = 0, record left as posed
+otherwise:    top = [record1 3x3 | head]; RotY(+0x98 + P.y) RotX(+0x94 + P.x)
+              RotZ(+0x9C + P.z); MatrixStore(record2 + 0x28)
+```
+
+`obj+0x354` is `obj+0x20C + 2*0x90 + 0x28`: the draw records start at
+`obj+0x20C` (`model+0x78`, the model block at `obj+0x194`), `0x90` apart, and
+`+0x28` is the node matrix -- so mode 2 looks at **the captor's head**. Bone 2
+hangs from bone 1 in every character skeleton that has a bone 2, so `P` is the
+head's own angles under the neck, and the clamp is a neck's: up `0x1800`, down
+`0x2000`, `0x3800` either side. What is eased is the **offset** off the pose,
+so a clip that moves the neck moves the look with it. **Mode 6 is a return,
+not a hold**: it wants the pose, the offsets ease to zero and the mode drops
+to 0. The draw hook writes it when the captor's bit 0 goes -- `ActorDespawn`'s
+`AND AL, 0xFE` -- and both of `CivilianUpdate`'s shot arms write it over any
+other mode (`0x0048AB5E`, `0x0048ACE4`). Nothing else touches
+`sub+0x8C`, `+0x94`, `+0x98` or `+0x9C`: every instruction that loads
+`g_cur_civilian` (`0x007DD0A0`) is in a class-0x10 routine, and an operand
+scan of `.text` for those displacements finds only `CivilianInit`'s zeroing,
+the two shot arms, the two ops and this arm.
+
+**The turn is stored.** Class 0x30's head aim turns only the push its hook
+draws in; this one is `MatrixStore`d over bone 2's record, so the hit centre
+`SkeletonEmitNode` takes after the hook, the held items and the attachments
+hung from the record and the head's own draw all turn with it.
+
+The shipped streams use modes 1 (seventeen times), 2 (three), 3 (two), 5 (two,
+by op `0x24`) and 6 (ten). Ported in `game/class10/head.ts` (the state) and
+`render/characters/civilian_head.ts` (the rebuild).
 
 ### The waist and the skirt are not in the skeleton either
 

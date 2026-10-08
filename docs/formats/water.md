@@ -6,7 +6,9 @@ answer to "why is the water missing here".
 1. **Most of the canal is level geometry.** It is streamed per region like
    every other mesh, and no code displaces it.
 2. **The rest is drawn by a task**, class 0x41 type 1: tiles the script loads
-   and no region names, drawn every frame and rippled as they are.
+   and no region names, drawn every frame and rippled as they are -- except
+   in stage 3's two boat cut scenes, where the region draw itself draws two of
+   those tiles (§1, *The canal under the boat*).
 3. **The wave field is a height *query*.** The script spawns it; floating
    objects sample it. It never touches either surface.
 
@@ -49,10 +51,31 @@ each entry and draws it; nothing else is ever drawn. So water is present in 27
 of stage 2's 58 non-empty regions and absent from the other 31, and the browser
 player reproduces that rule exactly.
 
-**If water looks missing where it should not be, check two things**: which
+**If water looks missing where it should not be, check three things**: which
 region the walker is in — the tile that covers a given stretch of canal is only
-drawn in the regions that name it — and whether a class-0x41 type-1 task
-should be drawing it (§2). Stage 2's block 16 was the second.
+drawn in the regions that name it — whether a class-0x41 type-1 task
+should be drawing it (§2), and whether `RegionDrawResidentSet` draws it
+beside one of the region's entries (below). Stage 2's block 16 was the
+second, stage 3's canal shot the third.
+
+### The canal under the boat — `[proved]`
+
+`RegionDrawResidentSet` tests each entry's slot before drawing it
+(`0x004012B7`..`0x00401333`). For slot `0x1828` (`st3_08[2]`, first in stage
+3's regions 2 and 3) while the current region is 2 or 3, it pushes and calls
+`AssetDrawSlot(0x13B2)` and `AssetDrawSlot(0x13B0)` — `st1_1[14]` and
+`st1_1[12]`, two of the class-0x41 tiles (§2) — with no frustum test.
+Regions 2 and 3 are the boat's cut scenes, block 0 step 2 and block 7 step 2;
+both tiles are loaded in the step before, and the script leaves the region
+(ops 40 and 42) before it places the water task that draws `0x13B2` from then
+on (ops 56 and 47), so the two drawers never overlap. Without this arm the
+port drew the canal shot (`cp_st3` slot 122) as a boat over nothing.
+
+The same routine has two more per-slot arms, neither of them water: slot
+`0x1918` (`st6_01[14]`) is raised 9 under `g_scene_index == 9`, and slot
+`0x1A56` (`st4_06[4]`), which stage 4 lists twice in region 8, skips its
+draw at table index `0x16`. And it draws nothing at all while
+`g_screen_furniture_flags & 0x20`, the chapter card's bit, is up.
 
 `RegionDrawResidentSet`'s loop tail (`0x00401443..0x0040145F`, the next index
 and the branch back to `0x0040129B`) lies outside Ghidra's function body, so
@@ -89,8 +112,8 @@ fills its tail from the placer `[proved]`:
 
 Fifteen spawns: five in stage 2, seven in stage 3, three in training, every
 one at the origin with no angle. The script loads each tile (opcode 0x50 or
-`asset_load_polfile`) just before placing its task; loading alone draws
-nothing.
+`asset_load_polfile`) before placing its task; loading alone draws
+nothing, and the one other drawer of these tiles is the region arm in §1.
 
 Each frame the task `[proved]`:
 

@@ -98,10 +98,9 @@
  * with nothing to raise the bit it could not be taken, and stage 3's block-0
  * boat moors and never reaches it.
  *
- * [open] `SpawnCivilianBloodPool` (`FUN_0048E080`) builds a ground decal at the
- * shot point, scaled by how far below the camera plane it is. It is a whole
- * object of its own class with an unread update, and the renderer's impact
- * sprite already marks the hit.
+ * A shot civilian costs the shooter a life with no damage overlay, and
+ * leaves `SpawnCivilianHitMarker` (`FUN_0048E080`)'s marker on screen where
+ * she was hit for a second: `shot.ts` and `hit_marker.ts`.
  *
  * ## Where each routine lives
  *
@@ -121,6 +120,7 @@
  * | `children.ts` | `CivilianPruneDeadChildren` `FUN_0048CA60`, `CivilianHookRideChildrenStep` `FUN_0048DAB0` |
  * | `hooks.ts`    | op 0x10's four installs -- `CivilianHookStartFall` `FUN_0048D9F0`, `CivilianHookRideChildren` `FUN_0048DA90`, `CivilianHookStartMoveY` `FUN_0048DB90`, `CivilianHookStartMoveLocal` `FUN_0048DBD0` -- and three of their steps, `CivilianHookFallStep` `FUN_0048DA20`, `CivilianHookMoveYStep` `FUN_0048DBC0`, `CivilianHookMoveLocalStep` `FUN_0048DC10`; `PoseHookGrowAndPushOutOfWorld` `FUN_0048D070` |
  * | `shot.ts`     | `CivilianPlayDeathVoice` `FUN_0048D140`, and the shot branch of the update |
+ * | `hit_marker.ts` | `SpawnCivilianHitMarker` `FUN_0048E080`, `CivilianHitMarkerUpdate` `FUN_0048E190` |
  * | `loops.ts`    | the update's clip-loop arm                                 |
  * | `update.ts`   | `CivilianUpdate` `FUN_0048A920` and its inline tails        |
  * | `debug.ts`    | the sidebar's row. No exe function.                        |
@@ -163,6 +163,8 @@ export const CivilianHandler: ClassHandler = {
   // A shot civilian keeps running: its on-shot script is what plays the fall,
   // the voice and the removal, and stopping at `dead` froze it upright.
   updatesWhenDead: true,
+  // `CivilianInit` installs `CivilianUpdate` and returns (`0x0048A766`).
+  firstUpdateNextWalk: true,
   // `CivilianCheckShot`'s first branch: no on-shot script, no way to be hurt.
   invulnerable: (obj: Actor) => (obj.civ?.onShotScript ?? -1) < 0,
   leave: CivilianLeaveField,

@@ -14,8 +14,8 @@
 /** The view toggles. One name per checkbox, so adding one is adding a case. */
 export type ToggleName =
   | "allRegions" | "rails" | "aimRails" | "unported" | "stuck" | "coli"
-  | "boxes" | "rigs" | "sky" | "hud" | "spawns" | "chars" | "props"
-  | "breakables" | "propBoxes"
+  | "boxes" | "rigs" | "sky" | "hud" | "spawns" | "chars"
+  | "breakables"
   | "muzzle" | "redBlood" | "branchPause" | "perf" | "netStats" | "fps";
 
 export type UiCommand =

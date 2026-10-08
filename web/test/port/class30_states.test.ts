@@ -68,7 +68,8 @@ import {
 
 /** Slot `i` held by `at`, as a fill or a direct claim leaves it. */
 function ClaimSlot(i: number, at = 0): void {
-  G.g_enemy_slots[i] = { occupied: 1, at, prop: null };
+  G.g_enemy_slots[i] = { occupied: 1, at, prop: null, thrown: null,
+                         creature: null };
 }
 
 console.log("\nclass 0x30 state 26: the arc alone moves the leap:");
@@ -1594,7 +1595,7 @@ console.log("\na held captor's cue frame, and the finish_sequence that frees it:
     presentEnemies: () => 1,
     aliveCivilians: () => null, cameraFree: () => null,
     scriptFlagRaised: () => null,
-    showMessage: () => null, endDialogue: () => undefined,
+    showMessage: () => null,
   };
   const w = new Walker(script, host);
   // The action runs in the camera actor, after the interpreter has queued it,

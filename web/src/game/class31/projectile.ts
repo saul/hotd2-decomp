@@ -54,7 +54,7 @@
  * shot down stops trailing after its tenth. `[proved]`
  */
 import type { Rng } from "../../core/rng";
-import { ActorByAt, G } from "../globals";
+import { ActorByAt, G, HIT_SLOT_NONE } from "../globals";
 import { PlayerTakeDamage } from "../combat/player";
 import { ThrowerReleaseAttackPermit } from "../combat/permits";
 import { SpawnSpriteEffect, SpriteEffectKind } from "../effects/sprite";
@@ -68,6 +68,8 @@ import {
   type ThrownWeapon, type ThrownWeaponCamera, type ThrownWeaponFrame,
 } from "../thrown_weapon";
 import { ZombieThrownWeaponUpdate } from "../class30/thrown_weapon";
+import { RegisterThrownWeaponForCameraTracking } from "../camera/slots";
+import { ActorDrawGroundShadowWithSize } from "../ground_shadow";
 import { VecToAngles } from "../vec";
 
 /** `g_thrown_weapon_states` — `0x00592AE0`. Read as `40fd4400 50004500`. */
@@ -142,6 +144,8 @@ const ZSLMAN_AFTERIMAGE_HAND5 = 0x1fe5;
  * thrower's type, which `SpawnThrownWeapon` copies onto the weapon.
  */
 const CHAR_ZSLMAN = 0x18;
+/** `PUSH 0x40a00000` twice at `0x004508AF`: the shadow, 5.0 by 5.0. */
+export const THROWN_WEAPON_SHADOW_SIZE = 5.0;
 /** `CMP dword ptr [EBP+0x1368], 0xA` / `JGE` at `0x00450948`: under ten out. */
 const AFTERIMAGE_LIMIT = 0xa;
 /** `MOV dword ptr [EBX+0x1330], 0xF` at `0x0045099D`: its life. */
@@ -409,7 +413,7 @@ export function ThrownWeaponDeflected(w: ThrownWeapon,
  * }
  * g_thrown_weapon_states[state](obj);
  * if (obj+0x1F8 & 1) { draw; obj+0x70 = view pos; RegisterForShotTest(obj);
- *                      ActorDrawGroundShadow(obj, 5.0, 5.0) }
+ *                      ActorDrawGroundShadowWithSize(obj, 5.0, 5.0) }
  * if (obj+0x1F4 == 0x18 && (state == 0 && sub < 2 || state == 1))
  *     ZslmanBladeEmitAfterimage(obj);
  * if (state == 0) { obj+0x100 = pos; RegisterForCameraTracking(obj); }
@@ -426,11 +430,25 @@ export function ThrownWeaponDeflected(w: ThrownWeapon,
  * {@link ThrownWeaponDespawn}. So the weapon is not drawn on the frame it
  * goes, and makes no afterimage then.
  *
- * `[diverges]` Two calls are not made, each for a reason of its own:
- * `FUN_0040A600` is `ActorDrawGroundShadow` at 5 by 5, and the port draws no
- * ground shadow for anything yet (`ActorDrawShadow` in `model_draw.ts`); and
- * `RegisterForCameraTracking` wants the camera candidate list to take a
- * non-actor, the same gap `body_creature.ts` records for the creature.
+ * **The shadow** is `ActorDrawGroundShadowWithSize` (`FUN_0040A600`) at 5 by
+ * 5, `0x004508AF`..`0x004508BA`: slot `0x10D0` in draw layer `0xD`, on the
+ * floor traced three units above the weapon (its `obj+0x1F8` is 5, so bit 2
+ * is up) and lifted 0.1 off it. It is drawn on every frame the weapon is,
+ * the blink's on half included, and follows a knife stuck to the screen
+ * along the ground under it.
+ *
+ * **The camera.** Every frame in state 0 -- launch, flight, stuck and blink
+ * alike -- the weapon puts its position in `obj+0x100` and offers itself to
+ * `RegisterForCameraTracking` (`FUN_00408EC0`), and `SpawnThrownWeapon`
+ * (`FUN_004504E0`) already did once on the frame it was made. It carries its
+ * thrower's permit, so the next slot fill deals it slot 0 or 1, and
+ * `SelectCameraLookAtTarget` (`FUN_00403050`) looks at it -- at the midpoint
+ * of it and whatever else holds a permit, the thrower included, which the
+ * launch leaves holding 0. A weapon that has been shot down, in state 1, is
+ * not offered. `[proved]`
+ *
+ * Both used to be left out, under a note that the port drew no ground shadow
+ * for anything and that the camera's candidate list took only actors.
  */
 export function ThrownWeaponUpdate(w: ThrownWeapon,
                                    f: ThrownWeaponFrame): void {
@@ -446,11 +464,19 @@ export function ThrownWeaponUpdate(w: ThrownWeapon,
     if (ThrownWeaponDrawAndProject(w, (w.tilt + w.rx) | 0, f.cam)) {
       RegisterThrownWeaponForShotTest(w);
     }
+    ActorDrawGroundShadowWithSize(w, w.drawFlags, THROWN_WEAPON_SHADOW_SIZE,
+                                  THROWN_WEAPON_SHADOW_SIZE, null);
   }
   if (w.charType === CHAR_ZSLMAN
       && ((w.state === ThrownWeaponState.Fly && w.sub < FlySub.Land)
           || w.state === ThrownWeaponState.Deflected)) {
     ZslmanBladeEmitAfterimage(w);
+  }
+  if (w.state === ThrownWeaponState.Fly) {
+    w.lookAt.x = w.pos.x;
+    w.lookAt.y = w.pos.y;
+    w.lookAt.z = w.pos.z;
+    RegisterThrownWeaponForCameraTracking(w);
   }
 }
 
@@ -484,7 +510,7 @@ export function ThrownWeaponUpdate(w: ThrownWeapon,
  * afterimage finds the count to give back. `a+0x3C = -1` is "no hit slot" for
  * `ActorDespawn` (`FUN_00409CC0`), whose clear of `g_hit_slots` is gated on
  * `obj+0x38` bit `0x40` first, which nothing sets here — so the store has no
- * reader on this object and the port does not carry it.
+ * reader on this object, and is made anyway because it is the routine's.
  *
  * `ActorAlloc` (`FUN_004A6FA0`) links the new task at the **tail** of the
  * running one's sibling list, so it runs, and draws, on the frame it is made,
@@ -506,6 +532,7 @@ export function ZslmanBladeEmitAfterimage(w: ThrownWeapon): void {
     a.timer = AFTERIMAGE_LIFE;
     a.light = AFTERIMAGE_LIGHT;
     a.lightStep = AFTERIMAGE_LIGHT_STEP;
+    a.hitSlot = HIT_SLOT_NONE;
     a.slot = w.slot;
     if (a.slot === ZSLMAN_BLADE_HAND8) {
       a.light = AFTERIMAGE_BLADE_LIGHT;

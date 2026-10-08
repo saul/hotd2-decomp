@@ -41,12 +41,18 @@ export function drawViewSlots(h: ViewSlotHost, seen: Set<string>): void {
   });
 }
 
+/** `SetDrawLayerNibble(8)`, the world's layer, which the port spells as 0. */
+const WORLD_LAYER = 8;
+
 /**
  * The asset slots a routine drew in the world this frame --
  * `G.g_world_slot_draws`, `DrawSlotInWorld` -- each at the matrix it built.
  * The matrix stack's layout is three.js's `Matrix4.elements` as it stands
- * (`game/matrix.ts`), so the node takes it whole. Original Mode's trunk is
- * the list's writer (`game/class6e/`).
+ * (`game/matrix.ts`), so the node takes it whole. Original Mode's trunk, the
+ * class-0x27 vehicle and every ground shadow (`game/ground_shadow.ts`) are
+ * among the list's writers. A record that names its draw layer is drawn in
+ * it, as the `renderOrder` the port spells a layer with -- the world's own 8
+ * being 0 -- which is the shadow's `0xD`, drawn after the world it lies on.
  */
 export function drawWorldSlots(h: ViewSlotHost, seen: Set<string>): void {
   G.g_world_slot_draws.forEach((d, i) => {
@@ -55,6 +61,7 @@ export function drawWorldSlots(h: ViewSlotHost, seen: Set<string>): void {
     const node = h.node(key, d.slot, h.world);
     if (!node) return;
     seen.add(key);
+    if (d.layer !== undefined) node.renderOrder = d.layer - WORLD_LAYER;
     node.matrixAutoUpdate = false;
     node.matrix.fromArray(d.m);
     node.matrixWorldNeedsUpdate = true;

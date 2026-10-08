@@ -68,6 +68,12 @@ export enum ItemSelectRoutine {
   Update = 0,
   /** `ItemSelectFinish`, `FUN_004895C0`. */
   Finish = 1,
+  /**
+   * `[port-only]` -- `ItemSelectPassedBySeek`: a trunk a seek or a deep link
+   * replayed the script past, closed on its first frame with the last
+   * choice. Not a routine the engine has.
+   */
+  PassedBySeek = 2,
 }
 
 /** `[port-only]` -- a fresh block: every word state 0 writes, zeroed. */

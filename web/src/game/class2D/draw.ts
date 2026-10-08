@@ -243,6 +243,8 @@ export function Class2DDraw(obj: EmperorActor, f: ClassFrame): void {
   obj.class2d.drawLight = LightsUseCustomSet(BOSS_AMBIENT, l0.pitch, l0.yaw,
                                              b.colour[0], b.colour[1],
                                              b.colour[1]);
+  // `MOV [0x009a26a0], ESI` at `0x0042901C`, straight before the draw.
+  G.g_cur_actor = obj.at;
   DrawSkinnedModelAndShadow(obj);
   ActorRunNodeDrawHooks(obj, (o, bone, slot, ff) =>
     Class2DNodeDrawHook(o as EmperorActor, bone, slot, ff), f);

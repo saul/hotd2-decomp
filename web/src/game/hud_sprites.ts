@@ -45,11 +45,15 @@ export const LAMP_CELS = 7;
 
 /**
  * Every sprite id `hud_readout.ts` can draw -- the list the exporter puts in
- * the bundle. Original Mode's bullets are not here: they are
- * `original_mode.ammo_hud_rows`' sprites, `.rdata` the exporter reads (see
- * `ExeTables.originalModeTables`).
+ * the bundle. Original Mode's other bullets are not here: they are
+ * `original_mode.ammo_hud_rows`' sprites, `.rdata` the exporter reads for an
+ * Original stage (see `ExeTables.originalModeTables`). **The Arcade bullet
+ * is**, and has to be named here: it is that table's row 0 as well, and while
+ * it came into the bundle only through the table, every Arcade stage shipped
+ * without it and drew no bullets at all.
  */
 export const HUD_READOUT_SPRITES: readonly number[] = [
+  HudSprite.Bullet,
   ...Array.from({ length: 10 }, (_, d) => HudSprite.Digit0 + d),
   HudSprite.Glyph63, HudSprite.Times, HudSprite.HoldYourFire, HudSprite.Tag1P,
   HudSprite.Tag2P,

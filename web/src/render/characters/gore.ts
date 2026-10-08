@@ -121,26 +121,54 @@ export function swapGore(parts: ReadonlyMap<number, Object3D>,
 
   // A multi-primitive bone: hide the primitives, keep the child bones, and
   // hang a clone of the whole damaged part off the same node.
+  //
+  // **Only the bone's own primitives**, and every one of them written down so
+  // `restoreGore` can show exactly those again. Not the cel holders
+  // `render/characters/cels.ts` parks here: those are a *second draw* the
+  // engine's own hook makes, and `char_adv02`'s bone 1 has one before it is
+  // ever hit. Not an attachment, a held item or a hook's extra model either:
+  // `ActorDrawAttachedParts` (`FUN_004124F0`) draws the attachments after
+  // every node with no gate at all, whatever the bone is showing. Hiding them
+  // here took a civilian's hair off with her head's first mouth cel.
+  let hidden = prev?.hidden;
   if (!prev) {
     const bones = new Set(inst.bones.values());
+    const drawnBeside = new Set<Object3D>([
+      ...(inst.attached?.values() ?? []), ...(inst.held?.values() ?? []),
+      ...(inst.hookDraws?.values() ?? []),
+    ]);
+    hidden = [];
     for (const c of node.children) {
-      // Not the cel holders `render/characters/cels.ts` parks here: those are
-      // a *second draw* the engine's own hook makes, and `char_adv02`'s bone 1
-      // has one before it is ever hit.
-      if (bones.has(c) || c.name === CEL_HOLDER) continue;
+      if (bones.has(c) || c.name === CEL_HOLDER || drawnBeside.has(c)) continue;
+      if (!c.visible) continue;
       c.visible = false;
+      hidden.push(c);
     }
   }
   const copy = seated(tmpl);
   node.add(copy);
-  inst.gore.set(bone, { keep: null, added: [copy] });
+  inst.gore.set(bone, { keep: null, added: [copy], hidden });
   return true;
 }
 
-/** Undo one bone's swap: put the saved model back, take the additions off. */
+/**
+ * Undo one bone's swap: put the saved model back, take the additions off, and
+ * show again the primitives a multi-primitive swap hid.
+ *
+ * That last step used to be left to the caller, and only `restoreNodes`
+ * did it -- by showing every child of every bone afterwards. Every other
+ * caller left a multi-primitive bone empty: a talking head drawn as its own
+ * record again (`CharacterLayer.syncNodeDrawSlots`), which every player
+ * character's nine-mesh head is, and a claimed body's hand put back to its
+ * own model (`setClaimedBoneSlot`). Not over a class-0x30 cel arm that has
+ * hidden the same primitives for its own reason (`inst.celHidden`).
+ */
 export function restoreGore(inst: Instance, bone: number,
                             g: GoreSwap): void {
   for (const n of g.added) n.removeFromParent();
+  if (!inst.celHidden?.has(bone)) {
+    for (const n of g.hidden ?? []) n.visible = true;
+  }
   const node = inst.bones.get(bone) as Mesh | undefined;
   if (g.keep && node?.isMesh) {
     node.geometry = g.keep.geometry;

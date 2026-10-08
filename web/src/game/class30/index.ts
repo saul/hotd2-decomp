@@ -62,6 +62,7 @@ import { G } from "../globals";
 import { GameMode } from "../game_mode";
 import { ZombiePushOutOfWorldAndActors } from "./ground";
 import { ActorRunNodeDrawHooks } from "../model_draw";
+import { DrawSkinnedModelAndShadow } from "../skeleton";
 import {
   ENLARGED_HEAD_BONE, ENLARGED_HEAD_CHAR_TYPE_0E, ZombieDrawBonePart,
   ZombieDrawWithEnlargedHead,
@@ -96,6 +97,9 @@ const ZOMBIE_BODY_RADIUS = 3.5;
 
 export function EnemyZombieUpdate(obj: ZombieActor, f: ClassFrame): void {
   const { dt, rng, host, events } = f;
+  // `MOV [0x009a26a0], ESI` at `0x004533FC`, the routine's first store: the
+  // update names itself, and the draw's shadow below is drawn for that name.
+  G.g_cur_actor = obj.at;
   // `CALL 0x004547C0` at `0x00453402` and `CALL 0x00454660` at `0x00453408`:
   // the stumble's two per-frame halves, before anything else -- the bits a
   // reaction raised come down here, so the state below sees them as the engine
@@ -144,6 +148,10 @@ export function EnemyZombieUpdate(obj: ZombieActor, f: ClassFrame): void {
   ActorRunNodeDrawHooks(obj, obj.nodeDrawHook === NodeDrawHookId.EnlargedHead
     ? ZombieDrawWithEnlargedHead : ZombieDrawBonePart, f);
   HeadAimEndDraw(obj, obj.zom, host);
+  // ...and the draw's last call, the ground shadow under `g_cur_actor`,
+  // which `EnemyZombieUpdate` pointed at this actor on its first line
+  // (`0x004533FC`).
+  DrawSkinnedModelAndShadow(obj);
   // `TEST EAX, 0x8000000; JNZ` on `obj+0x136C` at `0x00453465`, then `CALL
   // 0x00409010` at `0x0045346D`: the actor files itself for next frame's
   // distance rank, measured to this frame's gameplay eye.
@@ -539,6 +547,9 @@ export function ZombieTaskUpdate(obj: ZombieActor, f: ClassFrame): void {
 export const EnemyZombieHandler: ClassHandler = {
   init: EnemyZombieInit,
   update: ZombieTaskUpdate,
+  // `EnemyZombieInit` installs `EnemyZombieUpdate` (or
+  // `ZombieTwinFollowHost`) and returns (`0x00452FB5`, `0x00452FC1`).
+  firstUpdateNextWalk: true,
   leave: ZombieReleaseAndDespawn,
   onDeadSweep: EnemyZombieDeadSweep,
   // **Class 0x30's death is four states**, the same as class 0x31's, and the

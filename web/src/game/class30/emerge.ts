@@ -249,8 +249,8 @@ export function ZombieStateEmerge(obj: ZombieActor, dt: number,
 export function ZombieStateDelayedLeap(obj: ZombieActor, dt: number, rng: Rng,
                                        host?: GameHost,
                                        events?: Events): void {
-  const p = obj.delayedLeap;
-  if (!p) { obj.state = ZombieState.AttackRun; obj.sub = 0; return; }
+  // `iVar1 = obj+0x1390`, the tail, read with no test (`bundle:entry_tails`).
+  const p = obj.delayedLeap!;
   const frames = SecondsToTicks(dt);
 
   if (obj.sub === 0) {

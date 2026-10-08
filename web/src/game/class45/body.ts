@@ -5,6 +5,7 @@
  * a lap and lunges at the player. Its death is the second gate of a stage-3
  * block, and it hands the camera back as it dies.
  */
+import { EvtOpPlayDialogue2D } from "../dialogue";
 import type { Boss3Actor } from "../actor";
 import { ActorFlag } from "../actor";
 import { G } from "../globals";
@@ -595,7 +596,7 @@ function Boss3BodyStateSwim(obj: Boss3Actor, f: ClassFrame): void {
   if (variant === 1 && blk.pathCursor === CUE_BULGE) Boss3SpawnMeshBulge();
   if (blk.pathCursor === CUE_LINE) {
     // `EvtOpPlayDialogue2D` (`FUN_00435B80`) with group 0x83, then the shutter.
-    f.events?.emit("actor.dialogue", { at: obj.at, group: LINE_GROUP });
+    EvtOpPlayDialogue2D(LINE_GROUP, f.events);
     G.g_bHudShutterState = SHUTTER_CLOSED;
   }
   if (blk.pathCursor === CUE_BAR) G.g_bHudShutterState = SHUTTER_OPENING;

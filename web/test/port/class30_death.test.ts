@@ -39,6 +39,10 @@ import {
 import { ZombieEnterCorpseState, ZombieReleasePermitAndUntrack }
   from "../../src/game/class30/death";
 import { ZombieOnShot } from "../../src/game/class30/on_shot";
+import { DrawSkinnedModelAndShadow } from "../../src/game/skeleton";
+import { CarrierTransformPoint } from "../../src/game/carrier";
+import { GROUND_SHADOW_LAYER, GROUND_SHADOW_SLOT }
+  from "../../src/game/ground_shadow";
 import { ThrowerReleaseSlotOnDeath } from "../../src/game/combat/counts";
 import {
   COND_HEAVY_LANDING, LANDING_HEAVY_SHAKE, SND_LANDING, SND_LANDING_HEAVY,
@@ -71,7 +75,7 @@ import { Walker } from "../../src/script/walker";
 import {
   check, motion, TYPE, CHARS, SCENE_MAJOR_PLAYING, DRAW_FRAME, spawnZombie,
   openShutter, scene, slotHolds, slotsShown, EnterPlay, run, TYPE31_ZSLMAN,
-  CHARS31, coliQuad, FLOOR_BLOB,
+  CHARS31, coliQuad, FLOOR_BLOB, shadowsUnder,
 } from "./harness";
 
 /**
@@ -451,7 +455,7 @@ console.log("class 0x30, the corpse that blinks:");
   for (let i = 0; i < 4; i++) {
     GameUpdate(1 / 60, NULL_HOST, rng, events);
     seen.push(`${z.motionFlags & MotionFlag.Drawn}:${z.partVisible}`);
-    shadow.push(ActorDrawShadow(z) !== null);
+    shadow.push(shadowsUnder(z).length !== 0);
   }
   check("the blink is the countdown's parity on both gates, first frame drawn",
         seen.join(" ") === "1:1,1 0:0,0 1:1,1 0:0,0", seen.join(" "));
@@ -502,22 +506,31 @@ console.log("the skinned model's draw gates, as state:");
         && (z.motionFlags & MotionFlag.Drawn) !== 0);
 
   // `ActorDrawShadow` (`FUN_0040A590`): `obj+0x34` bit 0x80000 and
-  // `obj+0x1F8` bit 0, then 11x10 -- or 50x30 for types 0x44 and 0x47.
-  const small = ActorDrawShadow(z);
-  check("an ordinary character's shadow is 11 by 10",
-        small?.w === 11 && small?.d === 10, JSON.stringify(small));
+  // `obj+0x1F8` bit 0, then 11x10 -- or 50x30 for types 0x44 and 0x47 --
+  // as `MatrixScale(w, 1.0, d)` on the disc's matrix: no turn, so the scale
+  // is the diagonal.
+  const size = (): string => {
+    G.g_world_slot_draws = [];
+    ActorDrawShadow(z);
+    const d = shadowsUnder(z)[0];
+    return d ? `${d.m[0]}x${d.m[10]}` : "none";
+  };
+  const small = size();
+  check("an ordinary character's shadow is 11 by 10", small === "11x10", small);
   z.charType = 0x47;
-  const large = ActorDrawShadow(z);
+  const large = size();
+  z.charType = 0x44;
+  const large44 = size();
   z.charType = 1;
   check("...and types 0x44 and 0x47 get 50 by 30",
-        large?.w === 50 && large?.d === 30, JSON.stringify(large));
+        large === "50x30" && large44 === "50x30", `${large} ${large44}`);
   z.motionFlags &= ~MotionFlag.Drawn;
-  const noSkel = ActorDrawShadow(z);
+  const noSkel = size();
   z.motionFlags |= MotionFlag.Drawn;
   z.flags |= ActorFlag.NoShadow;
-  const flagged = ActorDrawShadow(z);
+  const flagged = size();
   check("...and none while the skeleton is not drawn or 0x80000 is up",
-        noSkel === null && flagged === null);
+        noSkel === "none" && flagged === "none", `${noSkel} ${flagged}`);
 
   // `DrawCharacterPartSlot`'s alpha arms, from its jump table at 0x00419DCC:
   // types 9, 0x12, 0x17 and 0x18, and no others.
@@ -540,6 +553,80 @@ console.log("the skinned model's draw gates, as state:");
   ActorRunNodeDrawHooks(z, hook, DRAW_FRAME);
   check("...and no node at all while `obj+0x1F8` bit 0 is down",
         walked.length === 0, walked.join());
+}
+
+console.log("the ground shadow every skinned draw ends with:");
+{
+  // `DrawSkinnedModelAndShadow` (`FUN_00411090`) ends in `ActorDrawShadow`
+  // on `g_cur_actor`, which `EnemyZombieUpdate` points at itself first; the
+  // disc is slot 0x10D0 in draw layer 0xD, on the floor traced from three
+  // above (a class-0x30 actor carries `MotionFlag.TraceGround`), lifted 0.1,
+  // eleven across and ten deep. Driven from the reset, through the frame.
+  const rng = new Rng(21);
+  const events = scene(0, rng);
+  const prevColi = T.coli;
+  const prevSet = G.g_coli_full_set;
+  T.coli = { files: ["test"], blobs: { floor: FLOOR_BLOB } };
+  G.g_coli_full_set = ["floor"];
+  const z = spawnZombie(0x3098, 1, "shadowed");
+  z.visible = true;
+  z.pos = vec3(12, 0, 40);
+  run(1, rng, events);
+  const discs = G.g_world_slot_draws.filter((d) => d.slot === GROUND_SHADOW_SLOT);
+  const d = shadowsUnder(z)[0];
+  const lift = Math.fround(0 + 0.10000000149011612);
+  check("a zombie's frame draws one ground shadow, in layer 0xD",
+        discs.length === 1 && d !== undefined
+        && d.layer === GROUND_SHADOW_LAYER,
+        `${discs.length} discs, ${JSON.stringify(discs.map((x) => x.m.slice(12, 15)))}`
+        + ` zombie at ${JSON.stringify(z.pos)}`);
+  check("...on the floor under it, lifted 0.1, 11 across and 10 deep",
+        d !== undefined && d.m[13] === lift && d.m[0] === 11 && d.m[10] === 10
+        && d.m[5] === 1,
+        d ? `y ${d.m[13]} scale ${d.m[0]} ${d.m[5]} ${d.m[10]}` : "none");
+  // The same frame with the shadow's bit up draws none -- the gate, read in
+  // the draw and not by the test.
+  z.flags |= ActorFlag.NoShadow;
+  run(1, rng, events);
+  check("...and none on a frame the actor carries 0x80000",
+        !G.g_world_slot_draws.some((x) => x.slot === GROUND_SHADOW_SLOT));
+  z.flags &= ~ActorFlag.NoShadow;
+  T.coli = prevColi;
+  G.g_coli_full_set = prevSet;
+
+  // **A rider's shadow is drawn under its carrier's push.** The port's
+  // stand-in for `CivilianUpdateOnCarrier`'s and `CarriedZombieUpdate18`'s
+  // `T Rx Rz Ry` is `carrierAt`, and the disc has to land where the rider
+  // itself is drawn: `CarrierTransformPoint` of the disc's own local point.
+  // A quarter turn, so a missing or transposed carrier cannot pass (L48).
+  const boat = spawnZombie(0x30a0, 1, "carrier");
+  boat.pos = vec3(100, 7, -50);
+  boat.yaw = 0x4000;
+  boat.flags |= ActorFlag.NoShadow;
+  const rider = spawnZombie(0x30a8, 1, "rider");
+  rider.motionFlags &= ~MotionFlag.TraceGround;
+  rider.pos = vec3(3, 2, 9);
+  rider.carrierAt = boat.at;
+  G.g_world_slot_draws = [];
+  G.g_cur_actor = rider.at;
+  DrawSkinnedModelAndShadow(rider);
+  const want = vec3();
+  CarrierTransformPoint(boat, 3, Math.fround(2 + 0.10000000149011612), 9, want);
+  const r = G.g_world_slot_draws.find((x) => x.slot === GROUND_SHADOW_SLOT);
+  check("a rider's disc is drawn in its carrier's frame, under the rider",
+        r !== undefined && Math.abs(r.m[12] - want.x) < 1e-4
+        && Math.abs(r.m[13] - want.y) < 1e-4
+        && Math.abs(r.m[14] - want.z) < 1e-4
+        && Math.abs(r.m[12] - 3) > 1,
+        r ? `${r.m.slice(12, 15)} vs ${JSON.stringify(want)}` : "none");
+  // ...and the shadow is `g_cur_actor`'s, not the model's owner's.
+  G.g_world_slot_draws = [];
+  G.g_cur_actor = z.at;
+  DrawSkinnedModelAndShadow(rider);
+  check("...and the disc is g_cur_actor's, whichever model is drawn",
+        shadowsUnder(z).length === 1
+        && !G.g_world_slot_draws.some((x) => x.m[12] === r?.m[12]));
+  G.g_cur_actor = -1;
 }
 
 console.log("class 0x31, the hand grows back in the draw:");
@@ -1521,6 +1608,9 @@ console.log("class 0x30, the dust, the splash and the rings a death leaves:");
     z.hp = 10;
     z.state = ZombieState.ArcScriptedEntrance;
     z.sub = 4;
+    // The state reads its tail with no test, as `0x00458A70` does, so the
+    // fixture carries one: an actor in state 30 always has its arc's.
+    z.entry = { dest: [0, 0, 60], frames: 20, step: 1, delay: 0 };
     z.arcPhase = ArcPhase.Settled;
     z.flags2 |= ZombieFlag2.Carried;
     G.g_screen_shake_frames = 0;

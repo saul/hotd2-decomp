@@ -20,10 +20,10 @@ export const RIGS: readonly Rig[] = [
    * The stage-1 opening vehicle. `FUN_0048E600` picks its route from the
    * camera path -- cp_st1 0/1/2 (0x20/0x21/0x22) select op_st1 0/1/2
    * (0xFD/0xFE/0xFF) -- so the object runs in lockstep with the shot.
-   * obj+0x1334, the stage-1 occupants' yaw: op_st1 2's `rot_y` less 0x4000,
+   * obj+0x1334, the stage-1 vehicle's doors' yaw: op_st1 2's `rot_y` less 0x4000,
    * evaluated at the routine's own clamped time, and only on cp_st1 2. Before
-   * that shot the field is still zero, which is why the occupants face forward
-   * for the whole drive and only turn once the car has stopped.
+   * that shot the field is still zero, which is why the doors stay shut for
+   * the whole drive and only swing once the car has stopped.
    *
    * `condition` "only while obj+0x1320 (moving) is set": Drawn only while the
    * object is moving. FUN_0048E600 sets obj+0x1320 when the camera is on
@@ -35,7 +35,7 @@ export const RIGS: readonly Rig[] = [
    *   the end of the path the car has just finished -- and clears obj+0x1320,
    *   so the car is parked and its wheels and dust trails stop being drawn. It
    *   reads op 0xFF only for `local_8` (rot_y), which becomes obj+0x1334, the
-   *   occupants' yaw; op 0xFF's position channels are never read by this
+   *   doors' yaw; op 0xFF's position channels are never read by this
    *   routine at all.
    * - part `part_898`: two MatrixTranslate calls in a row compose:
    *   (-4.6755,0,0.239)+(0,9,6)
@@ -43,9 +43,14 @@ export const RIGS: readonly Rig[] = [
    *   rotation about an axis tilted -39.375 deg from Z, and IDENTITY when the
    *   sin term is 0. Baking only the first RotX would leave the part half-
    *   rotated.
-   * - part `side_left`: 11.3 tall, 11.7 deep, seated either side at y 9.4 --
-   *   they read as the two occupants, but that is inference from the shape and
-   *   place.
+   * - part `side_left`: 11.3 tall, 11.7 deep, either side of the cabin at its
+   *   front -- `[likely]` the two doors: 52 vertices each, swung about Y on
+   *   their front edge only once the car is parked, and the right one only
+   *   with two players, which is when someone sits on that side
+   *   (`g_st1_vehicle_seat_x`). They were noted as the occupants until the
+   *   occupants turned out to be the players' own bodies, which this routine
+   *   does not draw (`PlayerHookRideSt1Vehicle`, `FUN_00415BD0`, seats them
+   *   on the same routes).
    * - part `spinner_front`: 20.8 wide -- the full track -- and spun about X at
    *   0x2000 a frame, which is 45 deg/frame or 7.5 turns a second at 60 Hz.
    *   Reads as a wheel pair rather than an axle, but the routine does not say.
@@ -116,7 +121,7 @@ export const RIGS: readonly Rig[] = [
           camPaths: [34],
           note: "obj+0x1334 = CamEvalObjectPath6(0xFF, t).rot_y - 0x4000, where t = g_cam_path_frame + 100.0 for frames 0..0x31 and 150.0 outside that range",
         },
-        note: "[likely] an occupant; drawn in layer 0xC, then the routine restores layer 8",
+        note: "[likely] the driver's door; drawn in layer 0xC, then the routine restores layer 8",
       },
       {
         name: "side_right",
@@ -138,7 +143,7 @@ export const RIGS: readonly Rig[] = [
           condition: "only while obj+0x1324 is set, which happens when two players are in play",
           note: "obj+0x1334 = CamEvalObjectPath6(0xFF, t).rot_y - 0x4000, where t = g_cam_path_frame + 100.0 for frames 0..0x31 and 150.0 outside that range",
         },
-        note: "[likely] the other occupant",
+        note: "[likely] the passenger's door",
       },
       {
         name: "spinner_front",
@@ -188,7 +193,7 @@ export const RIGS: readonly Rig[] = [
         hiddenUnless: "moving",
       },
     ],
-    note: "Draws car_pl.bin parts and char_adv00.bin occupants. Route selected by the active camera path: cp_st1 0/1 ride op_st1 0/1 in lockstep, and cp_st1 2 parks the car at the end of op_st1 1.",
+    note: "Draws car_pl.bin and char_adv00.bin parts -- not the people in it, who are the players' bodies. Route selected by the active camera path: cp_st1 0/1 ride op_st1 0/1 in lockstep, and cp_st1 2 parks the car at the end of op_st1 1.",
   },
   /**
    * `Class26Subtype2Update` (`FUN_0048EAD0`), subtype 2 of the class-0x26
@@ -622,6 +627,13 @@ export const RIGS: readonly Rig[] = [
    * object starts *moving*, which is a different thing. Conflating the two
    * would claim a cp_st1 gate on op_st2 routes, a gate that could never fire.
    *
+   * Only the table's rows 0 and 1 are routes of this routine: every shipped
+   * class-0x28 spawn carries `obj+0x11C` 0 or 1. Rows 2 and 3, op_st2 0x149
+   * and 0x14A, are **class 0x27's** -- `PathRidingVehicleUpdate`
+   * (`FUN_004329D0`) reads the same table as dwords from `0x00589AE8` -- and
+   * listing them here exported this rig into stage 2, which places no class
+   * 0x28, as two route roots nothing draws.
+   *
    * - part `part_135f`: Both sprite parts bias the path position before the
    *   billboard yaw, so neither offset can be expressed as a child of the
    *   rotated root.
@@ -644,14 +656,6 @@ export const RIGS: readonly Rig[] = [
       {
         slot: 326,
         note: "obj+0x11C == 1; held at frame 0x29B before launch",
-      },
-      {
-        slot: 329,
-        note: "obj+0x11C == 2; held at frame 0",
-      },
-      {
-        slot: 330,
-        note: "obj+0x11C == 3; held at frame 0",
       },
     ],
     spawnClass: 40,

@@ -229,24 +229,22 @@ console.log("\nThe HUD strip's shutter row, built in app/:\n");
 for (const [k, label] of Object.entries(SHUTTER_LABEL)) {
   const state = Number(k);
   check(`state ${state} is "${label}", the same word the feed uses`,
-        describeShutter({ shutterState: state, captionFrames: 0 }, true)
+        describeShutter({ shutterState: state }, true)
           === label);
 }
 check("a state the table has no row for still says which one it was",
-      describeShutter({ shutterState: 99, captionFrames: 0 }, true)
+      describeShutter({ shutterState: 99 }, true)
         === "state 99",
       "an unknown state must not read as one of the nine");
-check("a caption still counting is on the end of the row",
-      describeShutter({ shutterState: 3, captionFrames: 40.2 }, true)
-        === "closing, dialogue 41f",
-      "the countdown is fractional and the row rounds up, so a caption with "
-      + "any frames left never reads as 0f");
+check("a subtitle still counting is on the end of the row",
+      describeShutter({ shutterState: 3 }, true, 40)
+        === "closing, dialogue 40f");
 // `Hud` held a copy of this boolean, written through `setEnabled`, purely so
 // this string could say "off" -- a second owner of the fact React had already
 // taken for `.hud-layer`'s `hidden`. The copy is gone; the row still says it,
 // from `Player.toggles` where the toggle lives.
 check("and the toggle being off outranks everything else",
-      describeShutter({ shutterState: 3, captionFrames: 40 }, false) === "off");
+      describeShutter({ shutterState: 3 }, false, 40) === "off");
 check("...even with no walker at all",
       describeShutter(null, false) === "off"
       && describeShutter(null, true) === "open",

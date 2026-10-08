@@ -36,6 +36,14 @@ const BUNDLE_DIR = process.env.HOTD2_BUNDLE
   ?? resolve(__dirname, "..", "extract", "player");
 
 /**
+ * `npm run sounds`' output, the AAC set (`tools/sounds.ts`): served as
+ * `/sounds.json`, `/clips.pack` and `/bgm/*.m4a` when it exists. Without it
+ * `/sounds.json` is a 404 and the page plays the install's WAVs.
+ */
+const SOUND_DIR = process.env.HOTD2_SOUND
+  ?? resolve(__dirname, "..", "extract", "sound");
+
+/**
  * BGM is streamed from the user's own install rather than copied into the
  * bundle: the six stage tracks plus their boss tracks are 161 MB of
  * uncompressed PCM, which would more than double the bundle for data the
@@ -167,6 +175,34 @@ function serveBundle() {
             res.statusCode = 404;
             return res.end("no CA yet: run `npm run https-cert`");
           }
+        }
+
+        // The AAC set, whole files and validated like the bundle: the service
+        // worker keeps them, and a 304 is how it learns its copy is current.
+        if (url === "/sounds.json" || url === "/clips.pack"
+            || (url.startsWith("/bgm/") && url.endsWith(".m4a"))) {
+          const rel = decodeURIComponent(url.slice(1));
+          const file = join(SOUND_DIR, normalize(rel));
+          let st;
+          try {
+            if (normalize(rel).startsWith("..")) throw new Error("outside");
+            st = statSync(file);
+          } catch {
+            res.statusCode = 404;
+            return res.end(`no ${rel}: run \`npm run sounds\``);
+          }
+          const etag = `W/"${st.size}-${Math.floor(st.mtime.getTime())}"`;
+          res.setHeader("Content-Type", url.endsWith(".json") ? "application/json"
+            : url.endsWith(".m4a") ? "audio/mp4" : "application/octet-stream");
+          res.setHeader("ETag", etag);
+          res.setHeader("Last-Modified", st.mtime.toUTCString());
+          res.setHeader("Cache-Control", "no-cache");
+          if (req.headers["if-none-match"] === etag) {
+            res.statusCode = 304;
+            return res.end();
+          }
+          res.setHeader("Content-Length", String(st.size));
+          return createReadStream(file).pipe(res);
         }
 
         const sound = url.startsWith("/bgm/") ? (["bgm", "bgm"] as const)

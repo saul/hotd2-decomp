@@ -1124,6 +1124,8 @@ export function SpawnWaterEnemyAt(x: number, y: number, z: number, lifetime: num
 const handler: ClassHandler = {
   init: FishInit,
   update: FishUpdate,
+  // `FishInit` installs `FishUpdate` and returns (`0x0043862F`).
+  firstUpdateNextWalk: true,
   updatesWhenDead: true,
   ownsShotResult: true,
   leave(obj: Actor): void {

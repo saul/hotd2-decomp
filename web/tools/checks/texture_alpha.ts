@@ -225,9 +225,15 @@ function sphereKey(part: string, sphere: readonly number[]): string {
   return [part, ...sphere.map(String)].join("\u0000");
 }
 
-/** A material as the bundle carries it: base colour RGBA and culling. */
-function materialKey(rgba: readonly number[], doubleSided: boolean): string {
-  return `${rgba.map(String).join(",")}|${doubleSided}`;
+/**
+ * A material as the bundle carries it: base colour RGBA and culling, and the
+ * rest of the `SetMaterial` -- the ambient scale, the specular colour and its
+ * power (`extras.pvr2.tex_ambient`, `specular`, `specular_power`).
+ */
+function materialKey(rgba: readonly number[], doubleSided: boolean,
+                     amb: unknown, spec: unknown, power: unknown): string {
+  return `${rgba.map(String).join(",")}|${doubleSided}`
+    + `|${String(amb)}|${String(spec)}|${String(power)}`;
 }
 
 /**
@@ -253,7 +259,8 @@ async function corpus(chk: Checker, source: NodeAssetSource,
         let set = own.get(key);
         if (!set) own.set(key, set = new Set());
         set.add(materialKey([r, g, b, a].map((v) => Math.min(Math.max(v, 0.0), 1.0)),
-                            me.doubleSided));
+                            me.doubleSided, me.texAmbient, me.specularColour,
+                            me.specularPower));
         if ((me.listType === 0) !== me.opaquePass) {
           if (me.textured) texturedDisagree++;
           else untextured.set(stem, (untextured.get(stem) ?? 0) + 1);
@@ -415,7 +422,8 @@ async function bundle(chk: Checker, source: NodeAssetSource, exe: ExeTables,
     const { doc, bin } = readGlb(path);
     const file = path.slice(path.lastIndexOf("/") + 1);
     // Every model primitive draws with its own mesh's material: the base
-    // colour WalkMeshChainAndDraw hands SetMaterial, and the culling. A
+    // colour, ambient scale and specular WalkMeshChainAndDraw hands
+    // SetMaterial, and the culling. A
     // primitive is found by its part and the mesh header's sphere, which it
     // carries as `hod2_sphere` -- node names number a filtered model list in
     // the rigs, and a chain index skips empty meshes -- and it must hold one
@@ -432,7 +440,9 @@ async function bundle(chk: Checker, source: NodeAssetSource, exe: ExeTables,
           ? own.get(sphereKey(part, sphere as number[])) : undefined;
         if (!want || pr.material === undefined) continue;
         const mat = mats[pr.material];
-        const got = materialKey(mat.pbrMetallicRoughness!.baseColorFactor!, mat.doubleSided ?? false);
+        const pv = mat.extras?.pvr2 ?? {};
+        const got = materialKey(mat.pbrMetallicRoughness!.baseColorFactor!, mat.doubleSided ?? false,
+                                pv.tex_ambient, pv.specular, pv.specular_power);
         prims++;
         if (!want.has(got)) {
           wrongMat++;
@@ -493,7 +503,7 @@ async function bundle(chk: Checker, source: NodeAssetSource, exe: ExeTables,
          + (missingNamed.length ? `; missing ${missingNamed.join(", ")}` : ""));
   chk.eq(mismatched, 0, `images whose alpha differs from the bank's, of ${compared}`);
   chk.ok(prims > 10000, `${prims} stage primitives matched a mesh (more than 10000)`);
-  chk.eq(wrongMat, 0, `stage primitives drawing with another mesh's base colour or culling, of ${prims}`);
+  chk.eq(wrongMat, 0, `stage primitives drawing with another mesh's material or culling, of ${prims}`);
 }
 
 /** Code-point order, as a sort of `str` keys has it. */

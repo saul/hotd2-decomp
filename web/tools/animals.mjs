@@ -141,7 +141,7 @@ for (const [name, stage, block, step, cls, wanted, entry, minTravel,
     presentEnemies: () => G.g_enemies_present,
     aliveCivilians: () => G.g_civilians_alive,
     scriptFlagRaised: (i) => (G.g_script_flags[i] ?? 0) !== 0,
-    cameraFree: () => true, showMessage: () => null, endDialogue() {},
+    cameraFree: () => true, showMessage: () => null,
   }, { seed: 1 });
   // Walk the whole block rather than seeking to one op: the spawns we want
   // may be anywhere in it.

@@ -93,7 +93,9 @@ export interface GltfMaterial {
   };
   doubleSided?: boolean;
   alphaMode?: string;
-  extras?: { pvr2?: { ignore_texture_alpha?: boolean; pixel_format?: string } };
+  extras?: { pvr2?: { ignore_texture_alpha?: boolean; pixel_format?: string;
+                      tex_ambient?: number; specular?: number[];
+                      specular_power?: number } };
 }
 
 /** The exported bundle, when there is one: {@link BUNDLE_ROOT} with a manifest. */

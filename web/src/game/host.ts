@@ -67,7 +67,16 @@ export type ShotPick =
        */
       mesh?: { surface: number; normal: Vec3 };
     }
-  | { kind: "prop"; propId: number; point: Vec3 }
+  | {
+      kind: "prop"; propId: number; point: Vec3;
+      /**
+       * A prop shot through its own collision mesh (`ShotTestMesh`,
+       * `FUN_00404A00`), which only ever arrives from the registration list:
+       * the quad's surface and its normal, for `MarkActorShot`'s world
+       * impact, as on an actor. Absent for `render/`'s sphere pick.
+       */
+      mesh?: { surface: number; normal: Vec3 };
+    }
   /**
    * One of `znjoe`'s released creatures — `G.g_body_creatures`, identified by
    * its `id`.
@@ -191,6 +200,17 @@ export interface GameHost {
    * reader. Optional and false when the actor is not posed.
    */
   boneMatrix?(at: number, bone: number, out: number[]): boolean;
+  /**
+   * One bone's world matrix **as the pose left it**, before the class's
+   * node hook rewrote the record: what `SkeletonEmitNode` (`FUN_004114C0`)
+   * `MatrixStore`s at `+0x28` just before it calls the hook, and what the
+   * hook reads there. The same as {@link GameHost.boneMatrix} for every bone
+   * a hook leaves alone; different for a civilian's turned head, whose
+   * `CivilianDrawBonePart` (`FUN_0048D1F0`) stores the turn over the pose and
+   * reads the pose to turn it. Optional and false when the actor is not
+   * posed.
+   */
+  bonePoseMatrix?(at: number, bone: number, out: number[]): boolean;
   /**
    * The two matrices of the camera block `g_camera_index` names:
    * `g_camera_world_to_view` (`0x009A6000`, the block's `+0x00`) and its

@@ -13,6 +13,7 @@ import { CharacterTypeOf, T } from "../tables";
 import { ActorBindPartList } from "../attachments";
 import { CivilianRunScript } from "./script";
 import { makeCivilianState } from "./state";
+import { CivilianWait } from "./ops";
 
 /** `CivilianInit`'s literals. */
 const DEFAULT_MOTION_BLEND = 10;
@@ -77,6 +78,14 @@ export function CivilianInit(obj: Actor, rng?: Rng): void {
   // on the straight-line fall-through — and this runs exactly when the engine
   // runs it, on the script's spawn opcode. Three paths take it back, one each.
   G.g_civilians_alive += 1;
+  // `TEST [sub], 0x8000000` at `0x0048A705`: a civilian whose wait word
+  // marks her uncounted is not a civilian the run has seen. The word is the
+  // one this Init zeroed, so every shipped civilian is counted here.
+  // `g_civilians_seen_by_scene` (`0x009C9100`) beside it is not in `G`:
+  // nothing the port runs reads it.
+  if ((sub.wait & CivilianWait.Uncounted) === 0) {
+    G.g_civilians_seen_total = (G.g_civilians_seen_total + 1) & 0xffff;
+  }
 
   const entry = T.civilians?.entries?.[p.script];
   if (entry === undefined) return;

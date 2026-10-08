@@ -69,7 +69,6 @@ export enum CreditPromptDrawer {
   ContinueCostsMore = 2,
 }
 
-
 /**
  * `CreditPromptMessageIndex` — `FUN_00406D60`. Which row of
  * `g_credit_prompt_messages` the line shows, from the prompted player's

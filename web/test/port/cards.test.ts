@@ -145,7 +145,7 @@ console.log("\n`wait_script_flag` holds for the actor that raises the flag:");
     // same array the civilian writes.
     scriptFlagRaised: (i: number) => (G.g_script_flags[i] ?? 0) !== 0,
     cameraFree: () => null,
-    showMessage: () => null, endDialogue: () => undefined,
+    showMessage: () => null,
   };
   const w = new Walker(script, host);
 
@@ -323,7 +323,7 @@ console.log("\n`spawn_simple` builds the cards, and the cards open the gate:");
     presentEnemies: () => null, aliveCivilians: () => null,
     scriptFlagRaised: (i: number) => (G.g_script_flags[i] ?? 0) !== 0,
     cameraFree: () => null,
-    showMessage: () => null, endDialogue: () => undefined,
+    showMessage: () => null,
   };
 
   /** Drive one card to its flag and report how many frames it took. */

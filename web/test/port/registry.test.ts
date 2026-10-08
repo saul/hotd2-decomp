@@ -3,7 +3,6 @@ import { Rng } from "../../src/core/rng";
 import { Scope } from "../../src/core/scope";
 import { CameraFrame } from "../../src/core/camera";
 import type { Context, Tick } from "../../src/core/system";
-import { HingePose } from "../../src/render/hinge";
 import { Events } from "../../src/core/events";
 import { ticksOfAuthoredFrame } from "../../src/core/play_cursor";
 import { ActorSpawn, GameUpdate } from "../../src/game/director";
@@ -120,53 +119,6 @@ console.log("\nrain: DrawRainParticles' simulation half");
   RainResetParticles(rules, new Rng(7));
   check("and the same seed gives the same rain",
         JSON.stringify(G.g_rain_particles) === a);
-}
-
-// ---------------------------------------------------------------------------
-// `FUN_00473CF0`'s pose: `side` is a sign, and four hinges prove it matters
-// ---------------------------------------------------------------------------
-{
-  console.log("\nscripted scenery: the hinge pose");
-
-  // One key from stage 1's curve 0, frame 20 -- the slam judder, where the
-  // door has stopped swinging and the X and Z wobble peak. This is the frame
-  // the four odd hinges went berserk on, which is why it reads on screen as
-  // "spins at the end of the swing" rather than "opens to the wrong angle".
-  const slam = [9400, 16869, 9443];
-
-  check("side +1 leaves every angle as the curve wrote it",
-        JSON.stringify(HingePose({ side: 1 }, slam))
-        === JSON.stringify({ rx: 9400, ry: 16869, rz: 9443 }));
-
-  // `ADD ECX` becomes `SUB ECX` and the yaw gets a `NEG`; `obj+0x6C` is
-  // written from the same `ADD EDX,EAX` on both arms, so rz does not mirror.
-  check("side -1 mirrors rx and ry, and leaves rz alone",
-        JSON.stringify(HingePose({ side: -1 }, slam))
-        === JSON.stringify({ rx: -9400, ry: -16869, rz: 9443 }));
-
-  // The bug. `prop_06dc_0` and `prop_0724_0` in stage 1 carry +/-512 -- the
-  // amplitude of the wobble they do when shot -- and multiplying by that put
-  // 4.8 million BAMS, 73 turns, on the X axis of a door.
-  const big = HingePose({ side: 512 }, slam);
-  check("a magnitude never reaches the pose",
-        big.rx === 9400 && big.ry === 16869 && big.rz === 9443,
-        `rx=${big.rx} (${(big.rx / 65536).toFixed(1)} turns)`);
-  check("and its sign still mirrors, at 416 as at 1",
-        HingePose({ side: -416 }, slam).rx === -9400);
-
-  // `TEST EAX,EAX; JLE`: zero takes the negative arm. No shipped hinge is
-  // zero, but the exporter's `or 0` can produce one from an absent parameter.
-  check("zero takes the mirrored arm, as `JLE` does",
-        HingePose({ side: 0 }, slam).ry === -16869);
-
-  // Every angle stays inside a turn for every side the game ships. The four
-  // odd ones are stage 1's; the other 52 are +/-1.
-  const shipped = [1, -1, 512, -512, 416, -416];
-  check("no shipped side can drive an angle past one turn",
-        shipped.every((side) => {
-          const a = HingePose({ side }, slam);
-          return Math.abs(a.rx) < 0x10000 && Math.abs(a.ry) < 0x10000;
-        }));
 }
 
 // ---------------------------------------------------------------------------
@@ -537,9 +489,15 @@ console.log("\n`g_class_handlers`, filled by the classes themselves:");
     [SpawnClass.RankScaledEnemy, "0x21 rescue target"],
     [SpawnClass.ScriptedProp, "0x13 script-driven prop / the boat"],
     [SpawnClass.FlagStripProp, "0x12 slot strip on a flag / the bin's door"],
+    [SpawnClass.FloatingPropRow, "0x15 stage 2's floating planks"],
+    [SpawnClass.DynamicLight, "0x2B a scripted light"],
     [SpawnClass.CarriedZombie, "0x18 the zombie that rides it"],
     [SpawnClass.Vehicle, "0x26 subtype 2, the boat the player rides"],
+    [SpawnClass.PathRidingVehicle, "0x27 stage 2's two path riders"],
     [SpawnClass.PathRidingProp, "0x28 stage 1's two burning cars"],
+    [SpawnClass.SceneryBatch, "0x29 the floor decals"],
+    [SpawnClass.CutsceneSkipWatcher, "0x63 the cutscene-skip watcher"],
+    [SpawnClass.ScoreRouteSelect, "0x64 stage 6's route selector"],
     [SpawnClass.SetPieceProp, "0x24 set piece"],
     [SpawnClass.ScriptedHumanoid, "0x25 scripted humanoid"],
     [SpawnClass.Zombie, "0x30 zombie"],
@@ -573,11 +531,12 @@ console.log("\n`g_class_handlers`, filled by the classes themselves:");
         PORTED_CLASSES.map((c) => `0x${c.toString(16)}`).join(","));
   // The cat is 0x53 and now has one -- its sub-type 2 is a route-branch
   // trigger -- and 0x40, the horde, and 0x42, the worm, have one too, and so
-  // does 0x2D, the stage-6 boss. Class 0x29 still has none: an unported class
-  // must stay absent rather than fall back to anything, because an `if` is
-  // what had the cat running the zombie's state machine.
+  // does 0x2D, the stage-6 boss, 0x29, the floor decals, and 0x27, stage 2's
+  // path riders. Class 0x54, an ending-scene class, still has none: an
+  // unported class must stay absent rather than fall back to anything,
+  // because an `if` is what had the cat running the zombie's state machine.
   check("a class with no module has no row",
-        g_class_handlers[SpawnClass.SceneryBatch] === undefined);
+        g_class_handlers[0x54 as SpawnClass] === undefined);
 
   // Loud, not last-one-wins. A row silently overwritten by a second module is
   // a class whose behaviour depends on evaluation order.

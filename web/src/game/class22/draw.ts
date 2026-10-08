@@ -13,6 +13,7 @@
 import type { Actor, JudgmentActor } from "../actor";
 import { ActorSetMotion } from "../class30/motion_cue";
 import { ActorByAt, G } from "../globals";
+import { DrawSkinnedModelAndShadow } from "../skeleton";
 import { ActorAdvanceMotion } from "../motion";
 import type { GameHost } from "../host";
 import type { ClassFrame } from "../registry";
@@ -115,15 +116,25 @@ export function Class22DrawAndPoseSubActor(obj: JudgmentActor,
                                            f: ClassFrame): void {
   const t = obj.judgment;
   obj.alpha = 1;
+  // `MOV [0x009a26a0], EBX` at `0x0049D780`: the flier's draw is its own.
+  G.g_cur_actor = obj.at;
   Class22SampleCursor(obj, t);
   JudgmentEmitTrackedBone(obj, f.host);
   Class22DrawBonePart(obj, t, f.host);
+  DrawSkinnedModelAndShadow(obj);
 
   const sub = ActorByAt(t.subActorAt);
   if (!sub || sub.cls !== obj.cls) return;
   const s = sub.judgment;
   sub.alpha = 1;
+  // `0x0049D817`: the sub-actor is drawn under its own name, so the shadow
+  // is the sub-actor's -- which its `0x88000` refuses.
+  G.g_cur_actor = sub.at;
   Class22SampleCursor(sub, s);
+  DrawSkinnedModelAndShadow(sub);
+  // `0x0049D95A`, the routine's last store: back to the flier. The switch
+  // below reads no `g_cur_actor`.
+  G.g_cur_actor = obj.at;
   switch (t.variant) {
     case Class22Variant.Cameo:
       Class22ReclipSubActor(sub);

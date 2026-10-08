@@ -324,12 +324,21 @@ console.log(`${total} civilians driven, ${moved} advanced, `
  * whole of 21 -> 19 and 10 -> 12: every other civilian ends as it did on the
  * pinned build (b885f3fe, the last commit this passed on unchanged).
  *
+ * **Nineteen was one too many again.** Stage 4's `0x3578` counted as rescued
+ * because her captor `0x35B4`, in state 43 (`ZombieStateDragTarget`), had no
+ * drag clip in the bundle: `ActorSetMotionBlended(0x1A4)` found nothing, the
+ * spawn clip `0x3BC` stayed on, and the state's kill on frame 30 of the last
+ * loop never fired, so the halfway shot found her alive. With the state's
+ * four clips baked (`game/class30/drag_clips.ts`) the kill comes about 160
+ * frames in, as the exe's does, and she is mauled: 19 -> 18 rescued, 12 -> 13
+ * mauled, and 37 -> 36 moved, since a dead civilian's script stops.
+ *
  * `misPaid` is `obj+0x131C`. Every rescue here follows a kill by player 0,
  * so it must name player 0; before `ResolveHit` wrote the byte all nineteen
- * named -1 and paid both players.
+ * then named -1 and paid both players.
  */
-const EXPECT = { total: 53, moved: 37, rescued: 19, holding: 4,
-                 captors: 60, inCaptorState: 58, mauled: 12 };
+const EXPECT = { total: 53, moved: 36, rescued: 18, holding: 4,
+                 captors: 60, inCaptorState: 58, mauled: 13 };
 const got = { total, moved, rescued, holding, captors, inCaptorState, mauled };
 const missing = Object.keys(EXPECT).filter((k) => EXPECT[k] !== got[k]);
 if (bad || unplaced || misPaid || snapWrong || total === 0

@@ -29,12 +29,20 @@
  *
  * The engine's light colour is global state and the afterimage never puts it
  * back; what the port does instead is declared on `applyLight`.
+ *
+ * ## The ground shadow
+ *
+ * Both weapon families also draw slot `0x10D0` under the weapon every frame
+ * it is drawn (`ActorDrawGroundShadowWithSize`, `FUN_0040A600`). That is a
+ * world draw like every other ground shadow, recorded in
+ * `G.g_world_slot_draws` and drawn by `render/view_slots.ts`, not here.
  */
 import {
   Color, Group, Mesh, Object3D, SRGBColorSpace, type Material,
 } from "three";
 import type { System } from "../core/system";
 import type { RenderContext } from "./context";
+import { unlitMaterial } from "./lighting";
 import { G } from "../game/globals";
 
 export interface SlotSource {
@@ -144,8 +152,9 @@ export class ProjectileLayer implements System<RenderContext> {
       node.traverse((o) => {
         const mesh = o as Mesh;
         if (!mesh.isMesh) return;
+        // The unlit material, never a lit twin: see `unlitMaterial`.
         const own = (m: Material): Material => {
-          const c = m.clone() as Material & { color?: Color };
+          const c = unlitMaterial(m).clone() as Material & { color?: Color };
           if (c.color) {
             mats!.push({ mat: c as Material & { color: Color },
                          base: c.color.clone() });

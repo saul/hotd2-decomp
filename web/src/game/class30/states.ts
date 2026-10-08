@@ -171,8 +171,8 @@ export enum ZombieState {
   RideCarrier = 29,
   /**
    * `ZombieStateArcScriptedEntrance` (`FUN_00458A70`). Waits, crouches, then
-   * rides a scripted ballistic arc to a world point. Three spawns, all
-   * reached from `RideCarrier`.
+   * rides a scripted ballistic arc to a world point. Six spawns: three start
+   * in it (stage 4) and three are handed to it by `RideCarrier` (stage 2).
    */
   ArcScriptedEntrance = 30,
   /**

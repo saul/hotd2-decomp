@@ -179,7 +179,7 @@ export function buildHost(stage: number) {
     onFeed: () => undefined, onBranch: () => undefined, playSound: () => undefined,
     aliveEnemies: () => null, presentEnemies: () => null, aliveCivilians: () => null,
     scriptFlagRaised: () => null, cameraFree: () => null,
-    showMessage: () => null, endDialogue: () => undefined,
+    showMessage: () => null,
   });
   scriptSys.walker = walker;
   ctx.walker = walker;

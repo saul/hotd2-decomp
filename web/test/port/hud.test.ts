@@ -1,5 +1,8 @@
 import { Rng } from "../../src/core/rng";
-import { GameUpdate } from "../../src/game/director";
+import { GameUpdate, SpawnSimpleActors } from "../../src/game/director";
+import { Events } from "../../src/core/events";
+import { DialogueTasksTick, EvtOpPlayDialogue2D } from "../../src/game/dialogue";
+import { SetDialogueTables } from "../../src/game/tables";
 import {
   CamBlockSetAnglesFromLookAt, CameraPoseBlock,
 } from "../../src/game/camera/path";
@@ -10,7 +13,9 @@ import { UpdateSceneViewAndLight } from "../../src/game/camera/view";
 import { makeActor } from "../../src/game/actor";
 import { CameraDriverSelectMode, CameraMode } from "../../src/game/camera/mode";
 import { PlayerTasksDrawWithoutAFrame } from "../../src/game/player_shell";
-import { G, ResetGameGlobals, ResetSceneOnEnter } from "../../src/game/globals";
+import {
+  AppState, G, ResetGameGlobals, ResetSceneOnEnter,
+} from "../../src/game/globals";
 import { NULL_HOST, type GameHost } from "../../src/game/host";
 import { MatrixTransformPoint } from "../../src/game/matrix";
 import {
@@ -476,7 +481,7 @@ console.log("\na route branch, with and without the debug pause:");
     presentEnemies: () => null,
     aliveCivilians: () => null, cameraFree: () => null,
     scriptFlagRaised: () => null,
-    showMessage: () => null, endDialogue: () => undefined,
+    showMessage: () => null,
   };
 
   ResetGameGlobals();
@@ -1192,4 +1197,149 @@ console.log("\nthe gun: the magazine, the reload, and the HUD readouts:");
         G.g_stashed_path_frame === 102);
   G.g_force_rail_advance = 0;
   G.g_players_in_play = inPlay;
+}
+
+// -- evt 0x2D: the subtitle, drawn as the game draws it -------------------
+
+console.log("\nthe dialogue subtitle -- EvtOpPlayDialogue2D, its task and "
+            + "DrawTextCentred:");
+{
+  // A group with a one-player and a two-player variant, as group 5's "Get
+  // him!" / "Get them!" is. The glyph table is the fixture's own: every
+  // printable character names sprite 0x400 + its code, the space none.
+  const line = (text: string, end: number, x = 0) =>
+    ({ line: 0, text, x_offset: x, end_frame: end });
+  const variant = (id: number, frames: number, lines: ReturnType<typeof line>[]) =>
+    ({ variant: id, player_cfg: 0, sprite: 0, frames, x: 0, y: 0,
+       voice: 0x100000 + id, voice_file: null, lines });
+  const glyphs = Array.from({ length: 0x80 },
+                            (_u, c) => (c > 0x20 ? 0x400 + c : 0));
+  const reset = () => {
+    ResetGameGlobals();
+    // The skip words are not the scene's to reset (`ResetSceneOnEnter`
+    // stores to none of them), so the fixture clears what the case before set.
+    G.g_nEvtSkipFlag = 0;
+    G.g_cutscene_skipping = 0;
+    G.g_app_state = AppState.InPlay;
+    SetDialogueTables({
+      "5": [variant(10, 100, [line("Gg y~", 60, -8), line("Ab", 0)]), null,
+            variant(11, 30, [line("Get them!", 0)])],
+    }, glyphs);
+  };
+  const sounds: number[] = [];
+  const events = new Events();
+  events.on("sound.play", (e) => sounds.push(e.id));
+
+  reset();
+  G.g_active_player = 0;
+  const t = EvtOpPlayDialogue2D(5, events);
+  check("one player picks the group's configuration-0 variant and plays its "
+        + "voice", t?.variant === 10 && sounds.at(-1) === 0x10000a,
+        `${t?.variant} 0x${(sounds.at(-1) ?? 0).toString(16)}`);
+  reset();
+  G.g_active_player = 2;
+  check("...two players configuration 2 -- group * 3 + g_active_player",
+        EvtOpPlayDialogue2D(5, events)?.variant === 11);
+  reset();
+  G.g_active_player = 1;
+  check("...and a variant id of 0 says nothing",
+        EvtOpPlayDialogue2D(5, events) === null && !G.g_dialogue_tasks.length);
+  reset();
+  G.g_active_player = 2;
+  G.g_app_state = 0xa;
+  check("in g_app_state 10 configuration 0 whatever g_active_player says",
+        EvtOpPlayDialogue2D(5, events)?.variant === 10);
+  reset();
+  G.g_nEvtSkipFlag = 1;
+  const before = sounds.length;
+  check("with the skip flag up nothing is said and nothing allocated",
+        EvtOpPlayDialogue2D(5, events) === null && sounds.length === before
+          && !G.g_dialogue_tasks.length);
+
+  // The countdown and the glyphs. Line 0 gives way when the frames left drop
+  // below its end_frame, 60: the 41st run leaves 59.
+  reset();
+  G.g_active_player = 0;
+  EvtOpPlayDialogue2D(5, events);
+  G.g_screen_sprite_draws = [];
+  DialogueTasksTick();
+  const d = G.g_screen_sprite_draws;
+  // "Gg y~", five characters, the space drawing nothing: four glyphs.
+  const x0 = Math.fround(320 - 5 * Math.fround(5.6) + -8);
+  const adv = Math.fround(11.2);
+  const at = (i: number) => {
+    let x = x0;
+    for (let k = 0; k < i; k++) x = Math.fround(x + adv);
+    return x;
+  };
+  check("the first line's glyphs, the space drawing none",
+        d.map((s) => s.id).join() === [0x447, 0x467, 0x479, 0x62d].join(),
+        d.map((s) => s.id.toString(16)).join());
+  check("...from 320 - len * 5.6 + x_offset, 11.2 a character",
+        d[0].x === x0 && d[1].x === at(1) && d[2].x === at(3)
+          && d[3].x === at(4),
+        d.map((s) => s.x).join());
+  check("...on the 384 baseline, a lowercase letter dropped by its own "
+        + "amount: g 4, y 5",
+        d[0].y === 384 && d[1].y === 388 && d[2].y === 389 && d[3].y === 384,
+        d.map((s) => s.y).join());
+  check("...each at 0.7 of its sprite, depth 1, its corner at (x, y)",
+        d.every((s) => s.sx === Math.fround(0.7) && s.sy === Math.fround(0.7)
+                       && s.depth === 1 && s.flags === 0));
+  for (let i = 0; i < 40; i++) DialogueTasksTick();
+  check("...the task counting down from the record's 100 frames",
+        G.g_dialogue_tasks[0]?.frames === 59 && G.g_dialogue_tasks[0].line === 1,
+        JSON.stringify(G.g_dialogue_tasks[0]));
+  G.g_screen_sprite_draws = [];
+  DialogueTasksTick();
+  check("...and the second line drawn once the first has given way",
+        G.g_screen_sprite_draws.map((s) => s.id).join() === [0x441, 0x462].join());
+  for (let i = 0; i < 57; i++) DialogueTasksTick();
+  G.g_screen_sprite_draws = [];
+  DialogueTasksTick();
+  check("the run that counts it to 0 ends the task and draws nothing",
+        !G.g_dialogue_tasks.length && !G.g_screen_sprite_draws.length);
+
+  reset();
+  G.g_active_player = 0;
+  EvtOpPlayDialogue2D(5, events);
+  DialogueTasksTick();
+  G.g_cutscene_skipping = 1;
+  DialogueTasksTick();
+  check("g_cutscene_skipping ends a subtitle already on screen",
+        !G.g_dialogue_tasks.length);
+}
+
+// -- class 0x63: the cutscene-skip watcher ---------------------------------
+
+console.log("\nclass 0x63 -- the skip watcher turns a request into a skip:");
+{
+  const rng = new Rng(63);
+  ResetGameGlobals();
+  G.g_nEvtSkippableRegion = 1;
+  SpawnSimpleActors([{ at: -9, class: 0x63, hp: 0 }]);
+  G.g_nSkipRequested = 1;
+  GameUpdate(1 / 60, NULL_HOST, rng);
+  const w = G.g_object_list.find((o) => o.at === -9)!;
+  check("its Init clears a request left over and installs the Check",
+        G.g_nSkipRequested === 0 && G.g_nEvtSkipFlag === 0 && !w.dead);
+  G.g_nSkipRequested = 1;
+  G.g_cam_path_cursor = 40;
+  G.g_cam_path_end_frame = 120;
+  GameUpdate(1 / 60, NULL_HOST, rng);
+  check("a request raises g_nEvtSkipFlag and g_cutscene_skipping and ends "
+        + "the camera move where it stands",
+        G.g_nEvtSkipFlag === 1 && G.g_cutscene_skipping === 1
+          && G.g_nSkipRequested === 0 && G.g_cam_path_end_frame === 40,
+        `${G.g_nEvtSkipFlag} ${G.g_cutscene_skipping} ${G.g_cam_path_end_frame}`);
+  GameUpdate(1 / 60, NULL_HOST, rng);
+  check("...and the next run clears g_cutscene_skipping and kills it, the "
+        + "skip flag left up for set_skippable_region(0)",
+        G.g_cutscene_skipping === 0 && G.g_nEvtSkipFlag === 1 && w.dead);
+  ResetGameGlobals();
+  G.g_nEvtSkippableRegion = 0;
+  SpawnSimpleActors([{ at: -9, class: 0x63, hp: 0 }]);
+  GameUpdate(1 / 60, NULL_HOST, rng);
+  check("with no region open it kills itself on its first run",
+        G.g_object_list.find((o) => o.at === -9)?.dead === true);
 }

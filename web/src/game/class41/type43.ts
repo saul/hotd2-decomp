@@ -28,7 +28,7 @@
  * 0046231c  obj+0x28C = kind == 3 ? 0x19E8 : 0xFFFF   ; SUB 3 ; NEG ; SBB ; AND ; ADD
  * 00462345  obj+0x1CC = obj+0x1D4 = 0           ; EBX, zero since 0x00461D73
  * 00462351  obj+0x1B8 = (float)kinds[(s8)placer+0x131B].rise
- * 00462371  if (g_GameMode == 1 && byte [0x009C88AA]) obj+0x194 = 1
+ * 00462371  if (g_GameMode == 1 && g_original_first_aid) obj+0x194 = 1
  * ```
  *
  * **The arm draws four `rand()`s and the routine's re-seed draws five**, and

@@ -18,6 +18,7 @@
     "gen:hashes": "node tools/run_ts.mjs tools/gen/schema_hash.ts && node tools/run_ts.mjs tools/gen/builder_hash.ts",
     "export": "node tools/run_ts.mjs tools/export.ts",
     "site": "node tools/run_ts.mjs tools/site.ts",
+    "sounds": "node tools/run_ts.mjs tools/sounds.ts",
     "site:check": "node tools/site_check.mjs",
     "test:port": "node tools/run_test.mjs test/port/index.ts",
     "test:audio": "node tools/run_test.mjs test/audio.test.ts",

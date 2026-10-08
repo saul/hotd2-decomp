@@ -35,9 +35,15 @@ import { makeOwlTail, type OwlTail } from "./class43/state";
 import { makeScriptedPropTail, type ScriptedPropTail } from "./class13/state";
 import { makeScriptedProp12Tail, type ScriptedProp12Tail }
   from "./class12/state";
+import { makeFloatingPropTail, type FloatingPropTail }
+  from "./class15/state";
+import { makeDynamicLightTail, type DynamicLightTail }
+  from "./class2B/state";
 import { makeVehicleTail, type VehicleTail } from "./class26/state";
 import { makePathRidingPropTail, type PathRidingPropTail }
   from "./class28/state";
+import { makePathRidingVehicleTail, type PathRidingVehicleTail }
+  from "./class27/state";
 import { makeBatTail, type BatTail } from "./class46/state";
 import { makeBoss3Tail, type Boss3Tail } from "./class45/state";
 import { makeBoss5Tail, type Boss5Tail } from "./class32/state";
@@ -46,6 +52,7 @@ import { makeWormTail, type WormTail } from "./class42/state";
 import { makeFishTail, type FishTail } from "./class51/state";
 import { makeMouseTail, type MouseTail } from "./class52/state";
 import { makeCatTail, type CatTail } from "./class53/state";
+import { makeSkipWatchTail, type SkipWatchTail } from "./class63/state";
 import { makeScriptedSceneryTail, type ScriptedSceneryTail }
   from "./class33/state";
 import { makeSetPiecePropTail, type SetPiecePropTail }
@@ -54,6 +61,8 @@ import { makeThrowerTail, type ThrowerTail } from "./class31/state";
 import { makeZombieTail, type ZombieTail } from "./class30/state";
 import { makeResultCardTail, type ResultCardTail } from "./class61/state";
 import { makeChapterCardTail, type ChapterCardTail } from "./class60/state";
+import { makePropContainerTail, type PropContainerTail }
+  from "./class41/placer_state";
 
 /**
  * `model+0x64` — the **motion block's** flag word, which is `obj+0x1F8`.
@@ -287,8 +296,12 @@ export enum ActorFlag {
    * `0x90100` with {@link ShotImmune} as well in
    * `ZombieStateWaitForCameraFrame`, `0xA0000` with {@link Airborne} in both
    * corpse states. Other classes use the same bit of this word for their own
-   * ends (class 0x46's `PlaceBats` writes it, class 0x14 toggles it), and
-   * `L3` applies: this names the reader, not every writer's intent.
+   * ends (class 0x46's `PlaceBats` and `SpawnBatWings` write it, as do class
+   * 0x22's and 0x2D's sub-actors and the route map's figures; class 0x14
+   * toggles it), and `L3` applies: this names the reader, not every
+   * writer's intent. For every one of them it is at least the shadow, which
+   * `DrawSkinnedModelAndShadow` (`FUN_00411090`) draws for every skinned
+   * actor.
    */
   NoShadow = 0x80000,
   /**
@@ -444,9 +457,14 @@ export enum ActorFlag {
    * the bit. It runs once, from `ActorBuildSkinnedModel` (`FUN_00410440`),
    * which every skinned class's `Init` calls after pointing `g_cur_actor` at
    * itself -- so a civilian, a zombie, a thrower and every boss carry it.
-   * Six builders clear it again with `AND 0x7F` straight after: `PlaceBats`,
-   * `SpawnBatWings`, `CatInit`, `SpawnGoldenFrog` and two class-0x41 builders
-   * (`0x00463E50`, `0x004641F0`). `ActorBuildSkinnedModel` in `spawn.ts` is
+   * `PlaceBats`, `SpawnBatWings` and `CatInit` clear it again with `AND 0x7F`
+   * straight after. `SpawnGoldenFrog` and constructor 68 (`0x00463E50`) make
+   * their `AND 0x7F` on the word of the object they were **handed** -- the
+   * prop, or the placer (`AND DL,0x7F` on `[EDI+0x34]`, `[EBX+0x34]`) -- and
+   * the frog loses the bit to the `MOV dword ptr [ESI+0x34], 0x1` before it
+   * (`class41/golden_frog.ts`). `PlaceType61Figures` makes the same `AND` on
+   * the placer's word, so constructor 61's figures keep the bit (see
+   * `docs/formats/combat.md`). `ActorBuildSkinnedModel` in `spawn.ts` is
    * where the port raises it.
    */
   ShootPerBone = 0x80,
@@ -456,9 +474,9 @@ export enum ActorFlag {
    * (`FUN_00404A00`) instead of `ShotTestSphere`, and `RegisterForShotTest`
    * takes it whatever its depth. Class 0x12's stage-1 door carries it in its
    * record's flags word, class 0x26's boat raises it with `obj+0x34 |= 0x51`,
-   * and so does a story switch whose descriptor names a mesh. The test is
-   * `combat/shot_test.ts`'s, on {@link Actor.coliBlob} through
-   * {@link Actor.coliMatrix}.
+   * and so does a story switch whose descriptor names a mesh (a prop, the
+   * same bit on `BreakableProp.flags`). The test is `combat/shot_test.ts`'s,
+   * on {@link Actor.coliBlob} through {@link Actor.coliMatrix}.
    */
   ShotTestMesh = 0x10,
   /**
@@ -1371,8 +1389,24 @@ export type ListCursor = number;
  */
 export interface ActorBase {
   // -- identity ----------------------------------------------------------
-  /** The spawn's script address. Stable, and the key the renderer binds on. */
+  /**
+   * The object's address in the pool -- the key every other object and the
+   * renderer reach it by. The spawn's script address, except for a second
+   * live object built from the same descriptor (see {@link descAt}).
+   *
+   * [port-only] The engine's pool is keyed by pointer: `ActorAlloc`
+   * (`FUN_004A6FA0`) hands out a fresh object every time a spawn instruction
+   * runs, however many already came from that descriptor.
+   */
   at: number;
+  /**
+   * `obj+0x1390`'s descriptor, by its script address: what the object was
+   * spawned from, and what a constructor reads its tail by. Equal to
+   * {@link at} unless an object from the same descriptor was already in the
+   * pool when this one was built, in which case `at` is a fresh synthetic
+   * address (`g_summoned_actor_at`) and this still names the descriptor.
+   */
+  descAt: number;
   /**
    * The spawn class — `g_class_handlers` is indexed by it.
    *
@@ -1583,10 +1617,11 @@ export interface ActorBase {
     delay: number; dest: [number, number, number]; gravity: number;
   } | null;
   /**
-   * The descriptor tail of whichever of the twelve entrance states this spawn
-   * starts in — see `class30/entrance.ts`. One field rather than twelve
-   * because a spawn has one initial state and every other state's reading of
-   * the same bytes is the next descriptor's.
+   * The descriptor tail of whichever of the twelve entrance states reads this
+   * spawn's tail — see `class30/entrance.ts`. That is the state it starts in,
+   * or, for a spawn that starts in `ZombieStateRideCarrier` (state 29, which
+   * reads only byte 3), the attack state the ride hands it to. One field
+   * rather than twelve because only one state reads the bytes.
    */
   entry: ZombieEntryTail | null;
   hp: number;               // +0x11C
@@ -1804,6 +1839,13 @@ export interface ActorBase {
   class13: CharacterPlacement["class13"];
   /** Class 0x12's descriptor tail — the strip, its flag, delay and cue. */
   class12: CharacterPlacement["class12"];
+  /**
+   * Class 0x15's descriptor tail, `obj+0x130C` -- the row's count, spacing,
+   * slot, mesh and cues. The spawn carries it and so does every plank it
+   * makes: `FloatingPropRowSpawn` copies the pointer into each, and
+   * `FloatingPropUpdate` reads the count back through it.
+   */
+  class15: CharacterPlacement["class15"];
   /** Class 0x18's three — the rider's leave-state and its camera cue. */
   class18: CharacterPlacement["class18"];
   /** Class 0x26 subtype 2's tail — the collision blob its first frame seats. */
@@ -1898,6 +1940,12 @@ export interface ActorBase {
    * it; the objects it builds are allocated with none.
    */
   class42: CharacterPlacement["class42"];
+  /**
+   * Class 0x29's descriptor tail -- the camera path and frame
+   * `SceneryBatchUpdate29` (`FUN_00432C80`) dies on. The list it draws is
+   * `obj+0x11C`, {@link hp}.
+   */
+  class29: CharacterPlacement["class29"];
   class51: CharacterPlacement["class51"];
   class52: CharacterPlacement["class52"];
   /**
@@ -1988,6 +2036,20 @@ export interface ActorBase {
    * `class33/effect_cue.ts`.
    */
   class33Cue: CharacterPlacement["class33_cue"];
+  /**
+   * Class 0x33 **selectors 6 to 11 and 99**'s tails, each tagged with the
+   * selector that reads it. One of the class's five mutually exclusive
+   * blocks; see `class33/cues.ts` and `class33/strips.ts`.
+   */
+  class33Sub: CharacterPlacement["class33_sub"];
+  /**
+   * Class 0x33 **selector 2's** tail — the draw slot, and the camera frame
+   * and script flag `ScriptedPropDrawUntilFlag` (`FUN_00433A10`) leaves on.
+   *
+   * One of five mutually exclusive blocks, on the same terms as the others.
+   * See `class33/draw_until_flag.ts`. Selector 3 reads no tail and has none.
+   */
+  class33Prop: CharacterPlacement["class33_prop"];
   /**
    * `obj+0x124` — the radius `ShotTestSphere` (`FUN_00404630`) measures the
    * shot against, and the **whole** hit test for an actor with no skeleton.
@@ -2544,6 +2606,19 @@ export interface ActorBase {
    * under the head's turn, which is the order the hook pushes it in.
    */
   nodeDrawScale: ([number, number, number] | null)[];
+  /**
+   * The slot a class's node draw hook handed `AssetDrawSlot` for each bone
+   * this frame, by bone number: the bone's own record slot for an arm that
+   * draws the record, another model for one that draws a cel instead.
+   * `CivilianDrawBonePart` (`FUN_0048D1F0`) and `ScriptedHumanoidBoneDrawHook`
+   * (`FUN_00485260`) draw a talking head this way -- the record slot plus a
+   * mouth cel -- and leave the record itself alone, which is why this is not
+   * {@link Actor.boneSlot}.
+   *
+   * [port-only] as a field, for the reason {@link Actor.nodeDrawAlpha} is
+   * one; `render/characters.ts` shows the model.
+   */
+  nodeDrawSlot: (number | null)[];
   /** `obj+0x12EC` — which node draw hook `Init` installed. */
   nodeDrawHook: NodeDrawHookId;
   /**
@@ -2565,7 +2640,7 @@ export interface ActorBase {
  *
  * ## Why this is a union, and what it does and does not fix
  *
- * The struct's tail is reused. `obj+0x1330` is a hand-prop selector for class
+ * The struct's tail is reused. `obj+0x1330` is the face mode for class
  * 0x25, a slide countdown for 0x24 and an arc frame counter for 0x31 — one
  * word, three meanings, and that is the *engine's* design, not a porting
  * mistake. A flat interface asserts that all of those coexist on every actor,
@@ -2577,7 +2652,7 @@ export interface ActorBase {
  * plan's.** Two kinds of aliasing look alike in a flat struct and only one is
  * cross-class:
  *
- * * *Between* classes — `obj+0x1330` as class 0x25's `bonePropMode` against
+ * * *Between* classes — `obj+0x1330` as class 0x25's `faceMode` against
  *   class 0x24's `slideTimer`. A `cls` discriminant fixes this, and it is what
  *   the arms below are for.
  * * *Within* one class — `obj+0x1330` is also class 0x30's general-purpose
@@ -2626,9 +2701,13 @@ export type Actor =
   | (ActorBase & { cls: SpawnClass.FlyingEnemy; owl: OwlTail })
   | (ActorBase & { cls: SpawnClass.ScriptedProp; prop13: ScriptedPropTail })
   | (ActorBase & { cls: SpawnClass.FlagStripProp; prop12: ScriptedProp12Tail })
+  | (ActorBase & { cls: SpawnClass.FloatingPropRow; float15: FloatingPropTail })
+  | (ActorBase & { cls: SpawnClass.DynamicLight; light2b: DynamicLightTail })
   | (ActorBase & { cls: SpawnClass.Vehicle; vehicle: VehicleTail })
   | (ActorBase & { cls: SpawnClass.PathRidingProp;
                    pathProp: PathRidingPropTail })
+  | (ActorBase & { cls: SpawnClass.PathRidingVehicle;
+                   vehicle27: PathRidingVehicleTail })
   | (ActorBase & { cls: SpawnClass.Bat; bat: BatTail })
   | (ActorBase & { cls: SpawnClass.Boss3; boss3: Boss3Tail })
   | (ActorBase & { cls: SpawnClass.Emperor; class2d: Class2DTail })
@@ -2639,6 +2718,9 @@ export type Actor =
                    scenery: ScriptedSceneryTail })
   | (ActorBase & { cls: SpawnClass.ResultCard; card: ResultCardTail })
   | (ActorBase & { cls: SpawnClass.ChapterCard; chapter: ChapterCardTail })
+  | (ActorBase & { cls: SpawnClass.CutsceneSkipWatcher; skipWatch: SkipWatchTail })
+  | (ActorBase & { cls: SpawnClass.PropContainerPlacer;
+                   placer: PropContainerTail })
   | (ActorBase & { cls: Exclude<SpawnClass,
       SpawnClass.ScriptedHumanoid | SpawnClass.SetPieceProp
       | SpawnClass.Thrower | SpawnClass.Zombie
@@ -2648,10 +2730,14 @@ export type Actor =
       | SpawnClass.Frog | SpawnClass.FlyingEnemy | SpawnClass.Bat
       | SpawnClass.Boss3 | SpawnClass.Emperor | SpawnClass.Boss5
       | SpawnClass.ScriptedProp | SpawnClass.FlagStripProp
+      | SpawnClass.FloatingPropRow | SpawnClass.DynamicLight
       | SpawnClass.CarriedZombie
       | SpawnClass.ScriptedScenery | SpawnClass.Vehicle
-      | SpawnClass.PathRidingProp | SpawnClass.HordeSpawner
+      | SpawnClass.PathRidingProp | SpawnClass.PathRidingVehicle
+      | SpawnClass.HordeSpawner
       | SpawnClass.Worm | SpawnClass.ResultCard
+      | SpawnClass.CutsceneSkipWatcher
+      | SpawnClass.PropContainerPlacer
       | SpawnClass.ChapterCard> });
 
 /** An actor already narrowed to class 0x25, for that class's own routines. */
@@ -2708,6 +2794,13 @@ export type ResultCardActor = Extract<Actor, { cls: SpawnClass.ResultCard }>;
 /** An actor already narrowed to class 0x60, the chapter card. */
 export type ChapterCardActor = Extract<Actor, { cls: SpawnClass.ChapterCard }>;
 
+/**
+ * An actor already narrowed to class 0x41: a placer, a constructor-61 figure
+ * or a golden frog.
+ */
+export type PropContainerActor = Extract<Actor,
+  { cls: SpawnClass.PropContainerPlacer }>;
+
 /** An actor already narrowed to class 0x33, for that class's own routines. */
 export type ScriptedSceneryActor = Extract<Actor,
   { cls: SpawnClass.ScriptedScenery }>;
@@ -2747,7 +2840,7 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
   // assigning `cls` here would widen it back to `SpawnClass` and defeat the
   // narrowing the union exists for.
   const head: Omit<ActorBase, "cls"> = {
-    at, charType, name, flags38: 0, hitSlot: HIT_SLOT_NONE,
+    at, descAt: at, charType, name, flags38: 0, hitSlot: HIT_SLOT_NONE,
     // `ActorBuildSkinnedModel` writes both of these while building the model:
     // the scale from the character type alone, the flags unconditionally.
     scale: ActorModelScale(charType),
@@ -2809,6 +2902,7 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     class11: null,
     class13: null,
     class12: null,
+    class15: null,
     class18: null,
     class26: null,
     coliBlob: null,
@@ -2822,6 +2916,7 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     class2dSpawn: null,
     class40: null,
     class42: null,
+    class29: null,
     class51: null,
     class52: null,
     class14: null,
@@ -2836,6 +2931,8 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     class33: null,
     class33Push: null,
     class33Cue: null,
+    class33Sub: null,
+    class33Prop: null,
     class53: null,
     hitRadius: 0,
     entranceMotion: 0,
@@ -2893,6 +2990,7 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     suppressedBones: 0,
     nodeDrawAlpha: [],
     nodeDrawScale: [],
+    nodeDrawSlot: [],
     nodeDrawHook: NodeDrawHookId.Class,
     attachments: [],
   };
@@ -2948,11 +3046,20 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
   if (cls === SpawnClass.FlagStripProp) {
     return { ...head, cls, prop12: makeScriptedProp12Tail() };
   }
+  if (cls === SpawnClass.FloatingPropRow) {
+    return { ...head, cls, float15: makeFloatingPropTail() };
+  }
+  if (cls === SpawnClass.DynamicLight) {
+    return { ...head, cls, light2b: makeDynamicLightTail() };
+  }
   if (cls === SpawnClass.Vehicle) {
     return { ...head, cls, vehicle: makeVehicleTail() };
   }
   if (cls === SpawnClass.PathRidingProp) {
     return { ...head, cls, pathProp: makePathRidingPropTail() };
+  }
+  if (cls === SpawnClass.PathRidingVehicle) {
+    return { ...head, cls, vehicle27: makePathRidingVehicleTail() };
   }
   if (cls === SpawnClass.Bat) {
     return { ...head, cls, bat: makeBatTail() };
@@ -2980,6 +3087,12 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
   }
   if (cls === SpawnClass.ChapterCard) {
     return { ...head, cls, chapter: makeChapterCardTail() };
+  }
+  if (cls === SpawnClass.CutsceneSkipWatcher) {
+    return { ...head, cls, skipWatch: makeSkipWatchTail() };
+  }
+  if (cls === SpawnClass.PropContainerPlacer) {
+    return { ...head, cls, placer: makePropContainerTail() };
   }
   return { ...head, cls };
 }

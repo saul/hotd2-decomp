@@ -183,9 +183,10 @@ function DrawSlotFor(a: Actor): number | null {
     case SpawnClass.ScriptedScenery:
       // `obj+0x13F0`, which `ScriptedPushableUpdate33` (`FUN_00433B70`) seeds
       // from its descriptor tail and never changes. Selector 1's draw is a
-      // whole chain of sprite loops and sub-models the rig writer already
-      // exports, so it is deliberately not here: `a.scenery.slot` is non-zero
-      // only once a selector-4 object has seeded itself.
+      // fire, the model and a chain of sprite loops or sub-models, recorded
+      // by `game/class33/` and placed by {@link drawCarrier33}, so it is not
+      // here: `a.scenery.slot` is non-zero only once a selector-4 object has
+      // seeded itself.
       return a.hp === ScriptedScenerySelector.Pushable
         ? (a.scenery.slot || null) : null;
     case SpawnClass.HordeSpawner:
@@ -523,6 +524,17 @@ export class SlotModelLayer implements System<RenderContext> {
         live.node.position.set(a.pos.x, a.pos.y, a.pos.z);
         live.node.rotation.set(a.pitch * BAMS_TO_RAD, a.yaw * BAMS_TO_RAD,
                                a.roll * BAMS_TO_RAD, "XZY");
+        if (a.cls === SpawnClass.ScriptedProp) {
+          // `AssetDrawSlotWithAlpha(obj+0x1F4, sub+0x18)` whenever the alpha
+          // is not 1.0 (`0x0043FF2F`..`0x0043FF62`), in the layer the
+          // behaviour left -- carrier selector 3's 9; the world's 8 keeps
+          // the template's order, as `extra` does.
+          const t = a.prop13;
+          setDrawAlpha(live.node, t.alpha === 1 ? null : t.alpha);
+          if (t.drawLayer !== WORLD_LAYER) {
+            live.node.renderOrder = t.drawLayer - WORLD_LAYER;
+          }
+        }
       } else if (a.cls === SpawnClass.HordeSpawner
                  || a.cls === SpawnClass.Worm
                  || a.cls === SpawnClass.Vehicle
@@ -551,6 +563,7 @@ export class SlotModelLayer implements System<RenderContext> {
     }
 
     this.drawCarrierEffects(seen);
+    this.drawCarrier33(seen);
     this.drawPropStrips(seen);
     this.drawBoss2Flipbooks(ctx, seen);
     this.drawLandingRings(seen);
@@ -637,6 +650,26 @@ export class SlotModelLayer implements System<RenderContext> {
       _m.fromArray(d.m);
       this.extra(`c32t:${task.id}`, d.slot, _m, seen, d.alpha, d.light,
                  d.layer);
+    }
+  }
+
+  /**
+   * Class 0x33's recorded draws, every one of them: `ScriptedCarrierUpdate33`
+   * (`FUN_004331D0`) records each `AssetDrawSlot` it makes with its world
+   * matrix (`game/class33/`) -- the fire, the model at `obj+0x118`'s scale,
+   * and stage 5's car parts or the two sprite loops -- and so do selectors 8,
+   * 9 and 99 (`class33/strips.ts`) and selector 2's one model,
+   * `ScriptedPropDrawUntilFlag` (`FUN_00433A10`), recorded the same way on the
+   * frames it draws. Selector 4 records none; its one slot is
+   * {@link DrawSlotFor}'s.
+   */
+  private drawCarrier33(seen: Set<number | string>): void {
+    for (const a of G.g_object_list) {
+      if (a.despawned || a.cls !== SpawnClass.ScriptedScenery) continue;
+      a.scenery.draws.forEach((d, i) => {
+        _m.fromArray(d.m);
+        this.extra(`c33:${i}:${a.at}`, d.slot, _m, seen);
+      });
     }
   }
 

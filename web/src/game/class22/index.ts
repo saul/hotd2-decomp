@@ -79,7 +79,11 @@ const CLASS22_RADIUS = 10.0;
  * the write.
  */
 const MODEL_68 = 5;
-/** `obj+0x1F8 |= 4` — `model+0x64` bit 2. `[open]` meaning; kept on the word. */
+/**
+ * `obj+0x1F8 |= 4` — `model+0x64` bit 2, `MotionFlag.TraceGround`: the
+ * ground shadow (`ActorDrawGroundShadow`, `FUN_0040A620`) and the corpse
+ * ring trace the floor under the actor rather than sit at its own height.
+ */
 const MOTION_FLAG_4 = 4;
 /** The sub-actor's `obj+0x34 |= 0x88000`: bit `0x8000` keeps it out of the shot test and the push. */
 const SUBACTOR_FLAGS = 0x88000;

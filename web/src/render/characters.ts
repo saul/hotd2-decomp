@@ -93,7 +93,7 @@ const boneSuffix = (part: string) => `_${part}`;
  * What is left here is three.js, which a snapshot never contains and which
  * `resync` rebuilds from the actor after a load.
  */
-import type { Instance } from "./characters/instance";
+import type { GoreSwap, Instance } from "./characters/instance";
 import { Poser } from "./characters/pose";
 import { PoseFromModelBlock } from "./characters/model_block";
 import { clearBoss5NodeDraws, syncBoss5NodeDraws } from "./characters/boss5";
@@ -103,11 +103,15 @@ import { clearBoneCels, syncBoneCels } from "./characters/cels";
 import { alphaGatesWholeActor, applyDrawGates }
   from "./characters/draw_gates";
 import { applyHeadAim } from "./characters/head_aim";
+import { applyCivilianHeadLook } from "./characters/civilian_head";
+import { CIVILIAN_HEAD_BONE } from "../game/class10/head";
 import { clearHeldItems, syncHeldItems } from "./characters/held_items";
 import {
   clearHumanoidHookDraws, syncHumanoidHookDraws,
 } from "./characters/humanoid_hook";
 import { syncResultFigure } from "./characters/result_figure";
+import { syncType61FigureLight } from "./characters/type61_figure";
+import { syncGoldenFrogDraw } from "./characters/golden_frog";
 import { RESULT_FIGURE_AT_BIT, RESULT_FIGURE_TEMPLATE_BIT }
   from "../game/class61/state";
 import {
@@ -137,12 +141,18 @@ interface Pending {
 /**
  * A result card figure's address: bit 26 without the template's bit 25 --
  * `ResultFigureAt` in `game/class61/state.ts`, written out, because a
- * renderer may not call into the port.
+ * renderer may not call into the port. A golden frog's address is in the
+ * same space (`GoldenFrogAt`, `game/class41/golden_frog.ts`), for the same
+ * reason: it is allocated with no descriptor and drawn from its type's
+ * template.
  */
 function isFigureAt(at: number): boolean {
   return at > 0 && (at & RESULT_FIGURE_AT_BIT) !== 0
     && (at & RESULT_FIGURE_TEMPLATE_BIT) === 0;
 }
+
+/** A character type's own slot per bone, for `syncNodeDrawSlots`. */
+const OWN_SLOTS = new WeakMap<CharacterType, Map<number, number>>();
 
 export class CharacterLayer implements System {
   readonly id = "render.characters";
@@ -599,6 +609,10 @@ export class CharacterLayer implements System {
         this.poser.pose(inst);
         poseHordeJaw(inst, this.poser);
         syncJudgmentWings(this.goreParts, inst, this.poser);
+        // `CivilianDrawBonePart`'s turn, stored over the head's record: on
+        // the pose, before anything hangs from the bone. See
+        // `render/characters/civilian_head.ts`.
+        applyCivilianHeadLook(inst);
       }
       syncHordeMirror(inst, true);
       // `a.removed` and `a.boneSlot` only grow within a life. Either one
@@ -626,6 +640,9 @@ export class CharacterLayer implements System {
       // `setBoneSlot`, which is what lands on the host; the actor says them
       // all, which is what lands everywhere.
       this.syncSlots(inst);
+      // ...and the model a class's node hook drew a bone with instead of its
+      // record this frame: a talking head's mouth.
+      this.syncNodeDrawSlots(inst);
       // `ZombieDrawBonePart` (`FUN_004534A0`) -- the cel a class-0x30 bone
       // draws instead of, or as well as, its own model. This is what fills
       // `char_adv02`'s midriff once its torso is shot; see
@@ -641,6 +658,12 @@ export class CharacterLayer implements System {
       // `ResultCardFigureDrawNode` (`FUN_004357F0`)'s own draws -- see
       // `render/characters/result_figure.ts`.
       syncResultFigure(inst, (slot) => this.cloneSlot(slot));
+      // `Type61FigureUpdate` (`FUN_004729E0`)'s light -- see
+      // `render/characters/type61_figure.ts`.
+      syncType61FigureLight(inst);
+      // `GoldenFrogUpdate` (`FUN_00471FA0`)'s light and strip -- see
+      // `render/characters/golden_frog.ts`.
+      syncGoldenFrogDraw(inst, (slot) => this.cloneSlot(slot));
       // `ScriptedHumanoidBoneDrawHook` (`FUN_00485260`)'s extra models -- see
       // `render/characters/humanoid_hook.ts`.
       syncHumanoidHookDraws(inst, (slot) => this.cloneSlot(slot));
@@ -1058,6 +1081,7 @@ export class CharacterLayer implements System {
     clearBoneCels(inst);
     inst.hidden = 0;
     inst.slots = undefined;
+    inst.drawnSlots = undefined;
     clearHeldItems(inst);
     clearHumanoidHookDraws(inst);
     clearBoss5NodeDraws(inst);
@@ -1135,6 +1159,61 @@ export class CharacterLayer implements System {
       if (inst.slots?.[k] === slot) continue;
       swapGore(this.goreParts, inst, Number(k), slot);
       (inst.slots ??= {})[k] = slot;
+      // The node shows the record now, whatever cel it showed before; the
+      // next call puts the cel back if the hook still draws one.
+      if (inst.drawnSlots) delete inst.drawnSlots[Number(k)];
+    }
+  }
+
+  /**
+   * Show the model each bone's node hook drew it with, where that is not the
+   * bone's record -- `Actor.nodeDrawSlot`, which `CivilianDrawBonePart`
+   * (`FUN_0048D1F0`) and `ScriptedHumanoidBoneDrawHook` (`FUN_00485260`)
+   * write for a talking or blinking head -- and put the record's model back
+   * when the hook draws the record again.
+   *
+   * The swap is `swapGore`'s, which keeps the pristine model however many
+   * times a bone is swapped, and every model a hook can draw rides the
+   * type's hidden template (`hod2lib/characters.ts`). A cel the template
+   * lacks -- a bundle exported before the faces were carried -- leaves the
+   * record showing.
+   */
+  private syncNodeDrawSlots(inst: Instance): void {
+    const drawn = inst.a.nodeDrawSlot;
+    if (!drawn.length && !inst.drawnSlots) return;
+    let own = OWN_SLOTS.get(inst.type);
+    if (!own) {
+      own = new Map(inst.type.bones.map((b) => [b.bone, b.slot]));
+      OWN_SLOTS.set(inst.type, own);
+    }
+    for (let bone = 0; bone < drawn.length; bone++) {
+      const want = drawn[bone];
+      const shown = inst.drawnSlots?.[bone];
+      const record = inst.a.boneSlot[String(bone)] ?? own.get(bone) ?? 0;
+      // The common frame: the hook drew this bone's record and no cel is up.
+      if (shown === undefined && (want === null || want === undefined
+                                  || want === record)) {
+        continue;
+      }
+      if (want !== null && want !== undefined && want !== record && want) {
+        if (shown === want) continue;
+        if (swapGore(this.goreParts, inst, bone, want)) {
+          (inst.drawnSlots ??= {})[bone] = want;
+        }
+        continue;
+      }
+      if (shown === undefined) continue;
+      delete inst.drawnSlots![bone];
+      const over = inst.slots?.[String(bone)];
+      if (over !== undefined) {
+        swapGore(this.goreParts, inst, bone, over);
+        continue;
+      }
+      const g = inst.gore.get(bone);
+      if (g) {
+        restoreGore(inst, bone, g);
+        inst.gore.delete(bone);
+      }
     }
   }
 
@@ -1247,6 +1326,38 @@ export class CharacterLayer implements System {
     return true;
   }
 
+  /**
+   * One bone's world matrix as the pose left it, for `CivilianDrawBonePart`:
+   * a civilian's head before its turn, every other bone as
+   * {@link boneMatrix} has it. See `GameHost.bonePoseMatrix`.
+   */
+  bonePoseMatrix(at: number, bone: number, out: number[]): boolean {
+    const inst = this.instances.find((i) => i.at === at);
+    if (bone === CIVILIAN_HEAD_BONE && inst?.headPose) {
+      for (let i = 0; i < 16; i++) out[i] = inst.headPose.elements[i];
+      return true;
+    }
+    return this.boneMatrix(at, bone, out);
+  }
+
+  /**
+   * One bone's drawn model on a hierarchy this layer handed out with
+   * {@link claim} -- a player body's hand, `PlayerBodySetHandSlot`'s slot.
+   * `gore` is the claimant's record of what it laid on; `own` is the
+   * skeleton's own model for the bone, which puts the bone back as built.
+   */
+  setClaimedBoneSlot(body: Pick<Instance, "bones">,
+                     gore: Map<number, GoreSwap>, bone: number, slot: number,
+                     own: number): void {
+    const inst = { bones: body.bones, gore } as Instance;
+    const prev = gore.get(bone);
+    if (prev) {
+      restoreGore(inst, bone, prev);
+      gore.delete(bone);
+    }
+    if (slot !== own) swapGore(this.goreParts, inst, bone, slot);
+  }
+
   /** Swap one bone's drawn model — the thrower's hand going bare and back. */
   setBoneSlot(at: number, bone: number, slot: number): void {
     const inst = this.instances.find((i) => i.at === at);
@@ -1301,6 +1412,7 @@ export class CharacterLayer implements System {
         this.poser.pose(inst);
         poseHordeJaw(inst, this.poser);
         syncJudgmentWings(this.goreParts, inst, this.poser);
+        applyCivilianHeadLook(inst);
       }
       syncHordeMirror(inst, inst.root.visible);
     }

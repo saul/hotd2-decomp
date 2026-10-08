@@ -144,18 +144,21 @@ console.log("\nevery caller of the ring effects, where the exe calls it:");
     const a = corpse(285, 1);
     const slot = a.hitSlot;
     a.cameraSlot = 3;
-    G.g_enemy_slots[3] = { occupied: 1, at: a.at, prop: null };
+    G.g_enemy_slots[3] = { occupied: 1, at: a.at, prop: null, thrown: null,
+                           creature: null };
     G.g_enemies_present = 1;
     const alive = G.g_enemies_alive;
     const rng = new Rng(15);
     for (let i = 0; i < 200 && !a.despawned; i++) {
       ThrowerStateCorpseSink(a, 1 / 60, rng);
     }
+    // Not `NoCameraTrack`: `ActorDespawn` (`FUN_00409CC0`) raises
+    // `0x80018000` itself on its first line (`0x00409CCB`), so the bit is up
+    // after every despawn and says nothing about the exit. The slot does.
     check("the corpse's exit retires no count and keeps a slot it was not "
           + "told to give up",
           a.despawned && G.g_enemies_alive === alive
-          && G.g_enemies_present === 1 && G.g_enemy_slots[3]!.occupied === 1
-          && (a.flags & ActorFlag.NoCameraTrack) === 0,
+          && G.g_enemies_present === 1 && G.g_enemy_slots[3]!.occupied === 1,
           `alive ${G.g_enemies_alive}/${alive} present ${G.g_enemies_present} `
           + `slot ${G.g_enemy_slots[3]!.occupied}`);
     check("...but frees its hit slot",
@@ -165,7 +168,8 @@ console.log("\nevery caller of the ring effects, where the exe calls it:");
     const b = corpse(285, 1);
     b.flags |= ActorFlag.KeepCameraWhenLast;
     b.cameraSlot = 3;
-    G.g_enemy_slots[3] = { occupied: 1, at: b.at, prop: null };
+    G.g_enemy_slots[3] = { occupied: 1, at: b.at, prop: null, thrown: null,
+                           creature: null };
     G.g_enemies_present = 0;
     for (let i = 0; i < 200 && !b.despawned; i++) {
       ThrowerStateCorpseSink(b, 1 / 60, rng);

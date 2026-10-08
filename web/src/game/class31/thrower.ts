@@ -30,7 +30,9 @@ import {
 } from "../registry";
 import { SpawnClass } from "../spawn_class";
 import { ActorRegisterCameraPoint } from "../camera/track";
-import { RegisterEnemySlot } from "../camera/slots";
+import {
+  RegisterEnemySlot, RegisterThrownWeaponForCameraTracking,
+} from "../camera/slots";
 import {
   AttackClaimRefusal, ThrowerReleaseAttackPermit, ThrowerTryClaimAttackSlot,
 } from "../combat/permits";
@@ -57,6 +59,7 @@ import {
 import { ThrowerStateLeapToSurface } from "./surface";
 import { ThrowerPushOutOfWorld } from "./collide";
 import { ActorRunNodeDrawHooks } from "../model_draw";
+import { DrawSkinnedModelAndShadow } from "../skeleton";
 import { ThrowerDrawBonePart, ThrowerDrawWithEnlargedHead } from "./draw";
 import { HeadAimBeginDraw, HeadAimEndDraw, HeadAimSeed }
   from "../class30/head_aim";
@@ -83,7 +86,8 @@ import {
   THROWN_WEAPON_AFTERIMAGE_PERIOD,
 } from "./projectile";
 import {
-  ThrownWeaponAlloc, ThrownWeaponCameraOf, ThrownWeaponRoutine,
+  ThrownWeaponAlloc, ThrownWeaponCameraOf, ThrownWeaponClaimHitSlot,
+  ThrownWeaponRoutine,
   THROWN_WEAPON_DRAW_FLAGS, THROWN_WEAPON_HIT_RADIUS, THROWN_WEAPON_SPAWN_FLAGS,
 } from "../thrown_weapon";
 
@@ -319,10 +323,15 @@ function ThrowerThrowCue(obj: ThrowerActor, hand: ThrowHandJson):
  * and so it **cannot fail**. The port has no skeleton in `game/`, so it asks
  * the host, and a host that cannot answer gets the actor's own position lifted
  * by a chest height rather than no weapon at all: a routine with no path that
- * declines to make the weapon must not grow one. And two things the weapon
- * does in the engine are not done, for the reasons `ZombieThrowHandWeapon`
- * (`FUN_0045A240`) gives for its own identical two: the hit slot and the
- * camera candidate.
+ * declines to make the weapon must not grow one.
+ *
+ * **The weapon claims a hit slot and is a camera candidate**, both in the
+ * engine's own calls: `ActorClaimHitSlot` (`FUN_00409270`) at `0x004504FE`,
+ * before anything else is written, and `obj+0x100 = pos;
+ * RegisterForCameraTracking` (`FUN_00408EC0`) at `0x00450755`..`0x00450771`,
+ * the routine's last act. Both were left out, as they still are for
+ * `ZombieThrowHandWeapon` (`FUN_0045A240`), while neither table could hold a
+ * record that is not an actor.
  *
  * The hand's hit-sphere radius **is** zeroed -- `MOV [reg + EDI + 0x284],
  * EBX` with the index `obj+0x1358 * 0x90`, in all four arms (`0x0045054E`,
@@ -337,6 +346,7 @@ export function SpawnThrownWeapon(obj: ThrowerActor, hand: ThrowHandJson,
                                   events?: Events): void {
   const cfg = CharacterTypeOf(obj)?.throw;
   const w = ThrownWeaponAlloc(ThrownWeaponRoutine.Thrower);
+  ThrownWeaponClaimHitSlot(w);
 
   // `obj+0x20C + bone*0x90` -- the draw record, recorded on the actor beside
   // the call that asks the renderer for it, so a snapshot carries which model
@@ -380,6 +390,10 @@ export function SpawnThrownWeapon(obj: ThrowerActor, hand: ThrowHandJson,
   w.state = ThrownWeaponState.Fly;
   w.sub = FlySub.Launch;
   AimThrownWeapon(w, ThrownWeaponCameraOf(host));
+  w.lookAt.x = w.pos.x;
+  w.lookAt.y = w.pos.y;
+  w.lookAt.z = w.pos.z;
+  RegisterThrownWeaponForCameraTracking(w);
   G.g_thrown_weapons.push(w);
   events?.emit("enemy.threw", { at: obj.at, who: obj.name });
 }
@@ -500,6 +514,9 @@ export function ThrowerStateThrow(obj: ThrowerActor, host: GameHost,
  */
 export function EnemyThrowerUpdate(obj: ThrowerActor, f: ClassFrame): void {
   const { dt, rng, host, events } = f;
+  // `MOV [0x009a26a0], ESI` at `0x0044991B`, the routine's first store: the
+  // draw's shadow is drawn for this name.
+  G.g_cur_actor = obj.at;
   // The cooldown is also the post-knockdown window in which shots ricochet:
   // `EnemyThrowerUpdate` clears `obj+0x34` bit 0x100 when it reaches zero.
   if (obj.cooldown > 0) {
@@ -541,6 +558,9 @@ export function EnemyThrowerUpdate(obj: ThrowerActor, f: ClassFrame): void {
   ActorRunNodeDrawHooks(obj, obj.nodeDrawHook === NodeDrawHookId.EnlargedHead
     ? ThrowerDrawWithEnlargedHead : ThrowerDrawBonePart, f);
   HeadAimEndDraw(obj, obj.thr, host);
+  // ...and the draw's last call, the ground shadow under `g_cur_actor`,
+  // which `EnemyThrowerUpdate` pointed here at `0x0044991B`.
+  DrawSkinnedModelAndShadow(obj);
   // `PUSH 0; CALL 0x00409b70` at `0x0044998F`, the routine's last act and on
   // every path: the camera point, not lifted, and the candidate filing. The
   // death chain's `0x10000` keeps a corpse off the list.
@@ -916,6 +936,9 @@ function EnemyThrowerDeadSweep(obj: ThrowerActor, why: DeadSweep): void {
 export const EnemyThrowerHandler: ClassHandler = {
   init: EnemyThrowerInit,
   update: EnemyThrowerUpdate,
+  // `EnemyThrowerInit` installs `EnemyThrowerUpdate` and returns
+  // (`0x004498F3`).
+  firstUpdateNextWalk: true,
   leave: ThrowerLeave,
   onDeadSweep: EnemyThrowerDeadSweep,
   updatesWhenDead: true,

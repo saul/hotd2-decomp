@@ -610,14 +610,19 @@ draws a composite rig by matrix chain:
 | Slot | Asset | Role |
 |---|---|---|
 | `0x1579`, `0x157E` | `char_adv00.bin[49]`, `[54]` | body |
-| `0x157A`–`0x157D` | `char_adv00.bin[50..53]` | two occupants, each yawed by `obj+0x1334` |
+| `0x157A`–`0x157D` | `char_adv00.bin[50..53]` | the two doors `[likely]`, each yawed by `obj+0x1334` once parked; the passenger's (`0x157A/B`) only with two players |
 | `0x157F`, `0x1580` | `char_adv00.bin[55..56]` | pitched by `obj+0x1330`, incremented `0x2000`/frame |
 | `0x898` | `car_pl.bin[8]` | |
 | `0x8CE + (n % 12)` | `car_pl.bin[16..]` | wheels, 12-frame spin, mirrored on the left side |
 
 `car_pl.bin` is the player's car. So this is the opening jeep ride, its wheels
-turning and its passengers looking around, on a route synchronised to the
-camera.
+turning and its doors opening once it stops, on a route synchronised to the
+camera. **Nobody in it is this rig's.** The people are the players' own
+bodies, which stage 1's `set_update_routine 0` seats on the same two routes
+through their `+0x80` hook (`PlayerHookRideSt1Vehicle`, `FUN_00415BD0`; see
+`web/src/game/player_body.ts`). An earlier reading of this table called
+`0x157A`--`0x157D` the occupants, from their size and place; they are 52
+vertices each.
 
 ### Reproducing a rig
 

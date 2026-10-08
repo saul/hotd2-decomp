@@ -87,7 +87,6 @@ for (let stage = 1; stage <= 6; stage++) {
     aliveCivilians: () => null,
     scriptFlagRaised: () => null,
     cameraFree: () => null, setShutter: NOOP, showMessage: NOOP,
-    endDialogue: NOOP,
   });
   const throwers = (chars.placements ?? [])
     .filter((p) => p.class === 0x30 && p.initial_state === 33);

@@ -49,7 +49,7 @@
 import type { GameHost } from "../host";
 import { G } from "../globals";
 import { GameMode } from "../game_mode";
-import { MatrixGetAngles, RotZYX } from "../carrier";
+import { MatrixGetAngles, RotZYX } from "../matrix";
 import { vec3, type Vec3 } from "../vec";
 
 /** `ActorAlloc(St2CarInit, 0x13F4)` -- `PUSH 0x13F4` at `0x00452120`. */

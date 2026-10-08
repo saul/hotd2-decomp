@@ -64,6 +64,22 @@ export function LerpWeighted(a: number, b: number, num: number,
 }
 
 /**
+ * `LerpWeightedByFractions` — `FUN_00401E90`. The same weighting as
+ * {@link LerpWeighted}, written as two fractions:
+ *
+ * ```c
+ * return (num / (num + den)) * b + (den / (num + den)) * a;   // x87, in ST0
+ * ```
+ *
+ * `[proved]`. Its caller is `CameraFollowPlayerMidpoint` (`FUN_0040C9C0`),
+ * three times with `(1, 1)`, and stores each result as a float.
+ */
+export function LerpWeightedByFractions(a: number, b: number, num: number,
+                                        den: number): number {
+  return (num / (num + den)) * b + (den / (num + den)) * a;
+}
+
+/**
  * `LerpAngleShortWay` — `FUN_00401EC0`. {@link LerpWeighted} for a BAMS
  * angle, the short way round:
  *

@@ -42,6 +42,7 @@ import {
   ITEM_SELECT_TRUNK_YAW, ItemSelectSound,
 } from "../../src/game/class6e/state";
 import { OriginalItem } from "../../src/game/original_mode";
+import { HUD_READOUT_SPRITES, HudSprite } from "../../src/game/hud_sprites";
 
 const ITEM_SELECT_UPDATE = 0x00488820;
 const ITEM_SELECT_UPDATE_END = 0x004895c0;
@@ -198,6 +199,29 @@ async function main(): Promise<void> {
     const missing = want.filter((id) => !(String(id) in s.screen_sprites));
     c.ok(missing.length === 0, "it ships every sprite the trunk can draw"
          + (missing.length ? `; not ${missing.map((m) => hex(m)).join(", ")}` : ""));
+    // The bullets, in every stage of both modes: the Arcade readout draws
+    // row 0's sprite, which is `HudSprite.Bullet`, and an Original stage any
+    // row's. Arcade stages shipped without a bullet for a week once the
+    // Original rows left `HUD_READOUT_SPRITES`, and nothing noticed.
+    const rows = t.ammo_hud_rows.map((r) => r.sprite);
+    c.ok(rows[0] === HudSprite.Bullet,
+         `ammo_hud_rows row 0 is the Arcade bullet ${hex(HudSprite.Bullet)}`);
+    const short: string[] = [];
+    for (let n = 1; n <= 6; n++) {
+      for (const name of [`stage${n}`, `stage${n}_original`]) {
+        const f = join(BUNDLE_ROOT, name, `${name}.script.json`);
+        if (!existsSync(f)) continue;
+        const ss = (JSON.parse(readFileSync(f, "utf8")) as {
+          screen_sprites: Record<string, unknown> }).screen_sprites;
+        const want = [...HUD_READOUT_SPRITES,
+                      ...(name.endsWith("_original") ? rows : [])];
+        const gone = want.filter((id) => !(String(id) in ss));
+        if (gone.length) short.push(`${name}: ${gone.map((g) => hex(g)).join(" ")}`);
+      }
+    }
+    c.ok(short.length === 0, "every stage ships every sprite the HUD readout "
+         + "draws, an Original stage its ammo rows too"
+         + (short.length ? `; not ${short.join("; ")}` : ""));
     const aj = join(BUNDLE_ROOT, "stage1", "stage1.script.json");
     if (existsSync(aj)) {
       const a = JSON.parse(readFileSync(aj, "utf8")) as { entry_step: number;

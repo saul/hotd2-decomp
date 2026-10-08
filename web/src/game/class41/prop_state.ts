@@ -39,7 +39,7 @@ export enum PropFamily {
    * `StoryModeSwitchUpdate` (`FUN_00474F30`) — class 0x44 selector 17, the
    * branch writer with the widest reach. Its own family and not `Generic`
    * because `PlaceStoryModeSwitch` is a different constructor and the object
-   * does **not** run `PropExpireByStepLifetime`.
+   * does **not** run `PropExpireByStepLifetime`. See `class44/story_switch.ts`.
    */
   StoryModeSwitch = 6,
   /**
@@ -208,6 +208,72 @@ export enum PropFamily {
    */
   DrawOnlySelector14 = 27,
   /**
+   * `PropUpdateType16` (`FUN_00468640`) -- the six objects
+   * `PlaceTable16Props` builds in stage 2's warehouse water, which crack,
+   * fly and float. See `class41/type16.ts`.
+   *
+   * These four are numbered 200 past their constructor's type, so that no
+   * two branches adding families at once land on one number.
+   */
+  Type16 = 216,
+  /** `PropUpdateType17` (`FUN_00468D10`) -- constructor 17's three pieces. */
+  Type17 = 217,
+  /** `PropUpdateType29` (`FUN_0046A030`) -- constructor 29's nine models. */
+  Type29 = 229,
+  /**
+   * `PropUpdateType37` (`FUN_0046B5F0`) -- constructor 37's pair, one on the
+   * other. See `class41/type37.ts`.
+   */
+  Type37 = 237,
+  /**
+   * `HingeUpdate` (`FUN_00473CF0`) — class 0x44 selectors 1, 2 and 4, the
+   * doors and shutters the script swings open, and the hinge selector 5's
+   * object hands over to. See `class44/hinge.ts`.
+   */
+  Hinge = 28,
+  /**
+   * `PropDrawOnlyType31` (`FUN_0046A1C0`) handed to `ActorAlloc` by class
+   * 0x44 selector 10's `PropBuildSlotStripLoop` (`FUN_00473370`) rather than
+   * by `PlaceGenericProp`. Its own family for the reason {@link
+   * DrawOnlyType12} is: the routine runs and the generic arm's lookup does
+   * not. See `class44/draw_only.ts`.
+   */
+  DrawOnlyType31 = 29,
+  /**
+   * `FlagSlotEffectUpdate` (`FUN_00474120`) — class 0x44 selector 3, an
+   * effect tree with every node drawn as one slot. See
+   * `class44/slot_effect.ts`.
+   */
+  FlagSlotEffect = 30,
+  /**
+   * `EffectHandoffUpdate` (`FUN_00474240`) — class 0x44 selector 5, which
+   * plays an effect on flag 0x62 and hands itself to a hinge. See
+   * `class44/effect_handoff.ts`.
+   */
+  EffectHandoff = 31,
+  /**
+   * `SwingThenBreakUpdate` (`FUN_00474470`) — class 0x44 selector 6. See
+   * `class44/swing_then_break.ts`.
+   */
+  SwingThenBreak = 32,
+  /**
+   * `ScaledSlotEffectUpdate` (`FUN_00474770`) — class 0x44 selector 7. See
+   * `class44/slot_effect.ts`.
+   */
+  ScaledSlotEffect = 33,
+  /**
+   * `EffectCollapseUpdate` (`FUN_004748C0`) — class 0x44 selector 8, a
+   * 0xD14-byte object whose effect tree falls apart. See
+   * `class44/effect_collapse.ts`.
+   */
+  EffectCollapse = 34,
+  /**
+   * `ChainSegmentUpdate` (`FUN_00469510`) — one of the twenty 0x200-byte links
+   * `PlaceChainSegments` (`FUN_00463160`, constructor 24) builds. Its words
+   * are {@link BreakableProp.chain}. See `class41/chain.ts`.
+   */
+  ChainSegment = 35,
+  /**
    * `OriginalItemDropUpdate` (`FUN_00466BE0`) — the Original Mode item
    * `SpawnOriginalItemDrop` (`FUN_00466B40`) releases, which
    * `PropUpdateType7`'s first hit does. See `class41/type07.ts`.
@@ -223,11 +289,59 @@ export enum PropFamily {
    */
   Type8Piece = 108,
   /**
+   * `Type16DropStripUpdate` (`FUN_00468CA0`) -- the strip
+   * `SpawnType16DropStrip` leaves where a constructor-16 object comes down.
+   */
+  Type16DropStrip = 116,
+  /**
    * `Type67MountedPartUpdate` (`FUN_004702E0`) — one of the three objects
    * `PlaceGenericProp` case 0x43 allocates beside a type-67 prop, drawn the
    * same way. See `class41/type67.ts`.
    */
   Type67Piece = 167,
+  /**
+   * `PropDrawOnlyType42` (`FUN_0046CE80`) — constructor 42's 0x48-byte task:
+   * one model at its own coordinates until the step index is 2. See
+   * `class41/type42.ts`. These three are numbered 200 past their constructor,
+   * as constructor 16's family is.
+   */
+  Type42 = 242,
+  /**
+   * `PropUpdateType55Particles` (`FUN_0046EEB0`) — constructor 55's
+   * 0x8500-byte task: eight hundred pieces that wait for a script flag, fall
+   * and bounce. See `class41/type55.ts`.
+   */
+  Type55 = 255,
+  /**
+   * `PropUpdateType65Particles` (`FUN_0046FCC0`) — constructor 65's
+   * 0x8500-byte task: three hundred pieces that fall for 300 frames. See
+   * `class41/type65.ts`.
+   */
+  Type65 = 265,
+}
+
+/**
+ * One of the pieces constructors 55 and 65 build into their 0x8500-byte task
+ * -- the same layout in both, five parallel arrays in the engine and one
+ * record a piece here, so the pool still survives `structuredClone`.
+ */
+export interface ScatterParticle {
+  x: number;              // +0x1C0 + 12i
+  y: number;              // +0x1C4 + 12i
+  z: number;              // +0x1C8 + 12i
+  vx: number;             // +0x2740 + 12i
+  vy: number;             // +0x2744 + 12i
+  vz: number;             // +0x2748 + 12i
+  /** s16 BAMS; the draw is `Rz . Ry . Rx`. */
+  rx: number;             // +0x4CC0 + 6i
+  ry: number;             // +0x4CC2 + 6i
+  rz: number;             // +0x4CC4 + 6i
+  /** s16 BAMS added to each angle every frame. */
+  wx: number;             // +0x5F80 + 6i
+  wy: number;             // +0x5F82 + 6i
+  wz: number;             // +0x5F84 + 6i
+  /** The draw's `MatrixScale`. */
+  s: number;              // +0x7240 + 4i
 }
 
 /**
@@ -284,6 +398,24 @@ export interface PropDrawCall {
    * the renderer hands it to.
    */
   alpha?: number;
+  /**
+   * The light set the call was made under, for a routine that brackets its
+   * draw with `LightsUseSecondarySet` (`FUN_0041DC70`) and
+   * `LightsRestoreScene` (`FUN_0041DCC0`): the three device words as
+   * `RenderLightSet` reads them at the call. Absent means the scene's own,
+   * which is what every other prop routine draws under. Recorded and not yet
+   * drawn: `render/breakables.ts`'s group is not one `render/lighting.ts`
+   * lights, so no prop's draw is lit by either block there.
+   */
+  light?: { ambient: number; dir: [number, number, number];
+            rgb: [number, number, number] };
+  /**
+   * Made after `AssetSlotUVsFromViewNormals` (`FUN_00418660`) on the same
+   * slot: the model's marked primitives draw with UVs made from their
+   * normals through this frame's modelview (`ModelUVsFromViewNormals`,
+   * `FUN_004AA400`).
+   */
+  envUv?: boolean;
 }
 
 /**
@@ -315,6 +447,13 @@ export interface BurstPiece {
   sx: number;             // +0xAC6 + 6i
   sy: number;             // +0xAC8 + 6i
   sz: number;             // +0xACA + 6i
+  /**
+   * `obj+0xC7C + 2i` -- the model piece *i* draws. Only
+   * `EffectCollapseUpdate` (`FUN_004748C0`, `class44/effect_collapse.ts`)
+   * keeps one, the slot its tree walk last drew for bone *i*; type 40's
+   * pieces draw `0xCA5 + i` and carry none.
+   */
+  slot?: number;          // +0xC7C + 2i
 }
 
 /** One of `PropUpdateType48FlickerLight`'s thirty debris pieces. */
@@ -540,7 +679,9 @@ export interface BreakableProp {
    * `BreakablePropUpdate`'s three draw blocks: the model matrix of the prop as
    * it was last drawn, rattle included, in `g_MatrixStackTop`'s layout.
    * `BreakablePropSpawnShatter` (`FUN_00465170`) places its fifteen pieces
-   * off it. Empty until the first draw, and only the group family writes it.
+   * off it. Empty until the first draw, and only the group family writes it
+   * -- and {@link PropFamily.Type37}, whose pivot stores the matrix it turns
+   * about a hull corner here and draws through it.
    *
    * **World space here; the engine's has the camera's world-to-view on it**,
    * because the draw composes onto the live stack. That half is
@@ -662,16 +803,6 @@ export interface BreakableProp {
    */
   shotRegistered: boolean;
   /**
-   * `obj+0x1AC` — which chain a `ChainSegmentUpdate` segment belongs to, and
-   * `obj+0x1AD` its index 0..19 within it.
-   *
-   * Only `PlaceChainSegments`' twenty-segment objects have these; for every
-   * other family they are 0. `g_chain_segments` is indexed
-   * `[chainGroup * 0x14 + chainIndex]`.
-   */
-  chainGroup: number;     // +0x1AC
-  chainIndex: number;     // +0x1AD
-  /**
    * `obj+0x1BA` — `PropUpdateType40`'s sub-kind, from the placer.
    *
    * Sub-kind **9** is the pair whose two breakages
@@ -721,9 +852,12 @@ export interface BreakableProp {
    * twice.
    *
    * One port field for the engine offsets of the routines ported only as far
-   * as their branch arm — `obj+0x34` bit `0x40000000` for type 76,
-   * `obj+0x192` for the story switch, `obj+0x1B0` of a chain's **segment 0**
-   * for the chain — and `obj+0x1B9` for type 40. Types 14, 19, 25, 56, 69
+   * as their branch arm — `obj+0x34` bit `0x40000000` for type 76 — and
+   * `obj+0x1B9` for type 40. The story switch's `obj+0x192` was here too and
+   * is {@link BreakableProp.routinePhase} now, its routine being transcribed
+   * whole (`class44/story_switch.ts`). The
+   * chain's `obj+0x1B0` was here too and is its own word now
+   * ({@link ChainSegmentState.latch}). Types 14, 19, 25, 56, 69
    * and 73 used to be here too; they are transcribed whole now and keep
    * their latch in the word their routine does. Where the rest are ported,
    * this splits the same way.
@@ -820,9 +954,50 @@ export interface BreakableProp {
    */
   hitAim: { x: number; y: number } | null;
   /**
+   * `obj+0x14C` — the object's own collision blob, as its `coli.blobs` key,
+   * for a family that is shot through it: `RegisterForShotTest`
+   * (`FUN_00405160`) files an object whose `obj+0x34` has bit `0x10` past its
+   * depth test, and `ProcessPlayerShots` sends it to `ShotTestMesh`
+   * (`FUN_00404A00`), which traces the shot against this blob in the
+   * object's own space, and which the moving-object collision passes trace
+   * (`coli.ts`). `null` for `-1`, and for every family whose builder does not
+   * write the offset. The families whose routines test the word against
+   * `-1` keep it raw as well (`o14c` in {@link words}), and every store to
+   * it writes both. See `class41/shot_test.ts`, `PropRegisterForShotTestMesh`.
+   */
+  coliBlob: string | null;   // +0x14C
+  /**
+   * `obj+0x150` — the matrix {@link coliBlob} is in, row-major 3x4 as
+   * `Actor.coliMatrix` is. The engine's draw stores its stack top here (the
+   * view under the model) and `RegisterForShotTest`'s mesh arm multiplies the
+   * camera block's view-to-world in on top; the port's draw stores the world
+   * matrix that product leaves, and {@link coliMatrixDrawn} says whether a
+   * draw has stored it since the last registration. `null` until drawn.
+   */
+  coliMatrix: number[] | null;  // +0x150
+  /**
+   * `[port-only]` Whether `obj+0x150` holds what the draw's `MatrixStore`
+   * left (true) or what `RegisterForShotTest`'s product left (false). The
+   * engine tells the two apart by nothing -- its product runs on every
+   * registration -- so a frame that registers without drawing composes the
+   * camera block onto a matrix that is already the world's. The port's
+   * stored matrix is already the world's, so it needs to know which.
+   */
+  coliMatrixDrawn: boolean;
+  /**
+   * `obj+0x338` -- the effect state block's `+0x14`, where `EffectDrawNode`
+   * (`FUN_0040DE50`) `MatrixStore`s the matrix of the node whose bone is
+   * `EffectDrawWithCapture`'s capture bone (`ADD ECX,0x14` at `0x0040DF25`),
+   * sixteen floats in the matrix stack's layout. Class 0x44 selectors 0 and
+   * 3 copy it to `obj+0x150`. `null` until a capturing draw stores it.
+   */
+  effectCapture: number[] | null;  // +0x338
+  /**
    * `obj+0x192` for the two generic routines that keep a small state machine
    * there: {@link PropFamily.Type13}'s drop (`Type13Phase`) and type 35's
-   * door rattle (`Type35Phase`).
+   * door rattle (`Type35Phase`) -- and {@link PropFamily.Type37}'s fall,
+   * pivot and break (`Type37Phase`), which is its own constructor's -- and
+   * {@link PropFamily.StoryModeSwitch}'s throw (`StoryModeSwitchPhase`).
    *
    * The fifth port field for that one engine word, and separate for the same
    * reason {@link BreakableProp.cuePhase} is (`L3`): each routine's `1` means
@@ -833,6 +1008,66 @@ export interface BreakableProp {
   dead: boolean;
   /** {@link PropFamily.Type48}'s own words, and null for every other family. */
   flicker: FlickerLightState | null;
+  /**
+   * {@link PropFamily.ChainSegment}'s own words, and null for every other
+   * family: the link is a 0x200-byte object with a layout of its own, and the
+   * offsets the fields above name are other words of it (`L3`).
+   */
+  chain: ChainSegmentState | null;
+  /**
+   * {@link PropFamily.Type55}'s eight hundred pieces and
+   * {@link PropFamily.Type65}'s three hundred; empty for every other family.
+   * The task's frame count, `obj+0x1A0`, is a word of the routine's own
+   * ({@link BreakableProp.words}) -- see each routine's file.
+   */
+  particles: ScatterParticle[];
+}
+
+/**
+ * The words of one chain link (`ChainSegmentUpdate`, `FUN_00469510`), by the
+ * offsets `PlaceChainSegments` and the routine write.
+ */
+export interface ChainSegmentState {
+  /** `+0x11C` (s16) — how many step boundaries the link outlives. */
+  lifetime: number;       // +0x11C
+  /**
+   * `+0x194..+0x19C` — the link's **foot** in the world: the translation of
+   * its stored matrix, which is 1.5 below where its model is drawn. The shot
+   * sphere's centre and the item drop's `x`/`z`.
+   */
+  wx: number;             // +0x194
+  wy: number;             // +0x198
+  wz: number;             // +0x19C
+  /** `+0x1A0..+0x1A8` — the placer's position, the top of the chain. */
+  ax: number;             // +0x1A0
+  ay: number;             // +0x1A4
+  az: number;             // +0x1A8
+  /** `+0x1AC` (s8) — the chain group, `g_chain_segments`' row. */
+  group: number;          // +0x1AC
+  /** `+0x1AD` (s8) — 0..19, the link's place from the top. */
+  index: number;          // +0x1AD
+  /** `+0x1AE` (s8) — the step index as a byte, read back sign-extended. */
+  lastStep: number;       // +0x1AE
+  /** `+0x1AF` (s8) — step boundaries seen. */
+  steps: number;          // +0x1AF
+  /** `+0x1B0` — segment 0's route latch (`ChainLatch`); unused on the rest. */
+  latch: number;          // +0x1B0
+  /** `+0x1B2` (s16 BAMS) — the swing about X. */
+  pitch: number;          // +0x1B2
+  /** `+0x1B4` (s16 BAMS) — the link's own turn, `index << 14`. */
+  yaw: number;            // +0x1B4
+  /** `+0x1B6` (s16 BAMS) — the swing about Z. */
+  roll: number;           // +0x1B6
+  /** `+0x1B8` (s16) — {@link pitch}'s rate. */
+  pitchRate: number;      // +0x1B8
+  /** `+0x1BC` (s16) — {@link roll}'s rate. */
+  rollRate: number;       // +0x1BC
+  /**
+   * `+0x1C0` — `MatrixStore` of the link's matrix after its 1.5 drop: what the
+   * link below hangs from. The world matrix in the port, where the engine's
+   * is built on the view (`class41/prop_draw.ts`).
+   */
+  m: number[];            // +0x1C0
 }
 
 /** `obj+0x34` bits `BreakablePropUpdate` tests. */
@@ -898,8 +1133,6 @@ export function makeBreakableProp(id: number, group: number,
     hitRadius: 0,
     shotX: 0, shotY: 0, shotZ: 0,
     shotRegistered: false,
-    chainGroup: 0,
-    chainIndex: 0,
     subKind: 0,
     removeFlag: -1,
     cuePhase: PropCuePhase.Untouched,
@@ -918,7 +1151,13 @@ export function makeBreakableProp(id: number, group: number,
     draws: null,
     words: {},
     hitAim: null,
+    coliBlob: null,
+    coliMatrix: null,
+    coliMatrixDrawn: false,
+    effectCapture: null,
     dead: false,
     flicker: null,
+    chain: null,
+    particles: [],
   };
 }

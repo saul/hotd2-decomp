@@ -49,6 +49,8 @@ import {
   type ThrownWeaponCamera, type ThrownWeaponFrame,
 } from "../thrown_weapon";
 import { VecToAngles, type Vec3 } from "../vec";
+import { RegisterThrownWeaponForCameraTracking } from "../camera/slots";
+import { ActorDrawGroundShadowWithSize } from "../ground_shadow";
 
 /** `g_zombie_thrown_weapon_states` — `0x00593170`. */
 export enum ZombieThrownWeaponState {
@@ -91,6 +93,14 @@ export const ZOMBIE_AXE_SPIN = 0xb00;
 export const ZOMBIE_BLADE_SPIN = 0x1600;
 /** `obj+0x6C = 0x800` at `0x0045A4C4`: the roll every one leaves the hand at. */
 export const ZOMBIE_WEAPON_ROLL = 0x800;
+/**
+ * `FADD float ptr [0x004C4CB8]` -- 1.5, the lift on the point this family
+ * files with the camera: every weapon's at the launch (`0x0045A4B7`), the
+ * axe's alone in flight (`0x0045A65C`).
+ */
+export const ZOMBIE_WEAPON_LOOK_LIFT = 1.5;
+/** `PUSH 0x40a00000` twice at `0x0045A617`: the shadow, 5.0 by 5.0. */
+const ZOMBIE_WEAPON_SHADOW_SIZE = 5.0;
 /** `PlayerTakeDamage(obj+0x121, 1, 4)` — `PUSH 0x4` at `0x0045977E`. */
 const STRAIGHT_HIT_KIND = 4;
 /** `PlayerTakeDamage(obj+0x121, 1, 6)` — `PUSH 0x6` at `0x00459A07`. */
@@ -421,10 +431,24 @@ export function ZombieThrownWeaponStateShotDown(w: ThrownWeapon,
  * that despawned the weapon never comes back to it (see `ThrownWeaponDespawn`
  * in `game/thrown_weapon.ts`), so a weapon is not drawn on the frame it goes.
  *
- * `[diverges]` Two calls are not made, for the reasons
- * `ThrownWeaponUpdate` (`FUN_00450780`) gives for its own: the 5-by-5 ground
- * shadow at `0x0045A622`, and `RegisterForCameraTracking` for states 1 and 2
- * at `0x0045A676`, which lifts the axe's point by 1.5 first.
+ * Then the two calls class 0x31's `ThrownWeaponUpdate` (`FUN_00450780`)
+ * makes too, read here from `0x0045A617`..`0x0045A676`:
+ *
+ * ```
+ * if (obj+0x1F8 & 1) { ...; ActorDrawGroundShadowWithSize(obj, 5.0, 5.0) }
+ * if (state == 1 || state == 2) {
+ *     obj+0x100 = pos; if (obj+0x13F0 == 0x249) obj+0x104 = y + 1.5;
+ *     RegisterForCameraTracking(obj);
+ * }
+ * ```
+ *
+ * The shadow is the same disc, on the floor traced from three above the
+ * weapon (its `obj+0x1F8` is 5 too). The camera is offered the weapon in
+ * flight -- straight or arced, stuck to the screen and blinking included,
+ * since those are the flight states' own sub-states -- and not once it is
+ * shot down (state 3); the axe's point is lifted 1.5, a blade's is not.
+ * `[proved]` Both were left out until class 0x31's port gave a record that
+ * is not an actor a shadow and a camera slot.
  */
 export function ZombieThrownWeaponUpdate(w: ThrownWeapon,
                                          f: ThrownWeaponFrame): void {
@@ -446,5 +470,16 @@ export function ZombieThrownWeaponUpdate(w: ThrownWeapon,
     if (ThrownWeaponDrawAndProject(w, w.rx, f.cam)) {
       RegisterThrownWeaponForShotTest(w);
     }
+    ActorDrawGroundShadowWithSize(w, w.drawFlags, ZOMBIE_WEAPON_SHADOW_SIZE,
+                                  ZOMBIE_WEAPON_SHADOW_SIZE, null);
+  }
+  if (w.state === ZombieThrownWeaponState.Straight
+      || w.state === ZombieThrownWeaponState.Arc) {
+    w.lookAt.x = w.pos.x;
+    // `FST [ESI+0x104]`, then for the axe `FADD [0x004C4CB8]; FSTP` over it.
+    w.lookAt.y = w.slot === ZOMBIE_AXE_SLOT
+      ? Math.fround(w.pos.y + ZOMBIE_WEAPON_LOOK_LIFT) : w.pos.y;
+    w.lookAt.z = w.pos.z;
+    RegisterThrownWeaponForCameraTracking(w);
   }
 }

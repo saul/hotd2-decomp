@@ -82,7 +82,6 @@ const mkHost = () => ({
   aliveCivilians: () => G.g_civilians_alive,
   scriptFlagRaised: (i) => (G.g_script_flags[i] ?? 0) !== 0,
   cameraFree: () => true, showMessage: () => null,
-  endDialogue: () => undefined,
 });
 
 for (const [name, stage, block, step, subtype, entry] of CASES) {

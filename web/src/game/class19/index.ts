@@ -302,6 +302,8 @@ function Boss4Debug(obj: Actor): ActorDebug {
 export const Boss4Handler: ClassHandler = {
   init: Boss4Init,
   update: Boss4Update,
+  // `Boss4Init` installs `Boss4Update` and returns (`0x004919C3`).
+  firstUpdateNextWalk: true,
   // The death is several sub-states long and the flag lands seventy frames
   // into it. The class never sets `obj.dead` -- its death is its own state
   // machine off `obj+0x34` bit `0x4000000` -- so this is a declaration of

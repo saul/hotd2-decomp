@@ -33,6 +33,7 @@ import { PlayerTasksDrawWithoutAFrame } from "../game/player_shell";
 import { treeProjection } from "./projection/script";
 import { makeWalkerHost } from "./walker_host";
 import { LoadMeter } from "./load_meter";
+import { stageSoundIds } from "../audio/precache";
 import type { Player } from "./main";
 import type { PlayerState } from "./urlstate";
 import type { ScriptJson } from "../bundle/stage";
@@ -131,6 +132,19 @@ export async function loadStageInto(p: Player): Promise<void> {
   const src = sourceOf(slot.from);
   const bundle = await loadStage(src, entry, (loaded, total) => meter.bytes(loaded, total));
   if (superseded()) return;
+  // `SoundStopAll` (`FUN_0041D350`) -- what `MarkSceneOver` and
+  // `ResetGameOnStart` both call on the way into the next scene -- so the
+  // last stage's music, voice and SE do not carry over into this one. Then
+  // the new stage's tables, and its sounds fetched and decoded under the
+  // loading screen, alongside the parse and the build: `audio/precache.ts`.
+  p.bgm.stopAll();
+  p.bgm.prepare();
+  p.bgm.setTable(bundle.script.bgm, entry.game_mode);
+  p.bgm.setSoundTables(bundle.script.sound);
+  let soundsLoaded: [number, number] = [0, 0];
+  const sounds = p.bgm.precache(stageSoundIds(bundle.script), (d, t) => {
+    soundsLoaded = [d, t];
+  });
   p.paths = new CamPaths(bundle.cam);
   // The same curves, for the port's `CamEvalPath7`: every camera routine in
   // `game/camera/` evaluates them there, with no renderer attached.
@@ -288,13 +302,6 @@ export async function loadStageInto(p: Player): Promise<void> {
     return s ? { w: s.w, h: s.h, url: s.png } : null;
   };
   p.deepSprites.images = p.hudLayer.spriteImages;
-  // `SoundStopAll` (`FUN_0041D350`) -- what `MarkSceneOver` and
-  // `ResetGameOnStart` both call on the way into the next scene -- so the
-  // last stage's music, voice and SE do not carry over into this one.
-  p.bgm.stopAll();
-  p.bgm.prepare();
-  p.bgm.setTable(bundle.script.bgm, entry.game_mode);
-  p.bgm.setSoundTables(bundle.script.sound);
   p.treeProj = treeProjection(bundle.script);
   p.clearFeed();
 
@@ -333,6 +340,15 @@ export async function loadStageInto(p: Player): Promise<void> {
   // -- a belief that had looked only at `bgm_entry_play` -- so the music
   // opened a step early and the script's own `se_play` of the same track,
   // which in the engine starts it from the top, found it already playing.
+  // The stage's sounds, if they are not in yet: the bar counts them in.
+  meter.begin("sounds");
+  const tick = setInterval(() => meter.count(...soundsLoaded), 100);
+  try {
+    await sounds;
+  } finally {
+    clearInterval(tick);
+  }
+  if (superseded()) return;
   // The shader programs, while the loading screen still covers the cost.
   meter.begin("shaders");
   await afterPaint();

@@ -99,6 +99,8 @@ const SFX_GAIN = 0.85;
  * hits and deaths are a few dozen files; a clip is under a megabyte decoded.
  */
 const CLIP_CACHE = 48;
+/** How many of a stage's sounds {@link Bgm.precache} fetches at once. */
+const PRECACHE_PARALLEL = 4;
 
 /** What `PlaySoundId` does with one id, decided and not yet done. */
 export type SoundAction =
@@ -230,6 +232,14 @@ export class Bgm {
                              kind: "se" | "voice" }[] = [];
   /** Decoded clips by URL, most recently used last; see `CLIP_CACHE`. */
   private readonly clips = new Map<string, Promise<AudioBuffer | null>>();
+  /**
+   * What {@link precache} loaded for the current stage, by URL for a clip
+   * and by `file|loop` for a track. Held for the stage's life, outside the
+   * LRU: stage 2 names more voice lines than `CLIP_CACHE` holds, and a line
+   * evicted before it plays is a download again.
+   */
+  private pinnedClips = new Map<string, () => Promise<AudioBuffer | null>>();
+  private pinnedTracks = new Map<string, () => Promise<AudioBuffer | null>>();
   /**
    * Bumped by each stop of its kind, so a clip still decoding when the SE or
    * the voice is stopped does not start afterwards.
@@ -462,8 +472,18 @@ export class Bgm {
   /** Fetch a track and decode one period of its stream, or reuse the last. */
   private async decode(file: string, loop: boolean): Promise<AudioBuffer | null> {
     const key = `${file}|${loop ? "loop" : "once"}`;
+    const pinned = this.pinnedTracks.get(key);
+    if (pinned) return pinned();
     const hit = this.decoded.find((d) => d.key === key);
     if (hit) return hit.buffer;
+    const buffer = await this.decodeUncached(file, loop);
+    if (buffer) this.decoded = [{ key, buffer }, ...this.decoded].slice(0, 2);
+    return buffer;
+  }
+
+  /** The fetch and the fill, with no cache on either side. */
+  private async decodeUncached(file: string,
+                               loop: boolean): Promise<AudioBuffer | null> {
     let bytes: ArrayBuffer;
     try {
       const r = await fetch(soundUrl("bgm", file));
@@ -478,7 +498,6 @@ export class Bgm {
     const buffer = ctx.createBuffer(filled.channels.length, filled.channels[0].length,
                                     filled.sampleRate);
     filled.channels.forEach((a, c) => buffer.copyToChannel(a, c));
-    this.decoded = [{ key, buffer }, ...this.decoded].slice(0, 2);
     return buffer;
   }
 
@@ -566,6 +585,63 @@ export class Bgm {
     const ctx = this.ctx;
     if (!ctx || ctx.state === "running") return;
     void ctx.resume().catch(() => {}).finally(() => this.emit());
+  }
+
+  /**
+   * `[port-only]` -- fetch and decode a stage's sounds before it runs, and
+   * keep them until the next stage's: `audio/precache.ts` says which and why.
+   * `ids` are routed exactly as {@link play} would route them, against the
+   * tables {@link setTable} and {@link setSoundTables} were last given, so call
+   * it after those. Resolves when every one has loaded or failed; a 404 -- the
+   * 36 `_OFF` names that never shipped -- is a failure that costs nothing.
+   *
+   * Looping SE are skipped: they play through an `<audio>` element
+   * (`startLoopingSe`), which streams and starts at once.
+   */
+  async precache(ids: readonly number[],
+                 progress?: (done: number, total: number) => void):
+      Promise<void> {
+    // Each entry starts its load once, on whichever asks first: the queue
+    // below, or a play that reaches it before the queue has.
+    const once = (start: () => Promise<AudioBuffer | null>) => {
+      let p: Promise<AudioBuffer | null> | null = null;
+      return () => (p ??= start());
+    };
+    const clips = new Map<string, () => Promise<AudioBuffer | null>>();
+    const tracks = new Map<string, () => Promise<AudioBuffer | null>>();
+    const jobs: (() => Promise<unknown>)[] = [];
+    for (const id of ids) {
+      const a = routeSoundId(id, this.table, this.useArTable, this.sound);
+      if (a.kind === "bgm") {
+        const key = `${a.file}|${a.loop ? "loop" : "once"}`;
+        if (tracks.has(key)) continue;
+        const job = once(() => this.decodeUncached(a.file, a.loop));
+        tracks.set(key, job);
+        jobs.push(job);
+      } else if ((a.kind === "se" && a.loop === null) || a.kind === "voice") {
+        const url = soundUrl(a.kind, a.file);
+        if (clips.has(url)) continue;
+        const job = once(() => this.fetchClip(url));
+        clips.set(url, job);
+        jobs.push(job);
+      }
+    }
+    // The new stage's set replaces the last one's: nothing of a stage the
+    // player has left is kept.
+    this.pinnedClips = clips;
+    this.pinnedTracks = tracks;
+    // A few at a time, in the order the script names them, so the opening
+    // track and the first lines are not queued behind the whole stage.
+    let done = 0;
+    let next = 0;
+    progress?.(0, jobs.length);
+    const worker = async () => {
+      while (next < jobs.length) {
+        await jobs[next++]();
+        progress?.(++done, jobs.length);
+      }
+    };
+    await Promise.all(Array.from({ length: PRECACHE_PARALLEL }, worker));
   }
 
   // -- SE and voice -----------------------------------------------------------
@@ -668,26 +744,31 @@ export class Bgm {
 
   /** A clip, fetched and decoded once. See `CLIP_CACHE`. */
   private clip(url: string): Promise<AudioBuffer | null> {
+    const pinned = this.pinnedClips.get(url);
+    if (pinned) return pinned();
     const hit = this.clips.get(url);
     if (hit) {
       this.clips.delete(url);
       this.clips.set(url, hit);
       return hit;
     }
-    const p = (async () => {
-      try {
-        const r = await fetch(url);
-        if (!r.ok) return null;
-        return await this.graph().ctx.decodeAudioData(await r.arrayBuffer());
-      } catch {
-        return null;
-      }
-    })();
+    const p = this.fetchClip(url);
     this.clips.set(url, p);
     while (this.clips.size > CLIP_CACHE) {
       this.clips.delete(this.clips.keys().next().value as string);
     }
     return p;
+  }
+
+  /** One clip off the network, decoded; null for a 404 or a bad file. */
+  private async fetchClip(url: string): Promise<AudioBuffer | null> {
+    try {
+      const r = await fetch(url);
+      if (!r.ok) return null;
+      return await this.graph().ctx.decodeAudioData(await r.arrayBuffer());
+    } catch {
+      return null;
+    }
   }
 
   private release(v: { node: AudioBufferSourceNode }): void {

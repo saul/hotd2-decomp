@@ -62,6 +62,12 @@ export interface ScreenSprite {
    * other sprite, which is drawn white. The image is multiplied by it.
    */
   tint?: number;
+  /**
+   * `+0x28` -- the quad's turn about its anchor, BAMS; absent for 0. The
+   * trunk's two arrows in its two-player panel are the only callers that
+   * pass anything else (`ItemSelectDrawPanels`, `0x1000` and `0xF000`).
+   */
+  rot?: number;
 }
 
 /**
@@ -98,9 +104,9 @@ function ScreenSpriteRecord(id: number, x: number, y: number, depth: number,
 /**
  * `SetRenderLightColour` — `FUN_004AA0A0`. The light colour the next lit
  * draw takes -- `g_render_light_colour_r`, `g`, `b` -- and the light
- * generation up one. The port records it for the 2D quads that read it
- * ({@link SCREEN_SPRITE_LIT}); the 3D draws that call it are the renderer's,
- * which has its own copy of the scene light (`render/lighting.ts`).
+ * generation up one. The 2D quads read it ({@link SCREEN_SPRITE_LIT}), and
+ * a 3D draw that sets no light of its own records it (`light_sets.ts`,
+ * `RenderLightSet`).
  */
 export function SetRenderLightColour(r: number, g: number, b: number): void {
   G.g_render_light_colour = [r, g, b];
@@ -108,14 +114,16 @@ export function SetRenderLightColour(r: number, g: number, b: number): void {
 
 /**
  * `DrawScreenSprite` — `FUN_0041C6D0`. Recorded rather than drawn; see
- * `G.g_screen_sprite_draws`. The rotation argument is 0 at every call the
- * port makes and is not carried; the flags word is, for its anchor nibble
- * and {@link SCREEN_SPRITE_LIT}.
+ * `G.g_screen_sprite_draws`. The flags word is carried for its anchor
+ * nibble, its U/V flips and {@link SCREEN_SPRITE_LIT}. `rot` is the engine's
+ * seventh argument, last here because only the trunk passes one.
  */
 export function DrawScreenSprite(id: number, x: number, y: number,
-                                 depth = 1, sx = 1, sy = 1, flags = 0): void {
-  G.g_screen_sprite_draws.push(
-    ScreenSpriteRecord(id, x, y, depth, sx, sy, 1, flags));
+                                 depth = 1, sx = 1, sy = 1, flags = 0,
+                                 rot = 0): void {
+  const s = ScreenSpriteRecord(id, x, y, depth, sx, sy, 1, flags);
+  if (rot !== 0) s.rot = rot;
+  G.g_screen_sprite_draws.push(s);
 }
 
 /** `ScreenSpriteDraw`'s flags word: anchor `(2, 2)`, the sprite's centre. */

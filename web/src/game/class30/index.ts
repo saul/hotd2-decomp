@@ -61,10 +61,15 @@ import {
 } from "./death";
 import { ZombieStateDeathKnockbackArc } from "./knockback";
 import { CountEnemyZombieIn } from "../combat/counts";
-import { MotionFlag, ZombieFlag2 } from "../actor";
+import { MotionFlag, NodeDrawHookId, ZombieFlag2 } from "../actor";
+import { G } from "../globals";
+import { GameMode } from "../game_mode";
 import { ZombiePushOutOfWorldAndActors } from "./ground";
 import { ActorRunNodeDrawHooks } from "../model_draw";
-import { ZombieDrawBonePart } from "./draw";
+import {
+  ENLARGED_HEAD_BONE, ENLARGED_HEAD_CHAR_TYPE_0E, ZombieDrawBonePart,
+  ZombieDrawWithEnlargedHead,
+} from "./draw";
 import {
   ZOMBIE_TWIN_CHAR_TYPE, ZombieTwinFollowHost,
 } from "./twin";
@@ -131,18 +136,17 @@ export function EnemyZombieUpdate(obj: ZombieActor, f: ClassFrame): void {
   // inside the same draw before any node is emitted. The clock half of the
   // routine is the director's `ActorAdvanceMotion`.
   //
-  // [diverges] The hook is always `ZombieDrawBonePart`. In Training
-  // `EnemyZombieInit` installs `ZombieDrawBoneSlotOnly` (`FUN_00453B30`),
-  // which aims nothing, and `ZombieAdvanceMotion` swaps between the two for
-  // the next frame on `obj+0x34` bit `0x4000` and bytes `0x009C72F1`/
-  // `0x009C72F3`; no stage bundle is exported in Training, and the port keeps
-  // no hook pointer. Original Mode's big-head hook, `ZombieDrawWithEnlargedHead`
-  // (`FUN_00453B50`), calls this one inside a scale, so it aims the same; the
-  // same arm of `EnemyZombieInit` doubles bone 2's hit radius (`obj+0x3A4`,
-  // `FADD ST0,ST0` -- `FMUL [0x0055DD48]` for type 0xE -- at `0x00452F71`),
-  // which goes with the item.
+  // The hook is `obj+0x12EC`, which `EnemyZombieInit` chose: the class's
+  // own, or ROTTEN MEAT's `ZombieDrawWithEnlargedHead` (`FUN_00453B50`).
+  //
+  // [diverges] In Training `EnemyZombieInit` installs
+  // `ZombieDrawBoneSlotOnly` (`FUN_00453B30`), which aims nothing, and
+  // `ZombieAdvanceMotion` swaps between the two for the next frame on
+  // `obj+0x34` bit `0x4000` and bytes `0x009C72F1`/`0x009C72F3`; no stage
+  // bundle is exported in Training, so the port has neither.
   HeadAimBeginDraw(obj, obj.zom, host);
-  ActorRunNodeDrawHooks(obj, ZombieDrawBonePart, f);
+  ActorRunNodeDrawHooks(obj, obj.nodeDrawHook === NodeDrawHookId.EnlargedHead
+    ? ZombieDrawWithEnlargedHead : ZombieDrawBonePart, f);
   HeadAimEndDraw(obj, obj.zom, host);
   // `TEST EAX, 0x8000000; JNZ` on `obj+0x136C` at `0x00453465`, then `CALL
   // 0x00409010` at `0x0045346D`: the actor files itself for next frame's
@@ -406,6 +410,19 @@ export function EnemyZombieInit(obj: ZombieActor, _rng?: Rng,
   // a shipped descriptor names has an arm now, so the list only ever changed
   // the twin's 0 -- a state the twin never dispatches -- and it is gone.
   obj.state = obj.initialState;
+  // `0x00452F49`..`0x00452F8E`, on the mode: Original Mode's ROTTEN MEAT
+  // (`CMP byte ptr [0x009C88A8], 1`) makes the head a bigger target -- bone
+  // 2's hit radius, `obj+0x3A4`, doubled (`FADD ST0, ST0`), or times 1.8 for
+  // character type 0xE (`FMUL [0x0055DD48]`), stored as a float -- and draws
+  // it bigger, installing `ZombieDrawWithEnlargedHead` at `obj+0x12EC`.
+  // Training's arm is the draw's [diverges].
+  if (G.g_GameMode === GameMode.Original && G.g_original_item_big_head === 1) {
+    const k = String(ENLARGED_HEAD_BONE);
+    const r = obj.boneRadius[k] ?? 0;
+    obj.boneRadius[k] = Math.fround(obj.charType === ENLARGED_HEAD_CHAR_TYPE_0E
+      ? r * Math.fround(1.8) : r + r);
+    obj.nodeDrawHook = NodeDrawHookId.EnlargedHead;
+  }
   // ...and the actor counts itself in, which is the engine's own last act
   // here. The two exclusions are the interesting part -- see `CountEnemyZombieIn`.
   CountEnemyZombieIn(obj);

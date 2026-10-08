@@ -62,6 +62,7 @@ import { ScriptedScenerySelector } from "../game/class33/state";
 import { OwlBodyChain, type OwlPart } from "./owl";
 import { deformHordeSheet, HordeDrawParts, type HordePart } from "./horde";
 import { WormDrawParts, type WormPart } from "./worm";
+import { FishDrawParts, type FishPart } from "./fish";
 import { SpawnClass } from "../game/spawn_class";
 import { BAMS_TO_RAD } from "../core/bams";
 import {
@@ -70,6 +71,7 @@ import {
 }
   from "../game/class13/state";
 import type { VehicleTail } from "../game/class26/state";
+import { Class32Routine } from "../game/class32/state";
 import { setAssetDrawAlpha } from "./draw_order";
 
 /**
@@ -135,6 +137,9 @@ function setDrawAlpha(c: Object3D, alpha: number | null): void {
  */
 const CHAIN = -1;
 
+/** `SetDrawLayerNibble(8)`, the world's layer: `renderOrder` 0. */
+const WORLD_LAYER = 8;
+
 /** Templates come from the hidden `slots_actor` rig the exporter emits. */
 const SLOT_PART = /_slot_([0-9a-f]{4})$/;
 const SLOT_RIG = "slots_actor";
@@ -159,11 +164,11 @@ function DrawSlotFor(a: Actor): number | null {
       // and the arm below places one model per entry. `-1` says so.
       return -1;
     case SpawnClass.WaterEnemy:
-      // `sub+0x6E` — `fish.bin`'s twenty-frame swim strip while it is alive,
-      // and entry 0 or 1 once it is a corpse. `FishDraw` (`FUN_00439860`)
-      // also draws a **flattened silhouette** on the water when the fish is
-      // below it and `sub+0x6A` bit 2 is set; that second draw is not here.
-      return a.fish.frame || null;
+      // A chain too: `FishDraw` (`FUN_00439860`) draws `sub+0x6E` -- the swim
+      // strip, or a corpse -- under the sub-block's own angles, and a
+      // **flattened silhouette** of it on the water when it is drawn solid
+      // and below the surface. `render/fish.ts` composes both.
+      return CHAIN;
     case SpawnClass.ScriptedProp:
       // `obj+0x1F4`, straight off the descriptor tail. One slot, drawn under
       // `Translate; RotX; RotZ; RotY` and an optional uniform scale --
@@ -241,18 +246,6 @@ function DrawScaleFor(a: Actor): number {
       // The same test on `sub+0x10` at `0x0043FB2F` (`FCOMP 1.0`), and the
       // same call at `0x0043FB43`. All three shipped descriptors carry 1.0.
       return a.prop12.scale || 1;
-    case SpawnClass.WaterEnemy:
-      // `MatrixScale(0.3, 0.3, 0.3)` at `0x00439AC9`, and again at
-      // `0x00439CF8` in `FishSwimAwayTick` (`FUN_00439C20`). A fish drawn at
-      // one is three and a third times the size of the one in the game, which
-      // is what it looked like.
-      //
-      // The **other** two scale calls in the class are the flattened
-      // silhouette on the water — `(0.4, 0.01, 0.4)` at `0x0043994F` and
-      // `0x00439A4A` — and that is a second draw of the same model at a
-      // different place, which this layer has no way to express. It is
-      // declared in `game/class51/`.
-      return 0.3;
     default:
       return 1;
   }
@@ -376,6 +369,8 @@ export class SlotModelLayer implements System<RenderContext> {
   private readonly _hordeParts: HordePart[] = [];
   /** Scratch for class 0x42's chain. */
   private readonly _wormParts: WormPart[] = [];
+  /** Scratch for {@link FishDrawParts}. */
+  private readonly _fishParts: FishPart[] = [];
   /** Scratch for class 0x26's chain. */
   private readonly _vehicleParts: VehiclePart[] = [];
   private enabled = true;
@@ -530,9 +525,11 @@ export class SlotModelLayer implements System<RenderContext> {
                                a.roll * BAMS_TO_RAD, "XZY");
       } else if (a.cls === SpawnClass.HordeSpawner
                  || a.cls === SpawnClass.Worm
-                 || a.cls === SpawnClass.Vehicle) {
-        // `render/horde.ts` and `render/worm.ts` hand back world-space
-        // matrices, and class 0x26's routines recorded them.
+                 || a.cls === SpawnClass.Vehicle
+                 || a.cls === SpawnClass.WaterEnemy) {
+        // `render/horde.ts`, `render/worm.ts` and `render/fish.ts` hand back
+        // world-space matrices, scale included, and class 0x26's routines
+        // recorded them.
         live.node.visible = true;
         live.node.position.set(0, 0, 0);
         live.node.rotation.set(0, 0, 0);
@@ -558,6 +555,7 @@ export class SlotModelLayer implements System<RenderContext> {
     this.drawBoss2Flipbooks(ctx, seen);
     this.drawLandingRings(seen);
     this.drawAttachedEffects(seen);
+    this.drawBoss5Draws(seen);
 
     for (const [key, l] of this.extras) {
       if (seen.has(key)) continue;
@@ -579,10 +577,15 @@ export class SlotModelLayer implements System<RenderContext> {
   /**
    * A node for one of a routine's extra draws, re-cloned when its slot moves
    * on, and placed by the matrix the routine composed. `alpha` is
-   * `AssetDrawSlotWithAlpha`'s, and absent for `AssetDrawSlot`.
+   * `AssetDrawSlotWithAlpha`'s, and absent for `AssetDrawSlot`; `light` is
+   * the colour `SetRenderLightColour` gave the draw, which
+   * `render/lighting.ts` reads off the node; `layer` is the
+   * `SetDrawLayerNibble` it was made in, the world's own 8 when absent.
    */
   private extra(key: string, slot: number, m: Matrix4,
-                seen: Set<number | string>, alpha: number | null = null): void {
+                seen: Set<number | string>, alpha: number | null = null,
+                light: readonly number[] | null = null,
+                layer: number | null = null): void {
     if (this.residency && !this.residency.slotResident(slot)) return;
     let live = this.extras.get(key);
     if (!live || live.slot !== slot) {
@@ -597,7 +600,45 @@ export class SlotModelLayer implements System<RenderContext> {
     live.node.matrix.copy(m);
     live.node.visible = true;
     setDrawAlpha(live.node, alpha);
+    if (light) live.node.userData.hod2_light_colour = [...light];
+    else delete live.node.userData.hod2_light_colour;
+    // The port spells a layer as `renderOrder`, the world's 8 being 0 --
+    // `render/draw_order.ts`. A draw in the world's own layer keeps the
+    // template's, and a key is always the same routine's draw.
+    if (layer !== null) live.node.renderOrder = layer - WORLD_LAYER;
     seen.add(key);
+  }
+
+  /**
+   * Class 0x32's draws that are not its skeleton: each projectile's, and
+   * each task's, on the frames the port says they drew -- the slot, the
+   * world matrix, the light colour, the alpha and the layer the routine
+   * recorded (`game/class32/projectile.ts`, `game/class32/tasks.ts`).
+   *
+   * * **projectile** (`Class32ProjectileDispatchAndDraw`, `FUN_0047EFA0`):
+   *   `T RotZ RotY RotX Scale(p+0x118)` and `SetRenderLightColour(1, v, v)`.
+   * * **afterimage**, **trail**, **hands**: `T RotZ RotY RotX`, the trail
+   *   scaled, each under its own colour.
+   * * **body loop**: the boss's own matrix raised 15, at `a * 0.5`, in
+   *   layer 9.
+   * * **death burst** and **exit effect**: no colour of their own; the
+   *   record carries the one the draw before them left in the register.
+   */
+  private drawBoss5Draws(seen: Set<number | string>): void {
+    for (const a of G.g_object_list) {
+      if (a.despawned || a.cls !== SpawnClass.Boss5) continue;
+      const t = a.boss5;
+      if (t.routine !== Class32Routine.Projectile || !t.draw) continue;
+      _m.fromArray(t.draw.m);
+      this.extra(`c32p:${a.at}`, t.slot, _m, seen, null, t.draw.light);
+    }
+    for (const task of G.g_class32_tasks) {
+      const d = task.draw;
+      if (task.killed || !d) continue;
+      _m.fromArray(d.m);
+      this.extra(`c32t:${task.id}`, d.slot, _m, seen, d.alpha, d.light,
+                 d.layer);
+    }
   }
 
   /**
@@ -770,14 +811,16 @@ export class SlotModelLayer implements System<RenderContext> {
    * the matrices are rewritten every frame either way, because the angles do.
    */
   private chain(a: Actor, live: Live | undefined): Live | null {
-    const parts: (OwlPart | HordePart | WormPart | VehiclePart)[] =
+    const resident = (slot: number): boolean =>
+      !this.residency || this.residency.slotResident(slot);
+    const parts: (OwlPart | HordePart | WormPart | VehiclePart | FishPart)[] =
       a.cls === SpawnClass.HordeSpawner
         ? HordeDrawParts(a, this._hordeParts)
         : a.cls === SpawnClass.Worm ? WormDrawParts(a, this._wormParts)
+          : a.cls === SpawnClass.WaterEnemy
+            ? FishDrawParts(a, this._fishParts, resident)
           : a.cls === SpawnClass.Vehicle
-            ? VehicleDrawParts(a, this._vehicleParts,
-                               (slot) => !this.residency
-                                 || this.residency.slotResident(slot))
+            ? VehicleDrawParts(a, this._vehicleParts, resident)
             : OwlBodyChain(a, this._parts);
     if (!parts.length) {
       // Nothing drawn this frame -- a member that is not drawing its shadow.
@@ -859,9 +902,11 @@ export class SlotModelLayer implements System<RenderContext> {
    *
    * Returns the nearest hit along the ray, or `null`.
    */
-  pickSphere(ray: Ray): { at: number; point: Vector3; t: number } | null {
+  pickSphere(ray: Ray):
+      { at: number; point: Vector3; t: number; radius: number } | null {
     if (!this.enabled) return null;
-    let best: { at: number; point: Vector3; t: number } | null = null;
+    let best: { at: number; point: Vector3; t: number; radius: number }
+      | null = null;
     for (const a of G.g_object_list) {
       if (a.dead || a.hitRadius <= 0) continue;
       // A class that registers the engine's way is `game/`'s to test.
@@ -875,7 +920,7 @@ export class SlotModelLayer implements System<RenderContext> {
       if (t <= 0) continue;                      // behind the muzzle
       if (ray.distanceSqToPoint(this._c) > a.hitRadius * a.hitRadius) continue;
       if (!best || t < best.t) {
-        best = { at: a.at, point: this._c.clone(), t };
+        best = { at: a.at, point: this._c.clone(), t, radius: a.hitRadius };
       }
     }
     return best;

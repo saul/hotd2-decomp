@@ -44,22 +44,10 @@ export enum HudSprite {
 export const LAMP_CELS = 7;
 
 /**
- * `g_original_ammo_hud_rows` — `0x004ECA20`, twelve bytes per
- * `g_original_fire_mode`: `{s16 sprite; f32 extra spacing; f32 dy}`. Only
- * Original Mode reads it; rows 4..7 repeat row 0.
- */
-export const ORIGINAL_AMMO_HUD_ROWS: readonly {
-  sprite: number; spacing: number; dy: number;
-}[] = [
-  { sprite: 0xa74, spacing: 0, dy: 0 },
-  { sprite: 0xa79, spacing: 5, dy: -12 },
-  { sprite: 0xa78, spacing: 0, dy: -10 },
-  { sprite: 0xa76, spacing: 20, dy: -18 },
-];
-
-/**
  * Every sprite id `hud_readout.ts` can draw -- the list the exporter puts in
- * the bundle.
+ * the bundle. Original Mode's bullets are not here: they are
+ * `original_mode.ammo_hud_rows`' sprites, `.rdata` the exporter reads (see
+ * `ExeTables.originalModeTables`).
  */
 export const HUD_READOUT_SPRITES: readonly number[] = [
   ...Array.from({ length: 10 }, (_, d) => HudSprite.Digit0 + d),
@@ -68,7 +56,6 @@ export const HUD_READOUT_SPRITES: readonly number[] = [
   ...Array.from({ length: LAMP_CELS }, (_, c) => HudSprite.Lamp1P + c),
   ...Array.from({ length: LAMP_CELS }, (_, c) => HudSprite.Lamp2P + c),
   HudSprite.Reload, HudSprite.PressReloadButton, HudSprite.ShootOutside,
-  ...ORIGINAL_AMMO_HUD_ROWS.map((r) => r.sprite),
 ];
 
 /**

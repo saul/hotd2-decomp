@@ -25,7 +25,10 @@ import { CameraBlockYaw } from "../camera/view";
 import { T } from "../tables";
 import { PropRegisterForShotTest } from "./shot_test";
 import { MsvcRand } from "./group";
-import { HiddenItemCopy, ReleaseHiddenItem } from "./items";
+import {
+  HiddenItemCopy, ReleaseHiddenItem, SpawnExtraLifePickup,
+} from "./items";
+import { GameMode } from "../game_mode";
 import {
   BreakableFlag, BreakableSlot, BreakableState, HIT_FLAG_MASK, ItemSet,
   makeBreakableProp, PropFamily, type BreakableProp,
@@ -144,7 +147,18 @@ export function KindedPropUpdate(p: BreakableProp, rng: Rng,
       const params = T.breakables?.kinds?.[p.kind];
       events?.emit("prop.broken",
                    { id: p.id, sound: params?.sound ?? SFX_KINDED_CRACK });
-      ReleaseKindedItem(p, rng, events);
+      // Original Mode's FIRST AID KIT (`0x00466120`..`0x00466153`): with
+      // `g_original_first_aid` up, and the break effect not 0x13 or 0x16,
+      // the set is the extra life's (`+0x194 = 1`) and the life comes out in
+      // place of the release switch.
+      if (G.g_GameMode === GameMode.Original && G.g_original_first_aid !== 0
+          && p.effect !== FIRST_AID_SKIP_EFFECT_A
+          && p.effect !== FIRST_AID_SKIP_EFFECT_B) {
+        p.itemSet = ItemSet.ExtraLife;
+        SpawnExtraLifePickup(p, events);
+      } else {
+        ReleaseKindedItem(p, rng, events);
+      }
     }
   }
   p.flags &= ~HIT_FLAG_MASK;
@@ -206,6 +220,10 @@ function ReleaseKindedItem(p: BreakableProp, rng: Rng,
   const storyRise = p.kind === KINDED_STORY_RAISED_KIND ? KINDED_STORY_RISE : 0;
   ReleaseHiddenItem(p, rng, events, HiddenItemCopy.Kinded, rise, storyRise);
 }
+
+/** `CMP EAX, 0x13` / `CMP EAX, 0x16` on `+0x324`: no first-aid life from these. */
+const FIRST_AID_SKIP_EFFECT_A = 0x13;
+const FIRST_AID_SKIP_EFFECT_B = 0x16;
 
 /** The one kind whose story item is released 1.0 up. */
 const KINDED_STORY_RAISED_KIND = 2;

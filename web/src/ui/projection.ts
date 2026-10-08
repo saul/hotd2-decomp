@@ -529,6 +529,11 @@ export interface UiProjection {
   fps: FpsProjection | null;
   branch: BranchProjection | null;
   gameOver: GameOverProjection | null;
+  /**
+   * Original Mode's saved items, for the menu's debug buttons: how many are
+   * in the profile, of how many kinds. Null outside Original Mode.
+   */
+  originalItems: { count: number; kinds: number } | null;
   /** Netplay, whenever a session is up or being made; null alone. */
   net: NetProjection | null;
   /**

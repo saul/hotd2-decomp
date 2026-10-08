@@ -38,7 +38,7 @@
  * each other (L29).
  */
 import { chromium } from "playwright-core";
-import { freePort, requireBundle, serve } from "./lib/player.mjs";
+import { closeBrowser, freePort, requireBundle, serve } from "./lib/player.mjs";
 
 requireBundle("net_pair");
 const args = process.argv.slice(2);
@@ -366,7 +366,7 @@ try {
                   { both: "relay=1", seconds: SECONDS, relayOnly: true });
   }
 } finally {
-  await browser.close();
+  await closeBrowser(browser);
   vite.kill("SIGTERM");
 }
 check(`nothing threw and nothing logged an error (${faults.length})`, faults.length === 0,

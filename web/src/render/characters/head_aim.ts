@@ -47,7 +47,9 @@
 import { Matrix4, type Camera, type Object3D } from "three";
 import { HEAD_AIM_BONE, HEAD_AIM_FACING } from "../../game/class30/head_aim";
 import type { HeadAimWords } from "../../game/class30/state";
-import { MatIdentity, MatrixRotateX, MatrixRotateY } from "../../game/matrix";
+import {
+  MatIdentity, MatrixRotateX, MatrixRotateY, MatrixScale,
+} from "../../game/matrix";
 import { SpawnClass } from "../../game/spawn_class";
 import { partNodesOf } from "./draw_gates";
 import type { Instance } from "./instance";
@@ -134,13 +136,21 @@ export function applyHeadAim(inst: Instance): void {
   const turn = inst.headTurn
     ?? (inst.headTurn = { on: false, local: new Matrix4(), node });
   turn.node = node;
-  turn.on = aim.headAimed;
+  // ROTTEN MEAT's hook pushes a scale around the head's draw before
+  // `ZombieDrawBonePart` turns it (`Actor.nodeDrawScale`), so the scale is
+  // the first thing on the matrix and the turn goes on after it -- the order
+  // `MatrixScale` and `MatrixRotateY` leave a vertex transformed in.
+  const scale = inst.a.nodeDrawScale[HEAD_AIM_BONE] ?? null;
+  turn.on = aim.headAimed || scale !== null;
   if (!turn.on) return;
 
   const m = MatIdentity();
-  MatrixRotateY(m, -((inst.a.yaw - HEAD_AIM_FACING) & 0xffff));
-  MatrixRotateY(m, aim.headYaw);
-  MatrixRotateX(m, aim.headPitch);
+  if (scale) MatrixScale(m, scale[0], scale[1], scale[2]);
+  if (aim.headAimed) {
+    MatrixRotateY(m, -((inst.a.yaw - HEAD_AIM_FACING) & 0xffff));
+    MatrixRotateY(m, aim.headYaw);
+    MatrixRotateX(m, aim.headPitch);
+  }
   turn.local.fromArray(m);
 
   const keep = new Set<Object3D>(partNodesOf(inst).values());

@@ -545,11 +545,13 @@ console.log("\n`g_class_handlers`, filled by the classes themselves:");
     [SpawnClass.ScriptedHumanoid, "0x25 scripted humanoid"],
     [SpawnClass.Zombie, "0x30 zombie"],
     [SpawnClass.Thrower, "0x31 thrower"],
+    [SpawnClass.Boss5, "0x32 stage-5 boss"],
     [SpawnClass.ScriptedScenery, "0x33 scripted scenery / the carrier"],
     [SpawnClass.PropContainerPlacer, "0x41 prop container placer"],
     [SpawnClass.FlyingEnemy, "0x43 owl"],
     [SpawnClass.PropPlacer, "0x44 prop placer"],
     [SpawnClass.Boss3, "0x45 stage-3 boss"],
+    [SpawnClass.Emperor, "0x2D stage-6 boss"],
     [SpawnClass.HordeSpawner, "0x40 horde"],
     [SpawnClass.Worm, "0x42 worm"],
     [SpawnClass.Bat, "0x46 bat"],
@@ -559,6 +561,7 @@ console.log("\n`g_class_handlers`, filled by the classes themselves:");
     [SpawnClass.ChapterCard, "0x60 chapter card"],
     [SpawnClass.ResultCard, "0x61 result card"],
     [SpawnClass.ResultCardTally, "0x62 result card loader"],
+    [SpawnClass.ItemSelect, "0x6e trunk"],
   ];
   for (const [cls, name] of want) {
     check(`${name} registered itself`,
@@ -570,12 +573,12 @@ console.log("\n`g_class_handlers`, filled by the classes themselves:");
         && want.every(([c]) => PORTED_CLASSES.includes(c)),
         PORTED_CLASSES.map((c) => `0x${c.toString(16)}`).join(","));
   // The cat is 0x53 and now has one -- its sub-type 2 is a route-branch
-  // trigger -- and 0x40, the horde, and 0x42, the worm, have one too. Class
-  // 0x2D still has none: an unported class must stay absent rather than fall
-  // back to anything, because an `if` is what had the cat running the
-  // zombie's state machine.
+  // trigger -- and 0x40, the horde, and 0x42, the worm, have one too, and so
+  // does 0x2D, the stage-6 boss. Class 0x29 still has none: an unported class
+  // must stay absent rather than fall back to anything, because an `if` is
+  // what had the cat running the zombie's state machine.
   check("a class with no module has no row",
-        g_class_handlers[SpawnClass.LargeCreature] === undefined);
+        g_class_handlers[SpawnClass.SceneryBatch] === undefined);
 
   // Loud, not last-one-wins. A row silently overwritten by a second module is
   // a class whose behaviour depends on evaluation order.

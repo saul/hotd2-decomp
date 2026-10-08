@@ -886,7 +886,9 @@ for (const stage of STAGES) {
   if (existsSync(file)) {
     const script = JSON.parse(readFileSync(file, "utf8")) as ScriptJson;
     const block = script.blocks.find((b) => b.index === 0);
-    const step = block?.steps?.find((st) => st.index === 2);
+    // Step 3 by the exe's own index (`EvtGetStep`): block 0's step 0 is the
+    // com step, which the bundle carries now.
+    const step = block?.steps?.find((st) => st.index === 3);
     const gated = (step?.ops ?? []).filter((o) => o.op === 0x03 || o.op === 0x07);
 
     check("stage 1's opening encounter is behind the player-count gate",
@@ -943,6 +945,11 @@ for (const stage of STAGES) {
                                    aliveCivilians: () => 0,
                                    cameraFree: roomOver,
                                    scriptFlagRaised: shotsDone });
+    // From the scene's own entry, as the player starts one
+    // (`app/stage_load.ts`): a walker nobody has reset sits on step 0, which
+    // is the checkpoint stream -- stage 1's is the com step, `comevtbl.bin`'s
+    // -- and not where a stage is played from.
+    w.reset();
     const CAP = 60 * 60 * 20;            // twenty simulated minutes
     const STALL = 60 * 60 * 5;           // five on one instruction is a park
     let frames = 0, stalls = 0, at = "";
@@ -1191,8 +1198,8 @@ for (const stage of STAGES) {
  *
  * `PlaySoundId` (`FUN_0041CFD0`) is reached by `se_play` as well as by
  * `bgm_entry_play`, and the stage tracks are started through the first: at
- * step 2 of the entry block, a `se_play` of `0x10000000 | index` (stage 5
- * alone uses `bgm_entry_play`). The walker used to record only `0x5F`, so a
+ * step 2 of the entry block (step 3 in stage 1), a `se_play` of
+ * `0x10000000 | index` (stage 5 alone uses `bgm_entry_play`). The walker used to record only `0x5F`, so a
  * seek past that `se_play` had no music to restore, and the player covered
  * for it by starting a track "by convention" at load. This asserts the
  * script's own first track, that the walker records it across a seek, that a
@@ -1229,8 +1236,11 @@ for (const stage of STAGES) {
       }
     }
     const want = script.bgm?.stage_track?.id ?? null;
-    check(`${name}: the entry block starts the stage's own track at step 2`,
-          !!first && first[1] === 2 && first[3] === want,
+    // Step 2 by the exe's index -- step 3 in stage 1, whose entry step 1 is a
+    // lone `advance_step` and whose block 0 opens with the com step.
+    const at = name.startsWith("stage1") ? 3 : 2;
+    check(`${name}: the entry block starts the stage's own track at step ${at}`,
+          !!first && first[1] === at && first[3] === want,
           first ? `${first.slice(0, 3).join("/")} plays 0x${first[3].toString(16)}`
                   + `, stage_track 0x${(want ?? 0).toString(16)}`
                 : "no BGM id in the entry block");

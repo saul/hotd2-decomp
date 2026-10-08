@@ -17,6 +17,7 @@ import type { Rng } from "../../core/rng";
 import type { CharacterBone, CharacterType } from "../../bundle";
 import { ActorFlag, DamageZone, ZombieFlag2, type Actor } from "../actor";
 import { AppState, G } from "../globals";
+import { GameMode } from "../game_mode";
 import { CameraBlockYaw } from "../camera/view";
 import { SpawnClass } from "../spawn_class";
 import { ZombieState } from "../class30/states";
@@ -868,6 +869,22 @@ export function ResolveHit(obj: Actor, bone: number,
 
   // `damage = table + DamageRankModifier(bone)`, floored at zero.
   let damage = Math.max(0, (step?.[2] ?? 0) + DamageRankModifier(b));
+  // Original Mode's weapon (`004094C8`..`00409527`). BULLET BLOW's -1.0
+  // (`CMP [EDX*4 + 0x9a224c], 0xbf800000`) makes the damage the actor's own
+  // hit points, `obj+0x11C`: one hit kills whatever the tables say. Any
+  // other scale multiplies (`FILD` / `FMUL [EDX+0xC]`), by 4.0 again under
+  // LIFE 1/4 (`CMP AL, 1` on `0x009C88A9`, `FMUL [0x004C4CA0]`), and
+  // `__ftol` truncates.
+  if (G.g_GameMode === GameMode.Original) {
+    const scale = G.g_original_weapon_damage_scale[player] ?? 1;
+    if (scale === -1) {
+      damage = obj.hp;
+    } else {
+      let x = damage * Math.fround(scale);
+      if (G.g_original_quarter_life === 1) x *= 4.0;
+      damage = Math.trunc(x);
+    }
+  }
 
   let result = HitResultCode.None;
   let gore = false;

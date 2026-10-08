@@ -9,7 +9,7 @@ import { UpdateSceneViewAndLight } from "../../src/game/camera/view";
 import { MotionFlag } from "../../src/game/actor";
 import { ScoreAddForPlayer } from "../../src/game/combat/score";
 import { G, HIT_SLOT_NONE, ResetGameGlobals } from "../../src/game/globals";
-import { NULL_HOST } from "../../src/game/host";
+import { NULL_HOST, type GameHost } from "../../src/game/host";
 import { SetGameTables } from "../../src/game/tables";
 import { QueryGroundHeightAt } from "../../src/game/coli";
 import { ActorFlag } from "../../src/game/actor";
@@ -26,7 +26,9 @@ import {
 import { CivilianLeaveField } from "../../src/game/class10/update";
 import type { CivilianCmdJson, CivilianItemJson } from "../../src/bundle/scene";
 import { vec3, type Vec3 } from "../../src/game/vec";
-import { MatIdentity, MatrixTranslate } from "../../src/game/matrix";
+import {
+  MatCopy, MatIdentity, MatrixRotateY, MatrixTranslate, type Mat,
+} from "../../src/game/matrix";
 import { CivilianHitMarkersTick } from "../../src/game/class10/hit_marker";
 import { ResolveHit } from "../../src/game/combat/resolve_hit";
 import {
@@ -1955,5 +1957,204 @@ console.log("\nclass 0x10, the mouth -- op 0x25 and CivilianDrawBonePart:");
     check("a civilian not drawn does not step her mouth",
           a.civ?.mouthFrame === 3 && a.civ?.mouthFrames === 37,
           `cursor ${a.civ?.mouthFrame} frames ${a.civ?.mouthFrames}`);
+  }
+}
+
+console.log("\nclass 0x10, the head look -- ops 0x23/0x24 and CivilianDrawBonePart:");
+{
+  const rng = new Rng(9);
+  const cmd = (op: CivilianOp, ...args: number[]): CivilianCmdJson =>
+    ({ op, args });
+  // Bone 1 turned `0x1000` about y at (0, 8, 0), and the head two above it
+  // as the clip posed it: no turn of its own off bone 1, so the pose's
+  // angles are zero and the turn is all offset.
+  const B1 = MatIdentity();
+  MatrixTranslate(B1, 0, 8, 0);
+  MatrixRotateY(B1, 0x1000);
+  const HEAD = MatCopy(MatIdentity(), B1);
+  MatrixTranslate(HEAD, 0, 2, 0);
+  const CIV = 0x4000;
+  const kidHead = vec3(0, 0, 0);
+  const host: GameHost = {
+    ...NULL_HOST,
+    boneMatrix: (at, bone, out) => {
+      if (at !== CIV || bone !== 1) return false;
+      MatCopy(out as Mat, B1);
+      return true;
+    },
+    bonePoseMatrix: (at, bone, out) => {
+      if (at !== CIV || bone !== 2) return false;
+      MatCopy(out as Mat, HEAD);
+      return true;
+    },
+    boneWorld: (at, bone, out) => {
+      if (at === CIV || bone !== 2) return false;
+      out.x = kidHead.x; out.y = kidHead.y; out.z = kidHead.z;
+      return true;
+    },
+    cameraMatrices: (w2v, v2w) => {
+      MatCopy(w2v as Mat, MatIdentity());
+      MatCopy(v2w as Mat, MatIdentity());
+      return true;
+    },
+  };
+  const scene = (scripts: CivilianCmdJson[][], children: number[] = []) => {
+    ResetGameGlobals();
+    EnterPlay();
+    G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    G.g_scene_state_major = SCENE_MAJOR_PLAYING;
+    SetGameTables(CHARS, undefined, undefined, undefined, undefined, {
+      entries: [0], scripts, items: [],
+      spawns: { "16384": {
+        charType: 1, script: 0, removePath: -1, removeFrame: 0,
+        removeDelay: 0,
+        children: children.map((at) => ({
+          at, class: 0x30, charType: 1,
+          pos: [0, 0, 0] as [number, number, number], yaw: 0, hp: 1,
+        })),
+      } },
+    });
+    const kids = children.map((at) => {
+      const k = spawnZombie(at, 1, "captor");
+      k.visible = true;
+      return k;
+    });
+    const a = ActorSpawn(CIV, SpawnClass.Civilian, 1, "civilian", undefined,
+                         rng);
+    a.visible = true;
+    a.pos = vec3(0, 0, 0);
+    const events = new Events();
+    const step = (n: number, h: GameHost = host) => {
+      for (let i = 0; i < n; i++) {
+        CivilianUpdate(a, { dt: 1 / 60, rng, host: h, events });
+      }
+    };
+    return { a, kids, step };
+  };
+  // A point 1001.5 above the head and 100 away at world heading `0x2000`:
+  // in bone 1's frame, turned `0x1000`, the heading is `0x1000`, and the
+  // height less the hook's 1.5 is a thousand -- far past the `-0x2000` the
+  // pitch may reach. Mode 1 looks fifteen above the eye, so the eye is put
+  // fifteen below it.
+  const S = Math.SQRT1_2 * 100;
+  const lookAt = () => {
+    G.g_camera_eye.x = S;
+    G.g_camera_eye.y = 10 + 1001.5 - 15;
+    G.g_camera_eye.z = S;
+  };
+
+  {
+    const { a, step } = scene([[cmd(CivilianOp.Wait, 0),
+                                cmd(CivilianOp.SetHeadLook, 1),
+                                cmd(CivilianOp.Wait, 0), cmd(CivilianOp.End)]]);
+    lookAt();
+    step(4);
+    const c = a.civ!;
+    check("op 0x23 1: the head eases 0x100 a drawn frame toward the eye",
+          c.headLook === 1 && c.headLookPitch === -0x400
+          && c.headLookYaw === 0x400 && c.headLookRoll === 0
+          && c.headLookTurned,
+          `mode ${c.headLook} pitch ${c.headLookPitch} yaw ${c.headLookYaw} `
+          + `roll ${c.headLookRoll} turned ${c.headLookTurned}`);
+    step(40);
+    check("...to the yaw in bone 1's frame, and the pitch held at its -0x2000 limit",
+          c.headLookPitch === -0x2000 && Math.abs(c.headLookYaw - 0x1000) <= 1,
+          `pitch ${c.headLookPitch} yaw ${c.headLookYaw}`);
+    step(1, NULL_HOST);
+    check("a host that cannot pose her holds the look, and the record is the clip's",
+          c.headLookPitch === -0x2000 && !c.headLookTurned,
+          `pitch ${c.headLookPitch} turned ${c.headLookTurned}`);
+  }
+
+  // Op 0x23 6 is a return: the offsets ease home at 0x100 a frame, and the
+  // frame all three reach zero the mode drops to 0 and the head is left as
+  // the clip posed it -- the pitch's 0x2000 is the last to get there.
+  {
+    const { a, step } = scene([[cmd(CivilianOp.Wait, 0),
+                                cmd(CivilianOp.SetHeadLook, 1),
+                                cmd(CivilianOp.Wait, 0), cmd(CivilianOp.End)],
+                               [cmd(CivilianOp.Wait, 0),
+                                cmd(CivilianOp.SetHeadLook, 6),
+                                cmd(CivilianOp.Wait, 0), cmd(CivilianOp.End)]]);
+    lookAt();
+    step(44);
+    CivilianRunScript(a, 1, 0, { dt: 1 / 60, rng, host, events: new Events() });
+    const c = a.civ!;
+    step(31);
+    check("op 0x23 6 eases the head home, a frame short of it after 31",
+          c.headLook === 6 && c.headLookPitch === -0x100 && c.headLookYaw === 0
+          && c.headLookTurned,
+          `mode ${c.headLook} pitch ${c.headLookPitch} yaw ${c.headLookYaw}`);
+    step(1);
+    check("...and on the 32nd the mode is 0 and the record is not rewritten",
+          c.headLook === 0 && c.headLookPitch === 0 && !c.headLookTurned,
+          `mode ${c.headLook} pitch ${c.headLookPitch} turned ${c.headLookTurned}`);
+  }
+
+  // Op 0x24 5: the point is in her own frame. Turned `0x6000`, her
+  // `(0, 11.5, 100)` is level with the head at world heading `0x6000`, and
+  // `0x5000` off bone 1's own `0x1000` -- past the yaw's `0x3800`.
+  {
+    const { a, step } = scene([[cmd(CivilianOp.Wait, 0),
+                                { op: CivilianOp.SetHeadLookTarget,
+                                  args: [5, 0x0056e028],
+                                  point: [0, 11.5, 100] },
+                                cmd(CivilianOp.Wait, 0), cmd(CivilianOp.End)]]);
+    a.yaw = 0x6000;
+    step(60);
+    const c = a.civ!;
+    check("op 0x24 5: a point in her own frame, the yaw held at its 0x3800 limit",
+          c.headLook === 5 && c.headLookTarget === 0x0056e028
+          && c.headLookYaw === 0x3800
+          && Math.abs(c.headLookPitch) <= 1,
+          `mode ${c.headLook} yaw ${c.headLookYaw} pitch ${c.headLookPitch}`);
+  }
+
+  // Op 0x23 2 takes the first child; with none it writes 0.
+  {
+    const { a } = scene([[cmd(CivilianOp.Wait, 0),
+                          cmd(CivilianOp.SetHeadLook, 2),
+                          cmd(CivilianOp.Wait, 0), cmd(CivilianOp.End)]]);
+    check("op 0x23 2 with no child writes mode 0",
+          a.civ?.headLook === 0, `mode ${a.civ?.headLook}`);
+  }
+  // With a captor the head looks at the captor's head, and when the captor
+  // is despawned -- its flags word's bit 0 gone -- the head goes home.
+  {
+    const { a, kids, step } = scene([[cmd(CivilianOp.Wait, 0),
+                                      cmd(CivilianOp.SetHeadLook, 2),
+                                      cmd(CivilianOp.Wait, 0),
+                                      cmd(CivilianOp.End)]], [0x5000]);
+    const c = a.civ!;
+    kidHead.x = S; kidHead.y = 10 + 1.5; kidHead.z = S;
+    step(3);
+    check("op 0x23 2 looks at the first child's head",
+          c.headLook === 2 && c.headLookTarget === 0x5000
+          && c.headLookYaw === 0x300 && c.headLookPitch === 0,
+          `mode ${c.headLook} target ${c.headLookTarget.toString(16)} `
+          + `yaw ${c.headLookYaw} pitch ${c.headLookPitch} `
+          + `kid flags ${(kids[0].flags >>> 0).toString(16)}`);
+    ActorDespawn(kids[0]);
+    step(1);
+    check("...and a despawned captor sends the head home",
+          c.headLook === 6 && c.headLookYaw === 0x200,
+          `mode ${c.headLook} yaw ${c.headLookYaw}`);
+  }
+
+  // Both shot arms send a looking head home.
+  {
+    const { a, step } = scene([[cmd(CivilianOp.Wait, 0),
+                                { op: CivilianOp.SetOnShot, args: [0],
+                                  scripts: [1] },
+                                cmd(CivilianOp.SetHeadLook, 1),
+                                cmd(CivilianOp.Wait, 0), cmd(CivilianOp.End)],
+                               [cmd(CivilianOp.Wait, 0),
+                                cmd(CivilianOp.Wait, 0), cmd(CivilianOp.End)]]);
+    lookAt();
+    step(2);
+    a.flags |= ActorFlag.Dead;
+    step(1, NULL_HOST);
+    check("a shot civilian's head look becomes 6",
+          a.civ?.headLook === 6, `mode ${a.civ?.headLook}`);
   }
 }

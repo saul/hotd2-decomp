@@ -14,8 +14,8 @@ import {
 } from "../../src/game/carried_prop";
 import { CarriedPropIsOnScreen } from "../../src/game/combat/permits";
 import {
-  MatIdentity, MatrixRotateX, MatrixRotateY, MatrixRotateZ, MatrixToEulerZYX,
-  VecAimXAxisYThenZ,
+  MatIdentity, MatrixGetAngles, MatrixRotateX, MatrixRotateY, MatrixRotateZ,
+  MatrixToEulerBams, MatrixToEulerZYX, RotXZY, RotYXZ, VecAimXAxisYThenZ,
 } from "../../src/game/matrix";
 import { CameraTargetsClear, waitTargetsClear }
   from "../../src/script/waits/targets";
@@ -30,7 +30,6 @@ import { SpawnClass } from "../../src/game/spawn_class";
 import { syncCharacterSpawns, type CharacterPool } from "../../src/app/systems";
 import {
   CARRIER_RIDERS_DONE_BIT, CarrierBakeWorldPose, CarrierInverseTransformPoint,
-  MatrixGetAngles, MatrixToEulerBams, RotXZY, RotYXZ,
 } from "../../src/game/carrier";
 import { bamsDelta } from "../../src/core/bams";
 import { GameMode } from "../../src/game/game_mode";

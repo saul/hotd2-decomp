@@ -18,7 +18,7 @@
  *  * **`CivilianDrawBonePart`'s arm is the one ported**: the `6` it compares
  *    the row with, the row and count loads at `0x0056B950`/`0x0056B954`
  *    eight bytes a row, the `SUB ECX, 2` that picks the hand-over and the
- *    `3` it hands over to. `game/class10/mouth.ts`.
+ *    `3` it hands over to. `game/class10/head.ts`.
  *  * **The six rows** are pointers into the image with a positive count, and
  *    `faces.ts`'s `civilianMouthTables` returns them byte for byte; the two
  *    words after row 5 are not a row. `civilians.md`'s table.
@@ -49,7 +49,7 @@ import {
 } from "../../src/hod2lib/faces";
 import {
   CIVILIAN_HEAD_BONE, CIVILIAN_MOUTH_HANDOFF_FROM, CIVILIAN_MOUTH_HANDOFF_TO,
-} from "../../src/game/class10/mouth";
+} from "../../src/game/class10/head";
 import { CIVILIAN_MOUTH_NONE } from "../../src/game/class10/state";
 import {
   FACE_BLINK_BASES, FACE_MODE_TALK, FACE_TALK_BASES, FACE_TALK_TWO_BASE,

@@ -717,6 +717,13 @@ export class ExeTables {
           } else if (op === 6) {
             d.point = this.civPoint(args[0]);
           }
+          // Op 0x24's second dword is `sub+0x90`, and the head look's two
+          // point modes read it as three floats: `MOV EDX,[EAX+0x90]; MOV
+          // EAX,[EDX]` at `0x0048D3DA` (4) and `0x0048D3F5` (5). The other
+          // modes read it as an object or not at all.
+          if (op === 0x24 && (args[0] === 4 || args[0] === 5)) {
+            d.point = this.civPoint(args[1]);
+          }
           if (op === 5) d.radius = asFloatBits(args[1]);
           if (op === 0x16) d.radius = asFloatBits(args[0]);
           // Op 0x18 copies six **dwords** -- `MOV EDX,[EAX]; MOV [ECX],EDX`

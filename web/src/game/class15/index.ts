@@ -32,7 +32,6 @@
  */
 import type { Actor } from "../actor";
 import { CameraBlockYaw } from "../camera/view";
-import { MatrixToEulerBams, type Rot3 } from "../carrier";
 import { PropBehaviour } from "../class13";
 import { WaterFieldSampleHeight } from "../class16";
 import { NoOpStub } from "../class45";
@@ -42,8 +41,8 @@ import { PropStripKind, SpawnPropStripEffect } from "../effects/prop_strip";
 import { G } from "../globals";
 import {
   FtolS16, MatIdentity, MatrixLoadIdentity, MatrixRotateAxis, MatrixRotateX,
-  MatrixRotateY, MatrixRotateZ, MatrixTransformPoint, MatrixTranslate,
-  RADIANS_TO_BAMS, type Mat,
+  MatrixRotateY, MatrixRotateZ, MatrixToEulerBams, MatrixTransformPoint,
+  MatrixTranslate, RADIANS_TO_BAMS, type Mat, type Rot3,
 } from "../matrix";
 import {
   registerClass, type ActorDebug, type ClassFrame, type ClassHandler,

@@ -43,7 +43,7 @@ import { Boss4SwapSlots } from "../game/class19/slots";
 import { HumanoidHookDrawSlots } from "../game/class25/state";
 import { FACE_MODE_TALK, HumanoidFaceSlots } from "../game/class25/face";
 import { CIVILIAN_HEAD_BONE, CIVILIAN_MOUTH_HANDOFF_FROM,
-         CIVILIAN_MOUTH_HANDOFF_TO } from "../game/class10/mouth";
+         CIVILIAN_MOUTH_HANDOFF_TO } from "../game/class10/head";
 import type { Character } from "./charbuild";
 import { BODY_CREATURE_HOST_CLIPS, CLASS20_DEATH_MOTION,
          CLASS20_IDLE_MOTIONS, CLASS21_FREED_MOTION, CLASS30_DEATH_CLIPS,

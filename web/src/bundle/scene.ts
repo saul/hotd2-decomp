@@ -688,7 +688,11 @@ export interface CivilianCmdJson {
   args: number[];
   /** Indices into {@link CiviliansJson.scripts} for a pointer operand. */
   scripts?: number[];
-  /** Ops 5, 6 and 0x26: the three floats the operand points at. */
+  /**
+   * Ops 5, 6 and 0x26: the three floats the operand points at. Op 0x24 in
+   * the head look's point modes (4 and 5): the three its second operand
+   * points at.
+   */
   point?: [number, number, number] | null;
   /** Op 5's approach radius, op 0x16's target scale — the operand as a float. */
   radius?: number;

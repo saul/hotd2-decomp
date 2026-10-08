@@ -43,7 +43,7 @@
 import type { Rng } from "../../core/rng";
 import { MotionFlag, type Actor, type HumanoidActor } from "../actor";
 import { ActorBindPartList } from "../attachments";
-import { MatrixToEulerBams, RotZYX } from "../carrier";
+import { MatrixToEulerBams, RotZYX } from "../matrix";
 import { ActorSetMotion, ActorSetMotionBlended } from "../class30/motion_cue";
 import { ScriptedHumanoidDebug } from "./debug";
 import { SpawnBloodSpray } from "../effects/blood";

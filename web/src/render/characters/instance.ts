@@ -6,7 +6,7 @@
  * whose state is the port's and goes in the snapshot — or three.js nodes,
  * which are the renderer's and do not.
  */
-import type { Group, Mesh, Object3D } from "three";
+import type { Group, Matrix4, Mesh, Object3D } from "three";
 import type { Actor } from "../../game/actor";
 import type { BakedMotion, CharacterType } from "../../bundle";
 import type { CelRunNode } from "./cels";
@@ -115,6 +115,13 @@ export interface Instance {
    * `headAimed` and yaw. See `render/characters/head_aim.ts`.
    */
   headTurn?: HeadTurn;
+  /**
+   * A civilian's head as this frame posed it, before `CivilianDrawBonePart`
+   * (`FUN_0048D1F0`) stored its turn over it: the record the hook reads,
+   * which `GameHost.bonePoseMatrix` hands the port. See
+   * `render/characters/civilian_head.ts`.
+   */
+  headPose?: Matrix4;
   /**
    * The exporter's `part<i>_<slot>` nodes — the vertex-blended parts, which
    * are not bones — by part index. Found once by name; render bookkeeping.

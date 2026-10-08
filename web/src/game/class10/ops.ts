@@ -185,24 +185,25 @@ export enum CivilianOp {
   /** Queue a list of `(id, delay)` pairs. */
   QueueSoundList = 0x22,
   /**
-   * `sub+0x8C = cmd[1]` (`0x0048C044`), and for a 2, `sub+0x90 = ` the first
-   * child, or `sub+0x8C = 0` with none: **where the head looks**. Its reader
-   * is `CivilianDrawBonePart` (`FUN_0048D1F0`)'s bone-2 arm, which turns the
-   * head toward the camera's eye (1), that child (2), the camera's target
-   * (3) or a point (4, 5), clamped and eased `0x100` a frame. That arm is not
-   * ported, so neither is this op's store. It was `SetAttachMode`.
+   * `sub+0x8C = cmd[1]` (`0x0048C044`), a {@link CivilianHeadLook}, and for
+   * a 2, `sub+0x90 = sub+0x60[0]`, the first child, while `sub+0x1E` counts
+   * one, or `sub+0x8C = 0` with none: **where the head looks**. Its reader is
+   * `CivilianDrawBonePart` (`FUN_0048D1F0`)'s bone-2 arm, `class10/head.ts`.
+   * It was `SetAttachMode`.
    */
   SetHeadLook = 0x23,
   /**
    * `sub+0x8C = cmd[1]`, `sub+0x90 = cmd[2]` (`0x0048C08C`): the head look
-   * with its target given. It was `SetAttachTarget`.
+   * with its target given -- in the shipped streams always mode 5 and a
+   * pointer to three floats in `.data`, which the bundle carries as the
+   * command's `point`. It was `SetAttachTarget`.
    */
   SetHeadLookTarget = 0x24,
   /**
    * **The civilian talks.** `sub+0xA4 = cmd[1]` frames, `sub+0xA8 = cmd[2]`,
    * a row of `g_civilian_mouth_tables` (`0x0056B950`), and `sub+0xA0 = 0`
    * (`0x0048C0B0`..`0x0048C0D0`, `EBP` zero). `CivilianDrawBonePart`
-   * (`FUN_0048D1F0`) is what reads all three: see `class10/mouth.ts`. It was
+   * (`FUN_0048D1F0`) is what reads all three: see `class10/head.ts`. It was
    * `SetPairA`, "which nothing read reads", before the hook was read.
    */
   SetMouth = 0x25,
@@ -421,6 +422,49 @@ export enum CivilianTarget {
   Camera = -1,
   /** The actor's own position mirrored through the camera: turn away. */
   AwayFromCamera = -2,
+}
+
+/**
+ * `sub+0x8C`: what the head looks at, which ops {@link CivilianOp.SetHeadLook}
+ * and {@link CivilianOp.SetHeadLookTarget} write and `CivilianDrawBonePart`
+ * (`FUN_0048D1F0`) switches on -- `DEC ECX; CMP ECX, 4; JA 0x0048D4E0; JMP
+ * [ECX*4 + 0x0048D994]` at `0x0048D2C6`, five cells for 1 to 5, everything
+ * else falling past the switch with no target of its own. `[proved]`
+ *
+ * The shipped streams write 1, 2, 3, 5 and 6 (`ExeTables.civilianScripts`:
+ * seventeen 1s, three 2s, two 3s, ten 6s and two 5s by op `0x24`).
+ */
+export enum CivilianHeadLook {
+  /** The arm does not run, and the head is drawn as the clip posed it. */
+  Off = 0,
+  /**
+   * `0x0048D2D7`: `g_camera_eye` with `0x004C4398` -- 15.0 -- on its `y`:
+   * the camera's own lens, as the class-0x30 head aim's point is.
+   */
+  CameraEye = 1,
+  /**
+   * `0x0048D2FC`: the head of the child `sub+0x90` names -- see
+   * `CivilianDrawBonePart` for which matrix, and for the two words that end
+   * it.
+   */
+  Captor = 2,
+  /** `0x0048D3B8`: `g_camera_lookat_target` (`0x009C6FA8`). */
+  CameraTarget = 3,
+  /** `0x0048D3DA`: the three floats `sub+0x90` points at, in the world. */
+  Point = 4,
+  /**
+   * `0x0048D3F5`: the same three floats in the civilian's own frame -- and
+   * on a carrier, the carrier's under it.
+   */
+  LocalPoint = 5,
+  /**
+   * **Back to the clip's pose, not a hold.** No target: the arm wants the
+   * angles the pose already has, eases the offsets home, and writes
+   * {@link CivilianHeadLook.Off} once all three are zero. The draw hook
+   * writes it when the captor is gone and both of `CivilianUpdate`'s shot
+   * arms write it over any other mode.
+   */
+  Home = 6,
 }
 
 /**

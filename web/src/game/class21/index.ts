@@ -55,7 +55,7 @@ import type { Rng } from "../../core/rng";
 import type { Actor } from "../actor";
 import { ActorFlag, MotionFlag } from "../actor";
 import { ReleaseCameraEnemySlot } from "../camera/slots";
-import { MatrixGetAngles, RotZYX } from "../carrier";
+import { MatrixGetAngles, RotZYX } from "../matrix";
 import { ActorSetMotionBlended } from "../class30/motion_cue";
 import { ScoreAddForPlayer } from "../combat/score";
 import { ActorPlayHitVoice, ActorVoice } from "../combat/voice";

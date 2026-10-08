@@ -11,7 +11,7 @@
  * side. The fields the port does not use yet are still named and still carry
  * their offset: an unnamed gap is where the next wrong reading goes.
  */
-import { CivilianFrameHook, CivilianSphereMode } from "./ops";
+import { CivilianFrameHook, CivilianHeadLook, CivilianSphereMode } from "./ops";
 
 /**
  * `sub+0xA8`'s "no mouth": `CivilianDrawBonePart` (`FUN_0048D1F0`) skips its
@@ -177,6 +177,36 @@ export interface CivilianState {
   /** +0x84 / +0x88 the sound queued to play, and the frames left before it. */
   soundId: number;
   soundDelay: number;
+  /** +0x8C what the head looks at, a {@link CivilianHeadLook}. */
+  headLook: number;
+  /**
+   * +0x90 what it looks at: for {@link CivilianHeadLook.Captor} the child,
+   * by spawn address; for the two point modes the operand op 0x24 stored, an
+   * address in the exe's `.data`, whose three floats are
+   * {@link headLookPoint}.
+   */
+  headLookTarget: number;
+  /**
+   * Not the engine's: the three floats {@link headLookTarget} points at in
+   * the point modes. The port cannot follow an exe address, so op 0x24
+   * copies them out of the command, where the exporter put them.
+   */
+  headLookPoint: { x: number; y: number; z: number };
+  /**
+   * +0x94 / +0x98 / +0x9C how far the head is turned off the clip's pose,
+   * pitch, yaw and roll, BAMS. `AngleApproachInPlace` (`FUN_0048D9B0`) steps
+   * them, and a step adds to the whole dword: they are unwrapped angles and
+   * are tested against zero as ints. `CivilianInit` zeroes all three.
+   */
+  headLookPitch: number;
+  headLookYaw: number;
+  headLookRoll: number;
+  /**
+   * Not the engine's: **this frame's draw rewrote bone 2's record** with the
+   * turn. The renderer's cue, as `HeadAimWords.headAimed` is class 0x30's:
+   * `CivilianUpdate` drops it before the node walk and the hook raises it.
+   */
+  headLookTurned: boolean;
   /**
    * +0xA0 the mouth's cursor into its cel list, which
    * `CivilianDrawBonePart` (`FUN_0048D1F0`) reads as `% count` and steps
@@ -228,6 +258,9 @@ export function makeCivilianState(): CivilianState {
     scaleTarget: 1, scaleStep: 0, sphereCentreMode: CivilianSphereMode.Bone1,
     deathVoice: 0xff,
     soundId: 0, soundDelay: 0,
+    headLook: CivilianHeadLook.Off, headLookTarget: 0,
+    headLookPoint: { x: 0, y: 0, z: 0 },
+    headLookPitch: 0, headLookYaw: 0, headLookRoll: 0, headLookTurned: false,
     mouthFrame: 0, mouthFrames: 0, mouthTable: CIVILIAN_MOUTH_NONE,
     cameraBone: 2,
     moveFrames: 0, moveTo: { x: 0, y: 0, z: 0 },

@@ -16,7 +16,7 @@ import type { ClassFrame } from "../registry";
 import { GameMode } from "../game_mode";
 import { vec3 } from "../vec";
 import { SpawnCivilianHitMarker } from "./hit_marker";
-import { CivilianTarget, CivilianWait } from "./ops";
+import { CivilianHeadLook, CivilianTarget, CivilianWait } from "./ops";
 import { CivilianRunScript } from "./script";
 
 /** What a shot costs — `ScoreAddForPlayer`'s operand. */
@@ -168,16 +168,23 @@ function CivilianShotStops(sub: NonNullable<Actor["civ"]>): void {
 }
 
 /**
- * Both arms' tail: the death voice, then Training's `g_training_out`
- * (`0x009A2234 = 1` when `g_GameMode` is 2, `0x0048AB75` and `0x0048ACFB`).
+ * Both arms' tail: the death voice, then her head sent home, then Training's
+ * `g_training_out` (`0x009A2234 = 1` when `g_GameMode` is 2, `0x0048AB75` and
+ * `0x0048ACFB`).
  *
- * Between the two each arm also sends her head back to rest when it was
- * looking at anything (`CMP [EAX+0x8C], EBX; JZ; MOV [EAX+0x8C], 6`); the
- * port has no head-look state to write, as `docs/UNPORTED.md` records.
+ * The head: `CMP dword ptr [EAX + 0x8c], EBX; JZ; MOV dword ptr [EAX +
+ * 0x8c], 0x6` at `0x0048AB5E` and `0x0048ACE4`, `EBX` the routine's zero. A
+ * head looking at anything -- whatever the on-shot script just pointed it at
+ * -- eases back to the clip's pose ({@link CivilianHeadLook.Home}); one that
+ * was not stays off.
  *
  * `[port-only]` as a function, for the same reason as the stores.
  */
 function CivilianShotTail(obj: Actor, f: ClassFrame): void {
   CivilianPlayDeathVoice(obj, f.events);
+  const sub = obj.civ;
+  if (sub && sub.headLook !== CivilianHeadLook.Off) {
+    sub.headLook = CivilianHeadLook.Home;
+  }
   if (G.g_GameMode === GameMode.Training) G.g_training_out = 1;
 }

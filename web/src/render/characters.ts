@@ -103,6 +103,8 @@ import { clearBoneCels, syncBoneCels } from "./characters/cels";
 import { alphaGatesWholeActor, applyDrawGates }
   from "./characters/draw_gates";
 import { applyHeadAim } from "./characters/head_aim";
+import { applyCivilianHeadLook } from "./characters/civilian_head";
+import { CIVILIAN_HEAD_BONE } from "../game/class10/head";
 import { clearHeldItems, syncHeldItems } from "./characters/held_items";
 import {
   clearHumanoidHookDraws, syncHumanoidHookDraws,
@@ -607,6 +609,10 @@ export class CharacterLayer implements System {
         this.poser.pose(inst);
         poseHordeJaw(inst, this.poser);
         syncJudgmentWings(this.goreParts, inst, this.poser);
+        // `CivilianDrawBonePart`'s turn, stored over the head's record: on
+        // the pose, before anything hangs from the bone. See
+        // `render/characters/civilian_head.ts`.
+        applyCivilianHeadLook(inst);
       }
       syncHordeMirror(inst, true);
       // `a.removed` and `a.boneSlot` only grow within a life. Either one
@@ -1321,6 +1327,20 @@ export class CharacterLayer implements System {
   }
 
   /**
+   * One bone's world matrix as the pose left it, for `CivilianDrawBonePart`:
+   * a civilian's head before its turn, every other bone as
+   * {@link boneMatrix} has it. See `GameHost.bonePoseMatrix`.
+   */
+  bonePoseMatrix(at: number, bone: number, out: number[]): boolean {
+    const inst = this.instances.find((i) => i.at === at);
+    if (bone === CIVILIAN_HEAD_BONE && inst?.headPose) {
+      for (let i = 0; i < 16; i++) out[i] = inst.headPose.elements[i];
+      return true;
+    }
+    return this.boneMatrix(at, bone, out);
+  }
+
+  /**
    * One bone's drawn model on a hierarchy this layer handed out with
    * {@link claim} -- a player body's hand, `PlayerBodySetHandSlot`'s slot.
    * `gore` is the claimant's record of what it laid on; `own` is the
@@ -1392,6 +1412,7 @@ export class CharacterLayer implements System {
         this.poser.pose(inst);
         poseHordeJaw(inst, this.poser);
         syncJudgmentWings(this.goreParts, inst, this.poser);
+        applyCivilianHeadLook(inst);
       }
       syncHordeMirror(inst, inst.root.visible);
     }

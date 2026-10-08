@@ -23,7 +23,7 @@ import {
   type HumanoidProgram,
 } from "../../src/game/class25";
 import { HumanoidRoutine } from "../../src/game/class25/state";
-import { RotXZY, RotZYX } from "../../src/game/carrier";
+import { RotXZY, RotZYX } from "../../src/game/matrix";
 import {
   check, CHARS, slotsShown, EnterPlay, JETTY_CHARS, jettyScene, TYPE,
 } from "./harness";

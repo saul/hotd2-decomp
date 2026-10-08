@@ -24,8 +24,8 @@ import { CivilianAddHeldItem, CivilianAddPickedItem, CivilianPickHeldItem }
   from "./items";
 import { CivilianCallHookInstall } from "./hooks";
 import { ActorStorePlayCursor } from "../motion";
-import { AsFloat, CivilianFrameHook, CivilianHookInstall, CivilianOp,
-         CivilianWait, CmdAt } from "./ops";
+import { AsFloat, CivilianFrameHook, CivilianHeadLook, CivilianHookInstall,
+         CivilianOp, CivilianWait, CmdAt } from "./ops";
 import { CivilianApplyMotionPose } from "./pose";
 
 /** What a rescue pays — `ScoreAddForPlayer`'s operand. */
@@ -249,9 +249,11 @@ export function CivilianRunScript(obj: Actor, script: number, pc: number,
           G.g_bHudShutterState = a[0] & 0xff;
         }
         break;
-      // The head look: its one reader, `CivilianDrawBonePart`'s bone-2 turn,
-      // is not ported, so its two words are not kept. See
-      // {@link CivilianOp.SetHeadLook}.
+      // The head look, which `CivilianDrawBonePart`'s bone-2 arm reads
+      // (`class10/head.ts`). `MOV [EAX+0x8c], EDX` at `0x0048C047`; for a 2,
+      // `CMP word ptr [EAX+0x1e], BP` -- the child count, `EBP` the routine's
+      // zero -- and the first child into `sub+0x90` at `0x0048C069`, or
+      // `MOV [EAX+0x8c], EBP` at `0x0048C079` with none.
       //
       // **These used to fall through into `SetScale`'s body**, with op 0x25,
       // and write its operand into `obj.scale`, which is `model+0x116C` and
@@ -261,7 +263,21 @@ export function CivilianRunScript(obj: Actor, script: number, pc: number,
       // a denormal around 1e-45 and every step the clip authored was
       // multiplied to nothing.
       case CivilianOp.SetHeadLook:
+        sub.headLook = a[0];
+        if (sub.headLook === CivilianHeadLook.Captor) {
+          if (sub.childCount !== 0) sub.headLookTarget = sub.children[0];
+          else sub.headLook = CivilianHeadLook.Off;
+        }
+        break;
+      // `MOV [EAX+0x8c], ECX` / `MOV [EAX+0x90], EDX` at `0x0048C092` and
+      // `0x0048C0A0`: both words as they are. The floats a point mode's
+      // address holds came across with the command.
       case CivilianOp.SetHeadLookTarget:
+        sub.headLook = a[0];
+        sub.headLookTarget = a[1];
+        if (c.point) {
+          sub.headLookPoint = { x: c.point[0], y: c.point[1], z: c.point[2] };
+        }
         break;
       // The mouth: `MOV [EAX+0xa4], ECX` / `MOV [EAX+0xa8], EDX` /
       // `MOV [ECX+0xa0], EBP` at `0x0048C0B6`..`0x0048C0D0`, `EBP` the zero

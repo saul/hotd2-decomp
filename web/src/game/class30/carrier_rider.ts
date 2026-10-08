@@ -32,9 +32,9 @@ import type { Events } from "../../core/events";
 import { BAMS_TO_RAD_F64 } from "../../core/bams";
 import { ActorFlag, type ZombieActor } from "../actor";
 import { TurnActorAwayFromPoint } from "../actor_turn";
+import { MatrixGetAngles, MatrixToEulerBams, RotXZY, RotYXZ } from "../matrix";
 import {
-  CarrierBakeWorldPose, CarrierInverseTransformPoint, MatrixGetAngles,
-  MatrixToEulerBams, RotXZY, RotYXZ,
+  CarrierBakeWorldPose, CarrierInverseTransformPoint,
 } from "../carrier";
 import { QueryGroundHeightAt } from "../coli";
 import { SpawnSpriteEffect } from "../effects/sprite";

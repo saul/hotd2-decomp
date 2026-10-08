@@ -1107,6 +1107,22 @@ answer for the `Init` walk). And a one-frame transient is invisible to
 screenshots taken at intervals: step the page under `?drive=1` and read a
 drawn quantity -- `Actor.lookAt` is bone 1 as last drawn -- every tick.
 
+
+**L116 -- The port has no world convention: its coordinates are the engine's,
+so a sign is an instruction.** `MouseSetVelocityFromYaw` negated both terms of
+`(sin yaw, cos yaw) * 0.4` under a note calling it "the port's world
+convention, the same `(-sin, -cos)` class 0x30's facing uses". All three
+copies in the exe are `FSIN`/`FCOS` with no `FCHS`, and the draw's
+`MatrixRotateY` carries the model's `+Z` onto that same vector, so every mouse
+in the port ran backwards -- reported as "sometimes", because a wanderer
+pauses and mostly crosses the view side-on -- and every Original Mode trigger
+fled away from the bound that ends its flight. The routes test had set a yaw
+"in the port's world convention" and then moved the mouse past its bound by
+hand, so it never asked whether the flight gets there. **A negation, a swapped
+axis or an offset angle with no instruction behind it is port-only logic,
+whatever it is called; another class's facing is that class's model. Drive a
+moving actor from its shipped spawn and yaw to whatever its routine says ends
+the motion, and never place it there.**
 ---
 
 ## Running the tools

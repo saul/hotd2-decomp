@@ -1132,8 +1132,17 @@ console.log("\nclass 0x33 selector 4: the scenery an actor shoves aside:");
           (c.flags & SCENERY_SKIP_COLLISION) !== 0,
           `0x${c.flags.toString(16)}`);
     G.g_script_flags[PUSH_FLAG] = 1;
+    // The walk that reaches the object runs `ScriptedSceneryDispatch33`,
+    // which installs the routine, claims the hit slot and returns
+    // (`0x00433044`..`0x00433050`): the routine is not called on that walk.
     GameUpdate(1 / 60, NULL_HOST, rng, events);
-    check("one `GameUpdate` reaches the selector-4 routine through the class "
+    check("the first `GameUpdate` runs the dispatch and not the routine: "
+          + "no sphere yet, still held",
+          c.bodyRadius !== CHAIR_SPHERE
+          && (c.flags & SCENERY_SKIP_COLLISION) !== 0,
+          `${c.bodyRadius}/0x${c.flags.toString(16)}`);
+    GameUpdate(1 / 60, NULL_HOST, rng, events);
+    check("the next reaches the selector-4 routine through the class "
           + "table, seeds the sphere and lifts the freeze",
           c.bodyRadius === CHAIR_SPHERE && c.scenery.slot === CHAIR_SLOT
           && !(c.flags & SCENERY_SKIP_COLLISION),

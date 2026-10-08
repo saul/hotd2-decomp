@@ -764,6 +764,9 @@ export const ScriptedSceneryHandler: ClassHandler = {
   // bits, so a shot on it must never reach the damage tables.
   ownsShotResult: true,
   update: ScriptedSceneryUpdate33,
+  // `ScriptedSceneryDispatch33` installs the selector's routine, claims
+  // the hit slot and returns (`0x0043301A`..`0x004330BA`).
+  firstUpdateNextWalk: true,
   debug: ScriptedSceneryDebug33,
   outlivedByReplay: ScriptedSceneryOutlivedByReplay33,
 };

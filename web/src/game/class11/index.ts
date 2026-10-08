@@ -1512,6 +1512,8 @@ function FrogRelease(obj: Actor): void {
 const handler: ClassHandler = {
   init: FrogInit,
   update: FrogUpdate,
+  // `FrogInit` installs `FrogUpdate` and returns (`0x0043A1C9`).
+  firstUpdateNextWalk: true,
   updatesWhenDead: true,
   ownsShotResult: true,
   // `[port-only]`: `RetireUnlistedActor`'s route out. A frog gives back what

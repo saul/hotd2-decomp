@@ -734,6 +734,9 @@ function ScriptedPropDebug(obj: Actor): ActorDebug {
 export const ScriptedPropHandler: ClassHandler = {
   init: ScriptedPropInit13,
   update: ScriptedPropUpdate13,
+  // `ScriptedPropInit13` calls the behaviour once, installs
+  // `ScriptedPropUpdate13` and returns (`0x0043FE7E`).
+  firstUpdateNextWalk: true,
   // `ScriptedPropInit13` writes no `obj+0x11C` and the update reads no hit
   // bit. Nothing marks it either: the record's `0x8000` keeps it out of
   // `RegisterForShotTest`'s list (`0x00405168`) for its whole life, which is

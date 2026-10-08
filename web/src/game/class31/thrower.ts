@@ -936,6 +936,9 @@ function EnemyThrowerDeadSweep(obj: ThrowerActor, why: DeadSweep): void {
 export const EnemyThrowerHandler: ClassHandler = {
   init: EnemyThrowerInit,
   update: EnemyThrowerUpdate,
+  // `EnemyThrowerInit` installs `EnemyThrowerUpdate` and returns
+  // (`0x004498F3`).
+  firstUpdateNextWalk: true,
   leave: ThrowerLeave,
   onDeadSweep: EnemyThrowerDeadSweep,
   updatesWhenDead: true,

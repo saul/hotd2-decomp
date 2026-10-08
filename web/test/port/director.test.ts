@@ -16,6 +16,8 @@ import {
   ReleaseAttackSlot, TryClaimAttackSlot,
 } from "../../src/game/combat/permits";
 import { SpawnClass } from "../../src/game/spawn_class";
+import { SpawnFromDescriptor } from "../../src/game/spawn";
+import { g_class_handlers } from "../../src/game/registry";
 import { dist2d, vec3, type Vec3 } from "../../src/game/vec";
 import {
   EffectCode, HitResultCode, ResolveHit,
@@ -973,4 +975,33 @@ console.log("determinism:");
   check("every actor is in the loop, none stuck outside it",
         G.g_object_list.every((o) => IN_LOOP.has(o.state) || o.dead),
         G.g_object_list.map((o) => ZombieState[o.state] ?? o.state).join(","));
+}
+
+// -- 7. the walk that runs an `Init` ----------------------------------------
+
+// `EnemyZombieInit` (`FUN_00452DA0`) writes `EnemyZombieUpdate` over `obj+0x00`
+// and returns (`0x00452FB5`), so `TaskRunTree` reaches the update on the
+// walk after the one that ran the `Init`. Counted at the class table's own
+// entry, which is what the walk calls.
+console.log("the walk that runs an Init:");
+{
+  const rng = new Rng(7);
+  const events = scene(0, rng);
+  const row = g_class_handlers[SpawnClass.Zombie]!;
+  const update = row.update;
+  let calls = 0;
+  row.update = (obj, f) => { calls++; update(obj, f); };
+  try {
+    const z = SpawnFromDescriptor(0x5100, SpawnClass.Zombie, 1, "fresh");
+    z.visible = true;
+    GameUpdate(1 / 60, NULL_HOST, rng, events);
+    check("a zombie's Init walk runs its Init and not its update",
+          !z.initPending && calls === 0,
+          `initPending ${z.initPending}, ${calls} update(s)`);
+    GameUpdate(1 / 60, NULL_HOST, rng, events);
+    check("...and the next walk runs the update, once", calls === 1,
+          `${calls} update(s)`);
+  } finally {
+    row.update = update;
+  }
 }

@@ -1050,18 +1050,22 @@ function SceneTaskWalk(dt: number, host: GameHost,
     // An object an `Init` links is pushed behind this one and reached below,
     // on this frame, as `TaskRunTree`'s next-pointer read reaches it.
     //
-    // The port then runs the frame's update as well, as it did when every
-    // `Init` ran at the spawn. The engine does not always: `EnemyZombieInit`
-    // writes `EnemyZombieUpdate` over `obj+0x00` and returns (`0x00452FB5`),
-    // so a zombie's update starts on the next walk, while class 0x28's
-    // handler seats itself on its first call and `Class22Init` runs its
-    // update from inside -- the port's split of each handler into `init` and
-    // `update` answers that class by class, and moving it is not this change.
+    // Whether the frame's update follows on this walk is the class's: an
+    // `Init` that calls its update (`Class22Init`), or a handler that is the
+    // update (class 0x28's), has it run now; one that writes its update over
+    // `obj+0x00` and returns (`EnemyZombieInit`, `0x00452FB5`) has it run on
+    // the next walk. The port's split of each handler into `init` and
+    // `update` answers that class by class, through
+    // `ClassHandler.firstUpdateNextWalk`, whose doc lists every class.
     if (obj.initPending) {
       ActorRunInit(obj, rng, events, host);
       // An `Init` that kills its object (`PlaceWormBatch`, a fish group
       // header) longjmps out of the walk: nothing else of it runs.
       if (obj.despawned) continue;
+      // ...and one that installs its update and returns has had this walk's
+      // call: the update starts on the next. See
+      // `ClassHandler.firstUpdateNextWalk`.
+      if (g_class_handlers[obj.cls]?.firstUpdateNextWalk) continue;
     }
     // Every actor's clips run, handler or not: a class with no behaviour still
     // loops the motion the script gave it.

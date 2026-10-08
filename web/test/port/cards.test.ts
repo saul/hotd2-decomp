@@ -391,6 +391,27 @@ console.log("\n`spawn_simple` builds the cards, and the cards open the gate:");
           `at ${w.block}/${w.step}/${w.opIndex} wait ${w.wait?.op.op}`);
   }
 
+  // A seek past the gate leaves no card. In play the card raises the flag as
+  // its last act and kills itself; a replay steps over the wait and raises
+  // the flag itself, and a card left listed or alive was rebuilt at the
+  // landing address -- stage 1's `block=4` deep link drew "The First Chapter"
+  // over the barrier for three seconds.
+  for (const [cls, flag] of [[SpawnClass.ChapterCard, CHAPTER_CARD_FLAG],
+                             [SpawnClass.ResultCard, RESULT_CARD_FLAG]] as const) {
+    ResetGameGlobals();
+    EnterPlay();
+    SetGameTables(CHARS);
+    const w = new Walker(cardScript(cls, flag), cardHost);
+    const arrived = seekTo(w, 0, 0, 2);
+    const live = G.g_object_list.filter((o) => o.cls === cls && !o.dead);
+    check(`0x${cls.toString(16)}: a seek past its gate leaves no card listed `
+          + "and none alive",
+          arrived && (G.g_script_flags[flag] ?? 0) === 1
+          && w.simpleSpawns.length === 0 && live.length === 0,
+          `arrived ${arrived} flag ${G.g_script_flags[flag]} `
+          + `listed ${w.simpleSpawns.length} alive ${live.length}`);
+  }
+
   /** A fresh game with a chapter card built by the opcode, and its frame. */
   const chapterCard = () => {
     ResetGameGlobals();

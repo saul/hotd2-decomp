@@ -181,15 +181,7 @@ export function ScriptFlagsThisBundleCanRaise(
   // the two the port has from `spawn_simple` are the cards, and the placed
   // ones are the bosses and a class-0x41 prop.
   const declared = (r: SpawnRecord): void => {
-    const decl = g_class_handlers[r.class as SpawnClass]?.raisesScriptFlag;
-    // A class may answer per record rather than per class: class 0x41's flag
-    // belongs to one of its 79 constructors and not to the class. And it may
-    // answer with several: class 0x14 writes nine. See
-    // `ClassHandler.raisesScriptFlag`.
-    const f = typeof decl === "function" ? decl(r) : decl;
-    if (f === undefined) return;
-    if (typeof f === "number") flags.add(f);
-    else for (const one of f) flags.add(one);
+    for (const f of DeclaredScriptFlags(r)) flags.add(f);
   };
   for (const b of script.blocks ?? []) {
     for (const st of b.steps ?? []) {
@@ -202,6 +194,24 @@ export function ScriptFlagsThisBundleCanRaise(
 
   cache = { script, civ, chars, breakables, flags };
   return flags;
+}
+
+/**
+ * The `g_script_flags` bytes a spawn record's class declares it raises --
+ * {@link ClassHandler.raisesScriptFlag}, in whichever of its three shapes.
+ *
+ * [port-only] The engine has no such question; the bundle's own walk and a
+ * replay's retirement of a flag's raisers both ask it.
+ */
+export function DeclaredScriptFlags(r: SpawnRecord): readonly number[] {
+  const decl = g_class_handlers[r.class as SpawnClass]?.raisesScriptFlag;
+  // A class may answer per record rather than per class: class 0x41's flag
+  // belongs to one of its 79 constructors and not to the class. And it may
+  // answer with several: class 0x14 writes nine. See
+  // `ClassHandler.raisesScriptFlag`.
+  const f = typeof decl === "function" ? decl(r) : decl;
+  if (f === undefined) return [];
+  return typeof f === "number" ? [f] : f;
 }
 
 /**

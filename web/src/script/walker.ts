@@ -42,7 +42,7 @@ import type { BlockJson, OpJson, ScriptJson, SpawnJson } from "../bundle";
 import type { OpStatus } from "./opstatus";
 import { OPS as OPS_TABLE } from "./ops";
 import { WAIT_RULES, passedBecause, type WaitContext } from "./waits";
-import { CivilianRaisesScriptFlag } from "./waits/flag";
+import { CivilianRaisesScriptFlag, DeclaredScriptFlags } from "./waits/flag";
 import {
   CivilianEndsRemovable, CivilianHasChildren, CivilianRemoveCue,
   type CivilianLife,
@@ -1205,12 +1205,36 @@ export class Walker {
    * So a class-0x10 spawn whose streams raise the flag being stepped over is
    * retired with the gate, the way {@link retireGated} retires the enemies an
    * enemy gate counts. Replay only, for the same reason.
+   *
+   * **And a card.** The `spawn_simple` classes that raise a gate's flag are
+   * the two cards -- class 0x60's 248, in `ChapterCardInstall`
+   * (`FUN_004342E0`), and class 0x61's 254, at `0x0043567C` -- and each
+   * raises it as its last act, then kills itself. A replay that stepped over the gate and left the
+   * card's record listed built a fresh card at the landing address: a deep
+   * link into stage 1's block 4 played three seconds of "The First Chapter"
+   * over the barrier, the level hidden behind its furniture bit. A simple
+   * spawn whose class declares the flag goes with the gate. Placed spawns
+   * that declare a flag are not retired by this: a boss raises its flags
+   * from the middle of its life, not as its end.
    */
   private retireFlagRaisers(flag: number): void {
     if (!this.replaying) return;
     const civ = this.script.civilians;
     this.spawns = this.spawns.filter((s) => s.class !== SpawnClass.Civilian
       || !CivilianRaisesScriptFlag(civ, s.at, flag));
+    this.simpleSpawns = this.simpleSpawns.filter((s) => {
+      if (!DeclaredScriptFlags(s).includes(flag)) return true;
+      // The opcode built it in the pool as the replay ran it
+      // (`script/ops/spawn.ts`), and the replay runs no frame for it to die
+      // in. It is gone the way the card's own end leaves it, as
+      // `retireGated` takes a placer.
+      const card = G.g_object_list.find((o) => o.at === s.at && !o.dead);
+      if (card) {
+        card.dead = true;
+        card.visible = false;
+      }
+      return false;
+    });
   }
 
   /**

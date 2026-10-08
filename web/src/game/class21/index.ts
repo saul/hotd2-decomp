@@ -62,6 +62,10 @@ import { ActorPlayHitVoice, ActorVoice } from "../combat/voice";
 import { ActorDespawn } from "../despawn";
 import { SpawnGroundRingEffect } from "../effects/ring_effect";
 import { G, HIT_SLOT_NONE } from "../globals";
+import { GameMode } from "../game_mode";
+import { SkeletonRecordCameraPoint } from "../camera/track";
+import { RegisterForShotTest } from "../combat/shot_test";
+import { SpawnBoneHitSprite } from "../effects/blood";
 import { DrawSkinnedModelAndShadow } from "../skeleton";
 import { ActorFreeHitSlot } from "../hit_slots";
 import { RecordRescue, RESCUE_TARGET_CHAR_TYPE } from "../rescue";
@@ -71,7 +75,7 @@ import {
   type ReplaySpawnRecord,
 } from "../registry";
 import { SpawnClass } from "../spawn_class";
-import { MotionPlayFrame, MotionPlayLength } from "../tables";
+import { CharacterTypeOf, MotionPlayFrame, MotionPlayLength } from "../tables";
 import { LerpAngleShortWay, LerpWeighted, vec3 } from "../vec";
 import { St2CarSpawn } from "./car";
 import { RescueTargetState, type RescueTargetTail } from "./state";
@@ -199,12 +203,34 @@ function Tail(obj: Actor): RescueTargetTail | null {
  * obj->+0x1F8 &= ~2;                      // root motion OFF
  * obj->+0x1FC = 5;                        // the rotation order
  * obj->+0x1B4 = 0x3E6;                    // the idle clip
+ * obj->+0x12EC = RescueTargetBoneDrawHook; // 0x00452090
  * obj->+0x194 = rand() % 10;              // its start frame
+ * obj->+0x124 = g_actor_radius_by_char[obj->+0x1F4];   // the shot sphere
+ * if (g_GameMode == 1 && g_original_item_big_head == 1)
+ *     bone 2's record +0x78 *= 2;          // 0x0045179C, read from the bytes
  * g_enemies_present += 1;  g_enemies_alive += 1;
  * if (g_GameMode != 2) obj->+0x11C = g_class21_hp_by_rank[rank];  // not Training
  * St2CarSpawn(0);                          // the car it rides -- car.ts
- * *obj = RescueTargetRideInState;
+ * RescueTargetRideInState(obj);  *obj = RescueTargetRideInState;
  * ```
+ *
+ * **The big-head test is in no pseudocode.** Ghidra has the instruction
+ * boundary wrong at `0x0045179E` and prints `TEST AL,0x88; PUSHFD; ...`; the
+ * bytes from `0x0045179C` are `38 05 a8889c00` (`CMP byte ptr [0x009C88A8],
+ * AL`, with `AL = 1`), `75 0e`, `d9 87 10020000` (`FLD [EDI+0x210]`, bone
+ * 2's radius with `EDI = obj+0x194`), `dc c0` (`FADD ST0,ST0`) and
+ * `d9 9f 10020000` (`FSTP`) -- the same four lines `OneHitTargetInit` has.
+ *
+ * `RescueTargetBoneDrawHook` draws every node's record slot and bone 2's at
+ * `MatrixScale(2, 2, 2)` under the same two tests; with
+ * `g_original_item_big_head`'s writer unported that arm cannot be reached, so
+ * the renderer's plain draw is the whole of it.
+ *
+ * Not yet followed here, and reported rather than tagged: the
+ * `CALL 0x00451860` at `0x00451806` runs one frame of the ride-in inside the
+ * `Init` itself -- the pose, the draw and `obj+0x194++` -- before installing
+ * it. A port `Init` is handed no frame (no host to sample the car's path
+ * from), so the ride-in's first frame here is the next update's.
  *
  * **Both counters**, which is what makes this actor a `wait_enemies_alive`
  * gate's business as well as a branch's — a stage that waits for the room to
@@ -245,6 +271,18 @@ export function RescueTargetInit(obj: Actor, rng?: Rng): void {
   // counter now (`advancesOwnMotion`), so the start is the engine's.
   obj.rootCursor = -1;
   obj.playTicks = rng ? rng.int(10) : 0;
+  // `MOV byte ptr [ESI + 0x120], AL` with `AL = 0xFF` at `0x00451738`.
+  obj.cameraSlot = -1;
+  // `MOV EAX, [EDX*4 + 0x4C4D28]; MOV [ESI+0x124], EAX` at `0x00451780`:
+  // `g_actor_radius_by_char`, the sphere `ShotTestSphere` tests first.
+  const r = CharacterTypeOf(obj)?.actor_radius ?? 0;
+  obj.hitRadius = r;
+  obj.radius = r;
+  // `0x0045178D`..`0x004517B0`, bone 2's record `+0x78` (`obj+0x3A4`).
+  if (G.g_GameMode === GameMode.Original && G.g_original_item_big_head === 1) {
+    const k = String(CLASS21_HEAD_PART);
+    obj.boneRadius[k] = Math.fround((obj.boneRadius[k] ?? 0) * 2);
+  }
   obj.hp = CLASS21_HP_BY_RANK[G.g_damage_rank] ?? 1;
   G.g_enemies_present += 1;
   G.g_enemies_alive += 1;
@@ -400,7 +438,10 @@ export function RescueTargetRideInState(obj: Actor, f: ClassFrame): void {
  * if (g_script_flags[0] == 1) { ...give both counters back...; ActorDespawn; }
  * if (obj->+0x34 & 8) {
  *     for (part = 0; part < 16; part++)
- *         if (obj->part[part].flags & 8) { obj->+0x11C -= 1; ...score...; }
+ *         if (obj->part[part].flags & 8) {
+ *             obj->+0x11C -= 1;  ActorPlayHitVoice(obj, 0);
+ *             part.flags &= ~8;  SpawnBoneHitSprite(obj, part);  ...score...;
+ *         }
  * }
  * if (obj->+0x11C < 1) {
  *     g_script_branch_var = 1;                    // THE ROUTE
@@ -414,9 +455,11 @@ export function RescueTargetRideInState(obj: Actor, f: ClassFrame): void {
  *     *obj = RescueTargetFreedState;
  *     return;
  * }
+ * RescueTargetPoseFromRouteWithVelocity(obj); RescueTargetDraw(obj); obj->+0x194++;
  * if (g_active_cam_path == 0x39 && g_cam_path_frame > 0x121) {
- *     ...both counters back...;  *obj = RescueTargetAbandonedState;
+ *     ...both counters back...;  *obj = RescueTargetAbandonedState;  return;
  * }
+ * obj->+0x70 = view(obj->+0x100);  obj->+0x34 &= ~8;  RegisterForShotTest(obj);
  * ```
  *
  * **The order is the whole point.** The parts are charged first and the hit
@@ -445,7 +488,17 @@ export function RescueTargetHeldState(obj: Actor, f: ClassFrame): void {
     const p0 = (obj.flags & ActorFlag.HitByPlayer0) !== 0;
     const p1 = (obj.flags & ActorFlag.HitByPlayer1) !== 0;
     const who = p0 && !p1 ? 0 : p1 && !p0 ? 1 : f.rng.int(2);
+    // `DEC word ptr [ESI+0x11C]` at `0x004519FA`, then the part's own
+    // feedback before any score: `ActorPlayHitVoice(obj, 0)` -- `PUSH EBX`
+    // with `EBX = 0` from `0x004519D9`, the hurt voice -- at `0x00451A03`,
+    // `NoOpStub(obj, part)`, the part's bit 3 cleared, and
+    // `SpawnBoneHitSprite(obj, part)` at `0x00451A18`. The same order as
+    // `OneHitTargetUpdate`'s bone loop.
     obj.hp -= 1;
+    ActorPlayHitVoice(obj, ActorVoice.Hurt, f.rng,
+                      (id) => f.events?.emit("sound.play", { id }));
+    obj.pendingHit = null;
+    SpawnBoneHitSprite(obj.at, part);
     if (part === CLASS21_HEAD_PART) {
       ScoreAddForPlayer(who, CLASS21_SCORE_HEAD);
       ScoreAddForPlayer(who, G.g_head_combo_bonus[who] ?? 0);
@@ -456,8 +509,8 @@ export function RescueTargetHeldState(obj: Actor, f: ClassFrame): void {
       G.g_head_combo_bonus[who] = 0;
     }
     G.g_player_hit_count[who] = (G.g_player_hit_count[who] ?? 0) + 1;
-    obj.flags &= ~ActorFlag.Hit;
-    obj.pendingHit = null;
+    // `obj+0x34` bit 3 is not cleared here: the engine clears it only at the
+    // tail, on the frames that register, below.
   }
 
   if (obj.hp < 1) {
@@ -493,7 +546,42 @@ export function RescueTargetHeldState(obj: Actor, f: ClassFrame): void {
     if (obj.cameraSlot >= 0) ReleaseCameraEnemySlot(obj);
     if (obj.hitSlot !== HIT_SLOT_NONE) ActorFreeHitSlot(obj);
     t.state = RescueTargetState.Abandoned;
+    return;
   }
+  RescueTargetRegisterForShotTest(obj, f);
+}
+
+/**
+ * `RescueTargetHeldState`'s tail, `0x00451C8D`..`0x00451D08`, the only
+ * registration in the class `[proved]` -- a scan of `0x00451720`..
+ * `0x00452120` for `E8` calls to `RegisterForShotTest` (`FUN_00405160`),
+ * `ActorRegisterCameraPoint` (`FUN_00409B70`) and
+ * `ActorRegisterOriginInViewSpace` (`FUN_0043F950`) finds `0x00451D08` and
+ * nothing else, so the ride-in, the abandoned, freed and sinking states are
+ * never in the shot test and a bullet passes through them:
+ *
+ * ```
+ * 00451c8d  Push; SetTop(g_camera_world_to_view[g_camera_index])
+ * 00451cb5  obj+0x70..0x78 = MatrixTransformPoint(obj+0x100..0x108); Pop
+ * 00451cfe  obj+0x34 &= ~8
+ * 00451d08  RegisterForShotTest(obj)
+ * ```
+ *
+ * `obj+0x100` is the tracked bone the draw a few lines up recorded -- the
+ * port re-reads the pose for it, as `ActorRegisterCameraPoint` does -- and
+ * the port keeps `obj+0x70..0x78` in world space (`Actor.shotCentre`), so
+ * the transform is `RegisterForShotTest`'s to make. No lift and no camera
+ * tracking: this is not `ActorRegisterCameraPoint`.
+ *
+ * `[port-only]` as a function; the engine has it inline.
+ */
+function RescueTargetRegisterForShotTest(obj: Actor, f: ClassFrame): void {
+  SkeletonRecordCameraPoint(obj, f.host);
+  obj.shotCentre.x = obj.lookAt.x;
+  obj.shotCentre.y = obj.lookAt.y;
+  obj.shotCentre.z = obj.lookAt.z;
+  obj.flags &= ~ActorFlag.Hit;
+  RegisterForShotTest(obj, f.host);
 }
 
 /**
@@ -861,6 +949,11 @@ export const RescueTargetHandler: ClassHandler = {
   // The class reads `obj+0x34` bit 3 itself and charges one hit point a part;
   // `ResolveHit` would look up a damage row it has no entry in.
   ownsShotResult: true,
+  // **Picked the engine's way**: only the held state registers
+  // (`0x00451D08`), so the ride-in and the abandoned target cannot be shot,
+  // and the pick is `ShotTestSphere`'s broad phase at `obj+0x124` round the
+  // tracked bone, then the bones.
+  registersForShotTest: true,
   outlivedByReplay: RescueTargetOutlivedByReplay,
   debug: RescueTargetDebug,
 };

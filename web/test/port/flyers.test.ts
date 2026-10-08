@@ -253,6 +253,30 @@ import {
           `${FishState[below.ft.state]} sinkY=${below.ft.sinkY}`);
     check("...each paying 80", G.g_player_score[0] - score === 160,
           `${G.g_player_score[0] - score}`);
+
+    // `FishProjectToScreen` (`FUN_00439B50`) files states 0 to 3 alone
+    // (`0x00439B58`..`0x00439B77`), so a corpse is never a candidate.
+    ShotTestListReset();
+    FishUpdate(above.f, frame(rng));
+    FishUpdate(below.f, frame(rng));
+    check("neither corpse is ever in the shot test -- flung or sinking",
+          above.ft.state === FishState.Flung && below.ft.state === FishState.Sink
+          && !G.g_shot_test_list.some((e) => e.at === above.f.at
+                                         || e.at === below.f.at),
+          JSON.stringify(G.g_shot_test_list.map((e) => e.at)));
+    const live = mk(0x9202, false);
+    live.f.flags &= ~(ActorFlag.Hit | ActorFlag.HitByPlayer0);
+    ShotTestListReset();
+    FishUpdate(live.f, frame(rng));
+    check("...while a fish still rising files itself, at its own point",
+          live.ft.state === FishState.Rise
+          && G.g_shot_test_list.some((e) => e.at === live.f.at)
+          && live.f.shotCentre.x === live.f.pos.x
+          && live.f.shotCentre.y === live.f.pos.y,
+          JSON.stringify(G.g_shot_test_list.map((e) => e.at)));
+    check("...and the class is picked only through that list",
+          g_class_handlers[SpawnClass.WaterEnemy]?.registersForShotTest
+            === true);
   }
 
   // -- class 0x11, the frog ------------------------------------------------

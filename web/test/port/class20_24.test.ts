@@ -9,14 +9,16 @@ import { ActorKillAll } from "../../src/game/combat/resolve_hit";
 import { ActorAdvanceMotion } from "../../src/game/motion";
 import { ShotTestPickedHere } from "../../src/game/combat/shot_test";
 import { G, ResetGameGlobals } from "../../src/game/globals";
-import { NULL_HOST } from "../../src/game/host";
-import { MarkActorShot } from "../../src/game/combat/shot";
+import { NULL_HOST, type GameHost, type ShotPick } from "../../src/game/host";
+import { FireShotRequest, MarkActorShot } from "../../src/game/combat/shot";
+import { GameMode } from "../../src/game/game_mode";
 import { MotionOf, SetGameTables } from "../../src/game/tables";
 import {
   ActorFlag, type Actor, type OneHitTargetActor, type SetPiecePropActor,
 } from "../../src/game/actor";
 import { ActorIsEnemy, g_class_handlers } from "../../src/game/registry";
 import {
+  CLASS20_CARRIED_BONES, CLASS20_CARRYING_BONES, CLASS20_UNSHOOTABLE_APP_STATE,
   CLASS20_DEATH_MOTION, CLASS20_HEAD_BONE, CLASS20_SCORE_HEAD,
   CLASS20_SCORE_HEAD_COMBO_STEP, CLASS20_SCORE_KILL, CLASS20_SINK_FRAMES,
   CLASS20_SINK_PER_FRAME, CLASS20_SPIN_STEP, CLASS20_WALL_TURN,
@@ -307,6 +309,184 @@ console.log("\nclass 0x20 is not an enemy, and owns its own shot:");
         g_class_handlers[SpawnClass.OneHitTarget]?.ownsShotResult === true);
   check("...and keeps ticking once dead, or the body would hang in the air",
         g_class_handlers[SpawnClass.OneHitTarget]?.updatesWhenDead === true);
+}
+
+// -- 9c. class 0x20's own skeleton: the carried bones, the damaged part, the
+// big head, and the head combo it keeps across a pull ----------------------
+
+/**
+ * Character type 7, `char_adv00`, as far as `OneHitTargetInit` and
+ * `OneHitTargetUpdate` read it: fifteen bones in the skeleton's own
+ * depth-first order with `parent` an index into the list, each with a sphere
+ * whose row names its own slot, and each bone's first effect entry as the
+ * shipped table has it -- 8008 on bone 4, 0 on bone 9 (a control code, no
+ * swap), 7976 on the head. The numbers are `char_adv00`'s, read out of the
+ * stage-2 bundle's type 7.
+ */
+const TYPE7_BONES: [number, number, number | null, number, number][] = [
+  // bone, slot, parent index, radius, first effect entry
+  [1, 7993, null, 2.55, 7994], [2, 7945, 0, 1.3, 7976],
+  [3, 7981, 0, 1.4, 7983], [4, 8006, 2, 1.3, 8008], [5, 8000, 3, 0.8, 8002],
+  [6, 7978, 0, 1.4, 7980], [7, 8003, 5, 1.3, 8005], [8, 7997, 6, 0.8, 7999],
+  [9, 7984, null, 1.75, 0], [10, 7990, 8, 2.15, 7991],
+  [11, 7942, 9, 2.0, 7943], [12, 7937, 10, 1.0, 0],
+  [13, 7987, 8, 2.15, 7988], [14, 7939, 12, 2.0, 7940], [15, 7936, 13, 1.0, 0],
+];
+const TYPE7 = {
+  ...CHARS.types["1"], type: 7, name: "char_adv00", actor_radius: 10,
+  bones: TYPE7_BONES.map(([bone, slot, parent, r, first], i) => ({
+    bone, part: `bone${bone}`, slot, parent,
+    // A child's offset the carried draw can be told apart by.
+    offset: [i * 0.5, -1 - i, 0.25 * i] as [number, number, number],
+    damage_rank: [], hit_radius: r, hit_slot: slot, hit_centre: [0, 0, 0],
+    steps: [[first, 0, 25]] as [number, number, number][],
+  })),
+};
+const CHARS7 = {
+  ...CHARS, types: { ...CHARS.types, "7": TYPE7 },
+} as unknown as typeof CHARS;
+
+/** One class-0x20 target of type 7, spawned the way the page spawns it. */
+function target7(at = 0x52ec, over: Partial<NonNullable<Actor["oneHitTarget"]>>
+                   = {}): { a: OneHitTargetActor; events: Events; rng: Rng;
+                            swaps: [number, number, number][];
+                            host: typeof NULL_HOST } {
+  SetGameTables(CHARS7, undefined, undefined, undefined);
+  const rng = new Rng(5);
+  const a = ActorSpawn(at, SpawnClass.OneHitTarget, 7, "target", {
+    oneHitTarget: {
+      subtype: 0, remove_path: 68, remove_frame: 260, motion: 10, box: null,
+      ...over,
+    },
+  }, rng);
+  if (a.cls !== SpawnClass.OneHitTarget) throw new Error("not class 0x20");
+  a.visible = true;
+  const swaps: [number, number, number][] = [];
+  const host = { ...NULL_HOST,
+                 setBoneSlot: (at2: number, bone: number, slot: number) => {
+                   swaps.push([at2, bone, slot]);
+                 } };
+  return { a, events: new Events(), rng, swaps, host };
+}
+
+console.log("\nclass 0x20's Init takes the ends of the limbs off the skeleton:");
+{
+  ResetGameGlobals();
+  EnterPlay();
+  const { a } = target7();
+  // `MOV [ESI + 0x348/0x3C0/0x4F8/0x570/0x738/0x7B0/0x8E8/0x960], EBP` at
+  // `0x00448F8E`..`0x00448FB8`: bones 5, 8, 12 and 15's record slot and
+  // radius, both zero. The port's zero slot is `removed`.
+  check("bones 5, 8, 12 and 15 draw no slot of their own",
+        [5, 8, 12, 15].every((b) => a.removed.includes(b))
+        && a.removed.length === 4, JSON.stringify(a.removed));
+  check("...and have no sphere to shoot",
+        [5, 8, 12, 15].every((b) => a.boneRadius[String(b)] === 0),
+        JSON.stringify(a.boneRadius));
+  check("...while the bones that carry them keep theirs",
+        [4, 7, 11, 14].every((b) => (a.boneRadius[String(b)] ?? 0) > 0)
+        && !a.removed.includes(4),
+        JSON.stringify(a.boneRadius));
+  check("...and `CLASS20_CARRIED_BONES` is that list, each the first child of "
+        + "a carrying bone",
+        CLASS20_CARRIED_BONES.join() === "5,8,12,15"
+        && CLASS20_CARRYING_BONES.join() === "4,7,11,14");
+  // `obj+0x124 = g_actor_radius_by_char[type]` at `0x00448F76`, and the
+  // camera slot `0xFF` at `0x00448EEC`.
+  check("the shot sphere is the character's radius, and there is no camera "
+        + "slot", a.hitRadius === 10 && a.cameraSlot === -1,
+        `r ${a.hitRadius} slot ${a.cameraSlot}`);
+
+  // `CMP [g_app_state], 0xA; JZ` at `0x00448F69`: the other arm raises
+  // `0x8000` and leaves `obj+0x124` alone.
+  ResetGameGlobals();
+  EnterPlay();
+  G.g_app_state = CLASS20_UNSHOOTABLE_APP_STATE;
+  const off = target7().a;
+  check("in app state 10 it is out of the shot test instead",
+        (off.flags & ActorFlag.NoShotTest) !== 0 && off.hitRadius === 0,
+        `flags 0x${(off.flags >>> 0).toString(16)} r ${off.hitRadius}`);
+}
+
+console.log("\nclass 0x20's Original Mode big head:");
+{
+  // `CMP [g_GameMode], 1; CMP byte [0x009C88A8], AL; FLD [ESI+0x210];
+  // FADD ST0,ST0; FSTP` at `0x00448FBE`..`0x00448FDD` -- bone 2's radius,
+  // doubled. The build left it as the row's radius times the model's size.
+  ResetGameGlobals();
+  EnterPlay();
+  const plain = target7().a.boneRadius["2"];
+  ResetGameGlobals();
+  EnterPlay();
+  G.g_GameMode = GameMode.Original;
+  G.g_original_item_big_head = 1;
+  const big = target7().a.boneRadius["2"];
+  G.g_original_item_big_head = 0;
+  ResetGameGlobals();
+  EnterPlay();
+  G.g_GameMode = GameMode.Arcade;
+  G.g_original_item_big_head = 1;
+  const arcade = target7().a.boneRadius["2"];
+  G.g_original_item_big_head = 0;
+  check("with the big-head item in Original Mode the head's sphere doubles",
+        plain > 0 && big === Math.fround(plain * 2), `${plain} -> ${big}`);
+  check("...and in Arcade the flag is not read", arcade === plain,
+        `${arcade} vs ${plain}`);
+}
+
+console.log("\nclass 0x20 sinks wearing the damaged part:");
+{
+  ResetGameGlobals();
+  EnterPlay();
+  const { a, events, rng, swaps, host } = target7();
+  MarkActorShot(a, 0, 4);
+  OneHitTargetUpdate(a, { dt: 1 / 60, rng, host, events });
+  // `MOV AX, [EDX + bone*0xC]; CMP EAX, 2; JLE` and `MOV [EDI+0x78], EAX` at
+  // `0x004490C6`..`0x004490D3`: bone 4's first effect entry is 8008.
+  check("a hit on bone 4 swaps its record to 8008, the bone's first damaged "
+        + "part", a.boneSlot["4"] === 8008
+        && swaps.length === 1 && swaps[0][1] === 4 && swaps[0][2] === 8008,
+        `${a.boneSlot["4"]} ${JSON.stringify(swaps)}`);
+  check("...and it dies of it", a.dead, String(a.dead));
+
+  const nine = target7(0x52f0);
+  MarkActorShot(nine.a, 0, 9);
+  OneHitTargetUpdate(nine.a, { dt: 1 / 60, rng: nine.rng, host: nine.host,
+                               events: nine.events });
+  check("an entry of 0 -- a control code -- swaps nothing",
+        nine.a.boneSlot["9"] === undefined && nine.swaps.length === 0
+        && nine.a.dead,
+        `${nine.a.boneSlot["9"]} ${JSON.stringify(nine.swaps)}`);
+}
+
+console.log("\nclass 0x20's head combo survives the pull that marks it:");
+{
+  // Two head shots through the whole shot path. `MarkActorShot` writes no
+  // `g_head_combo_bonus`, and `OneHitTargetUpdate` is one of the four
+  // routines in the image that do: the second pays 120 + 10.
+  ResetGameGlobals();
+  EnterPlay();
+  const t1 = target7(0x5300);
+  const t2 = target7(0x5304);
+  const events = new Events();
+  const rng = new Rng(8);
+  let pick: ShotPick | null = null;
+  const host: GameHost = { ...t1.host, pickShot: () => pick };
+  const RAY = { origin: vec3(0, 0, 0), dir: vec3(0, 0, 1) };
+  G.g_player_score = [0, 0];
+  for (const a of [t1.a, t2.a]) {
+    pick = { kind: "actor", at: a.at, bone: CLASS20_HEAD_BONE, point: vec3() };
+    FireShotRequest({ player: 0, frame: 0, onScreen: 1, ray: RAY }, host, rng,
+                    events);
+    OneHitTargetUpdate(a, { dt: 1 / 60, rng, host, events });
+  }
+  check("two class-0x20 head shots pay 120 + 80, then 130 + 80",
+        G.g_player_score[0] === (CLASS20_SCORE_HEAD + CLASS20_SCORE_KILL) * 2
+          + CLASS20_SCORE_HEAD_COMBO_STEP,
+        String(G.g_player_score[0]));
+  check("...and the combo stands at 20",
+        G.g_head_combo_bonus[0] === 2 * CLASS20_SCORE_HEAD_COMBO_STEP,
+        String(G.g_head_combo_bonus[0]));
 }
 
 // -- 10. class 0x24, the set-pieces ----------------------------------------

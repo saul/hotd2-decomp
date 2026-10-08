@@ -43,6 +43,17 @@
  * writing 1 and 2. The two alternates and the two mice line up with nothing
  * left over.
  *
+ * ## Only the trigger is ever in the shot test
+ *
+ * `MouseBranchTriggerUpdate` ends every frame it does not despawn in
+ * `ActorRegisterOriginInViewSpace` (`FUN_0043F950`, `0x0043F909`): one sphere
+ * of `obj+0x124` about its feet. `MouseWanderUpdate` calls nothing that
+ * registers `[proved]` -- a scan of `0x0043F4C0`..`0x0043F950` for `E8` calls
+ * to it, `RegisterForShotTest` (`FUN_00405160`) and `ActorRegisterCameraPoint`
+ * (`FUN_00409B70`) finds only the trigger's -- so a running mouse is never a
+ * candidate and a shot at it goes on to what is behind. The port's pick used
+ * to find it anyway, by its drawn node.
+ *
  * ## What is not ported
  *
  * The draw itself, which is `render/slotmodels.ts`'s. Subtype 1's
@@ -54,6 +65,8 @@ import { RegisterEnemySlot } from "../camera/slots";
 import type { Actor } from "../actor";
 import { ActorFlag } from "../actor";
 import { ActorDespawn } from "../despawn";
+import { ActorRegisterOriginInViewSpace } from "../combat/shot_test";
+import type { GameHost } from "../host";
 import { GameMode } from "../game_mode";
 import { G } from "../globals";
 import {
@@ -95,13 +108,14 @@ export const MOUSE_REMOVE_FLAG: Partial<Record<number, number>> = {
 };
 
 /**
- * Where each subtype's flight ends, spelled as three immediates in three
- * `switch` arms rather than as a table — subtype 2 runs until its **z** falls
+ * Where each subtype's flight ends: three float32s, one per `switch` arm, at
+ * `0x00564458` (subtype 2's `z`, `c4f2999a`), `0x00564454` (3's `x`, -87.0)
+ * and `0x00564450` (4's `x`, -184.0) -- subtype 2 runs until its **z** falls
  * below the bound, 3 and 4 until their **x** passes theirs in opposite
  * directions.
  */
 export const MOUSE_FLEE_BOUND: Partial<Record<number, number>> = {
-  2: -1940.8, 3: -87.0, 4: -184.0,
+  2: Math.fround(-1940.8), 3: -87.0, 4: -184.0,
 };
 
 /** The ten frames of `mouse.bin`, as asset slots. */
@@ -109,8 +123,8 @@ export const MOUSE_FIRST_SLOT = 0x1385;
 export const MOUSE_LAST_SLOT = 0x138e;
 export const MOUSE_FRAMES = 10;
 
-/** `sub+0x0C` — the only speed the class has, in units a frame. */
-export const MOUSE_SPEED = 0.4;
+/** `sub+0x0C` — the only speed the class has, in units a frame: `0x3ECCCCCD`. */
+export const MOUSE_SPEED = Math.fround(0.4);
 /**
  * The width of each of the two draws the turn is built from — `rand() & 0xFFF`.
  *
@@ -148,13 +162,23 @@ const BAMS = (Math.PI * 2) / 65536;
  * here, because three copies of a velocity is how one of them ends up with a
  * different speed.
  *
- * The signs are the port's world convention, which negates both terms — the
- * same `(-sin, -cos)` `class30`'s facing uses.
+ * **Both terms positive**, as all three copies are: `FILD [EDI+0x68]; FMUL
+ * [0x004C4370]; FSIN; FMUL [ESI+0xC]; FSTP [ESI]` and the same with `FCOS`
+ * into `[ESI+0x8]` (`0x0043F591`, `0x0043F61E`, `0x0043F7BC`), no `FCHS`
+ * anywhere. The draw is `MatrixRotateY(obj+0x68)`, which carries the model's
+ * `+Z` onto `(sin yaw, cos yaw)` (`VecAimXAxisYThenZ`'s reading of the same
+ * matrix), so the mouse runs the way it faces. This used to negate both terms
+ * as "the port's world convention" -- there is none; positions are the
+ * engine's own -- and every mouse ran backwards, and every trigger fled away
+ * from the bound that stops it: stage 4 block 10's subtype 3 starts at
+ * `x = -110.2` facing 14848 and must pass `-87`, its subtype 4 at `-163.2`
+ * facing 53248 must pass `-184`, and stage 2's subtype 2 faces 32768 and must
+ * pass `z = -1940.8`. Each is a float32 store.
  */
 function MouseSetVelocityFromYaw(obj: Actor, sub: MouseTail): void {
   const r = obj.yaw * BAMS;
-  sub.vx = -Math.sin(r) * sub.speed;
-  sub.vz = -Math.cos(r) * sub.speed;
+  sub.vx = Math.fround(Math.sin(r) * sub.speed);
+  sub.vz = Math.fround(Math.cos(r) * sub.speed);
 }
 
 /** `sub->+0x20 += 1`, wrapping past `+0x22` back to `+0x24`. */
@@ -175,7 +199,7 @@ function MouseAdvanceStrip(sub: MouseTail): void {
  * sub->velocity = (sin yaw, _, cos yaw) * 0.4;
  * sub->+0x24 = 0x1385;  sub->+0x22 = 0x138E;
  * sub->+0x20 = 0x1385 + rand() % 10;
- * FUN_00409270(obj);                          // claim a slot at 0x009C88C0
+ * RegisterEnemySlot(obj);                     // 0x00408E80, at 0x0043F557
  * if (sub->+0x26 < 2)       { ...rebuild the velocity...; *obj = MouseWanderUpdate; }
  * else if (g_GameMode == 1) { sub->velocity = 0; sub->+0x20 = 0x1385;
  *                             *obj = MouseBranchTriggerUpdate; }
@@ -253,8 +277,9 @@ export function MouseWanderUpdate(obj: Actor, f: ClassFrame): void {
   const sub = Tail(obj);
   if (!sub) return;
   if (sub.state === MouseState.Run) {
-    obj.pos.x += sub.vx;
-    obj.pos.z += sub.vz;
+    // `FLD [ESI]; FADD [EDI+0x40]; FSTP [EDI+0x40]`: float32 stores.
+    obj.pos.x = Math.fround(obj.pos.x + sub.vx);
+    obj.pos.z = Math.fround(obj.pos.z + sub.vz);
     MouseAdvanceStrip(sub);
     if (sub.life % 100 === 99 && f.rng.int(10) < 4) {
       sub.state = MouseState.Pause;
@@ -292,6 +317,7 @@ export function MouseWanderUpdate(obj: Actor, f: ClassFrame): void {
  *         g_script_branch_var = *(s8 *)(0x00564442 + subtype);
  *         sub->+0x18 = 1;
  *         sub->+0x20 = sub->+0x24;
+ *         sub->+0x10 = obj->y;
  *     }
  *     obj->+0x34 &= ~8;
  *     break;
@@ -301,6 +327,7 @@ export function MouseWanderUpdate(obj: Actor, f: ClassFrame): void {
  *   case 4:  ...if (obj->x < -184.0) sub->+0x18 = 10;
  *   case 11: ActorDespawn(obj);
  * }
+ * ...draw...;  ActorRegisterOriginInViewSpace(obj);     // 0x0043F909
  * ```
  *
  * **The hit bit is cleared whether or not the gate passed**, which is what
@@ -314,7 +341,7 @@ export function MouseWanderUpdate(obj: Actor, f: ClassFrame): void {
  * and keeps drawing where it stopped; that is transcribed as written rather
  * than turned into the despawn it looks like it ought to be.
  */
-export function MouseBranchTriggerUpdate(obj: Actor): void {
+export function MouseBranchTriggerUpdate(obj: Actor, host: GameHost): void {
   const sub = Tail(obj);
   if (!sub) return;
   const remove = MOUSE_REMOVE_FLAG[sub.subtype];
@@ -330,6 +357,8 @@ export function MouseBranchTriggerUpdate(obj: Actor): void {
         if (value !== undefined) G.g_script_branch_var = value;
         sub.state = MouseState.Pause;
         sub.frame = sub.firstFrame;
+        // `MOV EDX, [EDI+0x44]; MOV [ESI+0x10], EDX` at `0x0043F7A9`.
+        sub.hitY = obj.pos.y;
       }
       obj.flags &= ~ActorFlag.Hit;
       obj.pendingHit = null;
@@ -345,11 +374,14 @@ export function MouseBranchTriggerUpdate(obj: Actor): void {
     case MouseState.FleeSubtype2:
     case MouseState.FleeSubtype3:
     case MouseState.FleeSubtype4: {
-      obj.pos.x += sub.vx;
-      obj.pos.z += sub.vz;
+      obj.pos.x = Math.fround(obj.pos.x + sub.vx);
+      // Subtype 2 compares the sum still on the FPU stack (`FST [EDI+0x48];
+      // FCOMP [0x00564458]` at `0x0043F829`); 3 and 4 reload the stored x.
+      const z = obj.pos.z + sub.vz;
+      obj.pos.z = Math.fround(z);
       const bound = MOUSE_FLEE_BOUND[sub.subtype];
       if (bound !== undefined) {
-        const past = sub.subtype === 2 ? obj.pos.z < bound
+        const past = sub.subtype === 2 ? z < bound
           : sub.subtype === 3 ? bound < obj.pos.x
           : obj.pos.x < bound;
         if (past) sub.state = MouseState.Stopped;
@@ -359,10 +391,13 @@ export function MouseBranchTriggerUpdate(obj: Actor): void {
     }
     case MouseState.Leave:
       ActorDespawn(obj);
-      break;
+      return;
     default:
       break;
   }
+  // The draw is `render/slotmodels.ts`'s; then, on every frame the routine
+  // did not despawn, `CALL 0x0043F950` at `0x0043F909`.
+  ActorRegisterOriginInViewSpace(obj, host);
 }
 
 /**
@@ -374,7 +409,7 @@ export function MouseUpdate(obj: Actor, f: ClassFrame): void {
   const sub = Tail(obj);
   if (!sub) return;
   if (sub.subtype < MOUSE_FIRST_TRIGGER_SUBTYPE) MouseWanderUpdate(obj, f);
-  else MouseBranchTriggerUpdate(obj);
+  else MouseBranchTriggerUpdate(obj, f.host);
 }
 
 function MouseDebug(obj: Actor): ActorDebug {
@@ -402,6 +437,9 @@ export const MouseHandler: ClassHandler = {
   // The class reads `obj+0x34` bit 3 itself and has no hit points at all —
   // `ResolveHit` would look up a damage row it has no entry in.
   ownsShotResult: true,
+  // Only the trigger registers, through `ActorRegisterOriginInViewSpace`;
+  // the wanderer is never in the shot test. See the file comment.
+  registersForShotTest: true,
   debug: MouseDebug,
 };
 

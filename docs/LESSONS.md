@@ -370,6 +370,25 @@ along. **Before calling an offset unreachable, look at the variable's type in
 the decompilation, and read the `ADD`/`LEA` in the listing: the instruction
 carries the byte offset and the pseudocode does not.**
 
+**L115 -- A repair of the database is not a re-reading of what was written from
+it, and a negative is what the cut pseudocode wrote best.** `L89` put back the
+bodies 1,085 flow overrides had cut, and every row, comment and `[open]`
+written from the cut pseudocode stayed as it was. `FishBeginSwimAway`'s row
+said "NOTHING EVER REMOVES THE OBJECT: the frame count is never read",
+`FishSwimAwayTick`'s "No despawn", and the port had built on both: a fish that
+found the four attack slots taken swam off at the surface for ever, still
+shootable, because the countdown and the `ActorDespawn` sit after the
+`MatrixStackPop` the old database stopped at -- and today's pseudocode prints
+them. A positive reading made from a cut body is short; a claim that something
+*never* happens was made entirely of the missing bytes. The same sweep found
+`MouseInit`'s row naming `FUN_00409270` (the hit-slot claim) for the call at
+`0x0043F557`, which is `RegisterEnemySlot`, and `RescueTargetInit`'s Original
+Mode big-head test behind an instruction boundary Ghidra still decodes wrong
+(`TEST AL,0x88` at `0x0045179E`; the instruction starts at `0x0045179C`).
+**When a row or a comment says a routine never does something, re-decompile
+the routine before building on the claim**, and read the bytes of any body
+that crosses a call `L89` names or a stretch the listing shows as nonsense.
+
 
 ## Transcribing behaviour into the port
 
@@ -1088,6 +1107,22 @@ answer for the `Init` walk). And a one-frame transient is invisible to
 screenshots taken at intervals: step the page under `?drive=1` and read a
 drawn quantity -- `Actor.lookAt` is bone 1 as last drawn -- every tick.
 
+
+**L116 -- The port has no world convention: its coordinates are the engine's,
+so a sign is an instruction.** `MouseSetVelocityFromYaw` negated both terms of
+`(sin yaw, cos yaw) * 0.4` under a note calling it "the port's world
+convention, the same `(-sin, -cos)` class 0x30's facing uses". All three
+copies in the exe are `FSIN`/`FCOS` with no `FCHS`, and the draw's
+`MatrixRotateY` carries the model's `+Z` onto that same vector, so every mouse
+in the port ran backwards -- reported as "sometimes", because a wanderer
+pauses and mostly crosses the view side-on -- and every Original Mode trigger
+fled away from the bound that ends its flight. The routes test had set a yaw
+"in the port's world convention" and then moved the mouse past its bound by
+hand, so it never asked whether the flight gets there. **A negation, a swapped
+axis or an offset angle with no instruction behind it is port-only logic,
+whatever it is called; another class's facing is that class's model. Drive a
+moving actor from its shipped spawn and yaw to whatever its routine says ends
+the motion, and never place it there.**
 ---
 
 ## Running the tools

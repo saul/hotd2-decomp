@@ -370,6 +370,39 @@ export function RegisterForShotTest(obj: Actor, host: GameHost): void {
 }
 
 /**
+ * `ActorRegisterOriginInViewSpace` — `FUN_0043F950`. The actor's own
+ * position, through `g_camera_world_to_view[g_camera_index]`, into
+ * `obj+0x70..0x78`, and then {@link RegisterForShotTest}.
+ *
+ * Ghidra's body ends at the `MatrixStackPop`; the bytes carry on (`L89`):
+ *
+ * ```
+ * 0043F9B3  MOV [ESI+0x70],ECX / [ESI+0x74],EDX / [ESI+0x78],EAX
+ * 0043F9BC  CALL MatrixStackPop(1)
+ * 0043F9C1  PUSH ESI
+ * 0043F9C2  CALL 0x00405160                  ; RegisterForShotTest(obj)
+ * ```
+ *
+ * So the object is tested as one sphere of `obj+0x124` about its **feet** --
+ * not about a bone, and not lifted. **Two callers** `[proved]`, from the xref
+ * list and from a scan of the image for `E8` rel32 to `0x0043F950`, which
+ * finds the same two: `CatBranchTriggerUpdate` (`0x00431536`), class 0x53's
+ * trigger, and `MouseBranchTriggerUpdate` (`0x0043F909`), class 0x52's.
+ * `MouseWanderUpdate` never calls it, nor anything else that registers.
+ *
+ * The port keeps `obj+0x70..0x78` in world space ({@link Actor.shotCentre})
+ * and `RegisterForShotTest` takes the depth itself, so the transform is the
+ * identity here.
+ */
+export function ActorRegisterOriginInViewSpace(obj: Actor,
+                                               host: GameHost): void {
+  obj.shotCentre.x = obj.pos.x;
+  obj.shotCentre.y = obj.pos.y;
+  obj.shotCentre.z = obj.pos.z;
+  RegisterForShotTest(obj, host);
+}
+
+/**
  * `[port-only]` Whether this pick, rather than `render/characters.ts`', tests
  * the object: a class that has moved across
  * ({@link ClassHandler.registersForShotTest}), or an actor that carries the

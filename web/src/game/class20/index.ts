@@ -49,26 +49,38 @@
  * 2. The one the bug report names — stage 2, block 9, step 4, op 13, spawn
  * `0x52EC` — is sub-type 0 with motion 0.
  *
+ * ## Four bones that are not drawn as bones
+ *
+ * `OneHitTargetInit` zeroes the draw record's slot **and** hit radius of
+ * bones 5, 8, 12 and 15 -- the last node of each limb -- and
+ * `OneHitTargetBoneDrawHook` (`FUN_00449530`) draws each of those four models
+ * itself, from the bone above: bones 4, 7, 11 and 14 draw their own record's
+ * slot and then the **skeleton node's** first child's slot at that child's
+ * offset, with no turn of its own. So a hand or a foot is carried rigidly by
+ * its forearm or shin, and it cannot be shot: its record has no slot for
+ * `ShotTestBoneTree` to descend into and no sphere. The port keeps the zero
+ * slot as {@link Actor.removed} and the zero radius in
+ * {@link Actor.boneRadius}; the hook's draw is `render/characters/`'s
+ * (`class20_hook.ts`), and {@link CLASS20_CARRIED_BONES} is what it reads.
+ *
  * ## What is not ported, by name
  *
  * * `OneHitTargetHoldDrawn` and the `g_GameMode` 2 (Training) / block 0x0D
  *   arms that reach it, whose two gate bytes are the open question
  *   `OneHitTargetState` records.
- * * `OneHitTargetBoneDrawHook` (`FUN_00449530`) — a per-bone draw callback
- *   that writes nothing to the actor. The renderer's.
  * * `SpawnGroundRingEffect` (`FUN_00407DA0`) and `SpawnBoneHitSprite`
  *   (`FUN_00407200`) used to be listed here and are ported now — see
- *   `game/effects/ring_effect.ts` and `game/effects/blood.ts`.
- * * The damaged-part swap `g_pBoneEffectSlots[type][bone][0]`. The port has
- *   `ActorSwapDamagedPart` for the combat classes; wiring class 0x20's
- *   single-index read of the same table to it is a renderer question, and
- *   it is not done: `[diverges]`, the hit bone keeps the model it had.
+ *   `game/effects/ring_effect.ts` and `game/effects/blood.ts`. So is the
+ *   damaged-part swap, `g_pBoneEffectSlots[type][bone][0]`, in
+ *   {@link OneHitTargetTakeShot}: a kill used to sink with the intact model.
  */
 import { ActorFlag, type Actor, type OneHitTargetActor } from "../actor";
 import { ActorDespawn } from "../despawn";
 import { SpawnBoneHitSprite } from "../effects/blood";
 import { SpawnGroundRingEffect } from "../effects/ring_effect";
-import { G } from "../globals";
+import { G, HIT_SLOT_NONE } from "../globals";
+import { GameMode } from "../game_mode";
+import type { GameHost } from "../host";
 import { DrawSkinnedModelAndShadow } from "../skeleton";
 import type { Rng } from "../../core/rng";
 import { ScoreAddForPlayer } from "../combat/score";
@@ -78,10 +90,13 @@ import {
   registerClass, type ActorDebug, type ClassFrame, type ClassHandler,
 } from "../registry";
 import { SpawnClass } from "../spawn_class";
-import { MotionOf } from "../tables";
-import { OneHitTargetState, type OneHitTargetTail } from "./state";
+import { CharacterTypeOf, MotionOf } from "../tables";
+import { CLASS20_CARRIED_BONES, OneHitTargetState } from "./state";
 
-export { OneHitTargetState, type OneHitTargetTail };
+export {
+  CLASS20_CARRIED_BONES, CLASS20_CARRYING_BONES, OneHitTargetState,
+  type OneHitTargetTail,
+} from "./state";
 
 /**
  * `g_class20_idle_motions` — `0x005647A4`. `u32[4]`, read out of `.rdata` as
@@ -153,16 +168,46 @@ export const CLASS20_SCORE_HEAD_COMBO_STEP = 10;
 export const CLASS20_SCORE_KILL = 80;
 
 /**
+ * `CMP EAX, 0x2; JLE` at `0x004490CE`: 0, 1 and 2 are the effect table's
+ * control codes, and the swap leaves the bone's model alone for them.
+ */
+export const CLASS20_EFFECT_CONTROL_MAX = 2;
+
+/**
+ * The `g_app_state` whose `Init` raises `obj+0x34` bit `0x8000` instead of
+ * writing the shot radius: `CMP dword ptr [0x009C8E98], 0xA` at `0x00448F69`.
+ * Which screen 10 is stays `[open]` (`AppState` names the ones the port has
+ * evidence for); the stage the port plays is 6.
+ */
+export const CLASS20_UNSHOOTABLE_APP_STATE = 0x0a;
+
+/**
  * `OneHitTargetInit` — `FUN_00448ED0`.
  *
- * [diverges] Six things the engine's Init does are the renderer's or are
- * unreachable here, and none of them is state this port keeps:
- * `ActorBuildSkinnedModel`, the bone-draw hook at `obj+0x12EC`,
- * `obj+0x120 = 0xFF` and `obj+0x3C = -1` (a camera slot and a hit slot this
- * class never claims), the `g_app_state == 10` arm that takes the actor out of
- * the shot test with `obj+0x34` bit `0x8000`, and `obj+0x124` from
- * `g_actor_radius_by_char` — which the port's shot test does not use, because
- * `pickShot` is answered by three.js.
+ * ```
+ * obj+0x3C = -1; obj+0x120 = 0xFF; obj+0x130C = tail+1; obj+0x1F4 = tail+0
+ * obj+0x1B4 = tail+6 ? tail+6 : g_class20_idle_motions[rand() & 3]
+ * ActorBuildSkinnedModel(obj+0x194, obj+0x40, obj+0x20C)   ; claims a hit slot
+ * obj+0x1F8 |= 2; obj+0x1FC = 5; obj+0x194 = rand(); obj+0x12EC = the hook
+ * if (g_app_state == 10) obj+0x34 |= 0x8000
+ * else obj+0x124 = g_actor_radius_by_char[type]
+ * bones 5, 8, 12, 15: record slot = 0, record radius = 0
+ * if (g_GameMode == 1 && g_original_item_big_head == 1) bone 2 radius *= 2
+ * obj+0x1334 = 0
+ * *obj = g_GameMode == 2 && block == 0xD ? OneHitTargetHoldDrawn : OneHitTargetUpdate
+ * ```
+ *
+ * The build is `ActorSpawn`'s, run just before this for every class in
+ * `HIT_SLOT_CLAIMING_CLASSES` (`game/spawn.ts`), and it claims the
+ * `g_hit_slots` entry the removal and the sink give back; the Init's own
+ * `obj+0x3C = -1` comes before it in the engine, so it is not repeated here.
+ * The hook is the renderer's (`render/characters/class20_hook.ts`).
+ * `obj+0x1FC = 5`, the order the object's three turns compose in, has no
+ * field on an actor without the model block; every one of the 36 shipped
+ * spawns is turned about y alone (the spawn records' pitch and roll are 0),
+ * for which all six orders are the same matrix.
+ * `obj+0x1334` is the Training arm's latch, which is not ported (see
+ * {@link OneHitTargetUpdate}), and so is the `HoldDrawn` install.
  *
  * `rng` is required and used: the engine calls `rand()` twice here, and a draw
  * that is not from `ctx.rng` is a save state that does not restore.
@@ -170,6 +215,8 @@ export const CLASS20_SCORE_KILL = 80;
 export function OneHitTargetInit(obj: Actor, rng?: Rng): void {
   const a = obj as OneHitTargetActor;
   a.tgt.state = OneHitTargetState.Alive;
+  // `MOV byte ptr [EDI + 0x120], CL` with `ECX = -1` at `0x00448EEC`.
+  a.cameraSlot = -1;
   const d = a.oneHitTarget;
   // `if (tail+6 == 0) obj+0x1B4 = g_class20_idle_motions[rand() & 3]`. The
   // engine's mask is `rand() & 0x80000003` sign-corrected, which is
@@ -190,6 +237,30 @@ export function OneHitTargetInit(obj: Actor, rng?: Rng): void {
   // `obj+0x1F8 |= 2`. Root motion's gate is bit 1 of that word and
   // `ActorBuildSkinnedModel` already sets it to 3 for every skeletal actor —
   // see `root_motion.ts` — so there is nothing for the port to do here.
+
+  // `CMP [g_app_state], 0xA; JZ` at `0x00448F69`: out of the shot test, or
+  // the shot sphere -- `g_actor_radius_by_char[obj+0x1F4]` at `0x00448F76`.
+  if (G.g_app_state === CLASS20_UNSHOOTABLE_APP_STATE) {
+    a.flags |= ActorFlag.NoShotTest;
+  } else {
+    const r = CharacterTypeOf(a)?.actor_radius ?? 0;
+    a.hitRadius = r;
+    a.radius = r;
+  }
+  // The four carried bones: no slot for the skeleton to draw -- the port's
+  // zero slot is `removed`, as for `ActorSwapDamagedPart`'s slot 0 -- and no
+  // sphere to shoot.
+  for (const bone of CLASS20_CARRIED_BONES) {
+    if (!a.removed.includes(bone)) a.removed.push(bone);
+    a.boneRadius[String(bone)] = 0;
+  }
+  // `CMP [g_GameMode], 1; JNZ; CMP byte ptr [0x009C88A8], AL; JNZ;
+  // FLD [ESI+0x210]; FADD ST0,ST0; FSTP [ESI+0x210]` at `0x00448FBE`..
+  // `0x00448FDD` -- bone 2's record `+0x78`, `obj+0x3A4`, doubled.
+  if (G.g_GameMode === GameMode.Original && G.g_original_item_big_head === 1) {
+    const k = String(CLASS20_HEAD_BONE);
+    a.boneRadius[k] = Math.fround((a.boneRadius[k] ?? 0) * 2);
+  }
 }
 
 /**
@@ -228,8 +299,23 @@ export function OneHitTargetShouldRemove(obj: OneHitTargetActor): boolean {
  * (`FUN_00449020`) from `0x0044909A` to `0x0044922E`, not a routine of its
  * own. Split out because it is the half of the class worth asserting on.
  */
-export function OneHitTargetTakeShot(obj: OneHitTargetActor, rng: Rng): void {
+export function OneHitTargetTakeShot(obj: OneHitTargetActor, rng: Rng,
+                                     host: GameHost): void {
   const bone = obj.pendingHit?.bone ?? 0;
+  // **The damaged part.** `MOV EDX, [EDX*4 + 0x4C7160]` (the type's row of
+  // `g_pBoneEffectSlots`), `XOR EAX, EAX; MOV AX, [EDX + bone*0xC]` and
+  // `CMP EAX, 2; JLE` at `0x004490BF`..`0x004490D1`: the bone's first effect
+  // entry, zero-extended and taken only above the three control codes, into
+  // `[EDI + 0x78]` -- the record's slot, `obj+0x20C + bone*0x90`. Not
+  // `ActorSwapDamagedPart` (`FUN_004098E0`): no sphere, no step counter, no
+  // zone bit, no `obj+0x34` bit `0x200` test. The body then sinks wearing it.
+  // The bundle's `steps[0][0]` is that entry.
+  const slot = CharacterTypeOf(obj)?.bones.find((b) => b.bone === bone)
+    ?.steps?.[0]?.[0] ?? 0;
+  if (slot > CLASS20_EFFECT_CONTROL_MAX) {
+    obj.boneSlot[String(bone)] = slot;
+    host.setBoneSlot(obj.at, bone, slot);
+  }
   // `SpawnBoneHitSprite` (`FUN_00407200`), once per hit bone. The class has no
   // hit points and no `ActorShotFeedback`, so this is the whole of what being
   // shot looks like on one of these.
@@ -322,11 +408,17 @@ export function OneHitTargetStepIdle(obj: OneHitTargetActor): void {
  * a stage bundle can carry reaches this arm at all.
  *
  * [diverges] `RegisterForShotTest` (`FUN_00405160`), which the engine calls at
- * the bottom of every frame `obj+0x34` bit 0 is set, is not called: the port's
- * shot test is `GameHost.pickShot`, answered from three.js, and there is no
- * per-frame registration list to join. `obj+0x34` bit 0 is still cleared on
- * death, because that is the bit the engine's list is gated on and a class
- * that clears it has left the test.
+ * the bottom of every frame `obj+0x34` bit 0 is set (`0x00449366`), is not
+ * called. The class is shot through `render/characters.ts`'s pick, which
+ * tests every live one bone by bone -- and so does the engine's, in effect:
+ * nothing in the class writes `obj+0x70..0x78`, so the point it registers is
+ * the view-space origin `ActorClearGameFields` left, which every shot line
+ * passes through and which `RegisterForShotTest`'s depth test takes, and the
+ * broad phase at `obj+0x124` never refuses. The list's other reader, the
+ * crowd push, would find a sphere at `obj+0x12C` -- never written either, so
+ * the world origin -- of `obj+0x124`'s ten units; whether a shipped scene
+ * puts a walker within reach of it is `[open]`. `obj+0x34` bit 0 is still
+ * cleared on death, because that is the bit the engine's call is gated on.
  */
 export function OneHitTargetUpdate(obj: Actor, f: ClassFrame): void {
   const a = obj as OneHitTargetActor;
@@ -340,11 +432,14 @@ export function OneHitTargetUpdate(obj: Actor, f: ClassFrame): void {
   }
 
   if ((a.flags & ActorFlag.Hit) !== 0) {
-    OneHitTargetTakeShot(a, f.rng);
+    OneHitTargetTakeShot(a, f.rng, f.host);
   } else if (OneHitTargetShouldRemove(a)) {
-    // `g_hit_slots[obj+0x3C] = 0; ActorDespawn(obj)`. The slot write is not
-    // ported: `OneHitTargetInit` leaves `obj+0x3C` at -1 and nothing in the
-    // class claims one, so what the engine indexes there is `[open]`.
+    // `MOV ECX, [EBP+0x3C]; MOV dword ptr [ECX*4 + 0x9C88C0], 0` at
+    // `0x00449291`, then `ActorDespawn`: the entry the build claimed goes
+    // back, and `obj+0x3C` keeps its index. `[port-only]` guard: an actor
+    // that found the table full would write the word before it, which the
+    // port's table does not have.
+    if (a.hitSlot !== HIT_SLOT_NONE) G.g_hit_slots[a.hitSlot] = HIT_SLOT_NONE;
     ActorDespawn(a);
     return;
   }
@@ -460,7 +555,12 @@ export function OneHitTargetSinkAndDespawn(obj: OneHitTargetActor): void {
   DrawSkinnedModelAndShadow(obj);
   obj.arcFrames -= 1;
   obj.pos.y -= CLASS20_SINK_PER_FRAME;
-  if (obj.arcFrames === 0) ActorDespawn(obj);
+  if (obj.arcFrames !== 0) return;
+  // `MOV EDX, [ESI+0x3C]; MOV dword ptr [EDX*4 + 0x9C88C0], 0` at
+  // `0x004494B1`, then `ActorDespawn` -- the removal's own two lines, with
+  // the same `[port-only]` guard.
+  if (obj.hitSlot !== HIT_SLOT_NONE) G.g_hit_slots[obj.hitSlot] = HIT_SLOT_NONE;
+  ActorDespawn(obj);
 }
 
 /** One target, for the sidebar. [port-only]. */

@@ -398,11 +398,28 @@ The per-bone classes' registration sites `[proved]`:
   `0x00433CC7`; `0x40` `0x0043C42A`, `0x0043D425`, `0x0043D7DD`, `0x0043D9DB`,
   `0x0043E330`; `0x43` `0x00446488`; `0x44` eight sites `0x00473CDF`..
   `0x004758C7`; `0x46` `0x0042E9B7`, `0x0042ED16`, `0x0042F401`, `0x0042F5B3`;
-  `0x51` `FishProjectToScreen` `0x00439BE3`; the class-0x53 trigger through
-  `ActorRegisterOriginInViewSpace` (`FUN_0043F950`, the call at `0x0043F9C2`).
-  That routine has **one** caller, `CatBranchTriggerUpdate` (`get_xrefs_to`).
-  The other site near it, `0x0043FB76`, is `ScriptedPropUpdate12`'s: class
-  0x12's door, which registers as a mesh. Where `0x52` registers is `[open]`.
+  `0x51` `FishProjectToScreen` `0x00439BE3`, in states 0 to 3 only; the
+  class-0x53 and class-0x52 triggers through `ActorRegisterOriginInViewSpace`
+  (`FUN_0043F950`, the call at `0x0043F9C2`), which has **two** callers --
+  `CatBranchTriggerUpdate` at `0x00431536` and `MouseBranchTriggerUpdate` at
+  `0x0043F909`, from the xrefs and from an `E8` scan of the whole image, which
+  agree. The other site near it, `0x0043FB76`, is `ScriptedPropUpdate12`'s:
+  class 0x12's door, which registers as a mesh.
+* **Who never registers, among the small classes** `[proved]`, by an `E8`
+  scan of each class's code for `RegisterForShotTest`,
+  `ActorRegisterCameraPoint` and `ActorRegisterOriginInViewSpace`: class
+  0x52's wanderers (`MouseWanderUpdate`, sub-types 0 and 1); class 0x51's
+  corpses (states 4 and 5) and a fish swimming away (`FishSwimAwayTick`, which
+  replaces `FishUpdate` at `*obj`); class 0x21 riding in, abandoned, freed or
+  sinking -- only `RescueTargetHeldState` files it, from the tracked bone
+  (`obj+0x70 = view(obj+0x100)`). Classes 0x21, 0x51 and 0x52 are picked
+  through the list (`registersForShotTest`), so a shot passes through each of
+  those to whatever is behind. Class 0x20 registers on every live frame
+  (`0x00449366`) with an `obj+0x70` nothing in the class writes -- the
+  view-space origin `ActorClearGameFields` left, which every shot line passes
+  through -- so its broad phase never refuses, and its pick is still
+  `render/characters.ts`'s bone walk; `OneHitTargetInit` takes bones 5, 8, 12
+  and 15 out of that walk (slot and radius zeroed).
 * Class `0x25`: **none**, `[proved]` -- see *A class that never registers*
   above. `FUN_004825B0` (`0x00482991`), a task `FUN_00482070` allocates, is not
   class 0x25's: nothing class 0x25 runs reaches either routine, and whose task
@@ -762,7 +779,15 @@ last.
 
 The head combo (`g_head_combo_bonus`, `+player*0x98`) is added *and then
 incremented by 10*, so consecutive headshots pay 120, 130, 140 … and any
-non-head hit resets it to zero. The hit counter at `g_player_hit_count` feeds
+non-head hit resets it to zero. **Four routines keep it**, and nothing on the
+shot path does `[proved]`: every instruction naming either player's copy
+(`0x009A5C82`, `0x009A5DB2`) or a register base loaded from the player block
+is in `ResolveHit`, `OneHitTargetUpdate` (class 0x20), `RescueTargetHeldState`
+(class 0x21) or `CivilianUpdate` (class 0x10, its non-kill shot arm), apart
+from the scene resets (`0x00425EF7`, `ResetSceneOnEnter`, `0x00498E96`), which
+zero it. `MarkActorShot` (`FUN_00404DB0`) writes nothing of it, so a pull that
+is only marked -- a prop, a thrown weapon, a body creature, a boss -- leaves
+the combo running, and a class-0x20 or 0x21 head hit pays it. The hit counter at `g_player_hit_count` feeds
 the end-of-stage accuracy grade that evt `0x2B` reads. A **result-5** hit is
 tested in one place in the tail, `CMP [g_hit_result + p*4], 5 / JZ` at
 `0x00409819`, ahead of the **body** arm's 10 and its hit count: that pays

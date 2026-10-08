@@ -37,13 +37,15 @@
  * ```
  *
  * So an actor with no skeleton is hit as **one sphere, whole**, at radius
- * `obj+0x124`. {@link SlotModelLayer.pickSphere} is that else-arm, and it is
- * what makes the mouse shootable.
+ * `obj+0x124`. {@link SlotModelLayer.pickSphere} is that else-arm.
  *
  * The whole routine, broad phase and fork included, is
  * `game/combat/shot_test.ts`'s, for the classes that register the engine's
- * way. This layer tests the ones that do not; `CharacterLayer.pickShot` says
- * what that costs them.
+ * way -- among the slot models the mouse (only its trigger registers), the
+ * fish (only in states 0 to 3) and the owl, which is how a running mouse, a
+ * fish corpse and a fish swimming away came to be passed through as they are
+ * in the exe. This layer tests the ones that do not; `CharacterLayer.pickShot`
+ * says what that costs them.
  */
 import {
   Group, Matrix4, Object3D, Ray, Vector3, type Mesh,
@@ -899,7 +901,8 @@ export class SlotModelLayer implements System<RenderContext> {
       c.visible = true;
       if ((parts[i] as Partial<HordePart>).deform) deformHordeSheet(c, a);
       // `AssetDrawSlotWithAlpha` (`FUN_004185A0`): the fading draws in a
-      // chain, class 0x40's ripple and class 0x42's shadow. Every other part
+      // chain, class 0x40's ripple, class 0x42's shadow and a fading fish (class
+      // 0x51 with `sub+0x6A` bit 2 down). Every other part
       // is `AssetDrawSlot`.
       setDrawAlpha(c, (parts[i] as Partial<HordePart>).alpha ?? null);
       // A draw its routine lit with a colour of its own, which

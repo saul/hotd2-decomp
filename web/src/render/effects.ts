@@ -293,10 +293,8 @@ export class EffectLayer implements System<RenderContext> {
     drawLifeMarkers({ node: (key, slot, parent) => this.node(key, slot, parent),
                       view: this.viewGroup }, seen);
     // ...and the one a shot civilian leaves, `render/life_markers.ts` too.
-    drawCivilianHitMarkers({
-      node: (key, slot, parent) => this.node(key, slot, parent),
-      view: this.viewGroup,
-    }, seen);
+    drawCivilianHitMarkers({ node: (key, slot, parent) => this.node(key, slot, parent),
+                             view: this.viewGroup }, seen);
     // The result card's glyphs, and anything else drawn under
     // `MatrixLoadIdentity` by slot: `render/view_slots.ts`.
     drawViewSlots({ node: (key, slot, parent) => this.node(key, slot, parent),

@@ -251,6 +251,8 @@ export function Class14Update(obj: Actor, f: ClassFrame): void {
 export const Boss2Handler: ClassHandler = {
   init: Class14Init,
   update: Class14Update,
+  // `Class14Init` installs `Class14Update` and returns (`0x0047613D`).
+  firstUpdateNextWalk: true,
   // The deaths are three states of the class's own: stopping on the frame
   // the hit points run out would freeze the boss in the reaction that is
   // about to raise the flag.

@@ -54,11 +54,13 @@ import {
   FLICKER_SLOT_WHOLE, FLICKER_WHOLE_RISE, FLICKER_WHOLE_SCALE,
 } from "../game/class41/type48";
 import { SpawnClass } from "../game/spawn_class";
+import { PropContainerRoutine } from "../game/class41/placer_state";
 import { BAMS_TO_RAD } from "../core/bams";
 import { Rng } from "../core/rng";
 import { COMPOSITE_FAMILIES, PropParts, type PropPart } from "./prop_parts";
 import { BannerWave } from "./banner_wave";
 import { releaseAssetDrawAlpha, setAssetDrawAlpha } from "./draw_order";
+import { rewriteEnvUvs } from "./class2d_draws";
 
 /** `AssetDrawSlot(0x10D0)` — the ground shadow a standing prop gets. */
 const SHADOW_SLOT = 0x10d0;
@@ -106,10 +108,11 @@ const SLOT_PART = /_slot_([0-9a-f]{4})$/;
  * family until `GENERIC_POSE_ORDER` was read out of the EXE.
  *
  * `[open]` It stays the default for the families whose own routine has **not**
- * been read for its rotation order — the group props, the kinded props, the
- * break puff and the story-mode switch. Keeping the behaviour those four had
- * is deliberate: changing it would be a guess in the other direction.
- * (`PropUpdateType75` was a fifth; its routine records its draws now.)
+ * been read for its rotation order — the group props, the kinded props and the
+ * break puff. Keeping the behaviour those three had is deliberate: changing
+ * it would be a guess in the other direction. (`PropUpdateType75` and
+ * `StoryModeSwitchUpdate` were two more; their routines record their draws
+ * now.)
  * `RisingDoorUpdate` (`FUN_004753F0`) is the one that is
  * read, and it is one `MatrixRotateY` and nothing else, so it gets a row.
  */
@@ -120,10 +123,6 @@ const GENERIC_FAMILY_DEFAULT = PoseOrder.YawRollPitch;
  * and does not record its own draws (a family that does is drawn from
  * {@link BreakableProp.draws} and never reaches this).
  *
- * * {@link PropFamily.ScriptFlagEffect} — `EffectPoseNode` (`FUN_0040D9D0`)
- *   is `RotZ; RotY; RotX` after its translate, and the port has already
- *   resolved its three angles into `pitch`/`yaw`/`roll`, so the effect tree's
- *   nodes ride this rather than a fourth arm.
  * * {@link PropFamily.RisingDoor} — `RisingDoorUpdate` (`FUN_004753F0`) is
  *   `MatrixTranslate` then **one** `MatrixRotateY` and then its draw. Both
  *   shipped shutters carry a zero pitch and roll, because
@@ -132,7 +131,6 @@ const GENERIC_FAMILY_DEFAULT = PoseOrder.YawRollPitch;
  *   three rotations it does not make.
  */
 const FAMILY_POSE_ORDER: Partial<Record<PropFamily, PoseOrder>> = {
-  [PropFamily.ScriptFlagEffect]: PoseOrder.RollYawPitch,
   [PropFamily.RisingDoor]: PoseOrder.YawOnly,
   // `FallingContainerFragmentUpdate` (`FUN_0046AD20`): `RotZ; RotY; RotX`
   // in both draw blocks, the container's own order.
@@ -247,6 +245,9 @@ export class BreakableLayer implements System<RenderContext> {
   /** Draw-time noise only — see `shake`. Reseeded by `adopt`. */
   private readonly rng = new Rng(SHAKE_SEED);
   private readonly _m = new Matrix4();
+  /** This frame's world-to-view, for {@link PropDrawCall.envUv}. */
+  private readonly _view = new Matrix4();
+  private viewValid = false;
   /** `PropUpdateType45`'s bend of the banner templates (`banner_wave.ts`). */
   private readonly banners = new BannerWave();
 
@@ -344,9 +345,16 @@ export class BreakableLayer implements System<RenderContext> {
     return c;
   }
 
-  update(): void {
+  update(ctx?: RenderContext): void {
     this.group.visible = this.enabled;
     if (!this.enabled) return;
+    // The modelview an `AssetSlotUVsFromViewNormals` draw rewrites its UVs
+    // through: the camera's world-to-view, as `render/effects.ts` takes it.
+    this.viewValid = false;
+    if (ctx?.camera) {
+      this._view.copy(ctx.camera.matrixWorldInverse);
+      this.viewValid = true;
+    }
     const seen = new Set<number>();
 
     for (const p of G.g_breakable_props) {
@@ -434,10 +442,10 @@ export class BreakableLayer implements System<RenderContext> {
         // "roll" that is really a slot-strip length. The check prints both.
         //
         // For every other family it is the family's single order:
-        // `FallingContainerUpdate` and `ScriptFlagEffectUpdate` -- whose
-        // nodes are posed by `EffectPoseNode` (`FUN_0040D9D0`) -- draw
-        // `Rz.Ry.Rx`, which is also the order `BreakablePropGroundContact`'s
-        // hull test uses, so box and model agree.
+        // `FallingContainerUpdate` -- whose nodes are posed by
+        // `EffectPoseNode` (`FUN_0040D9D0`) -- draws `Rz.Ry.Rx`, which is
+        // also the order `BreakablePropGroundContact`'s hull test uses, so
+        // box and model agree.
         for (const axis of PoseOrderFor(p)) {
           if (axis === "Z") l.node.rotateZ(p.roll * BAMS_TO_RAD);
           else if (axis === "Y") l.node.rotateY(p.yaw * BAMS_TO_RAD);
@@ -604,6 +612,8 @@ export class BreakableLayer implements System<RenderContext> {
       n.matrixWorldNeedsUpdate = true;
       // `AssetDrawSlotWithAlpha`'s forced blend, or the plain draw.
       setAssetDrawAlpha(n, c.alpha ?? null);
+      // `AssetSlotUVsFromViewNormals` on the same slot just before the draw.
+      if (c.envUv && this.viewValid) rewriteEnvUvs(n, this._view);
       // The layer goes on the primitives, as `draw_order.ts` puts layer 7:
       // a group's order would become its children's `groupOrder`, which
       // three.js compares before anything else.
@@ -721,9 +731,12 @@ export class BreakableLayer implements System<RenderContext> {
       // The placers are counted rather than the props, because that is the
       // distinction: "the script has not placed any here" and "press play"
       // want different responses from whoever is reading the panel.
+      // A class-0x41 actor is a placer unless it is one of constructor 61's
+      // figures, which is a skinned actor that stays.
       const waiting = G.g_object_list.filter((o) =>
         !o.despawned && !o.dead
-        && (o.cls === SpawnClass.PropContainerPlacer
+        && ((o.cls === SpawnClass.PropContainerPlacer
+             && o.placer.routine === PropContainerRoutine.Placer)
             || o.cls === SpawnClass.PropPlacer)).length;
       return waiting
         ? `none built yet — ${waiting} placer${waiting === 1 ? "" : "s"}`

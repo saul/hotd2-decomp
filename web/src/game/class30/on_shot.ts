@@ -9,7 +9,9 @@
  * only thing routing a thrower into its fall since it was written.
  */
 import { ActorFlag, ZombieFlag2, type ZombieActor } from "../actor";
-import { ActorReleaseBodyCreatureOnHit } from "../combat/resolve_hit";
+import type { Events } from "../../core/events";
+import { ActorReleaseBodyCreatureOnHit, HitResultCode } from "../combat/resolve_hit";
+import { ActorUpdateBodyCondition } from "./condition";
 import { CharacterTypeOf } from "../tables";
 import { ZOMBIE_SPRINTS, ZombieState } from "./states";
 
@@ -95,7 +97,7 @@ const COND_SIX = 6;
  * `FUN_004550E0` — the camera-space landing point, the arc, the water case and
  * the bounce — so the write below is the engine's own.
  */
-export function ZombieOnShot(obj: ZombieActor): void {
+export function ZombieOnShot(obj: ZombieActor, events?: Events): void {
   const hit = obj.pendingHit;
   if (!hit) return;
   obj.pendingHit = null;
@@ -113,6 +115,19 @@ export function ZombieOnShot(obj: ZombieActor): void {
   obj.zom.hitResult = hit.result;
   obj.flags2 &= ~ZombieFlag2.EntryClipPlaying;
   obj.flags |= ZOMBIE_SPRINTS;
+  // `00453F2D CALL 0x00454050`, `ActorShotFeedback`, next -- and on results
+  // 1, 3 and 4 (the jump table at `0x0045425C`) it calls
+  // `ActorUpdateBodyCondition` (`FUN_00454270`) at `0x004541F4`. The port's
+  // feedback is one merged call at shot time (see `combat/feedback.ts`); the
+  // condition half is class 0x30's alone and is made here, where the engine
+  // makes it: after this frame's `ZombieTickAltHitReaction` has read the
+  // condition it had, and before the death arm below, whose state reads the
+  // condition it leaves.
+  if (hit.result === HitResultCode.Damaged
+      || hit.result === HitResultCode.Severed
+      || hit.result === HitResultCode.Split) {
+    ActorUpdateBodyCondition(obj, events);
+  }
   // `00453F3B TEST EAX, 0x80000000` / `JNZ 0x00454035` -- the latch comes
   // **before** the live/dead split, so a latched actor takes neither arm.
   if (obj.flags2 & ZombieFlag2.DiedInFlight) return;

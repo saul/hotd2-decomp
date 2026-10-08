@@ -49,7 +49,7 @@ const w = new Walker(script, {
   playSound: NOOP, aliveEnemies: () => null, presentEnemies: () => null,
   aliveCivilians: () => null, cameraFree: () => null, setShutter: NOOP,
   scriptFlagRaised: () => null,
-  showMessage: NOOP, endDialogue: NOOP,
+  showMessage: NOOP,
 });
 if (!seekTo(w, Number(block), Number(step), Number(op))) {
   throw new Error(`seek to ${block}/${step}/${op} failed`);

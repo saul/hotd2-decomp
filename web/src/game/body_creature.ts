@@ -54,20 +54,25 @@
  * reaches `BodyCreatureUpdate` only through the allocation — so there is no
  * `SpawnClass` for it to key a handler on.
  *
- * One consequence, and it is not a spelling difference -- the divergence
- * declared at the last line of `BodyCreatureUpdate`, below:
- * `BodyCreatureUpdate` ends by calling `RegisterForCameraTracking`
- * (`FUN_00408EC0`), so a live creature is a **camera candidate** in the
- * engine. The port's candidate list (`camera/slots.ts`) is over `Actor`s, so
- * a record here cannot enter it, and `g_camera_free` therefore does not see
- * the creature. Making it see one means either the slot array taking non-actor
- * objects or the creature becoming an `Actor` with an invented class id;
- * both are decisions above this file. The point the engine registers is
- * `obj+0x100`, and **what space that point is in is itself `[open]`**: the
- * routine writes `g_camera_blocks[cur]+0x00 · obj+0x40` with `obj+0x40` in
- * camera space, and that matrix is the world-to-camera one everywhere else in
- * the image (`GameHost.viewSpaceOfPoint`, `RegisterForShotTest`'s bit-0x10
- * arm). So the port writes no point rather than guessing at one.
+ * ## It is a camera candidate, and the camera holds it as an attacker
+ *
+ * Three calls put it in front of the camera, and the port makes each through
+ * `camera/slots.ts`' creature arm, which files it by {@link BodyCreature.id}
+ * as the thrown weapons are filed by theirs:
+ *
+ * * `SpawnBodyCreature` enrols it straight into a general slot with
+ *   `RegisterEnemySlot` (`FUN_00408E80`);
+ * * every flying frame `BodyCreatureUpdate` writes `obj+0x100` -- its
+ *   position taken **out** of camera space through `g_camera_blocks +
+ *   g_camera_index * 0x1A4` (`LEA EAX, [EDX*4 + 0x9a6040]` at `0x0043EAF3`),
+ *   which is the block's view-to-world matrix, so a world point -- and calls
+ *   `RegisterForCameraTracking` (`FUN_00408EC0`);
+ * * and its two ways out of the flight free the slot the last fill dealt it.
+ *
+ * Its `obj+0x121` is the player it flies at, never `0xFF`, so
+ * `UpdateCameraEnemySlots` (`FUN_00408DD0`) deals it slot 0 or 1 as it would
+ * an enemy holding an attack permit, and `SelectCameraLookAtTarget`
+ * (`FUN_00403050`) can hold the view on it alone. `[proved]`
  */
 import type { Events } from "../core/events";
 import type { Rng } from "../core/rng";
@@ -78,6 +83,12 @@ import { PlayerTakeDamage } from "./combat/player";
 import { SpawnBloodSprayAtPoint } from "./effects/blood";
 import { vec3, type Vec3 } from "./vec";
 import { ActorFlag, type Actor } from "./actor";
+import {
+  CameraSlotVacate, RegisterBodyCreatureEnemySlot,
+  RegisterBodyCreatureForCameraTracking,
+} from "./camera/slots";
+import { CameraBlockViewToWorld } from "./camera/view";
+import { MatrixTransformPoint } from "./matrix";
 
 /**
  * `obj+0x1310` — the creature's own state word, which is a different set from
@@ -229,6 +240,20 @@ export interface BodyCreature {
   state: BodyCreatureState;
   /** `obj+0x40..0x48`, **in camera space**. See the note at the top. */
   pos: Vec3;
+  /**
+   * `obj+0x100..0x108` -- the point the camera looks at. The host's, copied by
+   * `SpawnBodyCreature` and again by `BodyCreatureInit`; then, on every frame
+   * the creature registers with the camera, its position put through the
+   * camera block's view-to-world matrix: a **world** point, unlike
+   * {@link pos}.
+   */
+  lookAt: Vec3;
+  /**
+   * `obj+0x120` -- the `g_enemy_slots` index the last fill or
+   * `RegisterEnemySlot` dealt it, `-1` for the `0xFF` `SpawnBodyCreature`
+   * writes first. Read back by the two slot vacates in the flight.
+   */
+  cameraSlot: number;
   /** `obj+0x11C` — one hit point. */
   hp: number;
   /** `obj+0x124` — the shot sphere's radius. */
@@ -258,7 +283,12 @@ export interface BodyCreature {
    * since, and {@link HIT_DELAY_FRAMES} of them is what the player pays for.
    */
   arrived: number;
-  /** `obj+0x121` — which player it is flying at, and who it charges. */
+  /**
+   * `obj+0x121` — which player it is flying at, and who it charges. The slot
+   * fill reads the same byte as `Actor.attackPermit`, and in that encoding
+   * (`-1` for `0xFF`); nothing ever writes it `0xFF`, so to the camera the
+   * creature always holds a permit.
+   */
   target: number;
   /**
    * `obj+0x34`, and this object reads exactly three of its bits — the same
@@ -297,6 +327,10 @@ export function BodyCreatureDrawSlot(c: BodyCreature): number {
  * `BodyCreatureInit` when it next walks — and neither half does anything the
  * other can observe in between, so they are one call here.
  *
+ * The spawn's half ends in `RegisterEnemySlot` (`FUN_00408E80`), which deals
+ * the creature the first free general slot straight away, until the next
+ * `UpdateCameraEnemySlots` clears the table.
+ *
  * **Both enemy counters go up.** `0043E7F4 INC word ptr [0x009C7006]` and
  * `0043E7FB INC word ptr [0x009C904A]`, unconditionally and with none of the
  * `obj+0x38` latching class 0x30 does — the object is made once and it leaves
@@ -308,6 +342,13 @@ export function SpawnBodyCreature(host: Actor): BodyCreature {
     host: host.at,
     state: BodyCreatureState.RideHostBone,
     pos: vec3(),
+    // `obj+0x100..0x108 = host+0x100..0x108` at `0x0043E750`, and again in
+    // `BodyCreatureInit` at `0x0043E802` -- the same words, a frame apart in
+    // the engine and in one call here.
+    lookAt: vec3(host.lookAt.x, host.lookAt.y, host.lookAt.z),
+    // `MOV byte ptr [ESI + 0x120], 0xFF` at `0x0043E774`; the enrolment below
+    // overwrites it.
+    cameraSlot: -1,
     hp: BODY_CREATURE_HP,
     radius: BODY_CREATURE_RADIUS,
     pitch: 0,
@@ -330,6 +371,8 @@ export function SpawnBodyCreature(host: Actor): BodyCreature {
       published: vec3(),
     },
   };
+  // `CALL 0x00408E80` at `0x0043E77B`, the last line of `SpawnBodyCreature`.
+  RegisterBodyCreatureEnemySlot(c);
   G.g_body_creatures.push(c);
   G.g_enemies_present += 1;
   G.g_enemies_alive += 1;
@@ -367,6 +410,9 @@ function BodyCreatureRideHostBone(c: BodyCreature, host: Actor | undefined,
   events?.emit("sound.play", { id: SOUND_RELEASE });
   c.frame = 0;
   c.arrived = 0;
+  // `OR EBP, 0x10000000` at `0x0043E934`: the bit a zombie raises for its
+  // strike, which the moving-object pushes read off a pusher.
+  c.flags |= ActorFlag.Committed;
   c.t = 0;
   c.ease = EASE_START;
   c.pitch = 0;
@@ -386,7 +432,11 @@ function BodyCreatureRideHostBone(c: BodyCreature, host: Actor | undefined,
   }
 }
 
-/** `BodyCreatureUpdate`'s `case 3` — the flight. Returns false to retire. */
+/**
+ * `BodyCreatureUpdate`'s `case 3` — the flight. False when the routine ends
+ * here: the shot arm returns out of `BodyCreatureUpdate` before the draw and
+ * the tail.
+ */
 function BodyCreatureFly(c: BodyCreature, rng: Rng,
                          events?: Events): boolean {
   // `INC ECX / MOV [ESI+0x1330], ECX` happens **before** the shot test, so a
@@ -427,15 +477,17 @@ function BodyCreatureFly(c: BodyCreature, rng: Rng,
     c.fallSpeed = 0;
     c.flight.fallSpin = FALL_SPIN_SHOT;
     c.state = BodyCreatureState.FallShot;
-    // The engine never clears bit 3 here; it does not have to, because the
-    // arm it takes leaves state 3 and no other state reads the bit. Cleared
-    // anyway so a record that somehow came back could not double-pay.
-    c.flags &= ~ActorFlag.Hit;
-    // The engine also drops its enemy slot here — `g_enemy_slots[obj+0x120]
-    // = 0` — and returns without drawing. The port has no slot for a
-    // non-actor to hold: the camera-candidate divergence the file's header
-    // describes, one line from the other end of the same routine.
-    return true;
+    // Bit 3 is not cleared: the arm leaves state 3, and no other state reads
+    // it.
+    //
+    // ```
+    // 0043EC30  TEST EAX, 0x10000 / JNZ 0x0043EF0A  ; obj+0x34; the epilogue
+    // 0043EC41  CMP AL, 0xFF / JZ 0x0043EF0A        ; obj+0x120
+    // 0043EC4E  MOV byte [ECX*8 + 0x9a5ec0], BL     ; the slot's occupied byte
+    // 0043EC5A  RET                                 ; no draw, no tail
+    // ```
+    if (!(c.flags & ActorFlag.NoCameraTrack)) CameraSlotVacate(c);
+    return false;
   }
   const f = c.flight;
   // `x` and `z` lerp; `y` descends to zero and takes the arc on top.
@@ -458,6 +510,9 @@ function BodyCreatureFly(c: BodyCreature, rng: Rng,
     if (c.t > ARRIVE_T) c.arrived = 1;
   }
   if (c.arrived > 0 && ++c.arrived > HIT_DELAY_FRAMES) {
+    // The slot goes first, behind the same two tests as the shot arm's
+    // (`0x0043ED99`, `0x0043EDA0`; the store at `0x0043EDAD`).
+    if (!(c.flags & ActorFlag.NoCameraTrack)) CameraSlotVacate(c);
     // The engine's own three clauses, in this order and no others.
     if (G.g_scene_state_major_entered === DAMAGE_SCENE_MAJOR
         && G.g_players_in_play > 0
@@ -496,6 +551,12 @@ function BodyCreatureFall(c: BodyCreature): boolean {
   if (c.pos.y <= DESPAWN_Y) {
     G.g_enemies_present -= 1;
     G.g_enemies_alive -= 1;
+    // `ActorDespawn` (`FUN_00409CC0`) at `0x0043EEC5`, and the pool drops
+    // the record. Of that routine's lines, `ColiDynamicListRemove`
+    // (`FUN_00405220`) has nothing to find here: the port's creature files
+    // no `g_shot_test_list` entry (its shot test is `render/`'s, see the
+    // flight's last lines), so none was published; and it claims no hit
+    // slot.
     return false;
   }
   return true;
@@ -504,41 +565,63 @@ function BodyCreatureFall(c: BodyCreature): boolean {
 /**
  * `BodyCreatureUpdate` — `FUN_0043E880`. One creature, one frame. False once
  * it should leave the pool.
+ *
+ * Past the switch, on every path that neither despawns nor takes the shot
+ * arm's `RET`:
+ *
+ * ```
+ * 0043EA58  the draw: AssetDrawSlot(obj+0x1330 % 0x28 + 0x1D31)
+ * 0043EAAB  TEST [ESI+0x34], 0x10000 / JNZ 0x0043EEF9
+ * 0043EABF  state == 0 or state == 3, else JNZ 0x0043EEF9
+ * 0043EAD8  state 3: Push; SetTop(g_camera_blocks + g_camera_index * 0x1A4)
+ *           obj+0x100 = MatrixTransformPoint(obj+0x40); Pop
+ * 0043EED5  state 0: obj+0x100 = obj+0x40
+ * 0043EEF1  RegisterForCameraTracking(obj)
+ * 0043EEF9  tail+0x00..0x08 = obj+0x40..0x48
+ * ```
+ *
+ * `[proved]`. The matrix is `0x009A6040 + index * 0x1A4`, the block's `+0x40`
+ * -- view to world -- so `obj+0x100` is the creature in the world. The state-0
+ * arm cannot be reached from the engine's own case 0, which always leaves
+ * state 3 (`0x0043E953`) with no way out before it; states 4 and 6 do not
+ * register at all.
  */
 export function BodyCreatureUpdate(c: BodyCreature, rng: Rng, host: GameHost,
                                    events?: Events): boolean {
   const obj = G.g_object_list.find((a) => a.at === c.host);
-  let live = true;
   switch (c.state) {
     case BodyCreatureState.RideHostBone:
       BodyCreatureRideHostBone(c, obj, rng, host, events);
       break;
     case BodyCreatureState.Fly:
-      live = BodyCreatureFly(c, rng, events);
+      if (!BodyCreatureFly(c, rng, events)) return true;
       break;
     case BodyCreatureState.FallAfterHit:
     case BodyCreatureState.FallShot:
-      live = BodyCreatureFall(c);
+      if (!BodyCreatureFall(c)) return false;
       break;
     default:
       break;
   }
-  // The last line of the routine, past the draw, on every state and every
-  // path that does not despawn — the part the decompiler drops.
-  //
-  // [diverges] Its other half, `RegisterForCameraTracking` (`FUN_00408EC0`),
-  // is not called: the port's camera candidates are `Actor`s and this record
-  // is not one, so a live creature is never a camera candidate here as it is
-  // in the engine. The file's header has the whole of it, and the open
-  // question of what space the registered point is in.
-  if (live) {
-    // The draw's own argument, resolved here — see {@link BodyCreature.slot}.
-    c.slot = BodyCreatureDrawSlot(c);
-    c.flight.published.x = c.pos.x;
-    c.flight.published.y = c.pos.y;
-    c.flight.published.z = c.pos.z;
+  // The draw's own argument, resolved here — see {@link BodyCreature.slot}.
+  c.slot = BodyCreatureDrawSlot(c);
+  if (!(c.flags & ActorFlag.NoCameraTrack)
+      && (c.state === BodyCreatureState.RideHostBone
+          || c.state === BodyCreatureState.Fly)) {
+    if (c.state === BodyCreatureState.Fly) {
+      MatrixTransformPoint(CameraBlockViewToWorld(G.g_camera_index), c.pos,
+                           c.lookAt);
+    } else {
+      c.lookAt.x = c.pos.x;
+      c.lookAt.y = c.pos.y;
+      c.lookAt.z = c.pos.z;
+    }
+    RegisterBodyCreatureForCameraTracking(c);
   }
-  return live;
+  c.flight.published.x = c.pos.x;
+  c.flight.published.y = c.pos.y;
+  c.flight.published.z = c.pos.z;
+  return true;
 }
 
 /**

@@ -429,7 +429,7 @@ export class Shooting implements System {
     if (r.kind === "marked") {
       // The class scores it and the class draws it: `OneHitTargetUpdate`
       // spawns its own `SpawnBoneHitSprite`, and a civilian's shot arm its
-      // `SpawnCivilianHitMarker` (`game/class10/hit_marker.ts`).
+      // `SpawnCivilianHitMarker` (`FUN_0048E080`, `game/class10/hit_marker.ts`).
       this.onShot({ hit: true, bone: r.bone, points: 0 },
                   `${r.who} · marked, its own class scores it`);
       return;

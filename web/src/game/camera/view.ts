@@ -59,10 +59,11 @@
 import { AppState, G } from "../globals";
 import { BuildSceneLightDirection } from "../light_block";
 import { SetRenderLightDirection } from "../light_sets";
-import { MatrixGetAngles, type Rot3 } from "../carrier";
-import { MatIdentity, MatCopy, MatrixGetTranslation, MatrixLoadIdentity,
-         MatrixRotateX, MatrixRotateY, MatrixRotateZ, MatrixTransformPoint,
-         MatrixTranslate, type Mat } from "../matrix";
+import {
+  MatCopy, MatIdentity, MatrixGetAngles, MatrixGetTranslation,
+  MatrixLoadIdentity, MatrixRotateX, MatrixRotateY, MatrixRotateZ,
+  MatrixTransformPoint, MatrixTranslate, type Mat, type Rot3,
+} from "../matrix";
 import { vec3, type Vec3 } from "../vec";
 import { CameraUpdateHook } from "./driver";
 import { CamBlockSetAnglesFromLookAt, CamEvalPath7, CameraPoseBlock }
@@ -83,11 +84,11 @@ const _p = vec3();
 const _q = vec3();
 
 /**
- * The view-to-world matrix's rotation as `game/carrier.ts`'s `Rot3`: the
+ * The view-to-world matrix's rotation as `game/matrix.ts`'s `Rot3`: the
  * matrix stack keeps row vectors, so its `+X` image is row 0 where `Rot3`'s is
  * column 0. `[port-only]`.
  */
-export function RotationOf(m: ArrayLike<number>): Rot3 {
+function RotationOf(m: ArrayLike<number>): Rot3 {
   return [m[0], m[4], m[8], m[1], m[5], m[9], m[2], m[6], m[10]];
 }
 

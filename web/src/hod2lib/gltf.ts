@@ -519,9 +519,14 @@ export async function exportLevel(
     // stage-2 car's door shells, which took the black of the body's inner
     // copies. `web/tools/checks/texture_alpha.ts` holds every primitive of a
     // bundle to its own mesh's colour and culling.
+    //
+    // The rest of that `SetMaterial` is in it too: the ambient scale at
+    // `+0x28` and the specular colour the offset colour supplies. Leaving
+    // them out would draw a mesh with another mesh's highlight.
     const key = [part, mesh.textureId, mesh.tsp, mesh.textureControl,
                  mesh.parameterControl, mesh.ispTsp, mesh.shading,
-                 ...factor, mesh.doubleSided].join(" ");
+                 ...factor, mesh.doubleSided, mesh.texAmbient,
+                 ...mesh.specularColour].join(" ");
     const hit = matCache.get(key);
     if (hit !== undefined) return hit;
 
@@ -605,6 +610,13 @@ export async function exportLevel(
         fog_control: mesh.fogControl,
         texture_shading: ["decal", "modulate", "decal_alpha",
                           "modulate_alpha"][mesh.textureShading],
+        // The rest of the D3DMATERIAL7 `WalkMeshChainAndDraw` sets for this
+        // mesh: diffuse is the base colour above, ambient is it times
+        // `tex_ambient`, specular and power are these. See
+        // `docs/formats/materials.md`, "The material and the light equation".
+        tex_ambient: mesh.texAmbient,
+        specular: mesh.specularColour,
+        specular_power: mesh.specularPower,
       },
     };
     // HOTD2 does no runtime lighting on level geometry: illumination is

@@ -23,7 +23,8 @@ import {
   OriginalItem, OriginalItemsApply, OriginalItemsApplyOnJoin,
   ResetOriginalModeLoadout,
 } from "../../src/game/original_mode";
-import { ItemSelectApplyToPlayers } from "../../src/game/class6e";
+import { ItemSelectApplyToPlayers, OriginalRunStartWithLastChoice }
+  from "../../src/game/class6e";
 import {
   ITEM_SELECT_BGM, ItemSelectPad, ItemSelectRoutine, ItemSelectSound,
   ItemSelectSprite, ItemSelectState,
@@ -44,6 +45,7 @@ import { OriginalWeaponKind } from "../../src/game/effects/shot_effects";
 import type { CharactersJson, ScriptJson } from "../../src/bundle";
 import { IMPACT_SPRITE_BY_MATERIAL } from "../../src/hod2lib/combat";
 import { Walker } from "../../src/script/walker";
+import { seekTo } from "../../src/script/seek";
 import {
   CHARS, check, EnterPlay, ORIGINAL_MODE, scene, spawnZombie,
 } from "./harness";
@@ -173,8 +175,10 @@ console.log("\nOriginal Mode, the trunk hands the items to the run:");
   G.g_evt_step_index = 5;
   G.g_evt_ip = 16;
   const sounds: number[] = [];
+  let chosen: number[][] | null = null;
   const events = new Events();
   events.on("sound.play", (e) => { sounds.push(e.id); });
+  events.on("original.choice", (e) => { chosen = e.slots; });
   const f: ClassFrame = { dt: 1 / 60, rng: new Rng(3), host: NULL_HOST, events };
   const trunk = ActorSpawn(-0x9ec, SpawnClass.ItemSelect, -1, "simple 0x6e",
                            { hp: 0 });
@@ -245,6 +249,120 @@ console.log("\nOriginal Mode, the trunk hands the items to the run:");
         sounds.includes(0x80000000) && trunk.dead);
   check("...and adds no credit: CREDIT +2 stayed in the trunk",
         G.g_credits[0] === credits);
+  check("[port-only] ...and the choice is kept for a trunk a seek passes, "
+        + "and raised for the page to store",
+        JSON.stringify(G.g_original_last_choice)
+          === JSON.stringify([[OriginalItem.PowerUp12, OriginalItem.Chamber2],
+                              [-1, -1]])
+        && JSON.stringify(chosen)
+          === JSON.stringify(G.g_original_last_choice),
+        `${JSON.stringify(G.g_original_last_choice)} ${JSON.stringify(chosen)}`);
+}
+
+console.log("\nOriginal Mode, a seek past the trunk:");
+{
+  // Stage 1 block 0 as Original Mode's bundle has it, cut down: step 5 spawns
+  // the trunk and waits on it, step 1 is the opening. A seek into step 2
+  // replays step 5 on the way, which spawns the trunk and steps over its
+  // wait; the trunk must then close with the last choice rather than open
+  // over the opening and, once its menu was done, send the script back.
+  const op = (i: number, code: number, extra: object = {}) => ({
+    i, at: 100 + i * 8, op: code, name: `op${code}`, cat: "flow", ...extra,
+  });
+  const script = {
+    scene: 0, stage: 1, game_mode: GameMode.Original, evt_file: "test",
+    entry_block: 0, entry_step: 5, entries: [0], exits: [],
+    routes: [{ kind: "goto", next: [1, -1, -1] }, { kind: "end", next: [-1, -1, -1] }],
+    regions: [], cam_slots_used: [], warnings: [],
+    blocks: [
+      { index: 0, at: 0, route: { kind: "goto", next: [1, -1, -1] }, steps: [
+        { index: 0, at: 0, ops: [op(0, 0x4f)] },
+        { index: 1, at: 8, ops: [op(1, 0x4f)] },
+        { index: 2, at: 16, ops: [
+          op(2, 0x42, { arg: 600, blocks_on: "arg frames elapsed" }),
+          op(3, 0x4f)] },
+        { index: 3, at: 32, ops: [op(4, 0x3f), op(5, 0x4f)] },
+        { index: 4, at: -1, ops: [], end: true },
+        { index: 5, at: 48, ops: [
+          op(6, 0x0a, { name: "spawn_simple",
+                        simple: [{ class: SpawnClass.ItemSelect, hp: 0 }] }),
+          op(7, 0x43, { arg: 0, blocks_on: "enemies present <= arg" }),
+          op(8, 0x4f)] },
+      ] },
+      { index: 1, at: 64, route: { kind: "end", next: [-1, -1, -1] },
+        steps: [{ index: 0, at: 64, ops: [] }] },
+    ],
+  } as unknown as ScriptJson;
+  ProfileBoot(null);
+  OriginalRun();
+  G.g_original_last_choice = [[OriginalItem.Chamber2, -1], [-1, -1]];
+  const w = new Walker(script, {
+    enterRegion: () => undefined, loadSlot: () => undefined,
+    unloadSlot: () => undefined, startCamera: () => undefined,
+    onFeed: () => undefined, onBranch: () => undefined,
+    playSound: () => undefined, aliveEnemies: () => 0,
+    presentEnemies: () => G.g_enemies_present,
+    aliveCivilians: () => null, cameraFree: () => null,
+    scriptFlagRaised: () => null,
+    showMessage: () => null,
+  });
+  w.reset();
+  const reached = seekTo(w, 0, 2, 0);
+  const trunk = G.g_object_list.find((o) => o.cls === SpawnClass.ItemSelect);
+  check("the seek reaches step 2 through the trunk's step, which spawned it",
+        reached && w.block === 0 && w.step === 2 && trunk !== undefined,
+        `block ${w.block} step ${w.step} trunk ${trunk !== undefined}`);
+  check("...and the trunk is handed the seek's routine, not left to open",
+        trunk?.itemSelect?.routine === ItemSelectRoutine.PassedBySeek
+        && trunk.initPending === false);
+  const f: ClassFrame = { dt: 1 / 60, rng: new Rng(3), host: NULL_HOST,
+                          events: new Events() };
+  g_class_handlers[SpawnClass.ItemSelect]!.update(trunk!, f);
+  check("its first frame closes it with the last choice: CHAMBER +2 taken "
+        + "out of the saved items, an eight-round magazine, loaded",
+        trunk!.dead && G.g_original_item_slots[0][0] === OriginalItem.Chamber2
+        && G.g_original_items_taken[OriginalItem.Chamber2] === 0
+        && G.g_player_magazine_size[0] === 8 && G.g_player_ammo[0] === 8,
+        `slots ${G.g_original_item_slots[0]} mag ${G.g_player_magazine_size[0]}`);
+  check("...and leaves the script where the seek put it: not back at step 1",
+        w.step === 2 && G.g_evt_step_index === 2,
+        `step ${w.step} g_evt_step_index ${G.g_evt_step_index}`);
+}
+
+console.log("\nOriginal Mode, a new run on a stage with no trunk:");
+{
+  // A link into stage 3, say: the run starts from the title in the reset, as
+  // every new run does, and no trunk is coming. It gets the last choice.
+  ProfileBoot(null);
+  OriginalRun();
+  G.g_original_last_choice = [[OriginalItem.Chamber2, OriginalItem.PowerUp12],
+                              [-1, -1]];
+  OriginalRunStartWithLastChoice(new Rng(3));
+  check("the run takes the last choice out of the saved items, as the trunk "
+        + "would: both slots, and the counts one lower",
+        G.g_original_item_slots[0].join()
+          === [OriginalItem.Chamber2, OriginalItem.PowerUp12].join()
+        && G.g_original_items_taken[OriginalItem.Chamber2] === 0
+        && G.g_original_items_taken[OriginalItem.PowerUp12] === 0,
+        `slots ${G.g_original_item_slots[0]}`);
+  check("...and the hand-over runs: an eight-round magazine, loaded, and 1.2 "
+        + "times the damage",
+        G.g_player_magazine_size[0] === 8 && G.g_player_ammo[0] === 8
+        && G.g_original_weapon_damage_scale[0] === Math.fround(1.2),
+        `mag ${G.g_player_magazine_size[0]}`);
+
+  // Arcade has no items, remembered or not.
+  ProfileBoot(null);
+  G.g_GameMode = GameMode.Arcade;
+  ResetGameGlobals();
+  SetGameTables(CHARS);
+  SetOriginalModeTables(ORIGINAL_MODE);
+  EnterPlay();
+  OriginalRunStartWithLastChoice(new Rng(3));
+  check("...and an Arcade run is left alone",
+        G.g_original_item_slots[0].join() === "-1,-1"
+        && G.g_player_magazine_size[0] === 6,
+        `slots ${G.g_original_item_slots[0]} mag ${G.g_player_magazine_size[0]}`);
 }
 
 console.log("\nOriginal Mode, a pair the trunk refuses:");
@@ -391,7 +509,7 @@ console.log("\nthe script: a -1 step word, and g_evt_ip moved under a wait:");
     presentEnemies: () => G.g_enemies_present,
     aliveCivilians: () => null, cameraFree: () => null,
     scriptFlagRaised: () => null,
-    showMessage: () => null, endDialogue: () => undefined,
+    showMessage: () => null,
   });
   w.reset();
   check("Original Mode enters block 0 at step 5, past the -1 at step 4",

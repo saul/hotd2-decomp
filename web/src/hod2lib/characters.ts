@@ -31,7 +31,7 @@
 import {
   arcScript, CLASS30_ARC_SCRIPTS, CLASS30_ENTRANCE_ARC_SCRIPTS,
 } from "./arcscript";
-import { civilianItemSlots, civilianMotionIds, civilianMouthOffsets,
+import { civilianItemSlots, civilianMotionIds, civilianMouthRows,
          civilianOrderedStates,
          TARGET_SCRIPT_SHAPE, targetScript,
          targetScriptMotions } from "./actorscript";
@@ -41,13 +41,19 @@ import { build, goreEntry, rigEntry } from "./charbuild";
 import { Boss4SwapSlots } from "../game/class19/slots";
 // Data only, as `class25/state.ts` is for `bundle.ts`: the hook's slots.
 import { HumanoidHookDrawSlots } from "../game/class25/state";
+import { FACE_MODE_TALK, HumanoidFaceSlots } from "../game/class25/face";
+import { CIVILIAN_HEAD_BONE, CIVILIAN_MOUTH_HANDOFF_FROM,
+         CIVILIAN_MOUTH_HANDOFF_TO } from "../game/class10/head";
 import type { Character } from "./charbuild";
 import { BODY_CREATURE_HOST_CLIPS, CLASS20_DEATH_MOTION,
          CLASS20_IDLE_MOTIONS, CLASS21_FREED_MOTION, CLASS30_DEATH_CLIPS,
-         bake, humanoidModelCommands, humanoidMotionIds, introFor, motionFor,
+         bake, humanoidFaceModes, humanoidModelCommands, humanoidMotionIds,
+         introFor, motionFor,
          BOSS3_CLIPS, BOSS4_CLIPS, FROG_CLIPS } from "./charmotion";
 import { class31MotionIds, class31Tables } from "./class31";
 import { class14Tables } from "./class14";
+import { civilianMouthTables, HUMANOID_FACE_CELS, HUMANOID_FACE_CELS_TWO,
+         humanoidFaceCels } from "./faces";
 import { CLASS32_MOTIONS, class32Tables, class32Tail } from "./class32";
 import { boneEffectSlot, boneZones, combatTables, DEATH_LEFT, DEATH_RIGHT,
          deathMotions, difficultyTables, HIT_STEPS,
@@ -63,7 +69,8 @@ import type { ExeTables } from "./exetab";
 import { attachmentList, BACK_AWAY_STATES, CUE_STATES,
          ENTRANCE_CLIP_STATES, entryTail, GRAB_STATES, LEAP_STATES,
          LEAP_STRIKE_STATES, PATH_STATES, Placement, POUNCE_STATES,
-         WALK_DISTANCE_STATES, WAYPOINT_BYTES } from "./placement";
+         WALK_DISTANCE_STATES, WAYPOINT_BYTES, entranceTailState }
+  from "./placement";
 import type { SpawnJson } from "./placement";
 import { AssetCache } from "./rigs";
 import type { RigInstance } from "./rigs";
@@ -71,7 +78,8 @@ import type { Program } from "./script";
 import { resolveSpawn } from "./spawnres";
 import type { Stage } from "./stage";
 // Data only -- see the head of that file for why `hod2lib` may import it.
-import { PLAYER_BODY_AT, ROUTE_FIGURES } from "../game/player_body_data";
+import { PLAYER_BODY_AT, PLAYER_ENTITY_HOOK_CLIPS, ROUTE_FIGURES }
+  from "../game/player_body_data";
 // Data only, for the same reason: the result card's clips, its template rows'
 // address, and the car rescue's type.
 import {
@@ -88,12 +96,25 @@ import {
 import { CLASS23_MOTIONS } from "../game/class23/records";
 // Data only, for the same reason: every clip the cat's two routines play.
 import { CAT_CLIPS } from "../game/class53/records";
+// Data only, for the same reason: the golden frog's type, clips and strips.
+import {
+  GOLDEN_FROG_CHAR_TYPE, GOLDEN_FROG_IDLE_MOTION, GOLDEN_FROG_SHOT_MOTION,
+  GOLDEN_FROG_STRIP_SLOTS,
+} from "../game/class41/item_pickup_slots";
+import { DRAG_TARGET_CLIPS } from "../game/class30/drag_clips";
+import { ZombieState } from "../game/class30/states";
 import {
   CLASS2D_AT_KIND0, CLASS2D_AT_WING, CLASS2D_CHILD_CHAR_TYPES,
   CLASS2D_CHILD_CLIPS, CLASS2D_CLIPS, CLASS2D_PART_SHELLS,
   CLASS2D_WING_CHAR_TYPE,
   CLASS2D_WING_CLIP, Class2DChildAt,
 } from "../game/class2D/state";
+// Data only, for the same reason: class 0x41 constructor 61's clips and the
+// address each of its figures is known by.
+import {
+  TYPE61_CONSTRUCTOR, Type61FigureAt, Type61FigureClip,
+} from "../game/class41/ctor_literals";
+import { type61FigureTypes } from "./class41_ctors";
 
 const finite = (v: number | null | undefined): v is number =>
   v !== null && v !== undefined && Number.isFinite(v);
@@ -143,10 +164,13 @@ export function class20Tail(rec: Spawn): Record<string, unknown> {
  * Classes 0x16 and 0x17 draw nothing at all -- `WaterFieldCreate` and
  * `WaterWaveSourceAdd` build the stage-2 boss arena's wave field and kill
  * themselves -- but they are here for the same reason: no character type,
- * and the port still needs the placement to build them.
+ * and the port still needs the placement to build them. So is class 0x2B,
+ * a scripted light (`DynamicLightInit`, `FUN_00438060`), which draws nothing
+ * and reads only `desc+0x22`, the placement's `hp`.
  */
-export const SLOT_DRAWN_CLASSES = new Set([0x12, 0x13, 0x16, 0x17, 0x26, 0x33,
-                                           0x40, 0x42, 0x43, 0x51, 0x52]);
+export const SLOT_DRAWN_CLASSES = new Set([0x12, 0x13, 0x15, 0x16, 0x17, 0x26,
+                                           0x29, 0x2b, 0x33, 0x40, 0x42, 0x43,
+                                           0x51, 0x52]);
 
 /**
  * Class 0x17's descriptor tail, as `WaterWaveSourceAdd` (`FUN_004422D0`) and
@@ -257,12 +281,21 @@ export function class52Tail(rec: Spawn): Record<string, unknown> {
  * +0x0C f32  a uniform scale, applied only when it is not 1.0
  * +0x10 u32  an index into g_prop_behaviours (0x005926A8)
  * +0x14 ...  the behaviour's own operand block. For behaviour 8,
- *            `CarrierPropSelectRoutine`, the first dword is the routine.
+ *            `CarrierPropSelectRoutine`, the first dword is the routine;
+ *            for 7, `PropBehaviourRideObjectPath` (`FUN_004400D0`), the
+ *            `op_` path slot; for 6, `PropBehaviourLaunchWithAccel`
+ *            (`FUN_0043FFC0`), two f32 vectors, the launch velocity and the
+ *            acceleration, turned by the record's angles.
  * ```
  *
  * `selector` is emitted for every spawn and is meaningless unless `behaviour`
- * is 8 — five of the game's 23 spawns take behaviour 0, `NoOpStub`, and are
- * static props whose `+0x14` is `-1`.
+ * is 7 or 8 — five of the game's 23 spawns take behaviour 0, `NoOpStub`, and
+ * are static props whose `+0x14` is `-1`. `operand` (the six floats) is
+ * emitted for behaviour 6 alone and `path_length` --
+ * `g_cam_path_length[selector]` (`0x00576D38`), the one table entry 7 reads
+ * besides the tail -- for behaviour 7 alone: each only where its reader is.
+ * No shipped descriptor takes either behaviour, so no shipped bundle carries
+ * either field.
  */
 /**
  * Class 0x18's three numbers, and they are all read out of the class-0x30
@@ -446,15 +479,78 @@ export function class12Tail(
   };
 }
 
-export function class13Tail(rec: Spawn): Record<string, unknown> {
+/**
+ * Class 0x15's descriptor tail, as `FloatingPropRowSpawn` (`FUN_00441750`)
+ * reads it through `obj+0x130C`:
+ *
+ * ```
+ * +0x00  s16  the slot every plank draws           -> plank+0x1F4
+ * +0x04  u32  a coli blob pointer, -1 for none      -> plank+0x14C
+ * +0x08  s16  the g_prop_behaviours index           -> sub+0x00
+ * +0x0A  s16  the camera path that kills a plank    -> sub+0x06
+ * +0x0C  s16  ...and its frame                       -> sub+0x08
+ * +0x0E  s16, +0x10 s16  copied, read by nothing   -> sub+0x0A, sub+0x0C
+ * +0x12  s16  the script flag that starts the delay -> sub+0x0E
+ * +0x18  f32 x3  the step between planks
+ * +0x24  s8   the count
+ * +0x25  s8   how many of the last never leave on the flag
+ * +0x26  s16  the delay step between the ones that do
+ * ```
+ *
+ * `+0x14` (1.0 in both shipped descriptors) is read by neither the routine
+ * nor the plank's update, so it is not carried. Every width is the load's:
+ * `MOVSX` byte for `+0x24`/`+0x25`, word moves into the block and `MOVSX`
+ * word where the update reads them back. See `game/class15/`.
+ */
+export function class15Tail(
+    rec: Spawn,
+    sets: [colilib.ColiFile, colilib.ColiFile] | null): Record<string, unknown> {
+  const word = rec.param(0x04, "u32");
+  const hit = word !== null && word !== 0xffffffff && sets
+    ? colilib.pointerToOffset(word, sets[0], sets[1]) : null;
   return {
+    slot: rec.param(0x00, "i16") ?? 0,
+    coli: hit ? `${hit[0]}:${hit[1]}` : null,
+    behaviour: rec.param(0x08, "i16") ?? 0,
+    cam_path: rec.param(0x0a, "i16") ?? -1,
+    cam_frame: rec.param(0x0c, "i16") ?? -1,
+    word_0e: rec.param(0x0e, "i16") ?? 0,
+    word_10: rec.param(0x10, "i16") ?? 0,
+    flag: rec.param(0x12, "i16") ?? -1,
+    delta: [rec.param(0x18, "f32") ?? 0, rec.param(0x1c, "f32") ?? 0,
+            rec.param(0x20, "f32") ?? 0],
+    count: rec.param(0x24, "i8") ?? 0,
+    keep: rec.param(0x25, "i8") ?? 0,
+    delay_step: rec.param(0x26, "i16") ?? 0,
+  };
+}
+
+/** `g_prop_behaviours[6]` and `[7]`, the two that read more than `selector`. */
+export const PROP13_LAUNCH_WITH_ACCEL = 6;
+export const PROP13_RIDE_OBJECT_PATH = 7;
+
+export function class13Tail(rec: Spawn,
+                            tables: ExeTables): Record<string, unknown> {
+  const behaviour = rec.param(0x10, "u32") ?? 0;
+  const selector = rec.param(0x14, "u32") ?? 0;
+  const out: Record<string, unknown> = {
     slot: rec.param(0x00, "u16") ?? 0,
     cam_path: rec.param(0x08, "u16") ?? -1,
     cam_frame: rec.param(0x0a, "u16") ?? -1,
     scale: rec.param(0x0c, "f32") ?? 1,
-    behaviour: rec.param(0x10, "u32") ?? 0,
-    selector: rec.param(0x14, "u32") ?? 0,
+    behaviour,
+    selector,
   };
+  if (behaviour === PROP13_LAUNCH_WITH_ACCEL) {
+    // `pfVar2 = *(sub+0x08)`, `pfVar2[0..2]` and `pfVar2[3..5]`.
+    out.operand = [0, 1, 2, 3, 4, 5].map((k) =>
+      rec.param(0x14 + 4 * k, "f32") ?? 0);
+  }
+  if (behaviour === PROP13_RIDE_OBJECT_PATH) {
+    // `CMP EDX, [EDI*4 + 0x576D38]` at `0x0044010C`, EDI = the first dword.
+    out.path_length = tables.camPathLength(selector);
+  }
+  return out;
 }
 
 export function class43Tail(rec: Spawn): Record<string, unknown> {
@@ -480,6 +576,26 @@ export function class42Tail(rec: Spawn): Record<string, unknown> {
   const b = rec.evt?.raw;
   const at = rec.offset + 0x25;
   return { subtype: b ? ((b[at] ?? 0) << 24) >> 24 : 0 };
+}
+
+/**
+ * Class 0x29's descriptor tail, as `SceneryBatchUpdate29` (`FUN_00432C80`)
+ * reads it through `obj+0x1390`:
+ *
+ * ```
+ * tail+0x00  s16  the camera path that ends it  (MOVSX EDX,[EAX])
+ * tail+0x02  s16  ...from this frame on         (MOVSX EAX,[EAX+0x2])
+ * ```
+ *
+ * The list it draws is `obj+0x11C`, the spawn's `hp`. All three shipped
+ * spawns use `spawn_obj` (0x0B), whose allocator sets `obj+0x1390` to
+ * `desc+0x24`. See `game/class29/`.
+ */
+export function class29Tail(rec: Spawn): Record<string, unknown> {
+  return {
+    kill_path: rec.param(0x00, "i16") ?? -1,
+    kill_frame: rec.param(0x02, "i16") ?? 0,
+  };
 }
 
 /**
@@ -696,7 +812,7 @@ async function zombieTwinPlacements(stage: Stage, tables: ExeTables,
 
 /**
  * The synthetic placement a player's body is drawn from on the game-over
- * screen, and the character type it needs in the bundle.
+ * screen and in play, and the character type it needs in the bundle.
  *
  * `PlayerBodiesCreate` (`FUN_00416450`) allocates a skinned actor per player
  * with no spawn record behind it, and the route map's figures
@@ -708,7 +824,10 @@ async function zombieTwinPlacements(stage: Stage, tables: ExeTables,
  *
  * Every clip the screen can draw that type on is baked: the start motion
  * (`0x004EC8A4`), the fall (`0x004EC8B4`) -- both read from the exe -- and
- * the route figures' walk and end clips where the figure is this type.
+ * the route figures' walk and end clips where the figure is this type -- and
+ * every clip the `+0x80` hooks put a body on in play: their four immediates
+ * (`PLAYER_ENTITY_HOOK_CLIPS`) and `g_player_stand_motions` (`0x004EC91C`)
+ * entries 2..5, the ones `p + g_players_in_play * 2` can name.
  * Returns null when the type or the fall will not build, which leaves the
  * screen with no body rather than a heap.
  */
@@ -718,7 +837,7 @@ async function playerBodyPlacement(stage: Stage, tables: ExeTables,
     Promise<Placement | null> {
   const go = tables.gameOverTables() as {
     body_char_types: number[]; body_start_motions: number[];
-    fall_motions: number[];
+    fall_motions: number[]; stand_motions: number[];
   };
   const ct = go.body_char_types[player];
   const fall = go.fall_motions[player];
@@ -732,7 +851,9 @@ async function playerBodyPlacement(stage: Stage, tables: ExeTables,
   const c = chars.get(ct)!;
   const clips = [fall, go.body_start_motions[player],
                  ...ROUTE_FIGURES.filter((f) => f.charType === ct)
-                   .flatMap((f) => [f.walk, f.end])];
+                   .flatMap((f) => [f.walk, f.end]),
+                 ...PLAYER_ENTITY_HOOK_CLIPS,
+                 ...go.stand_motions.slice(2)];
   for (const mid of clips) {
     if (c.motions.has(mid)) continue;
     const baked = await bake(stage.source, tables, mid, c.boneCount);
@@ -843,6 +964,71 @@ async function hordeMemberPlacements(stage: Stage, tables: ExeTables,
   return out;
 }
 
+/** Class 0x41, whose constructor 61 builds skinned figures. */
+const CLASS41 = 0x41;
+/** `desc+0x25` -- the s8 a class-0x41 placer's `+0x130C`, its constructor. */
+const CLASS41_CTOR_BYTE = 0x25;
+
+/**
+ * The synthetic placements class 0x41 constructor 61's nine figures are
+ * drawn from: one per figure of every placer whose descriptor names
+ * constructor 61, at `Type61FigureAt`, of the character type
+ * `g_type61_figure_types` gives it and on the clip `Type61FigureClip` says,
+ * parented to the placer.
+ *
+ * The same arrangement as the horde's members: `PlaceType61Figures`
+ * (`FUN_004641F0`) makes the objects with no descriptor, and the client binds
+ * a drawable hierarchy to each by address. The rows are never spawned from,
+ * and they take the placer's own spawn dict -- the figure's place is the
+ * constructor's to decide, in `game/class41/type61.ts`, and the character
+ * layer poses the root from the actor. A figure whose type or clip will not
+ * build is left out, which leaves it undrawn rather than drawn wrong.
+ */
+async function type61FigurePlacements(stage: Stage, tables: ExeTables,
+                                      recs: Iterable<Spawn>,
+                                      byAt: Map<number, SpawnJson>,
+                                      chars: Map<number, Character>):
+    Promise<Placement[]> {
+  const out: Placement[] = [];
+  for (const rec of recs) {
+    if (rec.cls !== CLASS41 || !rec.evt) continue;
+    const at = rec.offset + CLASS41_CTOR_BYTE;
+    if (at >= rec.evt.raw.length) continue;
+    if (((rec.evt.raw[at] << 24) >> 24) !== TYPE61_CONSTRUCTOR) continue;
+    const sp = byAt.get(rec.offset);
+    const types = type61FigureTypes(tables);
+    if (!sp || !types) continue;
+    for (let i = 0; i < types.length; i++) {
+      const ct = types[i];
+      const clip = Type61FigureClip(ct);
+      if (!chars.has(ct)) {
+        const file = tables.characterAssetFile(ct);
+        if (!file) continue;
+        const built = build(tables, ct, file);
+        if (built === null) continue;
+        chars.set(ct, built);
+      }
+      const c = chars.get(ct)!;
+      if (!c.motions.has(clip)) {
+        const baked = await bake(stage.source, tables, clip, c.boneCount);
+        if (baked === null) continue;
+        c.motions.set(clip, baked);
+      }
+      const f = new Placement();
+      f.at = Type61FigureAt(rec.offset, i);
+      f.cls = CLASS41;
+      f.char_type = ct;
+      f.motion = clip;
+      f.hp = 0;
+      f.spawn = { ...sp, at: f.at };
+      f.parent_at = rec.offset;
+      f.synthetic = true;
+      out.push(f);
+    }
+  }
+  return out;
+}
+
 /** Class 0x61, the result card: `spawn_simple 0x0097723C`'s record. */
 const CLASS61 = 0x61;
 /** Class 0x10, whose rescues the card stands. */
@@ -858,6 +1044,25 @@ export function stagePlacesResultCard(prog: Program): boolean {
       for (const o of st.ops) {
         const simple = (o.detail.simple as { class: number }[]) ?? [];
         if (simple.some((r) => r.class === CLASS61)) return true;
+      }
+    }
+  }
+  return false;
+}
+
+/** Class 0x60, the chapter card: `spawn_simple 0x00977234`'s record. */
+const CLASS60 = 0x60;
+
+/**
+ * Whether this stage's script places the chapter card -- a `spawn_simple`
+ * whose record is class 0x60. Every stage does, in its first block.
+ */
+export function stagePlacesChapterCard(prog: Program): boolean {
+  for (const b of prog.liveBlocks()) {
+    for (const st of b.steps) {
+      for (const o of st.ops) {
+        const simple = (o.detail.simple as { class: number }[]) ?? [];
+        if (simple.some((r) => r.class === CLASS60)) return true;
       }
     }
   }
@@ -974,6 +1179,77 @@ async function resultFigureTemplates(stage: Stage, tables: ExeTables,
   }
   return out;
 }
+
+/** Item set 3: `SpawnGoldenFrog` (`FUN_004722A0`)'s arm of the release. */
+const GOLDEN_FROG_ITEM_SET = 3;
+/** `g_class41_updates[63]`: `PropUpdateType63`, whose table lets one out. */
+const GOLDEN_FROG_TABLE_TYPE = 63;
+
+/**
+ * Whether this stage can make a golden frog: a container placement in item
+ * set 3 (a kinded prop, a falling container, constructor 37's pair, whose
+ * set is its `field_1f4`), a group with a member in it, a generic type 63
+ * -- whose table, `g_prop_type63_items`, holds one -- or constructor 68.
+ */
+export function stageMakesGoldenFrog(
+    tables: ExeTables, breakables: readonly Record<string, unknown>[]):
+    boolean {
+  const groups = tables.breakableGroups() as { item_set: number }[][];
+  return breakables.some((pl) =>
+    pl.item_set === GOLDEN_FROG_ITEM_SET
+    || (pl.container === "type37" && pl.field_1f4 === GOLDEN_FROG_ITEM_SET)
+    || (pl.container === "group"
+        && (groups[pl.group as number] ?? []).some(
+          (m) => m.item_set === GOLDEN_FROG_ITEM_SET))
+    || (pl.container === "generic" && pl.type === GOLDEN_FROG_TABLE_TYPE)
+    || pl.container === "golden_frog");
+}
+
+/**
+ * The template row the golden frog is drawn from: one hidden row of
+ * character type `0x1C`, at `ResultFigureTemplateAt(0x1C)`, which the
+ * character layer clones for each frog the port makes -- the result card's
+ * figures' arrangement, for the same reason: the frog is allocated with no
+ * descriptor (`SpawnGoldenFrog`, `FUN_004722A0`, and constructor 68), at a
+ * place decided in play. The type is baked both clips `GoldenFrogUpdate`
+ * plays, and given both players' score strips to clone
+ * (`GOLDEN_FROG_STRIP_SLOTS`). Nothing for a stage that cannot make one.
+ */
+async function goldenFrogTemplates(stage: Stage, tables: ExeTables,
+                                   breakables: readonly Record<string, unknown>[],
+                                   chars: Map<number, Character>):
+    Promise<Placement[]> {
+  if (!stageMakesGoldenFrog(tables, breakables)) return [];
+  const ct = GOLDEN_FROG_CHAR_TYPE;
+  if (!chars.has(ct)) {
+    const file = tables.characterAssetFile(ct);
+    if (!file) return [];
+    const built = build(tables, ct, file);
+    if (built === null) return [];
+    chars.set(ct, built);
+  }
+  const c = chars.get(ct)!;
+  for (const mid of [GOLDEN_FROG_IDLE_MOTION, GOLDEN_FROG_SHOT_MOTION]) {
+    if (c.motions.has(mid)) continue;
+    const baked = await bake(stage.source, tables, mid, c.boneCount);
+    if (baked !== null) c.motions.set(mid, baked);
+  }
+  if (!c.motions.has(GOLDEN_FROG_IDLE_MOTION)) return [];
+  for (const slot of GOLDEN_FROG_STRIP_SLOTS) c.heldSlots.add(slot);
+  const t = new Placement();
+  t.at = ResultFigureTemplateAt(ct);
+  t.cls = CLASS41_GOLDEN_FROG;
+  t.char_type = ct;
+  t.motion = GOLDEN_FROG_IDLE_MOTION;
+  t.hp = 0;
+  t.spawn = { at: t.at, class: CLASS41_GOLDEN_FROG, pos: [0, 0, 0],
+              yaw_deg: 0, orient: [0, 0, 0] };
+  t.synthetic = true;
+  return [t];
+}
+
+/** Class 0x41, which the port files the golden frog under. */
+const CLASS41_GOLDEN_FROG = 0x41;
 
 export function class46Tail(rec: Spawn): Record<string, unknown> {
   const b = rec.evt?.raw;
@@ -1095,20 +1371,54 @@ export const CLASS33_PUSHABLE = 4;
 export const CLASS33_EFFECT_CUE = 5;
 
 /**
+ * The class-0x33 sub-handlers {@link class33SubTail} reads, by their
+ * `obj+0x11C`: 6 `ScriptedSpriteEffectOnce33` (`FUN_00433E30`), 7
+ * `ScriptedSoundCues33` (`FUN_00433E90`), 8 `ScriptedBridgeCrashStrip33`
+ * (`FUN_00433FE0`), 9 `ScriptedFireLoopUntilCue33` (`FUN_00434100`), 10
+ * `ScriptedSoundAndFlagAtCue33` (`FUN_00433F40`), 11
+ * `ScriptedEndingTrackSelect33` (`FUN_00434260`) and 99
+ * `ScriptedStaticSlotDraw33` (`FUN_00433160`) -- jump-table entries 5 to 11
+ * at `0x004330C4`, 99 through byte 98 of the map at `0x004330F8`.
+ */
+export const CLASS33_SUB_SELECTORS = [6, 7, 8, 9, 10, 11, 99] as const;
+
+/**
+ * The fourth class-0x33 sub-handler the player runs: `obj+0x11C == 2`.
+ *
+ * `ScriptedPropDrawUntilFlag` (`FUN_00433A10`), entry 1 of the jump table at
+ * `0x004330C4` (`0x00433027`). One model at the object's own pose until block
+ * 0's camera frame equals `tail+0x0C` or script flag `tail+0x11` reads 1.
+ * Ten descriptors, stage 1's `0x5FE8`..`0x60C8` and stage 2's
+ * `0x668`..`0x748`, spawned fifty-six times over both modes.
+ */
+export const CLASS33_DRAW_UNTIL_FLAG = 2;
+
+/**
+ * The fifth: `obj+0x11C == 3`. `ScriptedEffectOnFirstFrame33`
+ * (`FUN_00433AC0`), entry 2 (`0x00433035`). One kind-0x62 sprite on its first
+ * update and a despawn; it reads **no tail**, so it has no block and its
+ * placement is all the port needs. Stage 1's `0x37E8`, stage 2's `0x5574`,
+ * `0x5598`, `0xA4D0` and `0xA4F4`.
+ */
+export const CLASS33_EFFECT_FIRST_FRAME = 3;
+
+/**
  * Which spawns of a {@link SLOT_DRAWN_CLASSES} class the bundle carries a
  * placement for.
  *
  * Class 0x52 is one object, so every spawn of it qualifies. Class 0x33 is
- * eleven, and only **three** sub-handlers are decoded below -- selector 1 by
- * {@link class33Tail}, selector 4 by {@link class33PushTail} and selector 5 by
- * {@link class33CueTail}. Selector 2's props already reach the player through
- * `props`, and the rest are unread. Emitting one of those would be a
- * placement whose tail block is a different handler's bytes read under one of
- * these three's names, which is `L3` written into the bundle.
+ * twelve, and every one is decoded below -- selector 1 by
+ * {@link class33Tail}, selector 2 by {@link class33PropTail}, selector 4 by
+ * {@link class33PushTail}, selector 5 by {@link class33CueTail} and selectors
+ * 6 to 11 and 99 by {@link class33SubTail}; selector 3 reads no tail at all.
+ * A selector outside these would be a placement whose tail block is a
+ * different handler's bytes read under one of these names, which is `L3`
+ * written into the bundle.
  *
- * **The three blocks are mutually exclusive and the port reads their presence
- * as the selector**, so widening this is only half the change: see the gate on
- * `class33`/`class33_push`/`class33_cue` in {@link resolveCharacters}.
+ * **The blocks are mutually exclusive and the port reads their presence as
+ * the selector**, so widening this is only half the change: see the gate on
+ * `class33`/`class33_prop`/`class33_push`/`class33_cue`/`class33_sub` in
+ * {@link resolveCharacters}, and the director's.
  */
 export function slotDrawnSpawn(cls: number, rec: Spawn): boolean {
   // Class 0x26 is eight objects behind one id, switched on `obj+0x11C` by
@@ -1124,9 +1434,14 @@ export function slotDrawnSpawn(cls: number, rec: Spawn): boolean {
   // shipped descriptor names. One that named another would arrive drawing
   // the right slot and doing nothing else.
   if (cls === 0x12) return rec.param(0x08, "i16") === 0;
+  // Class 0x15's planks call theirs every frame too (`FloatingPropUpdate`,
+  // `FUN_004418C0`), and both shipped descriptors name entry 0.
+  if (cls === 0x15) return rec.param(0x08, "i16") === 0;
   if (cls === 0x33) {
     return rec.hp === CLASS33_CARRIER || rec.hp === CLASS33_PUSHABLE
-      || rec.hp === CLASS33_EFFECT_CUE;
+      || rec.hp === CLASS33_EFFECT_CUE || rec.hp === CLASS33_DRAW_UNTIL_FLAG
+      || rec.hp === CLASS33_EFFECT_FIRST_FRAME
+      || (CLASS33_SUB_SELECTORS as readonly number[]).includes(rec.hp);
   }
   return true;
 }
@@ -1161,11 +1476,23 @@ export function slotDrawnSpawn(cls: number, rec: Spawn): boolean {
  *
  * Three shipped spawns, all `spawn_obj` (opcode 0x0B): stage 2's `0x4FD0` and
  * `0x12590`, and stage 5's `0x1CE4`.
+ *
+ * `shot_mesh` is the raw word, which the seat tests against `-1`;
+ * `shot_blob` is the same pointer resolved to the `coli.blobs` key
+ * `ShotTestMesh` traces through `obj+0x150` -- `null` for `-1`, and for a
+ * pointer that lands on no blob header.
  */
-export function class33Tail(rec: Spawn): Record<string, unknown> {
+export function class33Tail(
+    rec: Spawn,
+    sets: [colilib.ColiFile, colilib.ColiFile] | null = null):
+    Record<string, unknown> {
+  const mesh = rec.param(0x04, "i32") ?? -1;
+  const hit = mesh !== -1 && sets
+    ? colilib.pointerToOffset(mesh >>> 0, sets[0], sets[1]) : null;
   return {
     slot: rec.param(0x00, "i32") ?? 0,
-    shot_mesh: rec.param(0x04, "i32") ?? -1,
+    shot_mesh: mesh,
+    shot_blob: hit ? `${hit[0]}:${hit[1]}` : null,
     shot_radius: rec.param(0x08, "f32") ?? 0,
     path: rec.param(0x0c, "i32") ?? -1,
     path_end: rec.param(0x10, "f32") ?? 0,
@@ -1271,6 +1598,95 @@ export function class33PushTail(rec: Spawn): Record<string, unknown> {
  */
 export function class33CueTail(rec: Spawn): Record<string, unknown> {
   return { cue: rec.param(0x00, "i32") ?? -1 };
+}
+
+/**
+ * Class 0x33 **selectors 6 to 11 and 99**'s tails, each read the way its own
+ * routine reads it and tagged with the selector, or null for any other
+ * selector. Every offset is from the routines' listings:
+ *
+ * ```
+ * 6   tail+0x0C kind, +0x10 face-camera mode, +0x14 player  (0x00433E68)
+ * 7   {s16 mode, s16 frame, u32 sound} records, stride 8    (0x00433ED6, 0x00433F15)
+ * 8   nothing
+ * 9   tail+0x00 s16 mode, +0x02 s16 frame                   (0x00434208)
+ * 10  selector 7's first record, and tail+0x08 s16 flag     (0x00433FBC)
+ * 11  nothing
+ * 99  tail+0x00 the draw slot                               (0x004331B3)
+ * ```
+ *
+ * Selector 7 walks its records by moving `obj+0x1390` itself, one record per
+ * cue, and only a mode of 0 or 1 can ever be a cue. So the list stops at, and
+ * includes, the first record with any other mode: the routine parks there
+ * and reads nothing beyond it. That record's `+0x04` is never read and is not
+ * carried -- on the one shipped spawn, `0x1E7C`, it is the class word of the
+ * descriptor after it (`L6`). The list is also bounded by the file.
+ */
+export function class33SubTail(rec: Spawn): Record<string, unknown> | null {
+  const mode = rec.param(0x00, "i16") ?? -1;
+  const frame = rec.param(0x02, "i16") ?? -1;
+  switch (rec.hp) {
+    case 6:
+      return { selector: 6, kind: rec.param(0x0c, "i32") ?? 0,
+               face: rec.param(0x10, "i32") ?? 0,
+               player: rec.param(0x14, "i32") ?? -1 };
+    case 7: {
+      const cues: Record<string, number>[] = [];
+      for (let at = 0; ; at += 8) {
+        const m = rec.param(at, "i16");
+        const fr = rec.param(at + 2, "i16");
+        if (m === null || fr === null) break;
+        if (m !== 0 && m !== 1) {
+          cues.push({ mode: m, frame: fr });
+          break;
+        }
+        const sound = rec.param(at + 4, "u32");
+        if (sound === null) break;
+        cues.push({ mode: m, frame: fr, sound });
+      }
+      return { selector: 7, cues };
+    }
+    case 8:
+      return { selector: 8 };
+    case 9:
+      return { selector: 9, mode, frame };
+    case 10:
+      return { selector: 10, mode, frame,
+               sound: rec.param(0x04, "u32") ?? 0,
+               flag: rec.param(0x08, "i16") ?? 0 };
+    case 11:
+      return { selector: 11 };
+    case 99:
+      return { selector: 99, slot: rec.param(0x00, "i32") ?? 0 };
+  }
+  return null;
+}
+
+/**
+ * Class 0x33 **selector 2's** tail, as `ScriptedPropDrawUntilFlag`
+ * (`FUN_00433A10`) reads it.
+ *
+ * ```
+ * tail+0x00  i32  draw slot                  -> obj+0x13F0   MOV EDX,[ECX]      0x00433A27
+ * tail+0x0C  i32  the camera frame it leaves on              MOV EAX,[ECX+0xC]  0x00433A37
+ * tail+0x11  u8   the script flag it leaves on               MOV DL,[ECX+0x11]  0x00433A46
+ * ```
+ *
+ * Nothing else: `+0x04`, `+0x08`, `+0x10` and `+0x12..+0x13` are read by
+ * nothing in the routine, and the next descriptor starts at `tail+0x14`. The
+ * frame is compared with `g_cam_path_frame` as an integer and carried as the
+ * raw word -- every shipped one is `-1` -- rather than turned into a "none":
+ * the routine has no such test. The flag byte has none either.
+ *
+ * Its own block for the reason the other three are each other's: `tail+0x0C`
+ * is selector 1's path slot and selector 4's arming flag.
+ */
+export function class33PropTail(rec: Spawn): Record<string, unknown> {
+  return {
+    slot: rec.param(0x00, "i32") ?? 0,
+    despawn_frame: rec.param(0x0c, "i32") ?? -1,
+    despawn_flag: rec.param(0x11, "u8") ?? 0xff,
+  };
 }
 
 /**
@@ -1580,7 +1996,9 @@ export interface ResolvedCharacters {
 export async function resolveForStage(
     stage: Stage, prog: Program | null, spawnRecords: Spawn[] | null,
     poseFrame: number | null = null, poseMotion: number | null = null,
-    cache: AssetCache = new AssetCache(stage)): Promise<ResolvedCharacters> {
+    cache: AssetCache = new AssetCache(stage),
+    breakables: readonly Record<string, unknown>[] = []):
+    Promise<ResolvedCharacters> {
   const tables = stage.tables;
   if (prog === null) {
     return { chars: new Map(), placements: [], entries: [] };
@@ -1737,8 +2155,11 @@ export async function resolveForStage(
          rec.param(3, "i8") || 0]
       : cls === 0x19 ? [0, rec.param(1, "u8") || 0, 0]
       : [0, 0, 0];
+    // Whichever state reads the tail past byte 3: the initial state, or the
+    // attack state for a passenger. See `entranceTailState`.
+    const tailState = entranceTailState(cls, tail[1], tail[2]);
     const inStates = (m: Record<number, number[]>) =>
-      (m[cls] ?? []).includes(tail[1]);
+      (m[cls] ?? []).includes(tailState);
 
     // The leap states read a destination and a duration out of the same
     // descriptor; every other state uses those bytes for something else, so
@@ -1802,7 +2223,7 @@ export async function resolveForStage(
     }
     // The twelve entrance states, each gated on its own initial state. Class
     // 0x30 only: class 0x31 numbers its states differently.
-    const entry = cls === 0x30 ? entryTail(rec, tail[1], tail[2]) : null;
+    const entry = cls === 0x30 ? entryTail(rec, tailState, tail[2]) : null;
     let entranceMotion: number | null = null;
     if (inStates(ENTRANCE_CLIP_STATES)) {
       const m = rec.param(4, "i32");
@@ -1850,21 +2271,22 @@ export async function resolveForStage(
     // off the tail at offsets no other state uses.
     let emerge: Record<string, unknown> | null = null;
     let delayedLeap: Record<string, unknown> | null = null;
-    if (cls === 0x30 && tail[1] === 27) {
+    if (cls === 0x30 && tailState === 27) {
       const m = rec.param(8, "i32");
       if (m !== null && m > 0 && m < 4096) {
         emerge = { delay: rec.param(4, "i32") || 0, motion: m };
       }
     }
-    if (cls === 0x30 && tail[1] === 26) {
+    if (cls === 0x30 && tailState === 26) {
       const dest = [0, 1, 2].map((k) => rec.param(8 + 4 * k, "f32"));
       const g = rec.param(0x14, "f32");
       if (dest.every(finite) && finite(g) && g > 0 && g < 10) {
         delayedLeap = { delay: rec.param(4, "i32") || 0, dest, gravity: g };
       }
     }
-    const class13 = cls === 0x13 ? class13Tail(rec) : null;
+    const class13 = cls === 0x13 ? class13Tail(rec, tables) : null;
     const class12 = cls === 0x12 ? class12Tail(rec, coliSets) : null;
+    const class15 = cls === 0x15 ? class15Tail(rec, coliSets) : null;
     const class18 = cls === 0x18 ? class18Tail(rec) : null;
     const class26 = cls === 0x26 ? class26Tail(rec, coliSets) : null;
     const class19 = cls === 0x19 ? class19Tail(rec, coliSets) : null;
@@ -1875,6 +2297,7 @@ export async function resolveForStage(
     const class43 = cls === 0x43 ? class43Tail(rec) : null;
     const class46 = cls === 0x46 ? class46Tail(rec) : null;
     const class42 = cls === 0x42 ? class42Tail(rec) : null;
+    const class29 = cls === 0x29 ? class29Tail(rec) : null;
     const class40 = cls === CLASS40 ? class40Tail(rec) : null;
     const class51 = cls === 0x51 ? class51Tail(rec) : null;
     const class52 = cls === 0x52 ? class52Tail(rec) : null;
@@ -1892,18 +2315,21 @@ export async function resolveForStage(
     const class45 = cls === 0x45 ? class45Tail(rec) : null;
     const class2d = cls === 0x2d ? class2dTail(rec) : null;
     // **Gated on the selector, not on the class.** Class 0x33 is eleven
-    // objects behind one id and these three blocks are three of them reading
+    // objects behind one id and these four blocks are four of them reading
     // the same bytes; emitting two for one spawn, or any for a sub-handler
     // that is none of them, is `L3` written into the bundle. The port reads
     // which key is present as the selector, so exactly one of them is ever
     // set.
     const is33 = cls === 0x33;
     const class33 = is33 && rec.hp === CLASS33_CARRIER
-      ? class33Tail(rec) : null;
+      ? class33Tail(rec, coliSets) : null;
     const class33Push = is33 && rec.hp === CLASS33_PUSHABLE
       ? class33PushTail(rec) : null;
     const class33Cue = is33 && rec.hp === CLASS33_EFFECT_CUE
       ? class33CueTail(rec) : null;
+    const class33Sub = is33 ? class33SubTail(rec) : null;
+    const class33Prop = is33 && rec.hp === CLASS33_DRAW_UNTIL_FLAG
+      ? class33PropTail(rec) : null;
     let tscript: TargetScript | null = null;
     let ascript: TargetScript | null = null;
     let cameraCue: Record<string, unknown> | null = null;
@@ -1986,6 +2412,7 @@ export async function resolveForStage(
     p.ring_set = res.charType === 0 ? RING_SET_FOR_CHAR0 : 0;
     p.class13 = class13;
     p.class12 = class12;
+    p.class15 = class15;
     p.class18 = class18;
     p.class26 = class26;
     p.class19 = class19;
@@ -1995,6 +2422,7 @@ export async function resolveForStage(
     p.class43 = class43;
     p.class46 = class46;
     p.class42 = class42;
+    p.class29 = class29;
     p.class40 = class40;
     p.class51 = class51;
     p.class52 = class52;
@@ -2015,6 +2443,8 @@ export async function resolveForStage(
     p.class33 = class33;
     p.class33_push = class33Push;
     p.class33_cue = class33Cue;
+    p.class33_sub = class33Sub;
+    p.class33_prop = class33Prop;
     // `ActorBindPartList` (`FUN_00412440`) -- the faces and accessories this
     // spawn wears. 97 of the game's spawns carry one and every list matches
     // its character's own family, which is what says the tail offsets are
@@ -2135,15 +2565,15 @@ export async function resolveForStage(
       entryClips.push(entry.motion as number | undefined,
                       entry.idle_motion as number | undefined,
                       entry.strike_motion as number | undefined);
-      if (tail[1] === 13) {
+      if (tailState === 13) {
         // Chosen by character type, not named in the tail.
         entryClips.push(0xb8, 0x3d8);
       }
-      if (tail[1] === 23) {
+      if (tailState === 23) {
         // The paired wait/grab clips: it plays 0xBB and blends 0xBA.
         entryClips.push(0xba, 0xbb);
       }
-      if (tail[1] === 30) {
+      if (tailState === 30) {
         // The crouch and the three arc-script stages, both by type.
         entryClips.push(0x10c, 0x39f);
         for (const k of CLASS30_ENTRANCE_ARC_SCRIPTS) {
@@ -2172,6 +2602,20 @@ export async function resolveForStage(
     // they are offered per character type rather than per spawn, and which
     // four arms are deliberately still out.
     if (cls === 0x30) entryClips.push(...CLASS30_DEATH_CLIPS);
+    // State 43's four -- `ZombieStateDragTarget` (`FUN_0045C080`) names them
+    // as immediates, so no script does. Gated on the actor being able to be
+    // in state 43: its descriptor's own initial or attack state, or a state
+    // its civilian's op 0x1A orders it into. Stage 4's `0x35B4` is the one
+    // spawn in the game that is; without them it stood upright inside the
+    // civilian it is meant to be on the back of.
+    if (cls === 0x30) {
+      const parent = recs.get((sp.civilian_child as number | undefined) ?? -1);
+      const ordered = parent === undefined ? []
+        : civilianOrderedStates(civscripts, parent.param(0x01, "i8") || 0);
+      if ([tail[1], tail[2], ...ordered].includes(ZombieState.DragTarget)) {
+        entryClips.push(...DRAG_TARGET_CLIPS);
+      }
+    }
     // Class 0x25's own clips: the ones its command block names with `op 2` and
     // `op 3`. Baking only the header's motion leaves some of the six stages'
     // 385 (program, clip) pairs, across 137 programs, with no frames, and a
@@ -2194,6 +2638,15 @@ export async function resolveForStage(
                                             humanoidMotionIds(evt, rec))) {
         c.heldSlots.add(s);
       }
+      // ...and the heads the same hook draws for a talking or blinking face
+      // -- see `game/class25/face.ts`.
+      const talks = humanoidFaceModes(evt, rec).includes(FACE_MODE_TALK);
+      for (const s of HumanoidFaceSlots(
+          res.charType, talks,
+          humanoidFaceCels(tables, HUMANOID_FACE_CELS),
+          humanoidFaceCels(tables, HUMANOID_FACE_CELS_TWO))) {
+        c.heldSlots.add(s);
+      }
     }
     // Class 0x20's four idles -- `OneHitTargetInit` picks between them with
     // `rand() & 3`, so all four have to exist before the draw is made -- and
@@ -2210,20 +2663,13 @@ export async function resolveForStage(
       const which = rec.param(0x01, "i8") || 0;
       entryClips.push(...civilianMotionIds(civscripts, which));
       for (const s of civilianItemSlots(civscripts, which)) c.heldSlots.add(s);
-      // ...and the head's mouth frames: `CivilianDrawBonePart` draws bone 2's
-      // record slot plus a table's byte, and the record slot is the face this
-      // spawn's attachment list binds, or the skeleton's own.
-      const offsets = civilianMouthOffsets(civscripts, which);
-      if (offsets.size) {
-        let head = c.bones.find((b) => b.bone === 2)?.slot ?? 0;
-        for (const id of p.attachments) {
-          const arec = attachRecords[id];
-          if (id < ExeTablesClass.ATTACHMENT_REPLACES_BELOW && arec
-              && arec.bone === 2 && arec.slot) {
-            head = arec.slot;
-          }
-        }
-        if (head) for (const k of offsets) c.heldSlots.add(head + k);
+      // ...and the mouth: `CivilianDrawBonePart` (`FUN_0048D1F0`) draws her
+      // head at its record slot plus a cel from the rows her script's op
+      // 0x25 names, so every `slot + cel` it can reach rides the template.
+      for (const s of civilianMouthSlots(tables, c, p.attachments,
+                                         attachRecords,
+                                         civilianMouthRows(civscripts, which))) {
+        c.heldSlots.add(s);
       }
     }
     // The models the stage-4 boss swaps onto its bones -- the hand that holds
@@ -2356,6 +2802,18 @@ export async function resolveForStage(
     tlist.push(tw.spawn);
   }
 
+  // -- class 0x41 constructor 61's figures ---------------------------------
+  //
+  // Nine skinned actors `PlaceType61Figures` allocates with no descriptor;
+  // see `type61FigurePlacements`.
+  for (const f of await type61FigurePlacements(stage, tables, recs.values(),
+                                               byAt, chars)) {
+    placements.push(f);
+    let flist = perType.get(f.char_type);
+    if (!flist) { flist = []; perType.set(f.char_type, flist); }
+    flist.push(f.spawn);
+  }
+
   // -- the players' bodies ---------------------------------------------------
   //
   // Two synthetic rows, one per player, in every stage: a game over can come
@@ -2384,6 +2842,18 @@ export async function resolveForStage(
     let flist = perType.get(t.char_type);
     if (!flist) { flist = []; perType.set(t.char_type, flist); }
     flist.push(t.spawn);
+  }
+
+  // -- the golden frog -----------------------------------------------------
+  //
+  // One hidden row of type 0x1C where a container can let one out; see
+  // `goldenFrogTemplates`.
+  for (const t of await goldenFrogTemplates(stage, tables, breakables,
+                                            chars)) {
+    placements.push(t);
+    let glist = perType.get(t.char_type);
+    if (!glist) { glist = []; perType.set(t.char_type, glist); }
+    glist.push(t.spawn);
   }
 
   const order = [...perType.keys()].sort((a, b) => a - b);
@@ -2446,6 +2916,35 @@ export function partSpheres(tables: ExeTables,
   return out;
 }
 
+/**
+ * Every head model `CivilianDrawBonePart` (`FUN_0048D1F0`) can draw for one
+ * class-0x10 spawn: its head's record slot plus each cel of each mouth row
+ * its script names -- and row 3 behind row 2, which the hook hands over to.
+ *
+ * The record is what `ActorBindPartList` (`FUN_00412440`) leaves in bone 2:
+ * the last head id below the split the spawn's list names, or the skeleton's
+ * own head when it names none.
+ */
+function civilianMouthSlots(tables: ExeTables, c: Character,
+                            attachments: readonly number[],
+                            records: readonly { bone: number; slot: number }[],
+                            rows: readonly number[]): number[] {
+  if (!rows.length) return [];
+  let head = c.bones.find((b) => b.bone === CIVILIAN_HEAD_BONE)?.slot ?? 0;
+  for (const id of attachments) {
+    if (id >= ExeTablesClass.ATTACHMENT_REPLACES_BELOW) continue;
+    const r = records[id];
+    if (r && r.bone === CIVILIAN_HEAD_BONE && r.slot) head = r.slot;
+  }
+  if (!head) return [];
+  const mouth = civilianMouthTables(tables);
+  const want = new Set(rows);
+  if (want.has(CIVILIAN_MOUTH_HANDOFF_FROM)) want.add(CIVILIAN_MOUTH_HANDOFF_TO);
+  const out = new Set<number>();
+  for (const r of want) for (const cel of mouth[r] ?? []) out.add(head + cel);
+  return [...out].sort((a, b) => a - b);
+}
+
 /** The `characters` block of `<stage>.script.json`. */
 export function charactersJson(chars: Map<number, Character>,
                                placements: Placement[],
@@ -2469,6 +2968,12 @@ export function charactersJson(chars: Map<number, Character>,
     // `g_player_hand_slots` -- class 0x25's `op 9` reads it at run time,
     // because in Original Mode the row is a global's and not the command's.
     player_hand_slots: tables !== null ? playerHandSlots(tables) : [],
+    // The cels the two talking hooks add to a head's slot -- see `faces.ts`.
+    civilian_mouth_tables: tables !== null ? civilianMouthTables(tables) : [],
+    humanoid_face_cels: tables !== null
+      ? humanoidFaceCels(tables, HUMANOID_FACE_CELS) : [],
+    humanoid_face_cels_two: tables !== null
+      ? humanoidFaceCels(tables, HUMANOID_FACE_CELS_TWO) : [],
     class31: tables !== null ? class31Tables(tables) : {},
     // Class 0x14's `.rdata` -- the stage-2 boss's cue, cone, window and
     // round tables. See `class14.ts`.

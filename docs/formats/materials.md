@@ -194,7 +194,14 @@ flattens every bit of that away and makes dim corridors render as brightly as
 lit rooms.
 
 glTF multiplies `baseColorTexture` by `baseColorFactor`, which is exactly what
-modulate does, so the base colour maps across directly.
+modulate does, so the base colour maps across directly -- **as a number, not as
+a colour**. glTF defines `baseColorFactor` as linear light, and `GLTFLoader`
+adopts it so, while the device multiplies the framebuffer byte: a renderer that
+takes the factor at its word draws a base colour of 0.5 at 0.73 of the texel.
+The player reads it as the device does (`render/lighting.ts`); a generic glTF
+viewer shows this game's baked shading washed out. And the base colour is only
+the diffuse half of the material -- see *The material and the light equation*
+below.
 
 Under **decal** (3 meshes) the texture replaces the colour outright, so there
 the factor must stay white.
@@ -522,6 +529,72 @@ dir = ( cos(pitch)·sin(yaw), −sin(pitch), cos(pitch)·cos(yaw) )
 `SetRenderLightDirection` negates it, so `dir` is the direction the light
 comes **from**. Note the caller passes the **view-space** vector, not the
 world one.
+
+#### The material and the light equation — [proved]
+
+`WalkMeshChainAndDraw` (`0x004A7EF0`) calls `SetMaterial` once per mesh, from
+the mesh header, with a `D3DMATERIAL7` at `0x007E78D0`:
+
+| `D3DMATERIAL7` | from the mesh header |
+|---|---|
+| diffuse | base colour `+0x30..+0x38`, alpha `+0x2C` |
+| ambient | `+0x28` × the base colour, alpha `+0x2C` |
+| specular | offset colour `+0x40..+0x48` when the power is non-zero, else 0 |
+| power | `(float)(1 << +0x24)` when `+0x24 >= 1`, else 0 |
+| emissive | never written: 0 |
+
+So on this port the "shading mode" word at `+0x24` is, past its three negative
+layout values, the **log2 of the specular exponent**, and the offset colour is
+the specular colour: 5,993 meshes in `pol/` have a highlight (3,596 of them at
+power 32). `+0x28` is 0.75 on 35,372 of the 41,463 meshes.
+
+Every device state the equation depends on is either set once or never
+written. `D3DRENDERSTATE_LIGHTING` is never written and keeps D3D7's default of
+on, so **every mesh draw is lit**; `SPECULARENABLE` is 1 from
+`RenderInitStates`; `COLORVERTEX` is 0 and all four material sources are
+`D3DMCS_MATERIAL`; `LOCALVIEWER` (on) and `NORMALIZENORMALS` (off) keep their
+defaults; and all 278,807 strips in `pol/` set bit `0x40`, `D3DSHADE_GOURAUD`.
+(Those are all 25 readers of the device pointer `0x007DEB74`.) One vertex is
+therefore
+
+```
+N.L    = dot(N, L)                     N per the reference not renormalised (see below); L toward the light
+colour = clamp(Ma·(Ga + La) + (N.L > 0 ? Md·Ld·N.L : 0))
+spec   = clamp(Ms·Ls·max(N.H, 0)^P)    H = normalize(L + normalize(eye − vertex))
+pixel  = texel·colour + spec, then the fog
+```
+
+with `Ga` the packed `D3DRENDERSTATE_AMBIENT` and `La`, `Ld`, `Ls` the light's
+three colours from `SetLightingDefaultSingle` above, every term a fraction of a
+framebuffer byte. **The normal, as the PC game draws it, is unit length.**
+Microsoft's fixed-function reference transforms it by the inverse transpose of
+the world-view matrix and renormalises only under `NORMALIZENORMALS`, which
+the exe never sets; taken literally, `FishDraw`'s `Scale(0.3)` stretches the
+fish's normals by 3.3 and the highlight saturates them white. The shipped
+game on Windows draws them coloured, and the fish's silhouette (flattened
+`Scale(0.4, 0.01, 0.4)` at light colour 0.1) is a shadow only with unit
+normals, so the player renormalises. Whether the
+hardware gates the highlight on `N.L > 0` is the
+driver's and not the exe's; the reference rasteriser does, and the player
+follows it: `[likely]`.
+
+Under `LightBlockInit`'s ambient of 0.7 and a white light, `Ma·(Ga + La)` is
+`+0x28 × base` — 0.75 of the texel for a white mesh facing away from the
+light — and a face toward it saturates at the texel itself. The dome is an
+`AssetDrawSlot` like any model and is lit the same way.
+
+#### What is not drawn is black — [proved]
+
+`RenderBeginFrame` (`0x004ABF00`) runs ahead of every frame's scene:
+`BeginScene`, the D3DX context's `Clear(D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER)`
+and `SetClearColor(g_clear_colour)`. `g_clear_colour` (`0x00598C58`) is
+`0xFF000000` in the image and its one writer, `SetClearColour` (`0x004ABEF0`),
+is called with 0 by `ScreenLeaveReset` and with anything else only by the
+options calibration screens. The fog colour never reaches the clear: a pixel
+no mesh covers is black under any fog, and the sky the fog colours is the
+dome's own fogged meshes. (The two context slots, `+0x54` `Clear` and `+0x58`
+`SetClearColor`, are the DX7 SDK's `ID3DXContext` order, which the `+0x14`
+`GetD3DDevice` and `+0x18` `GetPrimary` calls agree with: `[likely]`.)
 
 ### The mesh fog patch
 

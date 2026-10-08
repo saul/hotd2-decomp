@@ -32,22 +32,22 @@ import type { DebugGroupName, StripRow } from "../../ui/projection";
 /**
  * The shutter's row: what state it is in, and any dialogue still counting.
  *
- * The parameter is the two walker fields this reads and not `Walker` itself.
- * `Walker` satisfies it structurally, so the call site is unchanged, and
- * naming the two fields is what lets the check in `test/projection.test.ts`
- * hand it a plain object and pin all nine labels without a bundle.
+ * The parameter is the walker field this reads and not `Walker` itself.
+ * `Walker` satisfies it structurally, and naming the field is what lets the
+ * check in `test/projection.test.ts` hand it a plain object and pin all nine
+ * labels without a bundle. `dialogueFrames` is the newest subtitle task's
+ * frames left (`G.g_dialogue_tasks`, `game/dialogue.ts`).
  *
  * `shown` is `toggles.hud`, read from `Player` where the toggle lives, so the
  * sentence and `.hud-layer`'s `hidden` come from one fact rather than two.
  */
 export function describeShutter(
-    w: { shutterState: number; captionFrames: number } | null,
-    shown: boolean): string {
+    w: { shutterState: number } | null,
+    shown: boolean, dialogueFrames = 0): string {
   if (!shown) return "off";
   const state = w?.shutterState ?? 2;
   const label = SHUTTER_LABEL[state] ?? `state ${state}`;
-  const frames = w?.captionFrames ?? 0;
-  return `${label}${frames > 0 ? `, dialogue ${Math.ceil(frames)}f` : ""}`;
+  return `${label}${dialogueFrames > 0 ? `, dialogue ${dialogueFrames}f` : ""}`;
 }
 
 export interface XYZ { x: number; y: number; z: number }
@@ -80,7 +80,6 @@ export interface HudSource {
     readonly view: { readonly yawBams: number; readonly forward: XYZ };
   };
   readonly chars: Describes;
-  readonly props: Describes;
   readonly rigs: Describes;
   /**
    * `render/slotmodels.ts` — the actors drawn as a bare asset slot rather
@@ -126,7 +125,6 @@ export function hudInputs(p: HudSource): HudInputs | null {
     yawBams: p.ctx.view.yawBams,
     describe: {
       characters: p.chars.describe,
-      props: p.props.describe,
       rigs: p.rigs.describe,
       slotModels: p.slotModels.describe(),
       breakables: p.breakables.describe,
@@ -136,7 +134,8 @@ export function hudInputs(p: HudSource): HudInputs | null {
       coli: p.coliDebug.describe,
       wedged: p.stuckDebug.describe,
       enemies: p.game.describe,
-      shutter: describeShutter(w, p.toggles.hud),
+      shutter: describeShutter(w, p.toggles.hud,
+                               G.g_dialogue_tasks.at(-1)?.frames ?? 0),
       rain: p.rain.describe,
       fog: p.sceneFog.describe,
       light: p.lighting.describe,
@@ -166,7 +165,7 @@ export interface HudInputs {
   /** The camera's heading in the engine's own units. See `core/bams.ts`. */
   yawBams: number;
   describe: {
-    characters: string; props: string; rigs: string; breakables: string;
+    characters: string; rigs: string; breakables: string;
     slotModels: string;
     shooting: string; effects: string; blood: string; coli: string;
     wedged: string; enemies: string;
@@ -262,7 +261,6 @@ export function groupRows(w: Walker, x: HudInputs):
       ["enemies", d.enemies],
     ],
     props: [
-      ["props", d.props],
       ["breakables", d.breakables],
       ["rigs", d.rigs],
       ["slot models", d.slotModels],

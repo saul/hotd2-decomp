@@ -16,19 +16,22 @@ export const OPS: Record<number, OpImpl> = {
 
     // -- the cutscene skip -------------------------------------------------
     0x2c: {                                     // set_skippable_region
-      // EvtOpSetSkippableRegion2C:
-      //   arg != 0 -> DAT_009A2230 = 0; DAT_009A2D7C = 1
-      //   arg == 0 -> DAT_009A2D7C = 0; skip flag = 0
+      // `EvtOpSetSkippableRegion2C` (`FUN_0045FD90`):
+      //   arg != 0 -> g_cutscene_skipping = 0; g_nEvtSkippableRegion = 1
+      //   arg == 0 -> g_nEvtSkippableRegion = 0; g_nEvtSkipFlag = 0
       // Closing always clears the flag, so a skip never carries past the
       // region it was asked for.
       status: "done",
       run: (w, op) => {
-        w.skippable = op.open ?? (op.raw?.length
+        const open = op.open ?? (op.raw?.length
           ? Number.parseInt(op.raw[0], 16) !== 0 : false);
-        if (!w.skippable) w.skipRequested = false;
-        // `MOV [0x009a2230], EAX` at `0x0045FD9D`, the opening arm's zero:
-        // a region that opens drops `g_cutscene_skipping`.
-        else G.g_cutscene_skipping = 0;
+        if (open) {
+          G.g_cutscene_skipping = 0;
+          w.skippable = true;
+        } else {
+          w.skippable = false;
+          w.skipRequested = false;
+        }
         return op.means;
       },
     },

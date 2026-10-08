@@ -453,9 +453,11 @@ export function ZombieStateRideCarrier(obj: ZombieActor,
 /**
  * `ZombieStateArcScriptedEntrance` — `FUN_00458A70`, class 0x30 state 30.
  *
- * Three spawns, all stage 4, all reached from `ZombieStateRideCarrier` rather
- * than started in. Wait, crouch, then ride a scripted ballistic arc to a world
- * point: `ActorArcBegin` sets the endpoints and `ActorArcStep` runs the flight
+ * Six spawns: stage 4's `0xD20`, `0xD64` and `0xDA8` start in it, and stage
+ * 2's three boat riders `0x125D8`, `0x1261C` and `0x12660` are handed to it by
+ * `ZombieStateRideCarrier` when their boat strikes the wall (it is their
+ * attack state). Wait, crouch, then ride a scripted ballistic arc to a world
+ * point -- for the riders, off the boat and onto the pavement: `ActorArcBegin` sets the endpoints and `ActorArcStep` runs the flight
  * and its three-stage motion script together, which is class 0x31's machinery
  * reused whole — see `class31/arc.ts`.
  *
@@ -491,10 +493,12 @@ export function ZombieStateRideCarrier(obj: ZombieActor,
 export function ZombieStateArcScriptedEntrance(obj: ZombieActor, dt: number,
                                                rng: Rng, host?: GameHost,
                                                events?: Events): void {
-  const t = obj.entry;
+  // `iVar2 = obj+0x1390`, the tail, read with no test: every spawn that can be
+  // in this state has it, which `bundle:entry_tails` holds the bundle to.
+  const t = obj.entry!;
 
   if (obj.sub === 0) {
-    obj.zom.holdFrames = t?.delay ?? 0;
+    obj.zom.holdFrames = t.delay!;                         // tail+0x18
     obj.sub = 1;
   }
 
@@ -517,9 +521,9 @@ export function ZombieStateArcScriptedEntrance(obj: ZombieActor, dt: number,
   }
 
   if (obj.sub === 3) {
-    const d = t?.dest;
-    if (!d) { obj.state = ZombieState.AttackRun; obj.sub = 0; return; }
-    ActorArcBegin(obj, { x: d[0], y: d[1], z: d[2] }, t?.frames ?? 1);
+    // `ActorArcBegin(pos, tail+0x04..0x0C, tail+0x10)`.
+    const d = t.dest!;
+    ActorArcBegin(obj, { x: d[0], y: d[1], z: d[2] }, t.frames!);
     InstallArcMotionScript(obj, ZombieArcEntranceScript(obj));
     obj.arcPhase = ArcPhase.Windup;
     obj.flags2 &= ~ZombieFlag2.OneShotFired;
@@ -552,7 +556,7 @@ export function ZombieStateArcScriptedEntrance(obj: ZombieActor, dt: number,
       break;
   }
 
-  if (ActorArcStep(obj, t?.step ?? 1, dt, host, events)) return;
+  if (ActorArcStep(obj, t.step!, dt, host, events)) return;     // tail+0x14
 
   obj.flags2 &= ~ZombieFlag2.OneShotFired;
   obj.flags &= ~ActorFlag.NoHitReaction;

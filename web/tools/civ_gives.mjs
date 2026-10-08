@@ -148,7 +148,7 @@ function play(bundle, at) {
     aliveCivilians: () => G.g_civilians_alive,
     scriptFlagRaised: (i) => (G.g_script_flags[i] ?? 0) !== 0,
     cameraFree: () => G.g_camera_free !== 0,
-    showMessage: () => null, endDialogue: () => undefined,
+    showMessage: () => null,
   }, { seed: 1 });
   scriptSys.walker = walker;
   ctx.walker = walker;
@@ -308,6 +308,13 @@ check("the survey finds the five life-givers the exe's streams name "
  */
 const BEHIND_RESUME_BY_MODE = new Set([
   "stage2:8510", "stage2:1158c", "stage2:12098", "stage4:23f8",
+  // Not op 0x1F's: played from its spawn step, stage 4's block 2 step 7, in
+  // Original Mode the walker parks on the step's opening
+  // `wait_script_flag 20` and never reaches the `spawn_obj_c` that makes her
+  // (Arcade passes it by frame 140). No evt op and no civilian stream raises
+  // flag 20, so an actor does; which one, and why not in Original Mode from
+  // this seek, is `[open]`. Main's harness listed her here as op 0x1F's.
+  "stage4_original:23f8",
 ]);
 
 let gave = 0;
@@ -362,7 +369,8 @@ check("every life-giver in both modes hands the life over",
         `${r.bundle}:${r.at.toString(16)}`)),
       missed.join());
 check("...and every Original Mode item does too, but the four behind op "
-      + "0x1F's second arm in Arcade",
+      + "0x1F's second arm in Arcade, and stage 4's 0x23F8 in Original Mode, "
+      + "which this seek never spawns",
       missed.length === BEHIND_RESUME_BY_MODE.size
       && missed.every((m) => BEHIND_RESUME_BY_MODE.has(m)),
       `missed ${missed.join()}`);

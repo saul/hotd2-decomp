@@ -34,6 +34,7 @@ import { ActorSpawn } from "../spawn";
 import { SpawnClass } from "../spawn_class";
 import { RegisterForShotTest } from "../combat/shot_test";
 import { ActorRunNodeDrawHooks } from "../model_draw";
+import { DrawSkinnedModelAndShadow } from "../skeleton";
 import { ZombieDrawBonePart } from "./draw";
 import { ZombiePushOutOfWorldAndActors } from "./ground";
 import { ZombieOnShot } from "./on_shot";
@@ -186,6 +187,9 @@ export function ZombieTwinFollowHost(obj: ZombieActor, f: ClassFrame): void {
   // shove timer.
   ZombiePushOutOfWorldAndActors(obj);
   ActorRunNodeDrawHooks(obj, ZombieDrawBonePart, f);
+  // The draw's shadow, on the twin -- this routine pointed `g_cur_actor` at
+  // it (`0x004532A5`) -- which `TWIN_EVERY_FRAME`'s `0x80000` refuses.
+  DrawSkinnedModelAndShadow(obj);
   // `obj+0x70`: the port keeps the point in world space and lets the shot
   // test take the depth (`RegisterForShotTest`). The point is `obj+0x100`,
   // the tracked bone the walk recorded, not lifted -- the twin never calls
@@ -221,5 +225,6 @@ function ZombieTwinCopyHost(obj: ZombieActor, host: Actor): void {
   obj.action = host.action ? { ...host.action } : null;
   obj.rootActionCursor = host.rootActionCursor;
   obj.fadeFrom = null;
+  obj.fadeInto = null;
   obj.fade = 0;
 }

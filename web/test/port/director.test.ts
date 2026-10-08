@@ -16,6 +16,8 @@ import {
   ReleaseAttackSlot, TryClaimAttackSlot,
 } from "../../src/game/combat/permits";
 import { SpawnClass } from "../../src/game/spawn_class";
+import { SpawnFromDescriptor } from "../../src/game/spawn";
+import { g_class_handlers } from "../../src/game/registry";
 import { dist2d, vec3, type Vec3 } from "../../src/game/vec";
 import {
   EffectCode, HitResultCode, ResolveHit,
@@ -98,21 +100,22 @@ console.log("an unread class:");
 {
   const rng = new Rng(7);
   const events = scene(0, rng);
-  // Class 0x29 has no module in `g_class_handlers`, so it must not move. This
+  // Class 0x54 has no module in `g_class_handlers`, so it must not move. This
   // used to be the cat, until the cat was read: class 0x53 has a module now,
   // and its clips are *meant* to carry it -- see "class 0x53, the cat". Then
-  // it was class 0x42, until the worm was read, and class 0x2D, until the
-  // stage-6 boss was.
-  const idle = ActorSpawn(0x2000, SpawnClass.SceneryBatch, 1, "unread");
+  // it was class 0x42, until the worm was read, class 0x2D, until the
+  // stage-6 boss was, class 0x29, until its floor decals were, and class
+  // 0x27, until stage 2's path riders were.
+  const idle = ActorSpawn(0x2000, 0x54 as SpawnClass, 1, "unread");
   idle.visible = true;
   idle.attackState = 1;
   idle.hp = 10;
   idle.pos = vec3(0, 0, 60);
   const start = { ...idle.pos };
   run(600, rng, events);
-  check("class 0x29 stayed where the script put it",
+  check("class 0x54 stayed where the script put it",
         idle.pos.x === start.x && idle.pos.z === start.z);
-  check("class 0x29 took no permit", idle.attackPermit === -1);
+  check("class 0x54 took no permit", idle.attackPermit === -1);
 }
 
 // -- 3. `attack_state` does not gate the swing ------------------------------
@@ -972,4 +975,33 @@ console.log("determinism:");
   check("every actor is in the loop, none stuck outside it",
         G.g_object_list.every((o) => IN_LOOP.has(o.state) || o.dead),
         G.g_object_list.map((o) => ZombieState[o.state] ?? o.state).join(","));
+}
+
+// -- 7. the walk that runs an `Init` ----------------------------------------
+
+// `EnemyZombieInit` (`FUN_00452DA0`) writes `EnemyZombieUpdate` over `obj+0x00`
+// and returns (`0x00452FB5`), so `TaskRunTree` reaches the update on the
+// walk after the one that ran the `Init`. Counted at the class table's own
+// entry, which is what the walk calls.
+console.log("the walk that runs an Init:");
+{
+  const rng = new Rng(7);
+  const events = scene(0, rng);
+  const row = g_class_handlers[SpawnClass.Zombie]!;
+  const update = row.update;
+  let calls = 0;
+  row.update = (obj, f) => { calls++; update(obj, f); };
+  try {
+    const z = SpawnFromDescriptor(0x5100, SpawnClass.Zombie, 1, "fresh");
+    z.visible = true;
+    GameUpdate(1 / 60, NULL_HOST, rng, events);
+    check("a zombie's Init walk runs its Init and not its update",
+          !z.initPending && calls === 0,
+          `initPending ${z.initPending}, ${calls} update(s)`);
+    GameUpdate(1 / 60, NULL_HOST, rng, events);
+    check("...and the next walk runs the update, once", calls === 1,
+          `${calls} update(s)`);
+  } finally {
+    row.update = update;
+  }
 }

@@ -9,7 +9,7 @@
  * file is the drawing of them and nothing else, as `cels.ts` is for class
  * 0x30's hook. Which arm draws is a function of `a.charType`, `a.motion` and
  * `a.hum.playCursor` -- the cursor the draw computed, which
- * `HumanoidSampleDrawnCursor` leaves on the actor -- so a snapshot fully
+ * `ScriptedHumanoidDraw` (`game/class25/`) leaves on the actor -- so a snapshot fully
  * determines it and `resync` needs no help.
  *
  * **Every call post-multiplies** (`game/matrix.ts`), so each arm's local
@@ -28,9 +28,10 @@
  * 2's programs), because each also calls `SpawnTumblingModelAtBone5`
  * (`FUN_00485DE0`) on its first frame -- an object with an update of its own
  * that is state, and the port has no object for it yet. The rest of the hook
- * -- bone 2's head aim and hand-prop cels, and the Original Mode scale on
- * bones 2, 5, 8, 12 and 15 -- changes the node's own draw and is not here
- * either.
+ * changes the node's own draw and is not here either: bone 2's face cels,
+ * which `game/class25/face.ts` ports and `render/characters.ts` shows, and
+ * the head aim and the Original Mode scale on bones 2, 5, 8, 12 and 15,
+ * which are not ported.
  */
 import { Matrix4, Object3D } from "three";
 import {

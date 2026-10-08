@@ -56,6 +56,7 @@ import type { RenderContext } from "./context";
 import { BAMS_TO_RAD } from "../core/bams";
 import { applyForcedAlphaBlend } from "./draw_order";
 import { prepareFogMaterial } from "./fog";
+import { unlitMaterial } from "./lighting";
 
 /** One drawn drop. Its *position* is `G.g_rain_particles[i]`, not here. */
 interface Drop {
@@ -141,8 +142,10 @@ export class Rain implements System<RenderContext> {
           // discards the streak's clear texels and only the streak occludes.
           // This used to turn the depth write off "or the drops occlude each
           // other", which is what the engine lets them do.
-          const clone = (m as Material).clone();
-          applyForcedAlphaBlend(clone, cfg.alpha, (m as Material).opacity);
+          // The unlit material, never a lit twin: see `unlitMaterial`.
+          const base = unlitMaterial(m as Material);
+          const clone = base.clone();
+          applyForcedAlphaBlend(clone, cfg.alpha, base.opacity);
           // Cloned after `sceneFog.prepare` ran over the stage tree; the hook
           // it installed is not something `Material.copy` carries.
           prepareFogMaterial(clone);

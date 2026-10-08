@@ -47,6 +47,7 @@ import {
 import { WATER_SURFACE_ALSO_DRAWS } from "../game/class41/water_slots";
 import type { RenderContext } from "./context";
 import { prepareFogMaterial } from "./fog";
+import { unlitMaterial } from "./lighting";
 import type { StageScene } from "./stagescene";
 
 /** What this needs of the slot-model layer: a fresh copy of a rig template. */
@@ -285,7 +286,10 @@ export class WaterSurfaceLayer implements System<RenderContext> {
       this.meshes.set(mesh, m);
     }
     if (!m.linear) {
-      const one = (x: Material): Material => {
+      // The unlit material, never the lit twin the mesh may be wearing:
+      // see `unlitMaterial`. The lighting gives the clone its own twin.
+      const one = (worn: Material): Material => {
+        const x = unlitMaterial(worn);
         const c = x.clone();
         c.userData = { ...x.userData, [LINEAR_TAG]: true };
         const map = (x as { map?: Texture | null }).map;

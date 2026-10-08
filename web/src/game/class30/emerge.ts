@@ -249,8 +249,8 @@ export function ZombieStateEmerge(obj: ZombieActor, dt: number,
 export function ZombieStateDelayedLeap(obj: ZombieActor, dt: number, rng: Rng,
                                        host?: GameHost,
                                        events?: Events): void {
-  const p = obj.delayedLeap;
-  if (!p) { obj.state = ZombieState.AttackRun; obj.sub = 0; return; }
+  // `iVar1 = obj+0x1390`, the tail, read with no test (`bundle:entry_tails`).
+  const p = obj.delayedLeap!;
   const frames = SecondsToTicks(dt);
 
   if (obj.sub === 0) {
@@ -339,10 +339,14 @@ export function ZombieStateDelayedLeap(obj: ZombieActor, dt: number, rng: Rng,
     obj.frozen = 0;
     obj.flags &= ~ActorFlag.PoseFrozen;
     obj.zom.targetLoops = MotionPlayLength(obj) - rng.int(0x1e) - 1;
-    // `if (!(obj+0x136C & 0x10000000)) obj+0x34 &= ~0x20000` — the ground snap
-    // comes back, unless something else is still holding the actor up. That
-    // bit is unported and never set, so this always clears.
-    obj.flags &= ~ActorFlag.Airborne;
+    // `TEST EAX, 0x10000000` / `JNZ` / `AND [ESI+0x34], 0xFFFDFFFF` at
+    // `0x004583EF`: the ground snap comes back, unless the actor rides the
+    // carrier ({@link ZombieFlag2.AttachedToCarrier}), whose seat holds it up.
+    // This used to say the bit was unported and clear unconditionally; the
+    // carrier's port gave it a name and nobody came back here.
+    if (!(obj.flags2 & ZombieFlag2.AttachedToCarrier)) {
+      obj.flags &= ~ActorFlag.Airborne;
+    }
     if (obj.condition === COND_HEAVY_LANDING) {
       events?.emit("sound.play", { id: SND_LANDING_HEAVY });
       G.g_screen_shake_frames = LANDING_HEAVY_SHAKE;

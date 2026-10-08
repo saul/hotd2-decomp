@@ -62,12 +62,10 @@
  * ends with a wait word carrying `0x10000000` — which is where
  * `CivilianRunScript` pays **+400**, to that player or to both.
  *
- * Shooting the civilian instead costs the shooter a **life** -- through the
- * invulnerability window -- and **-100**, and leaves a marker where she was
- * hit (`hit_marker.ts`); a civilian her **captors** kill costs *both* players
- * 100. That asymmetry is in the code, not a reading of it: the shot arm calls
- * `ScoreAddForPlayer` once with the player the hit flags name, and the arm for
- * a civilian already dead -- the maul raised the bit -- calls it twice.
+ * Shooting the civilian instead costs the shooter a **life** and **-100**, and
+ * a killing shot costs *both* players 100. That asymmetry is in the code, not
+ * a reading of it: the survivable branch calls `ScoreAddForPlayer` once with
+ * the player the hit flags name, and the killed branch calls it twice.
  *
  * ## What this does not do
  *
@@ -100,9 +98,9 @@
  * with nothing to raise the bit it could not be taken, and stage 3's block-0
  * boat moors and never reaches it.
  *
- * **The node hook is ported** (`draw.ts`): the head that turns to look at the
- * player, a captor or a point, and the mouth that moves while she speaks --
- * ops 0x23, 0x24 and 0x25, which the port once ran as no-ops.
+ * A shot civilian costs the shooter a life with no damage overlay, and
+ * leaves `SpawnCivilianHitMarker` (`FUN_0048E080`)'s marker on screen where
+ * she was hit for a second: `shot.ts` and `hit_marker.ts`.
  *
  * ## Where each routine lives
  *
@@ -117,13 +115,12 @@
  * | `pose.ts`     | `CivilianApplyMotionPose` `FUN_0048C310`                   |
  * | `items.ts`    | `CivilianAddHeldItem` `FUN_0048CAE0`, `CivilianAddPickedItem` `FUN_0048CB60`, `CivilianPickHeldItem` `FUN_0048CBF0`, `CivilianDrawHeldItems` `FUN_0048CD10` (its game half), `CivilianHeldItemGrantLife` `FUN_0048DCC0`, `CivilianHeldItemGrantOriginalItem` `FUN_0048DD60` |
  * | `life_marker.ts` | `SpawnLifeGrantedMarker` `FUN_0048DF10`, `LifeGrantedMarkerUpdate` `FUN_0048DFE0` |
- * | `hit_marker.ts` | `SpawnCivilianHitMarker` `FUN_0048E080`, `CivilianHitMarkerUpdate` `FUN_0048E190` |
- * | `draw.ts`     | `CivilianDrawBonePart` `FUN_0048D1F0` (its game half), `AngleApproachInPlace` `FUN_0048D9B0` |
  * | `step.ts`     | `CivilianStepScript` `FUN_0048B1E0`                        |
  * | `turn.ts`     | `CivilianStepTurnToTarget` `FUN_0048C850`, `ActorTurnTowardPoint` `FUN_0048C990` |
  * | `children.ts` | `CivilianPruneDeadChildren` `FUN_0048CA60`, `CivilianHookRideChildrenStep` `FUN_0048DAB0` |
  * | `hooks.ts`    | op 0x10's four installs -- `CivilianHookStartFall` `FUN_0048D9F0`, `CivilianHookRideChildren` `FUN_0048DA90`, `CivilianHookStartMoveY` `FUN_0048DB90`, `CivilianHookStartMoveLocal` `FUN_0048DBD0` -- and three of their steps, `CivilianHookFallStep` `FUN_0048DA20`, `CivilianHookMoveYStep` `FUN_0048DBC0`, `CivilianHookMoveLocalStep` `FUN_0048DC10`; `PoseHookGrowAndPushOutOfWorld` `FUN_0048D070` |
  * | `shot.ts`     | `CivilianPlayDeathVoice` `FUN_0048D140`, and the shot branch of the update |
+ * | `hit_marker.ts` | `SpawnCivilianHitMarker` `FUN_0048E080`, `CivilianHitMarkerUpdate` `FUN_0048E190` |
  * | `loops.ts`    | the update's clip-loop arm                                 |
  * | `update.ts`   | `CivilianUpdate` `FUN_0048A920` and its inline tails        |
  * | `debug.ts`    | the sidebar's row. No exe function.                        |
@@ -143,8 +140,6 @@ import type { CivilianState } from "./state";
 export * from "./ops";
 export * from "./items";
 export * from "./life_marker";
-export * from "./hit_marker";
-export * from "./draw";
 export * from "./turn";
 export * from "./children";
 export * from "./hooks";
@@ -168,6 +163,8 @@ export const CivilianHandler: ClassHandler = {
   // A shot civilian keeps running: its on-shot script is what plays the fall,
   // the voice and the removal, and stopping at `dead` froze it upright.
   updatesWhenDead: true,
+  // `CivilianInit` installs `CivilianUpdate` and returns (`0x0048A766`).
+  firstUpdateNextWalk: true,
   // `CivilianCheckShot`'s first branch: no on-shot script, no way to be hurt.
   invulnerable: (obj: Actor) => (obj.civ?.onShotScript ?? -1) < 0,
   leave: CivilianLeaveField,

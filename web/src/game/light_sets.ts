@@ -33,6 +33,7 @@
  * | `CatBranchTriggerUpdate` (`FUN_00431430`) and `CatMotionListUpdate` (`FUN_00431340`) | 0x53 |
  * | `ResultCardFigureUpdate` (`FUN_00435760`) | 0x61's figures, not the card |
  * | `Class32DrawAndAdvance` (`FUN_0047FE40`) | 0x32, the boss; not its projectiles or tasks |
+ * | `Type61FigureUpdate` (`FUN_004729E0`), and a direction of its own | 0x41's figures, not the placer |
  *
  * Also callers, and not actors this module can answer for:
  * `BodyCreatureUpdate` (`FUN_0043E880`, `znjoe`'s released creatures, a pool of
@@ -42,7 +43,7 @@
  * `[open]` The remaining callers are unnamed routines
  * (`FUN_004021D0`, `FUN_00415120`, `FUN_00420550`, `FUN_00420820`,
  * `FUN_00423050`, `FUN_004231C0`,
- * `FUN_004729E0`, `FUN_00483A40`, `FUN_00483B40`,
+ * `FUN_00483A40`, `FUN_00483B40`,
  * `FUN_00483CE0`, `FUN_0049A210`,
  * `FUN_0049A470`, `FUN_0049A680`, `FUN_0049A7F0`, `FUN_0049AFB0`); which
  * classes they draw has not been read, so no class is listed for them.
@@ -59,6 +60,7 @@ import { vec3, type Vec3 } from "./vec";
 import { OwlState } from "./class43/state";
 import { ResultCardRoutine } from "./class61/state";
 import { Class32Routine } from "./class32/state";
+import { PropContainerRoutine } from "./class41/placer_state";
 import { WormBodyDraw } from "./class42/state";
 
 /** The classes whose every draw is under block 1. */
@@ -88,6 +90,10 @@ export function ActorDrawsUnderSecondaryLights(obj: Actor): boolean {
   // The result card's figures make the call; the card draws no model.
   if (obj.cls === SpawnClass.ResultCard) {
     return obj.card.routine !== ResultCardRoutine.Card;
+  }
+  // So do class 0x41 constructor 61's; the placer draws nothing.
+  if (obj.cls === SpawnClass.PropContainerPlacer) {
+    return obj.placer.routine === PropContainerRoutine.Type61Figure;
   }
   // The owl's live update does not make the call; `OwlCorpseFallAndSettle`,
   // the update it is swapped for on death, does.

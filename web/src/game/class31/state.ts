@@ -78,7 +78,7 @@ export interface ThrowerTail extends HeadAimWords {
    * `obj+0x1330` in sub 1: the delay before the first leg.
    *
    * The same word is the shared arc record's `arcFrames`, which stays on the
-   * head, and class 0x24's `slideTimer` and class 0x25's `bonePropMode`. The
+   * head, and class 0x24's `slideTimer` and class 0x25's `faceMode`. The
    * path follow and an arc never run at once.
    */
   pathDelay: number;        // +0x1330, also `arcFrames` / class 0x24 / 0x25

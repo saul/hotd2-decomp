@@ -31,7 +31,9 @@
  * Slots `0x132D` and `0x132E` are `common.bin` entries 305 and 306, beside the
  * life marker's 303 and 304. This was `SpawnCivilianBloodPool`, "a ground
  * decal", named from what it was guessed to be before its update was read:
- * nothing in it touches the ground.
+ * nothing in it touches the ground. Until it was ported the port showed a
+ * shot civilian with the player's damage overlay instead -- see
+ * `game/class10/shot.ts`.
  */
 import { CameraBlockWorldToView } from "../camera/view";
 import { G } from "../globals";

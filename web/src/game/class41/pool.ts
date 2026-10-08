@@ -23,13 +23,19 @@ import { SlideOnFlagUpdate } from "../class44/slide_on_flag";
 import { FlagLiftedPropUpdate } from "../class44/flag_lifted";
 import { PropUpdateType47 } from "./type47";
 import { PropDrawOnlySelector14 } from "../class44/draw_only";
+import { HingeUpdate } from "../class44/hinge";
+import {
+  FlagSlotEffectUpdate, ScaledSlotEffectUpdate,
+} from "../class44/slot_effect";
+import { EffectHandoffUpdate } from "../class44/effect_handoff";
+import { SwingThenBreakUpdate } from "../class44/swing_then_break";
+import { EffectCollapseUpdate } from "../class44/effect_collapse";
 import { ScriptFlagEffectUpdate } from "../class44/script_flag_effect";
+import { StoryModeSwitchUpdate } from "../class44/story_switch";
+import { ChainSegmentUpdate } from "./chain";
 import {
-  ChainSegmentUpdate, StoryModeSwitchUpdate,
-  STORY_SWITCH_FLAG_AT, STORY_SWITCH_SCRIPT_FLAG,
-} from "./branch";
-import {
-  PropDrawOnlyType33, PropDrawOnlyType53, PropDrawOnlyType54,
+  PropDrawOnlyType31, PropDrawOnlyType33, PropDrawOnlyType53,
+  PropDrawOnlyType54,
 } from "./draw_only";
 import { GENERIC_ROUTINES } from "./generic_routines";
 import { OriginalItemBannersTick } from "./item_banner";
@@ -40,10 +46,9 @@ import { Type67MountedPartUpdate } from "./type67";
 import { PropUpdateType43 } from "./type43";
 import { PropUpdateType48FlickerLight } from "./type48";
 import { KindedPropUpdate } from "./kinded";
-import { PropExpireByStepLifetime } from "./lifetime";
-import { ClearPropShotTestList, PropRegisterAtOrigin } from "./shot_test";
-import { ActorDespawnProp, BreakablePropUpdate } from "./prop";
-import { HIT_FLAG_MASK, PropFamily, type BreakableProp }
+import { ClearPropShotTestList } from "./shot_test";
+import { BreakablePropUpdate } from "./prop";
+import { PropFamily, type BreakableProp }
   from "./prop_state";
 import { LiftUpdate } from "./lift";
 import { PropUpdateType38 } from "./type38";
@@ -52,6 +57,13 @@ import { PropUpdateType40 } from "./type40";
 import { PropUpdateType44 } from "./type44";
 import { PropUpdateType66 } from "./type66";
 import { PropDrawOnlyType12 } from "./type12";
+import { PropUpdateType16, Type16DropStripUpdate } from "./type16";
+import { PropUpdateType17 } from "./type17";
+import { PropUpdateType29 } from "./type29";
+import { PropUpdateType37 } from "./type37";
+import { PropDrawOnlyType42 } from "./type42";
+import { PropUpdateType55Particles } from "./type55";
+import { PropUpdateType65Particles } from "./type65";
 
 /**
  * Every live container, once a frame.
@@ -91,9 +103,13 @@ export function BreakablePropPoolUpdate(rng: Rng, events?: Events,
         FallingContainerFragmentUpdate(p, rng, events); break;
       case PropFamily.Lift: LiftUpdate(p, events); break;
       case PropFamily.Generic: GenericPropUpdate(p, rng, events); break;
-      case PropFamily.StoryModeSwitch: StoryModeSwitchPoolUpdate(p); break;
+      // The whole routine, with its own despawn tests, its own shot-test
+      // registration and no `AND` on `obj+0x34`: the hit bits a shot leaves
+      // stay up. See `class44/story_switch.ts`.
+      case PropFamily.StoryModeSwitch:
+        StoryModeSwitchUpdate(p, rng, events); break;
       case PropFamily.ScriptFlagEffect:
-        ScriptFlagEffectUpdate(p, events); break;
+        ScriptFlagEffectUpdate(p, rng, events); break;
       // No prologue and no shot-test tail around this one either:
       // `RisingDoorUpdate` has no `PropExpireByStepLifetime`, no `AND` on
       // `obj+0x34` and no `RegisterForShotTest` in it. Its remove flag is its
@@ -109,6 +125,17 @@ export function BreakablePropPoolUpdate(rng: Rng, events?: Events,
       case PropFamily.Type47: PropUpdateType47(p); break;
       // Selector 14 opens on the prologue itself and registers nothing.
       case PropFamily.DrawOnlySelector14: PropDrawOnlySelector14(p); break;
+      // The class-0x44 hinges and their neighbours: each its own remove flag
+      // and sweep, no prologue, and its own shot-test tail where it has one.
+      case PropFamily.Hinge: HingeUpdate(p, events); break;
+      case PropFamily.FlagSlotEffect: FlagSlotEffectUpdate(p, rng, events); break;
+      case PropFamily.EffectHandoff: EffectHandoffUpdate(p, rng); break;
+      case PropFamily.SwingThenBreak: SwingThenBreakUpdate(p, rng); break;
+      case PropFamily.ScaledSlotEffect: ScaledSlotEffectUpdate(p, rng); break;
+      case PropFamily.EffectCollapse: EffectCollapseUpdate(p, rng); break;
+      // Selector 10's object: `PropDrawOnlyType31` itself, with the step
+      // lifetime it opens on.
+      case PropFamily.DrawOnlyType31: PropDrawOnlyType31(p, rng, events); break;
       // Neither of these calls `PropExpireByStepLifetime` — 53 inlines its
       // own variant of it and 54 has no lifetime at all — so neither can ride
       // the generic arm, which runs that prologue before it dispatches.
@@ -135,6 +162,9 @@ export function BreakablePropPoolUpdate(rng: Rng, events?: Events,
       case PropFamily.Type39: PropUpdateType39(p, rng, events); break;
       case PropFamily.Type40: PropUpdateType40(p, rng, events); break;
       case PropFamily.Type44: PropUpdateType44(p, rng, events); break;
+      // A chain link: its own byte-wide lifetime, its own hit arm and swing,
+      // and its shot sphere at its own foot. See `class41/chain.ts`.
+      case PropFamily.ChainSegment: ChainSegmentUpdate(p, rng, events); break;
       // Its own inlined lifetime (step count before the sweep, `ActorKill`
       // rather than `ActorDespawn`), no `AND` on `obj+0x34` and no
       // `RegisterForShotTest`. See `class41/type13.ts`.
@@ -149,6 +179,21 @@ export function BreakablePropPoolUpdate(rng: Rng, events?: Events,
       // routine runs and nothing of the generic arm's lookup does. See
       // `class41/type50.ts`.
       case PropFamily.DrawOnlyType12: PropDrawOnlyType12(p, rng, events); break;
+      // Constructors 16, 17, 29 and 37 hand `ActorAlloc` their own routines,
+      // each with its own head and tail; 16's landing allocates the strip,
+      // which steps this frame for the reason the falling container's pieces
+      // do. See `class41/type16.ts` and its siblings.
+      case PropFamily.Type16: PropUpdateType16(p, rng, events); break;
+      case PropFamily.Type16DropStrip: Type16DropStripUpdate(p); break;
+      case PropFamily.Type17: PropUpdateType17(p, rng, events); break;
+      case PropFamily.Type29: PropUpdateType29(p); break;
+      case PropFamily.Type37: PropUpdateType37(p, rng, events); break;
+      // Constructors 42, 55 and 65 hand `ActorAlloc` routines of their own,
+      // each with its own way out and no prologue, sphere or counter. See
+      // `class41/type42.ts`, `type55.ts` and `type65.ts`.
+      case PropFamily.Type42: PropDrawOnlyType42(p); break;
+      case PropFamily.Type55: PropUpdateType55Particles(p, rng); break;
+      case PropFamily.Type65: PropUpdateType65Particles(p); break;
       default: BreakablePropUpdate(p, rng, events, cam); break;
     }
   }
@@ -173,8 +218,7 @@ export function BreakablePropPoolUpdate(rng: Rng, events?: Events,
 
 /**
  * The pool's generic arm: `g_class41_updates[type]` for the objects
- * `PlaceGenericProp` (`FUN_00461CF0`) builds with no family of their own, and
- * `ChainSegmentUpdate` for the twenty links `PlaceChainSegments` builds.
+ * `PlaceGenericProp` (`FUN_00461CF0`) builds with no family of their own.
  *
  * Every class-0x41 generic routine is transcribed whole and is a
  * `GENERIC_ROUTINES` row (`class41/generic_routines.ts`): it brings its own
@@ -183,89 +227,14 @@ export function BreakablePropPoolUpdate(rng: Rng, events?: Events,
  * `g_class41_updates[obj->+0x130C]` and the object calls through it every
  * frame.
  *
- * What is left below is a chain link (type 0, which has no row): the shared
- * `PropExpireByStepLifetime` head, its branch arm (`class41/branch.ts`), the
- * mask of the four hit bits and its sphere at its own link.
+ * A type with no row has no routine and does nothing -- neither draws nor
+ * registers -- as a class with no `g_class_handlers` entry does nothing. The
+ * last object that reached this arm without a row was the chain link, which
+ * has its own family now (`class41/chain.ts`); no shipped placement does.
  */
 function GenericPropUpdate(p: BreakableProp, rng: Rng,
                            events?: Events): void {
   const routine = GENERIC_ROUTINES[p.kind];
-  if (routine) {
-    routine(p, rng, events);
-    return;
-  }
-  if (PropExpireByStepLifetime(p)) return;
-  if (p.chainGroup > 0) {
-    ChainSegmentUpdate(p, ChainSegmentZero(p.chainGroup));
-  }
-  p.flags &= ~HIT_FLAG_MASK;
-  PropRegisterAtOrigin(p);
+  if (routine) routine(p, rng, events);
 }
 
-/**
- * `StoryModeSwitchUpdate`'s own frame — its removal flag, the script flag its
- * head raises, then its route.
- *
- * It does **not** run `PropExpireByStepLifetime`: `PlaceStoryModeSwitch`
- * writes `obj+0x11C` as a literal 1, so that word is not a lifetime here and
- * counting against it would retire every switch in the game one step boundary
- * after it was placed.
- *
- * [port-only] as a *function*: the head of `StoryModeSwitchUpdate`
- * (`FUN_00474F30`), split from the branch arm so the pool has one call to
- * make. **The split is between the two despawn tests and the mode gate**, at
- * `0x00474FB4`, which is exactly where the engine's `CMP g_GameMode, 1` is —
- * so everything in here runs in Arcade and everything in
- * {@link StoryModeSwitchUpdate} does not.
- */
-function StoryModeSwitchPoolUpdate(p: BreakableProp): void {
-  // `if (obj->+0x2A4 >= 0 && g_script_flags[obj->+0x2A4] == 1) ActorDespawn;`
-  if (p.removeFlag >= 0 && (G.g_script_flags[p.removeFlag] ?? 0) === 1) {
-    ActorDespawnProp(p);
-    return;
-  }
-  // ```c
-  // if (g_scene_index == 1) {
-  //     if (g_script_flags[0x77] != 0) { ActorDespawn(obj); return; }
-  // } else if (g_scene_index == 2 && g_evt_block_index == 2
-  //            && obj->+0x192 == 0) {
-  //     g_script_flags[0x15] = 1;                       // 0x00474FA6
-  // }
-  // ```
-  //
-  // An `if`/`else if`, and the `else` is load-bearing: the second arm is not a
-  // separate test the engine also makes. The scene-1 arm is the sweep every
-  // prop family answers; the scene-2 arm is the flag stage 3's block 2 waits
-  // on, raised **every frame** while the switch is unthrown and with no
-  // reference to `g_GameMode` — see `STORY_SWITCH_SCRIPT_FLAG`.
-  if (G.g_scene_index === 1) {
-    if ((G.g_script_flags[0x77] ?? 0) !== 0) {
-      ActorDespawnProp(p);
-      return;
-    }
-  } else if (G.g_scene_index === STORY_SWITCH_FLAG_AT[0]
-             && G.g_evt_block_index === STORY_SWITCH_FLAG_AT[1]
-             // `obj+0x192`, and for this family that word is the branch latch
-             // — `L3`. Unthrown is what the write is gated on: once the switch
-             // has been shot it is the *second* write, behind the mode gate
-             // and the item spawn, that raises the flag instead.
-             && !p.branchLatched) {
-    G.g_script_flags[STORY_SWITCH_SCRIPT_FLAG] = 1;
-  }
-  StoryModeSwitchUpdate(p);
-  p.flags &= ~HIT_FLAG_MASK;
-  PropRegisterAtOrigin(p);
-}
-
-/**
- * Segment 0 of a chain group — where `ChainSegmentUpdate` keeps the latch
- * that stops twenty links opening one route twenty times.
- *
- * `g_chain_segments[group * 0x14 + 0]`, by prop id, because the port's pool
- * is a list and the engine's is an array of pointers.
- */
-function ChainSegmentZero(group: number): BreakableProp | undefined {
-  const id = G.g_chain_segments[group * 0x14];
-  if (!id) return undefined;
-  return G.g_breakable_props.find((q) => q.id === id);
-}

@@ -118,7 +118,6 @@ function reset() {
     presentEnemies: () => G.g_enemies_present, aliveCivilians: () => null,
     scriptFlagRaised: () => null,
     cameraFree: () => null, setShutter: NOOP, showMessage: NOOP,
-    endDialogue: NOOP,
   });
 }
 

@@ -37,15 +37,13 @@ export interface DistanceRankEntry {
 }
 
 /**
- * `[port-only]` -- `obj+0x34 & 1`, the bit both rank routines test first, and
- * class 0x10's node hook tests of the child whose head it watches
- * (`TEST byte ptr [ECX + 0x34], 0x1` at `0x0048D328`). `ActorInitFlags`
- * raises it on every spawn and a leave like `ThrowerLeave` clears it on the
- * way to `ActorDespawn` (`0x0044AD93`). The port does not model it; "in the
- * pool and drawn" is its stand-in, as it was when the registration test lived
- * here.
+ * `[port-only]` -- `obj+0x34 & 1`, the bit both rank routines test first.
+ * The port keeps it as `ActorFlag.Live` at every spawn and despawn and at a
+ * class-0x30 corpse, but not yet at every clear the other classes make, so
+ * "in the pool and drawn" is still its stand-in here, as it was when the
+ * registration test lived here.
  */
-export function ActorLiveBit(obj: Actor | undefined): obj is Actor {
+function RankLive(obj: Actor | undefined): obj is Actor {
   return obj !== undefined && !obj.despawned && obj.visible;
 }
 
@@ -74,7 +72,7 @@ export function ActorLiveBit(obj: Actor | undefined): obj is Actor {
  */
 export function RegisterForDistanceRank(obj: Actor): void {
   // `obj.dead` is the port's `obj+0x34 & 0x4000000`, as it was here before.
-  if (!ActorLiveBit(obj) || obj.dead) return;
+  if (!RankLive(obj) || obj.dead) return;
   if (G.g_distance_rank_list.length >= RANK_SLOTS) return;
   const dz = obj.pos.z - G.g_camera_eye.z;
   const dx = obj.pos.x - G.g_camera_eye.x;
@@ -130,7 +128,7 @@ export function RankEnemiesByDistance(): void {
   const objs = list.map((e) => ActorByAt(e.at));
   for (let i = 0; i < objs.length; i++) {
     const o = objs[i];
-    if (!ActorLiveBit(o)) continue;
+    if (!RankLive(o)) continue;
     o.rank = i;
     o.queueRank = RANK_SLOTS;
   }
@@ -138,7 +136,7 @@ export function RankEnemiesByDistance(): void {
   // one turns to retreat, which is what keeps the queue flowing.
   let n = 0;
   for (const o of objs) {
-    if (!ActorLiveBit(o) || (o.flags & ActorFlag.BackingOff) !== 0) continue;
+    if (!RankLive(o) || (o.flags & ActorFlag.BackingOff) !== 0) continue;
     o.queueRank = n++;
   }
   G.g_distance_rank_list = [];

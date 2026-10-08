@@ -143,6 +143,7 @@ import {
 import { ActorReleaseHitSlot } from "../hit_slots";
 import { SpawnBloodSprayAtPoint } from "../effects/blood";
 import { G, PlayerState } from "../globals";
+import { DrawSkinnedModelAndShadow } from "../skeleton";
 import { CameraBlockEye, CameraBlockYaw } from "../camera/view";
 import {
   registerClass, type ActorDebug, type ClassFrame, type ClassHandler,
@@ -179,10 +180,11 @@ export const BAT_WING_CLIP = 0x406;
 export const BAT_HIT_RADIUS = 4.0;
 /**
  * `obj+0x34`'s bit `0x80000`, which every arm of `PlaceBats` ORs in after the
- * model is built, and `SpawnBatWings` writes whole as `0x80001` before it.
- * `[open]` what it does for a bat. Class 0x30's `FUN_0040A590` tests it before
- * a ground decal; nothing the port runs reads it, and it is kept so the flag
- * word is the engine's.
+ * model is built, and `SpawnBatWings` writes whole as `0x80001` before it:
+ * {@link ActorFlag.NoShadow}. Every draw a bat or a wing makes is a
+ * `DrawSkinnedModelAndShadow` (`FUN_00411090`), whose last call is the
+ * ground shadow under `g_cur_actor` -- and each update points that at itself
+ * first -- so this is what keeps a bat's disc off the floor under it. `[proved]`
  */
 export const BAT_FLAG_80000 = 0x80000;
 /** `obj+0x34 = 1` -- `PlaceBats` overwrites the word before the build. */
@@ -933,6 +935,8 @@ export function BatDiveUpdate(obj: Actor, f: ClassFrame): void {
   const sub = Tail(obj);
   if (!sub) return;
   G.g_bat_members[MemberSlot(sub)] = obj.at;
+  // The draw, first (`0x0042E271`): its shadow refused by `BAT_FLAG_80000`.
+  DrawSkinnedModelAndShadow(obj);
   // The shot, before the state switch -- and the engine **falls straight on**
   // into the switch with the state already `Dead`, so the corpse takes its
   // first step on the frame of the kill.
@@ -1032,6 +1036,8 @@ export function BatScatterUpdate(obj: Actor, f: ClassFrame): void {
   const sub = Tail(obj);
   if (!sub) return;
   G.g_bat_members[MemberSlot(sub)] = obj.at;
+  // The draw, first (`0x0042EA12`), as the dive's.
+  DrawSkinnedModelAndShadow(obj);
 
   if (sub.state === BatState.Wait) {
     const before = sub.timer;
@@ -1106,6 +1112,8 @@ export function BatSwarmUpdate(obj: Actor, f: ClassFrame): void {
   const sub = Tail(obj);
   if (!sub) return;
   G.g_bat_members[MemberSlot(sub)] = obj.at;
+  // The draw, first (`0x0042ED92`), as the dive's.
+  DrawSkinnedModelAndShadow(obj);
   // The shot, before the switch, as the dive has it -- with the swarm's own
   // gate, which lets an orbiting bat die.
   BatResolveShot(obj, f);
@@ -1247,6 +1255,8 @@ export function BatWingUpdate(obj: Actor, _f: ClassFrame): void {
   obj.yaw = body.yaw + 0x8000;
   obj.motion = BatWingClip(body.motion, obj.motion);
   obj.playTicks = body.playTicks;
+  // The draw it ends on (`0x0042F7D8`); `0x80001` refuses its shadow.
+  DrawSkinnedModelAndShadow(obj);
 }
 
 /** `MatrixTranslate(0, 0x3F800000, 0x40000000)` in the body node's frame. */

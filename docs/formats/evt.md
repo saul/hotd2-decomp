@@ -466,7 +466,7 @@ inference; **[open]** = undetermined.
 | `42` | `wait_frames` | **[proved]** countdown; only decrements while the gate is open, and `FUN_00499530` can clamp it downward to shorten a wait in progress |
 | `43` | `wait_enemies_present` | **[proved]** `g_enemies_present <= op` **and `g_camera_free`** (`0x009C6F2D`) — so the room does not hand over on the frame the last enemy dies, but once no enemy holds a camera slot and the aim has swung back onto the rail |
 | `44` | `wait_enemies_alive` | **[likely]** `g_enemies_alive <= op`, `g_camera_free`, plus **one frame of hysteresis** (`g_evt_wait_alive_hysteresis`, `0x007DCCA8` — the condition must hold two frames running; no other wait has it). The two counters differ because `alive` drops at kill time and `present` at death-animation end, so `present >= alive` |
-| `45` | `wait_script_flag` | **[proved]** `g_script_flags[op] != 0` **and `g_evt_gameplay_live`** (`0x007DCCA4`) — a 256-byte array at `0x009C7200`. It is a **gameplay** gate and nothing else: across all six shipped scripts *every one* of its **61** sites names a flag that stage's own `48` never sets. A whole-image sweep of the array puts every writer in an actor: `CivilianRunScript` op 0x1C (`0x0048BF2A`), `ZombieStateTargetScriptWithFlag` (`0x0045B1DF`, class 0x30 state 36), the chapter card (class 0x60, `0x004348C1`, flag 248) and the stage-clear card (class 0x61, `0x0043567C`, flag 254 — **the only instruction in the image that names `0x009C72FE`**), class 0x14 (`0x00478350`..`0x0047BA6E`, flags 10-17 and 31), class 0x19 (`0x0049390C`, `0x004958C7`), class 0x22 (`0x0049CC85`/`95`, flags 0 and 3), class 0x32 (`0x00480590`, flag 30 -- reached only from `Class32OnShot` (`FUN_0047CC20`) on the frame that actor's hit points run out, through states 2 and 3, so it is an enemy's death and not a cue), class 0x2D (`0x00426BE4`), class 0x33 (`0x00433FC1`) and the class-0x41/0x44 prop family (`0x0046F0F2`, `0x004710D7`, `0x0047314A`, `0x00473D76`, `0x00474FA6`). **A routine may write one flag from several instructions and the list above names one apiece**: `PropUpdateType75` (`FUN_004710C0`, `g_class41_updates[75]`) raises flag 20 at `0x004710D7` when the mode is not Original, at `0x00471120` on the second change of `g_evt_step_index`, and at `0x00471263` 290 frames after it is shot. So this opcode is *the* way the script waits on one actor finishing. See [civilians.md](civilians.md#and-how-the-stage-script-finds-out) and [spawns.md](spawns.md) for classes 0x60-0x63 |
+| `45` | `wait_script_flag` | **[proved]** `g_script_flags[op] != 0` **and `g_evt_gameplay_live`** (`0x007DCCA4`) — a 256-byte array at `0x009C7200`. It is a **gameplay** gate and nothing else: across all six shipped scripts *every one* of its **61** sites names a flag that stage's own `48` never sets. A whole-image sweep of the array puts every writer in an actor: `CivilianRunScript` op 0x1C (`0x0048BF2A`), `ZombieStateTargetScriptWithFlag` (`0x0045B1DF`, class 0x30 state 36), the chapter card (class 0x60, `0x004348C1`, flag 248, and its app-state-0x0B arm at `0x00434EC0`) and the stage-clear card (class 0x61, `0x0043567C`, flag 254 — **the only instruction in the image that names `0x009C72FE`**), class 0x14 (`0x00478350`..`0x0047BA6E`, flags 10-17 and 31), class 0x19 (`0x0049390C`, `0x004958C7`), class 0x22 (`0x0049CC85`/`95`, flags 0 and 3), class 0x32 (`0x00480590`, flag 30 -- reached only from `Class32OnShot` (`FUN_0047CC20`) on the frame that actor's hit points run out, through states 2 and 3, so it is an enemy's death and not a cue), class 0x2D (`0x00426BE4`), class 0x33 (`0x00433FC1`) and the class-0x41/0x44 prop family (`0x0046F0F2`, `0x004710D7`, `0x0047314A`, `0x00473D76`, `0x00474FA6`). **A routine may write one flag from several instructions and the list above names one apiece**: `PropUpdateType75` (`FUN_004710C0`, `g_class41_updates[75]`) raises flag 20 at `0x004710D7` when the mode is not Original, at `0x00471120` on the second change of `g_evt_step_index`, and at `0x00471263` 290 frames after it is shot. So this opcode is *the* way the script waits on one actor finishing. See [civilians.md](civilians.md#and-how-the-stage-script-finds-out) and [spawns.md](spawns.md) for classes 0x60-0x63 |
 | `46` | `wait_scripted_actors` | **[proved]** `g_civilians_alive <= op` — the **class-0x10 civilians**. Byte for byte the `43` handler on a different counter — `g_camera_free` included — and all 68 sites in the game pass operand 0, so it is always "wait for the last civilian to leave play" |
 | `47` | `wait_targets_clear` | **[proved]** `EvtOpWaitTargetsClear47` (`FUN_0045FD20`): after the first-visit yield, `g_evt_gameplay_live && (g_camera_settled \|\| g_camera_free) && g_camera_candidate_count == 0` -- nothing registered for camera tracking this frame, which includes a carried prop in flight or stuck to the lens |
 | `48` | `set_script_flag` | **[proved]** `g_script_flags[op] = 1`, and that is the entire handler — no yield, no test. There is **no clear-flag opcode** in the dispatch table, so a flag stays up until `ResetSceneOnEnter` (`FUN_0045EDD0`) zeroes all 0x100 bytes on the next scene |
@@ -593,6 +593,34 @@ writes a 5 of its own before its first wait, and opens the bars later (stage
 `web/src/hod2lib/script.ts` attaches these readings to the instruction as
 `means` and `firing_gate`, so the player shows "5 — close, and disable firing"
 rather than "5".
+
+### `2D` — the dialogue, and its subtitle drawn glyph by glyph
+
+**[proved]** `EvtOpPlayDialogue2D` (`FUN_00435B80`): `variant =
+g_pDialogueVariants[group * 3 + cfg]` (`0x0058B6B8`), `cfg` being
+`g_active_player` -- 0 or 1 for one player alone, 2 for both -- except in
+`g_app_state` 10 and 11, which take 0. A variant of 0, or either skip flag
+up (`g_nEvtSkipFlag`, `g_cutscene_skipping`), says nothing. Otherwise the
+record's voice plays and a 0x3C-byte task, `DrawDialogueSubtitleTask`
+(`FUN_00435AA0`), takes `{variant, frames, line 0}`.
+
+The task counts `frames` down **before** testing it, ends on 0 or on either
+skip flag, and steps `line` while the frames left are below the current
+line's `end_frame` (the last line's is 0). It draws the line with
+`DrawTextCentred(x_offset, 384.0, text)` (`FUN_00436850`): `x = 320 -
+strlen * 5.6 + x_offset`, then per character a `DrawScreenSprite` at depth
+1.0 and **scale 0.7** (not a colour, as this was once read), advancing 11.2.
+The sprite is `g_subtitle_glyphs[c]` (`0x0055E054`, s16 by signed byte),
+`0x62D` for `~`; lowercase letters drop below the baseline by `b i l` 1, `f j
+t` 2, `g` 4, `p q y` 5, `d h k` 0, the rest 3 (jump table `0x004369BC`); only
+characters outside `a-z`, `A-Z` and `~` are tested for a 0 glyph. The glyphs
+are 16x32 PAL4 textures of `tex/scr_jimaku_e.bin`, bank `0x17B`, which
+`TexBankPaletteIndex`'s default arm gives palette 0. The other caption mode
+(`g_wCaptionMode == 1`, a sprite per variant) is never set in this build.
+
+Ported whole: `web/src/game/dialogue.ts`; the glyph table travels as
+`script.subtitle_glyphs`, the glyphs a shipped line uses as screen sprites.
+Civilians' op `0x1D` and three bosses call the same routine.
 
 ### `1D` — the rain, read out
 
@@ -804,9 +832,9 @@ null, and the sub-tables are laid out immediately **before** it:
 
 | Sel | Name | Effect |
 |---|---|---|
-| `0x10` | `set_player_flag` | `DAT_009A5EBC` bit 0 = op0, mirrored to `DAT_009A5D8C` |
+| `0x10` | `set_player_flag` | `g_player_flags` (`0x009A5D8C + p*0x130`) bit 0: player 1's = op0, then player 0's = player 1's. Bit 0 is what `PlayerHookDrawBody` draws the player's body by |
 | `0x11` | `scene_state` | `EvtEnterSceneState(current_major, op0)` — a transition in the 2-D state table at `0x00576C14` |
-| `0x12` | `set_update_routine` | `DAT_009A5CE0 = PTR_FUN_00579E90[op0]` (two routines exist) |
+| `0x12` | `set_update_routine` | both players' `+0x80` hook (`g_player_entity_hook`, `0x009A5CE0`) = `g_player_entity_routines[op0]`: 0 `PlayerHookEnterSt1Vehicle` (stage 1 block 0: the bodies ride in the car), 1 `PlayerHookStandAtScenePoint` (stage 2 block 6). See `web/src/game/player_body.ts` |
 | `0x13` | `set_continuation` | per-player continuation = `op0 ? LAB_00403290 : FUN_00420810`. **Defined but never used in shipped data** |
 | `0x14` | `set_global` | `DAT_009C6F00 = op0` |
 | `0x15` | `set_flag` | `DAT_009C6F33 = 1`; the operand is ignored |

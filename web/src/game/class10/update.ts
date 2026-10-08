@@ -21,12 +21,13 @@ import { CivilianSphereMode, CivilianTarget, CivilianWait } from "./ops";
 import { ActorBoundsOnScreen } from "../combat/permits";
 import type { GameHost } from "../host";
 import { CivilianDrawHeldItems } from "./items";
-import { ActorRunNodeDrawHooks } from "../model_draw";
-import { CivilianDrawBonePart } from "./draw";
 import { CivilianRunScript } from "./script";
 import { CivilianCheckShot } from "./shot";
 import { CivilianStepScript } from "./step";
 import { CivilianStepTurnToTarget } from "./turn";
+import { DrawSkinnedModelAndShadow } from "../skeleton";
+import { ActorRunNodeDrawHooks } from "../model_draw";
+import { CivilianDrawBonePart } from "./head";
 
 /**
  * `CivilianUpdate` — `FUN_0048A920`. One frame of a civilian.
@@ -40,6 +41,9 @@ import { CivilianStepTurnToTarget } from "./turn";
 export function CivilianUpdate(obj: Actor, f: ClassFrame): void {
   const sub = obj.civ;
   if (!sub) return;
+  // `MOV [0x009a26a0], ESI` at `0x0048A930`: the update names itself, and
+  // the draw's shadow is drawn for that name.
+  G.g_cur_actor = obj.at;
   // `CivilianUpdateOnCarrier` (`FUN_0048B140`) is this routine with the
   // carrier's matrix pushed around it. The push is `game/carrier.ts`'s and
   // the world point it produces is published for the renderer; everything
@@ -67,13 +71,17 @@ export function CivilianUpdate(obj: Actor, f: ClassFrame): void {
   // `DrawSkinnedModelAndShadow` (`FUN_00411090`) at `0x0048AA02`. The pose is
   // the renderer's; what the draw runs that is the game's is the pose hook at
   // `model+0x115C`, which reads the sphere the switch below left last frame,
-  // and then the node hook at `model+0x1158` on every node the walk draws --
-  // `CivilianDrawBonePart`, the head's turn and the mouth.
+  // and the ground shadow it ends with, under `g_cur_actor` -- this actor
+  // since `0x0048A930`.
   PoseHookGrowAndPushOutOfWorld(obj);
-  sub.headTurned = false;
-  sub.mouthOffset = 0;
-  sub.partScale = false;
+  // ...and the node hook `CivilianInit` installed at `model+0x1158`, on every
+  // node the walk draws: the head's turn and its mouth, `class10/head.ts`.
+  // [port-only] The renderer's cue starts each walk down: `SkeletonEmitNode`
+  // stores the pose in the record before its gate, so a head the walk does
+  // not draw is the clip's, and only the hook raises it again.
+  sub.headLookTurned = false;
   ActorRunNodeDrawHooks(obj, CivilianDrawBonePart, f);
+  DrawSkinnedModelAndShadow(obj);
 
   // The loop counter. The clip clock itself is `ActorAdvanceMotion`'s; this is
   // the part class 0x10 owns — how many more times it may come round.
@@ -370,18 +378,16 @@ export function CivilianReleaseCaptors(obj: Actor): void {
  * only, so a rescued civilian stood where her script left her for the rest of
  * the stage.
  *
- * The skip arm is `MOV EAX, [0x009a2230]; CMP EAX, EBX; JZ; TEST dword ptr
- * [ECX], 0x20000000; JZ 0x0048b0c4` (`0x0048AF8E`): the frame a cut scene is
- * skipped, every civilian whose word does not carry
- * {@link CivilianWait.StayThroughSkip} -- all but three of the 596 shipped
- * words -- has one frame left, and leaves on the next unless she still holds
- * captors. It went unported while `g_cutscene_skipping` had no field.
+ * The skip arm (`0x0048AF8E`): with `g_cutscene_skipping` (`0x009A2230`) up
+ * and {@link CivilianWait.SkipKeepsRemoval} clear, the countdown is set to 1
+ * (`MOV word [ECX+0x2A],DI` at `0x0048B0C4`) and the other arms are passed
+ * over; on the next frame the countdown takes her off.
  */
 function CivilianCheckRemoval(obj: Actor, host: GameHost): void {
   const sub = obj.civ;
   if (!sub) return;
   if (G.g_cutscene_skipping !== 0
-      && (sub.wait & CivilianWait.StayThroughSkip) === 0) {
+      && (sub.wait & CivilianWait.SkipKeepsRemoval) === 0) {
     sub.removeDelay = 1;
     return;
   }

@@ -24,7 +24,7 @@ import { CameraFrame } from "../core/camera";
 import type { Walker } from "../script/walker";
 import {
   RetireUnlistedActor, SpawnPropContainers, SpawnScriptedCharacters,
-  SlotActorsForgetUnlisted, SpawnSlotActor,
+  SlotActorsForgetUnlisted, SpawnSiteKeys, SpawnSlotActor,
   type CharacterSpawnRequest, type ScriptSpawn,
 } from "../game/director";
 import type { Actor } from "../game/actor";
@@ -39,7 +39,7 @@ export interface HostBackend {
   boneWorld(at: number, bone: number, out: Vec3): boolean;
   /** One bone's world matrix, `Matrix4.elements`. See `GameHost.boneMatrix`. */
   boneMatrix?(at: number, bone: number, out: number[]): boolean;
-  /** The same as posed, before a node hook turned it. See `GameHost.bonePoseMatrix`. */
+  /** The same before a node hook turned it. See `GameHost.bonePoseMatrix`. */
   bonePoseMatrix?(at: number, bone: number, out: number[]): boolean;
   /** One bone's hit sphere in world space. See `GameHost.boneSphere`. */
   boneSphereWorld?(at: number, bone: number, out: Vec3): number | null;
@@ -118,6 +118,8 @@ export class GameSystem implements System {
     // A `cp_` path by global slot, for the port's own `CamEvalPath7` calls --
     // the game-over fly-over's. The curves are the camera bundle's.
     camPath: (slot) => this.paths?.paths.get(slot) ?? null,
+    // `GetTickCount`, for Boss Mode's clock: milliseconds, a `DWORD`.
+    tickCount: () => Math.floor(performance.now()) >>> 0,
     // The camera looks down its own local -Z, which is where the player is.
     aimPoint: (ahead, out) => {
       _p.x = 0; _p.y = 0; _p.z = -ahead;
@@ -348,11 +350,12 @@ export function syncCharacterSpawns(chars: CharacterPool,
   // ahead of the rest -- see `SpawnHordePlacers`. They read nothing another
   // spawn leaves behind, so building them first changes nothing they do.
   SpawnHordePlacers(spawns, T.chars?.placements ?? []);
-  for (const s of spawns) {
+  const keys = SpawnSiteKeys(spawns);
+  spawns.forEach((s, i) => {
     const r = ready.get(s.at);
     if (r) make(r);
-    else SpawnSlotActor(s);
-  }
+    else SpawnSlotActor(s, keys[i]);
+  });
   for (const r of reqs) make(r);
   for (const a of chars.syncSpawns(spawns, made)) RetireUnlistedActor(a);
 }
@@ -407,7 +410,8 @@ export function syncPortGlobals(w: Walker, freeRoam: boolean,
   // There is one array, in `game/globals.ts`, and both halves write it.
   // The spawn opcode places a group the moment it runs, so this is only the
   // safety net for a spawn list restored by a snapshot load rather than by
-  // an instruction. It is idempotent — `ActorByAt` refuses a second one.
+  // an instruction. It is idempotent -- each listed spawn instruction is
+  // built once (`g_prop_placers_built`).
   SpawnPropContainers(w.spawns);
 }
 

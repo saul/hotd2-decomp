@@ -192,14 +192,13 @@ function PlayerFloorLivesOffPath(player: number): void {
  * the attract demo, and it does not refuse player -1 before calling
  * `CheckPlayerCanBeHit`, which refuses it anyway.
  *
- * **One caller, class 0x10's shot**: `CivilianUpdate` at `0x0048AC45`
- * (`e8e6a7f8ff`), `PUSH -1; PUSH 1; PUSH EBX; PUSH EBX; PUSH EDI` with
- * `EBX = 0` -- `(player, 0, 0, 1, -1)`: no overlay, **through** the
- * invulnerability window, and the window left as it is. `[proved]` This said
- * nothing called it, from a search that predates the database's flow repair
- * (L89); the class-0x31 weapon once attributed to it calls `PlayerTakeDamage`
- * (`player, 1, 6`) from `ThrownWeaponFlyToTarget` (`FUN_0044FD40`), as it
- * does here.
+ * Its one caller is the shot arm of `CivilianUpdate` (`FUN_0048A920`): `CALL
+ * 0x00415430` at `0x0048AC45`, with `(player, 0, 0, 1, -1)` -- a life and no
+ * damage overlay, through the invulnerability window. `[proved]` This said
+ * no call to it existed, from a search that missed that one; the class-0x31
+ * thrown weapon was attributed to it as well, and its engine routine,
+ * `ThrownWeaponFlyToTarget` (`FUN_0044FD40`), calls `PlayerTakeDamage`
+ * (`player, 1, 6`) instead, as the port does.
  */
 export function PlayerTakeDamageTimed(player: number, latch: number,
                                       overlayKind: number, ignoreInvuln = 0,

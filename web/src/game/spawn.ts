@@ -10,6 +10,7 @@
  */
 import type { Events } from "../core/events";
 import type { Rng } from "../core/rng";
+import type { GameHost } from "./host";
 import { ActorFlag, MOTION_FLAGS_INIT, makeActor, type Actor } from "./actor";
 import { G } from "./globals";
 import { ActorClaimHitSlot, HIT_SLOT_CLAIMING_CLASSES }
@@ -108,7 +109,8 @@ export function SpawnFromDescriptor(at: number, cls: SpawnClass,
  * members of a {@link ClassHandler}, and {@link Actor.initPending} says which
  * is due.
  */
-export function ActorRunInit(obj: Actor, rng?: Rng, events?: Events): void {
+export function ActorRunInit(obj: Actor, rng?: Rng, events?: Events,
+                             host?: GameHost): void {
   obj.initPending = false;
   // 35 class `Init`s call `ActorBuildSkinnedModel` -- every one that builds a
   // skinned character. The port has no model build, so what the build leaves
@@ -116,7 +118,7 @@ export function ActorRunInit(obj: Actor, rng?: Rng, events?: Events): void {
   // caller and no others. `obj+0x3C` is the phase of every cel a class-0x30
   // bone draws; see `class30/bonecels.ts`.
   if (HIT_SLOT_CLAIMING_CLASSES.has(obj.cls)) ActorBuildSkinnedModel(obj);
-  g_class_handlers[obj.cls]?.init(obj, rng, events);
+  g_class_handlers[obj.cls]?.init(obj, rng, events, host);
 }
 
 /**
@@ -297,5 +299,5 @@ export function ActorBuildSkinnedModel(obj: Actor): void {
  * was one nobody had read.
  */
 export function ActorInitFlags(obj: Actor, spawnFlags: number): void {
-  obj.flags = spawnFlags | 1;
+  obj.flags = spawnFlags | ActorFlag.Live;
 }

@@ -150,6 +150,15 @@ const MAUL_STATES = [34, 35];
 
 /** `class25/index.ts`. */
 const HUMANOID_BLOCKS = 137;
+/**
+ * The programs whose own first command (`blk + 8`, where
+ * `ScriptedHumanoidInit` points the cursor) is not the first one the
+ * address-ordered list emits, because an `op 15` jumps back into commands
+ * stored before the block: every one a player-2 figure (type `0x3A`) sharing
+ * player 1's tail. The bundle's `entry` is what starts them in the right
+ * place.
+ */
+const HUMANOID_ENTRY_NOT_FIRST = 13;
 /** `charmotion.ts`: the `op 10` modes that test; `-2` closes an arm. */
 const IF_MODES = [0, 1, 2];
 /** `spawns.md` and `class20/index.ts`. */
@@ -384,7 +393,8 @@ async function captorScripts(c: Checker, source: AssetSource, exe: ExeTables,
 }
 
 function humanoidFlow(c: Checker, evts: evt.EvtFile[]): void {
-  let blocks = 0, cmds = 0, tests = 0, jumps = 0;
+  let blocks = 0, cmds = 0, tests = 0, jumps = 0, notFirst = 0;
+  const lostEntry: string[] = [];
   const badOp: string[] = [], holes: string[] = [], skips: string[] = [], gotos: string[] = [];
   evts.forEach((ev, i) => {
     const raw = ev.raw;
@@ -395,6 +405,9 @@ function humanoidFlow(c: Checker, evts: evt.EvtFile[]): void {
       blocks++;
       const offs = humanoidCommandOffsets(ev, rec);
       const seen = new Set(offs);
+      const entry = humanoidBlockOffset(ev, rec)! + 8;
+      if (!seen.has(entry)) lostEntry.push(where);
+      else if (offs[0] !== entry) notFirst++;
       offs.forEach((off, k) => {
         cmds++;
         const op = i16(raw, off);
@@ -417,6 +430,10 @@ function humanoidFlow(c: Checker, evts: evt.EvtFile[]): void {
     }
   });
   count(c, blocks, HUMANOID_BLOCKS, "class-0x25 command blocks");
+  c.ok(!lostEntry.length, "every block's first command is in its own list"
+       + (lostEntry.length ? `; not ${lostEntry.slice(0, 4).join(", ")}` : ""));
+  count(c, notFirst, HUMANOID_ENTRY_NOT_FIRST,
+        "programs that start after the first command listed");
   c.ok(!badOp.length, `every one of their ${cmds} commands is op 0..18 or -1`
        + (badOp.length ? `; ${badOp.slice(0, 4).join(", ")}` : ""));
   c.ok(!holes.length, "every command but 15, 18 and -1 falls through to the next one emitted"

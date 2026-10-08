@@ -55,13 +55,14 @@ import type { Rng } from "../../core/rng";
 import type { Actor } from "../actor";
 import { ActorFlag, MotionFlag } from "../actor";
 import { ReleaseCameraEnemySlot } from "../camera/slots";
-import { MatrixGetAngles, RotZYX } from "../carrier";
+import { MatrixGetAngles, RotZYX } from "../matrix";
 import { ActorSetMotionBlended } from "../class30/motion_cue";
 import { ScoreAddForPlayer } from "../combat/score";
 import { ActorPlayHitVoice, ActorVoice } from "../combat/voice";
 import { ActorDespawn } from "../despawn";
 import { SpawnGroundRingEffect } from "../effects/ring_effect";
 import { G, HIT_SLOT_NONE } from "../globals";
+import { DrawSkinnedModelAndShadow } from "../skeleton";
 import { ActorFreeHitSlot } from "../hit_slots";
 import { RecordRescue, RESCUE_TARGET_CHAR_TYPE } from "../rescue";
 import { ActorAdvanceMotion } from "../motion";
@@ -247,6 +248,9 @@ export function RescueTargetInit(obj: Actor, rng?: Rng): void {
   obj.hp = CLASS21_HP_BY_RANK[G.g_damage_rank] ?? 1;
   G.g_enemies_present += 1;
   G.g_enemies_alive += 1;
+  // `INC word [0x009A21BA]` at `0x004517E8`, in the arm that is not
+  // Training's: the rider counts as a civilian the run has seen.
+  G.g_civilians_seen_total = (G.g_civilians_seen_total + 1) & 0xffff;
   // **The car.** `PUSH 0x0` at `0x004517F6`, `CALL 0x00452120` at
   // `0x00451800`: this Init is the only thing in the game that allocates the
   // stage-2 car, so the car exists from the frame class 0x21 does and not
@@ -381,11 +385,12 @@ export function RescueTargetRideInState(obj: Actor, f: ClassFrame): void {
   // hand-over's included.
   RescueTargetDraw(obj, f);
   ActorAdvanceMotion(obj, f.dt);
-  // [diverges] `g_cutscene_skipping` (0x009A2230) hands over at once wherever
-  // the ride has got to, and that arm is not ported. It is not in `G` — the
-  // port's skip is the walker's `skipRequested`, which is a different global —
-  // so a skipped cutscene here simply finishes the ride. The one shipped
-  // spawn's block is not skippable.
+  // `g_cutscene_skipping` (0x009A2230) hands over at once wherever the ride
+  // has got to.
+  if (G.g_cutscene_skipping !== 0) {
+    t.route = 1;
+    t.state = RescueTargetState.Held;
+  }
 }
 
 /**
@@ -709,6 +714,9 @@ export function RescueTargetDraw(obj: Actor, f: ClassFrame): void {
   if (!t) return;
   if (f.host.viewSpaceOfPoint?.(obj.pos, _view) && !(_view.z < 0)) return;
   t.clipEnded = MotionPlayFrame(obj) >= MotionPlayLength(obj) ? 1 : 0;
+  // ...and the draw's ground shadow, under `g_cur_actor`, which every state
+  // that draws points at the body first.
+  DrawSkinnedModelAndShadow(obj);
 }
 
 /**

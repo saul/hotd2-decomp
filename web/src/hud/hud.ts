@@ -50,79 +50,13 @@
  *
  * ## The dialogue — evt `0x2D`
  *
- * `FUN_00435B80` picks a variant by player configuration, plays its voice
- * through the ordinary sound dispatcher, and starts a task holding a frame
- * count. That task, `FUN_00435AA0`, is a **subtitle renderer**:
- *
- * ```c
- * frames -= 1;
- * if (frames == 0 || skip_flag || DAT_009A2230) { task_end(); return; }
- * if (DAT_009C911E != 1) {
- *     id = lines[variant * 4 + line];
- *     if (frames < line_rec[id].end_frame) line++;
- *     DrawTextCentred(line_rec[id].x_offset, 384.0, line_rec[id].text);
- *     return;
- * }
- * DrawSprite(rec.sprite, rec.x, rec.y, ...);   // never reached
- * ```
- *
- * The sprite branch is dead: `DAT_009C911E` has exactly one writer in the
- * binary and it stores 2, and the global is BSS, so `== 1` is never true. The
- * game always draws text — which means the actual dialogue is recoverable, and
- * it is: "We're meeting G over there.", "Get him!" (or "Get them!" on the 2P
- * variant), and so on.
- *
- * Lines advance on a **countdown**: `frames` counts down from the record's
- * duration and the line index steps whenever it drops below the current line's
- * `end_frame`. The last line of a variant has `end_frame` 0, so it holds to the
- * end. That is reproduced exactly here.
- *
- * `FUN_00436850` draws the line centred at `x = 320 - len * 5.6 + x_offset` on
- * a 384 baseline in the 640x480 screen, 11.2 px per glyph, in (1.0, 0.8, 0.8).
- * The position and the colour are honoured; the bitmap font is not, since the
- * player has no 2D glyph pipeline, so the browser's own text sits where the
- * game's would.
+ * Not this layer's any more. `EvtOpPlayDialogue2D` and its subtitle task are
+ * `game/dialogue.ts`, and the task draws its line as the engine does, glyph by
+ * glyph through `DrawScreenSprite` -- so the subtitle reaches this layer in
+ * the frame's screen sprites with the lives and the bullets, from the
+ * bundle's images of the game's own font.
  */
 
-/**
- * One subtitle line, as this layer draws it.
- *
- * Declared here rather than imported from `bundle/` on purpose. A type-only
- * import carries no code, but it makes the UI track the exporter's schema —
- * and the whole point of the boundary is that this side owns the shape of its
- * own input. `app/projection/message.ts` maps the bundle's `DialogueLine` onto
- * this and would not compile if the two drifted.
- *
- * It lived in `ui/projection.ts` until step 28, whose stated contract is "what
- * the UI is allowed to know" and whose every other type is a field of
- * `UiProjection`. This one never was: the only consumer is `ScreenMessage`
- * below, and that is a contract between `app/` and `hud/` that the projection
- * has no part in. The reasoning above is why it is still a declaration and not
- * an import from `bundle/`; only the file it sits in changed.
- */
-export interface SubtitleLine {
-  text: string;
-  /** Added to the centred position, in the game's 640-wide screen. */
-  xOffset: number;
-  /** The frame count this line gives way at. */
-  endFrame: number;
-}
-
-/**
- * What `app/` hands over for evt `0x2D`.
- *
- * The bundle's `MessageVariant` has nine fields; four of them are what a
- * subtitle needs. Taking only those keeps `hud/` off the exporter's schema —
- * see `ui-reads-projection-only`.
- */
-export interface ScreenMessage {
-  frames: number;
-  x: number;
-  y: number;
-  lines: SubtitleLine[];
-  /** `STAGE2_VOICE\\...wav`, for the feed line. Null when there is no voice. */
-  voiceFile: string | null;
-}
 
 /**
  * Half-height of the bar itself.
@@ -154,13 +88,6 @@ const SHUTTER_HALF = 0.05;
  */
 const HALF_HEIGHT = Math.tan((41.1 * Math.PI) / 180 / 2);
 
-/** The game's screen space, which the subtitle geometry is expressed in. */
-const SCREEN_W = 640;
-const SCREEN_H = 480;
-
-/** `FUN_00436850`'s baseline, and its per-glyph advance. */
-const TEXT_BASELINE_Y = 384;
-const GLYPH_ADVANCE = 11.2;
 
 /**
  * The shutter and the caption, drawn.
@@ -189,24 +116,6 @@ const GLYPH_ADVANCE = 11.2;
  * had already taken `.hud-layer`'s `hidden` in step 26, so the flag existed
  * only to make that one string say `"off"`. What is left here draws.
  */
-/**
- * What this layer reads of the walker: the caption. Structural on purpose.
- *
- * It is `Walker`'s shape and it is deliberately not `Walker`'s *type*: `hud/`
- * is the UI layer, and an import from `script/` would make it a second reader
- * of engine state — which is what `layer-direction` counts, and it counted
- * this the first time round. `app/` is the composition root and the only
- * layer allowed to see both sides, so the two lines that put this in the tick
- * order live in `app/systems.ts`.
- *
- * It carried the shutter's state and counter too, and this layer turned them
- * into bars. It no longer does: the bars are {@link ShutterBarView}s, what the
- * engine's routine drew.
- */
-export interface CaptionView {
-  captionGroup: number;
-  captionFrames: number;
-}
 
 /**
  * One bar `HudDrawShutterState` drew: its origin's `y` in view space at
@@ -220,7 +129,7 @@ export interface ShutterBarView {
 
 /**
  * One screen sprite to draw: `DrawScreenSprite`'s arguments as the engine
- * recorded them. Structural, like {@link CaptionView}: the engine's type is
+ * recorded them. Structural, like {@link ShutterBarView}: the engine's type is
  * `ScreenSprite` in `game/hud_readout.ts`, and `app/` hands its list across.
  */
 export interface ScreenSpriteView {
@@ -297,8 +206,6 @@ export interface HudElements {
   top: HTMLElement;
   /** `.shutter-bottom`, likewise. */
   bottom: HTMLElement;
-  /** `.screen-message`, the caption. This layer owns its `hidden`. */
-  message: HTMLElement;
   /**
    * `.hud-screen`, a 640x480 canvas fitted to the game's 4:3 screen: the
    * readouts `DrawScreenSprite` draws. This layer owns its pixels.
@@ -309,7 +216,6 @@ export interface HudElements {
 export class Hud {
   private readonly top: HTMLElement;
   private readonly bottom: HTMLElement;
-  private readonly message: HTMLElement;
   private readonly screen: CanvasRenderingContext2D | null;
 
   /**
@@ -324,14 +230,6 @@ export class Hud {
   /** What the screen last showed, as a string, so an unchanged frame costs nothing. */
   private screenDrawn = "";
 
-  /**
-   * The dialogue table, by group. Installed by `app/` at stage load.
-   *
-   * The lines are bundle data rather than state, which is why the walker
-   * carries the group and not the words.
-   */
-  messages: (group: number) => ScreenMessage | null = () => null;
-
   /** What was last drawn, so an unchanged frame costs no DOM writes. */
   private drawn = "";
 
@@ -341,13 +239,7 @@ export class Hud {
   constructor(nodes: HudElements) {
     this.top = nodes.top;
     this.bottom = nodes.bottom;
-    this.message = nodes.message;
     this.screen = nodes.screen.getContext("2d");
-    // The caption starts hidden because there is no caption until the script
-    // starts one, and this layer is the only writer of that flag — React
-    // renders the node and never touches its `hidden`, precisely so there is
-    // no moment where the two disagree about a caption that does not exist.
-    this.message.hidden = true;
   }
 
   /**
@@ -357,11 +249,9 @@ export class Hud {
    * `app/` can register it with `drawSystem` and a load, a seek and an
    * ordinary frame all go through one path.
    */
-  draw(w: CaptionView | null,
-       sprites: readonly ScreenSpriteView[] = [],
+  draw(sprites: readonly ScreenSpriteView[] = [],
        bars: readonly ShutterBarView[] = []): void {
     this.apply(bars);
-    this.drawLine(w?.captionGroup ?? -1, w?.captionFrames ?? 0);
     this.drawSprites(sprites);
   }
 
@@ -460,43 +350,6 @@ export class Hud {
       this.images.set(url, img);
     }
     return img;
-  }
-
-  /**
-   * Which line the countdown is on.
-   *
-   * `DrawDialogueSubtitleTask` steps an index when `frames` drops below the
-   * current line's `end_frame`. The end frames are fixed and descending and
-   * the countdown is monotone, so counting the lines still ahead of it gives
-   * the same answer — and keeps the index derived, which is what lets it stay
-   * out of the save state. The last line stores `end_frame` 0 and holds.
-   */
-  private lineFor(lines: readonly SubtitleLine[], framesLeft: number)
-      : SubtitleLine | undefined {
-    if (!lines.length) return undefined;
-    let i = 0;
-    while (i < lines.length - 1 && framesLeft < lines[i].endFrame) i++;
-    return lines[i];
-  }
-
-  /** Place and fill the caption for whichever line the countdown is on. */
-  private drawLine(group: number, framesLeft: number): void {
-    const v = group >= 0 ? this.messages(group) : null;
-    const l = v ? this.lineFor(v.lines, framesLeft) : undefined;
-    if (!l || framesLeft <= 0) {
-      this.message.hidden = true;
-      return;
-    }
-    this.message.hidden = false;
-    this.message.textContent = l.text;
-    // The game centres on 320 and nudges by x_offset, so the caption's own
-    // centre is what moves; the transform below anchors it there.
-    const cx = SCREEN_W / 2 + l.xOffset;
-    this.message.style.left = `${(cx / SCREEN_W) * 100}%`;
-    this.message.style.top = `${(TEXT_BASELINE_Y / SCREEN_H) * 100}%`;
-    // Match the game's advance so a long line occupies the width it would.
-    this.message.style.fontSize =
-      `${(GLYPH_ADVANCE / SCREEN_W) * 100 * 1.35}cqw`;
   }
 
   /**

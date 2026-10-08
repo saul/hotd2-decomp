@@ -16,7 +16,7 @@ import type { ClassFrame } from "../registry";
 import { GameMode } from "../game_mode";
 import { vec3 } from "../vec";
 import { SpawnCivilianHitMarker } from "./hit_marker";
-import { CivilianHeadMode, CivilianTarget, CivilianWait } from "./ops";
+import { CivilianHeadLook, CivilianTarget, CivilianWait } from "./ops";
 import { CivilianRunScript } from "./script";
 
 /** What a shot costs — `ScoreAddForPlayer`'s operand. */
@@ -80,61 +80,66 @@ export function CivilianCheckShot(obj: Actor, f: ClassFrame): void {
     obj.pendingHit = null;
     return;
   }
-  // **Killed by her captors**: `obj+0x34` bit `0x4000000` is already up
-  // (`TEST ECX, 0x4000000; JZ` at `0x0048AADF`) -- the maul raised it, not a
-  // shot -- and the arm at `0x0048AAEB` takes her on-shot script and fines
-  // both players.
+  // **Killed already**: `obj+0x34` bit `0x4000000` is up (`TEST ECX,
+  // 0x4000000; JZ` at `0x0048AADF`) -- something other than this shot raised
+  // it -- and the arm at `0x0048AAEB` takes her on-shot script and fines
+  // both players. No life, no marker.
   if ((obj.flags & ActorFlag.Dead) !== 0) {
     obj.pendingHit = null;
     obj.dead = true;
-    CivilianShotCommonStops(sub);
+    CivilianShotStops(sub);
     f.events?.emit("civilian.shot", { at: obj.at, player: -1 });
+    // `CALL 0x0048B9E0` with `sub+0x4C` (`0x0048AB19`), then the two words
+    // cleared (`0x0048AB27`, `0x0048AB30`).
     CivilianRunScript(obj, sub.onShotScript, 0, f);
     sub.onShot = 0;
     sub.onShotScript = -1;
     sub.resume = 0;
     sub.resumeScript = -1;
-    // `TEST dword ptr [EAX], 0x8000000` at `0x0048AB38`, **after** the new
-    // script's first block has loaded its word -- whose `Uncounted` bit the
-    // VM keeps from the old one as well.
+    // `TEST dword ptr [EAX], 0x8000000` at `0x0048AB38`, **after** the
+    // script's first block has loaded its wait word. Both players, no test
+    // of who fired: `ScoreAddForPlayer(0, -100)`, `(1, -100)`.
     if (!(sub.wait & CivilianWait.Uncounted)) {
       ScoreAddForPlayer(0, SHOT_PENALTY, f.events);
       ScoreAddForPlayer(1, SHOT_PENALTY, f.events);
     }
-    CivilianShotCommonTail(obj, f);
+    CivilianShotTail(obj, f);
     return;
   }
   // **Shot**: `TEST CL, 0x8; JZ` at `0x0048AB8F`.
   if ((obj.flags & 8) === 0 && obj.pendingHit === null) return;
   // Where the marker goes: bone `sub+0xAC`'s record point in the world --
-  // `MatrixMultiply(model + 0xA0 + bone*0x90)` onto the camera block and
-  // its translation, `0x0048AB99`..`0x0048AC09`. The records are the
-  // renderer's pose here (`GameHost.boneWorld`); a host that cannot pose
-  // her has no point, and the marker is only a draw, so it is not made.
+  // `MatrixMultiply(model + 0xA0 + bone*0x90)` onto the camera block's
+  // view-to-world matrix, and its translation (`0x0048AB98`..`0x0048AC09`).
+  // The records are the renderer's pose here (`GameHost.boneWorld`); a host
+  // that cannot pose her has no point, and the marker is only a draw, so it
+  // is then not made.
   const posed = f.host.boneWorld(obj.at, sub.hitBone, _hit);
-  // `obj+0x34` bits 1 and 2 name the shooter; neither, or both, is `rand() %
-  // 2` (`0x0048AC1F`..`0x0048AC32`).
+  // `obj+0x34` bits 1 and 2 name the shooter; neither, or both, is `rand()`'s
+  // parity (`0x0048AC1F`..`0x0048AC32`).
   const two = obj.flags & 6;
   const player = two === 2 ? 0 : two === 4 ? 1 : f.rng.int(2);
   // `PUSH -1; PUSH 1; PUSH EBX; PUSH EBX; PUSH EDI` with `EBX = 0` at
-  // `0x0048AC3E`: no overlay, through the invulnerability window, and the
-  // window left alone. The port passed `(p, 1, 0, 0, -1)`, which raised the
-  // damage overlay and let an invulnerable player shoot her for nothing.
+  // `0x0048AC3E`, `CALL 0x00415430`: a life, with **no** damage overlay (the
+  // latch is 0), through the invulnerability window, and the window left as
+  // it is. The port passed `(p, 1, 0, 0, -1)`, which drew overlay kind 0 --
+  // the diagonal swipe of an enemy's claw -- over the screen, and let an
+  // invulnerable player shoot her for nothing.
   PlayerTakeDamageTimed(player, 0, 0, 1, -1, f.events, obj);
   ScoreAddForPlayer(player, SHOT_PENALTY, f.events);
   G.g_head_combo_bonus[player] = 0;
   G.g_player_hit_count[player] += 1;
+  // `CALL 0x0048E080` at `0x0048AC6F`: what the player sees instead.
   if (posed) SpawnCivilianHitMarker(player, _hit);
   obj.flags |= ActorFlag.Dead;
   obj.pendingHit = null;
   obj.dead = true;
-  CivilianShotCommonStops(sub);
+  CivilianShotStops(sub);
   f.events?.emit("civilian.shot", { at: obj.at, player });
-  // `sub+0x50` when there is one, else `sub+0x4C` (`0x0048ACB2`) -- and the
-  // two words are cleared only **after** the script runs (`0x0048ACCE`), so
-  // an on-shot script that names a new one of either loses it. The port
-  // cleared them first and ran the voice before the script, whose op 0x2A
-  // picks the voice.
+  // `sub+0x50` when there is one, else `sub+0x4C` (`0x0048ACB2`), and the two
+  // words cleared only **after** the script has run (`0x0048ACCE`); the voice
+  // comes after that (`0x0048ACDA`), not before the script as the port had
+  // it.
   const to = sub.onShotAltScript >= 0 ? sub.onShotAltScript
     : sub.onShotScript;
   CivilianRunScript(obj, to, 0, f);
@@ -142,7 +147,7 @@ export function CivilianCheckShot(obj: Actor, f: ClassFrame): void {
   sub.onShotScript = -1;
   sub.resume = 0;
   sub.resumeScript = -1;
-  CivilianShotCommonTail(obj, f);
+  CivilianShotTail(obj, f);
 }
 
 const _hit = vec3();
@@ -155,7 +160,7 @@ const _hit = vec3();
  * `[port-only]` as a function: the engine writes them out twice, the same
  * four instructions in each arm.
  */
-function CivilianShotCommonStops(sub: NonNullable<Actor["civ"]>): void {
+function CivilianShotStops(sub: NonNullable<Actor["civ"]>): void {
   sub.timer = -1;
   sub.targetMode = CivilianTarget.None;
   sub.sounds = [];
@@ -163,18 +168,23 @@ function CivilianShotCommonStops(sub: NonNullable<Actor["civ"]>): void {
 }
 
 /**
- * Both arms' tail: the death voice, the head sent back to rest if it was
- * looking at anything (`CMP [EAX+0x8C], EBX; JZ; MOV [EAX+0x8C], 6`), and
- * Training's `g_training_out` (`0x009A2234`).
+ * Both arms' tail: the death voice, then her head sent home, then Training's
+ * `g_training_out` (`0x009A2234 = 1` when `g_GameMode` is 2, `0x0048AB75` and
+ * `0x0048ACFB`).
  *
- * `[port-only]` as a function, for the same reason.
+ * The head: `CMP dword ptr [EAX + 0x8c], EBX; JZ; MOV dword ptr [EAX +
+ * 0x8c], 0x6` at `0x0048AB5E` and `0x0048ACE4`, `EBX` the routine's zero. A
+ * head looking at anything -- whatever the on-shot script just pointed it at
+ * -- eases back to the clip's pose ({@link CivilianHeadLook.Home}); one that
+ * was not stays off.
+ *
+ * `[port-only]` as a function, for the same reason as the stores.
  */
-function CivilianShotCommonTail(obj: Actor, f: ClassFrame): void {
-  const sub = obj.civ;
-  if (!sub) return;
+function CivilianShotTail(obj: Actor, f: ClassFrame): void {
   CivilianPlayDeathVoice(obj, f.events);
-  if (sub.headMode !== CivilianHeadMode.None) {
-    sub.headMode = CivilianHeadMode.Rest;
+  const sub = obj.civ;
+  if (sub && sub.headLook !== CivilianHeadLook.Off) {
+    sub.headLook = CivilianHeadLook.Home;
   }
   if (G.g_GameMode === GameMode.Training) G.g_training_out = 1;
 }

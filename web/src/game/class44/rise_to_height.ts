@@ -84,13 +84,12 @@
  *
  * ## What the prop does not carry
  *
- * `obj+0x68` and `MatrixStore(obj+0x150)` are read by nothing but the mesh
- * shot test and the two collision passes, and those reach the object only
- * through `obj+0x14C` -- which is `-1` in all thirteen shipped spawns
- * (`web/tools/checks/rise_to_height.ts` holds every one to it). The prop
- * struct carries the draw's yaw (`+0x1D0`) and the draw's matrix is in the
- * recorded draw; the blob word itself is kept, because both exits and the
- * registration branch on it.
+ * `obj+0x68`, which the builder writes with the descriptor's yaw and which
+ * only `ShotTestMesh` reads. `MatrixStore(obj+0x150)` is kept (built on the
+ * identity, as the hinges' is) and the registration takes the mesh arm, but
+ * `obj+0x14C` is `-1` in all thirteen shipped spawns
+ * (`web/tools/checks/rise_to_height.ts` holds every one to it), so none
+ * registers; a blob would want `obj+0x68` carried for the hit's normal.
  */
 import type { BreakablePlacement } from "../../bundle";
 import { G } from "../globals";
@@ -101,7 +100,8 @@ import { PropDrawBegin, PropDrawSlot, PropMatrixPush }
 import {
   BreakableState, makeBreakableProp, PropFamily, type BreakableProp,
 } from "../class41/prop_state";
-import { PropRegisterForShotTest } from "../class41/shot_test";
+import { PropRegisterForShotTestAsIs } from "../class41/shot_test";
+import { ColiStoreObjectMatrix } from "../coli";
 import { PropWords } from "../class41/words";
 
 /** `FADD float ptr [0x004C4380]` — `1.0f`, the climb per frame. */
@@ -156,6 +156,7 @@ export function PropBuildRiseToHeight(pl: BreakablePlacement): BreakableProp {
   // `obj+0x28C` — the u16 at tail+0x04.
   p.slot = pl.slot ?? 0;
   PropWords(p, RISE_TO_HEIGHT_WORDS).o14c = pl.coli ?? -1;
+  p.coliBlob = pl.coli_blob ?? null;
   // `obj+0x2A0` and `obj+0x2A4`, the two signed bytes of the tail.
   p.storyItem = pl.open_flag ?? 0;
   p.removeFlag = pl.remove_flag ?? -1;
@@ -196,9 +197,10 @@ export function RiseToHeightUpdate(p: BreakableProp): void {
   MatrixTranslate(m, p.x, p.y, p.z);
   MatrixRotateY(m, p.yaw);
   PropDrawSlot(p, m, p.slot);
-  // `MatrixStore(obj+0x150); MatrixStackPop(1)` -- see the file comment.
-  // `RegisterForShotTest` only with a blob. The routine never writes
-  // `obj+0x70..0x78`, so the point it files is the one the object was
-  // cleared with, and the `0x10` it raised sends the engine to the mesh.
-  if (w.o14c !== -1) PropRegisterForShotTest(p, p.shotX, p.shotY, p.shotZ);
+  // `MatrixStore(obj+0x150)` at `0x004758AC`, then the pop.
+  ColiStoreObjectMatrix(p, m);
+  p.coliMatrixDrawn = true;
+  // `RegisterForShotTest` only with a blob, and the `0x10` the builder
+  // raised sends it to the mesh arm.
+  if (w.o14c !== -1) PropRegisterForShotTestAsIs(p);
 }

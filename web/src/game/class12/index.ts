@@ -233,6 +233,9 @@ function ScriptedProp12Debug(obj: Actor): ActorDebug {
 export const ScriptedProp12Handler: ClassHandler = {
   init: ScriptedPropInit12,
   update: ScriptedPropUpdate12,
+  // `ScriptedPropInit12` installs `ScriptedPropUpdate12` and returns
+  // (`0x0043FA53`).
+  firstUpdateNextWalk: true,
   // It calls `RegisterForShotTest` itself, at `0x0043FB76`, and the pick is
   // `combat/shot_test.ts`' mesh arm.
   registersForShotTest: true,

@@ -80,13 +80,24 @@ export const BANK_PALETTE_INDEX: ReadonlyMap<number, number> =
  * item pictures `OriginalItemBannerUpdate` (`FUN_00475D00`) draws, one bank
  * per `g_original_item_records[id].sprite` (`0x5BD..0x5DE`).
  *
+ * And palette 0xB for the six chapter banks `scr_chapter_st1`..`st6`
+ * (`0x18C..0x191`), which the byte table sends to jump-table entry 16,
+ * `MOV EAX, 0xB` at `0x0041CA20`: the chapter card's title sprites,
+ * `ChapterTitleDraw` (`FUN_00436AD0`).
+ *
  * And palette 0x1B for `0x1B5`, `scr_item_all`, jump-table entry 18 (byte
  * `0x0041CBFE`), `MOV EAX, 0x1B` at `0x0041CA8E`: the trunk's list of item
  * names, `g_original_item_list_sprites` (`0x5F9..0x61A`).
+ *
+ * And palette 0 for `0x17B`, `scr_jimaku_e`, the subtitles' font: its byte
+ * (`0x0041CBC4`) is 21, the default arm, `XOR EAX, EAX` at `0x0041CB32`.
+ * `DrawTextCentred` (`FUN_00436850`) draws every glyph from it.
  */
 export const BANK_PALETTE_CONST: ReadonlyMap<number, number> = new Map([
   [0x177, 10], [0x186, 10], [0x187, 10], [0x188, 10], [0x189, 10],
-  [0x18a, 10], [0x18b, 10], [0x156, 0x14], [0x1b5, 0x1b],
+  [0x18a, 10], [0x18b, 10], [0x156, 0x14], [0x1b5, 0x1b], [0x17b, 0],
+  [0x18c, 0xb], [0x18d, 0xb], [0x18e, 0xb], [0x18f, 0xb], [0x190, 0xb],
+  [0x191, 0xb],
   ...Array.from({ length: 0x1b5 - 0x193 },
                 (_, i): [number, number] => [0x193 + i, 0x14]),
 ]);
@@ -598,18 +609,6 @@ export class ExeTables {
   static readonly CIVILIAN_ITEM_BYTES = 0x7c;
 
   /**
-   * `g_civilian_mouth_tables` -- six `{u8 *bytes, s32 count}` records that
-   * `CivilianDrawBonePart` (`FUN_0048D1F0`) indexes by `sub+0xA8`: `MOV EAX,
-   * [ESI*8 + 0x56b950]` and `IDIV dword ptr [ESI*8 + 0x56b954]` at
-   * `0x0048D7F4`..`0x0048D7FE`, each byte `MOVSX`ed and added to bone 2's
-   * slot. Six because op 0x25 and the hook's own `2 -> 3` hand-over name
-   * nothing past 5, and 6 is the "none" the hook tests for; the word after the
-   * sixth record is the first civilian script (L6).
-   */
-  static readonly CIVILIAN_MOUTH_TABLES = 0x0056b950;
-  static readonly CIVILIAN_MOUTH_TABLE_COUNT = 6;
-
-  /**
    * `g_original_item_bank_sprite` -- `{s16 texbank, s16 banner sprite}` per
    * Original Mode item id, which a held-item record's kind is:
    * `MOVSX EAX, word ptr [EDX*4 + 0x56b0f6]` into `SpawnOriginalItemBanner`
@@ -653,7 +652,7 @@ export class ExeTables {
    * opcodes go out of range within a command or two.
    */
   civilianScripts(): { entries: number[]; scripts: CivCommand[][];
-                       items: CivItem[]; mouthTables: number[][] } {
+                       items: CivItem[] } {
     return this.cached("civilianScripts", () => {
       const tab = ExeTables.CIVILIAN_SCRIPT_TABLE;
       const entryVa: number[] = [];
@@ -725,9 +724,11 @@ export class ExeTables {
           } else if (op === 6) {
             d.point = this.civPoint(args[0]);
           }
-          // Op 0x24's second operand is the head's target: three floats for
-          // modes 4 and 5, which are the only ones its two uses name.
-          if (op === 0x24 && (args[1] ?? 0) > 0) {
+          // Op 0x24's second dword is `sub+0x90`, and the head look's two
+          // point modes read it as three floats: `MOV EDX,[EAX+0x90]; MOV
+          // EAX,[EDX]` at `0x0048D3DA` (4) and `0x0048D3F5` (5). The other
+          // modes read it as an object or not at all.
+          if (op === 0x24 && (args[0] === 4 || args[0] === 5)) {
             d.point = this.civPoint(args[1]);
           }
           if (op === 5) d.radius = asFloatBits(args[1]);
@@ -764,30 +765,8 @@ export class ExeTables {
         scripts.push(out);
       }
       return { entries: entryVa.map((v) => index.get(v)!), scripts,
-               items: this.civItems,
-               mouthTables: this.civilianMouthTables() };
+               items: this.civItems };
     });
-  }
-
-  /**
-   * `g_civilian_mouth_tables`, each record's bytes read as the signed offsets
-   * the hook adds -- see {@link ExeTables.CIVILIAN_MOUTH_TABLES}.
-   */
-  civilianMouthTables(): number[][] {
-    const out: number[][] = [];
-    for (let i = 0; i < ExeTables.CIVILIAN_MOUTH_TABLE_COUNT; i++) {
-      const rec = ExeTables.CIVILIAN_MOUTH_TABLES + i * 8;
-      const va = this.ru32(rec);
-      const n = this.ri32(rec + 4);
-      const r = va === null ? null : this.v2r(va);
-      if (r === null || n === null || n <= 0 || r + n > this.data.length) {
-        throw new Error(`civilian mouth table ${i} at ${hex(rec)} is unreadable`);
-      }
-      const row: number[] = [];
-      for (let k = 0; k < n; k++) row.push((this.data[r + k] << 24) >> 24);
-      out.push(row);
-    }
-    return out;
   }
 
   /** Decode one held-item record, memoised; returns its index. */
@@ -1513,6 +1492,22 @@ export class ExeTables {
    * * `default_route` -- `0x0059351C`, s8[6][16]: the route
    *   `GameOverRouteMapArm` (`FUN_00460F00`) copies over an empty history.
    *
+   * And the bodies' tables in play, which travel in the same block because
+   * the same two bodies are what they place:
+   *
+   * * `entity_offsets` -- `0x00579E98`, f32[4], indexed
+   *   `p + g_max_attackers * 2 - 2`: the x a body sits at in the gameplay
+   *   eye's frame (`PlacePlayerEntityFromViewPose`, `FUN_004159A0`, which
+   *   indexes from `0x00579E90`, two code pointers earlier).
+   * * `seat_x` -- `g_st1_vehicle_seat_x`, `0x004EC8D8`, f32[6], indexed
+   *   `p + g_players_in_play * 2`: the seat's x in the stage-1 vehicle
+   *   (`PlayerHookRideSt1Vehicle`, `FUN_00415BD0`).
+   * * `stand_points` -- `g_player_stand_points`, `0x004EC8F0`, four
+   *   `{f32 x, y, z}`, indexed `p - 2 + g_players_in_play * 2`
+   *   (`PlayerHookStandAtScenePoint`, `FUN_00415E40`).
+   * * `stand_motions` -- `g_player_stand_motions`, `0x004EC91C`, s16[6],
+   *   indexed `p + g_players_in_play * 2` (the same routine).
+   *
    * All `[proved]` from the routines named.
    */
   gameOverTables(): Record<string, unknown> {
@@ -1528,6 +1523,8 @@ export class ExeTables {
       const v = this.data[r];
       return v >= 0x80 ? v - 0x100 : v;
     };
+    const f32s = (va: number, n: number) =>
+      Array.from({ length: n }, (_u, i) => this.rf32(va + i * 4) ?? 0);
     const offsets = Array.from({ length: 4 }, (_u, i) =>
       [this.rf32(0x00579ea8 + i * 12) ?? 0,
        this.rf32(0x00579ea8 + i * 12 + 8) ?? 0]);
@@ -1548,6 +1545,12 @@ export class ExeTables {
       route_tiles: Array.from({ length: 4 }, (_u, i) => s16(0x005679fc + i * 2)),
       route_waypoints: waypoints,
       default_route: route,
+      entity_offsets: f32s(0x00579e98, 4),
+      seat_x: f32s(0x004ec8d8, 6),
+      stand_points: Array.from({ length: 4 }, (_u, i) =>
+        f32s(0x004ec8f0 + i * 12, 3)),
+      stand_motions: Array.from({ length: 6 }, (_u, i) =>
+        s16(0x004ec91c + i * 2)),
     };
   }
 
@@ -1717,6 +1720,60 @@ export class ExeTables {
           return v >= 0x8000 ? v - 0x10000 : v;
         }),
     };
+  }
+
+  /**
+   * The chapter card's `.rdata`, for `script.json`'s `chapter_card` block:
+   * the four tables its variant arms index, each only as long as the index
+   * that reads it (L6).
+   *
+   * * `boss_mode_backdrop_sprites` -- `0x0055DD50`, s16, one per scene:
+   *   `MOVSX EAX, word ptr [EDX*2 + 0x55dd50]` at `0x004349CC`, `EDX` the
+   *   scene index (`BossModeChapterCardUpdate`, `FUN_00434920`).
+   * * `boss_mode_backdrop_flags` -- `0x0055DD5C`, u8, one per scene: `MOV
+   *   DL, byte ptr [ECX + 0x55dd5c]` at `0x00434A28`.
+   * * `attract11_frames` and `attract11_flash_frames` -- `0x0055DD64` and
+   *   `0x0055DD70`, s16[5]: `MOVSX EDX, word ptr [EDX*2 + 0x55dd64]` /
+   *   `0x55dd70` at `0x00434E61` / `0x00434E24`, `EDX` being
+   *   `(g_frame_counter % 10) >> 1` (`AttractScene11ChapterCardUpdate`,
+   *   `FUN_00434DA0`).
+   */
+  chapterCardTables(): Record<string, unknown> {
+    const s16 = (va: number): number => {
+      const v = this.ru16(va) ?? 0;
+      return v >= 0x8000 ? v - 0x10000 : v;
+    };
+    const u8 = (va: number): number => {
+      const r = this.v2r(va);
+      return r === null ? 0 : this.data[r];
+    };
+    const SCENES = 6;
+    const FRAMES = 5;
+    return {
+      boss_mode_backdrop_sprites: Array.from({ length: SCENES },
+        (_u, i) => s16(0x0055dd50 + i * 2)),
+      boss_mode_backdrop_flags: Array.from({ length: SCENES },
+        (_u, i) => u8(0x0055dd5c + i)),
+      attract11_frames: Array.from({ length: FRAMES },
+        (_u, i) => s16(0x0055dd64 + i * 2)),
+      attract11_flash_frames: Array.from({ length: FRAMES },
+        (_u, i) => s16(0x0055dd70 + i * 2)),
+    };
+  }
+
+  /**
+   * `g_subtitle_glyphs` -- `0x0055E054`, s16[128]: the screen sprite of each
+   * character code `DrawTextCentred` (`FUN_00436850`) draws, `MOVSX EAX,word
+   * [ECX*2 + 0x55e054]` with `ECX` the character's signed byte. A 0 draws
+   * nothing. Only `0..0x7F` is carried: the shipped lines are ASCII, and a
+   * byte past `0x7F` would index before the table. `~` never reads it -- the
+   * routine draws `0x62D` for it.
+   */
+  subtitleGlyphs(): number[] {
+    return Array.from({ length: 0x80 }, (_u, i) => {
+      const v = this.ru16(0x0055e054 + i * 2) ?? 0;
+      return v >= 0x8000 ? v - 0x10000 : v;
+    });
   }
 
   /**

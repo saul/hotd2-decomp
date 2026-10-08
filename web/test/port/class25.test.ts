@@ -23,8 +23,9 @@ import {
   type HumanoidProgram,
 } from "../../src/game/class25";
 import { HumanoidRoutine } from "../../src/game/class25/state";
+import { RotXZY, RotZYX } from "../../src/game/matrix";
 import {
-  check, CHARS, slotsShown, EnterPlay, JETTY_CHARS, jettyScene,
+  check, CHARS, slotsShown, EnterPlay, JETTY_CHARS, jettyScene, TYPE,
 } from "./harness";
 
 // -- 9. class 0x25, the scripted humanoid VM -------------------------------
@@ -36,7 +37,7 @@ function humanoidScene(cmds: HumanoidProgram["cmds"],
   EnterPlay();
   const prog: HumanoidProgram = {
     charType: 1, removePath: 90, removeFrame: 900, flags2: 0,
-    motion: 10, phase: 0, cmds, ...over,
+    motion: 10, phase: 0, entry: 0, cmds, ...over,
   };
   SetGameTables(CHARS, undefined, undefined, { "12288": prog });
   G.g_active_cam_path = -1;
@@ -81,8 +82,8 @@ function unionRejectsCrossClassReads(a: Actor, h: HumanoidActor,
   void a.hum;
   // @ts-expect-error and it has no class-0x30 arm either
   void a.zom;
-  // @ts-expect-error class 0x25's hand-prop selector is not on the head
-  void a.bonePropMode;
+  // @ts-expect-error class 0x25's face mode is not on the head
+  void a.faceMode;
   // @ts-expect-error nor is its command cursor
   void a.pc;
   // @ts-expect-error class 0x24's state selector is not on the head either
@@ -99,13 +100,13 @@ function unionRejectsCrossClassReads(a: Actor, h: HumanoidActor,
   void a.arcKind;
   // The two words 0x25 and 0x31 share are the ones worth pinning both ways:
   // `obj+0x1394` is a command cursor to one class and a waypoint cursor to the
-  // other, and `obj+0x1330` a hand-prop selector against a path delay.
+  // other, and `obj+0x1330` a face mode against a path delay.
   // @ts-expect-error a humanoid has no waypoint cursor
   void h.pathLeg;
   // @ts-expect-error and a thrower has no command cursor
   void t.pc;
-  // @ts-expect-error nor the hand-prop selector that shares its path delay
-  void t.bonePropMode;
+  // @ts-expect-error nor the face mode that shares its path delay
+  void t.faceMode;
   // The class-0x30 tail, one address at a time. Each of these was a field on
   // `ActorBase` before this change, readable off a civilian or a set-piece.
   // (`a.holdFrames` still compiles: that name is class 0x24's `obj+0x1320`
@@ -119,7 +120,7 @@ function unionRejectsCrossClassReads(a: Actor, h: HumanoidActor,
   // @ts-expect-error `obj+0x1338` — frames since the last shove
   void a.shoveTimer;
   // @ts-expect-error `obj+0x1368` bit 0, which class 0x31 reads as `reactBone`
-  void a.hasCooldown;
+  void a.flags1368;
   // @ts-expect-error `obj+0x1398` — the captor script cursor
   void a.scriptPc;
   // @ts-expect-error ...and which of the two blobs it is walking
@@ -143,8 +144,8 @@ function unionRejectsCrossClassReads(a: Actor, h: HumanoidActor,
   // ...and the other way round: the zombie arm does not carry class 0x25's.
   // @ts-expect-error class 0x25's command cursor is not on a zombie
   void z.hum;
-  // @ts-expect-error nor is its hand-prop cel index, `obj+0x1334`
-  void z.bonePropFrame;
+  // @ts-expect-error nor is its face's frame counter, `obj+0x1334`
+  void z.faceFrame;
   // `obj+0x1334` as class 0x30's back-off counter is now behind its own arm,
   // so a humanoid can no longer be asked for it. This line used to be a plain
   // `void h.backoffFrames` with a comment saying why it could not be a
@@ -177,7 +178,7 @@ function unionRejectsCrossClassReads(a: Actor, h: HumanoidActor,
   // and fails the build, which is why it is not written as one.
   void h.slideTimer;
   // The arm is reachable once, and only once, `cls` has been tested.
-  if (a.cls === SpawnClass.ScriptedHumanoid) void a.hum.bonePropMode;
+  if (a.cls === SpawnClass.ScriptedHumanoid) void a.hum.faceMode;
   if (a.cls === SpawnClass.Thrower) void a.thr.landSurface;
   if (a.cls === SpawnClass.Zombie) void a.zom.backoffFrames;
   // And an already-narrowed arm needs no test at all.
@@ -223,14 +224,14 @@ console.log("\nclass 0x25, the VM runs until a command blocks:");
   // first frame, because only a wait costs one.
   const { a, events } = humanoidScene([
     { op: HumanoidOp.SetPos, mode: 0, a: 0, b: 0, f0: 5, f1: 7 },
-    { op: HumanoidOp.SetBonePropMode, mode: 2, a: 0, b: 0 },
+    { op: HumanoidOp.SetFaceMode, mode: 2, a: 0, b: 0 },
     { op: HumanoidOp.TurnMode, mode: 1, a: 0, b: 0 },
     { op: HumanoidOp.WaitUntil, mode: HumanoidCond.Frames, a: 30, b: 0 },
     { op: HumanoidOp.Kill, mode: 0, a: 0, b: 0 },
   ]);
   hFrame(a, events, rng);
   check("a run of setup commands all take effect in one frame",
-        a.pos.x === 5 && a.pos.z === 7 && a.hum.bonePropMode === 2
+        a.pos.x === 5 && a.pos.z === 7 && a.hum.faceMode === 2
         && a.hum.turnMode === HumanoidTurn.FaceCamera && a.hum.pc === 3,
         `pc ${a.hum.pc}`);
 
@@ -347,6 +348,29 @@ console.log("\nclass 0x25, op 10 picks an arm by g_active_player:");
           !a.dead && a.visible && a.hum.routine === HumanoidRoutine.Idle,
           `dead ${a.dead} pc ${a.hum.pc}`);
   }
+  {
+    // Stage 4 block 4's pair, shaped as the bundle lists player 2's program:
+    // in address order, so the first two commands are the tail player 1's
+    // block keeps and player 2's `op 15` jumps back into, and player 2's own
+    // block -- the `op 0` the Init points at (`blk + 8`, `0x00484282`) --
+    // comes after them. One player on slot 0, so player 2's figure goes.
+    const { a, events } = humanoidScene([
+      { op: HumanoidOp.WaitUntil, mode: HumanoidCond.Frames, a: 9999, b: 0 },
+      { op: HumanoidOp.End, mode: 0, a: 0, b: 0 },
+      { op: HumanoidOp.WaitThenPlay, mode: -1, a: 0, b: 0 },
+      { op: HumanoidOp.IfActivePlayer, mode: 0, a: 0, b: 0, skip: 5 },
+      { op: HumanoidOp.Kill, mode: 0, a: 0, b: 0 },
+      { op: HumanoidOp.SetPos, mode: 1, a: 0, b: 0, f0: 99, f1: 0 },
+      { op: HumanoidOp.WaitUntil, mode: HumanoidCond.Frames, a: 9999, b: 0 },
+    ], { entry: 2 });
+    check("the Init starts the program at its block's first command, not at "
+          + "the first one listed", a.hum.pc === 2, `pc ${a.hum.pc}`);
+    G.g_active_player = 0;
+    hFrame(a, events, rng);
+    check("...so player 2's figure tests the active player and goes, rather "
+          + "than playing player 1's tail beside player 1",
+          a.dead && !a.visible, `dead ${a.dead} pc ${a.hum.pc}`);
+  }
   G.g_active_player = 0;
 }
 
@@ -368,27 +392,30 @@ console.log("\nclass 0x25, the removal trigger:");
 console.log("\nclass 0x25, the two draw fields the VM writes:");
 {
   const rng = new Rng(4);
-  // `op 14` picks the hand prop and mode 2 restarts the cel counter; `op 12`
+  // `op 14` sets the face mode and mode 2 restarts its counter; `op 12`
   // is a persistent bone toggle, not the one-shot effect it was read as.
   const { a, events } = humanoidScene([
     { op: HumanoidOp.SetHeadAim, mode: 1, a: 0, b: 0 },
-    { op: HumanoidOp.SetBonePropMode, mode: 2, a: 0, b: 0 },
+    { op: HumanoidOp.SetFaceMode, mode: 2, a: 0, b: 0 },
     { op: HumanoidOp.WaitUntil, mode: HumanoidCond.Frames, a: 4, b: 0 },
     { op: HumanoidOp.SetHeadAim, mode: 0, a: 0, b: 0 },
-    { op: HumanoidOp.SetBonePropMode, mode: 7, a: 0, b: 0 },
+    { op: HumanoidOp.SetFaceMode, mode: 7, a: 0, b: 0 },
     { op: HumanoidOp.WaitUntil, mode: HumanoidCond.Frames, a: 9999, b: 0 },
   ]);
-  a.hum.bonePropFrame = 9;
+  a.hum.faceFrame = 9;
   hFrame(a, events, rng);
   check("op 12 mode 1 sets the head-aim toggle and it stays set",
         a.hum.aimsHead === 1);
-  check("op 14 mode 2 picks hand prop 2 and restarts the cel counter",
-        a.hum.bonePropMode === 2 && a.hum.bonePropFrame === 0);
+  // The VM runs before the frame's draw, and the draw's node hook steps the
+  // counter on the talking face's first frame: 9, zeroed, then 1.
+  check("op 14 mode 2 sets face mode 2 and restarts its counter under the draw",
+        a.hum.faceMode === 2 && a.hum.faceFrame === 1,
+        `mode ${a.hum.faceMode} frame ${a.hum.faceFrame}`);
 
   for (let i = 0; i < 4; i++) hFrame(a, events, rng);
   check("op 12 mode 0 clears it again", a.hum.aimsHead === 0);
-  check("and a mode op 14 does not know leaves the prop alone",
-        a.hum.bonePropMode === 2, `mode ${a.hum.bonePropMode}`);
+  check("and a mode op 14 does not know leaves the face alone",
+        a.hum.faceMode === 2, `mode ${a.hum.faceMode}`);
 }
 
 console.log("\nclass 0x25, the program ends into ScriptedHumanoidIdle:");
@@ -449,6 +476,48 @@ console.log("\nclass 0x25, the object path's attachment offset:");
         && Math.abs(a.pos.z - (20 + r.dz)) < 1e-6
         && a.yaw === r.dyaw,
         `pos ${a.pos.x},${a.pos.y},${a.pos.z} yaw ${a.yaw}`);
+}
+
+console.log("\nclass 0x25, an offset yaw re-reads the path's angles in the draw's order:");
+{
+  // `0x00484C32`-`0x00484C72`: a record with a yaw loads `RotZ(+0x6C);
+  // RotY(+0x68); RotX(+0x64)` -- the object path's order -- reads it back with
+  // `MatrixToEulerBams` (`FUN_00401AE0`) as the `RotX; RotZ; RotY` triple the
+  // body is drawn in (`model+0x68 = 1`), and only then adds the yaw. So the
+  // drawn body is the path's frame, half a turn about its own Y. The angles
+  // are `op_st3` 340's at frame 10, under stage 3's boat passengers (evt 3792,
+  // 3940, 4128, 4252, records 4..7, every one a `0x8000`): there the two
+  // orders differ by a quarter turn, and the port drew the four lying on
+  // their sides through the hull until frame ~1020.
+  const rng = new Rng(4);
+  const { a, events } = humanoidScene([
+    { op: HumanoidOp.FollowPath, mode: 1, a: 340, b: 4 },
+    { op: HumanoidOp.WaitUntil, mode: HumanoidCond.Frames, a: 9999, b: 0 },
+  ]);
+  const path = { pitch: 15445, yaw: -16384, roll: -16384 };
+  const host = {
+    ...NULL_HOST,
+    objectPath: () => ({ x: -137, y: -16, z: -2172, ...path }),
+  };
+  ScriptedHumanoidUpdate(a, { dt: 1 / 60, rng, host, events });
+  const want = RotZYX(path.roll, path.yaw, path.pitch);
+  const half = RotXZY(0, 0, g_class25_path_offsets[4].dyaw);
+  const drawn = RotXZY(a.pitch, a.roll, a.yaw);
+  // The frame times the half turn, as a column-vector product.
+  const turned = want.map((_, i) => {
+    const r = Math.floor(i / 3), c = i % 3;
+    return want[r * 3] * half[c] + want[r * 3 + 1] * half[3 + c]
+      + want[r * 3 + 2] * half[6 + c];
+  });
+  // `MatrixToEulerBams` truncates each angle to a BAMS, ~1e-4 rad.
+  const err = Math.max(...drawn.map((v, i) => Math.abs(v - turned[i])));
+  check("the body drawn RotX;RotZ;RotY is the path's RotZ;RotY;RotX frame, "
+        + "half-turned", err < 1e-3,
+        `max error ${err.toExponential(2)}; angles ${a.pitch} ${a.yaw} ${a.roll}`);
+  // ...which is upright, because the boat is: the path's frame carries +Y
+  // to within a few degrees of +Y.
+  check("so the passenger sits up in the boat", drawn[4] > 0.95,
+        `body up.y ${drawn[4].toFixed(3)}`);
 }
 
 console.log("\nclass 0x25, a path in mode 1 gives the rider all three angles:");
@@ -661,7 +730,7 @@ function woundScene(cmds: HumanoidProgram["cmds"]):
   EnterPlay();
   SetGameTables(WOUND_CHARS, undefined, undefined, { "12288": {
     charType: 1, removePath: 100, removeFrame: 65, flags2: 1,
-    motion: 1024, phase: 0, cmds,
+    motion: 1024, phase: 0, entry: 0, cmds,
   } });
   G.g_active_cam_path = 79;
   G.g_cam_path_frame = 0;
@@ -871,7 +940,7 @@ console.log("\nclass 0x25, op 2 and the Init write the counter itself:");
   ResetGameGlobals();
   SetGameTables(JETTY_CHARS, undefined, undefined, { "12288": {
     charType: 1, removePath: 100, removeFrame: 65, flags2: 2, motion: 900,
-    phase: -1, cmds: [] } });
+    phase: -1, entry: 0, cmds: [] } });
   const seeded = ActorSpawn(0x3000, SpawnClass.ScriptedHumanoid, 1, "seed",
                             { visible: true }, new Rng(4));
   check("a phase of -1 is rand() % 10, drawn from the spawn's generator",
@@ -1032,4 +1101,118 @@ console.log("\nclass 0x25 answers the sidebar (B13's other half):");
         d?.summary);
   check("...and the camera pair it is waiting for",
         !!d?.summary.includes("cam (67,85)"), d?.summary);
+}
+
+console.log("\nclass 0x25, a skipped cut scene tears the actor down:");
+{
+  // `MOV ECX,[0x009a2230]` is `ScriptedHumanoidUpdate`'s first instruction
+  // (`0x004842A0`): with `g_cutscene_skipping` up the actor is killed before
+  // its program runs, its removal cue unread.
+  const rng = new Rng(25);
+  const { a, events } = humanoidScene([
+    { op: HumanoidOp.WaitUntil, mode: HumanoidCond.Frames, a: 9999, b: 0 },
+  ]);
+  ScriptedHumanoidUpdate(a, { dt: 1 / 60, rng, host: NULL_HOST, events });
+  check("it lives through a frame with no skip", !a.dead);
+  G.g_cutscene_skipping = 1;
+  ScriptedHumanoidUpdate(a, { dt: 1 / 60, rng, host: NULL_HOST, events });
+  G.g_cutscene_skipping = 0;
+  check("...and dies on the frame g_cutscene_skipping is up", a.dead);
+}
+
+console.log("\nclass 0x25, the face -- op 14 and ScriptedHumanoidBoneDrawHook:");
+{
+  const rng = new Rng(4);
+  // `g_class25_face_cels` (`0x00596C80`) and `g_class25_face_cels_two`
+  // (`0x00596C90`), thirteen bytes each as the image holds them.
+  const RAMP = [0, 1, 2, 3, 4, 5, 6, 5, 4, 3, 2, 1, 0];
+  const TWO = [0, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0];
+  const RECORD = TYPE.bones.find((b) => b.bone === 2)!.slot;
+  // One humanoid of `charType`, with the fixture's skeleton under that type
+  // so the walk has a head to hand the hook.
+  const faceScene = (charType: number, cmds: HumanoidProgram["cmds"]) => {
+    ResetGameGlobals();
+    EnterPlay();
+    const prog: HumanoidProgram = {
+      charType, removePath: 90, removeFrame: 900, flags2: 0,
+      motion: 10, phase: 0, entry: 0, cmds,
+    };
+    SetGameTables({
+      ...CHARS,
+      types: { ...CHARS.types, [String(charType)]: { ...TYPE, type: charType } },
+      humanoid_face_cels: RAMP, humanoid_face_cels_two: TWO,
+    } as CharactersJson, undefined, undefined, { "12288": prog });
+    G.g_active_cam_path = -1;
+    const a = ActorSpawn(0x3000, SpawnClass.ScriptedHumanoid, charType,
+                         "humanoid");
+    if (a.cls !== SpawnClass.ScriptedHumanoid) throw new Error("not 0x25");
+    a.visible = true;
+    a.pos = vec3(0, 0, 0);
+    return { a, events: new Events() };
+  };
+  const TALK: HumanoidProgram["cmds"] = [
+    { op: HumanoidOp.SetFaceMode, mode: 2, a: 0, b: 0 },
+    { op: HumanoidOp.WaitUntil, mode: HumanoidCond.Frames, a: 9999, b: 0 },
+  ];
+  const drawn = (a: HumanoidActor, events: Events, n: number,
+                 before?: (i: number) => void) => {
+    const out: number[] = [];
+    for (let i = 0; i < n; i++) {
+      before?.(i);
+      hFrame(a, events, rng);
+      out.push(a.nodeDrawSlot[2] ?? -1);
+    }
+    return out;
+  };
+
+  // James (0x39): the head is `0x14B3` plus the ramp at the counter, read
+  // before the step, so fifteen frames from the op are the whole ramp and
+  // the start of the next.
+  {
+    const { a, events } = faceScene(0x39, TALK);
+    const got = drawn(a, events, 15);
+    const want = [...RAMP, RAMP[0], RAMP[1]].map((c) => 0x14b3 + c);
+    check("op 14 mode 2 on type 0x39: the head draws 0x14B3 + the ramp, frame by frame",
+          got.join(",") === want.join(","),
+          `${got.map((s) => s.toString(16)).join(",")}`);
+    check("...and the record is still the skeleton's",
+          a.boneSlot["2"] === undefined && a.hum.faceFrame === 15,
+          `frame ${a.hum.faceFrame}`);
+  }
+  // A type with no face of its own takes the default arm: the record, and
+  // the counter steps all the same.
+  {
+    const { a, events } = faceScene(1, TALK);
+    const got = drawn(a, events, 4);
+    check("a type the switch does not name draws its record and still counts",
+          got.every((s) => s === RECORD) && a.hum.faceFrame === 4,
+          `${got.join(",")} frame ${a.hum.faceFrame}`);
+  }
+  // Type 0x36 reads the two-cel table over `0x149D`.
+  {
+    const { a, events } = faceScene(0x36, TALK);
+    const got = drawn(a, events, 13);
+    check("type 0x36 talks through g_class25_face_cels_two over 0x149D",
+          got.join(",") === TWO.map((c) => 0x149d + c).join(","),
+          got.map((s) => s.toString(16)).join(","));
+  }
+  // Gary (0x3A) opens blinking -- the Init's mode 1 -- and blinks for the
+  // thirteen frames in every hundred and fifty that `g_frame_counter`'s
+  // unsigned remainder is below 13, through the ramp at that remainder over
+  // `0x14CB`; the rest of the time the head is the record.
+  {
+    const { a, events } = faceScene(0x3a, [
+      { op: HumanoidOp.WaitUntil, mode: HumanoidCond.Frames, a: 9999, b: 0 },
+    ]);
+    const start = 2 * 150 - 5;
+    const got = drawn(a, events, 20, (i) => { G.g_frame_counter = start + i; });
+    const want = got.map((_, i) => {
+      const r = (start + i) % 150;
+      return r < 13 ? 0x14cb + RAMP[r] : RECORD;
+    });
+    check("type 0x3A opens in face mode 1 and blinks on g_frame_counter % 150 < 13",
+          a.hum.faceMode === 1 && got.join(",") === want.join(",")
+          && got.includes(0x14cb + 6) && got.includes(RECORD),
+          got.map((s) => s.toString(16)).join(","));
+  }
 }

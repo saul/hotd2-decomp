@@ -11,8 +11,14 @@
  * side. The fields the port does not use yet are still named and still carry
  * their offset: an unnamed gap is where the next wrong reading goes.
  */
-import { CIVILIAN_MOUTH_NONE, CivilianFrameHook, CivilianHeadMode,
-         CivilianSphereMode } from "./ops";
+import { CivilianFrameHook, CivilianHeadLook, CivilianSphereMode } from "./ops";
+
+/**
+ * `sub+0xA8`'s "no mouth": `CivilianDrawBonePart` (`FUN_0048D1F0`) skips its
+ * whole cel arm for it (`if (iVar2 != 6)`), and `CivilianInit` writes it.
+ * Below it, a row of `g_civilian_mouth_tables` (`0x0056B950`).
+ */
+export const CIVILIAN_MOUTH_NONE = 6;
 
 /** One 8-byte entry of the held-item array at `sub+0x70`. */
 export interface CivilianHeldItem {
@@ -155,7 +161,11 @@ export interface CivilianState {
    * `CivilianInit` picks it from the character type.
    */
   attachSet: number;
-  /** +0x78 / +0x7C op 0x16 — the radius ramp `PoseHookGrowAndPushOutOfWorld` runs. */
+  /**
+   * +0x78 / +0x7C op 0x16 — the radius ramp `PoseHookGrowAndPushOutOfWorld`
+   * runs: the target and the step, measured from `obj+0x128` when the op
+   * runs. `CivilianInit` writes 1.0 to the target **before** the first block.
+   */
   scaleTarget: number;
   scaleStep: number;
   /**
@@ -171,41 +181,52 @@ export interface CivilianState {
   /** +0x84 / +0x88 the sound queued to play, and the frames left before it. */
   soundId: number;
   soundDelay: number;
+  /** +0x8C what the head looks at, a {@link CivilianHeadLook}. */
+  headLook: number;
   /**
-   * +0x8C — **what the head looks at**, ops 0x23 and 0x24: 0 nothing, 1 the
-   * gameplay eye, 2 a child's head, 3 the camera's look-at, 4 a point, 5 a
-   * point in her own frame, 6 back to rest. `CivilianDrawBonePart`
-   * (`FUN_0048D1F0`) reads it on bone 2 and writes 0 when the turn has
-   * wound back to nothing and 6 when a child it watched is gone; the shot
-   * arm of `CivilianUpdate` writes 6. See {@link CivilianHeadMode}.
+   * +0x90 what it looks at: for {@link CivilianHeadLook.Captor} the child,
+   * by spawn address; for the two point modes the operand op 0x24 stored, an
+   * address in the exe's `.data`, whose three floats are
+   * {@link headLookPoint}.
    */
-  headMode: number;
+  headLookTarget: number;
   /**
-   * +0x90 — the mode's target, a **pointer** in the engine: a child actor for
-   * mode 2 (op 0x23, or the hook's own retarget to the first survivor), a
-   * three-float point for modes 4 and 5 (op 0x24). One word, two meanings,
-   * so two fields here, and every writer writes both (`L79`): the child by
-   * spawn address or -1, the point or null.
+   * Not the engine's: the three floats {@link headLookTarget} points at in
+   * the point modes. The port cannot follow an exe address, so op 0x24
+   * copies them out of the command, where the exporter put them.
    */
-  headTargetAt: number;
-  headTargetPoint: { x: number; y: number; z: number } | null;
+  headLookPoint: { x: number; y: number; z: number };
   /**
-   * +0x94 / +0x98 / +0x9C — the head's turn on top of the pose, pitch, yaw
-   * and roll in BAMS, each stepped by `AngleApproachInPlace`
-   * (`FUN_0048D9B0`) at most `0x100` a draw. Unwrapped ints, as the engine
-   * keeps them. `CivilianInit` zeroes all three.
+   * +0x94 / +0x98 / +0x9C how far the head is turned off the clip's pose,
+   * pitch, yaw and roll, BAMS. `AngleApproachInPlace` (`FUN_0048D9B0`) steps
+   * them, and a step adds to the whole dword: they are unwrapped angles and
+   * are tested against zero as ints. `CivilianInit` zeroes all three.
    */
-  headPitch: number;
-  headYaw: number;
-  headRoll: number;
+  headLookPitch: number;
+  headLookYaw: number;
+  headLookRoll: number;
   /**
-   * +0xA0 / +0xA4 / +0xA8 — **the mouth**, op 0x25: the cursor into the
-   * table, the frames it still steps for, and which of
-   * `g_civilian_mouth_tables`' six it reads -- 6 is none, which is what
-   * `CivilianInit` writes.
+   * Not the engine's: **this frame's draw rewrote bone 2's record** with the
+   * turn. The renderer's cue, as `HeadAimWords.headAimed` is class 0x30's:
+   * `CivilianUpdate` drops it before the node walk and the hook raises it.
    */
-  mouthCursor: number;
+  headLookTurned: boolean;
+  /**
+   * +0xA0 the mouth's cursor into its cel list, which
+   * `CivilianDrawBonePart` (`FUN_0048D1F0`) reads as `% count` and steps
+   * while {@link mouthFrames} runs. Op 0x25 zeroes it.
+   */
+  mouthFrame: number;
+  /**
+   * +0xA4 op 0x25's first operand: how many more drawn frames the mouth
+   * moves. At zero the cursor parks on the list's last cel.
+   */
   mouthFrames: number;
+  /**
+   * +0xA8 op 0x25's second operand: which row of `g_civilian_mouth_tables`
+   * (`0x0056B950`) the mouth reads -- {@link CIVILIAN_MOUTH_NONE} for none,
+   * which is `CivilianInit`'s `g_cur_civilian[0x2a] = 6`.
+   */
   mouthTable: number;
   /**
    * +0xAC op 0x28 — **the bone the shot marker is placed at**: the shot arm
@@ -221,21 +242,11 @@ export interface CivilianState {
    * +0xBC / +0xC0 — op 0x2B's s16 and the command it points back into.
    * `CivilianUpdate` counts the first down once a frame (`0x0048AD97`) and
    * **nothing reads either** -- see {@link CivilianOp.InPlayOnly} for the
-   * sweep. Kept because the engine keeps them.
+   * sweep. Kept because the engine keeps them; the second is the command's
+   * index, as {@link pc} is.
    */
   inPlayCountdown: number;
   inPlayCursor: number;
-  /**
-   * `[port-only]` What this frame's `CivilianDrawBonePart` decided about the
-   * draw, for `render/characters/civilian_head.ts`: whether it rebuilt bone
-   * 2's matrix (the three angles above are then the turn), the offset it
-   * added to bone 2's slot (the mouth), and whether it took the Original
-   * Mode scale arm. The draw's own outputs, reset before each walk, as
-   * `ResultCardTail.partScale` is.
-   */
-  headTurned: boolean;
-  mouthOffset: number;
-  partScale: boolean;
   /**
    * Not the engine's. `CivilianRunScript` is entered with a **pointer**; the
    * port carries the index of the stream it is in, because the exported
@@ -265,13 +276,13 @@ export function makeCivilianState(): CivilianState {
     scaleTarget: 1, scaleStep: 0, sphereCentreMode: CivilianSphereMode.Bone1,
     deathVoice: 0xff,
     soundId: 0, soundDelay: 0,
-    headMode: CivilianHeadMode.None, headTargetAt: -1, headTargetPoint: null,
-    headPitch: 0, headYaw: 0, headRoll: 0,
-    mouthCursor: 0, mouthFrames: 0, mouthTable: CIVILIAN_MOUTH_NONE,
+    headLook: CivilianHeadLook.Off, headLookTarget: 0,
+    headLookPoint: { x: 0, y: 0, z: 0 },
+    headLookPitch: 0, headLookYaw: 0, headLookRoll: 0, headLookTurned: false,
+    mouthFrame: 0, mouthFrames: 0, mouthTable: CIVILIAN_MOUTH_NONE,
     hitBone: 2,
     moveFrames: 0, moveTo: { x: 0, y: 0, z: 0 },
     inPlayCountdown: 0, inPlayCursor: -1,
-    headTurned: false, mouthOffset: 0, partScale: false,
     script: -1, pc: 0, onShotScript: -1, onShotAltScript: -1,
     resumeScript: -1,
   };

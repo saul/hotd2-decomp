@@ -49,6 +49,31 @@ import { WATER_SURFACE_ALSO_DRAWS } from "../game/class41/water_slots";
 import { SLIDE_SECOND_DRAW_SLOT, SLIDE_SECOND_SLOT }
   from "../game/class44/slide_slots";
 import { TYPE47_CONSTRUCTOR, TYPE47_SLOT } from "../game/class41/type47_slots";
+import { CHAIN_ITEM_ROW, CHAIN_LINK_SLOT } from "../game/class41/chain_slots";
+// ...and constructors 16, 17, 29 and 37: their models, and where their tables
+// are (`class41_rows.ts` reads them).
+import { TYPE16_CONSTRUCTOR, Type16DrawSlots }
+  from "../game/class41/type16_slots";
+import { TYPE17_CONSTRUCTOR, TYPE17_FIRST_SLOT, TYPE17_OBJECTS }
+  from "../game/class41/type17_slots";
+import { TYPE29_CONSTRUCTOR, Type29DrawSlots }
+  from "../game/class41/type29_slots";
+import {
+  TYPE37_CONSTRUCTOR, TYPE37_EFFECT, TYPE37_MOTION, Type37DrawSlots,
+} from "../game/class41/type37_slots";
+import {
+  goldenFrogLessonRows, itemPickupRows, polFilesHoldingSlot, type16Rows,
+  type29Rows, type37Hull,
+} from "./class41_rows";
+import {
+  TYPE42_CONSTRUCTOR, TYPE42_SLOT, TYPE52_CONSTRUCTOR, TYPE52_OBJECTS,
+  TYPE52_SLOT, TYPE55_CONSTRUCTOR, TYPE55_SLOT, TYPE55_SLOT_SPAN,
+  TYPE61_CONSTRUCTOR, TYPE65_CONSTRUCTOR, TYPE65_SLOT, TYPE65_SLOT_SPAN,
+} from "../game/class41/ctor_literals";
+import { type55ParticleOffsets, type61FigureTypes } from "./class41_ctors";
+import { TYPE26_CONSTRUCTOR, TYPE26_SLOT } from "../game/class41/type26_slots";
+import { GOLDEN_FROG_LESSON_CONSTRUCTOR }
+  from "../game/class41/item_pickup_slots";
 // Same argument again: `hud_sprites.ts` is the id list `hud_readout.ts` draws
 // from, as data, and the exporter must put exactly those textures in.
 // The continue screen's and the credit line's are in the same file.
@@ -64,14 +89,20 @@ import { BOSS_BANNER_SPRITES, bannerCardSlots }
 // `GameOverLogoTask`, its route tiles are `.rdata` read below.
 import { GAME_OVER_LOGO_SPRITES, ROUTE_FIGURE_SHADOW_SLOT, ROUTE_MARK_SLOTS }
   from "../game/player_body_data";
+import { GROUND_SHADOW_SLOT } from "../game/ground_shadow";
 // And the options screen's: its titles, EXIT and backgrounds are immediates
 // in its routines; its glyphs, crosshairs and sliders are `.rdata` read below.
+import { SUBTITLE_TILDE_SPRITE } from "../game/dialogue_data";
 import { OPTIONS_SCREEN_SPRITES, SCREEN_IDLE_DIM_SLOT }
   from "../game/options_data";
 // And the result card's: its seventeen tiles and its glyph models are
 // immediates in `ResultCardInstall`.
 import { RESULT_CARD_SPRITES, RESULT_GLYPH_SLOTS }
   from "../game/class61/state";
+// And the chapter card's: its title sprites and stage 6's model are
+// immediates in `ChapterCardInstall`, by scene.
+import { ChapterCardSlotsOf, ChapterCardSpritesOf }
+  from "../game/class60/state";
 // The trunk's sprites and models: class 0x6E's immediates.
 import { ITEM_SELECT_SLOTS, ITEM_SELECT_SPRITES } from "../game/class6e/state";
 import { SpawnClass } from "../game/spawn_class";
@@ -85,8 +116,9 @@ import { WEAPON_FIRST_SLOT, WEAPON_LAST_FRAME }
   from "../game/effects/shot_effects";
 import { SpriteEffectKind } from "../game/effects/sprite";
 import { charactersJson, resolveForStage as resolveCharacters,
-         stagePlacesResultCard } from "./characters";
+         stagePlacesChapterCard, stagePlacesResultCard } from "./characters";
 import * as charmotion from "./charmotion";
+import * as colilib from "./coli";
 import { class42Tables } from "./class42";
 import * as degraded from "./degraded";
 import type { Degradation } from "./degraded";
@@ -320,8 +352,89 @@ export function genericPropEffects(type: number,
 }
 
 /**
+ * The effect trees a class-0x44 builder's object draws, as `[effect, motion]`
+ * pairs, by the container the exporter names it: each is a pair of literals
+ * the builder writes to `obj+0x324`/`+0x328`, or its update rewrites the
+ * block with between draws.
+ *
+ * * `flag_slot_effect` -- `PropBuildFlagSlotEffect` (`FUN_00472E00`): 0xB on
+ *   0x1D6.
+ * * `effect_handoff` -- `PropBuildEffectHandoff` (`FUN_00472F80`): 0xC
+ *   on 0x1CE.
+ * * `swing_then_break` -- `SwingThenBreakUpdate` (`FUN_00474470`) draws 0xD
+ *   on 0x1C7 and 0xE on 0x1C8 while flag 0x64 is down, 0xF on 0x1CA once it
+ *   is up.
+ * * `scaled_slot_effect` -- `PropBuildScaledSlotEffect` (`FUN_00473170`):
+ *   0xF on 0x1CA.
+ * * `effect_collapse` -- `PropBuildEffectCollapse` (`FUN_00473260`): 0x10 on
+ *   0x1D3.
+ */
+export function class44PropEffects(container: string): [number, number][] {
+  switch (container) {
+    case "flag_slot_effect": return [[0xb, 0x1d6]];
+    case "effect_handoff": return [[0xc, 0x1ce]];
+    case "swing_then_break": return [[0xd, 0x1c7], [0xe, 0x1c8], [0xf, 0x1ca]];
+    case "scaled_slot_effect": return [[0xf, 0x1ca]];
+    case "effect_collapse": return [[0x10, 0x1d3]];
+    default: return [];
+  }
+}
+
+/** `PropBuildVanDoors` (`FUN_00472C90`): `obj+0x28C = 0x1794 + i`, i = 0, 1. */
+export const VAN_DOOR_SLOTS = [0x1794, 0x1795];
+/** `EffectHandoffUpdate` (`FUN_00474240`) draws this until its clip starts. */
+export const EFFECT_HANDOFF_CLOSED_SLOT = 0x17d7;
+/** `SwingThenBreakUpdate` (`FUN_00474470`)'s strip, `0x170` stepped to `0x174`. */
+export const SWING_THEN_BREAK_STRIP = [0x170, 0x171, 0x172, 0x173, 0x174];
+/** `PropBuildFlagSlotEffect` (`FUN_00472E00`): scene 0's slot, and every other's. */
+export const FLAG_SLOT_EFFECT_SLOTS = [0x17ee, 0x197c];
+/**
+ * `EffectCollapseUpdate` (`FUN_004748C0`): block 0xB's two models, one per
+ * state of its flag, and block 0x12's one.
+ */
+export const EFFECT_COLLAPSE_SLOTS = [0x173b, 0x173c, 0x197e];
+/**
+ * `PropDrawOnlyType31` (`FUN_0046A1C0`)'s second strip, drawn only in scene 2
+ * block 0xB: `g_scene_tick_counter % 7 + 0x1797`.
+ */
+export const TYPE31_EXTRA_SLOTS = Array.from({ length: 7 }, (_, i) => 0x1797 + i);
+export const TYPE31_EXTRA_SCENE = 2;
+
+/**
+ * Every asset slot a class-0x44 builder's object can draw, from its placement
+ * -- the descriptor's slot or the literals the routine names -- for the
+ * `slots_breakable` template rig.
+ */
+export function class44DrawSlots(pl: Record<string, unknown>,
+                                 scene: number): number[] {
+  const slot = (pl.slot as number) ?? 0;
+  switch (pl.container) {
+    case "hinge": case "hinge_scaled": case "scaled_slot_effect":
+      return [slot];
+    case "van_doors": return VAN_DOOR_SLOTS;
+    case "effect_handoff": return [slot, EFFECT_HANDOFF_CLOSED_SLOT];
+    case "swing_then_break": return [slot, ...SWING_THEN_BREAK_STRIP];
+    case "flag_slot_effect":
+      return [scene === 0 ? FLAG_SLOT_EFFECT_SLOTS[0] : FLAG_SLOT_EFFECT_SLOTS[1]];
+    case "effect_collapse": return EFFECT_COLLAPSE_SLOTS;
+    case "slot_strip_loop": {
+      const span = Math.max(0, (pl.roll as number) ?? 0);
+      return [...Array.from({ length: span + 1 }, (_, i) => slot + i),
+              ...(scene === TYPE31_EXTRA_SCENE ? TYPE31_EXTRA_SLOTS : [])];
+    }
+    case "generic":
+      // A class-0x41 type-31 prop runs the same routine.
+      return pl.type === 31 && scene === TYPE31_EXTRA_SCENE
+        ? TYPE31_EXTRA_SLOTS : [];
+    default: return [];
+  }
+}
+
+/**
  * The effect trees the stage's generic props draw, keyed by effect id, for
- * the same map {@link scriptFlagEffectsJson} fills. One motion per id is all
+ * the same map {@link scriptFlagEffectsJson} fills -- and the class-0x44
+ * builders' in {@link class44PropEffects}, which go into the same map on the
+ * same terms. One motion per id is all
  * the map can hold: a second motion for an id already there is noted and not
  * exported, rather than silently posing one effect with another's clip.
  */
@@ -330,9 +443,10 @@ export async function genericPropEffectsJson(
     have: Record<string, unknown>): Promise<Record<string, unknown>> {
   const out: Record<string, unknown> = {};
   for (const pl of placements) {
-    if (pl.container !== "generic") continue;
-    for (const [effect, motion] of genericPropEffects(pl.type as number,
-                                                      stage.scene ?? -1)) {
+    const pairs = pl.container === "generic"
+      ? genericPropEffects(pl.type as number, stage.scene ?? -1)
+      : class44PropEffects(pl.container as string);
+    for (const [effect, motion] of pairs) {
       const key = String(effect);
       const prior = (out[key] ?? have[key]) as { motion?: number } | undefined;
       if (prior) {
@@ -597,13 +711,27 @@ function genericTypes(tables: ExeTables): Set<number> {
  * decrement the same `g_item_set_countdown` and the port has to place them all
  * before any of the countdowns mean anything.
  */
-export function containerPlacements(tables: ExeTables, evt: evtlib.EvtFile,
-                                    spawnRecords: Spawn[]):
+export function containerPlacements(
+    tables: ExeTables, evt: evtlib.EvtFile, spawnRecords: Spawn[],
+    coliSets: [colilib.ColiFile, colilib.ColiFile] | null = null):
     Record<string, unknown>[] {
   const raw = evt.raw;
   const out: Record<string, unknown>[] = [];
   const generic = genericTypes(tables);
   const s8 = (o: number) => (raw[o] << 24) >> 24;
+  // The i32 at tail `+0x08`, which every class-0x44 builder that reads it
+  // stores to `obj+0x14C` as it stands (selectors 0 to 7, 11, 12, 13 and
+  // 17 -- one `MOV [ESI+0x14C], r32` in each, and no class-0x41 routine
+  // writes the offset at all), resolved to the `coli.blobs` key it points
+  // at: the mesh `ShotTestMesh` (`FUN_00404A00`) and the moving-object
+  // collision passes trace through `obj+0x150`. `null` for `-1`, and for a
+  // pointer that lands on no blob, which is what a wrong reading looks like.
+  const coliBlobOf = (coli: number): string | null => {
+    const hit = coli !== -1 && coliSets
+      ? colilib.pointerToOffset(coli >>> 0, coliSets[0], coliSets[1])
+      : null;
+    return hit ? `${hit[0]}:${hit[1]}` : null;
+  };
   for (const rec of spawnRecords) {
     if (rec.cls !== 0x41 && rec.cls !== 0x44) continue;
     if (rec.offset + 0x30 > raw.length) continue;
@@ -654,6 +782,63 @@ export function containerPlacements(tables: ExeTables, evt: evtlib.EvtFile,
           lifetime_evt_steps: 0,
           pos: [...rec.pos],
         });
+      } else if (ctor === TYPE16_CONSTRUCTOR || ctor === TYPE29_CONSTRUCTOR) {
+        // `PlaceTable16Props` and `PlaceTable29Props`: every object's point
+        // is a row of a table in the image (`breakables.type16_xz`,
+        // `type29_xyz`), so the descriptor contributes only `+0x11C`, the
+        // step lifetime each object copies.
+        out.push({
+          at: rec.offset, container: `table${ctor}`,
+          lifetime_evt_steps: rec.hp,
+        });
+      } else if (ctor === TYPE17_CONSTRUCTOR) {
+        // `PlaceType17Props` -- three objects about the placer's point, and
+        // nothing else of the descriptor. They have no lifetime word.
+        out.push({
+          at: rec.offset, container: "type17",
+          lifetime_evt_steps: 0,
+          pos: [...rec.pos],
+        });
+      } else if (ctor === TYPE37_CONSTRUCTOR) {
+        // `PlaceType37PropPair` -- two objects at the placer's point, turned by
+        // its `+0x68`; `+0x1F4` (the s8 at `desc+0x24`) is their item set and
+        // `+0x64` the set's size, `+0x11C` the lifetime. The effect and motion
+        // their break draws are literals in the constructor, named here so
+        // the effect's tree and clip travel (`scriptFlagEffectsJson`).
+        out.push({
+          at: rec.offset, container: "type37",
+          lifetime_evt_steps: rec.hp,
+          field_1f4: s8(rec.offset + 0x24),
+          set_size: rec.orient[0],
+          effect: TYPE37_EFFECT, motion: TYPE37_MOTION,
+          pos: [...rec.pos], yaw: rec.orient[1],
+        });
+      } else if (ctor === TYPE42_CONSTRUCTOR || ctor === TYPE52_CONSTRUCTOR
+                 || ctor === TYPE55_CONSTRUCTOR || ctor === TYPE61_CONSTRUCTOR
+                 || ctor === TYPE65_CONSTRUCTOR) {
+        // Constructors 42, 52, 55, 61 and 65 (`game/class41/type42.ts` and
+        // its neighbours) read at most the descriptor's position, yaw and
+        // `+0x11C`; 55 and 61 read a table of the image as well, and it
+        // travels here, cut to the rows the constructor's own immediate
+        // reaches.
+        const pl: Record<string, unknown> = {
+          at: rec.offset, container: `type${ctor}`,
+          lifetime_evt_steps: rec.hp,
+          pos: [...rec.pos], yaw: rec.orient[1],
+        };
+        const table = ctor === TYPE55_CONSTRUCTOR
+          ? type55ParticleOffsets(tables)
+          : ctor === TYPE61_CONSTRUCTOR ? type61FigureTypes(tables) : [];
+        if (table === null) {
+          degraded.note("hod2lib.bundle.container_placements",
+                        `constructor ${ctor} at 0x${rec.offset.toString(16)}`,
+                        "the objects are not placed and nothing draws them",
+                        "its table is not in the image");
+          continue;
+        }
+        if (ctor === TYPE55_CONSTRUCTOR) pl.offsets = table;
+        if (ctor === TYPE61_CONSTRUCTOR) pl.char_types = table;
+        out.push(pl);
       } else if (ctor === 24) {
         // `PlaceChainSegments` -- twenty segments, each carrying the placer's
         // `+0x1F4` as a chain group. Group 1 is a **route-branch trigger**.
@@ -729,6 +914,42 @@ export function containerPlacements(tables: ExeTables, evt: evtlib.EvtFile,
           field_1f4: index, slot,
           lifetime_evt_steps: rec.hp,
         });
+      } else if (ctor === TYPE26_CONSTRUCTOR) {
+        // `PlaceType26RippleTask` -- the warehouse water's task. It reads
+        // the lifetime alone; what travels besides is the slot it walks and
+        // draws and the one `pol/` file that slot belongs to, whose state
+        // its resident bit is.
+        const pols = polFilesHoldingSlot(tables, TYPE26_SLOT);
+        if (pols.length !== 1) {
+          degraded.note("hod2lib.bundle.container_placements",
+                        `constructor 26 at 0x${rec.offset.toString(16)}`,
+                        "the task is not placed and nothing draws its water",
+                        `slot 0x${TYPE26_SLOT.toString(16)} is in `
+                        + `${pols.length} pol files, not one`);
+          continue;
+        }
+        out.push({
+          at: rec.offset, container: "ripple",
+          slot: TYPE26_SLOT, pol: pols[0],
+          lifetime_evt_steps: rec.hp,
+        });
+      } else if (ctor === GOLDEN_FROG_LESSON_CONSTRUCTOR) {
+        // `PlaceGoldenFrogFromLessonTable` -- a golden frog at one of three
+        // places a Training lesson picks, from `g_golden_frog_lesson_xz`,
+        // which travels raw; the placer gives its `+0x44` and its `+0x11C`.
+        out.push({
+          at: rec.offset, container: "golden_frog",
+          xz: goldenFrogLessonRows(tables),
+          lifetime_evt_steps: rec.hp,
+          pos: [...rec.pos],
+        });
+      } else if (ctor === 3) {
+        // `PlaceType3UvScrollTask` -- the stage-1 car's reflection. The task
+        // reads nothing of the placer; the placement only says it is there.
+        out.push({
+          at: rec.offset, container: "uv_scroll",
+          lifetime_evt_steps: rec.hp,
+        });
       } else if (ctor === 4) {
         out.push({
           at: rec.offset, container: "kinded",
@@ -741,23 +962,33 @@ export function containerPlacements(tables: ExeTables, evt: evtlib.EvtFile,
         });
       }
     } else if (rec.hp === 17) {              // class 0x44 selector 17
-      // `PlaceStoryModeSwitch` -- the branch writer with the widest reach.
-      // `obj+0x11C` is written as the LITERAL 1 by the constructor, so it is
-      // not a lifetime here; `+0x2A4` names the script flag that removes it.
+      // `PlaceStoryModeSwitch` (`FUN_00473A70`) -- the branch writer with the
+      // widest reach. The tail at the offsets and widths the constructor
+      // reads it: the signed byte at `+0x00` is the hinge curve
+      // (`obj+0x194`, `MOVSX` at `0x00474FE3`), the i16 at `+0x04` the slot,
+      // the i32 at `+0x08` the collision blob (`obj+0x14C`), the i32 at
+      // `+0x0C` the swing's side (`obj+0x1DC`), the two signed bytes at
+      // `+0x10`/`+0x11` the route flag and the remove flag, three f32 at
+      // `+0x14` the draw's scale and four signed bytes at `+0x20` the item
+      // keys. `obj+0x11C` is written as the LITERAL 1, so it is not a
+      // lifetime here; `+0x2A4` is.
+      const coli = rec.param(0x08, "i32") ?? -1;
       out.push({
         at: rec.offset, container: "story_switch",
+        curve: rec.param(0x00, "i8") ?? 0,
         slot: rec.param(0x04, "i16") || 0,
-        // The script flag the route waits on, and the one that removes the
-        // object. Both signed bytes, and -1 means "none".
-        // The descriptor's `+0x08`, which decides how the switch is shot:
-        // -1 is the sphere path (radius 8, centre never written, so it answers
-        // any shot on screen) and anything else is the mesh volume, which the
-        // port has not got. See `game/class41/shot_test.ts`.
-        volume: rec.param(0x08, "i32"),
+        // -1 is the sphere arm (radius 8, `obj+0x34 |= 0x80000000`); anything
+        // else is the mesh arm (`|= 0x50`), and `coli_blob` is the
+        // `coli.blobs` key it points at -- `null` for -1, or for a pointer
+        // that lands on no blob, which is what a wrong reading looks like.
+        coli,
+        coli_blob: coliBlobOf(coli),
+        side: rec.param(0x0c, "i32") ?? 0,
         branch_flag: rec.param(0x10, "i8"),
         remove_flag: rec.param(0x11, "i8"),
-        // The four Original Mode item ids that throw the switch without a
-        // shot. -1 in the first means the switch has no key at all.
+        scale: [0x14, 0x18, 0x1c].map((o) => rec.param(o, "f32") ?? 0),
+        // The four Original Mode item ids that throw the switch on a shot.
+        // -1 in the first means the switch has no key at all.
         keys: [0, 1, 2, 3].map((k) => rec.param(0x20 + k, "i8")),
         lifetime_evt_steps: 1,
         pos: [...rec.pos], yaw: rec.orient[1],
@@ -798,6 +1029,7 @@ export function containerPlacements(tables: ExeTables, evt: evtlib.EvtFile,
         at: rec.offset, container: "rise_to_height",
         slot: rec.param(0x04, "u16") || 0,
         coli: rec.param(0x08, "i32") ?? -1,
+        coli_blob: coliBlobOf(rec.param(0x08, "i32") ?? -1),
         rise: rec.param(0x14, "i32") ?? 0,
         open_flag: rec.param(0x20, "i8") ?? 0,
         remove_flag: rec.param(0x21, "i8") ?? -1,
@@ -817,6 +1049,7 @@ export function containerPlacements(tables: ExeTables, evt: evtlib.EvtFile,
         slot: rec.param(0x04, "u16") || 0,
         slot_word: rec.param(0x04, "u32") ?? 0,
         coli: rec.param(0x08, "i32") ?? -1,
+        coli_blob: coliBlobOf(rec.param(0x08, "i32") ?? -1),
         speed: rec.param(0x10, "i32") ?? 0,
         travel: rec.param(0x14, "i32") ?? 0,
         open_flag: rec.param(0x20, "i8") ?? 0,
@@ -852,6 +1085,117 @@ export function containerPlacements(tables: ExeTables, evt: evtlib.EvtFile,
         pos: [...rec.pos],
         pitch: rec.orient[0], yaw: rec.orient[1], roll: rec.orient[2],
       });
+    } else if (rec.hp === 1 || rec.hp === 2 || rec.hp === 4) {
+      // Class 0x44 selectors 1, 2 and 4 -- `PropBuildHinge` (`FUN_00472BD0`),
+      // `PropBuildVanDoors` (`FUN_00472C90`) and `PropBuildHingeScaled`
+      // (`FUN_00472EB0`), whose objects all run `HingeUpdate`. The tail at the
+      // offsets and widths each builder reads it: the u16 at `+0x00` is the
+      // curve (`obj+0x290`), the u16 at `+0x04` the slot, the i32 at `+0x08`
+      // the collision blob (`obj+0x14C`), and then the builders part --
+      // selector 1 takes `obj+0x1DC` from the i32 at `+0x10`, the wobble
+      // phase `obj+0x1E8` from the i32 at `+0x14` and its two flags from the
+      // signed bytes at `+0x20`/`+0x21`; selector 4 takes `obj+0x1DC` from
+      // `+0x0C`, its flags from `+0x10`/`+0x11` and three f32 of scale from
+      // `+0x14`; selector 2 reads only `+0x08`, `+0x14` and `+0x20`/`+0x21`,
+      // its slots, curve and sides being literals. No lifetime: the remove
+      // flag is the object's whole life.
+      const scaled = rec.hp === 4;
+      out.push({
+        at: rec.offset,
+        container: rec.hp === 1 ? "hinge" : scaled ? "hinge_scaled"
+                                                   : "van_doors",
+        curve: rec.param(0x00, "u16") ?? 0,
+        slot: rec.param(0x04, "u16") ?? 0,
+        coli: rec.param(0x08, "i32") ?? -1,
+        coli_blob: coliBlobOf(rec.param(0x08, "i32") ?? -1),
+        side: rec.param(scaled ? 0x0c : 0x10, "i32") ?? 0,
+        ...(scaled ? {} : { wobble_phase: rec.param(0x14, "i32") ?? 0 }),
+        open_flag: rec.param(scaled ? 0x10 : 0x20, "i8") ?? 0,
+        remove_flag: rec.param(scaled ? 0x11 : 0x21, "i8") ?? -1,
+        ...(scaled ? { scale: [0x14, 0x18, 0x1c].map(
+          (o) => rec.param(o, "f32") ?? 0) } : {}),
+        lifetime_evt_steps: 0,
+        pos: [...rec.pos], yaw: rec.orient[1],
+      });
+    } else if (rec.hp === 5 || rec.hp === 6 || rec.hp === 7) {
+      // Selectors 5, 6 and 7 -- `PropBuildEffectHandoff` (`FUN_00472F80`),
+      // `PropBuildSwingThenBreak` (`FUN_00473060`) and
+      // `PropBuildScaledSlotEffect` (`FUN_00473170`). All three read the
+      // hinges' words: selector 5 at selector 1's offsets, 6 and 7 at
+      // selector 4's, plus the signed byte at `+0x12` (`obj+0x2AC`). The
+      // effects each draws are literals (`class44PropEffects`).
+      const five = rec.hp === 5;
+      out.push({
+        at: rec.offset,
+        container: five ? "effect_handoff"
+          : rec.hp === 6 ? "swing_then_break" : "scaled_slot_effect",
+        curve: rec.param(0x00, "u16") ?? 0,
+        slot: rec.param(0x04, "u16") ?? 0,
+        coli: rec.param(0x08, "i32") ?? -1,
+        coli_blob: coliBlobOf(rec.param(0x08, "i32") ?? -1),
+        side: rec.param(five ? 0x10 : 0x0c, "i32") ?? 0,
+        ...(five ? { wobble_phase: rec.param(0x14, "i32") ?? 0 }
+                 : { field_2ac: rec.param(0x12, "i8") ?? 0,
+                     scale: [0x14, 0x18, 0x1c].map(
+                       (o) => rec.param(o, "f32") ?? 0) }),
+        open_flag: rec.param(five ? 0x20 : 0x10, "i8") ?? 0,
+        remove_flag: rec.param(five ? 0x21 : 0x11, "i8") ?? -1,
+        lifetime_evt_steps: 0,
+        pos: [...rec.pos], yaw: rec.orient[1],
+      });
+    } else if (rec.hp === 3) {               // class 0x44 selector 3
+      // `PropBuildFlagSlotEffect` (`FUN_00472E00`): the two signed bytes at
+      // `+0x20`/`+0x21` and the i32 at `+0x08`, nothing else of the tail. The
+      // slot is a literal picked by `g_scene_index` and the effect is the
+      // literal 0xB on motion 0x1D6.
+      out.push({
+        at: rec.offset, container: "flag_slot_effect",
+        coli: rec.param(0x08, "i32") ?? -1,
+        coli_blob: coliBlobOf(rec.param(0x08, "i32") ?? -1),
+        open_flag: rec.param(0x20, "i8") ?? 0,
+        remove_flag: rec.param(0x21, "i8") ?? -1,
+        lifetime_evt_steps: 0,
+        pos: [...rec.pos],
+      });
+    } else if (rec.hp === 8) {               // class 0x44 selector 8
+      // `PropBuildEffectCollapse` (`FUN_00473260`): the signed byte at `+0x10`
+      // is the flag that plays it, the one at `+0x11` its lifetime in steps
+      // (`MOVSX AX, byte` into the word at `obj+0x11C`), and three f32 at
+      // `+0x14` the scale. Effect 0x10 on motion 0x1D3, literals.
+      out.push({
+        at: rec.offset, container: "effect_collapse",
+        open_flag: rec.param(0x10, "i8") ?? 0,
+        lifetime_evt_steps: rec.param(0x11, "i8") ?? 0,
+        scale: [0x14, 0x18, 0x1c].map((o) => rec.param(o, "f32") ?? 0),
+        pos: [...rec.pos], yaw: rec.orient[1],
+      });
+    } else if (rec.hp === 10) {              // class 0x44 selector 10
+      // `PropBuildSlotStripLoop` (`FUN_00473370`): the u16 at `+0x00` is the
+      // lifetime, the u16 at `+0x04` the strip's first slot, three f32 at
+      // `+0x14` the scale, and the descriptor's `+0x6C` the strip's last
+      // cursor -- so every frame of the strip travels.
+      out.push({
+        at: rec.offset, container: "slot_strip_loop",
+        slot: rec.param(0x04, "u16") ?? 0,
+        lifetime_evt_steps: rec.param(0x00, "u16") ?? 0,
+        scale: [0x14, 0x18, 0x1c].map((o) => rec.param(o, "f32") ?? 0),
+        roll: rec.orient[2],
+        pos: [...rec.pos], yaw: rec.orient[1],
+      });
+    } else if (rec.hp === 15) {              // class 0x44 selector 15
+      // `PropBuildKindedProp` (`FUN_00473770`): the kind is the descriptor's
+      // `+0x6C` read as a word, the set size its `+0x64`, the lifetime the u16
+      // at tail `+0x00`, the item set the signed byte at `+0x04` and the
+      // story item the i32 at `+0x08`.
+      out.push({
+        at: rec.offset, container: "kinded_44",
+        kind: (rec.orient[2] << 16) >> 16,
+        set_size: rec.orient[0],
+        item_set: rec.param(0x04, "i8") ?? 0,
+        story_item: rec.param(0x08, "i32") ?? -1,
+        lifetime_evt_steps: rec.param(0x00, "u16") ?? 0,
+        pos: [...rec.pos], yaw: rec.orient[1],
+      });
     } else if (rec.hp === 16) {              // class 0x44 selector 16
       const tail = rec.offset + 0x24;
       out.push({
@@ -883,6 +1227,12 @@ export function containerPlacements(tables: ExeTables, evt: evtlib.EvtFile,
         // `obj+0x28C`, which this family never draws through: the routine
         // reads its own node slots out of the tree instead.
         slot: rec.param(0x04, "u16") ?? 0,
+        // `obj+0x14C` (`MOV [ESI+0x14C], EDX` at 0x00472BC0), raw and
+        // resolved. The port does not file this object yet -- see
+        // `game/class44/script_flag_effect.ts` -- and carries the blob so
+        // what that needs is measured on the data.
+        coli: rec.param(0x08, "i32") ?? -1,
+        coli_blob: coliBlobOf(rec.param(0x08, "i32") ?? -1),
         // `ScriptFlagEffectUpdate` has no `PropExpireByStepLifetime`; script
         // flag 0x13 is its whole lifetime.
         lifetime_evt_steps: 0,
@@ -996,6 +1346,12 @@ export function scriptedHumanoidsJson(evt: evtlib.EvtFile,
       flags2: i16(raw, blk + 2),
       motion: i16(raw, blk + 4),
       phase: i16(raw, blk + 6),
+      // Where the program starts: `ScriptedHumanoidInit` points `obj+0x1394`
+      // at `blk + 8` (`0x00484282`). That is not always `cmds[0]`: the list
+      // is sorted by address, and a program whose `op 15` jumps back into
+      // commands stored before its own block -- another spawn's, shared --
+      // lists those first.
+      entry: index.get(blk + 8) ?? 0,
       cmds,
     };
   }
@@ -1024,18 +1380,31 @@ export function breakablesJson(tables: ExeTables,
     hull: tables.breakableHullPoints().map((p) => [...p]),
     falling_hull: tables.fallingHullPoints().map((p) => [...p]),
     fragment_hull: tables.fragmentHullPoints().map((p) => [...p]),
+    // Class 0x41 constructors 16, 29 and 37's tables, raw: the routines'
+    // own multiplies are in `game/class41/`.
+    type16_xz: type16Rows(tables),
+    type29_xyz: type29Rows(tables),
+    type37_hull: type37Hull(tables),
+    // `g_item_pickup_slot`'s five rows: the score pickup any container's
+    // item set 2 or 5..8 lets out (`SpawnScorePickup`, `ScorePickupUpdate`).
+    item_pickups: itemPickupRows(tables),
     shatter: tables.shatterPieces(),
     kinds: tables.propKindParams(),
     placements,
     effects,
     level_height: 7.540296,
     original_items: originalItemsJson(tables, placements, scene),
-    // `g_pHingeCurvesXYZ`, whole: the class-0x41 generic routines that swing
-    // a hinge read it by a literal curve index, in `game/`, where the
-    // class-0x44 hinges' own copy in `props.curves` cannot be reached.
+    // `g_pHingeCurvesXYZ` and `g_pHingeCurvesYaw`, whole: `HingeUpdate`
+    // (`FUN_00473CF0`) reads one or the other by the curve its object names,
+    // `SwingThenBreakUpdate` (`FUN_00474470`) the yaw table's curve 1 by a
+    // literal, and the class-0x41 generic routines that swing a part the XYZ
+    // table by a literal.
     hinge_curves_xyz: Object.fromEntries(
       propslib.HINGE_CURVES_XYZ_SELECTORS.map(
         (c) => [String(c), propslib.hingeCurve(tables, c)])),
+    hinge_curves_yaw: Object.fromEntries(
+      propslib.hingeYawCurves(tables).map(
+        (c) => [String(c), propslib.hingeCurve(tables, c).map((k) => k[1])])),
   };
   return out;
 }
@@ -1085,7 +1454,8 @@ export const STORY_ITEM_ROW_BY_TYPE: Record<number, number> = { 74: 2, 75: 1 };
  * placements can reach. See `OriginalItemsJson`.
  *
  * A row is named by the placer's byte for a collectible (types 70, 71, 72),
- * by a routine's own immediate for types 7, 43, 74 and 75, and by a story item --
+ * by a routine's own immediate for types 7, 43, 74 and 75 and the chain, and
+ * by a story item --
  * `obj+0x2A0` -- for a group member or a falling container, whose destroy
  * path hands `SpawnStoryModeItem` that word in Original Mode.
  */
@@ -1109,6 +1479,10 @@ export function originalItemsJson(tables: ExeTables,
       for (const m of groups[pl.group as number] ?? []) named.push(m.story_item);
     } else if (pl.container === "falling") {
       named.push((pl.story_item as number) ?? -1);
+    } else if (pl.container === "chain") {
+      // `SpawnChainItemDrop(18.0, 4, seg)` -- segment 0's drop, once a link
+      // of group 1 has opened the route.
+      named.push(CHAIN_ITEM_ROW);
     }
   }
   for (const row of named) {
@@ -1180,7 +1554,8 @@ export async function scriptFlagEffectsJson(
   const out: Record<string, unknown> = {};
   for (const pl of placements) {
     // Every placement that names an effect and a motion: class 0x44 selector
-    // 0's window halves, and class 0x41 type 44's two breakable chairs.
+    // 0's window halves, class 0x41 type 44's two breakable chairs, and
+    // constructor 37's pair, whose break is effect 7 on motion 0x1D5.
     if (pl.effect === undefined || pl.motion === undefined) continue;
     const effect = pl.effect as number;
     const motion = pl.motion as number;
@@ -1232,6 +1607,111 @@ function carriedPropTypes(placements: readonly Record<string, unknown>[]):
 }
 
 /** One effect id's tree and baked motion, or null with a degraded note. */
+/**
+ * `EffectCollapseUpdate` (`FUN_004748C0`) copies **73** entries of keys 0x22
+ * and 0x23 out of effect 0x10's motion, which has 72 -- so its last entry is
+ * read out of the rotation block and the next key. The bundle's decoded
+ * `t`/`r` stop at the node count, so the two keys travel raw on each
+ * `effect_collapse` placement as `collapse_keys`, read at the routine's own
+ * addresses (`MotionBank.effectKeyRaw`).
+ */
+export const EFFECT_COLLAPSE_EFFECT = 0x10;
+export const EFFECT_COLLAPSE_MOTION = 0x1d3;
+export const EFFECT_COLLAPSE_KEYS = [0x22, 0x23];
+export const EFFECT_COLLAPSE_ENTRIES = 0x49;
+
+export async function addEffectCollapseKeys(
+    stage: Stage, placements: Record<string, unknown>[]): Promise<void> {
+  const mine = placements.filter((pl) => pl.container === "effect_collapse");
+  if (!mine.length) return;
+  const tables = stage.tables;
+  const nodes = tables.ru16(propslib.EFFECT_BONE_COUNTS
+                            + EFFECT_COLLAPSE_EFFECT * 2) ?? 0;
+  const banks = tables.motionBanks();
+  const bankId = tables.motionBankOf(EFFECT_COLLAPSE_MOTION);
+  const bank = bankId !== null && banks.has(bankId)
+    ? await loadBank(stage.source, banks.get(bankId)![0],
+                     banks.get(bankId)![1])
+    : null;
+  const keys = EFFECT_COLLAPSE_KEYS.map((k) => {
+    const raw = bank?.effectKeyRaw(EFFECT_COLLAPSE_MOTION, nodes, k,
+                                   EFFECT_COLLAPSE_ENTRIES);
+    return raw ? { key: k, t_bits: raw.t, r: raw.r } : null;
+  });
+  if (keys.some((k) => k === null)) {
+    degraded.note("hod2lib.bundle.effect_collapse_keys",
+                  `motion 0x${EFFECT_COLLAPSE_MOTION.toString(16)}`,
+                  "the collapse's pieces start from nothing",
+                  "keys 0x22/0x23 could not be read");
+    return;
+  }
+  for (const pl of mine) pl.collapse_keys = keys;
+}
+
+/**
+ * The three angles class 0x44 selectors 0 and 3 write into `obj+0x64..0x6C`
+ * for `ShotTestMesh` to turn a hit's normal by, one triple per play cursor
+ * the routine can hold (`0 .. play_length - 2`, where its own step stops
+ * and `EffectDrawTree`'s wrap never fires):
+ *
+ * ```
+ * rot = EffectFrameRotations(obj + 0x324, obj->+0x32C);   // the RAW cursor
+ * obj->+0x64 = rot[obj->+0x2A0 * 3 - 3]; +0x68 = ...-2; +0x6C = ...-1;
+ * ```
+ *
+ * `obj+0x2A0` is the capture bone for selector 0 (`ScriptFlagEffectUpdate`,
+ * `FUN_00473B90`, `0x00473CBC`..) and the **open flag** for selector 3
+ * (`FlagSlotEffectUpdate`, `FUN_00474120`), so selector 3's entry is 30 for
+ * stage 1's spawn and lands in later keys' translations. Read where the
+ * routine reads (`MotionBank.effectRotationEntry`); `null` where the six
+ * bytes are past the end of the bank's file -- motion 471 from cursor 101,
+ * motion 470 at entry 30 from cursor 66 -- which the port reads as zero
+ * (the divergence declared on `EffectFrameRotationsEntry`,
+ * `game/class44/script_flag_effect.ts`).
+ */
+export async function addEffectRotationEntries(
+    stage: Stage, placements: Record<string, unknown>[]): Promise<void> {
+  const tables = stage.tables;
+  const banks = tables.motionBanks();
+  for (const pl of placements) {
+    let effect: number, motion: number, entry: number;
+    if (pl.container === "script_flag_effect") {
+      effect = pl.effect as number;
+      motion = pl.motion as number;
+      entry = pl.capture_bone as number;
+    } else if (pl.container === "flag_slot_effect") {
+      effect = FLAG_SLOT_EFFECT_EFFECT;
+      motion = FLAG_SLOT_EFFECT_MOTION;
+      entry = pl.open_flag as number;
+    } else {
+      continue;
+    }
+    const nodes = tables.ru16(propslib.EFFECT_BONE_COUNTS + effect * 2) ?? 0;
+    const bankId = tables.motionBankOf(motion);
+    const bank = bankId !== null && banks.has(bankId)
+      ? await loadBank(stage.source, banks.get(bankId)![0],
+                       banks.get(bankId)![1])
+      : null;
+    const len = tables.motionPlayLength(motion) ?? 0;
+    if (!bank || !nodes || len < 2) {
+      degraded.note("hod2lib.bundle.effect_rotation_entries",
+                    `effect ${effect} motion ${motion}`,
+                    "the shot test's normal is not turned",
+                    "the bank or the play length could not be read");
+      continue;
+    }
+    const out: ([number, number, number] | null)[] = [];
+    for (let c = 0; c <= len - 2; c++) {
+      out.push(bank.effectRotationEntry(motion, nodes, c, entry));
+    }
+    pl.rotation_entries = out;
+  }
+}
+
+/** `obj+0x324`/`+0x328` from `PropBuildFlagSlotEffect`: effect 0xB, motion 0x1D6. */
+const FLAG_SLOT_EFFECT_EFFECT = 0xb;
+const FLAG_SLOT_EFFECT_MOTION = 0x1d6;
+
 async function effectDefJson(stage: Stage, effect: number, motion: number,
                              site: string, cues: number[]):
     Promise<Record<string, unknown> | null> {
@@ -1289,6 +1769,10 @@ async function effectDefJson(stage: Stage, effect: number, motion: number,
  * and not a `BreakableProp`: it is registered for the shot test by
  * `RegisterForShotTest` with a radius at `obj+0x124`, not by a bounding box.
  */
+/** `0x1A78 + ftol(obj+0x1370) % 0x32` -- `water.bin` 13..62. */
+const ATTACHED_EFFECT_SLOTS: number[] =
+  Array.from({ length: 0x32 }, (_, i) => 0x1a78 + i);
+
 export const ACTOR_SLOTS: Record<number, number[]> = {
   // `fish.bin` 3..22 -- the twenty-frame swim strip class 0x51 flips through
   // -- then entries 0, 1 and 2: the flung corpse, the sunk one, and the ripple
@@ -1330,6 +1814,12 @@ export const ACTOR_SLOTS: Record<number, number[]> = {
   // (`Class23LandingRingUpdate`, `FUN_00491700`: slot `0x17C8`, `boss1q.bin`
   // 94). The walker is only ever made by the flier, so the flier carries both.
   0x22: [...Array.from({ length: 15 }, (_, i) => 0x94 + i), 0x17c8],
+  // Class 0x15, the floating planks: the strip a plank throws as it leaves
+  // on its flag, `SpawnPropStripEffect` (`FUN_0043FCA0`) kind 1 --
+  // `sanbasi.bin` 12..90, slots 0x16E1..0x172F -- which the strip object
+  // draws by slot. The plank's own model is its descriptor's
+  // (`floatingPropDrawSlots`).
+  0x15: Array.from({ length: 0x172f - 0x16e1 + 1 }, (_, i) => 0x16e1 + i),
   // Class 0x42, the worm: `buyo.bin` 0..53, every slot its three routines
   // draw through `WormAssetDrawSlot` (`FUN_00430B90`) -- the body `0x85A`,
   // its shadow `0x85B`, the landing splat `0x85C..0x874` (which the lone
@@ -1340,6 +1830,13 @@ export const ACTOR_SLOTS: Record<number, number[]> = {
   // 0x40's slots: the ripple `0x1A38` and the strip `0x15E4..0x1601`.
   0x42: [...Array.from({ length: 0x88f - 0x85a + 1 }, (_, i) => 0x85a + i),
          0x1a38, ...Array.from({ length: 30 }, (_, i) => 0x15e4 + i)],
+  // Classes 0x30 and 0x18 (whose update is `EnemyZombieUpdate` too): the
+  // wake `ActorCheckWaterEntry` (`FUN_00456920`) leaves on an actor that
+  // wades in -- `AttachedEffectThink` (`FUN_004083D0`) draws
+  // `AssetDrawSlotWithAlpha(0x1A78 + n % 0x32)`, `water.bin` 13..62, a
+  // fifty-cel cycle. See `game/effects/attached_effect.ts`.
+  0x30: ATTACHED_EFFECT_SLOTS,
+  0x18: ATTACHED_EFFECT_SLOTS,
   // Class 0x32, the stage-5 boss: every model its projectiles and its tasks
   // draw, in the world and under a light colour of their own, which
   // `render/slotmodels.ts` draws. The afterimage (`Class32AfterimageTick`,
@@ -1404,6 +1901,24 @@ export const EFFECT_SLOTS_BY_CLASS: Record<number, number[]> = {
   // sparks, splashes, bite flashes, wake, path effects, the civilian's
   // shadow and the water mound. See `game/class45/tables.ts`.
   0x45: [...BOSS3_EFFECT_SLOTS],
+  // Class 0x29, `SceneryBatchUpdate29` (`FUN_00432C80`): every record of its
+  // three lists draws `0x93C` or `0x93D` in the world -- the blood stage 1's
+  // blocks 3 and 8 and stage 2's block 11 leave on the floor
+  // (`game/class29/`).
+  0x29: [0x93c, 0x93d],
+  // Class 0x27, `PathRidingVehicleDraw` (`FUN_00432B10`), drawn in the world
+  // through `DrawSlotInWorld` (`game/class27/`): the body `0x2B` and, from
+  // camera frame `0xBE`, `0x33` (`char_adv04.bin` 0 and 8), and the two cel
+  // loops it then steps -- `0x1434..0x145A` once and `0x1AAB..0x1AD2` for
+  // good (`char_adv00.bin` 10..48 and 57..96), and `0xB67..0xB6E`
+  // (`char_adv00.bin` 1..8). `0x1433` is never drawn: the counter is stepped
+  // before the first cel is named.
+  0x27: [
+    0x2b, 0x33,
+    ...Array.from({ length: 0x145a - 0x1434 + 1 }, (_, i) => 0x1434 + i),
+    ...Array.from({ length: 0x1ad2 - 0x1aab + 1 }, (_, i) => 0x1aab + i),
+    ...Array.from({ length: 8 }, (_, i) => 0xb67 + i),
+  ],
   // The stage-6 boss's: every slot its routines draw by hand -- its own
   // nodes and shells, the satellites, the children's nodes, the flares and
   // the tasks. See `CLASS2D_EFFECT_SLOTS` in `game/class2D/state.ts`.
@@ -1432,21 +1947,26 @@ export const EFFECT_SLOTS_BY_CLASS: Record<number, number[]> = {
   // (`FUN_0048DF10`) raises when her held item pays a life --
   // `obj+0x1F4 = 0x1256 + player`, `common.bin` 303 and 304 -- which
   // `LifeGrantedMarkerUpdate` draws in camera space. See
-  // `game/class10/life_marker.ts`. And the marker a shot one leaves,
-  // `SpawnCivilianHitMarker` (`FUN_0048E080`), `obj+0x1F4 = 0x132D + player`
-  // -- `common.bin` 305 and 306 -- which `CivilianHitMarkerUpdate` draws at
-  // the point she was hit. See `game/class10/hit_marker.ts`.
+  // `game/class10/life_marker.ts`. And the marker her shot arm leaves,
+  // `SpawnCivilianHitMarker` (`FUN_0048E080`): `obj+0x1F4 = 0x132D` for
+  // player 0 and `0x132E` otherwise, `common.bin` 305 and 306, drawn in
+  // camera space by `CivilianHitMarkerUpdate`. See
+  // `game/class10/hit_marker.ts`.
   0x10: [0x1256, 0x1257, 0x132d, 0x132e],
-  // Class 0x33, the two sprite kinds its ported routines throw:
+  // Class 0x33, the sprite kinds its ported routines throw:
   // `SpawnSpriteEffectFromParams`' `case 0x44:` run `0xFD4..0x1031`, all 94 of
   // `eff_dokan.bin` (`ScriptedEffectAtCameraCue33`, `FUN_00433B00`, and
   // `ScriptedCarrierUpdate33`, `FUN_004331D0`, on every slot but `0x1B0E`),
   // and its `case 0x45:` run `0x174A..0x1785`, all 60 of `eff_shop.bin`
   // (the carrier on slot `0x1B0E`). Stage 2's script loads `eff_dokan.bin` in
-  // the steps that spawn them, and stage 5's `eff_shop.bin`.
+  // the steps that spawn them, and stage 5's `eff_shop.bin`. And `case 0x62:`,
+  // the kind-0x61 splash run `0x1339..0x1356` again, which
+  // `ScriptedEffectOnFirstFrame33` (`FUN_00433AC0`) throws -- stage 1 has no
+  // other class that would carry it.
   0x33: [
     ...Array.from({ length: 0x1031 - 0xfd4 + 1 }, (_, i) => 0xfd4 + i),
     ...Array.from({ length: 0x1785 - 0x174a + 1 }, (_, i) => 0x174a + i),
+    ...CREATURE_SPLASH_SLOTS,
   ],
   // Class 0x32, the stage-5 boss: sprite kind 0x50, `0x23A..0x248`, the
   // spark `Class32ChargeShotBone` (`FUN_0047CE10`) throws off a damaging hit.
@@ -1507,6 +2027,26 @@ export function humanoidDrawSlots(
  * blood hang off the same one. `render/slotmodels.ts` places its clones in
  * the world.
  */
+/**
+ * The asset slots a stage's **class-0x15 planks** draw: `tail+0x00` of each
+ * placement, `AssetDrawSlot((s16)obj+0x1F4)` at the end of
+ * `FloatingPropUpdate` (`FUN_004418C0`). A property of the descriptor, so of
+ * the placement, as `scriptedPropDrawSlots`' are. They ride `slots_effect`
+ * because the plank's draw is recorded with its world matrix
+ * (`DrawSlotInWorld`) and `render/view_slots.ts` places it from that layer.
+ */
+export function floatingPropDrawSlots(
+    placements: readonly { class15?: { slot?: number } | null }[]): number[] {
+  const out: number[] = [];
+  for (const p of placements) {
+    const slot = p.class15?.slot;
+    if (typeof slot === "number" && slot > 0 && !out.includes(slot)) {
+      out.push(slot);
+    }
+  }
+  return out;
+}
+
 export function bodyCreatureDrawSlots(
     charTypes: Iterable<number>): number[] {
   const out: number[] = [];
@@ -1544,29 +2084,79 @@ export function carriedPropDrawSlots(
 }
 
 /**
- * The asset slots a stage's class-0x33 **selector-4 descriptors** ask for.
+ * `ScriptedCarrierUpdate33` (`FUN_004331D0`)'s literal draws, by the slot its
+ * descriptor names: slot `0x1B0E` (stage 5's car) adds `0x899`, `0x8CB` twice,
+ * `0x1B0A` and `0x1B0D` (`0x0043362B`..`0x00433813`); every other slot adds
+ * the two 22-slot loops `0x24A..0x25F` and `0x260..0x275` it cycles while the
+ * ride runs (`0x004334E9`..`0x0043361B`). Every carrier can raise the fire,
+ * `0x1AAB..0x1AD2` (`0x004332B7`..`0x004332C8`).
+ */
+export const CARRIER33_SLOT_CAR = 0x1b0e;
+export const CARRIER33_CAR_PARTS = [0x899, 0x8cb, 0x1b0a, 0x1b0d];
+export const CARRIER33_LOOPS = Array.from({ length: 0x275 - 0x24a + 1 },
+                                          (_, i) => 0x24a + i);
+export const CARRIER33_FIRE = Array.from({ length: 0x1ad2 - 0x1aab + 1 },
+                                         (_, i) => 0x1aab + i);
+
+/**
+ * `ScriptedBridgeCrashStrip33` (`FUN_00433FE0`)'s strip, `0x174A..0x1785`
+ * (`eff_shop.bin` parts 0..59), one a frame. `ScriptedFireLoopUntilCue33`
+ * (`FUN_00434100`) draws {@link CARRIER33_FIRE}.
+ */
+export const SCENERY33_CRASH_STRIP = Array.from(
+  { length: 0x1785 - 0x174a + 1 }, (_, i) => 0x174a + i);
+
+/**
+ * The asset slots a stage's class-0x33 **selector-1, -4, -8, -9 and -99
+ * descriptors** ask for.
  *
  * Not in {@link ACTOR_SLOTS}, for the same reason {@link humanoidDrawSlots} is
  * not: the slot is a property of the descriptor and not of the class.
  * `ScriptedPushableUpdate33` (`FUN_00433B70`) writes `tail+0x00` to
  * `obj+0x13F0` and draws it, and the two shipped spawns both name 4196 --
  * `komono_7.bin` part 0, a chair. Keying it on the class would put a chair in
- * all six bundles for the benefit of one room.
+ * all six bundles for the benefit of one room. `ScriptedCarrierUpdate33`
+ * (`FUN_004331D0`) does the same with its own `tail+0x00` -- stage 2's boats
+ * `0x1A35` and `0x1A36`, stage 5's car `0x1B0E` -- and draws the literal
+ * slots {@link CARRIER33_CAR_PARTS}, {@link CARRIER33_LOOPS} and
+ * {@link CARRIER33_FIRE} beside it.
  *
  * Without this the placement travels, the actor is made, the push works and
  * the client has **no geometry to clone**, which is class 0x52's old bug from
  * the other side: there it was a model nothing could hit, here it would be a
- * chair nothing could see.
+ * chair nothing could see -- and, until the carrier's draw was ported, it
+ * was stage 2 block 9's boat.
  */
 export function sceneryDrawSlots(
-    placements: readonly { class33_push?: { slot?: number } | null }[],
+    placements: readonly {
+      class33_push?: { slot?: number } | null;
+      class33_prop?: { slot?: number } | null;
+      class33?: { slot?: number } | null;
+      class33_sub?: { selector?: number; slot?: number } | null;
+    }[],
 ): number[] {
   const out: number[] = [];
+  const add = (slot: number) => {
+    if (slot > 0 && !out.includes(slot)) out.push(slot);
+  };
   for (const p of placements) {
-    const slot = p.class33_push?.slot;
-    if (typeof slot === "number" && slot > 0 && !out.includes(slot)) {
-      out.push(slot);
-    }
+    // Selectors 8, 9 and 99 -- `class33/strips.ts`.
+    const sub = p.class33_sub;
+    if (sub?.selector === 8) for (const s of SCENERY33_CRASH_STRIP) add(s);
+    if (sub?.selector === 9) for (const s of CARRIER33_FIRE) add(s);
+    if (sub?.selector === 99 && typeof sub.slot === "number") add(sub.slot);
+    const push = p.class33_push?.slot;
+    if (typeof push === "number") add(push);
+    // Selector 2, `ScriptedPropDrawUntilFlag` (`FUN_00433A10`): one model,
+    // `tail+0x00`, and nothing beside it.
+    const prop = p.class33_prop?.slot;
+    if (typeof prop === "number") add(prop);
+    const ride = p.class33?.slot;
+    if (typeof ride !== "number") continue;
+    add(ride);
+    for (const s of ride === CARRIER33_SLOT_CAR ? CARRIER33_CAR_PARTS
+                                                : CARRIER33_LOOPS) add(s);
+    for (const s of CARRIER33_FIRE) add(s);
   }
   return out;
 }
@@ -1586,6 +2176,12 @@ export function waterSurfaceDrawSlots(
     placements: readonly Record<string, unknown>[]): number[] {
   const out: number[] = [];
   for (const pl of placements) {
+    // Constructor 26's task draws its one slot the same way, and nothing
+    // else draws it.
+    if (pl.container === "ripple") {
+      if (!out.includes(pl.slot as number)) out.push(pl.slot as number);
+      continue;
+    }
     if (pl.container !== "water_surface") continue;
     const first = pl.slot as number;
     for (const slot of [first, ...WATER_SURFACE_ALSO_DRAWS[first] ?? []]) {
@@ -1618,14 +2214,17 @@ export function scriptedPropDrawSlots(
   const out: number[] = [];
   for (const p of placements) {
     // Only a prop whose behaviour the port runs: `g_prop_behaviours[0]` is
-    // `NoOpStub`, a static model, and `[8]` is a carrier whose selector must
-    // be one of {@link CARRIER_SELECTORS_PORTED}. Stage 4's seven carriers take
-    // selectors 2..9; selector 3's (`0x00440AD0`, slot `0x966`) would
-    // otherwise stand at its descriptor while the game drives it -- right
-    // geometry, wrong behaviour, which is the reason
-    // `GENERIC_DESCRIPTOR_SLOT` holds its unported types back too.
+    // `NoOpStub`, a static model, `[6]` and `[7]` move the one model the
+    // update draws (no shipped descriptor takes either), and `[8]` is a
+    // carrier whose selector must be one of {@link CARRIER_SELECTORS_PORTED},
+    // so that a carrier the port cannot drive never stands at its descriptor
+    // while the game drives it -- right geometry, wrong behaviour, which is
+    // the reason `GENERIC_DESCRIPTOR_SLOT` holds its unported types back too.
+    // All ten are ported now; stage 4's selector 3 (`CarrierPropRoutine3`,
+    // `FUN_00440AD0`) brings `colo_monitor.bin[14]`, slot `0x966`.
     const t = p.class13;
-    const ported = t?.behaviour === 0
+    const ported = t?.behaviour === 0 || t?.behaviour === 6
+      || t?.behaviour === 7
       || (t?.behaviour === 8 && CARRIER_SELECTORS_PORTED.has(t.selector ?? -1));
     if (!ported) continue;
     const slot = t?.slot;
@@ -1794,8 +2393,10 @@ export async function actorSlotEntry(
   const rig: Rig = {
     name: "slots_actor",
     routine: "asset-slot actor draws (classes 0x13, 0x14, 0x32, 0x40, 0x42, "
-      + "0x43, 0x51, 0x52; class 0x25 variant 3; class 0x26 subtypes 6 and 7; "
-      + "class 0x33 selector 4; class 0x41 type 1's water tiles)",
+      + "0x43, 0x51, 0x52; class 0x25 variant 3; "
+      + "class 0x26 subtypes 6 and 7; "
+      + "class 0x33 selectors 1 and 4; class 0x41 type 1's water tiles; the "
+      + "wake classes 0x30 and 0x18 leave in the water)",
     worldSpace: false,
     parts: parts.map(([p]) => p),
     note: "actor models drawn by asset slot; hidden, cloned per live actor",
@@ -1996,6 +2597,13 @@ export async function breakableSlotEntry(
   for (const slot of [...shatter.slots_a, ...shatter.slots_b]) {
     if (!want.includes(slot)) want.push(slot);
   }
+  // The score pickup's models, one per kind, from its own table: any of the
+  // three families can let one out, so every stage carries all five, as it
+  // carries the extra life's heart. Its shadow (`0x10D0`) and the two
+  // players' strips are already in `BREAKABLE_SLOTS`.
+  for (const row of Object.values(itemPickupRows(stage.tables))) {
+    if (!want.includes(row.slot)) want.push(row.slot);
+  }
   for (const pl of placements) {
     if (pl.container !== "generic") continue;
     // The literals this type's routine draws, always; plus the descriptor slot
@@ -2073,7 +2681,37 @@ export async function breakableSlotEntry(
       slots.push(SLIDE_SECOND_SLOT);
     }
     if (pl.container === "type47") slots.push(TYPE47_SLOT);
+    // Constructors 16, 17, 29 and 37 draw literals: their models, 16's drop
+    // strip and 37's landing strip. 37's break effect travels as an effect.
+    if (pl.container === "table16") slots.push(...Type16DrawSlots());
+    if (pl.container === "type17") {
+      for (let i = 0; i < TYPE17_OBJECTS; i++) slots.push(TYPE17_FIRST_SLOT + i);
+    }
+    if (pl.container === "table29") slots.push(...Type29DrawSlots());
+    if (pl.container === "type37") slots.push(...Type37DrawSlots());
+    // `ChainSegmentUpdate` draws one literal for every link.
+    if (pl.container === "chain") slots.push(CHAIN_LINK_SLOT);
+    // Constructors 42, 52, 55 and 65 draw literals: one model, a pair, and
+    // a strip each task steps through by piece. 61 draws skeletons, which
+    // are the character layer's.
+    if (pl.container === "type42") slots.push(TYPE42_SLOT);
+    if (pl.container === "type52") {
+      for (let k = 0; k < TYPE52_OBJECTS; k++) slots.push(TYPE52_SLOT + k);
+    }
+    if (pl.container === "type55") {
+      for (let k = 0; k < TYPE55_SLOT_SPAN; k++) slots.push(TYPE55_SLOT + k);
+    }
+    if (pl.container === "type65") {
+      for (let k = 0; k < TYPE65_SLOT_SPAN; k++) slots.push(TYPE65_SLOT + k);
+    }
     for (const slot of slots) {
+      if (slot && !want.includes(slot)) want.push(slot);
+    }
+  }
+  // The class-0x44 selectors whose objects `HingeUpdate` and its neighbours
+  // run: each draws its descriptor's slot, or literals its routine names.
+  for (const pl of placements) {
+    for (const slot of class44DrawSlots(pl, stage.scene ?? -1)) {
       if (slot && !want.includes(slot)) want.push(slot);
     }
   }
@@ -2345,22 +2983,19 @@ export async function buildStage(stage: Stage, sink: BundleSink,
   // parts with a translation and an asset slot, which is exactly a rig. They
   // are appended to the glTF list only -- `rigsJson` below is built from
   // `rigInstances`, so a character never turns up as an object rig.
+  // Before the glTF: the template rig has to include every asset slot the
+  // stage's generic props name, and only the script knows which those are.
+  // Before the characters too: whether a container can let out a golden
+  // frog decides whether its type's template travels.
+  const placements = evt
+    ? containerPlacements(tables, evt, spawnRecords, await stage.colisets())
+    : [];
   say(`  ${name}: characters`);
   const { chars: charDefs, placements: charPlaces,
           entries: charEntries } = await resolveCharacters(
-    stage, prog, spawnRecords, null, null, cache);
-
-  // Scripted scenery -- the doors, shutters and vans the script opens. Same
-  // writer again: a prop is one model at a pose, which is a rig with a fixed
-  // placement.
-  say(`  ${name}: scripted props`);
-  const [hinges, statics] = propslib.resolveForStage(prog, spawnRecords);
-  const propEntries = await propslib.rigEntries(stage, hinges, statics, null,
-                                                cache);
-
-  // Before the glTF: the template rig has to include every asset slot the
-  // stage's generic props name, and only the script knows which those are.
-  const placements = evt ? containerPlacements(tables, evt, spawnRecords) : [];
+    stage, prog, spawnRecords, null, null, cache, placements);
+  await addEffectCollapseKeys(stage, placements);
+  await addEffectRotationEntries(stage, placements);
   const carriedEffects = await carriedPropEffectsJson(
     stage, charPlaces as unknown as Record<string, unknown>[]);
   const flagEffects = {
@@ -2387,6 +3022,7 @@ export async function buildStage(stage: Stage, sink: BundleSink,
     cache);
   const eff = await effectSlotEntry(stage, cache, [
     ...bodyCreatureDrawSlots(charDefs.keys()),
+    ...floatingPropDrawSlots(charPlaces),
     ...carriedPropDrawSlots(charPlaces as unknown as Record<string, unknown>[]),
     // ...and the break effects' node models, which `render/effects.ts` draws
     // for the same object once it has broken.
@@ -2396,6 +3032,13 @@ export async function buildStage(stage: Stage, sink: BundleSink,
     // ...and the game-over route map's: the figures' ground disc and the two
     // footprints, drawn in view space by `render/game_over_scene.ts`.
     ROUTE_FIGURE_SHADOW_SLOT, ...ROUTE_MARK_SLOTS,
+    // ...and the ground shadow, `common.bin` 200 (`PUSH 0x10d0` at
+    // `0x0040A6C8`, `ActorDrawGroundShadow`): the last call of every skinned
+    // draw (`DrawSkinnedModelAndShadow`, `FUN_00411090`, 52 call sites) and
+    // of both thrown weapons' -- in every stage, whose player bodies alone
+    // draw one -- recorded as a world draw and placed by
+    // `render/view_slots.ts`.
+    GROUND_SHADOW_SLOT,
     // ...and the boss-name banner's cards, for the classes this stage spawns
     // that make one: drawn in view space too, by `render/effects.ts`.
     ...bannerCardSlots(spawnRecords.map((r) => r.cls)),
@@ -2413,6 +3056,10 @@ export async function buildStage(stage: Stage, sink: BundleSink,
     // ...and the result card's `result.bin` glyphs, drawn in view space by
     // `render/view_slots.ts`, for a stage that places the card.
     ...(prog && stagePlacesResultCard(prog) ? RESULT_GLYPH_SLOTS : []),
+    // ...and the chapter card's scene-5 model, drawn in view space by
+    // `render/view_slots.ts`, for a stage that places the card.
+    ...(prog && stagePlacesChapterCard(prog)
+      ? ChapterCardSlotsOf(stage.scene) : []),
     // ...and the trunk and its lid, `car_org.bin` 1 and 2, drawn in the world
     // by `render/view_slots.ts`, where the trunk is spawned.
     ...(trunk ? ITEM_SELECT_SLOTS : []),
@@ -2421,7 +3068,7 @@ export async function buildStage(stage: Stage, sink: BundleSink,
   // own option offers. See `bloodTexturePredicate`.
   const isBloodTexture = bloodTexturePredicate(tables);
   const info = await gltf.exportLevel(name, parts, outDir, sink, deflate, {
-    rigs: [...rigInstances, ...charEntries, ...propEntries,
+    rigs: [...rigInstances, ...charEntries,
            ...(brk ? [brk] : []), ...(act ? [act] : []),
            ...(eff ? [eff] : [])],
     modelRegions,
@@ -2463,7 +3110,6 @@ export async function buildStage(stage: Stage, sink: BundleSink,
     (scriptJson.characters as Record<string, unknown>).class42 =
       await class42Tables(stage);
   }
-  scriptJson.props = propslib.propsJson(tables, hinges, statics);
   // The carriers' effects ride in the same map, and after
   // `breakableSlotEntry` has taken its node slots: theirs travel in
   // `slots_actor`, which is what draws them.
@@ -2492,6 +3138,9 @@ export async function buildStage(stage: Stage, sink: BundleSink,
   // is: the figures' records and lists, their attachment lists, the glyph
   // strings, the life bonus and the accuracy bonus.
   scriptJson.result_card = tables.resultCardTables();
+  // The chapter card's: the Boss Mode backdrop and app state 0x0B's frames,
+  // the two arms of `ChapterCardInstall` that read a table.
+  scriptJson.chapter_card = tables.chapterCardTables();
   const routeTiles = (gameOver.route_tiles as number[]).flatMap((base) =>
     Array.from({ length: ROUTE_TILES_PER_SCREEN }, (_u, i) => base + i));
   // The options screen (app state 0x0C): one block for the whole game, as
@@ -2504,6 +3153,10 @@ export async function buildStage(stage: Stage, sink: BundleSink,
     ammo_hud_rows: { sprite: number }[]; list_sprites: number[];
   };
   scriptJson.original_mode = originalMode;
+  // The dialogue subtitles' glyph table, one block for the whole game as
+  // `options` is, and the sprites it names beside `~`'s literal.
+  const subtitleGlyphs = tables.subtitleGlyphs();
+  scriptJson.subtitle_glyphs = subtitleGlyphs;
   const optionTableSprites = [
     ...(options.glyphs as number[]), ...(options.crosshair_sprites as number[]),
     ...(options.sight_speed_sprites as number[]),
@@ -2514,12 +3167,20 @@ export async function buildStage(stage: Stage, sink: BundleSink,
      ...BOSS_HP_BAR_SPRITES, ...BOSS_BANNER_SPRITES, ...BOSS3_CARD_SPRITES,
      ...GAME_OVER_LOGO_SPRITES, ...routeTiles,
      ...OPTIONS_SCREEN_SPRITES, ...optionTableSprites,
+     // `DrawTextCentred`'s glyphs for every character a shipped line uses,
+     // in every stage: any of them can play any group (`game/dialogue.ts`).
+     // The table's other entries are never drawn -- two of them, under
+     // control characters, name a sprite with no bank at all.
+     ...subtitleGlyphSprites(tables, subtitleGlyphs),
      // `OriginalItemBannerUpdate`'s two sprites, for the ids this stage's
      // collectibles can be.
      ...originalItemSprites(originalItemsJson(tables, placements,
                                               stage.scene)),
      // The result card's frame, for a stage that places the card.
      ...(prog && stagePlacesResultCard(prog) ? RESULT_CARD_SPRITES : []),
+     // The chapter card's title, this scene's eight.
+     ...(prog && stagePlacesChapterCard(prog)
+       ? ChapterCardSpritesOf(stage.scene) : []),
      // Original Mode's bullets, `HudDrawAmmoAndReloadPrompt`'s row by fire
      // mode, for an Original stage.
      ...(stage.original
@@ -2575,7 +3236,6 @@ export async function buildStage(stage: Stage, sink: BundleSink,
       spawns: nSpawns,
       rigs: info.rigs,
       characters: charDefs.size,
-      props: hinges.length + statics.length,
       posed_spawns: charPlaces.filter((p) => p.motion !== null).length,
       // **Zero is the only good value here.** Every other count says how much
       // is in the bundle; this one says how much of the game did not make it,
@@ -2640,6 +3300,27 @@ export async function writeManifest(
  * col`.
  */
 const ROUTE_TILES_PER_SCREEN = 5 * 15;
+
+/**
+ * The sprites `DrawTextCentred` (`FUN_00436850`) can draw for the shipped
+ * dialogue: `g_subtitle_glyphs[c]` for every character a line holds, and
+ * `0x62D` for `~`.
+ */
+function subtitleGlyphSprites(tables: ExeTables,
+                              glyphs: readonly number[]): number[] {
+  const chars = new Set<string>();
+  for (const m of tables.screenMessages()) {
+    for (const v of (m.variants as ({ lines?: { text: string }[] } | null)[])) {
+      for (const l of v?.lines ?? []) for (const ch of l.text) chars.add(ch);
+    }
+  }
+  const out: number[] = [];
+  for (const ch of chars) {
+    const id = ch === "~" ? SUBTITLE_TILDE_SPRITE : glyphs[ch.charCodeAt(0)] ?? 0;
+    if (id > 0 && !out.includes(id)) out.push(id);
+  }
+  return out.sort((a, b) => a - b);
+}
 
 /**
  * The screen sprites the game draws, as images the right way up.

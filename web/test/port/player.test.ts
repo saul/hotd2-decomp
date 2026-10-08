@@ -17,7 +17,11 @@ import { ZombieState } from "../../src/game/class30/states";
 import { ActorFlag, type ZombieActor } from "../../src/game/actor";
 import { CheckPlayerCanBeHit, IsPlayerAttackable, PlayerTakeDamage }
   from "../../src/game/combat/player";
-import { PlayerCameraHook } from "../../src/game/effects/damage_overlay";
+import { PlayerCameraHook, PlayerEntityHook, SceneStateInstallPlayerHooks }
+  from "../../src/game/effects/damage_overlay";
+import { PlayerBodiesCreate } from "../../src/game/player_body";
+import { EvtCallActionHandler } from "../../src/game/camera/actions";
+import { EvtActionHandler } from "../../src/game/camera/driver";
 import { TryClaimAttackSlot } from "../../src/game/combat/permits";
 import { EnemyZombieUpdate } from "../../src/game/class30";
 import {
@@ -39,7 +43,7 @@ import { CamPath, CamPaths } from "../../src/game/camera/curve";
 import { SetCameraPaths } from "../../src/game/tables";
 import {
   check, CHARS, SCENE_MAJOR_PLAYING, spawnZombie, scene, EnterPlay,
-  JoinPlayerTwo, RunOutInvulnerability, run,
+  JoinPlayerTwo, RunOutInvulnerability, run, TYPE,
 } from "./harness";
 
 console.log("\nthe player shell: in, hit, out, continue, over:");
@@ -179,6 +183,11 @@ console.log("\nthe player shell: in, hit, out, continue, over:");
     route_tiles: [0xce, 0x119, 0x164, 0x1af],
     route_waypoints: waypoints,
     default_route: Array.from({ length: 6 }, () => new Array(16).fill(-1)),
+    entity_offsets: [0, 0, -3, 3],
+    seat_x: [304, -304, -4.6755, -4.6755, -4.6755, 4.6755],
+    stand_points: [[-728.8, 36.01, -1319.8], [-728.8, 36.01, -1319.8],
+                   [-736.9, 36.01, -1316.2], [-728.8, 36.01, -1319.8]],
+    stand_motions: [0, 0, 0x356, 0x356, 0x349, 0x356],
   });
   run(1, rng, ev);
   check("phase 0: every player at 4 goes to 6, 200 frames, BGM 9 unlooped",
@@ -682,7 +691,7 @@ console.log("\nthe continue screen, as the exe draws it:");
     playSound: () => undefined, aliveEnemies: () => 0,
     presentEnemies: () => 0, aliveCivilians: () => 0, cameraFree: () => true,
     scriptFlagRaised: () => null, gameplayLive: () => live,
-    showMessage: () => null, endDialogue: () => undefined,
+    showMessage: () => null,
   });
   for (let f = 0; f < 10; f++) w.tick(1 / 60);
   check("the script holds at wait_frames 3 for ten frames while no player "
@@ -888,4 +897,138 @@ console.log("\nthe two enemy counters, stepped and not derived:");
   ReleaseEnemyPresentCount(a);
   check("a corpse leaves `alive` before it leaves `present`",
         G.g_enemies_present === 1, String(G.g_enemies_present));
+}
+
+console.log("\nthe player's body in stage 1's car:");
+{
+  // Stage 1 block 0's `set_update_routine 0` (`EvtActionSetUpdateRoutine12`)
+  // seats the body (`PlayerHookEnterSt1Vehicle`, `PlayerHookRideSt1Vehicle`),
+  // and `PlayerHookDrawBody` draws it because the routine raised flag bit 0.
+  // Driven from the reset, through the action dispatcher and `GameUpdate`.
+  const rng = new Rng(5);
+  const ev = new Events();
+  const zeros = (n: number) => new Array(n * 3).fill(0);
+  const body = (type: number, hand: number) => ({
+    ...TYPE, type, bones: [{ bone: 5, slot: hand }],
+    motions: {
+      "802": { bank: 0, frames: 31, fps: 30, play: 60, root: zeros(31), rot: [] },
+      "793": { bank: 0, frames: 21, fps: 30, play: 40, root: zeros(21), rot: [] },
+      "812": { bank: 0, frames: 2, fps: 30, play: 2, root: zeros(2), rot: [] },
+    },
+  });
+  G.g_GameMode = GameMode.Arcade;
+  ResetGameGlobals();
+  SetGameTables({
+    ...CHARS, types: { ...CHARS.types, "57": body(0x39, 5521),
+                       "58": body(0x3a, 5540) },
+    player_hand_slots: [5519, 5521, 5522, 5539, 5540, 5541],
+  } as never);
+  // `ExeTables.gameOverTables`' values, read from the exe.
+  SetGameOverTables({
+    body_char_types: [0x39, 0x3a], body_start_motions: [0x32c, 0x32c],
+    fall_motions: [0x338, 0x338], fall_frames: [0x50, 0x3c],
+    body_offsets: [[0, 0], [0, 0], [-5, -1.9], [4.2, 0.7]],
+    route_tiles: [0xce, 0x119, 0x164, 0x1af], route_waypoints: [],
+    default_route: [],
+    entity_offsets: [0, 0, -3, 3],
+    seat_x: [304, -304, -4.6755, -4.6755, -4.6755, 4.6755],
+    stand_points: [[-728.8, 36.01, -1319.8], [-728.8, 36.01, -1319.8],
+                   [-736.9, 36.01, -1316.2], [-728.8, 36.01, -1319.8]],
+    stand_motions: [0, 0, 0x356, 0x356, 0x349, 0x356],
+  });
+  PlayerBodiesCreate();
+  // `op_st1` 1, as a constant pose: (100, 7, 50), turned half round. Half a
+  // turn is the angle whose seat point does not depend on RotY's sign.
+  const k = (v: number) => [[0, v, 0, 0], [350, v, 0, 0]];
+  const paths = new CamPaths({ fps: 60, paths: {}, object_paths: {} } as never);
+  paths.objectPaths.set(0xfe, new CamPath(0xfe, {
+    file: "op_st1", index: 1, start: 0, duration: 350,
+    channels: { pos_x: k(100), pos_y: k(7), pos_z: k(50), rot_x: k(0),
+                rot_y: k(0x8000), rot_z: k(0) },
+  } as never, true));
+  SetCameraPaths(paths);
+  run(1, rng, ev);
+  const b = G.g_player_bodies[0];
+  check("in play the body is made and placed on the eye, and not drawn: "
+        + "row 0's `+0x80` hook, flag bit 0 down",
+        G.g_player_bodies.length === 2 && b.handSlot === 5521
+        && G.g_player_entity_hook[0] === PlayerEntityHook.PlaceEntityB
+        && (G.g_player_flags[0] & 1) === 0 && b.drawn === 0,
+        JSON.stringify({ hook: G.g_player_entity_hook, f: G.g_player_flags,
+                         drawn: b.drawn }));
+
+  G.g_active_cam_path = 0x21;
+  G.g_cam_path_frame = 100;
+  G.g_evt_action_handler = EvtActionHandler.SetUpdateRoutine;
+  G.g_evt_action_operands[0] = 0;
+  EvtCallActionHandler();
+  check("`set_update_routine 0` installs `PlayerHookEnterSt1Vehicle` for "
+        + "both players",
+        G.g_player_entity_hook[0] === PlayerEntityHook.EnterSt1Vehicle
+        && G.g_player_entity_hook[1] === PlayerEntityHook.EnterSt1Vehicle);
+  run(1, rng, ev);
+  check("...whose one frame raises the draw bit, puts the body on 0x322 with "
+        + "hand 0 and hands over to the ride -- and the body is drawn",
+        (G.g_player_flags[0] & 1) === 1 && b.motion === 0x322
+        && b.handSlot === 5519 && b.drawn === 1 && b.playTicks === 1
+        && G.g_player_entity_hook[0] === PlayerEntityHook.RideSt1Vehicle,
+        JSON.stringify(b));
+  run(1, rng, ev);
+  check("on cp 0x21 the ride seats it at the wheel: route point + "
+        + "RotY(0x8000) (-4.6755, 0, 0.239), y 0, yaw ry + 0x8000",
+        Math.abs(b.pos.x - (100 + 4.6755)) < 1e-4
+        && Math.abs(b.pos.z - (50 - 0.239)) < 1e-4
+        && b.pos.y === 0 && b.yaw === 0x10000 && b.drawn === 1,
+        JSON.stringify(b.pos) + ` yaw ${b.yaw}`);
+
+  G.g_cam_path_frame = 0x105;
+  b.pos.x = 1;
+  run(1, rng, ev);
+  check("...past frame 0x104 it keeps its own x",
+        b.pos.x === 1, JSON.stringify(b.pos));
+
+  G.g_active_cam_path = 0x22;
+  G.g_cam_path_frame = 0xc;
+  const before = b.playTicks;
+  run(1, rng, ev);
+  check("on cp 0x22 frame 0xC: clip 0x319 from cursor 5 under a fade that "
+        + "leaves the counter running, and the hold-the-end hook",
+        b.motion === 0x319 && b.cursor === 5 && b.playTicks === before + 1
+        && G.g_player_entity_hook[0] === PlayerEntityHook.HoldClipEnd,
+        `motion ${b.motion} cursor ${b.cursor} ticks ${b.playTicks}`);
+  run(1, rng, ev);
+  check("...and the fade's end puts the counter on the cursor after the "
+        + "start: cursor 6, counter 7",
+        b.cursor === 6 && b.playTicks === 7,
+        `cursor ${b.cursor} ticks ${b.playTicks}`);
+  b.playTicks = 39;
+  run(3, rng, ev);
+  check("`PlayerHookHoldClipEnd` holds it a frame short of the end",
+        b.playTicks === 39 && b.cursor === 38,
+        `cursor ${b.cursor} ticks ${b.playTicks}`);
+
+  // The ride on a camera path it has no arm for: the exe stores stack slots
+  // there; the port keeps the body's own.
+  G.g_player_entity_hook[0] = PlayerEntityHook.RideSt1Vehicle;
+  G.g_active_cam_path = 0x30;
+  b.pos.x = 3;
+  b.pos.z = 4;
+  b.yaw = 0x1234;
+  run(1, rng, ev);
+  check("on any other path the ride keeps the body's x, z and yaw "
+        + "(the declared divergence)",
+        b.pos.x === 3 && b.pos.z === 4 && b.yaw === 0x1234 && b.pos.y === 0,
+        JSON.stringify(b.pos) + ` yaw ${b.yaw}`);
+
+  SceneStateInstallPlayerHooks(1, 3);
+  G.g_evt_action_handler = EvtActionHandler.SetPlayerFlag;
+  G.g_evt_action_operands[0] = 0;
+  EvtCallActionHandler();
+  run(1, rng, ev);
+  check("`scene_state 3` puts a `PlaceEntity` hook back and "
+        + "`set_player_flag 0` drops the bit: the body is gone",
+        (G.g_player_entity_hook[0] as PlayerEntityHook)
+          === PlayerEntityHook.PlaceEntityB
+        && (G.g_player_flags[0] & 1) === 0 && b.drawn === 0,
+        `hook ${G.g_player_entity_hook[0]} flags ${G.g_player_flags[0]}`);
 }

@@ -104,7 +104,6 @@ const mkHost = (): WalkerHost => ({
   scriptFlagRaised: () => null,
   cameraFree: () => null,
   showMessage: () => null,
-  endDialogue: () => undefined,
 });
 
 const LIVE: Tick = { dt: TICK, frames: 1, wall: TICK, frozen: false };
@@ -689,8 +688,8 @@ console.log("\nThe shutter and the caption are script state:\n");
           r.walker.shutterState === 4 && !r.walker.firingGate,
           `state ${r.walker.shutterState}, gate ${r.walker.firingGate}`);
 
-    check("the caption countdown is in the slice too",
-          "captionGroup" in slice && "captionFrames" in slice);
+    check("the subtitle is not the walker's: its task is G's",
+          !("captionGroup" in slice) && !("captionFrames" in slice));
 
     // Step 28 moved the HUD strip's shutter row out of `hud/`, where it had
     // its own copy of the label table, and into `app/projection/hud.ts`, where

@@ -16,9 +16,12 @@
  * class 0x31's `EnemyThrowerInit` writes -- see `thrower.ts`. `[proved]`
  *
  * It shows on the actors `HumanoidFrameTail` seats on an object path in mode
- * 1, which takes all three of the path's angles: `op_st3` 340's boat riders
- * pitch with the deck they stand on. Drawn from yaw alone they stood upright
- * on it.
+ * 1, which takes all three of the path's angles. A path's triple is in
+ * `RotZ; RotY; RotX` order, so the class re-reads it into this one before it
+ * adds an offset record's yaw (`HumanoidApplyPathOffset`, through
+ * `MatrixToEulerBams`): `op_st3` 340's boat riders rock with the hull they sit
+ * in, and drawn from the path's raw triple in this order they lay on their
+ * sides through it.
  *
  * Everything here **reads** the actor.
  */

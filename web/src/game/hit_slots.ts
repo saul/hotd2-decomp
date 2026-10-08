@@ -29,6 +29,14 @@ import { SpawnClass } from "./spawn_class";
 export const HIT_SLOT_CLAIMED = 0x40;
 
 /**
+ * `[port-only]` -- what `ActorClaimHitSlot` writes to, as a type: an actor,
+ * or a task the port keeps as a record of its own rather than as an `Actor`
+ * (`game/effects/attached_effect.ts`'s wake, which the engine claims for
+ * with the same call). `at` is what the table holds.
+ */
+export type HitSlotHolder = Pick<Actor, "at" | "hitSlot" | "flags38">;
+
+/**
  * The classes whose `Init` is a **proved caller** of `ActorBuildSkinnedModel`
  * (`FUN_00410440`), which is where the claim happens.
  *
@@ -105,7 +113,7 @@ export const HIT_SLOT_CLAIMING_CLASSES: ReadonlySet<SpawnClass> = new Set([
  * runs this immediately before the class's `Init`, for the classes in
  * {@link HIT_SLOT_CLAIMING_CLASSES} and no others.
  */
-export function ActorClaimHitSlot(obj: Actor): void {
+export function ActorClaimHitSlot(obj: HitSlotHolder): void {
   obj.hitSlot = HIT_SLOT_NONE;
   for (let i = 0; i < HIT_SLOT_COUNT; i++) {
     if (G.g_hit_slots[i] !== HIT_SLOT_NONE) continue;

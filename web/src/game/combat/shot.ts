@@ -307,6 +307,11 @@ export function MergeShotPicks(picked: ShotPick | null,
     return { kind: "thrown", thrownId: registered.thrown,
              point: registered.point, t: registered.t, ...radius };
   }
+  if (registered.prop !== undefined) {
+    return { kind: "prop", propId: registered.prop, point: registered.point,
+             ...(registered.mesh ? { mesh: registered.mesh } : {}),
+             t: registered.t, ...radius };
+  }
   return { kind: "actor", at: registered.at, bone: registered.bone,
            whole: registered.whole, point: registered.point,
            ...(registered.mesh ? { mesh: registered.mesh } : {}),
@@ -542,14 +547,23 @@ export function FireShotRequest(req: ShotRequest, host: GameHost, rng: Rng,
  * what cracks the prop, pays the ten points through `BreakablePropAwardHit`
  * and releases whatever it was hiding.
  */
-function ResolveShotOnProp(req: ShotRequest, pick: { propId: number;
-                                                     point: { x: number;
-                                                              y: number;
-                                                              z: number } },
+function ResolveShotOnProp(req: ShotRequest,
+                           pick: { propId: number; point: Vec3;
+                                   mesh?: { surface: number; normal: Vec3 } },
                            host: GameHost, events?: Events): void {
   const prop = G.g_breakable_props.find((p) => p.id === pick.propId);
   if (!prop) return;
   BreakablePropTakeShot(prop, req.player);
+  // A mesh candidate (`ShotPushMeshObjectCandidate`, `FUN_00404B50`: the
+  // object's word with `0x50` raised) takes `MarkActorShot`'s whole-object
+  // arm and then, for the `0x10`, `SpawnWorldImpact` (`FUN_00405260`) at the
+  // quad, and GRENADE's blast at the hit point -- the order an actor's mesh
+  // hit takes them in.
+  if (pick.mesh) {
+    SpawnWorldImpact(req.player, pick.point, pick.mesh.normal,
+                     pick.mesh.surface, host, events);
+    MarkActorShotBlast(req.player, pick.point, undefined, host, events);
+  }
   // `SpawnPropHitSpark` (`FUN_00465860`): the crosshair unprojected to the
   // prop's own camera depth, with `z` then replaced by the prop's `+0x1A4`.
   // The prop routines call it themselves on the frame they read the hit bit;
@@ -640,8 +654,10 @@ export function MarkActorShot(obj: Actor, player: number, bone = 0,
  * the one winning candidate, inside `MarkActorShot`; the port reaches that
  * routine's equivalent along one path per kind of pick, and each calls this
  * where `MarkActorShot` would have reached it -- after the world impact.
- * A breakable prop's pick carries no radius, since which arm the engine's
- * candidate for one takes is `[open]`, and so throws no blast.
+ * A breakable prop's sphere pick (`render/`'s) carries no radius, since which
+ * arm the engine's candidate for one takes is `[open]`, and so throws no
+ * blast; a prop shot through its mesh is a bit-`0x10` candidate and takes
+ * the hit-point arm, as any mesh hit does.
  */
 function MarkActorShotBlast(player: number, point: Vec3,
                             radius: number | undefined, host?: GameHost,

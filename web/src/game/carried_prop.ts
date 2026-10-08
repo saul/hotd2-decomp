@@ -17,7 +17,8 @@
  *    words from the script.
  * 2. `CarriedPropHeldUpdate` (`FUN_00442820`, `g_prop_behaviours[1]`): seated
  *    between the carrier's bones 4 and 7 every frame, and **shootable** —
- *    `RegisterForShotTest` is called — but nothing reads the hit bit yet.
+ *    `RegisterForShotTest`, then `CarriedPropCheckShot` — so it can be shot
+ *    to pieces in the hands, which drops the carrier to its sub 4.
  * 3. On the carrier's cue frame `ZombieStateCarryProp` writes the release
  *    mode into `sub+0x10`, and the held routine's next frame calls
  *    `CarriedPropRelease` (`FUN_00442B90`): into the world, and for mode 4 a
@@ -68,7 +69,7 @@ import { QueryGroundHeightAt } from "./coli";
 import { RegisterPropForCameraTracking } from "./camera/slots";
 import { T } from "./tables";
 import { EffectNodePoseAt } from "./class44/script_flag_effect";
-import { PROJECTION_DISTANCE_PX } from "./combat/permits";
+import { CarriedPropIsOnScreen } from "./combat/permits";
 import { PropBehaviour } from "./class13";
 import { vec3, VecToAngles, type Vec3 } from "./vec";
 
@@ -442,10 +443,21 @@ function boneViewMatrix(carrier: Actor, bone: number, host: GameHost,
  * The draw is `seat · offset · RotX RotZ RotY`, in view space from an
  * identity, and the translation of that is the shot point. The carrier's
  * death takes it to {@link CarriedPropDrop}; the release mode appearing in
- * `sub+0x10` takes it to {@link CarriedPropRelease}.
+ * `sub+0x10` takes it to {@link CarriedPropRelease}. Then the shot test and
+ * the shot response, on whichever routine is installed by now:
+ *
+ * ```
+ * 00442928  CALL RegisterForShotTest
+ * 0044292f  CALL MatrixStackPop          ; back to the draw matrix
+ * 00442935  CALL CarriedPropCheckShot
+ * ```
+ *
+ * so a barrel or drum shot in the hands loses a hit point a hit and breaks
+ * at zero, which `ZombieStateCarryProp` sees as the prop's `obj+0x11C < 1`.
  */
 export function CarriedPropHeldUpdate(p: CarriedProp, host: GameHost,
-                                      cam: CameraPair | null): void {
+                                      cam: CameraPair | null, rng: Rng,
+                                      events?: Events): void {
   const carrier = ActorByAt(p.carrier);
   const m = MatIdentity();
   const seat = carrier && cam
@@ -480,6 +492,7 @@ export function CarriedPropHeldUpdate(p: CarriedProp, host: GameHost,
   }
   MatrixGetTranslation(m, p.shotPoint);
   RegisterForShotTest(p);
+  CarriedPropCheckShot(p, m, cam, rng, events);
 }
 
 /**
@@ -689,15 +702,19 @@ export function CarriedPropCheckShot(p: CarriedProp, m: Mat,
   const rec = g_carried_prop_types[p.type] ?? g_carried_prop_types[0];
   const who = p.flags & 6;
   const player = who === 2 ? 0 : who === 4 ? 1 : rng.int(2);
-  // `if (DAT_009A5C48 == 0) g_player_hit_count[player]++`. `[open]` what the
-  // guard word is; nothing the port runs writes it, so the count is taken.
-  G.g_player_hit_count[player] = (G.g_player_hit_count[player] ?? 0) + 1;
+  // `CMP word ptr [0x009A5C48], 0` -- the shot counter's own guard.
+  if (G.g_accuracy_stats_suppressed === 0) {
+    G.g_player_hit_count[player] = (G.g_player_hit_count[player] ?? 0) + 1;
+  }
   const immune = (p.flags & ActorFlag.ShotImmune) !== 0;
   if (!immune) p.hp -= 1;
   p.flags &= ~SHOT_BITS;
   if (p.hp === 0) {
     if (p.type !== 2) {
+      // `sub+0x44/0x48` = the record's two break words (read where they are
+      // used, from `p.type`), `sub+0x4C = sub+0x50 = 0`.
       p.breakFrame = 0;
+      p.breakPrev = 0;
       p.routine = CarriedPropRoutine.Break;
       const w = MatCopy(MatIdentity(), cam?.v2w ?? MatIdentity());
       MatrixMultiply(w, m);
@@ -726,6 +743,18 @@ export function CarriedPropCheckShot(p: CarriedProp, m: Mat,
     // ```
     if (p.player >= 0) G.g_attack_permits[p.player] = -1;
     events?.emit("sound.play", { id: rec.breakSound });
+    // `0x004426F6`..: `t = sub[1]; if (t != 0 && !(t+0x34 & 0x4000000))
+    // *(t->+0x1310 + 0x4C) = 0`. `sub[1]` is the carrier's `obj+0x1394`, which
+    // for a class-0x30 carrier is the civilian `CivilianInit` built it for
+    // (`Actor.targetAt`), and that civilian's `+0x4C` is the script its
+    // own shot switches to: the barrel shot out of the air takes the
+    // civilian's shot reaction away with it. The port keeps the word as two
+    // fields, so both are cleared (L79).
+    const t = p.target >= 0 ? ActorByAt(p.target) : undefined;
+    if (t && !(t.flags & ActorFlag.Dead) && t.civ) {
+      t.civ.onShot = 0;
+      t.civ.onShotScript = -1;
+    }
     return;
   }
   if (!immune) {
@@ -827,7 +856,7 @@ const BONE8 = 8;
  * CarriedPropCheckShot(obj); Pop
  * ```
  *
- * Unlike {@link CarriedPropHeldUpdate} it **checks shots while held**; the
+ * Like {@link CarriedPropHeldUpdate} it **checks shots while held**, but the
  * prop arrives shot-immune (`obj+0x34` bit `0x100`, `Boss4SpawnHeldProp`) and
  * `CarriedPropRelease` clears the bit, so a shot at a held prop is taken and
  * costs nothing. Its only allocator is `Boss4SpawnHeldProp` (`FUN_00494F70`).
@@ -1228,12 +1257,19 @@ const BOUNCE_TUMBLE = 0x200;
  * killing shot raises, so the civilian's own update runs its killed branch —
  * and plays `0x1D16A9`; every contact bounces the prop. It then turns by its
  * spin **about the pivot** the contact left, draws under
- * `g_camera_world_to_view`, and is shootable only while
- * `CarriedPropIsOnScreen`. Nothing here despawns it.
+ * `g_camera_world_to_view`, and is shot-tested while `CarriedPropIsOnScreen`
+ * -- and **despawned** the first frame it is not (`0x00443520`). Returns
+ * `false` on that frame.
+ *
+ * Only `CarriedPropRelease` installs it, from the state-37 script's `+0x08`:
+ * stage 1's barrel man (evt `0x3C7C`, reached through its civilian), and the
+ * same script in `advevtbl` and twice in `trnevtbl`, none of which the port
+ * plays. `[proved]` by a census of every class-0x30 and 0x18 head in the
+ * eleven `evt/` files.
  */
 export function CarriedPropThrowAtTarget(p: CarriedProp, host: GameHost,
                                          cam: CameraPair | null, rng: Rng,
-                                         events?: Events): void {
+                                         events?: Events): boolean {
   const w2v = cam?.w2v ?? MatIdentity();
   p.pos.x += p.vel.x;
   p.pos.y += p.vel.y;
@@ -1274,7 +1310,10 @@ export function CarriedPropThrowAtTarget(p: CarriedProp, host: GameHost,
   if (CarriedPropIsOnScreen(p)) {
     RegisterForShotTest(p);
     CarriedPropCheckShot(p, d, cam, rng, events);
+    return true;
   }
+  // `0x00443520`: `MatrixStackPop(1); ActorDespawn(obj)`.
+  return false;
 }
 
 /**
@@ -1406,28 +1445,6 @@ export function LineSphereIntersect(r: number, c: Vec3, a: Vec3, b: Vec3):
 }
 
 /**
- * `CarriedPropIsOnScreen` — `FUN_004459C0`. The sphere at the shot point,
- * projected at `g_projection_distance_px` against a 640x480 frame; anything
- * at or behind the eye is off.
- */
-export function CarriedPropIsOnScreen(p: CarriedProp): boolean {
-  const { x, y, z } = p.shotPoint;
-  if (0 <= z) return false;
-  const r = p.radius;
-  const ex = x <= 0 ? -x - r : r - x;
-  const ey = y <= 0 ? -y - r : r - y;
-  const k = PROJECTION_DISTANCE_PX / z;
-  const sx = k * ex, sy = k * ey;
-  const cx = -((PROJECTION_DISTANCE_PX * x) / z);
-  const cy = -((PROJECTION_DISTANCE_PX * y) / z);
-  if (((sx < 320 || cx < 320) && (-320 < sx || -320 < cx))
-      && (sy < 240 || cy < 240)) {
-    return !(sy <= -240 && cy <= -240);
-  }
-  return false;
-}
-
-/**
  * `RegisterForShotTest` (`FUN_00405160`)'s gate, for this pool. The list it
  * appends to is the renderer's pick; what the port owns is the decision.
  */
@@ -1466,7 +1483,7 @@ export function CarriedPropPoolUpdate(rng: Rng, host: GameHost,
         CarriedPropInit(p);
         return true;
       case CarriedPropRoutine.Held:
-        CarriedPropHeldUpdate(p, host, cam);
+        CarriedPropHeldUpdate(p, host, cam, rng, events);
         return true;
       case CarriedPropRoutine.HeldInBone8:
         CarriedPropHeldInBone8Update(p, host, cam, rng, events);
@@ -1477,8 +1494,7 @@ export function CarriedPropPoolUpdate(rng: Rng, host: GameHost,
         CarriedPropThrowAtCamera(p, cam, rng, events);
         return true;
       case CarriedPropRoutine.ThrowAtTarget:
-        CarriedPropThrowAtTarget(p, host, cam, rng, events);
-        return true;
+        return CarriedPropThrowAtTarget(p, host, cam, rng, events);
       case CarriedPropRoutine.RollAtCamera:
         CarriedPropRollAtCamera(p, cam, rng, events);
         return true;

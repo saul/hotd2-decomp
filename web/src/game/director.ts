@@ -24,6 +24,9 @@ import { ThrownWeaponPoolUpdate } from "./class31/projectile";
 import { ThrownWeaponCameraOf } from "./thrown_weapon";
 import { BreakablePropPoolUpdate } from "./class41/pool";
 import { WaterSurfacesTick } from "./class41/water";
+import { DialogueTasksTick } from "./dialogue";
+import { Type3UvScrollTick } from "./class41/type03";
+import { Type26RipplesTick } from "./class41/type26";
 import { St2CarsTick } from "./class21/car";
 import { PropContainerType } from "./class41";
 import { FLICKER_LIGHT_TYPE } from "./class41/type48";
@@ -45,7 +48,6 @@ import { ShotEffectsTick } from "./effects/tick";
 import { BossHpBarsTick } from "./boss_hp_bar";
 import { LifeGrantedMarkersTick } from "./class10/life_marker";
 import { CivilianHitMarkersTick } from "./class10/hit_marker";
-import { FinishCutsceneSkip } from "./cutscene_skip";
 import { BossBannersTick } from "./boss_banner";
 import { WaterWaveSourcesTick } from "./class17";
 import { Boss4HitMarksTick } from "./class19/hit_mark";
@@ -57,6 +59,7 @@ import { BatSplashesTick } from "./class46/splash";
 import { FishEffectsTick } from "./effects/fish";
 import { OwlEffectsTick } from "./effects/owl";
 import { RingEffectsTick } from "./effects/ring_effect";
+import { AttachedEffectsTick } from "./effects/attached_effect";
 import { ScreenSpriteQueueFlush, ScreenSpriteQueueReset } from "./screen_sprite";
 import { CreditBlinkTick, InputReadFrameCounters } from "./credit_prompt";
 import { SeveredHeadsTick } from "./effects/severed_head";
@@ -73,6 +76,7 @@ import { DeadSweep, g_class_handlers } from "./registry";
 // in this file names a class, and that is the point -- see `game/classes.ts`.
 import "./classes";
 import { SpawnClass as SpawnClassValue, type SpawnClass } from "./spawn_class";
+import { ScriptedScenerySelector } from "./class33/state";
 import { vec3, type Vec3 } from "./vec";
 
 const GAME_HZ = 60;
@@ -113,14 +117,66 @@ export interface ScriptSpawn {
   class: number;
   pos?: [number, number, number];
   /**
-   * The descriptor's own words, for the one class built from them alone:
+   * The descriptor's own words, for the classes built from them alone:
    * `desc+0x22` (`obj+0x11C`), the three angles at `+0x14`..`+0x1C` and the
    * flags word at `+0x04`. The walker's `ActiveSpawn` carries all three; see
-   * {@link SpawnPathRidingProp}.
+   * {@link SpawnPlacedFromRecord}.
    */
   hp?: number;
   orient?: [number, number, number];
   flags?: number;
+  /**
+   * The instruction that pushed it -- the walker's `ActiveSpawn` carries all
+   * three. What {@link SpawnSiteKeys} tells one spawn instruction from
+   * another by, when two of them name the same descriptor.
+   */
+  block?: number;
+  step?: number;
+  opIndex?: number;
+  /**
+   * `[port-only]` The record's replay scratch, which the walker's
+   * `ActiveSpawn` carries -- see `ClassHandler.followReplayCamera`.
+   */
+  replay?: Readonly<Record<string, number>>;
+}
+
+/**
+ * `[port-only]` -- one key per **spawn instruction run**, in list order.
+ *
+ * The spawn opcodes allocate a fresh object every time they run
+ * (`ActorAlloc`, `FUN_004A6FA0`), whatever descriptor they name: stage 2
+ * block 12 spawns block 11's class-0x2B light again while the first is still
+ * burning, block 35 places block 20's class-0x15 plank row again, and stage 1
+ * block 14 re-spawns the class-0x33 cars of blocks 5 and 11. The port
+ * materialises these objects from the walker's list rather than from the
+ * instruction, so it has to remember which list entries it has built -- and
+ * an entry is an instruction, `(block, step, op, descriptor)`, not a
+ * descriptor. The ordinal tells apart the same instruction run twice while
+ * both entries are listed.
+ */
+export function SpawnSiteKeys(spawns: readonly ScriptSpawn[]): string[] {
+  const seen = new Map<string, number>();
+  return spawns.map((s) => {
+    const base = `${s.block ?? -1}:${s.step ?? -1}:${s.opIndex ?? -1}:${s.at}`;
+    const k = seen.get(base) ?? 0;
+    seen.set(base, k + 1);
+    return `${base}#${k}`;
+  });
+}
+
+/**
+ * `[port-only]` -- the pool address a new object from descriptor `at` is
+ * linked under: `at` itself, or, when an object from that descriptor is
+ * already in the pool, the next synthetic address (`g_summoned_actor_at`,
+ * the counter `SpawnWaterEnemyAt` and the plank row draw from). The object
+ * keeps `at` as its {@link Actor.descAt}. The engine needs neither: its pool
+ * is keyed by pointer.
+ */
+export function SpawnSiteAt(at: number): number {
+  if (!ActorByAt(at)) return at;
+  const fresh = G.g_summoned_actor_at;
+  G.g_summoned_actor_at -= 1;
+  return fresh;
 }
 
 /**
@@ -257,9 +313,10 @@ export function SpawnScriptedCharacters(
  * `Init` runs where the port ran every `Init` before, at the spawn, reading
  * the camera as the paused frame holds it.
  */
-export function RunPendingInits(rng?: Rng, events?: Events): void {
+export function RunPendingInits(rng?: Rng, events?: Events,
+                                host?: GameHost): void {
   for (const obj of G.g_object_list) {
-    if (obj.initPending) ActorRunInit(obj, rng, events);
+    if (obj.initPending) ActorRunInit(obj, rng, events, host);
   }
 }
 
@@ -309,8 +366,8 @@ export function RunPendingInits(rng?: Rng, events?: Events): void {
 export function SpawnSlotActors(spawns: readonly ScriptSpawn[]): void {
   const placements = T.chars?.placements;
   if (!placements?.length) return;
-  // `[port-only]` — **build each listed spawn once**, and forget it when the
-  // script stops listing it. This routine runs every frame over the walker's
+  // `[port-only]` — **build each listed spawn instruction once**
+  // (`SpawnSiteKeys`), and forget it when the script stops listing it. This routine runs every frame over the walker's
   // list, and `GameUpdate` prunes a despawned actor from the pool at the end of
   // the frame, so without this an actor that leaves under its own state machine
   // is rebuilt on the next one. Class 0x52's mouse and class 0x33's carrier
@@ -325,7 +382,8 @@ export function SpawnSlotActors(spawns: readonly ScriptSpawn[]): void {
   // Class 0x40 counts instructions rather than addresses: see
   // `SpawnHordePlacers`.
   SpawnHordePlacers(spawns, placements);
-  for (const s of spawns) SpawnSlotActor(s);
+  const keys = SpawnSiteKeys(spawns);
+  spawns.forEach((s, i) => SpawnSlotActor(s, keys[i]));
 }
 
 /**
@@ -334,8 +392,8 @@ export function SpawnSlotActors(spawns: readonly ScriptSpawn[]): void {
  * there.
  */
 export function SlotActorsForgetUnlisted(spawns: readonly ScriptSpawn[]): void {
-  const listed = new Set(spawns.map((s) => s.at));
-  G.g_slot_actors_built = G.g_slot_actors_built.filter((at) => listed.has(at));
+  const listed = new Set(SpawnSiteKeys(spawns));
+  G.g_slot_actors_built = G.g_slot_actors_built.filter((k) => listed.has(k));
 }
 
 /**
@@ -346,26 +404,29 @@ export function SlotActorsForgetUnlisted(spawns: readonly ScriptSpawn[]): void {
  * what the previous one left behind (`g_civilian_carrier`) sees exactly that.
  * `[port-only]`, as {@link SpawnSlotActors} is.
  */
-export function SpawnSlotActor(s: ScriptSpawn): void {
-  if (s.class === SpawnClassValue.PathRidingProp) {
-    SpawnPathRidingProp(s);
+export function SpawnSlotActor(s: ScriptSpawn,
+                               key = SpawnSiteKeys([s])[0]): void {
+  if (s.class === SpawnClassValue.PathRidingProp
+      || s.class === SpawnClassValue.PathRidingVehicle) {
+    SpawnPlacedFromRecord(s, key);
     return;
   }
   const placements = T.chars?.placements;
   if (!placements?.length) return;
   {
-    if (G.g_slot_actors_built.includes(s.at)) return;
-    if (ActorByAt(s.at)) return;
+    if (G.g_slot_actors_built.includes(key)) return;
     const pl = placements.find((p) => p.at === s.at);
     if (!pl) return;
+    // Decided before any arm links its object, and only once it is sure to.
+    const at = (): number => SpawnSiteAt(s.at);
     if (s.class === SpawnClassValue.Mouse) {
-      G.g_slot_actors_built.push(s.at);
-      SpawnFromDescriptor(s.at, SpawnClassValue.Mouse, -1, "mouse",
+      G.g_slot_actors_built.push(key);
+      SpawnFromDescriptor(at(), SpawnClassValue.Mouse, -1, "mouse",
                           { class52: pl.class52 ?? null,
                             ...PlacementOrientation(pl),
                             pos: vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0,
                                       s.pos?.[2] ?? 0),
-                            visible: true });
+                            visible: true, descAt: s.at });
       return;
     }
     // Class 0x43 -- the owl. Its handler is a placer that builds a 0x2A0-byte
@@ -394,24 +455,50 @@ export function SpawnSlotActor(s: ScriptSpawn): void {
     // the word goes on as the class-0x13 arm below explains.
     if (s.class === SpawnClassValue.FlagStripProp) {
       if (!pl.class12) return;
-      G.g_slot_actors_built.push(s.at);
-      SpawnFromDescriptor(s.at, SpawnClassValue.FlagStripProp, -1, "strip",
+      G.g_slot_actors_built.push(key);
+      SpawnFromDescriptor(at(), SpawnClassValue.FlagStripProp, -1, "strip",
                           { class12: pl.class12, ...PlacementOrientation(pl),
                             flags: pl.init_flags ?? 0,
                             pos: vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0,
                                       s.pos?.[2] ?? 0),
-                            visible: true });
+                            visible: true, descAt: s.at });
+      return;
+    }
+    // Class 0x15 -- the row of floating planks. Opcode 0x0C too, so the
+    // record's three angles and flags word, which every plank copies; the
+    // placer builds the row from the tail and kills itself (`game/class15/`).
+    if (s.class === SpawnClassValue.FloatingPropRow) {
+      if (!pl.class15) return;
+      G.g_slot_actors_built.push(key);
+      SpawnFromDescriptor(at(), SpawnClassValue.FloatingPropRow, -1,
+                          "plank row",
+                          { class15: pl.class15, ...PlacementOrientation(pl),
+                            flags: pl.init_flags ?? 0,
+                            pos: vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0,
+                                      s.pos?.[2] ?? 0),
+                            visible: true, descAt: s.at });
+      return;
+    }
+    // Class 0x2B -- a scripted light. No tail and no position of its own:
+    // `obj+0x11C`, the selector, is all `DynamicLightInit` reads
+    // (`game/class2B/`).
+    if (s.class === SpawnClassValue.DynamicLight) {
+      G.g_slot_actors_built.push(key);
+      SpawnFromDescriptor(at(), SpawnClassValue.DynamicLight, -1,
+                          `light ${pl.hp}`,
+                          { hp: pl.hp, maxHp: pl.hp, flags: pl.init_flags ?? 0,
+                            visible: true, descAt: s.at });
       return;
     }
     if (s.class === SpawnClassValue.ScriptedProp) {
       if (!pl.class13) return;
-      G.g_slot_actors_built.push(s.at);
-      SpawnFromDescriptor(s.at, SpawnClassValue.ScriptedProp, -1, "prop",
+      G.g_slot_actors_built.push(key);
+      SpawnFromDescriptor(at(), SpawnClassValue.ScriptedProp, -1, "prop",
                           { class13: pl.class13, ...PlacementOrientation(pl),
                             flags: pl.init_flags ?? 0,
                             pos: vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0,
                                       s.pos?.[2] ?? 0),
-                            visible: true });
+                            visible: true, descAt: s.at });
       return;
     }
     // Class 0x26 subtypes 2, 6 and 7 -- stage 3's boat and stage 6 block 12's
@@ -421,25 +508,25 @@ export function SpawnSlotActor(s: ScriptSpawn): void {
     // subtype, `obj+0x11C`, as `SpawnFromDescriptor` copies it.
     if (s.class === SpawnClassValue.Vehicle) {
       if (!pl.class26) return;
-      G.g_slot_actors_built.push(s.at);
-      SpawnFromDescriptor(s.at, SpawnClassValue.Vehicle, -1,
+      G.g_slot_actors_built.push(key);
+      SpawnFromDescriptor(at(), SpawnClassValue.Vehicle, -1,
                           pl.hp === 2 ? "boat" : `class 0x26 subtype ${pl.hp}`,
                           { class26: pl.class26, hp: pl.hp, maxHp: pl.hp,
                             ...PlacementOrientation(pl),
                             flags: pl.init_flags ?? 0,
                             pos: vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0,
                                       s.pos?.[2] ?? 0),
-                            visible: true });
+                            visible: true, descAt: s.at });
       return;
     }
     if (s.class === SpawnClassValue.FlyingEnemy) {
       if (!pl.class43) return;
-      G.g_slot_actors_built.push(s.at);
-      SpawnFromDescriptor(s.at, SpawnClassValue.FlyingEnemy, -1, "owl",
+      G.g_slot_actors_built.push(key);
+      SpawnFromDescriptor(at(), SpawnClassValue.FlyingEnemy, -1, "owl",
                           { class43: pl.class43, ...PlacementOrientation(pl),
                             pos: vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0,
                                       s.pos?.[2] ?? 0),
-                            visible: true });
+                            visible: true, descAt: s.at });
       return;
     }
     // Class 0x42 -- the worm's placer. No character type: every draw of the
@@ -449,12 +536,27 @@ export function SpawnSlotActor(s: ScriptSpawn): void {
     // spawn record's, which is all `EvtOpSpawnPlaced09` gives it.
     if (s.class === SpawnClassValue.Worm) {
       if (!pl.class42) return;
-      G.g_slot_actors_built.push(s.at);
-      SpawnFromDescriptor(s.at, SpawnClassValue.Worm, -1, "worm placer",
+      G.g_slot_actors_built.push(key);
+      SpawnFromDescriptor(at(), SpawnClassValue.Worm, -1, "worm placer",
                           { class42: pl.class42, ...PlacementOrientation(pl),
                             pos: vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0,
                                       s.pos?.[2] ?? 0),
-                            visible: true });
+                            visible: true, descAt: s.at });
+      return;
+    }
+    // Class 0x29 -- a batch of floor decals. No character type: every draw is
+    // an asset slot from one of the image's three lists, picked by `hp`
+    // (`obj+0x11C`), and the tail names the camera cue that ends it.
+    if (s.class === SpawnClassValue.SceneryBatch) {
+      if (!pl.class29) return;
+      G.g_slot_actors_built.push(key);
+      SpawnFromDescriptor(at(), SpawnClassValue.SceneryBatch, -1,
+                          `decals ${pl.hp}`,
+                          { class29: pl.class29, hp: pl.hp, maxHp: pl.hp,
+                            ...PlacementOrientation(pl),
+                            pos: vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0,
+                                      s.pos?.[2] ?? 0),
+                            visible: true, descAt: s.at });
       return;
     }
     // Classes 0x16 and 0x17 -- the stage-2 boss arena's wave field and its
@@ -464,26 +566,26 @@ export function SpawnSlotActor(s: ScriptSpawn): void {
     // in the descriptor so the `Init` sees it.
     if (s.class === SpawnClassValue.WaterWaveField) {
       if (!pl.class16) return;
-      G.g_slot_actors_built.push(s.at);
-      SpawnFromDescriptor(s.at, SpawnClassValue.WaterWaveField, -1,
+      G.g_slot_actors_built.push(key);
+      SpawnFromDescriptor(at(), SpawnClassValue.WaterWaveField, -1,
                           "wave field",
                           { class16: pl.class16, ...PlacementOrientation(pl),
                             pos: vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0,
                                       s.pos?.[2] ?? 0),
-                            visible: true });
+                            visible: true, descAt: s.at });
       return;
     }
     if (s.class === SpawnClassValue.WaterWaveSource) {
       if (!pl.class17) return;
-      G.g_slot_actors_built.push(s.at);
-      SpawnFromDescriptor(s.at, SpawnClassValue.WaterWaveSource, -1,
+      G.g_slot_actors_built.push(key);
+      SpawnFromDescriptor(at(), SpawnClassValue.WaterWaveSource, -1,
                           "wave source",
                           { class17: pl.class17, hp: pl.hp, maxHp: pl.hp,
                             yaw: pl.yaw ?? 0, pitch: pl.class17.pitch,
                             roll: pl.class17.roll,
                             pos: vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0,
                                       s.pos?.[2] ?? 0),
-                            visible: true });
+                            visible: true, descAt: s.at });
       return;
     }
     // Class 0x51 -- the fish. Drawn by asset slot from `fish.bin`, so it has
@@ -495,31 +597,38 @@ export function SpawnSlotActor(s: ScriptSpawn): void {
       if (!pl.class51) return;
       // The position goes in the **descriptor**, not after the spawn: it is
       // the one class here whose `Init` reads it, into `sub+0x00..0x08`.
-      G.g_slot_actors_built.push(s.at);
-      SpawnFromDescriptor(s.at, SpawnClassValue.WaterEnemy, -1, "fish",
+      G.g_slot_actors_built.push(key);
+      SpawnFromDescriptor(at(), SpawnClassValue.WaterEnemy, -1, "fish",
                           { class51: pl.class51, ...PlacementOrientation(pl),
                             pos: vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0,
                                       s.pos?.[2] ?? 0),
-                            visible: true });
+                            visible: true, descAt: s.at });
       return;
     }
     // Class 0x33 -- `hp` is the **selector**, not hit points:
     // `SpawnFromDescriptor` (`FUN_00408A20`) copies the raw `s16` at
     // `desc+0x22` into `obj+0x11C`, and `ScriptedSceneryDispatch33`
     // (`FUN_00432FF0`) switches on it. The bundle carries a tail block for the
-    // three sub-handlers this port has read and for no other -- `class33` for
-    // selector 1, `class33_push` for selector 4, `class33_cue` for selector 5
-    // -- and never two on one spawn, so a placement with none is a
-    // sub-handler nothing here can run and gets no object. That is the same
-    // refusal `SpawnPropContainers` makes for an unnamed class-0x44 kind,
-    // rather than a default arm that would run the wrong handler.
+    // sub-handlers this port has read that read one, and for no other --
+    // `class33` for selector 1, `class33_prop` for selector 2, `class33_push`
+    // for selector 4, `class33_cue` for selector 5, `class33_sub` for 6 to 11
+    // and 99 -- and never two on one spawn. Selector 3
+    // (`ScriptedEffectOnFirstFrame33`, `FUN_00433AC0`) reads no tail at all,
+    // so its placement is the whole of what it needs. Any other placement is a
+    // sub-handler nothing here can run and gets no object: the same refusal
+    // `SpawnPropContainers` makes for an unnamed class-0x44 kind, rather than
+    // a default arm that would run the wrong handler.
     if (s.class === SpawnClassValue.ScriptedScenery) {
-      if (!pl.class33 && !pl.class33_push && !pl.class33_cue) return;
-      G.g_slot_actors_built.push(s.at);
-      SpawnFromDescriptor(s.at, SpawnClassValue.ScriptedScenery, -1,
-                          `scenery ${pl.hp}`,
+      if (!pl.class33 && !pl.class33_push && !pl.class33_cue
+          && !pl.class33_prop && !pl.class33_sub
+          && pl.hp !== ScriptedScenerySelector.EffectOnFirstFrame) return;
+      G.g_slot_actors_built.push(key);
+      const obj = SpawnFromDescriptor(at(), SpawnClassValue.ScriptedScenery,
+                          -1, `scenery ${pl.hp}`,
                           { class33: pl.class33, class33Push: pl.class33_push,
                             class33Cue: pl.class33_cue,
+                            class33Sub: pl.class33_sub,
+                            class33Prop: pl.class33_prop,
                             hp: pl.hp, maxHp: pl.hp,
                             ...PlacementOrientation(pl),
                             // `ActorInitFlags` (`FUN_00408970`) makes the
@@ -531,41 +640,50 @@ export function SpawnSlotActor(s: ScriptSpawn): void {
                             flags: pl.init_flags ?? 0,
                             pos: vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0,
                                       s.pos?.[2] ?? 0),
-                            visible: true });
+                            visible: true, descAt: s.at });
+      // `[port-only]` A seek's rebuild: what the replay's camera has run past
+      // this record's object -- selector 7's cues -- goes on before it runs.
+      if (s.replay) {
+        g_class_handlers[obj.cls]?.resumeFromReplay?.(obj, s.replay);
+      }
       return;
     }
   }
 }
 
 /**
- * Class 0x28, as `EvtOpSpawnPlaced09` (`FUN_004088A0`) builds it.
+ * Classes 0x28 and 0x27, as `EvtOpSpawnPlaced09` (`FUN_004088A0`) builds
+ * them.
  *
- * Opcode 9 allocates `g_class_handlers[desc[0]]`, runs `ActorInitFlags` on
- * the descriptor's flags word, and copies `desc+0x22` into `obj+0x11C` (and
- * `+0x11E`), the position into `obj+0x40..0x48` and the three angles into
- * `obj+0x64..0x6C` -- and calls no `Init` and reads no tail. So there is no
- * placement row to look up: everything the object starts with is on the
- * spawn record, and the handler seats it on its first frame
- * (`game/class28/`).
+ * Opcode 9 allocates `g_class_handlers[desc[0]]`, runs `ActorClearGameFields`
+ * and `ActorInitFlags` on the descriptor's flags word, and copies `desc+0x22`
+ * into `obj+0x11C` (and `+0x11E`), the position into `obj+0x40..0x48` and the
+ * three angles into `obj+0x64..0x6C` -- and calls no `Init` and reads no
+ * tail. So there is no placement row to look up: everything the object
+ * starts with is on the spawn record, and the class's handler seats it on its
+ * first frame (`game/class28/`, `game/class27/`). Both classes are placed
+ * only by this opcode: stage 1's six class-0x28 spawns and stage 2 block 0's
+ * two class-0x27 ones.
  *
  * `[port-only]` as a *function*, for the reason {@link SpawnSlotActors}
- * gives: built once per listed spawn, which is the port's answer to a replay.
- * Before this arm the spawn built nothing, and the object's draw ran in
- * `render/rigs.ts` off the rig table with no object behind it.
+ * gives: built once per listed spawn instruction, which is the port's answer
+ * to a replay. Before this arm each class's spawn built nothing: class 0x28's
+ * draw ran in `render/rigs.ts` off the rig table with no object behind it,
+ * and class 0x27 was not drawn at all.
  */
-function SpawnPathRidingProp(s: ScriptSpawn): void {
-  if (G.g_slot_actors_built.includes(s.at)) return;
-  if (ActorByAt(s.at)) return;
-  G.g_slot_actors_built.push(s.at);
-  SpawnFromDescriptor(s.at, SpawnClassValue.PathRidingProp, -1,
-                      `path prop ${s.hp ?? 0}`,
+function SpawnPlacedFromRecord(s: ScriptSpawn, key: string): void {
+  if (G.g_slot_actors_built.includes(key)) return;
+  G.g_slot_actors_built.push(key);
+  const cls = s.class as SpawnClass;
+  SpawnFromDescriptor(SpawnSiteAt(s.at), cls, -1,
+                      `placed 0x${cls.toString(16)} ${s.hp ?? 0}`,
                       { hp: s.hp ?? 0, maxHp: s.hp ?? 0,
                         flags: s.flags ?? 0,
                         pitch: s.orient?.[0] ?? 0, yaw: s.orient?.[1] ?? 0,
                         roll: s.orient?.[2] ?? 0,
                         pos: vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0,
                                   s.pos?.[2] ?? 0),
-                        visible: true });
+                        visible: true, descAt: s.at });
 }
 
 /**
@@ -616,13 +734,23 @@ export function SpawnSimpleActors(spawns: readonly SimpleScriptSpawn[]): void {
 export function SpawnPropContainers(spawns: readonly ScriptSpawn[]): void {
   const placements = T.breakables?.placements;
   if (!placements?.length) return;
-  for (const s of spawns) {
+  // Built once per spawn **instruction** while the script lists it, as
+  // `SpawnSlotActors` does and for its reason: the placer dies on its first
+  // frame and stays in the pool dead, which is what used to stop a second
+  // build -- and so also stopped every re-spawn of the same descriptor by a
+  // later instruction, which in the engine places the props again.
+  const keys = SpawnSiteKeys(spawns);
+  const listed = new Set(keys);
+  G.g_prop_placers_built = G.g_prop_placers_built.filter((k) => listed.has(k));
+  for (let i = 0; i < spawns.length; i++) {
+    const s = spawns[i];
     const isPlacer = s.class === SpawnClassValue.PropContainerPlacer
                   || s.class === SpawnClassValue.PropPlacer;
     if (!isPlacer) continue;
-    if (ActorByAt(s.at)) continue;
+    if (G.g_prop_placers_built.includes(keys[i])) continue;
     const pl = placements.find((p) => p.at === s.at);
     if (!pl) continue;
+    G.g_prop_placers_built.push(keys[i]);
 
     // Class 0x44 dispatches on `+0x11C`, so the selector goes in `hp` — the
     // same field that is the *group id* for a class-0x41 placer.
@@ -641,10 +769,20 @@ export function SpawnPropContainers(spawns: readonly ScriptSpawn[]): void {
       slide_on_flag: Class44Selector.SlideOnFlag,
       flag_lifted: Class44Selector.FlagLifted,
       draw_only_14: Class44Selector.DrawOnly,
+      hinge: Class44Selector.Hinge,
+      van_doors: Class44Selector.VanDoors,
+      flag_slot_effect: Class44Selector.FlagSlotEffect,
+      hinge_scaled: Class44Selector.HingeScaled,
+      effect_handoff: Class44Selector.EffectHandoff,
+      swing_then_break: Class44Selector.SwingThenBreak,
+      scaled_slot_effect: Class44Selector.ScaledSlotEffect,
+      effect_collapse: Class44Selector.EffectCollapse,
+      slot_strip_loop: Class44Selector.SlotStripLoop,
+      kinded_44: Class44Selector.KindedProp,
     };
     const sel = CLASS44_SELECTOR[pl.container];
     if (s.class === SpawnClassValue.PropPlacer && sel !== undefined) {
-      const a = ActorSpawn(s.at, SpawnClassValue.PropPlacer, 0,
+      const a = ActorSpawn(SpawnSiteAt(s.at), SpawnClassValue.PropPlacer, 0,
                            pl.container === "story_switch"
                              ? "story-mode switch"
                              : pl.container === "script_flag_effect"
@@ -657,8 +795,10 @@ export function SpawnPropContainers(spawns: readonly ScriptSpawn[]): void {
                                    ? `${pl.container}, flag ${pl.open_flag}`
                                    : pl.container === "draw_only_14"
                                      ? `slot 0x${(pl.slot ?? 0).toString(16)}`
-                                     : `container kind ${pl.kind}`,
-                           { hp: sel });
+                                     : pl.container === "falling"
+                                       ? `container kind ${pl.kind}`
+                                       : pl.container,
+                           { hp: sel, descAt: s.at });
       a.pos = vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0, s.pos?.[2] ?? 0);
       a.yaw = pl.yaw ?? 0;
       a.visible = true;
@@ -679,18 +819,40 @@ export function SpawnPropContainers(spawns: readonly ScriptSpawn[]): void {
       : pl.container === "table50" ? PropContainerType.Table50Props
       : pl.container === "table66" ? PropContainerType.Table66Props
       : pl.container === "water_surface" ? PropContainerType.WaterSurface
+      : pl.container === "uv_scroll" ? PropContainerType.UvScrollTask
       : pl.container === "type47" ? PropContainerType.Type47Prop
+      : pl.container === "table16" ? PropContainerType.Table16Props
+      : pl.container === "type17" ? PropContainerType.Type17Props
+      : pl.container === "table29" ? PropContainerType.Table29Props
+      : pl.container === "type37" ? PropContainerType.Type37PropPair
+      : pl.container === "type42" ? PropContainerType.Type42Prop
+      : pl.container === "type52" ? PropContainerType.Type52VanDoors
+      : pl.container === "type55" ? PropContainerType.Type55Particles
+      : pl.container === "type61" ? PropContainerType.Type61Figures
+      : pl.container === "type65" ? PropContainerType.Type65Particles
+      : pl.container === "golden_frog"
+        ? PropContainerType.GoldenFrogFromLessonTable
+      : pl.container === "ripple" ? PropContainerType.Type26RippleTask
       : PropContainerType.BreakableGroup;
-    // The three table constructors read the placer's `+0x11C` as the step
-    // lifetime they copy into every object, so that is what goes in `hp` for
-    // them; for a group it is the group id.
+    // The table constructors -- 38, 39, 44, 16 and 29 -- and constructor 37
+    // read the placer's `+0x11C` as the step lifetime they copy into every
+    // object, so that is what goes in `hp` for them; for a group it is the
+    // group id.
     const table = pl.container === "table38" || pl.container === "table39"
-      || pl.container === "table44";
+      || pl.container === "table44" || pl.container === "table16"
+      || pl.container === "table29" || pl.container === "type37"
+      // ...and constructors 52 and 61 copy it into what they build: 52's
+      // doors as their step lifetime, 61's figures as a word nothing reads;
+      // constructor 68 into its frog's `+0x11C`, the step lifetime
+      // `GoldenFrogUpdate` counts against; and constructor 26 into its task's
+      // `+0x35`, the same.
+      || pl.container === "type52" || pl.container === "type61"
+      || pl.container === "golden_frog" || pl.container === "ripple";
     // The water task and constructors 50 and 66 read both descriptor fields
     // as themselves: `+0x1F4` the table index, `+0x11C` the lifetime.
     const bothFields = pl.container === "water_surface"
       || pl.container === "table50" || pl.container === "table66";
-    const a = ActorSpawn(s.at, SpawnClassValue.PropContainerPlacer,
+    const a = ActorSpawn(SpawnSiteAt(s.at), SpawnClassValue.PropContainerPlacer,
                          bothFields ? pl.field_1f4 ?? 0 : pl.lifetime_evt_steps,
                          pl.container === "kinded"
                            ? `prop kind ${pl.kind}`
@@ -701,7 +863,7 @@ export function SpawnPropContainers(spawns: readonly ScriptSpawn[]): void {
                                : `breakable group ${pl.group}`,
                          { hp: table || bothFields ? pl.lifetime_evt_steps
                                               : pl.group ?? 0,
-                           condition: type });
+                           condition: type, descAt: s.at });
     a.pos = vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0, s.pos?.[2] ?? 0);
     a.yaw = pl.yaw ?? 0;
     a.visible = true;
@@ -833,6 +995,8 @@ function SceneTaskWalk(dt: number, host: GameHost,
   PushSceneLightStateToDevice(dt * GAME_HZ);
   CameraActorTick();
   CameraUpdateTick();
+  // `[port-only]`: a body is on screen only on a frame a hook draws it.
+  for (const b of G.g_player_bodies) b.drawn = 0;
   PlayerTasksRun({ host, rng, events });
   // The letterbox, the task `HudShutterTaskCreate` makes on the line after
   // `SpawnAttackablePlayerTask` (`0x00460733`): after both players have read
@@ -887,18 +1051,22 @@ function SceneTaskWalk(dt: number, host: GameHost,
     // An object an `Init` links is pushed behind this one and reached below,
     // on this frame, as `TaskRunTree`'s next-pointer read reaches it.
     //
-    // The port then runs the frame's update as well, as it did when every
-    // `Init` ran at the spawn. The engine does not always: `EnemyZombieInit`
-    // writes `EnemyZombieUpdate` over `obj+0x00` and returns (`0x00452FB5`),
-    // so a zombie's update starts on the next walk, while class 0x28's
-    // handler seats itself on its first call and `Class22Init` runs its
-    // update from inside -- the port's split of each handler into `init` and
-    // `update` answers that class by class, and moving it is not this change.
+    // Whether the frame's update follows on this walk is the class's: an
+    // `Init` that calls its update (`Class22Init`), or a handler that is the
+    // update (class 0x28's), has it run now; one that writes its update over
+    // `obj+0x00` and returns (`EnemyZombieInit`, `0x00452FB5`) has it run on
+    // the next walk. The port's split of each handler into `init` and
+    // `update` answers that class by class, through
+    // `ClassHandler.firstUpdateNextWalk`, whose doc lists every class.
     if (obj.initPending) {
-      ActorRunInit(obj, rng, events);
+      ActorRunInit(obj, rng, events, host);
       // An `Init` that kills its object (`PlaceWormBatch`, a fish group
       // header) longjmps out of the walk: nothing else of it runs.
       if (obj.despawned) continue;
+      // ...and one that installs its update and returns has had this walk's
+      // call: the update starts on the next. See
+      // `ClassHandler.firstUpdateNextWalk`.
+      if (g_class_handlers[obj.cls]?.firstUpdateNextWalk) continue;
     }
     // Every actor's clips run, handler or not: a class with no behaviour still
     // loops the motion the script gave it.
@@ -977,6 +1145,7 @@ function SceneTaskWalk(dt: number, host: GameHost,
     // engine's routine does, and sets nothing. See `camera/track.ts`.
     if (handler?.tracksCamera?.(obj)
         && !G.g_camera_candidates.some((c) => c.prop === null
+                                           && c.thrown === null
                                            && c.at === obj.at)) {
       RegisterForCameraTracking(obj);
     }
@@ -1002,6 +1171,13 @@ function SceneTaskWalk(dt: number, host: GameHost,
   // `ActorAlloc` like the props, so after the actors that placed them: a task
   // made this frame draws this frame. See `game/class41/water.ts`.
   WaterSurfacesTick();
+  // ...and the subtitle tasks evt 0x2D and its other callers allocate, the
+  // same way. See `game/dialogue.ts`.
+  DialogueTasksTick();
+  // ...and the car reflection's task, constructor 3's, the same way.
+  Type3UvScrollTick(host);
+  // ...and the warehouse water's, constructor 26's.
+  Type26RipplesTick();
 
   // The stage-2 car, which `RescueTargetInit` (`FUN_00451720`) allocates:
   // an actor's task, so after the scene's own -- the camera's among them --
@@ -1034,6 +1210,11 @@ function SceneTaskWalk(dt: number, host: GameHost,
   OwlEffectsTick(rng);
   FishEffectsTick();
   RingEffectsTick();
+  // The wakes a class-0x30 actor leaves in the water (`SpawnAttachedEffect`,
+  // `FUN_00408770`, from `ActorCheckWaterEntry`): after the actors, so the
+  // pair is stepped, and drawn, on the frame it is made. See
+  // `game/effects/attached_effect.ts`.
+  AttachedEffectsTick(events);
   // The splashes a falling bat allocates (`SpawnBatSplash`, `FUN_0042F980`):
   // after the bats, so the first is drawn on the frame it is made. See
   // `game/class46/splash.ts`.
@@ -1049,12 +1230,6 @@ function SceneTaskWalk(dt: number, host: GameHost,
   // hands effects, the projectiles' trails, the death bursts and the exit
   // effect -- the same way. Its projectiles are actors and ran above.
   Class32TasksTick(events);
-  // `[port-only]` placement: the skip watcher's second routine. The walker
-  // raises `g_cutscene_skipping` where the watcher would, between two
-  // frames, so its next update -- `FinishCutsceneSkip` -- comes after this
-  // walk's actors, each of which has seen it once. See
-  // `game/cutscene_skip.ts`.
-  if (G.g_cutscene_skipping !== 0) FinishCutsceneSkip();
   // The layered queue is flushed by `GameUpdate`, after the run phase.
   return { lookAt: G.g_camera_block_target };
 }

@@ -39,6 +39,16 @@ listed is **two**, which is that switch's fall-through `piVar8 = param_2 + 2`:
 
 ## Blocks, and what a wait word means
 
+**The first block runs inside `CivilianInit`, before most of the Init.**
+`CALL CivilianRunScript` is at `0x0048A5E2`: after the sub-block's stores
+(`sub+0x1E = 0`, `sub+0x78 = 1.0`, ...) and before the hooks, `obj+0x124` and
+`obj+0x128`, the permit and camera slot, the alive and seen counts, the part
+list, the carrier and the child count (`sub+0x1E = tail+0x0C` at
+`0x0048A775`). So in the first block op 0x16 ramps from a radius of 0, op
+0x1A and op 0x23 mode 2 find no children and do nothing, and the seen count's
+`Uncounted` test (`0x0048A705`) reads the wait word the first block loaded --
+nine shipped entry streams open on a word that carries it. `[proved]`
+
 A stream is a run of **blocks**, each led by a `Wait` (`0x2C`) and followed by
 its actions.
 
@@ -97,9 +107,10 @@ and `0x20000000` (3) also appear in the shipped words. `0x00040000` is the
 and `obj+0x34` bit `0x10000` is *excluded from `RegisterForCameraTracking`* —
 so the wait bit set means tracked. `0x01000000` is the world push and
 `0x20000000` keeps her through a skipped cut scene: its only two readers
-(every `TEST` of the mask) are the removal's skip arm (`0x0048AFA0`, see *How
-a civilian leaves*) and op 0x1D's gate on `g_cutscene_skipping` (`0x0048BF3E`).
-The counts are of the 596 `Wait` commands in the 136 shipped streams.
+(every class-0x10 `TEST` of the mask) are the removal's skip arm
+(`0x0048AFA0`, see *How a civilian leaves*) and op 0x1D's gate on
+`g_cutscene_skipping` (`0x0048BF3E`). The counts are of the 596 `Wait`
+commands in the 136 shipped streams.
 
 **The camera-track bit is how the room waits for her.** `[proved]`
 `CivilianUpdate` (`FUN_0048A920`) ends every path that does not despawn at
@@ -328,17 +339,17 @@ Two consequences worth knowing, both the engine's:
 | `0x18` | `SetPose` | pointer to six dwords, copied: three floats into `obj+0x40..0x48`, three BAMS **integers** into `obj+0x64..0x6C`. The five shipped yaws are `0xC000`, `0x2D00`, `0x4000`, `0x6000`, `0x7000` |
 | `0x19` | `SetRouteBranch` | **[proved]** `g_script_branch_var = (s16)cmd[1]` — the selector `EvtAdvanceStepOrRoute` indexes a route record's `next[]` with, so **this is how the game decides which way a branching stage goes**. Eleven streams run it, all eleven pass 1, and all eleven put it after the `SetOnShot 0` that makes the civilian safe. See [evt.md](evt.md#how-a-branch-is-decided) |
 | `0x1A` | `SetChildCue` | applied only while children survive |
-| `0x1B` | `SetHudShutterState` | the low byte into `g_bHudShutterState` (`0x009CA0F4`) unless `g_app_state` is 10 (`0x0048BF0A`) -- the letterbox, and with it the firing gate. `[proved]` |
+| `0x1B` | `SetGlobalB` | `DAT_009CA0F4`. `[open]` |
 | `0x1C` | `SetScriptFlag` | **[proved]** `g_script_flags[cmd[1]] = 1` (`0x0048BF2A`) — the *same* 0x100-byte array at `0x009C7200` that the evt's `set_script_flag` (0x48) writes and `wait_script_flag` (0x45) reads. **This is how a hostage tells the stage script she is done**, and it is the only way most of them can: across the six shipped scripts every `wait_script_flag` gate but two names a flag no `set_script_flag` in that stage ever raises. Twenty-eight commands in the 136 streams, on flags 0..7, 18, 29, 30, 35, 36, 53 and 54. See *The rescue* below |
 | `0x1D` | `PlayDialogue` | group — `EvtOpPlayDialogue2D`, when `(g_cutscene_skipping && word & 0x20000000) || sub+0x2A == 0` (`0x0048BF36`): not while she is walking off. The skip half reaches an `EvtOpPlayDialogue2D` that returns on the same flag, so it says nothing either way. `[proved]` |
 | `0x1E` | `SetResume` | script pointer |
 | `0x1F` | `SetResumeByMode` | two script pointers: the second when `g_title_menu_cursor` (`0x009A2226`) is 1 -- `CMP word ptr [0x009a2226], DX` with `DX = 1` from the loop's head (`0x0048BF79`, `0x0048BA0A`). The cursor is the title menu row the player confirmed, and rows 0..3 are the `g_GameMode` values, so the second stream is Original Mode's. `[proved]` |
 | `0x20` | `SetFlagIndex` | |
 | `0x21` | `QueueSound` | id, delay |
-| `0x22` | `QueueSoundList` | pointer to `(id, delay)` pairs, `0xFFFFFFFF`-terminated. A null pointer writes `sub+0x58 = 0` and nothing else (`0x0048BFBD`): a sound op 0x21 queued still plays. 14 of the 33 are null. `[proved]` |
-| `0x23` | `SetHeadLook` | the head's mode into `sub+0x8C`; mode 2 takes the first child into `sub+0x90` while there is one, else the mode is 0 (`0x0048C044`). See *The head and the mouth* |
-| `0x24` | `SetHeadLookAt` | mode into `sub+0x8C`, and a pointer to three floats into `sub+0x90` (`0x0048C08C`). Both shipped uses are mode 5 |
-| `0x25` | `SetMouth` | frames into `sub+0xA4`, a mouth table into `sub+0xA8`, `sub+0xA0 = 0` (`0x0048C0B0`) |
+| `0x22` | `QueueSoundList` | pointer to `(id, delay)` pairs, `0xFFFFFFFF`-terminated. A null pointer writes `sub+0x58 = 0` and nothing else (`0x0048C034`): a sound op 0x21 queued still plays. 14 of the 33 are null. `[proved]` |
+| `0x23` | `SetHeadLook` | where the head looks, `sub+0x8C`; a 2 also takes the first child as the target, `sub+0x90`, or writes 0 with none (`0x0048C044`) -- see *The head look* below. It was `SetAttachMode` |
+| `0x24` | `SetHeadLookTarget` | the same, with the target given: `sub+0x8C`, `sub+0x90` (`0x0048C08C`). The shipped two are mode 5 and a pointer into `.data` -- `(20, 50, -20)` at `0x0056E028`, `(20, 20, -20)` at `0x0056E038`, both in stream 60 -- and the bundle carries the three floats as the command's `point` for modes 4 and 5. It was `SetAttachTarget` |
+| `0x25` | `SetMouth` | **she talks**: frames into `sub+0xA4`, a mouth row into `sub+0xA8`, and `sub+0xA0 = 0` (`0x0048C0B0`) -- see *The mouth* below. It was `SetPairA`, "which nothing read reads" |
 | `0x26` | `MoveOverFrames` | point (or `< 1` for the camera), frames |
 | `0x27` | `SetScale` | `model+0x116C` |
 | `0x28` | `SetHitBone` | the s16 into `sub+0xAC` (the Init's 2): the bone whose record point the shot arm puts `SpawnCivilianHitMarker` at (`0x0048ABCB`). One use, bone 9. `[proved]` |
@@ -442,7 +453,7 @@ it ends.
 
 | Ids | Files | What happens |
 |---|---|---|
-| `0x00`–`0x23` | `hito_kao_*`, `etc_*_kao`; `0x02`, `0x03` and `0x0E` are `char_adv02`, `char_adv01` and `char_adv07` | `ActorBindPartList` writes the record's slot **over** `bone_records[bone].slot`. All 36 are bone 2. *Kao* (顔) is **face**: `hito_kao_gal.bin` alone holds 60 heads of the same 149 vertices and 234 triangles as `hito_gal`'s own, differing only in texture — three skins × twenty mouth positions. The skeleton's head is the default, not the character. |
+| `0x00`–`0x23` | `hito_kao_*`, `etc_*_kao`; `0x02`, `0x03` and `0x0E` are `char_adv02`, `char_adv01` and `char_adv07` | `ActorBindPartList` writes the record's slot **over** `bone_records[bone].slot`. All 36 are bone 2. *Kao* (顔) is **face**: `hito_kao_gal.bin` alone holds 60 heads of the same 149 vertices and 234 triangles as `hito_gal`'s own -- three faces of twenty slots each, and the slots after a face are its mouth shapes: `CivilianDrawBonePart` draws the face's slot **plus a cel** of 0 to 9 while she talks (see *The mouth*), and `0x0C6A` against `0x0C6C` moves 62 of the 149 vertices, all in the lower front of the face. What slots ten to nineteen of a face are is `[open]`: no table reaches them. The skeleton's head is the default, not the character. |
 | `0x24`–`0x50` | `etc_komono_*` | `ActorDrawAttachedParts` draws the record's slot **as well**, in the matrix of the record's bone. *Komono* (小物) is **small item**: hair and hats on bone 2, bags and aprons on bone 1, shoes on bones 12 and 15. |
 
 `ActorDrawAttachedParts` also scales bone 2 by `1.5, 1.0, 1.5` and bones 5, 8,
@@ -473,6 +484,100 @@ family**, with no exceptions: type `0x2E` (`hito_man`) takes `etc_komono_man`,
 `ActorReleasePartList` (`FUN_004124B0`) is the undo, and it releases the loads
 only — the overwritten bone slots are not put back, because the object is
 being torn down.
+
+### The mouth
+
+**Nothing in a civilian's motion moves her mouth.** `CivilianInit` installs
+`CivilianDrawBonePart` (`FUN_0048D1F0`) as the node draw hook (`MOV dword ptr
+[EAX + 0x1158], 0x48d1f0` at `0x0048A60B`), and for bone 2 it draws the head's
+record slot **plus a cel** out of `g_civilian_mouth_tables` (`0x0056B950`),
+six `{s8 *cels; s32 count}` rows. `[proved]`
+
+```
+if (sub+0xA8 != 6) {                      // CivilianInit writes 6
+    cel = rows[sub+0xA8].cels[sub+0xA0 % rows[sub+0xA8].count];
+    if (sub+0xA4 != 0) {
+        if (--sub+0xA4 == 0) {
+            if (sub+0xA8 == 2) { sub+0xA8 = 3; sub+0xA4 = count[3]; sub+0xA0 = 0; }
+            else sub+0xA0 = count[sub+0xA8] - 1;
+        } else sub+0xA0 += 1;
+    }
+}
+AssetDrawSlot(record + cel);
+```
+
+Op `0x25` writes the frames, the row and a zero cursor; the shipped streams
+name rows 0, 1, 2 and 5. The cel is read **before** the step. Row 2 hands over
+to row 3 -- `5 5 5 6 6 6 7 7 7 8 8 8 9` -- for its own thirteen frames, and
+every other row, row 3 included, parks its cursor on its last cel and holds it
+until the next op `0x25`: rows 0, 1, 4 and 5 end on 0, the face's own slot,
+and row 3 on 9. The count is of **drawn** frames: the hook runs only for a
+node `SkeletonEmitNode` draws. The record itself is never written.
+
+| Row | At | Count | Cels |
+|---|---|---|---|
+| 0 | `0x0056B88C` | 21 | `1 2 3 3 2 1 0 0 1 2 2 1 2 3 4 4 3 2 1 0 0` |
+| 1 | `0x0056B8A4` | 38 | `1 1 2 2 3 3 3 3 2 2 1 1 1 1 2 2 2 2 1 1 2 2 3 3 4 4 4 4 3 3 2 2 1 1 0 0 0 0` |
+| 2 | `0x0056B8CC` | 34 | `1 1 1 2 2 2 3 3 3 3 2 2 2 1 1 1 1 2 2 2 2 1 1 1 2 2 2 3 3 3 4 4 4 4`, then row 3 |
+| 3 | `0x0056B8F0` | 13 | `5 5 5 6 6 6 7 7 7 8 8 8 9` |
+| 4 | `0x0056B900` | 20 | `1` ten times, then `0` ten times |
+| 5 | `0x0056B914` | 56 | `1 1 2 2 3 3 3 3 2 2 1 1 1 1 2 2 2 2 1 1 0 0 0 0 1 1 2 2 3 3 4 4 5 5 6 6 7 7 7 7 6 6 5 5 4 4 3 3 2 2 1 1 0 0 0 0` |
+
+The bundle carries the rows as `characters.civilian_mouth_tables`, and the
+exporter puts every `record + cel` a spawn's script can reach on her type's
+hidden template. Ported in `game/class10/head.ts`.
+
+### The head look
+
+The same arm turns the head first, while `sub+0x8C` is not 0. `[proved]` from
+`0x0048D244..0x0048D7DA`:
+
+```
+target (world) by sub+0x8C:
+  1  g_camera_eye + (0, 15.0, 0)                       0x004C4398
+  2  the translation of (sub+0x90)->+0x354             the child's bone-2 record
+       sub+0x1E && child+0x34 & 0x4000000  ->  sub+0x90 = sub+0x60[0]
+       !(child+0x34 & 1)                   ->  sub+0x8C = 6
+  3  g_camera_lookat_target
+  4  *(vec3 *)sub+0x90
+  5  [carrier T Rx Rz Ry] T(obj+0x40) Rx(+0x64) Rz(+0x6C) Ry(+0x68) * *(vec3 *)sub+0x90
+  -  anything else: the head's own view-space translation (no stream uses it)
+P    = MatrixGetAngles(record1^-1 * record2)            the head's pose off bone 1
+want = sub+0x8C == 6 ? (P.x, P.y)
+     : VecToAngles(d.x, d.y - 1.5, d.z), d = rot(record1)^-1 (target - head)
+want.x clamped to -0x2000..0x1800, want.y to -0x3800..0x3800   (s16 compares)
+AngleApproachInPlace(sub+0x94, want.x - P.x, 0x100)    FUN_0048D9B0
+AngleApproachInPlace(sub+0x98, want.y - P.y, 0x100)
+AngleApproachInPlace(sub+0x9C, 0,            0x100)
+all three 0:  sub+0x8C = 0, record left as posed
+otherwise:    top = [record1 3x3 | head]; RotY(+0x98 + P.y) RotX(+0x94 + P.x)
+              RotZ(+0x9C + P.z); MatrixStore(record2 + 0x28)
+```
+
+`obj+0x354` is `obj+0x20C + 2*0x90 + 0x28`: the draw records start at
+`obj+0x20C` (`model+0x78`, the model block at `obj+0x194`), `0x90` apart, and
+`+0x28` is the node matrix -- so mode 2 looks at **the captor's head**. Bone 2
+hangs from bone 1 in every character skeleton that has a bone 2, so `P` is the
+head's own angles under the neck, and the clamp is a neck's: up `0x1800`, down
+`0x2000`, `0x3800` either side. What is eased is the **offset** off the pose,
+so a clip that moves the neck moves the look with it. **Mode 6 is a return,
+not a hold**: it wants the pose, the offsets ease to zero and the mode drops
+to 0. The draw hook writes it when the captor's bit 0 goes -- `ActorDespawn`'s
+`AND AL, 0xFE` -- and both of `CivilianUpdate`'s shot arms write it over any
+other mode (`0x0048AB5E`, `0x0048ACE4`). Nothing else touches
+`sub+0x8C`, `+0x94`, `+0x98` or `+0x9C`: every instruction that loads
+`g_cur_civilian` (`0x007DD0A0`) is in a class-0x10 routine, and an operand
+scan of `.text` for those displacements finds only `CivilianInit`'s zeroing,
+the two shot arms, the two ops and this arm.
+
+**The turn is stored.** Class 0x30's head aim turns only the push its hook
+draws in; this one is `MatrixStore`d over bone 2's record, so the hit centre
+`SkeletonEmitNode` takes after the hook, the held items and the attachments
+hung from the record and the head's own draw all turn with it.
+
+The shipped streams use modes 1 (seventeen times), 2 (three), 3 (two), 5 (two,
+by op `0x24`) and 6 (ten). Ported in `game/class10/head.ts` (the state) and
+`render/characters/civilian_head.ts` (the rebuild).
 
 ### The waist and the skirt are not in the skeleton either
 
@@ -736,40 +841,6 @@ last five fading by sixths. Its scale is fixed at the spawn from the point's
 depth `z`: `z * -0.02` beyond 50, 1 from 50 to 20, `z * -0.05` nearer.
 `[proved]` It used to be called `SpawnCivilianBloodPool`, "a ground decal",
 from what it was guessed to be before its update was read.
-
-## The head and the mouth
-
-`CivilianInit` writes `0x0048D1F0` into `model+0x1158` (`0x0048A60B`):
-`CivilianDrawBonePart`, the node hook `SkeletonEmitNode` calls on every node
-it draws after storing the node's posed matrix in its record. It switches on
-the bone through the byte map at `0x0048D984`: bones 5, 8, 12 and 15 take the
-Original Mode `MatrixScale(2, 2, 2)` when `g_original_item_part_scale` is up,
-every other bone but 2 draws its slot, and **bone 2 runs two arms**. `[proved]`
-
-**The head** runs while `sub+0x8C` (ops 0x23 and 0x24) is non-zero. It takes
-the head's world point `P` and a target `T` by mode -- 1 the gameplay eye 15
-up, 2 a child's head (retargeted to the first survivor when the one it had
-has died, and mode 6 when the child's `obj+0x34` bit 0 is clear), 3
-`g_camera_lookat_target`, 4 a point, 5 a point in her own frame -- and the
-head's own angles off the pose, `MatrixGetAngles(rec2 * inv(rec1))`. The want
-is those angles for mode 6, else `VecToAngles` of `inv(bone 1's rotation) *
-(T - P)` less 1.5 in y; the pitch is clamped to `-0x2000..0x1800` and the yaw
-to `+-0x3800`. The three words at `sub+0x94..0x9C` step toward want minus the
-pose by `0x100` a draw (`AngleApproachInPlace`, `FUN_0048D9B0`), and when all
-three are 0 the mode goes back to 0 -- so a head winding back across straight
-ahead stops there. Otherwise the node is rebuilt as bone 1's rotation at the
-head's point, `RotY RotX RotZ` of the pose's angles plus the three, and
-**stored over the node's record** -- no push, so the hit sphere and the hair
-turn with it.
-
-**The mouth** runs while `sub+0xA8` (op 0x25) is not 6: the draw adds
-`g_civilian_mouth_tables[sub+0xA8][sub+0xA0 % count]` (`0x0056B950`, six runs
-of 21, 38, 34, 13, 20 and 56 signed bytes, values 0..9) to bone 2's slot --
-another model of the face's file -- and steps the cursor while `sub+0xA4`
-counts down; at zero table 2 hands over to table 3 and every other table
-parks on its last byte. The port draws both halves in
-`render/characters/civilian_head.ts`, and the exporter carries the tables and,
-for each civilian whose streams name one, the face's slot plus every byte.
 
 ## The collision sphere
 

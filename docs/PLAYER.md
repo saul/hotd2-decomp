@@ -630,10 +630,20 @@ and **Clear cache**.
   the served bundle.
 * A stage neither holds is built on demand when the menu picks it, if an
   install is remembered.
-* **Sounds are fetched from the server** (`bgm/`, `se/`, `voice/` beside the
-  page), which finds them through the game directory a served manifest names.
-  A bundle built only in the browser therefore plays silently unless a server
-  supplies the sounds; `web/tools/first_visit.mjs` counts those requests.
+* **Sounds are fetched from the server**, which finds them through the game
+  directory a served manifest names: as AAC when `npm run sounds` has
+  encoded them (`sounds.json`, `clips.pack` and `bgm/*.m4a`, from
+  `extract/sound/` or `HOTD2_SOUND`), and as the install's WAVs (`bgm/`,
+  `se/`, `voice/` beside the page) otherwise. A bundle built only in the
+  browser therefore plays silently unless a server supplies the sounds;
+  `web/tools/first_visit.mjs` counts those requests.
+* **A stage's sounds load with the stage.** `audio/precache.ts` reads the
+  ids its data names -- the script's sound ops and dialogue, the civilian
+  streams its spawns reach, class 0x25's programs -- and the loading screen
+  waits for them, fetched and decoded. With the AAC set the whole
+  `clips.pack` comes too, so the sounds the gameplay code raises are on the
+  device as well; the service worker keeps the pack and each stage's tracks
+  like the rest of a stage played, so it plays offline with its sound.
 
 `npm run bundle-flow -- --game-dir ...` drives the whole flow in Chrome — the
 screen, an export, a stage built on demand, and the second visit out of the
@@ -814,9 +824,11 @@ npm run deploy -- --worker     # redeploy the Worker even if unchanged
 ```
 
 * **Staging** (`npm run site`, into `extract/site/`): the `vite build` (with
-  `base: "./"`, so every URL is relative), the bundle, and `bgm/`, `se/`,
-  `voice/` from the install **lowercased**, since the exe's tables and the
-  install spell names differently and an object key cannot resolve that. It
+  `base: "./"`, so every URL is relative), the bundle, and the sounds as the
+  AAC set `tools/sounds.ts` encodes (about 72 MB against the WAVs' 368, at
+  96 kbit/s; `--wav` stages the WAVs instead), every name **lowercased**,
+  since the exe's tables and the install spell names differently and an
+  object key cannot resolve that. It
   refuses a bundle the page would refuse, or a stale stage (`--allow-stale`).
   `npm run site:check` serves the staged site case-sensitively and plays
   stage 1 in Chrome.

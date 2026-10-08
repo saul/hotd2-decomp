@@ -19,7 +19,8 @@
  *
  * Passes when the page loads the served bundle -- not the welcome screen, not
  * a stale one -- starts, plays until the music and the effects have come from
- * the site, nothing it asked for failed but the `_OFF` stop sounds the game
+ * the site -- as the AAC set's `clips.pack` and `bgm/*.m4a` when it was
+ * staged (`tools/sounds.ts`), as `se/` and `bgm/` WAVs with `--wav` -- nothing it asked for failed but the `_OFF` stop sounds the game
  * never shipped (`audio/bgm.ts`), and nothing was asked of another origin.
  */
 import { chromium } from "playwright-core";
@@ -125,6 +126,8 @@ try {
       return;
     }
     for (const k of Object.keys(got)) if (path.startsWith(`/${k}/`)) got[k]++;
+    // The AAC set's effects are one file, fetched with the stage.
+    if (path === "/clips.pack") got.se++;
   });
   await page.goto(`http://127.0.0.1:${port}/index.html?stage=1`,
                   { waitUntil: "domcontentloaded" });
@@ -136,12 +139,16 @@ try {
   await page.click(".start-btn");
   // Until the script's first `se_play` of a track, which in stage 1 is some
   // way in -- `tools/bgm_loop.mjs` allows two minutes for it.
+  // The AAC set's music and pack arrive with the stage, before Start, so
+  // the sound button is waited for as well: it turns on a moment after.
+  const soundOn = () => page.evaluate(() =>
+    document.querySelector("#sound")?.getAttribute("aria-pressed"));
   const t0 = Date.now();
-  while ((got.bgm === 0 || got.se === 0) && Date.now() - t0 < 120_000) {
+  while ((got.bgm === 0 || got.se === 0 || await soundOn() !== "true")
+         && Date.now() - t0 < 120_000) {
     await page.waitForTimeout(500);
   }
-  const sound = await page.evaluate(() =>
-    document.querySelector("#sound")?.getAttribute("aria-pressed"));
+  const sound = await soundOn();
   check("it starts, with sound", sound === "true", `sound ${sound}`);
   check("the bundle came from the site", got.bundle >= 4, `${got.bundle} files`);
   check("the music came from the site", got.bgm >= 1, `${got.bgm} responses`);

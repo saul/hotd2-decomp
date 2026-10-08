@@ -78,6 +78,7 @@ import {
   Vector3,
 } from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { useStraightPngTextures } from "./png_textures";
 import type { ScriptJson } from "../bundle";
 import type { System } from "../core/system";
 import { G, ScreenFurniture } from "../game/globals";
@@ -161,7 +162,10 @@ export class StageScene {
    * loading bar's movement then is a compositor animation.
    */
   static async load(geometry: ArrayBuffer, script: ScriptJson): Promise<StageScene> {
-    const gltf = await new GLTFLoader().parseAsync(geometry, "");
+    // The images through the page's own PNG decoder: see `png_textures.ts`
+    // for what a browser's decoder does to a transparent texel's colour.
+    const gltf = await useStraightPngTextures(new GLTFLoader())
+      .parseAsync(geometry, "");
     // Before anything clones a node: every layer that draws a stage model
     // copies it, and the copies must carry the engine's draw state and the
     // primitive marks the translucent sort groups by. See `draw_order.ts`.

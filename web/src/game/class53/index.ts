@@ -408,6 +408,9 @@ function CatDebug(obj: Actor): ActorDebug {
 export const CatHandler: ClassHandler = {
   init: CatInit,
   update: CatUpdate,
+  // `CatInit` installs `CatMotionListUpdate` or `CatBranchTriggerUpdate`
+  // and returns (`0x004312D5`, `0x00431326`).
+  firstUpdateNextWalk: true,
   // The class reads `obj+0x34` bit 3 itself and has no hit points.
   ownsShotResult: true,
   // `CatBranchTriggerUpdate` registers itself through

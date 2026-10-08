@@ -214,6 +214,17 @@ export interface ClassHandler {
    * them into `g_enemies_alive` -- after hers. Updated in the same pass, she
    * tested her "wait while enemies are alive" with the count still at zero
    * and was rescued on the frame she appeared.
+   *
+   * Read for every row of `g_class_handler_pairs` (`0x00593358`) the port
+   * registers. `[proved]` Install and return: 0x10, 0x11, 0x12, 0x13, 0x14,
+   * 0x18, 0x19, 0x20, 0x30, 0x31, 0x32, 0x33, 0x51, 0x52, 0x53 -- each row
+   * cites its store. Call the update, then install it: 0x21, 0x22, 0x23,
+   * 0x24, 0x25, 0x26, 0x2B, 0x60, 0x63. The handler *is* the update: 0x27,
+   * 0x28, 0x29, 0x64, 0x6E. Classes 0x2D and 0x45 install routine after
+   * routine and keep the chain themselves; class 0x40's member `Init` is a
+   * routine of its own (`HordeKind.MemberInit`). The placers (0x15, 0x16,
+   * 0x17, 0x41..0x44, 0x46) kill themselves on the first walk and allocate
+   * their objects on update routines, which run on that same walk.
    */
   firstUpdateNextWalk?: boolean;
   /**

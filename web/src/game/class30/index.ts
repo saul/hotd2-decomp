@@ -547,6 +547,9 @@ export function ZombieTaskUpdate(obj: ZombieActor, f: ClassFrame): void {
 export const EnemyZombieHandler: ClassHandler = {
   init: EnemyZombieInit,
   update: ZombieTaskUpdate,
+  // `EnemyZombieInit` installs `EnemyZombieUpdate` (or
+  // `ZombieTwinFollowHost`) and returns (`0x00452FB5`, `0x00452FC1`).
+  firstUpdateNextWalk: true,
   leave: ZombieReleaseAndDespawn,
   onDeadSweep: EnemyZombieDeadSweep,
   // **Class 0x30's death is four states**, the same as class 0x31's, and the

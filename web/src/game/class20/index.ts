@@ -491,6 +491,9 @@ export function OneHitTargetDebug(a: Actor): ActorDebug {
 export const OneHitTargetHandler: ClassHandler = {
   init: OneHitTargetInit,
   update: OneHitTargetUpdate,
+  // `OneHitTargetInit` installs `OneHitTargetHoldDrawn` or
+  // `OneHitTargetUpdate` and returns (`0x00448FFC`, `0x00449007`).
+  firstUpdateNextWalk: true,
   // The death chain is three states long and the last of them is what despawns
   // the body, so the director has to keep calling it after `dead` is set --
   // the same reason class 0x31 has this.

@@ -1060,6 +1060,20 @@ router the port had invented, where the engine's byte 0 is `NoOpStub`.
 descriptor -- or pick a type number no routine switches on**, and when a new
 port breaks old fixtures, check the fixture against the data before the port.
 
+**L114 -- Moving when an update runs moves when the actor is drawn.** The
+engine draws an actor from inside its update (`DrawSkinnedModelAndShadow` in
+`EnemyZombieUpdate`), so a walk that runs no update draws nothing. The port's
+renderer draws every pooled actor after the walk, whatever ran. `c006e697`
+moved fourteen classes' first update to the walk after their `Init`, which is
+right, and left the renderer drawing them on the `Init` walk in the clip the
+`Init` set. Stage 1's grab zombie stood eleven units up for one frame above the
+barrier before its submerged clip began. The game state was right on every
+tick and every test passed. **When a change makes an update skip a walk, ask
+what the renderer shows on that walk** (`Actor.firstUpdatePending` is the
+answer for the `Init` walk). And a one-frame transient is invisible to
+screenshots taken at intervals: step the page under `?drive=1` and read a
+drawn quantity -- `Actor.lookAt` is bone 1 as last drawn -- every tick.
+
 ---
 
 ## Running the tools

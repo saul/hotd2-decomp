@@ -1213,10 +1213,14 @@ export function CarriedPropRollAtCamera(p: CarriedProp, cam: CameraPair | null,
 /**
  * `CarriedPropFallFree` — `FUN_00444D80`. A prop dropped from a dead
  * carrier's hands: integrate, tumble, `CarriedPropGroundContact`, draw, and a
- * shot test only while `CarriedPropIsOnScreen`. Nothing here despawns it.
+ * shot test while `CarriedPropIsOnScreen` -- and **despawned** the first frame
+ * it is not (`0x00444EC2`: `MatrixStackPop(1); ActorDespawn(obj)`), the same
+ * tail as `CarriedPropThrowAtTarget`'s. Stage 1's bridge barrel, shot out of
+ * its carrier's hands, goes over the edge and out of the frame, and is gone.
+ * Returns `false` on that frame.
  */
 export function CarriedPropFallFree(p: CarriedProp, cam: CameraPair | null,
-                                    rng: Rng, events?: Events): void {
+                                    rng: Rng, events?: Events): boolean {
   p.pos.x += p.vel.x;
   p.pos.y += p.vel.y;
   p.pos.z += p.vel.z;
@@ -1228,7 +1232,9 @@ export function CarriedPropFallFree(p: CarriedProp, cam: CameraPair | null,
   if (CarriedPropIsOnScreen(p)) {
     RegisterForShotTest(p);
     CarriedPropCheckShot(p, d, cam, rng, events);
+    return true;
   }
+  return false;
 }
 
 /** `g_app_state` 10, in which a dropped prop hits nothing. Which screen that
@@ -1499,8 +1505,7 @@ export function CarriedPropPoolUpdate(rng: Rng, host: GameHost,
         CarriedPropRollAtCamera(p, cam, rng, events);
         return true;
       case CarriedPropRoutine.FallFree:
-        CarriedPropFallFree(p, cam, rng, events);
-        return true;
+        return CarriedPropFallFree(p, cam, rng, events);
       case CarriedPropRoutine.StuckToScreen:
         return CarriedPropStuckToScreen(p, cam?.v2w);
       case CarriedPropRoutine.Break:

@@ -877,6 +877,36 @@ console.log("\nclass 0x30 state 37, release 5 — stage 2's rolling barrels, the
           `drawn ${drawn} moved ${moved} y ${drum()?.pos.y}`);
   }
 
+  // -- 2b. ...over the edge, out of the frame, and gone -------------------
+  // `CarriedPropFallFree` ends like `CarriedPropThrowAtTarget`: `if
+  // (CarriedPropIsOnScreen(obj)) {...} else ActorDespawn(obj)`
+  // (`0x00444EC2`). Stage 1's bridge barrel, its carrier shot, falls past the
+  // bottom of the frame to the ground far below; the ground here is
+  // `g_camera_fixed_eye_y`, put four hundred units down. With the identity
+  // camera "off screen" is below about `-z * 240 / 640.2`.
+  {
+    const { rng, z, events } = scene2(33);
+    for (let f = 0; f < 5; f++) GameUpdate(1 / 60, HOST, rng, events);
+    z.flags |= ActorFlag.Dead;
+    GameUpdate(1 / 60, HOST, rng, events);
+    // Dropped in the hands' place; only now does the ground fall away, so
+    // the carrier's own ground-follow does not carry the drum down with it.
+    const fell = drum()?.routine === CarriedPropRoutine.FallFree;
+    G.g_camera_fixed_eye_y = -400;
+    let lastOn = false, gone = -1, lastY = 0;
+    for (let f = 0; f < 600 && gone < 0; f++) {
+      GameUpdate(1 / 60, HOST, rng, events);
+      const p = drum();
+      if (!p) { gone = f; break; }
+      lastOn = CarriedPropIsOnScreen(p);
+      lastY = p.shotPoint.y;
+    }
+    check("a dropped drum that falls out of the frame is despawned that frame",
+          fell && gone >= 0 && lastOn && G.g_carried_props.length === 0,
+          `fell ${fell} gone ${gone} last on-screen ${lastOn} `
+          + `last view y ${lastY.toFixed(2)}`);
+  }
+
   // -- 3. the break draws its effect -------------------------------------
   {
     const { rng, events } = scene2(35);

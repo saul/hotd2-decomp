@@ -68,7 +68,7 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
   "game/camera/turn.ts": "54d9c2af22c864eb0586aab6e8d94b81538645f46410ffb972c4f14e23fdb9d2",
   "game/camera/view.ts": "f3e0890ae20ecefc2618b19fdd995fb523c3b766f78c9719daa5063ed227f6d6",
   "game/caption_mode.ts": "148e9a9ef83591ea5be7e30d52eb2d14ef3e116bb10abf41adf08d863a903315",
-  "game/carried_prop.ts": "113921940cb46eda15d8564c223aad6fa805bebaad1cc38e008980fd44faacf5",
+  "game/carried_prop.ts": "5fbb9e0ba6f1b3b659c4ced2cab4d81ee79d103be6b3ce25bf0bc612e3625098",
   "game/carrier.ts": "12c08e5a3d1ecc9a400b3a0e35dc965d49a317eb6584e3bad3a6d92c977243d6",
   "game/class10/head.ts": "dd8c52cd758504e4c7c46845b2a394feab7738b4d82655616db452cb1f50bbb2",
   "game/class10/ops.ts": "c4d11f3e64b2d05d75fa7c03b4e8c96bb772c74b8be4b910078fa2b0f58ae707",
@@ -227,4 +227,4 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
 };
 
 /** One digest over {@link BUILDER_FILES}, in filename order. */
-export const BUILDER_HASH = "24f36ab273596235ab4674b203be188fce637cbe37bf1c953d3b3c6470080819";
+export const BUILDER_HASH = "0053cf991abf9008ab7e194d8bb7faf00f75bbd9b36ba8e43c738d483d35694e";

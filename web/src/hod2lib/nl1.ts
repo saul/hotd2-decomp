@@ -129,8 +129,11 @@ export class Mesh {
      * this times the base colour, per channel (`0x007E78E0..E8 =
      * mesh[10] * mesh[0xC..0xE]`), and its diffuse to the base colour
      * itself. Read as a plain float, which is how the exe reads it. `[proved]`
+     *
+     * Not `readonly`, because the exe rewrites it once a model is loaded:
+     * {@link ModelSetMeshAmbientScale}.
      */
-    readonly texAmbient: number = 1,
+    public texAmbient: number = 1,
   ) {}
 
   /**
@@ -298,6 +301,38 @@ export class Model {
     for (const m of this.meshes) if (m.textureId >= 0) s.add(m.textureId);
     return s;
   }
+}
+
+/**
+ * `ModelSetMeshAmbientScale` -- `FUN_00419380`: `k` into every mesh header's
+ * `+0x28` along the model's chain, which is {@link Mesh.texAmbient}.
+ */
+export function ModelSetMeshAmbientScale(model: Model, k: number): void {
+  for (const m of model.meshes) m.texAmbient = k;
+}
+
+/** `CMP EAX, 0x15E4; JL` and `CMP EAX, 0x1601; JG` at `0x004193B4`. */
+export const AMBIENT_PATCH_FIRST_SLOT = 0x15e4;
+export const AMBIENT_PATCH_LAST_SLOT = 0x1601;
+/** `PUSH 0x3F000000` at `0x004193C5`. */
+export const AMBIENT_PATCH_SCALE = 0.5;
+
+/**
+ * `AssetSlotPatchAmbientScale` -- `FUN_004193B0`, the asset slot's load-time
+ * patch: a slot in `0x15E4..0x1601` has its model's ambient scale set to 0.5.
+ * `[proved]`
+ *
+ * All three slot loaders call it on every slot they load, straight after
+ * `BindModelTextureHandles`: `LoadCommonPolTexBanks` (`0x0041840E`),
+ * `AssetLoadTexBankStep` (`0x00418B00`) and `FUN_00418EC0` (`0x00418F6C`).
+ * The range is the thirty-cel strip `RingEffectSpread` and its two successors
+ * draw (`common.bin` 338..367, `game/effects/ring_effect.ts`), which the file
+ * ships at an ambient scale of 0 -- so without this every face of it turned
+ * from the scene light drew black.
+ */
+export function AssetSlotPatchAmbientScale(slot: number, model: Model): void {
+  if (slot < AMBIENT_PATCH_FIRST_SLOT || slot > AMBIENT_PATCH_LAST_SLOT) return;
+  ModelSetMeshAmbientScale(model, AMBIENT_PATCH_SCALE);
 }
 
 export function isModel(b: Uint8Array, off = 0): boolean {

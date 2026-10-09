@@ -213,7 +213,7 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
   "io.ts": "4471bf8bfab1643c6395ae496bdb7d26678835b053b867544c69d0b4c1403df8",
   "lz.ts": "dddff2029ebd1cafc686d25b57da5e5ad8e22fdb2febf4af4988651d627aa80e",
   "mot.ts": "bd505af586f4832cc0b51395269076b2c8d95c3bc313691b1f732d429a7ff208",
-  "nl1.ts": "035b863e71203b6f69616f101eb7331e276fc04efddd6ecbb1bccad70d796b81",
+  "nl1.ts": "cd534f788f1cebc3cba2c14008eca513f3751cc1af27e8c0450e43a7242da11f",
   "placement.ts": "34b4ea16badd9d0648bc61136b031b140769154b1f9e6df849d6115e101e9fcd",
   "png.ts": "326d5417b68475ad54b90e2a91a1f68ca3859d6ba044582928a13459b4afa50b",
   "props.ts": "5c5a9ac4076eb54fd0b2045bf8ddfc1e76c91f280a372c38bb54a8596d610a95",
@@ -222,9 +222,9 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
   "script.ts": "9c807ed0a82e9e6f0da720196bdcdeb60402db61bebe45c673e5edb7f07202b5",
   "sha256.ts": "7c01f5b843a50a7fc05e749c7a737c252482557ebc523eef7da0f46c7baa427c",
   "spawnres.ts": "74ca855e20edda89737187c72d0b917913d4f8d1f7baecd5ef39e6dbb5a7e420",
-  "stage.ts": "90b27680bd21c22cbe30616c55e5560a668818872f449f9e85892ae2ec43cb18",
+  "stage.ts": "6f282100c4d626eae5bec5f88ae3ebb7c599df5b67bff29648bfbf47aaefb3fa",
   "texbank.ts": "804ee06b5324e31ba191ac1c3e382bedd2861e9657a0f07da6b09b7a61267f0a",
 };
 
 /** One digest over {@link BUILDER_FILES}, in filename order. */
-export const BUILDER_HASH = "20aadd045180824bf55344f8d7e1ebb8aaea984221f5be45ffee7ab8d567ea72";
+export const BUILDER_HASH = "24f36ab273596235ab4674b203be188fce637cbe37bf1c953d3b3c6470080819";

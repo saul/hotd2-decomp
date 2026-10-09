@@ -27,6 +27,10 @@
  *     `TranslatePvr2StateToD3D`'s `ALPHATESTENABLE` and
  *     `WalkMeshChainAndDraw`'s pass -- and `DrawModelWithForcedAlphaBlend`'s
  *     mask `0x03FFFF7F` keeps the bit.
+ *   * **A slot's model is patched as it loads.** `AssetSlotPatchAmbientScale`
+ *     (`FUN_004193B0`), called by all three slot loaders, sets the ambient
+ *     scale `+0x28` of slots `0x15E4..0x1601` to 0.5 and does nothing else;
+ *     the corpus below applies it before the bundle is held to the meshes.
  *   * **The corpus.** Every textured mesh in `pol/` is drawn in the pass its
  *     list type names (so a glTF `alphaMode` from the pass is the list type a
  *     viewer expects); the only meshes that disagree are the untextured ones
@@ -109,6 +113,13 @@ const SEQUENCES: readonly Sequence[] = [
    "DrawModelWithForcedAlphaBlend: AND EAX, 0x03FFFF7F (keeps bits 19-20)"],
   [0x004a8645, "0d80000094",
    "DrawModelWithForcedAlphaBlend: OR EAX, 0x94000080 (bit 7: MODULATE)"],
+  [0x004193b0, "8b4424043de41500007c1e3d011600007f17c1e004680000003f"
+   + "8b80a4669a0050e8aaffffff83c408c3",
+   "AssetSlotPatchAmbientScale: slot 0x15E4..0x1601 -> "
+   + "ModelSetMeshAmbientScale(model, 0x3F000000), and nothing else"],
+  [0x0041840e, "e89d0f0000", "LoadCommonPolTexBanks: CALL AssetSlotPatchAmbientScale"],
+  [0x00418b00, "e8ab080000", "AssetLoadTexBankStep: CALL AssetSlotPatchAmbientScale"],
+  [0x00418f6c, "e83f040000", "FUN_00418EC0: CALL AssetSlotPatchAmbientScale"],
 ];
 /** `TranslatePvr2StateToD3D`'s shading-mode jump table: mode 1 alone differs. */
 const MODE_TABLE = 0x004a79c8;
@@ -249,6 +260,15 @@ async function corpus(chk: Checker, source: NodeAssetSource,
     const models = await parsePol(source, file);
     if (!models) continue;
     const stem = file.slice(0, -4);
+    // A model is drawn only through a slot, and every slot loader patches it
+    // first: the sequences above hold the exe to that, and this applies it
+    // the way `loadAsset` does, so the material each mesh owns is the one
+    // the device is handed.
+    for (const [slot, [f, index]] of exe.assetSlots()) {
+      if (f.replace(/\.bin$/, "") === stem && index < models.length) {
+        nl1.AssetSlotPatchAmbientScale(slot, models[index]);
+      }
+    }
     let bank: Bank | undefined;
     const cache = new Map<number, number | null>();
     for (const m of models) {

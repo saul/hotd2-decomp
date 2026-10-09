@@ -548,6 +548,17 @@ layout values, the **log2 of the specular exponent**, and the offset colour is
 the specular colour: 5,993 meshes in `pol/` have a highlight (3,596 of them at
 power 32). `+0x28` is 0.75 on 35,372 of the 41,463 meshes.
 
+**The file is not the last word on `+0x28`.** `AssetSlotPatchAmbientScale`
+(`0x004193B0`) runs on every slot as it loads -- `LoadCommonPolTexBanks`,
+`AssetLoadTexBankStep` and `FUN_00418EC0` each call it straight after
+`BindModelTextureHandles` -- and for slots `0x15E4..0x1601` calls
+`ModelSetMeshAmbientScale(model, 0.5)`. That range is the thirty-cel strip the
+ring task stands in a body's pool (`common.bin` 338..367), which ships at 0:
+read from the file, every face of it turned from the light has no ambient
+term and draws black. `[proved]` The exporter applies the patch in
+`loadAsset` (`hod2lib/stage.ts`), and `web/tools/checks/texture_alpha.ts`
+holds the routine's bytes and its three calls.
+
 Every device state the equation depends on is either set once or never
 written. `D3DRENDERSTATE_LIGHTING` is never written and keeps D3D7's default of
 on, so **every mesh draw is lit**; `SPECULARENABLE` is 1 from

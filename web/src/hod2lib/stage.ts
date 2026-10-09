@@ -130,6 +130,15 @@ export async function loadAsset(source: AssetSource, tables: ExeTables | null,
   const c = C.load(await source.read(pol));
   if (!c.models.length) throw new Error(`${name}: no models (${c.kind})`);
   const models = nl1.parseContainer(c);
+  // The patch the engine makes to a slot's model as it loads it -- the only
+  // way these files' models are drawn is through a slot.
+  if (tables) {
+    for (const [slot, [file, index]] of tables.assetSlots()) {
+      if (file.replace(/\.bin$/, "") === name && index < models.length) {
+        nl1.AssetSlotPatchAmbientScale(slot, models[index]);
+      }
+    }
+  }
 
   let bank: texbank.Bank | null = null;
   const tex = `tex/${name}.bin`;

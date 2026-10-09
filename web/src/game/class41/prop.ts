@@ -33,6 +33,7 @@ import { BAMS } from "../vec";
 import {
   BreakableGroupMembers, BreakablePropAt, MsvcRand, SetBreakableMemberSlot,
 } from "./group";
+import { BREAKABLE_PUFF_MOTION } from "./puff_slots";
 import {
   HiddenItemCopy, ReleaseHiddenItem, SpawnExtraLifePickup,
 } from "./items";
@@ -41,6 +42,10 @@ import {
   PropFamily, type BreakableProp,
 } from "./prop_state";
 import { BreakablePropSpawnShatter, type ShatterCamera } from "./shatter";
+import { ScoreAddForPlayer } from "../combat/score";
+import { SpawnPropHitSpark } from "../effects/sprite";
+import { PropDrawBegin, PropDrawEffect, PropMatrixPush } from "./prop_draw";
+import { EffectMotionPlayLength } from "../effect_draw";
 import {
   MatIdentity, MatrixRotateX, MatrixRotateY, MatrixRotateZ, MatrixTranslate,
 } from "../matrix";
@@ -128,11 +133,19 @@ export function BreakablePropAwardHit(flags: number, award: boolean,
   // Both players landed on the same frame: the engine picks one at random.
   const player = (!noP0 && !noP1) ? MsvcRand(rng) & 1 : (noP0 ? 1 : 0);
 
-  // Training pays nothing for a prop hit; Arcade and Original both do.
+  // Training pays nothing for a prop hit; Arcade and Original both do,
+  // through `ScoreAddForPlayer` (`CALL 0x004156C0` at `0x00465134`) -- so
+  // Original Mode's DOUBLE SCORE doubles it and the score floors at zero.
   if (award && G.g_GameMode !== GameMode.Training) {
-    G.g_player_score[player] = (G.g_player_score[player] ?? 0) + PROP_HIT_SCORE;
+    ScoreAddForPlayer(player, PROP_HIT_SCORE);
   }
-  G.g_player_hit_count[player] = (G.g_player_hit_count[player] ?? 0) + 1;
+  // `0x0046513C`..`0x0046514D`: the hit is counted only while
+  // `g_accuracy_stats_suppressed` is 0, or in Training -- the gate the shot
+  // count has (`combat/shot.ts`), so hits and shots agree.
+  if (G.g_accuracy_stats_suppressed === 0
+      || G.g_GameMode === GameMode.Training) {
+    G.g_player_hit_count[player] = (G.g_player_hit_count[player] ?? 0) + 1;
+  }
   return player;
 }
 
@@ -157,6 +170,18 @@ function RotateYZX(x: number, y: number, z: number,
   return { x: rx, y: ry, z: rz };
 }
 
+/** The scene whose props are held in a z band: scene 1, stage 2. */
+const BREAKABLE_Z_BAND_SCENE = 1;
+/** `FCOM [0x0056905C]` -1325.0, then `FADD [0x00569058]` 1325.0. */
+const BREAKABLE_Z_BAND_NEAR = -1325.0;
+const BREAKABLE_Z_BAND_NEAR_ADD = 1325.0;
+/**
+ * `FCOM double [0x00569050]` -1265.8, then `FADD float [0x0056904C]` --
+ * 1265.8 as a float, which is not quite the double it was compared with.
+ */
+const BREAKABLE_Z_BAND_FAR = -1265.8;
+const BREAKABLE_Z_BAND_FAR_ADD = Math.fround(1265.8);
+
 /**
  * `BreakablePropGroundContact` — `FUN_00465590`.
  *
@@ -179,21 +204,34 @@ export function BreakablePropGroundContact(p: BreakableProp): boolean {
   for (let i = 0; i < hull.length; i++) {
     const [hx, hy, hz] = hull[i];
     const q = RotateYZX(hx, hy - BREAKABLE_HEIGHT, hz, p.yaw, p.roll, p.pitch);
-    if (q.y + p.y >= floor) continue;
-
-    touched = true;
-    if (p.state === BreakableState.Falling) {
-      p.contact = i;
-      p.restX = q.x + p.x;
-      p.restY = G.g_camera_fixed_eye_y;
-      p.restZ = q.z + p.z;
-    } else if (p.state === BreakableState.Settled && i !== p.contact
-               && q.y < lowest) {
-      p.contact = i;
-      lowest = q.y;
-      p.restX = q.x + p.x;
-      p.restY = G.g_camera_fixed_eye_y;
-      p.restZ = q.z + p.z;
+    if (q.y + p.y < floor) {
+      touched = true;
+      if (p.state === BreakableState.Falling) {
+        p.contact = i;
+        p.restX = q.x + p.x;
+        p.restY = G.g_camera_fixed_eye_y;
+        p.restZ = q.z + p.z;
+      } else if (p.state === BreakableState.Settled && i !== p.contact
+                 && q.y < lowest) {
+        p.contact = i;
+        lowest = q.y;
+        p.restX = q.x + p.x;
+        p.restY = G.g_camera_fixed_eye_y;
+        p.restZ = q.z + p.z;
+      }
+    }
+    // Stage 2's band (`0x004656EF`..`0x00465751`), for every point of the
+    // hull whether it touched or not: the point is held between z -1325.0
+    // (`[0x0056905C]`) and -1265.8 (the double at `[0x00569050]`) by moving
+    // the prop itself, so every later point, the rest point and the re-seat
+    // below see the moved z.
+    if (G.g_scene_index === BREAKABLE_Z_BAND_SCENE) {
+      let fz = q.z + p.z;
+      if (fz < BREAKABLE_Z_BAND_NEAR) p.z = p.z - (fz + BREAKABLE_Z_BAND_NEAR_ADD);
+      fz = q.z + p.z;
+      if (!(fz <= BREAKABLE_Z_BAND_FAR)) {
+        p.z = p.z - (fz + BREAKABLE_Z_BAND_FAR_ADD);
+      }
     }
   }
 
@@ -219,13 +257,38 @@ export function BreakablePropGroundContact(p: BreakableProp): boolean {
  * `BreakableEffectUpdate` — `FUN_00465500`. What a destroyed ground-level prop
  * becomes: the engine overwrites the object's entry point with this, so the
  * prop stops being a prop and spends 0x48 frames as a puff before it dies.
+ *
+ * ```c
+ * if (obj->+0x32C < 0x48) {
+ *     obj->+0x32C += 1;
+ *     if (g_motion_slots[0x1D9].state == 2) {      // DAT_009A46AC
+ *         Push; Translate(+0x19C, +0x1A0, +0x1A4);
+ *         RotY(+0x1D0); RotZ(+0x1D4); RotX(+0x1CC);
+ *         EffectDrawUnlit(obj + 0x324); Pop;
+ *     }
+ * } else ActorKill();
+ * ```
+ *
+ * The residency test is on the literal motion `0x1D9`, the one every group
+ * prop's `+0x328` holds. `g_motion_play_length[0x1D9]` is 74, so the
+ * draw's own wrap (at 73) is never reached by a count that stops at 0x48.
+ * The exit is `ActorKill` (`CALL 0x004A7040`), not `ActorDespawn`.
  */
-export function BreakableEffectUpdate(p: BreakableProp): void {
+export function BreakableEffectUpdate(p: BreakableProp, rng: Rng): void {
+  PropDrawBegin(p);
   if (p.effectFrames < BREAKABLE_EFFECT_FRAMES) {
     p.effectFrames += 1;
+    if (EffectMotionPlayLength(BREAKABLE_PUFF_MOTION) !== null) {
+      const m = PropMatrixPush();
+      MatrixTranslate(m, p.x, p.y, p.z);
+      MatrixRotateY(m, p.yaw);
+      MatrixRotateZ(m, p.roll);
+      MatrixRotateX(m, p.pitch);
+      PropDrawEffect(p, m, rng);
+    }
     return;
   }
-  ActorDespawnProp(p);
+  ActorKillProp(p);
 }
 
 /**
@@ -290,7 +353,7 @@ export function BreakablePropUpdate(p: BreakableProp, rng: Rng,
                                     cam: ShatterCamera | null = null): void {
   // A destroyed ground-level prop has had its entry point replaced; it runs
   // the puff and nothing else.
-  if (p.family === PropFamily.Effect) { BreakableEffectUpdate(p); return; }
+  if (p.family === PropFamily.Effect) { BreakableEffectUpdate(p, rng); return; }
 
   // The prop re-registers itself every frame, so a slot freed by a break is
   // only ever reclaimed by something still alive.
@@ -387,12 +450,14 @@ export function BreakablePropUpdate(p: BreakableProp, rng: Rng,
 
   // `if (obj+0x192 != 3) { ...transform...; RegisterForShotTest(obj); }` --
   // the routine's last four lines. The rise is assigned **only** inside the
-  // standing arm, so a prop that is falling or settled publishes its raw
-  // origin; a removed one publishes nothing and cannot be shot again.
+  // standing arm (`0x00464D7D`, at its head, before the support walk), so a
+  // prop that is falling or settled publishes its raw origin, the frame one
+  // starts to fall still publishes the risen one, and a removed one
+  // publishes nothing and cannot be shot again.
   if (p.state !== BreakableState.Removed) {
     PropRegisterForShotTest(
       p, p.x,
-      p.y + (p.state === BreakableState.Standing ? BREAKABLE_STANDING_RISE : 0),
+      p.y + (drawn === BreakableState.Standing ? BREAKABLE_STANDING_RISE : 0),
       p.z);
   }
 }
@@ -448,6 +513,9 @@ function BreakDestroy(p: BreakableProp, level: number, rng: Rng,
   p.state = BreakableState.Removed;
   SetBreakableMemberSlot(p.group, p.member, 0);
   events?.emit("prop.broken", { id: p.id, sound: SFX_PROP_BREAK });
+  // `SpawnPropHitSpark(obj, (obj+0x34 & 2) == 0)` (`0x00464877`), after the
+  // sound, at the point `combat/shot.ts` left on the prop.
+  if (p.hitAim) SpawnPropHitSpark(p.hitAim.x, p.hitAim.y, p.z);
 
   if (level !== 0) {
     // Stacked: `BreakablePropSpawnShatter(obj); ActorKill();` at
@@ -491,8 +559,11 @@ function BreakCrack(p: BreakableProp, level: number, rng: Rng,
   // `0x009A60D0` — is the one block the port keeps.
   if (p.state === BreakableState.Standing) p.yaw = CameraBlockYaw(G.g_camera_index);
   p.hp -= 1;
-  p.shake = BREAKABLE_SHAKE;
   events?.emit("prop.cracked", { id: p.id, sound: SFX_PROP_CRACK });
+  // `SpawnPropHitSpark(obj, (obj+0x34 & 2) == 0)` (`0x00464781`), between
+  // the sound and the shake.
+  if (p.hitAim) SpawnPropHitSpark(p.hitAim.x, p.hitAim.y, p.z);
+  p.shake = BREAKABLE_SHAKE;
   ShakeSupportedMembers(p, level);
 }
 
@@ -605,9 +676,12 @@ function FallStep(p: BreakableProp, events?: Events): void {
  */
 function SettleStep(p: BreakableProp): void {
   const err = p.restPitch - p.pitch - p.spin;
-  p.spin = (err >> 4) + p.spin;
+  // `CDQ; AND EDX, 0xF; ADD; SAR 4` (`0x00464A1B`) and `CDQ; AND EDX, 7;
+  // ADD; SAR 3` (`0x00464A39`): signed divisions, truncating toward zero,
+  // where `>>` floors -- -1 is 0 to the engine.
+  p.spin = Math.trunc(err / 16) + p.spin;
   if (Math.abs(p.spin) > 0x20) {
-    p.pitch += p.spin >> 3;
+    p.pitch += Math.trunc(p.spin / 8);
     BreakablePropGroundContact(p);
   }
 }

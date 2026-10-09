@@ -50,6 +50,8 @@ import { SLIDE_SECOND_DRAW_SLOT, SLIDE_SECOND_SLOT }
   from "../game/class44/slide_slots";
 import { TYPE47_CONSTRUCTOR, TYPE47_SLOT } from "../game/class41/type47_slots";
 import { CHAIN_ITEM_ROW, CHAIN_LINK_SLOT } from "../game/class41/chain_slots";
+import { BREAKABLE_PUFF_EFFECT, BREAKABLE_PUFF_MOTION }
+  from "../game/class41/puff_slots";
 // ...and constructors 16, 17, 29 and 37: their models, and where their tables
 // are (`class41_rows.ts` reads them).
 import { TYPE16_CONSTRUCTOR, Type16DrawSlots }
@@ -380,6 +382,31 @@ export function class44PropEffects(container: string): [number, number][] {
   }
 }
 
+/**
+ * The effect a container family's update draws from the state block at
+ * `obj+0x324`, or null for a family that is not one of these:
+ *
+ * * `kinded` and `kinded_44` -- `KindedPropUpdate` (`FUN_00465FB0`) draws
+ *   `g_prop_kind_params[kind]`'s `(effect, motion)`, which `PlaceKindedProp`
+ *   (`FUN_00462E10`) copies to `+0x324`/`+0x328` (`0x00462F07`,
+ *   `0x00462F14`): the whole prop, for the seven kinds with no model, and
+ *   every kind's break.
+ * * `group` -- `BreakableEffectUpdate` (`FUN_00465500`)'s puff, the pair
+ *   `PlaceBreakableGroup` (`FUN_00462A80`) writes.
+ */
+export function containerPropEffects(
+    pl: Record<string, unknown>,
+    kinds: readonly Record<string, number>[]): [number, number][] | null {
+  switch (pl.container) {
+    case "kinded": case "kinded_44": {
+      const k = kinds[pl.kind as number];
+      return k ? [[k.effect, k.effect_variant]] : [];
+    }
+    case "group": return [[BREAKABLE_PUFF_EFFECT, BREAKABLE_PUFF_MOTION]];
+    default: return null;
+  }
+}
+
 /** `PropBuildVanDoors` (`FUN_00472C90`): `obj+0x28C = 0x1794 + i`, i = 0, 1. */
 export const VAN_DOOR_SLOTS = [0x1794, 0x1795];
 /** `EffectHandoffUpdate` (`FUN_00474240`) draws this until its clip starts. */
@@ -433,8 +460,8 @@ export function class44DrawSlots(pl: Record<string, unknown>,
 /**
  * The effect trees the stage's generic props draw, keyed by effect id, for
  * the same map {@link scriptFlagEffectsJson} fills -- and the class-0x44
- * builders' in {@link class44PropEffects}, which go into the same map on the
- * same terms. One motion per id is all
+ * builders' in {@link class44PropEffects} and the kinded and group props' in
+ * {@link containerPropEffects}, which go into the same map on the same terms. One motion per id is all
  * the map can hold: a second motion for an id already there is noted and not
  * exported, rather than silently posing one effect with another's clip.
  */
@@ -442,10 +469,12 @@ export async function genericPropEffectsJson(
     stage: Stage, placements: Record<string, unknown>[],
     have: Record<string, unknown>): Promise<Record<string, unknown>> {
   const out: Record<string, unknown> = {};
+  const kinds = stage.tables.propKindParams();
   for (const pl of placements) {
     const pairs = pl.container === "generic"
       ? genericPropEffects(pl.type as number, stage.scene ?? -1)
-      : class44PropEffects(pl.container as string);
+      : containerPropEffects(pl, kinds)
+        ?? class44PropEffects(pl.container as string);
     for (const [effect, motion] of pairs) {
       const key = String(effect);
       const prior = (out[key] ?? have[key]) as { motion?: number } | undefined;

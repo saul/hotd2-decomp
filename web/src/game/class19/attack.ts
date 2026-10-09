@@ -322,7 +322,10 @@ export function Boss4SpawnHeldProp(obj: Actor, b: Blk): void {
   const type = g_carried_prop_types[HELD_PROP_TYPE];
   p.routine = CarriedPropRoutine.HeldInBone8;
   p.flags |= ActorFlag.ShotImmune;
-  p.target = 0;
+  // `sub+0x04 = 0` (`0x00494F70`..): no target. The port's "none" is -1,
+  // the question `CarriedPropCheckShot`'s tail asks (`!= 0`) being "is there
+  // one" (L63) -- 0 would have named whatever actor sits at script address 0.
+  p.target = -1;
   p.type = HELD_PROP_TYPE;
   p.slot = type.slots[type.hp] ?? 0;
   p.mode = CARRIED_PROP_HELD;

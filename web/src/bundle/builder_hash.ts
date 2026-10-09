@@ -25,7 +25,7 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
   "approach.ts": "f2458fca4f4f943e775d2f73237eef7bf925b37dc38ba653bc89f80d3e800443",
   "arcscript.ts": "7c64fa78e89264425a0032c0918c846f8972905d848251d517112cd307722b35",
   "bams.ts": "f03b1290866a63ab2ae764d49bd15c57bd53c6b1a03794f7a0357e8dd842eb8f",
-  "bundle.ts": "74391eb5b796860c06baac8772f76bdf5045ff2b3ba658729cdc115f53c9627e",
+  "bundle.ts": "f01b98062848999d18478d4de20fdd83093823ec6b808ee24a42dba6e4951c3c",
   "bytes.ts": "59b2f363e98da56e88ada59458239032e40cad3a27342659e213d849c0967168",
   "cam.ts": "fe50200cb57c6578681a121766e7a5f4ed2425d91996169f83a82e8375dd63c3",
   "campaths.ts": "fbe28df3265d37b60a006e937a926eca8546609aa29cc5d80e7f1fc9afd639be",
@@ -68,7 +68,7 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
   "game/camera/turn.ts": "54d9c2af22c864eb0586aab6e8d94b81538645f46410ffb972c4f14e23fdb9d2",
   "game/camera/view.ts": "f3e0890ae20ecefc2618b19fdd995fb523c3b766f78c9719daa5063ed227f6d6",
   "game/caption_mode.ts": "148e9a9ef83591ea5be7e30d52eb2d14ef3e116bb10abf41adf08d863a903315",
-  "game/carried_prop.ts": "5fbb9e0ba6f1b3b659c4ced2cab4d81ee79d103be6b3ce25bf0bc612e3625098",
+  "game/carried_prop.ts": "2f3ed2ba12c77e3f9f14df2d473c3966c2ba59652e39d9788d2ead914b6adb17",
   "game/carrier.ts": "12c08e5a3d1ecc9a400b3a0e35dc965d49a317eb6584e3bad3a6d92c977243d6",
   "game/class10/head.ts": "dd8c52cd758504e4c7c46845b2a394feab7738b4d82655616db452cb1f50bbb2",
   "game/class10/ops.ts": "c4d11f3e64b2d05d75fa7c03b4e8c96bb772c74b8be4b910078fa2b0f58ae707",
@@ -115,7 +115,7 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
   "game/class41/chain_slots.ts": "b33d6d09ea6f36c8a310be912a05e17443e64bfdb2562b8f726299a86909a240",
   "game/class41/ctor_literals.ts": "cbd869fdeab67ca2644b47720d48cc15b5f4618e91914356684572fe2a2838a4",
   "game/class41/golden_frog.ts": "b08d3f06d48a4d599b0c3051bff1cbd6319f13c71c3a1c5cf5e4b5b45102ca27",
-  "game/class41/group.ts": "aa66aedbc0ecec00cd9413ab396bcdc6796d7e253c429f2ef647af81f48ce034",
+  "game/class41/group.ts": "c1909cca976182550d578276ea209baa269ef35bc50c251c210f7f491db81e42",
   "game/class41/item_banner.ts": "a2edaa4694130dcde6e9fd01c1a28b2b5e68d4d8ca01cd8694fdb4c08744ba4c",
   "game/class41/item_pickup_slots.ts": "ac2ca0face5d082d79d53c9ef8bacd6b5e8a7418f833e165e9bb5cb337822a8f",
   "game/class41/items.ts": "ccd3668b893a84358649f2b7750b45566dc5564698b2f1c0a36c47b911da804a",
@@ -123,9 +123,10 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
   "game/class41/object_path.ts": "1ca20c237b71116ea5f53c4dd1dc8276c80b41846add3c4654d2dde96c9038f4",
   "game/class41/original_item.ts": "62be303b53aaf67a85df310a9b299eb93ce423eab3d4610064afb47d88fa522e",
   "game/class41/placer_state.ts": "b5463d4f1f6d4e7c2ebb347f888f2404c48d57a21f4c0d74dc40d03242911a43",
-  "game/class41/prop.ts": "305ff56351e390775b3e2401536dc1e464ed98f5bee20b90e547f966c1268ab5",
+  "game/class41/prop.ts": "be3aff95be2ed4e0e7921ed405e06ed9846325f23fb4e22a53cb54f282b5faeb",
   "game/class41/prop_draw.ts": "e5bce3f14ac36dcd1e2fe7f2be9df0ac8b099750c8d8b5aadeb4efc9548d1e7a",
   "game/class41/prop_state.ts": "bcf1982a4675cd9de202041c4c95ab2e6b43ee0f77e2568d2a3a0c778a38b1b7",
+  "game/class41/puff_slots.ts": "ef0ec1b5cb43abdbf8937985eef1a9c5627febf97d3f580818dff8956b2506d5",
   "game/class41/shatter.ts": "186a01803f5c803808d0d4d7ef92c61feea772a340bc69c0a4daa5353bf40cf2",
   "game/class41/shot_test.ts": "97fc7aec8fc290ffba0d06216cbb990ed330ba6f03d79ab1eb47d8954cecf7df",
   "game/class41/type16_slots.ts": "c92f7bc4fc3bcb99dc940d3c9bdc8c26cf17beaa1e2675b1f6249ef6a37d3436",
@@ -159,7 +160,7 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
   "game/combat/player.ts": "48d320905d931787caf3b3ad838099b3ab5e7b639f46c5780d6924c70f56237f",
   "game/combat/resolve_hit.ts": "f399269d826827ee5593d789ac1a64a8bf3977dd0497b612be04412d46bdbb6e",
   "game/combat/score.ts": "d7b44960ed2a2151f3e7c6c3d68317b9bb33213c2b22bd1f9a3c9c0a570ada3a",
-  "game/combat/shot.ts": "c2c7ff6131bfd7d50fb54cce6e876a0597a891f0c4f2adb73d7bf40131de4ace",
+  "game/combat/shot.ts": "2cc4dc39616393914fe5f6721357636b1af1ef99330a033fa29d01606d4a0a76",
   "game/combat/shot_test.ts": "58072c95d5d81cfe650c63d0300105eb24254bca40e4fa4741483bc5eee96ad7",
   "game/combat/voice.ts": "8583a8a474bd5b7569a0aabc56eb42cfa69950a7a0359fc585a566407879496b",
   "game/continue_readout.ts": "0d15c1220d6386e871b1c01bd18f3fdf8a402534454af5a8ac55da96135df5fe",
@@ -227,4 +228,4 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
 };
 
 /** One digest over {@link BUILDER_FILES}, in filename order. */
-export const BUILDER_HASH = "0053cf991abf9008ab7e194d8bb7faf00f75bbd9b36ba8e43c738d483d35694e";
+export const BUILDER_HASH = "22efa5096447a9388a7b0e748371c68e2ff9128604d57c8af88dffafee93e922";

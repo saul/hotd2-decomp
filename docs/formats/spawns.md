@@ -754,8 +754,12 @@ else                                            FUN_0040DD90(obj + 0x324);
 
 so kinds 0, 1, 4, 5, 6, 7 and 10 have **no static model in the engine either**:
 they are animated effects, `obj+0x324`/`+0x328` coming from
-`g_prop_kind_params`. A spawn marker with nothing under it for one of those
-kinds is not a missing export — it is a renderer the player does not have.
+`g_prop_kind_params` -- drawn whole by the effect's first frame, and every
+kind's break is that effect playing on. The port draws them so: the exporter
+puts each placed kind's `(effect, motion)` in `breakables.effects`
+(`containerPropEffects` in `hod2lib/bundle.ts`), and `KindedPropUpdate`
+(`game/class41/kinded.ts`) records the effect walk with its draws. Stage 2's
+bar-room chairs are kind 5.
 
 ### The effect system: what the model-less props actually draw
 
@@ -836,9 +840,10 @@ the player already decodes motions and already exports per-slot templates.
 the whole corpus: all 29 trees
 walk to exactly their `g_effect_bone_counts` entry, every bone index in a tree
 is used once (0 for the root, 1..n-1 below it), and all 13 `(effect, motion)`
-pairs the two consumers name divide exactly by that count's stride. What is
-still missing is a renderer that walks a *general* tree: the player draws the
-one class whose trees are flat, below.
+pairs the two consumers name divide exactly by that count's stride. The walk
+is `PropDrawEffect` in `game/class41/prop_draw.ts` (and `game/effect_draw.ts`
+for the classes outside the prop pool): a child posed inside its parent's
+push, as `EffectDrawNode` does.
 
 #### The stride is the node count's, not a character's
 

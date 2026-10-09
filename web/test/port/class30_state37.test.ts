@@ -474,7 +474,7 @@ console.log("\nCarriedPropCheckShot's break tail -- the civilian's shot script, 
       return true;
     },
   };
-  const run = (suppressed: number, victimDead: boolean) => {
+  const run = (suppressed: number, victimDead: boolean, killCarrier = false) => {
     const rng = new Rng(31);
     ResetGameGlobals();
     EnterPlay();
@@ -498,10 +498,22 @@ console.log("\nCarriedPropCheckShot's break tail -- the civilian's shot script, 
     z.visible = true;
     z.pos = vec3(0, 0, -60);
     const hits0 = G.g_player_hit_count[0];
-    let shots = 0, broke = false;
+    let shots = 0, broke = false, hitFrameDraw = -1, hitFrameSlot = -1;
+    let before = -1;
     for (let f = 0; f < 80 && !broke; f++) {
+      if (killCarrier && f === 10) z.flags |= ActorFlag.Dead;
+      before = G.g_carried_props[0]?.slot ?? -1;
       GameUpdate(1 / 60, HOST, rng, new Events());
       const p = G.g_carried_props[0];
+      if (shots === 1 && hitFrameDraw < 0 && p?.draw) {
+        hitFrameDraw = p.draw.slot;
+        hitFrameSlot = p.slot;
+        if (hitFrameDraw !== before) hitFrameDraw = -2;
+      }
+      if (killCarrier) {
+        if (p?.routine === CarriedPropRoutine.FallFree) break;
+        continue;
+      }
       if (p?.routine === CarriedPropRoutine.Break) broke = true;
       else if (f >= 10 && p?.routine === CarriedPropRoutine.Held && p.shootable) {
         MarkCarriedPropShot(p, 0);
@@ -509,12 +521,18 @@ console.log("\nCarriedPropCheckShot's break tail -- the civilian's shot script, 
       }
     }
     return { broke, shots, hits: G.g_player_hit_count[0] - hits0, civ: victim.civ,
+             hitFrameDraw, hitFrameSlot,
              pooled: ActorByAt(victim.at) === victim };
   };
   const a = run(0, false);
   check("shot to pieces with the counter live: both hits counted",
         a.broke && a.shots === 2 && a.hits === 2,
         `broke ${a.broke} shots ${a.shots} hits ${a.hits}`);
+  // Every routine draws before `CarriedPropCheckShot` steps the slot down
+  // (`0x00442717`..), so the hit frame still shows the old model.
+  check("a hit that does not break it draws the old model on its frame",
+        a.hitFrameDraw >= 0 && a.hitFrameDraw !== a.hitFrameSlot,
+        `drew ${a.hitFrameDraw.toString(16)} slot ${a.hitFrameSlot.toString(16)}`);
   check("...and the live civilian's shot script is taken away (+0x4C = 0)",
         a.civ.onShot === 0 && a.civ.onShotScript === -1,
         `onShot ${a.civ.onShot.toString(16)} script ${a.civ.onShotScript}`);
@@ -525,6 +543,14 @@ console.log("\nCarriedPropCheckShot's break tail -- the civilian's shot script, 
   check("...and a dead civilian's (0x4000000) shot script is left alone",
         b.pooled && b.civ.onShot === 0x0ced1234 && b.civ.onShotScript === 2,
         `pooled ${b.pooled} onShot ${b.civ.onShot.toString(16)} script ${b.civ.onShotScript}`);
+  // `CarriedPropHeldUpdate`'s drop arm (`0x004428D0`..`0x004428E9`) makes
+  // the same write when the carrier dies holding it: shooting the barrel man
+  // rather than his barrel.
+  const c = run(0, false, true);
+  check("the carrier killed holding it also takes the shot script away",
+        c.shots === 0 && c.civ.onShot === 0 && c.civ.onShotScript === -1,
+        `shots ${c.shots} onShot ${c.civ.onShot.toString(16)} `
+        + `script ${c.civ.onShotScript}`);
 }
 
 console.log("\na civilian's captors are made with it, though the script never lists them:");

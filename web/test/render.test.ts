@@ -1388,6 +1388,9 @@ console.log("\nrigs: class 0x28's sprite cels draw in their own meshes' state --
   cam.lookAt(a.pos.x, a.pos.y, a.pos.z);
   cam.updateMatrixWorld(true);
   const order = new RenderCommandOrder(cam);
+  // The exe's order first; the PowerVR order the page draws by default is
+  // checked after it.
+  order.powerVr = false;
   order.beginFrame();
   let id = 0;
   const item = (o: InstanceType<typeof Obj3D>) => ({
@@ -1402,6 +1405,11 @@ console.log("\nrigs: class 0x28's sprite cels draw in their own meshes' state --
           first === cB67,
           `keys ${order.key(cB67).depth.toFixed(2)} / `
           + `${order.key(c135f).depth.toFixed(2)}`);
+    order.powerVr = true;
+    const pvrFirst = [item(c135f), item(cB67)].sort(order.compare)[0].object;
+    check("...and in the PowerVR order the 0x135F column is drawn first, so "
+          + "the 0xB67 cel blends over it instead of cutting it away",
+          pvrFirst === c135f);
   }
   a.despawned = true;
   rigs.update(ctx);
@@ -5429,6 +5437,8 @@ console.log("\nthe engine's two passes, and the translucent order");
   const cam = new PerspectiveCamera(41.1, 4 / 3, 0.8, 8000);
   cam.updateMatrixWorld(true);
   const order = new RenderCommandOrder(cam);
+  // `RenderCommandCompare` itself; the PowerVR order is checked below.
+  order.powerVr = false;
   order.beginFrame();
   let id = 0;
   const item = (o: InstanceType<typeof Obj3D>, renderOrder = 0,
@@ -5475,6 +5485,21 @@ console.log("\nthe engine's two passes, and the translucent order");
         && Math.abs(order.key(twoA).depth - -110) < 1e-6
         && Math.abs(order.key(twoB).depth - -10) < 1e-6
         && sorted([item(twoA), item(twoB)])[0] === twoB);
+
+  // The PowerVR order: the same keys, farthest first; inside a command,
+  // still the chain.
+  order.powerVr = true;
+  check("PowerVR order: commands go farthest first",
+        sorted([a, b])[0] === far.children[0]);
+  check("PowerVR order: keyed by the farthest skipped mesh too",
+        sorted([a, item(deep.children[0]!)])[0] === deep.children[0]);
+  check("PowerVR order: a command's own meshes still go in chain order",
+        sorted([item(walkNear), item(walkFar)])[0] === walkFar);
+  check("PowerVR order: the layer still comes before the depth", sorted([
+    item(far.children[0]!, 0), item(near.children[0]!, DRAW_LAYER_7_ORDER),
+  ])[0] === near.children[0]);
+  check("PowerVR order is the default", new RenderCommandOrder(cam).powerVr);
+  order.powerVr = false;
 
   // Region draw mode 2: `RegionDrawResidentSet` between SetDrawLayerNibble(7)
   // and (8). On the primitives, so the backdrop's -1000 still goes first.

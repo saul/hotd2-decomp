@@ -210,7 +210,7 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
   readonly scene = new Scene();
   readonly camera: PerspectiveCamera;
   /** The translucent pass's order. See `render/draw_order.ts`. */
-  private readonly drawOrder: RenderCommandOrder;
+  readonly drawOrder: RenderCommandOrder;
   /** React's, handed over once it has them. See `app/ui_root.ts`. */
   private readonly viewport: HTMLElement;
   private readonly canvas: HTMLCanvasElement;

@@ -92,6 +92,8 @@ export const TOGGLES: readonly ToggleSpec[] = [
     title: "The camera-following backdrop dome the script selects with evt 0x1B/0x1C." },
   { name: "hud", kind: "game", label: "HUD", on: true, group: "scene",
     title: "The screen-space layer: the letterbox shutter (evt 0x1F) and the dialogue subtitles (evt 0x2D)." },
+  { name: "pvrSort", kind: "game", label: "PowerVR translucency", on: true, group: "scene",
+    title: "Draw overlapping translucent models farthest first, so they blend the way the Dreamcast's PowerVR2 blends them (it sorts its translucent list per pixel). The PC port queues them nearest first with depth writes on, so a nearer one cuts off whatever translucent model lies behind it -- off, this draws that: stage 1's smoke plumes meet in a hard seam. Each model's own meshes keep the PC port's order either way." },
   { name: "rigs", kind: "game", label: "Rigs", on: true, group: "props",
     title: "Objects that ride op_ object paths \u2014 vehicles and props, assembled from transcribed draw routines. They appear only while the camera is on a path that selects them." },
   { name: "spawns", kind: "debug", label: "Spawns", on: false, group: "actors", key: "KeyN",

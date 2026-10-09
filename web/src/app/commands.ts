@@ -33,6 +33,7 @@ import { toggleFullscreen } from "./device";
 import type { Bgm } from "../audio/bgm";
 import type { Backdrop } from "../render/backdrop";
 import type { BloodColourLayer } from "../render/bloodcolour";
+import type { RenderCommandOrder } from "../render/draw_order";
 import type { BreakableLayer } from "../render/breakables";
 import type { EffectLayer } from "../render/effects";
 import type { CameraRig } from "../render/camera";
@@ -102,6 +103,8 @@ export interface PlayerCommands {
   readonly effects: EffectLayer;
   /** Red or green blood: the two banks the game ships (see the layer). */
   readonly bloodColour: BloodColourLayer;
+  /** The translucent sort, for the PowerVR translucency toggle. */
+  readonly drawOrder: RenderCommandOrder;
   readonly spawns: SpawnLayer;
   readonly shooting: Shooting;
   readonly debug: DebugBoxLayer;
@@ -361,6 +364,7 @@ export function applyToggle(p: PlayerCommands, name: ToggleName,
     case "perf":         p.setPerf(on); return;
     case "muzzle":       p.effects.setMuzzle(on); return;
     case "redBlood":     p.bloodColour.setColour(on ? "red" : "green"); return;
+    case "pvrSort":      p.drawOrder.powerVr = on; return;
     // A debug aid, not a view: it changes when the script moves on. The walker
     // reads it at the next branch; a stage loads its walker with the current
     // value (`stage_load.ts`). Turning it off while a branch is being held

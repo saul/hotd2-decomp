@@ -592,8 +592,34 @@ function* primitivesOf(cmd: Object3D): Generator<Mesh> {
  * screen sprites -- are not NL1 commands and none of this applies to them:
  * they keep three.js's own order among themselves and follow the commands of
  * their layer.
+ *
+ * ## The PowerVR order
+ *
+ * Nearest first, with every translucent mesh writing depth, means a command
+ * drawn early hides whatever translucent command lies behind it wherever its
+ * texels pass the alpha test -- alpha 1 of 255 is enough. That is the PC
+ * port's picture: stage 1's two smoke plumes over the burning cars
+ * (`char_adv04` slot `0x135F`, two commands) meet in a hard vertical seam, the
+ * nearer one cutting the farther one off. The game was made for the
+ * Dreamcast's PowerVR2, which sorts its translucent list per pixel, so the
+ * art expects every layer to blend; the D3D path's queue is the PC port's
+ * stand-in for that sort, and runs it the wrong way for blending.
+ *
+ * {@link powerVr} turns the queue round: the same commands, the same key,
+ * farthest first. Inside a command nothing changes -- chain order and depth
+ * writes are the exe's -- because a command is one model, and the stage-2
+ * car (translucent shells over black inner copies, one model) needs exactly
+ * that: drawing its meshes by their own depth without depth writes painted
+ * the insides over the bodywork. So this is per command, not per pixel, and
+ * two meshes of one model can still cut each other as they do in the exe.
+ *
+ * `[diverges]` from `RenderCommandCompare` while it is on, which is the
+ * default: the page's choice of the Dreamcast's look over the PC port's,
+ * like the blood colour. Off, the order is the exe's.
  */
 export class RenderCommandOrder {
+  /** Sort the commands farthest first. See "The PowerVR order". */
+  powerVr = true;
   private readonly keys = new Map<Object3D, CommandKey>();
   private readonly depths = new Map<number, number>();
   private readonly frustum = new Frustum();
@@ -620,7 +646,9 @@ export class RenderCommandOrder {
     if (ka.nl1 !== kb.nl1) return ka.nl1 ? -1 : 1;
     if (!ka.nl1) return a.z !== b.z ? b.z - a.z : a.id - b.id;
     if (ka.cmd !== kb.cmd) {
-      if (ka.depth !== kb.depth) return kb.depth - ka.depth;
+      if (ka.depth !== kb.depth) {
+        return this.powerVr ? ka.depth - kb.depth : kb.depth - ka.depth;
+      }
       return ka.cmd - kb.cmd;
     }
     return ka.chain !== kb.chain ? ka.chain - kb.chain : a.id - b.id;

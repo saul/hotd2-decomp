@@ -7,8 +7,8 @@
  * layout: position at `+0x19C`, velocity at `+0x1C0`, the three angles at
  * `+0x1CC`/`+0x1D0`/`+0x1D4` and their spins at `+0x1D8`/`+0x1E0`, state at
  * `+0x192`, floor at `+0x2E0`. So they are {@link BreakableProp} records in
- * `g_breakable_props`, family {@link PropFamily.ContainerFragment}, and the
- * renderer draws them the way it draws the container.
+ * `g_breakable_props`, family {@link PropFamily.ContainerFragment}, and their
+ * draw is recorded the way the container's is.
  *
  * `obj+0x2A0` is this routine's frame count -- another reading of the word
  * `storyItem` holds (`L3`); `ActorClearGameFields` zeroed it at the spawn.
@@ -20,7 +20,13 @@
  */
 import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
+import { G } from "../globals";
 import { T } from "../tables";
+import { MatrixTranslate } from "../matrix";
+import {
+  PropDrawBegin, PropDrawSlot, PropMatrixPush, PropMatrixTRzRyRx,
+  PropSubmitSlotWithSceneLightArray,
+} from "../class41/prop_draw";
 import { MsvcRand } from "../class41/group";
 import { ActorKillProp } from "../class41/prop";
 import { BreakableState, type BreakableProp } from "../class41/prop_state";
@@ -70,6 +76,7 @@ const FRAGMENT_SPIN_EASE = 32;
  */
 export function FallingContainerFragmentUpdate(p: BreakableProp, rng: Rng,
                                                events?: Events): void {
+  PropDrawBegin(p);
   const was = p.storyItem;
   p.storyItem = was + 1;
   if (was > FRAGMENT_LIFE_FRAMES) { ActorKillProp(p); return; }
@@ -100,9 +107,26 @@ export function FallingContainerFragmentUpdate(p: BreakableProp, rng: Rng,
     FallingContainerGroundContact(p, hull);
   }
 
-  // The draw block's one decision, left on the piece for `render/`: settled
-  // and past count 0x96, an odd count returns before `AssetDrawSlot`. The
-  // count read is the one just stored, after the increment.
-  p.drawSkipped = p.state === BreakableState.Settled
-    && p.storyItem > FRAGMENT_BLINK_AFTER && (p.storyItem & 1) !== 0;
+  // The draw (`0x0046AE8A`..), recorded where it is made. Settled: past count
+  // 0x96 an odd count -- the one just stored -- returns before it; else
+  // `T(rest) . Rz . Ry . Rx . T(hull[contact] * -0.001f)`, the draw, and
+  // `MatrixStore(+0x2E4)` -- so the frame a piece lands is drawn re-seated on
+  // the corner that touched. In the air: `T(x, y, z) . Rz . Ry . Rx`. Both
+  // submit through the scene light array while `g_scene_lighting` is up
+  // (`0x0046AF08`, `0x0046B00E`).
+  if (p.state === BreakableState.Settled) {
+    if (p.storyItem > FRAGMENT_BLINK_AFTER && (p.storyItem & 1) !== 0) return;
+    const m = PropMatrixPush();
+    PropMatrixTRzRyRx(m, p.restX, p.restY, p.restZ, p.pitch, p.yaw, p.roll);
+    const [cx, cy, cz] = hull[p.contact] ?? [0, 0, 0];
+    MatrixTranslate(m, -cx, -cy, -cz);
+    if (G.g_scene_lighting !== 0) PropSubmitSlotWithSceneLightArray(p, m, p.slot);
+    else PropDrawSlot(p, m, p.slot);
+    p.drawMatrix = m.slice(0, 16);
+    return;
+  }
+  const m = PropMatrixPush();
+  PropMatrixTRzRyRx(m, p.x, p.y, p.z, p.pitch, p.yaw, p.roll);
+  if (G.g_scene_lighting !== 0) PropSubmitSlotWithSceneLightArray(p, m, p.slot);
+  else PropDrawSlot(p, m, p.slot);
 }

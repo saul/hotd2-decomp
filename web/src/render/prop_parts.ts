@@ -13,7 +13,7 @@
 import { G } from "../game/globals";
 import { PropFamily, type BreakableProp } from "../game/class41/prop_state";
 import {
-  FRAGMENT_BURST_FRAMES, FRAGMENT_BURST_SCALES, FRAGMENT_BURST_SLOT,
+  FRAGMENT_BURST_SCALES, FRAGMENT_BURST_SLOT,
   FRAGMENT_BRANCH_SUBKIND, FRAGMENT_SUBKIND9_EXTRA_AT,
   FRAGMENT_SUBKIND9_EXTRA_SLOT,
 } from "../game/class41/type40";
@@ -33,6 +33,11 @@ export interface PropPart {
   sx: number; sy: number; sz: number;
   /** Index of the part this one hangs off, or -1 for world space. */
   parent: number;
+  /**
+   * The light colour the draw was made under (`SetRenderLightColour`), for
+   * `render/lighting.ts`'s `hod2_light_colour`; absent is the block's own.
+   */
+  light?: readonly [number, number, number];
 }
 
 /** The families this file draws. */
@@ -95,11 +100,16 @@ function Type39Parts(p: BreakableProp): PropPart[] {
  */
 function Type40Parts(p: BreakableProp): PropPart[] {
   const out: PropPart[] = [];
-  if (p.branchLatched && p.burstFrames < FRAGMENT_BURST_FRAMES) {
+  // The routine's own record that it drew the pieces this frame: it tests
+  // the count and then steps it after the draw, so a re-test here on the
+  // stepped count lost the hundredth frame.
+  if (p.burstLight) {
     const k = (FRAGMENT_BURST_SCALES[p.subKind] ?? 100) * 0.01;
     p.burst.forEach((b, i) => {
-      out.push(part(FRAGMENT_BURST_SLOT + i, b.x, b.y, b.z, b.rx, b.ry, b.rz,
-                    "ZYX", [k, k, k]));
+      const q = part(FRAGMENT_BURST_SLOT + i, b.x, b.y, b.z, b.rx, b.ry, b.rz,
+                     "ZYX", [k, k, k]);
+      if (p.burstLight) q.light = p.burstLight;
+      out.push(q);
     });
   }
   out.push(part(p.slot, p.x, p.y, p.z, p.pitch, p.yaw, p.roll, "ZYX",

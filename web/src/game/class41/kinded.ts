@@ -38,8 +38,10 @@ import {
   PROP_HIT_HOLD_SCENE, SCRIPT_FLAG_PROP_HIT_RELEASE,
 } from "./prop";
 import { PropExpireByStepLifetime } from "./lifetime";
-import { PropDrawBegin, PropDrawEffect, PropDrawSlot, PropMatrixPush }
-  from "./prop_draw";
+import {
+  PropDrawBegin, PropDrawEffect, PropDrawEffectSceneLit, PropDrawSlot,
+  PropMatrixPush, PropSubmitSlotWithSceneLightArray,
+} from "./prop_draw";
 import { MatrixRotateY, MatrixScale, MatrixTranslate } from "../matrix";
 import { EffectMotionPlayLength } from "../effect_draw";
 import { SpawnPropHitEffectScaled, SpawnPropHitSpark } from "../effects/sprite";
@@ -149,6 +151,8 @@ const KINDED_SQUASH_BLOCK = 0x11;
 const KINDED_SQUASH_X = 0.6;
 /** `g_camera_fixed_eye_y + [0x004D1D24] 0.2` — the shadow's height. */
 const KINDED_SHADOW_RISE = 0.2;
+/** `CMP word ptr [0x009A1A08], BX` with `BX = 3`: scene 3 draws its break lit. */
+const KINDED_LIT_EFFECT_SCENE = 3;
 /** `MatrixScale(10, 1, 10)` for `0x10D0`, `(8, 1, 8)` for `0x10D1`. */
 const KINDED_SHADOW_SCALE_LARGE = 10.0;
 const KINDED_SHADOW_SCALE_SMALL = 8.0;
@@ -270,15 +274,16 @@ export function KindedPropUpdate(p: BreakableProp, rng: Rng,
       if (p.slot !== BreakableSlot.Default) {
         MatrixTranslate(m, 0, KINDED_MODEL_RISE, 0);
       }
-      // `AssetDrawSlot` or, under `g_scene_lighting`,
-      // `SubmitSlotWithSceneLightArray`: one recorded call, as
-      // `PropDrawSlot` says.
-      PropDrawSlot(p, m, slot);
+      // `g_scene_lighting` (`0x0046644C`) picks
+      // `SubmitSlotWithSceneLightArray` over `AssetDrawSlot`.
+      if (G.g_scene_lighting !== 0) PropSubmitSlotWithSceneLightArray(p, m, slot);
+      else PropDrawSlot(p, m, slot);
+    } else if (p.itemSet === ItemSet.NoRelease
+               || G.g_scene_index === KINDED_LIT_EFFECT_SCENE) {
+      // `EffectDrawSceneLit` (`FUN_0040DFA0`) for set 4 or in scene 3
+      // (`0x0046647E`..`0x004664A5`), else `EffectDrawUnlit`.
+      PropDrawEffectSceneLit(p, m, rng);
     } else {
-      // `EffectDrawSceneLit` (`FUN_0040DFA0`) for set 4 or in scene 3, else
-      // `EffectDrawUnlit` (`FUN_0040DD90`): the same walk with the nodes
-      // submitted under the scene's lights, which the recording does not
-      // tell apart -- the `PropDrawSlot` convention above.
       PropDrawEffect(p, m, rng);
     }
   }

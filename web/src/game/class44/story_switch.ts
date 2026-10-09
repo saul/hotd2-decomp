@@ -111,9 +111,6 @@
  *
  * ## What the port does not carry
  *
- * * **The draw's lighting**: `SubmitSlotWithSceneLightArray` or
- *   `AssetDrawSlot`, on `g_scene_lighting` and camera path 0x46, are one
- *   recorded draw (`class41/prop_draw.ts`), as for the hinges.
  */
 import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
@@ -129,6 +126,7 @@ import { SpawnStoryModeItem } from "../class41/items";
 import { ActorDespawnProp } from "../class41/prop";
 import {
   PropDrawBegin, PropDrawSlot, PropMatrixPush,
+  PropSubmitSlotWithSceneLightArray,
 } from "../class41/prop_draw";
 import {
   BreakableFlag, BreakableState, makeBreakableProp, PropFamily,
@@ -312,6 +310,9 @@ function ScriptFlagSigned(i: number): number {
   return i >= 0 ? (G.g_script_flags[i] ?? 0) : 0;
 }
 
+/** `CMP g_active_cam_path, 0x46`: on camera path 0x46 the draw is never lit. */
+const STORY_SWITCH_UNLIT_CAM_PATH = 0x46;
+
 /**
  * `PlaceStoryModeSwitch` — `FUN_00473A70`. `g_class44_subtypes[17]`.
  *
@@ -441,10 +442,13 @@ export function StoryModeSwitchUpdate(p: BreakableProp, rng: Rng,
     MatrixRotateX(m, w.o64);
     MatrixScale(m, p.restX, p.restY, p.restZ);
     // `MaxOfThreeToNoOpStub` (`FUN_00461C20`) hands the largest of the three
-    // to an empty stub. `g_scene_lighting` and camera path 0x46 pick
-    // `SubmitSlotWithSceneLightArray` or `AssetDrawSlot`; both are this one
-    // recorded draw.
-    PropDrawSlot(p, m, p.slot);
+    // to an empty stub. `g_scene_lighting && g_active_cam_path != 0x46`
+    // (`0x0047538C`..`0x0047539F`) submits through the scene light array.
+    if (G.g_scene_lighting !== 0 && G.g_active_cam_path !== STORY_SWITCH_UNLIT_CAM_PATH) {
+      PropSubmitSlotWithSceneLightArray(p, m, p.slot);
+    } else {
+      PropDrawSlot(p, m, p.slot);
+    }
     // `MatrixStore(obj+0x150)`.
     ColiStoreObjectMatrix(p, m);
     p.coliMatrixDrawn = true;

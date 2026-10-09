@@ -36,10 +36,6 @@
  * equality on camera path `0x2F` at frame `0x96`, so the prop goes on the one
  * frame the camera is there and never if the route does not play path `0x2F`.
  * No `RegisterForShotTest`, no radius and no `AND` on `obj+0x34`.
- *
- * The lit/unlit choice is the draw's own business — both calls draw the same
- * slot under the same matrix, and the port's renderer lights every model the
- * same way — so both are one recorded call.
  */
 import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
@@ -50,8 +46,10 @@ import { PropExpireByStepLifetime } from "./lifetime";
 import { ActorDespawnProp } from "./prop";
 import {
   PropDrawBegin, PropDrawSlot, PropMatrixPush, PropMatrixTRzRyRx,
+  PropSubmitSlotWithSceneLightArray,
 } from "./prop_draw";
 import type { BreakableProp } from "./prop_state";
+import { GameMode } from "../game_mode";
 
 /** `g_active_cam_path` and `g_cam_path_frame` at which a type-12 prop goes. */
 export const TYPE12_DESPAWN_CAM_PATH = 0x2f;
@@ -84,7 +82,13 @@ export function PropDrawOnlyType12(p: BreakableProp, rng: Rng,
   PropMatrixTRzRyRx(m, p.x, p.y, Math.fround(p.vz + p.z), p.pitch, p.yaw,
                     p.roll);
   MatrixScale(m, p.restX, p.restY, p.restZ);
-  PropDrawSlot(p, m, p.slot);
+  // `g_GameMode != 2 && g_scene_lighting` (`0x00467F00`) submits through the
+  // scene light array, else `AssetDrawSlot`.
+  if (G.g_GameMode !== GameMode.Training && G.g_scene_lighting !== 0) {
+    PropSubmitSlotWithSceneLightArray(p, m, p.slot);
+  } else {
+    PropDrawSlot(p, m, p.slot);
+  }
 }
 
 /**

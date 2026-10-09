@@ -358,6 +358,18 @@ export const G = {
    * are carried. evt `0x16` writes them.
    */
   g_light_array_ambient: [0.5, 0.5, 0.5] as [number, number, number],
+  /**
+   * `0x007E8138` -- the D3D ambient the scene-light-array path draws with
+   * (`SetLightingSceneArray`, `FUN_004AA8B0`), as the three bytes
+   * `StoreLightArrayAmbientColour` (`FUN_004AA720`) packs:
+   * `__ftol(channel * 255.0)`. Its one writer runs only while
+   * `g_scene_lighting` is up, so a light-array draw made with the lighting
+   * off is lit by whatever the last lit stretch left here -- 0 before any
+   * has run -- and by no light. **Not reset** by `ResetGameGlobals`: the
+   * engine's word is the renderer's, written once a lit frame and never
+   * cleared.
+   */
+  g_render_array_ambient: [0, 0, 0] as [number, number, number],
   /** `g_entity_lights` — 0x009A1A20, sixteen entries of stride 0x74. */
   g_entity_lights: makeEntityLights(),
   /**

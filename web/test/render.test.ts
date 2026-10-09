@@ -5224,6 +5224,67 @@ console.log("\nthe gun light takes a scene-lit mesh with the torch's program, no
   entry.att0 = kept.att0;
 }
 
+console.log("\na light-array mesh keeps the light array with the torch off:");
+{
+  // `SetLightingSceneArray` (`FUN_004AA8B0`) lights a key-0x4000000 draw by
+  // the device ambient word and the enabled lights; with the gun aimed off
+  // screen there are none and the draw is the ambient's alone. The layer used
+  // to hand every such mesh back to the default light whenever no light was
+  // live -- the dark stretch went bright on every reload.
+  const { GunLights } = await import("../src/render/gunlights");
+  const { G: g } = await import("../src/game/globals");
+  const mk = () => {
+    const m = new MeshBasicMaterial();
+    m.userData = { pvr2: { tex_ambient: 0.75, specular: [0, 0, 0], specular_power: 0 } };
+    return new Mesh(new PlaneGeometry(1, 1), m);
+  };
+  const region = mk();
+  const regionNode = new Group();
+  regionNode.userData = { hod2_draw_mode: 1 };
+  regionNode.add(region);
+  const root = new Group();
+  root.add(regionNode);
+  const prop = mk();
+  const scene = new Scene();
+  const lights = new SceneLighting(scene);
+  lights.build(root);
+  const gun = new GunLights(scene, lights);
+  gun.build(root);
+  const view = { camera: new PerspectiveCamera() } as unknown as RenderContextT;
+  gun.source = { live: () => false, litActor: () => false };
+  gun.sceneLitNodes = () => [prop];
+  const wasLighting = g.g_scene_lighting;
+  const wasAmbient = g.g_render_array_ambient;
+  g.g_scene_lighting = 1;
+  g.g_render_array_ambient = [51, 102, 255];
+  gun.update(view);
+  const gunLit = (m: InstanceType<typeof Mesh>) => !!(m.material as { userData?: { gunLit?: boolean } })
+    .userData?.gunLit;
+  check("with no light live, a light-array prop wears the light array's twin",
+        gunLit(prop));
+  check("...and so does a draw_mode 1 region while g_scene_lighting is up",
+        gunLit(region));
+  const shader = {
+    vertexShader: ShaderLib.lambert.vertexShader,
+    fragmentShader: ShaderLib.lambert.fragmentShader,
+    uniforms: {} as Record<string, { value: { r: number; g: number; b: number } }>,
+  };
+  (prop.material as InstanceType<typeof MeshBasicMaterial>)
+    .onBeforeCompile(shader as never, undefined as never);
+  const amb = shader.uniforms.gunAmbient?.value;
+  check("...lit by the device's ambient word, g_render_array_ambient / 255",
+        !!amb && Math.abs(amb.r - 0.2) < 1e-6 && Math.abs(amb.g - 0.4) < 1e-6
+        && Math.abs(amb.b - 1) < 1e-6,
+        amb ? `${amb.r} ${amb.g} ${amb.b}` : "no uniform");
+  g.g_scene_lighting = 0;
+  gun.update(view);
+  check("with g_scene_lighting down the region has the default light back, "
+        + "the prop its routine's light array",
+        !gunLit(region) && gunLit(prop));
+  g.g_scene_lighting = wasLighting;
+  g.g_render_array_ambient = wasAmbient;
+}
+
 console.log("\nthe gun lights are built off the camera this frame draws:");
 {
   // `GunLightBuildSystem` runs after the camera draw, so the torch is placed

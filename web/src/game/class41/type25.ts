@@ -93,7 +93,9 @@ import { T } from "../tables";
 import { PROP_BRANCH_ANSWERED } from "./branch";
 import { PropExpireByStepLifetime } from "./lifetime";
 import { BreakablePropAwardHit } from "./prop";
-import { PropDrawBegin, PropDrawEffect, PropMatrixPush } from "./prop_draw";
+import {
+  PropDrawBegin, PropDrawEffectSceneLit, PropMatrixPush,
+} from "./prop_draw";
 import { BreakableFlag, type BreakableProp } from "./prop_state";
 import { PropRegisterForShotTest } from "./shot_test";
 
@@ -193,10 +195,8 @@ export function PropUpdateType25(p: BreakableProp, rng: Rng,
   if (n < TYPE25_BLINK_FRAMES && (n <= 0 || n % 2 === 0)) {
     const m = PropMatrixPush();
     MatrixTranslate(m, p.x, p.y, p.z);
-    // `EffectDrawSceneLit` is `EffectDrawUnlit`'s walk with each part
-    // submitted through `SubmitSlotWithSceneLightArray`; `PropDrawEffect`
-    // records the same slots under the same matrices.
-    PropDrawEffect(p, m, rng);
+    // `EffectDrawSceneLit` (`0x00469C05`): every part through the light array.
+    PropDrawEffectSceneLit(p, m, rng);
   }
 
   if ((p.flags & TYPE25_SHOT_TEST_DONE) === 0) {

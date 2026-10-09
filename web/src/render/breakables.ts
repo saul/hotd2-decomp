@@ -59,7 +59,7 @@ import { Rng } from "../core/rng";
 import { COMPOSITE_FAMILIES, PropParts, type PropPart } from "./prop_parts";
 import { BannerWave } from "./banner_wave";
 import { releaseAssetDrawAlpha, setAssetDrawAlpha } from "./draw_order";
-import { rewriteEnvUvs } from "./class2d_draws";
+import { rewriteEnvUvs, setLight } from "./class2d_draws";
 
 /** `AssetDrawSlot(0x10D0)` — the ground shadow a standing prop gets. */
 const SHADOW_SLOT = 0x10d0;
@@ -132,9 +132,6 @@ const GENERIC_FAMILY_DEFAULT = PoseOrder.YawRollPitch;
  */
 const FAMILY_POSE_ORDER: Partial<Record<PropFamily, PoseOrder>> = {
   [PropFamily.RisingDoor]: PoseOrder.YawOnly,
-  // `FallingContainerFragmentUpdate` (`FUN_0046AD20`): `RotZ; RotY; RotX`
-  // in both draw blocks, the container's own order.
-  [PropFamily.ContainerFragment]: PoseOrder.RollYawPitch,
 };
 
 /**
@@ -198,8 +195,6 @@ function ShadowSlotFor(p: BreakableProp): number | null {
   // `ScriptFlagEffectUpdate` (`FUN_00473B90`) draws the effect tree and
   // nothing else -- no second `AssetDrawSlot`, so no shadow.
   if (p.family === PropFamily.ScriptFlagEffect) return null;
-  // `FallingContainerFragmentUpdate` draws its piece and nothing else.
-  if (p.family === PropFamily.ContainerFragment) return null;
   // Nor does `PropUpdateType48FlickerLight`: a lamp, and three draws, none a
   // shadow.
   if (p.family === PropFamily.Type48) return null;
@@ -235,6 +230,8 @@ export class BreakableLayer implements System<RenderContext> {
   readonly group = new Group();
 
   private readonly templates = new Map<number, Object3D>();
+  /** This frame's light-array nodes: see {@link litNodes}. */
+  private lit: Object3D[] = [];
   private readonly nodes = new Map<number, Live>();
   private enabled = true;
   private readonly _c = new Vector3();
@@ -342,7 +339,16 @@ export class BreakableLayer implements System<RenderContext> {
     return c;
   }
 
+  /**
+   * The nodes whose draw was submitted through the scene light array this
+   * frame (`PropDrawCall.sceneLit`), for `render/gunlights.ts`.
+   */
+  litNodes(): readonly Object3D[] {
+    return this.lit;
+  }
+
   update(ctx?: RenderContext): void {
+    this.lit = [];
     this.group.visible = this.enabled;
     if (!this.enabled) return;
     // The modelview an `AssetSlotUVsFromViewNormals` draw rewrites its UVs
@@ -398,9 +404,7 @@ export class BreakableLayer implements System<RenderContext> {
       // records its own draws), nor behind a `0xFFFF` slot.
       const gone = p.state === BreakableState.Removed
         || p.slot === SLOT_NONE;
-      // A settled container piece skips its draw on odd counts at the end;
-      // `FallingContainerFragmentUpdate` says so on the piece.
-      l.node.visible = !gone && !p.drawSkipped;
+      l.node.visible = !gone;
 
       const [sx, sz] = this.shake(p);
       l.node.position.set(p.x + sx, p.y, p.z + sz);
@@ -559,6 +563,8 @@ export class BreakableLayer implements System<RenderContext> {
         else if (axis === "X") n.rotateX(q.pitch * BAMS_TO_RAD);
       }
       n.scale.set(q.sx, q.sy, q.sz);
+      if (q.light) n.userData.hod2_light_colour = [...q.light];
+      else delete n.userData.hod2_light_colour;
     });
   }
 
@@ -608,6 +614,11 @@ export class BreakableLayer implements System<RenderContext> {
       setAssetDrawAlpha(n, c.alpha ?? null);
       // `AssetSlotUVsFromViewNormals` on the same slot just before the draw.
       if (c.envUv && this.viewValid) rewriteEnvUvs(n, this._view);
+      // The light the call was made under: a set the routine installed
+      // (`LightsUseSecondarySet` and the like) for `render/lighting.ts`, or
+      // the scene light array, which is `render/gunlights.ts`'s.
+      setLight(n, c.light ?? null);
+      if (c.sceneLit) this.lit.push(n);
       // The layer goes on the primitives, as `draw_order.ts` puts layer 7:
       // a group's order would become its children's `groupOrder`, which
       // three.js compares before anything else.

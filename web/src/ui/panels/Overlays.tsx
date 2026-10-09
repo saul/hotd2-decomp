@@ -29,16 +29,23 @@ import { LoadBar } from "./LoadBar";
  * a shot the paused clock refuses, as it always was. On a touch screen the
  * whole screen resumes, because a tap on a paused game has nothing else it
  * could usefully mean and the button is a small target for a thumb.
+ *
+ * **Not while a stage loads.** `#overlay` stacks above `#viewport`, which
+ * holds the loading screen, so the card drew over the load bar -- through
+ * the sounds and the shaders -- and offered a Start that cannot start
+ * anything yet. Space still can: the frame loop does not tick while
+ * `loading` is set, so an early press starts the game when the load ends.
  */
 export function PauseScreen() {
   const dispatch = useDispatch();
   const paused = useSlice((p) => p?.paused);
+  const loading = useSlice((p) => p?.loading);
   const started = useSlice((p) => p?.started);
   const stage = useSlice((p) => p?.stage);
   const original = useSlice((p) => p?.original);
   const homeScreen = useSlice((p) => p?.homeScreenHint);
-  if (!paused) return null;
-  const go = () => dispatch({ kind: started ? "play" : "start" });
+  if (!paused || loading) return null;
+  const go =() => dispatch({ kind: started ? "play" : "start" });
   return (
     <div id="paused-overlay" className={started ? "is-paused" : "is-start"}
          onClick={(e) => { if (e.target === e.currentTarget) go(); }}>

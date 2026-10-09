@@ -354,8 +354,21 @@ console.log("\nthe fog range is `SetFogRange`'s pair, in either order");
 
   // The port's own guard, and the only one: the pre-script default stands in
   // for the range `FUN_00460250` seeds, and must not paint the background.
+  const unset = drive(65000, 65001);
   check("the pre-script default is past the far plane and draws no fog",
-        drive(65000, 65001) === null);
+        unset !== null && unset.near > 8000 && unset.far > unset.near,
+        JSON.stringify(unset));
+  // ...and is still a fog on the scene, as is the "off" view: whether the
+  // scene has one is in every program's key, so taking it off recompiled
+  // every fogged program in view the frame the script's first fog op ran.
+  const bare = new Scene();
+  const off = new SceneFog(bare);
+  const atLoad = bare.fog;
+  off.setMode("off");
+  check("the fog never leaves the scene: on from construction, kept by \"off\"",
+        atLoad !== null && bare.fog === atLoad
+        && (bare.fog as { near: number }).near > 8000,
+        `${atLoad ? "on" : "null"} at construction`);
 }
 
 console.log("\nthe fog blend happens in the space D3D blends in");
@@ -5153,6 +5166,54 @@ console.log("\nthe gun light takes a scene-lit mesh with the torch's program, no
   check("...and is not the scene light's device equation underneath",
         !shader.fragmentShader.includes("vD3dColour")
         && !shader.vertexShader.includes("d3dLightDir"));
+  check("...and skips a dark light in both loops, since every light is always "
+        + "in the scene",
+        shader.fragmentShader.includes("greaterThan( spotLight.color")
+        && shader.fragmentShader.includes("greaterThan( pointLight.color"));
+
+  // A light that comes and goes changes every program's key: three.js counts
+  // the visible lights and the shadowed ones into each. So turning the torch
+  // on and off must change neither, only its intensity and its shadow pass.
+  const { GUN_LIGHT_FIRST: first } = await import("../src/game/scene_lights");
+  type L = { isLight?: boolean; visible: boolean; castShadow: boolean };
+  const config = () => {
+    const out: string[] = [];
+    gun.group.traverse((o) => {
+      const l = o as unknown as L;
+      if (l.isLight) out.push(`${o.name}:${l.visible}:${l.castShadow}`);
+    });
+    return out.join(" ");
+  };
+  const torch = gun.group.getObjectByName("gun_light_1") as unknown as {
+    intensity: number; shadow: { autoUpdate: boolean };
+  };
+  const view = { camera: new PerspectiveCamera() } as unknown as RenderContextT;
+  // The entry as `BuildEntitySpotlightArray` writes it: white, `att0` 0.5.
+  const { G: g } = await import("../src/game/globals");
+  const entry = g.g_entity_lights[first];
+  const kept = { diffuse: entry.diffuse, att0: entry.att0 };
+  entry.diffuse = [1, 1, 1];
+  entry.att0 = 0.5;
+  let on = false;
+  gun.source = { live: (i) => on && i === first, litActor: () => false };
+  gun.update(view);
+  const dark = config();
+  on = true;
+  gun.update(view);
+  const litUp = config();
+  const lightOn = torch.intensity > 0 && torch.shadow.autoUpdate;
+  on = false;
+  gun.update(view);
+  check("the torch comes on and goes off with no light's visibility or shadow "
+        + "changed",
+        dark === litUp && config() === dark && dark.split(" ").length === 28
+        && !dark.includes(":false:"),
+        dark);
+  check("...only its intensity and its shadow pass",
+        lightOn && torch.intensity === 0 && !torch.shadow.autoUpdate,
+        `on: ${lightOn}, off: ${torch.intensity} ${torch.shadow.autoUpdate}`);
+  entry.diffuse = kept.diffuse;
+  entry.att0 = kept.att0;
 }
 
 console.log("\nthe gun lights are built off the camera this frame draws:");

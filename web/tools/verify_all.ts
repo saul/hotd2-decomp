@@ -331,6 +331,13 @@ export const CHECKS: readonly Check[] = [
       + "crosshair until the mouse moves again; and a phone, with no fine "
       + "pointer, never shows one",
         NEEDS_BUNDLE, LANE_BROWSER),
+  check("shader_warm", ["node", "tools/shader_warm_page.mjs", "--headless"],
+        "that once the loading screen lifts the page compiles no shader "
+      + "program -- through stage 3's torch coming on, going off and coming "
+      + "back, and through stage 1's first fog -- counted at the WebGL "
+      + "context: the only check that the load's warm-up covers what play "
+      + "draws, and that no light or fog changes every program's key mid-play",
+        NEEDS_BUNDLE, LANE_BROWSER),
   check("drop_pitch", ["node", "tools/drop_pitch.mjs", "--headless"],
         "that on stage 2 block 5 step 6's stashed rail the camera's aim moves "
       + "only by `TurnLookAtToward` at the exe's rate, recomputed from its "

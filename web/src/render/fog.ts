@@ -175,6 +175,13 @@ export const FOG_RANGE_SCALE = 2;
 const CAMERA_FAR_PLANE = 8000;
 
 /**
+ * The range the scene's fog has while there is none to draw: past the far
+ * plane, so every fragment's factor is exactly 0. See {@link SceneFog}'s
+ * `apply` for why the fog is never taken off the scene instead.
+ */
+const FOG_OFF = { near: 65000, far: 65001 };
+
+/**
  * `g_clear_colour` -- `0x00598C58`, the colour the frame is cleared to in
  * play: black. See {@link SceneFog}'s `apply`.
  */
@@ -251,7 +258,9 @@ export function prepareFogMaterial(m: Material | null | undefined): void {
 export class SceneFog implements System {
   readonly id = "render.fog";
   private readonly scene: Scene;
-  private readonly fog = new Fog(0x000000, 65000, 65001);
+  private readonly fog = new Fog(0x000000, FOG_OFF.near, FOG_OFF.far);
+  /** The script's range, doubled and ordered ({@link fogRangeFor}). */
+  private range = { ...FOG_OFF };
   /** Planar, because that is what table fog does. See the note above. */
   private mode: FogMode = "planar";
   private last = "";
@@ -259,6 +268,9 @@ export class SceneFog implements System {
   constructor(scene: Scene) {
     patchShaderChunk();
     this.scene = scene;
+    // On the scene from the start, so the load's shader warm-up compiles
+    // what the stage will draw with. See `apply`.
+    this.apply();
   }
 
   /**
@@ -309,8 +321,7 @@ export class SceneFog implements System {
     this.last = key;
     // The doubling *and* the swap guard: see {@link fogRangeFor}.
     const range = fogRangeFor(near, far);
-    this.fog.near = range.near;
-    this.fog.far = range.far;
+    this.range = range;
     // **`SRGBColorSpace` is load-bearing.** These are the bytes
     // `PushSceneFogColour` (`FUN_0040D5B0`) packs into a D3DCOLOR, so they are
     // sRGB; `setRGB`'s default is the linear-sRGB working space, which took
@@ -352,10 +363,20 @@ export class SceneFog implements System {
    * `SetClearColor` by the DX7 SDK's declaration order, which the `+0x14`
    * `GetD3DDevice` and `+0x18` `GetPrimary` calls in
    * `InitD3DDeviceAndTextureStages` agree with: `[likely]`.
+   *
+   * **No fog is a fog past the far plane, not `scene.fog = null`** (`L117`).
+   * Whether the scene has a fog is in every program's key, so taking it off
+   * and putting it back made every fogged program in view compile again: the
+   * shader warm-up ran before the script's first fog op, without one, and
+   * stage 1's first frame compiled twelve programs. The factor past the far
+   * plane is exactly 0 -- the ramp is clamped -- so nothing drawn changes.
    */
   private apply(): void {
     const on = this.mode !== "off" && this.activeRange;
-    this.scene.fog = on ? this.fog : null;
+    const range = on ? this.range : FOG_OFF;
+    this.fog.near = range.near;
+    this.fog.far = range.far;
+    this.scene.fog = this.fog;
     (this.scene.background as Color | null)?.set(CLEAR_COLOUR);
   }
 

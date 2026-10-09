@@ -270,7 +270,12 @@ export async function loadStageInto(p: Player): Promise<void> {
       : null,
     p.rng);
   p.lighting.build(p.scene3d.root);
-  p.gunLights.build(p.scene3d.root);
+  // Whether the script ever turns the scene light array on -- `0x14`, the
+  // only writer of `g_scene_lighting` -- which is whether the stage can light
+  // anything with the torch, and so whether its programs are worth compiling
+  // at load (`GunLights.warm`). Stages 1 and 6 never do.
+  p.gunLights.build(p.scene3d.root, bundle.script.blocks.some(
+    (b) => b.steps?.some((s) => s.ops.some((o) => o.op === 0x14 && !!o.enabled))));
   p.scene.add(p.scene3d.root);
 
   // Made per stage, from that stage's curves, and never freed until now: one
@@ -354,6 +359,8 @@ export async function loadStageInto(p: Player): Promise<void> {
   await afterPaint();
   if (superseded()) return;
   p.warmShaders();
+  await p.programsLinked(superseded);
+  if (superseded()) return;
   meter.done();
   p.setLoading(null);
   // The bundle screen's picker shows a frame of each stage, and this is the

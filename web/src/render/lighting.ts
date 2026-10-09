@@ -153,9 +153,10 @@ import { SRGB_TRANSFER_GLSL } from "./srgb_glsl";
  * What of a mesh and its material goes into its twins' programs, as far as
  * this layer's materials vary: the program three.js builds depends on these
  * and not on which texture or colour. Generous rather than exact -- a kind
- * split too finely costs a compile that hits the cache.
+ * split too finely costs a compile that hits the cache. The gun light's
+ * warm-up (`render/gunlights.ts`) sorts its twins by it too.
  */
-function programKind(mesh: Mesh, m: Material): string {
+export function programKind(mesh: Mesh, m: Material): string {
   const b = m as MeshBasicMaterial;
   const g = mesh.geometry;
   const colour = g?.attributes.color;

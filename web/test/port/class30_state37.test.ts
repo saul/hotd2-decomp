@@ -498,11 +498,18 @@ console.log("\nCarriedPropCheckShot's break tail -- the civilian's shot script, 
     z.visible = true;
     z.pos = vec3(0, 0, -60);
     const hits0 = G.g_player_hit_count[0];
-    let shots = 0, broke = false;
+    let shots = 0, broke = false, hitFrameDraw = -1, hitFrameSlot = -1;
+    let before = -1;
     for (let f = 0; f < 80 && !broke; f++) {
       if (killCarrier && f === 10) z.flags |= ActorFlag.Dead;
+      before = G.g_carried_props[0]?.slot ?? -1;
       GameUpdate(1 / 60, HOST, rng, new Events());
       const p = G.g_carried_props[0];
+      if (shots === 1 && hitFrameDraw < 0 && p?.draw) {
+        hitFrameDraw = p.draw.slot;
+        hitFrameSlot = p.slot;
+        if (hitFrameDraw !== before) hitFrameDraw = -2;
+      }
       if (killCarrier) {
         if (p?.routine === CarriedPropRoutine.FallFree) break;
         continue;
@@ -514,12 +521,18 @@ console.log("\nCarriedPropCheckShot's break tail -- the civilian's shot script, 
       }
     }
     return { broke, shots, hits: G.g_player_hit_count[0] - hits0, civ: victim.civ,
+             hitFrameDraw, hitFrameSlot,
              pooled: ActorByAt(victim.at) === victim };
   };
   const a = run(0, false);
   check("shot to pieces with the counter live: both hits counted",
         a.broke && a.shots === 2 && a.hits === 2,
         `broke ${a.broke} shots ${a.shots} hits ${a.hits}`);
+  // Every routine draws before `CarriedPropCheckShot` steps the slot down
+  // (`0x00442717`..), so the hit frame still shows the old model.
+  check("a hit that does not break it draws the old model on its frame",
+        a.hitFrameDraw >= 0 && a.hitFrameDraw !== a.hitFrameSlot,
+        `drew ${a.hitFrameDraw.toString(16)} slot ${a.hitFrameSlot.toString(16)}`);
   check("...and the live civilian's shot script is taken away (+0x4C = 0)",
         a.civ.onShot === 0 && a.civ.onShotScript === -1,
         `onShot ${a.civ.onShot.toString(16)} script ${a.civ.onShotScript}`);

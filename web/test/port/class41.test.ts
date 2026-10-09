@@ -31,6 +31,11 @@ import {
 } from "../../src/game/class41/shatter";
 import { MsvcRand } from "../../src/game/class41/group";
 import {
+  BreakablePropAwardHit, BreakablePropGroundContact,
+} from "../../src/game/class41/prop";
+import { BREAKABLE_STANDING_RISE } from "../../src/game/class41/shot_test";
+import { SetBreakableMemberSlot } from "../../src/game/class41/group";
+import {
   EXTRA_LIFE_HEART_SLOT, EXTRA_LIFE_ROUTINE_TYPE, EXTRA_LIFE_STRIP_SLOT,
   EXTRA_LIFE_TAG_SLOT, ExtraLifePickupUpdate,
 } from "../../src/game/class41/items";
@@ -613,7 +618,7 @@ console.log("\nclass 0x41 type 4, the kinded props:");
              interp: 0, motion: 0x1d5, play_length: 74, frames: 1, bones: 2,
              t: [0, 0, 0, 0, 0, 0], r: [0, 0, 0, 0, 0, 0], cues: [] },
     },
-  } as never;
+  } as unknown as typeof T.breakables;
   check("the break leaves the effect counter at 2",
         a.effectFrames === 2, `${a.effectFrames}`);
   let after = 0;
@@ -621,6 +626,96 @@ console.log("\nclass 0x41 type 4, the kinded props:");
   check("the destroyed prop leaves once its effect has run (71 updates)",
         a.dead && after === 71, `dead ${a.dead} after ${after}`);
   void released;
+}
+
+console.log("\nBreakablePropAwardHit pays through ScoreAddForPlayer and gates the count:");
+{
+  // `FUN_004650F0`: `ScoreAddForPlayer(player, 10)` (`0x00465134`), so
+  // Original Mode's DOUBLE SCORE pays 20; and the hit is counted only while
+  // `g_accuracy_stats_suppressed` is 0 or in Training (`0x0046513C`).
+  const rng = new Rng(13);
+  propScene(rng, GameMode.Original);
+  G.g_original_score_multiplier[0] = 2;
+  const s0 = G.g_player_score[0], h0 = G.g_player_hit_count[0];
+  BreakablePropAwardHit(BreakableFlag.HitByPlayer0, true, rng);
+  check("DOUBLE SCORE doubles a prop's ten",
+        G.g_player_score[0] === s0 + 20, `${G.g_player_score[0] - s0}`);
+  check("...and the hit is counted", G.g_player_hit_count[0] === h0 + 1);
+  G.g_accuracy_stats_suppressed = 1;
+  BreakablePropAwardHit(BreakableFlag.HitByPlayer0, false, rng);
+  check("with the accuracy stats suppressed the hit is not counted",
+        G.g_player_hit_count[0] === h0 + 1, `${G.g_player_hit_count[0] - h0}`);
+}
+
+console.log("\nBreakablePropUpdate and its ground contact, against the listing:");
+{
+  // Stage 2's z band (`0x004656EF`..`0x00465751`): every hull point is held
+  // above z -1325 by moving the prop, so with the fixture's corners at z +-1
+  // a prop at -1400 ends at -1324.
+  {
+    const rng = new Rng(17);
+    propScene(rng);
+    G.g_scene_index = 1;
+    const p = PlaceBreakableGroup(2, 4, rng)[0];
+    p.yaw = 0; p.roll = 0; p.pitch = 0;
+    p.z = -1400; p.y = 100;
+    p.state = BreakableState.Falling;
+    BreakablePropGroundContact(p);
+    check("stage 2 holds a prop's hull inside z -1325..-1265.8",
+          Math.abs(p.z - -1324) < 1e-9, `z ${p.z}`);
+    G.g_scene_index = 0;
+    p.z = -1400;
+    BreakablePropGroundContact(p);
+    check("...and no other stage does", p.z === -1400, `z ${p.z}`);
+  }
+  // The settle's two divisions truncate (`CDQ; AND; ADD; SAR`,
+  // `0x00464A1B`): an error of -1 moves the spin by 0, where `>> 4` gave -1.
+  {
+    const rng = new Rng(19);
+    const events = propScene(rng);
+    const p = PlaceBreakableGroup(2, 4, rng)[0];
+    p.state = BreakableState.Settled;
+    p.restPitch = 0; p.pitch = 1; p.spin = 0;
+    BreakablePropUpdate(p, rng, events);
+    check("a settle error of -1 leaves the spin at 0", p.spin === 0,
+          `spin ${p.spin}`);
+  }
+  // The frame a stacked prop loses its support it still registers its shot
+  // sphere 3.770148 up: the rise is set at the head of the standing arm
+  // (`0x00464D7D`), before the walk that starts the fall.
+  {
+    const rng = new Rng(23);
+    const events = propScene(rng);
+    const [base, top] = PlaceBreakableGroup(0, 4, rng);
+    G.g_breakable_props = G.g_breakable_props.filter((q) => q !== base);
+    SetBreakableMemberSlot(0, base.member, 0);
+    BreakablePropUpdate(top, rng, events);
+    check("the frame a prop starts to fall registers its risen sphere",
+          top.state === BreakableState.Falling
+          && Math.abs(top.shotY - (top.y + BREAKABLE_STANDING_RISE)) < 1e-9,
+          `state ${top.state} shotY ${top.shotY} y ${top.y}`);
+  }
+  // The crack and the destroy spark from the routine (`0x00464781`,
+  // `0x00464877`), so a shot its gate refuses -- group 4 -- sparks nothing.
+  {
+    const rng = new Rng(29);
+    const events = propScene(rng);
+    const p = PlaceBreakableGroup(1, 4, rng)[0];
+    const q = PlaceBreakableGroup(4, 4, rng)[0];
+    for (const r of [p, q]) {
+      r.hitAim = { x: 1, y: 2 };
+      BreakablePropTakeShot(r, 0);
+    }
+    const fx = G.g_sprite_effects.length;
+    BreakablePropUpdate(p, rng, events);
+    check("a group prop's crack sparks once, at the shot's point",
+          G.g_sprite_effects.length === fx + 1
+          && G.g_sprite_effects[fx].pos.x === 1
+          && G.g_sprite_effects[fx].pos.z === p.z);
+    BreakablePropUpdate(q, rng, events);
+    check("...and a shot group 4's gate refuses sparks nothing",
+          G.g_sprite_effects.length === fx + 1);
+  }
 }
 
 console.log("\nclass 0x41 type 4 and the group puff, drawn:");
@@ -645,7 +740,7 @@ console.log("\nclass 0x41 type 4 and the group puff, drawn:");
       sound: 0x1d16a9, radius: 6, y_offset: 6,
     })),
     effects: { "5": fx(0x1db, 0x0b05), "0": fx(0x1d9, 0x0b00) },
-  } as never;
+  } as unknown as typeof T.breakables;
   const k0 = PlaceKindedProp(0xd100, 0, ItemSet.None, 1, 5,
                              30, 2, -40, 0, rng);
   G.g_breakable_props.push(k0);

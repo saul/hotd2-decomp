@@ -274,11 +274,13 @@ export interface CarriedProp {
   bodyRadius: number;
   /**
    * `[port-only]` — what this frame's `AssetDrawSlot` drew with: the engine's
-   * matrix, and whether it was in view space. `null` for a frame that drew
-   * nothing (the blink, a routine with no draw). Render reads it; nothing
-   * reads it back.
+   * matrix, whether it was in view space, and the slot it drew -- taken at
+   * the draw, because every routine draws before `CarriedPropCheckShot`
+   * steps the slot down, so a hit frame still shows the old model. `null`
+   * for a frame that drew nothing (the blink, a routine with no draw).
+   * Render reads it; nothing reads it back.
    */
-  draw: { m: Mat; view: boolean } | null;
+  draw: { m: Mat; view: boolean; slot: number } | null;
   /** `[port-only]` — `RegisterForShotTest` took it this frame. */
   shootable: boolean;
   /**
@@ -473,7 +475,7 @@ export function CarriedPropHeldUpdate(p: CarriedProp, host: GameHost,
     MatrixRotateX(m, p.rx);
     MatrixRotateZ(m, p.rz);
     MatrixRotateY(m, p.ry);
-    p.draw = { m, view: true };
+    p.draw = { m, view: true, slot: p.slot };
   } else if (p.draw) {
     // `[port-only]`: no skeleton or no camera to seat it with -- a headless
     // run -- so it keeps the last matrix it had rather than inventing one.
@@ -643,7 +645,7 @@ export function CarriedPropThrowAtCamera(p: CarriedProp, cam: CameraPair | null,
   MatrixRotateZ(m, p.rz);
   MatrixRotateY(m, p.ry);
   MatrixRotateX(m, p.rx);
-  p.draw = { m: m.slice(0, 16), view: true };
+  p.draw = { m: m.slice(0, 16), view: true, slot: p.slot };
   // `obj+0x100 = pos; RegisterForCameraTracking` at `0x00443C70`..`0x00443C87`.
   CarriedPropRegisterCameraPoint(p, p.pos);
   MatrixGetTranslation(m, p.shotPoint);
@@ -683,7 +685,7 @@ export function CarriedPropStuckToScreen(p: CarriedProp,
   MatrixRotateZ(m, p.rz);
   MatrixRotateY(m, p.ry);
   MatrixRotateX(m, p.rx);
-  p.draw = { m, view: true };
+  p.draw = { m, view: true, slot: p.slot };
   // `obj+0x100 = g_camera_blocks * pos; RegisterForCameraTracking(obj)` at
   // `0x00444220`..`0x00444244` -- after the blink's early return, so a
   // blinked-out frame is not counted. The prop sits in view space here, so
@@ -838,7 +840,7 @@ export function CarriedPropDeflectedFlight(p: CarriedProp,
   MatrixRotateZ(m, p.rz);
   MatrixRotateY(m, p.ry);
   MatrixRotateX(m, p.rx);
-  p.draw = { m: m.slice(0, 16), view: true };
+  p.draw = { m: m.slice(0, 16), view: true, slot: p.slot };
   MatrixGetTranslation(m, p.shotPoint);
   // `if (FUN_004459C0(obj) == 0) ActorDespawn(obj)`. With no camera there is
   // no screen to leave, and the prop is kept rather than despawned blind.
@@ -883,7 +885,7 @@ export function CarriedPropHeldInBone8Update(p: CarriedProp, host: GameHost,
     MatrixRotateX(m, p.rx);
     MatrixRotateZ(m, p.rz);
     MatrixRotateY(m, p.ry);
-    p.draw = { m, view: true };
+    p.draw = { m, view: true, slot: p.slot };
   } else if (p.draw) {
     // `[port-only]`: no skeleton or no camera -- a headless run -- so the
     // last matrix stands, as the other held routine keeps it.
@@ -1156,7 +1158,7 @@ function CarriedPropDrawWorld(p: CarriedProp, w2v: Mat): Mat {
   const d = MatCopy(MatIdentity(), w2v);
   MatrixTranslate(d, p.pos.x, p.pos.y, p.pos.z);
   MatrixRotateZ(d, p.rz); MatrixRotateY(d, p.ry); MatrixRotateX(d, p.rx);
-  p.draw = { m: d, view: true };
+  p.draw = { m: d, view: true, slot: p.slot };
   MatrixGetTranslation(d, p.shotPoint);
   return d;
 }
@@ -1318,7 +1320,7 @@ export function CarriedPropThrowAtTarget(p: CarriedProp, host: GameHost,
   const d = MatCopy(MatIdentity(), w2v);
   MatrixTranslate(d, p.pos.x, p.pos.y, p.pos.z);
   MatrixRotateZ(d, p.rz); MatrixRotateY(d, p.ry); MatrixRotateX(d, p.rx);
-  p.draw = { m: d, view: true };
+  p.draw = { m: d, view: true, slot: p.slot };
   MatrixGetTranslation(d, p.shotPoint);
   if (CarriedPropIsOnScreen(p)) {
     RegisterForShotTest(p);

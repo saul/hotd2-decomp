@@ -591,7 +591,11 @@ function ResolveShotOnProp(req: ShotRequest,
   // So does every routine transcribed whole: one that records its own draws
   // (`class41/prop_draw.ts`) also makes its own hit effect, where and if its
   // routine makes one, from the point left on the prop here.
-  if (spark && !NO_PROP_SPARK.has(prop.family) && prop.draws === null) {
+  // Nor does it reach the group props: `BreakablePropUpdate` sparks from its
+  // own crack and destroy arms (`0x00464781`, `0x00464877`), so a shot its
+  // hit gate refuses -- group 4, scene 1's held block -- sparks nothing.
+  if (spark && !NO_PROP_SPARK.has(prop.family) && prop.draws === null
+      && prop.family !== PropFamily.Group) {
     SpawnPropHitSpark(spark.x, spark.y, prop.z);
   }
   events?.emit("shot.resolved", {

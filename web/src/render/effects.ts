@@ -543,9 +543,9 @@ export class EffectLayer implements System<RenderContext> {
         node.matrixWorldNeedsUpdate = true;
         node.renderOrder = 0;
       });
-      if (!c.draw || !c.slot) continue;
+      if (!c.draw || !c.draw.slot) continue;
       const key = `cp${c.id}`;
-      const node = this.node(key, c.slot,
+      const node = this.node(key, c.draw.slot,
                              c.draw.view ? this.viewGroup : this.group);
       if (!node) continue;
       seen.add(key);

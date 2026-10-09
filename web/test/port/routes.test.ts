@@ -63,6 +63,7 @@ import {
   check, motion, TYPE, CHARS, WalkerCameraFrame, StillPath, EnterPlay,
   propScene,
 } from "./harness";
+import { ActorDrawsSceneLit } from "../../src/game/scene_lights";
 
 console.log("\nclass 0x21, the rescue target and stage 2's first fork:");
 {
@@ -1090,6 +1091,19 @@ console.log("\nclasses 0x52 and 0x53, the two shootable triggers:");
     tick(a);
     check(`class 0x52 sub-type ${sub} writes route ${want}`,
           G.g_script_branch_var === want, String(G.g_script_branch_var));
+  }
+  // `MouseWanderUpdate` (`FUN_0043F5C0`): sub-type 1 submits through the
+  // scene light array (`0x0043F6C7`) with no test of `g_scene_lighting`;
+  // sub-type 0 and the trigger (`FUN_0043F720`) are `AssetDrawSlot`.
+  for (const lighting of [0, 1]) {
+    const lit = [0, 1, 2, 3, 4].map((sub) => {
+      const a = triggerScene(SpawnClass.Mouse, { class52: { subtype: sub } },
+                             GameMode.Original);
+      G.g_scene_lighting = lighting;
+      return ActorDrawsSceneLit(a) ? 1 : 0;
+    }).join("");
+    check(`lighting ${lighting}: only the sub-type-1 mouse draws through the `
+          + "scene light array", lit === "01000", lit);
   }
   {
     const a = triggerScene(SpawnClass.Mouse, { class52: { subtype: 0 } });

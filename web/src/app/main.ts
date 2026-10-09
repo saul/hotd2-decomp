@@ -766,6 +766,10 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     // Drawn through the scene light array, which is the gun lights'.
     this.gunLights.sceneLitNodes = () => [
       ...this.type26Ripples.litNodes(), ...this.breakables.litNodes(),
+      ...this.slotModels.litNodes((at) => {
+        const obj = ActorByAt(at);
+        return !!obj && ActorDrawsSceneLit(obj);
+      }),
     ];
     this.scene.add(this.effects.group);
     this.scene.add(this.effects.viewGroup);

@@ -54,11 +54,11 @@
  * candidate and a shot at it goes on to what is behind. The port's pick used
  * to find it anyway, by its drawn node.
  *
- * ## What is not ported
+ * ## The draw
  *
- * The draw itself, which is `render/slotmodels.ts`'s. Subtype 1's
- * `SubmitSlotWithSceneLightArray` against subtype 0's `AssetDrawSlot` — the
- * same model lit or unlit — is a renderer difference the port does not carry.
+ * `render/slotmodels.ts`'s. Subtype 1 submits through the scene light array,
+ * every other subtype `AssetDrawSlot`: `ActorDrawsSceneLit`
+ * (`game/scene_lights.ts`) says so, and `render/gunlights.ts` lights it.
  */
 import type { Rng } from "../../core/rng";
 import { RegisterEnemySlot } from "../camera/slots";

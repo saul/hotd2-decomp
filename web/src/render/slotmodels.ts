@@ -364,6 +364,17 @@ export class SlotModelLayer implements System<RenderContext> {
   readonly group = new Group();
   private readonly templates = new Map<number, Object3D>();
   private readonly nodes = new Map<number, Live>();
+
+  /**
+   * The drawn nodes of the actors `lit` names -- the ones the port says draw
+   * through the scene light array (`ActorDrawsSceneLit`) -- for
+   * `render/gunlights.ts`. The question is the port's, so `app/` asks it.
+   */
+  litNodes(lit: (at: number) => boolean): Object3D[] {
+    const out: Object3D[] = [];
+    for (const [at, l] of this.nodes) if (lit(at)) out.push(l.node);
+    return out;
+  }
   /** The routines' extra draws, keyed by what drew them. Session state. */
   private readonly extras = new Map<string, Live>();
   /** Scratch for {@link SlotModelLayer.chain}; the layer is single-threaded. */

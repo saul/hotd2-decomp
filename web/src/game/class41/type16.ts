@@ -49,7 +49,10 @@ import { MatrixRotateX, MatrixRotateY, MatrixRotateZ, MatrixScale,
 import { MsvcRand } from "./group";
 import { SCRIPT_FLAG_CLEAR_PROPS } from "./lifetime";
 import { ActorDespawnProp, ActorKillProp, BreakablePropAwardHit } from "./prop";
-import { PropDrawBegin, PropDrawSlot, PropMatrixPush } from "./prop_draw";
+import {
+  PropDrawBegin, PropDrawSlot, PropMatrixPush,
+  PropSubmitSlotWithSceneLightArray,
+} from "./prop_draw";
 import {
   BreakableFlag, makeBreakableProp, PropFamily, type BreakableProp,
 } from "./prop_state";
@@ -325,12 +328,12 @@ export function PropUpdateType16(p: BreakableProp, rng: Rng,
   MatrixRotateY(m, p.yaw);
   MatrixRotateZ(m, p.roll);
   MatrixRotateX(m, p.pitch);
-  PropDrawSlot(p, m, p.slot);
+  PropSubmitSlotWithSceneLightArray(p, m, p.slot);           // 0x00468B9F
   if (s16(p.slot) === TYPE16_LAUNCHED_SLOT) {
     const b = PropMatrixPush();
     MatrixTranslate(b, w.o1b4, TYPE16_BASE_Y, w.o1bc);
     MatrixRotateY(b, p.yaw);
-    PropDrawSlot(p, b, TYPE16_BASE_SLOT);
+    PropSubmitSlotWithSceneLightArray(p, b, TYPE16_BASE_SLOT); // 0x00468BE9
   }
   // The sphere at the origin, without the rattle, every frame.
   PropRegisterForShotTest(p, p.x, p.y, p.z);

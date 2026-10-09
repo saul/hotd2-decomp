@@ -72,7 +72,10 @@ import {
 } from "../matrix";
 import { PlayerHoldsOriginalItem } from "../original_mode";
 import { ActorDespawnProp, ActorKillProp, BreakablePropAwardHit } from "./prop";
-import { PropDrawBegin, PropDrawSlot, PropMatrixPush } from "./prop_draw";
+import {
+  PropDrawBegin, PropDrawSlot, PropMatrixPush,
+  PropSubmitSlotWithSceneLightArray,
+} from "./prop_draw";
 import { BreakableFlag, type BreakableProp } from "./prop_state";
 import { PropRegisterForShotTest } from "./shot_test";
 import { PropEvalObjectPath6 } from "./object_path";
@@ -202,10 +205,10 @@ export function PropUpdateType73(p: BreakableProp, rng: Rng,
   MatrixRotateZ(m, p.roll);
   MatrixRotateY(m, p.yaw);
   MatrixRotateX(m, p.pitch);
-  // `g_scene_lighting` picks `SubmitSlotWithSceneLightArray`
-  // (`FUN_004185E0`) over `AssetDrawSlot` (`FUN_00418560`); the two draw the
-  // same slot under the same matrix, and the record does not tell them apart.
-  PropDrawSlot(p, m, TYPE73_SLOT);
+  // `g_scene_lighting` (`0x00470D99`) picks `SubmitSlotWithSceneLightArray`
+  // (`FUN_004185E0`) over `AssetDrawSlot` (`FUN_00418560`).
+  if (G.g_scene_lighting !== 0) PropSubmitSlotWithSceneLightArray(p, m, TYPE73_SLOT);
+  else PropDrawSlot(p, m, TYPE73_SLOT);
 
   PropRegisterForShotTest(p, p.x, Math.fround(p.y + TYPE73_SHOT_RISE), p.z);
 }

@@ -35,8 +35,13 @@ import type { Rng } from "../../core/rng";
 import { MatrixRotateX, MatrixRotateY, MatrixRotateZ, MatrixTranslate }
   from "../matrix";
 import { PropExpireByStepLifetime } from "./lifetime";
-import { PropDrawBegin, PropDrawSlot, PropMatrixPush } from "./prop_draw";
+import {
+  PropDrawBegin, PropDrawSlot, PropMatrixPush,
+  PropSubmitSlotWithSceneLightArray,
+} from "./prop_draw";
 import type { BreakableProp } from "./prop_state";
+import { GameMode } from "../game_mode";
+import { G } from "../globals";
 
 /**
  * `PropDrawOnlyType51` — `FUN_0046EB20`. `g_class41_updates[51]`.
@@ -53,5 +58,11 @@ export function PropDrawOnlyType51(p: BreakableProp, rng: Rng,
   MatrixRotateY(m, p.yaw);
   MatrixRotateZ(m, p.roll);
   MatrixRotateX(m, p.pitch);
-  PropDrawSlot(p, m, p.slot);
+  // `g_GameMode != 2 && g_scene_lighting` (`0x0046EB7B`) submits through the
+  // scene light array, else `AssetDrawSlot`.
+  if (G.g_GameMode !== GameMode.Training && G.g_scene_lighting !== 0) {
+    PropSubmitSlotWithSceneLightArray(p, m, p.slot);
+  } else {
+    PropDrawSlot(p, m, p.slot);
+  }
 }

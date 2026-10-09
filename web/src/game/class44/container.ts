@@ -93,7 +93,8 @@
  * 0046ab21  state 2: Push; T(+0x1A8..0x1B0) . Rz . Ry . Rx . T(hull[contact] * -0.001f);
  *                    draw +0x28C; MatrixStore(+0x2E4); Pop
  *           else:    Push; T(x, y, z) . Rz . Ry . Rx; draw +0x28C; Pop
- *           (lit or unlit on g_scene_lighting -- one recorded call either way)
+ *           (SubmitSlotWithSceneLightArray under g_scene_lighting, else
+ *            AssetDrawSlot)
  * 0046ac9d  if ((s16)+0x11C > 0) RegisterForShotTest(obj) at (x, y, z)
  * ```
  *
@@ -123,6 +124,7 @@ import {
 import { ActorDespawnProp, BreakablePropAwardHit } from "../class41/prop";
 import {
   PropDrawBegin, PropDrawSlot, PropMatrixPush, PropMatrixTRzRyRx,
+  PropSubmitSlotWithSceneLightArray,
 } from "../class41/prop_draw";
 import {
   BreakableFlag, BreakableState, ItemSet, makeBreakableProp, PropFamily,
@@ -545,7 +547,10 @@ export function FallingContainerUpdate(p: BreakableProp, rng: Rng,
     const [cx, cy, cz] = hull[p.contact] ?? [0, 0, 0];
     // `FMUL float [0x0056903C]` -- `-0.001f` on the raw s16 point.
     MatrixTranslate(m, -cx, -cy, -cz);
-    PropDrawSlot(p, m, p.slot);
+    // `g_scene_lighting` picks `SubmitSlotWithSceneLightArray`
+    // (`0x0046AB88`) over `AssetDrawSlot`.
+    if (G.g_scene_lighting !== 0) PropSubmitSlotWithSceneLightArray(p, m, p.slot);
+    else PropDrawSlot(p, m, p.slot);
     // `MatrixStore(obj+0x2E4)` (`0x004A8CA0`). Nothing reads it back for this
     // family; kept because the routine writes it. World space, as for the
     // group props.
@@ -553,7 +558,9 @@ export function FallingContainerUpdate(p: BreakableProp, rng: Rng,
   } else {
     const m = PropMatrixPush();
     PropMatrixTRzRyRx(m, p.x, p.y, p.z, p.pitch, p.yaw, p.roll);
-    PropDrawSlot(p, m, p.slot);
+    // ...and at `0x0046AC71`.
+    if (G.g_scene_lighting !== 0) PropSubmitSlotWithSceneLightArray(p, m, p.slot);
+    else PropDrawSlot(p, m, p.slot);
   }
 
   // `if ((s16)obj+0x11C > 0)` -- the raw origin, no rise, only while it has a

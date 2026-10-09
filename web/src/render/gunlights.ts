@@ -20,7 +20,8 @@
  * clamp(ambient + sum(spot_i * 2 * N.L), 0, 1) * texel        (gamma space)
  * ```
  *
- * `ambient` is `g_light_array_ambient` (evt `0x16`), `2` is `1 /
+ * `ambient` is the device word `g_render_array_ambient` -- evt `0x16`'s
+ * `g_light_array_ambient`, packed to bytes on a lit frame -- `2` is `1 /
  * attenuation0`, and the spot factor is 1 inside `theta = pi/8` and 0 outside.
  * That is what the `makeGunLitMaterial` shader computes, per pixel, and it
  * converts the clamped factor to linear before the multiply, which is the
@@ -49,8 +50,12 @@
  * and is presentation only.
  *
  * No shadow map is rendered unless a gun light is live -- each light's
- * `shadow.autoUpdate` is whether it is on -- and the materials are swapped
- * back when the last light goes out.
+ * `shadow.autoUpdate` is whether it is on. The materials are not the
+ * torch's to give back: a mesh drawn through the light array wears its twin
+ * for as long as its routine draws it that way, lit by the ambient alone
+ * when every light is off (the gun aimed off screen, the script's `0x15`
+ * down), as `SetLightingSceneArray` (`FUN_004AA8B0`) lights it. The ambient
+ * is the device's word, `g_render_array_ambient`, not evt `0x16`'s.
  *
  * ## Every light is in the scene all the time, at intensity 0 when off
  *
@@ -311,6 +316,8 @@ export class GunLights implements System<RenderContext> {
   /** Mesh -> the material it had before the gun light took it. */
   private readonly saved = new Map<Mesh, Material | Material[]>();
   private active = false;
+  /** Whether {@link regionLit} wears the light array's twins now. */
+  private regionsLit = false;
   /** Can this stage's script light anything? See {@link build}. */
   private canLight = true;
   /** Which gun lights are on: the lights themselves are never hidden. */
@@ -370,6 +377,7 @@ export class GunLights implements System<RenderContext> {
     this.twins.clear();
     this.saved.clear();
     this.regionLit = [];
+    this.regionsLit = false;
     this.characters = new Map();
     this.litCharacters = new Set();
     const visit = (o: Object3D, drawMode: number): void => {
@@ -395,7 +403,7 @@ export class GunLights implements System<RenderContext> {
     visit(root, 0);
   }
 
-  /** Is any gun light on this frame? */
+  /** Is anything drawn through the light array this frame? */
   get live(): boolean {
     return this.active;
   }
@@ -505,29 +513,45 @@ export class GunLights implements System<RenderContext> {
                              e.pos.z + e.dir.z);
       sp.target.updateMatrixWorld();
     }
-    const [r, g, b] = G.g_light_array_ambient;
-    gunAmbient.value.setRGB(r, g, b);
+    // `SetLightingSceneArray` (`FUN_004AA8B0`) hands the device the ambient
+    // `StoreLightArrayAmbientColour` last packed -- `g_render_array_ambient`,
+    // three bytes -- whatever the lights are doing this frame.
+    const [r, g, b] = G.g_render_array_ambient;
+    gunAmbient.value.setRGB(r / 255, g / 255, b / 255);
 
-    if (!any) {
-      if (this.active) this.restoreAll(base);
-      this.active = false;
-      this.litCharacters.clear();
-      this.litNodes.clear();
-      return;
-    }
-    if (!this.active) {
-      for (const mesh of this.regionLit) this.light(mesh);
-    }
-    this.active = true;
-    // Characters every frame, but only the live ones: which actors are lit
-    // can change (a civilian spawned, an actor despawned) and a lit one's
-    // meshes can too -- a gore swap clones a part onto a bone.
+    // Which meshes the light array draws is the routines' question, not the
+    // torch's: a light-array draw with every light off is lit by the ambient
+    // alone -- the dark the torch leaves when the gun points off screen --
+    // and not by the default light. Regions draw through it while
+    // `g_scene_lighting` is up; actors and other layers' nodes when the port
+    // says so.
+    const regions = G.g_scene_lighting !== 0;
     const want = new Set<number>();
     for (const obj of G.g_object_list) {
       if (this.characters.has(obj.at) && this.source.litActor(obj.at)) {
         want.add(obj.at);
       }
     }
+    const nodes = new Set(this.sceneLitNodes());
+    if (!any && !regions && want.size === 0 && nodes.size === 0) {
+      if (this.active) this.restoreAll(base);
+      this.active = false;
+      this.regionsLit = false;
+      this.litCharacters.clear();
+      this.litNodes.clear();
+      return;
+    }
+    if (regions !== this.regionsLit) {
+      for (const mesh of this.regionLit) {
+        if (regions) this.light(mesh);
+        else this.restore(mesh, base);
+      }
+      this.regionsLit = regions;
+    }
+    this.active = true;
+    // Characters every frame, but only the live ones: which actors are lit
+    // can change (a civilian spawned, an actor despawned) and a lit one's
+    // meshes can too -- a gore swap clones a part onto a bone.
     for (const at of this.litCharacters) {
       if (want.has(at)) continue;
       this.characters.get(at)?.traverse((o) => {
@@ -542,7 +566,6 @@ export class GunLights implements System<RenderContext> {
     this.litCharacters = want;
     // ...and the nodes another layer drew through the light array, the same
     // way: every frame, the ones it hands over now.
-    const nodes = new Set(this.sceneLitNodes());
     for (const n of this.litNodes) {
       if (nodes.has(n)) continue;
       n.traverse((o) => {

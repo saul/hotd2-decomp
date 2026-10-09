@@ -90,9 +90,9 @@ export function PropMatrixClearRotation(m: Mat): void {
 }
 
 /**
- * `AssetDrawSlot` (`FUN_00418560`), and its lit twin
- * `SubmitSlotWithSceneLightArray` (`FUN_004185E0`), which draws the same slot
- * under the scene's light array: the model is `slot`, under `m`.
+ * `AssetDrawSlot` (`FUN_00418560`): the model is `slot`, under `m`, lit by
+ * the default single light. Its twin through the scene light array is
+ * {@link PropSubmitSlotWithSceneLightArray}.
  *
  * `(s16)` on the way in, which is how every caller loads it (`MOVSX`). Slot 0
  * is not recorded: `AssetDrawSlot(0)` calls `NoOpStub(1.0f)` and returns
@@ -111,6 +111,22 @@ export function PropDrawSlot(p: BreakableProp, m: Mat, slot: number,
   const call: PropDrawCall = { slot: s, m: m.slice(0, 16) };
   if (layer !== DRAW_LAYER_WORLD) call.layer = layer;
   (p.draws ??= []).push(call);
+}
+
+/**
+ * `SubmitSlotWithSceneLightArray` (`FUN_004185E0`): {@link PropDrawSlot}'s
+ * draw -- the same resident test, the same model -- submitted with key
+ * `0x4000000`, so the flush lights it with the scene light array
+ * (`SetLightingSceneArray`, `FUN_004AA8B0`) instead of the default light.
+ *
+ * `[port-only]` as a function: it records the call rather than making it.
+ */
+export function PropSubmitSlotWithSceneLightArray(p: BreakableProp, m: Mat,
+                                                  slot: number): void {
+  const n = p.draws?.length ?? 0;
+  PropDrawSlot(p, m, slot);
+  const last = p.draws?.[p.draws.length - 1];
+  if (last && p.draws!.length > n) last.sceneLit = true;
 }
 
 /**
@@ -205,6 +221,30 @@ export function PropMatrixTRzRyRx(m: Mat, x: number, y: number, z: number,
  */
 export function PropDrawEffect(p: BreakableProp, m: Mat, rng: Rng,
                                slot = -1, capture = -1): void {
+  PropDrawEffectTree(p, m, rng, slot, capture, false);
+}
+
+/**
+ * `EffectDrawSceneLit` (`FUN_0040DFA0`): {@link PropDrawEffect}'s walk with
+ * `DAT_007C1788 = 1`, so `EffectDrawNode` submits every part through
+ * `SubmitSlotWithSceneLightArray` -- see
+ * {@link PropSubmitSlotWithSceneLightArray}. No slot override, no capture.
+ *
+ * `[port-only]` as a function, as {@link PropDrawEffect} is: the walk,
+ * recorded rather than drawn.
+ */
+export function PropDrawEffectSceneLit(p: BreakableProp, m: Mat,
+                                       rng: Rng): void {
+  PropDrawEffectTree(p, m, rng, -1, -1, true);
+}
+
+/**
+ * `EffectDrawTree` (`FUN_0040DDC0`) under the four globals its two callers
+ * set. `[port-only]` as a function: the engine's entry points write the
+ * globals and call it.
+ */
+function PropDrawEffectTree(p: BreakableProp, m: Mat, rng: Rng, slot: number,
+                            capture: number, lit: boolean): void {
   const def = T.breakables?.effects?.[String(p.effect)];
   if (!def || !def.frames || def.motion !== p.effectVariant) return;
   if (def.play_length - 1 <= p.effectFrames) p.effectFrames = 0;
@@ -212,7 +252,7 @@ export function PropDrawEffect(p: BreakableProp, m: Mat, rng: Rng,
   const root = def.nodes[0];
   const pose: EffectNodePose = { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0 };
   for (const c of root?.children ?? []) {
-    PropDrawEffectNode(p, def, c, m, pose, rng, slot, capture);
+    PropDrawEffectNode(p, def, c, m, pose, rng, slot, capture, lit);
   }
   p.effectPrevFrame = p.effectFrames;
 }
@@ -227,7 +267,8 @@ const EFFECT_SMOKE_PUFF_BASE = 0.27;
 /** One node of {@link PropDrawEffect}'s walk, and its children. */
 function PropDrawEffectNode(p: BreakableProp, def: EffectDefJson, i: number,
                             parent: Mat, pose: EffectNodePose,
-                            rng: Rng, slot: number, capture: number): void {
+                            rng: Rng, slot: number, capture: number,
+                            lit: boolean): void {
   const node = def.nodes[i];
   if (!node) return;
   const m = PropMatrixPush(parent);
@@ -241,14 +282,17 @@ function PropDrawEffectNode(p: BreakableProp, def: EffectDefJson, i: number,
         + EFFECT_SMOKE_PUFF_BASE;
       MatrixScale(m, s, s, s);
     }
-    // `if (DAT_007C178C < 0) ...node->slot... else AssetDrawSlot(override)`.
-    PropDrawSlot(p, m, slot < 0 ? node.slot : slot);
+    // `if (DAT_007C178C < 0) { DAT_007C1788 ? SubmitSlotWithSceneLightArray
+    // : AssetDrawSlot }(node->slot) else AssetDrawSlot(override)`
+    // (`0x0040DEE3`..`0x0040DF02`): an override is never the light array's.
+    if (slot < 0 && lit) PropSubmitSlotWithSceneLightArray(p, m, node.slot);
+    else PropDrawSlot(p, m, slot < 0 ? node.slot : slot);
     // `CMP '\0' < DAT_007C1789 && DAT_007C1789 - 1 == node->bone`.
     if (capture >= 0 && node.bone === capture) {
       p.effectCapture = m.slice(0, 16);
     }
   }
   for (const c of node.children) {
-    PropDrawEffectNode(p, def, c, m, pose, rng, slot, capture);
+    PropDrawEffectNode(p, def, c, m, pose, rng, slot, capture, lit);
   }
 }

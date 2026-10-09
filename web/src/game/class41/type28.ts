@@ -53,8 +53,8 @@
  * * The pose is `T RotY(+0x1D0) RotX(+0x64) T(0, 0, -6.5)`: the descriptor's
  *   yaw only, the swing about X after it, and the model 6.5 units along its
  *   own `-Z` (`PUSH 0xC0D00000`), so its origin is the pivot.
- * * The draw is **lit**, `EffectDrawSceneLit` (`FUN_0040DFA0`); the port
- *   records it as a plain draw.
+ * * The draw is **lit**, `EffectDrawSceneLit` (`FUN_0040DFA0`), recorded so
+ *   (`PropDrawCall.sceneLit`).
  * * Nothing writes `+0x32C`, so the effect is drawn at cursor 0 for ever and
  *   `EffectDrawTree` (`FUN_0040DDC0`)'s wrap leaves it there.
  * * No hit arm, no `RegisterForShotTest` (`FUN_00405160`) and no `AND` on
@@ -71,7 +71,9 @@ import { G } from "../globals";
 import { MatrixRotateX, MatrixRotateY, MatrixTranslate } from "../matrix";
 import { PropExpireByStepLifetime } from "./lifetime";
 import { SFX_PROP_BREAK } from "./prop";
-import { PropDrawBegin, PropDrawEffect, PropMatrixPush } from "./prop_draw";
+import {
+  PropDrawBegin, PropDrawEffectSceneLit, PropMatrixPush,
+} from "./prop_draw";
 import type { BreakableProp } from "./prop_state";
 import { PropWords } from "./words";
 
@@ -149,5 +151,5 @@ export function PropUpdateType28(p: BreakableProp, rng: Rng,
   MatrixRotateY(m, p.yaw);
   MatrixRotateX(m, w.o64);
   MatrixTranslate(m, 0, 0, TYPE28_PIVOT_Z);
-  PropDrawEffect(p, m, rng);
+  PropDrawEffectSceneLit(p, m, rng);                          // 0x0046A01D
 }

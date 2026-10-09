@@ -89,9 +89,6 @@
  *
  * ## What the port does not carry
  *
- * * **The draw's lighting.** `SubmitSlotWithSceneLightArray` or
- *   `AssetDrawSlot`, on `g_GameMode`, `g_scene_lighting` and camera path 0x46;
- *   both are the one recorded draw (`class41/prop_draw.ts`).
  * * **`PoseHookNone`** (`FUN_00420810`), called with `(3, 0x14)` and
  *   `(4, 0x14)`: a bare `RET`, so the calls do nothing.
  */
@@ -104,14 +101,17 @@ import {
 } from "../matrix";
 import { T } from "../tables";
 import { ActorDespawnProp, ActorKillProp } from "../class41/prop";
-import { PropDrawBegin, PropDrawSlot, PropMatrixPush }
-  from "../class41/prop_draw";
+import {
+  PropDrawBegin, PropDrawSlot, PropMatrixPush,
+  PropSubmitSlotWithSceneLightArray,
+} from "../class41/prop_draw";
 import {
   BreakableState, makeBreakableProp, PropFamily, type BreakableProp,
 } from "../class41/prop_state";
 import { PropRegisterForShotTestAsIs } from "../class41/shot_test";
 import { ColiStoreObjectMatrix } from "../coli";
 import { PropWords } from "../class41/words";
+import { GameMode } from "../game_mode";
 
 /**
  * The words of the 0x378-byte object `HingeUpdate` keeps that no shared
@@ -243,6 +243,9 @@ function HingeAlloc(pl: BreakablePlacement): BreakableProp {
   w.o2c0 = 1.0;
   return p;
 }
+
+/** `CMP g_active_cam_path, 0x46`: on camera path 0x46 the draw is never lit. */
+const HINGE_UNLIT_CAM_PATH = 0x46;
 
 /** `PropBuildHinge` — `FUN_00472BD0`. `g_class44_subtypes[1]`. */
 export function PropBuildHinge(pl: BreakablePlacement): BreakableProp {
@@ -449,7 +452,15 @@ export function HingeUpdate(p: BreakableProp, events?: Events): void {
   } else {
     MatrixScale(m, p.restX, p.restY, p.restZ);
   }
-  PropDrawSlot(p, m, p.slot);
+  // `g_GameMode != 1 && g_scene_lighting && g_active_cam_path != 0x46`
+  // (`0x004740B1`..`0x004740C9`, `EBX = 1`) submits through the scene light
+  // array, else `AssetDrawSlot`.
+  if (G.g_GameMode !== GameMode.Original && G.g_scene_lighting !== 0
+      && G.g_active_cam_path !== HINGE_UNLIT_CAM_PATH) {
+    PropSubmitSlotWithSceneLightArray(p, m, p.slot);
+  } else {
+    PropDrawSlot(p, m, p.slot);
+  }
   // `MatrixStore(obj+0x150)` at `0x004740F1`, then the pop.
   ColiStoreObjectMatrix(p, m);
   p.coliMatrixDrawn = true;

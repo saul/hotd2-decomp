@@ -57,8 +57,8 @@
  * * A flag value other than 0 and 1 draws the effect without stepping it.
  * * Both draws are **lit**: `SubmitSlotWithSceneLightArray` (`FUN_004185E0`)
  *   and `EffectDrawSceneLit` (`FUN_0040DFA0`), which is `EffectDrawUnlit`'s
- *   walk with `SubmitSlotWithSceneLightArray` for each node. The port records
- *   both as plain draws; `render/` lights every prop the same way.
+ *   walk with `SubmitSlotWithSceneLightArray` for each node, with no test of
+ *   `g_scene_lighting` -- recorded so (`PropDrawCall.sceneLit`).
  * * No hit arm, no `RegisterForShotTest` (`FUN_00405160`) and no `AND` on
  *   `obj+0x34`: not shootable.
  *
@@ -75,7 +75,8 @@ import { MatrixRotateY, MatrixTranslate } from "../matrix";
 import { PropExpireByStepLifetime } from "./lifetime";
 import { ActorKillProp } from "./prop";
 import {
-  PropDrawBegin, PropDrawEffect, PropDrawSlot, PropMatrixPush,
+  PropDrawBegin, PropDrawEffectSceneLit, PropMatrixPush,
+  PropSubmitSlotWithSceneLightArray,
 } from "./prop_draw";
 import type { BreakableProp } from "./prop_state";
 import { PropWords } from "./words";
@@ -158,12 +159,12 @@ export function PropKillOnBranchOneUpdate(p: BreakableProp, rng: Rng,
     const m = PropMatrixPush();
     MatrixTranslate(m, p.x, p.y, p.z);
     MatrixRotateY(m, w.o68);
-    PropDrawSlot(p, m, TYPE27_WHOLE_SLOT);
+    PropSubmitSlotWithSceneLightArray(p, m, TYPE27_WHOLE_SLOT); // 0x00469EE2
     return;
   }
   // 0x00469EF3. `g_motion_slots[obj+0x328]` resident: always (file comment).
   const m = PropMatrixPush();
   MatrixTranslate(m, p.x, p.y, p.z);
   MatrixRotateY(m, w.o68);
-  PropDrawEffect(p, m, rng);
+  PropDrawEffectSceneLit(p, m, rng);                          // 0x00469F35
 }

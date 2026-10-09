@@ -30,6 +30,10 @@ import {
   SHATTER_GRAVITY, SHATTER_PIECES,
 } from "../../src/game/class41/shatter";
 import { MsvcRand } from "../../src/game/class41/group";
+import { SceneLightArrayUpdate } from "../../src/game/scene_lights";
+import {
+  FRAGMENT_BURST_FRAMES, PlaceFragmentProps,
+} from "../../src/game/class41/type40";
 import {
   BreakablePropAwardHit, BreakablePropGroundContact,
 } from "../../src/game/class41/prop";
@@ -1142,8 +1146,9 @@ console.log("\nclass 0x44 selector 16's two pieces:");
     BreakablePropPoolUpdate(rng, events);
     const blinkFrame = f0.state === BreakableState.Settled
       && f0.storyItem > 0x96 && (f0.storyItem & 1) === 1;
-    if (f0.drawSkipped && blinkFrame) skippedOdd++;
-    else if (f0.drawSkipped || blinkFrame) skippedWrong++;
+    const skipped = (f0.draws?.length ?? 0) === 0;
+    if (skipped && blinkFrame) skippedOdd++;
+    else if (skipped || blinkFrame) skippedWrong++;
   }
   check("both pieces land, and are announced",
         f0.state === BreakableState.Settled
@@ -2469,5 +2474,78 @@ console.log("\nclass 0x41 types 7, 20, 58 and 60, transcribed whole:");
     check("type 60: then it flies, falls and tumbles 0x400",
           p.x === Math.fround(p.vx + x0) && p.pitch === 0x400
           && p.y === Math.fround(Math.fround(0.3) - Math.fround(0.02722) + y0));
+  }
+}
+
+console.log("\nprop draws through the scene light array, and the light they are made under:");
+{
+  // `SubmitSlotWithSceneLightArray` (`FUN_004185E0`) and `EffectDrawSceneLit`
+  // (`FUN_0040DFA0`) are recorded as `sceneLit`; `AssetDrawSlot` is not.
+  const rng = new Rng(61);
+  propScene(rng);
+  // Kind 2's model is the light array's only under `g_scene_lighting`
+  // (`0x0046644C`).
+  T.breakables = {
+    ...T.breakables!,
+    effects: { ...(T.breakables?.effects ?? {}),
+      "7": { nodes: [{ slot: 0, bone: 0, children: [] }], interp: 0,
+             motion: 0x1d5, play_length: 74, frames: 1, bones: 1,
+             t: [], r: [], cues: [] } },
+  } as unknown as typeof T.breakables;
+  const k = PlaceKindedProp(0xd200, 2, ItemSet.None, 1, 5, 0, 0, -30, 0, rng);
+  k.effect = 7;
+  k.effectVariant = 0x1d5;
+  G.g_breakable_props.push(k);
+  G.g_scene_lighting = 0;
+  KindedPropUpdate(k, rng, new Events());
+  const plain = k.draws?.[0];
+  G.g_scene_lighting = 1;
+  KindedPropUpdate(k, rng, new Events());
+  const lit = k.draws?.[0];
+  check("a kinded model is submitted through the light array only under "
+        + "g_scene_lighting",
+        plain?.slot === KIND_SLOT[2] && !plain?.sceneLit
+        && lit?.slot === KIND_SLOT[2] && lit?.sceneLit === true);
+
+  // `StoreLightArrayAmbientColour` (`FUN_004AA720`): `__ftol(c * 255.0)` per
+  // channel, written only on a lit frame, and kept through a reset.
+  G.g_light_array_ambient = [0.5, 0.25, 1.0];
+  G.g_scene_lighting = 1;
+  SceneLightArrayUpdate(NULL_HOST);
+  const packed = G.g_render_array_ambient.join();
+  G.g_light_array_ambient = [0.1, 0.1, 0.1];
+  G.g_scene_lighting = 0;
+  SceneLightArrayUpdate(NULL_HOST);
+  const kept = G.g_render_array_ambient.join();
+  ResetGameGlobals();
+  check("the light array's ambient is packed to truncated bytes on a lit frame",
+        packed === "127,63,255", packed);
+  check("...left alone on an unlit one, and through a reset",
+        kept === "127,63,255" && G.g_render_array_ambient.join() === kept,
+        `${kept} / ${G.g_render_array_ambient.join()}`);
+
+  // `PropUpdateType40` (`FUN_0046C570`): `SetRenderLightColour` before the
+  // forty pieces -- (0.5, 1, 0.5) in scene 0 block 1, else (1, 1, 0.8) --
+  // and the pieces drawn on the hundredth frame too, since the count is
+  // tested before and stepped after the draw.
+  for (const [scene, block, want] of [[0, 1, "0.5,1,0.5"], [1, 3, `1,1,${Math.fround(0.8)}`]] as const) {
+    const r2 = new Rng(67);
+    const ev = propScene(r2);
+    G.g_scene_index = scene;
+    G.g_evt_block_index = block;
+    const [f] = PlaceFragmentProps({ at: 0x19e4, container: "fragment",
+                                     sub_kind: 0, lifetime_evt_steps: 99,
+                                     pos: [0, 0, 0] } as never);
+    G.g_breakable_props.push(f);
+    BreakablePropTakeShot(f, 0);
+    let first: string | null = null, frames = 0;
+    for (let n = 0; n < 120; n++) {
+      BreakablePropPoolUpdate(r2, ev);
+      if (f.burstLight) { frames++; first ??= f.burstLight.join(); }
+    }
+    check(`scene ${scene} block ${block}: the pieces are lit in ${want}, for `
+          + "a hundred frames",
+          first === want && frames === FRAGMENT_BURST_FRAMES,
+          `${first} x${frames}`);
   }
 }

@@ -134,8 +134,9 @@ export class EffectLayer implements System<RenderContext> {
   /** Camera-space effects: the muzzle flash and the Original Mode record. */
   readonly viewGroup = new Group();
   /**
-   * Class 0x2D's hand-drawn models (`render/class2d_draws.ts`), which are
-   * lit -- each under the set its routine installed -- so they hang in two
+   * The models drawn by `AssetDrawSlot` -- class 0x2D's hand-drawn ones
+   * (`render/class2d_draws.ts`), each under the set its routine installed,
+   * and the carried props -- which the device lights, so they hang in two
    * groups of their own that `render/lighting.ts` walks: the world's, and
    * the camera's.
    */
@@ -527,6 +528,9 @@ export class EffectLayer implements System<RenderContext> {
    * `g_camera_world_to_view`, the stuck one from `MatrixLoadIdentity` again.
    * So the node hangs off the view group with the engine's matrix as its
    * local transform, and the element layouts agree (see `game/matrix.ts`).
+   *
+   * `AssetDrawSlot` is the default single light's, as `EffectDrawUnlit`'s
+   * parts are, so both hang in the lit groups `render/lighting.ts` walks.
    */
   private drawCarriedProps(seen: Set<string>): void {
     for (const c of G.g_carried_props) {
@@ -535,7 +539,7 @@ export class EffectLayer implements System<RenderContext> {
       // modelview it builds is `view . part` and the part is the world one.
       c.parts.forEach((part, i) => {
         const key = `cp${c.id}p${i}`;
-        const node = this.node(key, part.slot, this.group);
+        const node = this.node(key, part.slot, this.litGroup);
         if (!node) return;
         seen.add(key);
         node.matrixAutoUpdate = false;
@@ -546,7 +550,7 @@ export class EffectLayer implements System<RenderContext> {
       if (!c.draw || !c.draw.slot) continue;
       const key = `cp${c.id}`;
       const node = this.node(key, c.draw.slot,
-                             c.draw.view ? this.viewGroup : this.group);
+                             c.draw.view ? this.litViewGroup : this.litGroup);
       if (!node) continue;
       seen.add(key);
       node.matrixAutoUpdate = false;

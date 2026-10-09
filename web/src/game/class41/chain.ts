@@ -54,7 +54,9 @@ import { CHAIN_ITEM_ROW, CHAIN_LINK_SLOT } from "./chain_slots";
 import { SCRIPT_FLAG_CLEAR_PROPS } from "./lifetime";
 import { PICKED_ITEM_WORDS_ZERO } from "./original_item";
 import { ActorDespawnProp, BreakablePropAwardHit } from "./prop";
-import { PropDrawBegin, PropDrawSlot, PropMatrixPush } from "./prop_draw";
+import {
+  PropDrawBegin, PropMatrixPush, PropSubmitSlotWithSceneLightArray,
+} from "./prop_draw";
 import {
   BreakableFlag, BreakableState, makeBreakableProp, PropFamily,
   type BreakableProp, type ChainSegmentState,
@@ -351,7 +353,7 @@ export function ChainSegmentUpdate(p: BreakableProp, rng: Rng,
   MatrixRotateX(m, c.pitch);
   const link = PropMatrixPush(m);
   MatrixRotateY(link, c.yaw);
-  PropDrawSlot(p, link, CHAIN_LINK_SLOT);
+  PropSubmitSlotWithSceneLightArray(p, link, CHAIN_LINK_SLOT);  // 0x004698E0
   MatrixTranslate(m, 0, CHAIN_LINK_DROP, 0);
   MatCopy(c.m, m);
   // `SetTop(g_camera_blocks[g_camera_index]); MatrixMultiply(+0x1C0)`: the

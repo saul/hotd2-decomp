@@ -749,8 +749,13 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     this.scene.add(this.rain.group);
     this.scene.add(this.spawns.group);
     this.scene.add(this.debug.group);
+    // Every prop draw is lit by the device: `AssetDrawSlot` by the default
+    // single light, which `render/lighting.ts` gives them; the ones through
+    // the scene light array by `render/gunlights.ts`, below.
     this.scene.add(this.breakables.group);
+    this.lighting.addRoot(this.breakables.group);
     this.scene.add(this.shatters.group);
+    this.lighting.addRoot(this.shatters.group);
     this.shatters.source = this.breakables;
     this.scene.add(this.slotModels.group);
     this.lighting.addRoot(this.slotModels.group);
@@ -759,7 +764,9 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     this.scene.add(this.type26Ripples.group);
     this.lighting.addRoot(this.type26Ripples.group);
     // Drawn through the scene light array, which is the gun lights'.
-    this.gunLights.sceneLitNodes = () => this.type26Ripples.litNodes();
+    this.gunLights.sceneLitNodes = () => [
+      ...this.type26Ripples.litNodes(), ...this.breakables.litNodes(),
+    ];
     this.scene.add(this.effects.group);
     this.scene.add(this.effects.viewGroup);
     this.scene.add(this.effects.litGroup);

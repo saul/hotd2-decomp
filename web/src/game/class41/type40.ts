@@ -362,6 +362,13 @@ export function PlaceFragmentProps(pl: BreakablePlacement): BreakableProp[] {
   return out;
 }
 
+/** `PUSH 0x3F000000; PUSH 0x3F800000; PUSH 0x3F000000` -- scene 0, block 1. */
+export const FRAGMENT_BURST_LIGHT_BLOCK1: readonly [number, number, number] =
+  [0.5, 1.0, 0.5];
+/** `PUSH 0x3F4CCCCD; PUSH 0x3F800000; PUSH 0x3F800000` -- everywhere else. */
+export const FRAGMENT_BURST_LIGHT: readonly [number, number, number] =
+  [1.0, 1.0, Math.fround(0.8)];
+
 /**
  * `PropUpdateType40` — `FUN_0046C570`. `g_class41_updates[40]`.
  *
@@ -440,9 +447,15 @@ export function PropUpdateType40(p: BreakableProp, rng: Rng,
     }
   }
 
+  p.burstLight = null;
   if (p.branchLatched && p.burstFrames < FRAGMENT_BURST_FRAMES) {
-    // `SetRenderLightColour` around the pieces' draw — (0.5, 1, 0.5) in scene
-    // 0 block 1, (1, 1, 0.8) elsewhere — is lighting and the renderer's.
+    // `SetRenderLightColour` before the pieces' draw (`0x0046C8E5`..
+    // `0x0046C919`) -- (0.5, 1, 0.5) in scene 0 block 1, (1, 1, 0.8)
+    // elsewhere -- and `LightsRestoreScene` after it (`0x0046CA79`): the
+    // forty are lit by block 0 in that colour, the object itself by the
+    // block's own.
+    p.burstLight = G.g_scene_index === 0 && G.g_evt_block_index === 1
+      ? [...FRAGMENT_BURST_LIGHT_BLOCK1] : [...FRAGMENT_BURST_LIGHT];
     const floor = G.g_camera_fixed_eye_y + FRAGMENT_BURST_FLOOR;
     const noBounce = G.g_scene_index === 1 && G.g_evt_block_index === 0x10;
     for (const b of p.burst) {

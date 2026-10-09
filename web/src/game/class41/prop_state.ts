@@ -403,12 +403,19 @@ export interface PropDrawCall {
    * draw with `LightsUseSecondarySet` (`FUN_0041DC70`) and
    * `LightsRestoreScene` (`FUN_0041DCC0`): the three device words as
    * `RenderLightSet` reads them at the call. Absent means the scene's own,
-   * which is what every other prop routine draws under. Recorded and not yet
-   * drawn: `render/breakables.ts`'s group is not one `render/lighting.ts`
-   * lights, so no prop's draw is lit by either block there.
+   * which is what every other prop routine draws under. `render/breakables.ts`
+   * hands it to `render/lighting.ts` as the node's light set.
    */
   light?: { ambient: number; dir: [number, number, number];
             rgb: [number, number, number] };
+  /**
+   * Made through the scene light array -- `SubmitSlotWithSceneLightArray`
+   * (`FUN_004185E0`), or a node of `EffectDrawSceneLit` (`FUN_0040DFA0`) --
+   * rather than the default single light: lit by the array's ambient
+   * (`g_render_array_ambient`) and its live entries, the gun lights among
+   * them (`render/gunlights.ts`). Absent is `AssetDrawSlot`'s default light.
+   */
+  sceneLit?: true;
   /**
    * Made after `AssetSlotUVsFromViewNormals` (`FUN_00418660`) on the same
    * slot: the model's marked primitives draw with UVs made from their
@@ -893,6 +900,12 @@ export interface BreakableProp {
   /** `obj+0x1C0` — frames the burst has run; it draws while this is < 100. */
   burstFrames: number;    // +0x1C0
   /**
+   * `[port-only]` The light colour `PropUpdateType40` put its forty pieces'
+   * draws under this frame -- `SetRenderLightColour` (`FUN_004AA0A0`) before
+   * them and `LightsRestoreScene` after -- or null on a frame it drew none.
+   */
+  burstLight: [number, number, number] | null;
+  /**
    * [port-only] The answers the draw halves of types 39, 40 and 44 compute
    * on their way to `AssetDrawSlot`, left on the object so `render/` reads
    * them rather than making the decision itself: how many stack items this
@@ -902,12 +915,6 @@ export interface BreakableProp {
   stackDrawn: number;
   drawScale: [number, number, number];
   effectPoses: PosedNode[];
-  /**
-   * [port-only] The routine returned before its `AssetDrawSlot` this frame.
-   * Only {@link PropFamily.ContainerFragment} ever sets it: a settled piece
-   * past count 0x96 draws on even counts only.
-   */
-  drawSkipped: boolean;
   /**
    * [port-only] Every `AssetDrawSlot` the object's routine made on its last
    * frame, in the order it made them, each with the matrix it was made under
@@ -1144,10 +1151,10 @@ export function makeBreakableProp(id: number, group: number,
     scale: 1,
     burst: [],
     burstFrames: 0,
+    burstLight: null,
     stackDrawn: 0,
     drawScale: [1, 1, 1],
     effectPoses: [],
-    drawSkipped: false,
     draws: null,
     words: {},
     hitAim: null,

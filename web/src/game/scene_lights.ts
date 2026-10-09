@@ -153,15 +153,33 @@ function RotateForwardByAngles(pitchBams: number, yawBams: number,
 
 /**
  * `SceneLightArrayUpdate` — `FUN_00480970`. The engine half of the per-frame
- * light task: only while `g_scene_lighting` is set are the gun lights built.
+ * light task: only while `g_scene_lighting` is set are the gun lights built
+ * and the array's ambient stored.
  *
- * `RenderLightsResetAll`, the ambient and the per-entry submission are the
- * renderer's and live in `render/lighting.ts`, which reads
- * {@link EntityLightLive} for the same gate.
+ * `RenderLightsResetAll` and the per-entry submission are the renderer's and
+ * live in `render/gunlights.ts`, which reads {@link EntityLightLive} for the
+ * same gate.
  */
 export function SceneLightArrayUpdate(host: GameHost): void {
   if (G.g_scene_lighting === 0) return;
   BuildEntitySpotlightArray(host);
+  StoreLightArrayAmbientColour(G.g_light_array_ambient);
+}
+
+/** `FMUL [0x00570F5C]` -- 255.0. */
+const AMBIENT_BYTE_SCALE = 255.0;
+
+/**
+ * `StoreLightArrayAmbientColour` — `FUN_004AA720`. `0x007E8138 = 0xFF000000
+ * | r << 16 | g << 8 | b`, each `__ftol(channel * 255.0)` -- a truncation --
+ * which {@link G.g_render_array_ambient} keeps as the three bytes.
+ */
+export function StoreLightArrayAmbientColour(rgb: readonly number[]): void {
+  G.g_render_array_ambient = [
+    Math.trunc(rgb[0] * AMBIENT_BYTE_SCALE) & 0xff,
+    Math.trunc(rgb[1] * AMBIENT_BYTE_SCALE) & 0xff,
+    Math.trunc(rgb[2] * AMBIENT_BYTE_SCALE) & 0xff,
+  ];
 }
 
 /**

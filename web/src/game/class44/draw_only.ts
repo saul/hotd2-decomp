@@ -47,8 +47,7 @@
  * the same prologue, the same product, the same dead call and the same pair of
  * draws, instruction for instruction, less the `0x2F`/`0x96` despawn -- so the
  * scale is the descriptor's rather than type 12's constant 1.0, and nothing
- * but the lifetime ends it. `+0x1C8` is never written and is zero. The lit
- * and unlit draws are one recorded call, as they are for type 12.
+ * but the lifetime ends it. `+0x1C8` is never written and is zero.
  *
  * No `RegisterForShotTest`, no radius, no `AND` on `obj+0x34`: it is drawn and
  * nothing else.
@@ -59,10 +58,12 @@ import { MatrixScale } from "../matrix";
 import { PropExpireByStepLifetime } from "../class41/lifetime";
 import {
   PropDrawBegin, PropDrawSlot, PropMatrixPush, PropMatrixTRzRyRx,
+  PropSubmitSlotWithSceneLightArray,
 } from "../class41/prop_draw";
 import {
   BreakableState, makeBreakableProp, PropFamily, type BreakableProp,
 } from "../class41/prop_state";
+import { GameMode } from "../game_mode";
 
 /**
  * `PropBuildDrawOnlySelector14` — `FUN_004736D0`. `g_class44_subtypes[14]`.
@@ -114,7 +115,13 @@ export function PropDrawOnlySelector14(p: BreakableProp): void {
   PropMatrixTRzRyRx(m, p.x, p.y, Math.fround(p.vz + p.z), p.pitch, p.yaw,
                     p.roll);
   MatrixScale(m, p.restX, p.restY, p.restZ);
-  PropDrawSlot(p, m, p.slot);
+  // `g_GameMode != 2 && g_scene_lighting` (`0x0047596F`) submits through the
+  // scene light array, else `AssetDrawSlot`.
+  if (G.g_GameMode !== GameMode.Training && G.g_scene_lighting !== 0) {
+    PropSubmitSlotWithSceneLightArray(p, m, p.slot);
+  } else {
+    PropDrawSlot(p, m, p.slot);
+  }
 }
 
 /**

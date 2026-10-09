@@ -106,7 +106,8 @@ import { T } from "../tables";
 import { EffectMotionPlayLength } from "../effect_draw";
 import { ActorDespawnProp, ActorKillProp } from "../class41/prop";
 import {
-  PropDrawBegin, PropDrawEffect, PropDrawSlot, PropMatrixPush,
+  PropDrawBegin, PropDrawEffectSceneLit, PropDrawSlot, PropMatrixPush,
+  PropSubmitSlotWithSceneLightArray,
 } from "../class41/prop_draw";
 import {
   BreakableState, makeBreakableProp, PropFamily, type BreakableProp,
@@ -257,7 +258,9 @@ export function SwingThenBreakUpdate(p: BreakableProp, rng: Rng): void {
   if (broken === 0) {
     MatrixRotateY(m, SWING_THEN_BREAK_TURN);
     MatrixTranslate(m, SWING_THEN_BREAK_OFFSET, 0, 0);
-    PropDrawSlot(p, m, p.slot);
+    // `SubmitSlotWithSceneLightArray` (`0x00474681`), with no test of
+    // `g_scene_lighting`: the whole door is always the light array's.
+    PropSubmitSlotWithSceneLightArray(p, m, p.slot);
     // `MatrixStore(obj+0x150)` at `0x0047468D`.
     ColiStoreObjectMatrix(p, m);
     p.coliMatrixDrawn = true;
@@ -273,14 +276,14 @@ export function SwingThenBreakUpdate(p: BreakableProp, rng: Rng): void {
       p.coliMatrixDrawn = true;
       p.effectVariant = SWING_THEN_BREAK_MOTION_A;
       p.effect = SWING_THEN_BREAK_EFFECT_A;
-      PropDrawEffect(p, m, rng);
+      PropDrawEffectSceneLit(p, m, rng);
       p.effect = SWING_THEN_BREAK_EFFECT_B;
       p.effectVariant = SWING_THEN_BREAK_MOTION_B;
-      PropDrawEffect(p, m, rng);
+      PropDrawEffectSceneLit(p, m, rng);
     } else {
       p.effectVariant = SWING_THEN_BREAK_MOTION_C;
       p.effect = SWING_THEN_BREAK_EFFECT_C;
-      PropDrawEffect(p, m, rng);
+      PropDrawEffectSceneLit(p, m, rng);
       // `MatrixStore(obj+0x150)` at `0x00474742`, after the effect.
       ColiStoreObjectMatrix(p, m);
       p.coliMatrixDrawn = true;

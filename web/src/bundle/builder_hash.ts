@@ -124,8 +124,8 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
   "game/class41/original_item.ts": "62be303b53aaf67a85df310a9b299eb93ce423eab3d4610064afb47d88fa522e",
   "game/class41/placer_state.ts": "b5463d4f1f6d4e7c2ebb347f888f2404c48d57a21f4c0d74dc40d03242911a43",
   "game/class41/prop.ts": "be3aff95be2ed4e0e7921ed405e06ed9846325f23fb4e22a53cb54f282b5faeb",
-  "game/class41/prop_draw.ts": "e5bce3f14ac36dcd1e2fe7f2be9df0ac8b099750c8d8b5aadeb4efc9548d1e7a",
-  "game/class41/prop_state.ts": "bcf1982a4675cd9de202041c4c95ab2e6b43ee0f77e2568d2a3a0c778a38b1b7",
+  "game/class41/prop_draw.ts": "32ba9c7ef7bb7b77f0c002e309a2d6ad88364f407455cb4ec85a1915bbc7626b",
+  "game/class41/prop_state.ts": "d3c33f2390258db7b65e657e93942a1a9281cd0d9a74dc0cefa499960f6484cd",
   "game/class41/puff_slots.ts": "ef0ec1b5cb43abdbf8937985eef1a9c5627febf97d3f580818dff8956b2506d5",
   "game/class41/shatter.ts": "186a01803f5c803808d0d4d7ef92c61feea772a340bc69c0a4daa5353bf40cf2",
   "game/class41/shot_test.ts": "97fc7aec8fc290ffba0d06216cbb990ed330ba6f03d79ab1eb47d8954cecf7df",
@@ -178,7 +178,7 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
   "game/effects/sprite.ts": "d395915d03641d7df3f3fb1d529517d3b3f0b06bd9bed116be72a5b6e33d43a5",
   "game/entity_light.ts": "772c4d0367f43206af39a2e8af8a7bed243b93035c301c09b4efd87793b87802",
   "game/game_mode.ts": "5882c6716bb8bf4b64ce7ebb370d273ebbbac02f9989a030ff60f5a7f43ce506",
-  "game/globals.ts": "0eb3395f0f25f3042eee85d508ef9c7bda1c0dcd0c8bf9e8037d04c8083461a5",
+  "game/globals.ts": "a65286a9f8d5fe1a4066ab9511b6e1aded3f23a8a8ac201fb6fe2c1a45688afc",
   "game/ground_shadow.ts": "c1f1c7d18db7d154dc89074da7208f1d0e4f88df4b0262a31044695ccf153f61",
   "game/hit_slots.ts": "4adec6e0bad1856f1b93f00ec5c76766f8b3e40f27cf14b5a7f60e25da4f4a02",
   "game/host.ts": "e9a0de7edf8e4ba4c537f7c57bab6fa21044e6148afdc6dd13a4d4b2cd9cf4a6",
@@ -201,7 +201,7 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
   "game/player_state.ts": "33003a26aa7f5e6a26e53136223dfcbc88427a32f200d665f3ca9245d5102836",
   "game/registry.ts": "d4240799eccb6b69be0db36d16e3391f17294a35937dcb047d2c890efb5bb6e1",
   "game/root_motion.ts": "14cfd3e2fd1fe3a2190eff58f24b7ed93e30969ea0856cc7e135094a0b4c4424",
-  "game/scene_lights.ts": "8ca1fe2e58b8e9e0ca9e46115a29d81cd93d5f74464a723e9aa37c244dd3d6f9",
+  "game/scene_lights.ts": "dcb8d4e48ef3c0c1f691633199bf491337afa8b947a5d7136ce03301b3f34e18",
   "game/screen_sprite.ts": "962a830c367d9869d3b6813fdf8897c7b5898f77c9835d1d45987f386ee6dcd7",
   "game/skeleton.ts": "764a1be5539c5ca62efb4dffe03c72147277eedc9eb8a53c62198e83b21c70d9",
   "game/spawn.ts": "32ee610f39bf1617b7c587b57f1c1e63ba53cb6f7baf4f4bb74c9a1c9272896c",
@@ -228,4 +228,4 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
 };
 
 /** One digest over {@link BUILDER_FILES}, in filename order. */
-export const BUILDER_HASH = "22efa5096447a9388a7b0e748371c68e2ff9128604d57c8af88dffafee93e922";
+export const BUILDER_HASH = "472124ca9e2434315618bc98a92da17c079232bc279d33b33c21a930087b0e1a";

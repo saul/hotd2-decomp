@@ -1123,6 +1123,22 @@ axis or an offset angle with no instruction behind it is port-only logic,
 whatever it is called; another class's facing is that class's model. Drive a
 moving actor from its shipped spawn and yaw to whatever its routine says ends
 the motion, and never place it there.**
+
+**L117 -- Anything three.js writes into every program's key must not change
+in play, or the load's shader warm-up warmed the wrong programs.** The
+number of visible lights of each kind, how many cast shadows, and whether the
+scene has a fog are defines of *every* material's program, the unlit ones
+included. `render/gunlights.ts` switched its lights with `visible`, so the
+torch's first frames on stage 2 compiled nineteen programs -- every
+device-lit twin again, the gun-lit twins, the depth pass -- 805 ms in one
+frame on a desktop, cold, and reported as stutter "when the flashlight turns
+on"; `render/fog.ts` set `scene.fog = null` until the script's first fog op,
+which runs after the warm-up, so stage 1's first frame compiled twelve. The
+warm-up had looked complete because it compiled every material -- under a
+key the frame never asked for. **Hold such state constant for the page's
+life (a dark light, a fog past the far plane), and count programs created
+after the overlay lifts** (`tools/shader_warm_page.mjs`) rather than
+reading the warm-up's list.
 ---
 
 ## Running the tools

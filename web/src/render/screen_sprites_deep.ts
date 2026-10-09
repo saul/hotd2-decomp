@@ -20,7 +20,8 @@
  */
 import {
   AlwaysDepth, DoubleSide, Group, LessEqualDepth, Mesh, MeshBasicMaterial,
-  PlaneGeometry, SRGBColorSpace, type Texture, TextureLoader,
+  type Object3D, PlaneGeometry, type Scene, SRGBColorSpace, Texture,
+  TextureLoader,
 } from "three";
 import type { System } from "../core/system";
 import { G } from "../game/globals";
@@ -129,6 +130,26 @@ export class ScreenSpritesDeep implements System<RenderContext> {
       n += 1;
     }
     for (let i = n; i < this.quads.length; i++) this.quads[i].visible = false;
+  }
+
+  /**
+   * The quads' program, compiled at load (`Player.warmShaders`) rather than
+   * the frame the stage's first deep sprite is drawn: one stand-in quad
+   * dressed as {@link update} dresses them, under the scene's fog and --
+   * because the game-over route map is drawn here and that screen takes the
+   * fog away -- without it.
+   */
+  warm(compile: (o: Object3D) => void, scene: Scene): void {
+    const map = new Texture();
+    map.colorSpace = SRGBColorSpace;
+    const q = new Mesh(this.geometry, new MeshBasicMaterial({
+      transparent: true, side: DoubleSide, depthWrite: true, map,
+    }));
+    compile(q);
+    const fog = scene.fog;
+    scene.fog = null;
+    compile(q);
+    scene.fog = fog;
   }
 
   private texture(url: string): Texture {

@@ -691,9 +691,9 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     });
     this.renderer.setPixelRatio(this.pixelRatio);
     // For the gun lights' shadows (`render/gunlights.ts`). On for the life of
-    // the page and free until one is live: three.js renders a shadow pass
-    // only for a visible light with `castShadow`, and those two lights are
-    // the only ones that have it.
+    // the page and free until one is live: those two lights are the only ones
+    // with `castShadow`, and each one's `shadow.autoUpdate` is whether it is
+    // on, so three.js skips its shadow pass otherwise.
     this.renderer.shadowMap.enabled = this.perfMeter.experiments.shadows;
     this.renderer.shadowMap.type = PCFSoftShadowMap;
     // `?blur=0`: every `backdrop-filter` over the game, off. The one A/B
@@ -2551,9 +2551,13 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
    * the glTF held that is no longer in the scene: the templates the layers
    * took out of it to copy from, the characters and effects among them, which
    * the scene's walk had silently missed. They are compiled against the
-   * scene's lights, as they will be drawn. A light turning on later can still
-   * ask for a variant; that is the rare case, not the common one. Called by
-   * `loadStageInto` before the loading screen lifts.
+   * scene's lights, as they will be drawn -- which are the only lights there
+   * ever are: the gun lights never leave the scene, they go dark, because a
+   * light coming or going changes every program's key
+   * (`render/gunlights.ts`). The fog is the same: always on the scene, past
+   * the far plane when there is none (`render/fog.ts`). Called by
+   * `loadStageInto` before the loading screen lifts, which then waits for
+   * {@link programsLinked}.
    *
    * Once compiled, a program stays: see `render/program_pins.ts`.
    */
@@ -2569,11 +2573,43 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     const compile = (o: Object3D) => { this.renderer.compile(o, this.camera, this.scene); };
     const drawables = this.scene3d?.drawables ?? [];
     for (const o of drawables) if (!inScene(o)) compile(o);
-    // ...and the twins the lighting gives meshes as they come into view, and
-    // the game-over screen, which draws without the fog.
+    // ...and the twins the lighting gives meshes as they come into view, the
+    // torch's twins and its shadow pass, the quads the deep screen sprites
+    // make as they are first drawn, and the game-over screen, which draws
+    // without the fog.
     this.lighting.warm(drawables, compile);
+    this.gunLights.warm(drawables, this.renderer, this.camera);
+    this.deepSprites.warm(compile, this.scene);
     this.gameOverScene.warm(compile, this.lighting);
     this.programPins.pin(this.renderer);
+  }
+
+  /**
+   * Wait, with the loading screen still up, until the GPU has finished every
+   * program {@link warmShaders} asked for, and take each one's first use now.
+   *
+   * `compile` only queues the work: the browser compiles and links in the
+   * background (`KHR_parallel_shader_compile`), and three.js asks for the
+   * link status, the logs and the uniform table the first time a program
+   * draws -- a call that blocks until the link is done. So a program
+   * compiled at load could still stall the frame that first drew it: stage
+   * 2's torch, with every program it needs compiled ahead, spent 56 ms of its
+   * first frame in that wait. Polled on a timer, so the page keeps painting
+   * and a background tab still gets there; without the extension `isReady` is
+   * true at once and the first use is the compile. Bounded, because a lost
+   * context answers "not ready" for ever: past the bound the first use simply
+   * blocks here, which is still behind the loading screen.
+   */
+  async programsLinked(superseded: () => boolean): Promise<void> {
+    const programs = this.renderer.info.programs ?? [];
+    type Linkable = { isReady?(): boolean };
+    const ready = (p: object) => (p as Linkable).isReady?.() ?? true;
+    const until = performance.now() + 10_000;
+    while (!programs.every(ready) && performance.now() < until) {
+      await new Promise((ok) => setTimeout(ok, 16));
+      if (superseded()) return;
+    }
+    for (const p of programs) p.getUniforms();
   }
 
   /** See `render/program_pins.ts`. */

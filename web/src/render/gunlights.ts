@@ -48,16 +48,38 @@
  * which is not what the game looks like either; `PENUMBRA` softens the rim
  * and is presentation only.
  *
- * Nothing here runs, and no shadow map is rendered, unless a gun light is
- * live: three.js only draws a shadow pass for a light that is visible and
- * `castShadow`, and the materials are swapped back when the last light goes
- * out, so every other stage costs exactly what it did.
+ * No shadow map is rendered unless a gun light is live -- each light's
+ * `shadow.autoUpdate` is whether it is on -- and the materials are swapped
+ * back when the last light goes out.
+ *
+ * ## Every light is in the scene all the time, at intensity 0 when off
+ *
+ * **A light that comes and goes is a recompile of every program in sight**
+ * (`L117`).
+ * three.js writes the number of point, spot and shadowed spot lights into
+ * every material's program key -- the unlit ones' and the device-lit twins'
+ * included, which never read them -- and counts only the lights that are
+ * `visible`. Toggling `visible` here made the torch's first frames on stage 2
+ * compile nineteen programs: the device-lit twins again under the new counts,
+ * the gun-lit twins, the shadow pass's depth programs -- 805 ms in one frame,
+ * cold, on a desktop, and many times that through Metal's translator on iOS.
+ * So the lights' number, kinds and `castShadow` never change for the life of
+ * the page, an off light only has its intensity at zero, and
+ * {@link GunLights.warm} compiles the programs the torch adds while the
+ * loading screen is up. The gun-lit program skips a light whose colour is
+ * zero ({@link skipDarkLights}), so the dark ones cost a uniform test each.
  */
 import {
+  BackSide,
+  DoubleSide,
+  FrontSide,
   Material,
   Mesh,
   MeshBasicMaterial,
+  MeshDepthMaterial,
   MeshLambertMaterial,
+  RGBADepthPacking,
+  WebGLRenderTarget,
   Object3D,
   Scene,
   ShaderChunk,
@@ -67,6 +89,8 @@ import {
   Color,
   Matrix4,
   Vector3,
+  type Camera,
+  type Side,
   type WebGLProgramParametersWithUniforms,
   type WebGLRenderer,
 } from "three";
@@ -75,9 +99,10 @@ import { GUN_LIGHT_FIRST, RenderLightType } from "../game/scene_lights";
 import type { System } from "../core/system";
 import type { RenderContext } from "./context";
 import {
-  copyDrawState, setUnfadedMaterial, unfadedMaterial,
+  applyForcedAlphaBlend, copyDrawState, fadedCopy, setUnfadedMaterial,
+  unfadedMaterial,
 } from "./draw_order";
-import { unlitMaterial, type SceneLighting } from "./lighting";
+import { programKind, unlitMaterial, type SceneLighting } from "./lighting";
 
 /**
  * The two questions this layer asks the port, answered by `app/`.
@@ -120,6 +145,11 @@ const GUN_OFFSET_UP = -2.5;
 /** How many gun lights there are — one per player. */
 const GUN_LIGHTS = 2;
 
+/** The side `WebGLShadowMap` draws a caster's depth with: the far one. */
+const SHADOW_SIDE: Record<Side, Side> = {
+  [FrontSide]: BackSide, [BackSide]: FrontSide, [DoubleSide]: DoubleSide,
+};
+
 const LIGHTS_BEGIN = patchLightsBegin(ShaderChunk.lights_fragment_begin);
 
 /**
@@ -141,13 +171,44 @@ const ENTITY_POINT_FIRST = 3;
  * the "+ scene light" directional or ambient when that view is on.
  */
 function patchLightsBegin(src: string): string {
-  const out = src
+  let out = src
     .replace("( NUM_DIR_LIGHTS > 0 ) && defined( RE_Direct )", "0")
     .replace("( NUM_HEMI_LIGHTS > 0 )", "0")
     .replace("getAmbientLightIrradiance( ambientLightColor )",
              "gunAmbient * PI");
   if (out === src) console.warn("gunlights: lights_fragment_begin not patched");
+  for (const kind of ["point", "spot"]) {
+    const guarded = skipDarkLights(out, kind);
+    if (guarded === out) console.warn(`gunlights: the ${kind} loop is not guarded`);
+    out = guarded;
+  }
   return out;
+}
+
+/**
+ * One light loop's body, run only for a light whose colour is not zero.
+ *
+ * Every light is in the scene all the time (see the header), so the loops
+ * run over all thirteen entity points, all fifteen spots and both shadow maps
+ * whatever is lit, and an off light's contribution is exactly zero: skipping
+ * it changes no pixel. The test is on a uniform, the same for every fragment,
+ * which costs a GPU next to nothing. three.js unrolls the loop from its `{` to
+ * the `}` before `#pragma unroll_loop_end`, so the guard opens once the light
+ * is read and closes after its `RE_Direct`, inside that pair.
+ */
+function skipDarkLights(src: string, kind: string): string {
+  const read = `${kind}Light = ${kind}Lights[ i ];`;
+  const at = src.indexOf(read);
+  const end = at < 0 ? -1 : src.indexOf("#pragma unroll_loop_end", at);
+  if (end < 0) return src;
+  const body = src.slice(at + read.length, end);
+  const last = body.lastIndexOf("RE_Direct(");
+  const close = last < 0 ? -1 : body.indexOf(";", last);
+  if (close < 0) return src;
+  return src.slice(0, at) + read
+    + `\n\t\tif ( any( greaterThan( ${kind}Light.color, vec3( 0.0 ) ) ) ) {`
+    + body.slice(0, close + 1) + "\n\t\t}" + body.slice(close + 1)
+    + src.slice(end);
 }
 
 const OUTGOING = "vec3 outgoingLight = reflectedLight.directDiffuse + "
@@ -250,19 +311,26 @@ export class GunLights implements System<RenderContext> {
   /** Mesh -> the material it had before the gun light took it. */
   private readonly saved = new Map<Mesh, Material | Material[]>();
   private active = false;
+  /** Can this stage's script light anything? See {@link build}. */
+  private canLight = true;
+  /** Which gun lights are on: the lights themselves are never hidden. */
+  private readonly gunOn: boolean[] = new Array(GUN_LIGHTS).fill(false);
   /** The camera this layer last saw, for {@link stale}. */
   private readonly lastCamera = new Matrix4();
   private cameraMoved = false;
   private readonly _right = new Vector3();
   private readonly _up = new Vector3();
 
-  constructor(scene: Scene, private readonly lighting: SceneLighting) {
+  constructor(private readonly scene: Scene,
+              private readonly lighting: SceneLighting) {
     this.group.name = "gun_lights";
     for (let i = 0; i < GUN_LIGHTS; i++) {
       const sp = new SpotLight(0xffffff, 0, 0, Math.PI / 16, PENUMBRA, 0);
       sp.name = `gun_light_${i + 1}`;
-      sp.visible = false;
+      // In the scene and casting for good, dark and unmapped until it is on:
+      // see the header for why it is never hidden.
       sp.castShadow = true;
+      sp.shadow.autoUpdate = false;
       sp.shadow.mapSize.set(SHADOW_MAP_SIZE, SHADOW_MAP_SIZE);
       sp.shadow.camera.near = SHADOW_NEAR;
       sp.shadow.camera.far = SHADOW_FAR;
@@ -276,14 +344,12 @@ export class GunLights implements System<RenderContext> {
       // the game ships hang in rooms the torch already shadows.
       const pt = new PointLight(0xffffff, 0, 0, 2);
       pt.name = `entity_light_${i}`;
-      pt.visible = false;
       this.points.push(pt);
       this.group.add(pt);
       // No shadow either, for the same reason, and the gun lights' hard cone
       // with its presentation-only soft rim (see the header).
       const sp = new SpotLight(0xffffff, 0, 0, Math.PI / 16, PENUMBRA, 0);
       sp.name = `entity_spot_${i}`;
-      sp.visible = false;
       this.entitySpots.push(sp);
       this.group.add(sp, sp.target);
     }
@@ -293,9 +359,13 @@ export class GunLights implements System<RenderContext> {
   /**
    * Index the stage: which meshes are `draw_mode` 1 region models, and where
    * each character hierarchy is. Every opaque mesh casts; the cost is nil
-   * until a shadow-casting light is visible.
+   * until a gun light is on and its `shadow.autoUpdate` with it.
+   *
+   * `canLight` is whether the stage's script ever turns the light array on;
+   * a stage that never does has nothing for {@link warm} to compile.
    */
-  build(root: Object3D): void {
+  build(root: Object3D, canLight = true): void {
+    this.canLight = canLight;
     this.restoreAll();
     this.twins.clear();
     this.saved.clear();
@@ -358,8 +428,12 @@ export class GunLights implements System<RenderContext> {
       const sp = this.spots[i];
       const idx = GUN_LIGHT_FIRST + i;
       const on = this.source.live(idx);
-      sp.visible = on;
-      if (!on) continue;
+      this.gunOn[i] = on;
+      sp.shadow.autoUpdate = on;
+      if (!on) {
+        sp.intensity = 0;
+        continue;
+      }
       any = true;
       const e = G.g_entity_lights[idx];
       // The engine's position, moved to the gun (see the header), and the
@@ -392,8 +466,10 @@ export class GunLights implements System<RenderContext> {
       const idx = ENTITY_POINT_FIRST + k;
       const e = G.g_entity_lights[idx];
       const on = !!e && e.type === RenderLightType.Point && this.source.live(idx);
-      pt.visible = on;
-      if (!on) continue;
+      if (!on) {
+        pt.intensity = 0;
+        continue;
+      }
       any = true;
       const peak = Math.max(e.diffuse[0], e.diffuse[1], e.diffuse[2], 1e-6);
       pt.color.setRGB(e.diffuse[0] / peak, e.diffuse[1] / peak,
@@ -412,8 +488,10 @@ export class GunLights implements System<RenderContext> {
       const idx = ENTITY_POINT_FIRST + k;
       const e = G.g_entity_lights[idx];
       const on = !!e && e.type === RenderLightType.Spot && this.source.live(idx);
-      sp.visible = on;
-      if (!on) continue;
+      if (!on) {
+        sp.intensity = 0;
+        continue;
+      }
       any = true;
       const peak = Math.max(e.diffuse[0], e.diffuse[1], e.diffuse[2], 1e-6);
       sp.color.setRGB(e.diffuse[0] / peak, e.diffuse[1] / peak,
@@ -529,6 +607,86 @@ export class GunLights implements System<RenderContext> {
     for (const mesh of [...this.saved.keys()]) this.restore(mesh, base);
   }
 
+  /**
+   * Compile, now, every program the torch can add to the stage: each kind of
+   * drawable's gun-lit twin, plain and faded, and the shadow pass's depth
+   * program for each kind of caster. Called by `Player.warmShaders` while the
+   * loading screen is up, after `SceneLighting.warm`.
+   *
+   * The lights are already in the scene in the only configuration they have
+   * (see the header), so what is compiled here is exactly what the first lit
+   * frame asks for. One mesh stands for its kind, as in `SceneLighting.warm`;
+   * the twins made here are the ones {@link light} hands out later, since
+   * {@link twinOf} keeps them for the stage. The copies are dropped and their
+   * programs stay (`render/program_pins.ts`).
+   */
+  warm(drawables: readonly Object3D[], renderer: WebGLRenderer,
+       camera: Camera): void {
+    if (!this.canLight) return;
+    const compile = (o: Object3D): void => {
+      renderer.compile(o, camera, this.scene);
+    };
+    const meshes = drawables.filter((o): o is Mesh =>
+      (o as Mesh).isMesh === true && !!(o as Mesh).material
+      && !Array.isArray((o as Mesh).material));
+    const lit = new Set<string>();
+    for (const mesh of meshes) {
+      const base = unlitMaterial(unfadedMaterial(mesh) as Material);
+      if (!lightable(base)) continue;
+      const kind = programKind(mesh, base);
+      if (lit.has(kind)) continue;
+      lit.add(kind);
+      const was = mesh.material;
+      const twin = this.twinOf(base);
+      mesh.material = twin;
+      compile(mesh);
+      const faded = fadedCopy(twin);
+      applyForcedAlphaBlend(faded, 0.5, twin.opacity);
+      mesh.material = faded;
+      compile(mesh);
+      mesh.material = was;
+    }
+    // The depth pass, as `WebGLShadowMap` draws it: into a render target,
+    // which makes the program's output linear and untonemapped, with no fog
+    // (it hands `renderBufferDirect` no scene), and with
+    // `MeshDepthMaterial`'s RGBA packing, the caster's map, alpha map and
+    // alpha test, and the opposite side to the caster's.
+    const target = new WebGLRenderTarget(1, 1);
+    const wasTarget = renderer.getRenderTarget();
+    const fog = this.scene.fog;
+    this.scene.fog = null;
+    renderer.setRenderTarget(target);
+    try {
+      const cast = new Set<string>();
+      for (const mesh of meshes) {
+        const m = mesh.material as MeshBasicMaterial;
+        if (m.transparent || !m.depthWrite) continue;
+        const g = mesh.geometry;
+        const kind = [
+          (mesh as { isSkinnedMesh?: boolean }).isSkinnedMesh ? "skin" : "",
+          g?.morphAttributes && Object.keys(g.morphAttributes).length ? "morph" : "",
+          m.side, m.map ? `map${m.map.channel}` : "", m.alphaMap ? "amap" : "",
+          m.alphaTest > 0 ? "atest" : "",
+        ].join("|");
+        if (cast.has(kind)) continue;
+        cast.add(kind);
+        const depth = new MeshDepthMaterial({ depthPacking: RGBADepthPacking });
+        depth.side = SHADOW_SIDE[m.side];
+        depth.map = m.map;
+        depth.alphaMap = m.alphaMap;
+        depth.alphaTest = m.alphaTest;
+        const was = mesh.material;
+        mesh.material = depth;
+        compile(mesh);
+        mesh.material = was;
+      }
+    } finally {
+      renderer.setRenderTarget(wasTarget);
+      this.scene.fog = fog;
+      target.dispose();
+    }
+  }
+
   /** Everything here is derived from `G`; a load rebuilds it by updating. */
   resync(ctx: RenderContext): void {
     this.update(ctx);
@@ -536,7 +694,7 @@ export class GunLights implements System<RenderContext> {
 
   get describe(): string {
     if (!this.active) return "off";
-    const n = this.spots.filter((s) => s.visible).length;
+    const n = this.gunOn.filter((on) => on).length;
     return `${n} gun light${n === 1 ? "" : "s"}, ${this.saved.size} meshes lit`;
   }
 }

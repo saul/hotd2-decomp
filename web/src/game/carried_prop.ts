@@ -486,9 +486,16 @@ export function CarriedPropHeldUpdate(p: CarriedProp, host: GameHost,
     if (p.mode !== CARRIED_PROP_HELD) CarriedPropRelease(p, m, host, cam);
   } else {
     CarriedPropDrop(p, m, seat, cam);
-    // `*(target+0x1310 + 0x4C) = 0` for a target still alive. `[open]` what
-    // that word of the civilian's block is; no state-37 spawn in the game has
-    // a civilian, so the write has no reader to reach.
+    // `0x004428D0`..`0x004428E9`: `t = sub[1]; if (t != 0 &&
+    // !(t+0x34 & 0x4000000)) *(t->+0x1310 + 0x4C) = 0` -- the write `CarriedPropCheckShot`'s shared
+    // tail makes. Stage 1's barrel man is built for a civilian, so shooting
+    // him takes the civilian's on-shot script away, as shooting his barrel
+    // does. Both port fields of the one word, as there (L79).
+    const t = p.target >= 0 ? ActorByAt(p.target) : undefined;
+    if (t && !(t.flags & ActorFlag.Dead) && t.civ) {
+      t.civ.onShot = 0;
+      t.civ.onShotScript = -1;
+    }
   }
   MatrixGetTranslation(m, p.shotPoint);
   RegisterForShotTest(p);

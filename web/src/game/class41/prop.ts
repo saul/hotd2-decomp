@@ -33,6 +33,7 @@ import { BAMS } from "../vec";
 import {
   BreakableGroupMembers, BreakablePropAt, MsvcRand, SetBreakableMemberSlot,
 } from "./group";
+import { BREAKABLE_PUFF_MOTION } from "./puff_slots";
 import {
   HiddenItemCopy, ReleaseHiddenItem, SpawnExtraLifePickup,
 } from "./items";
@@ -41,6 +42,8 @@ import {
   PropFamily, type BreakableProp,
 } from "./prop_state";
 import { BreakablePropSpawnShatter, type ShatterCamera } from "./shatter";
+import { PropDrawBegin, PropDrawEffect, PropMatrixPush } from "./prop_draw";
+import { EffectMotionPlayLength } from "../effect_draw";
 import {
   MatIdentity, MatrixRotateX, MatrixRotateY, MatrixRotateZ, MatrixTranslate,
 } from "../matrix";
@@ -219,13 +222,38 @@ export function BreakablePropGroundContact(p: BreakableProp): boolean {
  * `BreakableEffectUpdate` — `FUN_00465500`. What a destroyed ground-level prop
  * becomes: the engine overwrites the object's entry point with this, so the
  * prop stops being a prop and spends 0x48 frames as a puff before it dies.
+ *
+ * ```c
+ * if (obj->+0x32C < 0x48) {
+ *     obj->+0x32C += 1;
+ *     if (g_motion_slots[0x1D9].state == 2) {      // DAT_009A46AC
+ *         Push; Translate(+0x19C, +0x1A0, +0x1A4);
+ *         RotY(+0x1D0); RotZ(+0x1D4); RotX(+0x1CC);
+ *         EffectDrawUnlit(obj + 0x324); Pop;
+ *     }
+ * } else ActorKill();
+ * ```
+ *
+ * The residency test is on the literal motion `0x1D9`, the one every group
+ * prop's `+0x328` holds. `g_motion_play_length[0x1D9]` is 74, so the
+ * draw's own wrap (at 73) is never reached by a count that stops at 0x48.
+ * The exit is `ActorKill` (`CALL 0x004A7040`), not `ActorDespawn`.
  */
-export function BreakableEffectUpdate(p: BreakableProp): void {
+export function BreakableEffectUpdate(p: BreakableProp, rng: Rng): void {
+  PropDrawBegin(p);
   if (p.effectFrames < BREAKABLE_EFFECT_FRAMES) {
     p.effectFrames += 1;
+    if (EffectMotionPlayLength(BREAKABLE_PUFF_MOTION) !== null) {
+      const m = PropMatrixPush();
+      MatrixTranslate(m, p.x, p.y, p.z);
+      MatrixRotateY(m, p.yaw);
+      MatrixRotateZ(m, p.roll);
+      MatrixRotateX(m, p.pitch);
+      PropDrawEffect(p, m, rng);
+    }
     return;
   }
-  ActorDespawnProp(p);
+  ActorKillProp(p);
 }
 
 /**
@@ -290,7 +318,7 @@ export function BreakablePropUpdate(p: BreakableProp, rng: Rng,
                                     cam: ShatterCamera | null = null): void {
   // A destroyed ground-level prop has had its entry point replaced; it runs
   // the puff and nothing else.
-  if (p.family === PropFamily.Effect) { BreakableEffectUpdate(p); return; }
+  if (p.family === PropFamily.Effect) { BreakableEffectUpdate(p, rng); return; }
 
   // The prop re-registers itself every frame, so a slot freed by a break is
   // only ever reclaimed by something still alive.

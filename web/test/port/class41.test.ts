@@ -599,10 +599,94 @@ console.log("\nclass 0x41 type 4, the kinded props:");
   check("and that shot is worth ten", G.g_player_score[0] === before + 10,
         `${G.g_player_score[0]} vs ${before}`);
 
-  // The break effect holds the prop for its animation, then it goes.
-  for (let i = 0; i < 200 && !a.dead; i++) KindedPropUpdate(a, rng, events);
-  check("the destroyed prop leaves once its effect has run", a.dead);
+  // The break effect holds the prop for its animation, then it goes:
+  // `KindedPropUpdate` steps `+0x32C` and despawns past
+  // `g_motion_play_length[+0x328] - 2` (`0x00466355`..). Kind 2's effect is
+  // 7 on motion 0x1D5, whose play length in `0x004E07D0` is 74; the break's
+  // own frame leaves the counter at 2, so 72 is held on the 70th update
+  // after it and the 71st takes it past.
+  T.breakables = {
+    ...T.breakables!,
+    effects: { ...(T.breakables?.effects ?? {}),
+      "7": { nodes: [{ slot: 0, bone: 0, children: [1] },
+                     { slot: 0x17a9, bone: 1, children: [] }],
+             interp: 0, motion: 0x1d5, play_length: 74, frames: 1, bones: 2,
+             t: [0, 0, 0, 0, 0, 0], r: [0, 0, 0, 0, 0, 0], cues: [] },
+    },
+  } as never;
+  check("the break leaves the effect counter at 2",
+        a.effectFrames === 2, `${a.effectFrames}`);
+  let after = 0;
+  for (; after < 200 && !a.dead; after++) KindedPropUpdate(a, rng, events);
+  check("the destroyed prop leaves once its effect has run (71 updates)",
+        a.dead && after === 71, `dead ${a.dead} after ${after}`);
   void released;
+}
+
+console.log("\nclass 0x41 type 4 and the group puff, drawn:");
+{
+  // `PlaceKindedProp` gives kinds 0, 1, 4, 5, 6, 7 and 10 no model
+  // (`+0x28C = -1`), so `KindedPropUpdate` draws them whole with the effect
+  // at `+0x324` on its first frame (`0x0046647E`..`0x004664A5`), then the
+  // shadow its kind's `switch` names (`0x004664B7`..): kind 0 is effect 5 on
+  // motion 0x1DB with the large `0x10D0` under `Scale(10, 1, 10)`.
+  const rng = new Rng(43);
+  propScene(rng);
+  const fx = (motion: number, slot: number) => ({
+    nodes: [{ slot: 0, bone: 0, children: [1] },
+            { slot, bone: 1, children: [] }],
+    interp: 0, motion, play_length: 74, frames: 1, bones: 2,
+    t: [0, 0, 0, 0, 0, 0], r: [0, 0, 0, 0, 0, 0], cues: [],
+  });
+  T.breakables = {
+    ...T.breakables!,
+    kinds: Array.from({ length: 11 }, (_, k) => ({
+      kind: k, effect: k === 0 ? 5 : 0, effect_variant: k === 0 ? 0x1db : 0x1d9,
+      sound: 0x1d16a9, radius: 6, y_offset: 6,
+    })),
+    effects: { "5": fx(0x1db, 0x0b05), "0": fx(0x1d9, 0x0b00) },
+  } as never;
+  const k0 = PlaceKindedProp(0xd100, 0, ItemSet.None, 1, 5,
+                             30, 2, -40, 0, rng);
+  G.g_breakable_props.push(k0);
+  KindedPropUpdate(k0, rng, new Events());
+  const d = k0.draws ?? [];
+  check("a model-less kind is drawn whole by its effect's first frame",
+        d.length === 2 && d[0].slot === 0x0b05
+        && d[0].m[12] === 30 && d[0].m[13] === 2 && d[0].m[14] === -40,
+        d.map((c) => `${c.slot.toString(16)}@${c.m.slice(12, 15)}`).join(" "));
+  check("...and casts its kind's large shadow at the eye's floor + 0.2",
+        d[1]?.slot === 0x10d0 && d[1].m[0] === 10 && d[1].m[10] === 10
+        && Math.abs(d[1].m[13] - 0.2) < 1e-6,
+        d[1] ? `${d[1].slot.toString(16)} ${d[1].m}` : "none");
+
+  // The rattle is two of the game's `rand()`s a frame (`0x004662E2`,
+  // `0x0046630D`), taken from the same generator the attacks use.
+  const a = new Rng(7), b = new Rng(7);
+  k0.shake = 1.0;
+  KindedPropUpdate(k0, a, new Events());
+  MsvcRand(b); MsvcRand(b);
+  check("a rattling kinded prop takes exactly two rand()s a frame",
+        MsvcRand(a) === MsvcRand(b) && Math.abs(k0.shake - 0.85) < 1e-9);
+
+  // `BreakableEffectUpdate` (`FUN_00465500`): the ground-level group prop's
+  // puff, effect 0 on motion 0x1D9 under `T; RotY; RotZ; RotX`, for 0x48
+  // frames, and then `ActorKill`.
+  const g = PlaceBreakableGroup(2, 4, rng)[0];
+  check("the placer gives every group prop the puff's motion, 0x1D9",
+        g.effect === 0 && g.effectVariant === 0x1d9,
+        `${g.effect} / ${g.effectVariant.toString(16)}`);
+  g.hp = 1;
+  BreakablePropTakeShot(g, 0);
+  BreakablePropUpdate(g, rng, new Events());
+  let drawn = 0, frames = 0;
+  for (; frames < 100 && !g.dead; frames++) {
+    BreakablePropUpdate(g, rng, new Events());
+    if (g.draws?.[0]?.slot === 0x0b00) drawn++;
+  }
+  check("a destroyed ground-level prop draws its puff for 0x48 frames",
+        g.family === PropFamily.Effect && drawn === 0x48 && frames === 0x49
+        && g.dead, `drawn ${drawn} frames ${frames} dead ${g.dead}`);
 }
 
 console.log("\nclass 0x41 type 4, the whole set pays out exactly once:");

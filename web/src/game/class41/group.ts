@@ -16,6 +16,7 @@ import {
   BreakableFlag, BreakableSlot, BreakableState, makeBreakableProp,
   type BreakableProp,
 } from "./prop_state";
+import { BREAKABLE_PUFF_EFFECT, BREAKABLE_PUFF_MOTION } from "./puff_slots";
 
 /**
  * One stack level, in world units. `PlaceBreakableGroup` multiplies the
@@ -126,7 +127,12 @@ export function PlaceBreakableGroup(group: number, lifetime: number,
     p.slot = BreakableSlot.Default;
     p.state = BreakableState.Standing;
     p.flags = 0x80000000 | BreakableFlag.Live;
-    p.effect = 0;
+    // `+0x324 = 0; +0x328 = 0x1D9` (`0x00462BFB`, `0x00462C01`): the puff
+    // `BreakableEffectUpdate` draws once the prop is destroyed at ground
+    // level. The port had the id and not the motion, so no puff could match
+    // its effect record.
+    p.effect = BREAKABLE_PUFF_EFFECT;
+    p.effectVariant = BREAKABLE_PUFF_MOTION;
 
     p.x = m.x;
     p.y = BreakableGroupFloor(group) + m.level * BREAKABLE_LEVEL_HEIGHT;

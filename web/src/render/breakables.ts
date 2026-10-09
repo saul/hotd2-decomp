@@ -44,7 +44,6 @@ import {
   BreakableState, PropFamily, type BreakableProp, type PropDrawCall,
 } from "../game/class41/prop_state";
 import { T } from "../game/tables";
-import { KIND_SHADOW } from "../game/class41/kinded";
 import {
   GENERIC_DRAW_SLOT, GENERIC_POSE_ORDER, PoseOrder,
 } from "../game/class41/generic";
@@ -108,11 +107,12 @@ const SLOT_PART = /_slot_([0-9a-f]{4})$/;
  * family until `GENERIC_POSE_ORDER` was read out of the EXE.
  *
  * `[open]` It stays the default for the families whose own routine has **not**
- * been read for its rotation order — the group props, the kinded props and the
- * break puff. Keeping the behaviour those three had is deliberate: changing
- * it would be a guess in the other direction. (`PropUpdateType75` and
- * `StoryModeSwitchUpdate` were two more; their routines record their draws
- * now.)
+ * been read for its rotation order. Keeping the behaviour they had is
+ * deliberate: changing it would be a guess in the other direction.
+ * (`PropUpdateType75`, `StoryModeSwitchUpdate`, `KindedPropUpdate` and the
+ * break puff, `BreakableEffectUpdate`, were four more; their routines record
+ * their draws now, and the group props are posed from their own
+ * `drawMatrix`.)
  * `RisingDoorUpdate` (`FUN_004753F0`) is the one that is
  * read, and it is one `MatrixRotateY` and nothing else, so it gets a row.
  */
@@ -172,8 +172,7 @@ function DrawSlotFor(p: BreakableProp): number | null {
   if (p.family === PropFamily.Type48) {
     return (p.flags & FLICKER_BROKEN) ? FLICKER_SLOT_BROKEN : FLICKER_SLOT_WHOLE;
   }
-  // `-1` as a `u16`: the engine's "draw nothing", which `KindedPropUpdate`
-  // writes over a prop it has hidden.
+  // `-1` as a `u16`: the engine's "draw nothing".
   if (p.slot === SLOT_NONE && p.family !== PropFamily.Generic) return null;
   if (p.family !== PropFamily.Generic) return p.slot;
   const drawn = GENERIC_DRAW_SLOT[p.kind];
@@ -183,9 +182,8 @@ function DrawSlotFor(p: BreakableProp): number | null {
 /**
  * Which ground shadow a prop casts, if any.
  *
- * A group prop always casts the large one. A kinded prop casts one only for
- * the kinds the engine's `switch` on `obj+0x290` lists, and kinds 4 and 5 get
- * the smaller `0x10D1`; every other kind casts none.
+ * A group prop always casts the large one. A kinded prop records its own,
+ * by kind, and never reaches this.
  */
 function ShadowSlotFor(p: BreakableProp): number | null {
   // A generic prop is whatever its slot says it is -- scenery, an effect, in a
@@ -205,8 +203,7 @@ function ShadowSlotFor(p: BreakableProp): number | null {
   // Nor does `PropUpdateType48FlickerLight`: a lamp, and three draws, none a
   // shadow.
   if (p.family === PropFamily.Type48) return null;
-  if (p.family !== PropFamily.Kinded) return SHADOW_SLOT;
-  return KIND_SHADOW[p.kind] ?? null;
+  return SHADOW_SLOT;
 }
 
 interface Live {
@@ -397,13 +394,10 @@ export class BreakableLayer implements System<RenderContext> {
         this.nodes.set(p.id, (l = { node, shadow, slot }));
       }
 
-      // A destroyed prop is a puff the port is counting down; nothing of the
-      // prop itself is drawn once it is `Removed`, and a kinded prop whose
-      // model has been hidden behind 0xFFFF draws nothing either.
+      // Nothing of the prop itself is drawn once it is `Removed` (its puff
+      // records its own draws), nor behind a `0xFFFF` slot.
       const gone = p.state === BreakableState.Removed
-        || p.family === PropFamily.Effect
-        || p.slot === SLOT_NONE
-        || (p.family === PropFamily.Kinded && p.effectFrames > 0);
+        || p.slot === SLOT_NONE;
       // A settled container piece skips its draw on odd counts at the end;
       // `FallingContainerFragmentUpdate` says so on the piece.
       l.node.visible = !gone && !p.drawSkipped;
@@ -747,10 +741,7 @@ export class BreakableLayer implements System<RenderContext> {
     // generic family is still standing in for a routine it does not run.
     const generic = live.filter((p) => p.family === PropFamily.Generic
                                      && !p.draws).length;
-    // `+0x290` is the object kind for a kinded prop and the class-0x41 type
-    // for a generic one, so the two have to be counted apart or the line
-    // reports a kind as a type. Same offset, different meaning, again.
-    const kinds = new Set<number>();
+    // Only a generic type can get here now: `+0x290` is its class-0x41 type.
     const types = new Set<number>();
     let effects = 0;
     const noTemplate = new Set<number>();
@@ -767,19 +758,14 @@ export class BreakableLayer implements System<RenderContext> {
         continue;
       }
       effects++;
-      (p.family === PropFamily.Generic ? types : kinds).add(p.kind);
+      types.add(p.kind);
     }
     const bits = [`${live.length} up (${this.nodes.size} drawn)`];
     if (generic) bits.push(`${generic} placed but not simulated`);
     if (effects) {
-      // Not a gap in the export: `PlaceKindedProp` writes `obj+0x28C = -1`
-      // for every kind but 2, 3, 8 and 9, and `KindedPropUpdate` then draws
-      // `FUN_0040DD90(obj+0x324)` instead — the animated-effect system, which
-      // this player has no renderer for at all.
-      const who = [
-        kinds.size ? `kind ${[...kinds].sort((a, b) => a - b).join(",")}` : "",
-        types.size ? `type ${[...types].sort((a, b) => a - b).join(",")}` : "",
-      ].filter(Boolean).join(" / ");
+      // A generic type whose routine draws only an effect and does not yet
+      // record its draws.
+      const who = `type ${[...types].sort((a, b) => a - b).join(",")}`;
       bits.push(`${effects} are effects, not models (${who})`);
     }
     if (noTemplate.size) {

@@ -191,6 +191,9 @@ export function EntityLightLive(i: number): boolean {
   return G.g_scene_lighting !== 0 && !!G.g_entity_lights[i]?.enabled;
 }
 
+/** `CMP word ptr [sub+0x26], 1` -- the wandering mouse drawn through the array. */
+const MOUSE_SCENE_LIT_SUBTYPE = 1;
+
 /**
  * Does this actor draw through `SubmitSlotWithSceneLightArray`?
  *
@@ -212,11 +215,22 @@ export function EntityLightLive(i: number): boolean {
  * * `ThrowerDrawPart` (`FUN_0044A200`) and `ThrowerDrawPartWithAlpha`
  *   (`FUN_0044A240`): `obj+0x136C` bit 0, {@link ThrowerFlag.SceneLit}.
  *
+ * And one reader with **no** `g_scene_lighting` test at all:
+ *
+ * * `MouseWanderUpdate` (`FUN_0043F5C0`): `sub+0x26 == 1` submits through
+ *   the light array (`0x0043F6C7`), any other subtype `AssetDrawSlot`;
+ *   `MouseBranchTriggerUpdate` (`FUN_0043F720`), subtypes 2 to 4, always
+ *   `AssetDrawSlot`. So a subtype-1 mouse is the array's whether or not the
+ *   lighting is on, lit then by `g_render_array_ambient` alone.
+ *
  * A faded draw under the light array is `AssetDrawSlotWithAlphaSceneLights`
  * (`FUN_00418620`): lit and faded both, which `render/gunlights.ts` and the
  * fade in `render/draw_order.ts` compose.
  */
 export function ActorDrawsSceneLit(obj: Actor): boolean {
+  if (obj.cls === SpawnClass.Mouse) {
+    return obj.mouse.subtype === MOUSE_SCENE_LIT_SUBTYPE;
+  }
   if (G.g_scene_lighting === 0) return false;
   if (obj.flags38 & ZombieAux.SceneLit) return true;
   return obj.cls === SpawnClass.Thrower
